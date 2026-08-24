@@ -132,6 +132,9 @@ const assetOrigin = (): string =>
 
 const MAX_REDIRECTS = 3;
 
+const detail = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
+
 /**
  * Fetch an image, fail-closed to null.
  *
@@ -168,9 +171,7 @@ export const fetchBytes = async (
       });
     } catch (err) {
       // Covers the AbortSignal timeout, DNS failure and connection refused.
-      return fail(
-        `request failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      return fail(`request failed: ${detail(err)}`);
     }
     if (resp.status >= 300 && resp.status < 400) {
       const loc = resp.headers.get('location');
@@ -236,9 +237,7 @@ async function readCapped(
     }
   } catch (err) {
     // Timeout (AbortSignal) or a socket error mid-body.
-    return fail(
-      `body read failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    return fail(`body read failed: ${detail(err)}`);
   }
   return total > 0 ? Buffer.concat(chunks, total) : fail('zero-byte body');
 }

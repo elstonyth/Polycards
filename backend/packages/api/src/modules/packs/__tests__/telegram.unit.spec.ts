@@ -465,6 +465,32 @@ describe('postApexPull', () => {
     expect(result?.messageId).toBe(88);
   });
 
+  // The case production was ACTUALLY in on 2026-08-24, and the one every other
+  // test here misses: the composite dies, the URL fallback succeeds, so the
+  // post has a picture and `ok` is true. Before this, sendApexPost returned on
+  // that success and threw the composite's reason away — leaving the whole
+  // diagnostic firing only on a TOTAL photo failure, i.e. never in the state
+  // that was actually broken.
+  it('reports the composite failure even when the URL fallback delivers a picture', async () => {
+    global.fetch = (async (url: string, init?: { body?: unknown }) => {
+      const u = String(url);
+      if (u.startsWith('https://cdn.example/'))
+        return new Response('nope', { status: 503 });
+      sent.push({ url: u, body: JSON.parse(init!.body as string) });
+      return { json: async () => ({ ok: true, result: { message_id: 12 } }) };
+    }) as unknown as typeof fetch;
+
+    const result = await postApexPull(fakeContainer({}), EVENT);
+
+    const [call] = sent as { url: string }[];
+    expect(call.url).toContain('/sendPhoto'); // the picture DID go out
+    expect(result?.messageId).toBe(12);
+    expect(result?.photoPath).toBe('url');
+    expect(result?.photoError).toContain('HTTP 503');
+    const warn = warned.find((w) => w.includes('URL picture'));
+    expect(warn).toContain('HTTP 503');
+  });
+
   // The board degrading to a text-only channel is an `ok` post, so nothing else
   // logs it. Without this warn the failure is invisible from outside Telegram.
   it('warns with each path’s reason when the post lands without its picture', async () => {

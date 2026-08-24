@@ -10,12 +10,12 @@ import {
 /**
  * LIVE probe for the Telegram apex board's picture — opt-in, skipped by default.
  *
- * Why this exists: the board posted text-only for its entire life (every apex
- * post from #469 to 2026-08-24) and nothing said so. `sendApexPost` degrades to
- * `sendMessage`, which returns ok, so the post "succeeded" while the picture
- * silently vanished — and the only way to observe it was to wait for someone to
- * roll a Legendary and then look at the channel with your own eyes. This turns
- * that into a command.
+ * Why this exists: on 2026-08-24 production was found running entirely on the
+ * URL fallback — the black composite dead, Telegram white-flattening every
+ * slab, and some posts degrading further to text — with nothing anywhere
+ * saying so. Both fallbacks return ok, so the posts "succeeded"; the only way
+ * to observe it was to wait for someone to roll a Legendary and then look at
+ * the channel with your own eyes. This turns that into a command.
  *
  * It exercises EACH send path separately against the REAL Telegram API, because
  * `sendApexPost` returns on the first success and so hides which one actually
@@ -44,6 +44,11 @@ import {
  *
  *   corepack yarn telegram:probe
  *
+ * Nothing here runs without TELEGRAM_PROBE=1, which only `yarn telegram:probe`
+ * sets — so an ordinary `corepack yarn test:unit` never touches the network,
+ * however much of this is sitting in your env file. Opted in with no
+ * TELEGRAM_PROBE_CHAT_ID, it lists candidate chat ids instead of posting.
+ *
  * TELEGRAM_PROBE_CHAT_ID is deliberately NOT TELEGRAM_CHAT_ID: this posts four
  * throwaway messages, and a delete does not un-send a push notification. Point
  * it at a scratch group (add the bot, make it an admin) or your own DM with the
@@ -59,24 +64,41 @@ import {
  * i.e. exactly the kind of URL the board posts: a transparent .webp.
  */
 const token = process.env.TELEGRAM_BOT_TOKEN;
-const chatId = process.env.TELEGRAM_PROBE_CHAT_ID;
+const rawChatId = process.env.TELEGRAM_PROBE_CHAT_ID?.trim();
+// Refuse the production channel outright rather than documenting "don't".
+// A delete does not un-send a push notification, so a fat-fingered paste of
+// TELEGRAM_CHAT_ID here would put four test posts in front of real
+// subscribers and there is no taking them back.
+const isLiveChannel =
+  !!rawChatId && rawChatId === process.env.TELEGRAM_CHAT_ID?.trim();
+if (isLiveChannel) {
+  throw new Error(
+    'TELEGRAM_PROBE_CHAT_ID is the LIVE channel (TELEGRAM_CHAT_ID). The probe posts four throwaway messages and a delete does not un-send their push notifications. Point it at a scratch chat.',
+  );
+}
+const chatId = rawChatId;
 const imageUrl =
   process.env.TELEGRAM_PROBE_IMAGE_URL ??
   'https://polycards-media.sgp1.cdn.digitaloceanspaces.com/slab-reshiram-ex-168-psa-10-9692093-3a9bccdf-01KZP00GYWTKBDN14JN04FMTZ0.webp';
 
-// Skipped, not failed, when unconfigured: this file sits in the normal unit
-// tier so it is discoverable and type-checked on every run, and CI has no
-// business posting to Telegram.
-const live = token && chatId ? describe : describe.skip;
+// ONE explicit opt-in gates this whole file, and env-var presence alone never
+// does. The file sits in the normal unit tier so it stays discoverable and
+// type-checked on every run — but the credentials it needs live in the same
+// local env file everything else reads, so gating on "are the vars set" would
+// mean an ordinary `yarn test:unit` on a configured dev box firing live posts
+// at Telegram. `yarn telegram:probe` sets the flag; nothing else does, and CI
+// never sets it.
+const optedIn = process.env.TELEGRAM_PROBE === '1';
+const live = optedIn && token && chatId ? describe : describe.skip;
 
 // Network + Telegram round trips, not the ~5s unit default.
 jest.setTimeout(120_000);
 
 // Finding a chat id is the one genuinely annoying prerequisite (Telegram shows
 // it nowhere in the UI), and "I couldn't get the id" is how a diagnostic tool
-// ends up never being run. With a token but no chat, list the chats that have
-// recently messaged the bot instead of just skipping.
-const discover = token && !chatId ? describe : describe.skip;
+// ends up never being run. So an opted-in run with no chat id lists the chats
+// that have recently messaged the bot instead of doing nothing.
+const discover = optedIn && token && !chatId ? describe : describe.skip;
 discover('LIVE Telegram probe — chat id lookup', () => {
   it('lists chats that recently messaged the bot', async () => {
     const updates = (await callTelegram(token!, 'getUpdates', {})) as {
@@ -97,6 +119,10 @@ discover('LIVE Telegram probe — chat id lookup', () => {
       const c = u.message?.chat;
       if (c) chats.set(c.id, `${c.type} ${c.title ?? c.username ?? ''}`.trim());
     }
+    // Asserted, not just printed: a test that only logs is green whatever
+    // Telegram says, and "it ran and printed nothing" is indistinguishable
+    // from "the token is dead".
+    expect(updates.ok).toBe(true);
     console.log(
       chats.size
         ? `[probe] set TELEGRAM_PROBE_CHAT_ID to one of:\n${[...chats]

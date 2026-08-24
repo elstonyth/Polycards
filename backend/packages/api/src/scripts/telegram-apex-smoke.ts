@@ -131,12 +131,21 @@ export default async function telegramApexSmoke({ container }: ExecArgs) {
     // while this pre-flight kept reporting success. The photo path is the part
     // of this integration no unit test can prove, so it is the part the
     // pre-flight has to check, and it must never read as a pass.
-    if (posted.photoError) {
+    if (posted.photoPath === 'bytes') {
+      logger.info(
+        '[telegram-smoke] picture uploaded as our own composite — the photo path is healthy.',
+      );
+    } else if (posted.photoPath === 'url') {
+      // The trap this pre-flight missed for months: the post HAS a picture, so
+      // a human glancing at the channel sees a working board, while the
+      // composite is dead and Telegram is white-flattening the slab.
       logger.error(
-        `[telegram-smoke] POSTED WITHOUT ITS PICTURE — the board is degraded to text: ${posted.photoError}`,
+        `[telegram-smoke] DEGRADED — the picture came from the URL fallback (white-flattened by Telegram), not our black composite: ${posted.photoError ?? 'no reason recorded'}`,
       );
     } else {
-      logger.info('[telegram-smoke] picture sent — the photo path is healthy.');
+      logger.error(
+        `[telegram-smoke] POSTED WITHOUT ITS PICTURE — the board is degraded to text: ${posted.photoError ?? 'no reason recorded'}`,
+      );
     }
 
     // Take the test post straight back down. The default is DELETE, not keep:

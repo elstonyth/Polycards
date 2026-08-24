@@ -402,17 +402,28 @@ export async function uploadApexPhoto(
  *  on the final `sendMessage`, whose throw must keep propagating to
  *  postApexPull's catch. */
 const attempt = async (p: Promise<TelegramResult>): Promise<TelegramResult> =>
-  p.catch((err) => ({
-    ok: false,
-    description: err instanceof Error ? err.message : String(err),
-  }));
+  p.catch((err) => ({ ok: false, description: reason(err) }));
 
-/** A send, plus why the picture is missing when one is. `photoError` is set on
- *  EVERY post that wanted a photo and did not get one — including the ones that
- *  still went out fine as text, which is the whole point: `ok` is true on that
- *  post, so without this the board silently degrades to text forever and looks
- *  like a deliberately text-only channel. */
-export type ApexSendResult = TelegramResult & { photoError?: string };
+/** Which route actually carried the post.
+ *
+ *  'bytes' is the only healthy one. 'url' means Telegram fetched the art itself
+ *  and flattened its transparency onto WHITE — the post has a picture, in the
+ *  wrong backdrop, which is precisely the state #471 was written to end and
+ *  precisely the state production was found in on 2026-08-24. It is a degraded
+ *  success, so it must be distinguishable from both a healthy post and a
+ *  text-only one; treating it as "fine, it has a photo" is how it went
+ *  unnoticed. */
+export type ApexPhotoPath = 'bytes' | 'url' | 'text';
+
+/** A send, plus how it got there and what failed on the way. `photoError` is
+ *  set on EVERY post that wanted the byte path and did not get it — INCLUDING
+ *  the ones that still went out with a picture via the URL fallback. That is
+ *  the case this exists for: `ok` is true, a picture is visible, and without
+ *  this the composite can be dead for months with nothing to show for it. */
+export type ApexSendResult = TelegramResult & {
+  photoError?: string;
+  photoPath: ApexPhotoPath;
+};
 
 /** Post as a photo when we have an image, else as text. Two photo paths, tried
  *  in order and BOTH tried on failure: the preferred one uploads bytes we
@@ -439,7 +450,7 @@ export async function sendApexPost(
       const upload = await attempt(
         uploadApexPhoto(token, chatId, caption, composite.photo),
       );
-      if (upload.ok) return upload;
+      if (upload.ok) return { ...upload, photoPath: 'bytes' };
       failures.push(`byte upload: ${upload.description ?? 'unknown error'}`);
     }
     const urlPhoto = await attempt(
@@ -450,29 +461,55 @@ export async function sendApexPost(
         parse_mode: 'HTML',
       }),
     );
-    if (urlPhoto.ok) return urlPhoto;
+    // Carries `failures` even though it SUCCEEDED. This return is the normal
+    // production path when the composite is broken, so dropping the reasons
+    // here would silence the diagnostic in exactly the case it was written for
+    // and leave it firing only on a total photo failure.
+    if (urlPhoto.ok)
+      return { ...urlPhoto, ...photoErrorOf(failures), photoPath: 'url' };
     failures.push(`url photo: ${urlPhoto.description ?? 'unknown error'}`);
   }
-  const text = await callTelegram(token, 'sendMessage', {
-    chat_id: chatId,
-    text: caption,
-    parse_mode: 'HTML',
-    link_preview_options: { is_disabled: true },
-  });
-  return failures.length ? { ...text, photoError: failures.join('; ') } : text;
+  // Deliberately NOT wrapped in attempt(): a thrown text send must keep
+  // propagating to postApexPull's catch. The rethrow carries the photo reasons
+  // into that catch's message, which is otherwise the one path where the whole
+  // trail is lost.
+  let text: TelegramResult;
+  try {
+    text = await callTelegram(token, 'sendMessage', {
+      chat_id: chatId,
+      text: caption,
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+    });
+  } catch (err) {
+    throw failures.length
+      ? new Error(
+          `${reason(err)} (photo had already failed: ${failures.join('; ')})`,
+        )
+      : err;
+  }
+  return { ...text, ...photoErrorOf(failures), photoPath: 'text' };
 }
+
+/** Spread helper so an empty failure list leaves `photoError` ABSENT rather
+ *  than present-and-undefined — callers branch on its presence. */
+const photoErrorOf = (failures: string[]): { photoError?: string } =>
+  failures.length ? { photoError: failures.join('; ') } : {};
 
 export type ApexPostResult = {
   caption: string;
   /** Telegram's id for the post, so a caller can delete it again. Null when the
    *  send failed. */
   messageId: number | null;
-  /** Why the post carries no picture, when it wanted one. Undefined = the photo
-   *  went out (or there was no art to send). Surfaced, not just logged, so the
-   *  smoke pre-flight can FAIL on a text-only post: a degraded post is still an
-   *  `ok` post, and reporting it as success is how the board ran picture-less
-   *  from #469 to 2026-08-24 without anyone noticing. */
+  /** Why the byte path did not carry this post, when there was art to send.
+   *  Undefined = the composite went out (or there was no art at all). Set even
+   *  when a picture DID appear via the URL fallback. */
   photoError?: string;
+  /** Which route carried it. Surfaced, not just logged, so the smoke pre-flight
+   *  can fail on anything but 'bytes': a URL-fallback post and a text-only post
+   *  are both `ok` posts, and reporting those as success is how the board ran
+   *  on the fallback from #471 to 2026-08-24 without anyone noticing. */
+  photoPath: ApexPhotoPath;
 };
 
 export type ApexPullEvent = {
@@ -629,17 +666,24 @@ export async function postApexPull(
     // above, and the board quietly renders as a text-only channel with no
     // trace of why. Warn separately, with the reason each photo path gave.
     if (photoErrors.size) {
+      // Three outcomes, and the middle one is the trap: 'url' means the post
+      // DOES carry a picture, just Telegram's white-flattened version instead
+      // of our black composite. Calling that "without its picture" would read
+      // as a contradiction of the channel and get dismissed.
+      const what =
+        result.photoPath === 'url'
+          ? 'fell back to the URL picture (Telegram white-flattens it; the black composite is broken)'
+          : 'posted WITHOUT its picture';
       logWarn(
         container,
-        `[telegram] apex post for pull ${event.pull_id} posted WITHOUT its picture (${photoUrl}): ${[...photoErrors].join('; ')}`,
+        `[telegram] apex post for pull ${event.pull_id} ${what} (${photoUrl}): ${[...photoErrors].join('; ')}`,
       );
     }
     return {
       caption,
       messageId: result.result?.message_id ?? null,
-      ...(photoErrors.size
-        ? { photoError: [...photoErrors].join('; ') }
-        : {}),
+      ...(photoErrors.size ? { photoError: [...photoErrors].join('; ') } : {}),
+      photoPath: result.photoPath,
     };
   } catch (err) {
     logWarn(
