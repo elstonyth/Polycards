@@ -6,7 +6,6 @@ import {
   Package,
   Sparkles,
   Ticket,
-  TrendingUp,
   Trophy,
   type LucideIcon,
 } from 'lucide-react';

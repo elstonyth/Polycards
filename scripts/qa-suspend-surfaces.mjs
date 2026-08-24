@@ -43,11 +43,7 @@ const context = await browser.newContext({
 const page = await context.newPage();
 
 // 1. Suspended routes must 404.
-for (const route of [
-  '/vip',
-  '/vouchers',
-  '/daily',
-]) {
+for (const route of ['/vip', '/vouchers', '/daily']) {
   const resp = await page.goto(BASE + route, {
     waitUntil: 'load',
     timeout: 30_000,
@@ -151,9 +147,7 @@ if (PUB_KEY) {
       Array.from(document.querySelectorAll('a[href]'))
         .map((a) => a.getAttribute('href'))
         // /rewards was a redirect stub into /vip, so it 404s too.
-        .filter((h) =>
-          /^\/(vip|vouchers|daily|rewards)(\/|$)/.test(h),
-        ),
+        .filter((h) => /^\/(vip|vouchers|daily|rewards)(\/|$)/.test(h)),
     );
     check(
       deadLinks.length === 0,

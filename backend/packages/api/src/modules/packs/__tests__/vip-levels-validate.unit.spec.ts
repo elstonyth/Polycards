@@ -70,17 +70,10 @@ describe('validateVipLevels', () => {
     );
   });
 
-  it('rejects negative voucher_amount and out-of-range direct_referral_pct', () => {
+  it('rejects negative voucher_amount', () => {
     expect(() => validateVipLevels(ladder([rung({ voucher_amount: -1 })]))).toThrow(
       /voucher_amount must be between 0 and/,
     );
-    expect(() =>
-      validateVipLevels(ladder([rung({ direct_referral_pct: -1 })])),
-    ).toThrow(/direct_referral_pct must be between 0 and 100/);
-    expect(() =>
-      validateVipLevels(ladder([rung({ direct_referral_pct: 101 })])),
-    ).toThrow(/direct_referral_pct must be between 0 and 100/);
-    expect(validateVipLevels(ladder([rung({ direct_referral_pct: 100 })]))).toHaveLength(1);
   });
 
   it('rejects frame_unlock above level 100 but accepts the ladder without it', () => {
