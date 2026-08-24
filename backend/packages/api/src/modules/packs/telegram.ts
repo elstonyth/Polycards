@@ -14,8 +14,10 @@ import { fetchBytes, MAX_DECODE_PIXELS } from '../../api/utils/image-fetch';
 
 // Telegram "apex pull" board — posts every Legendary-or-better pull to the
 // public POLYCARDS.GG channel, so the community sees the big hits land in real
-// time. Fed by the `pack.opened` event (one per pull, from BOTH open-pack and
-// open-batch), via subscribers/pack-opened-telegram.ts.
+// time. Fed by the `pull.revealed` event via subscribers/pull-revealed-telegram
+// .ts — the FLIP, not the roll. It hung off `pack.opened` until 2026-08-24,
+// which fires when the roll commits: the channel named the card while the
+// player's reels were still spinning.
 //
 // Config is env-only, so an unconfigured environment (dev, CI, integration
 // tests) is a silent no-op rather than a failure or a stray post:
@@ -60,8 +62,8 @@ const minRarity = (container: { resolve: (k: string) => any }): Rarity => {
   const configured = process.env.TELEGRAM_MIN_RARITY?.trim();
   if (!configured) return DEFAULT_MIN_RARITY;
   if (RARITY_ORDER.includes(configured as Rarity)) return configured as Rarity;
-  // Once per process, not per open: this runs on EVERY pack.opened, and a line
-  // per pack open would bury the thing it is trying to report. Silence here
+  // Once per process, not per reveal: this runs on EVERY pull.revealed, and a
+  // line per reveal would bury the thing it is trying to report. Silence here
   // would be worse than noise though — the fallback is invisible from the
   // outside, so a typo'd bar looks exactly like a quiet week of no apex pulls.
   if (!minRarityWarned) {

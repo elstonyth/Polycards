@@ -88,7 +88,9 @@ export const openPackWorkflow = createWorkflow(
     }));
     decrementCardStockStep(stockInput);
 
-    // 3. Emit pack.opened for the live-pulls feed / leaderboard subscribers. The
+    // 3. Emit pack.opened. NOTE (2026-08-24): this currently has NO subscribers
+    //    — the Telegram board moved to `pull.revealed` so it fires on the flip
+    //    rather than mid-spin. Kept as the domain event for the commit itself. The
     //    event only fires if the whole workflow succeeds (Medusa defers emission
     //    to commit), so a compensated run emits nothing.
     const eventData = transform({ input, card, pull }, (d) => ({
