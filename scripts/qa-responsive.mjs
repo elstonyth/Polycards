@@ -54,8 +54,8 @@ const PUBLIC = [
 ];
 
 // Rendered against a freshly registered customer, so these are EMPTY-STATE
-// layouts only — no orders, cards, transactions or vault items. /referrals,
-// /vip and /vouchers were suspended 2026-07-29 (#294) and now 404.
+// layouts only — no orders, cards, transactions or vault items. /vip and
+// /vouchers were suspended 2026-07-29 (#294) and now 404.
 const AUTHED = [
   '/me',
   '/vault',

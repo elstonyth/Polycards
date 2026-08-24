@@ -1,5 +1,5 @@
 // scripts/qa-phase5.mjs — Visual QA for VIP Phase 5 pages.
-// Captures full-page screenshots of wallet, vip, referrals, notifications, and /invite/:handle.
+// Captures full-page screenshots of wallet and notifications.
 // Attempts to auth as the test customer first; falls back to logged-out captures if backend is
 // unavailable (redirects to home still prove no crash/error overlay).
 //
@@ -16,8 +16,8 @@ const EMAIL = process.env.QA_EMAIL ?? null;
 const PASSWORD = process.env.QA_PASSWORD ?? null;
 const AUTH_COOKIE = '_polycards_jwt';
 
-const TOKEN_PAGES = ['/wallet', '/vip', '/referrals', '/notifications'];
-const PUBLIC_PAGES = ['/invite/test'];
+const TOKEN_PAGES = ['/wallet', '/notifications'];
+const PUBLIC_PAGES = [];
 
 const OUT_DIR = path.resolve('docs/research');
 if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });

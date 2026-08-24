@@ -7,7 +7,6 @@ const rung = (over: Partial<Record<string, unknown>> = {}) => ({
   voucher_amount: 0,
   box_tier: 'a',
   frame_unlock: false,
-  direct_referral_pct: 1,
   ...over,
 });
 
@@ -23,7 +22,6 @@ describe('validateVipLevels', () => {
       voucher_amount: 0,
       box_tier: 'a',
       frame_unlock: false,
-      direct_referral_pct: 1,
     });
   });
 

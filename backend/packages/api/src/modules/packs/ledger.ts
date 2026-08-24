@@ -12,14 +12,13 @@
 // year) — ponytail: if this ever needs to serve a DST-observing zone, this
 // function needs Intl.DateTimeFormat/date-fns-tz instead of the fixed shift.
 
-export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'RF' | 'AD' | 'WP' | 'WD';
+export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'AD' | 'WP' | 'WD';
 
 export type LedgerPayload =
   | { type: 'TP'; payment_method: string; gateway_ref: string | null }
   | { type: 'SP'; channel: 'single' | 'batch'; pack_id: string; prize_skus: string[] }
   | { type: 'SE'; card_handle: string; sp_ref_id: string | null; price: number; rate: number }
   | { type: 'OD'; handles: { card_handle: string; qty: number }[]; status: string }
-  | { type: 'RF'; period: string; spend_total: number; pct: number }
   | { type: 'AD'; admin_id: string; reason: string; detail: string | null; card_handle: string | null }
   | { type: 'WP'; period: string; stage: number; rank: number; sku: string | null; value: number }
   // WD: a GlobePay365 payout. One row when the debit is taken (negative

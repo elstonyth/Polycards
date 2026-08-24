@@ -29,8 +29,6 @@ import DeliveryOrder from '../models/delivery-order';
 import DeliveryOrderItem from '../models/delivery-order-item';
 import VipLevel from '../models/vip-level';
 import RewardsSettings from '../models/rewards-settings';
-import ReferralRelationship from '../models/referral-relationship';
-import Commission from '../models/commission';
 import CustomerAccountState from '../models/customer-account-state';
 import AdminActionAudit from '../models/admin-action-audit';
 import VipMemberState from '../models/vip-member-state';
@@ -51,8 +49,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
     DeliveryOrderItem,
     VipLevel,
     RewardsSettings,
-    ReferralRelationship,
-    Commission,
     CustomerAccountState,
     AdminActionAudit,
     VipMemberState,
@@ -69,7 +65,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
             voucher_amount: r.voucher_amount,
             box_tier: r.box_tier,
             frame_unlock: r.frame_unlock,
-            direct_referral_pct: r.direct_referral_pct,
             prizes: r.prizes ?? null,
           })),
         );

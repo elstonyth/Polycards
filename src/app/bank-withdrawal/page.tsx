@@ -20,8 +20,8 @@ const WITHDRAWALS_OPEN = process.env.NEXT_PUBLIC_WITHDRAWALS_ENABLED === 'true';
 
 export default async function BankWithdrawalPage() {
   const customer = await getCustomer();
-  // withdrawable, not raw balance: the freeze/locked-commission/playthrough
-  // gate lives server-side, and the form must not promise money the server
+  // withdrawable, not raw balance: the freeze/playthrough gate lives
+  // server-side, and the form must not promise money the server
   // will refuse.
   const walletResult = customer ? await getWallet() : null;
   const withdrawable =

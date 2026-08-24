@@ -34,10 +34,6 @@ export const qk = {
   globepayBalance: ['admin', 'globepay-balance'] as const,
   eligibleProducts: ['admin', 'eligible-products'] as const,
   customerGacha: (id: string) => ['admin', 'customer', id, 'gacha'] as const,
-  referralTree: (id: string, d: number) =>
-    ['admin', 'customer', id, 'referral-tree', d] as const,
-  customerCommissions: (id: string, page: number) =>
-    ['admin', 'customer', id, 'commissions', page] as const,
   customerAudit: (id: string, page: number) =>
     ['admin', 'customer', id, 'audit', page] as const,
   customerTransactions: (id: string, page: number) =>
@@ -50,9 +46,6 @@ export const qk = {
   // siblings can't do that.
   customerPulls: (id: string, page: number, status?: string) =>
     ['admin', 'customer', id, 'pulls', page, status ?? 'all'] as const,
-  // 4-segment prefix — invalidates ALL pages of a customer's commissions in one call
-  customerCommissionsKey: (id: string) =>
-    ['admin', 'customer', id, 'commissions'] as const,
   // 4-segment prefix — invalidates ALL pages of a customer's audit in one call
   customerAuditKey: (id: string) => ['admin', 'customer', id, 'audit'] as const,
   // 4-segment prefix — invalidates ALL pages of a customer's transaction ledger in one call
@@ -60,9 +53,6 @@ export const qk = {
     ['admin', 'customer', id, 'transactions'] as const,
   // 4-segment prefix — invalidates ALL pages of a customer's pull history in one call
   customerPullsKey: (id: string) => ['admin', 'customer', id, 'pulls'] as const,
-  // 4-segment prefix — invalidates ALL depths of a customer's referral tree in one call
-  referralTreeKey: (id: string) =>
-    ['admin', 'customer', id, 'referral-tree'] as const,
   // customerId: same always-rendered-segment rule as qk.pulls above.
   deliveryOrders: (
     status: string | undefined,

@@ -728,26 +728,6 @@ export function createDeliveryWriteRateLimit(
 }
 
 /**
- * The referral-recruit limiter — caps how fast NEW recruits can be added,
- * keyed per authenticated customer (the recruit). A sponsor cannot drive the
- * recruit's key, but this throttles automated tree-stuffing from one account.
- * Env-tunable: REFERRAL_RECRUIT_RATE_BURST_LIMIT / _BURST_WINDOW_MS (3/60s),
- * REFERRAL_RECRUIT_RATE_LIMIT / _WINDOW_MS (20/24h).
- */
-export function createReferralRecruitRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'referral-recruit',
-    message: 'Too many referral attempts. Try again later.',
-    defaults: {
-      burstLimit: 3,
-      burstWindowMs: 60_000,
-      limit: 20,
-      windowMs: 86_400_000, // 24h
-    },
-  });
-}
-
-/**
  * The auth-endpoint limiter, SITEWIDE (login / register / password reset /
  * reset-completion). These routes are PUBLIC — there is no auth_context yet —
  * so the middleware keys on the request IP (its designed fallback), and the

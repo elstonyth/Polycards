@@ -1,7 +1,8 @@
 // Canonical VIP ladder — parsed from Workbook1.xlsx (boss's authoritative sheet),
-// thresholds rounded to whole MYR. Resolved 2026-06-20: L40 direct_referral_pct
-// = 4 (no blank); L50 voucher = 300 (confirmed); thresholds whole-MYR. Do NOT
-// edit values without re-confirming against the workbook.
+// thresholds rounded to whole MYR. Resolved 2026-06-20: L50 voucher = 300
+// (confirmed); thresholds whole-MYR. Do NOT edit values without re-confirming
+// against the workbook. (The per-level direct_referral_pct column left the
+// ladder with the referral engine.)
 //
 // VIP_LEVELS is the record of the SHEET, not what gets inserted — seeding goes
 // through VIP_LEVELS_SEED at the bottom of this file, which zeroes voucher_amount
@@ -13,7 +14,6 @@ export type VipLevelSeed = {
   voucher_amount: number;
   box_tier: string;
   frame_unlock: boolean;
-  direct_referral_pct: number;
   prizes: null;
 };
 
@@ -24,7 +24,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 0,
     box_tier: 'a',
     frame_unlock: false,
-    direct_referral_pct: 1,
     prizes: null,
   },
   {
@@ -33,7 +32,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 2,
     box_tier: 'a',
     frame_unlock: false,
-    direct_referral_pct: 1,
     prizes: null,
   },
   {
@@ -42,7 +40,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 2,
     box_tier: 'a',
     frame_unlock: false,
-    direct_referral_pct: 1,
     prizes: null,
   },
   {
@@ -51,7 +48,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 2,
     box_tier: 'a',
     frame_unlock: false,
-    direct_referral_pct: 1,
     prizes: null,
   },
   {
@@ -60,7 +56,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 2,
     box_tier: 'a',
     frame_unlock: false,
-    direct_referral_pct: 1,
     prizes: null,
   },
   {
@@ -69,7 +64,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 2,
     box_tier: 'a',
     frame_unlock: false,
-    direct_referral_pct: 1,
     prizes: null,
   },
   {
@@ -78,7 +72,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 5,
     box_tier: 'a',
     frame_unlock: false,
-    direct_referral_pct: 1,
     prizes: null,
   },
   {
@@ -87,7 +80,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 5,
     box_tier: 'a',
     frame_unlock: false,
-    direct_referral_pct: 1,
     prizes: null,
   },
   {
@@ -96,7 +88,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 5,
     box_tier: 'a',
     frame_unlock: false,
-    direct_referral_pct: 1,
     prizes: null,
   },
   {
@@ -105,7 +96,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 50,
     box_tier: 'b',
     frame_unlock: true,
-    direct_referral_pct: 2,
     prizes: null,
   },
   {
@@ -114,7 +104,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 10,
     box_tier: 'b',
     frame_unlock: false,
-    direct_referral_pct: 2,
     prizes: null,
   },
   {
@@ -123,7 +112,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 10,
     box_tier: 'b',
     frame_unlock: false,
-    direct_referral_pct: 2,
     prizes: null,
   },
   {
@@ -132,7 +120,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 10,
     box_tier: 'b',
     frame_unlock: false,
-    direct_referral_pct: 2,
     prizes: null,
   },
   {
@@ -141,7 +128,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 10,
     box_tier: 'b',
     frame_unlock: false,
-    direct_referral_pct: 2,
     prizes: null,
   },
   {
@@ -150,7 +136,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 10,
     box_tier: 'b',
     frame_unlock: false,
-    direct_referral_pct: 2,
     prizes: null,
   },
   {
@@ -159,7 +144,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 10,
     box_tier: 'b',
     frame_unlock: false,
-    direct_referral_pct: 2,
     prizes: null,
   },
   {
@@ -168,7 +152,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 10,
     box_tier: 'b',
     frame_unlock: false,
-    direct_referral_pct: 2,
     prizes: null,
   },
   {
@@ -177,7 +160,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 10,
     box_tier: 'b',
     frame_unlock: false,
-    direct_referral_pct: 2,
     prizes: null,
   },
   {
@@ -186,7 +168,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 10,
     box_tier: 'b',
     frame_unlock: false,
-    direct_referral_pct: 2,
     prizes: null,
   },
   {
@@ -195,7 +176,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'c',
     frame_unlock: true,
-    direct_referral_pct: 3,
     prizes: null,
   },
   {
@@ -204,7 +184,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 88,
     box_tier: 'c',
     frame_unlock: false,
-    direct_referral_pct: 3,
     prizes: null,
   },
   {
@@ -213,7 +192,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 88,
     box_tier: 'c',
     frame_unlock: false,
-    direct_referral_pct: 3,
     prizes: null,
   },
   {
@@ -222,7 +200,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 88,
     box_tier: 'c',
     frame_unlock: false,
-    direct_referral_pct: 3,
     prizes: null,
   },
   {
@@ -231,7 +208,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 88,
     box_tier: 'c',
     frame_unlock: false,
-    direct_referral_pct: 3,
     prizes: null,
   },
   {
@@ -240,7 +216,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 88,
     box_tier: 'c',
     frame_unlock: false,
-    direct_referral_pct: 3,
     prizes: null,
   },
   {
@@ -249,7 +224,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 88,
     box_tier: 'c',
     frame_unlock: false,
-    direct_referral_pct: 3,
     prizes: null,
   },
   {
@@ -258,7 +232,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 88,
     box_tier: 'c',
     frame_unlock: false,
-    direct_referral_pct: 3,
     prizes: null,
   },
   {
@@ -267,7 +240,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 88,
     box_tier: 'c',
     frame_unlock: false,
-    direct_referral_pct: 3,
     prizes: null,
   },
   {
@@ -276,7 +248,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 88,
     box_tier: 'c',
     frame_unlock: false,
-    direct_referral_pct: 3,
     prizes: null,
   },
   {
@@ -285,7 +256,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 888,
     box_tier: 'd',
     frame_unlock: true,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -294,7 +264,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 120,
     box_tier: 'd',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -303,7 +272,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 120,
     box_tier: 'd',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -312,7 +280,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 120,
     box_tier: 'd',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -321,7 +288,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 120,
     box_tier: 'd',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -330,7 +296,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 120,
     box_tier: 'd',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -339,7 +304,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 120,
     box_tier: 'd',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -348,7 +312,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 120,
     box_tier: 'd',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -357,7 +320,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 120,
     box_tier: 'd',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -366,7 +328,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 120,
     box_tier: 'd',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -375,7 +336,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1200,
     box_tier: 'e',
     frame_unlock: true,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -384,7 +344,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'e',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -393,7 +352,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'e',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -402,7 +360,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'e',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -411,7 +368,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'e',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -420,7 +376,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'e',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -429,7 +384,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'e',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -438,7 +392,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'e',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -447,7 +400,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'e',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -456,7 +408,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'e',
     frame_unlock: false,
-    direct_referral_pct: 4,
     prizes: null,
   },
   {
@@ -465,7 +416,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'f',
     frame_unlock: true,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -474,7 +424,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'f',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -483,7 +432,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'f',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -492,7 +440,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'f',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -501,7 +448,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'f',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -510,7 +456,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'f',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -519,7 +464,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'f',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -528,7 +472,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'f',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -537,7 +480,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'f',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -546,7 +488,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 300,
     box_tier: 'f',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -555,7 +496,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 3000,
     box_tier: 'g',
     frame_unlock: true,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -564,7 +504,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 500,
     box_tier: 'g',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -573,7 +512,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 500,
     box_tier: 'g',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -582,7 +520,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 500,
     box_tier: 'g',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -591,7 +528,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 500,
     box_tier: 'g',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -600,7 +536,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 500,
     box_tier: 'g',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -609,7 +544,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 500,
     box_tier: 'g',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -618,7 +552,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 500,
     box_tier: 'g',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -627,7 +560,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 500,
     box_tier: 'g',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -636,7 +568,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 500,
     box_tier: 'g',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -645,7 +576,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 5000,
     box_tier: 'h',
     frame_unlock: true,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -654,7 +584,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 800,
     box_tier: 'h',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -663,7 +592,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 800,
     box_tier: 'h',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -672,7 +600,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 800,
     box_tier: 'h',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -681,7 +608,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 800,
     box_tier: 'h',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -690,7 +616,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 800,
     box_tier: 'h',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -699,7 +624,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 800,
     box_tier: 'h',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -708,7 +632,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 800,
     box_tier: 'h',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -717,7 +640,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 800,
     box_tier: 'h',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -726,7 +648,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 800,
     box_tier: 'h',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -735,7 +656,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 8000,
     box_tier: 'i',
     frame_unlock: true,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -744,7 +664,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1200,
     box_tier: 'i',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -753,7 +672,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1200,
     box_tier: 'i',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -762,7 +680,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1200,
     box_tier: 'i',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -771,7 +688,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1200,
     box_tier: 'i',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -780,7 +696,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1200,
     box_tier: 'i',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -789,7 +704,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1200,
     box_tier: 'i',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -798,7 +712,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1200,
     box_tier: 'i',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -807,7 +720,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1200,
     box_tier: 'i',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -816,7 +728,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1200,
     box_tier: 'i',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -825,7 +736,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 12000,
     box_tier: 'j',
     frame_unlock: true,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -834,7 +744,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1500,
     box_tier: 'j',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -843,7 +752,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1500,
     box_tier: 'j',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -852,7 +760,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1500,
     box_tier: 'j',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -861,7 +768,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1500,
     box_tier: 'j',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -870,7 +776,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1500,
     box_tier: 'j',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -879,7 +784,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1500,
     box_tier: 'j',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -888,7 +792,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1500,
     box_tier: 'j',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -897,7 +800,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1500,
     box_tier: 'j',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -906,7 +808,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 1500,
     box_tier: 'j',
     frame_unlock: false,
-    direct_referral_pct: 5,
     prizes: null,
   },
   {
@@ -915,7 +816,6 @@ export const VIP_LEVELS: readonly VipLevelSeed[] = Object.freeze([
     voucher_amount: 15000,
     box_tier: 'Z',
     frame_unlock: true,
-    direct_referral_pct: 5,
     prizes: null,
   },
 ]);

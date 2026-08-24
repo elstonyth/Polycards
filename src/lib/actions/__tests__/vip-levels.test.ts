@@ -16,7 +16,6 @@ describe('mapVipLevels', () => {
           voucher_amount: 2,
           box_tier: 'a',
           frame_unlock: false,
-          direct_referral_pct: 2,
         },
       },
     ]);
@@ -28,7 +27,6 @@ describe('mapVipLevels', () => {
           voucherAmount: 2,
           boxTier: 'a',
           frameUnlock: false,
-          directReferralPct: 2,
         },
       },
     ]);

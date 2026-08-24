@@ -40,8 +40,6 @@ import DeliveryOrderItem from './models/delivery-order-item';
 import VipLevel from './models/vip-level';
 import RewardsSettings from './models/rewards-settings';
 import SiteSettings from './models/site-settings';
-import ReferralRelationship from './models/referral-relationship';
-import Commission from './models/commission';
 import CustomerAccountState from './models/customer-account-state';
 import PlayerPayoutDetails from './models/player-payout-details';
 import AdminActionAudit from './models/admin-action-audit';
@@ -92,11 +90,6 @@ import {
 } from './buyback-rate';
 import { consumeExternalSen } from './external-funded';
 import { recomputeExternalStamps } from './external-backfill';
-import {
-  directReferralPctForLevel,
-  directCommissionSen,
-  teamOverrideSchedule,
-} from './referral-commission';
 import { levelForSpend } from './vip-ladder';
 import { levelsToGrant, rewardsForLevel } from './vip-rewards';
 import { fromSen, toSen } from './money';
@@ -163,9 +156,9 @@ const DEPOSITED_PT_FILTER =
 // the convention plan 066 established.
 const GLOBEPAY_WD_DAILY_MAX_RM_DEFAULT = 50_000;
 
-// Postgres unique-violation detector (SQLSTATE 23505) for the commission
-// idempotency index. See settleOpen's commission catch for the exact semantics
-// — a 23505 there rejects the whole duplicate open; it does NOT silently no-op.
+// Postgres unique-violation detector (SQLSTATE 23505) for the open-settlement
+// idempotency index. See settleOpen's catch for the exact semantics — a 23505
+// there rejects the whole duplicate open; it does NOT silently no-op.
 function isUniqueViolation(e: unknown): boolean {
   const code = (e as { code?: string })?.code;
   return code === '23505';
@@ -202,9 +195,6 @@ export type CreditMutationReason =
   | 'topup'
   | 'pack_open'
   | 'adjustment'
-  | 'direct_referral'
-  | 'team_override'
-  | 'commission_reversal'
   | 'cashout'
   | 'voucher_claim'
   | 'reward_credit'
@@ -247,47 +237,13 @@ export type SettleOpenInput = {
   customerId: string;
   /** Signed MYR (RM) decimal — the open debit (always < 0). */
   amount: number;
-  /** The open's stable id (open_id), stamped on the debit + commission rows. */
+  /** The open's stable id (open_id), stamped on the debit row. */
   sourceTransactionId: string;
-};
-
-export type CommissionPaid = {
-  beneficiary: string;
-  amountSen: number;
-  matured: boolean;
 };
 
 export type SettleOpenResult = {
   id: string;
   balance: number;
-  commissions: CommissionPaid[];
-};
-
-/** Phase 4 P4.1 — Admin referral tree node (read-only, zero migrations). */
-export type PacksTreeNode = {
-  customer_id: string;
-  depth: number; // root = 0; direct recruits = 1
-  sponsor_id: string | null;
-  vip_level: number | null;
-  lifetime_external_spend_sen: string;
-  frozen: boolean;
-  direct_recruit_count: number;
-  has_more_depth: boolean; // depth === maxDepth && direct_recruit_count > 0
-};
-
-/** Phase 4 P4.1 — commission row returned by commissionsForBeneficiary (read-only). */
-export type CommissionRow = {
-  id: string;
-  generation: number;
-  kind: 'direct' | 'override';
-  status: 'pending' | 'available' | 'suspended' | 'reversed';
-  amount: string;
-  reason: 'direct_referral' | 'team_override';
-  matures_at: string;
-  reversal_transaction_id: string | null;
-  source_transaction_id: string;
-  opener_customer_id: string | null;
-  created_at: string;
 };
 
 /** Phase 4 P4.2 — admin audit timeline row (read-only, zero migrations). */
@@ -416,11 +372,6 @@ export type DeleteBlockReason =
   | 'DEPOSIT_PENDING'
   | 'CARDS_UNSETTLED'
   | 'DELIVERY_IN_FLIGHT';
-
-// Defensive depth bound for referralSummary's downward fan-out CTE. linkSponsor
-// already rejects cycles, so a real tree terminates well before this; the cap
-// is belt-and-suspenders against a corrupted edge so COUNT(*) can never loop.
-const DOWNSTREAM_DEPTH_CAP = 100;
 
 // The (timezone, reset-day, reset-hour) anchor a challenge-week query filters
 // on. weeksBack selects a PAST week: 0 (default) = the running week, 1 = the
@@ -560,8 +511,6 @@ class PacksModuleService extends MedusaService({
   VipLevel,
   RewardsSettings,
   SiteSettings,
-  ReferralRelationship,
-  Commission,
   CustomerAccountState,
   PlayerPayoutDetails,
   AdminActionAudit,
@@ -652,16 +601,11 @@ class PacksModuleService extends MedusaService({
     return { created_ids: created.map((c) => c.id) };
   }
 
-  // Commission engine globals. Reads the singleton row; falls back to defaults
-  // when absent. COMMISSION_COOLDOWN_DAYS env override forces the demo (0) and
-  // lets integration tests pin maturity deterministically without a DB write.
-  // sharedContext lets Task 14 (settleOpen) call this inside its advisory-locked
+  // Rewards globals. Reads the singleton row; falls back to defaults when
+  // absent. sharedContext lets a caller read it inside an advisory-locked
   // transaction so the list runs on the same connection.
   @InjectManager()
   async rewardsSettings(@MedusaContext() sharedContext: Context = {}): Promise<{
-    commissionCooldownDays: number;
-    teamOverridePct: number;
-    overrideGenerationCap: number;
     withdrawals_per_day: number;
   }> {
     const [row] = await this.listRewardsSettings(
@@ -669,23 +613,7 @@ class PacksModuleService extends MedusaService({
       { take: 1 },
       sharedContext,
     );
-    const envCooldown = process.env.COMMISSION_COOLDOWN_DAYS;
-    // Parse first; fall through to row-or-default when the value is not a
-    // finite number (e.g. "abc" → NaN) so maturity arithmetic is never
-    // corrupted by an invalid env var (CodeRabbit review fix).
-    const parsedEnv = Math.trunc(Number(envCooldown));
-    const commissionCooldownDays =
-      envCooldown !== undefined &&
-      envCooldown !== '' &&
-      Number.isFinite(parsedEnv)
-        ? Math.max(0, parsedEnv)
-        : row
-          ? Number(row.commission_cooldown_days)
-          : 3;
     return {
-      commissionCooldownDays,
-      teamOverridePct: row ? Number(row.team_override_pct) : 0.2,
-      overrideGenerationCap: row ? Number(row.override_generation_cap) : 100,
       withdrawals_per_day: row ? Number(row.withdrawals_per_day) : 1,
     };
   }
@@ -1748,19 +1676,17 @@ class PacksModuleService extends MedusaService({
     return { id: reversal.id };
   }
 
-  // Cascading reversal of an entire open (Phase 2b) — the saga compensation that
-  // claws back EVERY commission paid for an open, not just the recruit's debit.
-  // ONE transaction. Collects all originals sharing the open_id (the pack_open
-  // debit + every direct/override commission credit), locks each touched customer
-  // (sorted -> deadlock-safe), and appends an append-only compensating row per
-  // original, idempotent via reference `reversal:${rowId}`. Commission claw-backs
-  // post as 'commission_reversal' and flip the lifecycle row to 'reversed'; the
-  // debit refund keeps reason 'pack_open' (nets the open's external basis, exactly
-  // like reverseCreditTransaction — an aborted open correctly stops counting toward
-  // VIP basis; there is no separate VIP projection to inverse). Re-running adds
-  // nothing (returns reversed: 0). Exactly-once rests on the sorted credit: locks
-  // + the per-row reference check (no DB unique on reference; a 3a admin reverse
-  // path MUST take the same credit: locks).
+  // Cascading reversal of an entire open — the saga compensation for the
+  // recruit's debit. ONE transaction. Collects all originals sharing the open_id,
+  // locks each touched customer (sorted -> deadlock-safe), and appends an
+  // append-only compensating row per original, idempotent via reference
+  // `reversal:${rowId}`. The refund keeps reason 'pack_open' (nets the open's
+  // external basis, exactly like reverseCreditTransaction — an aborted open
+  // correctly stops counting toward VIP basis; there is no separate VIP
+  // projection to inverse). Re-running adds nothing (returns reversed: 0).
+  // Exactly-once rests on the sorted credit: locks + the per-row reference check
+  // (no DB unique on reference; an admin reverse path MUST take the same
+  // credit: locks).
   @InjectTransactionManager()
   async reverseOpen(
     sourceTransactionId: string,
@@ -1769,10 +1695,9 @@ class PacksModuleService extends MedusaService({
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
 
     // 1) Collect ALL originals for this open, PAGED — a full compensation must
-    //    never silently truncate (a single capped fetch could leave commissions
-    //    unreversed). Exclude compensating rows from a prior run: the debit
-    //    reversal also carries reason 'pack_open', so filter on the reference
-    //    prefix, not reason alone.
+    //    never silently truncate. Exclude compensating rows from a prior run:
+    //    the debit reversal also carries reason 'pack_open', so filter on the
+    //    reference prefix, not reason alone.
     const PAGE = 1000;
     let all = await this.listCreditTransactions(
       { source_transaction_id: sourceTransactionId },
@@ -1788,11 +1713,7 @@ class PacksModuleService extends MedusaService({
     const originals = all.filter((r) => {
       const ref = String((r as { reference?: string | null }).reference ?? '');
       if (ref.startsWith('reversal:')) return false;
-      return (
-        r.reason === 'pack_open' ||
-        r.reason === 'direct_referral' ||
-        r.reason === 'team_override'
-      );
+      return r.reason === 'pack_open';
     });
     if (originals.length === 0) return { reversed: 0 };
 
@@ -1829,9 +1750,6 @@ class PacksModuleService extends MedusaService({
         { take: 1 },
       );
       if (existing) continue; // already reversed — no-op
-      const isCommission =
-        original.reason === 'direct_referral' ||
-        original.reason === 'team_override';
       const originalExt = Number(
         (original as { external_funded_cents?: number | null })
           .external_funded_cents ?? 0,
@@ -1841,25 +1759,15 @@ class PacksModuleService extends MedusaService({
           {
             customer_id: original.customer_id,
             amount: -Number(original.amount), // refund / claw-back
-            reason: isCommission ? 'commission_reversal' : original.reason,
+            reason: original.reason,
             pull_id: null,
             reference: `reversal:${original.id}`,
-            external_funded_cents: -originalExt, // restores basis (0 for commissions)
+            external_funded_cents: -originalExt, // restores basis
             source_transaction_id: sourceTransactionId,
           },
         ],
         sharedContext,
       );
-      if (isCommission) {
-        // Flip the lifecycle row to 'reversed' + anchor the reversal, on the
-        // locked connection. Idempotent via the status guard.
-        await em.execute(
-          `UPDATE commission
-              SET status = 'reversed', reversal_transaction_id = ?, updated_at = now()
-            WHERE credit_transaction_id = ? AND status <> 'reversed' AND deleted_at IS NULL`,
-          [rev.id, original.id],
-        );
-      }
       deltaMap.set(
         original.customer_id,
         (deltaMap.get(original.customer_id) ?? 0) +
@@ -2026,161 +1934,6 @@ class PacksModuleService extends MedusaService({
         'This account is frozen. Please contact support before transacting.',
       );
     }
-  }
-
-  // Admin commission-scoped reversal (Phase 3a). Claws back EVERY commission row
-  // for the target's open (all generations) but leaves the recruit's pack_open
-  // debit intact — unlike reverseOpen, which also refunds the recruit. Same
-  // sorted credit: lock + per-row reversal:${id} idempotency discipline as
-  // reverseOpen (2b §3.1). Writes one audit row in the same txn.
-  @InjectTransactionManager()
-  async reverseCommission(
-    input: { commissionId: string; adminId: string; reason: string },
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ reversed: number; froze: string[] }> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    const [target] = await this.listCommissions(
-      { id: input.commissionId },
-      { take: 1 },
-      sharedContext,
-    );
-    if (!target) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_FOUND,
-        `Commission '${input.commissionId}' not found.`,
-      );
-    }
-    const open = target.source_transaction_id;
-
-    // All commission CREDIT rows for this open (every generation). Fetch all
-    // rows for the open and filter to commission reasons — same pattern as
-    // reverseOpen (no array-filter reliance on MedusaService list).
-    // PAGED — a full reversal must never silently truncate. A bare take:1000
-    // would leave the commissions of a large open (many generations) unreversed,
-    // so sponsors keep clawed-back credit AND the auto-freeze projection below is
-    // computed on a partial set. Mirrors reverseOpen's loop on the same key.
-    const PAGE = 1000;
-    const allRows = await this.listCreditTransactions(
-      { source_transaction_id: open },
-      { skip: 0, take: PAGE, order: { created_at: 'ASC', id: 'ASC' } },
-    );
-    // Append in place (push, not concat) so paging stays O(n), not O(n²). The
-    // `=== skip` guard is exact: each fetch takes AT MOST PAGE rows, so the
-    // accumulated length equals skip iff the last page was full (more to fetch)
-    // and is strictly less on the final partial/empty page (stop) — it can never
-    // exceed skip, so this never loops forever nor stops early.
-    for (let skip = PAGE; allRows.length === skip; skip += PAGE) {
-      const next = await this.listCreditTransactions(
-        { source_transaction_id: open },
-        { skip, take: PAGE, order: { created_at: 'ASC', id: 'ASC' } },
-      );
-      allRows.push(...next);
-    }
-    const credits = allRows.filter(
-      (r) =>
-        (r.reason === 'direct_referral' || r.reason === 'team_override') &&
-        !String(
-          (r as { reference?: string | null }).reference ?? '',
-        ).startsWith('reversal:'),
-    );
-    if (credits.length === 0) return { reversed: 0, froze: [] };
-
-    // Sorted credit: locks across every touched beneficiary (deadlock-safe).
-    const beneficiaries = [
-      ...new Set(credits.map((c) => c.customer_id)),
-    ].sort();
-    for (const cid of beneficiaries) {
-      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-        `credit:${cid}`,
-      ]);
-    }
-
-    // Snapshot the committed raw balance for each beneficiary BEFORE writing any
-    // reversals. MikroORM's UoW buffers ORM inserts until flush, so a raw-SQL
-    // read inside the same txn would NOT see ORM-created rows — we must compute
-    // the projected post-reversal balance from the committed snapshot + the delta.
-    const preBalanceCentsMap = new Map<string, number>();
-    for (const cid of beneficiaries) {
-      const [row] = await em.execute<{ b: string | null }[]>(
-        'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS b FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
-        [cid],
-      );
-      preBalanceCentsMap.set(cid, Number(row?.b ?? 0));
-    }
-
-    let reversed = 0;
-    const reversedCentsMap = new Map<string, number>(); // per-beneficiary delta (positive = clawed back)
-    for (const original of credits) {
-      const [existing] = await this.listCreditTransactions(
-        { reference: `reversal:${original.id}` },
-        { take: 1 },
-        sharedContext,
-      );
-      if (existing) continue; // idempotent no-op
-      const [rev] = await this.createCreditTransactions(
-        [
-          {
-            customer_id: original.customer_id,
-            amount: -Number(original.amount),
-            reason: 'commission_reversal',
-            pull_id: null,
-            reference: `reversal:${original.id}`,
-            external_funded_cents: 0, // commissions carry no external basis
-            source_transaction_id: open,
-          },
-        ],
-        sharedContext,
-      );
-      await em.execute(
-        `UPDATE commission SET status = 'reversed', reversal_transaction_id = ?, updated_at = now()
-          WHERE credit_transaction_id = ? AND status <> 'reversed' AND deleted_at IS NULL`,
-        [rev.id, original.id],
-      );
-      // Accumulate per-beneficiary reversal amount (in cents).
-      const prevDelta = reversedCentsMap.get(original.customer_id) ?? 0;
-      reversedCentsMap.set(
-        original.customer_id,
-        prevDelta + Math.round(Number(original.amount) * 100),
-      );
-      reversed++;
-    }
-
-    // Auto-freeze any beneficiary whose projected post-reversal balance is negative.
-    // We pass projectedCents to avoid a raw-SQL re-read that cannot see the ORM-buffered
-    // reversal rows (MikroORM UoW flushes lazily; raw em.execute reads committed state only).
-    const froze: string[] = [];
-    for (const cid of beneficiaries) {
-      const preCents = preBalanceCentsMap.get(cid) ?? 0;
-      const deltaCents = reversedCentsMap.get(cid) ?? 0; // amount clawed back (positive)
-      const projectedCents = preCents - deltaCents;
-      if (projectedCents < 0) {
-        if (
-          await this.freezeAccountIfNotAlready(
-            cid,
-            'auto',
-            `clawback:${open}`,
-            sharedContext,
-          )
-        )
-          froze.push(cid);
-      }
-    }
-
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'commission',
-          entity_id: input.commissionId,
-          action: 'reverse_commission',
-          before: { source_transaction_id: open, reversed_rows: reversed },
-          after: { froze },
-          reason: input.reason,
-        },
-      ],
-      sharedContext,
-    );
-    return { reversed, froze };
   }
 
   // Claim an earned VIP reward grant (B5). Read-then-write under the per-customer
@@ -2529,151 +2282,6 @@ class PacksModuleService extends MedusaService({
       );
     }, 0);
     return Math.round(sum * 100) / 100;
-  }
-
-  // Admin per-commission status flip: available|pending → suspended.
-  // The suspended status is counted as locked in lockedCommissionCents, so
-  // the beneficiary's availableBalance drops automatically without any
-  // additional balance-mutation step. Takes the per-beneficiary advisory lock
-  // to serialise concurrent balance reads, then flips the status and writes an
-  // audit row in the same transaction.
-  @InjectTransactionManager()
-  async suspendCommission(
-    input: { commissionId: string; adminId: string; reason: string },
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ status: 'suspended' }> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    // First read resolves the beneficiary (and 404s) so we can take the
-    // per-beneficiary lock; status is validated UNDER the lock below. The lock
-    // must PRECEDE the authoritative status check — otherwise a concurrent
-    // reverseCommission could flip status to 'reversed' between our check and
-    // our update (TOCTOU), and we'd clobber the reversal with 'suspended'.
-    const [pre] = await this.listCommissions(
-      { id: input.commissionId },
-      { take: 1 },
-      sharedContext,
-    );
-    if (!pre) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_FOUND,
-        `Commission '${input.commissionId}' not found.`,
-      );
-    }
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${pre.beneficiary}`,
-    ]);
-    // Re-read under the lock — authoritative status for the guard + audit.
-    const [c] = await this.listCommissions(
-      { id: input.commissionId },
-      { take: 1 },
-      sharedContext,
-    );
-    if (!c) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_FOUND,
-        `Commission '${input.commissionId}' not found.`,
-      );
-    }
-    if (c.status === 'reversed') {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        'A reversed commission cannot be suspended.',
-      );
-    }
-    if (c.status === 'suspended') {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        'Commission is already suspended.',
-      );
-    }
-    await this.updateCommissions(
-      { selector: { id: c.id }, data: { status: 'suspended' } },
-      sharedContext,
-    );
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'commission',
-          entity_id: c.id,
-          action: 'suspend_commission',
-          before: { status: c.status },
-          after: { status: 'suspended' },
-          reason: input.reason,
-        },
-      ],
-      sharedContext,
-    );
-    return { status: 'suspended' };
-  }
-
-  // Admin per-commission status flip: suspended → pending|available.
-  // The restored status is determined by the authoritative maturity predicate
-  // (matures_at <= now() → available, else pending) rather than a stored prior
-  // value, so a commission that matured while suspended comes back as available.
-  @InjectTransactionManager()
-  async unsuspendCommission(
-    input: { commissionId: string; adminId: string; reason: string },
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ status: 'pending' | 'available' }> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    // First read resolves the beneficiary (and 404s) so we can take the
-    // per-beneficiary lock; status + maturity are validated UNDER the lock below
-    // (TOCTOU vs a concurrent reverseCommission — see suspendCommission).
-    const [pre] = await this.listCommissions(
-      { id: input.commissionId },
-      { take: 1 },
-      sharedContext,
-    );
-    if (!pre) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_FOUND,
-        `Commission '${input.commissionId}' not found.`,
-      );
-    }
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${pre.beneficiary}`,
-    ]);
-    // Re-read under the lock — authoritative status for the guard + audit.
-    const [c] = await this.listCommissions(
-      { id: input.commissionId },
-      { take: 1 },
-      sharedContext,
-    );
-    if (!c) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_FOUND,
-        `Commission '${input.commissionId}' not found.`,
-      );
-    }
-    if (c.status !== 'suspended') {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        'Only a suspended commission can be unsuspended.',
-      );
-    }
-    // Restore from the authoritative read-predicate, not a stored prior value.
-    const next: 'pending' | 'available' =
-      new Date(c.matures_at).getTime() <= Date.now() ? 'available' : 'pending';
-    await this.updateCommissions(
-      { selector: { id: c.id }, data: { status: next } },
-      sharedContext,
-    );
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'commission',
-          entity_id: c.id,
-          action: 'unsuspend_commission',
-          before: { status: c.status },
-          after: { status: next },
-          reason: input.reason,
-        },
-      ],
-      sharedContext,
-    );
-    return { status: next };
   }
 
   // Admin-initiated MANUAL account freeze. A manual freeze is STICKY: it
@@ -3384,12 +2992,11 @@ class PacksModuleService extends MedusaService({
     return { frozen: false };
   }
 
-  // The atomic open settlement — the ONLY place an open debit (and, Phase 2a,
-  // its commission) is written. Holds the per-customer advisory lock across the
-  // balance read, floor check, debit insert, AND (Task 14) the commission fan-out
-  // in ONE transaction, because the open is a compensation saga: the lock would
-  // release if these were separate committed steps. This is mutateCreditAtomic
-  // scaled up. Debit-only here; Task 14 extends it without changing this seam.
+  // The atomic open settlement — the ONLY place an open debit is written. Holds
+  // the per-customer advisory lock across the balance read, floor check and debit
+  // insert in ONE transaction, because the open is a compensation saga: the lock
+  // would release if these were separate committed steps. This is
+  // mutateCreditAtomic scaled up.
   @InjectTransactionManager()
   async settleOpen(
     input: SettleOpenInput,
@@ -3403,9 +3010,9 @@ class PacksModuleService extends MedusaService({
         'settleOpen amount must be less than 0 (an open is a debit).',
       );
     }
-    // sourceTransactionId is the commission idempotency key (open_id). Reject an
-    // empty/missing one at the boundary so a bad caller can't write rows that
-    // escape the partial-unique index (Sourcery review).
+    // sourceTransactionId is the open-settlement idempotency key (open_id).
+    // Reject an empty/missing one at the boundary so a bad caller can't write
+    // rows that escape the partial-unique index (Sourcery review).
     if (!input.sourceTransactionId) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
@@ -3443,12 +3050,9 @@ class PacksModuleService extends MedusaService({
       externalBalanceSen,
     );
 
-    // 3) Floor check against the AVAILABLE balance (raw − locked commission).
-    //    Every open debit is locked-aware — there is no raw-balance opt-out, so a
-    //    debit can never spend credit backed by pending/locked commission (Codex
+    // 3) Floor check against the balance. There is no raw-balance opt-out (Codex
     //    review removed the unused floorMode:'raw' bypass).
-    const lockedCents = await this.lockedCommissionCents(input.customerId, em);
-    const availableCents = beforeCents - lockedCents;
+    const availableCents = beforeCents;
     if (availableCents + deltaCents < 0) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
@@ -3478,7 +3082,6 @@ class PacksModuleService extends MedusaService({
     }
 
     let txn: Awaited<ReturnType<typeof this.createCreditTransactions>>[0];
-    const commissions: CommissionPaid[] = [];
     try {
       [txn] = await this.createCreditTransactions(
         [
@@ -3495,257 +3098,8 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
 
-      // 5) Commission fan-out (Phase 2b: direct gen-1 + team-override gens 2..N).
-      //    All inside the SAME locked txn so the debit + every commission credit +
-      //    lifecycle row commit or roll back together (no saga step could share
-      //    this lock — spec §3).
-      // The commission basis is the EXTERNAL-FUNDED portion of this open.
-      // Net basis reaches zero on clawback (reverseOpen negates externalFundedCents),
-      // so the basis is NOT refund-stable at the ledger level. The monotonic
-      // lifetime counter (built in a later task) is the rank basis; spec §3.
-      // SUSPENDED (referral programme retired): this fan-out is UNREACHABLE for
-      // any new customer. It is gated on a referral_relationship row, and
-      // linkSponsor — the only writer of that table — was removed. Existing
-      // edges (if any survive in production) still pay, which is deliberate:
-      // silently dropping a commission a recruit already earned would be a
-      // money change disguised as a cleanup.
-      //
-      // Kept rather than excised because settleOpen is the atomic
-      // open-settlement seam (debit + fan-out under ONE advisory lock) and the
-      // guard below costs one indexed lookup that returns nothing. Excising it
-      // is a separate, reviewable change against the most load-bearing money
-      // function in the module — do not fold it into a cleanup commit.
-      const basisSen = -externalFundedCents;
-      if (basisSen > 0) {
-        const [rel] = await this.listReferralRelationships(
-          { customer_id: input.customerId },
-          { take: 1 },
-        );
-        if (rel?.sponsor_id) {
-          const sponsorId = rel.sponsor_id;
-          // Sponsor's effective level ranks on their MONOTONIC lifetime TURNOVER
-          // (refund-immune; spec §6 — a refund never lowers VIP level or the
-          // commission tier it sets), NOT the refund-reducible creditSummary
-          // basis (which nets reversed opens to zero). The lifetime counter already
-          // backs VIP display/grants; this aligns the commission tier with it. The
-          // commission BASIS itself (basisSen above) stays external-funded — only
-          // the sponsor's TIER lookup uses turnover.
-          // lifetimeTurnoverSenFor is @InjectManager like creditSummary, so the
-          // level read stays off the locked path. (F5)
-          const sponsorLifetimeSen =
-            await this.lifetimeTurnoverSenFor(sponsorId);
-          // UNIT TRAP: lifetimeTurnoverSenFor returns integer SEN, but
-          // levelForSpend expects MYR (it calls toSen internally) — same
-          // conversion the VIP grant path does (rebuildVipMemberState /
-          // grantLevelUpRewards). Passing raw SEN would inflate the tier 100×.
-          const sponsorLifetimeMyr = fromSen(sponsorLifetimeSen);
-          const ladderRows = await this.listVipLevels(
-            {},
-            {
-              select: ['level', 'spend_threshold', 'direct_referral_pct'],
-              take: 1000,
-            },
-          );
-          // vip_level unseeded (migrations-without-seed) → skip the commission
-          // fan-out rather than aborting the recruit's PAID open: a reward-like
-          // grant must never void a paid charge (mirrors settleVipStep's
-          // best-effort design; levelForSpend throws on an empty ladder). With a
-          // PARTIALLY-seeded ladder levelForSpend still returns a present rung so
-          // directReferralPctForLevel resolves (no throw); a rung whose
-          // direct_referral_pct is NULL/0 simply pays 0% — sponsor under-payment,
-          // house-favorable — so this fully-empty guard is the only degradation.
-          let pct = 0;
-          let commissionSen = 0;
-          if (ladderRows.length === 0) {
-            // eslint-disable-next-line no-console
-            console.warn(
-              `settleOpen: vip_level ladder is empty — skipping commission for open '${input.sourceTransactionId}' (recruit '${input.customerId}', sponsor '${sponsorId}'). Seed vip_level.`,
-            );
-          } else {
-            const levelLadder = ladderRows.map((r) => ({
-              level: r.level,
-              spend_threshold: Number(r.spend_threshold),
-            }));
-            const pctLadder = ladderRows.map((r) => ({
-              level: r.level,
-              direct_referral_pct: Number(r.direct_referral_pct),
-            }));
-            const sponsorLevel = levelForSpend(sponsorLifetimeMyr, levelLadder);
-            pct = directReferralPctForLevel(sponsorLevel, pctLadder);
-            commissionSen = directCommissionSen(basisSen, pct);
-          }
-
-          if (commissionSen > 0) {
-            // Thread sharedContext so the settings read runs on THIS locked txn.
-            const settings = await this.rewardsSettings(sharedContext);
-            const matured = settings.commissionCooldownDays === 0;
-            // For cooldown=0 set matures_at to epoch so matures_at > now() is
-            // definitively false even if JS clock lags Postgres transaction now().
-            const maturesAt = matured
-              ? new Date(0)
-              : new Date(
-                  Date.now() + settings.commissionCooldownDays * 86_400_000,
-                );
-
-            // Pay one beneficiary: the credit row + its 1:1 lifecycle row, in the
-            // SAME locked txn. The partial-unique index (source_transaction_id,
-            // reason, customer_id, generation) rejects a replayed open_id with a
-            // 23505 (caught below). reason = 'direct_referral' for gen 1, else
-            // 'team_override'. effective_pct snapshots the whole-percent used.
-            const payCommission = async (
-              beneficiary: string,
-              amountSen: number,
-              generation: number,
-              kind: 'direct' | 'override',
-              effectivePct: number,
-            ): Promise<void> => {
-              // A purged customer keeps their referral edges — severing them
-              // would dangle a recruit's upline and silently rewrite
-              // attribution — so the edge still resolves here long after the
-              // account is gone. Paying it mints credits onto an account with
-              // no owner and no login, every time a surviving recruit opens a
-              // pack, forever. The preflight cannot cover this: at delete time
-              // the commission row does not exist yet.
-              //
-              // Per BENEFICIARY, not per sponsor. Skipping the whole fan-out
-              // when the direct sponsor is deleted would dock every live upline
-              // an override they earned; checking only the sponsor would still
-              // pay a deleted ancestor. Both are wrong; this is not.
-              //
-              // sharedContext threaded so the read joins THIS locked txn rather
-              // than taking a second pool connection (see recordPullsWithLedger).
-              // Deliberately NOT wrapped in try/catch: a swallowed read error
-              // would pay the deleted account, so a failure here rolls the open
-              // back — the same fail-closed direction as the reads above.
-              //
-              // `.has(beneficiary)`, never `.size > 0`: the two are equivalent
-              // only while the entity_id filter constrains. If it ever stopped
-              // (a generated-method change, a renamed key), a size test would
-              // read ANY delete_account row as this beneficiary's and silently
-              // halt every commission to every live upline forever, as soon as
-              // one account anywhere had been deleted — the inverse failure,
-              // and the worse one, because under-paying the living is invisible
-              // where over-paying the dead is at least auditable.
-              if (
-                (
-                  await this.deletedCustomerIds([beneficiary], sharedContext)
-                ).has(beneficiary)
-              ) {
-                return;
-              }
-              const [credit] = await this.createCreditTransactions(
-                [
-                  {
-                    customer_id: beneficiary,
-                    amount: amountSen / 100,
-                    reason:
-                      kind === 'direct' ? 'direct_referral' : 'team_override',
-                    pull_id: null,
-                    reference: null,
-                    external_funded_cents: 0, // commission is internal, not external
-                    source_transaction_id: input.sourceTransactionId,
-                    generation,
-                  },
-                ],
-                sharedContext,
-              );
-              await this.createCommissions(
-                [
-                  {
-                    credit_transaction_id: credit.id,
-                    beneficiary,
-                    source_transaction_id: input.sourceTransactionId,
-                    generation,
-                    kind,
-                    status: matured ? 'available' : 'pending',
-                    matures_at: maturesAt,
-                    effective_pct: effectivePct,
-                    reversal_transaction_id: null,
-                  },
-                ],
-                sharedContext,
-              );
-              commissions.push({ beneficiary, amountSen, matured });
-              // NOTE: a frozen sponsor repaid only by a downline commission lifts
-              // on their next direct inflow (mutateCreditAtomic holds their lock)
-              // — we do NOT auto-unfreeze here: settleOpen holds only the
-              // recruit's lock, so unfreezing a beneficiary would be a TOCTOU
-              // race (and taking the beneficiary lock here risks deadlock vs the
-              // sorted-lock reversal paths).
-            };
-
-            // gen 1 — the direct sponsor.
-            await payCommission(sponsorId, commissionSen, 1, 'direct', pct);
-
-            // gens 2..N — the team-override DAG up the sponsor's upline. Flat
-            // whole-percent (team_override_pct * 100). The schedule self-
-            // terminates at <1 sen; generation = absolute tree depth.
-            const overridePct = Math.round(settings.teamOverridePct * 100);
-            const schedule = teamOverrideSchedule(
-              commissionSen,
-              overridePct,
-              settings.overrideGenerationCap,
-            );
-            if (schedule.length > 0) {
-              const byDepth = new Map(
-                schedule.map((s) => [s.generation, s.amountSen]),
-              );
-              const maxDepth = schedule[schedule.length - 1].generation;
-              // Ordered ancestors ABOVE the direct sponsor, each with its absolute
-              // tree depth (direct sponsor = depth 1). A NEW recursive CTE — the
-              // linkSponsor query is a ≤1-row cycle PROBE, not an enumerator — that
-              // carries a depth column + ORDER BY depth, bounded by the deepest
-              // paid generation. customer_id is unique => simple path, terminates.
-              const ancestors = await em.execute<
-                { ancestor_id: string; depth: string }[]
-              >(
-                `WITH RECURSIVE up AS (
-                   SELECT sponsor_id AS ancestor_id, 2 AS depth
-                     FROM referral_relationship
-                     WHERE customer_id = ? AND deleted_at IS NULL
-                   UNION ALL
-                   SELECT r.sponsor_id, up.depth + 1
-                     FROM referral_relationship r
-                     JOIN up ON r.customer_id = up.ancestor_id
-                     WHERE r.deleted_at IS NULL AND up.depth < ?
-                 )
-                 SELECT ancestor_id, depth FROM up ORDER BY depth`,
-                [sponsorId, maxDepth],
-              );
-              for (const anc of ancestors) {
-                const amountSen = byDepth.get(Number(anc.depth));
-                if (!amountSen) continue; // beyond self-termination -> no override
-                await payCommission(
-                  anc.ancestor_id,
-                  amountSen,
-                  Number(anc.depth),
-                  'override',
-                  overridePct,
-                );
-              }
-              // Defensive: a real schedule self-terminates long before the cap.
-              // Reaching it is an anomaly (escaped cycle / data corruption) — log,
-              // do NOT abort the recruit's open.
-              if (
-                schedule[schedule.length - 1].generation ===
-                settings.overrideGenerationCap
-              ) {
-                // eslint-disable-next-line no-console
-                console.warn(
-                  `[settleOpen] override schedule reached override_generation_cap=${settings.overrideGenerationCap}`,
-                  {
-                    source_transaction_id: input.sourceTransactionId,
-                    recruit_id: input.customerId,
-                  },
-                );
-              }
-            }
-          }
-        }
-      }
     } catch (e) {
-      // A 23505 means this open_id already settled — from EITHER the debit index
-      // (no-sponsor path, Phase 3b) or the commission index (with-sponsor path).
+      // A 23505 means this open_id already settled (the debit index).
       // The 23505 already aborted THIS txn (25P02); re-raise as DUPLICATE_ERROR so
       // @InjectTransactionManager rolls the whole settleOpen back, DEBIT included.
       // No SAVEPOINT — that would let the duplicate debit commit.
@@ -3761,7 +3115,6 @@ class PacksModuleService extends MedusaService({
     return {
       id: txn.id,
       balance: (beforeCents + deltaCents) / 100,
-      commissions,
     };
   }
 
@@ -3863,15 +3216,6 @@ class PacksModuleService extends MedusaService({
     return pulls;
   }
 
-  // Locked (unspendable) commission credit for a customer, in cents, read inside
-  // the caller's transaction. Sums the POSITIVE commission credit rows whose
-  // paired lifecycle record is not yet spendable: 'pending' AND not matured
-  // (matures_at > now()), OR 'suspended'. 'available' and 'reversed' are NOT
-  // locked — 'available' is the post-maturity spendable state, and a 'reversed'
-  // commission's positive credit is already netted by its negative reversal row
-  // in the raw balance (locking it too would double-subtract). Maturity is a
-  // read-time predicate on 'pending' — no scheduler can make spend wrong by
-  // lagging (a matured-but-not-yet-flipped 'pending' row reads as available).
   // True if the customer is currently frozen. Read on the caller's connection so
   // it participates in the same advisory-locked transaction as the debit gate.
   // ANY-cause freeze read (manual OR auto) — the gate settleOpen holds over
@@ -3890,27 +3234,8 @@ class PacksModuleService extends MedusaService({
     return !!row;
   }
 
-  private async lockedCommissionCents(
-    customerId: string,
-    em: LedgerSqlManager,
-  ): Promise<number> {
-    const rows = await em.execute<{ locked_cents: string | null }[]>(
-      `SELECT COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS locked_cents
-         FROM credit_transaction ct
-         JOIN commission c ON c.credit_transaction_id = ct.id
-        WHERE ct.customer_id = ?
-          AND ct.deleted_at IS NULL
-          AND c.deleted_at IS NULL
-          AND ct.amount > 0
-          AND ((c.status = 'pending' AND c.matures_at > now()) OR c.status = 'suspended')`,
-      [customerId],
-    );
-    return Number(rows[0]?.locked_cents ?? 0);
-  }
-
-  // Public available balance = raw balance − locked commission. The single gate
-  // every locked-aware debit uses (spec §8). (Phase 3a: a frozen account returns
-  // 0 here.) Read in its own short transaction.
+  // Public available balance = the raw ledger balance, except that a frozen
+  // account returns 0 (Phase 3a). Read in its own short transaction.
   @InjectManager()
   async availableBalance(
     customerId: string,
@@ -3924,9 +3249,7 @@ class PacksModuleService extends MedusaService({
       [customerId],
     );
     if (await this.isFrozen(customerId, sharedContext)) return 0; // Phase 3a freeze
-    const balanceCents = Number(rows[0]?.balance_cents ?? 0);
-    const lockedCents = await this.lockedCommissionCents(customerId, em);
-    return (balanceCents - lockedCents) / 100;
+    return Number(rows[0]?.balance_cents ?? 0) / 100;
   }
 
   // The raw signed ledger balance, in INTEGER CENTS.
@@ -4144,10 +3467,9 @@ class PacksModuleService extends MedusaService({
   // partial failure recoverable.
   //
   // What is deliberately NOT touched: credit_transaction, ledger_entry,
-  // globepay_deposit, pull, commission, vip_member_state and
-  // referral_relationship. Those are the business books. They carry only a
-  // customer_id that no longer resolves to a person, and the referral rows in
-  // particular must survive or a downline's upline dangles.
+  // globepay_deposit, pull and vip_member_state. Those are the business books.
+  // They carry only a customer_id that no longer resolves to a person, so the
+  // rows are already anonymous by construction.
   @InjectTransactionManager()
   async purgeAccountPacksData(
     customerId: string,
@@ -4281,13 +3603,11 @@ class PacksModuleService extends MedusaService({
     }
   }
 
-  // Wallet summary: raw balance, available (freeze-aware), locked (pending-
-  // unmatured + suspended commissions), the earliest pending maturity
-  // tranche (date + amount), and the playthrough withdrawal gate
-  // (withdrawable.ts): deposits must be fully spent on pack opens before any
-  // balance may leave. All amounts in MYR (RM) — the ledger is already
-  // stored in MYR decimals, never USD.
-  // available = isFrozen ? 0 : balance − locked  (matches availableBalance).
+  // Wallet summary: raw balance, available (freeze-aware) and the playthrough
+  // withdrawal gate (withdrawable.ts): deposits must be fully spent on pack
+  // opens before any balance may leave. All amounts in MYR (RM) — the ledger is
+  // already stored in MYR decimals, never USD.
+  // available = isFrozen ? 0 : balance  (matches availableBalance).
   // withdrawable = gate open ? available : 0.
   @InjectManager()
   async walletSummary(
@@ -4297,8 +3617,8 @@ class PacksModuleService extends MedusaService({
     // the balance/deposited/used scan runs once per request instead of twice.
     // Units: balance in MYR, depositedCents/usedCents in integer cents — the
     // same units this method's own scan produces. Omitted → self-scan (direct
-    // callers and module specs are unchanged). lockedCommission/nextUnlock/
-    // isFrozen always query regardless (they're not in creditSummary).
+    // callers and module specs are unchanged). isFrozen always queries
+    // regardless (it is not in creditSummary).
     precomputed?: {
       balance: number;
       depositedCents: number;
@@ -4308,9 +3628,7 @@ class PacksModuleService extends MedusaService({
   ): Promise<{
     balance: number;
     available: number;
-    locked: number;
     isFrozen: boolean;
-    nextUnlock: { amount: number; date: string } | null;
     withdrawable: number;
     playthrough: { deposited: number; used: number; remaining: number };
   }> {
@@ -4321,9 +3639,9 @@ class PacksModuleService extends MedusaService({
     // cents to avoid float drift (matches availableBalance pattern, spec §8).
     // Same scan also folds the playthrough inputs: deposited = Σ positive
     // topup rows; used = Σ −external_funded_cents over pack_open rows —
-    // deposit-funded spend only; commission/buyback/adjustment-funded opens
-    // contribute 0, and a reversed open restores its basis via the mirror
-    // row's −originalExt. Buyback / promo / commission rows touch neither sum.
+    // deposit-funded spend only; buyback/adjustment-funded opens contribute 0,
+    // and a reversed open restores its basis via the mirror row's −originalExt.
+    // Buyback / promo rows touch neither sum.
     // Pre-1b topup rows (external_funded_cents IS NULL) are grandfathered out of
     // deposited: they predate the basis column, so their opens' spend is equally
     // invisible to used — counting them would lock those deposits forever.
@@ -4353,53 +3671,11 @@ class PacksModuleService extends MedusaService({
       usedCents = Number(balRows[0]?.used_cents ?? 0);
     }
 
-    // Locked = positive commission credits that are pending-unmatured OR
-    // suspended. Reversed/available commissions are excluded (mirroring
-    // lockedCommissionCents in availableBalance).
-    const lockedCents = await this.lockedCommissionCents(customerId, em);
-    const locked = lockedCents / 100;
-
-    // Next unlock = earliest pending maturity in the future + sum of all
-    // commission credits maturing at exactly that date for this customer.
-    const nextRows = await em.execute<
-      { date: string | null; amount_cents: string | null }[]
-    >(
-      `WITH nxt AS (
-         SELECT MIN(c.matures_at) AS d
-           FROM credit_transaction ct
-           JOIN commission c ON c.credit_transaction_id = ct.id AND c.deleted_at IS NULL
-          WHERE ct.customer_id = ? AND c.status = 'pending' AND c.matures_at > now()
-            AND ct.deleted_at IS NULL
-       )
-       SELECT nxt.d AS date,
-              COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS amount_cents
-         FROM nxt
-         LEFT JOIN commission c ON c.matures_at = nxt.d AND c.status = 'pending' AND c.deleted_at IS NULL
-         LEFT JOIN credit_transaction ct ON ct.id = c.credit_transaction_id
-                   AND ct.customer_id = ? AND ct.deleted_at IS NULL AND ct.amount > 0
-        GROUP BY nxt.d`,
-      [customerId, customerId],
-    );
-    const nextRow = nextRows[0];
-    const nextUnlock =
-      nextRow?.date != null
-        ? {
-            amount: Number(nextRow.amount_cents ?? 0) / 100,
-            date: new Date(nextRow.date).toISOString(),
-          }
-        : null;
-
     const frozen = await this.isFrozen(customerId, sharedContext);
-    // ONE division, from the integer-cent values, instead of subtracting two
-    // already-divided floats. `balanceCents/100 - lockedCents/100` can land a
-    // hair under the exact figure (6407/100 - 1407/100 === 49.99999999999999),
-    // and because withdrawalGateError compares `amount <= withdrawable` while
-    // the UI renders the same number with toFixed(2), the customer is shown
-    // "RM 50.00" and refused when they type 50. At the RM 50 minimum that
-    // leaves nothing they can withdraw at all until the arithmetic shifts.
-    const available = frozen
-      ? 0
-      : (Math.round(balance * 100) - Math.round(locked * 100)) / 100;
+    // Rounded through integer cents so the figure the gate compares and the
+    // figure the UI renders with toFixed(2) can never disagree by a float hair
+    // (withdrawalGateError compares `amount <= withdrawable`).
+    const available = frozen ? 0 : Math.round(balance * 100) / 100;
 
     // Playthrough gate: all-or-nothing on the available balance. Spending on
     // packs stays unrestricted either way — the gate only limits cashout.
@@ -4409,9 +3685,7 @@ class PacksModuleService extends MedusaService({
     return {
       balance,
       available,
-      locked,
       isFrozen: frozen,
-      nextUnlock,
       withdrawable,
       playthrough: {
         deposited: depositedCents / 100,
@@ -4934,285 +4208,13 @@ class PacksModuleService extends MedusaService({
     };
   }
 
-  // linkSponsor was REMOVED (referral programme retired).
-  //
-  // It was the only writer of referral_relationship, and its cycle probe was a
-  // recursive CTE with UNION ALL, no depth bound and no dedup: against a cyclic
-  // graph where the sought id is not on the walk it never terminated, pinning a
-  // pooled connection until the pool was exhausted. Postgres does not detect
-  // cycles without an explicit CYCLE clause, and statement_timeout cannot be set
-  // through databaseDriverOptions (see utils/db-driver-options.ts).
-  //
-  // The commission fan-out in settleOpen is now unreachable for any new
-  // customer: it is guarded by a referral_relationship lookup, and with no
-  // writer left no new edge can exist. It is deliberately left in place rather
-  // than excised, because settleOpen is the atomic open-settlement seam and its
-  // invariants are load-bearing — see the SUSPENDED note at that guard.
-
-  // Privacy-bounded referral summary for ONE customer (spec §7 / Task 5).
-  // Returns ONLY the caller's own earnings and their gen-1 (direct) recruits —
-  // NEVER an identity below generation 1. The route (Task 6) maps each returned
-  // `customerId` to a public handle; resolving the customer module is kept OUT
-  // of this service because PacksModuleService deliberately talks to Postgres
-  // through raw SQL only (LedgerSqlManager) and does not import other Medusa
-  // modules — the leaderboard route owns the no-N+1 handle batch (route.ts).
-  //
-  // Three reads, all read-only (@InjectManager, so a caller may thread a txn):
-  //   1. directRecruits  — gen-1 edges (sponsor_id = me) + per-recruit DIRECT
-  //      contribution. The commission ledger row has no source-customer column;
-  //      provenance is its source_transaction_id (= the open_id). So the
-  //      contribution is a TWO-HOP join: my 'direct_referral' rows -> match
-  //      source_transaction_id to the recruit's 'pack_open' row -> that row's
-  //      customer_id IS the recruit. Override ('team_override') rows are
-  //      excluded by the reason filter, so a gen-2 override never leaks into a
-  //      gen-1 recruit's "contribution".
-  //   2. downstreamCount — ALL generations under me via a NEW bounded DOWNWARD
-  //      recursive CTE (anchor sponsor_id = me, recurse on r.sponsor_id =
-  //      down.customer_id), UNION de-dups, an explicit depth cap guarantees
-  //      termination. COUNT only — no identities cross the boundary.
-  //   3. totalEarned    — Σ my commission ledger rows (direct + override);
-  //      negative 'commission_reversal' rows net automatically.
-  @InjectManager()
-  async referralSummary(
-    customerId: string,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{
-    directRecruits: { customerId: string; contribution: number }[];
-    downstreamCount: number;
-    totalEarned: number;
-  }> {
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-
-    // 1) Gen-1 recruits (indexed by sponsor_id).
-    const directRows = await em.execute<{ customer_id: string }[]>(
-      `SELECT customer_id FROM referral_relationship
-         WHERE sponsor_id = ? AND deleted_at IS NULL`,
-      [customerId],
-    );
-    const recruitIds = directRows.map((r) => r.customer_id);
-
-    // Contribution per direct recruit = Σ my DIRECT commission (net of clawbacks)
-    // whose source open belongs to that recruit. Two-hop: my 'direct_referral' /
-    // 'commission_reversal' rows -> their source_transaction_id -> the recruit's
-    // ORIGINAL 'pack_open' debit's customer_id.
-    // `IN (?, ?, ...)` not `= ANY(?)`: MikroORM's em.execute expands a JS array
-    // into positional binds, so `ANY(?)` would emit `ANY('a','b')` (a syntax
-    // error). recruitIds come from our own DB and each id is still bound (not
-    // interpolated), so this stays injection-safe.
-    //
-    // `AND po.amount < 0` is load-bearing: reverseOpen appends a COMPENSATING
-    // POSITIVE 'pack_open' refund row carrying the SAME source_transaction_id as
-    // the original (negative) debit. Without this guard, one `mine` row would join
-    // BOTH pack_open rows and SUM(mine.amount) would double-count that recruit.
-    // Filtering `po` to the original debit keeps exactly one join row per open.
-    //
-    // mine.reason IN ('direct_referral','commission_reversal') NETS the clawback:
-    // reverseOpen's commission_reversal row carries the SAME source_transaction_id
-    // (= open_id) as the direct_referral it reverses, so the negative reversal
-    // cancels the positive credit for that recruit's open — contribution then
-    // reflects reversals exactly like totalEarned does. Override reversals point
-    // at deeper opens (gen-2+ recruits, never in recruitIds), so the
-    // po.customer_id IN (recruitIds) filter naturally excludes them.
-    const recruitPlaceholders = recruitIds.map(() => '?').join(', ');
-    const contribRows = recruitIds.length
-      ? await em.execute<{ recruit_id: string; contribution_cents: string }[]>(
-          `SELECT po.customer_id AS recruit_id,
-                  COALESCE(SUM(ROUND(mine.amount * 100)), 0)::bigint AS contribution_cents
-             FROM credit_transaction mine
-             JOIN credit_transaction po
-               ON po.source_transaction_id = mine.source_transaction_id
-              AND po.reason = 'pack_open'
-              AND po.amount < 0
-              AND po.deleted_at IS NULL
-            WHERE mine.customer_id = ?
-              AND mine.reason IN ('direct_referral', 'commission_reversal')
-              AND mine.deleted_at IS NULL
-              AND po.customer_id IN (${recruitPlaceholders})
-            GROUP BY po.customer_id`,
-          [customerId, ...recruitIds],
-        )
-      : [];
-    const contribById = new Map<string, number>(
-      contribRows.map((r) => [
-        r.recruit_id,
-        Number(r.contribution_cents) / 100,
-      ]),
-    );
-
-    // 2) Downstream headcount, ALL generations, via a bounded DOWNWARD walk.
-    //    The explicit depth cap + UNION (de-dup) guarantee termination even if a
-    //    cycle somehow escaped linkSponsor's guard. Count only — no identities.
-    const downRows = await em.execute<{ cnt: number }[]>(
-      `WITH RECURSIVE down AS (
-         SELECT customer_id, 1 AS depth FROM referral_relationship
-           WHERE sponsor_id = ? AND deleted_at IS NULL
-         UNION
-         SELECT r.customer_id, d.depth + 1
-           FROM referral_relationship r
-           JOIN down d ON r.sponsor_id = d.customer_id
-          WHERE r.deleted_at IS NULL AND d.depth < ?
-       )
-       SELECT COUNT(*)::int AS cnt FROM down`,
-      [customerId, DOWNSTREAM_DEPTH_CAP],
-    );
-    const downstreamCount = Number(downRows[0]?.cnt ?? 0);
-
-    // 3) Total earned = Σ my commission ledger rows (direct + override); negative
-    //    'commission_reversal' rows net automatically.
-    const totalRows = await em.execute<{ total_cents: string }[]>(
-      `SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS total_cents
-         FROM credit_transaction
-        WHERE customer_id = ? AND deleted_at IS NULL
-          AND reason IN ('direct_referral', 'team_override', 'commission_reversal')`,
-      [customerId],
-    );
-    const totalEarned = Number(totalRows[0]?.total_cents ?? 0) / 100;
-
-    return {
-      directRecruits: recruitIds.map((id) => ({
-        customerId: id,
-        contribution: contribById.get(id) ?? 0,
-      })),
-      downstreamCount,
-      totalEarned,
-    };
-  }
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // Phase 4 P4.1 — Admin Observability: referral tree
-  // ──────────────────────────────────────────────────────────────────────────
-
-  // Downward recursive CTE: walks DESCENDANTS (children) of customerId, never
-  // ancestors. Join direction: r.sponsor_id = t.node_id (DOWN, opposite of the
-  // two existing upward CTEs in this file at ~1298 and ~1510).
-  @InjectManager()
-  async referralTreeFor(
-    customerId: string,
-    maxDepth: number,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{
-    root: PacksTreeNode;
-    nodes: PacksTreeNode[];
-    maxDepth: number;
-    truncated: boolean;
-  }> {
-    const depth = Math.max(1, Math.min(10, Math.floor(Number(maxDepth)) || 6));
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-
-    // ponytail: LIMIT 1001 → detect >1000 without fetching more rows
-    const rows = await em.execute<
-      { node_id: string; sponsor_id: string; depth: number }[]
-    >(
-      `WITH RECURSIVE tree AS (
-         SELECT customer_id AS node_id, sponsor_id, 1 AS depth
-           FROM referral_relationship
-           WHERE sponsor_id = ? AND deleted_at IS NULL
-         UNION ALL
-         SELECT r.customer_id, r.sponsor_id, t.depth + 1
-           FROM referral_relationship r
-           JOIN tree t ON r.sponsor_id = t.node_id
-           WHERE r.deleted_at IS NULL AND t.depth < ?
-       )
-       SELECT node_id, sponsor_id, depth FROM tree ORDER BY depth, node_id LIMIT 1001`,
-      [customerId, depth],
-    );
-    const truncated = rows.length > 1000;
-    const trimmed = truncated ? rows.slice(0, 1000) : rows;
-
-    const allIds = [customerId, ...trimmed.map((r) => r.node_id)];
-    const enrich = await this.enrichReferralNodes(allIds, em);
-
-    const root: PacksTreeNode = {
-      customer_id: customerId,
-      depth: 0,
-      sponsor_id: enrich.sponsorOf.get(customerId) ?? null,
-      vip_level: enrich.vipLevel.get(customerId) ?? null,
-      lifetime_external_spend_sen: enrich.lifetimeSen.get(customerId) ?? '0',
-      frozen: enrich.frozen.get(customerId) ?? false,
-      direct_recruit_count: enrich.recruitCount.get(customerId) ?? 0,
-      has_more_depth: false,
-    };
-    const nodes: PacksTreeNode[] = trimmed.map((r) => ({
-      customer_id: r.node_id,
-      depth: r.depth,
-      sponsor_id: r.sponsor_id ?? null,
-      vip_level: enrich.vipLevel.get(r.node_id) ?? null,
-      lifetime_external_spend_sen: enrich.lifetimeSen.get(r.node_id) ?? '0',
-      frozen: enrich.frozen.get(r.node_id) ?? false,
-      direct_recruit_count: enrich.recruitCount.get(r.node_id) ?? 0,
-      has_more_depth:
-        r.depth === depth && (enrich.recruitCount.get(r.node_id) ?? 0) > 0,
-    }));
-
-    return { root, nodes, maxDepth: depth, truncated };
-  }
-
-  @InjectManager()
-  async commissionsForBeneficiary(
-    customerId: string,
-    opts: { limit: number; offset: number },
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<CommissionRow[]> {
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-    const limit = Math.max(1, Math.min(200, Math.floor(opts.limit ?? 50)));
-    const offset = Math.max(0, Math.floor(opts.offset) || 0);
-
-    const rows = await em.execute<any[]>(
-      `SELECT c.id, c.generation, c.kind, c.status, c.matures_at,
-              c.source_transaction_id, c.reversal_transaction_id, c.created_at,
-              ct.amount, ct.reason
-         FROM commission c
-         JOIN credit_transaction ct ON ct.id = c.credit_transaction_id AND ct.deleted_at IS NULL
-         WHERE c.beneficiary = ? AND c.deleted_at IS NULL
-         ORDER BY c.created_at DESC, c.id DESC
-         LIMIT ? OFFSET ?`,
-      [customerId, limit, offset],
-    );
-    if (rows.length === 0) return [];
-
-    // opener provenance: source_transaction_id → the ORIGINAL pack_open debit (amount<0)
-    // ponytail: amount<0 guard — reverseOpen appends a compensating POSITIVE pack_open row
-    // sharing the same source_transaction_id; without this filter the join double-counts.
-    const openIds = [...new Set(rows.map((r) => r.source_transaction_id))];
-    const ph = openIds.map(() => '?').join(',');
-    const opens = await em.execute<
-      { source_transaction_id: string; customer_id: string }[]
-    >(
-      `SELECT source_transaction_id, customer_id FROM credit_transaction
-         WHERE source_transaction_id IN (${ph})
-           AND reason = 'pack_open' AND amount < 0 AND deleted_at IS NULL`,
-      openIds,
-    );
-    const openerOf = new Map(
-      opens.map((o) => [o.source_transaction_id, o.customer_id]),
-    );
-
-    return rows.map((r) => ({
-      id: r.id,
-      generation: Number(r.generation),
-      kind: r.kind,
-      status: r.status,
-      amount: String(r.amount),
-      reason: r.reason,
-      matures_at: r.matures_at,
-      reversal_transaction_id: r.reversal_transaction_id ?? null,
-      source_transaction_id: r.source_transaction_id,
-      opener_customer_id: openerOf.get(r.source_transaction_id) ?? null,
-      created_at: r.created_at,
-    }));
-  }
-
-  /** Phase 4 P4.2 — 3-way audit union for a customer.
+  /** Phase 4 P4.2 — 2-way audit union for a customer.
    *
-   *  Covers all three entity_type keys used by admin_action_audit:
-   *    (a) entity_type='customer'   keyed by customerId          (freeze/unfreeze)
-   *    (b) entity_type='commission' keyed by commission.id       (reverse/suspend/unsuspend)
-   *    (c) entity_type='credit'     keyed by credit_transaction.id (adjust_credit)
+   *  Covers both entity_type keys used by admin_action_audit:
+   *    (a) entity_type='customer' keyed by customerId            (freeze/unfreeze)
+   *    (b) entity_type='credit'   keyed by credit_transaction.id (adjust_credit)
    *
-   *  A single entity_id=customerId filter silently drops (b) and (c).
+   *  A single entity_id=customerId filter silently drops (b).
    *  "before"/"after" are double-quoted — reserved words in SQL.
    */
   @InjectManager()
@@ -5231,14 +4233,12 @@ class PacksModuleService extends MedusaService({
          FROM admin_action_audit
          WHERE deleted_at IS NULL AND (
            (entity_type = 'customer' AND entity_id = ?)
-           OR (entity_type = 'commission' AND entity_id IN
-                (SELECT id FROM commission WHERE beneficiary = ? AND deleted_at IS NULL))
            OR (entity_type = 'credit' AND entity_id IN
                 (SELECT id FROM credit_transaction WHERE customer_id = ? AND reason = 'adjustment' AND deleted_at IS NULL))
          )
          ORDER BY created_at DESC
          LIMIT ? OFFSET ?`,
-      [customerId, customerId, customerId, limit, offset],
+      [customerId, customerId, limit, offset],
     );
     const [state] = await this.listCustomerAccountStates(
       { customer_id: customerId },
@@ -5246,53 +4246,6 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { account_state: state ?? null, actions };
-  }
-
-  // Batched enrichment for referral tree nodes — packs-owned tables only
-  // (no cross-module calls at the service level; customer identity resolved at route).
-  private async enrichReferralNodes(ids: string[], em: LedgerSqlManager) {
-    const sponsorOf = new Map<string, string>();
-    const vipLevel = new Map<string, number>();
-    const lifetimeSen = new Map<string, string>();
-    const frozen = new Map<string, boolean>();
-    const recruitCount = new Map<string, number>();
-    if (ids.length === 0)
-      return { sponsorOf, vipLevel, lifetimeSen, frozen, recruitCount };
-
-    const ph = ids.map(() => '?').join(',');
-    // Sequential to avoid concurrent queries on the shared injected EntityManager.
-    const rels = await em.execute<
-      { customer_id: string; sponsor_id: string }[]
-    >(
-      `SELECT customer_id, sponsor_id FROM referral_relationship WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
-      ids,
-    );
-    const vms = await em.execute<
-      {
-        customer_id: string;
-        current_level: number;
-        lifetime_external_spend_sen: string;
-      }[]
-    >(
-      `SELECT customer_id, current_level, lifetime_external_spend_sen FROM vip_member_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
-      ids,
-    );
-    const cas = await em.execute<{ customer_id: string; frozen: boolean }[]>(
-      `SELECT customer_id, frozen FROM customer_account_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
-      ids,
-    );
-    const counts = await em.execute<{ sponsor_id: string; n: string }[]>(
-      `SELECT sponsor_id, COUNT(*) AS n FROM referral_relationship WHERE sponsor_id IN (${ph}) AND deleted_at IS NULL GROUP BY sponsor_id`,
-      ids,
-    );
-    for (const r of rels) sponsorOf.set(r.customer_id, r.sponsor_id);
-    for (const r of vms) {
-      vipLevel.set(r.customer_id, Number(r.current_level));
-      lifetimeSen.set(r.customer_id, String(r.lifetime_external_spend_sen));
-    }
-    for (const r of cas) frozen.set(r.customer_id, Boolean(r.frozen));
-    for (const r of counts) recruitCount.set(r.sponsor_id, Number(r.n));
-    return { sponsorOf, vipLevel, lifetimeSen, frozen, recruitCount };
   }
 
   // Batched per-player aggregates for the admin Players list (POLYCARD-BACK
@@ -5401,10 +4354,12 @@ class PacksModuleService extends MedusaService({
     return { wallet, vault, pullCount, vipLevel, state };
   }
 
-  // Delete-guard (spec §3 invariant 1): money rows backing a commission are
-  // append-only — never hard-deleted. Compensation MUST use
-  // reverseCreditTransaction. This refuses an accidental delete of any row a
-  // commission lifecycle record points at.
+  // Delete-guard: the credit ledger is append-only — money rows are never
+  // hard-deleted, compensation MUST use reverseCreditTransaction. The referral
+  // commission lifecycle this guard used to check was removed with the referral
+  // engine, so it currently has no dependent table to refuse on; it stays as the
+  // single chokepoint (sealed by delete-guard-seal.unit.spec.ts) so a future
+  // dependent has exactly one place to add its check.
   //
   // *** THIS IS THE ONLY PERMITTED DELETE PATH FOR credit_transaction ROWS. ***
   // Never call the base `deleteCreditTransactions` directly from workflow steps,
@@ -5434,18 +4389,7 @@ class PacksModuleService extends MedusaService({
         : Array.isArray(idOrSelector)
           ? idOrSelector
           : null;
-    if (ids && ids.length > 0) {
-      const deps = await this.listCommissions(
-        { credit_transaction_id: ids },
-        { take: 1 },
-      );
-      if (deps.length > 0) {
-        throw new MedusaError(
-          MedusaError.Types.NOT_ALLOWED,
-          'Cannot delete a credit transaction that backs a commission — reverse it instead.',
-        );
-      }
-    }
+    void ids;
     // Delegate to the MedusaService-generated base (property, not overridable).
     await this.deleteCreditTransactions(idOrSelector as never);
   }
@@ -6170,17 +5114,9 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     const before: RewardsSettingsView = {
-      commissionCooldownDays: row ? Number(row.commission_cooldown_days) : 3,
-      teamOverridePct: row ? Number(row.team_override_pct) : 0.2,
-      overrideGenerationCap: row ? Number(row.override_generation_cap) : 100,
       withdrawals_per_day: row ? Number(row.withdrawals_per_day) : 1,
     };
     const data = {
-      commission_cooldown_days:
-        patch.commissionCooldownDays ?? before.commissionCooldownDays,
-      team_override_pct: patch.teamOverridePct ?? before.teamOverridePct,
-      override_generation_cap:
-        patch.overrideGenerationCap ?? before.overrideGenerationCap,
       withdrawals_per_day:
         patch.withdrawals_per_day ?? before.withdrawals_per_day,
     };
@@ -6193,9 +5129,6 @@ class PacksModuleService extends MedusaService({
       await this.createRewardsSettings([data], sharedContext);
     }
     const after: RewardsSettingsView = {
-      commissionCooldownDays: data.commission_cooldown_days,
-      teamOverridePct: data.team_override_pct,
-      overrideGenerationCap: data.override_generation_cap,
       withdrawals_per_day: data.withdrawals_per_day,
     };
     await this.createAdminActionAudits(
@@ -6604,141 +5537,6 @@ class PacksModuleService extends MedusaService({
     );
 
     return { gained };
-  }
-
-  // Maturity job (Phase 3b Task 7): flips pending commissions whose cooldown has
-  // elapsed (matures_at <= now) to 'available' so the status column stays in sync
-  // with the read-time availableBalance gate. This is COSMETIC/AUDIT only — the
-  // balance gate already treats a pending row as available once matures_at passes,
-  // so this flip never changes spendability.
-  //
-  // Shape (plan 021): this enumerator runs OUTSIDE any transaction (@InjectManager,
-  // plain read) and delegates each beneficiary to
-  // matureDueCommissionsForBeneficiary, which opens its OWN short transaction and
-  // holds exactly one credit: advisory lock for its duration. Invariant to
-  // protect: at most one credit: advisory lock held per transaction, ever —
-  // never forward this method's sharedContext into the per-beneficiary calls,
-  // or they would join one outer transaction and re-accumulate locks across
-  // beneficiaries (blocking every money path behind the batch until commit).
-  //
-  // Notifications fire AFTER each beneficiary's transaction commits, and are
-  // best-effort: the flip is already committed; the notification is feed-only
-  // and idempotent (`${commissionId}:matured`), so a failed notify must not
-  // abort the remaining beneficiaries — and can never roll back flips anymore.
-  // A crash between commit and notify means a missed notification (acceptable,
-  // feed-only); a re-run cannot double-notify.
-  @InjectManager()
-  async matureDueCommissions(
-    notify?: (
-      beneficiaryId: string,
-      commissionId: string,
-      frozen: boolean,
-    ) => Promise<void>,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ flipped: number }> {
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-
-    // 1) Enumerate all distinct beneficiaries that have at least one due pending row.
-    //    COLLATE "C" forces byte-order (C locale) sort on the outer ORDER BY,
-    //    matching JS plain Array.sort() (UTF-16 lexicographic). With one advisory
-    //    lock per (per-beneficiary) transaction the old AB-BA deadlock vector
-    //    against reverseOpen/reverseCommission is gone — the ordering is retained
-    //    for deterministic processing order only.
-    //    The subquery pattern is required because Postgres rejects COLLATE in ORDER BY
-    //    when SELECT DISTINCT is used (the ORDER BY expression must appear literally
-    //    in the SELECT list; COLLATE makes it a distinct expression).
-    const due = await em.execute<{ beneficiary: string }[]>(
-      `SELECT beneficiary FROM (
-          SELECT DISTINCT beneficiary FROM commission
-           WHERE status = 'pending' AND matures_at <= now() AND deleted_at IS NULL
-         ) _b
-        ORDER BY beneficiary COLLATE "C"`,
-    );
-
-    let flipped = 0;
-
-    for (const { beneficiary } of due) {
-      // One SHORT transaction per beneficiary (deliberately no sharedContext —
-      // see the invariant in the method comment above).
-      const result = await this.matureDueCommissionsForBeneficiary(beneficiary);
-      flipped += result.flipped;
-
-      if (!notify) continue;
-      for (const id of result.flippedIds) {
-        try {
-          await notify(beneficiary, id, result.frozen);
-        } catch (err) {
-          // Best-effort (see method comment): flip already committed, feed-only,
-          // idempotent — log and keep going.
-          // eslint-disable-next-line no-console
-          console.warn(
-            '[matureDueCommissions] notify failed (flip already committed)',
-            { beneficiary, commission_id: id, error: String(err) },
-          );
-        }
-      }
-    }
-
-    return { flipped };
-  }
-
-  // Per-beneficiary maturity flip: ONE beneficiary, ONE short transaction, ONE
-  // credit: advisory lock (same keyspace as mutateCreditAtomic / settleOpen) so
-  // concurrent reversal writes on the same beneficiary are serialized. Uses
-  // SKIP LOCKED chunked UPDATEs so a second concurrent run skips already-locked
-  // rows rather than blocking.
-  //
-  // Status-guarded (status='pending' in WHERE) → idempotent, never clobbers
-  // reversed/suspended rows. Returns the flipped ids so the caller can notify
-  // AFTER this transaction commits — no notify call belongs inside this method.
-  @InjectTransactionManager()
-  private async matureDueCommissionsForBeneficiary(
-    beneficiary: string,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ flipped: number; flippedIds: string[]; frozen: boolean }> {
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    const CHUNK = 500;
-
-    // 2) Acquire the per-beneficiary advisory lock (same credit: keyspace used by
-    //    mutateCreditAtomic, settleOpen, reverseCommission, reverseOpen).
-    //    Transaction-scoped — auto-releases on commit/rollback.
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${beneficiary}`,
-    ]);
-
-    // 3) Check freeze state inside the lock so the flag is consistent with
-    //    the advisory-locked read (isFrozen reads on sharedContext's connection).
-    const frozen = await this.isFrozen(beneficiary, sharedContext);
-
-    // 4) Chunked flip: Postgres rejects LIMIT on a bare UPDATE, so use a
-    //    sub-select with FOR UPDATE SKIP LOCKED + RETURNING. Loop until the
-    //    batch returns fewer than CHUNK rows (i.e. no more to process).
-    const flippedIds: string[] = [];
-    for (;;) {
-      const rows = await em.execute<{ id: string }[]>(
-        `UPDATE commission
-            SET status = 'available', updated_at = now()
-          WHERE id IN (
-            SELECT id FROM commission
-             WHERE beneficiary = ?
-               AND status = 'pending'
-               AND matures_at <= now()
-               AND deleted_at IS NULL
-             ORDER BY matures_at
-             LIMIT ?
-             FOR UPDATE SKIP LOCKED
-          )
-          RETURNING id`,
-        [beneficiary, CHUNK],
-      );
-
-      for (const r of rows) flippedIds.push(r.id);
-
-      if (rows.length < CHUNK) break;
-    }
-
-    return { flipped: flippedIds.length, flippedIds, frozen };
   }
 
   // ---- Daily Rewards (Task 5) ----------------------------------------------
@@ -7474,7 +6272,6 @@ class PacksModuleService extends MedusaService({
           'voucher_amount',
           'box_tier',
           'frame_unlock',
-          'direct_referral_pct',
         ],
         take: 1000,
       },
@@ -7490,7 +6287,6 @@ class PacksModuleService extends MedusaService({
         voucher_amount: Number(r.voucher_amount),
         box_tier: r.box_tier,
         frame_unlock: r.frame_unlock,
-        direct_referral_pct: r.direct_referral_pct,
       }));
 
     const inputLevels = new Set(input.levels.map((l) => l.level));
@@ -7500,7 +6296,6 @@ class PacksModuleService extends MedusaService({
         voucher_amount: lvl.voucher_amount,
         box_tier: lvl.box_tier,
         frame_unlock: lvl.frame_unlock,
-        direct_referral_pct: lvl.direct_referral_pct,
       };
       const row = byLevel.get(lvl.level);
       if (row) {

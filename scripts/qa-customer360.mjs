@@ -1,17 +1,15 @@
 // QA the Customer-360 admin page:
-//   P4.1 — referral-tree table + commissions section (or empty-state).
 //   P4.2 — audit timeline section + one automated freeze/unfreeze round-trip
 //           (the only automated check of the Task-10 mutation wiring).
 //
 // Screenshot targets:
-//   docs/research/phase4_customer360.png      (P4.1 — full page)
-//   docs/research/phase4_customer360_audit.png (P4.2 — audit section)
+//   docs/research/phase4_customer360.png      (full page)
+//   docs/research/phase4_customer360_audit.png (audit section)
 //
 // ⚠️  LIVE RUN DEFERRED — do NOT run until:
 //     • backend (:9000) + admin (:7000) are booted
-//     • DB has a customer seeded with freeze + reverse_commission + adjust_credit
-//       audit rows (C360_CUSTOMER_ID must point at that customer)
-//     P4.1 correctness: Task 2/4 integration:http tests.
+//     • DB has a customer seeded with freeze + adjust_credit audit rows
+//       (C360_CUSTOMER_ID must point at that customer)
 //     P4.2 backend correctness: Task 8/9 integration tests.
 //
 // Usage:
@@ -87,86 +85,6 @@ try {
   });
   ok(`screenshot saved → docs/research/phase4_customer360.png`);
 
-  // ── Assert: referral-tree table root row ──────────────────────────────────
-  // The tree table renders a tbody; the root customer is always the first row
-  // (depth = 1 anchor). Wait a reasonable time for React-Query to fetch + render.
-  const treeRow = page
-    .locator(
-      '[data-testid="referral-tree"] tbody tr, table.referral-tree tbody tr',
-    )
-    .first();
-  const treeLoaded = await treeRow
-    .waitFor({ timeout: 15000 })
-    .then(() => true)
-    .catch(() => false);
-
-  if (treeLoaded) {
-    const rowCount = await page
-      .locator(
-        '[data-testid="referral-tree"] tbody tr, table.referral-tree tbody tr',
-      )
-      .count();
-    ok(`referral-tree table rendered (${rowCount} row(s))`);
-  } else {
-    // Fall back: look for any heading/label containing "referral" — the section
-    // mounted but the table selector may not match exactly (CSS class drift).
-    const heading = await page
-      .getByText(/referral/i)
-      .first()
-      .isVisible()
-      .catch(() => false);
-    if (heading)
-      ok(
-        'referral-tree section heading visible (table selector may need updating)',
-      );
-    else
-      fail(
-        'referral-tree table / section not found — page may not have mounted or CUSTOMER_ID is wrong',
-      );
-  }
-
-  // ── Assert: commissions section OR empty state ────────────────────────────
-  // Either a commission row renders, or an explicit empty-state message does.
-  // Both are acceptable — we're testing that the section itself mounted.
-  const commissionRow = page.locator(
-    '[data-testid="commissions-table"] tbody tr, table.commissions tbody tr',
-  );
-  const emptyState = page.getByText(/no commissions/i);
-
-  const hasCommissionRow = await commissionRow
-    .first()
-    .waitFor({ timeout: 10000 })
-    .then(() => true)
-    .catch(() => false);
-
-  if (hasCommissionRow) {
-    const count = await commissionRow.count();
-    ok(`commissions table rendered (${count} row(s))`);
-  } else {
-    const hasEmpty = await emptyState
-      .first()
-      .isVisible()
-      .catch(() => false);
-    if (hasEmpty)
-      ok('commissions empty-state rendered (no commissions on record)');
-    else {
-      // Last-resort: look for any element containing "commission"
-      const anyCommission = await page
-        .getByText(/commission/i)
-        .first()
-        .isVisible()
-        .catch(() => false);
-      if (anyCommission)
-        ok(
-          'commissions section heading visible (table/empty-state selector may need updating)',
-        );
-      else
-        fail(
-          'commissions section not found — page may not have mounted or CUSTOMER_ID is wrong',
-        );
-    }
-  }
-
   // ── P4.2 — Audit timeline section ─────────────────────────────────────────
 
   // 1. Capture the audit section screenshot (full-page again — audit is at the
@@ -226,8 +144,8 @@ try {
     ok('audit: "Admin action timeline" section heading visible');
 
     // Check for rows containing known seeded action types.
-    // i18n values: "Freeze account", "Reverse commission", "Adjust credits"
-    // (customer360.action.freeze / .reverse_commission / .adjust_credit).
+    // i18n values: "Freeze account", "Adjust credits"
+    // (customer360.action.freeze / .adjust_credit).
     // t() falls back to the raw key if the label is missing, so we also match
     // the raw keys as a fallback pattern.
     const actionPatterns = [

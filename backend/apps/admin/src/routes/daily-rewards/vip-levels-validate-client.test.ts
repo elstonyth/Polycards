@@ -10,7 +10,6 @@ const row = (over: Partial<VipLevelRow> = {}): VipLevelRow => ({
   voucherInput: '0',
   boxTier: 'a',
   frameUnlock: false,
-  referralInput: '1',
   ...over,
 });
 
@@ -46,16 +45,16 @@ describe('validateVipLevelsClient', () => {
     );
   });
 
-  // Referral % and box tier have no editor on the tab any more, and neither
+  // Box tier has no editor on the tab any more, and neither
   // bound is reachable from shipped data, so a client error on either would be
   // an uncorrectable block on saving the WHOLE ladder. Both stay enforced
   // server-side; this pins that the CLIENT stays quiet about them.
-  test('does not block the ladder on referral % or box tier', () => {
+  test('does not block the ladder on box tier', () => {
     expect(
-      validateVipLevelsClient([row({ referralInput: '101', boxTier: '' })]),
+      validateVipLevelsClient([row({ boxTier: '' })]),
     ).toEqual([]);
     expect(
-      validateVipLevelsClient([row({ referralInput: '', boxTier: '   ' })]),
+      validateVipLevelsClient([row({ boxTier: '   ' })]),
     ).toEqual([]);
   });
 

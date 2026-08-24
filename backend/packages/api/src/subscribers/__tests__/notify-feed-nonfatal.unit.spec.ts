@@ -25,7 +25,6 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import { notifyFeedNonfatal } from '../../modules/packs/notify-feed';
 import vipSpendSettledHandler from '../vip-spend-settled';
-import matureCommissionsJob from '../../jobs/mature-commissions';
 import { POST as claimPOST } from '../../api/store/rewards/claim/[grantId]/route';
 
 // A notification module whose provider is down — the failure mode every
@@ -134,52 +133,6 @@ describe('vip-spend-settled subscriber', () => {
     await expect(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       vipSpendSettledHandler({ event, container } as any),
-    ).resolves.toBeUndefined();
-  });
-});
-
-describe('mature-commissions job', () => {
-  // Stand-in for matureDueCommissions: invokes the notify callback per flipped
-  // commission with no guard of its own, so a throwing callback fails the job.
-  const packsFlipping = (calls: Array<[string, string, boolean]>) => ({
-    matureDueCommissions: async (
-      notify: (b: string, c: string, f: boolean) => Promise<void>,
-    ) => {
-      for (const [b, c, f] of calls) await notify(b, c, f);
-      return { flipped: calls.length };
-    },
-  });
-
-  it('swallows a per-commission notification failure and warns for each', async () => {
-    const { warns, logger } = loggerSpy();
-    const container = containerWith({
-      [PACKS_MODULE]: packsFlipping([
-        ['cus_9', 'com_1', false],
-        ['cus_9', 'com_2', true],
-      ]),
-      [Modules.NOTIFICATION]: failingNotif,
-      logger,
-    });
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await expect(
-      matureCommissionsJob(container as any),
-    ).resolves.toBeUndefined();
-
-    expect(warns).toHaveLength(2);
-    expect(warns[0]).toContain('commission_matured');
-    expect(warns[0]).toContain('cus_9');
-    expect(warns[0]).toContain('com_1');
-    expect(warns[0]).toContain('provider exploded');
-    expect(warns[1]).toContain('com_2');
-  });
-
-  it('cannot throw when the container resolves a non-logger for every key', async () => {
-    const packs = packsFlipping([['cus_9', 'com_1', false]]);
-    const container = { resolve: () => packs };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await expect(
-      matureCommissionsJob(container as any),
     ).resolves.toBeUndefined();
   });
 });

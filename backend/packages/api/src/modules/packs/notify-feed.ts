@@ -1,7 +1,6 @@
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 
 export type FeedTemplate =
-  | 'commission_matured'
   | 'vip_level_up'
   | 'reward_won'
   | 'voucher_claimed'

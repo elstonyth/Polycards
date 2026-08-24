@@ -44,35 +44,6 @@ export default async function WalletPage() {
         </div>
       )}
 
-      {/* Held credit. `locked` alone can't say WHY, but nextUnlock can: it only
-          fires for a commission still inside its cooldown (status='pending' AND
-          matures_at > now()). With the cooldown at 0 days nothing new can land
-          there, so held credit with no pending maturity is an admin suspension
-          — the only other thing lockedCommissionCents counts. Never claim
-          "suspended" when a maturity date exists; that would be a lie for the
-          legacy pending rows written before the cooldown was zeroed. */}
-      {w.locked > 0 && (
-        <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
-          {w.nextUnlock ? (
-            <>
-              {rm(w.nextUnlock.amount)} of your commission credit unlocks on{' '}
-              {new Date(w.nextUnlock.date).toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric',
-              })}
-              . It is not spendable or withdrawable until then.
-            </>
-          ) : (
-            <>
-              An admin has suspended {rm(w.locked)} of your commission credit
-              pending review — it is not spendable or withdrawable. Contact
-              support if you think this is a mistake.
-            </>
-          )}
-        </div>
-      )}
-
       <Panel className="mb-4">
         <p className="text-[11px] uppercase tracking-wide text-white/40">
           Available

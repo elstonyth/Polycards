@@ -97,13 +97,13 @@ From `purgeAccountPacksData`, `backend/packages/api/src/modules/packs/service.ts
   permanent, irreversible action with no other record is not something
   support can answer questions about later.
 - **Retained completely untouched**: `credit_transaction`, `ledger_entry`,
-  `ledger_sequence`, `globepay_deposit`, `pull`, `commission`,
-  `vip_member_state`, and `referral_relationship`. Reason: all of these
-  carry only a `customer_id` that no longer resolves to a person once the
-  customer row is scrubbed and soft-deleted — the row is already anonymous
-  by construction, so there is nothing left to scrub. `referral_relationship`
-  specifically stays because upline/downline chains and commission
-  attribution reference it; deleting one dangles a downline's upline.
+  `ledger_sequence`, `globepay_deposit`, `pull`, and `vip_member_state`.
+  Reason: all of these carry only a `customer_id` that no longer resolves to
+  a person once the customer row is scrubbed and soft-deleted — the row is
+  already anonymous by construction, so there is nothing left to scrub.
+  (`commission` and `referral_relationship` were on this list until the
+  referral programme was removed on 2026-08-24, ADR 0007; both tables are
+  gone.)
 
 ## Accepted residual risk — admin free text outlives the purge
 

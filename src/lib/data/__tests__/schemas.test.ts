@@ -251,7 +251,7 @@ describe('parseOne — null on failure', () => {
 });
 
 describe('CreditTransactionSchema — keeps every reason the backend emits', () => {
-  it('keeps VIP commission rows (direct_referral etc.), not just the original 4', () => {
+  it('keeps every reason row, not just the original 4', () => {
     const rows = [
       {
         id: 'a',
@@ -260,33 +260,15 @@ describe('CreditTransactionSchema — keeps every reason the backend emits', () 
         created_at: '2026-06-22T00:00:00Z',
       },
       {
-        id: 'b',
-        amount: 1.25,
-        reason: 'direct_referral',
-        created_at: '2026-06-22T00:01:00Z',
-      },
-      {
-        id: 'c',
-        amount: 0.2,
-        reason: 'team_override',
-        created_at: '2026-06-22T00:02:00Z',
-      },
-      {
-        id: 'd',
-        amount: -1.25,
-        reason: 'commission_reversal',
-        created_at: '2026-06-22T00:03:00Z',
-      },
-      {
         id: 'e',
         amount: 5,
         reason: 'cashout',
         created_at: '2026-06-22T00:04:00Z',
       },
     ];
-    // The backend ledger emits all 8 reasons; the storefront must not silently
-    // drop commission rows (balance would stop reconciling to visible history).
-    expect(parseList(CreditTransactionSchema, rows)).toHaveLength(5);
+    // The storefront must not silently drop any ledger row (balance would stop
+    // reconciling to visible history).
+    expect(parseList(CreditTransactionSchema, rows)).toHaveLength(2);
   });
 
   // Audit 2026-07-07 #11: `reason` is `z.string()`, not `z.enum(CREDIT_REASONS)`
@@ -322,9 +304,6 @@ const BACKEND_CREDIT_REASONS = [
   'topup',
   'pack_open',
   'adjustment',
-  'direct_referral',
-  'team_override',
-  'commission_reversal',
   'cashout',
   'voucher_claim',
   'reward_credit',

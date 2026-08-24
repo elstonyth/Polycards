@@ -12,7 +12,7 @@ import { useModalA11y } from '@/lib/use-modal-a11y';
  * with the rest of the VIP reward surfaces
  * (docs/superpowers/specs/2026-07-29-suspend-vip-referral-surfaces-design.md).
  * Kept unreferenced, not deleted, so un-suspending is a revert — same
- * treatment as the other kept orphans (daily.ts, referral.ts, voucherLabel).
+ * treatment as the other kept orphans (daily.ts, voucherLabel).
  *
  * A minimal reveal animation for the daily box prize (adapted from the slab aesthetic).
  */

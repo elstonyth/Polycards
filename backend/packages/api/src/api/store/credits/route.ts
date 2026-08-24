@@ -29,7 +29,7 @@ export async function GET(
   // walletSummary so the wallet view reuses that one scan instead of issuing a
   // second identical SUM (balance/deposited/used are a strict subset). This
   // serializes walletSummary after creditSummary — intended; it still runs its
-  // own lockedCommission/nextUnlock/isFrozen queries.
+  // own isFrozen query.
   const [summary, txnRows] = await Promise.all([
     packs.creditSummary(customerId),
     packs.listCreditTransactions(
@@ -71,11 +71,7 @@ export async function GET(
     wallet: {
       balance: wallet.balance,
       available: wallet.available,
-      locked: wallet.locked,
       is_frozen: wallet.isFrozen,
-      next_unlock: wallet.nextUnlock
-        ? { amount: wallet.nextUnlock.amount, date: wallet.nextUnlock.date }
-        : null,
       // Playthrough gate (withdrawable.ts): deposits must be fully spent on
       // pack opens before balance can be withdrawn. withdrawable = 0 while
       // playthrough.remaining > 0; spending on packs is never restricted.

@@ -23,7 +23,6 @@ export default async function seedNotificationProbe({
   // Oldest first: the feed is ordered created_at DESC, so the two vip_level_up
   // rows written last are the ones at the top of the page.
   const rows: Array<{ template: FeedTemplate; data: Record<string, unknown> }> = [
-    { template: "commission_matured", data: { frozen: true } },
     { template: "topup_credited", data: { amount_myr: 100 } },
     { template: "voucher_claimed", data: { amount_myr: 25, level: 10 } },
     { template: "reward_won", data: { title: "Holo Charizard" } },
@@ -32,7 +31,6 @@ export default async function seedNotificationProbe({
       template: "delivery_status",
       data: { status: "shipped", tracking_number: "MY123456789" },
     },
-    { template: "commission_matured", data: {} },
     { template: "vip_level_up", data: { levels: [12] } },
     { template: "vip_level_up", data: { levels: [13] } },
   ]

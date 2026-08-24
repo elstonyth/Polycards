@@ -43,27 +43,24 @@ const rowFromDTO = (l: VipLevelDTO): Row => ({
   voucherInput: String(l.voucher_amount),
   boxTier: l.box_tier,
   frameUnlock: l.frame_unlock,
-  referralInput: String(l.direct_referral_pct),
 });
-// Voucher, box tier and referral % are no longer edited on this tab (all three
-// surfaces are suspended), but all three are still LIVE server-side —
-// voucher_amount mints a voucher on level-up when > 0 (rewardsForLevel),
-// box_tier picks the daily box and must name a real reward box tier,
-// direct_referral_pct pays sponsor commission. So they stay in the buffer and
+// Voucher and box tier are no longer edited on this tab (both surfaces are
+// suspended), but both are still LIVE server-side — voucher_amount mints a
+// voucher on level-up when > 0 (rewardsForLevel) and box_tier picks the daily
+// box and must name a real reward box tier. So they stay in the buffer and
 // round-trip untouched on save.
 //
-// A new rung INHERITS box tier and referral % from the rung above rather than
-// resetting to the first tier / 1% — with no editor, a silent reset would be
-// unfixable here. Voucher deliberately does NOT inherit: 0 means "grants
-// nothing", the safe default for a credit-minting lever. Inheriting would
-// silently mint a payout on a rung nobody priced.
+// A new rung INHERITS box tier from the rung above rather than resetting to the
+// first tier — with no editor, a silent reset would be unfixable here. Voucher
+// deliberately does NOT inherit: 0 means "grants nothing", the safe default for
+// a credit-minting lever. Inheriting would silently mint a payout on a rung
+// nobody priced.
 const blankRow = (inheritFrom: Row | undefined, fallbackTier: string): Row => ({
   localId: `vl-${nextId++}`,
   thresholdInput: "0",
   voucherInput: "0",
   boxTier: inheritFrom?.boxTier ?? fallbackTier,
   frameUnlock: false,
-  referralInput: inheritFrom?.referralInput ?? "1",
 });
 
 const snapshotOf = (rows: Row[]): string =>
@@ -73,7 +70,6 @@ const snapshotOf = (rows: Row[]): string =>
       r.voucherInput,
       r.boxTier,
       r.frameUnlock,
-      r.referralInput,
     ]),
   );
 
@@ -195,7 +191,6 @@ export const VipLevelsTab = () => {
       voucher_amount: Number(r.voucherInput) || 0,
       box_tier: r.boxTier,
       frame_unlock: r.frameUnlock,
-      direct_referral_pct: Number(r.referralInput) || 0,
     }));
     try {
       const res = await save.mutateAsync({ levels, reason: reason.trim() });

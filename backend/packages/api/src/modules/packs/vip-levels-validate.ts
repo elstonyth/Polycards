@@ -15,7 +15,6 @@ export interface VipLevelInput {
   voucher_amount: number;
   box_tier: string;
   frame_unlock: boolean;
-  direct_referral_pct: number;
 }
 
 const bad = (m: string): never => {
@@ -63,15 +62,6 @@ export function validateVipLevels(raw: unknown): VipLevelInput[] {
         `level ${level}: voucher_amount must be between 0 and ${MAX_VOUCHER_MYR}.`,
       );
 
-    const pct = r.direct_referral_pct;
-    if (
-      typeof pct !== 'number' ||
-      !Number.isFinite(pct) ||
-      pct < 0 ||
-      pct > 100
-    )
-      bad(`level ${level}: direct_referral_pct must be between 0 and 100.`);
-
     if (typeof r.box_tier !== 'string' || r.box_tier.trim().length === 0)
       bad(`level ${level}: box_tier is required.`);
 
@@ -91,7 +81,6 @@ export function validateVipLevels(raw: unknown): VipLevelInput[] {
       voucher_amount: voucher as number,
       box_tier: (r.box_tier as string).trim(),
       frame_unlock: r.frame_unlock as boolean,
-      direct_referral_pct: pct as number,
     });
   }
   return out;

@@ -26,7 +26,6 @@ import {
   createProfileAppearanceRateLimit,
   createProfileReadRateLimit,
   createPullRevealRateLimit,
-  createReferralRecruitRateLimit,
   createStoreReadRateLimit,
   createVaultBuybackRateLimit,
 } from './utils/rate-limit';
@@ -578,7 +577,7 @@ export default defineMiddlewares({
     },
     // delivery-orders are method-split (audit 2026-06-23): GETs keep the
     // generous read budget; the state-changing POSTs (create + address) get the
-    // tighter write-tier limiter, consistent with topup/buyback/referral. Only
+    // tighter write-tier limiter, consistent with topup/buyback. Only
     // GET + POST exist on these routes (no DELETE/PATCH), so the two pairs below
     // cover every handler — no method is left unlimited.
     {

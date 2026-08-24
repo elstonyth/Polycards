@@ -6,7 +6,7 @@ The experience: pack drops, slot-machine pack opening, a vault, and a leaderboar
 
 ## What's inside
 
-- **Storefront** (`src/`) — Next.js 16 (App Router, React 19, TypeScript strict), ~30 routes including the home page, `/slots` (slot-machine pack opening), `/how-it-works`, `/leaderboard` (Ranks — standings plus the Weekly Pulled Value Challenge), and an account area (vault, orders, transactions, settings, referrals).
+- **Storefront** (`src/`) — Next.js 16 (App Router, React 19, TypeScript strict), ~30 routes including the home page, `/slots` (slot-machine pack opening), `/how-it-works`, `/leaderboard` (Ranks — standings plus the Weekly Pulled Value Challenge), and an account area (vault, orders, transactions, settings).
 - **Backend** (`backend/`) — a [Medusa v2](https://medusajs.com/) + [Mercur](https://mercurjs.com/) (multi-vendor) commerce API at `backend/packages/api`, plus an admin dashboard at `backend/apps/admin`.
 - **Credit economy** — top-up, per-customer credit charging, public profiles, a client-side demo spin, forgot-password, a card vault, two-tier buyback, stock-aware pack pulls, and a DB-aggregated leaderboard.
 

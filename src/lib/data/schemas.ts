@@ -305,9 +305,6 @@ export const CREDIT_REASONS = [
   'topup',
   'pack_open',
   'adjustment',
-  'direct_referral',
-  'team_override',
-  'commission_reversal',
   'cashout',
   'voucher_claim',
   'reward_credit',
@@ -468,15 +465,13 @@ export const OpenBuybackSchema = z.looseObject({
 // --- actions/wallet.ts ------------------------------------------------------
 
 /** GET /store/credits — nested `wallet` block used by getWallet().
- *  The backend returns `{ wallet: { balance, available, locked, is_frozen,
- *  next_unlock }, transactions: [...] }`. getWallet() extracts
+ *  The backend returns `{ wallet: { balance, available, is_frozen },
+ *  transactions: [...] }`. getWallet() extracts
  *  `(raw as { wallet? }).wallet` and parses it with this schema. */
 export const WalletSchema = z.looseObject({
   balance: finite,
   available: finite,
-  locked: finite,
   is_frozen: z.boolean(),
-  next_unlock: z.looseObject({ amount: finite, date: z.string() }).nullable(),
   // Playthrough withdrawal gate: withdrawable is 0 until playthrough.remaining
   // hits 0 (lifetime deposits fully spent on pack opens). Both fields are
   // optional (mirroring OddsEntrySchema.marketPriceMyr) so a deploy-skew
@@ -521,7 +516,6 @@ export const VipSchema = z.looseObject({
           voucher_amount: finite,
           box_tier: z.string(),
           frame_unlock: z.boolean(),
-          direct_referral_pct: finite,
         }),
       }),
     )

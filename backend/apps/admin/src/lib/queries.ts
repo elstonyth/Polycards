@@ -33,7 +33,6 @@ import {
   deleteChallengeSchedule,
   getCustomerAudit,
   getCustomerGacha,
-  getCustomerCommissions,
   getCustomerTransactions,
   getCustomerPulls,
   getDeliveryOrder,
@@ -62,14 +61,12 @@ import {
   getDailyBoxes,
   getDailyBox,
   getVoucherLadder,
-  getReferralTree,
   getRewardsSettings,
   getSiteSettings,
   getTierSettings,
   getVipLevels,
   listDeliveryOrders,
   listEligibleProducts,
-  reverseCommission,
   saveAvatarFrames,
   saveChallengeSettings,
   saveChallengeStages,
@@ -80,12 +77,9 @@ import {
   saveVipLevels,
   saveVoucherRanges,
   setFxRate,
-  suspendCommission,
   unfreezeCustomer,
-  unsuspendCommission,
   updateDeliveryOrder,
   uploadImage,
-  type AdminCommissionRow,
   type AdminDeliveryOrder,
   type AvatarFramesView,
   type ChallengeSettingsDTO,
@@ -106,7 +100,6 @@ import {
   type EligibleProduct,
   type FxChange,
   type FxRateState,
-  type ReferralTree,
   type RewardsSettingsView,
   type SiteSettingsView,
   type TierRangeDTO,
@@ -253,34 +246,6 @@ export const useCustomerGacha = (
     queryKey: qk.customerGacha(id ?? ''),
     queryFn: () => getCustomerGacha(id as string),
     enabled: !!id,
-  });
-
-export const useReferralTree = (
-  id: string | null,
-  maxDepth = 6,
-): UseQueryResult<ReferralTree> =>
-  useQuery({
-    queryKey: qk.referralTree(id ?? '', maxDepth),
-    queryFn: () => getReferralTree(id!, maxDepth),
-    enabled: !!id,
-  });
-
-// keepPreviousData, but scoped to the SAME customer (queryKey[2] is the id —
-// see qk.customerCommissions/customerAudit): page flips keep the previous
-// page's rows (no skeleton flash), while navigating to another /customers/:id
-// blanks the tables. Unscoped keepPreviousData left the PRIOR customer's
-// commission rows visible and clickable during the switch — reversing one
-// submitted the stale commId while invalidating the new customer's caches.
-export const useCustomerCommissions = (
-  id: string | null,
-  page = 0,
-): UseQueryResult<{ commissions: AdminCommissionRow[] }> =>
-  useQuery({
-    queryKey: qk.customerCommissions(id ?? '', page),
-    queryFn: () => getCustomerCommissions(id!, page),
-    enabled: !!id,
-    placeholderData: (prev, prevQuery) =>
-      prevQuery?.queryKey[2] === (id ?? '') ? prev : undefined,
   });
 
 export const useCustomerAudit = (
@@ -547,7 +512,6 @@ export const useFreezeCustomer = () => {
       toast.success('Customer frozen');
       qc.invalidateQueries({ queryKey: qk.customerGacha(vars.id) });
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
-      qc.invalidateQueries({ queryKey: qk.referralTreeKey(vars.id) });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
@@ -562,70 +526,6 @@ export const useUnfreezeCustomer = () => {
       toast.success('Customer unfrozen');
       qc.invalidateQueries({ queryKey: qk.customerGacha(vars.id) });
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
-      qc.invalidateQueries({ queryKey: qk.referralTreeKey(vars.id) });
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
-  });
-};
-
-export const useReverseCommission = () => {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (vars: {
-      commId: string;
-      customerId: string;
-      reason: string;
-    }) => reverseCommission(vars.commId, vars.reason),
-    onSuccess: (_data, vars) => {
-      toast.success('Commission reversed');
-      qc.invalidateQueries({
-        queryKey: qk.customerCommissionsKey(vars.customerId),
-      });
-      qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.customerId) });
-      // Reversal inserts a negative credit_transaction (clawback) and may
-      // auto-freeze on a negative balance — refresh the header balance + ledger.
-      qc.invalidateQueries({ queryKey: qk.customerGacha(vars.customerId) });
-      qc.invalidateQueries({
-        queryKey: qk.customerTransactionsKey(vars.customerId),
-      });
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
-  });
-};
-
-export const useSuspendCommission = () => {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (vars: {
-      commId: string;
-      customerId: string;
-      reason: string;
-    }) => suspendCommission(vars.commId, vars.reason),
-    onSuccess: (_data, vars) => {
-      toast.success('Commission suspended');
-      qc.invalidateQueries({
-        queryKey: qk.customerCommissionsKey(vars.customerId),
-      });
-      qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.customerId) });
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
-  });
-};
-
-export const useUnsuspendCommission = () => {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (vars: {
-      commId: string;
-      customerId: string;
-      reason: string;
-    }) => unsuspendCommission(vars.commId, vars.reason),
-    onSuccess: (_data, vars) => {
-      toast.success('Commission unsuspended');
-      qc.invalidateQueries({
-        queryKey: qk.customerCommissionsKey(vars.customerId),
-      });
-      qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.customerId) });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
