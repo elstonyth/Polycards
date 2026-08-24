@@ -73,7 +73,14 @@ import type { GatewayPeriodRow, LedgerPeriodRow } from './globepay-settlement';
 import PurchaseInvoice from './models/purchase-invoice';
 import PurchaseInvoiceLine from './models/purchase-invoice-line';
 import StockMovement from './models/stock-movement';
-import { DEFAULT_REFERRAL_TIERS, type ReferralTier } from './referral';
+import {
+  DEFAULT_REFERRAL_TIERS,
+  lastClosedReferralWeek,
+  payoutCents,
+  referralWeekFor,
+  resolveRateBp,
+  type ReferralTier,
+} from './referral';
 import ReferralAttribution from './models/referral-attribution';
 import ReferralSettings from './models/referral-settings';
 import WeeklySettlement from './models/weekly-settlement';
@@ -936,6 +943,192 @@ class PacksModuleService extends MedusaService({
       ],
       sharedContext,
     );
+  }
+
+  // The Tuesday close ("TUES CHECK"): compute the just-ended week's referral
+  // commissions and VIP rebates into a DRAFT settlement run. No money moves
+  // here — payWeeklySettlement (after the admin approve gate) does that.
+  // Turnover is read straight from the pack_open ledger rows at close time;
+  // nothing accrues per purchase, so settleOpen stays untouched.
+  //
+  // Idempotent on the unique week_start index: a re-run (or a concurrent
+  // duplicate) returns { created: false } instead of duplicating lines.
+  @InjectTransactionManager()
+  async closeReferralWeek(
+    input: { weekStartIso?: string; now?: Date } = {},
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ settlementId: string; created: boolean; lines: number }> {
+    const week = input.weekStartIso
+      ? referralWeekFor(new Date(`${input.weekStartIso}T00:00:00+08:00`))
+      : lastClosedReferralWeek(input.now ?? new Date());
+    if (input.weekStartIso && week.weekStartIso !== input.weekStartIso) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `weekStartIso ${input.weekStartIso} is not an MYT Tuesday (nearest week starts ${week.weekStartIso}).`,
+      );
+    }
+
+    const [existing] = await this.listWeeklySettlements(
+      { week_start: week.startUtc },
+      { take: 1 },
+      sharedContext,
+    );
+    if (existing) {
+      return { settlementId: existing.id, created: false, lines: 0 };
+    }
+
+    // Per-spender pack turnover inside the window, in cents.
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const spenders = await em.execute<
+      { customer_id: string; turnover_cents: string }[]
+    >(
+      'SELECT customer_id, COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS turnover_cents ' +
+        'FROM credit_transaction ' +
+        "WHERE reason = 'pack_open' AND deleted_at IS NULL " +
+        '  AND created_at >= ? AND created_at < ? ' +
+        'GROUP BY customer_id',
+      [week.startUtc, week.endUtcExcl],
+    );
+    const turnoverByCustomer = new Map(
+      spenders.map((s) => [s.customer_id, Number(s.turnover_cents)]),
+    );
+
+    const settings = await this.getReferralSettings(sharedContext);
+
+    // Commission: roll each spender's turnover up to their direct referrer.
+    const spenderIds = [...turnoverByCustomer.keys()];
+    const attributions = spenderIds.length
+      ? await this.listReferralAttributions(
+          { customer_id: spenderIds },
+          { take: spenderIds.length },
+          sharedContext,
+        )
+      : [];
+    const downlineByReferrer = new Map<string, number>();
+    for (const a of attributions) {
+      const t = turnoverByCustomer.get(a.customer_id) ?? 0;
+      if (t <= 0) continue;
+      downlineByReferrer.set(
+        a.referrer_id,
+        (downlineByReferrer.get(a.referrer_id) ?? 0) + t,
+      );
+    }
+    const referrerIds = [...downlineByReferrer.keys()];
+    const partnerRows = referrerIds.length
+      ? await this.listCustomerAccountStates(
+          { customer_id: referrerIds },
+          { take: referrerIds.length },
+          sharedContext,
+        )
+      : [];
+    const partnerBpByCustomer = new Map(
+      partnerRows.map((r) => [r.customer_id, r.partner_referral_bp ?? null]),
+    );
+
+    type NewLine = {
+      customer_id: string;
+      kind: 'referral_commission' | 'vip_rebate';
+      basis_cents: number;
+      rate_bp: number;
+      amount_cents: number;
+    };
+    const lines: NewLine[] = [];
+    for (const [referrerId, basisCents] of downlineByReferrer) {
+      const rateBp = resolveRateBp(
+        basisCents,
+        settings.tiers,
+        partnerBpByCustomer.get(referrerId),
+      );
+      const amountCents = payoutCents(basisCents, rateBp);
+      if (amountCents <= 0) continue;
+      lines.push({
+        customer_id: referrerId,
+        kind: 'referral_commission',
+        basis_cents: basisCents,
+        rate_bp: rateBp,
+        amount_cents: amountCents,
+      });
+    }
+
+    // VIP rebate: each spender's own turnover x their level's rebate_bp.
+    // Level comes from vip_member_state (maintained by the settle-open saga);
+    // no state row = never opened before this week's rows landed = L1.
+    const stateRows = spenderIds.length
+      ? await this.listVipMemberStates(
+          { customer_id: spenderIds },
+          { take: spenderIds.length },
+          sharedContext,
+        )
+      : [];
+    const levelByCustomer = new Map(
+      stateRows.map((r) => [r.customer_id, Number(r.current_level)]),
+    );
+    const ladder = await this.listVipLevels(
+      {},
+      { select: ['level', 'rebate_bp'], take: 1000 },
+      sharedContext,
+    );
+    const rebateBpByLevel = new Map(
+      ladder.map((l) => [Number(l.level), Number(l.rebate_bp ?? 0)]),
+    );
+    for (const [customerId, basisCents] of turnoverByCustomer) {
+      if (basisCents <= 0) continue;
+      const level = levelByCustomer.get(customerId) ?? 1;
+      const rateBp = rebateBpByLevel.get(level) ?? 0;
+      const amountCents = payoutCents(basisCents, rateBp);
+      if (amountCents <= 0) continue;
+      lines.push({
+        customer_id: customerId,
+        kind: 'vip_rebate',
+        basis_cents: basisCents,
+        rate_bp: rateBp,
+        amount_cents: amountCents,
+      });
+    }
+
+    const totals = lines.reduce(
+      (acc, l) => {
+        if (l.kind === 'referral_commission') acc.commission += l.amount_cents;
+        else acc.rebate += l.amount_cents;
+        return acc;
+      },
+      { commission: 0, rebate: 0 },
+    );
+
+    let settlementId: string;
+    try {
+      const run = await this.createWeeklySettlements(
+        [
+          {
+            week_start: week.startUtc,
+            status: 'draft' as const,
+            total_commission_cents: totals.commission,
+            total_rebate_cents: totals.rebate,
+          },
+        ],
+        sharedContext,
+      );
+      settlementId = run[0].id;
+    } catch (e: unknown) {
+      // Lost a concurrent-close race on the unique week_start.
+      if ((e as { code?: string })?.code === '23505') {
+        const [winner] = await this.listWeeklySettlements(
+          { week_start: week.startUtc },
+          { take: 1 },
+          sharedContext,
+        );
+        return { settlementId: winner.id, created: false, lines: 0 };
+      }
+      throw e;
+    }
+    if (lines.length) {
+      await this.createWeeklySettlementLines(
+        lines.map((l) => ({ ...l, settlement_id: settlementId })),
+        sharedContext,
+      );
+    }
+    return { settlementId, created: true, lines: lines.length };
   }
 
   // Admin edit of the avatar-frame catalog — upsert + audit, same discipline
