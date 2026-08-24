@@ -1131,6 +1131,222 @@ class PacksModuleService extends MedusaService({
     return { settlementId, created: true, lines: lines.length };
   }
 
+  // The admin gate between Tuesday's draft and Wednesday's money.
+  @InjectTransactionManager()
+  async approveWeeklySettlement(
+    input: { settlementId: string; adminId: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const [run] = await this.listWeeklySettlements(
+      { id: input.settlementId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!run) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Settlement ${input.settlementId} not found.`,
+      );
+    }
+    if (run.status !== 'draft') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Only a draft run can be approved (this one is '${run.status}').`,
+      );
+    }
+    await this.updateWeeklySettlements(
+      {
+        selector: { id: run.id },
+        data: {
+          status: 'approved' as const,
+          approved_by: input.adminId,
+          approved_at: new Date(),
+        },
+      },
+      sharedContext,
+    );
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'weekly_settlement',
+          entity_id: run.id,
+          action: 'approve_settlement',
+          before: { status: 'draft' },
+          after: { status: 'approved' },
+          reason: `week ${new Date(run.week_start).toISOString().slice(0, 10)}`,
+        },
+      ],
+      sharedContext,
+    );
+  }
+
+  // Void one payable line before its money moves. Allowed while the line is
+  // pending and the run is draft or approved — never after pay.
+  @InjectTransactionManager()
+  async voidSettlementLine(
+    input: { lineId: string; adminId: string; reason: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const [line] = await this.listWeeklySettlementLines(
+      { id: input.lineId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!line) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Settlement line ${input.lineId} not found.`,
+      );
+    }
+    if (line.status !== 'pending') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Only a pending line can be voided (this one is '${line.status}').`,
+      );
+    }
+    await this.updateWeeklySettlementLines(
+      {
+        selector: { id: line.id },
+        data: {
+          status: 'voided' as const,
+          void_reason: input.reason,
+          voided_by: input.adminId,
+        },
+      },
+      sharedContext,
+    );
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'weekly_settlement',
+          entity_id: line.settlement_id,
+          action: 'void_settlement_line',
+          before: { line_id: line.id, status: 'pending' },
+          after: {
+            line_id: line.id,
+            status: 'voided',
+            customer_id: line.customer_id,
+            kind: line.kind,
+            amount_cents: line.amount_cents,
+          },
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+  }
+
+  // The Wednesday pay ("WED OUT"): one credit transaction + one RF ledger row
+  // per pending line of an APPROVED run. Idempotent two ways: the line row
+  // flips to paid inside the same transaction as its ledger write, and the
+  // ledger (type='RF', ref_id=line.id) unique index refuses a double-credit
+  // even if the line update was lost. skipCustomerIds (deleted accounts,
+  // resolved by the job layer — this module cannot see the customer module)
+  // are voided rather than paid.
+  //
+  // ponytail: the whole run commits as ONE transaction — fine at this
+  // volume; chunk per-line (settleChallengeWeek style) if runs ever grow to
+  // thousands of lines.
+  @InjectTransactionManager()
+  async payWeeklySettlement(
+    input: { settlementId: string; skipCustomerIds?: string[] },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ paid: number; skipped: number }> {
+    const [run] = await this.listWeeklySettlements(
+      { id: input.settlementId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!run) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Settlement ${input.settlementId} not found.`,
+      );
+    }
+    if (run.status !== 'approved' && run.status !== 'paid') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Only an approved run can be paid (this one is '${run.status}').`,
+      );
+    }
+    const weekStartIso = new Date(run.week_start).toISOString().slice(0, 10);
+    const skip = new Set(input.skipCustomerIds ?? []);
+    const pending = await this.listWeeklySettlementLines(
+      { settlement_id: run.id, status: 'pending' },
+      { take: 100_000 },
+      sharedContext,
+    );
+
+    let paid = 0;
+    let skipped = 0;
+    for (const line of pending) {
+      if (skip.has(line.customer_id)) {
+        await this.updateWeeklySettlementLines(
+          {
+            selector: { id: line.id },
+            data: { status: 'voided' as const, void_reason: 'account_deleted' },
+          },
+          sharedContext,
+        );
+        skipped++;
+        continue;
+      }
+      const [txn] = await this.createCreditTransactions(
+        [
+          {
+            customer_id: line.customer_id,
+            amount: line.amount_cents / 100,
+            reason: line.kind,
+          },
+        ],
+        sharedContext,
+      );
+      await this.recordLedgerEntry(
+        {
+          type: 'RF',
+          customerId: line.customer_id,
+          refId: line.id,
+          walletDelta: line.amount_cents / 100,
+          vaultDelta: null,
+          payload: {
+            type: 'RF',
+            kind: line.kind,
+            week_start: weekStartIso,
+            basis_cents: line.basis_cents,
+            rate_bp: line.rate_bp,
+          },
+        },
+        sharedContext,
+      );
+      await this.updateWeeklySettlementLines(
+        {
+          selector: { id: line.id },
+          data: { status: 'paid' as const, paid_transaction_id: txn.id },
+        },
+        sharedContext,
+      );
+      paid++;
+    }
+
+    const stillPending = await this.listWeeklySettlementLines(
+      { settlement_id: run.id, status: 'pending' },
+      { take: 1 },
+      sharedContext,
+    );
+    if (stillPending.length === 0 && run.status !== 'paid') {
+      await this.updateWeeklySettlements(
+        {
+          selector: { id: run.id },
+          data: { status: 'paid' as const, paid_at: new Date() },
+        },
+        sharedContext,
+      );
+    }
+    return { paid, skipped };
+  }
+
   // Admin edit of the avatar-frame catalog — upsert + audit, same discipline
   // as editSiteSettings (which owns slab_frame_url; this method never touches
   // it and vice versa).
