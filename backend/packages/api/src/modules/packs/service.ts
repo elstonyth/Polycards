@@ -80,8 +80,20 @@ import {
   referralWeekFor,
   resolveRateBp,
   type ReferralTier,
+  type ReferralWeek,
 } from './referral';
+import {
+  taskProgress,
+  validateTaskRequirement,
+  validateTaskReward,
+  type TaskFacts,
+  type TaskRequirement,
+  type TaskReward,
+} from './tasks';
 import ReferralAttribution from './models/referral-attribution';
+import TaskDefinition from './models/task-definition';
+import TaskClaim from './models/task-claim';
+import DailyCheckin from './models/daily-checkin';
 import ReferralSettings from './models/referral-settings';
 import WeeklySettlement from './models/weekly-settlement';
 import WeeklySettlementLine from './models/weekly-settlement-line';
@@ -549,6 +561,9 @@ class PacksModuleService extends MedusaService({
   ReferralSettings,
   WeeklySettlement,
   WeeklySettlementLine,
+  TaskDefinition,
+  TaskClaim,
+  DailyCheckin,
 }) {
   // Apply a pack-membership diff (add rows + delete rows + renormalize
   // survivor weights) as ONE transaction. The set-pack-members workflow step
@@ -1742,6 +1757,396 @@ class PacksModuleService extends MedusaService({
       amount_cents: l.amount_cents,
       status: l.status,
     }));
+  }
+
+  // ── Task system (spec 2026-08-24 Phase B) ───────────────────────────────
+
+  // Explicit daily check-in (the /task button). One row per MYT calendar day;
+  // the unique (customer_id, checkin_date) index settles double-taps — the
+  // loser's 23505 reads as already-checked-in.
+  @InjectTransactionManager()
+  async checkInDaily(
+    input: { customerId: string; now?: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ checked: boolean; day: string }> {
+    const MYT_OFFSET_MS = 8 * 60 * 60 * 1000;
+    const day = new Date((input.now ?? new Date()).getTime() + MYT_OFFSET_MS)
+      .toISOString()
+      .slice(0, 10);
+    // Explicit pre-check: MikroORM's UoW buffers creates until flush, so a
+    // duplicate would otherwise surface as a framework DUPLICATE_ERROR after
+    // this method returns (same reasoning as recordLedgerEntry's pre-check).
+    const [existing] = await this.listDailyCheckins(
+      { customer_id: input.customerId, checkin_date: day },
+      { take: 1 },
+      sharedContext,
+    );
+    if (existing) return { checked: false, day };
+    try {
+      await this.createDailyCheckins(
+        [{ customer_id: input.customerId, checkin_date: day }],
+        sharedContext,
+      );
+    } catch (e: unknown) {
+      if (
+        (e as { code?: string })?.code === '23505' ||
+        (e as { type?: string })?.type === MedusaError.Types.DUPLICATE_ERROR
+      ) {
+        return { checked: false, day };
+      }
+      throw e;
+    }
+    return { checked: true, day };
+  }
+
+  // The facts every task requirement evaluates against, counted once per
+  // request. Weekly facts scope to the referral week containing `now`;
+  // lifetime facts (level, vault) ignore it.
+  @InjectManager()
+  protected async taskFactsFor(
+    input: { customerId: string; week: ReferralWeek },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<TaskFacts> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const weekDays: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      weekDays.push(
+        new Date(
+          input.week.startUtc.getTime() +
+            8 * 3600 * 1000 +
+            i * 24 * 3600 * 1000,
+        )
+          .toISOString()
+          .slice(0, 10),
+      );
+    }
+    const [checkins, ripRows, [stateRow], vaultRows, pixelRows] =
+      await Promise.all([
+        this.listDailyCheckins(
+          { customer_id: input.customerId, checkin_date: weekDays },
+          { select: ['id'], take: 7 },
+          sharedContext,
+        ),
+        em.execute<{ pack_id: string; n: string }[]>(
+          'SELECT pack_id, COUNT(*)::bigint AS n FROM pull ' +
+            "WHERE customer_id = ? AND source = 'pack' AND deleted_at IS NULL " +
+            '  AND created_at >= ? AND created_at < ? GROUP BY pack_id',
+          [input.customerId, input.week.startUtc, input.week.endUtcExcl],
+        ),
+        this.listVipMemberStates(
+          { customer_id: input.customerId },
+          { select: ['current_level'], take: 1 },
+          sharedContext,
+        ),
+        em.execute<{ n: string }[]>(
+          'SELECT COUNT(*)::bigint AS n FROM pull ' +
+            "WHERE customer_id = ? AND status = 'vaulted' AND deleted_at IS NULL",
+          [input.customerId],
+        ),
+        em.execute<{ n: string }[]>(
+          'SELECT COUNT(*)::bigint AS n FROM pull p JOIN card c ON c.handle = p.card_id ' +
+            "WHERE p.customer_id = ? AND p.status = 'vaulted' AND p.deleted_at IS NULL " +
+            '  AND c.deleted_at IS NULL AND c.pokemon_dex IS NOT NULL',
+          [input.customerId],
+        ),
+      ]);
+    const byPack = new Map(ripRows.map((r) => [r.pack_id, Number(r.n)]));
+    return {
+      checkinDaysThisWeek: checkins.length,
+      ripsThisWeek: [...byPack.values()].reduce((a, b) => a + b, 0),
+      ripsThisWeekByPack: byPack,
+      vipLevel: stateRow ? Number(stateRow.current_level) : 1,
+      vaultCount: Number(vaultRows[0]?.n ?? 0),
+      vaultPixelCount: Number(pixelRows[0]?.n ?? 0),
+    };
+  }
+
+  // The /task Tasks tab payload: every ACTIVE definition with this
+  // customer's live progress and claim state.
+  @InjectManager()
+  async taskHubFor(
+    input: { customerId: string; now?: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    week_start: string;
+    tasks: {
+      id: string;
+      kind: 'weekly' | 'achievement';
+      title: string;
+      requirement: TaskRequirement;
+      reward: TaskReward;
+      progress: { current: number; target: number; completed: boolean };
+      claimed: boolean;
+    }[];
+  }> {
+    const week = referralWeekFor(input.now ?? new Date());
+    const [defs, facts, claims] = await Promise.all([
+      this.listTaskDefinitions(
+        { active: true },
+        { order: { sort: 'ASC' }, take: 200 },
+        sharedContext,
+      ),
+      this.taskFactsFor({ customerId: input.customerId, week }, sharedContext),
+      this.listTaskClaims(
+        {
+          customer_id: input.customerId,
+          period_key: [week.weekStartIso, ''],
+        },
+        { select: ['task_id', 'period_key'], take: 1000 },
+        sharedContext,
+      ),
+    ]);
+    const claimed = new Set(claims.map((c) => `${c.task_id}:${c.period_key}`));
+    return {
+      week_start: week.weekStartIso,
+      tasks: defs.map((d) => {
+        const requirement = d.requirement as unknown as TaskRequirement;
+        const periodKey = d.kind === 'weekly' ? week.weekStartIso : '';
+        return {
+          id: d.id,
+          kind: d.kind,
+          title: d.title,
+          requirement,
+          reward: d.reward as unknown as TaskReward,
+          progress: taskProgress(requirement, facts),
+          claimed: claimed.has(`${d.id}:${periodKey}`),
+        };
+      }),
+    };
+  }
+
+  // Claim a completed task's reward. The task_claim unique index is the
+  // idempotency spine; the credit grant carries its own idempotency reference
+  // on top (mutateCreditAtomic replay) so a crash between claim-insert and
+  // grant can be re-driven safely by support. Card/pack rewards mint a
+  // source='reward' pull (vault entry; no recorded pulled value — reward
+  // pulls never move the boards, same stance as reward boxes). decrementStock
+  // and rollPack are injected by the route (card-stock helper / rollOne) so
+  // this module doesn't import the workflow layer.
+  @InjectTransactionManager()
+  async claimTask(
+    input: {
+      customerId: string;
+      taskId: string;
+      now?: Date;
+      decrementStock?: (handle: string, qty: number) => Promise<boolean>;
+      rollPack?: (packId: string) => Promise<{ handle: string }>;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    | { claimed: true; reward: TaskReward; ref: string | null }
+    | {
+        claimed: false;
+        reason: 'not_found' | 'not_completed' | 'already_claimed';
+      }
+  > {
+    const [def] = await this.listTaskDefinitions(
+      { id: input.taskId, active: true },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!def) return { claimed: false, reason: 'not_found' };
+    const week = referralWeekFor(input.now ?? new Date());
+    const periodKey = def.kind === 'weekly' ? week.weekStartIso : '';
+    const requirement = def.requirement as unknown as TaskRequirement;
+    const reward = def.reward as unknown as TaskReward;
+
+    const facts = await this.taskFactsFor(
+      { customerId: input.customerId, week },
+      sharedContext,
+    );
+    if (!taskProgress(requirement, facts).completed) {
+      return { claimed: false, reason: 'not_completed' };
+    }
+
+    // Explicit pre-check (UoW buffers creates until flush — see checkInDaily).
+    // A true race still loses at flush, rolls the whole claim transaction
+    // back (reward included), and the retry lands here as already_claimed.
+    const [prior] = await this.listTaskClaims(
+      {
+        customer_id: input.customerId,
+        task_id: def.id,
+        period_key: periodKey,
+      },
+      { take: 1 },
+      sharedContext,
+    );
+    if (prior) return { claimed: false, reason: 'already_claimed' };
+    let claimId: string;
+    try {
+      const [claim] = await this.createTaskClaims(
+        [
+          {
+            customer_id: input.customerId,
+            task_id: def.id,
+            period_key: periodKey,
+            reward_snapshot: reward as unknown as Record<string, unknown>,
+          },
+        ],
+        sharedContext,
+      );
+      claimId = claim.id;
+    } catch (e: unknown) {
+      if (
+        (e as { code?: string })?.code === '23505' ||
+        (e as { type?: string })?.type === MedusaError.Types.DUPLICATE_ERROR
+      ) {
+        return { claimed: false, reason: 'already_claimed' };
+      }
+      throw e;
+    }
+
+    let ref: string | null = null;
+    if (reward.type === 'credit') {
+      const { id } = await this.mutateCreditAtomic(
+        {
+          customerId: input.customerId,
+          amount: reward.amount_myr,
+          reason: 'reward_credit',
+          idempotencyReference: `task:${def.id}:${input.customerId}:${periodKey || 'once'}`,
+        },
+        sharedContext,
+      );
+      ref = id;
+    } else if (reward.type === 'card') {
+      const [card] = await this.listCards(
+        { handle: reward.card_handle },
+        { select: ['handle'], take: 1 },
+        sharedContext,
+      );
+      if (!card) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Task reward card '${reward.card_handle}' no longer exists.`,
+        );
+      }
+      // Fulfillment counter, never a gate — negative = units owed (same
+      // stance as challenge grants). Non-fatal when the helper is absent.
+      await input.decrementStock?.(reward.card_handle, 1);
+      const [pull] = await this.createPulls(
+        [
+          {
+            customer_id: input.customerId,
+            pack_id: 'task-reward',
+            card_id: reward.card_handle,
+            order_id: null,
+            rolled_at: new Date(),
+            source: 'reward' as const,
+          },
+        ],
+        sharedContext,
+      );
+      ref = pull.id;
+    } else {
+      // pack: a free rip — roll the pack's live odds and vault the result.
+      if (!input.rollPack) {
+        throw new MedusaError(
+          MedusaError.Types.UNEXPECTED_STATE,
+          'claimTask: a pack reward needs the rollPack helper injected.',
+        );
+      }
+      const rolled = await input.rollPack(reward.pack_id);
+      await input.decrementStock?.(rolled.handle, 1);
+      const [pull] = await this.createPulls(
+        [
+          {
+            customer_id: input.customerId,
+            pack_id: reward.pack_id,
+            card_id: rolled.handle,
+            order_id: null,
+            rolled_at: new Date(),
+            source: 'reward' as const,
+          },
+        ],
+        sharedContext,
+      );
+      ref = pull.id;
+    }
+    await this.updateTaskClaims(
+      { selector: { id: claimId }, data: { claim_ref: ref } },
+      sharedContext,
+    );
+    return { claimed: true, reward, ref };
+  }
+
+  // Admin CRUD for task definitions — validated + audited.
+  @InjectTransactionManager()
+  async saveTaskDefinition(
+    input: {
+      id?: string;
+      kind: 'weekly' | 'achievement';
+      title: string;
+      requirement: unknown;
+      reward: unknown;
+      active: boolean;
+      sort: number;
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ id: string }> {
+    if (!input.title.trim() || input.title.length > 120) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'title is required (1–120 chars).',
+      );
+    }
+    const requirement = validateTaskRequirement(input.kind, input.requirement);
+    const reward = validateTaskReward(input.reward);
+    const data = {
+      kind: input.kind,
+      title: input.title.trim(),
+      requirement: requirement as unknown as Record<string, unknown>,
+      reward: reward as unknown as Record<string, unknown>,
+      active: input.active,
+      sort: input.sort,
+    };
+    let id = input.id;
+    let before: Record<string, unknown> | null = null;
+    if (id) {
+      const [existing] = await this.listTaskDefinitions(
+        { id },
+        { take: 1 },
+        sharedContext,
+      );
+      if (!existing) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_FOUND,
+          `Task ${id} not found.`,
+        );
+      }
+      before = {
+        kind: existing.kind,
+        title: existing.title,
+        requirement: existing.requirement,
+        reward: existing.reward,
+        active: existing.active,
+        sort: existing.sort,
+      };
+      await this.updateTaskDefinitions(
+        { selector: { id }, data },
+        sharedContext,
+      );
+    } else {
+      const [row] = await this.createTaskDefinitions([data], sharedContext);
+      id = row.id;
+    }
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'task_definition',
+          entity_id: id,
+          action: before ? 'edit' : 'create',
+          before,
+          after: data,
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+    return { id };
   }
 
   // Admin edit of the avatar-frame catalog — upsert + audit, same discipline

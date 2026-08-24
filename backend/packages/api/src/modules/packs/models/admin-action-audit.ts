@@ -32,6 +32,7 @@ export const AdminActionAudit = model
       // Referral rebuild (spec 2026-08-24).
       'referral_settings',
       'weekly_settlement',
+      'task_definition',
     ]),
     entity_id: model.text(),
     action: model.enum([

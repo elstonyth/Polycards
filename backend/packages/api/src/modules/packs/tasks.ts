@@ -1,0 +1,163 @@
+// modules/packs/tasks.ts — the task system's pure half (spec 2026-08-24
+// Phase B): the requirement/reward unions, their validator (admin CRUD's
+// gate), and the progress evaluator. No DB — the service feeds evaluators
+// the counted facts.
+
+import { MedusaError } from '@medusajs/framework/utils';
+
+export type TaskRequirement =
+  | { type: 'checkin_days'; days: number }
+  | { type: 'rip_count'; count: number; pack_id?: string | null }
+  | { type: 'reach_level'; level: number }
+  | { type: 'vault_count'; count: number }
+  | { type: 'vault_pixel_count'; count: number };
+
+export type TaskReward =
+  | { type: 'credit'; amount_myr: number }
+  | { type: 'pack'; pack_id: string }
+  | { type: 'card'; card_handle: string };
+
+export type TaskKind = 'weekly' | 'achievement';
+
+// Weekly cadence only makes sense for facts that reset with the week;
+// lifetime facts (level, vault size) only make sense as achievements.
+const WEEKLY_TYPES = new Set(['checkin_days', 'rip_count']);
+const ACHIEVEMENT_TYPES = new Set([
+  'reach_level',
+  'vault_count',
+  'vault_pixel_count',
+]);
+
+// Sanity ceiling on a single task's credit reward — same defensive stance as
+// the reward-box MAX_BOX_CREDIT_MYR cap.
+export const MAX_TASK_CREDIT_MYR = 10_000;
+
+const bad = (m: string): never => {
+  throw new MedusaError(MedusaError.Types.INVALID_DATA, m);
+};
+
+const posInt = (v: unknown): v is number =>
+  typeof v === 'number' && Number.isInteger(v) && v > 0;
+
+export function validateTaskRequirement(
+  kind: TaskKind,
+  raw: unknown,
+): TaskRequirement {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const type = r.type as string;
+  if (kind === 'weekly' && !WEEKLY_TYPES.has(type)) {
+    bad(
+      `A weekly task's requirement must be one of ${[...WEEKLY_TYPES].join(', ')}; got '${String(type)}'.`,
+    );
+  }
+  if (kind === 'achievement' && !ACHIEVEMENT_TYPES.has(type)) {
+    bad(
+      `An achievement's requirement must be one of ${[...ACHIEVEMENT_TYPES].join(', ')}; got '${String(type)}'.`,
+    );
+  }
+  switch (type) {
+    case 'checkin_days':
+      if (!posInt(r.days) || (r.days as number) > 7)
+        bad('checkin_days: days must be an integer 1..7.');
+      return { type, days: r.days as number };
+    case 'rip_count':
+      if (!posInt(r.count)) bad('rip_count: count must be a positive integer.');
+      if (r.pack_id != null && typeof r.pack_id !== 'string')
+        bad('rip_count: pack_id must be a pack slug string when set.');
+      return {
+        type,
+        count: r.count as number,
+        pack_id: (r.pack_id as string | undefined) ?? null,
+      };
+    case 'reach_level':
+      if (!posInt(r.level) || (r.level as number) > 100)
+        bad('reach_level: level must be an integer 1..100.');
+      return { type, level: r.level as number };
+    case 'vault_count':
+    case 'vault_pixel_count':
+      if (!posInt(r.count)) bad(`${type}: count must be a positive integer.`);
+      return { type, count: r.count as number } as TaskRequirement;
+    default:
+      return bad(`Unknown requirement type '${String(type)}'.`);
+  }
+}
+
+export function validateTaskReward(raw: unknown): TaskReward {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  switch (r.type as string) {
+    case 'credit': {
+      const amount = r.amount_myr;
+      if (
+        typeof amount !== 'number' ||
+        !Number.isFinite(amount) ||
+        amount <= 0 ||
+        amount > MAX_TASK_CREDIT_MYR ||
+        Math.abs(amount * 100 - Math.round(amount * 100)) >= 1e-6
+      ) {
+        bad(
+          `credit: amount_myr must be 0 < RM x <= ${MAX_TASK_CREDIT_MYR} in whole sen.`,
+        );
+      }
+      return { type: 'credit', amount_myr: amount as number };
+    }
+    case 'pack':
+      if (typeof r.pack_id !== 'string' || !r.pack_id)
+        bad('pack: pack_id (slug) is required.');
+      return { type: 'pack', pack_id: r.pack_id as string };
+    case 'card':
+      if (typeof r.card_handle !== 'string' || !r.card_handle)
+        bad('card: card_handle is required.');
+      return { type: 'card', card_handle: r.card_handle as string };
+    default:
+      return bad(`Unknown reward type '${String(r.type)}'.`);
+  }
+}
+
+/** The facts the service counts for one customer; the evaluator maps a
+ *  requirement onto them. Weekly facts are scoped to the referral week the
+ *  caller measured. */
+export interface TaskFacts {
+  checkinDaysThisWeek: number;
+  ripsThisWeek: number;
+  ripsThisWeekByPack: Map<string, number>;
+  vipLevel: number;
+  vaultCount: number;
+  vaultPixelCount: number;
+}
+
+export function taskProgress(
+  requirement: TaskRequirement,
+  facts: TaskFacts,
+): { current: number; target: number; completed: boolean } {
+  let current = 0;
+  let target = 0;
+  switch (requirement.type) {
+    case 'checkin_days':
+      current = facts.checkinDaysThisWeek;
+      target = requirement.days;
+      break;
+    case 'rip_count':
+      current = requirement.pack_id
+        ? (facts.ripsThisWeekByPack.get(requirement.pack_id) ?? 0)
+        : facts.ripsThisWeek;
+      target = requirement.count;
+      break;
+    case 'reach_level':
+      current = facts.vipLevel;
+      target = requirement.level;
+      break;
+    case 'vault_count':
+      current = facts.vaultCount;
+      target = requirement.count;
+      break;
+    case 'vault_pixel_count':
+      current = facts.vaultPixelCount;
+      target = requirement.count;
+      break;
+  }
+  return {
+    current: Math.min(current, target),
+    target,
+    completed: current >= target,
+  };
+}

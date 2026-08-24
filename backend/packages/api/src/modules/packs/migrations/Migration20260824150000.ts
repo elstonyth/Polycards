@@ -61,6 +61,35 @@ export class Migration20260824150000 extends Migration {
       `CREATE UNIQUE INDEX IF NOT EXISTS "IDX_wsl_settlement_customer_kind_unique" ON "weekly_settlement_line" ("settlement_id", "customer_id", "kind") WHERE deleted_at IS NULL;`,
     );
 
+    // -- task system (Phase B) -----------------------------------------------
+    this.addSql(
+      `create table if not exists "task_definition" ("id" text not null, "kind" text check ("kind" in ('weekly', 'achievement')) not null, "title" text not null, "requirement" jsonb not null, "reward" jsonb not null, "active" boolean not null default true, "sort" integer not null default 0, "created_at" timestamptz not null default now(), "updated_at" timestamptz not null default now(), "deleted_at" timestamptz null, constraint "task_definition_pkey" primary key ("id"));`,
+    );
+    this.addSql(
+      `CREATE INDEX IF NOT EXISTS "IDX_task_definition_deleted_at" ON "task_definition" ("deleted_at") WHERE deleted_at IS NULL;`,
+    );
+    this.addSql(
+      `create table if not exists "task_claim" ("id" text not null, "customer_id" text not null, "task_id" text not null, "period_key" text not null default '', "reward_snapshot" jsonb null, "claim_ref" text null, "created_at" timestamptz not null default now(), "updated_at" timestamptz not null default now(), "deleted_at" timestamptz null, constraint "task_claim_pkey" primary key ("id"));`,
+    );
+    this.addSql(
+      `CREATE INDEX IF NOT EXISTS "IDX_task_claim_deleted_at" ON "task_claim" ("deleted_at") WHERE deleted_at IS NULL;`,
+    );
+    this.addSql(
+      `CREATE INDEX IF NOT EXISTS "IDX_task_claim_customer" ON "task_claim" ("customer_id") WHERE deleted_at IS NULL;`,
+    );
+    this.addSql(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "IDX_task_claim_unique" ON "task_claim" ("customer_id", "task_id", "period_key") WHERE deleted_at IS NULL;`,
+    );
+    this.addSql(
+      `create table if not exists "daily_checkin" ("id" text not null, "customer_id" text not null, "checkin_date" text not null, "created_at" timestamptz not null default now(), "updated_at" timestamptz not null default now(), "deleted_at" timestamptz null, constraint "daily_checkin_pkey" primary key ("id"));`,
+    );
+    this.addSql(
+      `CREATE INDEX IF NOT EXISTS "IDX_daily_checkin_deleted_at" ON "daily_checkin" ("deleted_at") WHERE deleted_at IS NULL;`,
+    );
+    this.addSql(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "IDX_daily_checkin_unique" ON "daily_checkin" ("customer_id", "checkin_date") WHERE deleted_at IS NULL;`,
+    );
+
     // -- column additions ----------------------------------------------------
     this.addSql(
       `alter table if exists "customer_account_state" add column if not exists "partner_referral_bp" integer null;`,
@@ -86,7 +115,7 @@ export class Migration20260824150000 extends Migration {
       `alter table if exists "admin_action_audit" drop constraint if exists "admin_action_audit_entity_type_check";`,
     );
     this.addSql(
-      `alter table if exists "admin_action_audit" add constraint "admin_action_audit_entity_type_check" check("entity_type" in ('customer', 'commission', 'rewards_settings', 'credit', 'reward_pool', 'daily_reward_settings', 'daily_box', 'voucher_ladder', 'fx', 'site_settings', 'vip_levels', 'challenge_stages', 'challenge_settings', 'delivery_order', 'purchase_invoice', 'tier_settings', 'referral_settings', 'weekly_settlement'));`,
+      `alter table if exists "admin_action_audit" add constraint "admin_action_audit_entity_type_check" check("entity_type" in ('customer', 'commission', 'rewards_settings', 'credit', 'reward_pool', 'daily_reward_settings', 'daily_box', 'voucher_ladder', 'fx', 'site_settings', 'vip_levels', 'challenge_stages', 'challenge_settings', 'delivery_order', 'purchase_invoice', 'tier_settings', 'referral_settings', 'weekly_settlement', 'task_definition'));`,
     );
     this.addSql(
       `alter table if exists "admin_action_audit" drop constraint if exists "admin_action_audit_action_check";`,
@@ -126,6 +155,9 @@ export class Migration20260824150000 extends Migration {
         END IF;
       END $$;`);
 
+    this.addSql(`drop table if exists "task_claim" cascade;`);
+    this.addSql(`drop table if exists "task_definition" cascade;`);
+    this.addSql(`drop table if exists "daily_checkin" cascade;`);
     this.addSql(`drop table if exists "weekly_settlement_line" cascade;`);
     this.addSql(`drop table if exists "weekly_settlement" cascade;`);
     this.addSql(`drop table if exists "referral_settings" cascade;`);
