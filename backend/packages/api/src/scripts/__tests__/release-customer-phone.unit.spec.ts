@@ -237,6 +237,33 @@ describe('release-customer-phone script guards', () => {
     expect(JSON.stringify(rows[0])).not.toContain('+60123456789');
   });
 
+  // Unlike delete-customer-account.ts, this script's write never removes the
+  // customer row — only the phone column. So a NOT_FOUND on the post-release
+  // re-read is an anomaly (the release write already ran, the row vanished
+  // some other way), not proof of success, and must NOT collapse into the
+  // same '(none)' string a genuine release produces.
+  it('post-release re-read rejects NOT_FOUND: does not render as the (none) success shape, names the anomaly instead', async () => {
+    process.env.RELEASE_CUSTOMER_ID = 'cus_1';
+    process.env.RELEASE_REASON = 'dup phone cleanup';
+    process.env.CONFIRM_RELEASE = 'cus_1';
+    retrieveCustomer
+      .mockReset()
+      .mockResolvedValueOnce({ ...DEFAULT_CUSTOMER }) // initial lookup
+      .mockRejectedValueOnce(
+        new MedusaError(MedusaError.Types.NOT_FOUND, 'Customer not found'),
+      ); // post-release re-read
+    await run();
+    // The write path already ran — a failed verification read is a
+    // reporting problem, not a reason the release itself didn't happen.
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+    const doneCall = logger.info.mock.calls.find((c) =>
+      String(c[0]).includes('DONE'),
+    );
+    expect(doneCall?.[0]).toBeDefined();
+    expect(doneCall?.[0]).not.toContain('(none)');
+    expect(doneCall?.[0]).toContain('MISSING');
+  });
+
   it('phone_verified_at already null on an existing row: no account-state write; release still proceeds', async () => {
     process.env.RELEASE_CUSTOMER_ID = 'cus_1';
     process.env.RELEASE_REASON = 'dup phone cleanup';

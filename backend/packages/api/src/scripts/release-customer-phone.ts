@@ -225,11 +225,19 @@ export default async function releaseCustomerPhone({ container }: ExecArgs) {
     },
   ]);
 
-  // Same NOT_FOUND-vs-operational split as the lookup above, but the
-  // consequence differs: the release already succeeded, so a failed read
-  // here is a REPORTING problem, not a reason to fail the run — it must
-  // never render the same as a confirmed release, but it also must never
-  // throw.
+  // NOT_FOUND means something DIFFERENT here than at the lookup above, and
+  // different from delete-customer-account.ts's post-delete read too. There,
+  // NOT_FOUND on this same kind of read IS the proof of success — the whole
+  // row is gone, by design. Here the write only ever nulls `phone`; it never
+  // deletes the row, so the customer must still resolve afterward. A
+  // NOT_FOUND at this point is an anomaly — the release write above already
+  // ran, but the row is unexpectedly gone — not confirmation, and it must
+  // never render as the same clean '(none)' a genuine release produces (that
+  // was the bug class Sourcery flagged on the delete script twice already:
+  // an alarming state must never print as a clean success). A resolved
+  // non-null phone is likewise never rendered as success: mask() only
+  // returns '(none)' for a null value, so a masked non-null number already
+  // reads as "the release did not take" rather than being mistaken for one.
   let afterPhone: string;
   try {
     const after = await customers.retrieveCustomer(customerId, {
@@ -237,7 +245,9 @@ export default async function releaseCustomerPhone({ container }: ExecArgs) {
     });
     afterPhone = mask(after.phone);
   } catch (error) {
-    afterPhone = isNotFound(error) ? mask(null) : '(unreadable — verify manually)';
+    afterPhone = isNotFound(error)
+      ? '(customer row MISSING — investigate; the release write already succeeded)'
+      : '(unreadable — verify manually)';
   }
   logger.info(
     `[release-customer-phone] DONE — ${customerId} released. phone ` +
