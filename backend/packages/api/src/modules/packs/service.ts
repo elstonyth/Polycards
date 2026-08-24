@@ -445,8 +445,8 @@ export interface SettleDeps {
    */
   decrementStock?: (handle: string, qty: number) => Promise<boolean>;
   /** Fired after each winner's transaction COMMITS — notifications, operator
-   *  warnings. Optional + best-effort (matureDueCommissions' notify
-   *  precedent): the module stays container-free, so the JOB supplies it, and
+   *  warnings. Optional + best-effort: the module stays container-free, so
+   *  the JOB supplies it, and
    *  a throw here can never roll back an already-committed payout. Per winner
    *  rather than after the batch, so a later crash cannot permanently drop an
    *  already-paid winner's notification (the next tick's gate skips them). */
@@ -1179,14 +1179,13 @@ class PacksModuleService extends MedusaService({
   // Why the gate cannot merely PRECEDE the debit (it used to, in
   // globepay-withdrawal.ts, with no lock held across the two): `floor: 0` in
   // mutateCreditAtomic guards the RAW balance. It knows nothing about `locked`
-  // — walletSummary's withdrawable is `balance − locked` (minus the freeze flag
-  // and the playthrough gate), and the floor cannot see any of that. So N
-  // concurrent POST /store/credits/withdraw requests all read the SAME
-  // withdrawable, all pass the policy check, and all debit, bounded only by the
-  // raw balance: a customer holding unmatured or suspended commission credits
-  // could move up to `locked` more than they are entitled to, out to a bank,
-  // after which the reversal and auto-freeze machinery has nothing left to claw
-  // back. The rate limiter permits a 5-request burst per 10s, so that
+  // — walletSummary's withdrawable folds in the freeze flag and the playthrough
+  // gate, and the floor cannot see either. So N concurrent
+  // POST /store/credits/withdraw requests all read the SAME withdrawable, all
+  // pass the policy check, and all debit, bounded only by the raw balance: a
+  // customer could move more than the gate allows out to a bank, after which
+  // the reversal and auto-freeze machinery has nothing left to claw back. The
+  // rate limiter permits a 5-request burst per 10s, so that
   // concurrency is reachable. Holding `credit:<customer>` across the read AND
   // the write is what makes the policy layer atomic; floor 0 stays underneath
   // as the raw-overdraft backstop.
@@ -1200,8 +1199,8 @@ class PacksModuleService extends MedusaService({
   // Re-entrancy: withdrawCreditsWithLedger → mutateCreditAtomic re-acquires
   // this SAME advisory key below. Postgres advisory locks are re-entrant per
   // session, so that is a no-op. The invariant it must not break is at most one
-  // DISTINCT `credit:` key per transaction (see matureDueCommissions) — this
-  // method only ever takes its own customer's.
+  // DISTINCT `credit:` key per transaction — this method only ever takes its
+  // own customer's.
   @InjectTransactionManager()
   async withdrawForCashout(
     input: {
@@ -1332,11 +1331,11 @@ class PacksModuleService extends MedusaService({
 
     // 3) The withdrawal gate, read INSIDE the lock (withdrawable.ts's own
     //    invariant: "the cashout writer MUST route through this").
-    //    walletSummary folds THREE limits into one number: the freeze flag
-    //    (frozen accounts withdraw nothing — it is the fraud-response tool),
-    //    locked unmatured commissions, and the playthrough gate (deposits must
-    //    be spent on packs before they can leave to a bank — the
-    //    anti-laundering rule). Threading sharedContext is what makes the read
+    //    walletSummary folds TWO limits into one number: the freeze flag
+    //    (frozen accounts withdraw nothing — it is the fraud-response tool) and
+    //    the playthrough gate (deposits must be spent on packs before they can
+    //    leave to a bank — the anti-laundering rule). Threading sharedContext
+    //    is what makes the read
     //    see this locked transaction rather than a separate connection.
     const wallet = await this.walletSummary(
       input.customerId,
@@ -1618,8 +1617,8 @@ class PacksModuleService extends MedusaService({
   // Holds the SAME per-customer advisory lock as mutateCreditAtomic, then writes
   // a mirror row: sign-flipped amount (refund) + sign-flipped external_funded_cents
   // (restores external balance; Task-1 fold nets the VIP basis). The original is
-  // NEVER deleted — a reversed open keeps its history, which is mandatory once a
-  // commission can reference it (spec §3 invariant 1). Idempotent under the
+  // NEVER deleted — a reversed open keeps its history (spec §3 invariant 1).
+  // Idempotent under the
   // lock (below): a repeated compensation of the same charge returns the
   // existing reversal rather than appending a second full refund.
   @InjectTransactionManager()
@@ -1796,8 +1795,8 @@ class PacksModuleService extends MedusaService({
 
   // Freeze the account unconditionally (caller has already determined the balance
   // is projected negative). Returns true if the account ends up frozen (or was
-  // already frozen). Used by reverseOpen / reverseCommission after they compute
-  // the post-reversal balance from a pre-reversal snapshot + delta.
+  // already frozen). Used by reverseOpen after it computes the post-reversal
+  // balance from a pre-reversal snapshot + delta.
   private async freezeAccountIfNotAlready(
     customerId: string,
     cause: 'auto' | 'manual',
@@ -1937,8 +1936,8 @@ class PacksModuleService extends MedusaService({
   }
 
   // Claim an earned VIP reward grant (B5). Read-then-write under the per-customer
-  // `credit:` advisory lock, in ONE transaction (same discipline as
-  // reverseCommission): re-read the grant under the lock; if it's not owned by
+  // `credit:` advisory lock, in ONE transaction (same discipline as reverseOpen):
+  // re-read the grant under the lock; if it's not owned by
   // the caller or no longer `granted`, return {claimed:false} (idempotent no-op —
   // a double-click or replay can't double-credit). A VOUCHER grant credits
   // +payload.amount_myr via mutateCreditAtomic with reason 'voucher_claim',
@@ -2792,8 +2791,8 @@ class PacksModuleService extends MedusaService({
   // exactly this reason — "the list-then-create still needs a lock".
   //
   // Key namespace is `metadata:`, NOT `credit:`. The credit ledger's invariant
-  // (at most one `credit:` advisory lock per transaction, ever — see
-  // matureDueCommissions) is untouched by a different namespace, but nothing
+  // (at most one `credit:` advisory lock per transaction, ever) is untouched by
+  // a different namespace, but nothing
   // here may be composed into a transaction that already holds a `credit:`
   // lock.
   //
@@ -3259,10 +3258,9 @@ class PacksModuleService extends MedusaService({
   //
   //  - Cents, not the MYR decimals every sibling returns. The gate tests for
   //    exact zero, and a float RM comparison is the wrong instrument for that.
-  //  - Freeze-blind and lock-blind. availableBalance() returns 0 for a frozen
-  //    account and subtracts lockedCommissionCents, so a frozen account still
-  //    holding funds — or one whose balance happens to equal its locked
-  //    commission — reads as 0 there. Deleting either would strand real money.
+  //  - Freeze-blind. availableBalance() returns 0 for a frozen account, so a
+  //    frozen account still holding funds reads as 0 there. Deleting it would
+  //    strand real money.
   //
   // Signed, so a clawback-negative account (which owes us) is also non-zero and
   // is therefore refused by the same `!== 0` test.
@@ -3418,14 +3416,10 @@ class PacksModuleService extends MedusaService({
   // BEFORE the customer soft delete, so it covers a half-finished purge too.
   // The customer module is not reachable from this service anyway.
   //
-  // The two callers use this very differently, and a comment that flatters
-  // either one would mislead the next reader: settleChallengeWeek reads the
-  // WHOLE ranking in one query (at most ten ids, outside the per-winner
-  // transactions, service.ts:7619), while payCommission calls it once per
-  // BENEFICIARY inside its fan-out loop (service.ts:3427) — inside the credit
-  // advisory lock — so one pack open runs it about five times. Hoisting a
-  // batched read out of that loop would mean restructuring it for ~5 index
-  // seeks, which is not worth doing; it is worth not claiming otherwise.
+  // settleChallengeWeek reads the WHOLE ranking in one query (at most ten ids,
+  // outside the per-winner transactions). The referral fan-out that used to
+  // call this once per beneficiary inside a credit advisory lock is gone, so
+  // there is no per-row caller left.
   //
   // No `take`. The id count looked safe because the audit write is idempotent,
   // but "near-impossible" is not "impossible": a second delete_account row for
@@ -3438,8 +3432,7 @@ class PacksModuleService extends MedusaService({
   // 'delete_account', always with 'customer') but NOT for cost: the sole usable
   // index is IDX_admin_action_audit_entity on (entity_type, entity_id), and
   // omitting the leading column drops the seek for a full scan. admin_action_
-  // audit is append-only and grows with every admin money mutation forever,
-  // and payCommission runs this read inside settleOpen's credit advisory lock.
+  // audit is append-only and grows with every admin money mutation forever.
   @InjectManager()
   async deletedCustomerIds(
     customerIds: string[],
@@ -4901,8 +4894,8 @@ class PacksModuleService extends MedusaService({
   //      credit lock or the per-order delivery lock).
   //   2. SAME-transaction self-duplication: a batch/loop writer that calls
   //      this method twice with the same (type, ref_id) inside ONE already-
-  //      open transaction — e.g. a hypothetical Epic 6 payout job iterating
-  //      a list of commissions with ref_id = commission.id. The SAME UoW
+  //      open transaction — e.g. a batch payout job iterating a list of
+  //      payouts that share a ref_id. The SAME UoW
   //      buffering that motivated the raw-SQL pre-check also makes that
   //      pre-check BLIND to the first call's still-unflushed insert (raw SQL
   //      sees flushed/committed table state, never the UoW's pending
@@ -4916,7 +4909,7 @@ class PacksModuleService extends MedusaService({
   // inside one transaction. This method will not do it for you — doing so
   // would require either flushing mid-transaction or tracking written refs
   // in memory, both out of scope here (and likely to mask a real bug in the
-  // caller, e.g. a genuinely duplicated commission row upstream).
+  // caller, e.g. a genuinely duplicated payout row upstream).
   @InjectTransactionManager()
   async recordLedgerEntry(
     input: {
@@ -5150,7 +5143,7 @@ class PacksModuleService extends MedusaService({
 
   // Monotonic lifetime VIP turnover for a single customer, in SEN: full
   // pack_open spend regardless of funding source (2026-07-22 turnover-VIP —
-  // winnings-funded opens count; commissions/playthrough gate still use the
+  // winnings-funded opens count; the playthrough gate still uses the
   // external-funded basis). Sums ORIGINAL pack_open debits (amount<0) only —
   // reversals are amount>0 and thus excluded, so the counter never drops on a
   // clawback (spec §3).
@@ -6843,8 +6836,8 @@ class PacksModuleService extends MedusaService({
   // Settle the most recently ENDED challenge week (weeksBack: 1): pay the
   // week's top-10 the union of every pool-unlocked stage's rank rewards,
   // exactly once. Enumerator only — @InjectManager (plain read context, NO
-  // transaction at this level, mirroring matureDueCommissions): each winner
-  // settles in their OWN short transaction via settleChallengeWinner.
+  // transaction at this level): each winner settles in their OWN short
+  // transaction via settleChallengeWinner.
   @InjectManager()
   async settleChallengeWeek(
     deps: SettleDeps,
@@ -7002,8 +6995,8 @@ class PacksModuleService extends MedusaService({
         continue; // rank pays nothing this week
       }
       // One SHORT transaction per winner — deliberately NO sharedContext
-      // forwarding (matureDueCommissions invariant: one credit: advisory-lock
-      // chain per transaction, never accumulated across winners).
+      // forwarding (the ledger invariant: one credit: advisory-lock chain per
+      // transaction, never accumulated across winners).
       const settled = await this.settleChallengeWinner({
         weekStart: startUtc,
         weekEnd: endUtc,

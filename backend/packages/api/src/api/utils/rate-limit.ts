@@ -958,8 +958,8 @@ export function createNotificationReadAllRateLimit(): MiddlewareHandler {
 }
 
 /**
- * Rate-limiter for admin money-mutation routes (freeze/unfreeze, commission
- * reverse/suspend/unsuspend, rewards-settings, credit-adjust). Admins are
+ * Rate-limiter for admin money-mutation routes (freeze/unfreeze,
+ * rewards-settings, credit-adjust). Admins are
  * trusted operators, so the budget is deliberately generous — this is
  * anti-token-drain hardening, not a tight per-action throttle. One instance
  * is shared by all matched matchers so they share one budget and one Redis

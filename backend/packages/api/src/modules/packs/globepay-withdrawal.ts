@@ -478,7 +478,7 @@ export async function startGlobePayWithdrawal(
 
   // 2) GATE + DEBIT, as one serialized transaction inside the service.
   // The withdrawal gate lives in packs.withdrawForCashout — freeze flag,
-  // locked unmatured commissions, playthrough, and the rolling-24h value cap
+  // the freeze gate, playthrough, and the rolling-24h value cap
   // — held under the per-customer `credit:` advisory lock TOGETHER with the
   // debit. It used to be checked here, before and outside any lock, which let
   // concurrent requests all read the same `withdrawable`, all pass, and all

@@ -9,7 +9,7 @@ export function toMoney(value: unknown): number {
   return Number(value);
 }
 
-// Integer-sen helpers — the canonical money arithmetic for VIP/commission math.
+// Integer-sen helpers — the canonical money arithmetic for VIP math.
 // Mirrors the existing Math.round(x*100) integer-cent pattern (buyback-rate.ts,
 // credit-summary.ts) so a single place pins the rounding rule. Money is 2dp at the
 // boundary; compute in sen to avoid float drift.

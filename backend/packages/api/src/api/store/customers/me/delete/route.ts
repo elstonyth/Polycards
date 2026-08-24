@@ -61,11 +61,11 @@ async function emailpassEntityId(
 //     `delete_account` row from admin_action_audit (written in step 3, inside
 //     the packs transaction). It is not bookkeeping to tidy later — it is the
 //     row `deletedCustomerIds` (modules/packs/service.ts) reads, and both paths
-//     that consult it, payCommission's fan-out and settleChallengeWeek, SKIP
-//     every customer it names. Leave it behind and the recovered account looks
-//     entirely alive — it logs in, spins, deposits, withdraws — while referral
-//     commission and weekly-challenge winnings stop permanently, with no error
-//     and nothing on any surface that explains why. Marking a half-purged
+//     that consult it, settleChallengeWeek among them, SKIP every customer it
+//     names. Leave it behind and the recovered account looks entirely alive —
+//     it logs in, spins, deposits, withdraws — while weekly-challenge winnings
+//     stop permanently, with no error and nothing on any surface that explains
+//     why. Marking a half-purged
 //     account as deleted is deliberate and correct; un-marking it is what makes
 //     recovery real.
 //   - A failure at or after step 6 needs manual intervention against the

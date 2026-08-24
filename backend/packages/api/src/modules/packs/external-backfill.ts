@@ -22,7 +22,7 @@ export type BackfillLedgerRow = {
  * Rows MUST be one customer's ledger in chronological order (created_at, id).
  * Returns id → recomputed external_funded_cents for every topup/pack_open row
  * whose stored value differs (NULL counts as differing — the grandfather flip
- * is the point). Other reasons are never touched: buyback / commission /
+ * is the point). Other reasons are never touched: buyback /
  * adjustment / voucher income is internal by design and carries no basis.
  */
 export function recomputeExternalStamps(

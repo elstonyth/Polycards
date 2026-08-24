@@ -10,6 +10,10 @@ export const AdminActionAudit = model
     admin_id: model.text(),
     entity_type: model.enum([
       'customer',
+      // Historical only — the referral programme that wrote commission-keyed
+      // audit rows was removed (ADR 0007). The value stays because rows written
+      // before that removal are still in this table, and narrowing the CHECK
+      // would fail against them.
       'commission',
       'rewards_settings',
       'credit',
@@ -30,6 +34,7 @@ export const AdminActionAudit = model
     action: model.enum([
       'freeze',
       'unfreeze',
+      // Historical only — see the note on entity_type 'commission' above.
       'reverse_commission',
       'suspend_commission',
       'unsuspend_commission',

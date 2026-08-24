@@ -966,21 +966,6 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
-      matcher: '/admin/commissions/*/reverse',
-      method: 'POST',
-      middlewares: [adminActionRateLimit],
-    },
-    {
-      matcher: '/admin/commissions/*/suspend',
-      method: 'POST',
-      middlewares: [adminActionRateLimit],
-    },
-    {
-      matcher: '/admin/commissions/*/unsuspend',
-      method: 'POST',
-      middlewares: [adminActionRateLimit],
-    },
-    {
       matcher: '/admin/rewards-settings',
       method: 'POST',
       middlewares: [adminActionRateLimit],
