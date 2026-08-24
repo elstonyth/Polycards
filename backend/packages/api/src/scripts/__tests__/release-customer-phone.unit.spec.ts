@@ -36,6 +36,14 @@ const container = {
 
 const run = () => releaseCustomerPhone({ container, args: [] } as never);
 
+// Finds the final DONE/ANOMALY summary line regardless of which word it
+// used — the two are mutually exclusive outcomes of the same log call, so
+// tests assert on the word itself rather than pre-supposing one.
+const findSummary = () =>
+  logger.info.mock.calls.find((c) =>
+    /\[release-customer-phone\] (DONE|ANOMALY) —/.test(String(c[0])),
+  )?.[0];
+
 const DEFAULT_CUSTOMER = {
   id: 'cus_1',
   email: 'a@b.dev',
@@ -44,18 +52,40 @@ const DEFAULT_CUSTOMER = {
 };
 
 describe('release-customer-phone script guards', () => {
+  let retrieveCustomerCalls = 0;
+
   beforeEach(() => {
     delete process.env.RELEASE_CUSTOMER_ID;
     delete process.env.RELEASE_REASON;
     delete process.env.CONFIRM_RELEASE;
 
-    retrieveCustomer.mockReset().mockResolvedValue({ ...DEFAULT_CUSTOMER });
+    retrieveCustomerCalls = 0;
+    // Smart default: call 1 is the initial lookup, call 2 is the pre-write
+    // TOCTOU re-check (release-customer-phone.ts) — both return the
+    // unchanged DEFAULT_CUSTOMER, so "nothing changed" is the default
+    // scenario. Call 3+ is the post-release verification read; returning
+    // phone: null there means any test that doesn't override retrieveCustomer
+    // gets a realistic, fully-successful release (DONE) instead of an
+    // accidental ANOMALY from a mock that never simulates the write actually
+    // taking effect. Tests that want an anomalous verification read
+    // override this with their own mockReset() + mockResolvedValueOnce
+    // chain (which must then supply all 3 slots, in order).
+    retrieveCustomer.mockReset().mockImplementation(async () => {
+      retrieveCustomerCalls += 1;
+      return retrieveCustomerCalls >= 3
+        ? { id: 'cus_1', phone: null }
+        : { ...DEFAULT_CUSTOMER };
+    });
     // Default: 2 has_account:true rows carry this exact phone — the target
     // plus one other — so the release is legal by default; tests that need
     // the "not duplicated" refusal override this explicitly. Real ids, not
     // just a count: the guard filters rows by id, so a test that returned
     // an empty rows array here couldn't prove the filter actually excludes
-    // the target's own row.
+    // the target's own row. This same blanket default also answers the
+    // SECOND (unfiltered) read and the TOCTOU re-check read, since a plain
+    // (non-Once) mockResolvedValue answers every call not otherwise queued
+    // — matchingCount === allHoldersCount by default, so no
+    // has_account:false warning fires unless a test overrides this.
     listAndCountCustomers
       .mockReset()
       .mockResolvedValue([[{ id: 'cus_1' }, { id: 'cus_2' }], 2]);
@@ -67,6 +97,7 @@ describe('release-customer-phone script guards', () => {
     createAdminActionAudits.mockReset();
     logger.info.mockClear();
     logger.error.mockClear();
+    logger.warn.mockClear();
   });
 
   it('RELEASE_CUSTOMER_ID unset: logs an error and calls no service at all', async () => {
@@ -198,6 +229,20 @@ describe('release-customer-phone script guards', () => {
     expect(createAdminActionAudits).not.toHaveBeenCalled();
   });
 
+  // Sourcery (PR #479): CONFIRM_RELEASE was trimmed before comparison, so
+  // ' cus_1 ' silently matched 'cus_1' despite the docblock's "EXACTLY".
+  // Compared untrimmed now — this pins the rejection.
+  it('CONFIRM_RELEASE with surrounding whitespace: rejected, not silently trimmed into a match', async () => {
+    process.env.RELEASE_CUSTOMER_ID = 'cus_1';
+    process.env.RELEASE_REASON = 'dup phone cleanup';
+    process.env.CONFIRM_RELEASE = ' cus_1 ';
+    await run();
+    expect(updateCustomers).not.toHaveBeenCalled();
+    expect(
+      logger.info.mock.calls.some((c) => String(c[0]).includes('DRY RUN')),
+    ).toBe(true);
+  });
+
   it('CONFIRM_RELEASE matching: nulls the phone, clears the verified stamp, appends exactly one audit row', async () => {
     process.env.RELEASE_CUSTOMER_ID = 'cus_1';
     process.env.RELEASE_REASON = 'dup phone cleanup';
@@ -213,6 +258,10 @@ describe('release-customer-phone script guards', () => {
       expect.objectContaining({ phone: '+60123456789', has_account: true }),
       expect.objectContaining({ take: expect.any(Number) }),
     );
+    // The has_account:true-scoped guard, the unfiltered has_account:false
+    // blind-spot read, and the pre-write TOCTOU re-check all ran exactly
+    // once each on the happy path.
+    expect(listAndCountCustomers).toHaveBeenCalledTimes(3);
 
     expect(updateCustomers).toHaveBeenCalledTimes(1);
     expect(updateCustomers).toHaveBeenCalledWith('cus_1', { phone: null });
@@ -235,6 +284,10 @@ describe('release-customer-phone script guards', () => {
     });
     // Never the full phone number in the persisted audit row.
     expect(JSON.stringify(rows[0])).not.toContain('+60123456789');
+
+    // The true happy path must render as DONE, never ANOMALY.
+    const summary = findSummary();
+    expect(summary).toContain('DONE');
   });
 
   // Unlike delete-customer-account.ts, this script's write never removes the
@@ -242,13 +295,14 @@ describe('release-customer-phone script guards', () => {
   // re-read is an anomaly (the release write already ran, the row vanished
   // some other way), not proof of success, and must NOT collapse into the
   // same '(none)' string a genuine release produces.
-  it('post-release re-read rejects NOT_FOUND: does not render as the (none) success shape, names the anomaly instead', async () => {
+  it('post-release re-read rejects NOT_FOUND: renders as ANOMALY, not the (none) success shape, names the anomaly', async () => {
     process.env.RELEASE_CUSTOMER_ID = 'cus_1';
     process.env.RELEASE_REASON = 'dup phone cleanup';
     process.env.CONFIRM_RELEASE = 'cus_1';
     retrieveCustomer
       .mockReset()
       .mockResolvedValueOnce({ ...DEFAULT_CUSTOMER }) // initial lookup
+      .mockResolvedValueOnce({ ...DEFAULT_CUSTOMER }) // TOCTOU re-check: unchanged, passes
       .mockRejectedValueOnce(
         new MedusaError(MedusaError.Types.NOT_FOUND, 'Customer not found'),
       ); // post-release re-read
@@ -256,12 +310,85 @@ describe('release-customer-phone script guards', () => {
     // The write path already ran — a failed verification read is a
     // reporting problem, not a reason the release itself didn't happen.
     expect(updateCustomers).toHaveBeenCalledTimes(1);
-    const doneCall = logger.info.mock.calls.find((c) =>
-      String(c[0]).includes('DONE'),
+    const summary = findSummary();
+    expect(summary).toBeDefined();
+    expect(summary).toContain('ANOMALY');
+    expect(summary).not.toContain('(none)');
+    expect(summary).toContain('MISSING');
+  });
+
+  // Sourcery (PR #479): a non-null phone read back was masked (e.g.
+  // '••••6789') but the line still unconditionally said "DONE — released",
+  // so an operator could read a masked value, not notice it wasn't '(none)',
+  // and conclude the collision was resolved when it was not.
+  it('post-release re-read resolves with a non-null phone: renders as ANOMALY, wording says the release did not take', async () => {
+    process.env.RELEASE_CUSTOMER_ID = 'cus_1';
+    process.env.RELEASE_REASON = 'dup phone cleanup';
+    process.env.CONFIRM_RELEASE = 'cus_1';
+    retrieveCustomer
+      .mockReset()
+      .mockResolvedValueOnce({ ...DEFAULT_CUSTOMER }) // initial lookup
+      .mockResolvedValueOnce({ ...DEFAULT_CUSTOMER }) // TOCTOU re-check: unchanged, passes
+      .mockResolvedValueOnce({ id: 'cus_1', phone: '+60123456789' }); // still set!
+    await run();
+    expect(updateCustomers).toHaveBeenCalledTimes(1); // the write still ran
+    const summary = findSummary();
+    expect(summary).toBeDefined();
+    expect(summary).toContain('ANOMALY');
+    expect(summary).not.toMatch(/\bDONE\b/);
+    expect(String(summary).toLowerCase()).toContain('did not take');
+  });
+
+  // Fix for the has_account:false blind spot (docblock): the guard itself
+  // stays has_account:true-scoped and must NOT refuse on this by itself —
+  // it only warns, and the release still proceeds.
+  it('has_account:false row also holds the phone: warns without refusing; the numbers surface in both the info block and the final summary', async () => {
+    process.env.RELEASE_CUSTOMER_ID = 'cus_1';
+    process.env.RELEASE_REASON = 'dup phone cleanup';
+    process.env.CONFIRM_RELEASE = 'cus_1';
+    listAndCountCustomers
+      .mockReset()
+      .mockResolvedValueOnce([[{ id: 'cus_1' }, { id: 'cus_2' }], 2]) // guard: has_account:true only
+      .mockResolvedValueOnce([[], 3]) // unfiltered: 3 total -> 1 has_account:false row hiding
+      .mockResolvedValueOnce([[{ id: 'cus_1' }, { id: 'cus_2' }], 2]); // TOCTOU re-check
+    await run();
+
+    // Never refuses on this by itself.
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+
+    const infoBlock = logger.info.mock.calls.find((c) =>
+      String(c[0]).includes('all live holders'),
     );
-    expect(doneCall?.[0]).toBeDefined();
-    expect(doneCall?.[0]).not.toContain('(none)');
-    expect(doneCall?.[0]).toContain('MISSING');
+    expect(infoBlock?.[0]).toContain('3');
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(String(logger.warn.mock.calls[0][0])).toContain('has_account:false');
+
+    const summary = findSummary();
+    expect(summary).toContain('DONE'); // the release itself still succeeded
+    expect(summary).toContain('has_account:false');
+  });
+
+  // Fix for the TOCTOU window (docblock): the re-check runs immediately
+  // before the write and must abort — with NO write of any kind — if the
+  // other-holder count that made the release legal has since dropped to
+  // zero.
+  it('TOCTOU re-check: other-holder count drops to zero right before the write, aborts with no write', async () => {
+    process.env.RELEASE_CUSTOMER_ID = 'cus_1';
+    process.env.RELEASE_REASON = 'dup phone cleanup';
+    process.env.CONFIRM_RELEASE = 'cus_1';
+    listAndCountCustomers
+      .mockReset()
+      .mockResolvedValueOnce([[{ id: 'cus_1' }, { id: 'cus_2' }], 2]) // guard: passes, 1 other holder
+      .mockResolvedValueOnce([[{ id: 'cus_1' }, { id: 'cus_2' }], 2]) // unfiltered: no extra
+      .mockResolvedValueOnce([[{ id: 'cus_1' }], 1]); // TOCTOU re-check: the other holder is gone
+    await run();
+    expect(
+      logger.error.mock.calls.some((c) => String(c[0]).includes('REFUSED')),
+    ).toBe(true);
+    expect(updateCustomers).not.toHaveBeenCalled();
+    expect(updateCustomerAccountStates).not.toHaveBeenCalled();
+    expect(createAdminActionAudits).not.toHaveBeenCalled();
   });
 
   it('phone_verified_at already null on an existing row: no account-state write; release still proceeds', async () => {

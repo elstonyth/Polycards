@@ -19,13 +19,16 @@ import type PacksModuleService from '../modules/packs/service';
  * destroying an owned asset to resolve a phone collision is the wrong
  * trade.)
  *
- * DRY RUN BY DEFAULT — resolves the account, prints identity + the
- * duplicate-holder count, writes nothing:
+ * DRY RUN BY DEFAULT — resolves the account, prints identity + both
+ * duplicate-holder counts, writes nothing:
  *   RELEASE_CUSTOMER_ID=cus_xxx RELEASE_REASON="..." corepack yarn medusa exec ./src/scripts/release-customer-phone.ts
  *
- * APPLY — CONFIRM_RELEASE must equal RELEASE_CUSTOMER_ID EXACTLY (never
- * "yes" or "1"): the guard against releasing the wrong account's number
- * after an env-var slip.
+ * APPLY — CONFIRM_RELEASE must equal RELEASE_CUSTOMER_ID EXACTLY, byte for
+ * byte (never "yes" or "1"): unlike RELEASE_CUSTOMER_ID/RELEASE_REASON
+ * (both trimmed on read), CONFIRM_RELEASE is compared UNTRIMMED, so
+ * surrounding whitespace from a copy-paste is a mismatch, never silently
+ * forgiven — the guard against releasing the wrong account's number after
+ * an env-var slip.
  *   RELEASE_CUSTOMER_ID=cus_xxx RELEASE_REASON="..." CONFIRM_RELEASE=cus_xxx corepack yarn medusa exec ./src/scripts/release-customer-phone.ts
  *
  * SAFETY PROPERTY this script is built around: it may only ever null a phone
@@ -36,7 +39,43 @@ import type PacksModuleService from '../modules/packs/service';
  * than proceed. Exact-string match on `phone`, the same basis
  * report-duplicate-phones.ts and assertPhoneUnclaimed (api/utils/phone-
  * claim.ts) use, so this predicts the same grouping the pending partial
- * unique index on customer(phone) will enforce.
+ * unique index on customer(phone) will enforce — SCOPED to has_account:true,
+ * same as those two files. That scoping is deliberate and unchanged by the
+ * blind-spot paragraph below: it is what makes "another account still holds
+ * it" provable from one read, with no lock.
+ *
+ * has_account:false BLIND SPOT: the guard above, assertPhoneUnclaimed, and
+ * report-duplicate-phones.ts all only ever look at has_account:true rows.
+ * api/utils/phone-claim.ts's own docblock names the one historical
+ * exception: POST /admin/customers used to call createCustomersWorkflow
+ * directly (not createCustomerAccountWorkflow), so an admin-created row
+ * could hold `phone` with has_account: false — invisible to all three
+ * has_account:true-scoped checks above. That write path is now closed
+ * (rejectAdminPhoneWrite, same file), but closing it does not retroactively
+ * fix any row it already created, and the pending partial unique index on
+ * customer(phone) is NOT scoped to has_account — so a pre-existing
+ * has_account:false holder would still collide with that migration after
+ * this script "succeeds" by its own has_account:true-scoped guard's
+ * definition. This script therefore also takes a SECOND, separate,
+ * unfiltered read (any has_account value) purely to REPORT that population
+ * in the dry-run output and the final summary — it is never an input to the
+ * guard above and never refuses anything by itself. If the unfiltered count
+ * exceeds the has_account:true count, a warning names the gap, so the
+ * operator is never left concluding "resolved" when a has_account:false
+ * holder still exists.
+ *
+ * TOCTOU: the guard read(s) above and the write below are separate calls
+ * with no lock between them — the same check-then-write shape as
+ * assertPhoneUnclaimed. A real fix needs one transaction spanning
+ * Modules.CUSTOMER and PACKS_MODULE, which the module boundary does not
+ * allow (same limit noted under NOT ATOMIC below, for the writes
+ * themselves). What this script does instead: immediately before the write,
+ * it re-reads the target's own phone (aborts if it changed since the first
+ * read) and re-counts the other has_account:true holders (aborts if that
+ * count has dropped below 1). That shrinks the exposure from "however long
+ * the operator takes to read the dry-run output and re-invoke with
+ * CONFIRM_RELEASE" down to two queries' own round trip — milliseconds, on a
+ * manually-run script clearing one known duplicate. Not eliminated.
  *
  * Also clears customer_account_state.phone_verified_at when it is set.
  * purgeAccountPacksData (account deletion) deliberately does NOT clear that
@@ -48,6 +87,20 @@ import type PacksModuleService from '../modules/packs/service';
  * method on PacksModuleService (markPhoneVerified is one-way), so this
  * reads/updates customer_account_state through the same generated module
  * methods purgeAccountPacksData itself uses.
+ *
+ * NOT ATOMIC: the three writes below — customer-module phone null,
+ * packs-module verification-stamp clear, packs-module audit append — are
+ * three separate calls across two modules, not one transaction. The module
+ * boundary does not allow spanning both in one transaction, and the plan
+ * for this script forbids adding a transactional method to
+ * PacksModuleService to work around it. A failure partway through is real
+ * and disclosed, not hypothetical: a failure between the first write and
+ * the second leaves a released phone with a STALE, still-set verification
+ * stamp; a failure between either of the first two and the third leaves a
+ * released phone with NO audit row, and the operator's own terminal output
+ * becomes the only record of what happened and why. There is no automatic
+ * recovery from a partial run — an operator reads the log and finishes the
+ * remaining step(s) by hand.
  *
  * PII: phone masked to its last 4 (same rule as the other duplicate-phone
  * scripts), email reduced to a shape hint. Neither is ever printed whole.
@@ -122,6 +175,16 @@ export default async function releaseCustomerPhone({ container }: ExecArgs) {
     return;
   }
 
+  // Shared by the initial guard below and the pre-write TOCTOU re-check
+  // further down — the exact same query both times, factored out so the two
+  // call sites cannot silently drift apart (e.g. one losing the
+  // has_account filter while the other keeps it).
+  const holdersOf = (phone: string) =>
+    customers.listAndCountCustomers(
+      { phone, has_account: true } as unknown as CustomerFilters,
+      { select: ['id'], take: 50 },
+    );
+
   // The load-bearing safety property (see docblock): the exact SET of OTHER
   // has_account:true customers holding this phone string, not an inferred
   // count. Fetch the matching rows and filter by id — same idiom as
@@ -134,10 +197,7 @@ export default async function releaseCustomerPhone({ container }: ExecArgs) {
   // if even that undercounts, the true count cannot be trusted, so this
   // refuses rather than guesses (ABSOLUTE: if the count cannot be
   // determined, refuse rather than proceed).
-  const [holders, matchingCount] = await customers.listAndCountCustomers(
-    { phone: customer.phone, has_account: true } as unknown as CustomerFilters,
-    { select: ['id'], take: 50 },
-  );
+  const [holders, matchingCount] = await holdersOf(customer.phone);
   if (matchingCount > holders.length) {
     logger.error(
       `[release-customer-phone] REFUSED — ${matchingCount} accounts hold ` +
@@ -147,6 +207,17 @@ export default async function releaseCustomerPhone({ container }: ExecArgs) {
     return;
   }
   const otherHolders = holders.filter((c) => c.id !== customerId).length;
+
+  // SECOND, separate read — reporting only, never an input to the guard
+  // above (which stays has_account:true-scoped, unchanged). See the
+  // has_account:false BLIND SPOT paragraph in the docblock: this is how a
+  // has_account:false row holding the same phone gets surfaced to the
+  // operator instead of staying invisible.
+  const [, allHoldersCount] = await customers.listAndCountCustomers(
+    { phone: customer.phone } as unknown as CustomerFilters,
+    { select: ['id'], take: 1 },
+  );
+  const unscopedExtra = allHoldersCount > matchingCount;
 
   const [accountState] = await packs.listCustomerAccountStates(
     { customer_id: customerId },
@@ -159,10 +230,18 @@ export default async function releaseCustomerPhone({ container }: ExecArgs) {
       `  has_account      ${customer.has_account}`,
       `  phone            ${mask(customer.phone)}`,
       `  email            ${emailHint(customer.email)}`,
-      `  other holders    ${otherHolders}`,
+      `  other holders    ${otherHolders} (has_account:true only — this is what the guard checks)`,
+      `  all live holders ${allHoldersCount} (any has_account, including this account)`,
       `  phone_verified   ${accountState?.phone_verified_at ? 'set' : '(none)'}`,
     ].join('\n'),
   );
+  if (unscopedExtra) {
+    logger.warn(
+      `[release-customer-phone] ${allHoldersCount - matchingCount} has_account:false row(s) ` +
+        `also hold ${mask(customer.phone)} — the partial unique index migration will NOT be ` +
+        `fully unblocked for this number by this run alone.`,
+    );
+  }
 
   if (otherHolders < 1) {
     logger.error(
@@ -172,12 +251,17 @@ export default async function releaseCustomerPhone({ container }: ExecArgs) {
     return;
   }
 
-  const confirm = process.env.CONFIRM_RELEASE?.trim();
+  // Compared UNTRIMMED — see docblock. RELEASE_CUSTOMER_ID/RELEASE_REASON
+  // above are trimmed because they are free-form operator input; this one
+  // is a deliberate echo-back the operator copy-pastes verbatim, so
+  // whitespace slop is a signal something was copied wrong, not noise to
+  // forgive.
+  const confirm = process.env.CONFIRM_RELEASE;
   if (confirm !== customerId) {
     logger.info(
       `[release-customer-phone] DRY RUN — nothing written. CONFIRM_RELEASE is ` +
         `${confirm ? `'${confirm}'` : 'unset'}; set it to '${customerId}' ` +
-        `EXACTLY to release this phone.`,
+        `EXACTLY (no surrounding whitespace) to release this phone.`,
     );
     return;
   }
@@ -185,6 +269,35 @@ export default async function releaseCustomerPhone({ container }: ExecArgs) {
   logger.info(
     `[release-customer-phone] CONFIRM_RELEASE matched — releasing ${customerId}'s phone.`,
   );
+
+  // TOCTOU re-check, immediately before the write (see docblock). Two
+  // things could have changed since the reads above: the target's own
+  // phone, or the other-holder count — an operator can sit on a printed
+  // dry-run for minutes before re-invoking with CONFIRM_RELEASE, and this
+  // repo's release-on-delete behaviour (api/utils/account-deletion.ts nulls
+  // phone on delete) means a concurrent delete of "the other holder" is
+  // exactly the kind of event that could drop the count in that window.
+  const recheckCustomer = await customers.retrieveCustomer(customerId, {
+    select: ['id', 'phone'],
+  });
+  if (recheckCustomer.phone !== customer.phone) {
+    logger.error(
+      `[release-customer-phone] REFUSED — ${customerId}'s phone changed since the first ` +
+        `read (was ${mask(customer.phone)}, now ${mask(recheckCustomer.phone)}). Re-run the script.`,
+    );
+    return;
+  }
+  const [recheckHolders] = await holdersOf(customer.phone);
+  const recheckOtherHolders = recheckHolders.filter(
+    (c) => c.id !== customerId,
+  ).length;
+  if (recheckOtherHolders < 1) {
+    logger.error(
+      `[release-customer-phone] REFUSED — the other-holder count for ${mask(customer.phone)} ` +
+        `dropped to zero between the first read and the write. Re-run the script.`,
+    );
+    return;
+  }
 
   await customers.updateCustomers(customerId, { phone: null });
 
@@ -249,8 +362,22 @@ export default async function releaseCustomerPhone({ container }: ExecArgs) {
       ? '(customer row MISSING — investigate; the release write already succeeded)'
       : '(unreadable — verify manually)';
   }
+
+  // Sourcery flagged this exact bug class a third time (PR #479): this line
+  // used to say "DONE — ... released" unconditionally, so a non-'(none)'
+  // afterPhone — the release not having actually taken — still read as
+  // success. `released` is the single source of truth for the DONE/ANOMALY
+  // word; nothing else decides it.
+  const released = afterPhone === '(none)';
+  const holderNote = unscopedExtra
+    ? `; ${allHoldersCount - matchingCount} has_account:false row(s) also held this number`
+    : '';
   logger.info(
-    `[release-customer-phone] DONE — ${customerId} released. phone ` +
-      `${mask(customer.phone)} -> ${afterPhone}`,
+    `[release-customer-phone] ${released ? 'DONE' : 'ANOMALY'} — ${customerId}. phone ` +
+      `${mask(customer.phone)} -> ${afterPhone}. other has_account:true holders were ` +
+      `${otherHolders}${holderNote}.` +
+      (released
+        ? ''
+        : ' The release did NOT take — do not treat this phone collision as resolved.'),
   );
 }
