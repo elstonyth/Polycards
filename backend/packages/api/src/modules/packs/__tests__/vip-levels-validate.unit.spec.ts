@@ -22,6 +22,7 @@ describe('validateVipLevels', () => {
       voucher_amount: 0,
       box_tier: 'a',
       frame_unlock: false,
+      rebate_bp: 0, // defaulted when the client omits it
     });
   });
 
@@ -34,6 +35,21 @@ describe('validateVipLevels', () => {
       }),
     );
     expect(validateVipLevels(ladder(rungs))).toHaveLength(10);
+  });
+
+  it('rejects an out-of-range or fractional rebate_bp; accepts a valid one', () => {
+    expect(() => validateVipLevels(ladder([rung({ rebate_bp: -1 })]))).toThrow(
+      /rebate_bp/,
+    );
+    expect(() =>
+      validateVipLevels(ladder([rung({ rebate_bp: 10_001 })])),
+    ).toThrow(/rebate_bp/);
+    expect(() =>
+      validateVipLevels(ladder([rung({ rebate_bp: 50.5 })])),
+    ).toThrow(/rebate_bp/);
+    expect(validateVipLevels(ladder([rung({ rebate_bp: 150 })]))[0].rebate_bp).toBe(
+      150,
+    );
   });
 
   it('rejects a non-array / empty ladder', () => {

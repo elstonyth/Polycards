@@ -15,6 +15,8 @@ export interface VipLevelInput {
   voucher_amount: number;
   box_tier: string;
   frame_unlock: boolean;
+  // Weekly personal rebate (referral rebuild, spec 2026-08-24), basis points.
+  rebate_bp: number;
 }
 
 const bad = (m: string): never => {
@@ -75,12 +77,23 @@ export function validateVipLevels(raw: unknown): VipLevelInput[] {
         `level ${level}: frame_unlock may only be true on decade levels (10, 20, … 100).`,
       );
 
+    // Optional for older admin clients — absent means 0 (no rebate).
+    const rebate = r.rebate_bp === undefined ? 0 : r.rebate_bp;
+    if (
+      typeof rebate !== 'number' ||
+      !Number.isInteger(rebate) ||
+      rebate < 0 ||
+      rebate > 10_000
+    )
+      bad(`level ${level}: rebate_bp must be an integer in 0..10000.`);
+
     out.push({
       level,
       spend_threshold: t,
       voucher_amount: voucher as number,
       box_tier: (r.box_tier as string).trim(),
       frame_unlock: r.frame_unlock as boolean,
+      rebate_bp: rebate as number,
     });
   }
   return out;

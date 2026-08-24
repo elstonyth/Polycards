@@ -7101,6 +7101,7 @@ class PacksModuleService extends MedusaService({
           'voucher_amount',
           'box_tier',
           'frame_unlock',
+          'rebate_bp',
         ],
         take: 1000,
       },
@@ -7116,6 +7117,7 @@ class PacksModuleService extends MedusaService({
         voucher_amount: Number(r.voucher_amount),
         box_tier: r.box_tier,
         frame_unlock: r.frame_unlock,
+        rebate_bp: Number(r.rebate_bp ?? 0),
       }));
 
     const inputLevels = new Set(input.levels.map((l) => l.level));
@@ -7125,6 +7127,7 @@ class PacksModuleService extends MedusaService({
         voucher_amount: lvl.voucher_amount,
         box_tier: lvl.box_tier,
         frame_unlock: lvl.frame_unlock,
+        rebate_bp: lvl.rebate_bp,
       };
       const row = byLevel.get(lvl.level);
       if (row) {
