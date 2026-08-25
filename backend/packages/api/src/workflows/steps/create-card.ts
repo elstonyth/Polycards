@@ -13,10 +13,7 @@ import type PacksModuleService from '../../modules/packs/service';
 import { resolvePixelPokemonPatch } from '../../modules/packs/card-pixel-pokemon';
 import type { HouseSellerService } from '../../modules/packs/card-product';
 import { insertOrMapDuplicate } from './duplicate-race';
-import {
-  bakeSlabImage,
-  deleteSlabFile,
-} from '../../api/admin/media/bake-slab';
+import { bakeSlabImage, deleteSlabFile } from '../../api/admin/media/bake-slab';
 
 // Inventory-first registration: the PRODUCT is the item, created in the product
 // catalog beforehand. Registering it as a gacha Card only records the gacha
@@ -245,10 +242,10 @@ export const registerCardInvoke = async (
     const query = container.resolve(ContainerRegistrationKeys.QUERY);
     const { data: withSeller } = await query.graph({
       entity: 'product',
-      fields: ['id', 'seller.id'],
+      fields: ['id', 'sellers.id'],
       filters: { id: product.id },
     });
-    if (!withSeller[0]?.seller?.id) {
+    if (!withSeller[0]?.sellers?.some((s) => s?.id)) {
       const sellerService = container.resolve<HouseSellerService>(
         MercurModules.SELLER,
       );

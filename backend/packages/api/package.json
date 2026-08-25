@@ -19,7 +19,7 @@
   ],
   "scripts": {
     "build": "medusa build",
-    "check-types": "node node_modules/typescript/bin/tsc --noEmit",
+    "check-types": "tsc --noEmit",
     "seed": "medusa exec ./src/scripts/seed.ts",
     "seed:e2e": "medusa exec ./src/scripts/seed-e2e-fixtures.ts",
     "deploy:init": "medusa db:migrate && medusa exec ./src/scripts/seed.ts && medusa exec ./src/scripts/print-publishable-key.ts",
