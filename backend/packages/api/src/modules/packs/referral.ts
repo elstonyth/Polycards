@@ -36,6 +36,13 @@ export function payoutCents(basisCents: number, rateBp: number): number {
   return Math.floor((basisCents * rateBp) / 10_000);
 }
 
+// Defensive ceiling on ONE line's payout, mirroring MAX_TASK_CREDIT_MYR /
+// MAX_BOX_CREDIT_MYR: the tier table and partner bounds both already cap the
+// rate, but a bad config (or a compromised admin token) should not be able to
+// mint an unbounded credit — the close step refuses to write such a line at
+// all (security review 2026-08-25).
+export const MAX_SETTLEMENT_LINE_MYR = 50_000;
+
 const MYT_OFFSET_MS = 8 * 60 * 60 * 1000; // Asia/Kuala_Lumpur, no DST
 const DAY_MS = 24 * 60 * 60 * 1000;
 

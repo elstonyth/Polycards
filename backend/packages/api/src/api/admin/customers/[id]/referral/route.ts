@@ -4,7 +4,8 @@ import type {
 } from '@medusajs/framework/http';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
-import { MedusaError } from '@medusajs/framework/utils';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
+import type { ICustomerModuleService } from '@medusajs/types';
 import { reqReason } from '../../../rewards-settings/validate';
 
 // GET /admin/customers/:id/referral — the Customer-360 referral card: who
@@ -65,11 +66,16 @@ export async function POST(
     );
   }
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const customers = req.scope.resolve<ICustomerModuleService>(Modules.CUSTOMER);
   await packs.adminSetReferral({
     customerId: req.params.id,
     referrerId,
     adminId: req.auth_context.actor_id,
     reason: reqReason(req.body),
+    referrerExists: async (id) => {
+      const rows = await customers.listCustomers({ id }, { take: 1 });
+      return rows.length > 0;
+    },
   });
   res.json({ ok: true });
 }

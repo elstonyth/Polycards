@@ -297,6 +297,90 @@ moduleIntegrationTestRunner<PacksModuleService>({
       ).rejects.toThrow(/approved/i);
     });
 
+    it('a stranded pending line whose RF row already exists is NOT paid twice', async () => {
+      const id = await seedClosedWeek();
+      await service.approveWeeklySettlement({
+        settlementId: id,
+        adminId: 'admin_1',
+      });
+      await service.payWeeklySettlement({ settlementId: id });
+      const lines = await service.listWeeklySettlementLines({
+        settlement_id: id,
+      });
+      const line = lines[0];
+      // Simulate the crash window the ledger guard exists for: the money
+      // moved (RF row + credit written) but the line update was lost.
+      await service.updateWeeklySettlementLines({
+        selector: { id: line.id },
+        data: { status: 'pending' as const, paid_transaction_id: null },
+      });
+      await service.updateWeeklySettlements({
+        selector: { id },
+        data: { status: 'approved' as const },
+      });
+      const before = await service.listCreditTransactions({
+        customer_id: line.customer_id,
+        reason: line.kind,
+      });
+      const res = await service.payWeeklySettlement({ settlementId: id });
+      expect(res.paid).toBe(0); // replayed, not re-paid
+      const after = await service.listCreditTransactions({
+        customer_id: line.customer_id,
+        reason: line.kind,
+      });
+      expect(after).toHaveLength(before.length); // NO second credit
+      const [repaired] = await service.listWeeklySettlementLines({
+        id: line.id,
+      });
+      expect(repaired.status).toBe('paid'); // and the line is repaired
+    });
+
+    it('bindReferral refuses an established spender (signup-scoped)', async () => {
+      await service.createCreditTransactions([
+        { customer_id: 'cus_old', amount: -50, reason: 'pack_open' },
+      ]);
+      expect(
+        await service.bindReferral({
+          customerId: 'cus_old',
+          referrerId: 'cus_r9',
+        }),
+      ).toEqual({ bound: false, reason: 'not_a_new_account' });
+      expect(
+        await service.listReferralAttributions({ customer_id: 'cus_old' }),
+      ).toHaveLength(0);
+      // A brand-new account still binds.
+      expect(
+        await service.bindReferral({
+          customerId: 'cus_new',
+          referrerId: 'cus_r9',
+        }),
+      ).toEqual({ bound: true });
+    });
+
+    it('adminSetReferral rejects a referrer that does not resolve', async () => {
+      await expect(
+        service.adminSetReferral({
+          customerId: 'cus_z',
+          referrerId: 'cus_ghost',
+          adminId: 'admin_1',
+          reason: 'typo',
+          referrerExists: async () => false,
+        }),
+      ).rejects.toThrow(/not an existing customer/i);
+      // With a resolver that says yes, it lands.
+      await service.adminSetReferral({
+        customerId: 'cus_z',
+        referrerId: 'cus_real',
+        adminId: 'admin_1',
+        reason: 'support',
+        referrerExists: async () => true,
+      });
+      const [row] = await service.listReferralAttributions({
+        customer_id: 'cus_z',
+      });
+      expect(row.referrer_id).toBe('cus_real');
+    });
+
     it('adminSetReferral overrides, clears and audits attribution', async () => {
       await service.bindReferral({
         customerId: 'cus_x',

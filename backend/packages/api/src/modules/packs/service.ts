@@ -76,6 +76,7 @@ import StockMovement from './models/stock-movement';
 import {
   DEFAULT_REFERRAL_TIERS,
   lastClosedReferralWeek,
+  MAX_SETTLEMENT_LINE_MYR,
   payoutCents,
   referralWeekFor,
   resolveRateBp,
@@ -728,7 +729,11 @@ class PacksModuleService extends MedusaService({
     input: { customerId: string; referrerId: string },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
-    { bound: true } | { bound: false; reason: 'self' | 'already_bound' }
+    | { bound: true }
+    | {
+        bound: false;
+        reason: 'self' | 'already_bound' | 'not_a_new_account';
+      }
   > {
     if (input.customerId === input.referrerId) {
       return { bound: false, reason: 'self' };
@@ -739,6 +744,22 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     if (existing) return { bound: false, reason: 'already_bound' };
+    // Attribution binds AT SIGNUP (spec). The endpoint alone only proves
+    // "not yet bound", so an established customer could otherwise attach a
+    // referrer retroactively and hand them a cut of turnover they had no
+    // part in (security review 2026-08-25). Any prior pack spend means this
+    // is not a signup. The admin path (adminSetReferral) is the deliberate
+    // override for genuine support cases.
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [spent] = await em.execute<{ n: string }[]>(
+      'SELECT COUNT(*)::bigint AS n FROM credit_transaction ' +
+        "WHERE customer_id = ? AND reason = 'pack_open' AND deleted_at IS NULL",
+      [input.customerId],
+    );
+    if (Number(spent?.n ?? 0) > 0) {
+      return { bound: false, reason: 'not_a_new_account' };
+    }
     try {
       await this.createReferralAttributions(
         [{ customer_id: input.customerId, referrer_id: input.referrerId }],
@@ -1127,6 +1148,20 @@ class PacksModuleService extends MedusaService({
       });
     }
 
+    // Refuse to write an absurd line rather than paying it on Wednesday.
+    // Hitting this means the tier table or a partner rate is misconfigured;
+    // the operator sees it in the job log and fixes the config, then the
+    // hourly close recomputes the same week (unique week_start no-op only
+    // applies once a run EXISTS, and this throws before insert).
+    for (const l of lines) {
+      if (l.amount_cents > MAX_SETTLEMENT_LINE_MYR * 100) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          `Refusing to close ${week.weekStartIso}: ${l.kind} for ${l.customer_id} computes to RM ${(l.amount_cents / 100).toFixed(2)}, over the RM ${MAX_SETTLEMENT_LINE_MYR} per-line ceiling. Check the tier table and partner rates.`,
+        );
+      }
+    }
+
     const totals = lines.reduce(
       (acc, l) => {
         if (l.kind === 'referral_commission') acc.commission += l.amount_cents;
@@ -1268,6 +1303,10 @@ class PacksModuleService extends MedusaService({
       referrerId: string | null;
       adminId: string;
       reason: string;
+      /** Resolves a customer id, injected by the route (this module cannot
+       *  see the customer module). A referrer id that resolves to nothing
+       *  would mint commission for a non-existent account. */
+      referrerExists?: (id: string) => Promise<boolean>;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
@@ -1276,6 +1315,14 @@ class PacksModuleService extends MedusaService({
         MedusaError.Types.INVALID_DATA,
         'A customer cannot refer themself.',
       );
+    }
+    if (input.referrerId !== null && input.referrerExists) {
+      if (!(await input.referrerExists(input.referrerId))) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Referrer '${input.referrerId}' is not an existing customer.`,
+        );
+      }
     }
     const [existing] = await this.listReferralAttributions(
       { customer_id: input.customerId },
@@ -1525,17 +1572,12 @@ class PacksModuleService extends MedusaService({
         skipped++;
         continue;
       }
-      const [txn] = await this.createCreditTransactions(
-        [
-          {
-            customer_id: line.customer_id,
-            amount: line.amount_cents / 100,
-            reason: line.kind,
-          },
-        ],
-        sharedContext,
-      );
-      await this.recordLedgerEntry(
+      // Ledger FIRST, and its `replayed` flag is load-bearing: an RF row
+      // already carrying this line's ref_id means the money moved on an
+      // earlier run whose line update was lost. Minting the credit before
+      // this check would pay that customer twice — recordLedgerEntry returns
+      // the existing row instead of throwing (security review 2026-08-25).
+      const entry = await this.recordLedgerEntry(
         {
           type: 'RF',
           customerId: line.customer_id,
@@ -1550,6 +1592,24 @@ class PacksModuleService extends MedusaService({
             rate_bp: line.rate_bp,
           },
         },
+        sharedContext,
+      );
+      if (entry.replayed) {
+        // Already paid; just repair the line's status and move on.
+        await this.updateWeeklySettlementLines(
+          { selector: { id: line.id }, data: { status: 'paid' as const } },
+          sharedContext,
+        );
+        continue;
+      }
+      const [txn] = await this.createCreditTransactions(
+        [
+          {
+            customer_id: line.customer_id,
+            amount: line.amount_cents / 100,
+            reason: line.kind,
+          },
+        ],
         sharedContext,
       );
       await this.updateWeeklySettlementLines(

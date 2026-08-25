@@ -177,6 +177,38 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(lines).toHaveLength(3);
     });
 
+    it('refuses to close a week whose line breaches the per-line ceiling', async () => {
+      // A misconfigured 100% partner rate on RM 60,000 of downline turnover
+      // computes RM 60,000 — over the RM 50,000 per-line ceiling.
+      await service.createReferralAttributions([
+        { customer_id: 'cus_whale', referrer_id: 'cus_bigpartner' },
+      ]);
+      await service.setPartnerRate({
+        customerId: 'cus_bigpartner',
+        rateBp: 500,
+        adminId: 'admin_1',
+      });
+      await service.editReferralSettings({
+        partner_min_bp: 100,
+        partner_max_bp: 10_000,
+        adminId: 'admin_1',
+        reason: 'test widening',
+      });
+      await service.setPartnerRate({
+        customerId: 'cus_bigpartner',
+        rateBp: 10_000, // 100%
+        adminId: 'admin_1',
+      });
+      await service.createCreditTransactions([
+        { customer_id: 'cus_whale', amount: -60_000, reason: 'pack_open' },
+      ]);
+      await expect(
+        service.closeReferralWeek({ weekStartIso: week.weekStartIso }),
+      ).rejects.toThrow(/ceiling/i);
+      // Nothing was written — the operator fixes the config and re-runs.
+      expect(await service.listWeeklySettlements({})).toHaveLength(0);
+    });
+
     it('rejects a week key that is not an MYT Tuesday', async () => {
       await expect(
         service.closeReferralWeek({ weekStartIso: '2026-08-19' }), // a Wednesday
