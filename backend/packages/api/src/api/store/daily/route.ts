@@ -6,13 +6,12 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 
-// GET /store/daily — the logged-in customer's consolidated daily-rewards state
-// (box + voucher grants + shippable prizes) in one read: getDailyState().
+// GET /store/daily — the logged-in customer's VIP voucher/frame grant state.
+// The box and shippable-prize halves went with the daily box (2026-08-25);
+// what is left comes from vip_reward_grant.
 //
 // NOT gated (mirrors the old GET /store/rewards): the response carries
-// redemption_enabled so the UI can pre-disable the Draw button before ever
-// hitting the 403 on POST /store/daily/draw. The service never returns
-// weight/locked/odds fields — showcase prizes are UNLOCKED rows only.
+// redemption_enabled so the UI can pre-disable a claim before hitting a 403.
 //
 // AUTH + RATE LIMIT: registered in api/middlewares.ts (authenticate() then the
 // store-read limiter). The customer id comes ONLY from the verified bearer token.
@@ -26,6 +25,5 @@ export async function GET(
   }
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  // req.scope is passed so product-prize display can resolve Modules.PRODUCT.
-  res.json(await packs.getDailyState(customerId, req.scope));
+  res.json(await packs.getDailyState(customerId));
 }

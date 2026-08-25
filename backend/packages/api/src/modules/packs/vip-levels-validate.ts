@@ -8,12 +8,11 @@ const MAX_SPEND_THRESHOLD_MYR = 100_000_000;
 
 // POST /admin/vip-levels body → the full renumbered ladder. Pure cross-row
 // validation (contiguity, monotonic thresholds, decade-only frames, non-
-// negatives). The box_tier-exists check is a service-level DB lookup, NOT here.
+// negatives).
 export interface VipLevelInput {
   level: number;
   spend_threshold: number;
   voucher_amount: number;
-  box_tier: string;
   frame_unlock: boolean;
 }
 
@@ -62,9 +61,6 @@ export function validateVipLevels(raw: unknown): VipLevelInput[] {
         `level ${level}: voucher_amount must be between 0 and ${MAX_VOUCHER_MYR}.`,
       );
 
-    if (typeof r.box_tier !== 'string' || r.box_tier.trim().length === 0)
-      bad(`level ${level}: box_tier is required.`);
-
     if (typeof r.frame_unlock !== 'boolean')
       bad(`level ${level}: frame_unlock must be a boolean.`);
     if (
@@ -79,7 +75,6 @@ export function validateVipLevels(raw: unknown): VipLevelInput[] {
       level,
       spend_threshold: t,
       voucher_amount: voucher as number,
-      box_tier: (r.box_tier as string).trim(),
       frame_unlock: r.frame_unlock as boolean,
     });
   }

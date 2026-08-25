@@ -5,7 +5,6 @@ const rung = (over: Partial<Record<string, unknown>> = {}) => ({
   level: 1,
   spend_threshold: 0,
   voucher_amount: 0,
-  box_tier: 'a',
   frame_unlock: false,
   ...over,
 });
@@ -20,7 +19,6 @@ describe('validateVipLevels', () => {
       level: 1,
       spend_threshold: 0,
       voucher_amount: 0,
-      box_tier: 'a',
       frame_unlock: false,
     });
   });
@@ -106,9 +104,4 @@ describe('validateVipLevels', () => {
     ).toThrow(/spend_threshold must be <=/);
   });
 
-  it('rejects a blank box_tier', () => {
-    expect(() => validateVipLevels(ladder([rung({ box_tier: '  ' })]))).toThrow(
-      /box_tier is required/,
-    );
-  });
 });

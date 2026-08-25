@@ -68,38 +68,6 @@ export function shouldNotifyTopup(result: {
   );
 }
 
-/**
- * One notification per customer per draw. Mirrors the anchor drawDailyBox
- * already uses internally for the voucher grant, so the two never disagree
- * about what "the same draw" means.
- */
-export function rewardWonFeedKey(
-  customerId: string,
-  drawDay: string,
-  drawOrdinal: number,
-): string {
-  return `reward_won:${customerId}:${drawDay}:${drawOrdinal}`;
-}
-
-/**
- * True when a daily-draw result is worth a feed row.
- *
- * A 'nothing' prize is a normal drawn outcome, but there is no reward to
- * record. 'unavailable' and 'capped' never wrote a reward_draw row at all.
- * The key-material checks keep an incomplete result from producing a
- * malformed idempotency key.
- */
-export function shouldNotifyRewardWon(result: {
-  status?: string;
-  prize?: { kind?: string } | null;
-  draw_ordinal?: number;
-  draw_day?: string;
-}): boolean {
-  return (
-    result.status === 'drawn' &&
-    !!result.prize &&
-    result.prize.kind !== 'nothing' &&
-    typeof result.draw_ordinal === 'number' &&
-    typeof result.draw_day === 'string'
-  );
-}
+// rewardWonFeedKey / shouldNotifyRewardWon lived here until 2026-08-25. Their
+// only caller was the daily-box draw route, which is gone. The 'reward_won'
+// notification template stays in the union — historical rows still carry it.

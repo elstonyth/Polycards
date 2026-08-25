@@ -24,7 +24,6 @@ async function seedLadder(packs: PacksModuleService) {
         level: r.level,
         spend_threshold: r.spend_threshold,
         voucher_amount: r.voucher_amount,
-        box_tier: r.box_tier,
         frame_unlock: r.frame_unlock,
         prizes: r.prizes ?? null,
       })),

@@ -562,10 +562,9 @@ export const MarkAllReadSchema = z.looseObject({
  *  only the legacy rewards envelope did. `level` is a required top-level field:
  *  `GrantView` (packs/service.ts:199-205) declares `level: number`, and
  *  `toGrantView` (packs/service.ts:3223-3229) always sources it from the
- *  `VipRewardGrant.level` column (`model.number()`, non-nullable) — including
- *  box-origin grants, which set it explicitly via `resolveMemberLevel` (never
- *  null/undefined), NOT from `payload` (box grants' payload only carries
- *  `amount_myr`). */
+ *  `VipRewardGrant.level` column (`model.number()`, non-nullable). `kind` and
+ *  `origin` still admit 'box': the daily box is gone, but historical grant rows
+ *  that carry it must keep parsing. */
 export const RewardGrantSchema = z.looseObject({
   id: z.string(),
   kind: z.enum(['voucher', 'frame', 'box', 'prize']),
@@ -574,17 +573,6 @@ export const RewardGrantSchema = z.looseObject({
   origin: z.enum(['ladder', 'box']).optional(),
   payload: z.looseObject({}).nullable().optional(),
   granted_at: z.string(),
-});
-
-/** A vaulted reward-prize row (GET /store/daily `ship_prizes`, and the
- *  pre-consolidation GET /store/rewards `prizes`). `voucher` is included
- *  because box draws can mint a voucher prize alongside product/credit. */
-export const RewardPrizeSchema = z.looseObject({
-  pull_id: z.string(),
-  prize_kind: z.enum(['product', 'credit', 'voucher', 'nothing']),
-  prize_snapshot: z.looseObject({}).nullable().optional(),
-  status: z.string(),
-  draw_day: z.string(),
 });
 
 /** Address input for prize withdrawal (subset of AddAddressInput). Defined here
@@ -605,53 +593,20 @@ export const ClaimGrantSchema = z.looseObject({
   kind: z.string(),
 });
 
-/** POST /store/daily/draw response (packs/service.ts `DrawDailyBoxResult`). */
-export const DrawBoxSchema = z.looseObject({
-  status: z.enum(['drawn', 'unavailable', 'capped']),
-  prize: z
-    .looseObject({
-      kind: z.enum(['product', 'credit', 'voucher', 'nothing']),
-      title: z.string().optional(),
-      image: z.string().optional(),
-      amount_myr: finite.optional(),
-      product_handle: z.string().optional(),
-    })
-    .optional(),
-  draw_ordinal: finite.optional(),
-});
-
 /** POST /store/rewards/withdraw response. */
 export const WithdrawPrizeSchema = z.looseObject({
   status: z.enum(['requested', 'capped', 'invalid']),
 });
 
-/** GET /store/daily box view (packs/service.ts `DailyState['box']`). */
-const DailyBoxSchema = z.looseObject({
-  tier: z.string(),
-  name: z.string(),
-  draws_per_day: finite,
-  draws_today: finite,
-  next_reset: z.string(),
-  prizes: z.array(
-    z.looseObject({
-      kind: z.enum(['credit', 'product', 'voucher', 'nothing']),
-      title: z.string().optional(),
-      image: z.string().optional(),
-      amount_myr: finite.optional(),
-    }),
-  ),
-});
-
-/** GET /store/daily — consolidated daily-rewards state (packs/service.ts
- *  `DailyState`). `box` is nullable: no VIP tier resolves to a box yet. */
+/** GET /store/daily — the VIP voucher/frame grant state (packs/service.ts
+ *  `DailyState`). The box and ship-prize halves went with the daily box
+ *  (2026-08-25). */
 export const DailyStateSchema = z.looseObject({
   redemption_enabled: z.boolean(),
-  box: DailyBoxSchema.nullable(),
   vouchers: z.looseObject({
     claimable: z.array(RewardGrantSchema),
     claimed: z.array(RewardGrantSchema),
   }),
-  ship_prizes: z.array(RewardPrizeSchema),
 });
 
 // --- actions/delivery.ts ----------------------------------------------------

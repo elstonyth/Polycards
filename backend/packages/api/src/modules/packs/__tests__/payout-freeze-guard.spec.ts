@@ -32,7 +32,6 @@ import AdminActionAudit from '../models/admin-action-audit';
 import VipMemberState from '../models/vip-member-state';
 import VipRewardGrant from '../models/vip-reward-grant';
 import NotificationRead from '../models/notification-read';
-import RewardDraw from '../models/reward-draw';
 
 jest.setTimeout(300 * 1000);
 
@@ -54,7 +53,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
     VipMemberState,
     VipRewardGrant,
     NotificationRead,
-    RewardDraw,
   ],
   testSuite: ({ service }) => {
     const freeze = (customerId: string, cause: 'auto' | 'manual' = 'manual') =>

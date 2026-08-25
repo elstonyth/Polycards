@@ -111,7 +111,6 @@ const authIdentifierRateLimit = createAuthIdentifierRateLimit();
 const deliveryWriteRateLimit = createDeliveryWriteRateLimit((req) => {
   if (req.path.startsWith('/store/rewards/'))
     return 'Too many reward requests.';
-  if (req.path.startsWith('/store/daily/')) return 'Too many draw attempts.';
   if (req.path.startsWith('/store/profile/')) return 'Too many uploads.';
   if (req.path.startsWith('/store/phone-verification/'))
     return 'Too many verification requests.';
@@ -867,18 +866,6 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
-      // Daily-box draw (POST /store/daily/draw) — mints value, so it shares the
-      // write-tier budget like /store/rewards/* POSTs. The fail-closed
-      // redemption gate lives in the route handler; actor_id comes from the
-      // verified bearer token only.
-      matcher: '/store/daily/draw',
-      method: 'POST',
-      middlewares: [
-        authenticate('customer', ['bearer']),
-        deliveryWriteRateLimit,
-      ],
-    },
-    {
       // Customer profile-photo upload (POST /store/profile/avatar): bearer
       // auth, write-tier budget, then multipart parse (shared 20 MB edge cap —
       // the route enforces the tighter 5 MB avatar cap).
@@ -1010,14 +997,6 @@ export default defineMiddlewares({
     },
     {
       matcher: '/admin/customers/*/credits',
-      method: 'POST',
-      middlewares: [adminActionRateLimit],
-    },
-    {
-      // Daily-box authoring write (POST /admin/daily-rewards/boxes/:tier) —
-      // mutates the reward economy, so it shares the admin money-mutation
-      // budget. Auth is the framework default /admin guard.
-      matcher: '/admin/daily-rewards/boxes/*',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

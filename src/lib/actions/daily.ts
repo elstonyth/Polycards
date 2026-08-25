@@ -6,14 +6,13 @@
  * Kept unreferenced, not deleted, so un-suspending is a revert rather than a
  * rewrite; the backend routes these call are all still live.
  *
- * Daily Rewards server actions — the consolidated `/daily` surface (Task 12).
- * Absorbs the old `actions/rewards.ts` (all four actions moved/merged here);
- * the legacy streak check-in (`getDailyStatus`/`claimDailyReward` against
- * `/store/rewards/daily`) is gone along with its backend routes.
+ * The daily-BOX half (getDaily's `box`, `drawDailyBox`, the ship-prize list)
+ * was removed outright 2026-08-25 with the box itself — that is a retirement,
+ * not a suspension, so there is nothing to revert to. What remains is the VIP
+ * voucher/frame grant surface.
  *
  * Backend routes:
- *   GET  /store/daily                    — box + voucher grants + vaulted prizes
- *   POST /store/daily/draw               — daily-box draw
+ *   GET  /store/daily                    — voucher/frame grants
  *   POST /store/rewards/claim/:grantId   — claim a voucher or frame grant
  *   POST /store/rewards/withdraw         — ship a vaulted prize pull
  */
@@ -25,10 +24,8 @@ import {
   parseList,
   parseOne,
   RewardGrantSchema,
-  RewardPrizeSchema,
   ClaimGrantSchema,
   DailyStateSchema,
-  DrawBoxSchema,
   WithdrawPrizeSchema,
   WithdrawAddressSchema,
   type WithdrawAddressInput,
@@ -36,59 +33,24 @@ import {
 
 // ---- types ------------------------------------------------------------------
 
-export type DailyBoxView = {
-  tier: string;
-  name: string;
-  drawsPerDay: number;
-  drawsToday: number;
-  nextReset: string;
-  prizes: {
-    kind: 'credit' | 'product' | 'voucher' | 'nothing';
-    title?: string;
-    image?: string;
-    amountMyr?: number;
-  }[];
-};
-
 export type VoucherGrant = {
   id: string;
   kind: 'voucher' | 'frame';
   level: number;
-  /** 'ladder' = one-time level-up reward; 'box' = won from a daily box. */
+  /** 'ladder' = one-time level-up reward. 'box' only ever appears on rows
+   *  minted before the daily box was removed. */
   origin: 'ladder' | 'box';
   amountMyr?: number;
   grantedAt: string;
 };
 
-export type ShipPrize = {
-  pullId: string;
-  prizeKind: 'product' | 'credit' | 'voucher' | 'nothing';
-  prizeSnapshot: Record<string, unknown> | null;
-  status: string;
-  drawDay: string;
-};
-
 export type DailyState = {
   redemptionEnabled: boolean;
-  box: DailyBoxView | null;
   vouchers: { claimable: VoucherGrant[]; claimed: VoucherGrant[] };
-  shipPrizes: ShipPrize[];
 };
 
 export type DailyResult =
   | { ok: true; state: DailyState }
-  | { ok: false; error: string; needsAuth?: boolean };
-
-export type DrawPrize = {
-  kind: 'product' | 'credit' | 'voucher' | 'nothing';
-  title?: string;
-  image?: string;
-  amountMyr?: number;
-  productHandle?: string;
-};
-
-export type DrawBoxResult =
-  | { ok: true; status: 'drawn' | 'unavailable' | 'capped'; prize?: DrawPrize }
   | { ok: false; error: string; needsAuth?: boolean };
 
 export type ClaimGrantResult =
@@ -134,20 +96,9 @@ const toVoucherGrant = (
   grantedAt: g.granted_at,
 });
 
-const toShipPrize = (
-  p: ReturnType<typeof RewardPrizeSchema.parse>,
-): ShipPrize => ({
-  pullId: p.pull_id,
-  prizeKind: p.prize_kind,
-  prizeSnapshot:
-    (p.prize_snapshot as Record<string, unknown> | null | undefined) ?? null,
-  status: p.status,
-  drawDay: p.draw_day,
-});
-
 // ---- actions ----------------------------------------------------------------
 
-/** Load the consolidated daily-rewards state for the page in one call. */
+/** Load the customer's voucher/frame grant state in one call. */
 export async function getDaily(): Promise<DailyResult> {
   const token = await getAuthToken();
   if (!token) {
@@ -171,22 +122,6 @@ export async function getDaily(): Promise<DailyResult> {
       };
     }
 
-    const box: DailyBoxView | null = parsed.box
-      ? {
-          tier: parsed.box.tier,
-          name: parsed.box.name,
-          drawsPerDay: parsed.box.draws_per_day,
-          drawsToday: parsed.box.draws_today,
-          nextReset: parsed.box.next_reset,
-          prizes: parsed.box.prizes.map((p) => ({
-            kind: p.kind,
-            title: p.title,
-            image: p.image,
-            amountMyr: p.amount_myr,
-          })),
-        }
-      : null;
-
     const vouchers = {
       claimable: parseList(RewardGrantSchema, parsed.vouchers.claimable).map(
         toVoucherGrant,
@@ -196,63 +131,15 @@ export async function getDaily(): Promise<DailyResult> {
       ),
     };
 
-    const shipPrizes = parseList(RewardPrizeSchema, parsed.ship_prizes).map(
-      toShipPrize,
-    );
-
     return {
       ok: true,
       state: {
         redemptionEnabled: parsed.redemption_enabled,
-        box,
         vouchers,
-        shipPrizes,
       },
     };
   } catch (error) {
     logger.error('[daily] load failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, DAILY_RULES, DAILY_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
-}
-
-/** Open today's daily box. Fail-closed: the backend 403s when the gate is off. */
-export async function drawDailyBox(): Promise<DrawBoxResult> {
-  const token = await getAuthToken();
-  if (!token) {
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-  }
-  try {
-    const parsed = parseOne(
-      DrawBoxSchema,
-      await sdk.client.fetch('/store/daily/draw', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: {},
-      }),
-    );
-    if (!parsed) {
-      return {
-        ok: false,
-        error: 'Got an unexpected response. Please try again.',
-      };
-    }
-    const prize: DrawPrize | undefined = parsed.prize
-      ? {
-          kind: parsed.prize.kind,
-          title: parsed.prize.title,
-          image: parsed.prize.image,
-          amountMyr: parsed.prize.amount_myr,
-          productHandle: parsed.prize.product_handle,
-        }
-      : undefined;
-    return { ok: true, status: parsed.status, prize };
-  } catch (error) {
-    logger.error('[daily] draw failed:', error);
-    // 403 = gate off — show a friendly "not yet" message
     return {
       ok: false,
       error: friendlyError(error, DAILY_RULES, DAILY_FALLBACK),

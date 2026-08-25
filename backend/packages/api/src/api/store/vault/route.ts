@@ -63,24 +63,17 @@ export async function GET(
     { order: { rolled_at: 'DESC' }, take: VAULT_LIMIT },
   );
 
-  // Separate reward pulls (rendered from prize_snapshot) from normal card pulls.
-  //
-  // Weekly-challenge prizes are minted source='reward' but are NOT reward-box
-  // prizes: they carry a real card handle, not a product sentinel, and have no
-  // reward_draw row. Sent down the reward branch they emitted no card/buyback
-  // and the storefront's VaultItemSchema dropped them outright — a won card
-  // rendered as NOTHING in the winner's vault. They belong on the card path,
-  // where they sell and showcase like any pulled card (operator decision).
-  const isChallengePrize = (p: { source?: string | null; pack_id: string }) =>
-    p.source === 'reward' && isChallengePrizePack(p.pack_id);
-  const normalPulls = pulls.filter(
-    (p) => p.source !== 'reward' || isChallengePrize(p),
-  );
-  const rewardPulls = pulls.filter(
-    (p) => p.source === 'reward' && !isChallengePrize(p),
-  );
-
-  // For normal card pulls: resolve cards, packs, and odds as before.
+  // EVERY pull now takes the card path. The old second branch rendered a pull
+  // from its reward_draw prize_snapshot, which existed because a daily-box
+  // prize could be a bare product handle with no Card row behind it. The daily
+  // box was removed 2026-08-25 and reward_draw with it, so every surviving
+  // source='reward' pull — weekly-challenge prizes and task rewards alike —
+  // carries a real card handle and belongs here, where it sells and showcases
+  // like any pulled card. (Challenge prizes were moved across first, for
+  // exactly this reason: on the reward branch they emitted no card/buyback and
+  // the storefront's VaultItemSchema dropped them outright, so a won card
+  // rendered as NOTHING in the winner's vault.)
+  const normalPulls = pulls;
   const handles = [...new Set(normalPulls.map((p) => p.card_id))];
   const normalPackIds = [...new Set(normalPulls.map((p) => p.pack_id))];
 
@@ -109,21 +102,14 @@ export async function GET(
   // the exact wrong-tier report this work started from. Resolve those the same
   // way the card page does (best tier among openable packs), from ONE batched
   // lookup, and only when the customer actually holds a prize.
+  // Every source='reward' pull rides a synthetic pack with no odds rows —
+  // challenge prizes on challengePackId(week), task card rewards on the
+  // 'task-reward' sentinel — so all of them need the same treatment, not just
+  // the challenge ones.
   const prizeHandles = normalPulls
-    .filter((p) => isChallengePrizePack(p.pack_id))
+    .filter((p) => p.source === 'reward')
     .map((p) => p.card_id);
   const prizeTier = await bestLiveTierByHandle(packs, prizeHandles);
-
-  // For reward pulls: load matching reward_draw rows keyed by vault_pull_id.
-  // ponytail: single batch query; vault is capped at 500 so N is bounded.
-  const rewardPullIds = rewardPulls.map((p) => p.id);
-  const rewardDrawRows = rewardPullIds.length
-    ? await packs.listRewardDraws(
-        { vault_pull_id: rewardPullIds },
-        { take: rewardPullIds.length },
-      )
-    : [];
-  const drawByPullId = new Map(rewardDrawRows.map((d) => [d.vault_pull_id, d]));
 
   // Build vault items — normal pulls first (existing shape), then reward pulls.
   const normalItems = normalPulls
@@ -212,34 +198,9 @@ export async function GET(
     })
     .filter((e): e is NonNullable<typeof e> => e !== null);
 
-  // Reward pull items: title/image from prize_snapshot; no buyback block.
-  // If the reward_draw row is missing (a partial write or orphaned snapshot),
-  // STILL show the pull — it is an owned vault item — as a degraded placeholder
-  // rather than silently dropping the customer's prize from their vault.
-  const rewardItems = rewardPulls.map((p) => {
-    const draw = drawByPullId.get(p.id);
-    const snap = (draw?.prize_snapshot ?? {}) as {
-      title?: string;
-      image?: string;
-      product_handle?: string;
-    };
-    return {
-      pull_id: p.id,
-      rolled_at: p.rolled_at,
-      pack_id: p.pack_id,
-      challenge_prize: isChallengePrizePack(p.pack_id),
-      title: snap.title ?? 'Reward prize',
-      image: snap.image ?? '',
-      source: 'reward' as const,
-      // Reward prizes are never the free welcome pull, so they are never
-      // locked — stated rather than left absent so `locked` is present on
-      // EVERY item and the storefront needs no `?? false` fallback.
-      locked: false,
-    };
-  });
-
-  // Merge in rolled_at DESC order (pulls was already ordered DESC; preserve).
-  const items = [...normalItems, ...rewardItems].sort(
+  // Already rolled_at DESC from listPulls; the sort keeps that explicit now
+  // that a single list feeds it.
+  const items = [...normalItems].sort(
     (a, b) => new Date(b.rolled_at).getTime() - new Date(a.rolled_at).getTime(),
   );
 

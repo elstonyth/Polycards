@@ -46,9 +46,6 @@ const voucherFor = (L: number): number =>
 const referralFor = (L: number): number =>
   [...REFERRAL_STEPS].reverse().find(([from]) => L >= from)![1];
 
-const boxTierFor = (L: number): string =>
-  L === 100 ? 'Z' : 'abcdefghij'[Math.floor(L / 10)]!;
-
 describe('VIP_LEVELS matches Workbook1.xlsx', () => {
   it('has exactly levels 1..100 in order', () => {
     expect(VIP_LEVELS.map((r) => r.level)).toEqual(
@@ -64,7 +61,6 @@ describe('VIP_LEVELS matches Workbook1.xlsx', () => {
       );
       expect(row.voucher_amount).toBe(voucherFor(L));
       expect(row.frame_unlock).toBe(L % 10 === 0);
-      expect(row.box_tier).toBe(boxTierFor(L));
     },
   );
 });

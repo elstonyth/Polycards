@@ -58,8 +58,6 @@ import {
   type PixelPokemonPage,
   type PixelPokemonQuery,
   type CreatePixelPokemonBody,
-  getDailyBoxes,
-  getDailyBox,
   getVoucherLadder,
   getRewardsSettings,
   getSiteSettings,
@@ -70,7 +68,6 @@ import {
   saveAvatarFrames,
   saveChallengeSettings,
   saveChallengeStages,
-  saveDailyBox,
   saveRewardsSettings,
   saveSiteSettings,
   saveTierSettings,
@@ -91,9 +88,6 @@ import {
   type CustomerGacha,
   type SupportTransaction,
   type SupportPull,
-  type DailyBoxEditorDTO,
-  type DailyBoxSaveBody,
-  type DailyBoxSummary,
   type DeliveryOrdersPage,
   type DeliveryStatus,
   type EconomyReport,
@@ -599,36 +593,9 @@ export const useBulkUpdateDeliveryOrders = () => {
 };
 
 export type {
-  DailyBoxEditorDTO,
-  DailyBoxPrizeDTO,
-  DailyBoxSummary,
   VoucherLadderDTO,
   VoucherRangeDTO,
 } from './admin-rest';
-
-export const useDailyBoxes = (): UseQueryResult<{ boxes: DailyBoxSummary[] }> =>
-  useQuery({ queryKey: qk.dailyBoxes, queryFn: getDailyBoxes });
-
-export const useDailyBox = (tier: string): UseQueryResult<DailyBoxEditorDTO> =>
-  useQuery({
-    queryKey: qk.dailyBox(tier),
-    queryFn: () => getDailyBox(tier),
-    enabled: !!tier,
-  });
-
-export const useSaveDailyBox = () => {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (vars: { tier: string; body: DailyBoxSaveBody }) =>
-      saveDailyBox(vars.tier, vars.body),
-    onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: qk.dailyBoxes });
-      qc.invalidateQueries({ queryKey: qk.dailyBox(vars.tier) });
-      toast.success('Box saved');
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
-  });
-};
 
 export const useVoucherLadder = (): UseQueryResult<VoucherLadderDTO> =>
   useQuery({ queryKey: qk.voucherLadder, queryFn: getVoucherLadder });

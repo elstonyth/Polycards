@@ -20,7 +20,6 @@ export async function GET(
         'level',
         'spend_threshold',
         'voucher_amount',
-        'box_tier',
         'frame_unlock',
       ],
       take: 1000,
@@ -31,7 +30,6 @@ export async function GET(
       level: r.level,
       spend_threshold: Number(r.spend_threshold),
       voucher_amount: Number(r.voucher_amount),
-      box_tier: r.box_tier,
       frame_unlock: r.frame_unlock,
     }))
     .sort((a, b) => a.level - b.level);

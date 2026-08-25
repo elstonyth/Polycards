@@ -193,7 +193,6 @@ medusaIntegrationTestRunner({
           ].map((r) => ({
             ...r,
             voucher_amount: 0,
-            box_tier: 'bronze',
             frame_unlock: false,
             prizes: null,
           })),

@@ -63,7 +63,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
             level: r.level,
             spend_threshold: r.spend_threshold,
             voucher_amount: r.voucher_amount,
-            box_tier: r.box_tier,
             frame_unlock: r.frame_unlock,
             prizes: r.prizes ?? null,
           })),
@@ -111,7 +110,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           { take: 100 },
         );
 
-        // Each level grants voucher only (box no longer per-rung — tier derives live via drawDailyBox).
+        // Each level grants a voucher only.
         // frame_unlock is false for all L2-L5 in the seed data.
         const grantedLevels = [...new Set(grants.map((g) => g.level))].sort(
           (a, b) => a - b,

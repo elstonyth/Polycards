@@ -83,9 +83,6 @@ export const qk = {
   deliveryOrder: (id: string) => ['admin', 'delivery-order', id] as const,
   fxRate: ['admin', 'pricing', 'fx'] as const,
   fxHistory: ['admin', 'pricing', 'fx', 'history'] as const,
-  dailyBoxes: ['admin', 'daily-rewards', 'boxes'] as const,
-  dailyBox: (tier: string) =>
-    ['admin', 'daily-rewards', 'boxes', tier] as const,
   voucherLadder: ['admin', 'daily-rewards', 'vouchers'] as const,
   rewardsSettings: ['admin', 'rewards-settings'] as const,
   siteSettings: ['admin', 'site-settings'] as const,
