@@ -3,6 +3,18 @@
 node_modules/
 out/
 coverage/
+# scripts/serve-standalone.ps1 copies the standalone bundle here (gitignored).
+.next-serve/
+*.tsbuildinfo
+package-lock.json
+
+# Nested full-repo checkouts (all gitignored): Claude Code session worktrees,
+# superpowers `using-git-worktrees` worktrees, and scratch/orphaned tool copies.
+# Without these, `format`/`format:check` from the main checkout walks into the
+# nested copy and reports thousands of phantom files. Mirrors eslint.config.mjs.
+.claude/worktrees/
+.worktrees/
+.clone/
 
 # Separate package with its own toolchain
 backend/
