@@ -123,6 +123,8 @@ Run from `backend/packages/api` unless noted.
 | 9 | Catalog art, if the reseeded catalog needs it | `replace-catalog-polycards.ts`, `bake-slab-images.ts` |
 | 10 | Verify an FxRate row exists | else money display silently uses the `DEFAULT_USD_MYR = 4.7` fallback |
 | 11 | Configure real challenge stages | admin → Weekly Challenge → Milestone Stages (§1.2) |
+| 12 | **Write the `referral_settings` row** | admin → **Referrals** → settings (`POST /admin/referrals/settings`). There is NO seeder — see the note below, "no row" is a live rate |
+| 13 | **Create the launch task set** | admin → **Tasks**. No seeder either; until a definition exists, `/task` — slot 1 of the primary tab bar — renders an empty board |
 
 **Step 3 — post-wipe proof.** Run before seeding; a non-zero count means the wipe was partial
 and step 4 would seed on top of survivors:
@@ -151,6 +153,36 @@ not error — it silently prices everything at the fallback rate. `resolveFxRate
 and the open-pack/open-batch workflows stamp `recorded_value_usd` at draw time from the first
 pull onward. (Confirmed 2026-07-19: on the current DB it reported `Stamped 0` because all 153
 pulls were already stamped — `{total:153, stamped:153, unstamped:0}`.)
+
+**Note on step 12 — "no row" is a LIVE rate, not an off switch.** `referral_settings` is a
+singleton (`id = 'global'`) and nothing seeds it: `src/scripts/` has no
+`seed-referral-settings.ts`, and `seed.ts` does not write one. With the row absent the weekly
+close falls back to `DEFAULT_REFERRAL_TIERS` in `modules/packs/referral.ts:13-18` — 0.5% / 1% /
+1.5% / 2% by downline weekly turnover, whole-amount — so commissions ARE being paid at a rate
+the admin Referrals screen cannot show the operator. Same shape as the step-10 FxRate trap:
+silent default, real money. Write the row (even if the values match the defaults) so what is
+live is what is displayed. `partner_min_bp` / `partner_max_bp` default to 300 / 500 and bound
+the manual partner override; set them deliberately too.
+
+**Note on step 13 — an empty primary tab.** `task_definition` has no seeder either (only
+`src/scripts/qa-task-labels.ts`, which READS definitions for QA). `/task` is slot 1 of the
+five-slot tab bar (`src/components/app-shell/tabs.ts`), so on a freshly wiped prod the
+left-most primary destination renders an empty board for every visitor until definitions
+exist. Not a crash — just the worst possible first impression. Note the two week anchors while
+configuring: weekly tasks reset **Monday** 00:00 MYT (`taskWeekFor`), the settlement week
+closes **Tuesday** (`referralWeekFor`).
+
+**Steps 12–13 — post-launch proof.** Both must be non-zero before the storefront is public:
+
+```sql
+select
+  (select count(*) from referral_settings where id = 'global') as referral_settings_row,
+  (select count(*) from task_definition)                       as task_definitions,
+  (select count(*) from task_definition where kind = 'weekly') as weekly_tasks;
+```
+
+`referral_settings_row = 0` means commissions are running on the hardcoded defaults;
+`task_definitions = 0` means `/task` is empty.
 
 ## 4. Post-reset verification
 
