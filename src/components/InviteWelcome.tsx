@@ -19,8 +19,7 @@ import { Pill } from '@/components/ui/pill';
  * screenshot-URL doesn't re-open the modal.
  */
 type InviteState =
-  | { kind: 'invited'; handle: string }
-  | { kind: 'has-account' | 'unknown' };
+  { kind: 'invited'; handle: string } | { kind: 'has-account' | 'unknown' };
 
 export default function InviteWelcome() {
   const [state, setState] = useState<InviteState | null>(null);
