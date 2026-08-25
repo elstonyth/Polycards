@@ -1835,6 +1835,16 @@ class PacksModuleService extends MedusaService({
   ): Promise<{
     week_start: string;
     vip_level: number;
+    /** Free rips this customer has claimed but not yet spun. Listed at the top
+     *  level rather than on the task row on purpose: the task that granted it
+     *  may since have been retired or run out its window, and the entitlement
+     *  must not vanish with it. */
+    pending_spins: {
+      claim_id: string;
+      task_id: string;
+      title: string;
+      pack_id: string;
+    }[];
     tasks: {
       id: string;
       kind: 'weekly' | 'achievement';
@@ -1860,17 +1870,41 @@ class PacksModuleService extends MedusaService({
           customer_id: input.customerId,
           period_key: [week.weekStartIso, ''],
         },
-        { select: ['task_id', 'period_key'], take: 1000 },
+        {
+          select: ['id', 'task_id', 'period_key', 'claim_ref', 'reward_snapshot'],
+          take: 1000,
+        },
         sharedContext,
       ),
     ]);
     const claimed = new Set(claims.map((c) => `${c.task_id}:${c.period_key}`));
     const at = input.now ?? new Date();
+    const titleById = new Map(defs.map((d) => [d.id, d.title]));
+    // Unspent pack entitlements. `claim_ref` null is the whole test — it is
+    // stamped with the pull id the moment the spin commits.
+    const pendingSpins = claims
+      .filter((c) => {
+        if (c.claim_ref) return false;
+        const snap = (c.reward_snapshot ?? {}) as {
+          type?: string;
+          pack_id?: string;
+        };
+        return snap.type === 'pack' && typeof snap.pack_id === 'string';
+      })
+      .map((c) => ({
+        claim_id: c.id,
+        task_id: c.task_id,
+        title: titleById.get(c.task_id) ?? 'Free rip',
+        pack_id: String(
+          (c.reward_snapshot as { pack_id?: string }).pack_id ?? '',
+        ),
+      }));
     return {
       week_start: week.weekStartIso,
       // The Achievements & VIP tab shows the rung the reach_level tasks are
       // measured against; taskFactsFor already loaded it.
       vip_level: facts.vipLevel,
+      pending_spins: pendingSpins,
       tasks: defs
         .filter((d) => taskIsLive(d, at))
         .map((d) => {
@@ -1908,7 +1942,15 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
-    | { claimed: true; reward: TaskReward; ref: string | null }
+    | {
+        claimed: true;
+        reward: TaskReward;
+        ref: string | null;
+        /** The claim row's id. For a pack reward it is the entitlement the
+         *  slot spends — the tab sends the player to /slots/<pack>/spin with
+         *  it. */
+        claimId: string;
+      }
     | {
         claimed: false;
         reason:
@@ -2039,39 +2081,26 @@ class PacksModuleService extends MedusaService({
       );
       ref = pull.id;
     } else {
-      // pack: a free rip — roll the pack's live odds and vault the result.
-      if (!input.rollPack) {
-        throw new MedusaError(
-          MedusaError.Types.UNEXPECTED_STATE,
-          'claimTask: a pack reward needs the rollPack helper injected.',
-        );
-      }
-      const rolled = await input.rollPack(reward.pack_id);
-      try {
-        await input.decrementStock?.(rolled.handle, 1);
-      } catch {
-        // same stance as the card branch above.
-      }
-      const [pull] = await this.createPulls(
-        [
-          {
-            customer_id: input.customerId,
-            pack_id: reward.pack_id,
-            card_id: rolled.handle,
-            order_id: null,
-            rolled_at: new Date(),
-            source: 'reward' as const,
-          },
-        ],
+      // pack: a free RIP, and a rip is something the player does. Claiming
+      // grants the entitlement; redeemTaskPackClaim spends it when they spin
+      // the slot. The claim row IS the entitlement — `claim_ref` stays null
+      // until the spin stamps the pull id on it, which is also what makes the
+      // spin idempotent.
+      //
+      // Rolling here instead would have handed the card over before the reels
+      // ever moved, leaving the slot to animate a result the player already
+      // owned. It also could not survive the obvious question — what happens
+      // if they close the tab? — in any honest way: either the spin is
+      // theatre, or the reward is lost. An unspent entitlement simply waits.
+      ref = null;
+    }
+    if (ref !== null) {
+      await this.updateTaskClaims(
+        { selector: { id: claimId }, data: { claim_ref: ref } },
         sharedContext,
       );
-      ref = pull.id;
     }
-    await this.updateTaskClaims(
-      { selector: { id: claimId }, data: { claim_ref: ref } },
-      sharedContext,
-    );
-    return { claimed: true, reward, ref };
+    return { claimed: true, reward, ref, claimId };
   }
 
   // Admin CRUD for task definitions — validated + audited.
@@ -7086,6 +7115,118 @@ class PacksModuleService extends MedusaService({
           .filter((g) => g.status === 'fulfilled')
           .map(toGrantView),
       },
+    };
+  }
+
+  /**
+   * Spend a pack-reward entitlement: roll the pack and vault the card.
+   *
+   * This is what the slot's Spin button calls for a task's free rip. The claim
+   * row is the entitlement — `claim_ref` null means unspent — and stamping it
+   * with the pull id in the SAME transaction as the pull's creation is what
+   * makes the whole thing survive the player closing the tab mid-spin:
+   *
+   *   - request never reached the server  → entitlement intact, spin again
+   *   - request committed, response lost  → card is in the vault, and a retry
+   *                                         returns already_redeemed rather
+   *                                         than rolling a second one
+   *
+   * The advisory lock is per CLAIM, not per customer: two tabs racing the same
+   * entitlement must serialise, but a player spinning two different free rips
+   * has no reason to queue.
+   */
+  @InjectTransactionManager()
+  async redeemTaskPackClaim(
+    input: {
+      customerId: string;
+      claimId: string;
+      /** Returns the pack's normalized winner. Typed loosely so this module
+       *  keeps its independence from the workflow layer, but the whole rolled
+       *  card is handed back to the caller — the route needs its rarity, which
+       *  is a property of the WINNING odds row, not of the card. */
+      rollPack: (
+        packId: string,
+      ) => Promise<{ handle: string } & Record<string, unknown>>;
+      decrementStock?: (handle: string, qty: number) => Promise<boolean>;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    | {
+        redeemed: true;
+        pullId: string;
+        card: { handle: string } & Record<string, unknown>;
+        packId: string;
+      }
+    | {
+        redeemed: false;
+        reason: 'not_found' | 'already_redeemed' | 'not_a_pack_reward';
+        pullId?: string;
+      }
+  > {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `taskclaim:${input.claimId}`,
+    ]);
+
+    const [claim] = await this.listTaskClaims(
+      { id: input.claimId },
+      { take: 1 },
+      sharedContext,
+    );
+    // Ownership before anything else — the claim id comes from the client.
+    if (!claim || claim.customer_id !== input.customerId) {
+      return { redeemed: false, reason: 'not_found' };
+    }
+    if (claim.claim_ref) {
+      // Already spun. Hand back the pull so a lost response can still show the
+      // player what they won instead of an error.
+      return {
+        redeemed: false,
+        reason: 'already_redeemed',
+        pullId: claim.claim_ref,
+      };
+    }
+    // reward_snapshot is what was frozen at claim time — NOT the task's current
+    // reward, which an admin may have edited since.
+    const snapshot = (claim.reward_snapshot ?? {}) as {
+      type?: string;
+      pack_id?: string;
+    };
+    if (snapshot.type !== 'pack' || typeof snapshot.pack_id !== 'string') {
+      return { redeemed: false, reason: 'not_a_pack_reward' };
+    }
+
+    const rolled = await input.rollPack(snapshot.pack_id);
+    try {
+      await input.decrementStock?.(rolled.handle, 1);
+    } catch {
+      // Fulfillment counter, never a gate — the take runs on the inventory
+      // module's own connection, so a throw here would roll back the pull the
+      // player just watched land. Drift is operator-visible in inventory.
+    }
+    const [pull] = await this.createPulls(
+      [
+        {
+          customer_id: input.customerId,
+          pack_id: snapshot.pack_id,
+          card_id: rolled.handle,
+          order_id: null,
+          rolled_at: new Date(),
+          source: 'reward' as const,
+        },
+      ],
+      sharedContext,
+    );
+    await this.updateTaskClaims(
+      { selector: { id: claim.id }, data: { claim_ref: pull.id } },
+      sharedContext,
+    );
+    return {
+      redeemed: true,
+      pullId: pull.id,
+      card: rolled,
+      packId: snapshot.pack_id,
     };
   }
 

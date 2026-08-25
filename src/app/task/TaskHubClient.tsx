@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { CalendarCheck, Check, Crown, Gift, ListChecks } from 'lucide-react';
 import { checkInToday, claimTaskReward } from '@/lib/actions/tasks';
@@ -68,12 +69,21 @@ function TaskRow({
     startTransition(async () => {
       const res = await claimTaskReward(task.id);
       if (res.ok && res.claimed) {
+        // A pack reward is a free RIP, so the claim hands the player to the
+        // slot to take it. The entitlement is already recorded server-side —
+        // if they never arrive, or bail before spinning, it waits for them on
+        // /task rather than evaporating.
+        if (res.spin) {
+          onDone('Free rip unlocked — spinning it up…');
+          router.push(
+            `/slots/${encodeURIComponent(res.spin.packId)}/spin?freeRip=${encodeURIComponent(res.spin.claimId)}`,
+          );
+          return;
+        }
         onDone(
           res.rewardType === 'credit'
             ? 'Credit added to your wallet.'
-            : res.rewardType === 'pack'
-              ? 'Your free rip landed in your vault.'
-              : 'Card added to your vault.',
+            : 'Card added to your vault.',
         );
       } else if (res.ok && !res.claimed) {
         onDone(CLAIM_FAILURE_COPY[res.reason] ?? CLAIM_FALLBACK);
@@ -207,6 +217,37 @@ function WeeklyTab({
           >
             {notice}
           </p>
+        )}
+
+        {data.pending_spins.length > 0 && (
+          // An entitlement outlives the task that granted it — a retired task,
+          // or one whose window closed, must not take an unspent free rip with
+          // it. So this is driven by the claims, not by the rows above.
+          <Panel className="border-chase/40 bg-chase/[0.06]">
+            <p className="text-sm font-semibold text-white">
+              {data.pending_spins.length === 1
+                ? 'You have a free rip waiting'
+                : `You have ${data.pending_spins.length} free rips waiting`}
+            </p>
+            <ul className="mt-2 space-y-2">
+              {data.pending_spins.map((s) => (
+                <li
+                  key={s.claim_id}
+                  className="flex items-center justify-between gap-3"
+                >
+                  <span className="min-w-0 flex-1 truncate text-xs text-neutral-400">
+                    {s.title}
+                  </span>
+                  <Link
+                    href={`/slots/${encodeURIComponent(s.pack_id)}/spin?freeRip=${encodeURIComponent(s.claim_id)}`}
+                    className={cn(pillVariants({ size: 'sm' }))}
+                  >
+                    Spin it
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </Panel>
         )}
 
         <Panel>

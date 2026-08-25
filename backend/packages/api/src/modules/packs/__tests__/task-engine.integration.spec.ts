@@ -162,55 +162,148 @@ moduleIntegrationTestRunner<PacksModuleService>({
       ).toEqual({ claimed: false, reason: 'already_claimed' });
     });
 
-    it('pack reward rolls via the injected helper and vaults the result', async () => {
-      await service.createCards([
-        {
-          handle: 'rolled-card',
-          name: 'Rolled',
-          set: 'S',
-          grader: 'PSA',
-          grade: '8',
-          market_value: 5,
-          image: 'y.png',
-        },
-      ]);
-      await service.createPacks([
-        {
-          slug: 'bronze',
-          title: 'Bronze Pack',
-          category: 'standard',
-          price: 300,
-          image: '/x.webp',
-          status: 'active',
-        },
-      ]);
-      await service.checkInDaily({ customerId: 'cus_t4' });
-      const { id } = await service.saveTaskDefinition({
-        kind: 'weekly',
-        title: 'Check in for a free rip',
-        requirement: { type: 'checkin_days', days: 1 },
-        reward: { type: 'pack', pack_id: 'bronze' },
-        active: true,
-        sort: 2,
-        adminId: 'admin_1',
-        reason: 'seed',
+    // A pack reward is a free RIP: the claim grants an entitlement and the
+    // slot's Spin button spends it. These three tests are the whole contract,
+    // and the second is the one that matters — it is what makes closing the tab
+    // mid-spin safe.
+    describe('pack reward — claim grants, spin spends', () => {
+      const seedPackAndCard = async () => {
+        await service.createCards([
+          {
+            handle: 'rolled-card',
+            name: 'Rolled',
+            set: 'S',
+            grader: 'PSA',
+            grade: '8',
+            market_value: 5,
+            image: 'y.png',
+          },
+        ]);
+        await service.createPacks([
+          {
+            slug: 'bronze',
+            title: 'Bronze Pack',
+            category: 'standard',
+            price: 300,
+            image: '/x.webp',
+            status: 'active',
+          },
+        ]);
+      };
+
+      const makeTask = async (title: string, sort: number) =>
+        (
+          await service.saveTaskDefinition({
+            kind: 'weekly',
+            title,
+            requirement: { type: 'checkin_days', days: 1 },
+            reward: { type: 'pack', pack_id: 'bronze' },
+            active: true,
+            sort,
+            adminId: 'admin_1',
+            reason: 'seed',
+          })
+        ).id;
+
+      it('claiming records an unspent entitlement and vaults NOTHING', async () => {
+        await seedPackAndCard();
+        await service.checkInDaily({ customerId: 'cus_t4' });
+        const id = await makeTask('Check in for a free rip', 2);
+
+        const claim = await service.claimTask({
+          customerId: 'cus_t4',
+          taskId: id,
+        });
+        expect(claim).toMatchObject({ claimed: true, ref: null });
+        // The rip has not happened yet — that is the player's to do.
+        expect(
+          await service.listPulls({ customer_id: 'cus_t4', source: 'reward' }),
+        ).toHaveLength(0);
+        const [row] = await service.listTaskClaims({ customer_id: 'cus_t4' });
+        expect(row.claim_ref).toBeNull();
+        // And the hub advertises it, so a player who never reaches the slot
+        // can come back to it.
+        const hub = await service.taskHubFor({ customerId: 'cus_t4' });
+        expect(hub.pending_spins).toHaveLength(1);
+        expect(hub.pending_spins[0]).toMatchObject({ pack_id: 'bronze' });
       });
-      const claim = await service.claimTask({
-        customerId: 'cus_t4',
-        taskId: id,
-        rollPack: async (packId) => {
+
+      it('spinning rolls exactly once, however many times it is retried', async () => {
+        await seedPackAndCard();
+        await service.checkInDaily({ customerId: 'cus_t5' });
+        const id = await makeTask('Free rip retry', 3);
+        const claimed = await service.claimTask({
+          customerId: 'cus_t5',
+          taskId: id,
+        });
+        const claimId = (claimed as { claimId: string }).claimId;
+
+        let rolls = 0;
+        const rollPack = async (packId: string) => {
           expect(packId).toBe('bronze');
+          rolls++;
           return { handle: 'rolled-card' };
-        },
+        };
+
+        const first = await service.redeemTaskPackClaim({
+          customerId: 'cus_t5',
+          claimId,
+          rollPack,
+        });
+        expect(first).toMatchObject({ redeemed: true });
+        const pulls = await service.listPulls({
+          customer_id: 'cus_t5',
+          source: 'reward',
+        });
+        expect(pulls).toHaveLength(1);
+        expect(pulls[0].pack_id).toBe('bronze');
+        expect(pulls[0].card_id).toBe('rolled-card');
+
+        // THE POINT. A retry — a double-tap, a lost response, a reconnect after
+        // the tab was closed mid-spin — must not mint a second card, and must
+        // hand back the pull so the player can still be shown what they won.
+        const again = await service.redeemTaskPackClaim({
+          customerId: 'cus_t5',
+          claimId,
+          rollPack,
+        });
+        expect(again).toMatchObject({
+          redeemed: false,
+          reason: 'already_redeemed',
+          pullId: (first as { pullId: string }).pullId,
+        });
+        expect(rolls).toBe(1);
+        expect(
+          await service.listPulls({ customer_id: 'cus_t5', source: 'reward' }),
+        ).toHaveLength(1);
+        // Spent, so the hub stops offering it.
+        const hub = await service.taskHubFor({ customerId: 'cus_t5' });
+        expect(hub.pending_spins).toHaveLength(0);
       });
-      expect(claim.claimed).toBe(true);
-      const pulls = await service.listPulls({
-        customer_id: 'cus_t4',
-        source: 'reward',
+
+      it("refuses to spend someone else's entitlement", async () => {
+        await seedPackAndCard();
+        await service.checkInDaily({ customerId: 'cus_t6' });
+        const id = await makeTask('Free rip theft', 4);
+        const claimed = await service.claimTask({
+          customerId: 'cus_t6',
+          taskId: id,
+        });
+        const claimId = (claimed as { claimId: string }).claimId;
+        let rolls = 0;
+        expect(
+          await service.redeemTaskPackClaim({
+            customerId: 'cus_thief',
+            claimId,
+            rollPack: async () => {
+              rolls++;
+              return { handle: 'rolled-card' };
+            },
+          }),
+        ).toEqual({ redeemed: false, reason: 'not_found' });
+        // Ownership is checked BEFORE the roll — nothing was minted.
+        expect(rolls).toBe(0);
       });
-      expect(pulls).toHaveLength(1);
-      expect(pulls[0].pack_id).toBe('bronze');
-      expect(pulls[0].card_id).toBe('rolled-card');
     });
 
     it('vault achievements are a lifetime high-water — selling a card cannot un-complete them', async () => {
@@ -407,5 +500,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
         await service.claimTask({ customerId: 'cus_win', taskId: 'task_ghost' }),
       ).toEqual({ claimed: false, reason: 'not_found' });
     });
+
   },
 });

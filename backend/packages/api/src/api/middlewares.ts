@@ -676,6 +676,17 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), referralBindRateLimit],
     },
     {
+      // Spend a task's free-rip entitlement (POST /store/tasks/claims/:id/spin).
+      // It MINTS a card, so it shares the write-tier budget with the paid open
+      // rather than the store-read one.
+      matcher: '/store/tasks/claims/*',
+      method: 'POST',
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        deliveryWriteRateLimit,
+      ],
+    },
+    {
       // The /task Tasks tab payload (GET /store/tasks).
       matcher: '/store/tasks',
       method: 'GET',

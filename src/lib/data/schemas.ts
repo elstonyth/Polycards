@@ -743,10 +743,21 @@ export const TaskEntrySchema = z.looseObject({
 export type TaskEntry = z.infer<typeof TaskEntrySchema>;
 
 /** GET /store/tasks — the /task Tasks tab payload. */
+/** One unspent free-rip entitlement (GET /store/tasks `pending_spins`). */
+export const PendingSpinSchema = z.looseObject({
+  claim_id: z.string(),
+  task_id: z.string(),
+  title: z.string(),
+  pack_id: z.string(),
+});
+
 export const TaskHubSchema = z.looseObject({
   week_start: z.string(),
   vip_level: finite,
   checked_in_today: z.boolean(),
+  // `.catch([])` is the deploy-skew guard: a backend that predates the field
+  // must not drop the whole hub payload and blank the page.
+  pending_spins: z.array(PendingSpinSchema).catch([]),
   tasks: z.array(TaskEntrySchema),
 });
 export type TaskHub = z.infer<typeof TaskHubSchema>;

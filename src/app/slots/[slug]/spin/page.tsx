@@ -29,10 +29,10 @@ export default async function SlotSpinPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ count?: string; demo?: string }>;
+  searchParams: Promise<{ count?: string; demo?: string; freeRip?: string }>;
 }) {
   const { slug } = await params;
-  const { count: countRaw, demo } = await searchParams;
+  const { count: countRaw, demo, freeRip } = await searchParams;
   const parsed = Number(countRaw);
   const count = Number.isInteger(parsed) ? Math.min(3, Math.max(1, parsed)) : 1;
   const [base, detail, recentPulls] = await Promise.all([
@@ -56,6 +56,12 @@ export default async function SlotSpinPage({
       // pool (no backend open, no charge, nothing won). Logged-in visitors are
       // ignored by the client (they always get the real, auth-gated machine).
       demoPool={demo === '1' ? (detail?.pool ?? []) : null}
+      // A task's free-rip entitlement. The machine spends THIS instead of
+      // charging; the claim already recorded it, so a player who never arrives
+      // (or bails before spinning) still has it waiting on /task.
+      freeRipClaimId={
+        typeof freeRip === 'string' && freeRip.trim() !== '' ? freeRip : null
+      }
       // The demo draw rolls odds SET 3's real tier split (aggregated backend-
       // side), not the marketing published odds — display is unaffected. Gated
       // like demoPool above: only the demo reads it, so only the demo gets it.

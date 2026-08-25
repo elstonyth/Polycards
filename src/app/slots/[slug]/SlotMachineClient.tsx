@@ -16,6 +16,7 @@ import {
   revealPull,
   closeInstantWindow,
 } from '@/lib/actions/packs';
+import { spinTaskReward } from '@/lib/actions/tasks';
 import type { WonCard, OpenBatchResult } from '@/lib/actions/packs';
 import { sellBackPull } from '@/lib/actions/vault';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
@@ -116,6 +117,7 @@ export default function SlotMachineClient({
   pool = [],
   demoPool = null,
   demoOdds = null,
+  freeRipClaimId = null,
 }: {
   pack: ResolvedPack & Pack;
   recentPulls: RecentPull[];
@@ -132,6 +134,11 @@ export default function SlotMachineClient({
    *  spins sample client-side (no openBatch, no charge, no Pull row, no
    *  sell-back). Logged-in customers always get the real machine regardless. */
   demoPool?: PackCard[] | null;
+  /** A task's free-rip entitlement (?freeRip=<claimId>). When present the
+   *  machine spends THAT instead of charging: one reel, no cost, and the spin
+   *  calls the redeem endpoint. Claiming the task already recorded the
+   *  entitlement, so arriving here late — or never — loses nothing. */
+  freeRipClaimId?: string | null;
 }) {
   const reduced = usePrefersReducedMotion();
   // Immersive surface: chrome inert + body scroll locked the whole time mounted.
@@ -161,12 +168,16 @@ export default function SlotMachineClient({
   // route — the backend rejects a batch on this category outright — so the reel
   // count is pinned to 1 and every bet/quantity control goes away.
   const isFreePack = pack.categoryId === FREE_WELCOME_CATEGORY;
+  // A task's free rip. Like the welcome pack it is exactly ONE open at no cost,
+  // but it spends an entitlement rather than a one-time eligibility, and the
+  // card it yields is a reward pull — vaultable and shippable, never sellable.
+  const isFreeRip = freeRipClaimId !== null && freeRipClaimId !== '';
 
   // Real backend price, never re-parsed from the rounded display string.
   const cost = pack.priceValue;
   // Reel count — prop is the initial value (already clamped from ?count=); the
   // player adds/removes reels in-machine. cost * reels is the batch price.
-  const [reels, setReels] = useState(isFreePack ? 1 : count);
+  const [reels, setReels] = useState(isFreePack || isFreeRip ? 1 : count);
   // Shrink the cell so multiple reels fit across the viewport. On a roomy
   // viewport the cell grows instead: the phone layout on a desktop left the
   // machine a ~110px band floating in ~900px of empty room, which reads as an
@@ -331,7 +342,9 @@ export default function SlotMachineClient({
   // which is null while it loads and would leave a brand-new account (balance
   // RM 0, the exact audience) staring at a disabled Spin button.
   const canAfford =
-    isFreePack || (balance !== null && affordable(balance, cost * reels));
+    isFreePack ||
+    isFreeRip ||
+    (balance !== null && affordable(balance, cost * reels));
   // Spin + reel add/remove are locked for the ENTIRE non-idle flow — resolve,
   // spin, the reveal theater (flood/transform), AND the review/sell window
   // (spec #43). They only re-enable once every card is sold/kept and the reveal
@@ -426,7 +439,12 @@ export default function SlotMachineClient({
       openAuth('login');
       return;
     }
-    if (!isFreePack && balance !== null && !affordable(balance, cost * reels)) {
+    if (
+      !isFreePack &&
+      !isFreeRip &&
+      balance !== null &&
+      !affordable(balance, cost * reels)
+    ) {
       setNeedsTopUp(true);
       setError('Not enough credits to spin.');
       return;
@@ -456,7 +474,44 @@ export default function SlotMachineClient({
     // back unlocked and must keep its sell button.
     let lockedOpen = false;
     try {
-      if (isFreePack) {
+      if (isFreeRip) {
+        // Spends the task entitlement. `already_redeemed` is NOT an error: it
+        // means an earlier attempt committed (a retry, a double-tap, a lost
+        // response) and the card is already in the vault. Reload so the reveal
+        // is not invented client-side from a roll that did not happen here.
+        const spun = await spinTaskReward(freeRipClaimId!);
+        if (!spun.ok) {
+          res = { ok: false, error: spun.error };
+        } else if (!spun.redeemed) {
+          res = {
+            ok: false,
+            error:
+              spun.reason === 'already_redeemed'
+                ? 'This free rip was already spun — the card is in your vault.'
+                : 'That free rip is no longer available.',
+          };
+        } else {
+          res = {
+            ok: true,
+            rolls: [
+              {
+                card: spun.card,
+                pullId: spun.pullId,
+                marketValue: spun.marketValue,
+                // A reward pull is never sellable, so no offer is quoted — the
+                // reveal shows "Keep in vault" and says why.
+                buyback: null,
+              },
+            ],
+            price: 0,
+            total: 0,
+            balance: null,
+          };
+        }
+        // The card is unsellable, not un-shippable — the reveal keys its
+        // no-sell branch off `locked`, so this is what suppresses the offer.
+        lockedOpen = true;
+      } else if (isFreePack) {
         const one = await openPack(pack.id);
         lockedOpen = one.ok && one.locked;
         res = one.ok
@@ -1112,6 +1167,8 @@ export default function SlotMachineClient({
             costLine={
               isDemo ? (
                 <span>Free demo — no credits charged, no real cards won</span>
+              ) : isFreeRip ? (
+                <span>Your free rip from Tasks — nothing charged</span>
               ) : isFreePack ? (
                 <span>Your free welcome pack — nothing charged</span>
               ) : (
@@ -1145,11 +1202,13 @@ export default function SlotMachineClient({
                   : 'Demo spin'
                 : !customer
                   ? 'Log in to spin'
-                  : isFreePack
-                    ? 'Open Free Pack'
-                    : hasSpun
-                      ? 'Spin again'
-                      : 'Spin'
+                  : isFreeRip
+                    ? 'Spin Free Rip'
+                    : isFreePack
+                      ? 'Open Free Pack'
+                      : hasSpun
+                        ? 'Spin again'
+                        : 'Spin'
             }
             muted={muted}
             onSpin={handleSpin}
@@ -1158,8 +1217,12 @@ export default function SlotMachineClient({
             onAddReel={addReel}
             onRemoveReel={removeReel}
             // The free claim buys exactly ONE open — no reels to add or drop.
-            addDisabled={isFreePack || reels >= 3 || !canAdjustReels}
-            removeDisabled={isFreePack || reels <= 1 || !canAdjustReels}
+            addDisabled={
+              isFreePack || isFreeRip || reels >= 3 || !canAdjustReels
+            }
+            removeDisabled={
+              isFreePack || isFreeRip || reels <= 1 || !canAdjustReels
+            }
           />
           {error && (
             <p
