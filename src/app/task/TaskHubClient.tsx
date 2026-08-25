@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -37,6 +38,46 @@ const fromCents = (cents: number): string => rm(cents / 100);
 // trimmed — 50→"0.5%", 115→"1.15%", 200→"2%" (review 2026-08-25 finding 5).
 const pct = (bp: number): string =>
   `${(bp / 100).toFixed(2).replace(/\.?0+$/, '')}%`;
+
+// The tab hero band. A 21:9 art plate with the subject on the RIGHT and dark
+// negative space on the left, so the heading sits over empty black and stays
+// legible without a scrim fighting the art. Decorative only — every banner is
+// aria-hidden and the heading it carries is real text, never baked into the
+// image.
+function TabBanner({
+  src,
+  title,
+  sub,
+}: {
+  src: string;
+  title: string;
+  sub: string;
+}) {
+  return (
+    <div className="relative mb-4 overflow-hidden rounded-2xl border border-white/10 bg-neutral-950">
+      <Image
+        src={src}
+        alt=""
+        aria-hidden
+        width={1600}
+        height={686}
+        priority={false}
+        className="pointer-events-none h-28 w-full object-cover object-right select-none sm:h-32"
+      />
+      {/* Left-to-right fade: guarantees the copy's contrast even if the art
+          ever changes, without dimming the subject on the right. */}
+      <div className="absolute inset-0 bg-gradient-to-r from-neutral-950 via-neutral-950/80 to-transparent" />
+      <div className="absolute inset-0 flex flex-col justify-center px-4">
+        <p className="font-heading text-xl leading-none text-white sm:text-2xl">
+          {title}
+        </p>
+        <p className="mt-1.5 max-w-[26ch] text-[11px] leading-snug text-neutral-400 sm:text-xs">
+          {sub}
+        </p>
+      </div>
+    </div>
+  );
+}
 
 function Panel({
   children,
@@ -170,55 +211,67 @@ function ReferralTab({
   };
 
   return (
-    <div className="space-y-4">
-      <Panel>
-        <p className="text-[11px] tracking-wide text-white/40 uppercase">
-          Your invite link
-        </p>
-        <div className="mt-2 flex items-center gap-2">
-          <code className="min-w-0 flex-1 truncate rounded-lg bg-neutral-900 px-3 py-2 text-xs text-neutral-300">
-            {invitePath}
-          </code>
-          <Pill size="sm" variant="secondary" onClick={copy} aria-live="polite">
-            {copied ? (
-              <Check className="h-4 w-4" aria-hidden />
-            ) : (
-              <Copy className="h-4 w-4" aria-hidden />
-            )}
-            {copied ? 'Copied' : 'Copy'}
-          </Pill>
+    <div>
+      <TabBanner
+        src="/images/task/referral-banner.webp"
+        title="INVITE & EARN"
+        sub="Every pack your friends rip pays you a weekly cut."
+      />
+      <div className="space-y-4">
+        <Panel>
+          <p className="text-[11px] tracking-wide text-white/40 uppercase">
+            Your invite link
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded-lg bg-neutral-900 px-3 py-2 text-xs text-neutral-300">
+              {invitePath}
+            </code>
+            <Pill
+              size="sm"
+              variant="secondary"
+              onClick={copy}
+              aria-live="polite"
+            >
+              {copied ? (
+                <Check className="h-4 w-4" aria-hidden />
+              ) : (
+                <Copy className="h-4 w-4" aria-hidden />
+              )}
+              {copied ? 'Copied' : 'Copy'}
+            </Pill>
+          </div>
+          <p className="mt-2 text-xs leading-relaxed text-neutral-500">
+            Friends who sign up through your link count toward your weekly
+            commission — a cut of everything they rip, paid every Wednesday.
+          </p>
+        </Panel>
+
+        <div className="grid grid-cols-2 gap-2">
+          <Stat label="Referrals" value={String(data.downline_count)} />
+          <Stat
+            label="Their spend this week"
+            value={fromCents(data.week.turnover_cents)}
+          />
+          <Stat
+            label={data.week.partner ? 'Partner rate' : 'Current rate'}
+            value={pct(data.week.rate_bp)}
+          />
+          <Stat
+            label="Projected payout"
+            value={fromCents(data.week.projected_cents)}
+          />
         </div>
-        <p className="mt-2 text-xs leading-relaxed text-neutral-500">
-          Friends who sign up through your link count toward your weekly
-          commission — a cut of everything they rip, paid every Wednesday.
-        </p>
-      </Panel>
 
-      <div className="grid grid-cols-2 gap-2">
-        <Stat label="Referrals" value={String(data.downline_count)} />
-        <Stat
-          label="Their spend this week"
-          value={fromCents(data.week.turnover_cents)}
-        />
-        <Stat
-          label={data.week.partner ? 'Partner rate' : 'Current rate'}
-          value={pct(data.week.rate_bp)}
-        />
-        <Stat
-          label="Projected payout"
-          value={fromCents(data.week.projected_cents)}
-        />
+        <Panel>
+          <p className="mb-1 text-[11px] tracking-wide text-white/40 uppercase">
+            Past payouts
+          </p>
+          <HistoryList
+            rows={data.history}
+            empty="No payouts yet — share your link to start earning."
+          />
+        </Panel>
       </div>
-
-      <Panel>
-        <p className="mb-1 text-[11px] tracking-wide text-white/40 uppercase">
-          Past payouts
-        </p>
-        <HistoryList
-          rows={data.history}
-          empty="No payouts yet — share your link to start earning."
-        />
-      </Panel>
     </div>
   );
 }
@@ -238,33 +291,40 @@ function VipTab({
     );
   }
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-2">
-        <Stat label="VIP level" value={`L${data.level}`} />
-        <Stat label="Rebate rate" value={pct(data.rebate_bp)} />
-        <Stat
-          label="Your spend this week"
-          value={fromCents(data.week.turnover_cents)}
-        />
-        <Stat
-          label="Projected rebate"
-          value={fromCents(data.week.projected_cents)}
-        />
-      </div>
-      <p className="px-1 text-xs leading-relaxed text-neutral-500">
-        Rebate — every week, your VIP level pays back a slice of everything you
-        ripped, as credit, every Wednesday.{' '}
-        {data.rebate_bp === 0 && 'Level up to unlock a rebate rate.'}
-      </p>
-      <Panel>
-        <p className="mb-1 text-[11px] tracking-wide text-white/40 uppercase">
-          Past rebates
+    <div>
+      <TabBanner
+        src="/images/task/vip-banner.webp"
+        title="VIP REBATE"
+        sub="Your level pays back a slice of everything you rip."
+      />
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-2">
+          <Stat label="VIP level" value={`L${data.level}`} />
+          <Stat label="Rebate rate" value={pct(data.rebate_bp)} />
+          <Stat
+            label="Your spend this week"
+            value={fromCents(data.week.turnover_cents)}
+          />
+          <Stat
+            label="Projected rebate"
+            value={fromCents(data.week.projected_cents)}
+          />
+        </div>
+        <p className="px-1 text-xs leading-relaxed text-neutral-500">
+          Rebate — every week, your VIP level pays back a slice of everything
+          you ripped, as credit, every Wednesday.{' '}
+          {data.rebate_bp === 0 && 'Level up to unlock a rebate rate.'}
         </p>
-        <HistoryList
-          rows={data.history}
-          empty="No rebates yet — rip packs to build this week's rebate."
-        />
-      </Panel>
+        <Panel>
+          <p className="mb-1 text-[11px] tracking-wide text-white/40 uppercase">
+            Past rebates
+          </p>
+          <HistoryList
+            rows={data.history}
+            empty="No rebates yet — rip packs to build this week's rebate."
+          />
+        </Panel>
+      </div>
     </div>
   );
 }
@@ -394,75 +454,82 @@ function TasksTab({
     });
 
   return (
-    <div className="space-y-4">
-      <Panel className="flex items-center gap-3">
-        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-neutral-900">
-          <CalendarCheck className="text-chase h-5 w-5" aria-hidden />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-white">Daily check-in</p>
-          <p className="text-xs text-neutral-500">
-            Week of {data.week_start} — check-ins feed the weekly tasks.
+    <div>
+      <TabBanner
+        src="/images/task/tasks-banner.webp"
+        title="WEEKLY TASKS"
+        sub="Check in, rip packs, hit milestones — claim the rewards."
+      />
+      <div className="space-y-4">
+        <Panel className="flex items-center gap-3">
+          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-neutral-900">
+            <CalendarCheck className="text-chase h-5 w-5" aria-hidden />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-white">Daily check-in</p>
+            <p className="text-xs text-neutral-500">
+              Week of {data.week_start} — check-ins feed the weekly tasks.
+            </p>
+          </div>
+          <Pill
+            size="sm"
+            variant={data.checked_in_today ? 'ghost' : 'primary'}
+            disabled={data.checked_in_today || pending}
+            onClick={checkIn}
+          >
+            {data.checked_in_today ? (
+              <>
+                <Check className="h-4 w-4" aria-hidden /> Done
+              </>
+            ) : (
+              'Check in'
+            )}
+          </Pill>
+        </Panel>
+
+        {notice && (
+          <p
+            aria-live="polite"
+            className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-neutral-300"
+          >
+            {notice}
           </p>
-        </div>
-        <Pill
-          size="sm"
-          variant={data.checked_in_today ? 'ghost' : 'primary'}
-          disabled={data.checked_in_today || pending}
-          onClick={checkIn}
-        >
-          {data.checked_in_today ? (
-            <>
-              <Check className="h-4 w-4" aria-hidden /> Done
-            </>
+        )}
+
+        <Panel>
+          <p className="mb-1 flex items-center gap-1.5 text-[11px] tracking-wide text-white/40 uppercase">
+            <ListChecks className="h-3.5 w-3.5" aria-hidden /> Weekly tasks
+          </p>
+          {weekly.length === 0 ? (
+            <p className="py-3 text-center text-sm text-neutral-500">
+              No weekly tasks right now — check back soon.
+            </p>
           ) : (
-            'Check in'
+            <ul className="divide-y divide-white/5">
+              {weekly.map((t) => (
+                <TaskRow key={t.id} task={t} onDone={setNotice} />
+              ))}
+            </ul>
           )}
-        </Pill>
-      </Panel>
+        </Panel>
 
-      {notice && (
-        <p
-          aria-live="polite"
-          className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-neutral-300"
-        >
-          {notice}
-        </p>
-      )}
-
-      <Panel>
-        <p className="mb-1 flex items-center gap-1.5 text-[11px] tracking-wide text-white/40 uppercase">
-          <ListChecks className="h-3.5 w-3.5" aria-hidden /> Weekly tasks
-        </p>
-        {weekly.length === 0 ? (
-          <p className="py-3 text-center text-sm text-neutral-500">
-            No weekly tasks right now — check back soon.
+        <Panel>
+          <p className="mb-1 flex items-center gap-1.5 text-[11px] tracking-wide text-white/40 uppercase">
+            <Trophy className="h-3.5 w-3.5" aria-hidden /> Achievements
           </p>
-        ) : (
-          <ul className="divide-y divide-white/5">
-            {weekly.map((t) => (
-              <TaskRow key={t.id} task={t} onDone={setNotice} />
-            ))}
-          </ul>
-        )}
-      </Panel>
-
-      <Panel>
-        <p className="mb-1 flex items-center gap-1.5 text-[11px] tracking-wide text-white/40 uppercase">
-          <Trophy className="h-3.5 w-3.5" aria-hidden /> Achievements
-        </p>
-        {achievements.length === 0 ? (
-          <p className="py-3 text-center text-sm text-neutral-500">
-            No achievements configured yet.
-          </p>
-        ) : (
-          <ul className="divide-y divide-white/5">
-            {achievements.map((t) => (
-              <TaskRow key={t.id} task={t} onDone={setNotice} />
-            ))}
-          </ul>
-        )}
-      </Panel>
+          {achievements.length === 0 ? (
+            <p className="py-3 text-center text-sm text-neutral-500">
+              No achievements configured yet.
+            </p>
+          ) : (
+            <ul className="divide-y divide-white/5">
+              {achievements.map((t) => (
+                <TaskRow key={t.id} task={t} onDone={setNotice} />
+              ))}
+            </ul>
+          )}
+        </Panel>
+      </div>
     </div>
   );
 }
