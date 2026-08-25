@@ -93,3 +93,22 @@ computed Tuesday into an admin-approved settlement run and paid Wednesday —
 and shares nothing with the removed per-purchase fan-out except the retired
 `RF` ledger type, which it re-adopts for its payout rows. New vocabulary lives
 in `CONTEXT.md` §Rewards and VIP.
+
+### Amended 2026-08-26 — the successor has no VIP rebate
+
+"plus a VIP personal rebate" above describes the design as approved, not what
+shipped. The rebate was CUT before implementation: see the **Amendment —
+2026-08-25** block at the top of the design spec, item 1. There is no
+`vip_level.rebate_bp`, no `vip_rebate` credit reason, no `GET /store/vip-rebate`
+and no VIP tab on `/task`; `grep -rn rebate backend/packages/api/src` returns
+nothing. With the rebate gone a settlement line is always a referral
+commission, so `weekly_settlement_line.kind` and
+`weekly_settlement.total_rebate_cents` went with it — the line table's unique
+index is `IDX_wsl_settlement_customer_unique` on
+`(settlement_id, customer_id)`, one line per customer per run.
+
+Two more shipped shapes this paragraph pre-dates: `/task` is two tabs (Weekly
+Tasks, Achievements) with referrals on their own `/referral` page, and the
+weekly-TASK week resets **Monday** 00:00 MYT (`taskWeekFor`) while the
+settlement week stays Tuesday (`referralWeekFor`). `CONTEXT.md` §Rewards and
+VIP carries both anchors as separate glossary entries.

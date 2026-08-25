@@ -30,8 +30,10 @@ an equivalent inline note: `src/lib/actions/daily.ts`,
 `src/lib/actions/referral.ts` (**deleted by #427, 2026-08-12** — see the
 Amended section below), `src/lib/referral-cookie.ts` (**deleted by #427** —
 carried a 30-day cookie revert hazard note; see the Amended section),
-`src/components/rewards/PrizeReveal.tsx`,
+`src/components/rewards/PrizeReveal.tsx` (**deleted by #490, 2026-08-25** —
+see the 2026-08-26 amendment below),
 `src/components/rewards/WithdrawForm.tsx` (full banner); `src/components/account/ui.tsx`
+(**note since removed** — see the 2026-08-26 amendment)
 and `src/lib/format.ts`'s `voucherLabel` (inline "(suspended 2026-07-29)" /
 "UNUSED while … suspended" notes, not the full banner block); and — added
 alongside this ADR — `src/app/(account)/vip/vip-benefits.ts` and
@@ -43,10 +45,11 @@ full banner).
 - Grep `SUSPENDED` before deleting anything that looks like an unreferenced
   orphan in this codebase. A file carrying the banner is deliberate, not
   dead code.
-- `CONTEXT.md`'s "Rewards, VIP, and referrals" glossary section describes
-  these surfaces in the present tense; a marker line under that heading
-  points here so a reader doesn't mistake vocabulary-for-a-suspended-surface
-  as vocabulary-for-a-live-surface.
+- `CONTEXT.md`'s `## Rewards and VIP` glossary section (renamed from
+  "Rewards, VIP, and referrals" when ADR 0007 removed the referral half)
+  describes these surfaces in the present tense; a marker line under that
+  heading points here so a reader doesn't mistake
+  vocabulary-for-a-suspended-surface as vocabulary-for-a-live-surface.
 - **Review-by: 2026-10-01.** If the reward economy has not been restored (or
   the daily tasks/missions system has not shipped as its replacement) by
   then, decide retire-vs-restore explicitly rather than letting the
@@ -77,7 +80,9 @@ surfaces (`ReferralCookieClaim`, the referral cookie helpers).
 their holders (`daily.ts`, `PrizeReveal.tsx`, `WithdrawForm.tsx`,
 `vip-benefits.ts`, the `account/ui.tsx` / `format.ts` inline notes) are
 untouched, and restoring them is still a revert: delete the banner, re-add
-the route. **Referrals are not.** Restoring the referral write path now means
+the route. (Superseded 2026-08-26: `PrizeReveal.tsx` was later deleted and
+`account/ui.tsx` lost its note — see the last amendment.)
+**Referrals are not.** Restoring the referral write path now means
 rebuilding `linkSponsor` (with an actual cycle guard this time) and the
 storefront surfaces from scratch — a REBUILD, not a revert.
 
@@ -104,3 +109,35 @@ See also: `docs/superpowers/specs/2026-07-29-suspend-vip-referral-surfaces-desig
 and `docs/superpowers/plans/2026-07-29-suspend-vip-referral-surfaces.md`, both
 of which named `referral.ts` / `referral-cookie.ts` as "keep, do not delete"
 and now carry their own one-line pointers to this amendment.
+
+## Amended 2026-08-26 — a listed holder was deleted; holder list regenerated
+
+**`src/components/rewards/PrizeReveal.tsx` no longer exists.** `git log
+--diff-filter=D` puts its deletion in `1ad7bdd5` (#490, 2026-08-25) — the
+weekly-commission / `/task` change. It was listed above as a kept holder, so
+the "revert, not a rewrite" promise is now partially impossible for the reward
+half too: restoring the Reward Draw means rebuilding that component, not just
+deleting a banner. Nobody caught it because this list is hand-maintained and
+nothing compares it against the tree.
+
+**`src/components/account/ui.tsx` is no longer a holder.** `grep -i suspend`
+on it returns nothing; the inline note the list credited it with is gone. It
+is a live file — do not read its presence above as a reason to keep anything.
+
+**Reward-economy holders, verified 2026-08-26:**
+
+```
+src/app/(account)/vip/vip-benefits.ts        full banner
+src/components/rewards/WithdrawForm.tsx      full banner
+src/lib/actions/daily.ts                     full banner
+src/lib/format.ts (voucherLabel)             inline note, lowercase
+```
+
+Note for whoever automates this check: `grep -rl SUSPENDED src/` does **not**
+reproduce that list. It misses `format.ts`, whose note is lowercase
+("UNUSED while the reward surfaces are suspended"), and it returns three files
+that belong to a *different* suspension — the 2026-08-11 money-dot removal in
+`src/components/account/credit-dot.tsx`, plus the two that reference its
+banner (`src/components/app-shell/TopUpProvider.tsx` and
+`src/components/app-shell/__tests__/topup-deposit-watch.test.ts`). Those are
+not reward-economy holders and are out of scope for this ADR.
