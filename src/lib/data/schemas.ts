@@ -309,9 +309,8 @@ export const CREDIT_REASONS = [
   'voucher_claim',
   'reward_credit',
   'daily_reward',
-  // Referral rebuild (spec 2026-08-24): the Wednesday settlement payouts.
+  // Referral rebuild (spec 2026-08-24): the Wednesday settlement payout.
   'referral_commission',
-  'vip_rebate',
 ] as const;
 export type CreditReason = (typeof CREDIT_REASONS)[number];
 
@@ -764,19 +763,6 @@ export const ReferralSummarySchema = z.looseObject({
 });
 export type ReferralSummary = z.infer<typeof ReferralSummarySchema>;
 
-/** GET /store/vip-rebate — the /task VIP tab payload. */
-export const VipRebateSchema = z.looseObject({
-  level: finite,
-  rebate_bp: finite,
-  week: z.looseObject({
-    start: z.string(),
-    turnover_cents: finite,
-    projected_cents: finite,
-  }),
-  history: z.array(SettlementHistoryRowSchema),
-});
-export type VipRebate = z.infer<typeof VipRebateSchema>;
-
 /** One task row of GET /store/tasks (Phase B). requirement/reward are the
  *  backend's discriminated unions; the tab renders from progress + reward, so
  *  both stay loose JSON here (deploy-skew rule: an unknown new requirement
@@ -799,6 +785,7 @@ export type TaskEntry = z.infer<typeof TaskEntrySchema>;
 /** GET /store/tasks — the /task Tasks tab payload. */
 export const TaskHubSchema = z.looseObject({
   week_start: z.string(),
+  vip_level: finite,
   checked_in_today: z.boolean(),
   tasks: z.array(TaskEntrySchema),
 });

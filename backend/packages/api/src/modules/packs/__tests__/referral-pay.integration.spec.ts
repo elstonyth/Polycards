@@ -8,8 +8,6 @@ import WeeklySettlement from '../models/weekly-settlement';
 import WeeklySettlementLine from '../models/weekly-settlement-line';
 import CreditTransaction from '../models/credit-transaction';
 import CustomerAccountState from '../models/customer-account-state';
-import VipLevel from '../models/vip-level';
-import VipMemberState from '../models/vip-member-state';
 import AdminActionAudit from '../models/admin-action-audit';
 import LedgerEntry from '../models/ledger-entry';
 import LedgerSequence from '../models/ledger-sequence';
@@ -27,8 +25,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
     WeeklySettlementLine,
     CreditTransaction,
     CustomerAccountState,
-    VipLevel,
-    VipMemberState,
     AdminActionAudit,
     LedgerEntry,
     LedgerSequence,
@@ -36,30 +32,24 @@ moduleIntegrationTestRunner<PacksModuleService>({
   testSuite: ({ service }) => {
     const week = referralWeekFor(new Date());
 
-    // Seed one closed draft: R earns commission on A's spend; A earns a
-    // rebate. Returns the run id. DB resets between tests, so each test
+    // Seed one closed draft with TWO payable lines: R earns on A's spend,
+    // R2 on B's. Returns the run id. DB resets between tests, so each test
     // builds its own world through this.
     async function seedClosedWeek(): Promise<string> {
-      await service.createVipLevels([
-        {
-          level: 1,
-          spend_threshold: 0,
-          voucher_amount: 0,
-          box_tier: 'a',
-          rebate_bp: 100, // 1% rebate at L1 so A gets a line without state
-        },
-      ]);
       await service.createReferralAttributions([
         { customer_id: 'cus_a', referrer_id: 'cus_r' },
+        { customer_id: 'cus_b', referrer_id: 'cus_r2' },
       ]);
       await service.createCreditTransactions([
         { customer_id: 'cus_a', amount: -1000, reason: 'pack_open' }, // RM1000
+        { customer_id: 'cus_b', amount: -2000, reason: 'pack_open' }, // RM2000
       ]);
       const r = await service.closeReferralWeek({
         weekStartIso: week.weekStartIso,
       });
       expect(r.created).toBe(true);
-      expect(r.lines).toBe(2); // R commission 50bp x 100000c = 500c; A rebate 1000c
+      // Tier 1 (0.5%): R 50bp x 100,000c = 500c; R2 50bp x 200,000c = 1000c.
+      expect(r.lines).toBe(2);
       return r.settlementId;
     }
 
@@ -91,14 +81,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
       const lines = await service.listWeeklySettlementLines({
         settlement_id: id,
       });
-      const rebate = lines.find((l) => l.kind === 'vip_rebate')!;
+      const target = lines.find((l) => l.customer_id === 'cus_r2')!;
       await service.voidSettlementLine({
-        lineId: rebate.id,
+        lineId: target.id,
         adminId: 'admin_1',
         reason: 'suspicious volume',
       });
       const [voided] = await service.listWeeklySettlementLines({
-        id: rebate.id,
+        id: target.id,
       });
       expect(voided.status).toBe('voided');
       expect(voided.void_reason).toBe('suspicious volume');
@@ -111,11 +101,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(res.paid).toBe(1); // only the commission line
 
       // The voided customer got no money.
-      const aTxns = await service.listCreditTransactions({
-        customer_id: 'cus_a',
-        reason: 'vip_rebate',
+      const r2Txns = await service.listCreditTransactions({
+        customer_id: 'cus_r2',
+        reason: 'referral_commission',
       });
-      expect(aTxns).toHaveLength(0);
+      expect(r2Txns).toHaveLength(0);
     });
 
     it('rejects voiding a paid line', async () => {
@@ -127,7 +117,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
       await service.payWeeklySettlement({ settlementId: id });
       const [line] = await service.listWeeklySettlementLines({
         settlement_id: id,
-        kind: 'referral_commission',
       });
       expect(line.status).toBe('paid');
       await expect(
@@ -163,13 +152,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(rTxns).toHaveLength(1);
       expect(Number(rTxns[0].amount)).toBe(5);
 
-      // A: 1% of RM1000 = RM10, reason vip_rebate.
-      const aTxns = await service.listCreditTransactions({
-        customer_id: 'cus_a',
-        reason: 'vip_rebate',
+      // R2: 0.5% of RM2000 = RM10.
+      const r2Txns = await service.listCreditTransactions({
+        customer_id: 'cus_r2',
+        reason: 'referral_commission',
       });
-      expect(aTxns).toHaveLength(1);
-      expect(Number(aTxns[0].amount)).toBe(10);
+      expect(r2Txns).toHaveLength(1);
+      expect(Number(r2Txns[0].amount)).toBe(10);
 
       // Each line carries its transaction and an RF ledger row keyed on it.
       const lines = await service.listWeeklySettlementLines({
@@ -195,7 +184,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(again.paid).toBe(0);
       expect(
         await service.listCreditTransactions({
-          reason: ['referral_commission', 'vip_rebate'],
+          reason: 'referral_commission',
         }),
       ).toHaveLength(2);
     });
@@ -206,9 +195,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // the same source deletedCustomerIds reads everywhere else.
       await service.createAdminActionAudits([
         {
-          admin_id: 'cus_a',
+          admin_id: 'cus_r2',
           entity_type: 'customer',
-          entity_id: 'cus_a',
+          entity_id: 'cus_r2',
           action: 'delete_account',
           before: null,
           after: null,
@@ -222,15 +211,15 @@ moduleIntegrationTestRunner<PacksModuleService>({
       const res = await service.payWeeklySettlement({ settlementId: id });
       expect(res.paid).toBe(1);
       expect(res.skipped).toBe(1);
-      const [aLine] = await service.listWeeklySettlementLines({
+      const [r2Line] = await service.listWeeklySettlementLines({
         settlement_id: id,
-        customer_id: 'cus_a',
+        customer_id: 'cus_r2',
       });
-      expect(aLine.status).toBe('voided');
-      expect(aLine.void_reason).toBe('account_deleted');
-      // The skip deducted A's rebate from the run's stored totals.
+      expect(r2Line.status).toBe('voided');
+      expect(r2Line.void_reason).toBe('account_deleted');
+      // The skip deducted R2's line from the run's stored totals.
       const [run] = await service.listWeeklySettlements({ id });
-      expect(run.total_rebate_cents).toBe(0);
+      expect(run.total_commission_cents).toBe(500);
       // Run still flips to paid — nothing pending remains.
       expect(run.status).toBe('paid');
     });
@@ -240,15 +229,15 @@ moduleIntegrationTestRunner<PacksModuleService>({
       const lines = await service.listWeeklySettlementLines({
         settlement_id: id,
       });
-      const rebate = lines.find((l) => l.kind === 'vip_rebate')!;
+      const target = lines.find((l) => l.customer_id === 'cus_r2')!;
       await service.voidSettlementLine({
-        lineId: rebate.id,
+        lineId: target.id,
         adminId: 'admin_1',
         reason: 'test',
       });
       const [run] = await service.listWeeklySettlements({ id });
-      expect(run.total_rebate_cents).toBe(0);
-      expect(run.total_commission_cents).toBe(500); // untouched
+      // 1500c closed minus R2's 1000c line; R's 500c stands.
+      expect(run.total_commission_cents).toBe(500);
     });
 
     it('pay writes a pay_settlement audit row (cron identity when no admin)', async () => {
@@ -320,13 +309,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
       const before = await service.listCreditTransactions({
         customer_id: line.customer_id,
-        reason: line.kind,
+        reason: 'referral_commission',
       });
       const res = await service.payWeeklySettlement({ settlementId: id });
       expect(res.paid).toBe(0); // replayed, not re-paid
       const after = await service.listCreditTransactions({
         customer_id: line.customer_id,
-        reason: line.kind,
+        reason: 'referral_commission',
       });
       expect(after).toHaveLength(before.length); // NO second credit
       const [repaired] = await service.listWeeklySettlementLines({

@@ -1,8 +1,8 @@
 /**
- * Referral + VIP rebate data seams for the /task hub (rebuild, spec
- * 2026-08-24). Server-side authed fetches, zod-validated (looseObject per
- * house style), null on any failure — the tabs then render their logged-out /
- * unavailable panel instead of crashing the page.
+ * Referral data seam for the /referral page (rebuild, spec 2026-08-24).
+ * Server-side authed fetch, zod-validated (looseObject per house style), null
+ * on any failure — the page then renders its logged-out / unavailable panel
+ * instead of crashing.
  */
 import 'server-only';
 import { sdk } from '@/lib/medusa';
@@ -11,9 +11,7 @@ import { getAuthToken } from '@/lib/data/customer';
 import {
   parseOne,
   ReferralSummarySchema,
-  VipRebateSchema,
   type ReferralSummary,
-  type VipRebate,
 } from '@/lib/data/schemas';
 
 export async function getReferralSummary(): Promise<ReferralSummary | null> {
@@ -27,21 +25,6 @@ export async function getReferralSummary(): Promise<ReferralSummary | null> {
     return parseOne(ReferralSummarySchema, raw);
   } catch (error) {
     logger.error('[referral] summary load failed:', error);
-    return null;
-  }
-}
-
-export async function getVipRebate(): Promise<VipRebate | null> {
-  const token = await getAuthToken();
-  if (!token) return null;
-  try {
-    const raw = await sdk.client.fetch('/store/vip-rebate', {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
-    return parseOne(VipRebateSchema, raw);
-  } catch (error) {
-    logger.error('[referral] vip-rebate load failed:', error);
     return null;
   }
 }

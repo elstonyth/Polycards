@@ -822,8 +822,6 @@ export interface VipLevelDTO {
   voucher_amount: number; // MYR
   box_tier: string;
   frame_unlock: boolean;
-  /** Weekly personal rebate (referral rebuild, spec 2026-08-24), basis points. */
-  rebate_bp: number;
 }
 
 export const getVipLevels = () =>
@@ -1755,13 +1753,11 @@ export interface ReferralSettlement {
   approved_at: string | null;
   paid_at: string | null;
   total_commission_cents: number;
-  total_rebate_cents: number;
 }
 
 export interface ReferralSettlementLine {
   id: string;
   customer_id: string;
-  kind: 'referral_commission' | 'vip_rebate';
   basis_cents: number;
   rate_bp: number;
   amount_cents: number;
@@ -1826,7 +1822,6 @@ export interface CustomerReferralCard {
   lines: {
     id: string;
     settlement_id: string;
-    kind: 'referral_commission' | 'vip_rebate';
     basis_cents: number;
     rate_bp: number;
     amount_cents: number;
@@ -1861,6 +1856,9 @@ export interface AdminTaskDefinition {
   reward: Record<string, unknown>;
   active: boolean;
   sort: number;
+  /** Optional run window (ISO). null/null = runs until retired. */
+  starts_at: string | null;
+  ends_at: string | null;
 }
 
 export async function listTaskDefinitions(): Promise<AdminTaskDefinition[]> {
@@ -1876,6 +1874,8 @@ export async function saveTaskDefinition(input: {
   reward: Record<string, unknown>;
   active: boolean;
   sort: number;
+  starts_at: string | null;
+  ends_at: string | null;
   reason: string;
 }): Promise<{ id: string }> {
   return postJson<{ id: string }>('/admin/tasks', input);

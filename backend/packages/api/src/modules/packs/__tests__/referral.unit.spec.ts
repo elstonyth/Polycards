@@ -4,6 +4,7 @@ import {
   payoutCents,
   referralWeekFor,
   resolveRateBp,
+  taskWeekFor,
 } from '../referral';
 
 describe('resolveRateBp', () => {
@@ -74,5 +75,28 @@ describe('referral week (Tue 00:00 MYT → Tue 00:00 MYT)', () => {
     const w = lastClosedReferralWeek(new Date('2026-08-26T02:00:00Z')); // Wed MYT
     expect(w.weekStartIso).toBe('2026-08-18');
     expect(w.endUtcExcl.toISOString()).toBe('2026-08-24T16:00:00.000Z');
+  });
+});
+
+// The player-facing board sits on a DIFFERENT anchor from the money cycle —
+// a regression here silently re-opens every weekly claim a day early.
+describe('task week (Mon 00:00 MYT → Mon 00:00 MYT)', () => {
+  it('a Monday morning MYT is already the new task week', () => {
+    // 2026-08-24 is a Monday; 00:00 MYT = 2026-08-23T16:00:00Z.
+    const w = taskWeekFor(new Date('2026-08-24T02:00:00Z')); // Mon 10:00 MYT
+    expect(w.weekStartIso).toBe('2026-08-24');
+    expect(w.startUtc.toISOString()).toBe('2026-08-23T16:00:00.000Z');
+    expect(w.endUtcExcl.toISOString()).toBe('2026-08-30T16:00:00.000Z');
+  });
+
+  it('one instant before Monday 00:00 MYT is still the old week', () => {
+    const w = taskWeekFor(new Date('2026-08-23T15:59:59Z'));
+    expect(w.weekStartIso).toBe('2026-08-17');
+  });
+
+  it('is one day ahead of the settlement week mid-cycle', () => {
+    const at = new Date('2026-08-26T02:00:00Z'); // Wed MYT
+    expect(taskWeekFor(at).weekStartIso).toBe('2026-08-24'); // Mon
+    expect(referralWeekFor(at).weekStartIso).toBe('2026-08-25'); // Tue
   });
 });

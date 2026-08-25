@@ -468,7 +468,7 @@ const ReferralCardBody = ({
             {data.lines.slice(0, 8).map((l) => (
               <li key={l.id} className="flex items-center gap-2">
                 <Badge size="2xsmall">
-                  {l.kind === 'referral_commission' ? 'Commission' : 'Rebate'}
+                  Commission
                 </Badge>
                 <span className="tabular-nums">{rm(l.amount_cents / 100)}</span>
                 <span className="text-ui-fg-muted text-xs">{l.status}</span>

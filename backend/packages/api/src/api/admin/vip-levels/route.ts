@@ -22,7 +22,6 @@ export async function GET(
         'voucher_amount',
         'box_tier',
         'frame_unlock',
-        'rebate_bp',
       ],
       take: 1000,
     },
@@ -34,7 +33,6 @@ export async function GET(
       voucher_amount: Number(r.voucher_amount),
       box_tier: r.box_tier,
       frame_unlock: r.frame_unlock,
-      rebate_bp: Number(r.rebate_bp ?? 0),
     }))
     .sort((a, b) => a.level - b.level);
   res.json({ levels });

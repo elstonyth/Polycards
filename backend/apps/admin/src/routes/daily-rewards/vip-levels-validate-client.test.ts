@@ -10,23 +10,7 @@ const row = (over: Partial<VipLevelRow> = {}): VipLevelRow => ({
   voucherInput: '0',
   boxTier: 'a',
   frameUnlock: false,
-  rebateInput: '0',
   ...over,
-});
-
-test('rebate: out-of-range, sub-bp and blank are flagged; valid passes', () => {
-  expect(validateVipLevelsClient([row({ rebateInput: '101' })])).toEqual([
-    'Level 1: rebate must be 0–100% in steps of 0.01.',
-  ]);
-  expect(validateVipLevelsClient([row({ rebateInput: '0.505' })])).toEqual([
-    'Level 1: rebate must be 0–100% in steps of 0.01.',
-  ]);
-  expect(validateVipLevelsClient([row({ rebateInput: '' })])).toEqual([
-    'Level 1: rebate must be 0–100% in steps of 0.01.',
-  ]);
-  expect(validateVipLevelsClient([row({ rebateInput: '1.5' })])).toEqual([]);
-  // Float hazard: 1.15 * 100 !== 115 exactly — must still be accepted.
-  expect(validateVipLevelsClient([row({ rebateInput: '1.15' })])).toEqual([]);
 });
 
 

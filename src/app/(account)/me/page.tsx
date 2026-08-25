@@ -11,6 +11,7 @@ import {
   Package,
   Receipt,
   Settings,
+  Users,
   type LucideIcon,
 } from 'lucide-react';
 import { getCustomer } from '@/lib/data/customer';
@@ -38,6 +39,7 @@ export const metadata: Metadata = {
 // 2026-08-05 with real GlobePay payouts: saved accounts the withdraw form
 // prefills, managed at /bank.
 const QUICK_ACCESS: { label: string; href: string; icon: LucideIcon }[] = [
+  { label: 'Referral', href: '/referral', icon: Users },
   { label: 'History', href: '/transactions', icon: Receipt },
   { label: 'Orders', href: '/orders', icon: Package },
   { label: 'Bank', href: '/bank', icon: Landmark },
@@ -319,7 +321,7 @@ export default async function MePage() {
           <p className="text-[12px] font-semibold uppercase tracking-wide text-neutral-400">
             Quick access
           </p>
-          <div className="mt-4 grid grid-cols-4 gap-y-5">
+          <div className="mt-4 grid grid-cols-3 gap-y-5">
             {QUICK_ACCESS.map((item) => {
               const Icon = item.icon;
               // A phoneless account is refused by every money/goods path

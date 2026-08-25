@@ -13,7 +13,6 @@ export const WeeklySettlement = model.define('weekly_settlement', {
   approved_at: model.dateTime().nullable(),
   paid_at: model.dateTime().nullable(),
   total_commission_cents: model.number().default(0),
-  total_rebate_cents: model.number().default(0),
 });
 
 export default WeeklySettlement;

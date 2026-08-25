@@ -10,8 +10,6 @@ export interface VipLevelRow {
   voucherInput: string;
   boxTier: string;
   frameUnlock: boolean;
-  /** Weekly rebate %, as typed (wire = basis points, UI speaks percent). */
-  rebateInput: string;
 }
 
 // A blank field is NOT a valid 0 — Number('') coerces to 0, which would let an
@@ -50,16 +48,6 @@ export function validateVipLevelsClient(rows: VipLevelRow[]): string[] {
     // the redeeming surface is suspended), nothing can breach the cap, and the
     // column is gone. All three stay enforced server-side, surfacing as a toast
     // rather than a permanent block.
-    const rebate = num(r.rebateInput);
-    // Float-safe hundredths check — Number.isInteger(1.15 * 100) is false.
-    if (
-      !Number.isFinite(rebate) ||
-      rebate < 0 ||
-      rebate > 100 ||
-      Math.abs(rebate * 100 - Math.round(rebate * 100)) >= 1e-6
-    ) {
-      errors.push(`Level ${level}: rebate must be 0–100% in steps of 0.01.`);
-    }
     if (r.frameUnlock && !FRAME_LEVELS.includes(level))
       errors.push(
         `Level ${level}: a frame can only unlock on a decade level (10, 20, … 100).`,

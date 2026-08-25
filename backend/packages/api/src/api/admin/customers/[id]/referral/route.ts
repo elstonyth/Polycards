@@ -41,7 +41,6 @@ export async function GET(
     lines: lines.map((l) => ({
       id: l.id,
       settlement_id: l.settlement_id,
-      kind: l.kind,
       basis_cents: l.basis_cents,
       rate_bp: l.rate_bp,
       amount_cents: l.amount_cents,

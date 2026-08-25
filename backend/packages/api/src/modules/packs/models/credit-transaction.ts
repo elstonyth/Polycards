@@ -22,10 +22,9 @@ export const CreditTransaction = model
       'voucher_claim',
       'reward_credit',
       'daily_reward',
-      // Referral rebuild (spec 2026-08-24): the Wednesday settlement payouts.
-      // Both are written by payWeeklySettlement, paired with an RF ledger row.
+      // Referral rebuild (spec 2026-08-24): the Wednesday settlement payout,
+      // written by payWeeklySettlement and paired with an RF ledger row.
       'referral_commission',
-      'vip_rebate',
     ]),
     // The pull this credit came from (buyback rows only; null for top-ups).
     // UNIQUE — the DB itself guarantees a pull can never be credited twice,

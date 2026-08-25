@@ -11,11 +11,6 @@ export const VipLevel = model
     voucher_amount: model.bigNumber(),
     box_tier: model.text(),
     frame_unlock: model.boolean().default(false),
-    // Referral rebuild (spec 2026-08-24): weekly personal rebate (回水) on the
-    // member's OWN pack turnover, in basis points. 0 = no rebate at this rung.
-    // NOT the removed direct_referral_pct (that paid commission on DOWNLINE
-    // spend); this pays the spender themself, on the Tue-close/Wed-pay cycle.
-    rebate_bp: model.number().default(0),
     prizes: model.json().nullable(),
   })
   .indexes([

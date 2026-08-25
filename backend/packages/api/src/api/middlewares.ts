@@ -677,12 +677,6 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), referralBindRateLimit],
     },
     {
-      // The customer's VIP rebate panel (GET /store/vip-rebate).
-      matcher: '/store/vip-rebate',
-      method: 'GET',
-      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
-    },
-    {
       // The /task Tasks tab payload (GET /store/tasks).
       matcher: '/store/tasks',
       method: 'GET',

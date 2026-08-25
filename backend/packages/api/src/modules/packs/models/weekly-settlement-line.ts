@@ -1,6 +1,7 @@
 import { model } from '@medusajs/framework/utils';
 
-// One payable line: customer x kind within a settlement run. amount_cents is
+// One payable line: one referrer's commission within a settlement run.
+// amount_cents is
 // frozen at close time (basis x rate, floored to the cent). The Wednesday pay
 // step writes one credit_transaction per line and stamps paid_transaction_id;
 // the paired ledger row's (type='RF', ref_id=<line id>) partial unique index
@@ -11,7 +12,6 @@ export const WeeklySettlementLine = model
     id: model.id().primaryKey(),
     settlement_id: model.text(),
     customer_id: model.text(),
-    kind: model.enum(['referral_commission', 'vip_rebate']),
     basis_cents: model.number(),
     rate_bp: model.number(),
     amount_cents: model.number(),
@@ -32,8 +32,8 @@ export const WeeklySettlementLine = model
       where: 'deleted_at IS NULL',
     },
     {
-      name: 'IDX_wsl_settlement_customer_kind_unique',
-      on: ['settlement_id', 'customer_id', 'kind'],
+      name: 'IDX_wsl_settlement_customer_unique',
+      on: ['settlement_id', 'customer_id'],
       unique: true,
       where: 'deleted_at IS NULL',
     },

@@ -1,6 +1,6 @@
-// One-off QA capture of the /task hub (referral rebuild + task engine).
-// Logs in first — the Referral/VIP/Tasks panels (and their hero banners) only
-// render for an authenticated customer.
+// One-off QA capture of the /task hub and the /referral page (referral
+// rebuild + task engine). Logs in first — every panel below only renders for
+// an authenticated customer.
 // Usage:
 //   PW_BASE=http://localhost:4100 PW_EMAIL=demo@polycards.test \
 //   PW_PASSWORD=... node scripts/qa-task-hub.mjs
@@ -30,15 +30,14 @@ if (EMAIL && PASSWORD) {
   await page.getByRole('button', { name: /^log in$/i }).click();
   // The action redirects and re-renders the hub; wait for the tab list.
   await page
-    .getByRole('tab', { name: /tasks/i })
+    .getByRole('tab', { name: /weekly tasks/i })
     .waitFor({ state: 'attached', timeout: 20000 });
   await page.waitForTimeout(1500);
 }
 
 for (const [tab, file] of [
-  [/tasks/i, 'task-hub-tasks'],
-  [/referral/i, 'task-hub-referral'],
-  [/vip/i, 'task-hub-vip'],
+  [/weekly tasks/i, 'task-hub-weekly'],
+  [/achievements/i, 'task-hub-achievements'],
 ]) {
   // force: the page has a permanently animating badge, so Playwright's
   // stability check never settles; the tabs themselves are static.
@@ -46,6 +45,11 @@ for (const [tab, file] of [
   await page.waitForTimeout(700); // let the banner image paint
   await page.screenshot({ path: `${OUT}/${file}.png`, fullPage: true });
 }
+
+// Referral is its own page now.
+await page.goto(`${BASE}/referral`, { waitUntil: 'domcontentloaded' });
+await page.waitForTimeout(900);
+await page.screenshot({ path: `${OUT}/referral-page.png`, fullPage: true });
 
 console.log('captured 3 screenshots');
 await browser.close();

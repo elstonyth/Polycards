@@ -43,7 +43,6 @@ const rowFromDTO = (l: VipLevelDTO): Row => ({
   voucherInput: String(l.voucher_amount),
   boxTier: l.box_tier,
   frameUnlock: l.frame_unlock,
-  rebateInput: String(l.rebate_bp / 100),
 });
 // Voucher and box tier are no longer edited on this tab (both surfaces are
 // suspended), but both are still LIVE server-side — voucher_amount mints a
@@ -62,9 +61,6 @@ const blankRow = (inheritFrom: Row | undefined, fallbackTier: string): Row => ({
   voucherInput: "0",
   boxTier: inheritFrom?.boxTier ?? fallbackTier,
   frameUnlock: false,
-  // 0 for the same reason voucher doesn't inherit: a rebate is a credit-
-  // minting lever; a new rung must not silently pay one.
-  rebateInput: "0",
 });
 
 const snapshotOf = (rows: Row[]): string =>
@@ -74,7 +70,6 @@ const snapshotOf = (rows: Row[]): string =>
       r.voucherInput,
       r.boxTier,
       r.frameUnlock,
-      r.rebateInput,
     ]),
   );
 
@@ -196,7 +191,6 @@ export const VipLevelsTab = () => {
       voucher_amount: Number(r.voucherInput) || 0,
       box_tier: r.boxTier,
       frame_unlock: r.frameUnlock,
-      rebate_bp: Math.round((Number(r.rebateInput) || 0) * 100),
     }));
     try {
       const res = await save.mutateAsync({ levels, reason: reason.trim() });
@@ -324,7 +318,6 @@ export const VipLevelsTab = () => {
                 <Table.Row>
                   <Table.HeaderCell>Level</Table.HeaderCell>
                   <Table.HeaderCell>Threshold (RM)</Table.HeaderCell>
-                  <Table.HeaderCell>Rebate %</Table.HeaderCell>
                   <Table.HeaderCell>Frame</Table.HeaderCell>
                   <Table.HeaderCell>Actions</Table.HeaderCell>
                 </Table.Row>
@@ -358,17 +351,6 @@ export const VipLevelsTab = () => {
                           onChange={(e) =>
                             setRow(r.localId, {
                               thresholdInput: e.target.value,
-                            })
-                          }
-                        />
-                      </Table.Cell>
-                      <Table.Cell>
-                        <Input
-                          aria-label={`Level ${level} weekly rebate percent`}
-                          value={r.rebateInput}
-                          onChange={(e) =>
-                            setRow(r.localId, {
-                              rebateInput: e.target.value,
                             })
                           }
                         />

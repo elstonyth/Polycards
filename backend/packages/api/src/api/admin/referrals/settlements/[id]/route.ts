@@ -36,12 +36,10 @@ export async function GET(
       approved_at: run.approved_at,
       paid_at: run.paid_at,
       total_commission_cents: run.total_commission_cents,
-      total_rebate_cents: run.total_rebate_cents,
     },
     lines: lines.map((l) => ({
       id: l.id,
       customer_id: l.customer_id,
-      kind: l.kind,
       basis_cents: l.basis_cents,
       rate_bp: l.rate_bp,
       amount_cents: l.amount_cents,

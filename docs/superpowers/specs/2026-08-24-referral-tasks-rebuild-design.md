@@ -8,7 +8,28 @@ claim is an explicit store endpoint,
   source='reward' pull. No charge-seam change; reward pulls never move the
   boards.# Referral Rebuild + Task Page — Design
 
-**Date:** 2026-08-24 · **Status:** approved in chat · **Depends on:** PR #482 (`chore/remove-referrals`), ADR 0007
+**Date:** 2026-08-24 · **Status:** approved in chat, **amended 2026-08-25** · **Depends on:** PR #482 (`chore/remove-referrals`), ADR 0007
+
+## Amendment — 2026-08-25 (operator)
+
+The sections below are the original design. These five changes supersede it; where they conflict,
+the amendment wins.
+
+1. **VIP rebate (个人回水) is REMOVED.** No `vip_level.rebate_bp`, no `vip_rebate` settlement-line
+   kind, no `vip_rebate` credit reason, no `GET /store/vip-rebate`, no VIP tab on `/task`. A
+   settlement line is now always a referral commission, so `weekly_settlement_line.kind` and
+   `weekly_settlement.total_rebate_cents` are gone with it. VIP itself stays: the ladder is what
+   the `reach_level` achievements are measured against.
+2. **`/task` is two tabs**: *Weekly Tasks* and *Achievements & VIP*. Referral moved out to its own
+   page, `/referral`, reached from the Me quick-access grid.
+3. **The weekly-task week resets Monday 00:00 MYT**, not Tuesday. The settlement week is unchanged
+   (Tue close, Wed pay) — `referralWeekFor` stays Tuesday, `taskWeekFor` is the new Monday anchor.
+4. **Task scheduling**: `task_definition` gained an optional `starts_at`/`ends_at` window, driven by
+   the same `datetime-local` controls the Weekly Challenge schedule uses. Outside the window a task
+   is neither listed nor claimable. (Deliberately *not* the `challenge_schedule` queue table — that
+   pattern exists because the live challenge is a singleton; task definitions are already rows.)
+5. **Admin pickers, not free text**: pack, card, VIP level and pixel Pokémon are all dropdowns, and
+   `vault_pixel_count` gained an optional `pixel_pokemon_id` so an achievement can name one Pokémon.
 
 ## Purpose
 

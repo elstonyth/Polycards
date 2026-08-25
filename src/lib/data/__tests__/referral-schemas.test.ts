@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  CREDIT_REASONS,
-  ReferralSummarySchema,
-  VipRebateSchema,
-} from '@/lib/data/schemas';
+import { CREDIT_REASONS, ReferralSummarySchema } from '@/lib/data/schemas';
 import { reasonLabel } from '@/lib/transactions';
 
 const historyRow = {
@@ -44,28 +40,9 @@ describe('ReferralSummarySchema', () => {
   });
 });
 
-describe('VipRebateSchema', () => {
-  const valid = {
-    level: 12,
-    rebate_bp: 100,
-    week: { start: '2026-08-25', turnover_cents: 50_000, projected_cents: 500 },
-    history: [],
-  };
-
-  it('parses the backend payload', () => {
-    expect(VipRebateSchema.parse(valid).level).toBe(12);
-  });
-
-  it('rejects a non-numeric level', () => {
-    expect(() => VipRebateSchema.parse({ ...valid, level: 'x' })).toThrow();
-  });
-});
-
-describe('the new credit reasons', () => {
-  it('are in the known enum and carry labels', () => {
+describe('the new credit reason', () => {
+  it('is in the known enum and carries a label', () => {
     expect(CREDIT_REASONS).toContain('referral_commission');
-    expect(CREDIT_REASONS).toContain('vip_rebate');
     expect(reasonLabel('referral_commission')).toBe('Referral commission');
-    expect(reasonLabel('vip_rebate')).toBe('VIP rebate');
   });
 });

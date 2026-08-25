@@ -62,14 +62,12 @@ export type LedgerPayload =
       account_last4: string | null;
       gateway_ref: string | null;
     }
-  // RF: a weekly referral-engine payout (rebuild, spec 2026-08-24) — either a
-  // referral commission (tier % of the referrer's downline weekly pack
-  // turnover) or a VIP personal rebate (回水, rebate_bp of the member's OWN
-  // weekly turnover). ref_id = the weekly_settlement_line id, which makes the
-  // (type, ref_id) idempotency index the Wednesday pay step's re-run guard.
+  // RF: a weekly referral commission (rebuild, spec 2026-08-24) — the tier %
+  // of the referrer's downline weekly pack turnover. ref_id = the
+  // weekly_settlement_line id, which makes the (type, ref_id) idempotency
+  // index the Wednesday pay step's re-run guard.
   | {
       type: 'RF';
-      kind: 'referral_commission' | 'vip_rebate';
       week_start: string;
       basis_cents: number;
       rate_bp: number;

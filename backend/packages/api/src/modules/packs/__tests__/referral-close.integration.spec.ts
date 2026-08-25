@@ -8,8 +8,6 @@ import WeeklySettlement from '../models/weekly-settlement';
 import WeeklySettlementLine from '../models/weekly-settlement-line';
 import CreditTransaction from '../models/credit-transaction';
 import CustomerAccountState from '../models/customer-account-state';
-import VipLevel from '../models/vip-level';
-import VipMemberState from '../models/vip-member-state';
 import AdminActionAudit from '../models/admin-action-audit';
 import { referralWeekFor } from '../referral';
 
@@ -25,8 +23,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
     WeeklySettlementLine,
     CreditTransaction,
     CustomerAccountState,
-    VipLevel,
-    VipMemberState,
     AdminActionAudit,
   ],
   testSuite: ({ service }) => {
@@ -39,23 +35,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
     async function seed() {
       const existing = await service.listReferralAttributions({}, { take: 1 });
       if (existing.length > 0) return;
-      // Ladder: L1 pays no rebate, L2 pays 1%.
-      await service.createVipLevels([
-        {
-          level: 1,
-          spend_threshold: 0,
-          voucher_amount: 0,
-          box_tier: 'a',
-          rebate_bp: 0,
-        },
-        {
-          level: 2,
-          spend_threshold: 100,
-          voucher_amount: 0,
-          box_tier: 'b',
-          rebate_bp: 100,
-        },
-      ]);
       // Attribution: A and B referred by R; D referred by partner R2; C loose.
       await service.createReferralAttributions([
         { customer_id: 'cus_a', referrer_id: 'cus_r' },
@@ -68,15 +47,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
         rateBp: 400,
         adminId: 'admin_1',
       });
-      // A is VIP L2 (gets the 1% rebate); everyone else has no state row.
-      await service.createVipMemberStates([
-        {
-          customer_id: 'cus_a',
-          lifetime_external_spend_sen: 10_000,
-          highest_level_ever: 2,
-          current_level: 2,
-        },
-      ]);
       // This week's turnover: A RM100, B RM50, C RM30 (unreferred), D RM80.
       await service.createCreditTransactions([
         { customer_id: 'cus_a', amount: -100, reason: 'pack_open' },
@@ -122,9 +92,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
 
       // R: downline A+B = RM150 = 15,000c → tier 1 (0.5%) → 75c.
-      const rLine = lines.find(
-        (l) => l.customer_id === 'cus_r' && l.kind === 'referral_commission',
-      );
+      const rLine = lines.find((l) => l.customer_id === 'cus_r');
       expect(rLine).toBeDefined();
       expect(rLine!.basis_cents).toBe(15_000);
       expect(rLine!.rate_bp).toBe(50);
@@ -132,32 +100,21 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(rLine!.status).toBe('pending');
 
       // R2 (partner 4%): downline D = RM80 = 8,000c → 320c.
-      const r2Line = lines.find(
-        (l) => l.customer_id === 'cus_r2' && l.kind === 'referral_commission',
-      );
+      const r2Line = lines.find((l) => l.customer_id === 'cus_r2');
       expect(r2Line).toBeDefined();
       expect(r2Line!.basis_cents).toBe(8_000);
       expect(r2Line!.rate_bp).toBe(400);
       expect(r2Line!.amount_cents).toBe(320);
 
-      // A (VIP L2, 1%): own RM100 = 10,000c → 100c rebate.
-      const aRebate = lines.find(
-        (l) => l.customer_id === 'cus_a' && l.kind === 'vip_rebate',
-      );
-      expect(aRebate).toBeDefined();
-      expect(aRebate!.basis_cents).toBe(10_000);
-      expect(aRebate!.rate_bp).toBe(100);
-      expect(aRebate!.amount_cents).toBe(100);
-
-      // B and C are L1 (0 bp) — no rebate lines; C is unreferred — nobody
-      // earns commission on C's spend; zero-amount lines are skipped.
-      expect(
-        lines.filter((l) => l.kind === 'vip_rebate').map((l) => l.customer_id),
-      ).toEqual(['cus_a']);
-      expect(lines).toHaveLength(3);
+      // C is unreferred — nobody earns commission on C's spend, and a
+      // spender is never paid on their own turnover, so only the two
+      // referrers get a line.
+      expect(lines.map((l) => l.customer_id).sort()).toEqual([
+        'cus_r',
+        'cus_r2',
+      ]);
 
       expect(run.total_commission_cents).toBe(75 + 320);
-      expect(run.total_rebate_cents).toBe(100);
     });
 
     it('is idempotent — a re-run creates nothing new', async () => {
@@ -174,7 +131,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       const runs = await service.listWeeklySettlements({});
       expect(runs).toHaveLength(1);
       const lines = await service.listWeeklySettlementLines({});
-      expect(lines).toHaveLength(3);
+      expect(lines).toHaveLength(2);
     });
 
     it('refuses to close a week whose line breaches the per-line ceiling', async () => {

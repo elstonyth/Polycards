@@ -28,7 +28,6 @@ export async function GET(
       approved_at: r.approved_at,
       paid_at: r.paid_at,
       total_commission_cents: r.total_commission_cents,
-      total_rebate_cents: r.total_rebate_cents,
     })),
   });
 }

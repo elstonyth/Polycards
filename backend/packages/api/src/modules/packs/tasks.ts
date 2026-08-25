@@ -10,7 +10,13 @@ export type TaskRequirement =
   | { type: 'rip_count'; count: number; pack_id?: string | null }
   | { type: 'reach_level'; level: number }
   | { type: 'vault_count'; count: number }
-  | { type: 'vault_pixel_count'; count: number };
+  | {
+      type: 'vault_pixel_count';
+      count: number;
+      /** A pixel_pokemon id — narrows the count to that one Pokémon.
+       *  null/absent = any linked pixel card. */
+      pixel_pokemon_id?: string | null;
+    };
 
 export type TaskReward =
   | { type: 'credit'; amount_myr: number }
@@ -74,9 +80,19 @@ export function validateTaskRequirement(
         bad('reach_level: level must be an integer 1..100.');
       return { type, level: r.level as number };
     case 'vault_count':
+      if (!posInt(r.count)) bad(`${type}: count must be a positive integer.`);
+      return { type, count: r.count as number };
     case 'vault_pixel_count':
       if (!posInt(r.count)) bad(`${type}: count must be a positive integer.`);
-      return { type, count: r.count as number } as TaskRequirement;
+      if (r.pixel_pokemon_id != null && typeof r.pixel_pokemon_id !== 'string')
+        bad(
+          'vault_pixel_count: pixel_pokemon_id must be a pixel Pokémon id string when set.',
+        );
+      return {
+        type,
+        count: r.count as number,
+        pixel_pokemon_id: (r.pixel_pokemon_id as string | undefined) ?? null,
+      };
     default:
       return bad(`Unknown requirement type '${String(type)}'.`);
   }
@@ -123,6 +139,21 @@ export interface TaskFacts {
   vipLevel: number;
   vaultCount: number;
   vaultPixelCount: number;
+  /** Per-species tallies, keyed by pixel_pokemon_id. */
+  vaultPixelCountById: Map<string, number>;
+}
+
+/** Is this definition inside its scheduled run window at `at`?
+ *  Both bounds are optional: null start = "already running", null end =
+ *  "runs until retired". `active` is a separate manual kill switch. */
+export function taskIsLive(
+  def: { starts_at?: Date | string | null; ends_at?: Date | string | null },
+  at: Date,
+): boolean {
+  const t = at.getTime();
+  if (def.starts_at && new Date(def.starts_at).getTime() > t) return false;
+  if (def.ends_at && new Date(def.ends_at).getTime() <= t) return false;
+  return true;
 }
 
 export function taskProgress(
@@ -151,7 +182,9 @@ export function taskProgress(
       target = requirement.count;
       break;
     case 'vault_pixel_count':
-      current = facts.vaultPixelCount;
+      current = requirement.pixel_pokemon_id
+        ? (facts.vaultPixelCountById.get(requirement.pixel_pokemon_id) ?? 0)
+        : facts.vaultPixelCount;
       target = requirement.count;
       break;
     default:

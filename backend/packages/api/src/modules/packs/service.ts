@@ -79,11 +79,13 @@ import {
   MAX_SETTLEMENT_LINE_MYR,
   payoutCents,
   referralWeekFor,
+  taskWeekFor,
   resolveRateBp,
   type ReferralTier,
   type ReferralWeek,
 } from './referral';
 import {
+  taskIsLive,
   taskProgress,
   validateTaskRequirement,
   validateTaskReward,
@@ -1018,8 +1020,8 @@ class PacksModuleService extends MedusaService({
   }
 
   // The Tuesday close ("TUES CHECK"): compute the just-ended week's referral
-  // commissions and VIP rebates into a DRAFT settlement run. No money moves
-  // here — payWeeklySettlement (after the admin approve gate) does that.
+  // commissions into a DRAFT settlement run. No money moves here —
+  // payWeeklySettlement (after the admin approve gate) does that.
   // Turnover is read straight from the pack_open ledger rows at close time;
   // nothing accrues per purchase, so settleOpen stays untouched.
   //
@@ -1089,7 +1091,6 @@ class PacksModuleService extends MedusaService({
 
     type NewLine = {
       customer_id: string;
-      kind: 'referral_commission' | 'vip_rebate';
       basis_cents: number;
       rate_bp: number;
       amount_cents: number;
@@ -1105,43 +1106,6 @@ class PacksModuleService extends MedusaService({
       if (amountCents <= 0) continue;
       lines.push({
         customer_id: referrerId,
-        kind: 'referral_commission',
-        basis_cents: basisCents,
-        rate_bp: rateBp,
-        amount_cents: amountCents,
-      });
-    }
-
-    // VIP rebate: each spender's own turnover x their level's rebate_bp.
-    // Level comes from vip_member_state (maintained by the settle-open saga);
-    // no state row = never opened before this week's rows landed = L1.
-    const stateRows = spenderIds.length
-      ? await this.listVipMemberStates(
-          { customer_id: spenderIds },
-          { take: spenderIds.length },
-          sharedContext,
-        )
-      : [];
-    const levelByCustomer = new Map(
-      stateRows.map((r) => [r.customer_id, Number(r.current_level)]),
-    );
-    const ladder = await this.listVipLevels(
-      {},
-      { select: ['level', 'rebate_bp'], take: 1000 },
-      sharedContext,
-    );
-    const rebateBpByLevel = new Map(
-      ladder.map((l) => [Number(l.level), Number(l.rebate_bp ?? 0)]),
-    );
-    for (const [customerId, basisCents] of turnoverByCustomer) {
-      if (basisCents <= 0) continue;
-      const level = levelByCustomer.get(customerId) ?? 1;
-      const rateBp = rebateBpByLevel.get(level) ?? 0;
-      const amountCents = payoutCents(basisCents, rateBp);
-      if (amountCents <= 0) continue;
-      lines.push({
-        customer_id: customerId,
-        kind: 'vip_rebate',
         basis_cents: basisCents,
         rate_bp: rateBp,
         amount_cents: amountCents,
@@ -1160,17 +1124,9 @@ class PacksModuleService extends MedusaService({
 
     // Quarantined lines are excluded — the totals the approve dialog quotes
     // must equal what will actually pay.
-    const totals = lines
+    const totalCommissionCents = lines
       .filter((l) => l.amount_cents <= MAX_SETTLEMENT_LINE_MYR * 100)
-      .reduce(
-        (acc, l) => {
-          if (l.kind === 'referral_commission')
-            acc.commission += l.amount_cents;
-          else acc.rebate += l.amount_cents;
-          return acc;
-        },
-        { commission: 0, rebate: 0 },
-      );
+      .reduce((sum, l) => sum + l.amount_cents, 0);
 
     let settlementId: string;
     try {
@@ -1179,8 +1135,7 @@ class PacksModuleService extends MedusaService({
           {
             week_start: week.startUtc,
             status: 'draft' as const,
-            total_commission_cents: totals.commission,
-            total_rebate_cents: totals.rebate,
+            total_commission_cents: totalCommissionCents,
           },
         ],
         sharedContext,
@@ -1219,8 +1174,7 @@ class PacksModuleService extends MedusaService({
         `[close-referral-week] ${week.weekStartIso}: ${overCeiling.length} line(s) quarantined over the RM ${MAX_SETTLEMENT_LINE_MYR} ceiling — ` +
           overCeiling
             .map(
-              (l) =>
-                `${l.kind}/${l.customer_id}=RM${(l.amount_cents / 100).toFixed(2)}`,
+              (l) => `${l.customer_id}=RM${(l.amount_cents / 100).toFixed(2)}`,
             )
             .join(', '),
       );
@@ -1284,11 +1238,7 @@ class PacksModuleService extends MedusaService({
   // numbers the admin review screen quotes stay true after every void.
   @InjectTransactionManager()
   protected async deductRunTotal(
-    input: {
-      settlementId: string;
-      kind: 'referral_commission' | 'vip_rebate';
-      amountCents: number;
-    },
+    input: { settlementId: string; amountCents: number },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
     const [run] = await this.listWeeklySettlements(
@@ -1297,22 +1247,16 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     if (!run) return;
-    const data =
-      input.kind === 'referral_commission'
-        ? {
-            total_commission_cents: Math.max(
-              0,
-              run.total_commission_cents - input.amountCents,
-            ),
-          }
-        : {
-            total_rebate_cents: Math.max(
-              0,
-              run.total_rebate_cents - input.amountCents,
-            ),
-          };
     await this.updateWeeklySettlements(
-      { selector: { id: run.id }, data },
+      {
+        selector: { id: run.id },
+        data: {
+          total_commission_cents: Math.max(
+            0,
+            run.total_commission_cents - input.amountCents,
+          ),
+        },
+      },
       sharedContext,
     );
   }
@@ -1436,7 +1380,6 @@ class PacksModuleService extends MedusaService({
         data: {
           status: 'void' as const,
           total_commission_cents: 0,
-          total_rebate_cents: 0,
         },
       },
       sharedContext,
@@ -1511,11 +1454,7 @@ class PacksModuleService extends MedusaService({
     // out", so a voided line must leave the number the operator reads
     // (review 2026-08-25 finding 3).
     await this.deductRunTotal(
-      {
-        settlementId: line.settlement_id,
-        kind: line.kind,
-        amountCents: line.amount_cents,
-      },
+      { settlementId: line.settlement_id, amountCents: line.amount_cents },
       sharedContext,
     );
     await this.createAdminActionAudits(
@@ -1530,7 +1469,6 @@ class PacksModuleService extends MedusaService({
             line_id: line.id,
             status: 'voided',
             customer_id: line.customer_id,
-            kind: line.kind,
             amount_cents: line.amount_cents,
           },
           reason: input.reason,
@@ -1602,11 +1540,7 @@ class PacksModuleService extends MedusaService({
           sharedContext,
         );
         await this.deductRunTotal(
-          {
-            settlementId: run.id,
-            kind: line.kind,
-            amountCents: line.amount_cents,
-          },
+          { settlementId: run.id, amountCents: line.amount_cents },
           sharedContext,
         );
         skipped++;
@@ -1626,7 +1560,6 @@ class PacksModuleService extends MedusaService({
           vaultDelta: null,
           payload: {
             type: 'RF',
-            kind: line.kind,
             week_start: weekStartIso,
             basis_cents: line.basis_cents,
             rate_bp: line.rate_bp,
@@ -1647,7 +1580,7 @@ class PacksModuleService extends MedusaService({
           {
             customer_id: line.customer_id,
             amount: line.amount_cents / 100,
-            reason: line.kind,
+            reason: 'referral_commission',
           },
         ],
         sharedContext,
@@ -1772,75 +1705,17 @@ class PacksModuleService extends MedusaService({
         partner: partnerBp != null,
       },
       history: await this.settlementHistoryFor(
-        { customerId: input.customerId, kind: 'referral_commission' },
+        { customerId: input.customerId },
         sharedContext,
       ),
     };
   }
 
-  // Storefront read: the /task VIP tab payload — own-turnover rebate.
-  @InjectManager()
-  async vipRebateStorefrontSummary(
-    input: { customerId: string; now?: Date },
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{
-    level: number;
-    rebate_bp: number;
-    week: { start: string; turnover_cents: number; projected_cents: number };
-    history: {
-      week_start: string;
-      basis_cents: number;
-      rate_bp: number;
-      amount_cents: number;
-      status: string;
-    }[];
-  }> {
-    const week = referralWeekFor(input.now ?? new Date());
-    const turnoverCents =
-      (
-        await this.packTurnoverCentsByCustomer(
-          {
-            startUtc: week.startUtc,
-            endUtcExcl: week.endUtcExcl,
-            customerIds: [input.customerId],
-          },
-          sharedContext,
-        )
-      ).get(input.customerId) ?? 0;
-
-    const [stateRow] = await this.listVipMemberStates(
-      { customer_id: input.customerId },
-      { take: 1 },
-      sharedContext,
-    );
-    const level = stateRow ? Number(stateRow.current_level) : 1;
-    const [levelRow] = await this.listVipLevels(
-      { level },
-      { select: ['level', 'rebate_bp'], take: 1 },
-      sharedContext,
-    );
-    const rebateBp = Number(levelRow?.rebate_bp ?? 0);
-
-    return {
-      level,
-      rebate_bp: rebateBp,
-      week: {
-        start: week.weekStartIso,
-        turnover_cents: turnoverCents,
-        projected_cents: payoutCents(turnoverCents, rebateBp),
-      },
-      history: await this.settlementHistoryFor(
-        { customerId: input.customerId, kind: 'vip_rebate' },
-        sharedContext,
-      ),
-    };
-  }
-
-  // Shared history read: this customer's settled lines of one kind, newest
+  // Shared history read: this customer's paid settlement lines, newest
   // first, week_start denormalized from the parent run.
   @InjectManager()
   protected async settlementHistoryFor(
-    input: { customerId: string; kind: 'referral_commission' | 'vip_rebate' },
+    input: { customerId: string },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
     {
@@ -1855,7 +1730,7 @@ class PacksModuleService extends MedusaService({
     // line) is still voidable — showing it as a "past payout" promises money
     // the human gate can still pull (review 2026-08-25 finding, spec axis 5).
     const lines = await this.listWeeklySettlementLines(
-      { customer_id: input.customerId, kind: input.kind, status: 'paid' },
+      { customer_id: input.customerId, status: 'paid' },
       { order: { created_at: 'DESC' }, take: 12 },
       sharedContext,
     );
@@ -1972,24 +1847,32 @@ class PacksModuleService extends MedusaService({
           [input.customerId],
         ),
         // CARDS, not distinct species ("vault how many Pokémon card"): two
-        // Pikachu pulls count 2. pokemon_dex is the pixel LINK — a card an
-        // admin has not linked yet does not count, and linking it later
-        // advances progress (admin data, honest either way).
-        em.execute<{ n: string }[]>(
-          'SELECT COUNT(*)::bigint AS n FROM pull p JOIN card c ON c.handle = p.card_id ' +
+        // Pikachu pulls count 2. pixel_pokemon_id is the authoritative pixel
+        // LINK — a card an admin has not linked yet does not count, and
+        // linking it later advances progress (admin data, honest either way).
+        // Grouped so a task can name ONE Pokémon; the ungrouped total is the
+        // sum of the groups.
+        em.execute<{ pixel_pokemon_id: string; n: string }[]>(
+          'SELECT c.pixel_pokemon_id, COUNT(*)::bigint AS n ' +
+            'FROM pull p JOIN card c ON c.handle = p.card_id ' +
             'WHERE p.customer_id = ? AND p.deleted_at IS NULL ' +
-            '  AND c.deleted_at IS NULL AND c.pokemon_dex IS NOT NULL',
+            '  AND c.deleted_at IS NULL AND c.pixel_pokemon_id IS NOT NULL ' +
+            'GROUP BY c.pixel_pokemon_id',
           [input.customerId],
         ),
       ]);
     const byPack = new Map(ripRows.map((r) => [r.pack_id, Number(r.n)]));
+    const byPixel = new Map(
+      pixelRows.map((r) => [r.pixel_pokemon_id, Number(r.n)]),
+    );
     return {
       checkinDaysThisWeek: checkins.length,
       ripsThisWeek: [...byPack.values()].reduce((a, b) => a + b, 0),
       ripsThisWeekByPack: byPack,
       vipLevel: stateRow ? Number(stateRow.current_level) : 1,
       vaultCount: Number(vaultRows[0]?.n ?? 0),
-      vaultPixelCount: Number(pixelRows[0]?.n ?? 0),
+      vaultPixelCount: [...byPixel.values()].reduce((a, b) => a + b, 0),
+      vaultPixelCountById: byPixel,
     };
   }
 
@@ -2001,6 +1884,7 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
     week_start: string;
+    vip_level: number;
     tasks: {
       id: string;
       kind: 'weekly' | 'achievement';
@@ -2011,7 +1895,7 @@ class PacksModuleService extends MedusaService({
       claimed: boolean;
     }[];
   }> {
-    const week = referralWeekFor(input.now ?? new Date());
+    const week = taskWeekFor(input.now ?? new Date());
     const [defs, facts, claims] = await Promise.all([
       this.listTaskDefinitions(
         { active: true },
@@ -2031,21 +1915,27 @@ class PacksModuleService extends MedusaService({
       ),
     ]);
     const claimed = new Set(claims.map((c) => `${c.task_id}:${c.period_key}`));
+    const at = input.now ?? new Date();
     return {
       week_start: week.weekStartIso,
-      tasks: defs.map((d) => {
-        const requirement = d.requirement as unknown as TaskRequirement;
-        const periodKey = d.kind === 'weekly' ? week.weekStartIso : '';
-        return {
-          id: d.id,
-          kind: d.kind,
-          title: d.title,
-          requirement,
-          reward: d.reward as unknown as TaskReward,
-          progress: taskProgress(requirement, facts),
-          claimed: claimed.has(`${d.id}:${periodKey}`),
-        };
-      }),
+      // The Achievements & VIP tab shows the rung the reach_level tasks are
+      // measured against; taskFactsFor already loaded it.
+      vip_level: facts.vipLevel,
+      tasks: defs
+        .filter((d) => taskIsLive(d, at))
+        .map((d) => {
+          const requirement = d.requirement as unknown as TaskRequirement;
+          const periodKey = d.kind === 'weekly' ? week.weekStartIso : '';
+          return {
+            id: d.id,
+            kind: d.kind,
+            title: d.title,
+            requirement,
+            reward: d.reward as unknown as TaskReward,
+            progress: taskProgress(requirement, facts),
+            claimed: claimed.has(`${d.id}:${periodKey}`),
+          };
+        }),
     };
   }
 
@@ -2084,7 +1974,12 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     if (!def) return { claimed: false, reason: 'not_found' };
-    const week = referralWeekFor(input.now ?? new Date());
+    // A scheduled window that has closed (or not opened) is not claimable —
+    // unlike `active`, which is deliberately NOT checked here, a window is
+    // the operator saying exactly when this task runs.
+    if (!taskIsLive(def, input.now ?? new Date()))
+      return { claimed: false, reason: 'not_found' };
+    const week = taskWeekFor(input.now ?? new Date());
     const periodKey = def.kind === 'weekly' ? week.weekStartIso : '';
     const requirement = def.requirement as unknown as TaskRequirement;
     const reward = def.reward as unknown as TaskReward;
@@ -2232,6 +2127,9 @@ class PacksModuleService extends MedusaService({
       reward: unknown;
       active: boolean;
       sort: number;
+      /** Optional run window; omitted means "unscheduled" (null/null). */
+      startsAt?: Date | null;
+      endsAt?: Date | null;
       adminId: string;
       reason: string;
     },
@@ -2241,6 +2139,16 @@ class PacksModuleService extends MedusaService({
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
         'title is required (1–120 chars).',
+      );
+    }
+    if (
+      input.startsAt &&
+      input.endsAt &&
+      input.endsAt.getTime() <= input.startsAt.getTime()
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'The schedule end must be after its start.',
       );
     }
     const requirement = validateTaskRequirement(input.kind, input.requirement);
@@ -2280,6 +2188,8 @@ class PacksModuleService extends MedusaService({
       reward: reward as unknown as Record<string, unknown>,
       active: input.active,
       sort: input.sort,
+      starts_at: input.startsAt ?? null,
+      ends_at: input.endsAt ?? null,
     };
     let id = input.id;
     let before: Record<string, unknown> | null = null;
@@ -2311,6 +2221,8 @@ class PacksModuleService extends MedusaService({
         reward: existing.reward,
         active: existing.active,
         sort: existing.sort,
+        starts_at: existing.starts_at,
+        ends_at: existing.ends_at,
       };
       await this.updateTaskDefinitions(
         { selector: { id }, data },
@@ -7920,7 +7832,6 @@ class PacksModuleService extends MedusaService({
           'voucher_amount',
           'box_tier',
           'frame_unlock',
-          'rebate_bp',
         ],
         take: 1000,
       },
@@ -7936,7 +7847,6 @@ class PacksModuleService extends MedusaService({
         voucher_amount: Number(r.voucher_amount),
         box_tier: r.box_tier,
         frame_unlock: r.frame_unlock,
-        rebate_bp: Number(r.rebate_bp ?? 0),
       }));
 
     const inputLevels = new Set(input.levels.map((l) => l.level));
@@ -7946,7 +7856,6 @@ class PacksModuleService extends MedusaService({
         voucher_amount: lvl.voucher_amount,
         box_tier: lvl.box_tier,
         frame_unlock: lvl.frame_unlock,
-        rebate_bp: lvl.rebate_bp,
       };
       const row = byLevel.get(lvl.level);
       if (row) {

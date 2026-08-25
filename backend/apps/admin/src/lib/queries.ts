@@ -184,11 +184,13 @@ export const usePulls = (
 // changes refetch; keepPreviousData avoids a flash while typing.
 export const usePixelPokemon = (
   params: PixelPokemonQuery,
+  opts: { enabled?: boolean } = {},
 ): UseQueryResult<PixelPokemonPage> =>
   useQuery({
     queryKey: ['pixel-pokemon', params],
     queryFn: () => getPixelPokemon(params),
     placeholderData: keepPreviousData,
+    enabled: opts.enabled ?? true,
   });
 
 // Add a custom pixel-pokémon; refetches the library grid on success.

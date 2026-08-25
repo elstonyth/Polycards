@@ -264,7 +264,6 @@ function LineTable({ settlementId }: { settlementId: string }) {
       <Table.Header>
         <Table.Row>
           <Table.HeaderCell>Customer</Table.HeaderCell>
-          <Table.HeaderCell>Kind</Table.HeaderCell>
           <Table.HeaderCell className="text-right">Basis</Table.HeaderCell>
           <Table.HeaderCell className="text-right">Rate</Table.HeaderCell>
           <Table.HeaderCell className="text-right">Payout</Table.HeaderCell>
@@ -277,9 +276,6 @@ function LineTable({ settlementId }: { settlementId: string }) {
           <Table.Row key={l.id}>
             <Table.Cell className="font-mono text-xs">
               {l.customer_id}
-            </Table.Cell>
-            <Table.Cell>
-              {l.kind === 'referral_commission' ? 'Commission' : 'VIP rebate'}
             </Table.Cell>
             <Table.Cell className="text-right">
               {fromCents(l.basis_cents)}
@@ -340,7 +336,7 @@ function RunsCard() {
   const onApprove = async (run: ReferralSettlement) => {
     const confirmed = await prompt({
       title: `Approve week ${run.week_start}?`,
-      description: `${fromCents(run.total_commission_cents)} commission + ${fromCents(run.total_rebate_cents)} rebate will pay out on the next Wednesday run (or via Pay now).`,
+      description: `${fromCents(run.total_commission_cents)} in commission will pay out on the next Wednesday run (or via Pay now).`,
       confirmText: 'Approve',
     });
     if (!confirmed) return;
@@ -405,7 +401,6 @@ function RunsCard() {
               <Table.HeaderCell className="text-right">
                 Commission
               </Table.HeaderCell>
-              <Table.HeaderCell className="text-right">Rebate</Table.HeaderCell>
               <Table.HeaderCell />
             </Table.Row>
           </Table.Header>
@@ -421,9 +416,6 @@ function RunsCard() {
                   </Table.Cell>
                   <Table.Cell className="text-right">
                     {fromCents(run.total_commission_cents)}
-                  </Table.Cell>
-                  <Table.Cell className="text-right">
-                    {fromCents(run.total_rebate_cents)}
                   </Table.Cell>
                   <Table.Cell>
                     <div className="flex justify-end gap-2">

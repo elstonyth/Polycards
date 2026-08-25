@@ -1,4 +1,5 @@
 import {
+  taskIsLive,
   taskProgress,
   validateTaskRequirement,
   validateTaskReward,
@@ -12,6 +13,7 @@ const facts = (over: Partial<TaskFacts> = {}): TaskFacts => ({
   vipLevel: 1,
   vaultCount: 0,
   vaultPixelCount: 0,
+  vaultPixelCountById: new Map(),
   ...over,
 });
 
@@ -143,5 +145,69 @@ describe('taskProgress', () => {
         facts({ vaultPixelCount: 3 }),
       ).completed,
     ).toBe(true);
+  });
+});
+
+describe('vault_pixel_count with a species', () => {
+  it('counts only that Pokémon when one is named', () => {
+    const f = facts({
+      vaultPixelCount: 9,
+      vaultPixelCountById: new Map([
+        ['px_pikachu', 2],
+        ['px_mew', 7],
+      ]),
+    });
+    expect(
+      taskProgress(
+        { type: 'vault_pixel_count', count: 3, pixel_pokemon_id: 'px_pikachu' },
+        f,
+      ),
+    ).toEqual({ current: 2, target: 3, completed: false });
+    expect(
+      taskProgress(
+        { type: 'vault_pixel_count', count: 3, pixel_pokemon_id: 'px_mew' },
+        f,
+      ).completed,
+    ).toBe(true);
+    // A species the customer owns none of must read 0, never the total.
+    expect(
+      taskProgress(
+        { type: 'vault_pixel_count', count: 1, pixel_pokemon_id: 'px_ghost' },
+        f,
+      ),
+    ).toEqual({ current: 0, target: 1, completed: false });
+  });
+
+  it('validates and normalises pixel_pokemon_id', () => {
+    expect(
+      validateTaskRequirement('achievement', {
+        type: 'vault_pixel_count',
+        count: 2,
+      }),
+    ).toEqual({ type: 'vault_pixel_count', count: 2, pixel_pokemon_id: null });
+    expect(() =>
+      validateTaskRequirement('achievement', {
+        type: 'vault_pixel_count',
+        count: 2,
+        pixel_pokemon_id: 7,
+      }),
+    ).toThrow(/pixel_pokemon_id/);
+  });
+});
+
+describe('taskIsLive', () => {
+  const at = new Date('2026-08-25T12:00:00Z');
+
+  it('an unscheduled task is always live', () => {
+    expect(taskIsLive({}, at)).toBe(true);
+    expect(taskIsLive({ starts_at: null, ends_at: null }, at)).toBe(true);
+  });
+
+  it('is closed before the start and at/after the end', () => {
+    expect(taskIsLive({ starts_at: '2026-08-26T00:00:00Z' }, at)).toBe(false);
+    expect(taskIsLive({ starts_at: '2026-08-24T00:00:00Z' }, at)).toBe(true);
+    // End is EXCLUSIVE — the instant it hits, the task is over.
+    expect(taskIsLive({ ends_at: '2026-08-25T12:00:00Z' }, at)).toBe(false);
+    expect(taskIsLive({ ends_at: '2026-08-25T12:00:01Z' }, at)).toBe(true);
   });
 });

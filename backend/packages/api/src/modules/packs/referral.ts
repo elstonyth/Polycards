@@ -47,27 +47,43 @@ const MYT_OFFSET_MS = 8 * 60 * 60 * 1000; // Asia/Kuala_Lumpur, no DST
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type ReferralWeek = {
-  weekStartIso: string; // 'YYYY-MM-DD' of the MYT Tuesday
-  startUtc: Date; // Tue 00:00 MYT as a UTC instant (inclusive)
-  endUtcExcl: Date; // next Tue 00:00 MYT (exclusive — pair with `<`)
+  weekStartIso: string; // 'YYYY-MM-DD' of the MYT anchor day
+  startUtc: Date; // anchor 00:00 MYT as a UTC instant (inclusive)
+  endUtcExcl: Date; // next anchor 00:00 MYT (exclusive — pair with `<`)
 };
 
-// Week containing `at`: the most recent Tuesday 00:00 MYT at or before `at`.
-export function referralWeekFor(at: Date): ReferralWeek {
+// The two cycles deliberately sit on DIFFERENT anchors: money closes on
+// Tuesday ("TUES CHECK, WED OUT"), while the /task weekly board resets on
+// Monday so the player's week matches the calendar week they think in.
+const TUESDAY = 2;
+const MONDAY = 1;
+
+// Week containing `at`: the most recent `anchorDay` 00:00 MYT at or before it.
+function weekAnchoredOn(at: Date, anchorDay: number): ReferralWeek {
   const myt = new Date(at.getTime() + MYT_OFFSET_MS);
-  const day = myt.getUTCDay(); // 0=Sun … 2=Tue (in MYT thanks to the shift)
-  const daysSinceTue = (day - 2 + 7) % 7;
-  const tueMidnightMyt = Date.UTC(
+  const day = myt.getUTCDay(); // 0=Sun … 6=Sat (in MYT thanks to the shift)
+  const daysSinceAnchor = (day - anchorDay + 7) % 7;
+  const anchorMidnightMyt = Date.UTC(
     myt.getUTCFullYear(),
     myt.getUTCMonth(),
-    myt.getUTCDate() - daysSinceTue,
+    myt.getUTCDate() - daysSinceAnchor,
   );
-  const startUtc = new Date(tueMidnightMyt - MYT_OFFSET_MS);
+  const startUtc = new Date(anchorMidnightMyt - MYT_OFFSET_MS);
   return {
-    weekStartIso: new Date(tueMidnightMyt).toISOString().slice(0, 10),
+    weekStartIso: new Date(anchorMidnightMyt).toISOString().slice(0, 10),
     startUtc,
     endUtcExcl: new Date(startUtc.getTime() + 7 * DAY_MS),
   };
+}
+
+/** The settlement week — Tuesday 00:00 MYT. */
+export function referralWeekFor(at: Date): ReferralWeek {
+  return weekAnchoredOn(at, TUESDAY);
+}
+
+/** The /task weekly board's week — Monday 00:00 MYT. */
+export function taskWeekFor(at: Date): ReferralWeek {
+  return weekAnchoredOn(at, MONDAY);
 }
 
 // The most recently ENDED week — what the Tuesday close job settles.
