@@ -53,10 +53,7 @@ export async function checkInToday(): Promise<CheckInResult> {
  *  scheduled task can end between the page load and the tap, and answering
  *  "not completed yet" over a finished 3/3 row is the worst thing to say. */
 export type ClaimFailure =
-  | 'not_found'
-  | 'not_completed'
-  | 'already_claimed'
-  | 'window_closed';
+  'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
 
 export type ClaimResult =
   | { ok: true; claimed: true; rewardType: string }
