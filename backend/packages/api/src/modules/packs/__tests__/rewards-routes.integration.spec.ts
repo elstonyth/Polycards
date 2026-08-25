@@ -23,7 +23,9 @@
  * runs it — a file under src/api would match no test type and silently never run.
  *
  * Task 7 removed the old GET /store/rewards (index) and POST /store/rewards/draw
- * routes/tests — replaced by GET /store/daily + POST /store/daily/draw (daily-box.spec.ts).
+ * routes/tests, replacing them with GET /store/daily + POST /store/daily/draw.
+ * The draw half went with the daily box (2026-08-25); GET /store/daily now
+ * serves the voucher/frame grants alone.
  */
 
 import path from 'path';
@@ -44,7 +46,6 @@ import AdminActionAudit from '../models/admin-action-audit';
 import VipMemberState from '../models/vip-member-state';
 import VipRewardGrant from '../models/vip-reward-grant';
 import NotificationRead from '../models/notification-read';
-import RewardDraw from '../models/reward-draw';
 
 import { POST as claimPOST } from '../../../api/store/rewards/claim/[grantId]/route';
 import { POST as withdrawPOST } from '../../../api/store/rewards/withdraw/route';
@@ -83,7 +84,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
     VipMemberState,
     VipRewardGrant,
     NotificationRead,
-    RewardDraw,
   ],
   testSuite: ({ service }) => {
     // Build a mock req/res. scope.resolve returns the real packs service for every
@@ -140,23 +140,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
         },
       ]);
       await service.updatePulls([{ id: pull.id, status: 'vaulted' as const }]);
-      await service.createRewardDraws([
-        {
-          customer_id: customerId,
-          tier: 'c',
-          draw_day: today(),
-          draw_ordinal: 1,
-          prize_kind: 'product',
-          prize_snapshot: {
-            product_handle: 'prize-handle',
-            title: 'D1 Prize',
-            image: 'https://cdn.example.com/d1.png',
-          },
-          vault_pull_id: pull.id,
-          credit_txn_id: null,
-          status: 'drawn',
-        },
-      ]);
       return pull;
     };
 

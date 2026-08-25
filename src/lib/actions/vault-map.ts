@@ -22,6 +22,9 @@ export type VaultItem = {
    *  account's first PAID open). EVERY lock affordance must key off THIS, never
    *  `source`: a weekly-challenge prize is source='reward' and fully sellable. */
   locked: boolean;
+  /** Can it be SOLD? Narrower than `locked`: a reward card is unsellable but
+   *  still shippable, so the two must not be collapsed. */
+  sellable: boolean;
   card: {
     handle: string;
     name: string;
@@ -50,6 +53,7 @@ export interface BackendVaultItem {
   /** Absent on an older backend → 'pack' / false (see VaultItemSchema). */
   source?: 'pack' | 'reward' | 'free';
   locked?: boolean;
+  sellable?: boolean;
   card: {
     handle: string;
     name: string;
@@ -72,6 +76,8 @@ export function mapVaultItem(i: BackendVaultItem): VaultItem {
     showcased: (i as unknown as { showcased?: boolean }).showcased ?? false,
     source: i.source ?? 'pack',
     locked: i.locked ?? false,
+    // Defaults true — a backend without the field behaves as it always did.
+    sellable: (i.sellable ?? true) && !(i.locked ?? false),
     card: {
       handle: i.card.handle,
       name: i.card.name,

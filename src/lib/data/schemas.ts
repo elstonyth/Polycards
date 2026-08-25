@@ -243,6 +243,11 @@ export const VaultItemSchema = z.looseObject({
   // is source='reward' with a live, sellable quote.
   source: z.enum(['pack', 'reward', 'free']).catch('pack'),
   locked: z.boolean().catch(false),
+  // Narrower than `locked`: a reward card cannot be SOLD but can be SHIPPED.
+  // Defaults TRUE so a backend that predates the field behaves exactly as it
+  // did before — the sell then refuses server-side rather than the vault
+  // hiding a card the customer owns.
+  sellable: z.boolean().catch(true),
   // `firm` is false when the backend priced the quote on its FX display
   // fallback — selling would be refused, so the UI must not offer it as firm.
   // Optional: an older backend omits it (treated as firm).
@@ -309,6 +314,8 @@ export const CREDIT_REASONS = [
   'voucher_claim',
   'reward_credit',
   'daily_reward',
+  // Referral rebuild (spec 2026-08-24): the Wednesday settlement payout.
+  'referral_commission',
   'delivery_fee',
 ] as const;
 export type CreditReason = (typeof CREDIT_REASONS)[number];
@@ -561,10 +568,9 @@ export const MarkAllReadSchema = z.looseObject({
  *  only the legacy rewards envelope did. `level` is a required top-level field:
  *  `GrantView` (packs/service.ts:199-205) declares `level: number`, and
  *  `toGrantView` (packs/service.ts:3223-3229) always sources it from the
- *  `VipRewardGrant.level` column (`model.number()`, non-nullable) — including
- *  box-origin grants, which set it explicitly via `resolveMemberLevel` (never
- *  null/undefined), NOT from `payload` (box grants' payload only carries
- *  `amount_myr`). */
+ *  `VipRewardGrant.level` column (`model.number()`, non-nullable). `kind` and
+ *  `origin` still admit 'box': the daily box is gone, but historical grant rows
+ *  that carry it must keep parsing. */
 export const RewardGrantSchema = z.looseObject({
   id: z.string(),
   kind: z.enum(['voucher', 'frame', 'box', 'prize']),
@@ -573,17 +579,6 @@ export const RewardGrantSchema = z.looseObject({
   origin: z.enum(['ladder', 'box']).optional(),
   payload: z.looseObject({}).nullable().optional(),
   granted_at: z.string(),
-});
-
-/** A vaulted reward-prize row (GET /store/daily `ship_prizes`, and the
- *  pre-consolidation GET /store/rewards `prizes`). `voucher` is included
- *  because box draws can mint a voucher prize alongside product/credit. */
-export const RewardPrizeSchema = z.looseObject({
-  pull_id: z.string(),
-  prize_kind: z.enum(['product', 'credit', 'voucher', 'nothing']),
-  prize_snapshot: z.looseObject({}).nullable().optional(),
-  status: z.string(),
-  draw_day: z.string(),
 });
 
 /** Address input for prize withdrawal (subset of AddAddressInput). Defined here
@@ -604,53 +599,20 @@ export const ClaimGrantSchema = z.looseObject({
   kind: z.string(),
 });
 
-/** POST /store/daily/draw response (packs/service.ts `DrawDailyBoxResult`). */
-export const DrawBoxSchema = z.looseObject({
-  status: z.enum(['drawn', 'unavailable', 'capped']),
-  prize: z
-    .looseObject({
-      kind: z.enum(['product', 'credit', 'voucher', 'nothing']),
-      title: z.string().optional(),
-      image: z.string().optional(),
-      amount_myr: finite.optional(),
-      product_handle: z.string().optional(),
-    })
-    .optional(),
-  draw_ordinal: finite.optional(),
-});
-
 /** POST /store/rewards/withdraw response. */
 export const WithdrawPrizeSchema = z.looseObject({
   status: z.enum(['requested', 'capped', 'invalid']),
 });
 
-/** GET /store/daily box view (packs/service.ts `DailyState['box']`). */
-const DailyBoxSchema = z.looseObject({
-  tier: z.string(),
-  name: z.string(),
-  draws_per_day: finite,
-  draws_today: finite,
-  next_reset: z.string(),
-  prizes: z.array(
-    z.looseObject({
-      kind: z.enum(['credit', 'product', 'voucher', 'nothing']),
-      title: z.string().optional(),
-      image: z.string().optional(),
-      amount_myr: finite.optional(),
-    }),
-  ),
-});
-
-/** GET /store/daily — consolidated daily-rewards state (packs/service.ts
- *  `DailyState`). `box` is nullable: no VIP tier resolves to a box yet. */
+/** GET /store/daily — the VIP voucher/frame grant state (packs/service.ts
+ *  `DailyState`). The box and ship-prize halves went with the daily box
+ *  (2026-08-25). */
 export const DailyStateSchema = z.looseObject({
   redemption_enabled: z.boolean(),
-  box: DailyBoxSchema.nullable(),
   vouchers: z.looseObject({
     claimable: z.array(RewardGrantSchema),
     claimed: z.array(RewardGrantSchema),
   }),
-  ship_prizes: z.array(RewardPrizeSchema),
 });
 
 // --- actions/delivery.ts ----------------------------------------------------
@@ -740,3 +702,68 @@ export const CardDetailSchema = z.looseObject({
   pcSyncedAt: z.string().nullable().catch(null),
   priceHistory: z.array(CardPricePointSchema).catch([]),
 });
+
+/** One settled weekly line as the store surfaces render it (both the
+ *  Referral and VIP tabs of /task). Cents + basis points on the wire; the
+ *  UI converts for display. */
+export const SettlementHistoryRowSchema = z.looseObject({
+  week_start: z.string(),
+  basis_cents: finite,
+  rate_bp: finite,
+  amount_cents: finite,
+  status: z.string(),
+});
+
+/** GET /store/referral — the /task Referral tab payload. */
+export const ReferralSummarySchema = z.looseObject({
+  handle: z.string(),
+  downline_count: finite,
+  week: z.looseObject({
+    start: z.string(),
+    turnover_cents: finite,
+    rate_bp: finite,
+    projected_cents: finite,
+    partner: z.boolean(),
+  }),
+  history: z.array(SettlementHistoryRowSchema),
+});
+export type ReferralSummary = z.infer<typeof ReferralSummarySchema>;
+
+/** One task row of GET /store/tasks (Phase B). requirement/reward are the
+ *  backend's discriminated unions; the tab renders from progress + reward, so
+ *  both stay loose JSON here (deploy-skew rule: an unknown new requirement
+ *  type must not crash the page). */
+export const TaskEntrySchema = z.looseObject({
+  id: z.string(),
+  kind: z.enum(['weekly', 'achievement']),
+  title: z.string(),
+  requirement: z.looseObject({ type: z.string() }),
+  reward: z.looseObject({ type: z.string() }),
+  progress: z.looseObject({
+    current: finite,
+    target: finite,
+    completed: z.boolean(),
+  }),
+  claimed: z.boolean(),
+});
+export type TaskEntry = z.infer<typeof TaskEntrySchema>;
+
+/** GET /store/tasks — the /task Tasks tab payload. */
+/** One unspent free-rip entitlement (GET /store/tasks `pending_spins`). */
+export const PendingSpinSchema = z.looseObject({
+  claim_id: z.string(),
+  task_id: z.string(),
+  title: z.string(),
+  pack_id: z.string(),
+});
+
+export const TaskHubSchema = z.looseObject({
+  week_start: z.string(),
+  vip_level: finite,
+  checked_in_today: z.boolean(),
+  // `.catch([])` is the deploy-skew guard: a backend that predates the field
+  // must not drop the whole hub payload and blank the page.
+  pending_spins: z.array(PendingSpinSchema).catch([]),
+  tasks: z.array(TaskEntrySchema),
+});
+export type TaskHub = z.infer<typeof TaskHubSchema>;

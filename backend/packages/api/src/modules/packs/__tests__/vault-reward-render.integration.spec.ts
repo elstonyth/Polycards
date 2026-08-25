@@ -1,23 +1,24 @@
 /**
- * C2 — Include reward Pulls in the private vault (render from prize_snapshot)
+ * Reward pulls render in the private vault on the CARD path.
  *
- * The vault route (GET /store/vault) must show reward Pulls with title/image
- * from the reward_draw.prize_snapshot keyed by vault_pull_id, and must NOT
- * drop them via the `if (!card) return null` normal-card guard.
+ * History: this spec was written for C2, when a reward pull could be a daily-box
+ * product prize with no Card row behind it, so the vault rendered it from
+ * reward_draw.prize_snapshot on a separate branch. The daily box was removed
+ * 2026-08-25 and reward_draw with it. Every surviving source='reward' pull —
+ * weekly-challenge prizes and task rewards alike — carries a real card handle,
+ * so the branch is gone and this spec now pins the replacement contract:
  *
- * Step 1 (failing): The vault route handler is invoked with a mock request
- * carrying a reward Pull (source='reward', no Card row). Before C2 the
- * `if (!card) return null` guard drops it → items is empty. Test asserts the
- * reward item IS present → fails until the route is fixed.
+ *   - a reward pull appears in GET /store/vault,
+ *   - with its Card sub-object (title/image come from the card, not a snapshot),
+ *   - carrying source='reward',
+ *   - and it is NOT dropped by the `if (!card) return null` normal-card guard.
  *
- * Step 2 (implementation): Branch on Pull.source in the vault route. For
- * source==='reward', load the matching reward_draw by vault_pull_id, use
- * prize_snapshot.{title,image}, omit the buyback block.
+ * The regression this guards is the one that has bitten twice: a won or granted
+ * card rendering as NOTHING in the owner's vault.
  *
  * Execution model: moduleIntegrationTestRunner — schema from MODEL definitions;
  * hand-written CHECKs/partial-unique absent; runtime logic only.
  */
-
 import path from 'path';
 import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
 import { PACKS_MODULE } from '../index';
@@ -36,14 +37,11 @@ import AdminActionAudit from '../models/admin-action-audit';
 import VipMemberState from '../models/vip-member-state';
 import VipRewardGrant from '../models/vip-reward-grant';
 import NotificationRead from '../models/notification-read';
-import RewardDraw from '../models/reward-draw';
 
 // Import the vault route handler under test
 import { GET as vaultGET } from '../../../api/store/vault/route';
 
 jest.setTimeout(300 * 1000);
-
-const today = () => new Date().toISOString().slice(0, 10);
 
 moduleIntegrationTestRunner<PacksModuleService>({
   moduleName: PACKS_MODULE,
@@ -63,21 +61,20 @@ moduleIntegrationTestRunner<PacksModuleService>({
     VipMemberState,
     VipRewardGrant,
     NotificationRead,
-    RewardDraw,
   ],
   testSuite: ({ service }) => {
     const mkIds = (tag: string) => ({
       customer: `cus_c2_${tag}`,
       cardHandle: `card-c2-${tag}`,
       packSlug: `pack-c2-${tag}`,
-      rewardPackSlug: `reward-box-c2-${tag}`,
       prizeHandle: `prize-c2-${tag}`,
     });
 
     /**
-     * Seed: a normal card Pack + a reward_box Pack, one Card row, one normal
-     * vaulted Pack Pull, one reward vaulted Pull (card_id = prizeHandle sentinel,
-     * no Card row), and a matching RewardDraw row with vault_pull_id set.
+     * Seed: one Pack, two Cards, one normal vaulted Pack Pull, and one reward
+     * vaulted Pull on the 'task-reward' sentinel pack — the shape claimTask
+     * writes for a card reward, and the shape with no pack row and no odds rows
+     * behind it.
      */
     const seed = async (ids: ReturnType<typeof mkIds>) => {
       await service.createPacks([
@@ -91,17 +88,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
           buyback_percent: 50,
         },
       ]);
-      await service.createPacks([
-        {
-          slug: ids.rewardPackSlug,
-          title: 'C2 Reward Box',
-          image: 'img.png',
-          category: 'reward_box',
-          status: 'active',
-          price: 0,
-          buyback_percent: 0,
-        },
-      ]);
       await service.createCards([
         {
           handle: ids.cardHandle,
@@ -111,6 +97,15 @@ moduleIntegrationTestRunner<PacksModuleService>({
           grade: '10',
           market_value: 20,
           image: 'card.png',
+        },
+        {
+          handle: ids.prizeHandle,
+          name: 'C2 Prize Card',
+          set: 'Base',
+          grader: 'PSA',
+          grade: '9',
+          market_value: 35,
+          image: 'prize.png',
         },
       ]);
       await service.createPackOdds([
@@ -122,7 +117,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
         },
       ]);
 
-      // Normal pack Pull (source='pack', card row exists)
       const [normalPull] = await service.createPulls([
         {
           customer_id: ids.customer,
@@ -133,49 +127,36 @@ moduleIntegrationTestRunner<PacksModuleService>({
           source: 'pack',
         },
       ]);
-      await service.updatePulls([{ id: normalPull.id, status: 'vaulted' as const }]);
+      await service.updatePulls([
+        { id: normalPull.id, status: 'vaulted' as const },
+      ]);
 
-      // Reward Pull (source='reward', card_id = product handle sentinel, NO Card row)
       const [rewardPull] = await service.createPulls([
         {
           customer_id: ids.customer,
-          pack_id: ids.rewardPackSlug,
+          // The sentinel claimTask writes for a card reward: no Pack row, no
+          // odds rows. The vault must cope with both.
+          pack_id: 'task-reward',
           card_id: ids.prizeHandle,
           order_id: null,
           rolled_at: new Date(),
           source: 'reward',
         },
       ]);
-      await service.updatePulls([{ id: rewardPull.id, status: 'vaulted' as const }]);
-
-      // Matching RewardDraw row with vault_pull_id pointing at the reward Pull
-      const prizeSnapshot = {
-        product_handle: ids.prizeHandle,
-        title: 'C2 Prize Title',
-        image: 'https://cdn.example.com/c2-prize.png',
-      };
-      await service.createRewardDraws([
-        {
-          customer_id: ids.customer,
-          tier: 'c',
-          draw_day: today(),
-          draw_ordinal: 1,
-          prize_kind: 'product',
-          prize_snapshot: prizeSnapshot,
-          vault_pull_id: rewardPull.id,
-          credit_txn_id: null,
-          status: 'drawn',
-        },
+      await service.updatePulls([
+        { id: rewardPull.id, status: 'vaulted' as const },
       ]);
 
-      return { normalPull, rewardPull, prizeSnapshot };
+      return { normalPull, rewardPull };
     };
 
     // Build a minimal mock req/res pair to invoke the vault route handler
     const callVaultRoute = async (customerId: string) => {
       const captured: Record<string, unknown> = {};
       const res = {
-        json: (body: unknown) => { captured.body = body; },
+        json: (body: unknown) => {
+          captured.body = body;
+        },
       };
       const req = {
         auth_context: { actor_id: customerId },
@@ -185,27 +166,63 @@ moduleIntegrationTestRunner<PacksModuleService>({
       };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await vaultGET(req as any, res as any);
-      return (captured.body as { items: unknown[] });
+      return captured.body as { items: unknown[] };
     };
 
-    describe('C2 — reward Pull vault render', () => {
-      it('STEP1 (was failing before C2): reward Pull appears in GET /store/vault with snapshot title+image', async () => {
+    describe('reward pulls in GET /store/vault', () => {
+      it('renders a reward pull from its Card, not from a prize snapshot', async () => {
         const ids = mkIds('route');
         const { rewardPull } = await seed(ids);
 
         const body = await callVaultRoute(ids.customer);
         const items = body.items as Array<Record<string, unknown>>;
 
-        // After C2: reward Pull must appear in the vault response
-        const rewardItem = items.find(
-          (i) => i.pull_id === rewardPull.id,
-        );
+        const rewardItem = items.find((i) => i.pull_id === rewardPull.id);
         expect(rewardItem).toBeDefined();
-        expect(rewardItem!.title).toBe('C2 Prize Title');
-        expect(rewardItem!.image).toBe('https://cdn.example.com/c2-prize.png');
+        const normalItem = items.find((i) => i.pull_id !== rewardPull.id)!;
         expect(rewardItem!.source).toBe('reward');
-        // No buyback block on reward items
-        expect(rewardItem!.buyback).toBeUndefined();
+        const card = rewardItem!.card as Record<string, unknown>;
+        expect(card).toBeDefined();
+        expect(card.handle).toBe(ids.prizeHandle);
+        expect(card.name).toBe('C2 Prize Card');
+        // NOT locked — `locked` means neither sellable nor shippable, and a
+        // reward card ships fine (recordRewardWithdrawal). Locking it hid a
+        // path that works and put the free-pull explainer ("rip a paid pack to
+        // unlock") over a card that never unlocks that way.
+        expect(rewardItem!.locked).toBe(false);
+        // NOT sellable — buyback-pull.ts refuses any source='reward' pull that
+        // is not a weekly-challenge prize, so the row must quote nothing
+        // payable or the vault offers money the sell rejects.
+        expect(rewardItem!.sellable).toBe(false);
+        expect(normalItem.sellable).toBe(true);
+        const buyback = rewardItem!.buyback as Record<string, unknown>;
+        expect(buyback).toBeDefined();
+        expect(buyback.amount).toBe(0);
+        // `firm` is a GLOBAL fact about the FX rate, never a per-row signal:
+        // it must match every other row's, or one unsellable row would blame
+        // the whole vault's pricing and block selling the rest.
+        expect(buyback.firm).toBe(
+          (normalItem.buyback as Record<string, unknown>).firm,
+        );
+      });
+
+      it('resolves a synthetic-pack reward to a live tier, not Common', () => {
+        // 'task-reward' has no odds rows. Falling back to rarityOf would paint
+        // every task-granted card Common — the wrong-tier report this work
+        // started from. With no live pack offering the card the resolved tier
+        // is empty rather than a lie.
+        const ids = mkIds('tier');
+        return seed(ids)
+          .then(({ rewardPull }) =>
+            callVaultRoute(ids.customer).then((body) => ({ body, rewardPull })),
+          )
+          .then(({ body, rewardPull }) => {
+            const items = body.items as Array<Record<string, unknown>>;
+            const item = items.find((i) => i.pull_id === rewardPull.id)!;
+            expect((item.card as Record<string, unknown>).rarity).not.toBe(
+              'Common',
+            );
+          });
       });
 
       it('normal-card vault rows unchanged — still rendered with card + buyback', async () => {
@@ -217,29 +234,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
         const normalItem = items.find((i) => i.pull_id === normalPull.id);
         expect(normalItem).toBeDefined();
-        // Normal pull has a card sub-object and a buyback block
-        expect(normalItem!.card).toBeDefined();
-        expect((normalItem!.card as Record<string, unknown>).handle).toBe(ids.cardHandle);
+        expect((normalItem!.card as Record<string, unknown>).handle).toBe(
+          ids.cardHandle,
+        );
         expect(normalItem!.buyback).toBeDefined();
-        // Free-welcome pack (Task 7): EVERY vault item now states how it was
-        // acquired and whether it is locked. This used to assert `source` was
-        // absent from the normal shape; a plain pack pull is 'pack' + unlocked.
+        // Free-welcome pack (Task 7): EVERY vault item states how it was
+        // acquired and whether it is locked.
         expect(normalItem!.source).toBe('pack');
         expect(normalItem!.locked).toBe(false);
-      });
-
-      it('reward Pull has a matching RewardDraw with prize_snapshot.{title,image}', async () => {
-        const ids = mkIds('snapshot');
-        const { rewardPull, prizeSnapshot } = await seed(ids);
-
-        const draws = await service.listRewardDraws(
-          { vault_pull_id: rewardPull.id },
-          { take: 1 },
-        );
-        expect(draws).toHaveLength(1);
-        const snap = draws[0].prize_snapshot as typeof prizeSnapshot;
-        expect(snap.title).toBe('C2 Prize Title');
-        expect(snap.image).toBe('https://cdn.example.com/c2-prize.png');
       });
     });
   },

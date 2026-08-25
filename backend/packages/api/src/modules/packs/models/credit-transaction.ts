@@ -22,6 +22,9 @@ export const CreditTransaction = model
       'voucher_claim',
       'reward_credit',
       'daily_reward',
+      // Referral rebuild (spec 2026-08-24): the Wednesday settlement payout,
+      // written by payWeeklySettlement and paired with an RF ledger row.
+      'referral_commission',
       // Physical-shipment fee (shipping + mandatory insurance): negative at
       // delivery request, positive on the cancel refund (reference
       // `refund:<order_id>`). Sign-agnostic, like adjustment.

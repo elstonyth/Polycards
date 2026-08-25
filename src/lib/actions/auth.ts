@@ -18,6 +18,7 @@ import { logger } from '@/lib/logger';
 import { setAuthToken, clearAuthToken } from '@/lib/data/customer';
 import { fetchProfileHandle } from '@/lib/data/profiles';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
+import { bindReferralFromCookie } from '@/lib/referral-cookie';
 import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
 import { ALLOWED_SELF_HOSTS } from '@/lib/allowed-hosts';
 import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
@@ -199,7 +200,13 @@ export async function signup(input: {
       },
     );
     // The register token isn't a session token — log in to get the real one.
-    return await login({ email, password: input.password });
+    const result = await login({ email, password: input.password });
+    if (result.ok) {
+      // One-shot referral attribution from the invite cookie. Swallows every
+      // failure internally — a referral hiccup must never fail a signup.
+      await bindReferralFromCookie();
+    }
+    return result;
   } catch (error) {
     logger.error('[auth] signup failed:', error);
     return {
@@ -348,6 +355,12 @@ export async function googleCallback(query: {
         { Authorization: `Bearer ${sessionToken}` },
       );
       const handle = await fetchProfileHandle(sessionToken);
+      if (!payload.actor_id) {
+        // First Google login IS a signup — consume the invite cookie exactly
+        // like the emailpass path, or every Google recruit's link is dropped
+        // (review 2026-08-25, spec finding 2). Swallows failures internally.
+        await bindReferralFromCookie();
+      }
       return { ok: true, customer: toAuthCustomer(customer, handle) };
     } catch (error) {
       await clearAuthToken();

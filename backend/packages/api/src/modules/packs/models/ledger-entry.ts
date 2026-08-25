@@ -13,7 +13,7 @@ export const LedgerEntry = model
   .define('ledger_entry', {
     id: model.id().primaryKey(),
     display_id: model.text().unique(),
-    type: model.enum(['TP', 'SP', 'SE', 'OD', 'AD', 'WP', 'WD']),
+    type: model.enum(['TP', 'SP', 'SE', 'OD', 'AD', 'WP', 'WD', 'RF']),
     customer_id: model.text(),
     occurred_at: model.dateTime(),
     // MYR, signed. bigNumber (NOT number) — money — so this carries a

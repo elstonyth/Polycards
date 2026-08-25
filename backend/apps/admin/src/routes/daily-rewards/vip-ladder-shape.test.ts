@@ -9,7 +9,6 @@ import type { VipLevelRow } from './vip-levels-validate-client';
 const row = (over: Partial<VipLevelRow> = {}): VipLevelRow => ({
   thresholdInput: '0',
   voucherInput: '300',
-  boxTier: 'a',
   frameUnlock: false,
   ...over,
 });
@@ -18,7 +17,6 @@ const row = (over: Partial<VipLevelRow> = {}): VipLevelRow => ({
 const ladder = Array.from({ length: 25 }, (_, i) =>
   row({
     thresholdInput: String(i * 100),
-    boxTier: i < 10 ? 'a' : 'b',
     frameUnlock: i + 1 === 10 || i + 1 === 20,
   }),
 );
@@ -40,9 +38,8 @@ describe('groupByDecade', () => {
     expect(flat).toEqual(ladder);
   });
 
-  test('summarises tiers, frames and the threshold span per decade', () => {
+  test('summarises frames and the threshold span per decade', () => {
     const [first, second] = groupByDecade(ladder);
-    expect(first.tiers).toEqual(['a']);
     expect(first.frameLevels).toEqual([10]);
     expect(first.thresholdFrom).toBe('0');
     expect(first.thresholdTo).toBe('900');
@@ -55,13 +52,6 @@ describe('groupByDecade', () => {
 });
 
 describe('ladderShape', () => {
-  test('collapses consecutive equal tiers into runs', () => {
-    expect(ladderShape(ladder).tierSegments).toEqual([
-      { tier: 'a', from: 1, to: 10 },
-      { tier: 'b', from: 11, to: 25 },
-    ]);
-  });
-
   test('reports only the decade slots this ladder reaches', () => {
     const s = ladderShape(ladder);
     expect(s.frameSlots).toEqual([10, 20]);

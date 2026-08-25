@@ -109,7 +109,15 @@ export default function VaultClient({
     (s, i) => s + (i.card.marketPriceMyr ?? 0),
     0,
   );
-  const selectedBuyback = selectedItems.reduce(
+  // A reward card is selectable and shippable but never sellable, so the sell
+  // math runs over a NARROWER list than the selection. Keeping one list would
+  // quote a total that includes cards the buyback step refuses.
+  const sellableSelected = selectedItems.filter((i) => i.sellable);
+  const sellableFmv = sellableSelected.reduce(
+    (s, i) => s + (i.card.marketPriceMyr ?? 0),
+    0,
+  );
+  const selectedBuyback = sellableSelected.reduce(
     (s, i) => s + i.buyback.amount,
     0,
   );
@@ -119,7 +127,7 @@ export default function VaultClient({
   // amounts (selectedBuyback) — independent of this — so only the displayed rate
   // label leans on the invariant, and the credited total stays correct anyway.
   const selectedPercent =
-    selectedItems[0]?.buyback.percent ?? FLAT_BUYBACK_PERCENT;
+    sellableSelected[0]?.buyback.percent ?? FLAT_BUYBACK_PERCENT;
 
   // FX firmness is global (one rate), so any non-firm quote means all quotes
   // are on the display fallback and the backend would refuse every sell —
@@ -129,7 +137,7 @@ export default function VaultClient({
   // pricing outage and block selling everything else. (All-locked ⇒ `every` on
   // an empty list ⇒ true ⇒ no spurious banner, which is right: nothing is
   // mispriced, there is just nothing to sell yet.)
-  const quotesFirm = items.every((i) => i.locked || i.buyback.firm);
+  const quotesFirm = items.every((i) => !i.sellable || i.buyback.firm);
 
   const vaultValue = items.reduce(
     (sum, i) => sum + (i.card.marketPriceMyr ?? 0),
@@ -251,7 +259,8 @@ export default function VaultClient({
     setError(null);
     setNotice(null);
     setBulkSelling(true);
-    const ids = selectedItems.map((i) => i.pullId);
+    // Only the sellable ones — sending a reward card here is a guaranteed 400.
+    const ids = sellableSelected.map((i) => i.pullId);
     try {
       const res = await sellBackPullsBatch(ids);
       setConfirmBulkSell(false);
@@ -452,9 +461,10 @@ export default function VaultClient({
           {shown.map((item) => {
             const isSelected = selected.has(item.pullId);
             const glow = rarityRgb(item.card.rarity);
-            // The free welcome card until the first PAID open. `locked` is the
-            // ONLY signal — never `source`, which a sellable challenge prize
-            // also carries ('reward').
+            // Locked = the backend refuses BOTH sell and ship — the free
+            // welcome pull before the first PAID open, and only that. NOT
+            // `source`: a reward card is unsellable but ships fine, which is
+            // `sellable`, and a challenge prize is source='reward' and sells.
             const showLock = item.locked && !lockDismissed.has(item.pullId);
             const art = (
               // Pass `rarity` so the slab renders its tier frame + halo, matching
@@ -684,6 +694,7 @@ export default function VaultClient({
       {items.length > 0 && consent !== null && (
         <VaultActionBar
           selectedCount={selected.size}
+          sellableCount={sellableSelected.length}
           allVisibleSelected={allVisibleSelected}
           visibleCount={visibleIds.length}
           fmv={selectedFmv}
@@ -701,23 +712,28 @@ export default function VaultClient({
       {confirmBulkSell && (
         <SellConfirmModal
           open
-          count={selectedItems.length === 1 ? undefined : selectedItems.length}
+          // Counts the SELLABLE subset, not the selection: a reward card in the
+          // same selection ships, it does not sell, and quoting it here would
+          // promise money for it.
+          count={
+            sellableSelected.length === 1 ? undefined : sellableSelected.length
+          }
           cardName={
-            selectedItems.length === 1
-              ? (selectedItems[0]?.card.name ?? '')
-              : `${selectedItems.length} cards from your vault`
+            sellableSelected.length === 1
+              ? (sellableSelected[0]?.card.name ?? '')
+              : `${sellableSelected.length} cards from your vault`
           }
           image={
-            selectedItems.length === 1
-              ? (selectedItems[0]?.card.image ?? '')
+            sellableSelected.length === 1
+              ? (sellableSelected[0]?.card.image ?? '')
               : ''
           }
           slabImage={
-            selectedItems.length === 1
-              ? selectedItems[0]?.card.slabImage
+            sellableSelected.length === 1
+              ? sellableSelected[0]?.card.slabImage
               : undefined
           }
-          fmv={selectedFmv}
+          fmv={sellableFmv}
           rateType="flat"
           percent={selectedPercent}
           netCredit={selectedBuyback}
@@ -732,12 +748,22 @@ export default function VaultClient({
         items={selectedItems}
         addresses={addresses}
         onClose={() => setDeliverOpen(false)}
-        onSubmitted={(pullIds) => {
+        onSubmitted={(pullIds, skipped) => {
           setItems((prev) => prev.filter((i) => !pullIds.includes(i.pullId)));
           setSelected(new Set());
           setDeliverOpen(false);
-          setError(null);
-          setToast('Shipping order created successfully!');
+          // A reward card can hit its daily cap after the ordinary cards in the
+          // same selection have already shipped. Say which happened instead of
+          // a blanket success over a partial one.
+          if (skipped.length > 0) {
+            setError(
+              `${pullIds.length} card${pullIds.length === 1 ? '' : 's'} on the way. ${skipped.length} could not ship — ${skipped[0]?.reason ?? 'try again shortly'}`,
+            );
+            setToast(null);
+          } else {
+            setError(null);
+            setToast('Shipping order created successfully!');
+          }
         }}
       />
 

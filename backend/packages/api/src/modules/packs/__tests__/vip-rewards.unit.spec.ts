@@ -21,7 +21,6 @@ describe('rewardsForLevel', () => {
     const rewards = rewardsForLevel({
       level: 2,
       voucher_amount: 10,
-      box_tier: 'a',
       frame_unlock: false,
     });
     expect(rewards).toEqual([{ kind: 'voucher', payload: { amount_myr: 10 } }]);
@@ -31,7 +30,6 @@ describe('rewardsForLevel', () => {
     const r = rewardsForLevel({
       level: 10,
       voucher_amount: 50,
-      box_tier: 'a',
       frame_unlock: true,
     });
     expect(r).toContainEqual({ kind: 'frame', payload: { level: 10 } });
@@ -41,7 +39,6 @@ describe('rewardsForLevel', () => {
     const rewards = rewardsForLevel({
       level: 3,
       voucher_amount: 0,
-      box_tier: 'a',
       frame_unlock: false,
     });
     expect(rewards).toEqual([]);

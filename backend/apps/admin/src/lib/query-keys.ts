@@ -32,6 +32,14 @@ export const qk = {
   settlement: (granularity: string, periods: number) =>
     ['admin', 'globepay-settlement', granularity, periods] as const,
   globepayBalance: ['admin', 'globepay-balance'] as const,
+  // Referral rebuild (spec 2026-08-24).
+  referralSettings: ['admin', 'referral-settings'] as const,
+  taskDefinitions: ['admin', 'task-definitions'] as const,
+  referralSettlements: ['admin', 'referral-settlements'] as const,
+  referralSettlement: (id: string) =>
+    ['admin', 'referral-settlements', id] as const,
+  customerReferral: (id: string) =>
+    ['admin', 'customer', id, 'referral'] as const,
   eligibleProducts: ['admin', 'eligible-products'] as const,
   customerGacha: (id: string) => ['admin', 'customer', id, 'gacha'] as const,
   customerAudit: (id: string, page: number) =>
@@ -75,9 +83,6 @@ export const qk = {
   deliveryOrder: (id: string) => ['admin', 'delivery-order', id] as const,
   fxRate: ['admin', 'pricing', 'fx'] as const,
   fxHistory: ['admin', 'pricing', 'fx', 'history'] as const,
-  dailyBoxes: ['admin', 'daily-rewards', 'boxes'] as const,
-  dailyBox: (tier: string) =>
-    ['admin', 'daily-rewards', 'boxes', tier] as const,
   voucherLadder: ['admin', 'daily-rewards', 'vouchers'] as const,
   rewardsSettings: ['admin', 'rewards-settings'] as const,
   siteSettings: ['admin', 'site-settings'] as const,

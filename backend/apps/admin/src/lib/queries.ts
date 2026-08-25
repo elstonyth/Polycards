@@ -58,8 +58,6 @@ import {
   type PixelPokemonPage,
   type PixelPokemonQuery,
   type CreatePixelPokemonBody,
-  getDailyBoxes,
-  getDailyBox,
   getVoucherLadder,
   getRewardsSettings,
   getSiteSettings,
@@ -70,7 +68,6 @@ import {
   saveAvatarFrames,
   saveChallengeSettings,
   saveChallengeStages,
-  saveDailyBox,
   saveRewardsSettings,
   saveSiteSettings,
   saveTierSettings,
@@ -91,9 +88,6 @@ import {
   type CustomerGacha,
   type SupportTransaction,
   type SupportPull,
-  type DailyBoxEditorDTO,
-  type DailyBoxSaveBody,
-  type DailyBoxSummary,
   type DeliveryOrdersPage,
   type DeliveryStatus,
   type EconomyReport,
@@ -114,6 +108,26 @@ import {
   countCustomersInGroup,
   setCustomerGroup,
   type AdminCustomerGroup,
+  // ── Referral rebuild (spec 2026-08-24) ──
+  getReferralSettings,
+  updateReferralSettings,
+  listReferralSettlements,
+  getReferralSettlement,
+  approveReferralSettlement,
+  payReferralSettlement,
+  voidReferralLine,
+  getCustomerReferral,
+  listTaskDefinitions,
+  saveTaskDefinition,
+  type AdminTaskDefinition,
+  setCustomerReferrer,
+  setPartnerRate,
+  voidReferralSettlement,
+  type CustomerReferralCard,
+  type ReferralSettings,
+  type ReferralSettlement,
+  type ReferralSettlementLine,
+  type ReferralTierWire,
 } from './admin-rest';
 import type { SetEntry } from '@acme/odds-math';
 import { qk } from './query-keys';
@@ -164,11 +178,13 @@ export const usePulls = (
 // changes refetch; keepPreviousData avoids a flash while typing.
 export const usePixelPokemon = (
   params: PixelPokemonQuery,
+  opts: { enabled?: boolean } = {},
 ): UseQueryResult<PixelPokemonPage> =>
   useQuery({
     queryKey: ['pixel-pokemon', params],
     queryFn: () => getPixelPokemon(params),
     placeholderData: keepPreviousData,
+    enabled: opts.enabled ?? true,
   });
 
 // Add a custom pixel-pokémon; refetches the library grid on success.
@@ -577,36 +593,9 @@ export const useBulkUpdateDeliveryOrders = () => {
 };
 
 export type {
-  DailyBoxEditorDTO,
-  DailyBoxPrizeDTO,
-  DailyBoxSummary,
   VoucherLadderDTO,
   VoucherRangeDTO,
 } from './admin-rest';
-
-export const useDailyBoxes = (): UseQueryResult<{ boxes: DailyBoxSummary[] }> =>
-  useQuery({ queryKey: qk.dailyBoxes, queryFn: getDailyBoxes });
-
-export const useDailyBox = (tier: string): UseQueryResult<DailyBoxEditorDTO> =>
-  useQuery({
-    queryKey: qk.dailyBox(tier),
-    queryFn: () => getDailyBox(tier),
-    enabled: !!tier,
-  });
-
-export const useSaveDailyBox = () => {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (vars: { tier: string; body: DailyBoxSaveBody }) =>
-      saveDailyBox(vars.tier, vars.body),
-    onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: qk.dailyBoxes });
-      qc.invalidateQueries({ queryKey: qk.dailyBox(vars.tier) });
-      toast.success('Box saved');
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
-  });
-};
 
 export const useVoucherLadder = (): UseQueryResult<VoucherLadderDTO> =>
   useQuery({ queryKey: qk.voucherLadder, queryFn: getVoucherLadder });
@@ -1336,5 +1325,143 @@ export const useCreateProductsFromPriceChartingBatch = () => {
         invalidateInventory();
       }
     },
+  });
+};
+
+// ── Referral rebuild (spec 2026-08-24) ───────────────────────────────────────
+
+export type {
+  CustomerReferralCard,
+  ReferralSettings,
+  ReferralSettlement,
+  ReferralSettlementLine,
+  ReferralTierWire,
+} from './admin-rest';
+
+export const useReferralSettings = (): UseQueryResult<ReferralSettings> =>
+  useQuery({
+    queryKey: qk.referralSettings,
+    queryFn: getReferralSettings,
+  });
+
+export const useUpdateReferralSettings = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      tiers?: ReferralTierWire[];
+      partner_min_bp?: number;
+      partner_max_bp?: number;
+      reason: string;
+    }) => updateReferralSettings(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.referralSettings }),
+  });
+};
+
+export const useReferralSettlements = (): UseQueryResult<
+  ReferralSettlement[]
+> =>
+  useQuery({
+    queryKey: qk.referralSettlements,
+    queryFn: listReferralSettlements,
+  });
+
+export const useReferralSettlement = (
+  id: string | null,
+): UseQueryResult<{
+  settlement: ReferralSettlement;
+  lines: ReferralSettlementLine[];
+}> =>
+  useQuery({
+    queryKey: qk.referralSettlement(id ?? 'none'),
+    queryFn: () => getReferralSettlement(id as string),
+    enabled: id !== null,
+  });
+
+// approve / pay / void all reshape the run list AND the open detail — a plain
+// prefix invalidation of qk.referralSettlements covers both (detail keys nest
+// under the list key).
+export const useApproveReferralSettlement = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => approveReferralSettlement(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.referralSettlements }),
+  });
+};
+
+export const usePayReferralSettlement = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => payReferralSettlement(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.referralSettlements }),
+  });
+};
+
+export const useVoidReferralSettlement = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; reason: string }) =>
+      voidReferralSettlement(vars.id, vars.reason),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.referralSettlements }),
+  });
+};
+
+export const useSetCustomerReferrer = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      customerId: string;
+      referrerId: string | null;
+      reason: string;
+    }) => setCustomerReferrer(vars.customerId, vars.referrerId, vars.reason),
+    onSuccess: (_data, vars) =>
+      qc.invalidateQueries({
+        queryKey: qk.customerReferral(vars.customerId),
+      }),
+  });
+};
+
+export const useVoidReferralLine = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { lineId: string; reason: string }) =>
+      voidReferralLine(vars.lineId, vars.reason),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.referralSettlements }),
+  });
+};
+
+export const useCustomerReferral = (
+  customerId: string,
+): UseQueryResult<CustomerReferralCard> =>
+  useQuery({
+    queryKey: qk.customerReferral(customerId),
+    queryFn: () => getCustomerReferral(customerId),
+  });
+
+export const useSetPartnerRate = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      customerId: string;
+      rateBp: number | null;
+      reason: string;
+    }) => setPartnerRate(vars.customerId, vars.rateBp, vars.reason),
+    onSuccess: (_data, vars) =>
+      qc.invalidateQueries({
+        queryKey: qk.customerReferral(vars.customerId),
+      }),
+  });
+};
+
+export type { AdminTaskDefinition } from './admin-rest';
+
+export const useTaskDefinitions = (): UseQueryResult<AdminTaskDefinition[]> =>
+  useQuery({ queryKey: qk.taskDefinitions, queryFn: listTaskDefinitions });
+
+export const useSaveTaskDefinition = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Parameters<typeof saveTaskDefinition>[0]) =>
+      saveTaskDefinition(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.taskDefinitions }),
   });
 };

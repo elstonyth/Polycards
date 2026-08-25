@@ -8,10 +8,10 @@ import { decadesWithErrors } from './vip-ladder-shape';
 const row = (over: Partial<VipLevelRow> = {}): VipLevelRow => ({
   thresholdInput: '0',
   voucherInput: '0',
-  boxTier: 'a',
   frameUnlock: false,
   ...over,
 });
+
 
 describe('validateVipLevelsClient', () => {
   test('accepts a valid 2-rung ladder', () => {
@@ -43,19 +43,6 @@ describe('validateVipLevelsClient', () => {
     expect(validateVipLevelsClient([row({ frameUnlock: true })])).toContain(
       'Level 1: a frame can only unlock on a decade level (10, 20, … 100).',
     );
-  });
-
-  // Box tier has no editor on the tab any more, and neither
-  // bound is reachable from shipped data, so a client error on either would be
-  // an uncorrectable block on saving the WHOLE ladder. Both stay enforced
-  // server-side; this pins that the CLIENT stays quiet about them.
-  test('does not block the ladder on box tier', () => {
-    expect(
-      validateVipLevelsClient([row({ boxTier: '' })]),
-    ).toEqual([]);
-    expect(
-      validateVipLevelsClient([row({ boxTier: '   ' })]),
-    ).toEqual([]);
   });
 
   // Voucher used to be the exception here, and it cost the tab a whole repair

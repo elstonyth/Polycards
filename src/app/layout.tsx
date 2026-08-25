@@ -4,6 +4,7 @@ import localFont from 'next/font/local';
 import './globals.css';
 import AppHeader from '@/components/app-shell/AppHeader';
 import SiteFooter from '@/components/app-shell/SiteFooter';
+import InviteWelcome from '@/components/InviteWelcome';
 import TabBar from '@/components/app-shell/TabBar';
 import { CreditDotProvider } from '@/components/app-shell/CreditDotProvider';
 import { TopUpProvider } from '@/components/app-shell/TopUpProvider';
@@ -97,6 +98,10 @@ export default async function RootLayout({
                 <SkipLink />
                 <AppHeader />
                 <main id="main" className="flex-1 pb-12 lg:pb-8">
+                  {/* Referral-link landing. Client-only by design — reads the
+                      ?invite param from window.location so the ISR-cached home
+                      page stays visitor-agnostic. */}
+                  <InviteWelcome />
                   {children}
                 </main>
                 {/* Footer carries the TabBar clearance (pb-28) on phones. */}

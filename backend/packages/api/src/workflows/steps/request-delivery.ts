@@ -64,10 +64,13 @@ export const verdictError = (
         MedusaError.Types.NOT_ALLOWED,
         'One or more cards are no longer available to deliver.',
       );
+    // Only reachable if a caller hand-rolls a request against this path; the
+    // vault routes reward pulls to POST /store/rewards/withdraw itself. The
+    // old copy pointed at a rewards page that no longer exists.
     case 'reward_source':
       return new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        'Reward prizes are shipped from the rewards page, not the vault.',
+        'Reward cards ship on their own request — send this one to /store/rewards/withdraw.',
       );
     // NOT_ALLOWED is a 400 (same mapping as every case above) carrying the one
     // shared lock copy, so vault, buyback and delivery all refuse in the same

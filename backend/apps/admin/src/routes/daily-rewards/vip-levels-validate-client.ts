@@ -8,7 +8,6 @@ export const FRAME_LEVELS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 export interface VipLevelRow {
   thresholdInput: string;
   voucherInput: string;
-  boxTier: string;
   frameUnlock: boolean;
 }
 
@@ -36,10 +35,10 @@ export function validateVipLevelsClient(rows: VipLevelRow[]): string[] {
         );
       prev = t;
     }
-    // voucherInput / boxTier are deliberately NOT checked here. Neither is
-    // editable on the tab any more (both surfaces are suspended), so a client
-    // error on one would be a block the operator has no field to clear — the
-    // same reasoning #371 applied to box tier.
+    // voucherInput is deliberately NOT checked here. It is not editable on
+    // the tab any more (its redeeming surface is suspended), so a client error
+    // on it would be a block the operator has no field to clear — the same
+    // reasoning #371 applied to the box tier that used to sit beside it.
     //
     // Voucher was the exception until the data it checked went away: the ladder
     // paid 12,000 at L90 and 15,000 at L100 against a 10,000 server cap, so two

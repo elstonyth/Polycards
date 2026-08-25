@@ -24,6 +24,8 @@ import {
   createPhoneOtpStartPhoneRateLimit,
   createPhoneOtpStartRateLimit,
   createProfileAppearanceRateLimit,
+  createReferralBindRateLimit,
+  createTaskActionRateLimit,
   createProfileReadRateLimit,
   createPullRevealRateLimit,
   createStoreReadRateLimit,
@@ -109,7 +111,6 @@ const authIdentifierRateLimit = createAuthIdentifierRateLimit();
 const deliveryWriteRateLimit = createDeliveryWriteRateLimit((req) => {
   if (req.path.startsWith('/store/rewards/'))
     return 'Too many reward requests.';
-  if (req.path.startsWith('/store/daily/')) return 'Too many draw attempts.';
   if (req.path.startsWith('/store/profile/')) return 'Too many uploads.';
   if (req.path.startsWith('/store/phone-verification/'))
     return 'Too many verification requests.';
@@ -118,6 +119,8 @@ const deliveryWriteRateLimit = createDeliveryWriteRateLimit((req) => {
 // Frame equip/unequip — cosmetic metadata write with its own generous budget
 // (sharing the delivery-write tier 429'd a collector's 11th frame swap).
 const profileAppearanceRateLimit = createProfileAppearanceRateLimit();
+const referralBindRateLimit = createReferralBindRateLimit();
+const taskActionRateLimit = createTaskActionRateLimit();
 // Permanent account deletion — its own tier because the route takes a password
 // and the write tier is no throttle for one (see createAccountDeleteRateLimit).
 const accountDeleteRateLimit = createAccountDeleteRateLimit();
@@ -658,6 +661,51 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
+      // The customer's referral panel (GET /store/referral) — invite handle,
+      // live downline turnover, projected commission, settled history.
+      matcher: '/store/referral',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // Permanent one-shot referral attribution (POST /store/referral/bind).
+      // Fired blind by the storefront after signup when an invite cookie is
+      // present; tiny per-customer budget — one legitimate call per lifetime.
+      matcher: '/store/referral/bind',
+      method: 'POST',
+      middlewares: [authenticate('customer', ['bearer']), referralBindRateLimit],
+    },
+    {
+      // Spend a task's free-rip entitlement (POST /store/tasks/claims/:id/spin).
+      // It MINTS a card, so it shares the write-tier budget with the paid open
+      // rather than the store-read one.
+      matcher: '/store/tasks/claims/*',
+      method: 'POST',
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        deliveryWriteRateLimit,
+      ],
+    },
+    {
+      // The /task Tasks tab payload (GET /store/tasks).
+      matcher: '/store/tasks',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // Daily check-in (POST /store/tasks/checkin) — idempotent per MYT day.
+      matcher: '/store/tasks/checkin',
+      method: 'POST',
+      middlewares: [authenticate('customer', ['bearer']), taskActionRateLimit],
+    },
+    {
+      // Task reward claim (POST /store/tasks/:id/claim) — idempotent per
+      // (task, period) via the task_claim unique index.
+      matcher: '/store/tasks/*/claim',
+      method: 'POST',
+      middlewares: [authenticate('customer', ['bearer']), taskActionRateLimit],
+    },
+    {
       // The customer's in-app notification feed (GET /store/notifications).
       // receiver_id is scoped to the verified bearer token in the route handler —
       // never from query/body — so this entry is the auth + rate-limit gate only.
@@ -829,18 +877,6 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
-      // Daily-box draw (POST /store/daily/draw) — mints value, so it shares the
-      // write-tier budget like /store/rewards/* POSTs. The fail-closed
-      // redemption gate lives in the route handler; actor_id comes from the
-      // verified bearer token only.
-      matcher: '/store/daily/draw',
-      method: 'POST',
-      middlewares: [
-        authenticate('customer', ['bearer']),
-        deliveryWriteRateLimit,
-      ],
-    },
-    {
       // Customer profile-photo upload (POST /store/profile/avatar): bearer
       // auth, write-tier budget, then multipart parse (shared 20 MB edge cap —
       // the route enforces the tighter 5 MB avatar cap).
@@ -976,14 +1012,6 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
-      // Daily-box authoring write (POST /admin/daily-rewards/boxes/:tier) —
-      // mutates the reward economy, so it shares the admin money-mutation
-      // budget. Auth is the framework default /admin guard.
-      matcher: '/admin/daily-rewards/boxes/*',
-      method: 'POST',
-      middlewares: [adminActionRateLimit],
-    },
-    {
       // Voucher-ladder write (POST /admin/daily-rewards/vouchers) — rewrites
       // vip_level.voucher_amount, so it shares the admin money-mutation budget.
       matcher: '/admin/daily-rewards/vouchers',
@@ -994,6 +1022,51 @@ export default defineMiddlewares({
       // VIP-ladder write (POST /admin/vip-levels) — rewrites the ladder incl.
       // vip_level.voucher_amount, so it shares the admin money-mutation budget.
       matcher: '/admin/vip-levels',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Referral tier table + partner bounds (POST /admin/referrals/settings).
+      matcher: '/admin/referrals/settings',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // The weekly settlement lifecycle (approve/pay) and per-line void.
+      matcher: '/admin/referrals/settlements/*/approve',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/referrals/settlements/*/pay',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/referrals/lines/*/void',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/referrals/settlements/*/void',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Admin set/fix of attribution (POST /admin/customers/:id/referral).
+      matcher: '/admin/customers/*/referral',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Partner-rate flag on a customer (POST /admin/customers/:id/partner-rate).
+      matcher: '/admin/customers/*/partner-rate',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Task-definition CRUD (POST /admin/tasks).
+      matcher: '/admin/tasks',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

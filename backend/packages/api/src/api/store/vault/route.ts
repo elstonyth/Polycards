@@ -63,24 +63,17 @@ export async function GET(
     { order: { rolled_at: 'DESC' }, take: VAULT_LIMIT },
   );
 
-  // Separate reward pulls (rendered from prize_snapshot) from normal card pulls.
-  //
-  // Weekly-challenge prizes are minted source='reward' but are NOT reward-box
-  // prizes: they carry a real card handle, not a product sentinel, and have no
-  // reward_draw row. Sent down the reward branch they emitted no card/buyback
-  // and the storefront's VaultItemSchema dropped them outright — a won card
-  // rendered as NOTHING in the winner's vault. They belong on the card path,
-  // where they sell and showcase like any pulled card (operator decision).
-  const isChallengePrize = (p: { source?: string | null; pack_id: string }) =>
-    p.source === 'reward' && isChallengePrizePack(p.pack_id);
-  const normalPulls = pulls.filter(
-    (p) => p.source !== 'reward' || isChallengePrize(p),
-  );
-  const rewardPulls = pulls.filter(
-    (p) => p.source === 'reward' && !isChallengePrize(p),
-  );
-
-  // For normal card pulls: resolve cards, packs, and odds as before.
+  // EVERY pull now takes the card path. The old second branch rendered a pull
+  // from its reward_draw prize_snapshot, which existed because a daily-box
+  // prize could be a bare product handle with no Card row behind it. The daily
+  // box was removed 2026-08-25 and reward_draw with it, so every surviving
+  // source='reward' pull — weekly-challenge prizes and task rewards alike —
+  // carries a real card handle and belongs here, where it sells and showcases
+  // like any pulled card. (Challenge prizes were moved across first, for
+  // exactly this reason: on the reward branch they emitted no card/buyback and
+  // the storefront's VaultItemSchema dropped them outright, so a won card
+  // rendered as NOTHING in the winner's vault.)
+  const normalPulls = pulls;
   const handles = [...new Set(normalPulls.map((p) => p.card_id))];
   const normalPackIds = [...new Set(normalPulls.map((p) => p.pack_id))];
 
@@ -109,21 +102,17 @@ export async function GET(
   // the exact wrong-tier report this work started from. Resolve those the same
   // way the card page does (best tier among openable packs), from ONE batched
   // lookup, and only when the customer actually holds a prize.
+  // Every source='reward' pull rides a synthetic pack with no odds rows —
+  // challenge prizes on challengePackId(week), task card rewards on the
+  // 'task-reward' sentinel — so all of them need the same treatment, not just
+  // the challenge ones. A pack-reward (a task's free rip) names a REAL pack and
+  // is not in here: its odds rows resolve the tier normally.
+  const isSyntheticReward = (p: { source?: string | null; pack_id: string }) =>
+    p.source === 'reward' && !packBySlug.has(p.pack_id);
   const prizeHandles = normalPulls
-    .filter((p) => isChallengePrizePack(p.pack_id))
+    .filter(isSyntheticReward)
     .map((p) => p.card_id);
   const prizeTier = await bestLiveTierByHandle(packs, prizeHandles);
-
-  // For reward pulls: load matching reward_draw rows keyed by vault_pull_id.
-  // ponytail: single batch query; vault is capped at 500 so N is bounded.
-  const rewardPullIds = rewardPulls.map((p) => p.id);
-  const rewardDrawRows = rewardPullIds.length
-    ? await packs.listRewardDraws(
-        { vault_pull_id: rewardPullIds },
-        { take: rewardPullIds.length },
-      )
-    : [];
-  const drawByPullId = new Map(rewardDrawRows.map((d) => [d.vault_pull_id, d]));
 
   // Build vault items — normal pulls first (existing shape), then reward pulls.
   const normalItems = normalPulls
@@ -136,7 +125,16 @@ export async function GET(
       const prize = isChallengePrizePack(p.pack_id);
       // The free welcome pull is unsellable until the customer's first PAID
       // open — the SAME rule buyback-pull.ts refuses on.
+      // `locked` = neither sellable NOR shippable. That is the free welcome
+      // pull before the first PAID open, and only that.
       const locked = p.source === 'free' && !freeUnlocked;
+      // Sellable is the NARROWER fact: buyback-pull.ts refuses any
+      // source='reward' pull that is not a weekly-challenge prize. Those cards
+      // still SHIP — through recordRewardWithdrawal, which carries its own
+      // daily cap — so folding them into `locked` would have hidden a path
+      // that works.
+      const sellable =
+        !locked && !(p.source === 'reward' && !isChallengePrizePack(p.pack_id));
       const { percent, rate_type } = resolveBuybackRate(pack, {
         rolled_at: p.rolled_at,
         revealed_at: p.revealed_at,
@@ -166,11 +164,14 @@ export async function GET(
         challenge_prize: prize,
         showcased: (p as unknown as { showcased: boolean }).showcased ?? false,
         card: {
-          // A prize's synthetic pack has no odds row, so rarityOf would answer
-          // 'Common' for it; use the resolved live tier instead.
+          // A synthetic pack has no odds row, so rarityOf would answer
+          // 'Common' for it — the exact wrong-tier report this work started
+          // from. Keyed off isSyntheticReward, NOT `prize`: a task reward has
+          // the same no-odds shape as a challenge prize and needs the same
+          // resolved live tier.
           ...toCardView(
             card,
-            prize
+            isSyntheticReward(p)
               ? (prizeTier.get(p.card_id) ?? '')
               : rarityOf(p.pack_id, p.card_id),
           ),
@@ -181,9 +182,14 @@ export async function GET(
         // the sell/deliver lock must be keyed off `locked`, NEVER off `source`.
         source: p.source ?? 'pack',
         locked,
-        // A LOCKED free pull must advertise NOTHING payable: selling it 400s
-        // (FREE_PULL_LOCKED_MESSAGE), so quoting a price here would offer the
-        // customer money the sell then refuses. UNQUOTED_BUYBACK is the same
+        // Can this row be SOLD? False for a reward card, which still ships.
+        // Split from `locked` so the vault stops advertising a sell price the
+        // buyback step rejects without also hiding the shipping it allows.
+        sellable,
+        // A LOCKED pull must advertise NOTHING payable: selling it 400s
+        // (FREE_PULL_LOCKED_MESSAGE for a free pull, "Reward prizes can't be
+        // sold back" for a task reward), so quoting a price here would offer
+        // the customer money the sell then refuses. UNQUOTED_BUYBACK is the same
         // "no quote" block the open route degrades to — deliberately NOT an
         // omitted/null field, because the storefront drops any vault row
         // without a finite buyback.percent, which would delete the customer's
@@ -197,7 +203,7 @@ export async function GET(
         // blame the lock on a pricing outage for the WHOLE vault and block the
         // customer from selling their other, genuinely sellable cards.
         // The lock is carried by `locked`, never by `firm`.
-        buyback: locked
+        buyback: !sellable
           ? { ...UNQUOTED_BUYBACK, firm: fxFirm }
           : {
               percent,
@@ -212,34 +218,9 @@ export async function GET(
     })
     .filter((e): e is NonNullable<typeof e> => e !== null);
 
-  // Reward pull items: title/image from prize_snapshot; no buyback block.
-  // If the reward_draw row is missing (a partial write or orphaned snapshot),
-  // STILL show the pull — it is an owned vault item — as a degraded placeholder
-  // rather than silently dropping the customer's prize from their vault.
-  const rewardItems = rewardPulls.map((p) => {
-    const draw = drawByPullId.get(p.id);
-    const snap = (draw?.prize_snapshot ?? {}) as {
-      title?: string;
-      image?: string;
-      product_handle?: string;
-    };
-    return {
-      pull_id: p.id,
-      rolled_at: p.rolled_at,
-      pack_id: p.pack_id,
-      challenge_prize: isChallengePrizePack(p.pack_id),
-      title: snap.title ?? 'Reward prize',
-      image: snap.image ?? '',
-      source: 'reward' as const,
-      // Reward prizes are never the free welcome pull, so they are never
-      // locked — stated rather than left absent so `locked` is present on
-      // EVERY item and the storefront needs no `?? false` fallback.
-      locked: false,
-    };
-  });
-
-  // Merge in rolled_at DESC order (pulls was already ordered DESC; preserve).
-  const items = [...normalItems, ...rewardItems].sort(
+  // Already rolled_at DESC from listPulls; the sort keeps that explicit now
+  // that a single list feeds it.
+  const items = [...normalItems].sort(
     (a, b) => new Date(b.rolled_at).getTime() - new Date(a.rolled_at).getTime(),
   );
 

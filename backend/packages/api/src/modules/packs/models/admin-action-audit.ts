@@ -29,6 +29,10 @@ export const AdminActionAudit = model
       'delivery_order',
       'purchase_invoice',
       'tier_settings',
+      // Referral rebuild (spec 2026-08-24).
+      'referral_settings',
+      'weekly_settlement',
+      'task_definition',
     ]),
     entity_id: model.text(),
     action: model.enum([
@@ -59,6 +63,15 @@ export const AdminActionAudit = model
       // Customer self-service account deletion. admin_id carries the
       // CUSTOMER's own id for this action — see service.purgeAccountPacksData.
       'delete_account',
+      // Referral rebuild (spec 2026-08-24): partner-rate changes audit against
+      // entity_type 'customer'; the settlement lifecycle against
+      // 'weekly_settlement'; tier-table edits against 'referral_settings'.
+      'set_partner_rate',
+      'edit_referral_settings',
+      'approve_settlement',
+      'void_settlement_line',
+      'void_settlement',
+      'pay_settlement',
     ]),
     before: model.json().nullable(),
     after: model.json().nullable(),

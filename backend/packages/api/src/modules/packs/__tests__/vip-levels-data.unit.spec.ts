@@ -24,11 +24,10 @@ describe('VIP_LEVELS data', () => {
     }
   });
 
-  it('unlocks a frame at every 10th level and Z box at 100', () => {
+  it('unlocks a frame at every 10th level', () => {
     for (const r of VIP_LEVELS) {
       expect(r.frame_unlock).toBe(r.level % 10 === 0);
     }
-    expect(VIP_LEVELS.find((r) => r.level === 100)!.box_tier).toBe('Z');
   });
 });
 
@@ -47,9 +46,6 @@ describe('VIP_LEVELS_SEED', () => {
     );
     expect(VIP_LEVELS_SEED.map((r) => r.spend_threshold)).toEqual(
       VIP_LEVELS.map((r) => r.spend_threshold),
-    );
-    expect(VIP_LEVELS_SEED.map((r) => r.box_tier)).toEqual(
-      VIP_LEVELS.map((r) => r.box_tier),
     );
     expect(VIP_LEVELS_SEED.map((r) => r.frame_unlock)).toEqual(
       VIP_LEVELS.map((r) => r.frame_unlock),

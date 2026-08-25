@@ -9,9 +9,8 @@ export const VipLevel = model
     level: model.number().unique(),
     spend_threshold: model.bigNumber(),
     voucher_amount: model.bigNumber(),
-    box_tier: model.text(),
     frame_unlock: model.boolean().default(false),
-      prizes: model.json().nullable(),
+    prizes: model.json().nullable(),
   })
   .indexes([
     {

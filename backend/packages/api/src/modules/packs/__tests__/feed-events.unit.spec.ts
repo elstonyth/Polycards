@@ -3,8 +3,6 @@ import {
   deliveryFeedKey,
   topupFeedKey,
   shouldNotifyTopup,
-  rewardWonFeedKey,
-  shouldNotifyRewardWon,
 } from '../feed-events';
 
 describe('shouldNotifyDeliveryStatus', () => {
@@ -55,14 +53,6 @@ describe('idempotency keys', () => {
     expect(topupFeedKey('mock_abc')).toBe('topup:mock_abc');
   });
 
-  it('reward key is one per customer per draw', () => {
-    expect(rewardWonFeedKey('cus_1', '2026-07-20', 2)).toBe(
-      'reward_won:cus_1:2026-07-20:2',
-    );
-    expect(rewardWonFeedKey('cus_1', '2026-07-20', 3)).not.toBe(
-      rewardWonFeedKey('cus_1', '2026-07-20', 2),
-    );
-  });
 });
 
 describe('shouldNotifyTopup', () => {
@@ -81,38 +71,3 @@ describe('shouldNotifyTopup', () => {
   });
 });
 
-describe('shouldNotifyRewardWon', () => {
-  const drawn = {
-    status: 'drawn',
-    prize: { kind: 'voucher' },
-    draw_ordinal: 1,
-    draw_day: '2026-07-20',
-  };
-
-  it('notifies a real drawn prize', () => {
-    expect(shouldNotifyRewardWon(drawn)).toBe(true);
-  });
-
-  it('does NOT notify a "nothing" prize — drawn, but nothing to record', () => {
-    expect(
-      shouldNotifyRewardWon({ ...drawn, prize: { kind: 'nothing' } }),
-    ).toBe(false);
-  });
-
-  it('does NOT notify unavailable or capped draws — no reward_draw row exists', () => {
-    expect(shouldNotifyRewardWon({ ...drawn, status: 'capped' })).toBe(false);
-    expect(shouldNotifyRewardWon({ ...drawn, status: 'unavailable' })).toBe(
-      false,
-    );
-  });
-
-  it('does NOT notify when key material is missing', () => {
-    expect(shouldNotifyRewardWon({ ...drawn, prize: null })).toBe(false);
-    expect(
-      shouldNotifyRewardWon({ ...drawn, draw_ordinal: undefined }),
-    ).toBe(false);
-    expect(shouldNotifyRewardWon({ ...drawn, draw_day: undefined })).toBe(
-      false,
-    );
-  });
-});

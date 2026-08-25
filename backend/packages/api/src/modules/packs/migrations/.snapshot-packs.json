@@ -47,7 +47,10 @@
             "challenge_settings",
             "delivery_order",
             "purchase_invoice",
-            "tier_settings"
+            "tier_settings",
+            "referral_settings",
+            "weekly_settlement",
+            "task_definition"
           ],
           "mappedType": "enum"
         },
@@ -89,7 +92,13 @@
             "enable",
             "create",
             "reveal",
-            "delete_account"
+            "delete_account",
+            "set_partner_rate",
+            "edit_referral_settings",
+            "approve_settlement",
+            "void_settlement_line",
+            "void_settlement",
+            "pay_settlement"
           ],
           "mappedType": "enum"
         },
@@ -1234,6 +1243,7 @@
             "voucher_claim",
             "reward_credit",
             "daily_reward",
+            "referral_commission",
             "delivery_fee"
           ],
           "mappedType": "enum"
@@ -1503,6 +1513,15 @@
           "length": 6,
           "mappedType": "datetime"
         },
+        "partner_referral_bp": {
+          "name": "partner_referral_bp",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "integer"
+        },
         "free_pack_available_at": {
           "name": "free_pack_available_at",
           "type": "timestamptz",
@@ -1597,6 +1616,104 @@
         },
         {
           "keyName": "customer_account_state_pkey",
+          "columnNames": [
+            "id"
+          ],
+          "composite": false,
+          "constraint": true,
+          "primary": true,
+          "unique": true
+        }
+      ],
+      "checks": [],
+      "foreignKeys": {},
+      "nativeEnums": {}
+    },
+    {
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "checkin_date": {
+          "name": "checkin_date",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        }
+      },
+      "name": "daily_checkin",
+      "schema": "public",
+      "indexes": [
+        {
+          "keyName": "IDX_daily_checkin_deleted_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_daily_checkin_deleted_at\" ON \"daily_checkin\" (\"deleted_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_daily_checkin_unique",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"IDX_daily_checkin_unique\" ON \"daily_checkin\" (\"customer_id\", \"checkin_date\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "daily_checkin_pkey",
           "columnNames": [
             "id"
           ],
@@ -2722,7 +2839,8 @@
             "OD",
             "AD",
             "WP",
-            "WD"
+            "WD",
+            "RF"
           ],
           "mappedType": "enum"
         },
@@ -4431,257 +4549,6 @@
           "nullable": false,
           "mappedType": "text"
         },
-        "tier": {
-          "name": "tier",
-          "type": "text",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "mappedType": "text"
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "default": "''",
-          "mappedType": "text"
-        },
-        "enabled": {
-          "name": "enabled",
-          "type": "boolean",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "default": "false",
-          "mappedType": "boolean"
-        },
-        "draws_per_day": {
-          "name": "draws_per_day",
-          "type": "integer",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "default": "1",
-          "mappedType": "integer"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamptz",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "length": 6,
-          "default": "now()",
-          "mappedType": "datetime"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamptz",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "length": 6,
-          "default": "now()",
-          "mappedType": "datetime"
-        },
-        "deleted_at": {
-          "name": "deleted_at",
-          "type": "timestamptz",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": true,
-          "length": 6,
-          "mappedType": "datetime"
-        }
-      },
-      "name": "reward_box",
-      "schema": "public",
-      "indexes": [
-        {
-          "keyName": "IDX_reward_box_tier_unique",
-          "columnNames": [],
-          "composite": false,
-          "constraint": false,
-          "primary": false,
-          "unique": false,
-          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"IDX_reward_box_tier_unique\" ON \"reward_box\" (\"tier\") WHERE deleted_at IS NULL"
-        },
-        {
-          "keyName": "IDX_reward_box_deleted_at",
-          "columnNames": [],
-          "composite": false,
-          "constraint": false,
-          "primary": false,
-          "unique": false,
-          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_reward_box_deleted_at\" ON \"reward_box\" (\"deleted_at\") WHERE deleted_at IS NULL"
-        },
-        {
-          "keyName": "reward_box_pkey",
-          "columnNames": [
-            "id"
-          ],
-          "composite": false,
-          "constraint": true,
-          "primary": true,
-          "unique": true
-        }
-      ],
-      "checks": [],
-      "foreignKeys": {},
-      "nativeEnums": {}
-    },
-    {
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "mappedType": "text"
-        },
-        "box_id": {
-          "name": "box_id",
-          "type": "text",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "mappedType": "text"
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "enumItems": [
-            "credit",
-            "product",
-            "voucher",
-            "nothing"
-          ],
-          "mappedType": "enum"
-        },
-        "payload": {
-          "name": "payload",
-          "type": "jsonb",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "mappedType": "json"
-        },
-        "weight": {
-          "name": "weight",
-          "type": "integer",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "mappedType": "integer"
-        },
-        "locked": {
-          "name": "locked",
-          "type": "boolean",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "default": "false",
-          "mappedType": "boolean"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamptz",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "length": 6,
-          "default": "now()",
-          "mappedType": "datetime"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamptz",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "length": 6,
-          "default": "now()",
-          "mappedType": "datetime"
-        },
-        "deleted_at": {
-          "name": "deleted_at",
-          "type": "timestamptz",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": true,
-          "length": 6,
-          "mappedType": "datetime"
-        }
-      },
-      "name": "reward_box_prize",
-      "schema": "public",
-      "indexes": [
-        {
-          "keyName": "IDX_reward_box_prize_deleted_at",
-          "columnNames": [],
-          "composite": false,
-          "constraint": false,
-          "primary": false,
-          "unique": false,
-          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_reward_box_prize_deleted_at\" ON \"reward_box_prize\" (\"deleted_at\") WHERE deleted_at IS NULL"
-        },
-        {
-          "keyName": "IDX_reward_box_prize_box",
-          "columnNames": [],
-          "composite": false,
-          "constraint": false,
-          "primary": false,
-          "unique": false,
-          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_reward_box_prize_box\" ON \"reward_box_prize\" (\"box_id\") WHERE deleted_at IS NULL"
-        },
-        {
-          "keyName": "reward_box_prize_pkey",
-          "columnNames": [
-            "id"
-          ],
-          "composite": false,
-          "constraint": true,
-          "primary": true,
-          "unique": true
-        }
-      ],
-      "checks": [],
-      "foreignKeys": {},
-      "nativeEnums": {}
-    },
-    {
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "mappedType": "text"
-        },
         "customer_id": {
           "name": "customer_id",
           "type": "text",
@@ -4691,97 +4558,14 @@
           "nullable": false,
           "mappedType": "text"
         },
-        "tier": {
-          "name": "tier",
+        "referrer_id": {
+          "name": "referrer_id",
           "type": "text",
           "unsigned": false,
           "autoincrement": false,
           "primary": false,
           "nullable": false,
           "mappedType": "text"
-        },
-        "draw_day": {
-          "name": "draw_day",
-          "type": "text",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "mappedType": "text"
-        },
-        "draw_ordinal": {
-          "name": "draw_ordinal",
-          "type": "integer",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "mappedType": "integer"
-        },
-        "prize_kind": {
-          "name": "prize_kind",
-          "type": "text",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "enumItems": [
-            "product",
-            "credit",
-            "voucher",
-            "nothing"
-          ],
-          "mappedType": "enum"
-        },
-        "prize_snapshot": {
-          "name": "prize_snapshot",
-          "type": "jsonb",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "mappedType": "json"
-        },
-        "odds_snapshot": {
-          "name": "odds_snapshot",
-          "type": "jsonb",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": true,
-          "mappedType": "json"
-        },
-        "vault_pull_id": {
-          "name": "vault_pull_id",
-          "type": "text",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": true,
-          "mappedType": "text"
-        },
-        "credit_txn_id": {
-          "name": "credit_txn_id",
-          "type": "text",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": true,
-          "mappedType": "text"
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "default": "'drawn'",
-          "enumItems": [
-            "drawn",
-            "voided"
-          ],
-          "mappedType": "enum"
         },
         "created_at": {
           "name": "created_at",
@@ -4816,29 +4600,138 @@
           "mappedType": "datetime"
         }
       },
-      "name": "reward_draw",
+      "name": "referral_attribution",
       "schema": "public",
       "indexes": [
         {
-          "keyName": "IDX_reward_draw_deleted_at",
+          "keyName": "IDX_referral_attribution_customer_id_unique",
           "columnNames": [],
           "composite": false,
           "constraint": false,
           "primary": false,
           "unique": false,
-          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_reward_draw_deleted_at\" ON \"reward_draw\" (\"deleted_at\") WHERE deleted_at IS NULL"
+          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"IDX_referral_attribution_customer_id_unique\" ON \"referral_attribution\" (\"customer_id\") WHERE deleted_at IS NULL"
         },
         {
-          "keyName": "IDX_reward_draw_customer_day",
+          "keyName": "IDX_referral_attribution_deleted_at",
           "columnNames": [],
           "composite": false,
           "constraint": false,
           "primary": false,
           "unique": false,
-          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_reward_draw_customer_day\" ON \"reward_draw\" (\"customer_id\", \"draw_day\") WHERE deleted_at IS NULL"
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_referral_attribution_deleted_at\" ON \"referral_attribution\" (\"deleted_at\") WHERE deleted_at IS NULL"
         },
         {
-          "keyName": "reward_draw_pkey",
+          "keyName": "IDX_referral_attribution_referrer",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_referral_attribution_referrer\" ON \"referral_attribution\" (\"referrer_id\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "referral_attribution_pkey",
+          "columnNames": [
+            "id"
+          ],
+          "composite": false,
+          "constraint": true,
+          "primary": true,
+          "unique": true
+        }
+      ],
+      "checks": [],
+      "foreignKeys": {},
+      "nativeEnums": {}
+    },
+    {
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "tiers": {
+          "name": "tiers",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "json"
+        },
+        "partner_min_bp": {
+          "name": "partner_min_bp",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "300",
+          "mappedType": "integer"
+        },
+        "partner_max_bp": {
+          "name": "partner_max_bp",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "500",
+          "mappedType": "integer"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        }
+      },
+      "name": "referral_settings",
+      "schema": "public",
+      "indexes": [
+        {
+          "keyName": "IDX_referral_settings_deleted_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_referral_settings_deleted_at\" ON \"referral_settings\" (\"deleted_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "referral_settings_pkey",
           "columnNames": [
             "id"
           ],
@@ -5158,6 +5051,292 @@
           "nullable": false,
           "mappedType": "text"
         },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "period_key": {
+          "name": "period_key",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "''",
+          "mappedType": "text"
+        },
+        "reward_snapshot": {
+          "name": "reward_snapshot",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "json"
+        },
+        "claim_ref": {
+          "name": "claim_ref",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        }
+      },
+      "name": "task_claim",
+      "schema": "public",
+      "indexes": [
+        {
+          "keyName": "IDX_task_claim_deleted_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_task_claim_deleted_at\" ON \"task_claim\" (\"deleted_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_task_claim_customer",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_task_claim_customer\" ON \"task_claim\" (\"customer_id\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_task_claim_unique",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"IDX_task_claim_unique\" ON \"task_claim\" (\"customer_id\", \"task_id\", \"period_key\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "task_claim_pkey",
+          "columnNames": [
+            "id"
+          ],
+          "composite": false,
+          "constraint": true,
+          "primary": true,
+          "unique": true
+        }
+      ],
+      "checks": [],
+      "foreignKeys": {},
+      "nativeEnums": {}
+    },
+    {
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "enumItems": [
+            "weekly",
+            "achievement"
+          ],
+          "mappedType": "enum"
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "requirement": {
+          "name": "requirement",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "json"
+        },
+        "reward": {
+          "name": "reward",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "json"
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "true",
+          "mappedType": "boolean"
+        },
+        "sort": {
+          "name": "sort",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "0",
+          "mappedType": "integer"
+        },
+        "starts_at": {
+          "name": "starts_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        },
+        "ends_at": {
+          "name": "ends_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        }
+      },
+      "name": "task_definition",
+      "schema": "public",
+      "indexes": [
+        {
+          "keyName": "IDX_task_definition_deleted_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_task_definition_deleted_at\" ON \"task_definition\" (\"deleted_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "task_definition_pkey",
+          "columnNames": [
+            "id"
+          ],
+          "composite": false,
+          "constraint": true,
+          "primary": true,
+          "unique": true
+        }
+      ],
+      "checks": [],
+      "foreignKeys": {},
+      "nativeEnums": {}
+    },
+    {
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
         "ranges": {
           "name": "ranges",
           "type": "jsonb",
@@ -5264,15 +5443,6 @@
           "primary": false,
           "nullable": false,
           "mappedType": "decimal"
-        },
-        "box_tier": {
-          "name": "box_tier",
-          "type": "text",
-          "unsigned": false,
-          "autoincrement": false,
-          "primary": false,
-          "nullable": false,
-          "mappedType": "text"
         },
         "frame_unlock": {
           "name": "frame_unlock",
@@ -5674,6 +5844,336 @@
         },
         {
           "keyName": "vip_reward_grant_pkey",
+          "columnNames": [
+            "id"
+          ],
+          "composite": false,
+          "constraint": true,
+          "primary": true,
+          "unique": true
+        }
+      ],
+      "checks": [],
+      "foreignKeys": {},
+      "nativeEnums": {}
+    },
+    {
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "week_start": {
+          "name": "week_start",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "mappedType": "datetime"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "'draft'",
+          "enumItems": [
+            "draft",
+            "approved",
+            "paid",
+            "void"
+          ],
+          "mappedType": "enum"
+        },
+        "approved_by": {
+          "name": "approved_by",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "approved_at": {
+          "name": "approved_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        },
+        "paid_at": {
+          "name": "paid_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        },
+        "total_commission_cents": {
+          "name": "total_commission_cents",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "0",
+          "mappedType": "integer"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        }
+      },
+      "name": "weekly_settlement",
+      "schema": "public",
+      "indexes": [
+        {
+          "keyName": "IDX_weekly_settlement_week_start_unique",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"IDX_weekly_settlement_week_start_unique\" ON \"weekly_settlement\" (\"week_start\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_weekly_settlement_deleted_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_weekly_settlement_deleted_at\" ON \"weekly_settlement\" (\"deleted_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "weekly_settlement_pkey",
+          "columnNames": [
+            "id"
+          ],
+          "composite": false,
+          "constraint": true,
+          "primary": true,
+          "unique": true
+        }
+      ],
+      "checks": [],
+      "foreignKeys": {},
+      "nativeEnums": {}
+    },
+    {
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "settlement_id": {
+          "name": "settlement_id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "text"
+        },
+        "basis_cents": {
+          "name": "basis_cents",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "integer"
+        },
+        "rate_bp": {
+          "name": "rate_bp",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "integer"
+        },
+        "amount_cents": {
+          "name": "amount_cents",
+          "type": "integer",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "mappedType": "integer"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "'pending'",
+          "enumItems": [
+            "pending",
+            "voided",
+            "paid"
+          ],
+          "mappedType": "enum"
+        },
+        "void_reason": {
+          "name": "void_reason",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "voided_by": {
+          "name": "voided_by",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "paid_transaction_id": {
+          "name": "paid_transaction_id",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "length": 6,
+          "default": "now()",
+          "mappedType": "datetime"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        }
+      },
+      "name": "weekly_settlement_line",
+      "schema": "public",
+      "indexes": [
+        {
+          "keyName": "IDX_weekly_settlement_line_deleted_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_weekly_settlement_line_deleted_at\" ON \"weekly_settlement_line\" (\"deleted_at\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_wsl_settlement",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_wsl_settlement\" ON \"weekly_settlement_line\" (\"settlement_id\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_wsl_customer",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_wsl_customer\" ON \"weekly_settlement_line\" (\"customer_id\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "IDX_wsl_settlement_customer_unique",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"IDX_wsl_settlement_customer_unique\" ON \"weekly_settlement_line\" (\"settlement_id\", \"customer_id\") WHERE deleted_at IS NULL"
+        },
+        {
+          "keyName": "weekly_settlement_line_pkey",
           "columnNames": [
             "id"
           ],

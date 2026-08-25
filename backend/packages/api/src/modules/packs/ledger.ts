@@ -12,7 +12,7 @@
 // year) — ponytail: if this ever needs to serve a DST-observing zone, this
 // function needs Intl.DateTimeFormat/date-fns-tz instead of the fixed shift.
 
-export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'AD' | 'WP' | 'WD';
+export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'AD' | 'WP' | 'WD' | 'RF';
 
 export type LedgerPayload =
   | { type: 'TP'; payment_method: string; gateway_ref: string | null }
@@ -65,6 +65,16 @@ export type LedgerPayload =
       bank_code: string | null;
       account_last4: string | null;
       gateway_ref: string | null;
+    }
+  // RF: a weekly referral commission (rebuild, spec 2026-08-24) — the tier %
+  // of the referrer's downline weekly pack turnover. ref_id = the
+  // weekly_settlement_line id, which makes the (type, ref_id) idempotency
+  // index the Wednesday pay step's re-run guard.
+  | {
+      type: 'RF';
+      week_start: string;
+      basis_cents: number;
+      rate_bp: number;
     };
 
 const SERIAL_RE = /^([a-z]+)(\d{4})$/;
