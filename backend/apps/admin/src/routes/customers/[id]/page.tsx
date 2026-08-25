@@ -57,6 +57,22 @@ import { PullsTable } from '../../../components/PullsTable';
 
 // ponytail: no config export — keeps route out of sidebar nav (mirrors packs/[slug]/page.tsx)
 
+// This route DELIBERATELY takes over core Medusa's /customers/:id. "Players" is
+// a UI/i18n rename only and the URLs stay /customers/:id (epic 2 plan, merged in
+// #271), so `mergeRoutes` in @mercurjs/admin matches this file's path against
+// core's and our `lazy` replaces core's customer-detail page. Verified in the
+// browser, not just read: /dashboard/customers/:id renders THIS page.
+//
+// The consequence: core's customer-detail children — `edit`, `create-address`,
+// `add-customer-groups`, `:order_id/transfer`, `metadata/edit` (read from the
+// bundle's route table) — survive the merge but now sit under a component with
+// no <Outlet/>. Verified for `edit`: /customers/:id/edit renders this page and
+// no modal, the URL being the only thing that changes; the others share that
+// merge path. Nothing links to them anymore either, since core's detail page is
+// what linked to them. Restoring one would be new work (an <Outlet/> plus a
+// button), not a bug fix. Any NEW admin route must be checked against the core
+// route table first — see docs/adr/0002-admin-dashboard-ui-stack.md.
+
 // StatusBadge tone per delivery status, mirroring the All Orders table. A
 // ternary chain rather than a second copy of that page's exhaustive Record: an
 // unknown status from the API lands on 'orange' instead of `undefined`.

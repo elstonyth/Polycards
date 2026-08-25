@@ -31,6 +31,12 @@ const HTML_ESCAPES: Record<string, string> = {
 export const escapeHtml = (value: string): string =>
   value.replace(/[&<>"']/g, (char) => HTML_ESCAPES[char]);
 
+// Visual language mirrors the storefront: neutral-950 canvas, a neutral-900
+// "slab" card with a hairline border, the white pill CTA (Pill primitive), and a
+// single gold "chase" accent (--color-chase #ffb020) as the top holo strip.
+// Email constraints shape the markup: tables + bgcolor for Outlook/Gmail-proxy
+// robustness, inline styles only, system font stack (custom fonts don't load
+// reliably in mail clients — the heavy caps + tight tracking echo Nekst Black).
 const passwordReset = (url: string): Rendered => {
   const href = escapeHtml(url);
   return {
@@ -47,21 +53,57 @@ const passwordReset = (url: string): Rendered => {
     ].join('\n'),
     html: `<!doctype html>
 <html lang="en">
-  <body style="margin:0;padding:0;background:#171717;">
-    <div style="max-width:520px;margin:0 auto;padding:40px 24px;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;color:#fafafa;">
-      <h1 style="margin:0 0 20px;font-size:24px;line-height:1.25;font-weight:800;letter-spacing:-0.01em;">Reset your password</h1>
-      <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
-        Someone asked to reset the password for this Polycards account. Choose a new
-        one using the button below — the link expires in 15 minutes and works only once.
-      </p>
-      <a href="${href}" style="display:inline-block;padding:12px 24px;border-radius:9999px;background:#fafafa;color:#171717;font-size:15px;font-weight:700;text-decoration:none;">Reset password</a>
-      <p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#a3a3a3;">
-        If this wasn't you, ignore this email and your password stays unchanged.
-      </p>
-      <p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:#737373;word-break:break-all;">
-        Button not working? Paste this into your browser:<br />${href}
-      </p>
-    </div>
+  <body style="margin:0;padding:0;background:#0a0a0a;" bgcolor="#0a0a0a">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0a0a0a" style="background:#0a0a0a;">
+      <tr>
+        <td align="center" style="padding:48px 16px;">
+          <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:560px;max-width:100%;">
+            <tr>
+              <td style="padding:0 8px 20px;">
+                <img src="https://polycards.gg/branding/polycards-logo.png" alt="Polycards" height="26" style="height:26px;width:auto;border:0;display:block;" />
+              </td>
+            </tr>
+            <tr>
+              <td style="border-radius:16px;background:#171717;border:1px solid #262626;overflow:hidden;" bgcolor="#171717">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td height="3" style="height:3px;line-height:3px;font-size:0;background:#ffb020;background:linear-gradient(90deg,#ffb020 0%,rgba(255,176,32,0) 100%);">&nbsp;</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:36px 32px 32px;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;">
+                      <p style="margin:0 0 14px;font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#ffb020;">Account security</p>
+                      <h1 style="margin:0 0 16px;font-size:28px;line-height:1.15;font-weight:800;letter-spacing:-0.02em;color:#fafafa;text-transform:uppercase;">Reset your<br />password</h1>
+                      <p style="margin:0 0 28px;font-size:15px;line-height:1.65;color:#d4d4d4;">
+                        Someone asked to reset the password for this Polycards account.
+                        Choose a new one with the button below.
+                      </p>
+                      <a href="${href}" style="display:inline-block;padding:14px 32px;border-radius:9999px;background:#fafafa;color:#171717;font-size:15px;font-weight:700;text-decoration:none;">Reset password</a>
+                      <p style="margin:14px 0 0;font-size:12px;line-height:1.6;color:#737373;">
+                        Link expires in 15 minutes &middot; works once
+                      </p>
+                      <hr style="margin:28px 0 20px;border:0;border-top:1px solid #262626;" />
+                      <p style="margin:0 0 6px;font-size:13px;line-height:1.6;color:#a3a3a3;">
+                        If this wasn't you, ignore this email and your password stays unchanged.
+                      </p>
+                      <p style="margin:14px 0 0;font-size:12px;line-height:1.6;color:#737373;word-break:break-all;">
+                        Button not working? Paste this into your browser:<br />
+                        <a href="${href}" style="color:#a3a3a3;text-decoration:underline;">${href}</a>
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px 8px 0;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;font-size:12px;line-height:1.6;color:#737373;">
+                Sent by Polycards &middot; <a href="https://polycards.gg" style="color:#a3a3a3;text-decoration:none;">polycards.gg</a><br />
+                Need help? <a href="mailto:support@polycards.gg" style="color:#a3a3a3;text-decoration:underline;">support@polycards.gg</a>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
   </body>
 </html>`,
   };

@@ -14,4 +14,5 @@ export const ROUTES: string[] = [
   '/fairness',
   '/about',
   '/contact',
+  '/privacy',
 ];
