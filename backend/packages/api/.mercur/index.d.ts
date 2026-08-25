@@ -481,7 +481,7 @@ export type Routes = {
         };
         inventory: typeof import("../../src/api/admin/inventory/route") & {
             $handle: typeof import("../../src/api/admin/inventory/[handle]/route");
-            export.xlsx: typeof import("../../src/api/admin/inventory/export.xlsx/route");
+            "export.xlsx": typeof import("../../src/api/admin/inventory/export.xlsx/route");
         };
         ledger: typeof import("../../src/api/admin/ledger/route");
         media: typeof import("../../src/api/admin/media/route");
