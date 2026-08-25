@@ -1,0 +1,200 @@
+import path from 'path';
+import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
+import { PACKS_MODULE } from '../index';
+import type PacksModuleService from '../service';
+import ReferralAttribution from '../models/referral-attribution';
+import ReferralSettings from '../models/referral-settings';
+import WeeklySettlement from '../models/weekly-settlement';
+import WeeklySettlementLine from '../models/weekly-settlement-line';
+import CreditTransaction from '../models/credit-transaction';
+import CustomerAccountState from '../models/customer-account-state';
+import AdminActionAudit from '../models/admin-action-audit';
+import { referralWeekFor } from '../referral';
+
+jest.setTimeout(300 * 1000);
+
+moduleIntegrationTestRunner<PacksModuleService>({
+  moduleName: PACKS_MODULE,
+  resolve: path.resolve(__dirname, '../../..', 'modules/packs'),
+  moduleModels: [
+    ReferralAttribution,
+    ReferralSettings,
+    WeeklySettlement,
+    WeeklySettlementLine,
+    CreditTransaction,
+    CustomerAccountState,
+    AdminActionAudit,
+  ],
+  testSuite: ({ service }) => {
+    // The week CONTAINING now — the test closes it explicitly by iso key, so
+    // freshly inserted (created_at = now) rows land inside the window.
+    const week = referralWeekFor(new Date());
+
+    // The runner resets the DB between tests — seed per test, guarded by an
+    // existence check (sibling vip-member-state.spec convention).
+    async function seed() {
+      const existing = await service.listReferralAttributions({}, { take: 1 });
+      if (existing.length > 0) return;
+      // Attribution: A and B referred by R; D referred by partner R2; C loose.
+      await service.createReferralAttributions([
+        { customer_id: 'cus_a', referrer_id: 'cus_r' },
+        { customer_id: 'cus_b', referrer_id: 'cus_r' },
+        { customer_id: 'cus_d', referrer_id: 'cus_r2' },
+      ]);
+      // R2 is a partner at 4%.
+      await service.setPartnerRate({
+        customerId: 'cus_r2',
+        rateBp: 400,
+        adminId: 'admin_1',
+      });
+      // This week's turnover: A RM100, B RM50, C RM30 (unreferred), D RM80.
+      await service.createCreditTransactions([
+        { customer_id: 'cus_a', amount: -100, reason: 'pack_open' },
+        { customer_id: 'cus_b', amount: -50, reason: 'pack_open' },
+        { customer_id: 'cus_c', amount: -30, reason: 'pack_open' },
+        { customer_id: 'cus_d', amount: -80, reason: 'pack_open' },
+        // A top-up must never count as turnover.
+        { customer_id: 'cus_a', amount: 500, reason: 'topup' },
+      ]);
+      // A pack_open from LAST week — outside the window, must not count.
+      const [old] = await service.createCreditTransactions([
+        { customer_id: 'cus_a', amount: -999, reason: 'pack_open' },
+      ]);
+      // created_at is a framework column the generated update type doesn't
+      // expose — assign it anyway (the entity has the field) and VERIFY it
+      // stuck, so a silently-ignored assign can't fake an in-window row.
+      const lastWeekAt = new Date(week.startUtc.getTime() - 24 * 3600 * 1000);
+      await service.updateCreditTransactions({
+        selector: { id: old.id },
+        data: { created_at: lastWeekAt } as never,
+      });
+      const [oldRow] = await service.listCreditTransactions({ id: old.id });
+      expect(new Date(oldRow.created_at).toISOString()).toBe(
+        lastWeekAt.toISOString(),
+      );
+    }
+
+    it('closes the week into a draft run with the right lines', async () => {
+      await seed();
+      const r = await service.closeReferralWeek({
+        weekStartIso: week.weekStartIso,
+      });
+      expect(r.created).toBe(true);
+
+      const [run] = await service.listWeeklySettlements({ id: r.settlementId });
+      expect(run.status).toBe('draft');
+      expect(new Date(run.week_start).toISOString()).toBe(
+        week.startUtc.toISOString(),
+      );
+
+      const lines = await service.listWeeklySettlementLines({
+        settlement_id: r.settlementId,
+      });
+
+      // R: downline A+B = RM150 = 15,000c → tier 1 (0.5%) → 75c.
+      const rLine = lines.find((l) => l.customer_id === 'cus_r');
+      expect(rLine).toBeDefined();
+      expect(rLine!.basis_cents).toBe(15_000);
+      expect(rLine!.rate_bp).toBe(50);
+      expect(rLine!.amount_cents).toBe(75);
+      expect(rLine!.status).toBe('pending');
+
+      // R2 (partner 4%): downline D = RM80 = 8,000c → 320c.
+      const r2Line = lines.find((l) => l.customer_id === 'cus_r2');
+      expect(r2Line).toBeDefined();
+      expect(r2Line!.basis_cents).toBe(8_000);
+      expect(r2Line!.rate_bp).toBe(400);
+      expect(r2Line!.amount_cents).toBe(320);
+
+      // C is unreferred — nobody earns commission on C's spend, and a
+      // spender is never paid on their own turnover, so only the two
+      // referrers get a line.
+      expect(lines.map((l) => l.customer_id).sort()).toEqual([
+        'cus_r',
+        'cus_r2',
+      ]);
+
+      expect(run.total_commission_cents).toBe(75 + 320);
+    });
+
+    it('is idempotent — a re-run creates nothing new', async () => {
+      await seed();
+      const first = await service.closeReferralWeek({
+        weekStartIso: week.weekStartIso,
+      });
+      expect(first.created).toBe(true);
+      const again = await service.closeReferralWeek({
+        weekStartIso: week.weekStartIso,
+      });
+      expect(again.created).toBe(false);
+      expect(again.settlementId).toBe(first.settlementId);
+      const runs = await service.listWeeklySettlements({});
+      expect(runs).toHaveLength(1);
+      const lines = await service.listWeeklySettlementLines({});
+      expect(lines).toHaveLength(2);
+    });
+
+    it('refuses to close a week whose line breaches the per-line ceiling', async () => {
+      // A misconfigured 100% partner rate on RM 60,000 of downline turnover
+      // computes RM 60,000 — over the RM 50,000 per-line ceiling.
+      await service.createReferralAttributions([
+        { customer_id: 'cus_whale', referrer_id: 'cus_bigpartner' },
+      ]);
+      await service.setPartnerRate({
+        customerId: 'cus_bigpartner',
+        rateBp: 500,
+        adminId: 'admin_1',
+      });
+      await service.editReferralSettings({
+        partner_min_bp: 100,
+        partner_max_bp: 10_000,
+        adminId: 'admin_1',
+        reason: 'test widening',
+      });
+      await service.setPartnerRate({
+        customerId: 'cus_bigpartner',
+        rateBp: 10_000, // 100%
+        adminId: 'admin_1',
+      });
+      await service.createCreditTransactions([
+        { customer_id: 'cus_whale', amount: -60_000, reason: 'pack_open' },
+      ]);
+      const r = await service.closeReferralWeek({
+        weekStartIso: week.weekStartIso,
+      });
+      // The week still CLOSES — throwing here used to strand it forever once
+      // the week rolled over. The offending line is quarantined instead.
+      expect(r.created).toBe(true);
+      const lines = await service.listWeeklySettlementLines({
+        settlement_id: r.settlementId,
+        customer_id: 'cus_bigpartner',
+      });
+      expect(lines).toHaveLength(1);
+      expect(lines[0].status).toBe('voided');
+      expect(lines[0].void_reason).toMatch(/ceiling/i);
+      // …and it is excluded from the totals the approve dialog quotes.
+      const [run] = await service.listWeeklySettlements({ id: r.settlementId });
+      expect(run.total_commission_cents).toBe(0);
+      // A quarantined line pays nothing even after approve.
+      await service.approveWeeklySettlement({
+        settlementId: r.settlementId,
+        adminId: 'admin_1',
+      });
+      const paid = await service.payWeeklySettlement({
+        settlementId: r.settlementId,
+      });
+      expect(paid.paid).toBe(0);
+      expect(
+        await service.listCreditTransactions({
+          customer_id: 'cus_bigpartner',
+        }),
+      ).toHaveLength(0);
+    });
+
+    it('rejects a week key that is not an MYT Tuesday', async () => {
+      await expect(
+        service.closeReferralWeek({ weekStartIso: '2026-08-19' }), // a Wednesday
+      ).rejects.toThrow(/Tuesday/i);
+    });
+  },
+});

@@ -29,6 +29,11 @@ vi.mock('@/lib/phone-verification', () => ({
     return mocks.phoneVerificationRequired;
   },
 }));
+vi.mock('@/lib/referral-cookie', () => ({
+  // The bind is fire-and-forget after a successful signup; these tests cover
+  // auth outcomes, so the referral seam is stubbed inert.
+  bindReferralFromCookie: vi.fn(async () => {}),
+}));
 vi.mock('@/lib/data/profiles', () => ({
   fetchProfileHandle: mocks.fetchProfileHandle,
 }));

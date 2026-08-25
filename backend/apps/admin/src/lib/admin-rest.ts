@@ -680,50 +680,9 @@ export async function updateDeliveryOrder(
   return (await res.json()) as { order_id: string; status: DeliveryStatus };
 }
 
-// ── Daily Rewards (level-range vouchers + VIP-tier boxes) ───────────────────
-
-export interface DailyBoxSummary {
-  tier: string;
-  name: string;
-  enabled: boolean;
-  draws_per_day: number;
-  prize_count: number;
-  customer_count: number;
-  level_from: number;
-  level_to: number;
-}
-
-export interface DailyBoxPrizeDTO {
-  id?: string;
-  kind: 'credit' | 'product' | 'voucher' | 'nothing';
-  payload: Record<string, unknown>;
-  locked: boolean;
-  pct: number;
-}
-
-export interface DailyBoxEditorDTO {
-  box: { tier: string; name: string; enabled: boolean; draws_per_day: number };
-  prizes: DailyBoxPrizeDTO[];
-  /** Server-side ceiling for a credit/voucher prize's RM amount — served here
-   *  (not hardcoded client-side) so the row validation always matches the
-   *  backend's actual limit. */
-  max_box_credit_myr: number;
-}
-
-export interface DailyBoxSaveBody {
-  name: string;
-  enabled: boolean;
-  draws_per_day: number;
-  reason: string;
-  prizes: {
-    kind: 'credit' | 'product' | 'voucher' | 'nothing';
-    locked: boolean;
-    pct: number;
-    amount_myr?: number;
-    product_handle?: string;
-    qty?: number;
-  }[];
-}
+// ── Daily Rewards (level-range vouchers) ────────────────────────────────────
+// The VIP-tier daily boxes were removed 2026-08-25 (operator: the concept is
+// dead); what is left of this surface is the voucher ladder.
 
 export interface VoucherRangeDTO {
   from: number;
@@ -734,30 +693,6 @@ export interface VoucherRangeDTO {
 export interface VoucherLadderDTO {
   levels: { level: number; amount_myr: number }[];
   ranges: VoucherRangeDTO[];
-}
-
-// GET the VIP-tier daily boxes list (summary row per tier).
-export async function getDailyBoxes(): Promise<{ boxes: DailyBoxSummary[] }> {
-  return getJson<{ boxes: DailyBoxSummary[] }>('/admin/daily-rewards/boxes');
-}
-
-// GET one tier's box config + prize table. 404s for an unknown tier.
-export async function getDailyBox(tier: string): Promise<DailyBoxEditorDTO> {
-  return getJson<DailyBoxEditorDTO>(
-    `/admin/daily-rewards/boxes/${encodeURIComponent(tier)}`,
-  );
-}
-
-// Replace-all a tier's box + prizes. Throws Error(message) on a 400 validation
-// failure (httpError surfaces the backend MedusaError message).
-export async function saveDailyBox(
-  tier: string,
-  body: DailyBoxSaveBody,
-): Promise<DailyBoxEditorDTO> {
-  return postJson<DailyBoxEditorDTO>(
-    `/admin/daily-rewards/boxes/${encodeURIComponent(tier)}`,
-    body,
-  );
 }
 
 // GET the level-range voucher ladder (100 per-level amounts + authored ranges).
@@ -820,7 +755,6 @@ export interface VipLevelDTO {
   level: number;
   spend_threshold: number; // MYR
   voucher_amount: number; // MYR
-  box_tier: string;
   frame_unlock: boolean;
 }
 
@@ -1054,11 +988,7 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 // reconciliation sweep's window, i.e. a payment that may have landed at the
 // gateway without ever being credited here.
 export type GlobePayDepositView =
-  | 'pending'
-  | 'settled'
-  | 'failed'
-  | 'expired'
-  | 'all';
+  'pending' | 'settled' | 'failed' | 'expired' | 'all';
 
 export interface GlobePayDeposit {
   id: string;
@@ -1128,11 +1058,7 @@ export function getGlobePayDeposits(
 // always sends `status` explicitly (see getGlobePayWithdrawals below), so the
 // page's default view is what actually decides what an operator sees first.
 export type GlobePayWithdrawalView =
-  | 'held'
-  | 'pending'
-  | 'settled'
-  | 'failed'
-  | 'all';
+  'held' | 'pending' | 'settled' | 'failed' | 'all';
 
 export interface GlobePayWithdrawal {
   id: string;
@@ -1725,4 +1651,174 @@ export async function exportInventoryXlsx(q?: string): Promise<void> {
   // file. Handing the revoke to the next task lets the download claim the blob
   // first, while still releasing it (a leaked object URL lives until reload).
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+// ── Referral rebuild (spec 2026-08-24) ───────────────────────────────────────
+
+export interface ReferralTierWire {
+  min_cents: number;
+  rate_bp: number;
+}
+
+export interface ReferralSettings {
+  tiers: ReferralTierWire[];
+  partner_min_bp: number;
+  partner_max_bp: number;
+}
+
+export async function getReferralSettings(): Promise<ReferralSettings> {
+  return getJson<ReferralSettings>('/admin/referrals/settings');
+}
+
+export async function updateReferralSettings(input: {
+  tiers?: ReferralTierWire[];
+  partner_min_bp?: number;
+  partner_max_bp?: number;
+  reason: string;
+}): Promise<ReferralSettings> {
+  return postJson<ReferralSettings>('/admin/referrals/settings', input);
+}
+
+export interface ReferralSettlement {
+  id: string;
+  week_start: string;
+  status: 'draft' | 'approved' | 'paid' | 'void';
+  approved_by: string | null;
+  approved_at: string | null;
+  paid_at: string | null;
+  total_commission_cents: number;
+}
+
+export interface ReferralSettlementLine {
+  id: string;
+  customer_id: string;
+  basis_cents: number;
+  rate_bp: number;
+  amount_cents: number;
+  status: 'pending' | 'voided' | 'paid';
+  void_reason: string | null;
+  paid_transaction_id: string | null;
+}
+
+export async function listReferralSettlements(): Promise<ReferralSettlement[]> {
+  const data = await getJson<{ settlements: ReferralSettlement[] }>(
+    '/admin/referrals/settlements',
+  );
+  return data.settlements;
+}
+
+export async function getReferralSettlement(id: string): Promise<{
+  settlement: ReferralSettlement;
+  lines: ReferralSettlementLine[];
+}> {
+  return getJson(`/admin/referrals/settlements/${id}`);
+}
+
+export async function approveReferralSettlement(id: string): Promise<void> {
+  await postJson(`/admin/referrals/settlements/${id}/approve`, {});
+}
+
+export async function payReferralSettlement(
+  id: string,
+): Promise<{ paid: number; skipped: number }> {
+  return postJson(`/admin/referrals/settlements/${id}/pay`, {});
+}
+
+export async function voidReferralSettlement(
+  id: string,
+  reason: string,
+): Promise<void> {
+  await postJson(`/admin/referrals/settlements/${id}/void`, { reason });
+}
+
+export async function setCustomerReferrer(
+  customerId: string,
+  referrerId: string | null,
+  reason: string,
+): Promise<void> {
+  await postJson(`/admin/customers/${customerId}/referral`, {
+    referrer_id: referrerId,
+    reason,
+  });
+}
+
+export async function voidReferralLine(
+  lineId: string,
+  reason: string,
+): Promise<void> {
+  await postJson(`/admin/referrals/lines/${lineId}/void`, { reason });
+}
+
+export interface CustomerReferralCard {
+  referred_by: string | null;
+  partner_referral_bp: number | null;
+  downline: { customer_id: string; since: string }[];
+  lines: {
+    id: string;
+    settlement_id: string;
+    basis_cents: number;
+    rate_bp: number;
+    amount_cents: number;
+    status: string;
+  }[];
+}
+
+export async function getCustomerReferral(
+  customerId: string,
+): Promise<CustomerReferralCard> {
+  return getJson(`/admin/customers/${customerId}/referral`);
+}
+
+export async function setPartnerRate(
+  customerId: string,
+  rateBp: number | null,
+  reason: string,
+): Promise<void> {
+  await postJson(`/admin/customers/${customerId}/partner-rate`, {
+    rate_bp: rateBp,
+    reason,
+  });
+}
+
+// ── Task system (spec 2026-08-24 Phase B) ────────────────────────────────────
+
+export interface AdminTaskDefinition {
+  id: string;
+  kind: 'weekly' | 'achievement';
+  title: string;
+  requirement: Record<string, unknown>;
+  reward: Record<string, unknown>;
+  active: boolean;
+  sort: number;
+  /** Optional run window (ISO). null/null = runs until retired. */
+  starts_at: string | null;
+  ends_at: string | null;
+  /** Plain-English summaries resolved server-side (names, not slugs/ids), so
+   *  the console never has to load the pack / card / pixel catalogs to render
+   *  a row. A dangling reference reads "… (missing)".
+   *
+   *  OPTIONAL on purpose: a backend that predates this field is a normal
+   *  mid-deploy state, and typing it as required is what let the console crash
+   *  on `undefined.requirement` instead of degrading. */
+  labels?: { requirement: string; reward: string };
+}
+
+export async function listTaskDefinitions(): Promise<AdminTaskDefinition[]> {
+  const data = await getJson<{ tasks: AdminTaskDefinition[] }>('/admin/tasks');
+  return data.tasks;
+}
+
+export async function saveTaskDefinition(input: {
+  id?: string;
+  kind: 'weekly' | 'achievement';
+  title: string;
+  requirement: Record<string, unknown>;
+  reward: Record<string, unknown>;
+  active: boolean;
+  sort: number;
+  starts_at: string | null;
+  ends_at: string | null;
+  reason: string;
+}): Promise<{ id: string }> {
+  return postJson<{ id: string }>('/admin/tasks', input);
 }

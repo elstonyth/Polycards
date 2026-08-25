@@ -13,6 +13,7 @@ import { Pill } from '@/components/ui/pill';
 // Purely presentational: selection state and money live in VaultClient.
 export function VaultActionBar({
   selectedCount,
+  sellableCount,
   allVisibleSelected,
   visibleCount,
   fmv,
@@ -24,6 +25,9 @@ export function VaultActionBar({
   onDeliver,
 }: {
   selectedCount: number;
+  /** How many of the selected cards can actually be SOLD. A reward card ships
+   *  but never sells, so Sell counts and prices only these. */
+  sellableCount: number;
   allVisibleSelected: boolean;
   visibleCount: number;
   fmv: number;
@@ -37,6 +41,9 @@ export function VaultActionBar({
   const none = selectedCount === 0;
   const withCount = (label: string) =>
     none ? label : `${label} ${selectedCount}`;
+  // Sell carries its OWN count: a selection of three cards where one is a
+  // reward reads "Deliver 3 · Sell 2", which is exactly what will happen.
+  const noneSellable = sellableCount === 0;
   // The payout counts up as cards are picked instead of snapping — this is the
   // number the customer is deciding on, and watching it move is the feedback
   // that the tap registered. Snaps under reduced motion.
@@ -95,11 +102,15 @@ export function VaultActionBar({
           <Pill
             size="sm"
             onClick={onSell}
-            disabled={none || busy || !quotesFirm}
+            disabled={noneSellable || busy || !quotesFirm}
             className="bg-buyback text-white hover:bg-buyback/90 disabled:opacity-50"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-            {busy ? 'Selling…' : withCount('Sell')}
+            {busy
+              ? 'Selling…'
+              : noneSellable
+                ? 'Sell'
+                : `Sell ${sellableCount}`}
           </Pill>
         </div>
       </div>

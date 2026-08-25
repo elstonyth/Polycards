@@ -127,7 +127,6 @@ medusaIntegrationTestRunner({
             level: r.level,
             spend_threshold: r.spend_threshold,
             voucher_amount: r.voucher_amount,
-            box_tier: r.box_tier,
             frame_unlock: r.frame_unlock,
             prizes: r.prizes ?? null,
           })),
@@ -232,7 +231,6 @@ medusaIntegrationTestRunner({
           threshold: 3,
           remaining: 3,
         });
-        expect(res.data.next.reward).toHaveProperty('box_tier');
 
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         const grants = await packs.listVipRewardGrants(

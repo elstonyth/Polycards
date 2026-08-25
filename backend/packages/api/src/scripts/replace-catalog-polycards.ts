@@ -138,24 +138,6 @@ export default async function replaceCatalogPolycards({ container }: ExecArgs) {
     logger.info(`Deleted ${products.length} card product(s).`);
   }
 
-  // Reward boxes are PRESERVED — but a product-kind prize whose handle just
-  // got wiped can no longer grant; surface them for the operator to retune.
-  const prizes = await packs.listRewardBoxPrizes({}, { take: TAKE });
-  const handleSet = new Set(cardHandles);
-  const dangling = prizes.filter(
-    (p) =>
-      p.kind === 'product' &&
-      handleSet.has(
-        (p.payload as { product_handle?: string })?.product_handle ?? '',
-      ),
-  );
-  if (dangling.length) {
-    logger.warn(
-      `${dangling.length} reward-box product prize(s) reference deleted cards — retune them in admin: ` +
-        dangling.map((p) => p.id).join(', '),
-    );
-  }
-
   // Install the Polycards tier ladder (draft — assign cards, then activate).
   const existing = await packs.listPacks(
     { slug: POLYCARDS_PACKS.map((p) => p.slug) },

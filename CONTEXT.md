@@ -183,10 +183,57 @@ SUSPENDED 2026-07-29 (#294) — storefront routes 404, backend stays live. The
 VIP/daily vocabulary is retained because un-suspending is meant to be a revert,
 not a rewrite; see ADR 0004. VIP Level accrual itself stayed live throughout._
 
-_The referral programme is a different case: it was REMOVED outright on
-2026-08-24 (ADR 0007) — engine, tables and vocabulary — because it is being
-rebuilt from scratch. Commission / Sponsor / Recruit no longer name anything in
-this codebase; the replacement should establish its own terms._
+_The old referral programme was REMOVED outright on 2026-08-24 (ADR 0007) —
+engine, tables and vocabulary. Its replacement shipped the same day (spec
+`docs/superpowers/specs/2026-08-24-referral-tasks-rebuild-design.md`) with its
+own terms, below. The old Commission / Sponsor / Recruit words stay retired._
+
+**Referral Week**:
+Tuesday 00:00 MYT to the next Tuesday 00:00 MYT (exclusive) — the window every
+weekly payout is computed over. The Tuesday close job snapshots the just-ended
+week; Wednesday pays it ("TUES CHECK, WED OUT").
+
+**Referrer / Downline**:
+The customer whose invite handle a signup came through, and the set of
+customers they referred. Attribution (`referral_attribution`) is one row per
+referred customer, bound once at signup, permanent. Direct referrals only — no
+generations.
+
+**Referral Commission**:
+The referrer's weekly payout: a tier rate (whole-amount, from
+`referral_settings.tiers`, admin-editable, default 0.5%→2% by downline weekly
+pack turnover) times that same turnover. Paid as straight credit
+(`credit_transaction.reason = 'referral_commission'`, ledger type `RF`).
+
+**Partner**:
+A customer with a manual commission rate
+(`customer_account_state.partner_referral_bp`, bounds admin-configurable,
+default 3–5%) that REPLACES the tier table for them. Set on the Customer-360
+page; audited.
+
+**VIP Rebate (回水)**:
+A customer's own weekly pack turnover times their VIP level's `rebate_bp`
+(admin-set on the Levels ladder; 0 by default). Same weekly cycle and ledger
+treatment as commission, reason `vip_rebate`.
+
+**Task / Achievement**:
+An admin-defined goal on the /task hub (Phase B of the same spec). Weekly
+tasks (check-in days, rip counts — optionally per pack) reset with the
+Referral Week; achievements (reach VIP level, vault N cards, vault N pixel
+Pokémon) are once per account. Progress is computed live from the underlying
+facts; only claims are stored (`task_claim`, one per customer × task ×
+period). Rewards: credit, a free rip of a pack, or a card straight to the
+vault — the latter two land as `source='reward'` pulls.
+
+**Check-in**:
+The explicit once-per-MYT-day button on /task (`daily_checkin`), counted by
+weekly check-in tasks.
+
+**Weekly Settlement**:
+One `weekly_settlement` run per closed week: draft (Tuesday close) → approved
+(human gate on the admin Referrals page) → paid (Wednesday cron or "Pay now").
+Lines (`weekly_settlement_line`) are per customer × kind, voidable until paid;
+the pay step is idempotent per line via the ledger `(type='RF', ref_id)` index.
 
 **VIP Level**:
 A customer's rung 1–100, reached by cumulative pack-open turnover (winnings-funded

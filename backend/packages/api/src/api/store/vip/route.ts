@@ -11,7 +11,7 @@ import { levelForSpend } from '../../../modules/packs/vip-ladder';
 // with two differences:
 //   1. actor_id comes from the bearer token, not a route param.
 //   2. The ladder select is widened to include the reward columns
-//      (voucher_amount, box_tier, frame_unlock) so both the next-rung reward
+//      (voucher_amount, frame_unlock) so both the next-rung reward
 //      and the full `levels` ladder can be surfaced without a second query.
 export async function GET(
   req: AuthenticatedMedusaRequest,
@@ -33,7 +33,6 @@ export async function GET(
           'level',
           'spend_threshold',
           'voucher_amount',
-          'box_tier',
           'frame_unlock',
         ],
         take: 1000,
@@ -49,7 +48,6 @@ export async function GET(
       level: r.level,
       spend_threshold: Number(r.spend_threshold),
       voucher_amount: Number(r.voucher_amount),
-      box_tier: r.box_tier as string,
       frame_unlock: r.frame_unlock as boolean,
     }))
     .sort((a, b) => a.level - b.level);
@@ -72,7 +70,6 @@ export async function GET(
         remaining: Math.max(0, nextRung.spend_threshold - spend),
         reward: {
           voucher_amount: nextRung.voucher_amount,
-          box_tier: nextRung.box_tier,
           frame_unlock: Boolean(nextRung.frame_unlock),
         },
       }
@@ -83,7 +80,6 @@ export async function GET(
     threshold: r.spend_threshold,
     reward: {
       voucher_amount: r.voucher_amount,
-      box_tier: r.box_tier,
       frame_unlock: Boolean(r.frame_unlock),
     },
   }));

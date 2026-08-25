@@ -83,3 +83,13 @@ rebuilt system to claim.
 - The vocabulary entries for Commission / Sponsor / Recruit are gone from
   `CONTEXT.md`. A rebuilt programme should re-establish its own terms rather
   than inherit these.
+
+## Successor
+
+The replacement shipped 2026-08-25 on `feat/referral-rebuild` (design spec:
+`docs/superpowers/specs/2026-08-24-referral-tasks-rebuild-design.md`). It is a
+weekly batch engine — turnover-tiered commissions plus a VIP personal rebate,
+computed Tuesday into an admin-approved settlement run and paid Wednesday —
+and shares nothing with the removed per-purchase fan-out except the retired
+`RF` ledger type, which it re-adopts for its payout rows. New vocabulary lives
+in `CONTEXT.md` §Rewards and VIP.

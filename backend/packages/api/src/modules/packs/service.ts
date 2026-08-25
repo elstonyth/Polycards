@@ -46,9 +46,6 @@ import AdminActionAudit from './models/admin-action-audit';
 import VipMemberState from './models/vip-member-state';
 import VipRewardGrant from './models/vip-reward-grant';
 import NotificationRead from './models/notification-read';
-import RewardDraw from './models/reward-draw';
-import RewardBox from './models/reward-box';
-import RewardBoxPrize from './models/reward-box-prize';
 import PixelPokemon from './models/pixel-pokemon';
 import ChallengeStage from './models/challenge-stage';
 import ChallengeSchedule from './models/challenge-schedule';
@@ -73,6 +70,33 @@ import type { GatewayPeriodRow, LedgerPeriodRow } from './globepay-settlement';
 import PurchaseInvoice from './models/purchase-invoice';
 import PurchaseInvoiceLine from './models/purchase-invoice-line';
 import StockMovement from './models/stock-movement';
+import {
+  DEFAULT_REFERRAL_TIERS,
+  lastClosedReferralWeek,
+  MAX_SETTLEMENT_LINE_MYR,
+  payoutCents,
+  referralWeekFor,
+  taskWeekFor,
+  resolveRateBp,
+  type ReferralTier,
+  type ReferralWeek,
+} from './referral';
+import {
+  taskIsLive,
+  taskProgress,
+  validateTaskRequirement,
+  validateTaskReward,
+  type TaskFacts,
+  type TaskRequirement,
+  type TaskReward,
+} from './tasks';
+import ReferralAttribution from './models/referral-attribution';
+import TaskDefinition from './models/task-definition';
+import TaskClaim from './models/task-claim';
+import DailyCheckin from './models/daily-checkin';
+import ReferralSettings from './models/referral-settings';
+import WeeklySettlement from './models/weekly-settlement';
+import WeeklySettlementLine from './models/weekly-settlement-line';
 import { pageAll } from '../../api/utils/page-all';
 import {
   positiveIntFromEnv,
@@ -105,14 +129,6 @@ import {
   type RewardsSettingsPatch,
   type RewardsSettingsView,
 } from './rewards-settings-validate';
-import {
-  validateDailyBox,
-  computeBoxWeights,
-  pickPrize,
-  MAX_BOX_CREDIT_MYR,
-  type DailyBoxBody,
-  type BoxPrizeInput,
-} from './daily-box';
 import {
   foldRanges,
   MAX_VOUCHER_MYR,
@@ -305,9 +321,11 @@ const PULLED_VALUE_USD_SQL =
 // raw_ twin (see @medusajs/utils BigNumber DEFAULT_PRECISION).
 const BIG_NUMBER_RAW_PRECISION = 20;
 
-// ---- Daily Rewards (Task 5): getDailyState / drawDailyBox + admin authoring ----
-// Types match the task-5 brief verbatim — later tasks (routes, storefront) depend
-// on these exact shapes.
+// ---- Daily Rewards (Task 5): getDailyState ----------------------------------
+// The daily BOX was removed 2026-08-25 (operator: the concept is dead), taking
+// reward_box / reward_box_prize / reward_draw with it. What is left of this
+// surface is the VIP voucher/frame grant list, which comes from
+// vip_reward_grant and never depended on a box.
 
 /** A VIP reward grant projected for a store-facing list (no internal fields). */
 export type GrantView = {
@@ -316,52 +334,14 @@ export type GrantView = {
   level: number;
   payload: unknown;
   granted_at: string;
-  /** 'ladder' = one-time level-up reward; 'box' = won from a daily box. */
+  /** 'ladder' = one-time level-up reward. 'box' survives only because
+   *  vip_reward_grant.kind's CHECK still permits historical box rows. */
   origin: 'ladder' | 'box';
-};
-
-/** A vaulted reward-prize Pull, same shape as the old GET /store/rewards `prizes`. */
-export type PrizeView = {
-  pull_id: string;
-  prize_kind: string;
-  prize_snapshot: unknown;
-  status: string;
-  draw_day: string;
 };
 
 export type DailyState = {
   redemption_enabled: boolean;
-  box: null | {
-    tier: string;
-    name: string;
-    draws_per_day: number;
-    draws_today: number;
-    next_reset: string;
-    prizes: {
-      kind: string;
-      title?: string;
-      image?: string;
-      amount_myr?: number;
-    }[];
-  };
   vouchers: { claimable: GrantView[]; claimed: GrantView[] };
-  ship_prizes: PrizeView[];
-};
-
-export type DrawDailyBoxResult = {
-  status: 'drawn' | 'unavailable' | 'capped';
-  prize?: {
-    kind: string;
-    title?: string;
-    image?: string;
-    amount_myr?: number;
-    product_handle?: string;
-  };
-  draw_ordinal?: number;
-  /** UTC yyyy-mm-dd the draw was settled under — the notification key uses
-   *  this rather than recomputing the date in the route, which can disagree
-   *  across a midnight boundary. */
-  draw_day?: string;
 };
 
 /** Why an account may not be deleted yet. The storefront switches on these. */
@@ -517,9 +497,6 @@ class PacksModuleService extends MedusaService({
   VipMemberState,
   VipRewardGrant,
   NotificationRead,
-  RewardDraw,
-  RewardBox,
-  RewardBoxPrize,
   PixelPokemon,
   ChallengeStage,
   ChallengeSchedule,
@@ -533,6 +510,13 @@ class PacksModuleService extends MedusaService({
   PurchaseInvoice,
   PurchaseInvoiceLine,
   StockMovement,
+  ReferralAttribution,
+  ReferralSettings,
+  WeeklySettlement,
+  WeeklySettlementLine,
+  TaskDefinition,
+  TaskClaim,
+  DailyCheckin,
 }) {
   // Apply a pack-membership diff (add rows + delete rows + renormalize
   // survivor weights) as ONE transaction. The set-pack-members workflow step
@@ -682,6 +666,1574 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return data;
+  }
+
+  // ── Referral rebuild (spec 2026-08-24) ─────────────────────────────────
+  // Attribution + settings + partner rates. The weekly engine itself
+  // (close/approve/void/pay) lives further down with the other money writers.
+
+  // Permanent one-shot attribution. The route layer resolves the referral
+  // code (a profile handle) to referrerId — this module never reaches into
+  // another module's tables. Races on the same customer are settled by the
+  // unique customer_id index: the loser's 23505 reads as already_bound.
+  @InjectTransactionManager()
+  async bindReferral(
+    input: { customerId: string; referrerId: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    | { bound: true }
+    | {
+        bound: false;
+        reason: 'self' | 'already_bound' | 'not_a_new_account';
+      }
+  > {
+    if (input.customerId === input.referrerId) {
+      return { bound: false, reason: 'self' };
+    }
+    const [existing] = await this.listReferralAttributions(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (existing) return { bound: false, reason: 'already_bound' };
+    // Attribution binds AT SIGNUP (spec). The endpoint alone only proves
+    // "not yet bound", so an established customer could otherwise attach a
+    // referrer retroactively and hand them a cut of turnover they had no
+    // part in (security review 2026-08-25). Any prior pack spend means this
+    // is not a signup. The admin path (adminSetReferral) is the deliberate
+    // override for genuine support cases.
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [spent] = await em.execute<{ n: string }[]>(
+      'SELECT COUNT(*)::bigint AS n FROM credit_transaction ' +
+        "WHERE customer_id = ? AND reason = 'pack_open' AND deleted_at IS NULL",
+      [input.customerId],
+    );
+    if (Number(spent?.n ?? 0) > 0) {
+      return { bound: false, reason: 'not_a_new_account' };
+    }
+    try {
+      await this.createReferralAttributions(
+        [{ customer_id: input.customerId, referrer_id: input.referrerId }],
+        sharedContext,
+      );
+    } catch (e: unknown) {
+      if ((e as { code?: string })?.code === '23505') {
+        return { bound: false, reason: 'already_bound' };
+      }
+      throw e;
+    }
+    return { bound: true };
+  }
+
+  // Lazy-seeded singleton read (same pattern as tier/site settings). Returns
+  // plain values, never the row.
+  @InjectManager()
+  async getReferralSettings(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    tiers: ReferralTier[];
+    partner_min_bp: number;
+    partner_max_bp: number;
+  }> {
+    const [row] = await this.listReferralSettings(
+      {},
+      { take: 1 },
+      sharedContext,
+    );
+    if (row) {
+      return {
+        tiers: row.tiers as unknown as ReferralTier[],
+        partner_min_bp: row.partner_min_bp,
+        partner_max_bp: row.partner_max_bp,
+      };
+    }
+    try {
+      await this.createReferralSettings(
+        [
+          {
+            id: 'global',
+            tiers: DEFAULT_REFERRAL_TIERS as unknown as Record<string, unknown>,
+          },
+        ],
+        sharedContext,
+      );
+    } catch (e: unknown) {
+      // Two concurrent cold reads race the seed; the loser's PK collision
+      // (23505) means the row now exists — this is a READ path and must
+      // never 500 over losing that race (review 2026-08-25 finding 4).
+      if ((e as { code?: string })?.code !== '23505') throw e;
+    }
+    return {
+      tiers: DEFAULT_REFERRAL_TIERS,
+      partner_min_bp: 300,
+      partner_max_bp: 500,
+    };
+  }
+
+  // Named `edit…` to avoid shadowing the generated updateReferralSettings
+  // CRUD method (editSiteSettings convention). Validates, upserts, audits.
+  @InjectTransactionManager()
+  async editReferralSettings(
+    input: {
+      tiers?: ReferralTier[];
+      partner_min_bp?: number;
+      partner_max_bp?: number;
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const before = await this.getReferralSettings(sharedContext);
+    const next = {
+      tiers: input.tiers ?? before.tiers,
+      partner_min_bp: input.partner_min_bp ?? before.partner_min_bp,
+      partner_max_bp: input.partner_max_bp ?? before.partner_max_bp,
+    };
+    if (!next.tiers.length || next.tiers[0].min_cents !== 0) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'The first tier must start at min_cents 0.',
+      );
+    }
+    for (let i = 0; i < next.tiers.length; i++) {
+      const t = next.tiers[i];
+      if (
+        !Number.isInteger(t.min_cents) ||
+        t.min_cents < 0 ||
+        !Number.isInteger(t.rate_bp) ||
+        t.rate_bp < 0 ||
+        t.rate_bp > 10_000
+      ) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Tier ${i + 1}: min_cents must be a non-negative integer and rate_bp an integer in 0..10000.`,
+        );
+      }
+      if (i > 0 && t.min_cents <= next.tiers[i - 1].min_cents) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          'Tier bounds must be strictly increasing.',
+        );
+      }
+    }
+    if (
+      !Number.isInteger(next.partner_min_bp) ||
+      !Number.isInteger(next.partner_max_bp) ||
+      next.partner_min_bp < 0 ||
+      next.partner_max_bp > 10_000 ||
+      next.partner_min_bp >= next.partner_max_bp
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'partner bounds must be integers in 0..10000 with min < max.',
+      );
+    }
+    const [row] = await this.listReferralSettings(
+      {},
+      { take: 1 },
+      sharedContext,
+    );
+    if (row) {
+      await this.updateReferralSettings(
+        {
+          selector: { id: row.id },
+          data: {
+            ...next,
+            tiers: next.tiers as unknown as Record<string, unknown>,
+          },
+        },
+        sharedContext,
+      );
+    } else {
+      await this.createReferralSettings(
+        [
+          {
+            id: 'global',
+            ...next,
+            tiers: next.tiers as unknown as Record<string, unknown>,
+          },
+        ],
+        sharedContext,
+      );
+    }
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'referral_settings',
+          entity_id: 'global',
+          action: 'edit_referral_settings',
+          before,
+          after: next,
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+  }
+
+  // Partner flag: a manual commission rate that REPLACES the tier table for
+  // this customer. null clears it. Bounds come from referral_settings.
+  @InjectTransactionManager()
+  async setPartnerRate(
+    input: {
+      customerId: string;
+      rateBp: number | null;
+      adminId: string;
+      reason?: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    if (input.rateBp != null) {
+      const { partner_min_bp, partner_max_bp } =
+        await this.getReferralSettings(sharedContext);
+      if (
+        !Number.isInteger(input.rateBp) ||
+        input.rateBp < partner_min_bp ||
+        input.rateBp > partner_max_bp
+      ) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Partner rate must be an integer between ${partner_min_bp} and ${partner_max_bp} bp.`,
+        );
+      }
+    }
+    const [existing] = await this.listCustomerAccountStates(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    const beforeBp = existing?.partner_referral_bp ?? null;
+    if (existing) {
+      await this.updateCustomerAccountStates(
+        {
+          selector: { id: existing.id },
+          data: { partner_referral_bp: input.rateBp },
+        },
+        sharedContext,
+      );
+    } else {
+      await this.createCustomerAccountStates(
+        [
+          {
+            customer_id: input.customerId,
+            partner_referral_bp: input.rateBp,
+          },
+        ],
+        sharedContext,
+      );
+    }
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: 'set_partner_rate',
+          before: { partner_referral_bp: beforeBp },
+          after: { partner_referral_bp: input.rateBp },
+          reason: input.reason ?? 'partner rate change',
+        },
+      ],
+      sharedContext,
+    );
+  }
+
+  // THE definition of "pack turnover in a window": per-customer cents summed
+  // from pack_open ledger rows. One query, three consumers (close, the two
+  // storefront panels) — review 2026-08-25 dedup. customerIds omitted =
+  // everyone who spent in the window; [] = nobody (empty map, no query).
+  @InjectManager()
+  protected async packTurnoverCentsByCustomer(
+    input: { startUtc: Date; endUtcExcl: Date; customerIds?: string[] },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, number>> {
+    if (input.customerIds && input.customerIds.length === 0) return new Map();
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const filter = input.customerIds
+      ? `  AND customer_id IN (${input.customerIds.map(() => '?').join(', ')}) `
+      : '';
+    const rows = await em.execute<
+      { customer_id: string; turnover_cents: string }[]
+    >(
+      'SELECT customer_id, COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS turnover_cents ' +
+        'FROM credit_transaction ' +
+        "WHERE reason = 'pack_open' AND deleted_at IS NULL " +
+        filter +
+        '  AND created_at >= ? AND created_at < ? ' +
+        'GROUP BY customer_id',
+      [...(input.customerIds ?? []), input.startUtc, input.endUtcExcl],
+    );
+    return new Map(rows.map((r) => [r.customer_id, Number(r.turnover_cents)]));
+  }
+
+  // The Tuesday close ("TUES CHECK"): compute the just-ended week's referral
+  // commissions into a DRAFT settlement run. No money moves here —
+  // payWeeklySettlement (after the admin approve gate) does that.
+  // Turnover is read straight from the pack_open ledger rows at close time;
+  // nothing accrues per purchase, so settleOpen stays untouched.
+  //
+  // Idempotent on the unique week_start index: a re-run (or a concurrent
+  // duplicate) returns { created: false } instead of duplicating lines.
+  @InjectTransactionManager()
+  async closeReferralWeek(
+    input: { weekStartIso?: string; now?: Date } = {},
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ settlementId: string; created: boolean; lines: number }> {
+    const week = input.weekStartIso
+      ? referralWeekFor(new Date(`${input.weekStartIso}T00:00:00+08:00`))
+      : lastClosedReferralWeek(input.now ?? new Date());
+    if (input.weekStartIso && week.weekStartIso !== input.weekStartIso) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `weekStartIso ${input.weekStartIso} is not an MYT Tuesday (nearest week starts ${week.weekStartIso}).`,
+      );
+    }
+
+    const [existing] = await this.listWeeklySettlements(
+      { week_start: week.startUtc },
+      { take: 1 },
+      sharedContext,
+    );
+    if (existing) {
+      return { settlementId: existing.id, created: false, lines: 0 };
+    }
+
+    // Per-spender pack turnover inside the window, in cents.
+    const turnoverByCustomer = await this.packTurnoverCentsByCustomer(
+      { startUtc: week.startUtc, endUtcExcl: week.endUtcExcl },
+      sharedContext,
+    );
+
+    const settings = await this.getReferralSettings(sharedContext);
+
+    // Commission: roll each spender's turnover up to their direct referrer.
+    const spenderIds = [...turnoverByCustomer.keys()];
+    const attributions = spenderIds.length
+      ? await this.listReferralAttributions(
+          { customer_id: spenderIds },
+          { take: spenderIds.length },
+          sharedContext,
+        )
+      : [];
+    const downlineByReferrer = new Map<string, number>();
+    for (const a of attributions) {
+      const t = turnoverByCustomer.get(a.customer_id) ?? 0;
+      if (t <= 0) continue;
+      downlineByReferrer.set(
+        a.referrer_id,
+        (downlineByReferrer.get(a.referrer_id) ?? 0) + t,
+      );
+    }
+    const referrerIds = [...downlineByReferrer.keys()];
+    const partnerRows = referrerIds.length
+      ? await this.listCustomerAccountStates(
+          { customer_id: referrerIds },
+          { take: referrerIds.length },
+          sharedContext,
+        )
+      : [];
+    const partnerBpByCustomer = new Map(
+      partnerRows.map((r) => [r.customer_id, r.partner_referral_bp ?? null]),
+    );
+
+    type NewLine = {
+      customer_id: string;
+      basis_cents: number;
+      rate_bp: number;
+      amount_cents: number;
+    };
+    const lines: NewLine[] = [];
+    for (const [referrerId, basisCents] of downlineByReferrer) {
+      const rateBp = resolveRateBp(
+        basisCents,
+        settings.tiers,
+        partnerBpByCustomer.get(referrerId),
+      );
+      const amountCents = payoutCents(basisCents, rateBp);
+      if (amountCents <= 0) continue;
+      lines.push({
+        customer_id: referrerId,
+        basis_cents: basisCents,
+        rate_bp: rateBp,
+        amount_cents: amountCents,
+      });
+    }
+
+    // A line over the ceiling is QUARANTINED, never thrown: throwing aborted
+    // the whole close, and once the week rolled over nothing could ever
+    // recompute it — the week's commissions vanished (bug review 2026-08-25,
+    // a regression from the first ceiling fix). Instead the run still closes,
+    // the offending line lands 'voided' with a reason the operator reads in
+    // the review screen, and every OTHER line pays normally.
+    const overCeiling = lines.filter(
+      (l) => l.amount_cents > MAX_SETTLEMENT_LINE_MYR * 100,
+    );
+
+    // Quarantined lines are excluded — the totals the approve dialog quotes
+    // must equal what will actually pay.
+    const totalCommissionCents = lines
+      .filter((l) => l.amount_cents <= MAX_SETTLEMENT_LINE_MYR * 100)
+      .reduce((sum, l) => sum + l.amount_cents, 0);
+
+    let settlementId: string;
+    try {
+      const run = await this.createWeeklySettlements(
+        [
+          {
+            week_start: week.startUtc,
+            status: 'draft' as const,
+            total_commission_cents: totalCommissionCents,
+          },
+        ],
+        sharedContext,
+      );
+      settlementId = run[0].id;
+    } catch (e: unknown) {
+      // Lost a concurrent-close race on the unique week_start.
+      if ((e as { code?: string })?.code === '23505') {
+        const [winner] = await this.listWeeklySettlements(
+          { week_start: week.startUtc },
+          { take: 1 },
+          sharedContext,
+        );
+        return { settlementId: winner.id, created: false, lines: 0 };
+      }
+      throw e;
+    }
+    if (lines.length) {
+      await this.createWeeklySettlementLines(
+        lines.map((l) => ({
+          ...l,
+          settlement_id: settlementId,
+          ...(l.amount_cents > MAX_SETTLEMENT_LINE_MYR * 100
+            ? {
+                status: 'voided' as const,
+                void_reason: `over the RM ${MAX_SETTLEMENT_LINE_MYR} per-line ceiling — check the tier table and partner rates`,
+              }
+            : {}),
+        })),
+        sharedContext,
+      );
+    }
+    if (overCeiling.length > 0) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[close-referral-week] ${week.weekStartIso}: ${overCeiling.length} line(s) quarantined over the RM ${MAX_SETTLEMENT_LINE_MYR} ceiling — ` +
+          overCeiling
+            .map(
+              (l) => `${l.customer_id}=RM${(l.amount_cents / 100).toFixed(2)}`,
+            )
+            .join(', '),
+      );
+    }
+    return { settlementId, created: true, lines: lines.length };
+  }
+
+  // The admin gate between Tuesday's draft and Wednesday's money.
+  @InjectTransactionManager()
+  async approveWeeklySettlement(
+    input: { settlementId: string; adminId: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const [run] = await this.listWeeklySettlements(
+      { id: input.settlementId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!run) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Settlement ${input.settlementId} not found.`,
+      );
+    }
+    if (run.status !== 'draft') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Only a draft run can be approved (this one is '${run.status}').`,
+      );
+    }
+    await this.updateWeeklySettlements(
+      {
+        // re-assert draft: a void racing this approve must win or lose
+        // cleanly, never leave an approved run full of voided lines.
+        selector: { id: run.id, status: 'draft' as const },
+        data: {
+          status: 'approved' as const,
+          approved_by: input.adminId,
+          approved_at: new Date(),
+        },
+      },
+      sharedContext,
+    );
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'weekly_settlement',
+          entity_id: run.id,
+          action: 'approve_settlement',
+          before: { status: 'draft' },
+          after: { status: 'approved' },
+          reason: `week ${new Date(run.week_start).toISOString().slice(0, 10)}`,
+        },
+      ],
+      sharedContext,
+    );
+  }
+
+  // Subtract a voided line's amount from its run's stored totals, so the
+  // numbers the admin review screen quotes stay true after every void.
+  @InjectTransactionManager()
+  protected async deductRunTotal(
+    input: { settlementId: string; amountCents: number },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const [run] = await this.listWeeklySettlements(
+      { id: input.settlementId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!run) return;
+    await this.updateWeeklySettlements(
+      {
+        selector: { id: run.id },
+        data: {
+          total_commission_cents: Math.max(
+            0,
+            run.total_commission_cents - input.amountCents,
+          ),
+        },
+      },
+      sharedContext,
+    );
+  }
+
+  // Admin set/fix of attribution (spec: "Admin can set/fix one manually").
+  // Upserts — unlike bindReferral, which is the customer path and permanent.
+  // referrerId null clears the attribution. Audited.
+  @InjectTransactionManager()
+  async adminSetReferral(
+    input: {
+      customerId: string;
+      referrerId: string | null;
+      adminId: string;
+      reason: string;
+      /** Resolves a customer id, injected by the route (this module cannot
+       *  see the customer module). REQUIRED — a referrer id that resolves to
+       *  nothing would mint commission for a non-existent account, and an
+       *  optional guard is one careless caller away from being skipped. */
+      referrerExists: (id: string) => Promise<boolean>;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    if (input.referrerId === input.customerId) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'A customer cannot refer themself.',
+      );
+    }
+    if (input.referrerId !== null) {
+      if (!(await input.referrerExists(input.referrerId))) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Referrer '${input.referrerId}' is not an existing customer.`,
+        );
+      }
+    }
+    const [existing] = await this.listReferralAttributions(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    const before = existing?.referrer_id ?? null;
+    if (input.referrerId === null) {
+      if (existing) {
+        await this.deleteReferralAttributions(
+          { id: existing.id },
+          sharedContext,
+        );
+      }
+    } else if (existing) {
+      await this.updateReferralAttributions(
+        {
+          selector: { id: existing.id },
+          data: { referrer_id: input.referrerId },
+        },
+        sharedContext,
+      );
+    } else {
+      await this.createReferralAttributions(
+        [{ customer_id: input.customerId, referrer_id: input.referrerId }],
+        sharedContext,
+      );
+    }
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: 'edit',
+          before: { referrer_id: before },
+          after: { referrer_id: input.referrerId },
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+  }
+
+  // Void a whole DRAFT run — the "this week is bad, recompute later" lever
+  // (the status value existed with no writer; review 2026-08-25). Every
+  // pending line is voided with the run's reason; a re-close of the same
+  // week stays blocked by the unique week_start until the row is removed
+  // deliberately.
+  @InjectTransactionManager()
+  async voidWeeklySettlement(
+    input: { settlementId: string; adminId: string; reason: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const [run] = await this.listWeeklySettlements(
+      { id: input.settlementId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!run) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Settlement ${input.settlementId} not found.`,
+      );
+    }
+    if (run.status !== 'draft') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Only a draft run can be voided (this one is '${run.status}').`,
+      );
+    }
+    await this.updateWeeklySettlementLines(
+      {
+        selector: { settlement_id: run.id, status: 'pending' },
+        data: {
+          status: 'voided' as const,
+          void_reason: input.reason,
+          voided_by: input.adminId,
+        },
+      },
+      sharedContext,
+    );
+    await this.updateWeeklySettlements(
+      {
+        selector: { id: run.id, status: 'draft' as const },
+        data: {
+          status: 'void' as const,
+          total_commission_cents: 0,
+        },
+      },
+      sharedContext,
+    );
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'weekly_settlement',
+          entity_id: run.id,
+          action: 'void_settlement',
+          before: { status: 'draft' },
+          after: { status: 'void' },
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+  }
+
+  // Void one payable line before its money moves. Allowed while the line is
+  // pending and the run is draft or approved — never after pay.
+  @InjectTransactionManager()
+  async voidSettlementLine(
+    input: { lineId: string; adminId: string; reason: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const [line] = await this.listWeeklySettlementLines(
+      { id: input.lineId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!line) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Settlement line ${input.lineId} not found.`,
+      );
+    }
+    if (line.status !== 'pending') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Only a pending line can be voided (this one is '${line.status}').`,
+      );
+    }
+    // selector re-asserts `pending`: without it, a void racing the pay job
+    // could stamp 'voided' over a line whose money already moved (bug review
+    // 2026-08-25). A no-match means the race was lost — bail before the
+    // totals deduction so it can't double-subtract.
+    await this.updateWeeklySettlementLines(
+      {
+        selector: { id: line.id, status: 'pending' as const },
+        data: {
+          status: 'voided' as const,
+          void_reason: input.reason,
+          voided_by: input.adminId,
+        },
+      },
+      sharedContext,
+    );
+    const [afterVoid] = await this.listWeeklySettlementLines(
+      { id: line.id },
+      { take: 1 },
+      sharedContext,
+    );
+    if (afterVoid?.status !== 'voided') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'That line changed state while you were voting on it — reload the run.',
+      );
+    }
+    // Keep the run totals live — the approve dialog quotes them as "will pay
+    // out", so a voided line must leave the number the operator reads
+    // (review 2026-08-25 finding 3).
+    await this.deductRunTotal(
+      { settlementId: line.settlement_id, amountCents: line.amount_cents },
+      sharedContext,
+    );
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'weekly_settlement',
+          entity_id: line.settlement_id,
+          action: 'void_settlement_line',
+          before: { line_id: line.id, status: 'pending' },
+          after: {
+            line_id: line.id,
+            status: 'voided',
+            customer_id: line.customer_id,
+            amount_cents: line.amount_cents,
+          },
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+  }
+
+  // The Wednesday pay ("WED OUT"): one credit transaction + one RF ledger row
+  // per pending line of an APPROVED run. Idempotent two ways: the line row
+  // flips to paid inside the same transaction as its ledger write, and the
+  // ledger (type='RF', ref_id=line.id) unique index refuses a double-credit
+  // even if the line update was lost. Deleted accounts are resolved HERE via
+  // deletedCustomerIds (the audit trail's delete_account rows — the one
+  // customer-module fact this module can see) and voided rather than paid,
+  // so the route and the cron can't drift apart on that rule.
+  //
+  // adminId present = the dashboard's "Pay now"; absent = the Wednesday
+  // cron. Either way the payout is audited (action 'pay_settlement') when
+  // any money moved — a money mutation with no audit row was review
+  // 2026-08-25 finding 1.
+  //
+  // ponytail: the whole run commits as ONE transaction — fine at this
+  // volume; chunk per-line (settleChallengeWeek style) if runs ever grow to
+  // thousands of lines.
+  @InjectTransactionManager()
+  async payWeeklySettlement(
+    input: { settlementId: string; adminId?: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ paid: number; skipped: number }> {
+    const [run] = await this.listWeeklySettlements(
+      { id: input.settlementId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!run) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Settlement ${input.settlementId} not found.`,
+      );
+    }
+    if (run.status !== 'approved' && run.status !== 'paid') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Only an approved run can be paid (this one is '${run.status}').`,
+      );
+    }
+    const weekStartIso = new Date(run.week_start).toISOString().slice(0, 10);
+    const pending = await this.listWeeklySettlementLines(
+      { settlement_id: run.id, status: 'pending' },
+      { take: 100_000 },
+      sharedContext,
+    );
+    const skip = await this.deletedCustomerIds(
+      [...new Set(pending.map((l) => l.customer_id))],
+      sharedContext,
+    );
+
+    let paid = 0;
+    let skipped = 0;
+    for (const line of pending) {
+      if (skip.has(line.customer_id)) {
+        await this.updateWeeklySettlementLines(
+          {
+            selector: { id: line.id },
+            data: { status: 'voided' as const, void_reason: 'account_deleted' },
+          },
+          sharedContext,
+        );
+        await this.deductRunTotal(
+          { settlementId: run.id, amountCents: line.amount_cents },
+          sharedContext,
+        );
+        skipped++;
+        continue;
+      }
+      // Ledger FIRST, and its `replayed` flag is load-bearing: an RF row
+      // already carrying this line's ref_id means the money moved on an
+      // earlier run whose line update was lost. Minting the credit before
+      // this check would pay that customer twice — recordLedgerEntry returns
+      // the existing row instead of throwing (security review 2026-08-25).
+      const entry = await this.recordLedgerEntry(
+        {
+          type: 'RF',
+          customerId: line.customer_id,
+          refId: line.id,
+          walletDelta: line.amount_cents / 100,
+          vaultDelta: null,
+          payload: {
+            type: 'RF',
+            week_start: weekStartIso,
+            basis_cents: line.basis_cents,
+            rate_bp: line.rate_bp,
+          },
+        },
+        sharedContext,
+      );
+      if (entry.replayed) {
+        // Already paid; just repair the line's status and move on.
+        await this.updateWeeklySettlementLines(
+          { selector: { id: line.id }, data: { status: 'paid' as const } },
+          sharedContext,
+        );
+        continue;
+      }
+      const [txn] = await this.createCreditTransactions(
+        [
+          {
+            customer_id: line.customer_id,
+            amount: line.amount_cents / 100,
+            reason: 'referral_commission',
+          },
+        ],
+        sharedContext,
+      );
+      await this.updateWeeklySettlementLines(
+        {
+          // status guard: a concurrent void must not be overwritten (the
+          // ledger row above is still the authority on whether money moved).
+          selector: { id: line.id, status: 'pending' as const },
+          data: { status: 'paid' as const, paid_transaction_id: txn.id },
+        },
+        sharedContext,
+      );
+      paid++;
+    }
+
+    const stillPending = await this.listWeeklySettlementLines(
+      { settlement_id: run.id, status: 'pending' },
+      { take: 1 },
+      sharedContext,
+    );
+    if (stillPending.length === 0 && run.status !== 'paid') {
+      await this.updateWeeklySettlements(
+        {
+          selector: { id: run.id },
+          data: { status: 'paid' as const, paid_at: new Date() },
+        },
+        sharedContext,
+      );
+    }
+    if (paid > 0 || skipped > 0) {
+      await this.createAdminActionAudits(
+        [
+          {
+            admin_id: input.adminId ?? 'system:pay-referral-week',
+            entity_type: 'weekly_settlement',
+            entity_id: run.id,
+            action: 'pay_settlement',
+            before: { status: run.status },
+            after: { paid, skipped },
+            reason: `week ${weekStartIso}`,
+          },
+        ],
+        sharedContext,
+      );
+    }
+    return { paid, skipped };
+  }
+
+  // Storefront read: the /task Referral tab payload. Live numbers for the
+  // CURRENT (still-open) week plus this customer's settled history.
+  @InjectManager()
+  async referralStorefrontSummary(
+    input: { customerId: string; now?: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    downline_count: number;
+    week: {
+      start: string;
+      turnover_cents: number;
+      rate_bp: number;
+      projected_cents: number;
+      partner: boolean;
+    };
+    history: {
+      week_start: string;
+      basis_cents: number;
+      rate_bp: number;
+      amount_cents: number;
+      status: string;
+    }[];
+  }> {
+    const week = referralWeekFor(input.now ?? new Date());
+
+    // One joined aggregate instead of materialising every downline id into an
+    // IN list on every page view (review 2026-08-25 scalability finding: a
+    // 5k-downline partner would otherwise build a 5k-parameter statement per
+    // view; Postgres caps a statement at 65535 binds).
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [agg] = await em.execute<
+      { downline_count: string; turnover_cents: string }[]
+    >(
+      // Per-customer subtotal FIRST, negatives clamped to 0, then summed —
+      // exactly what closeReferralWeek does (it drops a downline whose net
+      // week turnover is <= 0). Summing raw rows let one refunded member drag
+      // the projection below the real payout, and at scale onto a different
+      // TIER (bug review 2026-08-25).
+      'SELECT COUNT(*)::bigint AS downline_count, ' +
+        '  COALESCE(SUM(GREATEST(per_customer, 0)), 0)::bigint AS turnover_cents ' +
+        'FROM ( ' +
+        '  SELECT ra.customer_id, ' +
+        '    COALESCE(SUM(CASE WHEN ct.created_at >= ? AND ct.created_at < ? ' +
+        '      THEN ROUND(-ct.amount * 100) ELSE 0 END), 0)::bigint AS per_customer ' +
+        '  FROM referral_attribution ra ' +
+        '  LEFT JOIN credit_transaction ct ON ct.customer_id = ra.customer_id ' +
+        "    AND ct.reason = 'pack_open' AND ct.deleted_at IS NULL " +
+        '  WHERE ra.referrer_id = ? AND ra.deleted_at IS NULL ' +
+        '  GROUP BY ra.customer_id ' +
+        ') d',
+      [week.startUtc, week.endUtcExcl, input.customerId],
+    );
+    const downlineCount = Number(agg?.downline_count ?? 0);
+    const turnoverCents = Number(agg?.turnover_cents ?? 0);
+
+    const [state] = await this.listCustomerAccountStates(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    const partnerBp = state?.partner_referral_bp ?? null;
+    const settings = await this.getReferralSettings(sharedContext);
+    const rateBp = resolveRateBp(turnoverCents, settings.tiers, partnerBp);
+
+    return {
+      downline_count: downlineCount,
+      week: {
+        start: week.weekStartIso,
+        turnover_cents: turnoverCents,
+        rate_bp: rateBp,
+        projected_cents: payoutCents(turnoverCents, rateBp),
+        partner: partnerBp != null,
+      },
+      history: await this.settlementHistoryFor(
+        { customerId: input.customerId },
+        sharedContext,
+      ),
+    };
+  }
+
+  // Shared history read: this customer's paid settlement lines, newest
+  // first, week_start denormalized from the parent run.
+  @InjectManager()
+  protected async settlementHistoryFor(
+    input: { customerId: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    {
+      week_start: string;
+      basis_cents: number;
+      rate_bp: number;
+      amount_cents: number;
+      status: string;
+    }[]
+  > {
+    // status 'paid' ONLY: Tuesday's draft (and even an approved-but-unpaid
+    // line) is still voidable — showing it as a "past payout" promises money
+    // the human gate can still pull (review 2026-08-25 finding, spec axis 5).
+    const lines = await this.listWeeklySettlementLines(
+      { customer_id: input.customerId, status: 'paid' },
+      { order: { created_at: 'DESC' }, take: 12 },
+      sharedContext,
+    );
+    if (lines.length === 0) return [];
+    const runs = await this.listWeeklySettlements(
+      { id: [...new Set(lines.map((l) => l.settlement_id))] },
+      { select: ['id', 'week_start'], take: lines.length },
+      sharedContext,
+    );
+    const weekById = new Map(
+      runs.map((r) => [
+        r.id,
+        new Date(r.week_start).toISOString().slice(0, 10),
+      ]),
+    );
+    return lines.map((l) => ({
+      week_start: weekById.get(l.settlement_id) ?? '',
+      basis_cents: l.basis_cents,
+      rate_bp: l.rate_bp,
+      amount_cents: l.amount_cents,
+      status: l.status,
+    }));
+  }
+
+  // ── Task system (spec 2026-08-24 Phase B) ───────────────────────────────
+
+  // Explicit daily check-in (the /task button). One row per MYT calendar day;
+  // the unique (customer_id, checkin_date) index settles double-taps — the
+  // loser's 23505 reads as already-checked-in.
+  @InjectTransactionManager()
+  async checkInDaily(
+    input: { customerId: string; now?: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ checked: boolean; day: string }> {
+    const MYT_OFFSET_MS = 8 * 60 * 60 * 1000;
+    const day = new Date((input.now ?? new Date()).getTime() + MYT_OFFSET_MS)
+      .toISOString()
+      .slice(0, 10);
+    // Explicit pre-check: MikroORM's UoW buffers creates until flush, so a
+    // duplicate would otherwise surface as a framework DUPLICATE_ERROR after
+    // this method returns (same reasoning as recordLedgerEntry's pre-check).
+    const [existing] = await this.listDailyCheckins(
+      { customer_id: input.customerId, checkin_date: day },
+      { take: 1 },
+      sharedContext,
+    );
+    if (existing) return { checked: false, day };
+    try {
+      await this.createDailyCheckins(
+        [{ customer_id: input.customerId, checkin_date: day }],
+        sharedContext,
+      );
+    } catch (e: unknown) {
+      if (
+        (e as { code?: string })?.code === '23505' ||
+        (e as { type?: string })?.type === MedusaError.Types.DUPLICATE_ERROR
+      ) {
+        return { checked: false, day };
+      }
+      throw e;
+    }
+    return { checked: true, day };
+  }
+
+  // The facts every task requirement evaluates against, counted once per
+  // request. Weekly facts scope to the referral week containing `now`;
+  // lifetime facts (level, vault) ignore it.
+  @InjectManager()
+  protected async taskFactsFor(
+    input: { customerId: string; week: ReferralWeek },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<TaskFacts> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const weekDays: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      weekDays.push(
+        new Date(
+          input.week.startUtc.getTime() +
+            8 * 3600 * 1000 +
+            i * 24 * 3600 * 1000,
+        )
+          .toISOString()
+          .slice(0, 10),
+      );
+    }
+    const [checkins, ripRows, [stateRow], vaultRows, pixelRows] =
+      await Promise.all([
+        this.listDailyCheckins(
+          { customer_id: input.customerId, checkin_date: weekDays },
+          { select: ['id'], take: 7 },
+          sharedContext,
+        ),
+        em.execute<{ pack_id: string; n: string }[]>(
+          'SELECT pack_id, COUNT(*)::bigint AS n FROM pull ' +
+            "WHERE customer_id = ? AND source = 'pack' AND deleted_at IS NULL " +
+            '  AND created_at >= ? AND created_at < ? GROUP BY pack_id',
+          [input.customerId, input.week.startUtc, input.week.endUtcExcl],
+        ),
+        this.listVipMemberStates(
+          { customer_id: input.customerId },
+          { select: ['current_level'], take: 1 },
+          sharedContext,
+        ),
+        // Lifetime counts, NOT current status: every pull STARTS vaulted
+        // (pull.ts lifecycle), so "cards ever vaulted" = all pulls — and an
+        // achievement must never UN-complete because the customer sold or
+        // shipped a card before claiming (review 2026-08-25 finding 2). This
+        // also rides IDX_pull_customer_id_rolled_at instead of scanning for a
+        // status that has no index.
+        em.execute<{ n: string }[]>(
+          'SELECT COUNT(*)::bigint AS n FROM pull ' +
+            'WHERE customer_id = ? AND deleted_at IS NULL',
+          [input.customerId],
+        ),
+        // CARDS, not distinct species ("vault how many Pokémon card"): two
+        // Pikachu pulls count 2. pixel_pokemon_id is the authoritative pixel
+        // LINK — a card an admin has not linked yet does not count, and
+        // linking it later advances progress (admin data, honest either way).
+        // Grouped so a task can name ONE Pokémon; the ungrouped total is the
+        // sum of the groups.
+        em.execute<{ pixel_pokemon_id: string; n: string }[]>(
+          'SELECT c.pixel_pokemon_id, COUNT(*)::bigint AS n ' +
+            'FROM pull p JOIN card c ON c.handle = p.card_id ' +
+            'WHERE p.customer_id = ? AND p.deleted_at IS NULL ' +
+            '  AND c.deleted_at IS NULL AND c.pixel_pokemon_id IS NOT NULL ' +
+            'GROUP BY c.pixel_pokemon_id',
+          [input.customerId],
+        ),
+      ]);
+    const byPack = new Map(ripRows.map((r) => [r.pack_id, Number(r.n)]));
+    const byPixel = new Map(
+      pixelRows.map((r) => [r.pixel_pokemon_id, Number(r.n)]),
+    );
+    return {
+      checkinDaysThisWeek: checkins.length,
+      ripsThisWeek: [...byPack.values()].reduce((a, b) => a + b, 0),
+      ripsThisWeekByPack: byPack,
+      vipLevel: stateRow ? Number(stateRow.current_level) : 1,
+      vaultCount: Number(vaultRows[0]?.n ?? 0),
+      vaultPixelCount: [...byPixel.values()].reduce((a, b) => a + b, 0),
+      vaultPixelCountById: byPixel,
+    };
+  }
+
+  // The /task Tasks tab payload: every ACTIVE definition with this
+  // customer's live progress and claim state.
+  @InjectManager()
+  async taskHubFor(
+    input: { customerId: string; now?: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    week_start: string;
+    vip_level: number;
+    /** Free rips this customer has claimed but not yet spun. Listed at the top
+     *  level rather than on the task row on purpose: the task that granted it
+     *  may since have been retired or run out its window, and the entitlement
+     *  must not vanish with it. */
+    pending_spins: {
+      claim_id: string;
+      task_id: string;
+      title: string;
+      pack_id: string;
+    }[];
+    tasks: {
+      id: string;
+      kind: 'weekly' | 'achievement';
+      title: string;
+      requirement: TaskRequirement;
+      reward: TaskReward;
+      progress: { current: number; target: number; completed: boolean };
+      claimed: boolean;
+    }[];
+  }> {
+    const week = taskWeekFor(input.now ?? new Date());
+    const [defs, facts, claims] = await Promise.all([
+      this.listTaskDefinitions(
+        { active: true },
+        // 500 matches the admin list cap — past it, definitions would vanish
+        // from the hub silently, so keep the two bounds identical.
+        { order: { sort: 'ASC' }, take: 500 },
+        sharedContext,
+      ),
+      this.taskFactsFor({ customerId: input.customerId, week }, sharedContext),
+      this.listTaskClaims(
+        {
+          customer_id: input.customerId,
+          period_key: [week.weekStartIso, ''],
+        },
+        {
+          select: ['id', 'task_id', 'period_key', 'claim_ref', 'reward_snapshot'],
+          take: 1000,
+        },
+        sharedContext,
+      ),
+    ]);
+    const claimed = new Set(claims.map((c) => `${c.task_id}:${c.period_key}`));
+    const at = input.now ?? new Date();
+    const titleById = new Map(defs.map((d) => [d.id, d.title]));
+    // Unspent pack entitlements. `claim_ref` null is the whole test — it is
+    // stamped with the pull id the moment the spin commits.
+    const pendingSpins = claims
+      .filter((c) => {
+        if (c.claim_ref) return false;
+        const snap = (c.reward_snapshot ?? {}) as {
+          type?: string;
+          pack_id?: string;
+        };
+        return snap.type === 'pack' && typeof snap.pack_id === 'string';
+      })
+      .map((c) => ({
+        claim_id: c.id,
+        task_id: c.task_id,
+        title: titleById.get(c.task_id) ?? 'Free rip',
+        pack_id: String(
+          (c.reward_snapshot as { pack_id?: string }).pack_id ?? '',
+        ),
+      }));
+    return {
+      week_start: week.weekStartIso,
+      // The Achievements & VIP tab shows the rung the reach_level tasks are
+      // measured against; taskFactsFor already loaded it.
+      vip_level: facts.vipLevel,
+      pending_spins: pendingSpins,
+      tasks: defs
+        .filter((d) => taskIsLive(d, at))
+        .map((d) => {
+          const requirement = d.requirement as unknown as TaskRequirement;
+          const periodKey = d.kind === 'weekly' ? week.weekStartIso : '';
+          return {
+            id: d.id,
+            kind: d.kind,
+            title: d.title,
+            requirement,
+            reward: d.reward as unknown as TaskReward,
+            progress: taskProgress(requirement, facts),
+            claimed: claimed.has(`${d.id}:${periodKey}`),
+          };
+        }),
+    };
+  }
+
+  // Claim a completed task's reward. The task_claim unique index is the
+  // idempotency spine; the credit grant carries its own idempotency reference
+  // on top (mutateCreditAtomic replay) so a crash between claim-insert and
+  // grant can be re-driven safely by support. Card/pack rewards mint a
+  // source='reward' pull (vault entry; no recorded pulled value — reward
+  // pulls never move the boards, same stance as reward boxes). decrementStock
+  // and rollPack are injected by the route (card-stock helper / rollOne) so
+  // this module doesn't import the workflow layer.
+  @InjectTransactionManager()
+  async claimTask(
+    input: {
+      customerId: string;
+      taskId: string;
+      now?: Date;
+      decrementStock?: (handle: string, qty: number) => Promise<boolean>;
+      rollPack?: (packId: string) => Promise<{ handle: string }>;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    | {
+        claimed: true;
+        reward: TaskReward;
+        ref: string | null;
+        /** The claim row's id. For a pack reward it is the entitlement the
+         *  slot spends — the tab sends the player to /slots/<pack>/spin with
+         *  it. */
+        claimId: string;
+      }
+    | {
+        claimed: false;
+        reason:
+          | 'not_found'
+          | 'not_completed'
+          | 'already_claimed'
+          | 'window_closed';
+      }
+  > {
+    // Deliberately NOT filtered on active: retiring a task must never strand
+    // a customer who completed it before the retire (review 2026-08-25
+    // finding 6). The hub only SHOWS active tasks, so retired ones are
+    // reachable only by someone who already saw them.
+    const [def] = await this.listTaskDefinitions(
+      { id: input.taskId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!def) return { claimed: false, reason: 'not_found' };
+    // A scheduled window that has closed (or not opened) is not claimable —
+    // unlike `active`, which is deliberately NOT checked here, a window is
+    // the operator saying exactly when this task runs.
+    //
+    // Its OWN reason, not 'not_found': the window can close between the page
+    // load and the tap, and a finished 3/3 task answering "not completed yet"
+    // is the most confusing thing this endpoint could say.
+    if (!taskIsLive(def, input.now ?? new Date()))
+      return { claimed: false, reason: 'window_closed' };
+    const week = taskWeekFor(input.now ?? new Date());
+    const periodKey = def.kind === 'weekly' ? week.weekStartIso : '';
+    const requirement = def.requirement as unknown as TaskRequirement;
+    const reward = def.reward as unknown as TaskReward;
+
+    const facts = await this.taskFactsFor(
+      { customerId: input.customerId, week },
+      sharedContext,
+    );
+    if (!taskProgress(requirement, facts).completed) {
+      return { claimed: false, reason: 'not_completed' };
+    }
+
+    // Explicit pre-check (UoW buffers creates until flush — see checkInDaily).
+    // A true race still loses at flush, rolls the whole claim transaction
+    // back (reward included), and the retry lands here as already_claimed.
+    const [prior] = await this.listTaskClaims(
+      {
+        customer_id: input.customerId,
+        task_id: def.id,
+        period_key: periodKey,
+      },
+      { take: 1 },
+      sharedContext,
+    );
+    if (prior) return { claimed: false, reason: 'already_claimed' };
+    let claimId: string;
+    try {
+      const [claim] = await this.createTaskClaims(
+        [
+          {
+            customer_id: input.customerId,
+            task_id: def.id,
+            period_key: periodKey,
+            reward_snapshot: reward as unknown as Record<string, unknown>,
+          },
+        ],
+        sharedContext,
+      );
+      claimId = claim.id;
+    } catch (e: unknown) {
+      if (
+        (e as { code?: string })?.code === '23505' ||
+        (e as { type?: string })?.type === MedusaError.Types.DUPLICATE_ERROR
+      ) {
+        return { claimed: false, reason: 'already_claimed' };
+      }
+      throw e;
+    }
+
+    let ref: string | null = null;
+    if (reward.type === 'credit') {
+      const { id } = await this.mutateCreditAtomic(
+        {
+          customerId: input.customerId,
+          amount: reward.amount_myr,
+          reason: 'reward_credit',
+          idempotencyReference: `task:${def.id}:${input.customerId}:${periodKey || 'once'}`,
+        },
+        sharedContext,
+      );
+      ref = id;
+    } else if (reward.type === 'card') {
+      const [card] = await this.listCards(
+        { handle: reward.card_handle },
+        { select: ['handle'], take: 1 },
+        sharedContext,
+      );
+      if (!card) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Task reward card '${reward.card_handle}' no longer exists.`,
+        );
+      }
+      // Fulfillment counter, never a gate — negative = units owed (same
+      // stance as challenge grants). Guarded: the take runs on the inventory
+      // module's own connection, so a throw here would 500 the claim, roll
+      // back the claim row AND leave the decrement committed — every retry
+      // then loses another unit (the decrement-card-stock step's rule: the
+      // TAKE does not belong in this transaction). A failed take is an
+      // operator concern, never a customer error.
+      try {
+        await input.decrementStock?.(reward.card_handle, 1);
+      } catch {
+        // stock counter drift is operator-visible in inventory; the claim
+        // must proceed.
+      }
+      const [pull] = await this.createPulls(
+        [
+          {
+            customer_id: input.customerId,
+            pack_id: 'task-reward',
+            card_id: reward.card_handle,
+            order_id: null,
+            rolled_at: new Date(),
+            source: 'reward' as const,
+          },
+        ],
+        sharedContext,
+      );
+      ref = pull.id;
+    } else {
+      // pack: a free RIP, and a rip is something the player does. Claiming
+      // grants the entitlement; redeemTaskPackClaim spends it when they spin
+      // the slot. The claim row IS the entitlement — `claim_ref` stays null
+      // until the spin stamps the pull id on it, which is also what makes the
+      // spin idempotent.
+      //
+      // Rolling here instead would have handed the card over before the reels
+      // ever moved, leaving the slot to animate a result the player already
+      // owned. It also could not survive the obvious question — what happens
+      // if they close the tab? — in any honest way: either the spin is
+      // theatre, or the reward is lost. An unspent entitlement simply waits.
+      ref = null;
+    }
+    if (ref !== null) {
+      await this.updateTaskClaims(
+        { selector: { id: claimId }, data: { claim_ref: ref } },
+        sharedContext,
+      );
+    }
+    return { claimed: true, reward, ref, claimId };
+  }
+
+  // Admin CRUD for task definitions — validated + audited.
+  @InjectTransactionManager()
+  async saveTaskDefinition(
+    input: {
+      id?: string;
+      kind: 'weekly' | 'achievement';
+      title: string;
+      requirement: unknown;
+      reward: unknown;
+      active: boolean;
+      sort: number;
+      /** Optional run window; omitted means "unscheduled" (null/null). */
+      startsAt?: Date | null;
+      endsAt?: Date | null;
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ id: string }> {
+    if (!input.title.trim() || input.title.length > 120) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'title is required (1–120 chars).',
+      );
+    }
+    if (
+      input.startsAt &&
+      input.endsAt &&
+      input.endsAt.getTime() <= input.startsAt.getTime()
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'The schedule end must be after its start.',
+      );
+    }
+    const requirement = validateTaskRequirement(input.kind, input.requirement);
+    const reward = validateTaskReward(input.reward);
+    // Reward targets must EXIST at save time — a typo'd pack slug or card
+    // handle otherwise surfaces only at claim time, as a permanent generic
+    // failure for every completed customer (review 2026-08-25 finding 4).
+    if (reward.type === 'card') {
+      const [card] = await this.listCards(
+        { handle: reward.card_handle },
+        { select: ['handle'], take: 1 },
+        sharedContext,
+      );
+      if (!card) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Reward card '${reward.card_handle}' does not exist.`,
+        );
+      }
+    } else if (reward.type === 'pack') {
+      const [pack] = await this.listPacks(
+        { slug: reward.pack_id },
+        { select: ['slug'], take: 1 },
+        sharedContext,
+      );
+      if (!pack) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Reward pack '${reward.pack_id}' does not exist.`,
+        );
+      }
+    }
+    const data = {
+      kind: input.kind,
+      title: input.title.trim(),
+      requirement: requirement as unknown as Record<string, unknown>,
+      reward: reward as unknown as Record<string, unknown>,
+      active: input.active,
+      sort: input.sort,
+      starts_at: input.startsAt ?? null,
+      ends_at: input.endsAt ?? null,
+    };
+    let id = input.id;
+    let before: Record<string, unknown> | null = null;
+    if (id) {
+      const [existing] = await this.listTaskDefinitions(
+        { id },
+        { take: 1 },
+        sharedContext,
+      );
+      if (!existing) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_FOUND,
+          `Task ${id} not found.`,
+        );
+      }
+      // kind drives period_key, which drives BOTH the claim unique index and
+      // the credit idempotency key — flipping it in place re-opens already
+      // claimed rewards (review 2026-08-25 finding 5). New cadence = new task.
+      if (existing.kind !== input.kind) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          "A task's kind cannot change after creation — retire this one and create a new task instead.",
+        );
+      }
+      before = {
+        kind: existing.kind,
+        title: existing.title,
+        requirement: existing.requirement,
+        reward: existing.reward,
+        active: existing.active,
+        sort: existing.sort,
+        starts_at: existing.starts_at,
+        ends_at: existing.ends_at,
+      };
+      await this.updateTaskDefinitions(
+        { selector: { id }, data },
+        sharedContext,
+      );
+    } else {
+      const [row] = await this.createTaskDefinitions([data], sharedContext);
+      id = row.id;
+    }
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'task_definition',
+          entity_id: id,
+          action: before ? 'edit' : 'create',
+          before,
+          after: data,
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+    return { id };
   }
 
   // Admin edit of the avatar-frame catalog — upsert + audit, same discipline
@@ -3096,7 +4648,6 @@ class PacksModuleService extends MedusaService({
         ],
         sharedContext,
       );
-
     } catch (e) {
       // A 23505 means this open_id already settled (the debit index).
       // The 23505 already aborted THIS txn (25P02); re-raise as DUPLICATE_ERROR so
@@ -4021,7 +5572,10 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     if (recentPending >= input.maxRecentPending) return null;
-    const [row] = await this.createGlobePayDeposits([input.data], sharedContext);
+    const [row] = await this.createGlobePayDeposits(
+      [input.data],
+      sharedContext,
+    );
     return { id: row.id };
   }
 
@@ -5263,7 +6817,6 @@ class PacksModuleService extends MedusaService({
           'level',
           'spend_threshold',
           'voucher_amount',
-          'box_tier',
           'frame_unlock',
         ],
         take: 1000,
@@ -5486,7 +7039,6 @@ class PacksModuleService extends MedusaService({
       const rewards = rewardsForLevel({
         level: row.level,
         voucher_amount: Number(row.voucher_amount),
-        box_tier: row.box_tier,
         frame_unlock: row.frame_unlock,
       });
       for (const reward of rewards) {
@@ -5532,167 +7084,14 @@ class PacksModuleService extends MedusaService({
     return { gained };
   }
 
-  // ---- Daily Rewards (Task 5) ----------------------------------------------
-  // getDailyState / drawDailyBox are the model-driven (reward_box +
-  // reward_box_prize) daily-box path — the sole reward-box draw path since
-  // Task 7 deleted the old PackOdds-based settleRewardDraw.
-  // Kept THIN: all pure pick/validate/fold logic lives in daily-box.ts /
-  // voucher-ranges.ts; this file only orchestrates DB reads/writes.
-
-  // Batch-resolve product title + thumbnail by handle (product-lookup helper
-  // for the 'product' prize branch — Modules.PRODUCT.listProducts).
-  private async resolveProductDisplay(
-    handles: string[],
-    container: MedusaContainer,
-  ): Promise<Map<string, { title: string; image: string }>> {
-    const out = new Map<string, { title: string; image: string }>();
-    if (handles.length === 0) return out;
-    const productModule = container.resolve(Modules.PRODUCT);
-    const products = await productModule.listProducts(
-      { handle: handles },
-      { select: ['handle', 'title', 'thumbnail'] },
-    );
-    for (const p of products as {
-      handle?: string;
-      title: string;
-      thumbnail?: string;
-    }[]) {
-      if (!p.handle) continue;
-      out.set(p.handle, { title: p.title, image: p.thumbnail ?? '' });
-    }
-    return out;
-  }
-
-  // Two-hop tier resolution shared by getDailyState/drawDailyBox: default to
-  // the floor level (L1) when the customer has no state row yet (mirrors
-  // grantLevelUpRewards / settleRewardDraw).
-  private async resolveBoxTier(
-    customerId: string,
-    sharedContext: Context,
-  ): Promise<string> {
-    const [state] = await this.listVipMemberStates(
-      { customer_id: customerId },
-      { take: 1 },
-      sharedContext,
-    );
-    const level = state ? Number(state.highest_level_ever) : 1;
-    const [vipLevel] = await this.listVipLevels(
-      { level },
-      { take: 1 },
-      sharedContext,
-    );
-    if (vipLevel) return vipLevel.box_tier;
-    // No exact rung: the admin shrank the ladder below this member's monotonic
-    // peak (legal since the Levels tab landed). Clamp to the top rung so the
-    // daily box keeps resolving instead of going 'unavailable' forever.
-    const [top] = await this.listVipLevels(
-      {},
-      { order: { level: 'DESC' }, take: 1 },
-      sharedContext,
-    );
-    return top?.box_tier ?? '';
-  }
-
-  // highest_level_ever, defaulting to the L1 floor — the level a box-won
-  // voucher grant is stamped with (mirrors resolveBoxTier's own read).
-  private async resolveMemberLevel(
-    customerId: string,
-    sharedContext: Context,
-  ): Promise<number> {
-    const [state] = await this.listVipMemberStates(
-      { customer_id: customerId },
-      { take: 1 },
-      sharedContext,
-    );
-    return state ? Number(state.highest_level_ever) : 1;
-  }
-
-  // The logged-in customer's daily-box + voucher-grant state in one read (B6
-  // successor). NEVER returns weight/locked/odds fields — those stay
-  // server-side. `prizes` showcases only UNLOCKED prize rows so the UI can't
-  // infer a locked pin's pct from its absence/presence pattern.
+  // The logged-in customer's VIP voucher/frame grant state. Was the /daily
+  // page's consolidated read; the box and ship-prize halves went with the
+  // daily box (2026-08-25), leaving the grant list this still serves.
   @InjectManager()
   async getDailyState(
     customerId: string,
-    container?: MedusaContainer,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<DailyState> {
-    const resolveContainer =
-      container ??
-      (this as unknown as { __container__: MedusaContainer }).__container__;
-    const em = (sharedContext.transactionManager ??
-      sharedContext.manager) as unknown as LedgerSqlManager;
-
-    const tier = await this.resolveBoxTier(customerId, sharedContext);
-
-    let box: DailyState['box'] = null;
-    if (tier) {
-      const [rewardBox] = await this.listRewardBoxes(
-        { tier },
-        { take: 1 },
-        sharedContext,
-      );
-      if (rewardBox && rewardBox.enabled) {
-        const drawDay = new Date().toISOString().slice(0, 10);
-        const countRows = await em.execute<{ n: string | null }[]>(
-          `SELECT COUNT(*) AS n FROM reward_draw
-             WHERE customer_id = ? AND draw_day = ? AND deleted_at IS NULL`,
-          [customerId, drawDay],
-        );
-        const drawsToday = Number(countRows[0]?.n ?? 0);
-
-        const prizeRows = await this.listRewardBoxPrizes(
-          { box_id: rewardBox.id, locked: false },
-          { take: 1000 },
-          sharedContext,
-        );
-        const productHandles = prizeRows
-          .filter((p) => p.kind === 'product')
-          .map((p) => (p.payload as { product_handle?: string }).product_handle)
-          .filter((h): h is string => Boolean(h));
-        const displayByHandle = await this.resolveProductDisplay(
-          productHandles,
-          resolveContainer,
-        );
-        const prizes = prizeRows.map((p) => {
-          const payload = p.payload as {
-            amount_myr?: number;
-            product_handle?: string;
-          };
-          if (p.kind === 'product') {
-            const display = payload.product_handle
-              ? displayByHandle.get(payload.product_handle)
-              : undefined;
-            return {
-              kind: 'product',
-              title: display?.title,
-              image: display?.image,
-            };
-          }
-          if (p.kind === 'credit' || p.kind === 'voucher') {
-            return {
-              kind: p.kind,
-              amount_myr: Number(payload.amount_myr ?? 0),
-            };
-          }
-          return { kind: 'nothing' };
-        });
-
-        // Next UTC midnight — the reset boundary for tomorrow's draw_day.
-        const nextReset = new Date(`${drawDay}T00:00:00.000Z`);
-        nextReset.setUTCDate(nextReset.getUTCDate() + 1);
-
-        box = {
-          tier,
-          name: rewardBox.name,
-          draws_per_day: rewardBox.draws_per_day,
-          draws_today: drawsToday,
-          next_reset: nextReset.toISOString(),
-          prizes,
-        };
-      }
-    }
-
     const grantRows = await this.listVipRewardGrants(
       { customer_id: customerId, kind: ['voucher', 'frame'] },
       { order: { created_at: 'DESC' }, take: 500 },
@@ -5706,512 +7105,128 @@ class PacksModuleService extends MedusaService({
       granted_at: g.created_at.toISOString(),
       origin: (g.origin as 'ladder' | 'box' | null) ?? 'ladder',
     });
-    const vouchers = {
-      claimable: grantRows
-        .filter((g) => g.status === 'granted')
-        .map(toGrantView),
-      claimed: grantRows
-        .filter((g) => g.status === 'fulfilled')
-        .map(toGrantView),
-    };
-
-    // ship_prizes — ported from GET /store/rewards (ships/vaulted reward Pulls).
-    const rewardPulls = await this.listPulls(
-      { customer_id: customerId, status: 'vaulted', source: 'reward' },
-      { order: { rolled_at: 'DESC' }, take: 500 },
-      sharedContext,
-    );
-    const pullIds = rewardPulls.map((p) => p.id);
-    const drawRows = pullIds.length
-      ? await this.listRewardDraws(
-          { vault_pull_id: pullIds },
-          { take: pullIds.length },
-          sharedContext,
-        )
-      : [];
-    const drawByPullId = new Map(drawRows.map((d) => [d.vault_pull_id, d]));
-    const shipPrizes: PrizeView[] = rewardPulls
-      .map((p): PrizeView | null => {
-        const d = drawByPullId.get(p.id);
-        if (!d) return null;
-        return {
-          pull_id: p.id,
-          prize_kind: d.prize_kind as string,
-          prize_snapshot: d.prize_snapshot,
-          status: p.status as string,
-          draw_day: d.draw_day as string,
-        };
-      })
-      .filter((e): e is PrizeView => e !== null);
-
     return {
       redemption_enabled: rewardsRedemptionEnabled(),
-      box,
-      vouchers,
-      ship_prizes: shipPrizes,
+      vouchers: {
+        claimable: grantRows
+          .filter((g) => g.status === 'granted')
+          .map(toGrantView),
+        claimed: grantRows
+          .filter((g) => g.status === 'fulfilled')
+          .map(toGrantView),
+      },
     };
   }
 
-  // Settle one daily reward-box draw for a customer, against the NEW
-  // reward_box/reward_box_prize model. Same read-then-write-under-lock
-  // discipline as settleRewardDraw (advisory lock, UTC draw_day, cap COUNT,
-  // reward_draw INSERT) — copied verbatim from that method (L1386-1394,
-  // L1436-1447 in the pre-Task-5 file). The prize pick runs over ALL prize
-  // rows (locked AND unlocked) via the stored weights — locked only pins the
-  // roll's probability, it never excludes a row from the pool.
+  /**
+   * Spend a pack-reward entitlement: roll the pack and vault the card.
+   *
+   * This is what the slot's Spin button calls for a task's free rip. The claim
+   * row is the entitlement — `claim_ref` null means unspent — and stamping it
+   * with the pull id in the SAME transaction as the pull's creation is what
+   * makes the whole thing survive the player closing the tab mid-spin:
+   *
+   *   - request never reached the server  → entitlement intact, spin again
+   *   - request committed, response lost  → card is in the vault, and a retry
+   *                                         returns already_redeemed rather
+   *                                         than rolling a second one
+   *
+   * The advisory lock is per CLAIM, not per customer: two tabs racing the same
+   * entitlement must serialise, but a player spinning two different free rips
+   * has no reason to queue.
+   */
   @InjectTransactionManager()
-  async drawDailyBox(
-    customerId: string,
-    container?: MedusaContainer,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<DrawDailyBoxResult> {
-    if (!rewardsRedemptionEnabled()) {
-      return { status: 'unavailable' };
-    }
-
-    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    const resolveContainer =
-      container ??
-      (this as unknown as { __container__: MedusaContainer }).__container__;
-
-    // 0) Serialize all credit mutations for THIS customer — ported verbatim
-    //    from settleRewardDraw.
-    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `credit:${customerId}`,
-    ]);
-    await this.assertNotFrozen(customerId, sharedContext);
-
-    // 1) Two-hop tier resolution (same helper getDailyState uses).
-    const tier = await this.resolveBoxTier(customerId, sharedContext);
-    if (!tier) return { status: 'unavailable' };
-
-    const [rewardBox] = await this.listRewardBoxes(
-      { tier },
-      { take: 1 },
-      sharedContext,
-    );
-    if (!rewardBox || !rewardBox.enabled) {
-      return { status: 'unavailable' };
-    }
-
-    const prizeRows = await this.listRewardBoxPrizes(
-      { box_id: rewardBox.id },
-      { take: 1000 },
-      sharedContext,
-    );
-    if (prizeRows.length === 0) {
-      return { status: 'unavailable' };
-    }
-
-    // 2) Daily-cap COUNT under the lock — ported verbatim from settleRewardDraw.
-    const drawDay = new Date().toISOString().slice(0, 10);
-    const countRows = await em.execute<{ n: string | null }[]>(
-      `SELECT COUNT(*) AS n FROM reward_draw
-         WHERE customer_id = ? AND draw_day = ? AND deleted_at IS NULL`,
-      [customerId, drawDay],
-    );
-    const count = Number(countRows[0]?.n ?? 0);
-    if (count >= rewardBox.draws_per_day) {
-      return { status: 'capped' };
-    }
-
-    // 3) Roll over the box's stored weights (locked rows included). The bound
-    // is the ACTUAL Σweight, not a fixed constant, so the draw is
-    // scale-invariant like the pack roll — rows saved on either side of the
-    // 4dp scale migration roll correctly.
-    const totalPrizeWeight = prizeRows.reduce((s, p) => s + p.weight, 0);
-    const roll = randomInt(Math.max(1, totalPrizeWeight));
-    const won = pickPrize(
-      prizeRows.map((p) => ({ ...p, weight: p.weight })),
-      roll,
-    );
-    const payload = won.payload as {
-      amount_myr?: number;
-      product_handle?: string;
-      qty?: number;
-    };
-
-    const drawOrdinal = count + 1;
-    let vaultPullId: string | null = null;
-    let creditTxnId: string | null = null;
-    let resultPrize: DrawDailyBoxResult['prize'];
-    let prizeSnapshot: Record<string, unknown>;
-    // Recorded prize_kind — starts as the roll's kind, degrades to 'nothing'
-    // below if the product stock/existence gate fails (Finding 1).
-    let prizeKind: 'product' | 'credit' | 'voucher' | 'nothing' = won.kind;
-
-    if (won.kind === 'product') {
-      const handle = payload.product_handle ?? '';
-      const qty = Number(payload.qty ?? 1);
-      const display = handle
-        ? (await this.resolveProductDisplay([handle], resolveContainer)).get(
-            handle,
-          )
-        : undefined;
-
-      // Post-roll gate (§Finding 1) — degrading (not re-rolling / not
-      // pre-filtering) keeps admin-pinned locked odds honest: the authored
-      // odds table stays what was configured, and odds_snapshot below still
-      // records it truthfully. A dead/missing product or insufficient stock
-      // (< qty, Finding 2) turns this draw into 'nothing' instead of minting
-      // a Pull the shipping pipeline can't back.
-      const stockByHandle = handle
-        ? await getCardStockByHandle(resolveContainer, [handle])
-        : new Map<string, number | null>();
-      const stock = stockByHandle.get(handle);
-      const inStock =
-        Boolean(display) &&
-        stockByHandle.has(handle) &&
-        (stock === null || (stock !== undefined && stock >= qty));
-
-      if (!inStock) {
-        resultPrize = { kind: 'nothing' };
-        prizeSnapshot = { degraded_from: 'product', product_handle: handle };
-        prizeKind = 'nothing';
-      } else {
-        for (let i = 0; i < qty; i += 1) {
-          const [pull] = await this.createPulls(
-            [
-              {
-                customer_id: customerId,
-                pack_id: `reward-box-${tier}`,
-                card_id: handle,
-                order_id: null,
-                rolled_at: new Date(),
-                source: 'reward',
-              },
-            ],
-            sharedContext,
-          );
-          vaultPullId = pull.id;
-        }
-        resultPrize = {
-          kind: 'product',
-          title: display?.title,
-          image: display?.image,
-          product_handle: handle,
-        };
-        prizeSnapshot = {
-          product_handle: handle,
-          title: display?.title ?? '',
-          image: display?.image ?? '',
-          qty,
-        };
-      }
-    } else if (won.kind === 'credit') {
-      const amountMyr = Number(payload.amount_myr ?? 0);
-      // Defense-in-depth ceiling, mirroring settleRewardDraw's MAX_REWARD_CREDIT_MYR
-      // guard — the authoring validator and the stored-weight table both already
-      // cap this, but fail loud here too.
-      if (amountMyr > MAX_BOX_CREDIT_MYR) {
-        throw new MedusaError(
-          MedusaError.Types.INVALID_DATA,
-          `Reward credit ${amountMyr} exceeds the ${MAX_BOX_CREDIT_MYR} MYR cap.`,
-        );
-      }
-      const { id } = await this.mutateCreditAtomic(
-        {
-          customerId,
-          amount: amountMyr,
-          reason: 'reward_credit',
-          idempotencyReference: `reward:${customerId}:${drawDay}:${drawOrdinal}`,
-        },
-        sharedContext,
-      );
-      creditTxnId = id;
-      resultPrize = { kind: 'credit', amount_myr: amountMyr };
-      prizeSnapshot = { amount_myr: amountMyr, currency: 'MYR' };
-    } else if (won.kind === 'voucher') {
-      const amountMyr = Number(payload.amount_myr ?? 0);
-      resultPrize = { kind: 'voucher', amount_myr: amountMyr };
-      prizeSnapshot = { amount_myr: amountMyr, currency: 'MYR' };
-    } else {
-      resultPrize = { kind: 'nothing' };
-      prizeSnapshot = {};
-    }
-
-    const [draw] = await this.createRewardDraws(
-      [
-        {
-          customer_id: customerId,
-          tier,
-          draw_day: drawDay,
-          draw_ordinal: drawOrdinal,
-          // prizeKind (not won.kind) — a degraded product prize records
-          // 'nothing' here so the audit trail matches what actually happened
-          // (no Pull, no credit), even though the roll picked 'product'.
-          prize_kind: prizeKind,
-          prize_snapshot: prizeSnapshot,
-          odds_snapshot: {
-            tier,
-            computed: prizeRows.map((p) => ({
-              kind: p.kind,
-              weight: p.weight,
-              locked: p.locked,
-            })),
-          },
-          vault_pull_id: vaultPullId,
-          credit_txn_id: creditTxnId,
-          status: 'drawn',
-        },
-      ],
-      sharedContext,
-    );
-
-    // Voucher payout happens AFTER the draw row exists so source_open_id can
-    // point at it directly — origin:'box' puts this grant outside the ladder's
-    // partial-unique index, so it's fine for a customer to win the same
-    // (level, kind) more than once from a box.
-    if (won.kind === 'voucher') {
-      const amountMyr = Number(payload.amount_myr ?? 0);
-      const level = await this.resolveMemberLevel(customerId, sharedContext);
-      await this.createVipRewardGrants(
-        [
-          {
-            customer_id: customerId,
-            level,
-            kind: 'voucher',
-            payload: { amount_myr: amountMyr },
-            status: 'granted',
-            origin: 'box',
-            source_open_id: draw.id,
-          },
-        ],
-        sharedContext,
-      );
-    }
-
-    return {
-      status: 'drawn',
-      prize: resultPrize,
-      draw_ordinal: drawOrdinal,
-      draw_day: drawDay,
-    };
-  }
-
-  // Admin listing: every reward_box row + prize/customer counts (read-only).
-  // Customer counts + level ranges come from ONE grouped SQL over
-  // vip_member_state JOIN vip_level (highest_level_ever = level), grouped by
-  // box_tier — cheaper than N+1 per-tier lookups.
-  @InjectManager()
-  async listDailyBoxesWithMeta(
+  async redeemTaskPackClaim(
+    input: {
+      customerId: string;
+      claimId: string;
+      /** Returns the pack's normalized winner. Typed loosely so this module
+       *  keeps its independence from the workflow layer, but the whole rolled
+       *  card is handed back to the caller — the route needs its rarity, which
+       *  is a property of the WINNING odds row, not of the card. */
+      rollPack: (
+        packId: string,
+      ) => Promise<{ handle: string } & Record<string, unknown>>;
+      decrementStock?: (handle: string, qty: number) => Promise<boolean>;
+    },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
-    {
-      tier: string;
-      name: string;
-      enabled: boolean;
-      draws_per_day: number;
-      prize_count: number;
-      customer_count: number;
-      level_from: number | null;
-      level_to: number | null;
-    }[]
+    | {
+        redeemed: true;
+        pullId: string;
+        card: { handle: string } & Record<string, unknown>;
+        packId: string;
+      }
+    | {
+        redeemed: false;
+        reason: 'not_found' | 'already_redeemed' | 'not_a_pack_reward';
+        pullId?: string;
+      }
   > {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `taskclaim:${input.claimId}`,
+    ]);
 
-    const boxes = await this.listRewardBoxes({}, { take: 1000 }, sharedContext);
-    const prizeRows = await this.listRewardBoxPrizes(
-      {},
-      { take: 100000, select: ['box_id'] },
+    const [claim] = await this.listTaskClaims(
+      { id: input.claimId },
+      { take: 1 },
       sharedContext,
     );
-    const prizeCountByBox = new Map<string, number>();
-    for (const p of prizeRows) {
-      prizeCountByBox.set(p.box_id, (prizeCountByBox.get(p.box_id) ?? 0) + 1);
+    // Ownership before anything else — the claim id comes from the client.
+    if (!claim || claim.customer_id !== input.customerId) {
+      return { redeemed: false, reason: 'not_found' };
     }
-
-    const metaRows = await em.execute<
-      {
-        box_tier: string;
-        customer_count: string;
-        level_from: number;
-        level_to: number;
-      }[]
-    >(
-      `SELECT vl.box_tier AS box_tier,
-              COUNT(DISTINCT vms.customer_id) AS customer_count,
-              MIN(vl.level) AS level_from,
-              MAX(vl.level) AS level_to
-         FROM vip_level vl
-         LEFT JOIN vip_member_state vms
-           ON vms.highest_level_ever = vl.level AND vms.deleted_at IS NULL
-        WHERE vl.deleted_at IS NULL
-        GROUP BY vl.box_tier`,
-    );
-    const metaByTier = new Map(metaRows.map((r) => [r.box_tier, r]));
-
-    return boxes.map((b) => {
-      const meta = metaByTier.get(b.tier);
+    if (claim.claim_ref) {
+      // Already spun. Hand back the pull so a lost response can still show the
+      // player what they won instead of an error.
       return {
-        tier: b.tier,
-        name: b.name,
-        enabled: b.enabled,
-        draws_per_day: b.draws_per_day,
-        prize_count: prizeCountByBox.get(b.id) ?? 0,
-        customer_count: meta ? Number(meta.customer_count) : 0,
-        level_from: meta ? Number(meta.level_from) : null,
-        level_to: meta ? Number(meta.level_to) : null,
+        redeemed: false,
+        reason: 'already_redeemed',
+        pullId: claim.claim_ref,
       };
-    });
-  }
-
-  // Admin editor read for one tier: box config + every prize row (incl.
-  // locked/pct — authoring-only; never reused for a store-facing response).
-  @InjectManager()
-  async getDailyBoxEditor(
-    tier: string,
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{
-    box: {
-      tier: string;
-      name: string;
-      enabled: boolean;
-      draws_per_day: number;
+    }
+    // reward_snapshot is what was frozen at claim time — NOT the task's current
+    // reward, which an admin may have edited since.
+    const snapshot = (claim.reward_snapshot ?? {}) as {
+      type?: string;
+      pack_id?: string;
     };
-    prizes: {
-      id: string;
-      kind: string;
-      payload: unknown;
-      locked: boolean;
-      pct: number;
-    }[];
-  }> {
-    const [rewardBox] = await this.listRewardBoxes(
-      { tier },
-      { take: 1 },
-      sharedContext,
-    );
-    if (!rewardBox) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_FOUND,
-        `No reward box configured for tier '${tier}'.`,
-      );
-    }
-    const prizeRows = await this.listRewardBoxPrizes(
-      { box_id: rewardBox.id },
-      { take: 1000 },
-      sharedContext,
-    );
-    return {
-      box: {
-        tier: rewardBox.tier,
-        name: rewardBox.name,
-        enabled: rewardBox.enabled,
-        draws_per_day: rewardBox.draws_per_day,
-      },
-      prizes: prizeRows.map((p) => ({
-        id: p.id,
-        kind: p.kind,
-        payload: p.payload,
-        locked: p.locked,
-        pct: p.weight / PCT_SCALE,
-      })),
-    };
-  }
-
-  // Atomic replace-all of one tier's box config + prize table (mirrors
-  // replaceRewardPool's delete-all/create-all + audit pattern). Called by
-  // saveDailyBoxWorkflow AFTER it has already validated the body and computed
-  // weights (pure logic stays outside the transaction).
-  @InjectTransactionManager()
-  async saveDailyBox(
-    input: {
-      tier: string;
-      body: DailyBoxBody;
-      weights: { weight: number; locked: boolean }[];
-      adminId: string;
-    },
-    @MedusaContext() sharedContext: Context = {},
-  ): Promise<{
-    tier: string;
-    prize_count: number;
-    enabled: boolean;
-    draws_per_day: number;
-  }> {
-    const [rewardBox] = await this.listRewardBoxes(
-      { tier: input.tier },
-      { take: 1 },
-      sharedContext,
-    );
-    if (!rewardBox) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_FOUND,
-        `No reward box configured for tier '${input.tier}'.`,
-      );
+    if (snapshot.type !== 'pack' || typeof snapshot.pack_id !== 'string') {
+      return { redeemed: false, reason: 'not_a_pack_reward' };
     }
 
-    const priorPrizes = await this.listRewardBoxPrizes(
-      { box_id: rewardBox.id },
-      { take: 1000 },
-      sharedContext,
-    );
-    const priorPrizeIds = priorPrizes.map((p) => p.id);
-    if (priorPrizeIds.length > 0) {
-      await this.deleteRewardBoxPrizes(priorPrizeIds, sharedContext);
+    const rolled = await input.rollPack(snapshot.pack_id);
+    try {
+      await input.decrementStock?.(rolled.handle, 1);
+    } catch {
+      // Fulfillment counter, never a gate — the take runs on the inventory
+      // module's own connection, so a throw here would roll back the pull the
+      // player just watched land. Drift is operator-visible in inventory.
     }
-    if (input.body.prizes.length > 0) {
-      await this.createRewardBoxPrizes(
-        input.body.prizes.map((p: BoxPrizeInput, i: number) => ({
-          box_id: rewardBox!.id,
-          kind: p.kind,
-          weight: input.weights[i].weight,
-          locked: input.weights[i].locked,
-          payload:
-            p.kind === 'product'
-              ? { product_handle: p.product_handle, qty: p.qty }
-              : p.kind === 'credit' || p.kind === 'voucher'
-                ? { amount_myr: p.amount_myr }
-                : {},
-        })),
-        sharedContext,
-      );
-    }
-
-    const before = {
-      name: rewardBox.name,
-      enabled: rewardBox.enabled,
-      draws_per_day: rewardBox.draws_per_day,
-      prize_count: priorPrizeIds.length,
-    };
-    await this.updateRewardBoxes(
-      {
-        selector: { id: rewardBox.id },
-        data: {
-          name: input.body.name,
-          enabled: input.body.enabled,
-          draws_per_day: input.body.draws_per_day,
-        },
-      },
-      sharedContext,
-    );
-
-    await this.createAdminActionAudits(
+    const [pull] = await this.createPulls(
       [
         {
-          admin_id: input.adminId,
-          entity_type: 'daily_box',
-          entity_id: rewardBox.id,
-          action: 'edit_daily_box',
-          before,
-          after: {
-            name: input.body.name,
-            enabled: input.body.enabled,
-            draws_per_day: input.body.draws_per_day,
-            prize_count: input.body.prizes.length,
-          },
-          reason: input.body.reason,
+          customer_id: input.customerId,
+          pack_id: snapshot.pack_id,
+          card_id: rolled.handle,
+          order_id: null,
+          rolled_at: new Date(),
+          source: 'reward' as const,
         },
       ],
       sharedContext,
     );
-
+    await this.updateTaskClaims(
+      { selector: { id: claim.id }, data: { claim_ref: pull.id } },
+      sharedContext,
+    );
     return {
-      tier: input.tier,
-      prize_count: input.body.prizes.length,
-      enabled: input.body.enabled,
-      draws_per_day: input.body.draws_per_day,
+      redeemed: true,
+      pullId: pull.id,
+      card: rolled,
+      packId: snapshot.pack_id,
     };
   }
 
@@ -6233,28 +7248,12 @@ class PacksModuleService extends MedusaService({
   // Audited whole-set replace of the VIP ladder. Diff-upsert keyed on `level`:
   // update survivors in place (ids + prizes preserved), create new rungs
   // (prizes null), HARD-delete removed rungs (a soft row keeps the unique
-  // `level` and would collide on recreate). box_tier existence is checked here
-  // (service-level DB lookup, not in the pure validator). One audit row.
+  // `level` and would collide on recreate). One audit row.
   @InjectTransactionManager()
   async saveVipLevels(
     input: { levels: VipLevelInput[]; adminId: string; reason: string },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<VipLevelInput[]> {
-    const boxes = await this.listRewardBoxes(
-      {},
-      { select: ['tier'], take: 1000 },
-      sharedContext,
-    );
-    const validTiers = new Set(boxes.map((b) => b.tier));
-    for (const lvl of input.levels) {
-      if (!validTiers.has(lvl.box_tier)) {
-        throw new MedusaError(
-          MedusaError.Types.INVALID_DATA,
-          `level ${lvl.level}: box_tier '${lvl.box_tier}' is not an existing reward box tier.`,
-        );
-      }
-    }
-
     const existing = await this.listVipLevels(
       {},
       {
@@ -6263,7 +7262,6 @@ class PacksModuleService extends MedusaService({
           'level',
           'spend_threshold',
           'voucher_amount',
-          'box_tier',
           'frame_unlock',
         ],
         take: 1000,
@@ -6278,7 +7276,6 @@ class PacksModuleService extends MedusaService({
         level: r.level,
         spend_threshold: Number(r.spend_threshold),
         voucher_amount: Number(r.voucher_amount),
-        box_tier: r.box_tier,
         frame_unlock: r.frame_unlock,
       }));
 
@@ -6287,7 +7284,6 @@ class PacksModuleService extends MedusaService({
       const data = {
         spend_threshold: lvl.spend_threshold,
         voucher_amount: lvl.voucher_amount,
-        box_tier: lvl.box_tier,
         frame_unlock: lvl.frame_unlock,
       };
       const row = byLevel.get(lvl.level);

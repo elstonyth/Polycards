@@ -12,7 +12,6 @@ import {
 import {
   useVipLevels,
   useSaveVipLevels,
-  useDailyBoxes,
 } from "../../lib/queries";
 import type { VipLevelDTO } from "../../lib/queries";
 import { LoadingSkeleton } from "../../components/LoadingSkeleton";
@@ -41,25 +40,21 @@ const rowFromDTO = (l: VipLevelDTO): Row => ({
   localId: `vl-${nextId++}`,
   thresholdInput: String(l.spend_threshold),
   voucherInput: String(l.voucher_amount),
-  boxTier: l.box_tier,
   frameUnlock: l.frame_unlock,
 });
-// Voucher and box tier are no longer edited on this tab (both surfaces are
-// suspended), but both are still LIVE server-side — voucher_amount mints a
-// voucher on level-up when > 0 (rewardsForLevel) and box_tier picks the daily
-// box and must name a real reward box tier. So they stay in the buffer and
-// round-trip untouched on save.
+// Voucher is not edited on this tab (its redeeming surface is suspended) but
+// is still LIVE server-side — voucher_amount mints a voucher on level-up when
+// > 0 (rewardsForLevel) — so it stays in the buffer and round-trips untouched
+// on save. It deliberately does NOT inherit from the rung above: 0 means
+// "grants nothing", the safe default for a credit-minting lever, and
+// inheriting would silently mint a payout on a rung nobody priced.
 //
-// A new rung INHERITS box tier from the rung above rather than resetting to the
-// first tier — with no editor, a silent reset would be unfixable here. Voucher
-// deliberately does NOT inherit: 0 means "grants nothing", the safe default for
-// a credit-minting lever. Inheriting would silently mint a payout on a rung
-// nobody priced.
-const blankRow = (inheritFrom: Row | undefined, fallbackTier: string): Row => ({
+// box_tier used to live here too, inherited rather than reset for the same
+// reason. The daily box was removed 2026-08-25 and the column with it.
+const blankRow = (): Row => ({
   localId: `vl-${nextId++}`,
   thresholdInput: "0",
   voucherInput: "0",
-  boxTier: inheritFrom?.boxTier ?? fallbackTier,
   frameUnlock: false,
 });
 
@@ -68,7 +63,6 @@ const snapshotOf = (rows: Row[]): string =>
     rows.map((r) => [
       r.thresholdInput,
       r.voucherInput,
-      r.boxTier,
       r.frameUnlock,
     ]),
   );
@@ -88,7 +82,6 @@ const levelInMessage = (message: string): number | null => {
 
 export const VipLevelsTab = () => {
   const { data, isError } = useVipLevels();
-  const { data: boxesData } = useDailyBoxes();
   const save = useSaveVipLevels();
 
   const [seededFrom, setSeededFrom] = useState<
@@ -124,7 +117,6 @@ export const VipLevelsTab = () => {
 
   // Only needed to seed the very first rung of an empty ladder — every other
   // rung inherits its tier from the one above.
-  const fallbackTier = boxesData?.boxes?.[0]?.tier ?? "a";
   const dirty = snapshotOf(rows) !== savedSnapshot;
   const errors = validateVipLevelsClient(rows);
   const reasonValid = reason.trim().length > 0;
@@ -161,7 +153,7 @@ export const VipLevelsTab = () => {
       // Inherit from the rung above; at index 0 there is none, so inherit from
       // the rung being displaced down — it is the ladder's current base and its
       // tier is the right one for the new base.
-      next.splice(index, 0, blankRow(prev[index - 1] ?? prev[index], fallbackTier));
+      next.splice(index, 0, blankRow());
       return next;
     });
   const removeAt = (index: number) =>
@@ -178,7 +170,7 @@ export const VipLevelsTab = () => {
     // Open the decade the new rung lands in, otherwise "Append level" looks
     // like it did nothing.
     setOpen(Math.floor(rows.length / DECADE), true);
-    setRows((prev) => [...prev, blankRow(prev[prev.length - 1], fallbackTier)]);
+    setRows((prev) => [...prev, blankRow()]);
   };
 
   async function onSave() {
@@ -189,7 +181,6 @@ export const VipLevelsTab = () => {
       level: i + 1,
       spend_threshold: Number(r.thresholdInput) || 0,
       voucher_amount: Number(r.voucherInput) || 0,
-      box_tier: r.boxTier,
       frame_unlock: r.frameUnlock,
     }));
     try {

@@ -40,7 +40,6 @@ import AdminActionAudit from '../models/admin-action-audit';
 import VipMemberState from '../models/vip-member-state';
 import VipRewardGrant from '../models/vip-reward-grant';
 import NotificationRead from '../models/notification-read';
-import RewardDraw from '../models/reward-draw';
 
 // Import route handlers under test (same pattern as C2)
 import { GET as vaultGET } from '../../../api/store/vault/route';
@@ -71,7 +70,6 @@ moduleIntegrationTestRunner<PacksModuleService>({
     VipMemberState,
     VipRewardGrant,
     NotificationRead,
-    RewardDraw,
   ],
   testSuite: ({ service }) => {
     const mkIds = (tag: string) => ({
@@ -122,6 +120,18 @@ moduleIntegrationTestRunner<PacksModuleService>({
           grade: '10',
           market_value: 20,
           image: 'card.png',
+        },
+        {
+          // The reward pull's card. Since the daily box was removed a reward
+          // pull always names a real Card, so the vault renders it on the card
+          // path — no Card row would mean the guard drops it.
+          handle: ids.prizeHandle,
+          name: 'C3 Prize Card',
+          set: 'Base',
+          grader: 'PSA',
+          grade: '9',
+          market_value: 35,
+          image: 'prize.png',
         },
       ]);
 
@@ -174,27 +184,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       ]);
       await service.updatePulls([{ id: rewardPull.id, status: 'vaulted' as const }]);
 
-      // Matching RewardDraw with vault_pull_id
-      const prizeSnapshot = {
-        product_handle: ids.prizeHandle,
-        title: 'C3 Prize',
-        image: 'https://cdn.example.com/c3-prize.png',
-      };
-      await service.createRewardDraws([
-        {
-          customer_id: ids.customer,
-          tier: 'c',
-          draw_day: today(),
-          draw_ordinal: 1,
-          prize_kind: 'product',
-          prize_snapshot: prizeSnapshot,
-          vault_pull_id: rewardPull.id,
-          credit_txn_id: null,
-          status: 'drawn',
-        },
-      ]);
-
-      return { normalPull, rewardPull, prizeSnapshot };
+      return { normalPull, rewardPull };
     };
 
     // Minimal mock req/res — same pattern as C2 vault test
@@ -236,7 +226,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
         // Normal card pull is present
         expect(items.some((i) => i.pull_id === normalPull.id)).toBe(true);
-        // Reward pull rendered from prize_snapshot (not dropped by card guard)
+        // Reward pull rendered from its Card row (not dropped by the guard)
         const rewardItem = items.find((i) => i.pull_id === rewardPull.id);
         expect(rewardItem).toBeDefined();
         expect(rewardItem!.source).toBe('reward');
