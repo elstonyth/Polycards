@@ -31,12 +31,7 @@ export default function CookieConsent() {
         <p className="text-sm text-neutral-300">
           We use cookies to keep you signed in and improve the experience. See
           our{' '}
-          <a
-            href="https://docs.polycards.com/user-agreements/privacy-policy"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline hover:text-white"
-          >
+          <a href="/privacy" className="underline hover:text-white">
             Privacy Policy
           </a>
           .

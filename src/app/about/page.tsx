@@ -246,7 +246,7 @@ export default function AboutPage() {
                 </p>
               </div>
               <a
-                href="mailto:hello@polycards.com"
+                href="mailto:support@polycards.gg"
                 className="flex min-h-11 w-fit items-center gap-1 text-[13px] font-semibold text-neutral-400 transition-colors hover:text-white"
               >
                 Talk to us
@@ -324,10 +324,10 @@ export default function AboutPage() {
                 around it, so colour alone can't distinguish it
                 (axe link-in-text-block). */}
             <a
-              href="mailto:hello@polycards.com"
+              href="mailto:support@polycards.gg"
               className="text-neutral-300 underline underline-offset-2"
             >
-              hello@polycards.com
+              support@polycards.gg
             </a>
           </p>
         </div>
