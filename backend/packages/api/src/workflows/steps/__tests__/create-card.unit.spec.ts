@@ -63,7 +63,7 @@ const buildContainer = (
     [ContainerRegistrationKeys.LOGGER]: { warn },
     [ContainerRegistrationKeys.QUERY]: {
       graph: jest.fn().mockResolvedValue({
-        data: [{ id: 'prod_1', seller: { id: 'sel_1' } }],
+        data: [{ id: 'prod_1', sellers: [{ id: 'sel_1' }] }],
       }),
     },
   };
@@ -172,7 +172,7 @@ describe('registerCardInvoke pixel-pokemon inheritance', () => {
         graph: jest
           .fn()
           .mockResolvedValue({
-            data: [{ id: 'prod_1', seller: { id: 'sel_1' } }],
+            data: [{ id: 'prod_1', sellers: [{ id: 'sel_1' }] }],
           }),
       },
     };

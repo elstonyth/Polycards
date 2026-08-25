@@ -8,7 +8,7 @@ import { Migration } from '@medusajs/framework/mikro-orm/migrations';
 // completes the SMS flow, which is the enforcement the operator asked for. A
 // backfill from customer.phone would silently trust numbers written before
 // PHONE_VERIFICATION_REQUIRED was flipped on — i.e. never proven.
-export class Migration20260804000000 extends Migration {
+export class Migration20260804000010 extends Migration {
   override async up(): Promise<void> {
     this.addSql(
       `alter table if exists "customer_account_state" add column if not exists "phone_verified_at" timestamptz null;`,
