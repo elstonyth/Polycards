@@ -226,9 +226,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
           FREE_PULL_LOCKED_MESSAGE,
         );
         expect((await pullById(freeId)).status).toBe('vaulted');
-        expect(await service.listCreditTransactions({ pull_id: freeId })).toEqual(
-          [],
-        );
+        expect(
+          await service.listCreditTransactions({ pull_id: freeId }),
+        ).toEqual([]);
       });
 
       it('sells the same free pull once a paid open exists', async () => {
@@ -308,6 +308,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
       it('ships the same free pull once a paid open exists', async () => {
         const freeId = await seedPull('free');
         await seedPull('pack');
+        // Delivery charges the RM15 West shipping fee from the wallet since
+        // 2026-08-25 (card-1 is RM96 — under the RM200 protection threshold,
+        // so no insurance) — fund the fee or the request refuses on balance.
+        await service.mutateCreditAtomic({
+          customerId,
+          amount: 20,
+          reason: 'topup',
+        });
 
         const { result } = await deliver([freeId]);
 

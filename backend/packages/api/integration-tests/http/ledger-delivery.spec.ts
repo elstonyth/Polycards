@@ -15,9 +15,11 @@ jest.setTimeout(240 * 1000);
 // (service.ts), and transitionPullStatus already flips vaulted -> delivering
 // at order CREATE (not at any later admin ship/deliver advance) — so the
 // ledger row fires there too, or it would misstate liability for the whole
-// requested/processed/ready_to_ship/shipped window. wallet_delta stays 0
-// throughout: no cash moves for a physical shipment. Canceling reverses it
-// with a second row keyed `cancel:<order_id>`; ONE hook in
+// requested/processed/ready_to_ship/shipped window. Since 2026-08-25 the OD
+// create row ALSO carries the shipping-fee wallet charge (West RM15 here;
+// insurance 5% of value only above RM200) in wallet_delta, matched by a
+// delivery_fee credit_transaction; the cancel row reverses both. Canceling
+// reverses with a second row keyed `cancel:<order_id>`; ONE hook in
 // transitionDeliveryOrderStatus covers both the customer cancel route and the
 // admin bulk "mark as canceled" tool. Delivery-order behavior itself (status
 // pipeline, address edit lock, admin listing) is delivery-orders.spec.ts's
@@ -174,9 +176,10 @@ medusaIntegrationTestRunner({
             first_name: 'Ada',
             last_name: 'Lovelace',
             address_1: '1 Analytical Way',
-            city: 'London',
-            postal_code: 'EC1',
-            country_code: 'gb',
+            // MY-only shipping since the fee landed; 50000 = KL = West RM15.
+            city: 'Kuala Lumpur',
+            postal_code: '50000',
+            country_code: 'my',
           },
           { headers: authed(token) },
         );
@@ -184,7 +187,7 @@ medusaIntegrationTestRunner({
         return list[list.length - 1].id as string;
       };
 
-      it('a delivery request writes ONE OD row: wallet 0, vault negative', async () => {
+      it('a delivery request writes ONE OD row: wallet carries the fee, vault negative', async () => {
         const { token, id } = await registerCustomer('ledger-test-10@test.dev');
         const pullId = await openOne(token);
         const addressId = await addAddress(token);
@@ -197,7 +200,9 @@ medusaIntegrationTestRunner({
 
         const rows = await ledgerEntryRowsFor(id, 'OD');
         expect(rows).toHaveLength(1);
-        expect(Number(rows[0].wallet_delta)).toBe(0);
+        // West shipping RM15; VALUE_PER_PULL (120) is under the RM200
+        // protection threshold, so no insurance component.
+        expect(Number(rows[0].wallet_delta)).toBe(-15);
         expect(Number(rows[0].vault_delta)).toBeLessThan(0);
       });
 
@@ -221,6 +226,9 @@ medusaIntegrationTestRunner({
         const rows = await ledgerEntryRowsFor(id, 'OD');
         expect(rows).toHaveLength(1);
         expect(Number(rows[0].vault_delta)).toBe(-2 * VALUE_PER_PULL);
+        // 240 exceeds the RM200 protection threshold → mandatory insurance
+        // 5% x 240 = 12, on top of the West RM15: wallet_delta = -27.
+        expect(Number(rows[0].wallet_delta)).toBe(-27);
         expect(rows[0].payload).toMatchObject({
           type: 'OD',
           handles: [{ card_handle: CARD_HANDLE, qty: 2 }],
@@ -251,6 +259,12 @@ medusaIntegrationTestRunner({
         expect(create).toBeDefined();
         expect(cancel).toBeDefined();
         expect(Number(cancel!.vault_delta)).toBe(-Number(create!.vault_delta)); // exact reversal
+        // The fee refund mirrors it on the wallet axis: -15 at create, +15 on
+        // cancel — the pair nets to zero like the vault side.
+        expect(Number(cancel!.wallet_delta)).toBe(
+          -Number(create!.wallet_delta),
+        );
+        expect(Number(create!.wallet_delta)).toBe(-15);
         expect(cancel!.ref_id).toBe(`cancel:${orderId}`);
       });
 
