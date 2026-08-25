@@ -23,7 +23,9 @@ import PacksModuleService from '../service';
  *     after another run's terminal write.
  */
 
-type OrderRow = { id: string; status: string; customer_id?: string; is_reward?: boolean } | undefined;
+type OrderRow =
+  | { id: string; status: string; customer_id?: string; is_reward?: boolean }
+  | undefined;
 
 // hasDebit models whether the CREATE-time OD debit row exists for this order.
 // The cancel-side credit is gated on that row's EXISTENCE (never on a field of
@@ -34,22 +36,39 @@ type OrderRow = { id: string; status: string; customer_id?: string; is_reward?: 
 // that stored amount; a row without the column would make the reversal read
 // undefined and every assertion here pass on a -0 write.
 const DEBIT_VAULT_DELTA = -141.55;
+// The CREATE-time wallet charge (shipping + insurance, 2026-08-25). The cancel
+// arm refunds its NEGATION via mutateCreditAtomic — like the vault reversal,
+// never recomputed.
+const DEBIT_WALLET_DELTA = -15;
 
 const fakeService = (order: OrderRow, hasDebit = true) => {
   const svc = Object.create(PacksModuleService.prototype) as PacksModuleService;
   const ops: string[] = [];
   const em = {
-    execute: jest.fn(async (q: string, _params?: unknown[]) => {
-      ops.push('sql');
-      if (q.includes('ledger_entry')) {
-        // numeric comes back from pg as a STRING — mirror that, so the
-        // Number() coercion in the reversal is exercised, not bypassed.
-        return hasDebit
-          ? [{ id: 'led_od_debit', vault_delta: String(DEBIT_VAULT_DELTA) }]
-          : [];
-      }
-      return [];
-    }),
+    // Wide row type so per-test mockImplementations can model degenerate rows
+    // (missing/NULL wallet_delta on pre-fee entries, corrupted values).
+    execute: jest.fn(
+      async (
+        q: string,
+        _params?: unknown[],
+      ): Promise<Record<string, unknown>[]> => {
+        ops.push('sql');
+        if (q.includes('ledger_entry')) {
+          // numeric comes back from pg as a STRING — mirror that, so the
+          // Number() coercion in the reversal is exercised, not bypassed.
+          return hasDebit
+            ? [
+                {
+                  id: 'led_od_debit',
+                  vault_delta: String(DEBIT_VAULT_DELTA),
+                  wallet_delta: String(DEBIT_WALLET_DELTA),
+                },
+              ]
+            : [];
+        }
+        return [];
+      },
+    ),
   };
   const listDeliveryOrders = jest.fn(async () => {
     ops.push('read');
@@ -75,12 +94,24 @@ const fakeService = (order: OrderRow, hasDebit = true) => {
     ops.push('ledger');
     return { id: 'led_1', display_id: 'OD26Q3A0001', replayed: false };
   });
+  // The fee refund writer. Fake answers only what the cancel arm reads.
+  const mutateCreditAtomic = jest.fn(async () => {
+    ops.push('refund');
+    return {
+      id: 'ct_1',
+      balance: 0,
+      amount: -DEBIT_WALLET_DELTA,
+      replayed: false,
+      reference: null,
+    };
+  });
   Object.assign(svc, {
     listDeliveryOrders,
     updateDeliveryOrders,
     transitionPullStatus,
     listPulls,
     recordLedgerEntry,
+    mutateCreditAtomic,
   });
   const ctx = { transactionManager: em } as never;
   return {
@@ -93,6 +124,7 @@ const fakeService = (order: OrderRow, hasDebit = true) => {
     transitionPullStatus,
     listPulls,
     recordLedgerEntry,
+    mutateCreditAtomic,
   };
 };
 
@@ -157,6 +189,65 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
       expect.objectContaining({
         type: 'OD',
         refId: 'cancel:do_1',
+        walletDelta: -DEBIT_WALLET_DELTA,
+        vaultDelta: -DEBIT_VAULT_DELTA,
+      }),
+      f.ctx,
+    );
+    // …and the fee comes back to the wallet: the NEGATED STORED wallet_delta,
+    // through the same locked credit writer every money mutation uses.
+    expect(f.mutateCreditAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: -DEBIT_WALLET_DELTA,
+        reason: 'delivery_fee',
+        reference: 'refund:do_1',
+      }),
+      f.ctx,
+    );
+  });
+
+  it('fails closed on a corrupt POSITIVE stored wallet_delta (no partial reversal)', async () => {
+    // The create arm only ever writes 0 or a negative charge; a positive value
+    // is corruption, and skipping it silently would emit the reversal ledger
+    // row with no matching credit_transaction (ledger↔credit mirror break).
+    const f = fakeService({ id: 'do_1', status: 'requested' });
+    f.em.execute.mockImplementation(async (q: string) =>
+      q.includes('ledger_entry')
+        ? [
+            {
+              id: 'led_od_debit',
+              vault_delta: String(DEBIT_VAULT_DELTA),
+              wallet_delta: '15',
+            },
+          ]
+        : [],
+    );
+    await expect(
+      f.svc.transitionDeliveryOrderStatus(cancelInput, f.ctx),
+    ).rejects.toMatchObject({ type: MedusaError.Types.UNEXPECTED_STATE });
+    expect(f.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(f.recordLedgerEntry).not.toHaveBeenCalled();
+  });
+
+  it('skips the wallet refund (but not the vault reversal) on a pre-fee debit row', async () => {
+    const f = fakeService({ id: 'do_1', status: 'requested' });
+    f.em.execute.mockImplementation(async (q: string) => {
+      if (q.includes('ledger_entry')) {
+        // Pre-fee CREATE row: wallet_delta 0 (or NULL in even older rows).
+        return [
+          {
+            id: 'led_od_debit',
+            vault_delta: String(DEBIT_VAULT_DELTA),
+            wallet_delta: null,
+          },
+        ];
+      }
+      return [];
+    });
+    await f.svc.transitionDeliveryOrderStatus(cancelInput, f.ctx);
+    expect(f.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(f.recordLedgerEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
         walletDelta: 0,
         vaultDelta: -DEBIT_VAULT_DELTA,
       }),

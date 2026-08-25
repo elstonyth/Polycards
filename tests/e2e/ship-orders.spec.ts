@@ -23,6 +23,7 @@ import {
   requestDelivery,
   adminToken,
   adminGetDeliveryOrder,
+  topup,
 } from './helpers/api';
 import { fundFor, primaryPack } from './helpers/catalog';
 import { ensureAdmin } from './helpers/admin';
@@ -68,6 +69,10 @@ test.describe('admin ship-orders workflow', () => {
       cust.token,
       `${stamp()} Pallet Town Rd`,
     );
+    // Delivery now charges West RM15 + mandatory 5% insurance when the card is
+    // worth over RM200 — fundFor's leftover doesn't cover it. RM600 clears the
+    // fee for any card the catalog's primary pack can pull (up to ~RM11k value).
+    await topup(cust.token, 600);
     const orderId = await requestDelivery(cust.token, [pullId], addressId);
 
     const tok = await adminToken();

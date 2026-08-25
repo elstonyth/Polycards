@@ -66,6 +66,14 @@ medusaIntegrationTestRunner({
             rarity: 'Rare' as const,
           },
         ]);
+        // Pin FX so the fee math is deterministic: order value =
+        // FMV 25 × 4 × 1.2 (DEFAULT_MARKET_MULTIPLIER) = RM120 → under the
+        // RM200 protection threshold, no insurance. Seeded in beforeEach so
+        // the FIRST resolveFxRate call in this file primes its module cache
+        // from this row, never from the 4.7 display fallback.
+        await packs.createFxRates([
+          { pair: 'USD_MYR', rate: 4, source: 'test', manual_override: false },
+        ]);
       });
 
       const authed = (token: string) => ({
@@ -125,17 +133,23 @@ medusaIntegrationTestRunner({
         return open.data.pull.id as string;
       };
 
-      // Add a Medusa customer address; returns its id.
-      const addAddress = async (token: string): Promise<string> => {
+      // Add a Medusa customer address; returns its id. Malaysian by default —
+      // shipping is MY-only since the 2026-08-25 fee (postal 50000 = KL =
+      // West zone, RM15). Overrides let the fee tests pick a zone/country.
+      const addAddress = async (
+        token: string,
+        overrides: { postal_code?: string; country_code?: string } = {},
+      ): Promise<string> => {
         const res = await api.post(
           '/store/customers/me/addresses',
           {
             first_name: 'Ada',
             last_name: 'Lovelace',
             address_1: '1 Analytical Way',
-            city: 'London',
-            postal_code: 'EC1',
-            country_code: 'gb',
+            city: 'Kuala Lumpur',
+            postal_code: '50000',
+            country_code: 'my',
+            ...overrides,
           },
           { headers: authed(token) },
         );
@@ -488,6 +502,168 @@ medusaIntegrationTestRunner({
           { address_id: addressId },
         );
         expect(edit.status).toBe(400);
+      });
+
+      // ---- Shipping fee (2026-08-25): West RM15 / East RM35 by postcode,
+      // mandatory 5% insurance above RM200, wallet-debited, refunded on cancel.
+
+      it('charges the West fee from the wallet, stamps it on the order, and refunds it on cancel', async () => {
+        const token = await registerCustomer('del-fee-w@test.dev');
+        const pullId = await openOne(token, 'delivery-fee-topup-w');
+        const addressId = await addAddress(token); // 50000 = West
+        const created = await reqApi(
+          'post',
+          '/store/delivery-orders',
+          authed(token),
+          { pull_ids: [pullId], address_id: addressId },
+        );
+        expect(created.status).toBe(201);
+        const orderId = created.data.order_id;
+
+        // Fee stamped on the order and exposed to the customer list.
+        const list = await reqApi('get', '/store/delivery-orders', authed(token));
+        expect(list.data.items[0]).toMatchObject({
+          id: orderId,
+          shipping_fee: 15,
+          insurance_fee: 0,
+        });
+
+        // Wallet debited: topup 25 − open 5 − fee 15 = 5.
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const [order] = await packs.listDeliveryOrders(
+          { id: orderId },
+          { take: 1 },
+        );
+        expect(await packs.creditBalance(order.customer_id)).toBe(5);
+
+        // Customer cancel → fee refunded in full, cards re-vaulted.
+        const cancel = await reqApi(
+          'post',
+          `/store/delivery-orders/${orderId}/cancel`,
+          authed(token),
+        );
+        expect(cancel.status).toBe(200);
+        expect(await packs.creditBalance(order.customer_id)).toBe(20);
+        const [pull] = await packs.listPulls({ id: pullId }, { take: 1 });
+        expect(pull.status).toBe('vaulted');
+      });
+
+      it('refuses the request when the balance cannot cover the East fee, leaving the pull vaulted', async () => {
+        const token = await registerCustomer('del-fee-e@test.dev');
+        const pullId = await openOne(token, 'delivery-fee-topup-e');
+        // Kota Kinabalu 88000 = East zone → RM35 > the RM20 balance.
+        const addressId = await addAddress(token, { postal_code: '88000' });
+        const refused = await reqApi(
+          'post',
+          '/store/delivery-orders',
+          authed(token),
+          { pull_ids: [pullId], address_id: addressId },
+        );
+        expect(refused.status).toBe(400);
+        expect(JSON.stringify(refused.data)).toMatch(/balance/i);
+
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        // The whole transaction rolled back: no order, pull still vaulted,
+        // balance untouched.
+        const [pull] = await packs.listPulls({ id: pullId }, { take: 1 });
+        expect(pull.status).toBe('vaulted');
+        const orders = await packs.listDeliveryOrders(
+          { customer_id: pull.customer_id },
+          { take: 10 },
+        );
+        expect(orders).toHaveLength(0);
+        expect(await packs.creditBalance(pull.customer_id)).toBe(20);
+      });
+
+      it('adds mandatory 5% insurance when the order value exceeds RM200', async () => {
+        const token = await registerCustomer('del-fee-i@test.dev');
+        const pullId = await openOne(token, 'delivery-fee-topup-i');
+        // Re-price the card ABOVE the protection threshold after the open:
+        // FMV 50 × 4 × 1.2 = RM240 → insurance 5% = RM12; West shipping 15.
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.updateCards({
+          selector: { handle: CARD_HANDLE },
+          data: { market_value: 50 },
+        });
+        // Second top-up: 20 on hand < the RM27 fee, so fund the wallet first.
+        await api.post(
+          '/store/credits/topup',
+          { amount: TOPUP },
+          {
+            headers: {
+              ...authed(token),
+              'idempotency-key': 'delivery-fee-topup-i2', // gitleaks:allow — test dedupe tag, not a key
+            },
+          },
+        );
+        const addressId = await addAddress(token);
+        const created = await reqApi(
+          'post',
+          '/store/delivery-orders',
+          authed(token),
+          { pull_ids: [pullId], address_id: addressId },
+        );
+        expect(created.status).toBe(201);
+        const list = await reqApi('get', '/store/delivery-orders', authed(token));
+        expect(list.data.items[0]).toMatchObject({
+          shipping_fee: 15,
+          insurance_fee: 12,
+        });
+        const [order] = await packs.listDeliveryOrders(
+          { id: created.data.order_id },
+          { take: 1 },
+        );
+        // topup 25 − open 5 + topup 25 − (15 + 12) = 18.
+        expect(await packs.creditBalance(order.customer_id)).toBe(18);
+      });
+
+      it('refuses a non-Malaysian address and a zone-changing address edit', async () => {
+        const token = await registerCustomer('del-fee-my@test.dev');
+        const pullId = await openOne(token, 'delivery-fee-topup-my');
+        const gbAddress = await addAddress(token, {
+          postal_code: 'EC1',
+          country_code: 'gb',
+        });
+        const refused = await reqApi(
+          'post',
+          '/store/delivery-orders',
+          authed(token),
+          { pull_ids: [pullId], address_id: gbAddress },
+        );
+        expect(refused.status).toBe(400);
+        expect(JSON.stringify(refused.data)).toMatch(/within Malaysia only/);
+
+        // Request with a West address, then try to re-point at an East one —
+        // the fee zone would change, so the edit is refused; a same-zone edit
+        // passes.
+        const westA = await addAddress(token);
+        const created = await reqApi(
+          'post',
+          '/store/delivery-orders',
+          authed(token),
+          { pull_ids: [pullId], address_id: westA },
+        );
+        expect(created.status).toBe(201);
+        const orderId = created.data.order_id;
+
+        const eastAddr = await addAddress(token, { postal_code: '93000' });
+        const zoneEdit = await reqApi(
+          'post',
+          `/store/delivery-orders/${orderId}/address`,
+          authed(token),
+          { address_id: eastAddr },
+        );
+        expect(zoneEdit.status).toBe(400);
+        expect(JSON.stringify(zoneEdit.data)).toMatch(/zone/);
+
+        const westB = await addAddress(token, { postal_code: '40000' });
+        const sameZone = await reqApi(
+          'post',
+          `/store/delivery-orders/${orderId}/address`,
+          authed(token),
+          { address_id: westB },
+        );
+        expect(sameZone.status).toBe(200);
       });
     });
   },

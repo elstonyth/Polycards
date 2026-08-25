@@ -13,6 +13,13 @@ import { addressViewFromInput } from '@/lib/address-view';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { Pill } from '@/components/ui/pill';
 import { INPUT_CLASS } from '@/components/account/ui';
+import {
+  computeDeliveryFee,
+  deliveryZone,
+  isShippablePostcode,
+  PROTECTION_INCLUDED_MYR,
+} from '@/lib/delivery-fee';
+import { rm } from '@/lib/format';
 import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 
@@ -57,6 +64,33 @@ export default function RequestDeliveryModal({
   });
   const panelRef = useRef<HTMLDivElement>(null);
   useModalA11y(panelRef, open, onClose);
+
+  // Fee preview — mirrors the backend's authoritative charge (delivery-fee.ts).
+  // Recomputed per render from the selected address; cheap (two lookups).
+  const selectedAddress = addrList.find((a) => a.id === selectedAddr);
+  // Rounded to cents like the backend's vaultValueForPulls sum, so a float
+  // artifact can't show an insurance line at exactly RM200 that the
+  // authoritative charge never applies.
+  const orderValue =
+    Math.round(items.reduce((s, i) => s + i.card.marketPriceMyr, 0) * 100) /
+    100;
+  const fee = selectedAddress
+    ? computeDeliveryFee(
+        selectedAddress.postalCode,
+        orderValue,
+        selectedAddress.province,
+        selectedAddress.city,
+      )
+    : null;
+  const nonMalaysian =
+    !!selectedAddress &&
+    selectedAddress.countryCode.trim().toUpperCase() !== 'MY';
+  // The backend refuses a postcode it can't zone, so say so here rather than
+  // previewing a West rate the request would reject.
+  const badPostcode =
+    !!selectedAddress &&
+    !nonMalaysian &&
+    !isShippablePostcode(selectedAddress.postalCode);
 
   // Liquid-glass rim on the panel (frosted fallback on Safari/Firefox).
   useLiquidGlass(panelRef, open, GLASS_SUBTLE);
@@ -150,7 +184,7 @@ export default function RequestDeliveryModal({
         </h2>
         <p className="mt-1 text-[13px] text-white/55">
           Ship {items.length} card{items.length === 1 ? '' : 's'} to your
-          address. No charge in this beta.
+          address. The shipping fee is deducted from your credit balance.
         </p>
 
         {/* Selected cards */}
@@ -307,6 +341,54 @@ export default function RequestDeliveryModal({
           </div>
         )}
 
+        {/* Fee preview — the backend recomputes and charges authoritatively;
+            this mirrors it so the RM total is never a surprise. Hidden while
+            the add-address form is open (no priced address selected yet). */}
+        {!adding && fee && !nonMalaysian && !badPostcode && (
+          <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-3 text-[13px]">
+            <div className="flex justify-between text-white/70">
+              <span>
+                Shipping (
+                {deliveryZone(
+                  selectedAddress?.postalCode ?? '',
+                  selectedAddress?.province,
+                  selectedAddress?.city,
+                ) === 'east'
+                  ? 'East'
+                  : 'West'}{' '}
+                Malaysia)
+              </span>
+              <span>{rm(fee.shipping)}</span>
+            </div>
+            {fee.insurance > 0 ? (
+              <div className="mt-1 flex justify-between text-white/70">
+                <span>Insurance (5% of card value)</span>
+                <span>{rm(fee.insurance)}</span>
+              </div>
+            ) : (
+              <p className="mt-1 text-[12px] text-white/45">
+                Shipment protection up to {rm(PROTECTION_INCLUDED_MYR)}{' '}
+                included.
+              </p>
+            )}
+            <div className="mt-2 flex justify-between border-t border-white/10 pt-2 font-semibold text-white">
+              <span>Total — deducted from balance</span>
+              <span>{rm(fee.total)}</span>
+            </div>
+          </div>
+        )}
+        {!adding && nonMalaysian && (
+          <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
+            We currently ship within Malaysia only — choose a Malaysian address.
+          </p>
+        )}
+        {!adding && badPostcode && (
+          <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
+            That address needs a valid 5-digit Malaysian postcode before it can
+            be shipped.
+          </p>
+        )}
+
         {/* The remedy sits INSIDE role="alert" so problem and way out are one
             announcement. PhoneGateAction dismisses the modal on the way out —
             a bare link would leave it overlaying /settings. */}
@@ -328,7 +410,12 @@ export default function RequestDeliveryModal({
           >
             Cancel
           </button>
-          <Pill disabled={busy || adding || !selectedAddr} onClick={submit}>
+          <Pill
+            disabled={
+              busy || adding || !selectedAddr || nonMalaysian || badPostcode
+            }
+            onClick={submit}
+          >
             {busy ? 'Requesting…' : 'Request delivery'}
           </Pill>
         </div>

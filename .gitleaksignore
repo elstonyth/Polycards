@@ -24,3 +24,10 @@
 # redacted to a placeholder, so squash-merged master never contains the key;
 # this fingerprint waives the already-pushed branch commit in history.
 b7623b23350b471dfa7db8769af0d8128abfd613:docs/superpowers/plans/2026-08-15-public-free-pack-badge.md:curl-auth-header:690
+
+# Integration-test Idempotency-Key literal ('delivery-fee-topup-i2') on the
+# topup helper call — a per-test dedupe tag, not a credential. Same waiver
+# shape as the entries above: inline `// gitleaks:allow` carries forward
+# across squash re-authoring, this fingerprint waives the already-pushed
+# branch commit in history.
+a7cdf2332bc83510f88d95f57623032857a2c7bc:backend/packages/api/integration-tests/http/delivery-orders.spec.ts:generic-api-key:595

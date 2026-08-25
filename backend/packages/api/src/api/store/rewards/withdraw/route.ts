@@ -6,6 +6,10 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { rewardsRedemptionEnabled } from '../../../../modules/packs/rewards-gate';
+import {
+  isMalaysianAddress,
+  MY_ONLY_MESSAGE,
+} from '../../../../modules/packs/delivery';
 
 // POST /store/rewards/withdraw — ship a vaulted reward-prize Pull as a physical
 // delivery. Body: { pull_id, address: { firstName, lastName, address1, city,
@@ -78,14 +82,18 @@ export async function POST(
     country_code: addr?.countryCode,
   };
   if (
-    Object.values(fields).some(
-      (v) => typeof v !== 'string' || v.trim() === '',
-    )
+    Object.values(fields).some((v) => typeof v !== 'string' || v.trim() === '')
   ) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
       '`address` requires firstName, lastName, address1, city, postalCode, and countryCode.',
     );
+  }
+  // MY-only shipping (2026-08-25) — same rule as the paid delivery flow.
+  // Reward prizes stay fee-exempt, but the geographic gate is a shipping rule,
+  // not a fee rule, so this path carries it too.
+  if (!isMalaysianAddress(fields.country_code as string)) {
+    throw new MedusaError(MedusaError.Types.INVALID_DATA, MY_ONLY_MESSAGE);
   }
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);

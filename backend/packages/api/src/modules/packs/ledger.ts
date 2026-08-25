@@ -29,10 +29,14 @@ export type LedgerPayload =
       price: number;
       rate: number;
     }
+  // shipping_fee/insurance_fee: the wallet charge breakdown (2026-08-25) —
+  // absent on pre-fee rows and on the cancel reversal row.
   | {
       type: 'OD';
       handles: { card_handle: string; qty: number }[];
       status: string;
+      shipping_fee?: number;
+      insurance_fee?: number;
     }
   | {
       type: 'AD';

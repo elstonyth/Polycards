@@ -1,12 +1,12 @@
-import type { HttpTypes } from "@medusajs/types";
+import type { HttpTypes } from '@medusajs/types';
 
 export const DELIVERY_STATUSES = [
-  "requested",
-  "processed",
-  "ready_to_ship",
-  "shipped",
-  "completed",
-  "canceled",
+  'requested',
+  'processed',
+  'ready_to_ship',
+  'shipped',
+  'completed',
+  'canceled',
 ] as const;
 export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
 
@@ -27,17 +27,17 @@ export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
 // two extra keys die with the CONTRACT migration named in
 // Migration20260727000000 — the canonical map outlives them.
 const CANONICAL_CUSTOMER_WORD: Record<DeliveryStatus, string> = {
-  requested: "requested",
-  processed: "processed",
-  ready_to_ship: "ready to ship",
-  shipped: "shipped",
-  completed: "delivered",
-  canceled: "canceled",
+  requested: 'requested',
+  processed: 'processed',
+  ready_to_ship: 'ready to ship',
+  shipped: 'shipped',
+  completed: 'delivered',
+  canceled: 'canceled',
 };
 export const CUSTOMER_STATUS_WORD: Record<string, string> = {
   ...CANONICAL_CUSTOMER_WORD,
-  packing: "processed",
-  delivered: "delivered",
+  packing: 'processed',
+  delivered: 'delivered',
 };
 
 type PullLike = {
@@ -48,17 +48,17 @@ type PullLike = {
 };
 
 export type DeliveryRequestVerdict =
-  | "ok"
-  | "empty"
-  | "duplicate"
-  | "not_found"
-  | "forbidden"
-  | "already_delivering" // e.g. double-submit — pull is in a pending delivery
-  | "already_delivered"
-  | "bought_back"
-  | "not_vaulted" // fallback for any other non-vaulted status
-  | "reward_source"
-  | "free_locked";
+  | 'ok'
+  | 'empty'
+  | 'duplicate'
+  | 'not_found'
+  | 'forbidden'
+  | 'already_delivering' // e.g. double-submit — pull is in a pending delivery
+  | 'already_delivered'
+  | 'bought_back'
+  | 'not_vaulted' // fallback for any other non-vaulted status
+  | 'reward_source'
+  | 'free_locked';
 
 // Pure validation for a batch delivery request. `fetchedPulls` is whatever the
 // DB returned for `requestedIds`; ownership failure and unknown id BOTH map to
@@ -74,35 +74,38 @@ export function validateDeliveryRequest(
   callerId: string,
   freeUnlocked: boolean,
 ): DeliveryRequestVerdict {
-  if (requestedIds.length === 0) return "empty";
-  if (new Set(requestedIds).size !== requestedIds.length) return "duplicate";
+  if (requestedIds.length === 0) return 'empty';
+  if (new Set(requestedIds).size !== requestedIds.length) return 'duplicate';
 
   const byId = new Map(fetchedPulls.map((p) => [p.id, p]));
   for (const id of requestedIds) {
     const pull = byId.get(id);
-    if (!pull) return "not_found";
-    if (pull.customer_id !== callerId) return "forbidden";
-    if (pull.status !== "vaulted") {
+    if (!pull) return 'not_found';
+    if (pull.customer_id !== callerId) return 'forbidden';
+    if (pull.status !== 'vaulted') {
       // Name the actual blocker (sim P3 #9: a double-submit read as "cards
       // vanished"). Safe to reveal — ownership was already verified above.
-      if (pull.status === "delivering") return "already_delivering";
-      if (pull.status === "delivered") return "already_delivered";
-      if (pull.status === "bought_back") return "bought_back";
-      return "not_vaulted";
+      if (pull.status === 'delivering') return 'already_delivering';
+      if (pull.status === 'delivered') return 'already_delivered';
+      if (pull.status === 'bought_back') return 'bought_back';
+      return 'not_vaulted';
     }
     // Reward prizes ship ONLY via recordRewardWithdrawal (daily cap +
     // is_reward stamping) — never via the generic delivery path. This is a
     // ROUTING verdict, not a refusal: the vault sends these pulls to the
     // reward path rather than showing the customer a wall.
-    if (pull.source === "reward") return "reward_source";
+    if (pull.source === 'reward') return 'reward_source';
     // The free welcome pull ships only after the customer's first PAID open —
     // same lock the buyback step applies (modules/packs/free-pack.ts).
-    if (pull.source === "free" && !freeUnlocked) return "free_locked";
+    if (pull.source === 'free' && !freeUnlocked) return 'free_locked';
   }
-  return "ok";
+  return 'ok';
 }
 
-export type TransitionVerdict = "ok" | "invalid_transition" | "tracking_required";
+export type TransitionVerdict =
+  | 'ok'
+  | 'invalid_transition'
+  | 'tracking_required';
 
 // Allowed admin transitions. Cancel is only legal before the parcel ships
 // (a shipped parcel can't revert to the vault). completed/canceled are terminal.
@@ -119,10 +122,10 @@ export type TransitionVerdict = "ok" | "invalid_transition" | "tracking_required
 // pulls stuck in 'delivering'. Delete the overlay's two keys in the same release
 // as the CONTRACT migration named in Migration20260727000000.
 const CANONICAL_ALLOWED: Record<DeliveryStatus, DeliveryStatus[]> = {
-  requested: ["processed", "canceled"],
-  processed: ["ready_to_ship", "canceled"],
-  ready_to_ship: ["shipped", "canceled"],
-  shipped: ["completed"],
+  requested: ['processed', 'canceled'],
+  processed: ['ready_to_ship', 'canceled'],
+  ready_to_ship: ['shipped', 'canceled'],
+  shipped: ['completed'],
   completed: [],
   canceled: [],
 };
@@ -132,7 +135,7 @@ const ALLOWED: Record<string, DeliveryStatus[]> = {
   // lands the row in the new pipeline (or cancels it — the pull restore in
   // transitionDeliveryOrderStatus is keyed on `to`, so delivering → vaulted
   // still runs). 'delivered' is what 'completed' is now: terminal.
-  packing: ["processed", "canceled"],
+  packing: ['processed', 'canceled'],
   delivered: [],
 };
 
@@ -144,9 +147,98 @@ export function validateDeliveryStatusTransition(
   to: DeliveryStatus,
   hasTracking: boolean,
 ): TransitionVerdict {
-  if (!ALLOWED[from]?.includes(to)) return "invalid_transition";
-  if (to === "shipped" && !hasTracking) return "tracking_required";
-  return "ok";
+  if (!ALLOWED[from]?.includes(to)) return 'invalid_transition';
+  if (to === 'shipped' && !hasTracking) return 'tracking_required';
+  return 'ok';
+}
+
+// --- Shipping fee (2026-08-25 operator spec) -------------------------------
+// West Malaysia RM15, East Malaysia RM35. Shipment protection is included up
+// to RM200 of order card value; above that, 5% insurance on the FULL order
+// value is MANDATORY (operator decision 2026-08-25 — the English brief said
+// "required", the optional reading was rejected). MY-only: the request step
+// refuses non-MY country codes, so a fee is always computable.
+export const WEST_SHIPPING_MYR = 15;
+export const EAST_SHIPPING_MYR = 35;
+export const PROTECTION_INCLUDED_MYR = 200;
+export const INSURANCE_RATE = 0.05;
+
+export type DeliveryFee = {
+  shipping: number;
+  /** 0 when the order value is at or under PROTECTION_INCLUDED_MYR. */
+  insurance: number;
+  total: number;
+};
+
+// ONE copy of the MY-only rule for both write paths (request step + address
+// edit route) so the guard and its customer copy can't drift.
+export const MY_ONLY_MESSAGE = 'We currently ship within Malaysia only.';
+export function isMalaysianAddress(countryCode: string): boolean {
+  return countryCode.trim().toUpperCase() === 'MY';
+}
+
+// East Malaysia = Labuan 87xxx, Sabah 88xxx–91xxx, Sarawak 93xxx–98xxx — one
+// contiguous numeric range (92xxx is unassigned in Malaysia's plan).
+export function isEastMalaysiaPostcode(postalCode: string): boolean {
+  const digits = postalCode.trim();
+  if (!/^\d{5}$/.test(digits)) return false;
+  const n = Number(digits);
+  return n >= 87000 && n <= 98999;
+}
+
+// Every Malaysian address has a 5-digit postcode. Anything else can't be
+// zoned, and a zone that can't be derived used to fall through to the CHEAP
+// rate — so an unparseable postcode is refused at the door instead
+// (security review 2026-08-25).
+export function isShippablePostcode(postalCode: string): boolean {
+  return /^\d{5}$/.test(postalCode.trim());
+}
+
+export type DeliveryZone = 'west' | 'east';
+
+// The East Malaysian states + their major localities. Matched on the address's
+// province AND city because the postcode alone is customer-typed: a Sabah
+// customer entering a KL postcode would otherwise be billed West RM15 for an
+// East parcel (security review 2026-08-25, MEDIUM). Word-boundary anchored so
+// a West place name can't collide on a substring.
+const EAST_PLACE_RE =
+  /\b(sabah|sarawak|labuan|kota\s*kinabalu|kuching|sandakan|tawau|miri|sibu|bintulu|lahad\s*datu|keningau)\b/i;
+
+// The zone actually billed: the MORE EXPENSIVE of what the postcode says and
+// what the state/city says. Both inputs are customer-supplied, so the rule is
+// deliberately asymmetric — a mismatch bills East rather than under-charging a
+// real East Malaysian shipment.
+export function deliveryZone(
+  postalCode: string,
+  province: string | null | undefined,
+  city: string | null | undefined,
+): DeliveryZone {
+  if (isEastMalaysiaPostcode(postalCode)) return 'east';
+  const place = [province, city].filter(Boolean).join(' ');
+  return EAST_PLACE_RE.test(place) ? 'east' : 'west';
+}
+
+const toCents = (n: number) => Math.round(n * 100) / 100;
+
+// `province`/`city` are optional so the storefront's preview (which has the
+// same address fields) and the authoritative backend call share one signature.
+// Omitting them degrades to the postcode-only zone — never pass them as
+// undefined on the charging path; snapshotAddress always carries both.
+export function computeDeliveryFee(
+  postalCode: string,
+  orderValueMyr: number,
+  province?: string | null,
+  city?: string | null,
+): DeliveryFee {
+  const shipping =
+    deliveryZone(postalCode, province, city) === 'east'
+      ? EAST_SHIPPING_MYR
+      : WEST_SHIPPING_MYR;
+  const insurance =
+    orderValueMyr > PROTECTION_INCLUDED_MYR
+      ? toCents(orderValueMyr * INSURANCE_RATE)
+      : 0;
+  return { shipping, insurance, total: toCents(shipping + insurance) };
 }
 
 export type AddressSnapshot = {
@@ -166,7 +258,10 @@ export type AddressSnapshot = {
 export function snapshotAddress(
   addr: Partial<HttpTypes.StoreCustomerAddress>,
 ): AddressSnapshot | null {
-  const name = [addr.first_name, addr.last_name].filter(Boolean).join(" ").trim();
+  const name = [addr.first_name, addr.last_name]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
   if (
     !name ||
     !addr.address_1 ||

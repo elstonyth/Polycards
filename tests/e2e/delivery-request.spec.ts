@@ -8,7 +8,7 @@
 // stays the bar's "Deliver N" pill.
 import { test, expect } from '@playwright/test';
 import { BASE, stamp } from './helpers/constants';
-import { createCustomer, openPack } from './helpers/api';
+import { createCustomer, openPack, topup } from './helpers/api';
 import { fundFor, primaryPack } from './helpers/catalog';
 import * as sf from './helpers/storefront';
 
@@ -34,6 +34,10 @@ test('customer requests delivery of a vaulted card via the UI', async ({
   // Funded customer holding one vaulted card (API setup), then log into the UI.
   const cust = await createCustomer(fundFor(pack));
   await openPack(cust.token, PACK); // auto-vaults the pull
+  // Delivery charges West RM15 + mandatory 5% insurance above RM200 card
+  // value (2026-08-25) — fundFor's leftover doesn't cover it. RM600 clears
+  // the fee for any card the primary pack can pull.
+  await topup(cust.token, 600);
   await sf.login(page, PACK, cust.email, PASSWORD);
 
   await page.goto(`${BASE}/vault`, { waitUntil: 'domcontentloaded' });

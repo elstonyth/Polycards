@@ -1,13 +1,16 @@
-import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk";
-import { MedusaError, Modules } from "@medusajs/framework/utils";
-import { PACKS_MODULE } from "../../modules/packs";
-import type PacksModuleService from "../../modules/packs/service";
+import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
+import { PACKS_MODULE } from '../../modules/packs';
+import type PacksModuleService from '../../modules/packs/service';
 import {
   validateDeliveryRequest,
   snapshotAddress,
-} from "../../modules/packs/delivery";
-import { FREE_PULL_LOCKED_MESSAGE } from "../../modules/packs/free-pack";
-import { resolveFxRate } from "../../modules/packs/pricing";
+  isMalaysianAddress,
+  isShippablePostcode,
+  MY_ONLY_MESSAGE,
+} from '../../modules/packs/delivery';
+import { FREE_PULL_LOCKED_MESSAGE } from '../../modules/packs/free-pack';
+import { resolveFxRate } from '../../modules/packs/pricing';
 
 export type RequestDeliveryInput = {
   customer_id: string; // from the authenticated token — NEVER the request body
@@ -17,7 +20,7 @@ export type RequestDeliveryInput = {
 
 export type RequestDeliveryResult = {
   order_id: string;
-  status: "requested";
+  status: 'requested';
   pull_ids: string[];
 };
 
@@ -29,51 +32,51 @@ export const verdictError = (
   v: ReturnType<typeof validateDeliveryRequest>,
 ): MedusaError => {
   switch (v) {
-    case "empty":
+    case 'empty':
       return new MedusaError(
         MedusaError.Types.INVALID_DATA,
-        "Select at least one card to deliver.",
+        'Select at least one card to deliver.',
       );
-    case "duplicate":
+    case 'duplicate':
       return new MedusaError(
         MedusaError.Types.INVALID_DATA,
-        "Duplicate cards in the selection.",
+        'Duplicate cards in the selection.',
       );
     // Per-status messages (sim P3 #9): a double-submit used to read as if the
     // cards vanished. Ownership is checked before status in the validator, so
     // naming the status leaks nothing about other customers' pulls.
-    case "already_delivering":
+    case 'already_delivering':
       return new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        "One or more cards are already in a pending delivery request.",
+        'One or more cards are already in a pending delivery request.',
       );
-    case "already_delivered":
+    case 'already_delivered':
       return new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        "One or more cards have already been delivered.",
+        'One or more cards have already been delivered.',
       );
-    case "bought_back":
+    case 'bought_back':
       return new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        "One or more cards were already sold back.",
+        'One or more cards were already sold back.',
       );
-    case "not_vaulted":
+    case 'not_vaulted':
       return new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        "One or more cards are no longer available to deliver.",
+        'One or more cards are no longer available to deliver.',
       );
     // Only reachable if a caller hand-rolls a request against this path; the
     // vault routes reward pulls to POST /store/rewards/withdraw itself. The
     // old copy pointed at a rewards page that no longer exists.
-    case "reward_source":
+    case 'reward_source':
       return new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        "Reward cards ship on their own request — send this one to /store/rewards/withdraw.",
+        'Reward cards ship on their own request — send this one to /store/rewards/withdraw.',
       );
     // NOT_ALLOWED is a 400 (same mapping as every case above) carrying the one
     // shared lock copy, so vault, buyback and delivery all refuse in the same
     // words.
-    case "free_locked":
+    case 'free_locked':
       return new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         FREE_PULL_LOCKED_MESSAGE,
@@ -82,13 +85,13 @@ export const verdictError = (
     default:
       return new MedusaError(
         MedusaError.Types.NOT_FOUND,
-        "One or more cards were not found.",
+        'One or more cards were not found.',
       );
   }
 };
 
 export const requestDeliveryStep = createStep(
-  "request-delivery",
+  'request-delivery',
   async (input: RequestDeliveryInput, { container }) => {
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
     const customerModule = container.resolve(Modules.CUSTOMER);
@@ -109,7 +112,7 @@ export const requestDeliveryStep = createStep(
       input.customer_id,
       freeUnlocked,
     );
-    if (verdict !== "ok") throw verdictError(verdict);
+    if (verdict !== 'ok') throw verdictError(verdict);
 
     // Frozen accounts cannot draw value out — physical delivery extracts value
     // exactly like buyback, so it gets the same gate (audit 2026-07-07 #2).
@@ -123,14 +126,29 @@ export const requestDeliveryStep = createStep(
     if (!address) {
       throw new MedusaError(
         MedusaError.Types.NOT_FOUND,
-        "Shipping address not found.",
+        'Shipping address not found.',
       );
     }
     const snapshot = snapshotAddress(address);
     if (!snapshot) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
-        "That address is missing required shipping fields.",
+        'That address is missing required shipping fields.',
+      );
+    }
+    // Only MY rates exist (West RM15 / East RM35 — computeDeliveryFee), so a
+    // non-Malaysian address has no priceable shipment. Refuse up front rather
+    // than undercharge an international parcel.
+    if (!isMalaysianAddress(snapshot.ship_country_code)) {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, MY_ONLY_MESSAGE);
+    }
+    // The zone (and therefore the fee) is derived from the postcode, so an
+    // unparseable one is refused rather than silently billed the cheaper West
+    // rate (security review 2026-08-25).
+    if (!isShippablePostcode(snapshot.ship_postal_code)) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Enter a valid 5-digit Malaysian postcode for this address.',
       );
     }
     // The storefront's inline address form carries no phone field, so most
@@ -166,7 +184,7 @@ export const requestDeliveryStep = createStep(
 
     const result: RequestDeliveryResult = {
       order_id: orderId,
-      status: "requested",
+      status: 'requested',
       pull_ids: input.pull_ids,
     };
     return new StepResponse(result, {
@@ -180,11 +198,24 @@ export const requestDeliveryStep = createStep(
     if (!data) return;
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
     await packs.updatePulls(
-      data.pullIds.map((id) => ({ id, status: "vaulted" as const })),
+      data.pullIds.map((id) => ({ id, status: 'vaulted' as const })),
     );
     await packs.deleteDeliveryOrderItems(data.itemIds);
     await packs.deleteDeliveryOrders([data.orderId]);
-    await packs.deleteLedgerEntryByRef("OD", data.orderId);
+    // Undo the fee debit BEFORE deleting the OD ledger row: compensation
+    // isn't transactional, and if it dies between the two deletes the
+    // surviving artifact should be the harmless one (a ledger row for a
+    // gone order) — not an unrefundable customer debit. The guarded delete
+    // needs ids, so resolve the row first — its `reference` is the order id,
+    // unique to this request (refund rows carry `refund:<id>`, no false match).
+    const feeRows = await packs.listCreditTransactions(
+      { reason: 'delivery_fee', reference: data.orderId },
+      { take: 10 },
+    );
+    if (feeRows.length) {
+      await packs.deleteCreditTransactionsGuarded(feeRows.map((r) => r.id));
+    }
+    await packs.deleteLedgerEntryByRef('OD', data.orderId);
   },
 );
 

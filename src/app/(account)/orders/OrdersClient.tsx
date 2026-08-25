@@ -14,6 +14,7 @@ import {
   type AddAddressInput,
 } from '@/lib/actions/delivery';
 import { addressViewFromInput } from '@/lib/address-view';
+import { rm } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
@@ -584,6 +585,32 @@ function OrderDetailModal({
             <p className="text-white/50">{order.address.phone}</p>
           )}
         </div>
+
+        {/* Fee lines only when a fee was charged — pre-fee orders and reward
+            shipments carry null and must not render as RM 0. */}
+        {order.shippingFee != null && (
+          <>
+            <p className="mt-5 text-[11px] uppercase tracking-wide text-white/40">
+              Shipping fee
+            </p>
+            <div className="mt-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-[13px] text-white/80">
+              <div className="flex justify-between">
+                <span>Shipping</span>
+                <span>{rm(order.shippingFee)}</span>
+              </div>
+              {(order.insuranceFee ?? 0) > 0 && (
+                <div className="mt-0.5 flex justify-between">
+                  <span>Insurance (5% of card value)</span>
+                  <span>{rm(order.insuranceFee ?? 0)}</span>
+                </div>
+              )}
+              <div className="mt-1.5 flex justify-between border-t border-white/10 pt-1.5 font-semibold text-white">
+                <span>Total</span>
+                <span>{rm(order.shippingFee + (order.insuranceFee ?? 0))}</span>
+              </div>
+            </div>
+          </>
+        )}
 
         <p className="mt-5 text-[11px] uppercase tracking-wide text-white/40">
           Tracking

@@ -7,6 +7,10 @@ import PacksModuleService from '../../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import {
   snapshotAddress,
+  deliveryZone,
+  isMalaysianAddress,
+  isShippablePostcode,
+  MY_ONLY_MESSAGE,
   CUSTOMER_STATUS_WORD,
 } from '../../../../../modules/packs/delivery';
 
@@ -60,6 +64,39 @@ export async function POST(
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
       'That address is missing required shipping fields.',
+    );
+  }
+  // Fee guards (2026-08-25): the shipping fee was charged at request time
+  // from the ORIGINAL address, so an edit may not change what the customer
+  // should have paid. Non-MY is never shippable; a West<->East zone flip
+  // changes the RM15/RM35 rate — refuse both and point at the free cancel
+  // path (a cancel refunds the fee, so re-requesting re-prices cleanly).
+  // Pre-fee orders (shipping_fee NULL) skip the zone check — nothing was
+  // charged, so there is nothing to protect.
+  if (!isMalaysianAddress(snapshot.ship_country_code)) {
+    throw new MedusaError(MedusaError.Types.INVALID_DATA, MY_ONLY_MESSAGE);
+  }
+  if (!isShippablePostcode(snapshot.ship_postal_code)) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Enter a valid 5-digit Malaysian postcode for this address.',
+    );
+  }
+  // Compares the SAME composite zone the charge used (postcode + state/city),
+  // not the postcode alone — otherwise re-pointing a KL-postcode order at a
+  // Sabah address would keep the RM15 it paid.
+  if (
+    order.shipping_fee != null &&
+    deliveryZone(
+      snapshot.ship_postal_code,
+      snapshot.ship_province,
+      snapshot.ship_city,
+    ) !==
+      deliveryZone(order.ship_postal_code, order.ship_province, order.ship_city)
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'That address changes the shipping fee zone — cancel this delivery (the fee is refunded) and request it again with the new address.',
     );
   }
   // Same fallback as request-delivery: addresses saved by the storefront's

@@ -124,7 +124,8 @@ export const updateDeliveryOrderInvoke = async (
   });
 
   const prevPullStatus: 'delivering' | null =
-    pullIds.length && (input.status === 'completed' || input.status === 'canceled')
+    pullIds.length &&
+    (input.status === 'completed' || input.status === 'canceled')
       ? 'delivering'
       : null;
   return new StepResponse({ order_id: order.id, status: input.status }, {
@@ -147,6 +148,22 @@ export const updateDeliveryOrderStep = createStep(
   async (data: CompensateData, { container }) => {
     if (!data) return;
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+    // A canceled order refunded its shipping fee (transitionDeliveryOrderStatus)
+    // — un-canceling it must take that money back, or the customer keeps both
+    // the refund and the delivery. Mirrors request-delivery's compensation,
+    // which likewise undoes its own fee row. Runs FIRST so a failure here
+    // leaves the order visibly canceled (refund intact, consistent) rather
+    // than live-with-no-charge.
+    if (data.prev.status !== 'canceled') {
+      const refunds = await packs.listCreditTransactions(
+        { reason: 'delivery_fee', reference: `refund:${data.orderId}` },
+        { take: 10 },
+      );
+      if (refunds.length) {
+        await packs.deleteCreditTransactionsGuarded(refunds.map((r) => r.id));
+      }
+      await packs.deleteLedgerEntryByRef('OD', `cancel:${data.orderId}`);
+    }
     await packs.updateDeliveryOrders([
       {
         id: data.orderId,

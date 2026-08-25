@@ -44,6 +44,10 @@ export type DeliveryOrderView = {
   status: DeliveryOrderStatus;
   trackingNumber: string | null;
   createdAt: string;
+  /** Wallet charge stamped at request (2026-08-25). null = pre-fee order or
+   *  reward-prize shipment — hide the fee lines rather than showing RM 0. */
+  shippingFee: number | null;
+  insuranceFee: number | null;
   items: DeliveryOrderItemView[];
   /** The shipping snapshot taken when the order was placed — NOT a live read of
    *  the address book, so editing or removing the book entry never rewrites it. */
@@ -105,6 +109,8 @@ interface BackendDeliveryOrder {
   id: string;
   status: DeliveryOrderView['status'];
   tracking_number: string | null;
+  shipping_fee?: number | null;
+  insurance_fee?: number | null;
   proof_images?: string[] | null;
   created_at: string;
   address: {
@@ -151,6 +157,8 @@ export async function getDeliveryOrders(): Promise<DeliveryOrdersResult> {
       status: o.status,
       trackingNumber: o.tracking_number,
       createdAt: o.created_at,
+      shippingFee: o.shipping_fee ?? null,
+      insuranceFee: o.insurance_fee ?? null,
       address: {
         name: o.address?.name ?? '',
         line1: o.address?.address_1 ?? '',

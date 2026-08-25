@@ -25,6 +25,10 @@ export const CreditTransaction = model
       // Referral rebuild (spec 2026-08-24): the Wednesday settlement payout,
       // written by payWeeklySettlement and paired with an RF ledger row.
       'referral_commission',
+      // Physical-shipment fee (shipping + mandatory insurance): negative at
+      // delivery request, positive on the cancel refund (reference
+      // `refund:<order_id>`). Sign-agnostic, like adjustment.
+      'delivery_fee',
     ]),
     // The pull this credit came from (buyback rows only; null for top-ups).
     // UNIQUE — the DB itself guarantees a pull can never be credited twice,
