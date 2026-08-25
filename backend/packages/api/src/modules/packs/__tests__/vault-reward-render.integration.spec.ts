@@ -179,14 +179,47 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
         const rewardItem = items.find((i) => i.pull_id === rewardPull.id);
         expect(rewardItem).toBeDefined();
+        const normalItem = items.find((i) => i.pull_id !== rewardPull.id)!;
         expect(rewardItem!.source).toBe('reward');
         const card = rewardItem!.card as Record<string, unknown>;
         expect(card).toBeDefined();
         expect(card.handle).toBe(ids.prizeHandle);
         expect(card.name).toBe('C2 Prize Card');
-        // A sentinel pack has no odds rows, so nothing can be inferred from
-        // them — but the item must still be present and rendered.
-        expect(rewardItem!.locked).toBe(false);
+        // LOCKED, and quoting nothing payable. buyback-pull.ts refuses to sell
+        // any source='reward' pull that is not a weekly-challenge prize, so a
+        // vault row that advertised a percent + amount here would offer money
+        // the sell then rejects. This assertion replaces the old branch's
+        // `expect(buyback).toBeUndefined()` — the field is present now (the
+        // storefront drops a row without a finite percent), but unpayable.
+        expect(rewardItem!.locked).toBe(true);
+        const buyback = rewardItem!.buyback as Record<string, unknown>;
+        expect(buyback).toBeDefined();
+        expect(buyback.amount).toBe(0);
+        // `firm` is a GLOBAL fact about the FX rate, never a per-row lock
+        // signal: it must match every other row's, or one locked row would
+        // blame the whole vault's pricing and block selling the rest.
+        expect(buyback.firm).toBe(
+          (normalItem.buyback as Record<string, unknown>).firm,
+        );
+      });
+
+      it('resolves a synthetic-pack reward to a live tier, not Common', () => {
+        // 'task-reward' has no odds rows. Falling back to rarityOf would paint
+        // every task-granted card Common — the wrong-tier report this work
+        // started from. With no live pack offering the card the resolved tier
+        // is empty rather than a lie.
+        const ids = mkIds('tier');
+        return seed(ids)
+          .then(({ rewardPull }) =>
+            callVaultRoute(ids.customer).then((body) => ({ body, rewardPull })),
+          )
+          .then(({ body, rewardPull }) => {
+            const items = body.items as Array<Record<string, unknown>>;
+            const item = items.find((i) => i.pull_id === rewardPull.id)!;
+            expect((item.card as Record<string, unknown>).rarity).not.toBe(
+              'Common',
+            );
+          });
       });
 
       it('normal-card vault rows unchanged — still rendered with card + buyback', async () => {

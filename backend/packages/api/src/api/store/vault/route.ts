@@ -105,9 +105,12 @@ export async function GET(
   // Every source='reward' pull rides a synthetic pack with no odds rows —
   // challenge prizes on challengePackId(week), task card rewards on the
   // 'task-reward' sentinel — so all of them need the same treatment, not just
-  // the challenge ones.
+  // the challenge ones. A pack-reward (a task's free rip) names a REAL pack and
+  // is not in here: its odds rows resolve the tier normally.
+  const isSyntheticReward = (p: { source?: string | null; pack_id: string }) =>
+    p.source === 'reward' && !packBySlug.has(p.pack_id);
   const prizeHandles = normalPulls
-    .filter((p) => p.source === 'reward')
+    .filter(isSyntheticReward)
     .map((p) => p.card_id);
   const prizeTier = await bestLiveTierByHandle(packs, prizeHandles);
 
@@ -122,7 +125,16 @@ export async function GET(
       const prize = isChallengePrizePack(p.pack_id);
       // The free welcome pull is unsellable until the customer's first PAID
       // open — the SAME rule buyback-pull.ts refuses on.
-      const locked = p.source === 'free' && !freeUnlocked;
+      // `locked` must mirror what buyback-pull.ts actually refuses, or the
+      // vault offers a price the sell then rejects. Two refusals:
+      //   - a free welcome pull before the first PAID open;
+      //   - any source='reward' pull that is NOT a weekly-challenge prize —
+      //     i.e. a task reward. That guard predates the task engine (it was
+      //     written for daily-box prizes) but it is what the sell enforces
+      //     today, so this is what the vault must advertise.
+      const locked =
+        (p.source === 'free' && !freeUnlocked) ||
+        (p.source === 'reward' && !isChallengePrizePack(p.pack_id));
       const { percent, rate_type } = resolveBuybackRate(pack, {
         rolled_at: p.rolled_at,
         revealed_at: p.revealed_at,
@@ -152,11 +164,14 @@ export async function GET(
         challenge_prize: prize,
         showcased: (p as unknown as { showcased: boolean }).showcased ?? false,
         card: {
-          // A prize's synthetic pack has no odds row, so rarityOf would answer
-          // 'Common' for it; use the resolved live tier instead.
+          // A synthetic pack has no odds row, so rarityOf would answer
+          // 'Common' for it — the exact wrong-tier report this work started
+          // from. Keyed off isSyntheticReward, NOT `prize`: a task reward has
+          // the same no-odds shape as a challenge prize and needs the same
+          // resolved live tier.
           ...toCardView(
             card,
-            prize
+            isSyntheticReward(p)
               ? (prizeTier.get(p.card_id) ?? '')
               : rarityOf(p.pack_id, p.card_id),
           ),
@@ -167,9 +182,10 @@ export async function GET(
         // the sell/deliver lock must be keyed off `locked`, NEVER off `source`.
         source: p.source ?? 'pack',
         locked,
-        // A LOCKED free pull must advertise NOTHING payable: selling it 400s
-        // (FREE_PULL_LOCKED_MESSAGE), so quoting a price here would offer the
-        // customer money the sell then refuses. UNQUOTED_BUYBACK is the same
+        // A LOCKED pull must advertise NOTHING payable: selling it 400s
+        // (FREE_PULL_LOCKED_MESSAGE for a free pull, "Reward prizes can't be
+        // sold back" for a task reward), so quoting a price here would offer
+        // the customer money the sell then refuses. UNQUOTED_BUYBACK is the same
         // "no quote" block the open route degrades to — deliberately NOT an
         // omitted/null field, because the storefront drops any vault row
         // without a finite buyback.percent, which would delete the customer's
