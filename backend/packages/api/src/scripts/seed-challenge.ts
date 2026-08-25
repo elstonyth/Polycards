@@ -1,8 +1,10 @@
 /**
  * seed-challenge.ts
  *
- * Demo seed for the Weekly Pulled Value Challenge the storefront /task page
- * renders (GET /store/challenge). Writes the cumulative milestone ladder (the
+ * Demo seed for the Weekly Pulled Value Challenge the storefront
+ * /leaderboard page renders (GET /store/challenge) — NOT /task, which is the
+ * separate tasks/achievements hub shipped by #490.
+ * Writes the cumulative milestone ladder (the
  * top-10 prize pool: a per-rank table, cards on ranks 1-3, credits on 4-10) +
  * the weekly
  * reset through the SAME audited service methods the admin "Weekly Challenge"
