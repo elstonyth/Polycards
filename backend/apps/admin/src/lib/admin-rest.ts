@@ -1793,6 +1793,14 @@ export interface AdminTaskDefinition {
   /** Optional run window (ISO). null/null = runs until retired. */
   starts_at: string | null;
   ends_at: string | null;
+  /** Plain-English summaries resolved server-side (names, not slugs/ids), so
+   *  the console never has to load the pack / card / pixel catalogs to render
+   *  a row. A dangling reference reads "… (missing)".
+   *
+   *  OPTIONAL on purpose: a backend that predates this field is a normal
+   *  mid-deploy state, and typing it as required is what let the console crash
+   *  on `undefined.requirement` instead of degrading. */
+  labels?: { requirement: string; reward: string };
 }
 
 export async function listTaskDefinitions(): Promise<AdminTaskDefinition[]> {

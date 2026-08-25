@@ -6,8 +6,11 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { reqReason } from '../rewards-settings/validate';
+import { resolveTaskLabels } from './labels';
 
-// GET /admin/tasks — every definition (active and retired), sorted.
+// GET /admin/tasks — every definition (active and retired), sorted. Each row
+// carries plain-English `labels` so the console can render a task without
+// pulling the pack / card / pixel catalogs into the browser.
 export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
@@ -17,6 +20,7 @@ export async function GET(
     {},
     { order: { sort: 'ASC' }, take: 500 },
   );
+  const labels = await resolveTaskLabels(packs, rows);
   res.json({
     tasks: rows.map((t) => ({
       id: t.id,
@@ -28,6 +32,7 @@ export async function GET(
       sort: t.sort,
       starts_at: t.starts_at ? new Date(t.starts_at).toISOString() : null,
       ends_at: t.ends_at ? new Date(t.ends_at).toISOString() : null,
+      labels: labels.get(t.id) ?? { requirement: '', reward: '' },
     })),
   });
 }
