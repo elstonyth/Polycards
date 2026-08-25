@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 };
 
 // The Task hub (referral rebuild, spec 2026-08-24; restructured 2026-08-25):
-// two tabs — Weekly Tasks and Achievements & VIP. Referral has its own page
+// two tabs — Weekly Tasks and Achievements. Referral has its own page
 // at /referral. Server component per the house split; the loader returns null
 // when logged out and the client tabs render a sign-in prompt instead.
 export default async function TaskPage() {

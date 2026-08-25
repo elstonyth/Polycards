@@ -714,7 +714,6 @@ export type Routes = {
             buybackBatch: typeof import("../../src/api/store/vault/buyback-batch/route");
             latest: typeof import("../../src/api/store/vault/latest/route");
         };
-        vipRebate: typeof import("../../src/api/store/vip-rebate/route");
         vip: typeof import("../../src/api/store/vip/route");
     };
     vendor: {

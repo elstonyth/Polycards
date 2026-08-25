@@ -19,13 +19,14 @@ import type { TaskEntry, TaskHub } from '@/lib/data/schemas';
 
 // Two tabs since 2026-08-25: Referral moved to its own /referral page (linked
 // from the Me quick-access grid), and the VIP rebate it sat beside was
-// removed outright. What remains of VIP here is the ladder itself — the rung
-// the "Reach level N" achievements are measured against.
+// removed outright. VIP survives inside this tab as the ladder the
+// "Reach level N" achievements are measured against — hence the level stat,
+// even though the tab itself is just called Achievements.
 type TabKey = 'weekly' | 'achievements';
 
 const TABS: { key: TabKey; label: string; icon: typeof ListChecks }[] = [
   { key: 'weekly', label: 'Weekly Tasks', icon: ListChecks },
-  { key: 'achievements', label: 'Achievements & VIP', icon: Crown },
+  { key: 'achievements', label: 'Achievements', icon: Crown },
 ];
 
 const REWARD_LABEL: Record<string, string> = {
@@ -234,7 +235,7 @@ function AchievementsTab({
     return isLoggedIn ? (
       <UnavailablePanel />
     ) : (
-      <SignInPrompt what="your achievements and VIP level" />
+      <SignInPrompt what="your achievements" />
     );
   }
 
@@ -245,7 +246,7 @@ function AchievementsTab({
     <div>
       <TabBanner
         src="/images/task/vip-banner.webp"
-        title="ACHIEVEMENTS & VIP"
+        title="ACHIEVEMENTS"
         sub="Climb the VIP ladder and fill the vault — one-off rewards."
       />
       <div className="space-y-4">

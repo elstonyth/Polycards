@@ -20,8 +20,9 @@ the amendment wins.
    settlement line is now always a referral commission, so `weekly_settlement_line.kind` and
    `weekly_settlement.total_rebate_cents` are gone with it. VIP itself stays: the ladder is what
    the `reach_level` achievements are measured against.
-2. **`/task` is two tabs**: *Weekly Tasks* and *Achievements & VIP*. Referral moved out to its own
-   page, `/referral`, reached from the Me quick-access grid.
+2. **`/task` is two tabs**: *Weekly Tasks* and *Achievements*. Referral moved out to its own
+   page, `/referral`, reached from the Me quick-access grid. VIP survives inside the Achievements
+   tab as the ladder the `reach_level` achievements are measured against, not as a tab of its own.
 3. **The weekly-task week resets Monday 00:00 MYT**, not Tuesday. The settlement week is unchanged
    (Tue close, Wed pay) — `referralWeekFor` stays Tuesday, `taskWeekFor` is the new Monday anchor.
 4. **Task scheduling**: `task_definition` gained an optional `starts_at`/`ends_at` window, driven by
