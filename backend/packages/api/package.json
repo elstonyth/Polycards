@@ -49,7 +49,7 @@
     "http-proxy-middleware": "^3.0.7",
     "ioredis": "^5.4.1",
     "multer": "^2.2.0",
-    "resend": "^6.20.0",
+    "resend": "^6.22.0",
     "sharp": "^0.35.3",
     "write-excel-file": "^4.1.1"
   },
