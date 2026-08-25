@@ -63,7 +63,6 @@ describe('VIP_LEVELS matches Workbook1.xlsx', () => {
         Math.round(3_000_000 * ((L - 1) / 99) ** 3),
       );
       expect(row.voucher_amount).toBe(voucherFor(L));
-      expect(row.direct_referral_pct).toBe(referralFor(L));
       expect(row.frame_unlock).toBe(L % 10 === 0);
       expect(row.box_tier).toBe(boxTierFor(L));
     },

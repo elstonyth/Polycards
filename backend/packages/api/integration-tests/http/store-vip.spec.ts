@@ -26,7 +26,6 @@ async function seedLadder(packs: PacksModuleService) {
         voucher_amount: r.voucher_amount,
         box_tier: r.box_tier,
         frame_unlock: r.frame_unlock,
-        direct_referral_pct: r.direct_referral_pct,
         prizes: r.prizes ?? null,
       })),
     );
@@ -123,7 +122,6 @@ medusaIntegrationTestRunner({
             voucher_amount: expect.any(Number),
             box_tier: expect.any(String),
             frame_unlock: expect.any(Boolean),
-            direct_referral_pct: expect.any(Number),
           },
         });
         // strictly increasing thresholds

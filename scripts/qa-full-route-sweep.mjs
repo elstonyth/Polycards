@@ -75,7 +75,8 @@ const PUBLIC = [
   '/bank-withdrawal',
   ...(slug ? [`/slots/${slug}`, `/slots/${slug}/spin`] : []),
 ];
-// /rewards, /vip, /referrals removed with the 2026-07-29 suspension (#294)
+// /rewards and /vip removed with the 2026-07-29 suspension (#294); the
+// referral routes went with the engine removal.
 const ACCOUNT = [
   '/me',
   '/wallet',

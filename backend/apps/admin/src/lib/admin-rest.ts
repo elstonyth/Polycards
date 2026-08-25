@@ -240,50 +240,6 @@ export const getCustomerPulls = (
   }>(`/admin/customers/${encodeURIComponent(id)}/pulls?${params}`);
 };
 
-// ── Customer 360: referral tree + commissions (Phase 4 P4.1) ─────────────────
-
-export interface ReferralTreeNode {
-  customer_id: string;
-  depth: number;
-  sponsor_id: string | null;
-  vip_level: number | null;
-  lifetime_external_spend_sen: string;
-  frozen: boolean;
-  direct_recruit_count: number;
-  has_more_depth: boolean;
-  handle: string | null;
-  email: string | null;
-  created_at: string | null;
-}
-export interface ReferralTree {
-  root: ReferralTreeNode;
-  nodes: ReferralTreeNode[];
-  maxDepth: number;
-  truncated: boolean;
-}
-export const getReferralTree = (id: string, maxDepth = 6) =>
-  getJson<ReferralTree>(
-    `/admin/customers/${encodeURIComponent(id)}/referral-tree?maxDepth=${maxDepth}`,
-  );
-
-export interface AdminCommissionRow {
-  id: string;
-  generation: number;
-  kind: 'direct' | 'override';
-  status: 'pending' | 'available' | 'suspended' | 'reversed';
-  amount: string;
-  reason: string;
-  matures_at: string;
-  reversal_transaction_id: string | null;
-  source_transaction_id: string;
-  opener: { customer_id: string | null; handle: string | null };
-  created_at: string;
-}
-export const getCustomerCommissions = (id: string, page = 0, limit = 50) =>
-  getJson<{ commissions: AdminCommissionRow[] }>(
-    `/admin/customers/${encodeURIComponent(id)}/commissions?limit=${limit}&offset=${page * limit}`,
-  );
-
 // ── Phase 4 P4.2 — audit timeline ───────────────────────────────────────────
 
 export interface AuditRow {
@@ -343,24 +299,6 @@ export const freezeCustomer = (id: string, reason: string) =>
 export const unfreezeCustomer = (id: string, reason: string) =>
   postJson<{ frozen: boolean }>(
     `/admin/customers/${encodeURIComponent(id)}/unfreeze`,
-    { reason },
-  );
-
-export const reverseCommission = (commId: string, reason: string) =>
-  postJson<{ reversed: boolean }>(
-    `/admin/commissions/${encodeURIComponent(commId)}/reverse`,
-    { reason },
-  );
-
-export const suspendCommission = (commId: string, reason: string) =>
-  postJson<{ suspended: boolean }>(
-    `/admin/commissions/${encodeURIComponent(commId)}/suspend`,
-    { reason },
-  );
-
-export const unsuspendCommission = (commId: string, reason: string) =>
-  postJson<{ suspended: boolean }>(
-    `/admin/commissions/${encodeURIComponent(commId)}/unsuspend`,
     { reason },
   );
 
@@ -838,9 +776,6 @@ export async function saveVoucherRanges(body: {
 // ── Rewards engine settings ──────────────────────────────────────────────────
 
 export interface RewardsSettingsView {
-  commissionCooldownDays: number;
-  teamOverridePct: number;
-  overrideGenerationCap: number;
   withdrawals_per_day: number;
 }
 
@@ -887,7 +822,6 @@ export interface VipLevelDTO {
   voucher_amount: number; // MYR
   box_tier: string;
   frame_unlock: boolean;
-  direct_referral_pct: number;
 }
 
 export const getVipLevels = () =>
@@ -1508,11 +1442,8 @@ export const setCustomerGroup = (customerId: string, groupId: string | null) =>
 
 // ── Epic 4 (Ledger) ──────────────────────────────────────────────────────────
 
-/** The seven ledger event types (POLYCARD-BACK §5.1). RF (referral payout) and
- *  WP (challenge settlement) are filterable but have no writer yet, so they
- *  return zero rows — kept because the ledger stores them and a later epic may
- *  wire them, not because they are broken. */
-export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'RF' | 'AD' | 'WP' | 'WD';
+/** The ledger event types (POLYCARD-BACK §5.1). */
+export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'AD' | 'WP' | 'WD';
 
 /** One row of GET /admin/ledger. Deltas are MYR and NULLABLE — an event that
  *  touches only one side leaves the other null (not 0). `payload` is the raw

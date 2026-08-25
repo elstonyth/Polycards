@@ -10,7 +10,6 @@ export interface VipLevelRow {
   voucherInput: string;
   boxTier: string;
   frameUnlock: boolean;
-  referralInput: string;
 }
 
 // A blank field is NOT a valid 0 — Number('') coerces to 0, which would let an
@@ -37,10 +36,10 @@ export function validateVipLevelsClient(rows: VipLevelRow[]): string[] {
         );
       prev = t;
     }
-    // voucherInput / referralInput / boxTier are deliberately NOT checked here.
-    // None of the three is editable on the tab any more (all three surfaces are
-    // suspended), so a client error on one would be a block the operator has no
-    // field to clear — the same reasoning #371 applied to referral and box tier.
+    // voucherInput / boxTier are deliberately NOT checked here. Neither is
+    // editable on the tab any more (both surfaces are suspended), so a client
+    // error on one would be a block the operator has no field to clear — the
+    // same reasoning #371 applied to box tier.
     //
     // Voucher was the exception until the data it checked went away: the ladder
     // paid 12,000 at L90 and 15,000 at L100 against a 10,000 server cap, so two

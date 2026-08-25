@@ -26,7 +26,7 @@ export const config: RouteConfig = {
 };
 
 // undefined is the "All" tab. WP (challenge settlement) is written by
-// settleChallengeWinner (plan 060). RF (referral payout) stays listed but is
+// settleChallengeWinner (plan 060). The remaining types are
 // still writerless — Epic 6 (referral payouts) is cancelled, so that filter
 // always returns zero rows. It is empty, not broken, so it gets no
 // special-case copy.
@@ -36,7 +36,6 @@ const TYPES: (LedgerType | undefined)[] = [
   'SP',
   'SE',
   'OD',
-  'RF',
   'AD',
   'WP',
   'WD',

@@ -93,14 +93,8 @@ export type LedgerTotals = {
   topups: number;
   /** Σ adjustment — net operator grants/clawbacks. */
   adjustments: number;
-  /** revenue − payouts − commission — the gacha margin after commission bleed. */
+  /** revenue − payouts — the gacha margin. */
   net: number;
-  /** Σ direct_referral — commission paid to direct sponsors (outflow). */
-  directReferral: number;
-  /** Σ team_override — override commission paid up the tree (outflow, Phase 2b). */
-  teamOverride: number;
-  /** Σ commission_reversal — clawed-back commission (signed; negative = recovered). */
-  commissionReversal: number;
   /** Σ cashout — customer withdrawals (balance move, not P&L). */
   cashout: number;
   /** Σ voucher_claim + reward_credit + daily_reward — promo credits granted; excluded from net/revenue. */
@@ -113,9 +107,6 @@ export function ledgerTotals(rows: LedgerRow[]): LedgerTotals {
   let buybackCents = 0;
   let topupCents = 0;
   let adjustmentCents = 0;
-  let directReferralCents = 0;
-  let teamOverrideCents = 0;
-  let commissionReversalCents = 0;
   let cashoutCents = 0;
   let rewardPromoCents = 0;
 
@@ -126,9 +117,6 @@ export function ledgerTotals(rows: LedgerRow[]): LedgerTotals {
     else if (row.reason === 'buyback') buybackCents += cents;
     else if (row.reason === 'topup') topupCents += cents;
     else if (row.reason === 'adjustment') adjustmentCents += cents;
-    else if (row.reason === 'direct_referral') directReferralCents += cents;
-    else if (row.reason === 'team_override') teamOverrideCents += cents;
-    else if (row.reason === 'commission_reversal') commissionReversalCents += cents;
     else if (row.reason === 'cashout') cashoutCents += cents;
     else if (
       row.reason === 'voucher_claim' ||
@@ -152,19 +140,11 @@ export function ledgerTotals(rows: LedgerRow[]): LedgerTotals {
     payouts,
     topups: topupCents / 100,
     adjustments: adjustmentCents / 100,
-    directReferral: directReferralCents / 100,
-    teamOverride: teamOverrideCents / 100,
-    commissionReversal: commissionReversalCents / 100,
     cashout: cashoutCents / 100,
     // Promo grants: excluded from net/revenue (operator-funded, not customer cash).
     rewardPromo: rewardPromoCents / 100,
-    // Margin AFTER commission bleed. Commission credits are positive rows, so
-    // subtract them; commission_reversal recovers margin (its rows are negative,
-    // so subtracting a negative adds back). Cashout is a balance move, excluded.
-    // rewardPromo is also excluded (it's operator cost tracked separately).
-    net:
-      (-openCents - buybackCents - directReferralCents - teamOverrideCents -
-        commissionReversalCents) /
-        100 || 0,
+    // Cashout is a balance move, excluded. rewardPromo is also excluded (it's
+    // operator cost tracked separately).
+    net: (-openCents - buybackCents) / 100 || 0,
   };
 }

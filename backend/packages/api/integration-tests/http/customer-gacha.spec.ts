@@ -195,7 +195,6 @@ medusaIntegrationTestRunner({
             voucher_amount: 0,
             box_tier: 'bronze',
             frame_unlock: false,
-            direct_referral_pct: 1,
             prizes: null,
           })),
         );

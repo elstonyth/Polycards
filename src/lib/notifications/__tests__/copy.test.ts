@@ -37,16 +37,17 @@ function backendFeedTemplates(): string[] {
 
 const TEMPLATES = backendFeedTemplates();
 
-// /vip, /vouchers, /daily, /referrals, /invite and /rewards all 404 while the
-// reward economy is suspended (spec 2026-07-29) — a feed row must not deep-link
-// to any of them. /rewards was a redirect STUB into /vip, which is exactly why
-// the first version of this guard (literal equality against the deleted
-// directories) missed it.
+// /vip, /vouchers, /daily and /rewards all 404 while the reward economy is
+// suspended (spec 2026-07-29) — a feed row must not deep-link to any of them.
+// /rewards was a redirect STUB into /vip, which is exactly why the first
+// version of this guard (literal equality against the deleted directories)
+// missed it. (/referrals and /invite left this list when the referral engine
+// was removed outright — they are free for the rebuilt system to claim.)
 //
 // Prefix + delimiter, not equality: `/vip/levels`, `/vip?source=notif` and
 // `/vip#top` are all just as dead as `/vip`, while `/vip-status` — a route that
 // merely shares the prefix — must NOT trip it.
-const DEAD_ROUTE = /^\/(vip|vouchers|daily|referrals|invite|rewards)([/?#]|$)/;
+const DEAD_ROUTE = /^\/(vip|vouchers|daily|rewards)([/?#]|$)/;
 
 describe('NOTIFICATION_COPY', () => {
   it('covers every template the backend can produce', () => {
@@ -87,7 +88,6 @@ describe('NOTIFICATION_COPY', () => {
         'bank_account_added',
         'bank_account_removed',
         'challenge_payout',
-        'commission_matured',
         'delivery_status',
         'vip_level_up',
         'withdrawal_paid',
@@ -130,8 +130,6 @@ describe('NOTIFICATION_COPY', () => {
       '/vip#rewards',
       '/vouchers',
       '/daily',
-      '/referrals/tree',
-      '/invite/abc123',
       '/rewards',
     ]) {
       expect(href).toMatch(DEAD_ROUTE);
@@ -156,16 +154,6 @@ describe('body rendering', () => {
     expect(body({ levels: [22, 23] })).toBe('You reached levels 22 and 23.');
     expect(body({ levels: [21, 22, 23] })).toBe(
       'You reached levels 21, 22 and 23.',
-    );
-  });
-
-  it('commission_matured branches on the frozen flag', () => {
-    const body = copyFor('commission_matured').body;
-    expect(body({ frozen: false })).toBe(
-      'Your commission is now available to spend.',
-    );
-    expect(body({ frozen: true })).toBe(
-      'It will be available once your account is unfrozen.',
     );
   });
 

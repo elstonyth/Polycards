@@ -24,15 +24,6 @@ describe('VIP_LEVELS data', () => {
     }
   });
 
-  it('has the agreed referral-% bands (L40=4, L50-100=5)', () => {
-    const at = (lvl: number) =>
-      VIP_LEVELS.find((r) => r.level === lvl)!.direct_referral_pct;
-    expect(at(1)).toBe(1);
-    expect(at(40)).toBe(4);
-    expect(at(50)).toBe(5);
-    expect(at(100)).toBe(5);
-  });
-
   it('unlocks a frame at every 10th level and Z box at 100', () => {
     for (const r of VIP_LEVELS) {
       expect(r.frame_unlock).toBe(r.level % 10 === 0);
@@ -62,9 +53,6 @@ describe('VIP_LEVELS_SEED', () => {
     );
     expect(VIP_LEVELS_SEED.map((r) => r.frame_unlock)).toEqual(
       VIP_LEVELS.map((r) => r.frame_unlock),
-    );
-    expect(VIP_LEVELS_SEED.map((r) => r.direct_referral_pct)).toEqual(
-      VIP_LEVELS.map((r) => r.direct_referral_pct),
     );
   });
 

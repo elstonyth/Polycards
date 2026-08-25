@@ -23,7 +23,7 @@ export default async function NotificationsPage({
         sub={
           res.ok && res.unreadCount > 0
             ? `${res.unreadCount} unread — tap a notification to mark it read.`
-            : 'Your VIP and commission updates.'
+            : 'Your VIP and reward updates.'
         }
       />
       {res.ok ? (

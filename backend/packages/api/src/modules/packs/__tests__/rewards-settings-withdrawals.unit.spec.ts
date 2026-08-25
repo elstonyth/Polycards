@@ -25,8 +25,14 @@ describe('validateRewardsPatch — withdrawals_per_day', () => {
     expect(validateRewardsPatch({ withdrawals_per_day: 2 })).toEqual({ withdrawals_per_day: 2 });
   });
 
-  test('accepts withdrawals_per_day in a combined patch', () => {
-    const result = validateRewardsPatch({ withdrawals_per_day: 3, commissionCooldownDays: 5 });
-    expect(result).toEqual({ withdrawals_per_day: 3, commissionCooldownDays: 5 });
+  test('ignores an unknown key alongside a valid one', () => {
+    const result = validateRewardsPatch({ withdrawals_per_day: 3, nonsense: 5 });
+    expect(result).toEqual({ withdrawals_per_day: 3 });
+  });
+
+  test('rejects a patch with no recognised key', () => {
+    expect(() => validateRewardsPatch({ nonsense: 5 })).toThrow(
+      /No valid settings to update/i,
+    );
   });
 });

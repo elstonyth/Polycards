@@ -300,12 +300,6 @@ export default async function MePage() {
                   <TopUpButton size="sm" className="" />
                 </div>
               </div>
-              {walletResult.wallet.locked > 0 && (
-                <p className="mt-2 text-[13px] text-neutral-400">
-                  {rm(walletResult.wallet.available)} available ·{' '}
-                  {rm(walletResult.wallet.locked)} locked
-                </p>
-              )}
             </>
           ) : (
             <p className="text-sm text-neutral-400">

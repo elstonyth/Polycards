@@ -208,12 +208,9 @@ medusaIntegrationTestRunner({
         expect(credits.data.balance).toBeCloseTo(sumRm, 2);
         expect(credits.data.wallet.balance).toBeCloseTo(sumRm, 2);
 
-        // available = balance − locked when not frozen; withdrawable ≤ available.
+        // available = balance when not frozen; withdrawable ≤ available.
         if (!wallet.isFrozen) {
-          expect(wallet.available).toBeCloseTo(
-            wallet.balance - wallet.locked,
-            2,
-          );
+          expect(wallet.available).toBeCloseTo(wallet.balance, 2);
         }
         expect(wallet.withdrawable).toBeLessThanOrEqual(wallet.available + 1e-9);
 

@@ -136,7 +136,7 @@ export default function NotificationsClient({
               No notifications yet.
             </p>
             <p className="mt-1 text-[13px] text-white/50">
-              VIP level-ups, unlocked commissions, and reward wins land here.{' '}
+              VIP level-ups, delivery updates, and reward wins land here.{' '}
               <Link
                 href="/"
                 className="font-semibold text-white underline underline-offset-2 hover:text-white/80"

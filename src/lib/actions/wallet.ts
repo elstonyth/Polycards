@@ -4,7 +4,7 @@
  * Wallet server action — reads the full credit balance + freeze/unlock state.
  *
  * Backend route: GET /store/credits
- * Wire shape: { wallet: { balance, available, locked, is_frozen, next_unlock }, transactions: [...] }
+ * Wire shape: { wallet: { balance, available, is_frozen }, transactions: [...] }
  *
  * The nested `wallet` block is extracted before parsing so WalletSchema only
  * needs to validate the inner object (not the outer envelope).
@@ -18,9 +18,7 @@ import { parseOne, WalletSchema } from '@/lib/data/schemas';
 export type Wallet = {
   balance: number;
   available: number;
-  locked: number;
   isFrozen: boolean;
-  nextUnlock: { amount: number; date: string } | null;
   /** Amount withdrawable now — 0 while the playthrough gate is closed. */
   withdrawable: number;
   /** Playthrough gate: deposits must be fully used on packs to unlock. */
@@ -70,11 +68,7 @@ export async function getWallet(): Promise<WalletResult> {
       wallet: {
         balance: w.balance,
         available: w.available,
-        locked: w.locked,
         isFrozen: w.is_frozen,
-        nextUnlock: w.next_unlock
-          ? { amount: w.next_unlock.amount, date: w.next_unlock.date }
-          : null,
         // Deploy-skew fallback: a backend missing these renders as
         // not-yet-withdrawable (0) rather than crashing the page. Default to 0
         // — never another balance field — so unknown never overstates.

@@ -1,5 +1,7 @@
 # The reward economy is suspended, not retired
 
+> **Superseded for referrals (2026-08-24).** The referral half of this suspension no longer applies — the programme was removed outright, code and schema, by [ADR 0007](0007-referral-programme-removed.md). Everything below about VIP, Reward Box, Reward Draw, Voucher and Daily still stands.
+
 PR #294 (2026-07-29) pulled VIP reward claiming (`/vip`, its voucher list, the
 daily reward box) and the two-tier referral programme
 (`/vouchers`, `/daily`, `/rewards`, `/referrals`, `/invite/[handle]`) off the

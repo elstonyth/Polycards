@@ -1,6 +1,8 @@
-// QA for the 2026-07-29 reward-surface suspension: /vip, /vouchers, /daily,
-// /referrals, /invite/* must 404; the home teaser must drop the referral pitch;
-// (best-effort) a logged-in /me must carry no links into the dead routes.
+// QA for the 2026-07-29 reward-surface suspension: /vip, /vouchers and /daily
+// must 404; the home teaser must drop the referral pitch; (best-effort) a
+// logged-in /me must carry no links into the dead routes.
+// (/referrals and /invite/* left this sweep when the referral engine was
+// removed outright — those paths are free for the rebuilt system to claim.)
 // Run after `npm run build && pwsh scripts/serve-standalone.ps1 -Port 4110`.
 import { chromium } from 'playwright';
 import { mkdir, readFile } from 'node:fs/promises';
@@ -41,13 +43,7 @@ const context = await browser.newContext({
 const page = await context.newPage();
 
 // 1. Suspended routes must 404.
-for (const route of [
-  '/vip',
-  '/vouchers',
-  '/daily',
-  '/referrals',
-  '/invite/anything',
-]) {
+for (const route of ['/vip', '/vouchers', '/daily']) {
   const resp = await page.goto(BASE + route, {
     waitUntil: 'load',
     timeout: 30_000,
@@ -151,9 +147,7 @@ if (PUB_KEY) {
       Array.from(document.querySelectorAll('a[href]'))
         .map((a) => a.getAttribute('href'))
         // /rewards was a redirect stub into /vip, so it 404s too.
-        .filter((h) =>
-          /^\/(vip|vouchers|daily|referrals|invite|rewards)(\/|$)/.test(h),
-        ),
+        .filter((h) => /^\/(vip|vouchers|daily|rewards)(\/|$)/.test(h)),
     );
     check(
       deadLinks.length === 0,

@@ -77,16 +77,8 @@ medusaIntegrationTestRunner({
         expect(res.data.wallet).toMatchObject({
           balance: expect.any(Number),
           available: expect.any(Number),
-          locked: expect.any(Number),
           is_frozen: false,
         });
-        // next_unlock is either null or { amount: Number, date: string }
-        expect(
-          res.data.wallet.next_unlock === null ||
-            (typeof res.data.wallet.next_unlock === 'object' &&
-              typeof res.data.wallet.next_unlock.amount === 'number' &&
-              typeof res.data.wallet.next_unlock.date === 'string'),
-        ).toBe(true);
         // backward-compat: top-level balance is unchanged and matches wallet.balance
         expect(res.data.balance).toBe(res.data.wallet.balance);
       });

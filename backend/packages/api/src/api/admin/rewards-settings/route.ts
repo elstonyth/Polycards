@@ -7,7 +7,7 @@ import type PacksModuleService from '../../../modules/packs/service';
 import { validateRewardsPatch } from '../../../modules/packs/rewards-settings-validate';
 import { reqReason } from './validate';
 
-// GET /admin/rewards-settings — current commission-engine config.
+// GET /admin/rewards-settings — current reward config.
 export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,

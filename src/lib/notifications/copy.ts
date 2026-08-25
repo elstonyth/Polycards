@@ -6,7 +6,6 @@ import {
   Package,
   Sparkles,
   Ticket,
-  TrendingUp,
   Trophy,
   type LucideIcon,
 } from 'lucide-react';
@@ -93,19 +92,6 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
     },
     href: null,
     action: null,
-  },
-
-  commission_matured: {
-    icon: TrendingUp,
-    variant: 'success',
-    policy: 'always',
-    title: 'Commission unlocked',
-    body: (data) =>
-      data?.frozen === true
-        ? 'It will be available once your account is unfrozen.'
-        : 'Your commission is now available to spend.',
-    href: '/transactions',
-    action: 'View ledger',
   },
 
   delivery_status: {

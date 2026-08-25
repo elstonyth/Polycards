@@ -11,7 +11,6 @@ const row = (over: Partial<VipLevelRow> = {}): VipLevelRow => ({
   voucherInput: '300',
   boxTier: 'a',
   frameUnlock: false,
-  referralInput: '1',
   ...over,
 });
 

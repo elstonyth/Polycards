@@ -16,7 +16,6 @@ export type VipLevel = {
     voucherAmount: number;
     boxTier: string;
     frameUnlock: boolean;
-    directReferralPct: number;
   };
 };
 
@@ -27,7 +26,6 @@ export type RawVipLevel = {
     voucher_amount: number;
     box_tier: string;
     frame_unlock: boolean;
-    direct_referral_pct: number;
   };
 };
 
@@ -57,7 +55,6 @@ export function mapVipLevels(raw: RawVipLevel[]): VipLevel[] {
       voucherAmount: r.reward.voucher_amount,
       boxTier: r.reward.box_tier,
       frameUnlock: r.reward.frame_unlock,
-      directReferralPct: r.reward.direct_referral_pct,
     },
   }));
 }

@@ -18,7 +18,6 @@ medusaIntegrationTestRunner({
           customerId: cust, amount: -40, sourceTransactionId: "open_settle_1",
         });
         expect(r.balance).toBe(60);
-        expect(r.commissions).toEqual([]);
         const summary = await packs.creditSummary(cust);
         expect(summary.balance).toBe(60);
         expect(summary.externalFundedSpendTotal).toBe(40); // external consumed

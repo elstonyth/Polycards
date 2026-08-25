@@ -146,7 +146,7 @@ export async function getVaultLatest(): Promise<string | null> {
 }
 
 // The newest balance movement for the caller — the Me tab's money-dot signal.
-// Every ledger row counts (sell-back, top-up, withdrawal, commission, reward,
+// Every ledger row counts (sell-back, top-up, withdrawal, reward,
 // pack-open charge): the row IS what the customer opens /transactions to read,
 // so filtering to money-in would drop the debits people most want to verify.
 // Null = logged out, no transactions, or a failed read; callers render no dot

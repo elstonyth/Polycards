@@ -44,7 +44,6 @@ medusaIntegrationTestRunner({
               voucher_amount: r.voucher_amount,
               box_tier: r.box_tier,
               frame_unlock: r.frame_unlock,
-              direct_referral_pct: r.direct_referral_pct,
               prizes: r.prizes ?? null,
             })),
           );

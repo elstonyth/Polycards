@@ -13,9 +13,9 @@ const BOX_TIERS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'Z'];
 // A small valid ladder reused across POST cases: 3 contiguous rungs, rung 1
 // threshold 0, strictly increasing, no frames (all non-decade), box_tier 'a'.
 const smallLadder = () => [
-  { level: 1, spend_threshold: 0, voucher_amount: 0, box_tier: 'a', frame_unlock: false, direct_referral_pct: 1 },
-  { level: 2, spend_threshold: 100, voucher_amount: 5, box_tier: 'a', frame_unlock: false, direct_referral_pct: 1 },
-  { level: 3, spend_threshold: 200, voucher_amount: 9, box_tier: 'a', frame_unlock: false, direct_referral_pct: 2 },
+  { level: 1, spend_threshold: 0, voucher_amount: 0, box_tier: 'a', frame_unlock: false },
+  { level: 2, spend_threshold: 100, voucher_amount: 5, box_tier: 'a', frame_unlock: false },
+  { level: 3, spend_threshold: 200, voucher_amount: 9, box_tier: 'a', frame_unlock: false },
 ];
 
 medusaIntegrationTestRunner({
@@ -42,7 +42,6 @@ medusaIntegrationTestRunner({
               voucher_amount: r.voucher_amount,
               box_tier: r.box_tier,
               frame_unlock: r.frame_unlock,
-              direct_referral_pct: r.direct_referral_pct,
               prizes: r.prizes ?? null,
             })),
           );
@@ -110,7 +109,7 @@ medusaIntegrationTestRunner({
             '/admin/vip-levels',
             {
               levels: [
-                { level: 1, spend_threshold: 5, voucher_amount: 0, box_tier: 'a', frame_unlock: false, direct_referral_pct: 1 },
+                { level: 1, spend_threshold: 5, voucher_amount: 0, box_tier: 'a', frame_unlock: false },
               ],
               reason: 'bad first threshold',
             },

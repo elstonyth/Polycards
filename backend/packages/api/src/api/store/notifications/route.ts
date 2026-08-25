@@ -26,7 +26,7 @@ import { CUSTOMER_FEED_CHANNEL } from '../../../modules/packs/notify-feed';
 // header rely on this spanning beyond the returned page.
 //
 // Pagination: ?limit=&offset= (parsePaginationParams — shared with the admin
-// audit/commissions routes). take limit + 1 → `has_more` without a separate
+// audit route). take limit + 1 → `has_more` without a separate
 // count query; the extra row is sliced off before mapping.
 const PAGE_SIZE = 20;
 

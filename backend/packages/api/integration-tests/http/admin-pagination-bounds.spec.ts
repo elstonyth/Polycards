@@ -6,13 +6,13 @@ jest.setTimeout(240 * 1000);
 const PASSWORD = 'pagination-bounds-test-pw-1';
 const ADMIN_EMAIL = 'pagination-bounds-admin@test.dev';
 
-// Plan 008 Item E: the admin audit/commissions GET routes must reject clearly
+// Plan 008 Item E: the admin audit GET route must reject clearly
 // invalid limit/offset at the boundary with a 400 (the service also clamps, so
 // this is API hygiene, not a live DoS). A valid request still returns 200.
 medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ api, getContainer }) => {
-    describe('admin audit/commissions pagination bounds', () => {
+    describe('admin audit pagination bounds', () => {
       let adminToken: string;
 
       beforeEach(async () => {
@@ -40,16 +40,6 @@ medusaIntegrationTestRunner({
       it('audit: rejects a non-numeric offset with 400', async () => {
         const res = await unwrapResponse(
           api.get(`/admin/customers/${cid}/audit?offset=abc`, adminHeaders()),
-        );
-        expect(res.status).toBe(400);
-      });
-
-      it('commissions: rejects an absurd limit with 400', async () => {
-        const res = await unwrapResponse(
-          api.get(
-            `/admin/customers/${cid}/commissions?limit=99999`,
-            adminHeaders(),
-          ),
         );
         expect(res.status).toBe(400);
       });

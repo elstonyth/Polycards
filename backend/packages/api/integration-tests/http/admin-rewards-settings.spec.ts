@@ -8,16 +8,24 @@ jest.setTimeout(240 * 1000);
 const PASSWORD = 'admin-rewards-settings-test-pw-1';
 const ADMIN_EMAIL = 'admin-rewards-settings@test.dev';
 
+// withdrawals_per_day is the only setting this endpoint still carries — the
+// commission knobs (cooldown / team-override pct / generation cap) left with
+// the referral programme (ADR 0007). The auth guard, the validation posture and
+// the audited upsert are unchanged, so they are still exercised here.
 medusaIntegrationTestRunner({
   inApp: true,
-  env: { COMMISSION_COOLDOWN_DAYS: '3' }, // leave env at default so DB row drives tests
   testSuite: ({ api, getContainer }) => {
     describe('GET + POST /admin/rewards-settings', () => {
       let adminToken: string;
 
       beforeEach(async () => {
         const container = getContainer();
-        adminToken = await mintSuperAdmin(container, api, ADMIN_EMAIL, PASSWORD);
+        adminToken = await mintSuperAdmin(
+          container,
+          api,
+          ADMIN_EMAIL,
+          PASSWORD,
+        );
       });
 
       const adminHeaders = (): Record<string, string> => ({
@@ -34,7 +42,7 @@ medusaIntegrationTestRunner({
       it('POST /admin/rewards-settings → 401 without auth', async () => {
         const res = await unwrapResponse(
           api.post('/admin/rewards-settings', {
-            teamOverridePct: 0.25,
+            withdrawals_per_day: 2,
             reason: 'tune',
           }),
         );
@@ -49,40 +57,28 @@ medusaIntegrationTestRunner({
         );
         expect(res.status).toBe(200);
         expect(res.data).toMatchObject({
-          teamOverridePct: expect.any(Number),
-          overrideGenerationCap: expect.any(Number),
+          withdrawals_per_day: expect.any(Number),
         });
       });
 
       // ------------------------------------------------------------------ POST validation
 
-      it('POST → 400 when teamOverridePct is exactly 1 (explode guard)', async () => {
+      it('POST → 400 when withdrawals_per_day is 0', async () => {
         const res = await unwrapResponse(
           api.post(
             '/admin/rewards-settings',
-            { teamOverridePct: 1, reason: 'x' },
+            { withdrawals_per_day: 0, reason: 'x' },
             { headers: adminHeaders() },
           ),
         );
         expect(res.status).toBe(400);
       });
 
-      it('POST → 400 when teamOverridePct is 0', async () => {
+      it('POST → 400 when withdrawals_per_day is fractional', async () => {
         const res = await unwrapResponse(
           api.post(
             '/admin/rewards-settings',
-            { teamOverridePct: 0, reason: 'x' },
-            { headers: adminHeaders() },
-          ),
-        );
-        expect(res.status).toBe(400);
-      });
-
-      it('POST → 400 when teamOverridePct is fractional (0.205)', async () => {
-        const res = await unwrapResponse(
-          api.post(
-            '/admin/rewards-settings',
-            { teamOverridePct: 0.205, reason: 'x' },
+            { withdrawals_per_day: 1.5, reason: 'x' },
             { headers: adminHeaders() },
           ),
         );
@@ -93,7 +89,7 @@ medusaIntegrationTestRunner({
         const res = await unwrapResponse(
           api.post(
             '/admin/rewards-settings',
-            { teamOverridePct: 0.25 },
+            { withdrawals_per_day: 2 },
             { headers: adminHeaders() },
           ),
         );
@@ -104,7 +100,7 @@ medusaIntegrationTestRunner({
         const res = await unwrapResponse(
           api.post(
             '/admin/rewards-settings',
-            { teamOverridePct: 0.25, reason: '   ' },
+            { withdrawals_per_day: 2, reason: '   ' },
             { headers: adminHeaders() },
           ),
         );
@@ -130,21 +126,19 @@ medusaIntegrationTestRunner({
         const postRes = await unwrapResponse(
           api.post(
             '/admin/rewards-settings',
-            { teamOverridePct: 0.25, reason: 'tune for test' },
+            { withdrawals_per_day: 3, reason: 'tune for test' },
             { headers: adminHeaders() },
           ),
         );
         expect(postRes.status).toBe(200);
-        expect(postRes.data.teamOverridePct).toBeCloseTo(0.25);
-        expect(postRes.data).toHaveProperty('commissionCooldownDays');
-        expect(postRes.data).toHaveProperty('overrideGenerationCap');
+        expect(postRes.data.withdrawals_per_day).toBe(3);
 
         // GET must now reflect the new value
         const getRes = await unwrapResponse(
           api.get('/admin/rewards-settings', { headers: adminHeaders() }),
         );
         expect(getRes.status).toBe(200);
-        expect(getRes.data.teamOverridePct).toBeCloseTo(0.25);
+        expect(getRes.data.withdrawals_per_day).toBe(3);
 
         // Audit row must exist with correct action + admin_id from session
         const [aud] = await packs.listAdminActionAudits(
@@ -158,31 +152,26 @@ medusaIntegrationTestRunner({
         expect(aud.admin_id.length).toBeGreaterThan(0);
       });
 
-      it('POST a second patch (upsert) → values merge correctly, second audit row written', async () => {
+      it('POST a second patch (upsert) → row is updated, second audit row written', async () => {
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
 
-        // First write
         await unwrapResponse(
           api.post(
             '/admin/rewards-settings',
-            { teamOverridePct: 0.3, commissionCooldownDays: 5, reason: 'first' },
+            { withdrawals_per_day: 4, reason: 'first' },
             { headers: adminHeaders() },
           ),
         );
 
-        // Second write — only override cap
         const res = await unwrapResponse(
           api.post(
             '/admin/rewards-settings',
-            { overrideGenerationCap: 50, reason: 'second' },
+            { withdrawals_per_day: 5, reason: 'second' },
             { headers: adminHeaders() },
           ),
         );
         expect(res.status).toBe(200);
-        expect(res.data.overrideGenerationCap).toBe(50);
-        // Previously-set values preserved
-        expect(res.data.teamOverridePct).toBeCloseTo(0.3);
-        expect(res.data.commissionCooldownDays).toBe(5);
+        expect(res.data.withdrawals_per_day).toBe(5);
 
         // Two audit rows total
         const rows = await packs.listAdminActionAudits(

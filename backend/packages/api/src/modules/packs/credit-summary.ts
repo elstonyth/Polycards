@@ -22,7 +22,7 @@ export interface LedgerTotals {
   externalFundedSpendCents: number;
   // VIP turnover basis (2026-07-22): net pack_open spend in cents regardless of
   // funding source — winnings-funded opens count toward VIP. Reversal rows
-  // (amount>0, reason pack_open) net it back down. Referral commissions and the
+  // (amount>0, reason pack_open) net it back down. Promo grants and the
   // withdrawal playthrough gate still use the external-funded fields above.
   vipSpendCents: number;
   // Plan 033/038 playthrough basis: topups that carry a non-null external basis

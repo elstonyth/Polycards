@@ -30,24 +30,16 @@ import {
   useFreezeCustomer,
   usePayoutDetails,
   usePulls,
-  useReferralTree,
-  useCustomerCommissions,
-  useReverseCommission,
   useSavePayoutDetails,
   useSetPlayerGroup,
   useSpendReport,
-  useSuspendCommission,
   useUnfreezeCustomer,
-  useUnsuspendCommission,
 } from '../../../lib/queries';
 import { deliveryStatusLabel, orderDateTime, rm } from '../../../lib/format';
 import type {
-  AdminCommissionRow,
   CustomerAudit,
   DeliveryStatus,
   PayoutDetails,
-  ReferralTree,
-  ReferralTreeNode,
 } from '../../../lib/admin-rest';
 import { resolveImageUrl } from '../../../lib/image-url';
 import {
@@ -59,16 +51,6 @@ import { Pager } from '../../../components/Pager';
 import { PullsTable } from '../../../components/PullsTable';
 
 // ponytail: no config export — keeps route out of sidebar nav (mirrors packs/[slug]/page.tsx)
-
-const COMMISSION_STATUS_COLOR: Record<
-  string,
-  'green' | 'orange' | 'red' | 'grey'
-> = {
-  available: 'green',
-  pending: 'orange',
-  suspended: 'red',
-  reversed: 'grey',
-};
 
 // StatusBadge tone per delivery status, mirroring the All Orders table. A
 // ternary chain rather than a second copy of that page's exhaustive Record: an
@@ -85,13 +67,7 @@ const deliveryTone = (
         : 'orange';
 
 // Which modal is open. null = none.
-type ModalKind =
-  | 'freeze'
-  | 'unfreeze'
-  | 'credits'
-  | 'reverse'
-  | 'suspend'
-  | 'unsuspend';
+type ModalKind = 'freeze' | 'unfreeze' | 'credits';
 
 type TabKey =
   | 'profile'
@@ -120,9 +96,8 @@ type TabKey =
 //
 // History is the exception that keeps its queries in the PARENT. The header's
 // frozen badge and its Freeze/Unfreeze button read `account_state` off the
-// very same /audit response, so that query cannot move down here — and the
-// referral/commission pair rides along with it rather than splitting one
-// section's data across two owners. This tab is a JSX move, nothing else.
+// very same /audit response, so that query cannot move down here. This tab is
+// a JSX move, nothing else.
 
 const BankForm = ({
   customerId,
@@ -340,7 +315,7 @@ const ProfileTab = ({ customerId }: { customerId: string | null }) => {
   // metadata is Record<string, unknown> — the handle is only renderable once
   // it has been narrowed to a non-empty string.
   const handle = customer?.metadata?.handle;
-  const referralCode = typeof handle === 'string' && handle ? handle : '—';
+  const handleLabel = typeof handle === 'string' && handle ? handle : '—';
   const name =
     [customer?.first_name, customer?.last_name].filter(Boolean).join(' ') ||
     '—';
@@ -371,8 +346,8 @@ const ProfileTab = ({ customerId }: { customerId: string | null }) => {
             <dd>{customer.email}</dd>
             <dt className="text-ui-fg-subtle">{t('players.phone')}</dt>
             <dd>{customer.phone ?? '—'}</dd>
-            <dt className="text-ui-fg-subtle">{t('players.referralCode')}</dt>
-            <dd>{referralCode}</dd>
+            <dt className="text-ui-fg-subtle">{t('players.handle')}</dt>
+            <dd>{handleLabel}</dd>
             <dt className="text-ui-fg-subtle">{t('players.registered')}</dt>
             <dd className="tabular-nums">
               {orderDateTime(customer.created_at)}
@@ -979,33 +954,18 @@ const PullsTab = ({ customerId }: { customerId: string }) => {
 };
 
 const HistoryTab = ({
-  treeQ,
-  commissionsQ,
   auditQ,
-  commPage,
-  setCommPage,
   auditPage,
   setAuditPage,
-  openModal,
 }: {
-  treeQ: UseQueryResult<ReferralTree>;
-  commissionsQ: UseQueryResult<{ commissions: AdminCommissionRow[] }>;
   auditQ: UseQueryResult<CustomerAudit>;
-  commPage: number;
-  setCommPage: (page: number) => void;
   auditPage: number;
   setAuditPage: (page: number) => void;
-  openModal: (kind: ModalKind, commId?: string) => void;
 }) => {
   const { t } = useTranslation();
-  const navigate = useNavigate();
 
-  const { data: tree, isError: treeError } = treeQ;
-  const { data: commissionsData, isError: commissionsError } = commissionsQ;
   const { data: auditData, isError: auditError } = auditQ;
 
-  const commissions = commissionsData?.commissions ?? [];
-  const nodes: ReferralTreeNode[] = tree ? [tree.root, ...tree.nodes] : [];
   const auditActions = (auditData?.actions ?? [])
     // ponytail: belt-and-suspenders — backend already orders DESC; sort client-side to guarantee newest-first regardless of fetch order
     .slice()
@@ -1017,260 +977,6 @@ const HistoryTab = ({
 
   return (
     <>
-      {/* ── Referral tree ───────────────────────────────────────── */}
-      <Container className="p-0">
-        <div className="px-6 py-4">
-          <Heading level="h2">{t('customer360.treeTitle')}</Heading>
-          <Text className="text-ui-fg-subtle mt-1" size="small">
-            {t('customer360.treeSubtitle')}
-          </Text>
-        </div>
-
-        {tree?.truncated && (
-          <div className="border-t bg-ui-tag-orange-bg px-6 py-3">
-            <Text size="small" className="text-ui-tag-orange-text">
-              {t('customer360.treeTruncated')}
-            </Text>
-          </div>
-        )}
-
-        {treeError ? (
-          <div className="border-t px-6 py-6">
-            <Text size="small" className="text-ui-fg-error">
-              Failed to load.
-            </Text>
-          </div>
-        ) : !tree ? (
-          <div className="border-t px-6 py-6">
-            <LoadingSkeleton />
-          </div>
-        ) : (
-          <div
-            className="overflow-x-auto"
-            tabIndex={0}
-            role="region"
-            aria-label="Referral tree table"
-          >
-            <Table>
-              <Table.Header>
-                <Table.Row>
-                  <Table.HeaderCell>
-                    {t('customer360.treeHandle')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell>
-                    {t('customer360.treeDepth')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell>
-                    {t('customer360.treeRecruits')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell>
-                    {t('customer360.treeVip')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell>
-                    {t('customer360.treeFrozen')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell />
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {nodes.map((node) => (
-                  <Table.Row key={node.customer_id}>
-                    <Table.Cell>
-                      {/* indent by depth using padding */}
-                      <span
-                        style={{ paddingLeft: `${node.depth * 20}px` }}
-                        className="flex flex-col"
-                      >
-                        <span className="font-medium">
-                          {node.handle ?? node.email ?? node.customer_id}
-                        </span>
-                        {node.handle && node.email && (
-                          <span className="text-ui-fg-subtle text-xs">
-                            {node.email}
-                          </span>
-                        )}
-                      </span>
-                    </Table.Cell>
-                    <Table.Cell className="tabular-nums">
-                      {node.depth}
-                    </Table.Cell>
-                    <Table.Cell className="tabular-nums">
-                      {node.direct_recruit_count}
-                    </Table.Cell>
-                    <Table.Cell>
-                      {node.vip_level !== null ? (
-                        <Badge size="2xsmall" color="purple">
-                          {t('customer360.vipLevelShort', {
-                            level: node.vip_level,
-                          })}
-                        </Badge>
-                      ) : (
-                        <span className="text-ui-fg-subtle">—</span>
-                      )}
-                    </Table.Cell>
-                    <Table.Cell>
-                      {node.frozen ? (
-                        <Badge size="2xsmall" color="red">
-                          {t('customer360.frozen')}
-                        </Badge>
-                      ) : (
-                        <span className="text-ui-fg-subtle">—</span>
-                      )}
-                    </Table.Cell>
-                    <Table.Cell>
-                      {node.has_more_depth && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            navigate(`/customers/${node.customer_id}`)
-                          }
-                          className="text-ui-fg-interactive hover:text-ui-fg-interactive-hover text-xs underline"
-                        >
-                          {t('customer360.treeOpenSubtree')}
-                        </button>
-                      )}
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table>
-          </div>
-        )}
-      </Container>
-
-      {/* ── Commissions ─────────────────────────────────────────── */}
-      <Container className="p-0">
-        <div className="px-6 py-4">
-          <Heading level="h2">{t('customer360.commissionsTitle')}</Heading>
-          <Text className="text-ui-fg-subtle mt-1" size="small">
-            {t('customer360.commissionsSubtitle')}
-          </Text>
-        </div>
-
-        {commissionsError ? (
-          <div className="border-t px-6 py-6">
-            <Text size="small" className="text-ui-fg-error">
-              Failed to load.
-            </Text>
-          </div>
-        ) : !commissionsData ? (
-          <div className="border-t px-6 py-6">
-            <LoadingSkeleton />
-          </div>
-        ) : commissions.length === 0 ? (
-          <div className="border-t px-6 py-6">
-            <Text className="text-ui-fg-subtle">
-              {t('customer360.commissionsEmpty')}
-            </Text>
-          </div>
-        ) : (
-          <>
-            <div
-              className="overflow-x-auto"
-              tabIndex={0}
-              role="region"
-              aria-label="Commissions table"
-            >
-              <Table>
-                <Table.Header>
-                  <Table.Row>
-                    <Table.HeaderCell>
-                      {t('customer360.commGen')}
-                    </Table.HeaderCell>
-                    <Table.HeaderCell>
-                      {t('customer360.commKind')}
-                    </Table.HeaderCell>
-                    <Table.HeaderCell>
-                      {t('customer360.commStatus')}
-                    </Table.HeaderCell>
-                    <Table.HeaderCell className="text-right">
-                      {t('customer360.commAmount')}
-                    </Table.HeaderCell>
-                    <Table.HeaderCell>
-                      {t('customer360.commOpener')}
-                    </Table.HeaderCell>
-                    <Table.HeaderCell>
-                      {t('customer360.commMatures')}
-                    </Table.HeaderCell>
-                    <Table.HeaderCell>
-                      {t('customer360.commActions')}
-                    </Table.HeaderCell>
-                  </Table.Row>
-                </Table.Header>
-                <Table.Body>
-                  {commissions.map((c) => (
-                    <Table.Row key={c.id}>
-                      <Table.Cell className="tabular-nums">
-                        {c.generation}
-                      </Table.Cell>
-                      <Table.Cell>
-                        <Badge size="2xsmall">{c.kind}</Badge>
-                      </Table.Cell>
-                      <Table.Cell>
-                        <StatusBadge
-                          color={COMMISSION_STATUS_COLOR[c.status] ?? 'grey'}
-                        >
-                          {c.status}
-                        </StatusBadge>
-                      </Table.Cell>
-                      <Table.Cell className="text-right tabular-nums">
-                        {rm(parseFloat(c.amount))}
-                      </Table.Cell>
-                      <Table.Cell className="text-ui-fg-subtle">
-                        {c.opener.handle ?? c.opener.customer_id ?? '—'}
-                      </Table.Cell>
-                      <Table.Cell className="text-ui-fg-subtle">
-                        {c.matures_at
-                          ? new Date(c.matures_at).toLocaleDateString('en-US')
-                          : '—'}
-                      </Table.Cell>
-                      <Table.Cell>
-                        <div className="flex items-center gap-1">
-                          {c.status !== 'reversed' && (
-                            <Button
-                              size="small"
-                              variant="secondary"
-                              onClick={() => openModal('reverse', c.id)}
-                            >
-                              {t('customer360.commReverse')}
-                            </Button>
-                          )}
-                          {c.status === 'available' && (
-                            <Button
-                              size="small"
-                              variant="secondary"
-                              onClick={() => openModal('suspend', c.id)}
-                            >
-                              {t('customer360.commSuspend')}
-                            </Button>
-                          )}
-                          {c.status === 'suspended' && (
-                            <Button
-                              size="small"
-                              variant="secondary"
-                              onClick={() => openModal('unsuspend', c.id)}
-                            >
-                              {t('customer360.commUnsuspend')}
-                            </Button>
-                          )}
-                        </div>
-                      </Table.Cell>
-                    </Table.Row>
-                  ))}
-                </Table.Body>
-              </Table>
-            </div>
-            <Pager
-              page={commPage}
-              onPage={setCommPage}
-              pageSize={50}
-              count={commissions.length}
-              total={null}
-            />
-          </>
-        )}
-      </Container>
-
       {/* ── Audit timeline ──────────────────────────────────────── */}
       <Container className="p-0">
         <div className="px-6 py-4">
@@ -1413,32 +1119,24 @@ const Customer360Page = () => {
 
   const [tab, setTab] = useState<TabKey>('profile');
 
-  // Offset pages for the two paged tables. Both endpoints serve 50/page.
-  const [commPage, setCommPage] = useState(0);
+  // Offset page for the audit table (the endpoint serves 50/page).
   const [auditPage, setAuditPage] = useState(0);
-  // Reset both offsets when the viewed customer changes (the tree's "open
-  // subtree" button navigates to another /customers/:id without remounting) so
-  // a stale offset can't leak into the next customer's tables. Render-phase
-  // reset runs before the fetch — no wasted (newId, stalePage) request — and is
-  // a harmless no-op if the route does remount.
+  // Reset the offset when the viewed customer changes without a remount, so a
+  // stale offset can't leak into the next customer's table. Render-phase reset
+  // runs before the fetch — no wasted (newId, stalePage) request — and is a
+  // harmless no-op if the route does remount.
   const [prevId, setPrevId] = useState(customerId);
   if (customerId !== prevId) {
     setPrevId(customerId);
-    setCommPage(0);
     setAuditPage(0);
   }
 
   const { data: view, isError: viewError } = useCustomerGacha(customerId);
-  const treeQ = useReferralTree(customerId);
-  const commissionsQ = useCustomerCommissions(customerId, commPage);
   const auditQ = useCustomerAudit(customerId, auditPage);
 
   const freeze = useFreezeCustomer();
   const unfreeze = useUnfreezeCustomer();
   const adjustCredits = useAdjustCredits();
-  const reverseComm = useReverseCommission();
-  const suspendComm = useSuspendCommission();
-  const unsuspendComm = useUnsuspendCommission();
 
   // The header's badge and its Freeze/Unfreeze button read the account state
   // off the audit response — which is why that query stays here and not in the
@@ -1450,19 +1148,16 @@ const Customer360Page = () => {
 
   // ── Modal state ─────────────────────────────────────────────────────────────
   const [modal, setModal] = useState<ModalKind | null>(null);
-  // shared reason field (freeze / unfreeze / reverse / suspend / unsuspend)
+  // shared reason field (freeze / unfreeze)
   const [reason, setReason] = useState('');
   // credits-specific fields
   const [creditAmount, setCreditAmount] = useState('');
   const [creditNote, setCreditNote] = useState('');
-  // target commission id for commission actions
-  const [targetCommId, setTargetCommId] = useState('');
 
-  function openModal(kind: ModalKind, commId = '') {
+  function openModal(kind: ModalKind) {
     setReason('');
     setCreditAmount('');
     setCreditNote('');
-    setTargetCommId(commId);
     setModal(kind);
   }
   function closeModal() {
@@ -1500,39 +1195,23 @@ const Customer360Page = () => {
     );
   }
 
-  function applyCommAction() {
-    if (!customerId || !targetCommId || !reason.trim()) return;
-    const vars = { commId: targetCommId, customerId, reason };
-    closeModal();
-    if (modal === 'reverse') reverseComm.mutate(vars);
-    else if (modal === 'suspend') suspendComm.mutate(vars);
-    else if (modal === 'unsuspend') unsuspendComm.mutate(vars);
-  }
-
   // ── Prompt titles / descriptions per modal kind ──────────────────────────
   const MODAL_TITLE: Record<ModalKind, string> = {
     freeze: t('customer360.modalFreezeTitle'),
     unfreeze: t('customer360.modalUnfreezeTitle'),
     credits: t('customer360.modalCreditsTitle'),
-    reverse: t('customer360.modalReverseTitle'),
-    suspend: t('customer360.modalSuspendTitle'),
-    unsuspend: t('customer360.modalUnsuspendTitle'),
   };
 
   const MODAL_DESC: Record<ModalKind, string> = {
     freeze: t('customer360.modalFreezeDesc'),
     unfreeze: t('customer360.modalUnfreezeDesc'),
     credits: t('customer360.modalCreditsDesc'),
-    reverse: t('customer360.modalReverseDesc'),
-    suspend: t('customer360.modalSuspendDesc'),
-    unsuspend: t('customer360.modalUnsuspendDesc'),
   };
 
   function handleConfirm() {
     if (modal === 'freeze') applyFreeze();
     else if (modal === 'unfreeze') applyUnfreeze();
     else if (modal === 'credits') applyAdjustCredits();
-    else applyCommAction();
   }
 
   // Mirror applyAdjustCredits' validation: Number('abc') is NaN (and 'Infinity'
@@ -1778,14 +1457,9 @@ const Customer360Page = () => {
       )}
       {tab === 'history' && (
         <HistoryTab
-          treeQ={treeQ}
-          commissionsQ={commissionsQ}
           auditQ={auditQ}
-          commPage={commPage}
-          setCommPage={setCommPage}
           auditPage={auditPage}
           setAuditPage={setAuditPage}
-          openModal={openModal}
         />
       )}
     </div>

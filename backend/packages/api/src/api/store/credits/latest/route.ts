@@ -14,7 +14,7 @@ import { PACKS_MODULE } from '../../../../modules/packs';
 //
 // EVERY credit_transaction counts, not just money in. The ledger row IS the
 // event the customer goes to /transactions to read: a sell-back, a top-up, a
-// withdrawal, a commission, a reward credit, a pack-open charge. Filtering to
+// withdrawal, a reward credit, a pack-open charge. Filtering to
 // credits only would silently drop the debits people most want to verify.
 //
 // created_at, not updated_at: a ledger row is append-only, and a later

@@ -1,7 +1,7 @@
 # Polycards
 
 The ubiquitous language of the trading-card-pack collectibles platform: gacha
-pack opening, a site-credit economy, buyback, a card vault, a VIP/referral
+pack opening, a site-credit economy, buyback, a card vault, a VIP
 program, and physical delivery. One shared context spans the Next.js storefront
 (`src/`) and the Medusa + Mercur backend (`backend/`) — the terms below mean the
 same thing on both sides of the wire.
@@ -103,13 +103,13 @@ _Avoid_: available (Available is the narrower spendable-now figure below)
 
 **External-Funded**:
 The portion of a balance or spend backed by real-money top-up, as opposed to
-buyback or commission credit. The basis for VIP spend.
+buyback or promo credit. The basis for VIP spend.
 _Avoid_: real money, deposited
 
-**Available** vs **Locked**:
-Commission credit is Locked (not yet spendable) while pending-and-unmatured or
-suspended; Available is the post-maturity spendable amount. Regular top-up and
-buyback credit is always Available.
+**Available**:
+The spendable balance. Equal to Balance, except that a frozen account reports 0.
+(Nothing locks credit any more — the commission lock left with the referral
+programme, ADR 0007.)
 
 ## Selling and cashing out
 
@@ -176,23 +176,22 @@ said no" and a late-landing bank transfer must still be recoverable.
 _Avoid_: failed (a genuinely gateway-refused deposit is a different,
 terminal status)
 
-## Rewards, VIP, and referrals
+## Rewards and VIP
 
-_The reward-granting surfaces below (Reward Box, Reward Draw, Voucher, referral Commission
-pages) are SUSPENDED 2026-07-29 (#294) — storefront routes 404, backend stays live. The
-VIP/daily vocabulary is retained because un-suspending is meant to be a revert, not a
-rewrite; see ADR 0004. VIP Level accrual itself stayed live throughout. **Commission /
-Sponsor / Recruit are a partial exception** (ADR 0004's 2026-08-15 amendment): #427
-deleted the referral WRITE path (`linkSponsor`, `POST /store/referral`) as a security
-fix, so restoring referrals is a rebuild, not a revert. The vocabulary below still
-describes live code, because the ledger reason values and `mature-commissions.ts` were
-deliberately kept — only the write path that would create new referral relationships
-is gone._
+_The reward-granting surfaces below (Reward Box, Reward Draw, Voucher) are
+SUSPENDED 2026-07-29 (#294) — storefront routes 404, backend stays live. The
+VIP/daily vocabulary is retained because un-suspending is meant to be a revert,
+not a rewrite; see ADR 0004. VIP Level accrual itself stayed live throughout._
+
+_The referral programme is a different case: it was REMOVED outright on
+2026-08-24 (ADR 0007) — engine, tables and vocabulary — because it is being
+rebuilt from scratch. Commission / Sponsor / Recruit no longer name anything in
+this codebase; the replacement should establish its own terms._
 
 **VIP Level**:
 A customer's rung 1–100, reached by cumulative pack-open turnover (winnings-funded
 opens count too, #254/ADR 0003 — not external-funded spend). Unlocks a Reward Box
-tier, avatar frames, and referral rates.
+tier and avatar frames.
 _Avoid_: rank, tier (Tier is the price axis)
 
 **Reward Box**:
@@ -210,16 +209,6 @@ A MYR credit grant awarded at a VIP milestone.
 **Frame** / **Avatar Frame**:
 A cosmetic avatar border unlocked at every tenth VIP level.
 _Avoid_: badge, tier, level
-
-**Commission**:
-Referral earnings paid to a sponsor — Direct (a recruit's own opens) or Override
-(deeper referral generations, a.k.a. team). Paired 1:1 with a credit-ledger row.
-_Avoid_: referral bonus, kickback
-
-**Sponsor** / **Recruit**:
-The two roles of a referral relationship — the sponsor earns Commission on the
-recruit's opens.
-_Avoid_: referrer/referee (pick sponsor/recruit)
 
 ## Operator economy
 
