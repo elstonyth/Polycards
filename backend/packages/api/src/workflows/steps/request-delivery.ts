@@ -189,10 +189,12 @@ export const requestDeliveryStep = createStep(
     );
     await packs.deleteDeliveryOrderItems(data.itemIds);
     await packs.deleteDeliveryOrders([data.orderId]);
-    await packs.deleteLedgerEntryByRef('OD', data.orderId);
-    // Undo the fee debit (in-flight rollback only, mirroring the ledger-row
-    // delete above). The guarded delete needs ids, so resolve the row first —
-    // its `reference` is the order id, unique to this request.
+    // Undo the fee debit BEFORE deleting the OD ledger row: compensation
+    // isn't transactional, and if it dies between the two deletes the
+    // surviving artifact should be the harmless one (a ledger row for a
+    // gone order) — not an unrefundable customer debit. The guarded delete
+    // needs ids, so resolve the row first — its `reference` is the order id,
+    // unique to this request (refund rows carry `refund:<id>`, no false match).
     const feeRows = await packs.listCreditTransactions(
       { reason: 'delivery_fee', reference: data.orderId },
       { take: 10 },
@@ -200,6 +202,7 @@ export const requestDeliveryStep = createStep(
     if (feeRows.length) {
       await packs.deleteCreditTransactionsGuarded(feeRows.map((r) => r.id));
     }
+    await packs.deleteLedgerEntryByRef('OD', data.orderId);
   },
 );
 

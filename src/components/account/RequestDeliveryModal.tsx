@@ -62,7 +62,12 @@ export default function RequestDeliveryModal({
   // Fee preview — mirrors the backend's authoritative charge (delivery-fee.ts).
   // Recomputed per render from the selected address; cheap (two lookups).
   const selectedAddress = addrList.find((a) => a.id === selectedAddr);
-  const orderValue = items.reduce((s, i) => s + i.card.marketPriceMyr, 0);
+  // Rounded to cents like the backend's vaultValueForPulls sum, so a float
+  // artifact can't show an insurance line at exactly RM200 that the
+  // authoritative charge never applies.
+  const orderValue =
+    Math.round(items.reduce((s, i) => s + i.card.marketPriceMyr, 0) * 100) /
+    100;
   const fee = selectedAddress
     ? computeDeliveryFee(selectedAddress.postalCode, orderValue)
     : null;
