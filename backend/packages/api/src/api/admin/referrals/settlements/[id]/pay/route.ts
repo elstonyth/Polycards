@@ -16,7 +16,7 @@ export async function POST(
   res: MedusaResponse,
 ): Promise<void> {
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const warn = (message: string) => {
+  const logError = (message: string) => {
     try {
       req.scope.resolve(ContainerRegistrationKeys.LOGGER).error(message);
     } catch {
@@ -46,7 +46,7 @@ export async function POST(
     try {
       await packs.maybeAutoUnfreezeForCustomer(customerId);
     } catch (e: unknown) {
-      warn(
+      logError(
         `[settlements/pay] auto-unfreeze check failed for '${customerId}' — payout stands: ${
           e instanceof Error ? e.message : String(e)
         }`,
