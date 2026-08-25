@@ -215,7 +215,7 @@ function VipTab({ data }: { data: VipRebate | null }) {
         />
       </div>
       <p className="px-1 text-xs leading-relaxed text-neutral-500">
-        回水 — every week, your VIP level pays back a slice of everything you
+        Rebate — every week, your VIP level pays back a slice of everything you
         ripped, as credit, every Wednesday.{' '}
         {data.rebate_bp === 0 && 'Level up to unlock a rebate rate.'}
       </p>
