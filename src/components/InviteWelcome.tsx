@@ -18,12 +18,12 @@ import { Pill } from '@/components/ui/pill';
  * The param is stripped from the URL immediately, so a refresh or a shared
  * screenshot-URL doesn't re-open the modal.
  */
+type InviteState =
+  | { kind: 'invited'; handle: string }
+  | { kind: 'has-account' | 'unknown' };
+
 export default function InviteWelcome() {
-  const [state, setState] = useState<
-    | { kind: 'invited'; handle: string }
-    | { kind: 'has-account' | 'unknown' }
-    | null
-  >(null);
+  const [state, setState] = useState<InviteState | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -39,11 +39,18 @@ export default function InviteWelcome() {
       window.location.pathname + (qs ? `?${qs}` : ''),
     );
 
-    if (invite === 'has-account' || invite === 'unknown') {
-      setState({ kind: invite });
-      return;
-    }
-    setState({ kind: 'invited', handle: invite });
+    const next: InviteState =
+      invite === 'has-account' || invite === 'unknown'
+        ? { kind: invite }
+        : { kind: 'invited', handle: invite };
+
+    // Deliberate post-mount sync read: the invite lives in the URL, which does
+    // not exist during SSR, so this cannot be a lazy initialiser. Same pattern
+    // as the other intentional effect reads in this app (see CookieConsent).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setState(next);
+    if (next.kind !== 'invited') return;
+
     // Give the header a beat to mount its auth listener before dispatching.
     const t = setTimeout(() => openAuth('signup'), 400);
     return () => clearTimeout(t);
