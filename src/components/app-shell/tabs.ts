@@ -28,13 +28,19 @@ export const TABS: Tab[] = [
     href: '/me',
     icon: CircleUserRound,
     gated: true,
+    // Every surface reached from the Me hub, or no tab lights up while the
+    // user is on it. `isTabActive` compares exact-or-`${p}/` prefix, so
+    // '/bank' does NOT swallow '/bank-withdrawal' and both entries are needed.
     match: [
       '/wallet',
       '/settings',
       '/orders',
       '/transactions',
+      '/bank',
       '/bank-withdrawal',
       '/notifications',
+      '/addresses',
+      '/referral',
     ],
   },
 ];
