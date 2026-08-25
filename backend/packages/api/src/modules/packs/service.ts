@@ -1452,7 +1452,16 @@ class PacksModuleService extends MedusaService({
   async payWeeklySettlement(
     input: { settlementId: string; adminId?: string },
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ paid: number; skipped: number }> {
+  ): Promise<{
+    paid: number;
+    skipped: number;
+    /** Customers whose commission credit was written by THIS call. The caller
+     *  runs the auto-unfreeze check over them AFTER this transaction commits —
+     *  see the note on paid++ below for why it cannot happen in here. Excludes
+     *  the replayed lines: those were paid on an earlier run and their unfreeze
+     *  already had its chance. */
+    paid_customer_ids: string[];
+  }> {
     const [run] = await this.listWeeklySettlements(
       { id: input.settlementId },
       { take: 1 },
@@ -1483,6 +1492,7 @@ class PacksModuleService extends MedusaService({
 
     let paid = 0;
     let skipped = 0;
+    const paidCustomerIds: string[] = [];
     for (const line of pending) {
       if (skip.has(line.customer_id)) {
         await this.updateWeeklySettlementLines(
@@ -1548,6 +1558,13 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
       paid++;
+      // This credit was written outside mutateCreditAtomic, so it skipped the
+      // inline auto-unfreeze — a referrer sitting on an AUTO freeze whose debt
+      // this repays stays frozen. The caller lifts it, POST-commit and bare.
+      // Not here: this method is one transaction, so an in-loop unfreeze would
+      // hold a `credit:<id>` advisory lock per customer until the whole run
+      // commits, racing every concurrent top-up.
+      paidCustomerIds.push(line.customer_id);
     }
 
     const stillPending = await this.listWeeklySettlementLines(
@@ -1580,7 +1597,7 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    return { paid, skipped };
+    return { paid, skipped, paid_customer_ids: paidCustomerIds };
   }
 
   // Storefront read: the /task Referral tab payload. Live numbers for the
