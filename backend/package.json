@@ -37,10 +37,15 @@
     "i18next-http-backend@2.4.2": "^3.0.5",
     "lodash@~4.17.0": "^4.18.1",
     "protobufjs": "^8.4.1",
-    "react-router@6.30.3": "6.30.4",
-    "react-router-dom@6.30.3": "6.30.4",
+    "react-router@6.30.3": "6.30.6",
+    "react-router-dom@6.30.3": "6.30.6",
     "uuid@^9.0.0": "^11.1.1",
-    "vite@^5.4.21": "^6.4.3"
+    "vite@^5.4.21": "^6.4.3",
+    "@mikro-orm/cli@6.6.12": "6.6.16",
+    "@mikro-orm/core@6.6.12": "6.6.16",
+    "@mikro-orm/knex@6.6.12": "6.6.16",
+    "@mikro-orm/migrations@6.6.12": "6.6.16",
+    "@mikro-orm/postgresql@6.6.12": "6.6.16"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
