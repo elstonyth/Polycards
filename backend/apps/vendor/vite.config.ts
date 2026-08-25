@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { mercurDashboardPlugin } from '@mercurjs/dashboard-sdk';
+import { mercurDashboardPlugin } from '@mercurjs/dashboard-sdk/vite';
 
 // Backend origin baked into the vendor bundle. It must be a VALID ABSOLUTE URL
 // — @mercurjs/client does `new URL(baseUrl)` with no fallback, so an

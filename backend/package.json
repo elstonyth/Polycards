@@ -11,11 +11,11 @@
   },
   "dependencies": {
     "@hookform/resolvers": "5.9.1",
-    "@medusajs/icons": "2.13.6",
-    "@medusajs/ui": "4.1.19",
-    "@mercurjs/client": "2.1.6",
-    "@mercurjs/dashboard-sdk": "2.1.6",
-    "@mercurjs/dashboard-shared": "2.1.6",
+    "@medusajs/icons": "2.19.0",
+    "@medusajs/ui": "4.2.1",
+    "@mercurjs/client": "2.3.1",
+    "@mercurjs/dashboard-sdk": "2.3.1",
+    "@mercurjs/dashboard-shared": "2.3.1",
     "@tanstack/react-query": "5.101.4",
     "jsonwebtoken": "9.0.3",
     "lodash": "^4.18.1",
@@ -24,7 +24,7 @@
     "react-hook-form": "7.86.0",
     "react-i18next": "13.5.0",
     "react-jwt": "^2.0.0",
-    "react-router-dom": "6.30.6",
+    "react-router-dom": "7.18.2",
     "zod": "4.4.3"
   },
   "resolutions": {
@@ -37,10 +37,12 @@
     "i18next-http-backend@2.4.2": "^3.0.5",
     "lodash@~4.17.0": "^4.18.1",
     "protobufjs": "^8.4.1",
-    "react-router@6.30.3": "6.30.6",
-    "react-router-dom@6.30.3": "6.30.6",
     "uuid@^9.0.0": "^11.1.1",
-    "vite@^5.4.21": "^6.4.3"
+    "vite@^5.4.21": "^7.3.6",
+    "@medusajs/dashboard@2.18.0": "2.19.0",
+    "@medusajs/admin-shared@2.18.0": "2.19.0",
+    "@medusajs/icons@2.18.0": "2.19.0",
+    "@medusajs/ui@4.1.19": "4.2.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

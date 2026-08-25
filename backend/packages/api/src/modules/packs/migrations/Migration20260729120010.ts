@@ -11,7 +11,7 @@ import { Migration } from '@medusajs/framework/mikro-orm/migrations';
 // Hand-written is correct here — plain partial indexes, no bigNumber column
 // involved, so none of the raw_* trap applies. IF NOT EXISTS keeps it a no-op
 // on any database that already has them.
-export class Migration20260729120000 extends Migration {
+export class Migration20260729120010 extends Migration {
   override async up(): Promise<void> {
     this.addSql(
       `CREATE INDEX IF NOT EXISTS "IDX_ledger_entry_deleted_at" ON "ledger_entry" ("deleted_at") WHERE deleted_at IS NULL;`,

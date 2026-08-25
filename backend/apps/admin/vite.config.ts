@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { mercurDashboardPlugin } from '@mercurjs/dashboard-sdk';
+import { mercurDashboardPlugin } from '@mercurjs/dashboard-sdk/vite';
 
 // @acme/odds-math is consumed from SOURCE here, not from its CJS `dist`.
 //
