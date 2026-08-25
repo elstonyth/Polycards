@@ -309,6 +309,7 @@ export const CREDIT_REASONS = [
   'voucher_claim',
   'reward_credit',
   'daily_reward',
+  'delivery_fee',
 ] as const;
 export type CreditReason = (typeof CREDIT_REASONS)[number];
 
@@ -674,6 +675,11 @@ export const DeliveryOrderSchema = z.looseObject({
   ]),
   created_at: z.string(),
   tracking_number: z.string().nullable().optional(),
+  // Wallet charge stamped at request since 2026-08-25. Optional AND nullable:
+  // an old backend omits them, pre-fee orders carry null — parseList must
+  // keep both rendering.
+  shipping_fee: finite.nullable().optional(),
+  insurance_fee: finite.nullable().optional(),
   // The backend has always sent the full shipping snapshot (delivery-view.ts);
   // only name/city/country_code were declared, so the rest was silently dropped
   // by the view mapping. The street lines are OPTIONAL here on purpose: an old

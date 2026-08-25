@@ -15,6 +15,7 @@ const REASON_LABEL: Record<CreditReason, string> = {
   voucher_claim: 'Voucher',
   reward_credit: 'Reward credit',
   daily_reward: 'Daily reward',
+  delivery_fee: 'Delivery fee',
 };
 
 // A backend reason added before the storefront redeploys has no entry in

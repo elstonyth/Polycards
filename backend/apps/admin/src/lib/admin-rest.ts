@@ -599,6 +599,11 @@ export interface AdminDeliveryOrder {
     phone: string | null;
   };
   tracking_number: string | null;
+  /** MYR wallet charge stamped at request (2026-08-25); null = pre-fee order
+   *  or reward-prize shipment (nothing charged). Optional: an older backend
+   *  omits the fields entirely. */
+  shipping_fee?: number | null;
+  insurance_fee?: number | null;
   proof_images: string[];
   shipped_at: string | null;
   delivered_at: string | null;

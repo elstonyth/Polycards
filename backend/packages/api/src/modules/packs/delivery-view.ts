@@ -14,6 +14,9 @@ type DeliveryOrderRow = {
   ship_country_code: string;
   ship_phone: string | null;
   tracking_number: string | null;
+  // bigNumber columns — NULL on pre-fee orders and reward-prize shipments.
+  shipping_fee?: string | number | null;
+  insurance_fee?: string | number | null;
   // Stored via model.json(), so the DML types it as Record<string, unknown> |
   // null; it actually holds a string[]. Coerced with Array.isArray at read.
   proof_images: unknown;
@@ -68,6 +71,10 @@ export async function serializeDeliveryOrders(
       phone: o.ship_phone,
     },
     tracking_number: o.tracking_number,
+    // Numbers for the storefront; null (not 0) preserves "no fee was charged"
+    // on pre-fee orders so the UI can hide the line instead of showing RM 0.
+    shipping_fee: o.shipping_fee == null ? null : Number(o.shipping_fee),
+    insurance_fee: o.insurance_fee == null ? null : Number(o.insurance_fee),
     proof_images: Array.isArray(o.proof_images)
       ? (o.proof_images as string[])
       : [],

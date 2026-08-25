@@ -823,6 +823,29 @@ const DeliveriesPage = () => {
                     <div>{detail.address.country_code.toUpperCase()}</div>
                   </div>
                 </div>
+                {/* Fee charged at request — absent on pre-fee orders and
+                    reward-prize shipments (nothing was charged). */}
+                {detail.shipping_fee != null && (
+                  <div className="flex flex-col gap-y-2">
+                    <Text size="small" weight="plus">
+                      Shipping fee (paid from balance)
+                    </Text>
+                    <div className="text-ui-fg-subtle text-sm">
+                      <div>Shipping RM {detail.shipping_fee.toFixed(2)}</div>
+                      {(detail.insurance_fee ?? 0) > 0 && (
+                        <div>
+                          Insurance RM {(detail.insurance_fee ?? 0).toFixed(2)}
+                        </div>
+                      )}
+                      <div>
+                        Total RM{' '}
+                        {(
+                          detail.shipping_fee + (detail.insurance_fee ?? 0)
+                        ).toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div className="flex flex-col gap-y-2">
                   <Text size="small" weight="plus" id="delivery-status-label">
                     Status

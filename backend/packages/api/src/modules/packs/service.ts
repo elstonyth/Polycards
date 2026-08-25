@@ -14,6 +14,7 @@ import {
   validateDeliveryRequest,
   validateDeliveryStatusTransition,
   snapshotAddress,
+  computeDeliveryFee,
   type AddressSnapshot,
   type DeliveryStatus,
 } from './delivery';
@@ -198,7 +199,8 @@ export type CreditMutationReason =
   | 'cashout'
   | 'voucher_claim'
   | 'reward_credit'
-  | 'daily_reward';
+  | 'daily_reward'
+  | 'delivery_fee';
 
 export type CreditMutationInput = {
   customerId: string;
@@ -2193,12 +2195,31 @@ class PacksModuleService extends MedusaService({
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ orderId: string; itemIds: string[] }> {
+    // ONE listPulls call feeds the value sum, the fee, and the payload tally —
+    // vaultValueForPulls takes the rows, not the ids, so this isn't fetched
+    // twice. Runs BEFORE the order insert since the fee is stamped at create.
+    const pulls = await this.listPulls(
+      { id: input.pullIds },
+      { take: input.pullIds.length },
+      sharedContext,
+    );
+    const vaultDelta = await this.vaultValueForPulls(
+      pulls,
+      input.fx,
+      sharedContext,
+    );
+    // Shipping + mandatory insurance, valued at the SAME instant as the OD
+    // debit so both derive from one vaultValueForPulls read.
+    const fee = computeDeliveryFee(input.snapshot.ship_postal_code, vaultDelta);
+
     const [order] = await this.createDeliveryOrders(
       [
         {
           customer_id: input.customerId,
           status: 'requested' as const,
           ...input.snapshot,
+          shipping_fee: fee.shipping,
+          insurance_fee: fee.insurance,
         },
       ],
       sharedContext,
@@ -2215,29 +2236,34 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
 
-    // ONE listPulls call feeds both the value sum and the payload tally —
-    // vaultValueForPulls takes the rows, not the ids, so this isn't fetched twice.
-    const pulls = await this.listPulls(
-      { id: input.pullIds },
-      { take: input.pullIds.length },
-      sharedContext,
-    );
-    const vaultDelta = await this.vaultValueForPulls(
-      pulls,
-      input.fx,
-      sharedContext,
-    );
+    // Charge the wallet inside this SAME transaction — mutateCreditAtomic
+    // joins via sharedContext (no second pool connection) and its floor guard
+    // rolls the whole order back when the balance can't cover the fee.
+    if (fee.total > 0) {
+      await this.mutateCreditAtomic(
+        {
+          customerId: input.customerId,
+          amount: -fee.total,
+          reason: 'delivery_fee',
+          reference: order.id,
+        },
+        sharedContext,
+      );
+    }
+
     await this.recordLedgerEntry(
       {
         type: 'OD',
         customerId: input.customerId,
         refId: order.id,
-        walletDelta: 0,
+        walletDelta: -fee.total,
         vaultDelta: -vaultDelta,
         payload: {
           type: 'OD',
           handles: countByHandle(pulls.map((p) => p.card_id)),
           status: 'requested',
+          shipping_fee: fee.shipping,
+          insurance_fee: fee.insurance,
         },
       },
       sharedContext,
@@ -3096,7 +3122,6 @@ class PacksModuleService extends MedusaService({
         ],
         sharedContext,
       );
-
     } catch (e) {
       // A 23505 means this open_id already settled (the debit index).
       // The 23505 already aborted THIS txn (25P02); re-raise as DUPLICATE_ERROR so
@@ -4021,7 +4046,10 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     if (recentPending >= input.maxRecentPending) return null;
-    const [row] = await this.createGlobePayDeposits([input.data], sharedContext);
+    const [row] = await this.createGlobePayDeposits(
+      [input.data],
+      sharedContext,
+    );
     return { id: row.id };
   }
 
@@ -4624,9 +4652,13 @@ class PacksModuleService extends MedusaService({
     // (this transaction), so it takes no extra pool connection.
     if (input.to === 'canceled' && input.pullIds.length) {
       const [debit] = await em.execute<
-        { id: string; vault_delta: string | number | null }[]
+        {
+          id: string;
+          vault_delta: string | number | null;
+          wallet_delta: string | number | null;
+        }[]
       >(
-        "SELECT id, vault_delta FROM ledger_entry WHERE type = 'OD' AND ref_id = ? AND deleted_at IS NULL LIMIT 1",
+        "SELECT id, vault_delta, wallet_delta FROM ledger_entry WHERE type = 'OD' AND ref_id = ? AND deleted_at IS NULL LIMIT 1",
         [input.orderId],
       );
       if (debit) {
@@ -4651,6 +4683,29 @@ class PacksModuleService extends MedusaService({
             `OD debit '${debit.id}' for order '${input.orderId}' has a non-numeric vault_delta — refusing to reverse it.`,
           );
         }
+        // The fee refund mirrors the vault reversal: NEGATE THE STORED
+        // wallet_delta (never recompute the fee — the address may have been
+        // re-pointed since create). Pre-fee orders stored 0, so this is a
+        // no-op for them. Same-sign guard as the vault amount above.
+        const storedWallet = Number(debit.wallet_delta ?? 0);
+        if (!Number.isFinite(storedWallet)) {
+          throw new MedusaError(
+            MedusaError.Types.UNEXPECTED_STATE,
+            `OD debit '${debit.id}' for order '${input.orderId}' has a non-numeric wallet_delta — refusing to reverse it.`,
+          );
+        }
+        const refund = -storedWallet || 0; // stored charge is negative; || 0 kills -0
+        if (refund > 0) {
+          await this.mutateCreditAtomic(
+            {
+              customerId: order.customer_id,
+              amount: refund,
+              reason: 'delivery_fee',
+              reference: `refund:${input.orderId}`,
+            },
+            sharedContext,
+          );
+        }
         // Still needed for the payload's handle tally (countByHandle) — the
         // reversal amount no longer comes from these rows.
         const pulls = await this.listPulls(
@@ -4663,7 +4718,7 @@ class PacksModuleService extends MedusaService({
             type: 'OD',
             customerId: order.customer_id,
             refId: `cancel:${input.orderId}`,
-            walletDelta: 0,
+            walletDelta: refund,
             vaultDelta: -stored,
             payload: {
               type: 'OD',

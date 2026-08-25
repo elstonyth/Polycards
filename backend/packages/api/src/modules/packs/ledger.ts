@@ -16,18 +16,56 @@ export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'AD' | 'WP' | 'WD';
 
 export type LedgerPayload =
   | { type: 'TP'; payment_method: string; gateway_ref: string | null }
-  | { type: 'SP'; channel: 'single' | 'batch'; pack_id: string; prize_skus: string[] }
-  | { type: 'SE'; card_handle: string; sp_ref_id: string | null; price: number; rate: number }
-  | { type: 'OD'; handles: { card_handle: string; qty: number }[]; status: string }
-  | { type: 'AD'; admin_id: string; reason: string; detail: string | null; card_handle: string | null }
-  | { type: 'WP'; period: string; stage: number; rank: number; sku: string | null; value: number }
+  | {
+      type: 'SP';
+      channel: 'single' | 'batch';
+      pack_id: string;
+      prize_skus: string[];
+    }
+  | {
+      type: 'SE';
+      card_handle: string;
+      sp_ref_id: string | null;
+      price: number;
+      rate: number;
+    }
+  // shipping_fee/insurance_fee: the wallet charge breakdown (2026-08-25) —
+  // absent on pre-fee rows and on the cancel reversal row.
+  | {
+      type: 'OD';
+      handles: { card_handle: string; qty: number }[];
+      status: string;
+      shipping_fee?: number;
+      insurance_fee?: number;
+    }
+  | {
+      type: 'AD';
+      admin_id: string;
+      reason: string;
+      detail: string | null;
+      card_handle: string | null;
+    }
+  | {
+      type: 'WP';
+      period: string;
+      stage: number;
+      rank: number;
+      sku: string | null;
+      value: number;
+    }
   // WD: a GlobePay365 payout. One row when the debit is taken (negative
   // wallet_delta) and, if the payout later fails, one when it is refunded
   // (positive) — the pair nets to zero, which is how a bounced withdrawal
   // reads in the ledger. The account number is stored as last-4 ONLY: the
   // full number lives on globepay_withdrawal, and the ledger is an operator-
   // and customer-visible surface.
-  | { type: 'WD'; outcome: 'requested' | 'refunded'; bank_code: string | null; account_last4: string | null; gateway_ref: string | null };
+  | {
+      type: 'WD';
+      outcome: 'requested' | 'refunded';
+      bank_code: string | null;
+      account_last4: string | null;
+      gateway_ref: string | null;
+    };
 
 const SERIAL_RE = /^([a-z]+)(\d{4})$/;
 
@@ -37,7 +75,9 @@ export function nextSerial(prev: string | null): string {
   if (prev === null) return 'a0001';
   const m = SERIAL_RE.exec(prev);
   if (!m) {
-    throw new Error(`ledger: malformed stored serial '${prev}' (expected /^[a-z]+\\d{4}$/)`);
+    throw new Error(
+      `ledger: malformed stored serial '${prev}' (expected /^[a-z]+\\d{4}$/)`,
+    );
   }
   const [, letters, digits] = m;
   const n = Number(digits);
@@ -108,7 +148,11 @@ export function sequenceScope(type: LedgerType, occurredAt: Date): string {
 }
 
 // The public display id: TYPE + YY + Q# + UPPERCASE serial.
-export function displayId(type: LedgerType, occurredAt: Date, serial: string): string {
+export function displayId(
+  type: LedgerType,
+  occurredAt: Date,
+  serial: string,
+): string {
   const { yy, q } = ymqInMyt(occurredAt);
   return `${type}${yy}Q${q}${serial.toUpperCase()}`;
 }
@@ -118,7 +162,9 @@ export function displayId(type: LedgerType, occurredAt: Date, serial: string): s
 // per distinct handle, first-seen order. Task 8: Task 2 shipped this file
 // without foreseeing a multi-card payload; every other LedgerPayload variant
 // only ever names ONE card.
-export const countByHandle = (handles: string[]): { card_handle: string; qty: number }[] => {
+export const countByHandle = (
+  handles: string[],
+): { card_handle: string; qty: number }[] => {
   const m = new Map<string, number>();
   for (const h of handles) m.set(h, (m.get(h) ?? 0) + 1);
   return [...m.entries()].map(([card_handle, qty]) => ({ card_handle, qty }));

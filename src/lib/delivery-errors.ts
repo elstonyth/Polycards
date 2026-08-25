@@ -30,6 +30,20 @@ export const DELIVERY_RULES: ErrorRule[] = [
     /verify your phone/i,
     'Verify your phone number in Account settings before requesting delivery.',
   ],
+  // Shipping-fee rules (2026-08-25) — must precede the generic /not allowed/
+  // and /invalid|400/ rules, which would flatten them into wrong diagnoses.
+  [
+    /exceeds the customer's balance/i,
+    'Not enough credit to cover the shipping fee — top up and try again.',
+  ],
+  [
+    /within Malaysia only/i,
+    'We currently ship within Malaysia only — choose a Malaysian address.',
+  ],
+  [
+    /changes the shipping fee zone/i,
+    'That address changes the shipping fee zone — cancel this delivery (the fee is refunded) and request it again with the new address.',
+  ],
   // Specific per-status reasons (sim P3 #9) — must precede the generic rule.
   [
     /already in a pending delivery/i,

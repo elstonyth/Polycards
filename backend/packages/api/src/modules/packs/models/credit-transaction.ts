@@ -1,4 +1,4 @@
-import { model } from "@medusajs/framework/utils";
+import { model } from '@medusajs/framework/utils';
 
 // CreditTransaction — the customer's site-credit ledger. Balance = Σ(amount)
 // per customer (append-only; no mutable balance column to drift). Writers:
@@ -6,7 +6,7 @@ import { model } from "@medusajs/framework/utils";
 // gateway-backed), the open-pack charge step (-price, reason "pack_open"),
 // and the operator adjust-credits workflow (signed, reason "adjustment").
 export const CreditTransaction = model
-  .define("credit_transaction", {
+  .define('credit_transaction', {
     id: model.id().primaryKey(),
     customer_id: model.text(),
     // RM (MYR) decimal (never sen). Positive = credit, negative = spend.
@@ -14,14 +14,18 @@ export const CreditTransaction = model
     // PriceCharting FMV on Card/product rows, converted via the pricing seam.
     amount: model.bigNumber(),
     reason: model.enum([
-      "buyback",
-      "topup",
-      "pack_open",
-      "adjustment",
-      "cashout",
-      "voucher_claim",
-      "reward_credit",
-      "daily_reward",
+      'buyback',
+      'topup',
+      'pack_open',
+      'adjustment',
+      'cashout',
+      'voucher_claim',
+      'reward_credit',
+      'daily_reward',
+      // Physical-shipment fee (shipping + mandatory insurance): negative at
+      // delivery request, positive on the cancel refund (reference
+      // `refund:<order_id>`). Sign-agnostic, like adjustment.
+      'delivery_fee',
     ]),
     // The pull this credit came from (buyback rows only; null for top-ups).
     // UNIQUE — the DB itself guarantees a pull can never be credited twice,
@@ -46,9 +50,9 @@ export const CreditTransaction = model
   // created_at; composite serves the filter + ORDER BY (+ pagination) in one scan.
   .indexes([
     {
-      name: "IDX_credit_transaction_customer_id_created_at",
-      on: ["customer_id", "created_at"],
-      where: "deleted_at IS NULL",
+      name: 'IDX_credit_transaction_customer_id_created_at',
+      on: ['customer_id', 'created_at'],
+      where: 'deleted_at IS NULL',
     },
   ]);
 

@@ -1233,7 +1233,8 @@
             "cashout",
             "voucher_claim",
             "reward_credit",
-            "daily_reward"
+            "daily_reward",
+            "delivery_fee"
           ],
           "mappedType": "enum"
         },
@@ -1746,6 +1747,15 @@
           "nullable": true,
           "mappedType": "decimal"
         },
+        "insurance_fee": {
+          "name": "insurance_fee",
+          "type": "numeric",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "decimal"
+        },
         "shipped_at": {
           "name": "shipped_at",
           "type": "timestamptz",
@@ -1778,6 +1788,15 @@
         },
         "raw_shipping_fee": {
           "name": "raw_shipping_fee",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "json"
+        },
+        "raw_insurance_fee": {
+          "name": "raw_insurance_fee",
           "type": "jsonb",
           "unsigned": false,
           "autoincrement": false,

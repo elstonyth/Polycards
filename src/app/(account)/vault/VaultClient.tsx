@@ -671,8 +671,10 @@ export default function VaultClient({
 
       <p className="mt-5 text-[12px] text-neutral-400">
         Sell-back credits your site balance instantly at the flat{' '}
-        {FLAT_BUYBACK_PERCENT}% buyback rate. Physical shipping of vaulted cards
-        arrives with checkout.
+        {FLAT_BUYBACK_PERCENT}% buyback rate. Shipping is RM15 (West Malaysia) /
+        RM35 (East Malaysia), with protection included up to RM200 — orders
+        above that add 5% insurance of card value. Fees are deducted from your
+        credit balance.
       </p>
 
       {items.length > 0 && consent !== null && (

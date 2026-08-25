@@ -7,6 +7,7 @@ import PacksModuleService from '../../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import {
   snapshotAddress,
+  isEastMalaysiaPostcode,
   CUSTOMER_STATUS_WORD,
 } from '../../../../../modules/packs/delivery';
 
@@ -60,6 +61,29 @@ export async function POST(
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
       'That address is missing required shipping fields.',
+    );
+  }
+  // Fee guards (2026-08-25): the shipping fee was charged at request time
+  // from the ORIGINAL address, so an edit may not change what the customer
+  // should have paid. Non-MY is never shippable; a West<->East zone flip
+  // changes the RM15/RM35 rate — refuse both and point at the free cancel
+  // path (a cancel refunds the fee, so re-requesting re-prices cleanly).
+  // Pre-fee orders (shipping_fee NULL) skip the zone check — nothing was
+  // charged, so there is nothing to protect.
+  if (snapshot.ship_country_code.trim().toUpperCase() !== 'MY') {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'We currently ship within Malaysia only.',
+    );
+  }
+  if (
+    order.shipping_fee != null &&
+    isEastMalaysiaPostcode(snapshot.ship_postal_code) !==
+      isEastMalaysiaPostcode(order.ship_postal_code)
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'That address changes the shipping fee zone — cancel this delivery (the fee is refunded) and request it again with the new address.',
     );
   }
   // Same fallback as request-delivery: addresses saved by the storefront's
