@@ -4685,13 +4685,16 @@ class PacksModuleService extends MedusaService({
         }
         // The fee refund mirrors the vault reversal: NEGATE THE STORED
         // wallet_delta (never recompute the fee — the address may have been
-        // re-pointed since create). Pre-fee orders stored 0, so this is a
-        // no-op for them. Same-sign guard as the vault amount above.
+        // re-pointed since create). Pre-fee orders stored 0/NULL, so this is
+        // a no-op for them. Fail CLOSED on anything else the create arm could
+        // never have written — NaN, or a POSITIVE stored charge — because a
+        // silent skip here would write the reversal ledger row below with no
+        // matching credit_transaction, breaking the ledger↔credit mirror.
         const storedWallet = Number(debit.wallet_delta ?? 0);
-        if (!Number.isFinite(storedWallet)) {
+        if (!Number.isFinite(storedWallet) || storedWallet > 0) {
           throw new MedusaError(
             MedusaError.Types.UNEXPECTED_STATE,
-            `OD debit '${debit.id}' for order '${input.orderId}' has a non-numeric wallet_delta — refusing to reverse it.`,
+            `OD debit '${debit.id}' for order '${input.orderId}' has an invalid wallet_delta — refusing to reverse it.`,
           );
         }
         const refund = -storedWallet || 0; // stored charge is negative; || 0 kills -0

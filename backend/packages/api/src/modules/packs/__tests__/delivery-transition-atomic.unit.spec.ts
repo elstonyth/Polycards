@@ -206,6 +206,29 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
     );
   });
 
+  it('fails closed on a corrupt POSITIVE stored wallet_delta (no partial reversal)', async () => {
+    // The create arm only ever writes 0 or a negative charge; a positive value
+    // is corruption, and skipping it silently would emit the reversal ledger
+    // row with no matching credit_transaction (ledger↔credit mirror break).
+    const f = fakeService({ id: 'do_1', status: 'requested' });
+    f.em.execute.mockImplementation(async (q: string) =>
+      q.includes('ledger_entry')
+        ? [
+            {
+              id: 'led_od_debit',
+              vault_delta: String(DEBIT_VAULT_DELTA),
+              wallet_delta: '15',
+            },
+          ]
+        : [],
+    );
+    await expect(
+      f.svc.transitionDeliveryOrderStatus(cancelInput, f.ctx),
+    ).rejects.toMatchObject({ type: MedusaError.Types.UNEXPECTED_STATE });
+    expect(f.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(f.recordLedgerEntry).not.toHaveBeenCalled();
+  });
+
   it('skips the wallet refund (but not the vault reversal) on a pre-fee debit row', async () => {
     const f = fakeService({ id: 'do_1', status: 'requested' });
     f.em.execute.mockImplementation(async (q: string) => {

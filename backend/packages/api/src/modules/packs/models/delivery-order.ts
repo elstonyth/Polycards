@@ -3,8 +3,7 @@ import { model } from '@medusajs/framework/utils';
 // DeliveryOrder — a customer's request to physically ship one or more vaulted
 // cards. The address is a DENORMALIZED SNAPSHOT taken from the Medusa customer
 // address book at request time, so later edits to the address book never
-// rewrite a shipped order. v1: address-only — shipping_fee is reserved (nullable,
-// no charge logic yet).
+// rewrite a shipped order.
 export const DeliveryOrder = model
   .define('delivery_order', {
     id: model.id().primaryKey(),

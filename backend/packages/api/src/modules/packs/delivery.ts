@@ -168,6 +168,13 @@ export type DeliveryFee = {
   total: number;
 };
 
+// ONE copy of the MY-only rule for both write paths (request step + address
+// edit route) so the guard and its customer copy can't drift.
+export const MY_ONLY_MESSAGE = 'We currently ship within Malaysia only.';
+export function isMalaysianAddress(countryCode: string): boolean {
+  return countryCode.trim().toUpperCase() === 'MY';
+}
+
 // East Malaysia = Labuan 87xxx, Sabah 88xxx–91xxx, Sarawak 93xxx–98xxx — one
 // contiguous numeric range (92xxx is unassigned in Malaysia's plan).
 // ponytail: a malformed postcode bills the West rate rather than refusing the

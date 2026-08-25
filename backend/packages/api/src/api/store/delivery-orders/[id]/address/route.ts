@@ -8,6 +8,8 @@ import { PACKS_MODULE } from '../../../../../modules/packs';
 import {
   snapshotAddress,
   isEastMalaysiaPostcode,
+  isMalaysianAddress,
+  MY_ONLY_MESSAGE,
   CUSTOMER_STATUS_WORD,
 } from '../../../../../modules/packs/delivery';
 
@@ -70,11 +72,8 @@ export async function POST(
   // path (a cancel refunds the fee, so re-requesting re-prices cleanly).
   // Pre-fee orders (shipping_fee NULL) skip the zone check — nothing was
   // charged, so there is nothing to protect.
-  if (snapshot.ship_country_code.trim().toUpperCase() !== 'MY') {
-    throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      'We currently ship within Malaysia only.',
-    );
+  if (!isMalaysianAddress(snapshot.ship_country_code)) {
+    throw new MedusaError(MedusaError.Types.INVALID_DATA, MY_ONLY_MESSAGE);
   }
   if (
     order.shipping_fee != null &&
