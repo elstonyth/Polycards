@@ -15,6 +15,7 @@ import {
   validateDeliveryStatusTransition,
   snapshotAddress,
   computeDeliveryFee,
+  isMalaysianAddress,
   type AddressSnapshot,
   type DeliveryStatus,
 } from './delivery';
@@ -2111,8 +2112,10 @@ class PacksModuleService extends MedusaService({
     // 2) Snapshot the shipping address (denormalized at request time). A missing
     //    required field is a bad request, surfaced here as 'invalid' (the route
     //    has already resolved + ownership-checked the address upstream).
+    //    Non-MY is 'invalid' too — defense-in-depth behind the route's named
+    //    MY_ONLY_MESSAGE refusal, same layering as the redemption gate above.
     const snapshot = snapshotAddress(address);
-    if (!snapshot) {
+    if (!snapshot || !isMalaysianAddress(snapshot.ship_country_code)) {
       return { status: 'invalid' };
     }
 

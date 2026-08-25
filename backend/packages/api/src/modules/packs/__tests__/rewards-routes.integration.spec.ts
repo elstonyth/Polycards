@@ -266,6 +266,57 @@ moduleIntegrationTestRunner<PacksModuleService>({
         const [after] = await service.listPulls({ id: pull.id }, { take: 1 });
         expect(after.status).toBe('vaulted');
       });
+
+      // MY-only shipping (2026-08-25) applies to reward prizes too — the fee
+      // exemption is deliberate, the geographic gate is not optional. The route
+      // names the refusal; recordRewardWithdrawal independently returns
+      // 'invalid' for a non-MY snapshot (defense-in-depth, pinned below via
+      // the direct service call).
+      it('POST /rewards/withdraw refuses a non-Malaysian address without shipping', async () => {
+        const customerId = 'cus_wd_nonmy';
+        const pull = await seedRewardPull(customerId);
+
+        const { req, res, captured } = makeReqRes({
+          customerId,
+          body: {
+            pull_id: pull.id,
+            address: { ...ADDRESS, countryCode: 'gb' },
+          },
+        });
+        let err: unknown;
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await withdrawPOST(req as any, res as any);
+        } catch (e) {
+          err = e;
+        }
+        expect(err).toBeDefined();
+        expect((err as { type?: string }).type).toBe('invalid_data');
+        expect((err as { message?: string }).message).toBe(
+          'We currently ship within Malaysia only.',
+        );
+        expect(captured.body).toBeUndefined();
+        const [after] = await service.listPulls({ id: pull.id }, { take: 1 });
+        expect(after.status).toBe('vaulted');
+
+        // Defense-in-depth: the service refuses on its own, even if a future
+        // caller skips the route's named guard.
+        const direct = await service.recordRewardWithdrawal(
+          customerId,
+          pull.id,
+          {
+            first_name: 'Ada',
+            last_name: 'Lovelace',
+            address_1: '1 Analytical Engine Way',
+            city: 'London',
+            postal_code: 'EC1A 1AA',
+            country_code: 'gb',
+          },
+        );
+        expect(direct.status).toBe('invalid');
+        const [after2] = await service.listPulls({ id: pull.id }, { take: 1 });
+        expect(after2.status).toBe('vaulted');
+      });
     });
   },
 });
