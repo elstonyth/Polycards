@@ -49,12 +49,21 @@ export async function checkInToday(): Promise<CheckInResult> {
   }
 }
 
+/** Why a claim did not pay. `window_closed` is its own case on purpose: a
+ *  scheduled task can end between the page load and the tap, and answering
+ *  "not completed yet" over a finished 3/3 row is the worst thing to say. */
+export type ClaimFailure =
+  | 'not_found'
+  | 'not_completed'
+  | 'already_claimed'
+  | 'window_closed';
+
 export type ClaimResult =
   | { ok: true; claimed: true; rewardType: string }
   | {
       ok: true;
       claimed: false;
-      reason: 'not_found' | 'not_completed' | 'already_claimed';
+      reason: ClaimFailure;
     }
   | { ok: false; error: string };
 
@@ -64,10 +73,7 @@ export async function claimTaskReward(taskId: string): Promise<ClaimResult> {
   try {
     const raw = await sdk.client.fetch<
       | { claimed: true; reward: { type: string } }
-      | {
-          claimed: false;
-          reason: 'not_found' | 'not_completed' | 'already_claimed';
-        }
+      | { claimed: false; reason: ClaimFailure }
     >(`/store/tasks/${encodeURIComponent(taskId)}/claim`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },

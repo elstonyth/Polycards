@@ -201,6 +201,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(buyback.firm).toBe(
           (normalItem.buyback as Record<string, unknown>).firm,
         );
+        // WHY it is locked travels with it. Without this the storefront shows
+        // the free-pull explainer — "rip a paid pack to unlock" — over a card
+        // that never unlocks that way.
+        expect(rewardItem!.lock_reason).toBe('reward');
+        expect(normalItem.lock_reason).toBeNull();
       });
 
       it('resolves a synthetic-pack reward to a live tier, not Common', () => {

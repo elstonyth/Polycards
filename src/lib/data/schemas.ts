@@ -243,6 +243,10 @@ export const VaultItemSchema = z.looseObject({
   // is source='reward' with a live, sellable quote.
   source: z.enum(['pack', 'reward', 'free']).catch('pack'),
   locked: z.boolean().catch(false),
+  // Why it is locked, so the explainer can say the true thing. `.catch(null)`
+  // is the deploy-skew guard: a backend that predates the field must not drop
+  // the row, it should just fall back to the free-pull copy.
+  lock_reason: z.enum(['free_pull', 'reward']).nullable().catch(null),
   // `firm` is false when the backend priced the quote on its FX display
   // fallback — selling would be refused, so the UI must not offer it as firm.
   // Optional: an older backend omits it (treated as firm).

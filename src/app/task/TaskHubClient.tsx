@@ -42,6 +42,15 @@ function rewardLabel(reward: TaskEntry['reward']): string {
   return REWARD_LABEL[reward.type] ?? 'Reward';
 }
 
+// Every way a claim can decline, in the customer's words.
+const CLAIM_FAILURE_COPY: Record<string, string> = {
+  already_claimed: 'Already claimed.',
+  not_completed: 'Not completed yet.',
+  window_closed: 'This task has ended.',
+  not_found: 'This task is no longer available.',
+};
+const CLAIM_FALLBACK = 'Could not claim this right now.';
+
 function TaskRow({
   task,
   onDone,
@@ -66,10 +75,8 @@ function TaskRow({
               ? 'Your free rip landed in your vault.'
               : 'Card added to your vault.',
         );
-      } else if (res.ok && !res.claimed && res.reason === 'already_claimed') {
-        onDone('Already claimed.');
       } else if (res.ok && !res.claimed) {
-        onDone('Not completed yet.');
+        onDone(CLAIM_FAILURE_COPY[res.reason] ?? CLAIM_FALLBACK);
       } else if (!res.ok) {
         onDone(res.error);
       }

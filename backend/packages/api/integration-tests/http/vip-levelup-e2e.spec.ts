@@ -231,7 +231,6 @@ medusaIntegrationTestRunner({
           threshold: 3,
           remaining: 3,
         });
-        expect(res.data.next.reward).toHaveProperty('box_tier');
 
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         const grants = await packs.listVipRewardGrants(

@@ -380,5 +380,32 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
       expect(audits.map((a) => a.action).sort()).toEqual(['create', 'edit']);
     });
+
+    it('a closed window declines with its own reason, not "not completed"', async () => {
+      // The window can close between the page load and the tap. Answering
+      // 'not_completed' over a finished task is the most confusing thing this
+      // endpoint could say, so window_closed is a distinct case.
+      const { id } = await service.saveTaskDefinition({
+        kind: 'achievement',
+        title: 'Vault one card',
+        requirement: { type: 'vault_count', count: 1 },
+        reward: { type: 'credit', amount_myr: 1 },
+        active: true,
+        sort: 0,
+        startsAt: null,
+        endsAt: new Date('2020-01-01T00:00:00Z'),
+        adminId: 'admin_1',
+        reason: 'window test',
+      });
+      expect(
+        await service.claimTask({ customerId: 'cus_win', taskId: id }),
+      ).toEqual({ claimed: false, reason: 'window_closed' });
+
+      // A task id that does not exist is still 'not_found' — the two must not
+      // collapse into one message.
+      expect(
+        await service.claimTask({ customerId: 'cus_win', taskId: 'task_ghost' }),
+      ).toEqual({ claimed: false, reason: 'not_found' });
+    });
   },
 });

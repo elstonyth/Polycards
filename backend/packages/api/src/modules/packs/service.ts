@@ -1911,7 +1911,11 @@ class PacksModuleService extends MedusaService({
     | { claimed: true; reward: TaskReward; ref: string | null }
     | {
         claimed: false;
-        reason: 'not_found' | 'not_completed' | 'already_claimed';
+        reason:
+          | 'not_found'
+          | 'not_completed'
+          | 'already_claimed'
+          | 'window_closed';
       }
   > {
     // Deliberately NOT filtered on active: retiring a task must never strand
@@ -1927,8 +1931,12 @@ class PacksModuleService extends MedusaService({
     // A scheduled window that has closed (or not opened) is not claimable —
     // unlike `active`, which is deliberately NOT checked here, a window is
     // the operator saying exactly when this task runs.
+    //
+    // Its OWN reason, not 'not_found': the window can close between the page
+    // load and the tap, and a finished 3/3 task answering "not completed yet"
+    // is the most confusing thing this endpoint could say.
     if (!taskIsLive(def, input.now ?? new Date()))
-      return { claimed: false, reason: 'not_found' };
+      return { claimed: false, reason: 'window_closed' };
     const week = taskWeekFor(input.now ?? new Date());
     const periodKey = def.kind === 'weekly' ? week.weekStartIso : '';
     const requirement = def.requirement as unknown as TaskRequirement;

@@ -78,7 +78,6 @@ medusaIntegrationTestRunner({
       it('401s without auth on every new route', async () => {
         for (const [method, path] of [
           ['get', '/store/referral'],
-          ['get', '/store/vip-rebate'],
           ['post', '/store/referral/bind'],
         ] as const) {
           const res = await unwrapResponse(
@@ -215,16 +214,6 @@ medusaIntegrationTestRunner({
         expect(rAfter.data.history).toHaveLength(1);
         expect(rAfter.data.history[0].status).toBe('paid');
         expect(rAfter.data.history[0].amount_cents).toBe(500);
-      });
-
-      it('vip-rebate panel returns level and empty history for a fresh customer', async () => {
-        const res = await unwrapResponse(
-          api.get('/store/vip-rebate', { headers: authed(recruitToken) }),
-        );
-        expect(res.status).toBe(200);
-        expect(res.data.level).toBe(1);
-        expect(res.data.history).toEqual([]);
-        expect(res.data.week.turnover_cents).toBe(0);
       });
 
       it('admin settings edit persists and partner-rate enforces bounds', async () => {

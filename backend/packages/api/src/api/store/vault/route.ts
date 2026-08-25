@@ -182,6 +182,15 @@ export async function GET(
         // the sell/deliver lock must be keyed off `locked`, NEVER off `source`.
         source: p.source ?? 'pack',
         locked,
+        // WHY it is locked — the two reasons have nothing in common and the
+        // storefront was rendering the free-pull copy ("rip a paid pack to
+        // unlock") over a reward card, which never unlocks that way. Null
+        // when unlocked.
+        lock_reason: locked
+          ? p.source === 'free'
+            ? ('free_pull' as const)
+            : ('reward' as const)
+          : null,
         // A LOCKED pull must advertise NOTHING payable: selling it 400s
         // (FREE_PULL_LOCKED_MESSAGE for a free pull, "Reward prizes can't be
         // sold back" for a task reward), so quoting a price here would offer

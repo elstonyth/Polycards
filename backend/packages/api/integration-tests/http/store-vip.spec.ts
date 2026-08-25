@@ -4,7 +4,7 @@
 //   (auth)     no bearer → 401
 //   (positive) authed GET /store/vip → 200, level + spend; if next present,
 //              next.level === level+1, next.remaining ≈ next.threshold - spend,
-//              next.reward has box_tier
+//              next.reward carries the rung's voucher + frame
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
@@ -100,7 +100,8 @@ medusaIntegrationTestRunner({
             res.data.next.threshold - res.data.spend,
             2,
           );
-          expect(res.data.next.reward).toHaveProperty('box_tier');
+          expect(res.data.next.reward).toHaveProperty('voucher_amount');
+          expect(res.data.next.reward).toHaveProperty('frame_unlock');
         }
       });
 
@@ -119,7 +120,6 @@ medusaIntegrationTestRunner({
           level: 2,
           reward: {
             voucher_amount: expect.any(Number),
-            box_tier: expect.any(String),
             frame_unlock: expect.any(Boolean),
           },
         });

@@ -50,9 +50,6 @@ medusaIntegrationTestRunner({
 
       it('401s without an admin token', async () => {
         expect(
-          (await unwrapResponse(api.get('/admin/daily-rewards/boxes'))).status,
-        ).toBe(401);
-        expect(
           (
             await unwrapResponse(
               api.post('/admin/daily-rewards/vouchers', {

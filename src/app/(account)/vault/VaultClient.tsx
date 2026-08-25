@@ -37,6 +37,14 @@ import { useConsent } from '@/lib/use-consent';
 // The customer's vault: every pulled card still held, each with a sell-back
 // offer (current FMV × the flat buyback rate — the server quotes the percent).
 // Selling removes the card here and credits the site balance shown at the top.
+// A reward card is locked for a different reason than a free pull, and it
+// never unlocks: the backend refuses both the sell ("Reward prizes can't be
+// sold back") and the ship ("Reward prizes are shipped from the rewards page,
+// not the vault"). Saying the free-pull line over it — "rip a paid pack" —
+// promised an unlock that will never come.
+const REWARD_PULL_LOCKED_MESSAGE =
+  'Reward cards stay in your vault — they cannot be sold back or shipped.';
+
 export default function VaultClient({
   initial,
   addresses,
@@ -452,9 +460,10 @@ export default function VaultClient({
           {shown.map((item) => {
             const isSelected = selected.has(item.pullId);
             const glow = rarityRgb(item.card.rarity);
-            // The free welcome card until the first PAID open. `locked` is the
-            // ONLY signal — never `source`, which a sellable challenge prize
-            // also carries ('reward').
+            // Locked = the backend refuses BOTH sell and ship on this pull.
+            // `locked` is the ONLY signal — never `source`, which a sellable
+            // challenge prize also carries ('reward'). `lockReason` picks the
+            // copy: the two reasons have nothing in common.
             const showLock = item.locked && !lockDismissed.has(item.pullId);
             const art = (
               // Pass `rarity` so the slab renders its tier frame + halo, matching
@@ -557,7 +566,9 @@ export default function VaultClient({
                         Shipping &amp; Selling Locked
                       </span>
                       <span className="text-[9px] leading-tight text-white/70 sm:text-[10px]">
-                        {FREE_PULL_LOCKED_MESSAGE}
+                        {item.lockReason === 'reward'
+                          ? REWARD_PULL_LOCKED_MESSAGE
+                          : FREE_PULL_LOCKED_MESSAGE}
                       </span>
                       <span className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/45">
                         Tap to dismiss
