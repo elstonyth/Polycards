@@ -1,4 +1,5 @@
 import type PacksModuleService from '../../../modules/packs/service';
+import { asPixelPokemonCrud } from '../../../modules/packs/pixel-pokemon-service';
 import type {
   TaskRequirement,
   TaskReward,
@@ -92,8 +93,12 @@ export async function resolveTaskLabels(
           },
         )
       : Promise.resolve([]),
+    // `listPixelPokemon`, SINGULAR — Medusa treats "pokemon" as uncountable, so
+    // the runtime method does not match the naively-pluralized generated type.
+    // asPixelPokemonCrud bridges that; calling packs.listPixelPokemons here
+    // type-checks and then throws "is not a function" at runtime.
     refs.pixelIds.size
-      ? packs.listPixelPokemons(
+      ? asPixelPokemonCrud(packs).listPixelPokemon(
           { id: [...refs.pixelIds] },
           { select: ['id', 'name', 'dex'], take: refs.pixelIds.size },
         )

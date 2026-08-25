@@ -22,7 +22,10 @@ const stub = {
       grade: '10',
     }));
   },
-  listPixelPokemons: async (sel: { id: string[] }) => {
+  // SINGULAR on purpose: this is the name the module exposes at runtime.
+  // Mocking the pluralized generated-type name made this suite pass while the
+  // real console 500'd on any task carrying a pixel_pokemon_id.
+  listPixelPokemon: async (sel: { id: string[] }) => {
     calls.pixel++;
     return sel.id.map((id) => ({ id, name: 'Pikachu', dex: 25 }));
   },
