@@ -91,6 +91,20 @@ describe('validateTaskReward', () => {
 });
 
 describe('taskProgress', () => {
+  it('an UNKNOWN requirement is never complete (fail closed)', () => {
+    // A row written before a union change, or straight into the DB. Without
+    // the target > 0 guard this returned completed:true and every customer
+    // could claim the reward at zero progress.
+    const unknown = { type: 'rip_streak', days: 3 } as unknown as Parameters<
+      typeof taskProgress
+    >[0];
+    expect(taskProgress(unknown, facts())).toEqual({
+      current: 0,
+      target: 0,
+      completed: false,
+    });
+  });
+
   it('checkin_days counts the week', () => {
     expect(
       taskProgress(

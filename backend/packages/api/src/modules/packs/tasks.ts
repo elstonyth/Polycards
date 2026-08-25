@@ -154,10 +154,18 @@ export function taskProgress(
       current = facts.vaultPixelCount;
       target = requirement.count;
       break;
+    default:
+      // An unrecognised requirement (a row written before a union change, or
+      // straight into the DB) leaves target at 0 — and `0 >= 0` would read as
+      // COMPLETE, handing every customer a free claim. Fail closed: the
+      // `target > 0` guard below is what makes that impossible (bug review
+      // 2026-08-25).
+      break;
   }
   return {
     current: Math.min(current, target),
     target,
-    completed: current >= target,
+    // target > 0 is load-bearing, not decorative — see the default branch.
+    completed: target > 0 && current >= target,
   };
 }

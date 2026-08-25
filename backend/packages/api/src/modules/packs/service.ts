@@ -1148,28 +1148,29 @@ class PacksModuleService extends MedusaService({
       });
     }
 
-    // Refuse to write an absurd line rather than paying it on Wednesday.
-    // Hitting this means the tier table or a partner rate is misconfigured;
-    // the operator sees it in the job log and fixes the config, then the
-    // hourly close recomputes the same week (unique week_start no-op only
-    // applies once a run EXISTS, and this throws before insert).
-    for (const l of lines) {
-      if (l.amount_cents > MAX_SETTLEMENT_LINE_MYR * 100) {
-        throw new MedusaError(
-          MedusaError.Types.NOT_ALLOWED,
-          `Refusing to close ${week.weekStartIso}: ${l.kind} for ${l.customer_id} computes to RM ${(l.amount_cents / 100).toFixed(2)}, over the RM ${MAX_SETTLEMENT_LINE_MYR} per-line ceiling. Check the tier table and partner rates.`,
-        );
-      }
-    }
-
-    const totals = lines.reduce(
-      (acc, l) => {
-        if (l.kind === 'referral_commission') acc.commission += l.amount_cents;
-        else acc.rebate += l.amount_cents;
-        return acc;
-      },
-      { commission: 0, rebate: 0 },
+    // A line over the ceiling is QUARANTINED, never thrown: throwing aborted
+    // the whole close, and once the week rolled over nothing could ever
+    // recompute it — the week's commissions vanished (bug review 2026-08-25,
+    // a regression from the first ceiling fix). Instead the run still closes,
+    // the offending line lands 'voided' with a reason the operator reads in
+    // the review screen, and every OTHER line pays normally.
+    const overCeiling = lines.filter(
+      (l) => l.amount_cents > MAX_SETTLEMENT_LINE_MYR * 100,
     );
+
+    // Quarantined lines are excluded — the totals the approve dialog quotes
+    // must equal what will actually pay.
+    const totals = lines
+      .filter((l) => l.amount_cents <= MAX_SETTLEMENT_LINE_MYR * 100)
+      .reduce(
+        (acc, l) => {
+          if (l.kind === 'referral_commission')
+            acc.commission += l.amount_cents;
+          else acc.rebate += l.amount_cents;
+          return acc;
+        },
+        { commission: 0, rebate: 0 },
+      );
 
     let settlementId: string;
     try {
@@ -1199,8 +1200,29 @@ class PacksModuleService extends MedusaService({
     }
     if (lines.length) {
       await this.createWeeklySettlementLines(
-        lines.map((l) => ({ ...l, settlement_id: settlementId })),
+        lines.map((l) => ({
+          ...l,
+          settlement_id: settlementId,
+          ...(l.amount_cents > MAX_SETTLEMENT_LINE_MYR * 100
+            ? {
+                status: 'voided' as const,
+                void_reason: `over the RM ${MAX_SETTLEMENT_LINE_MYR} per-line ceiling — check the tier table and partner rates`,
+              }
+            : {}),
+        })),
         sharedContext,
+      );
+    }
+    if (overCeiling.length > 0) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[close-referral-week] ${week.weekStartIso}: ${overCeiling.length} line(s) quarantined over the RM ${MAX_SETTLEMENT_LINE_MYR} ceiling — ` +
+          overCeiling
+            .map(
+              (l) =>
+                `${l.kind}/${l.customer_id}=RM${(l.amount_cents / 100).toFixed(2)}`,
+            )
+            .join(', '),
       );
     }
     return { settlementId, created: true, lines: lines.length };
@@ -1231,7 +1253,9 @@ class PacksModuleService extends MedusaService({
     }
     await this.updateWeeklySettlements(
       {
-        selector: { id: run.id },
+        // re-assert draft: a void racing this approve must win or lose
+        // cleanly, never leave an approved run full of voided lines.
+        selector: { id: run.id, status: 'draft' as const },
         data: {
           status: 'approved' as const,
           approved_by: input.adminId,
@@ -1304,9 +1328,10 @@ class PacksModuleService extends MedusaService({
       adminId: string;
       reason: string;
       /** Resolves a customer id, injected by the route (this module cannot
-       *  see the customer module). A referrer id that resolves to nothing
-       *  would mint commission for a non-existent account. */
-      referrerExists?: (id: string) => Promise<boolean>;
+       *  see the customer module). REQUIRED — a referrer id that resolves to
+       *  nothing would mint commission for a non-existent account, and an
+       *  optional guard is one careless caller away from being skipped. */
+      referrerExists: (id: string) => Promise<boolean>;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
@@ -1316,7 +1341,7 @@ class PacksModuleService extends MedusaService({
         'A customer cannot refer themself.',
       );
     }
-    if (input.referrerId !== null && input.referrerExists) {
+    if (input.referrerId !== null) {
       if (!(await input.referrerExists(input.referrerId))) {
         throw new MedusaError(
           MedusaError.Types.INVALID_DATA,
@@ -1407,7 +1432,7 @@ class PacksModuleService extends MedusaService({
     );
     await this.updateWeeklySettlements(
       {
-        selector: { id: run.id },
+        selector: { id: run.id, status: 'draft' as const },
         data: {
           status: 'void' as const,
           total_commission_cents: 0,
@@ -1456,9 +1481,13 @@ class PacksModuleService extends MedusaService({
         `Only a pending line can be voided (this one is '${line.status}').`,
       );
     }
+    // selector re-asserts `pending`: without it, a void racing the pay job
+    // could stamp 'voided' over a line whose money already moved (bug review
+    // 2026-08-25). A no-match means the race was lost — bail before the
+    // totals deduction so it can't double-subtract.
     await this.updateWeeklySettlementLines(
       {
-        selector: { id: line.id },
+        selector: { id: line.id, status: 'pending' as const },
         data: {
           status: 'voided' as const,
           void_reason: input.reason,
@@ -1467,6 +1496,17 @@ class PacksModuleService extends MedusaService({
       },
       sharedContext,
     );
+    const [afterVoid] = await this.listWeeklySettlementLines(
+      { id: line.id },
+      { take: 1 },
+      sharedContext,
+    );
+    if (afterVoid?.status !== 'voided') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'That line changed state while you were voting on it — reload the run.',
+      );
+    }
     // Keep the run totals live — the approve dialog quotes them as "will pay
     // out", so a voided line must leave the number the operator reads
     // (review 2026-08-25 finding 3).
@@ -1614,7 +1654,9 @@ class PacksModuleService extends MedusaService({
       );
       await this.updateWeeklySettlementLines(
         {
-          selector: { id: line.id },
+          // status guard: a concurrent void must not be overwritten (the
+          // ledger row above is still the authority on whether money moved).
+          selector: { id: line.id, status: 'pending' as const },
           data: { status: 'paid' as const, paid_transaction_id: txn.id },
         },
         sharedContext,
@@ -1689,13 +1731,23 @@ class PacksModuleService extends MedusaService({
     const [agg] = await em.execute<
       { downline_count: string; turnover_cents: string }[]
     >(
-      'SELECT COUNT(DISTINCT ra.customer_id)::bigint AS downline_count, ' +
-        '  COALESCE(SUM(CASE WHEN ct.created_at >= ? AND ct.created_at < ? ' +
-        '    THEN ROUND(-ct.amount * 100) ELSE 0 END), 0)::bigint AS turnover_cents ' +
-        'FROM referral_attribution ra ' +
-        'LEFT JOIN credit_transaction ct ON ct.customer_id = ra.customer_id ' +
-        "  AND ct.reason = 'pack_open' AND ct.deleted_at IS NULL " +
-        'WHERE ra.referrer_id = ? AND ra.deleted_at IS NULL',
+      // Per-customer subtotal FIRST, negatives clamped to 0, then summed —
+      // exactly what closeReferralWeek does (it drops a downline whose net
+      // week turnover is <= 0). Summing raw rows let one refunded member drag
+      // the projection below the real payout, and at scale onto a different
+      // TIER (bug review 2026-08-25).
+      'SELECT COUNT(*)::bigint AS downline_count, ' +
+        '  COALESCE(SUM(GREATEST(per_customer, 0)), 0)::bigint AS turnover_cents ' +
+        'FROM ( ' +
+        '  SELECT ra.customer_id, ' +
+        '    COALESCE(SUM(CASE WHEN ct.created_at >= ? AND ct.created_at < ? ' +
+        '      THEN ROUND(-ct.amount * 100) ELSE 0 END), 0)::bigint AS per_customer ' +
+        '  FROM referral_attribution ra ' +
+        '  LEFT JOIN credit_transaction ct ON ct.customer_id = ra.customer_id ' +
+        "    AND ct.reason = 'pack_open' AND ct.deleted_at IS NULL " +
+        '  WHERE ra.referrer_id = ? AND ra.deleted_at IS NULL ' +
+        '  GROUP BY ra.customer_id ' +
+        ') d',
       [week.startUtc, week.endUtcExcl, input.customerId],
     );
     const downlineCount = Number(agg?.downline_count ?? 0);
@@ -1919,6 +1971,10 @@ class PacksModuleService extends MedusaService({
             'WHERE customer_id = ? AND deleted_at IS NULL',
           [input.customerId],
         ),
+        // CARDS, not distinct species ("vault how many Pokémon card"): two
+        // Pikachu pulls count 2. pokemon_dex is the pixel LINK — a card an
+        // admin has not linked yet does not count, and linking it later
+        // advances progress (admin data, honest either way).
         em.execute<{ n: string }[]>(
           'SELECT COUNT(*)::bigint AS n FROM pull p JOIN card c ON c.handle = p.card_id ' +
             'WHERE p.customer_id = ? AND p.deleted_at IS NULL ' +

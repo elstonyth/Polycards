@@ -388,7 +388,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
       // Customer path is permanent…
       expect(
-        await service.bindReferral({ customerId: 'cus_x', referrerId: 'cus_r2' }),
+        await service.bindReferral({
+          customerId: 'cus_x',
+          referrerId: 'cus_r2',
+        }),
       ).toEqual({ bound: false, reason: 'already_bound' });
       // …the admin path can fix it.
       await service.adminSetReferral({
@@ -396,6 +399,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         referrerId: 'cus_r2',
         adminId: 'admin_1',
         reason: 'support ticket',
+        referrerExists: async () => true,
       });
       let [row] = await service.listReferralAttributions({
         customer_id: 'cus_x',
@@ -407,6 +411,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           referrerId: 'cus_x',
           adminId: 'admin_1',
           reason: 'bad',
+          referrerExists: async () => true,
         }),
       ).rejects.toThrow(/themself/i);
       await service.adminSetReferral({
@@ -414,6 +419,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         referrerId: null,
         adminId: 'admin_1',
         reason: 'clear',
+        referrerExists: async () => true,
       });
       [row] = await service.listReferralAttributions({ customer_id: 'cus_x' });
       expect(row).toBeUndefined();

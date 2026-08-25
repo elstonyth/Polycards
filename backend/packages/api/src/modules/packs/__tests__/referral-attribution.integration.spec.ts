@@ -6,6 +6,7 @@ import ReferralAttribution from '../models/referral-attribution';
 import ReferralSettings from '../models/referral-settings';
 import CustomerAccountState from '../models/customer-account-state';
 import AdminActionAudit from '../models/admin-action-audit';
+import CreditTransaction from '../models/credit-transaction';
 import { DEFAULT_REFERRAL_TIERS } from '../referral';
 
 jest.setTimeout(300 * 1000);
@@ -18,6 +19,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
     ReferralSettings,
     CustomerAccountState,
     AdminActionAudit,
+    // bindReferral reads pack_open turnover to enforce "signup only".
+    CreditTransaction,
   ],
   testSuite: ({ service }) => {
     describe('bindReferral', () => {

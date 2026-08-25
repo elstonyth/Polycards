@@ -202,11 +202,36 @@ moduleIntegrationTestRunner<PacksModuleService>({
       await service.createCreditTransactions([
         { customer_id: 'cus_whale', amount: -60_000, reason: 'pack_open' },
       ]);
-      await expect(
-        service.closeReferralWeek({ weekStartIso: week.weekStartIso }),
-      ).rejects.toThrow(/ceiling/i);
-      // Nothing was written — the operator fixes the config and re-runs.
-      expect(await service.listWeeklySettlements({})).toHaveLength(0);
+      const r = await service.closeReferralWeek({
+        weekStartIso: week.weekStartIso,
+      });
+      // The week still CLOSES — throwing here used to strand it forever once
+      // the week rolled over. The offending line is quarantined instead.
+      expect(r.created).toBe(true);
+      const lines = await service.listWeeklySettlementLines({
+        settlement_id: r.settlementId,
+        customer_id: 'cus_bigpartner',
+      });
+      expect(lines).toHaveLength(1);
+      expect(lines[0].status).toBe('voided');
+      expect(lines[0].void_reason).toMatch(/ceiling/i);
+      // …and it is excluded from the totals the approve dialog quotes.
+      const [run] = await service.listWeeklySettlements({ id: r.settlementId });
+      expect(run.total_commission_cents).toBe(0);
+      // A quarantined line pays nothing even after approve.
+      await service.approveWeeklySettlement({
+        settlementId: r.settlementId,
+        adminId: 'admin_1',
+      });
+      const paid = await service.payWeeklySettlement({
+        settlementId: r.settlementId,
+      });
+      expect(paid.paid).toBe(0);
+      expect(
+        await service.listCreditTransactions({
+          customer_id: 'cus_bigpartner',
+        }),
+      ).toHaveLength(0);
     });
 
     it('rejects a week key that is not an MYT Tuesday', async () => {
