@@ -72,6 +72,25 @@ describe('deliveryZone', () => {
     expect(deliveryZone('40000', 'Selangor', 'Shah Alam')).toBe('west');
     expect(deliveryZone('81000', 'Johor', 'Kulai')).toBe('west');
   });
+
+  // Every address written before the state field existed stored
+  // `province = null`, and the backend stays null-tolerant on purpose. These
+  // two cases pin what that means, in both directions.
+  it('still zones a legacy null-province address off its East postcode', () => {
+    expect(deliveryZone('88000', null, 'Kudat')).toBe('east');
+    expect(deliveryZone('93000', null, null)).toBe('east');
+  });
+
+  it('zones a legacy null-province address West on an unlisted East city', () => {
+    // ACCEPTED RESIDUAL, not a bug to fix here: rows created before the state
+    // field carry no province, so the postcode is the only signal for them. An
+    // East Malaysian town outside the twelve-name city list (Kudat, Semporna,
+    // Papar, Limbang, Mukah...) combined with a West postcode bills West. It
+    // closes for an address as soon as its owner edits it and picks a state;
+    // closing it for the rest is a backfill over `customer_address`.
+    expect(deliveryZone('50000', null, 'Semporna')).toBe('west');
+    expect(deliveryZone('50000', null, 'Limbang')).toBe('west');
+  });
 });
 
 describe('computeDeliveryFee', () => {
