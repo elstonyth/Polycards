@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { getReferralSummary, getVipRebate } from '@/lib/data/referral';
 import { getTaskHub } from '@/lib/actions/tasks';
+import { getAuthToken } from '@/lib/data/customer';
 import { TaskHubClient } from './TaskHubClient';
 
 export const metadata: Metadata = {
@@ -14,16 +15,18 @@ export const metadata: Metadata = {
 // Server component per the house split — both loaders return null when logged
 // out, and the client tabs render a sign-in prompt instead.
 export default async function TaskPage() {
-  const [referral, vipRebate, taskHub] = await Promise.all([
+  const [referral, vipRebate, taskHub, token] = await Promise.all([
     getReferralSummary(),
     getVipRebate(),
     getTaskHub(),
+    getAuthToken(),
   ]);
   return (
     <TaskHubClient
       referral={referral}
       vipRebate={vipRebate}
       taskHub={taskHub}
+      isLoggedIn={Boolean(token)}
     />
   );
 }

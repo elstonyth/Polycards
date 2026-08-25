@@ -9,10 +9,13 @@ import type PacksModuleService from '../modules/packs/service';
  * admin to review. No money moves here; pay-referral-week.ts does that after
  * the approve gate.
  *
- * Hourly on Tuesdays rather than once: the unique week_start makes every run
- * after the first a no-op, and hourly retries ride out a deploy or DB blip
- * landing exactly on the weekly boundary (same reasoning as
- * settle-challenge-week's hourly schedule).
+ * Hourly EVERY day, not just Tuesdays (review 2026-08-25 finding 1): the
+ * unique week_start makes every run after the first a no-op, and
+ * lastClosedReferralWeek(now) points at the same week for seven days — so a
+ * backend that was down the whole of Tuesday (deploy window, migrate gate,
+ * DB blip) still closes the week the moment it comes back, any day. A
+ * Tuesday-only cron stranded a missed week forever, and its UTC schedule
+ * only covered MYT Tue 08:00–Wed 07:00 anyway.
  */
 export default async function closeReferralWeekJob(container: MedusaContainer) {
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
@@ -34,5 +37,5 @@ export default async function closeReferralWeekJob(container: MedusaContainer) {
 
 export const config = {
   name: 'close-referral-week',
-  schedule: '0 * * * 2', // hourly on Tuesdays; the unique week_start makes extra runs no-ops
+  schedule: '0 * * * *', // hourly, every day — see the self-heal note above
 };

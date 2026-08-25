@@ -4,9 +4,12 @@ import { PACKS_MODULE } from '../modules/packs';
 import type PacksModuleService from '../modules/packs/service';
 
 /**
- * Wednesday pay ("WED OUT") — pays every APPROVED weekly settlement's pending
- * lines as straight site credit. A run the admin never approved simply waits:
- * the human gate IS the spec, so this job never touches drafts.
+ * The pay half of "WED OUT" — pays every APPROVED weekly settlement's
+ * pending lines as straight site credit. A run the admin never approved
+ * simply waits: the human gate IS the spec, so this job never touches
+ * drafts. Runs hourly every day (not just Wednesdays — review 2026-08-25):
+ * an approval that lands on a Thursday pays within the hour instead of
+ * silently waiting six days, and pay is idempotent per line either way.
  *
  * Idempotent end to end (line status + the RF ledger (type, ref_id) unique
  * index), so the hourly Wednesday cadence — and an admin's early "Pay now"
@@ -37,5 +40,5 @@ export default async function payReferralWeekJob(container: MedusaContainer) {
 
 export const config = {
   name: 'pay-referral-week',
-  schedule: '0 * * * 3', // hourly on Wednesdays; pay is idempotent per line
+  schedule: '0 * * * *', // hourly, every day; pay is idempotent per line
 };

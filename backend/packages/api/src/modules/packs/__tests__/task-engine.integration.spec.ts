@@ -174,6 +174,16 @@ moduleIntegrationTestRunner<PacksModuleService>({
           image: 'y.png',
         },
       ]);
+      await service.createPacks([
+        {
+          slug: 'bronze',
+          title: 'Bronze Pack',
+          category: 'standard',
+          price: 300,
+          image: '/x.webp',
+          status: 'active',
+        },
+      ]);
       await service.checkInDaily({ customerId: 'cus_t4' });
       const { id } = await service.saveTaskDefinition({
         kind: 'weekly',
@@ -201,6 +211,130 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(pulls).toHaveLength(1);
       expect(pulls[0].pack_id).toBe('bronze');
       expect(pulls[0].card_id).toBe('rolled-card');
+    });
+
+    it('vault achievements are a lifetime high-water — selling a card cannot un-complete them', async () => {
+      await service.createCards([
+        {
+          handle: 'hw-card',
+          name: 'HW',
+          set: 'S',
+          grader: 'PSA',
+          grade: '9',
+          market_value: 10,
+          image: 'x.png',
+        },
+      ]);
+      const [p1] = await service.createPulls([
+        {
+          customer_id: 'cus_hw',
+          pack_id: 'p',
+          card_id: 'hw-card',
+          rolled_at: new Date(),
+        },
+      ]);
+      const { id } = await service.saveTaskDefinition({
+        kind: 'achievement',
+        title: 'Vault your first card',
+        requirement: { type: 'vault_count', count: 1 },
+        reward: { type: 'credit', amount_myr: 1 },
+        active: true,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'seed',
+      });
+      // Sell the card BEFORE claiming — progress must not drop.
+      await service.updatePulls({
+        selector: { id: p1.id },
+        data: { status: 'bought_back' as const },
+      });
+      const hub = await service.taskHubFor({ customerId: 'cus_hw' });
+      expect(hub.tasks.find((t) => t.id === id)!.progress.completed).toBe(true);
+      const claim = await service.claimTask({
+        customerId: 'cus_hw',
+        taskId: id,
+      });
+      expect(claim.claimed).toBe(true);
+    });
+
+    it('a retired task stays claimable for someone who completed it', async () => {
+      await service.checkInDaily({ customerId: 'cus_ret' });
+      const { id } = await service.saveTaskDefinition({
+        kind: 'weekly',
+        title: 'Check in once',
+        requirement: { type: 'checkin_days', days: 1 },
+        reward: { type: 'credit', amount_myr: 1 },
+        active: true,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'seed',
+      });
+      await service.saveTaskDefinition({
+        id,
+        kind: 'weekly',
+        title: 'Check in once',
+        requirement: { type: 'checkin_days', days: 1 },
+        reward: { type: 'credit', amount_myr: 1 },
+        active: false,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'retire',
+      });
+      const claim = await service.claimTask({
+        customerId: 'cus_ret',
+        taskId: id,
+      });
+      expect(claim.claimed).toBe(true);
+    });
+
+    it('save-time guards: missing reward targets and kind flips are rejected', async () => {
+      await expect(
+        service.saveTaskDefinition({
+          kind: 'achievement',
+          title: 'Bad card',
+          requirement: { type: 'vault_count', count: 1 },
+          reward: { type: 'card', card_handle: 'no-such-card' },
+          active: true,
+          sort: 0,
+          adminId: 'admin_1',
+          reason: 'x',
+        }),
+      ).rejects.toThrow(/does not exist/i);
+      await expect(
+        service.saveTaskDefinition({
+          kind: 'weekly',
+          title: 'Bad pack',
+          requirement: { type: 'checkin_days', days: 1 },
+          reward: { type: 'pack', pack_id: 'no-such-pack' },
+          active: true,
+          sort: 0,
+          adminId: 'admin_1',
+          reason: 'x',
+        }),
+      ).rejects.toThrow(/does not exist/i);
+      const { id } = await service.saveTaskDefinition({
+        kind: 'weekly',
+        title: 'Kind-locked',
+        requirement: { type: 'checkin_days', days: 1 },
+        reward: { type: 'credit', amount_myr: 1 },
+        active: true,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'seed',
+      });
+      await expect(
+        service.saveTaskDefinition({
+          id,
+          kind: 'achievement',
+          title: 'Kind-locked',
+          requirement: { type: 'reach_level', level: 2 },
+          reward: { type: 'credit', amount_myr: 1 },
+          active: true,
+          sort: 0,
+          adminId: 'admin_1',
+          reason: 'flip',
+        }),
+      ).rejects.toThrow(/kind cannot change/i);
     });
 
     it('saveTaskDefinition validates and audits; inactive tasks vanish from the hub', async () => {

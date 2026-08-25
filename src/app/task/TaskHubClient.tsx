@@ -68,6 +68,19 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
+// Rendered when a tab's data is null but the customer IS logged in — the
+// backend hiccuped, and telling a logged-in customer to "sign in" reads as a
+// lost session (review 2026-08-25 finding 7).
+function UnavailablePanel() {
+  return (
+    <Panel className="text-center">
+      <p className="text-sm leading-relaxed text-neutral-400">
+        Couldn't load this right now — give it a second and refresh.
+      </p>
+    </Panel>
+  );
+}
+
 function SignInPrompt({ what }: { what: string }) {
   return (
     <Panel className="text-center">
@@ -124,9 +137,21 @@ function HistoryList({
   );
 }
 
-function ReferralTab({ data }: { data: ReferralSummary | null }) {
+function ReferralTab({
+  data,
+  isLoggedIn,
+}: {
+  data: ReferralSummary | null;
+  isLoggedIn: boolean;
+}) {
   const [copied, setCopied] = useState(false);
-  if (!data) return <SignInPrompt what="your referral link and earnings" />;
+  if (!data) {
+    return isLoggedIn ? (
+      <UnavailablePanel />
+    ) : (
+      <SignInPrompt what="your referral link and earnings" />
+    );
+  }
 
   // Rendered as a path (identical on server and client — no hydration skew);
   // the copy handler runs client-only, so it can prepend the real origin.
@@ -198,8 +223,20 @@ function ReferralTab({ data }: { data: ReferralSummary | null }) {
   );
 }
 
-function VipTab({ data }: { data: VipRebate | null }) {
-  if (!data) return <SignInPrompt what="your VIP rebate" />;
+function VipTab({
+  data,
+  isLoggedIn,
+}: {
+  data: VipRebate | null;
+  isLoggedIn: boolean;
+}) {
+  if (!data) {
+    return isLoggedIn ? (
+      <UnavailablePanel />
+    ) : (
+      <SignInPrompt what="your VIP rebate" />
+    );
+  }
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2">
@@ -323,11 +360,23 @@ function TaskRow({
   );
 }
 
-function TasksTab({ data }: { data: TaskHub | null }) {
+function TasksTab({
+  data,
+  isLoggedIn,
+}: {
+  data: TaskHub | null;
+  isLoggedIn: boolean;
+}) {
   const [pending, startTransition] = useTransition();
   const [notice, setNotice] = useState<string | null>(null);
   const router = useRouter();
-  if (!data) return <SignInPrompt what="your tasks and achievements" />;
+  if (!data) {
+    return isLoggedIn ? (
+      <UnavailablePanel />
+    ) : (
+      <SignInPrompt what="your tasks and achievements" />
+    );
+  }
 
   const weekly = data.tasks.filter((t) => t.kind === 'weekly');
   const achievements = data.tasks.filter((t) => t.kind === 'achievement');
@@ -422,10 +471,12 @@ export function TaskHubClient({
   referral,
   vipRebate,
   taskHub,
+  isLoggedIn,
 }: {
   referral: ReferralSummary | null;
   vipRebate: VipRebate | null;
   taskHub: TaskHub | null;
+  isLoggedIn: boolean;
 }) {
   const [tab, setTab] = useState<TabKey>('tasks');
   return (
@@ -455,9 +506,11 @@ export function TaskHubClient({
         ))}
       </div>
       <div className="mt-4">
-        {tab === 'tasks' && <TasksTab data={taskHub} />}
-        {tab === 'referral' && <ReferralTab data={referral} />}
-        {tab === 'vip' && <VipTab data={vipRebate} />}
+        {tab === 'tasks' && <TasksTab data={taskHub} isLoggedIn={isLoggedIn} />}
+        {tab === 'referral' && (
+          <ReferralTab data={referral} isLoggedIn={isLoggedIn} />
+        )}
+        {tab === 'vip' && <VipTab data={vipRebate} isLoggedIn={isLoggedIn} />}
       </div>
     </div>
   );

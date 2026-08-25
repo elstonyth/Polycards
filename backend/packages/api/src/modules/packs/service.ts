@@ -1285,11 +1285,17 @@ class PacksModuleService extends MedusaService({
     const before = existing?.referrer_id ?? null;
     if (input.referrerId === null) {
       if (existing) {
-        await this.deleteReferralAttributions({ id: existing.id }, sharedContext);
+        await this.deleteReferralAttributions(
+          { id: existing.id },
+          sharedContext,
+        );
       }
     } else if (existing) {
       await this.updateReferralAttributions(
-        { selector: { id: existing.id }, data: { referrer_id: input.referrerId } },
+        {
+          selector: { id: existing.id },
+          data: { referrer_id: input.referrerId },
+        },
         sharedContext,
       );
     } else {
@@ -1418,7 +1424,11 @@ class PacksModuleService extends MedusaService({
     // out", so a voided line must leave the number the operator reads
     // (review 2026-08-25 finding 3).
     await this.deductRunTotal(
-      { settlementId: line.settlement_id, kind: line.kind, amountCents: line.amount_cents },
+      {
+        settlementId: line.settlement_id,
+        kind: line.kind,
+        amountCents: line.amount_cents,
+      },
       sharedContext,
     );
     await this.createAdminActionAudits(
@@ -1609,28 +1619,27 @@ class PacksModuleService extends MedusaService({
     }[];
   }> {
     const week = referralWeekFor(input.now ?? new Date());
+
+    // One joined aggregate instead of materialising every downline id into an
+    // IN list on every page view (review 2026-08-25 scalability finding: a
+    // 5k-downline partner would otherwise build a 5k-parameter statement per
+    // view; Postgres caps a statement at 65535 binds).
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-
-    const downline = await this.listReferralAttributions(
-      { referrer_id: input.customerId },
-      { select: ['customer_id'], take: 100_000 },
-      sharedContext,
+    const [agg] = await em.execute<
+      { downline_count: string; turnover_cents: string }[]
+    >(
+      'SELECT COUNT(DISTINCT ra.customer_id)::bigint AS downline_count, ' +
+        '  COALESCE(SUM(CASE WHEN ct.created_at >= ? AND ct.created_at < ? ' +
+        '    THEN ROUND(-ct.amount * 100) ELSE 0 END), 0)::bigint AS turnover_cents ' +
+        'FROM referral_attribution ra ' +
+        'LEFT JOIN credit_transaction ct ON ct.customer_id = ra.customer_id ' +
+        "  AND ct.reason = 'pack_open' AND ct.deleted_at IS NULL " +
+        'WHERE ra.referrer_id = ? AND ra.deleted_at IS NULL',
+      [week.startUtc, week.endUtcExcl, input.customerId],
     );
-    const downlineIds = downline.map((d) => d.customer_id);
-
-    const downlineTurnover = await this.packTurnoverCentsByCustomer(
-      {
-        startUtc: week.startUtc,
-        endUtcExcl: week.endUtcExcl,
-        customerIds: downlineIds,
-      },
-      sharedContext,
-    );
-    const turnoverCents = [...downlineTurnover.values()].reduce(
-      (a, b) => a + b,
-      0,
-    );
+    const downlineCount = Number(agg?.downline_count ?? 0);
+    const turnoverCents = Number(agg?.turnover_cents ?? 0);
 
     const [state] = await this.listCustomerAccountStates(
       { customer_id: input.customerId },
@@ -1642,7 +1651,7 @@ class PacksModuleService extends MedusaService({
     const rateBp = resolveRateBp(turnoverCents, settings.tiers, partnerBp);
 
     return {
-      downline_count: downlineIds.length,
+      downline_count: downlineCount,
       week: {
         start: week.weekStartIso,
         turnover_cents: turnoverCents,
@@ -1839,14 +1848,20 @@ class PacksModuleService extends MedusaService({
           { select: ['current_level'], take: 1 },
           sharedContext,
         ),
+        // Lifetime counts, NOT current status: every pull STARTS vaulted
+        // (pull.ts lifecycle), so "cards ever vaulted" = all pulls — and an
+        // achievement must never UN-complete because the customer sold or
+        // shipped a card before claiming (review 2026-08-25 finding 2). This
+        // also rides IDX_pull_customer_id_rolled_at instead of scanning for a
+        // status that has no index.
         em.execute<{ n: string }[]>(
           'SELECT COUNT(*)::bigint AS n FROM pull ' +
-            "WHERE customer_id = ? AND status = 'vaulted' AND deleted_at IS NULL",
+            'WHERE customer_id = ? AND deleted_at IS NULL',
           [input.customerId],
         ),
         em.execute<{ n: string }[]>(
           'SELECT COUNT(*)::bigint AS n FROM pull p JOIN card c ON c.handle = p.card_id ' +
-            "WHERE p.customer_id = ? AND p.status = 'vaulted' AND p.deleted_at IS NULL " +
+            'WHERE p.customer_id = ? AND p.deleted_at IS NULL ' +
             '  AND c.deleted_at IS NULL AND c.pokemon_dex IS NOT NULL',
           [input.customerId],
         ),
@@ -1884,7 +1899,9 @@ class PacksModuleService extends MedusaService({
     const [defs, facts, claims] = await Promise.all([
       this.listTaskDefinitions(
         { active: true },
-        { order: { sort: 'ASC' }, take: 200 },
+        // 500 matches the admin list cap — past it, definitions would vanish
+        // from the hub silently, so keep the two bounds identical.
+        { order: { sort: 'ASC' }, take: 500 },
         sharedContext,
       ),
       this.taskFactsFor({ customerId: input.customerId, week }, sharedContext),
@@ -1941,8 +1958,12 @@ class PacksModuleService extends MedusaService({
         reason: 'not_found' | 'not_completed' | 'already_claimed';
       }
   > {
+    // Deliberately NOT filtered on active: retiring a task must never strand
+    // a customer who completed it before the retire (review 2026-08-25
+    // finding 6). The hub only SHOWS active tasks, so retired ones are
+    // reachable only by someone who already saw them.
     const [def] = await this.listTaskDefinitions(
-      { id: input.taskId, active: true },
+      { id: input.taskId },
       { take: 1 },
       sharedContext,
     );
@@ -2022,8 +2043,18 @@ class PacksModuleService extends MedusaService({
         );
       }
       // Fulfillment counter, never a gate — negative = units owed (same
-      // stance as challenge grants). Non-fatal when the helper is absent.
-      await input.decrementStock?.(reward.card_handle, 1);
+      // stance as challenge grants). Guarded: the take runs on the inventory
+      // module's own connection, so a throw here would 500 the claim, roll
+      // back the claim row AND leave the decrement committed — every retry
+      // then loses another unit (the decrement-card-stock step's rule: the
+      // TAKE does not belong in this transaction). A failed take is an
+      // operator concern, never a customer error.
+      try {
+        await input.decrementStock?.(reward.card_handle, 1);
+      } catch {
+        // stock counter drift is operator-visible in inventory; the claim
+        // must proceed.
+      }
       const [pull] = await this.createPulls(
         [
           {
@@ -2047,7 +2078,11 @@ class PacksModuleService extends MedusaService({
         );
       }
       const rolled = await input.rollPack(reward.pack_id);
-      await input.decrementStock?.(rolled.handle, 1);
+      try {
+        await input.decrementStock?.(rolled.handle, 1);
+      } catch {
+        // same stance as the card branch above.
+      }
       const [pull] = await this.createPulls(
         [
           {
@@ -2094,6 +2129,34 @@ class PacksModuleService extends MedusaService({
     }
     const requirement = validateTaskRequirement(input.kind, input.requirement);
     const reward = validateTaskReward(input.reward);
+    // Reward targets must EXIST at save time — a typo'd pack slug or card
+    // handle otherwise surfaces only at claim time, as a permanent generic
+    // failure for every completed customer (review 2026-08-25 finding 4).
+    if (reward.type === 'card') {
+      const [card] = await this.listCards(
+        { handle: reward.card_handle },
+        { select: ['handle'], take: 1 },
+        sharedContext,
+      );
+      if (!card) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Reward card '${reward.card_handle}' does not exist.`,
+        );
+      }
+    } else if (reward.type === 'pack') {
+      const [pack] = await this.listPacks(
+        { slug: reward.pack_id },
+        { select: ['slug'], take: 1 },
+        sharedContext,
+      );
+      if (!pack) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Reward pack '${reward.pack_id}' does not exist.`,
+        );
+      }
+    }
     const data = {
       kind: input.kind,
       title: input.title.trim(),
@@ -2114,6 +2177,15 @@ class PacksModuleService extends MedusaService({
         throw new MedusaError(
           MedusaError.Types.NOT_FOUND,
           `Task ${id} not found.`,
+        );
+      }
+      // kind drives period_key, which drives BOTH the claim unique index and
+      // the credit idempotency key — flipping it in place re-opens already
+      // claimed rewards (review 2026-08-25 finding 5). New cadence = new task.
+      if (existing.kind !== input.kind) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          "A task's kind cannot change after creation — retire this one and create a new task instead.",
         );
       }
       before = {
