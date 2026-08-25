@@ -110,6 +110,11 @@ describe('updateAddress', () => {
   it('sends null (not undefined) for CLEARED optional fields, so the partial update actually erases them', async () => {
     await updateAddress('addr_1', {
       ...FULL,
+      // Non-MY on purpose: since plan 126 the province is REQUIRED for MY, so
+      // a blank one on a MY address is rejected before it reaches the SDK and
+      // this case could never exercise the null mapping. Off-MY it is still a
+      // genuine optional field, which is what this test is about.
+      countryCode: 'SG',
       address2: '',
       province: '',
       phone: '',

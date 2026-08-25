@@ -14,6 +14,7 @@ import {
   type AddAddressInput,
 } from '@/lib/actions/delivery';
 import { addressViewFromInput } from '@/lib/address-view';
+import { MY_STATES } from '@/lib/my-states';
 import { rm } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -139,6 +140,7 @@ function EditAddressModal({
     lastName: '',
     address1: '',
     city: '',
+    province: '',
     postalCode: '',
     countryCode: '',
   });
@@ -307,6 +309,35 @@ function EditAddressModal({
                 }
                 className={INPUT_CLASS}
               />
+            </label>
+            {/* Re-pointing an existing order is where a wrong zone costs the
+                most: the backend re-derives the composite zone on an address
+                edit and refuses a zone change (store/delivery-orders/[id]/
+                address/route.ts). A fixed list, not free text, so a typed
+                "Sabah, Malaysia" still bills East. */}
+            <label className="block">
+              <span className="mb-1.5 block text-[12px] font-medium text-white/55">
+                State
+              </span>
+              <select
+                aria-label="State"
+                autoComplete="address-level1"
+                required
+                value={form.province ?? ''}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, province: e.target.value }))
+                }
+                className={INPUT_CLASS}
+              >
+                <option value="" disabled>
+                  Select a state
+                </option>
+                {MY_STATES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="block">
               <span className="mb-1.5 block text-[12px] font-medium text-white/55">
