@@ -38,7 +38,7 @@ const SECTIONS: { title: string; body: string }[] = [
   },
   {
     title: 'Public activity',
-    body: 'Polycards is partly a public product. Your display name and profile handle appear on public surfaces — the leaderboard, the weekly challenge, the live feed, and your profile page at polycards.gg/profile. Notable pulls are also announced automatically to our public Telegram channel, with your display name and a link to your profile. This is on by default for every account. We never publish your email address, your mobile number, or your account balance.',
+    body: 'Polycards is partly a public product. Your display name is shown on public surfaces — the leaderboard, the weekly challenge, the recent-pulls feed on the home and pack pages, and your public profile page, whose web address contains your handle. Notable pulls are also announced automatically to our public Telegram channel, with your display name and a link to that profile. This is on by default for every account. We never publish your email address, your mobile number, or your account balance.',
   },
   {
     title: 'Where your data lives',
