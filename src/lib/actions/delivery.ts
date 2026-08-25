@@ -18,7 +18,10 @@ import {
   parseList,
   parseOne,
   DeliveryOrderSchema,
+  WithdrawAddressSchema,
+  WithdrawPrizeSchema,
   type DeliveryOrderStatus,
+  type WithdrawAddressInput,
 } from '@/lib/data/schemas';
 import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
 import { DELIVERY_RULES, DELIVERY_FALLBACK } from '@/lib/delivery-errors';
@@ -65,6 +68,17 @@ export type DeliveryOrdersResult =
 
 export type RequestDeliveryResult =
   | { ok: true; orderId: string }
+  | { ok: false; error: string; needsAuth?: boolean };
+
+/** Outcome of shipping a mixed selection — see `shipVaultCards`. */
+export type ShipVaultResult =
+  | {
+      ok: true;
+      /** Pulls that are on their way; the vault drops these rows. */
+      shippedIds: string[];
+      /** Pulls that stayed, and why — rendered per card, not swallowed. */
+      skipped: { pullId: string; reason: string }[];
+    }
   | { ok: false; error: string; needsAuth?: boolean };
 
 export type EditAddressResult =
@@ -500,4 +514,102 @@ export async function deleteAddress(
       needsAuth: isAuthError(error),
     };
   }
+}
+
+/**
+ * Ship a vault selection that may mix ordinary cards with REWARD cards.
+ *
+ * The two take different backends and always have: an ordinary pull goes to
+ * POST /store/delivery-orders, a source='reward' pull to
+ * POST /store/rewards/withdraw, which stamps is_reward and enforces a
+ * withdrawals-per-day cap. The generic path refuses a reward pull outright
+ * (delivery.ts returns 'reward_source'), so this split is routing, not a
+ * preference — and getting it wrong is a 400, never a wrong shipment.
+ *
+ * Until now the vault simply had no way to reach the reward path: its only UI
+ * lived on the suspended /daily page, so a task-granted card was stuck in the
+ * vault with the delivery route telling the customer to use a page that does
+ * not exist.
+ *
+ * Reward pulls ship ONE AT A TIME because the cap is per-request. A partial
+ * outcome is normal (cap reached mid-selection) and is reported per card
+ * rather than failing the whole submit — the ordinary cards in the same
+ * selection have already shipped by then.
+ */
+export async function shipVaultCards(
+  normalPullIds: string[],
+  rewardPullIds: string[],
+  addressId: string,
+  address: WithdrawAddressInput,
+): Promise<ShipVaultResult> {
+  if (normalPullIds.length === 0 && rewardPullIds.length === 0) {
+    return { ok: false, error: 'Select at least one card.' };
+  }
+
+  const shippedIds: string[] = [];
+  const skipped: { pullId: string; reason: string }[] = [];
+
+  if (normalPullIds.length > 0) {
+    const res = await requestDelivery(normalPullIds, addressId);
+    if (!res.ok) {
+      // The ordinary batch is all-or-nothing on the backend, and it runs
+      // first — so nothing has shipped yet and the whole submit can fail
+      // cleanly.
+      return res;
+    }
+    shippedIds.push(...normalPullIds);
+  }
+
+  if (rewardPullIds.length > 0) {
+    const parsedAddress = WithdrawAddressSchema.safeParse(address);
+    if (!parsedAddress.success) {
+      for (const pullId of rewardPullIds) {
+        skipped.push({
+          pullId,
+          reason: 'That address is missing fields reward shipping requires.',
+        });
+      }
+      return { ok: true, shippedIds, skipped };
+    }
+    const token = await getAuthToken();
+    if (!token) {
+      return { ok: false, error: 'Please log in first.', needsAuth: true };
+    }
+    for (const pullId of rewardPullIds) {
+      try {
+        const parsed = parseOne(
+          WithdrawPrizeSchema,
+          await sdk.client.fetch('/store/rewards/withdraw', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+            body: { pull_id: pullId, address: parsedAddress.data },
+          }),
+        );
+        if (parsed?.status === 'requested') {
+          shippedIds.push(pullId);
+        } else if (parsed?.status === 'capped') {
+          skipped.push({
+            pullId,
+            reason: "You've hit today's reward shipping limit — try tomorrow.",
+          });
+        } else {
+          skipped.push({
+            pullId,
+            reason: 'This reward card could not be shipped right now.',
+          });
+        }
+      } catch (error) {
+        logger.error(
+          `[delivery] reward withdraw failed for '${pullId}':`,
+          error,
+        );
+        skipped.push({
+          pullId,
+          reason: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
+        });
+      }
+    }
+  }
+
+  return { ok: true, shippedIds, skipped };
 }

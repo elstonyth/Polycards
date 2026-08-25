@@ -90,8 +90,10 @@ export function validateDeliveryRequest(
       if (pull.status === "bought_back") return "bought_back";
       return "not_vaulted";
     }
-    // Reward prizes ship ONLY via recordRewardWithdrawal (redemption gate +
-    // daily cap + is_reward stamping) — never via the generic delivery path.
+    // Reward prizes ship ONLY via recordRewardWithdrawal (daily cap +
+    // is_reward stamping) — never via the generic delivery path. This is a
+    // ROUTING verdict, not a refusal: the vault sends these pulls to the
+    // reward path rather than showing the customer a wall.
     if (pull.source === "reward") return "reward_source";
     // The free welcome pull ships only after the customer's first PAID open —
     // same lock the buyback step applies (modules/packs/free-pack.ts).

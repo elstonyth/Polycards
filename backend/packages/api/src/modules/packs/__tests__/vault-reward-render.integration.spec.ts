@@ -185,27 +185,25 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(card).toBeDefined();
         expect(card.handle).toBe(ids.prizeHandle);
         expect(card.name).toBe('C2 Prize Card');
-        // LOCKED, and quoting nothing payable. buyback-pull.ts refuses to sell
-        // any source='reward' pull that is not a weekly-challenge prize, so a
-        // vault row that advertised a percent + amount here would offer money
-        // the sell then rejects. This assertion replaces the old branch's
-        // `expect(buyback).toBeUndefined()` — the field is present now (the
-        // storefront drops a row without a finite percent), but unpayable.
-        expect(rewardItem!.locked).toBe(true);
+        // NOT locked — `locked` means neither sellable nor shippable, and a
+        // reward card ships fine (recordRewardWithdrawal). Locking it hid a
+        // path that works and put the free-pull explainer ("rip a paid pack to
+        // unlock") over a card that never unlocks that way.
+        expect(rewardItem!.locked).toBe(false);
+        // NOT sellable — buyback-pull.ts refuses any source='reward' pull that
+        // is not a weekly-challenge prize, so the row must quote nothing
+        // payable or the vault offers money the sell rejects.
+        expect(rewardItem!.sellable).toBe(false);
+        expect(normalItem.sellable).toBe(true);
         const buyback = rewardItem!.buyback as Record<string, unknown>;
         expect(buyback).toBeDefined();
         expect(buyback.amount).toBe(0);
-        // `firm` is a GLOBAL fact about the FX rate, never a per-row lock
-        // signal: it must match every other row's, or one locked row would
-        // blame the whole vault's pricing and block selling the rest.
+        // `firm` is a GLOBAL fact about the FX rate, never a per-row signal:
+        // it must match every other row's, or one unsellable row would blame
+        // the whole vault's pricing and block selling the rest.
         expect(buyback.firm).toBe(
           (normalItem.buyback as Record<string, unknown>).firm,
         );
-        // WHY it is locked travels with it. Without this the storefront shows
-        // the free-pull explainer — "rip a paid pack to unlock" — over a card
-        // that never unlocks that way.
-        expect(rewardItem!.lock_reason).toBe('reward');
-        expect(normalItem.lock_reason).toBeNull();
       });
 
       it('resolves a synthetic-pack reward to a live tier, not Common', () => {

@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import { SlabImage } from '@/components/SlabImage';
 import {
-  requestDelivery,
+  shipVaultCards,
   addAddress,
   type AddressView,
   type AddAddressInput,
@@ -21,7 +21,12 @@ type Props = {
   items: VaultItem[]; // the selected cards
   addresses: AddressView[];
   onClose: () => void;
-  onSubmitted: (pullIds: string[]) => void; // parent removes them from the vault
+  /** Parent removes exactly these from the vault — the ones that actually
+   *  shipped, which is not always the whole selection (see `skipped`). */
+  onSubmitted: (
+    pullIds: string[],
+    skipped: { pullId: string; reason: string }[],
+  ) => void;
 };
 
 // ponytail: was a fourth hand-copy of this string, and the only one left
@@ -86,13 +91,43 @@ export default function RequestDeliveryModal({
     setBusy(true);
     setError(null);
     try {
-      const pullIds = items.map((i) => i.pullId);
-      const res = await requestDelivery(pullIds, selectedAddr);
+      // Reward cards take a different backend — POST /store/rewards/withdraw,
+      // which stamps is_reward and enforces a per-day cap — so the selection
+      // is split here rather than sent to a route that would refuse half of it.
+      const normalIds = items
+        .filter((i) => i.source !== 'reward')
+        .map((i) => i.pullId);
+      const rewardIds = items
+        .filter((i) => i.source === 'reward')
+        .map((i) => i.pullId);
+      const addr = addrList.find((a) => a.id === selectedAddr);
+      if (!addr) {
+        setError('Choose a shipping address.');
+        return;
+      }
+      const res = await shipVaultCards(normalIds, rewardIds, selectedAddr, {
+        firstName: addr.firstName,
+        lastName: addr.lastName,
+        address1: addr.line1,
+        city: addr.city,
+        postalCode: addr.postalCode,
+        countryCode: addr.countryCode,
+      });
       if (!res.ok) {
         setError(res.error);
         return;
       }
-      onSubmitted(pullIds);
+      // A partial result is normal: the reward cap can bite mid-selection
+      // after the ordinary cards have already shipped. Report it rather than
+      // pretending the whole selection went.
+      if (res.shippedIds.length === 0 && res.skipped.length > 0) {
+        setError(
+          res.skipped[0]?.reason ??
+            'Those cards could not be shipped right now.',
+        );
+        return;
+      }
+      onSubmitted(res.shippedIds, res.skipped);
     } catch {
       setError('Couldn’t request delivery. Please try again.');
     } finally {

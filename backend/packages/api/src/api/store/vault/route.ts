@@ -125,16 +125,16 @@ export async function GET(
       const prize = isChallengePrizePack(p.pack_id);
       // The free welcome pull is unsellable until the customer's first PAID
       // open — the SAME rule buyback-pull.ts refuses on.
-      // `locked` must mirror what buyback-pull.ts actually refuses, or the
-      // vault offers a price the sell then rejects. Two refusals:
-      //   - a free welcome pull before the first PAID open;
-      //   - any source='reward' pull that is NOT a weekly-challenge prize —
-      //     i.e. a task reward. That guard predates the task engine (it was
-      //     written for daily-box prizes) but it is what the sell enforces
-      //     today, so this is what the vault must advertise.
-      const locked =
-        (p.source === 'free' && !freeUnlocked) ||
-        (p.source === 'reward' && !isChallengePrizePack(p.pack_id));
+      // `locked` = neither sellable NOR shippable. That is the free welcome
+      // pull before the first PAID open, and only that.
+      const locked = p.source === 'free' && !freeUnlocked;
+      // Sellable is the NARROWER fact: buyback-pull.ts refuses any
+      // source='reward' pull that is not a weekly-challenge prize. Those cards
+      // still SHIP — through recordRewardWithdrawal, which carries its own
+      // daily cap — so folding them into `locked` would have hidden a path
+      // that works.
+      const sellable =
+        !locked && !(p.source === 'reward' && !isChallengePrizePack(p.pack_id));
       const { percent, rate_type } = resolveBuybackRate(pack, {
         rolled_at: p.rolled_at,
         revealed_at: p.revealed_at,
@@ -182,15 +182,10 @@ export async function GET(
         // the sell/deliver lock must be keyed off `locked`, NEVER off `source`.
         source: p.source ?? 'pack',
         locked,
-        // WHY it is locked — the two reasons have nothing in common and the
-        // storefront was rendering the free-pull copy ("rip a paid pack to
-        // unlock") over a reward card, which never unlocks that way. Null
-        // when unlocked.
-        lock_reason: locked
-          ? p.source === 'free'
-            ? ('free_pull' as const)
-            : ('reward' as const)
-          : null,
+        // Can this row be SOLD? False for a reward card, which still ships.
+        // Split from `locked` so the vault stops advertising a sell price the
+        // buyback step rejects without also hiding the shipping it allows.
+        sellable,
         // A LOCKED pull must advertise NOTHING payable: selling it 400s
         // (FREE_PULL_LOCKED_MESSAGE for a free pull, "Reward prizes can't be
         // sold back" for a task reward), so quoting a price here would offer
@@ -208,7 +203,7 @@ export async function GET(
         // blame the lock on a pricing outage for the WHOLE vault and block the
         // customer from selling their other, genuinely sellable cards.
         // The lock is carried by `locked`, never by `firm`.
-        buyback: locked
+        buyback: !sellable
           ? { ...UNQUOTED_BUYBACK, firm: fxFirm }
           : {
               percent,
