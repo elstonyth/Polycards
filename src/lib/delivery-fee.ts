@@ -27,15 +27,42 @@ export function isEastMalaysiaPostcode(postalCode: string): boolean {
   return n >= 87000 && n <= 98999;
 }
 
+/** Every Malaysian address has a 5-digit postcode; anything else can't be
+ *  zoned and the backend refuses it. */
+export function isShippablePostcode(postalCode: string): boolean {
+  return /^\d{5}$/.test(postalCode.trim());
+}
+
+export type DeliveryZone = 'west' | 'east';
+
+const EAST_PLACE_RE =
+  /\b(sabah|sarawak|labuan|kota\s*kinabalu|kuching|sandakan|tawau|miri|sibu|bintulu|lahad\s*datu|keningau)\b/i;
+
+/** The MORE EXPENSIVE of the postcode zone and the state/city zone — the
+ *  postcode alone is customer-typed, so a Sabah address with a KL postcode
+ *  must still preview (and be charged) the East rate. */
+export function deliveryZone(
+  postalCode: string,
+  province?: string | null,
+  city?: string | null,
+): DeliveryZone {
+  if (isEastMalaysiaPostcode(postalCode)) return 'east';
+  const place = [province, city].filter(Boolean).join(' ');
+  return EAST_PLACE_RE.test(place) ? 'east' : 'west';
+}
+
 const toCents = (n: number) => Math.round(n * 100) / 100;
 
 export function computeDeliveryFee(
   postalCode: string,
   orderValueMyr: number,
+  province?: string | null,
+  city?: string | null,
 ): DeliveryFee {
-  const shipping = isEastMalaysiaPostcode(postalCode)
-    ? EAST_SHIPPING_MYR
-    : WEST_SHIPPING_MYR;
+  const shipping =
+    deliveryZone(postalCode, province, city) === 'east'
+      ? EAST_SHIPPING_MYR
+      : WEST_SHIPPING_MYR;
   const insurance =
     orderValueMyr > PROTECTION_INCLUDED_MYR
       ? toCents(orderValueMyr * INSURANCE_RATE)

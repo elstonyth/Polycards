@@ -1874,7 +1874,13 @@ class PacksModuleService extends MedusaService({
           period_key: [week.weekStartIso, ''],
         },
         {
-          select: ['id', 'task_id', 'period_key', 'claim_ref', 'reward_snapshot'],
+          select: [
+            'id',
+            'task_id',
+            'period_key',
+            'claim_ref',
+            'reward_snapshot',
+          ],
           take: 1000,
         },
         sharedContext,
@@ -3765,7 +3771,22 @@ class PacksModuleService extends MedusaService({
     );
     // Shipping + mandatory insurance, valued at the SAME instant as the OD
     // debit so both derive from one vaultValueForPulls read.
-    const fee = computeDeliveryFee(input.snapshot.ship_postal_code, vaultDelta);
+    // Zone comes from postcode AND state/city (see deliveryZone) — a
+    // customer-typed West postcode on a Sabah address must not buy the RM15
+    // rate. Fee must be a real charge: a non-finite total would skip the debit
+    // here while the cancel arm refuses to reverse it, so fail closed.
+    const fee = computeDeliveryFee(
+      input.snapshot.ship_postal_code,
+      vaultDelta,
+      input.snapshot.ship_province,
+      input.snapshot.ship_city,
+    );
+    if (!Number.isFinite(fee.total) || fee.total <= 0) {
+      throw new MedusaError(
+        MedusaError.Types.UNEXPECTED_STATE,
+        'Could not price the shipping fee for this address.',
+      );
+    }
 
     const [order] = await this.createDeliveryOrders(
       [
@@ -6872,12 +6893,7 @@ class PacksModuleService extends MedusaService({
     const ladderRows = await this.listVipLevels(
       {},
       {
-        select: [
-          'level',
-          'spend_threshold',
-          'voucher_amount',
-          'frame_unlock',
-        ],
+        select: ['level', 'spend_threshold', 'voucher_amount', 'frame_unlock'],
         take: 1000,
       },
     );

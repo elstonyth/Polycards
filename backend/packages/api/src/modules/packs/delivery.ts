@@ -179,8 +179,6 @@ export function isMalaysianAddress(countryCode: string): boolean {
 
 // East Malaysia = Labuan 87xxx, Sabah 88xxx–91xxx, Sarawak 93xxx–98xxx — one
 // contiguous numeric range (92xxx is unassigned in Malaysia's plan).
-// ponytail: a malformed postcode bills the West rate rather than refusing the
-// order; the operator reconciles the odd manual case.
 export function isEastMalaysiaPostcode(postalCode: string): boolean {
   const digits = postalCode.trim();
   if (!/^\d{5}$/.test(digits)) return false;
@@ -188,15 +186,54 @@ export function isEastMalaysiaPostcode(postalCode: string): boolean {
   return n >= 87000 && n <= 98999;
 }
 
+// Every Malaysian address has a 5-digit postcode. Anything else can't be
+// zoned, and a zone that can't be derived used to fall through to the CHEAP
+// rate — so an unparseable postcode is refused at the door instead
+// (security review 2026-08-25).
+export function isShippablePostcode(postalCode: string): boolean {
+  return /^\d{5}$/.test(postalCode.trim());
+}
+
+export type DeliveryZone = 'west' | 'east';
+
+// The East Malaysian states + their major localities. Matched on the address's
+// province AND city because the postcode alone is customer-typed: a Sabah
+// customer entering a KL postcode would otherwise be billed West RM15 for an
+// East parcel (security review 2026-08-25, MEDIUM). Word-boundary anchored so
+// a West place name can't collide on a substring.
+const EAST_PLACE_RE =
+  /\b(sabah|sarawak|labuan|kota\s*kinabalu|kuching|sandakan|tawau|miri|sibu|bintulu|lahad\s*datu|keningau)\b/i;
+
+// The zone actually billed: the MORE EXPENSIVE of what the postcode says and
+// what the state/city says. Both inputs are customer-supplied, so the rule is
+// deliberately asymmetric — a mismatch bills East rather than under-charging a
+// real East Malaysian shipment.
+export function deliveryZone(
+  postalCode: string,
+  province: string | null | undefined,
+  city: string | null | undefined,
+): DeliveryZone {
+  if (isEastMalaysiaPostcode(postalCode)) return 'east';
+  const place = [province, city].filter(Boolean).join(' ');
+  return EAST_PLACE_RE.test(place) ? 'east' : 'west';
+}
+
 const toCents = (n: number) => Math.round(n * 100) / 100;
 
+// `province`/`city` are optional so the storefront's preview (which has the
+// same address fields) and the authoritative backend call share one signature.
+// Omitting them degrades to the postcode-only zone — never pass them as
+// undefined on the charging path; snapshotAddress always carries both.
 export function computeDeliveryFee(
   postalCode: string,
   orderValueMyr: number,
+  province?: string | null,
+  city?: string | null,
 ): DeliveryFee {
-  const shipping = isEastMalaysiaPostcode(postalCode)
-    ? EAST_SHIPPING_MYR
-    : WEST_SHIPPING_MYR;
+  const shipping =
+    deliveryZone(postalCode, province, city) === 'east'
+      ? EAST_SHIPPING_MYR
+      : WEST_SHIPPING_MYR;
   const insurance =
     orderValueMyr > PROTECTION_INCLUDED_MYR
       ? toCents(orderValueMyr * INSURANCE_RATE)

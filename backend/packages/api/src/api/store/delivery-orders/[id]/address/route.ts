@@ -7,8 +7,9 @@ import PacksModuleService from '../../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import {
   snapshotAddress,
-  isEastMalaysiaPostcode,
+  deliveryZone,
   isMalaysianAddress,
+  isShippablePostcode,
   MY_ONLY_MESSAGE,
   CUSTOMER_STATUS_WORD,
 } from '../../../../../modules/packs/delivery';
@@ -75,10 +76,23 @@ export async function POST(
   if (!isMalaysianAddress(snapshot.ship_country_code)) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, MY_ONLY_MESSAGE);
   }
+  if (!isShippablePostcode(snapshot.ship_postal_code)) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Enter a valid 5-digit Malaysian postcode for this address.',
+    );
+  }
+  // Compares the SAME composite zone the charge used (postcode + state/city),
+  // not the postcode alone — otherwise re-pointing a KL-postcode order at a
+  // Sabah address would keep the RM15 it paid.
   if (
     order.shipping_fee != null &&
-    isEastMalaysiaPostcode(snapshot.ship_postal_code) !==
-      isEastMalaysiaPostcode(order.ship_postal_code)
+    deliveryZone(
+      snapshot.ship_postal_code,
+      snapshot.ship_province,
+      snapshot.ship_city,
+    ) !==
+      deliveryZone(order.ship_postal_code, order.ship_province, order.ship_city)
   ) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,

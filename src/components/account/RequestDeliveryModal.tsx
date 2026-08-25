@@ -15,7 +15,8 @@ import { Pill } from '@/components/ui/pill';
 import { INPUT_CLASS } from '@/components/account/ui';
 import {
   computeDeliveryFee,
-  isEastMalaysiaPostcode,
+  deliveryZone,
+  isShippablePostcode,
   PROTECTION_INCLUDED_MYR,
 } from '@/lib/delivery-fee';
 import { rm } from '@/lib/format';
@@ -74,11 +75,22 @@ export default function RequestDeliveryModal({
     Math.round(items.reduce((s, i) => s + i.card.marketPriceMyr, 0) * 100) /
     100;
   const fee = selectedAddress
-    ? computeDeliveryFee(selectedAddress.postalCode, orderValue)
+    ? computeDeliveryFee(
+        selectedAddress.postalCode,
+        orderValue,
+        selectedAddress.province,
+        selectedAddress.city,
+      )
     : null;
   const nonMalaysian =
     !!selectedAddress &&
     selectedAddress.countryCode.trim().toUpperCase() !== 'MY';
+  // The backend refuses a postcode it can't zone, so say so here rather than
+  // previewing a West rate the request would reject.
+  const badPostcode =
+    !!selectedAddress &&
+    !nonMalaysian &&
+    !isShippablePostcode(selectedAddress.postalCode);
 
   // Liquid-glass rim on the panel (frosted fallback on Safari/Firefox).
   useLiquidGlass(panelRef, open, GLASS_SUBTLE);
@@ -332,12 +344,16 @@ export default function RequestDeliveryModal({
         {/* Fee preview — the backend recomputes and charges authoritatively;
             this mirrors it so the RM total is never a surprise. Hidden while
             the add-address form is open (no priced address selected yet). */}
-        {!adding && fee && !nonMalaysian && (
+        {!adding && fee && !nonMalaysian && !badPostcode && (
           <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-3 text-[13px]">
             <div className="flex justify-between text-white/70">
               <span>
                 Shipping (
-                {isEastMalaysiaPostcode(selectedAddress?.postalCode ?? '')
+                {deliveryZone(
+                  selectedAddress?.postalCode ?? '',
+                  selectedAddress?.province,
+                  selectedAddress?.city,
+                ) === 'east'
                   ? 'East'
                   : 'West'}{' '}
                 Malaysia)
@@ -366,6 +382,12 @@ export default function RequestDeliveryModal({
             We currently ship within Malaysia only — choose a Malaysian address.
           </p>
         )}
+        {!adding && badPostcode && (
+          <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
+            That address needs a valid 5-digit Malaysian postcode before it can
+            be shipped.
+          </p>
+        )}
 
         {/* The remedy sits INSIDE role="alert" so problem and way out are one
             announcement. PhoneGateAction dismisses the modal on the way out —
@@ -389,7 +411,9 @@ export default function RequestDeliveryModal({
             Cancel
           </button>
           <Pill
-            disabled={busy || adding || !selectedAddr || nonMalaysian}
+            disabled={
+              busy || adding || !selectedAddr || nonMalaysian || badPostcode
+            }
             onClick={submit}
           >
             {busy ? 'Requesting…' : 'Request delivery'}

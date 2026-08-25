@@ -6,6 +6,7 @@ import {
   validateDeliveryRequest,
   snapshotAddress,
   isMalaysianAddress,
+  isShippablePostcode,
   MY_ONLY_MESSAGE,
 } from '../../modules/packs/delivery';
 import { FREE_PULL_LOCKED_MESSAGE } from '../../modules/packs/free-pack';
@@ -140,6 +141,15 @@ export const requestDeliveryStep = createStep(
     // than undercharge an international parcel.
     if (!isMalaysianAddress(snapshot.ship_country_code)) {
       throw new MedusaError(MedusaError.Types.INVALID_DATA, MY_ONLY_MESSAGE);
+    }
+    // The zone (and therefore the fee) is derived from the postcode, so an
+    // unparseable one is refused rather than silently billed the cheaper West
+    // rate (security review 2026-08-25).
+    if (!isShippablePostcode(snapshot.ship_postal_code)) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Enter a valid 5-digit Malaysian postcode for this address.',
+      );
     }
     // The storefront's inline address form carries no phone field, so most
     // addresses snapshot with ship_phone null and the admin delivery view

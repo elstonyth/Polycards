@@ -318,6 +318,15 @@ medusaIntegrationTestRunner({
         expect(Number(cancel!.vault_delta)).toBe(VALUE_PER_PULL);
         const net = rows.reduce((sum, r) => sum + Number(r.vault_delta), 0);
         expect(net).toBe(0);
+        // Same invariant on the WALLET axis: the fee refund negates the STORED
+        // charge, so a price move between create and cancel must not change it
+        // either. A recompute-at-cancel regression would value these cards at
+        // 75 x 2.4 x 4 = 720 -> fee 51 -> net +36 instead of 0.
+        const netWallet = rows.reduce(
+          (sum, r) => sum + Number(r.wallet_delta),
+          0,
+        );
+        expect(netWallet).toBe(0);
       });
 
       it('an admin bulk mark-as-canceled ALSO writes the reversing OD row (one hook, both paths)', async () => {
