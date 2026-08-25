@@ -592,7 +592,7 @@ medusaIntegrationTestRunner({
           {
             headers: {
               ...authed(token),
-              'idempotency-key': 'delivery-fee-topup-i2',
+              'idempotency-key': 'delivery-fee-topup-i2', // gitleaks:allow — test dedupe tag, not a key
             },
           },
         );
