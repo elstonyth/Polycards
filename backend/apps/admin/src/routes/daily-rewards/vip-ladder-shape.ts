@@ -15,14 +15,6 @@ export interface DecadeGroup<T> {
   rows: T[];
   thresholdFrom: string;
   thresholdTo: string;
-  /**
-   * SUSPENDED — kept deliberately. Distinct box tiers in this decade, in
-   * first-seen order. No longer rendered: the Box tier column and its summary
-   * badges left the Levels tab when the VIP surface was suspended. `box_tier`
-   * is still live server-side (resolveBoxTier picks the daily box), so this
-   * read-model comes back for free if the column returns. Do not prune.
-   */
-  tiers: string[];
   /** Levels inside this decade that unlock a frame. */
   frameLevels: number[];
 }
@@ -33,10 +25,8 @@ export const groupByDecade = <T extends VipLevelRow>(
   const groups: DecadeGroup<T>[] = [];
   for (let start = 0; start < rows.length; start += DECADE) {
     const slice = rows.slice(start, start + DECADE);
-    const tiers: string[] = [];
     const frameLevels: number[] = [];
     slice.forEach((r, j) => {
-      if (!tiers.includes(r.boxTier)) tiers.push(r.boxTier);
       if (r.frameUnlock) frameLevels.push(start + j + 1);
     });
     groups.push({
@@ -47,28 +37,15 @@ export const groupByDecade = <T extends VipLevelRow>(
       rows: slice,
       thresholdFrom: slice[0].thresholdInput,
       thresholdTo: slice[slice.length - 1].thresholdInput,
-      tiers,
       frameLevels,
     });
   }
   return groups;
 };
 
-export interface TierSegment {
-  tier: string;
-  from: number;
-  to: number;
-}
-
 export interface LadderShape {
   count: number;
   topThreshold: string;
-  /**
-   * SUSPENDED — kept deliberately, same reason as `DecadeGroup.tiers` above.
-   * Consecutive runs of the same box tier — the ladder's real structure.
-   * Unrendered since the "Box tier runs" overview block was removed.
-   */
-  tierSegments: TierSegment[];
   /** Decade levels that exist in this ladder (candidate frame slots). */
   frameSlots: number[];
   /** Of those, the ones actually unlocking a frame. */
@@ -76,19 +53,13 @@ export interface LadderShape {
 }
 
 export const ladderShape = (rows: VipLevelRow[]): LadderShape => {
-  const tierSegments: TierSegment[] = [];
   const frameLevels: number[] = [];
   rows.forEach((r, i) => {
-    const level = i + 1;
-    const last = tierSegments[tierSegments.length - 1];
-    if (last && last.tier === r.boxTier) last.to = level;
-    else tierSegments.push({ tier: r.boxTier, from: level, to: level });
-    if (r.frameUnlock) frameLevels.push(level);
+    if (r.frameUnlock) frameLevels.push(i + 1);
   });
   return {
     count: rows.length,
     topThreshold: rows.length ? rows[rows.length - 1].thresholdInput : '0',
-    tierSegments,
     frameSlots: FRAME_LEVELS.filter((l) => l <= rows.length),
     frameLevels,
   };

@@ -457,9 +457,6 @@ export type Routes = {
             winners: typeof import("../../src/api/admin/challenge/winners/route");
         };
         dailyRewards: {
-            boxes: typeof import("../../src/api/admin/daily-rewards/boxes/route") & {
-                $tier: typeof import("../../src/api/admin/daily-rewards/boxes/[tier]/route");
-            };
             vouchers: typeof import("../../src/api/admin/daily-rewards/vouchers/route");
         };
         deliveryOrders: typeof import("../../src/api/admin/delivery-orders/route") & {
@@ -644,9 +641,7 @@ export type Routes = {
                 banks: typeof import("../../src/api/store/credits/withdraw/banks/route");
             };
         };
-        daily: typeof import("../../src/api/store/daily/route") & {
-            draw: typeof import("../../src/api/store/daily/draw/route");
-        };
+        daily: typeof import("../../src/api/store/daily/route");
         deliveryOrders: typeof import("../../src/api/store/delivery-orders/route") & {
             $id: typeof import("../../src/api/store/delivery-orders/[id]/route") & {
                 address: typeof import("../../src/api/store/delivery-orders/[id]/address/route");
