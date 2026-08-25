@@ -700,6 +700,11 @@ export type Routes = {
                 claim: typeof import("../../src/api/store/tasks/[id]/claim/route");
             };
             checkin: typeof import("../../src/api/store/tasks/checkin/route");
+            claims: {
+                $claimId: {
+                    spin: typeof import("../../src/api/store/tasks/claims/[claimId]/spin/route");
+                };
+            };
         };
         vault: typeof import("../../src/api/store/vault/route") & {
             $id: {

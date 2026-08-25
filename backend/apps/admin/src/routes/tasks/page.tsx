@@ -509,7 +509,7 @@ function TaskEditor({
                 {draft.rewardType === "pack" && (
                   <Field
                     label="Which pack"
-                    hint="The claim rolls this pack's live odds and vaults the result."
+                    hint="Claiming grants a free rip; the player spins it on the slot to roll this pack's live odds."
                     className="w-72"
                   >
                     <StaleAwareSelect
