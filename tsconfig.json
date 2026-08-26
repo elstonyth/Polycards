@@ -31,5 +31,12 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "backend"]
+  "exclude": [
+    "node_modules",
+    "backend",
+    ".next-serve/**",
+    ".claude/worktrees/**",
+    ".worktrees/**",
+    ".clone/**"
+  ]
 }

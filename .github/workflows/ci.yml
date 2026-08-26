@@ -101,16 +101,35 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    # 30, not 20: this workflow declares several caches, but the one that pays
-    # for the install below — `bnm2-*` (node_modules + install-state) — has no
-    # stored entry at all. `gh api .../actions/caches` lists exactly one entry
-    # for the whole repo, the `yarn-*` berry cache saved on master 2026-08-04,
-    # so every backend job restores nothing here and pays a COLD ~16 min
-    # `yarn install` instead of the ~71s immutable verify the cache was sized
-    # for. At 20 the jobs were being killed mid-step with "The operation was
-    # canceled" — backend-quality during its build, integration-http shard 4
-    # right after printing "63 passed" — which reads as a red build caused by
-    # the diff. Drop this back to 20 once a bnm2 entry exists on master.
+    # 30, not 20 — but the cost model behind that number has been corrected, so
+    # read this before touching it.
+    #
+    # WHY IT WAS RAISED: the cache that pays for the install below — `bnm2-*`
+    # (node_modules + install-state) — kept vanishing, so backend jobs restored
+    # nothing and paid a COLD ~16 min `yarn install` instead of the ~71s
+    # immutable verify the cache was sized for. At 20 the jobs were killed
+    # mid-step with "The operation was canceled" — backend-quality during its
+    # build, integration-http shard 4 right after printing "63 passed" — which
+    # reads as a red build caused by the diff.
+    #
+    # THE ACTUAL CAUSE (measured 2026-08-26, plan 127): not a missing cache
+    # declaration — eviction. The turbo cache was keyed per-commit, minting a
+    # fresh ~900 MB entry every push that no later run could hit by key. Nine of
+    # them (~8.09 GB) sat in a 12.46 GB / 26-entry total against GitHub's 10 GB
+    # per-repo cap, so LRU eviction ran continuously and the `bnm2-*` entries
+    # were the collateral. `bnm2-*` entries DO exist (four at 290-306 MB at the
+    # time of measuring); they were simply being evicted faster than they were
+    # being hit. The turbo key is now the lockfile hash, so the four backend jobs
+    # share one entry and the churn stops.
+    #
+    # WHEN TO DROP BACK TO 20: these timeouts now sit ~5x above measured
+    # wall-clock (backend-quality 2m48s; worst integration-http shard 5m40s).
+    # They are deliberately NOT lowered in the same change that fixed the key,
+    # because a cold install killed mid-step looks like a red build caused by the
+    # diff — the exact failure the raise was introduced to stop. Lower all four
+    # backend timeouts to 20 once a `bnm2-*` entry has SURVIVED several
+    # consecutive commits on master (check with
+    # `gh api repos/elstonyth/Polycards/actions/caches`), not merely appeared.
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -134,13 +153,19 @@ jobs:
           restore-keys: yarn-${{ runner.os }}-
 
       # turbo writes its local cache to backend/.turbo; without restoring it every
-      # lint/check-types/build task reruns cold. github.sha key + os restore-key
-      # means each run seeds from the newest prior cache and saves its own.
+      # lint/check-types/build task reruns cold. Keyed on the LOCKFILE, not the
+      # commit: all four backend jobs then share ONE entry, instead of every
+      # commit minting a fresh ~900 MB entry that no later run can ever hit by
+      # key. Nine such per-commit entries (~8.09 GB of a measured 12.46 GB across
+      # 26 entries) held this repo over GitHub's 10 GB per-repo cache cap, so LRU
+      # eviction ran continuously and kept clearing the `bnm2-*` node_modules
+      # entry — which is what made backend installs cold. The os-only restore-key
+      # is retained so a lockfile change still seeds from the previous entry.
       - name: Cache turbo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: backend/.turbo
-          key: turbo-${{ runner.os }}-${{ github.sha }}
+          key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
           restore-keys: |
             turbo-${{ runner.os }}-
 
@@ -214,11 +239,20 @@ jobs:
           key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
           restore-keys: yarn-${{ runner.os }}-
 
+      # turbo writes its local cache to backend/.turbo; without restoring it every
+      # lint/check-types/build task reruns cold. Keyed on the LOCKFILE, not the
+      # commit: all four backend jobs then share ONE entry, instead of every
+      # commit minting a fresh ~900 MB entry that no later run can ever hit by
+      # key. Nine such per-commit entries (~8.09 GB of a measured 12.46 GB across
+      # 26 entries) held this repo over GitHub's 10 GB per-repo cache cap, so LRU
+      # eviction ran continuously and kept clearing the `bnm2-*` node_modules
+      # entry — which is what made backend installs cold. The os-only restore-key
+      # is retained so a lockfile change still seeds from the previous entry.
       - name: Cache turbo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: backend/.turbo
-          key: turbo-${{ runner.os }}-${{ github.sha }}
+          key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
           restore-keys: |
             turbo-${{ runner.os }}-
 
@@ -376,13 +410,19 @@ jobs:
           key: bnm2-${{ runner.os }}-node22-${{ hashFiles('backend/yarn.lock') }}
 
       # turbo writes its local cache to backend/.turbo; without restoring it every
-      # lint/check-types/build task reruns cold. github.sha key + os restore-key
-      # means each run seeds from the newest prior cache and saves its own.
+      # lint/check-types/build task reruns cold. Keyed on the LOCKFILE, not the
+      # commit: all four backend jobs then share ONE entry, instead of every
+      # commit minting a fresh ~900 MB entry that no later run can ever hit by
+      # key. Nine such per-commit entries (~8.09 GB of a measured 12.46 GB across
+      # 26 entries) held this repo over GitHub's 10 GB per-repo cache cap, so LRU
+      # eviction ran continuously and kept clearing the `bnm2-*` node_modules
+      # entry — which is what made backend installs cold. The os-only restore-key
+      # is retained so a lockfile change still seeds from the previous entry.
       - name: Cache turbo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: backend/.turbo
-          key: turbo-${{ runner.os }}-${{ github.sha }}
+          key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
           restore-keys: |
             turbo-${{ runner.os }}-
 
@@ -478,11 +518,20 @@ jobs:
           key: yarn-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
           restore-keys: yarn-${{ runner.os }}-
 
+      # turbo writes its local cache to backend/.turbo; without restoring it every
+      # lint/check-types/build task reruns cold. Keyed on the LOCKFILE, not the
+      # commit: all four backend jobs then share ONE entry, instead of every
+      # commit minting a fresh ~900 MB entry that no later run can ever hit by
+      # key. Nine such per-commit entries (~8.09 GB of a measured 12.46 GB across
+      # 26 entries) held this repo over GitHub's 10 GB per-repo cache cap, so LRU
+      # eviction ran continuously and kept clearing the `bnm2-*` node_modules
+      # entry — which is what made backend installs cold. The os-only restore-key
+      # is retained so a lockfile change still seeds from the previous entry.
       - name: Cache turbo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: backend/.turbo
-          key: turbo-${{ runner.os }}-${{ github.sha }}
+          key: turbo-${{ runner.os }}-${{ hashFiles('backend/yarn.lock') }}
           restore-keys: |
             turbo-${{ runner.os }}-
 
