@@ -10,6 +10,7 @@ import {
 } from '@/lib/actions/delivery';
 import type { VaultItem } from '@/lib/actions/vault';
 import { addressViewFromInput } from '@/lib/address-view';
+import { MY_STATES } from '@/lib/my-states';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { Pill } from '@/components/ui/pill';
 import { INPUT_CLASS } from '@/components/account/ui';
@@ -59,6 +60,7 @@ export default function RequestDeliveryModal({
     lastName: '',
     address1: '',
     city: '',
+    province: '',
     postalCode: '',
     countryCode: '',
   });
@@ -288,6 +290,34 @@ export default function RequestDeliveryModal({
                 }
                 className={INPUT_CLASS}
               />
+            </label>
+            {/* A fixed list, not free text: the state feeds the shipping zone
+                (delivery-fee.ts), so a typed "Sabah, Malaysia" must still bill
+                East. aria-label matches the sibling inputs — none of these
+                labels are `for`-associated. */}
+            <label className="block">
+              <span className="mb-1.5 block text-[12px] font-medium text-white/55">
+                State
+              </span>
+              <select
+                aria-label="State"
+                autoComplete="address-level1"
+                required
+                value={form.province ?? ''}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, province: e.target.value }))
+                }
+                className={INPUT_CLASS}
+              >
+                <option value="" disabled>
+                  Select a state
+                </option>
+                {MY_STATES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="block">
               <span className="mb-1.5 block text-[12px] font-medium text-white/55">

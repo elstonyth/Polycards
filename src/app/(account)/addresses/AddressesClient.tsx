@@ -15,6 +15,7 @@ import { INPUT_CLASS } from '@/components/account/ui';
 import { PhoneField } from '@/components/PhoneField';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { cn } from '@/lib/utils';
+import { MY_STATES } from '@/lib/my-states';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
 const EMPTY_FORM: AddAddressInput = {
@@ -22,6 +23,7 @@ const EMPTY_FORM: AddAddressInput = {
   lastName: '',
   address1: '',
   city: '',
+  province: '',
   postalCode: '',
   countryCode: '',
 };
@@ -352,6 +354,35 @@ export function AddressesClient({
               autoComplete: 'address-level2',
               required: true,
             })}
+            {/* Not built with `field(...)`: that helper renders an <input> and
+                is typed to InputHTMLAttributes. The state has to be a fixed
+                list, not free text — it feeds the shipping zone, and a typed
+                "Sabah, Malaysia" must still bill East. Same markup + classes
+                as the helper so the grid stays visually uniform. */}
+            <label className="block">
+              <span className="mb-1.5 block text-[12px] font-medium text-white/55">
+                State
+              </span>
+              <select
+                aria-label="State"
+                autoComplete="address-level1"
+                required
+                value={form.province ?? ''}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, province: e.target.value }))
+                }
+                className={INPUT_CLASS}
+              >
+                <option value="" disabled>
+                  Select a state
+                </option>
+                {MY_STATES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
             {field('Postal code', 'postalCode', {
               autoComplete: 'postal-code',
               required: true,
