@@ -1374,7 +1374,15 @@ export const setCustomerGroup = (customerId: string, groupId: string | null) =>
 // ── Epic 4 (Ledger) ──────────────────────────────────────────────────────────
 
 /** The ledger event types (POLYCARD-BACK §5.1). */
-export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'AD' | 'WP' | 'WD';
+export type LedgerType =
+  | 'TP'
+  | 'SP'
+  | 'SE'
+  | 'OD'
+  | 'AD'
+  | 'WP'
+  | 'WD'
+  | 'RF';
 
 /** One row of GET /admin/ledger. Deltas are MYR and NULLABLE — an event that
  *  touches only one side leaves the other null (not 0). `payload` is the raw

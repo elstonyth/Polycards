@@ -14,6 +14,7 @@ import Pull from '../models/pull';
 import Card from '../models/card';
 import Pack from '../models/pack';
 import PackOdds from '../models/pack-odds';
+import { taskWeekFor } from '../referral';
 
 jest.setTimeout(300 * 1000);
 
@@ -279,6 +280,46 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // Spent, so the hub stops offering it.
         const hub = await service.taskHubFor({ customerId: 'cus_t5' });
         expect(hub.pending_spins).toHaveLength(0);
+      });
+
+      // The rollover case. A weekly claim's period_key is ITS week's Monday, so
+      // once Monday 00:00 MYT passes it falls out of the hub's period-scoped
+      // claims read. The entitlement must not fall out with it — /task is the
+      // only surface that lists a free rip, and the unique claim index means the
+      // player can never re-earn that week's task.
+      it('an unspent free rip survives the week rollover', async () => {
+        await seedPackAndCard();
+        await service.checkInDaily({ customerId: 'cus_t7' });
+        const id = await makeTask('Free rip rollover', 5);
+        const claimed = await service.claimTask({
+          customerId: 'cus_t7',
+          taskId: id,
+        });
+        const claimId = (claimed as { claimId: string }).claimId;
+
+        const thisWeek = await service.taskHubFor({ customerId: 'cus_t7' });
+        expect(thisWeek.pending_spins).toHaveLength(1);
+
+        // One hour PAST the next Monday 00:00 MYT anchor — comfortably inside
+        // the following task week, so no boundary-inclusivity detail decides
+        // this test.
+        const nextWeek = new Date(
+          taskWeekFor(new Date()).endUtcExcl.getTime() + 60 * 60 * 1000,
+        );
+        const hub = await service.taskHubFor({
+          customerId: 'cus_t7',
+          now: nextWeek,
+        });
+        // Proof we actually crossed the anchor rather than trusting arithmetic.
+        expect(hub.week_start).not.toBe(thisWeek.week_start);
+        expect(hub.pending_spins).toHaveLength(1);
+        expect(hub.pending_spins[0]).toMatchObject({
+          claim_id: claimId,
+          pack_id: 'bronze',
+        });
+        // And the other half of the contract: the weekly task itself IS
+        // claimable again, so the `claimed` set must have stayed period-scoped.
+        expect(hub.tasks.find((t) => t.id === id)?.claimed).toBe(false);
       });
 
       it("refuses to spend someone else's entitlement", async () => {
