@@ -9,13 +9,20 @@ export const metadata: Metadata = {
 
 // v1 policy written from what the product actually does (auth cookies,
 // consent-gated Meta Pixel, GlobePay payments, Resend transactional email,
-// DigitalOcean hosting). Operator should review wording before any formal
-// legal reliance; keep this page in sync when data practices change.
+// Twilio Verify SMS, the public Telegram pull broadcast, DigitalOcean
+// hosting). Operator should review wording before any formal legal reliance;
+// keep this page in sync when data practices change.
+//
+// Reviewed 2026-08-26: added the mandatory phone + SMS verification and the
+// public-activity/Telegram disclosure. The Telegram broadcast
+// (modules/packs/telegram.ts) has an ADMINISTRATIVE disable only, no customer
+// opt-out — the copy says what is true rather than promising a control that
+// does not exist. Adding one is a product decision, not a copy edit.
 
 const SECTIONS: { title: string; body: string }[] = [
   {
     title: 'What we collect',
-    body: 'Your account details (email, display handle), your pack, vault, and transaction history, and the technical basics every web service receives — IP address and browser information. If you sign in with Google, we receive your name and email from Google.',
+    body: 'Your account details (email, mobile phone number, display handle), your pack, vault, and transaction history, and the technical basics every web service receives — IP address and browser information. A mobile number is required to open and keep an account: we verify it by SMS at signup, and again if you change it or reset your password. If you sign in with Google, we receive your name and email from Google.',
   },
   {
     title: 'Cookies',
@@ -26,8 +33,12 @@ const SECTIONS: { title: string; body: string }[] = [
     body: 'Card and payment details are handled by our payment providers. Polycards never sees or stores your card number.',
   },
   {
-    title: 'Email',
-    body: 'We send transactional email only — password resets and account notices — from send.polycards.gg. We do not sell or share your address for marketing.',
+    title: 'Email and SMS',
+    body: 'We send transactional messages only — password resets, verification codes, and account notices — from send.polycards.gg by email and by SMS to your mobile number. A third-party messaging provider delivers them, so your email address and mobile number are shared with that provider for that purpose. We do not sell or share either for marketing.',
+  },
+  {
+    title: 'Public activity',
+    body: 'Polycards is partly a public product. Your display name is shown on public surfaces — the leaderboard, the weekly challenge, the recent-pulls feed on the home and pack pages, and your public profile page, whose web address contains your handle. Notable pulls are also announced automatically to our public Telegram channel, with your display name and a link to that profile. This is on by default for every account. We never publish your email address, your mobile number, or your account balance.',
   },
   {
     title: 'Where your data lives',

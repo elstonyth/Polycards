@@ -1,10 +1,12 @@
 import { model } from '@medusajs/framework/utils';
 
 // One row per CLAIMED task reward — the claim IS the idempotency record
-// (progress itself is computed on read, never stored). period_key is the
-// referral week's Tuesday ISO for weekly tasks and '' for achievements, so
-// the unique index makes "claim once per week" and "claim once ever" the
-// same constraint. reward_snapshot freezes what was actually granted;
+// (progress itself is computed on read, never stored). period_key is the TASK
+// week's MONDAY ISO (`taskWeekFor`) for weekly tasks and '' for achievements,
+// so the unique index makes "claim once per week" and "claim once ever" the
+// same constraint. Not the Tuesday settlement week (`referralWeekFor`) — the
+// player's board resets a day earlier, on purpose.
+// reward_snapshot freezes what was actually granted;
 // claim_ref carries the credit transaction / pull id it minted.
 export const TaskClaim = model
   .define('task_claim', {

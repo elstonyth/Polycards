@@ -212,16 +212,32 @@ const blockUnusedVendorSelfRegistration = (
 // 301→/dashboard/login when signed out) — the only human-facing surface here.
 //
 // WHY matcher '/*' AND a req.path==='/' guard (not a plain matcher:'/'):
-// Medusa's RoutesSorter (routes-sorter.js) buckets every route/middleware by its
-// path SEGMENTS — `matcher.split('/').filter(s => s.length)`. For matcher '/'
-// that is an EMPTY array, so the loop that inserts the entry into the sort tree
-// never runs and the handler is silently DROPPED — it is never registered on
-// Express. (Verified in prod: both a src/api/route.ts at '/' and a matcher:'/'
-// middleware 404'd, while every sibling matcher with ≥1 segment worked.) The
-// smallest matcher that survives is '/*' (one wildcard segment) → registers as
-// app.get('/*', …). It matches EVERY GET, so the guard restricts the redirect to
-// the exact root and next()s everything else through untouched. Confirmed against
-// the app's express@4.22 / path-to-regexp@0.1: '/*' compiles and matches '/'.
+// This shape was forced by a framework BUG that Medusa 2.19 has since FIXED.
+// RoutesSorter buckets every route/middleware by its path SEGMENTS —
+// `matcher.split('/').filter(s => s.length)`. For matcher '/' that is an EMPTY
+// array, and the pre-2.19 sorter fell straight through the insert loop, so the
+// handler was silently DROPPED and never registered on Express. (Verified in
+// prod at the time: both a src/api/route.ts at '/' and a matcher:'/' middleware
+// 404'd, while every sibling matcher with ≥1 segment worked.)
+//
+// 2.19 handles the zero-segment case explicitly — from the INSTALLED
+// node_modules/@medusajs/framework/dist/http/routes-sorter.js:94-102:
+//
+//   /**
+//    * A matcher without any segments (e.g. "/") targets the root. Placing it
+//    * directly on the root branch ensures it is not dropped from the tree.
+//    */
+//   if (!segments.length) { ... parent[bucket].routes.push(route); return }
+//
+// So a plain matcher:'/' would probably work now. It is DELIBERATELY NOT
+// changed: '/*' + the guard is the form that is behaviour-identical on both
+// sides of the fix, it is what has actually been exercised in prod, and a
+// zero-segment matcher is the exact shape the framework got wrong once
+// already. Do not "simplify" this to matcher:'/' for tidiness — the win is
+// one wildcard character and the downside is the root 404ing silently.
+// '/*' registers as app.get('/*', …) and matches EVERY GET, so the
+// req.path === '/' guard restricts the redirect to the exact root and next()s
+// everything else through untouched.
 // Cost: this runs one string compare on every GET — negligible. 302 (not 301):
 // the target is an internal path we may repoint, and a 301 would be cached past
 // that change.
@@ -311,9 +327,20 @@ export default defineMiddlewares({
       // caller on an endpoint that must decrypt before it can verify (§1.16).
       // It is a ceiling, never a substitute for the signature check.
       //
-      // Matcher shape verified empirically against the INSTALLED packages
-      // (express 4.22.2 + path-to-regexp 0.1.13 at packages/api/node_modules),
-      // not assumed: this entry carries a `method`, so define-middlewares.js:17
+      // Matcher shape verified empirically against the INSTALLED packages, not
+      // assumed. NOTE there are now TWO regex engines in play, not one:
+      //   1. express 4.22.2's bundled path-to-regexp 0.1.13
+      //      (node_modules/express/node_modules/path-to-regexp) — what
+      //      app.post(matcher, …) compiles the registration with; the analysis
+      //      below is about this one.
+      //   2. path-to-regexp 8.4.2, added by @medusajs/framework in 2.19 and
+      //      used by its OWN matcher lookups in
+      //      dist/http/routes-finder.js:56, which first rewrites '/*' to
+      //      '{*splat}' at :50 for 0.1.x backwards compatibility.
+      // Keep both in mind before changing any matcher string here: a shape that
+      // is fine under one can be rewritten or parsed differently by the other.
+      //
+      // This entry carries a `method`, so define-middlewares.js:17
       // gives it `methods: ['POST']` and router.js:189 takes the
       // `app.post(matcher, …)` branch — the ROUTE form, compiled with
       // `end: true` as /^\/hooks\/globepay\/(.*)\/?$/i (the `app.use` branch's

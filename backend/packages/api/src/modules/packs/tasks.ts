@@ -130,8 +130,9 @@ export function validateTaskReward(raw: unknown): TaskReward {
 }
 
 /** The facts the service counts for one customer; the evaluator maps a
- *  requirement onto them. Weekly facts are scoped to the referral week the
- *  caller measured. */
+ *  requirement onto them. Weekly facts are scoped to the TASK week the caller
+ *  measured — `taskWeekFor`, Monday 00:00 MYT — not the Tuesday settlement
+ *  week `referralWeekFor` returns. */
 export interface TaskFacts {
   checkinDaysThisWeek: number;
   ripsThisWeek: number;
