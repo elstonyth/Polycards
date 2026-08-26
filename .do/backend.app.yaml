@@ -563,7 +563,11 @@ workers:
       repo: elstonyth/Polycards
       branch: master
       deploy_on_push: true
-    instance_size_slug: basic-xxs
+    # basic-s, not basic-xxs: this component does a full Medusa boot, and on
+    # 2.19 that no longer fits in 512 MB — the container is OOM-killed mid-boot
+    # with a bare "exit code: 128" and no stack trace. Raised 2026-08-26 with
+    # the migrate job below, after that job died the same way.
+    instance_size_slug: basic-s
     instance_count: 1
     run_command: corepack yarn start
     # This component runs the scheduled jobs, including the GlobePay deposit
@@ -594,7 +598,10 @@ jobs:
     github:
       repo: elstonyth/Polycards
       branch: master
-    instance_size_slug: basic-xxs
+    # basic-s, not basic-xxs: deploy:migrate-user runs two `medusa exec`
+    # scripts after db:migrate, each a full app boot, which OOM-kills a 512 MB
+    # job on 2.19 (silent "exit code: 128"). See the worker note above.
+    instance_size_slug: basic-s
     # Explicit because the live app carries it — see the ingress note above.
     instance_count: 1
     run_command: corepack yarn deploy:migrate-user
