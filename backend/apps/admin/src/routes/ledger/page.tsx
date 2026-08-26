@@ -26,10 +26,9 @@ export const config: RouteConfig = {
 };
 
 // undefined is the "All" tab. WP (challenge settlement) is written by
-// settleChallengeWinner (plan 060). The remaining types are
-// still writerless — Epic 6 (referral payouts) is cancelled, so that filter
-// always returns zero rows. It is empty, not broken, so it gets no
-// special-case copy.
+// settleChallengeWinner (plan 060); RF (the weekly referral commission payout)
+// by payWeeklySettlement. Every type in this list now has a writer, so no tab
+// is structurally empty.
 const TYPES: (LedgerType | undefined)[] = [
   undefined,
   'TP',
@@ -39,6 +38,7 @@ const TYPES: (LedgerType | undefined)[] = [
   'AD',
   'WP',
   'WD',
+  'RF',
 ];
 
 // Header cells above; the payload expander spans all of them.
