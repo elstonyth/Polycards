@@ -28,6 +28,10 @@
 //
 // ponytail: delete this script and its `deploy:migrate-user` step once every
 // live database has been through it — the drift it repairs cannot recur.
+// Not yet: Migration20260826120000 drops the legacy column and REFUSES to run
+// while any option row is still missing from the pivots, so a clone restored
+// from a pre-repair backup needs this script to run first or its `db:migrate`
+// aborts. The pair retires together.
 
 const { Client } = require('pg');
 
