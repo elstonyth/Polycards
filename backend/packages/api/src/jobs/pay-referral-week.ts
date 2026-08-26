@@ -43,6 +43,32 @@ export default async function payReferralWeekJob(container: MedusaContainer) {
         'info',
         `[pay-referral-week] settlement ${run.id}: paid ${result.paid}, skipped ${result.skipped}`,
       );
+      // The commission credits were written outside mutateCreditAtomic, so
+      // they skipped its inline auto-unfreeze. Lift an AUTO freeze whose debt
+      // this payout repays — otherwise a paid referrer's available balance
+      // keeps reading 0 and their wallet stays locked until some unrelated
+      // top-up happens to reconcile it.
+      //
+      // Bare (no shared context) and out here rather than inside the
+      // settlement: payWeeklySettlement commits as ONE transaction, so an
+      // in-loop call would hold a `credit:<id>` advisory lock per customer
+      // until the whole run committed.
+      //
+      // Best-effort, per customer: the credit already committed, so a lingering
+      // freeze is no worse than before and clears on the next inflow — never
+      // fail a successful payout on the unfreeze check.
+      for (const customerId of result.paid_customer_ids) {
+        try {
+          await packs.maybeAutoUnfreezeForCustomer(customerId);
+        } catch (e: unknown) {
+          say(
+            'error',
+            `[pay-referral-week] auto-unfreeze check failed for '${customerId}' — payout stands: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+          );
+        }
+      }
     } catch (e: unknown) {
       // Pay is idempotent per line, so the next hourly tick retries this run
       // from wherever it stopped. Logged loudly because a run that keeps
