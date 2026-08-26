@@ -35,7 +35,7 @@ export function isShippablePostcode(postalCode: string): boolean {
 
 export type DeliveryZone = 'west' | 'east';
 
-const EAST_PLACE_RE =
+export const EAST_PLACE_RE =
   /\b(sabah|sarawak|labuan|kota\s*kinabalu|kuching|sandakan|tawau|miri|sibu|bintulu|lahad\s*datu|keningau)\b/i;
 
 /** The MORE EXPENSIVE of the postcode zone and the state/city zone — the

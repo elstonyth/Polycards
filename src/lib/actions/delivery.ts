@@ -402,7 +402,18 @@ const missingRequired = (input: AddAddressInput): boolean =>
   !input.address1?.trim() ||
   !input.city?.trim() ||
   !input.postalCode?.trim() ||
-  !input.countryCode?.trim();
+  !input.countryCode?.trim() ||
+  // The state, for MY only. It picks the shipping zone (delivery-fee.ts) and
+  // the postcode is customer-typed, so without a state an East Malaysian town
+  // outside the 12-name city allowlist is billed the West rate — RM20 short,
+  // every shipment, with no server-side signal.
+  //
+  // Scoped to MY deliberately: this gate is shared by addAddress AND
+  // updateAddress, so an unconditional requirement would make every
+  // pre-existing non-MY address uneditable until a state was invented for it.
+  // Delivery is MY-only at the backend anyway — workflows/steps/
+  // request-delivery.ts refuses other country codes.
+  (input.countryCode?.trim().toUpperCase() === 'MY' && !input.province?.trim());
 
 // The address-book phone is the actual SOURCE of a delivery order's
 // ship_phone — the backend's profile-phone fallback (request-delivery.ts)
