@@ -99,11 +99,22 @@ CODE_REVIEW_GRAPH_DOC="$(cat <<'MCPDOC'
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 
-**IMPORTANT: This project has a knowledge graph. ALWAYS use the
-code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
-the codebase.** The graph is faster, cheaper (fewer tokens), and gives
-you structural context (callers, dependents, test coverage) that file
-scanning cannot.
+> **PRECEDENCE (settled 2026-08-26).** `CLAUDE.md` §"Code exploration:
+> codebase-memory MCP is primary" **wins over this section** for general code
+> exploration — that is the later, benchmarked, repo-specific decision
+> (2026-07-06). Use **codebase-memory** to find code; use the
+> **code-review-graph** tools below for their review-specific capabilities
+> (`detect_changes_tool`, `get_review_context_tool`, `get_impact_radius_tool`,
+> `get_affected_flows_tool`), which codebase-memory does not provide.
+>
+> Keep this block in step with the matching section of `AGENTS.md`. The two are
+> separate sources with no equality gate: this heredoc generates CODEBUDDY.md,
+> QODER.md and .cursorrules, while AGENTS.md generates the other four copies.
+> Editing one and not the other is how they drift.
+
+This project has a knowledge graph. Prefer its tools over raw Grep/Glob/Read
+where they fit — the graph is cheaper in tokens and gives structural context
+(callers, dependents, test coverage) that file scanning cannot.
 
 ### When to use graph tools FIRST
 

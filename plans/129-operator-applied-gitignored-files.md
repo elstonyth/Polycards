@@ -9,9 +9,43 @@
 > Precedent: plan 043 was handled the same way ("OPERATOR-APPLIED — untracked
 > file, not worktree-dispatchable").
 
+## RESOLVED 2026-08-26 — with a correction to the finding that motivated it
+
+All five items applied directly in the main checkout (the gitignored ones cannot
+route through a PR); the tracked half went out as PR #502.
+
+**Finding #13 was overstated, and the verification proved it.** The claim was
+that editing `@acme/odds-math` "type-checks green against a program that
+excludes it". That is **wrong for odds-math and pokemon**, and **right only for
+`apps/vendor`**. Measured, with a deliberate `TS2322` injected into each:
+
+| edited package       | OLD routing (→ `backend` = packages/api)                    | verdict                                              |
+| -------------------- | ----------------------------------------------------------- | ---------------------------------------------------- |
+| `packages/odds-math` | **fail** — `../odds-math/src/index.ts(876,7): error TS2322` | caught, but mis-attributed to `backend/packages/api` |
+| `apps/vendor`        | **pass, 0 errors**                                          | genuinely, completely unchecked                      |
+
+The api program pulls `odds-math` and `pokemon` **source** in transitively
+through the workspace symlink, so their errors did surface — under the wrong
+label. Nothing imports `apps/vendor`, so its errors vanished entirely. The Stop
+hook run with the odds-math error present reported three failing projects
+(`packages/api`, `apps/admin`, `packages/odds-math`), which is the transitive
+pull-in made visible.
+
+**The fix is still worth having**, for three reasons that survive the
+correction: (1) `apps/vendor` was a real hole and is now closed; (2) errors are
+attributed to the project you actually edited instead of to `packages/api`; and
+(3) coverage for odds-math/pokemon was **contingent on api importing the file** —
+an export api does not import was never checked, and no longer depends on that.
+
+Proof captured, post-fix: the post-edit hook emits
+`tsc (backend/packages/odds-math) reports type error(s) …` with the exact
+`src/index.ts(876,7)` line; the Stop hook exits **2** with the error present and
+**0** on the clean tree (all six projects, no false positive). Both probe files
+were restored and `git status` on `backend/` is clean.
+
 ## Status
 
-- **Priority**: P2 (the hook item is P1 for anyone editing `@acme/odds-math`)
+- **Priority**: P2 (the hook item is P1 for anyone editing `apps/vendor`; see the correction above)
 - **Effort**: S–M
 - **Risk**: LOW — none of it ships to production; it changes local tooling and
   the instructions agents read
