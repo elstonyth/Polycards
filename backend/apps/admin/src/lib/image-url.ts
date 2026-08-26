@@ -43,8 +43,8 @@ function dashboardHost(): { proto: string; host: string } {
 // ever produced one (no FileReader/toDataURL anywhere; uploads return an http
 // URL), and it was the only branch below that handed a caller-supplied string
 // to the DOM verbatim — so the allowance was pure surface. If a data: producer
-// ever appears, re-add it ABOVE nothing: the guard must still run first, or
-// data:text/html walks straight through.
+// ever appears, the passthrough goes BELOW the isSafeImageUrl guard, never
+// above it: put it first and data:text/html walks straight past the check.
 const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 const SAFE_SCHEME = /^https?:/i;
 
