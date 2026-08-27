@@ -4,9 +4,11 @@
 //   1. the card tilts toward the pointer and the glare lights up
 //   2. opposite corners tilt opposite ways (it follows, not just "moves")
 //   3. it eases back to flat when the pointer leaves
-//   4. a tap still flips the card (the tilt must never eat the reveal)
-//   5. prefers-reduced-motion: reduce keeps it flat and unlit
-//   6. no page errors
+//   4. a real (click-emitting) DRAG turns the card and does NOT flip it
+//   5. the idle float keeps running — the tilt transform must not eat it
+//   6. a tap still flips the card (the tilt must never eat the reveal)
+//   7. prefers-reduced-motion: reduce keeps it flat and unlit
+//   8. no page errors
 // Run: node scripts/qa-card-tilt.mjs
 import { chromium } from 'playwright';
 
@@ -35,6 +37,16 @@ async function toReveal(page) {
   await page.waitForTimeout(600);
 }
 
+const rect = (page) =>
+  page.$eval(CARD, (el) => {
+    const b = el.getBoundingClientRect();
+    return { x: b.x, y: b.y, w: b.width, h: b.height };
+  });
+
+/** The button's own translateY, which the idle float drives. */
+const floatY = (page) =>
+  page.$eval(CARD, (el) => new DOMMatrix(getComputedStyle(el).transform).m42);
+
 const vars = (page) =>
   page.$eval(CARD, (el) => {
     const s = getComputedStyle(el);
@@ -56,10 +68,7 @@ try {
   page.on('pageerror', (e) => pageErrors.push(String(e)));
 
   await toReveal(page);
-  const box = await page.$eval(CARD, (el) => {
-    const r = el.getBoundingClientRect();
-    return { x: r.x, y: r.y, w: r.width, h: r.height };
-  });
+  const box = await rect(page);
   const at = async (fx, fy) => {
     await page.mouse.move(box.x + box.w * fx, box.y + box.h * fy);
     await page.waitForTimeout(350); // let the rAF ease settle
@@ -103,6 +112,38 @@ try {
   // A finger never hovers: it lands, drags, lifts. Dispatch a real touch
   // pointer stream (Playwright's touchscreen only taps) and check the card
   // turns under it — this is the mobile gesture, not a second mouse test.
+  // A real mouse drag emits a real `click` on pointerup — the exact path that
+  // would flip the card mid-turn. The hook must swallow that click past its
+  // slop threshold while leaving a plain tap alone.
+  await page.mouse.move(box.x + box.w * 0.5, box.y + box.h * 0.5);
+  await page.mouse.down();
+  for (let i = 1; i <= 14; i++) {
+    await page.mouse.move(
+      box.x + box.w * (0.5 + i * 0.02),
+      box.y + box.h * (0.5 - i * 0.015),
+    );
+    await page.waitForTimeout(30);
+  }
+  await page.waitForTimeout(300); // let the rAF ease reach the held angle
+  const dragging = await vars(page);
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  if (dragging.lean > 0.02)
+    ok(`mouse drag turns the card (lean ${dragging.lean.toFixed(3)})`);
+  else fail(`mouse drag did not turn the card (lean=${dragging.lean})`);
+  if (await page.$(CARD)) ok('a drag does NOT flip the card');
+  else fail('a drag FLIPPED the card — the click is not being swallowed');
+
+  await page.screenshot({
+    path: 'docs/research/qa-card-tilt.png',
+    clip: {
+      x: Math.round(box.x) - 20,
+      y: Math.round(box.y) - 20,
+      width: Math.round(box.w) + 40,
+      height: Math.round(box.h) + 40,
+    },
+  });
+
   const touchDrag = await page.evaluate(async (sel) => {
     const el = document.querySelector(sel);
     const b = el.getBoundingClientRect();
@@ -145,6 +186,20 @@ try {
     );
   await page.waitForTimeout(700);
 
+  // The idle float is the operator's explicitly-kept beat: the tilt rides in
+  // motion's transformTemplate precisely so it can't eat it. Pointer parked
+  // away, translateY must still be moving.
+  await page.mouse.move(box.x + box.w / 2, box.y + box.h + 220);
+  await page.waitForTimeout(500);
+  const ys = [];
+  for (let i = 0; i < 5; i++) {
+    ys.push(await floatY(page));
+    await page.waitForTimeout(550);
+  }
+  const swing = Math.max(...ys) - Math.min(...ys);
+  if (swing > 1) ok(`idle float still running (${swing.toFixed(2)}px swing)`);
+  else fail(`idle float is gone (${swing.toFixed(2)}px swing over 2.2s)`);
+
   // force: the card idle-floats, so Playwright's stability wait never settles
   await page.click(CARD, { force: true });
   await page.waitForTimeout(1200);
@@ -160,10 +215,7 @@ try {
   const rctx = await browser.newContext({ reducedMotion: 'reduce' });
   const rpage = await rctx.newPage();
   await toReveal(rpage);
-  const rbox = await rpage.$eval(CARD, (el) => {
-    const r = el.getBoundingClientRect();
-    return { x: r.x, y: r.y, w: r.width, h: r.height };
-  });
+  const rbox = await rect(rpage);
   await rpage.mouse.move(rbox.x + rbox.w * 0.85, rbox.y + rbox.h * 0.85);
   await rpage.waitForTimeout(400);
   const r = await vars(rpage);
