@@ -15,6 +15,7 @@ import { rm } from '@/lib/format';
 import { isTopRarity } from '@/lib/rarity';
 import { SlabImage, SLAB_ASPECT, FRAME_BAND } from '@/components/SlabImage';
 import { cn } from '@/lib/utils';
+import { useCardTilt } from '@/lib/use-card-tilt';
 
 /** The card back raster. Exported so the machine can warm it during the spin —
  *  it is the FIRST thing the reveal shows, and mounting this component was also
@@ -63,6 +64,10 @@ export function SlabCard({
   // the worse of the two mismatches.
   const raw = !card.slab_image;
 
+  // The slab turns under the pointer and catches a highlight as it turns, so
+  // the hold before the flip is something to handle rather than sit through.
+  const tilt = useCardTilt(!reduced && !flipped);
+
   // Shape-synced morph (spec #16): delta from the landed tile's rect to this
   // card's natural box. Computed in a layout effect (before paint) so the
   // first painted frame already sits at the tile's position; until then the
@@ -109,14 +114,35 @@ export function SlabCard({
         ease: [0.16, 1, 0.3, 1],
       }}
       style={{ visibility: wantsMorph && !delta ? 'hidden' : undefined }}
-      className="flex w-full flex-col items-center gap-3"
+      // The perspective here projects the button's TILT; the button's own
+      // perspective (same viewing distance) only reaches its faces, never its
+      // own rotation.
+      className="flex w-full flex-col items-center gap-3 perspective-[1200px]"
     >
       <motion.button
+        ref={tilt}
+        // Tilt rides OUTSIDE motion's generated transform, so the flip, the
+        // idle float and the morph all keep animating untouched.
+        transformTemplate={(_, generated) =>
+          `rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg)) ${generated}`
+        }
         type="button"
         onClick={flipped ? undefined : onFlip} // flip is one-way; guard mid-flight re-taps
         disabled={!onFlip || flipped}
         aria-label={flipped ? card.name : 'Flip to reveal your card'}
-        className="relative block [transform-style:preserve-3d]"
+        className={cn(
+          'relative block [transform-style:preserve-3d]',
+          // Images are draggable by default: a mouse press on the card art
+          // starts a native HTML5 drag, which cancels the pointer stream and
+          // strands the card mid-turn. Letting the button own every pointer
+          // inside it kills that at the source.
+          '[&_img]:pointer-events-none select-none',
+          // Face-down, a finger dragging ACROSS the card turns it instead of
+          // scrolling the page — the card is the thing you are handling.
+          // Scoped to the card itself (the rest of the stage still scrolls)
+          // and dropped on flip, when there is nothing left to turn.
+          !reduced && !flipped && 'touch-none',
+        )}
         style={
           {
             // Card width is owned by RevealStage (--slab-w: width- AND
@@ -218,6 +244,22 @@ export function SlabCard({
               />
             </span>
           )}
+          {/* Specular highlight — a real acrylic slab catches the light where
+              you are looking at it, so the hotspot tracks the pointer and dies
+              when the pointer leaves (useCardTilt owns the CSS vars). inset-0
+              covers case AND card: the whole object is glossy, not just the
+              art inside it. */}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 rounded-xl mix-blend-screen"
+            style={
+              {
+                opacity: 'var(--glare-o, 0)',
+                background:
+                  'radial-gradient(120% 90% at var(--glare-x, 50%) var(--glare-y, 50%), rgba(255,255,255,0.34), rgba(255,255,255,0.09) 38%, rgba(255,255,255,0) 62%)',
+              } as CSSProperties
+            }
+          />
           {/* the tile's pixel Pokémon rides the morph, fading out mid-growth */}
           {spriteSrc && entering && !reduced && (
             <motion.img
