@@ -31,15 +31,22 @@ function dashboardHost(): { proto: string; host: string } {
 }
 
 // Schemes this helper will hand to an <img src>. Anything with a scheme that
-// is not http(s) or an image data: URI is refused outright.
+// is not http(s) is refused outright.
 //
-// Not exploitable today — all ~28 call sites are <img src>, and no current
+// Not exploitable today — all 28 call sites are <img src>, and no current
 // browser runs javascript: from one — but the values reaching here are not all
 // ours: PriceCharting responses and admin free-text both flow in. Refusing the
 // scheme at the one shared helper is cheaper than auditing every future sink,
 // and the first call site to use an href would otherwise make it live.
+//
+// data: used to be allowed for image/* subtypes. Nothing in admin or vendor
+// ever produced one (no FileReader/toDataURL anywhere; uploads return an http
+// URL), and it was the only branch below that handed a caller-supplied string
+// to the DOM verbatim — so the allowance was pure surface. If a data: producer
+// ever appears, the passthrough goes BELOW the isSafeImageUrl guard, never
+// above it: put it first and data:text/html walks straight past the check.
 const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
-const SAFE_SCHEME = /^(?:https?:|data:image\/)/i;
+const SAFE_SCHEME = /^https?:/i;
 
 /**
  * The URL as a browser will actually parse it. Two normalisations, both from
@@ -63,7 +70,7 @@ const asBrowserParses = (url: string): string =>
   // eslint-disable-next-line no-control-regex
   url.replace(/[\u0009\u000A\u000D]/g, "").replace(/^[\u0000-\u0020]+/, "");
 
-/** Relative paths (no scheme) are fine; a scheme must be http(s) or data:image. */
+/** Relative paths (no scheme) are fine; a scheme must be http(s). */
 function isSafeImageUrl(url: string): boolean {
   return !HAS_SCHEME.test(url) || SAFE_SCHEME.test(url);
 }
@@ -74,10 +81,7 @@ export function resolveImageUrl(raw: string | null | undefined): string {
   // branch below agree with the browser about what this URL is.
   const url = asBrowserParses(raw);
   if (!url) return "";
-  // ABOVE the data: passthrough on purpose: put it below and `data:text/html`
-  // would walk straight past the check.
   if (!isSafeImageUrl(url)) return "";
-  if (url.startsWith("data:")) return url;
 
   const { proto, host } = dashboardHost();
 

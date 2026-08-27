@@ -29,14 +29,18 @@ describe('resolveImageUrl scheme handling', () => {
     }
   });
 
-  it('refuses data:text/html even though data: is otherwise allowed', () => {
-    // Regression pin for the ordering: the guard sits ABOVE the data:
-    // passthrough. Move it below and this is the case that goes green wrongly.
+  it('refuses data: entirely, image subtypes included', () => {
+    // data:image/* used to pass through verbatim. Nothing in admin or vendor
+    // produces a data: URL, so the allowance only widened what a caller could
+    // hand to the DOM unaltered. Re-adding it means re-adding an ordering
+    // constraint: the scheme guard has to run first, or data:text/html rides in
+    // behind it.
     expect(resolveImageUrl('data:text/html,<script>alert(1)</script>')).toBe(
       '',
     );
-    expect(resolveImageUrl('data:image/png;base64,iVBORw0KGgo=')).toBe(
-      'data:image/png;base64,iVBORw0KGgo=',
+    expect(resolveImageUrl('data:image/png;base64,iVBORw0KGgo=')).toBe('');
+    expect(resolveImageUrl('data:image/svg+xml,<svg onload=alert(1)>')).toBe(
+      '',
     );
   });
 
