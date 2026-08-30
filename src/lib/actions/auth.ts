@@ -14,6 +14,7 @@
 import { headers } from 'next/headers';
 import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { setAuthToken, clearAuthToken } from '@/lib/data/customer';
 import { fetchProfileHandle } from '@/lib/data/profiles';
@@ -223,8 +224,9 @@ export async function signup(input: {
 /**
  * Google OAuth (customer social login). Two server actions mirror the emailpass
  * flow — token exchange stays server-side (httpOnly cookie, no browser CORS) via
- * `sdk.client.fetch` with an explicit Bearer, so the shared SDK singleton never
- * holds per-request auth state.
+ * `sdk.client.fetch` (and `authedFetch` for the refresh, which carries an
+ * explicit Bearer), so the shared SDK singleton never holds per-request auth
+ * state.
  *
  * Flow (verified against @medusajs/auth-google 2.13.4):
  *  start:    POST /auth/customer/google { callback_url } → { location } → browser
@@ -341,9 +343,10 @@ export async function googleCallback(query: {
         { Authorization: `Bearer ${token}` },
       );
       // The post-register token still lacks actor_id — refresh for a real one.
-      const refreshed = await sdk.client.fetch<TokenResponse>(
+      const refreshed = await authedFetch<TokenResponse>(
+        token,
         '/auth/token/refresh',
-        { method: 'POST', headers: { Authorization: `Bearer ${token}` } },
+        { method: 'POST' },
       );
       sessionToken = refreshed.token;
     }

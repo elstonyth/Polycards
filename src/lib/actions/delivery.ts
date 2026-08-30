@@ -12,6 +12,7 @@
  */
 import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { getAuthToken, getCustomer } from '@/lib/data/customer';
 import {
@@ -144,10 +145,7 @@ export async function getDeliveryOrders(): Promise<DeliveryOrdersResult> {
     };
   }
   try {
-    const res = await sdk.client.fetch('/store/delivery-orders', {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
+    const res = await authedFetch(token, '/store/delivery-orders');
     const raw = parseList(
       DeliveryOrderSchema,
       (res as { items?: unknown }).items,
@@ -208,9 +206,8 @@ export async function requestDelivery(
     return { ok: false, error: 'Please log in first.', needsAuth: true };
 
   try {
-    const res = await sdk.client.fetch('/store/delivery-orders', {
+    const res = await authedFetch(token, '/store/delivery-orders', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
       body: { pull_ids: pullIds, address_id: addressId },
     });
     const orderId = (res as { order_id?: string }).order_id;
@@ -250,11 +247,11 @@ export async function editDeliveryAddress(
     return { ok: false, error: 'Please log in first.', needsAuth: true };
 
   try {
-    await sdk.client.fetch(
+    await authedFetch(
+      token,
       `/store/delivery-orders/${encodeURIComponent(orderId)}/address`,
       {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
         body: { address_id: addressId },
       },
     );
@@ -311,11 +308,11 @@ export async function cancelDeliveryOrder(
     return { ok: false, error: 'Please log in first.', needsAuth: true };
 
   try {
-    const res = await sdk.client.fetch(
+    const res = await authedFetch(
+      token,
       `/store/delivery-orders/${encodeURIComponent(orderId)}/cancel`,
       {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
       },
     );
     const order = parseOne(
@@ -598,9 +595,8 @@ export async function shipVaultCards(
       try {
         const parsed = parseOne(
           WithdrawPrizeSchema,
-          await sdk.client.fetch('/store/rewards/withdraw', {
+          await authedFetch(token, '/store/rewards/withdraw', {
             method: 'POST',
-            headers: { Authorization: `Bearer ${token}` },
             body: { pull_id: pullId, address: parsedAddress.data },
           }),
         );

@@ -12,7 +12,7 @@
  *   GET  /store/credits            — balance (Σ ledger) + recent transactions
  *   POST /store/credits/topup      — buy credit via the mock gateway (demo)
  */
-import { sdk } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { sanePage } from '@/lib/page-param';
 import { elapsedLabel } from '@/lib/transactions';
@@ -73,14 +73,8 @@ export async function getVault(): Promise<VaultResult> {
 
   try {
     const [vaultRes, creditRes] = await Promise.all([
-      sdk.client.fetch('/store/vault', {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store',
-      }),
-      sdk.client.fetch('/store/credits/balance', {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store',
-      }),
+      authedFetch(token, '/store/vault'),
+      authedFetch(token, '/store/credits/balance'),
     ]);
 
     const items = (
@@ -111,10 +105,7 @@ export async function getCreditBalance(): Promise<number | null> {
   try {
     const credit = parseOne(
       BalanceSchema,
-      await sdk.client.fetch('/store/credits/balance', {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store',
-      }),
+      await authedFetch(token, '/store/credits/balance'),
     );
     return credit ? credit.balance : null;
   } catch (error) {
@@ -133,10 +124,7 @@ export async function getVaultLatest(): Promise<string | null> {
   try {
     const parsed = parseOne(
       LatestEventSchema,
-      await sdk.client.fetch('/store/vault/latest', {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store',
-      }),
+      await authedFetch(token, '/store/vault/latest'),
     );
     return parsed?.latest_event_at ?? null;
   } catch (error) {
@@ -157,10 +145,7 @@ export async function getCreditsLatest(): Promise<string | null> {
   try {
     const parsed = parseOne(
       LatestEventSchema,
-      await sdk.client.fetch('/store/credits/latest', {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store',
-      }),
+      await authedFetch(token, '/store/credits/latest'),
     );
     return parsed?.latest_event_at ?? null;
   } catch (error) {
@@ -264,9 +249,8 @@ export async function startDeposit(
   try {
     const parsed = parseOne(
       DepositStartSchema,
-      await sdk.client.fetch('/store/credits/deposit', {
+      await authedFetch(token, '/store/credits/deposit', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
         body: { amount, payment_method_code: paymentMethodCode },
       }),
     );
@@ -303,9 +287,7 @@ export async function fetchWithdrawBanks(): Promise<WithdrawBanksResult> {
   try {
     const parsed = parseOne(
       WithdrawBanksSchema,
-      await sdk.client.fetch('/store/credits/withdraw/banks', {
-        headers: { Authorization: `Bearer ${token}` },
-      }),
+      await authedFetch(token, '/store/credits/withdraw/banks'),
     );
     if (!parsed) {
       return { ok: false, error: 'Could not load the bank list.' };
@@ -349,9 +331,7 @@ export async function fetchSavedBankAccounts(): Promise<SavedBankAccountsResult>
   try {
     const parsed = parseOne(
       SavedBankAccountsSchema,
-      await sdk.client.fetch('/store/credits/withdraw/accounts', {
-        headers: { Authorization: `Bearer ${token}` },
-      }),
+      await authedFetch(token, '/store/credits/withdraw/accounts'),
     );
     if (!parsed) {
       return { ok: false, error: 'Could not load your saved accounts.' };
@@ -391,9 +371,8 @@ export async function addSavedBankAccount(input: {
   try {
     const parsed = parseOne(
       SavedBankAccountsSchema,
-      await sdk.client.fetch('/store/credits/withdraw/accounts', {
+      await authedFetch(token, '/store/credits/withdraw/accounts', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
         body: {
           bank_code: input.bankCode,
           bank_name: input.bankName,
@@ -433,9 +412,8 @@ export async function removeSavedBankAccount(
   try {
     const parsed = parseOne(
       SavedBankAccountsSchema,
-      await sdk.client.fetch('/store/credits/withdraw/accounts', {
+      await authedFetch(token, '/store/credits/withdraw/accounts', {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
         body: { id },
       }),
     );
@@ -516,10 +494,9 @@ export async function startWithdrawal(input: {
   try {
     const parsed = parseOne(
       WithdrawStartSchema,
-      await sdk.client.fetch('/store/credits/withdraw', {
+      await authedFetch(token, '/store/credits/withdraw', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${token}`,
           // See the doc comment above: caller-minted so a retry of the same
           // attempt replays instead of double-debiting.
           'Idempotency-Key': input.idempotencyKey ?? crypto.randomUUID(),
@@ -585,10 +562,9 @@ export async function topUpCredits(
   try {
     const parsed = parseOne(
       AmountBalanceSchema,
-      await sdk.client.fetch('/store/credits/topup', {
+      await authedFetch(token, '/store/credits/topup', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${token}`,
           // Mandatory since the 2026-07-07 audit — a retried top-up without a
           // key would double-credit. Node 20+: crypto.randomUUID() is global.
           'Idempotency-Key': idempotencyKey ?? crypto.randomUUID(),
@@ -665,13 +641,11 @@ export async function getTransactions(
     };
   }
   try {
-    const raw = await sdk.client.fetch('/store/credits', {
-      headers: { Authorization: `Bearer ${token}` },
+    const raw = await authedFetch(token, '/store/credits', {
       query: {
         limit: TXN_PAGE_SIZE,
         offset: (safePage - 1) * TXN_PAGE_SIZE,
       },
-      cache: 'no-store',
     });
     const totals = parseOne(CreditsSchema, raw);
     const rows = parseList(
@@ -743,10 +717,7 @@ export async function getPendingDeposits(): Promise<PendingDeposit[]> {
   const token = await getAuthToken();
   if (!token) return [];
   try {
-    const raw = await sdk.client.fetch('/store/credits/deposit', {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
+    const raw = await authedFetch(token, '/store/credits/deposit');
     // One instant for the whole list, so two rows started a second apart do not
     // read as if measured by different clocks.
     const now = Date.now();
@@ -793,11 +764,11 @@ export async function toggleShowcase(
   try {
     const parsed = parseOne(
       VaultShowcaseSchema,
-      await sdk.client.fetch(
+      await authedFetch(
+        token,
         `/store/vault/${encodeURIComponent(pullId)}/showcase`,
         {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
           body: { showcased },
         },
       ),
@@ -871,9 +842,8 @@ export async function sellBackPullsBatch(
   }
 
   try {
-    const raw = await sdk.client.fetch('/store/vault/buyback-batch', {
+    const raw = await authedFetch(token, '/store/vault/buyback-batch', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
       body: { pull_ids: ids },
     });
     // The backend is ours, but a server action still validates its input at the
@@ -936,11 +906,11 @@ export async function sellBackPull(pullId: string): Promise<SellBackResult> {
   try {
     const parsed = parseOne(
       BuybackResultSchema,
-      await sdk.client.fetch(
+      await authedFetch(
+        token,
         `/store/vault/${encodeURIComponent(pullId)}/buyback`,
         {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
           body: {},
         },
       ),

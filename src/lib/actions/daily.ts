@@ -16,7 +16,7 @@
  *   POST /store/rewards/claim/:grantId   — claim a voucher or frame grant
  *   POST /store/rewards/withdraw         — ship a vaulted prize pull
  */
-import { sdk } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
 import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
@@ -109,10 +109,7 @@ export async function getDaily(): Promise<DailyResult> {
     };
   }
   try {
-    const raw = await sdk.client.fetch('/store/daily', {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
+    const raw = await authedFetch(token, '/store/daily');
 
     const parsed = parseOne(DailyStateSchema, raw);
     if (!parsed) {
@@ -160,11 +157,11 @@ export async function claimVoucher(grantId: string): Promise<ClaimGrantResult> {
   try {
     const parsed = parseOne(
       ClaimGrantSchema,
-      await sdk.client.fetch(
+      await authedFetch(
+        token,
         `/store/rewards/claim/${encodeURIComponent(grantId)}`,
         {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
           body: {},
         },
       ),
@@ -210,9 +207,8 @@ export async function withdrawPrize(
   try {
     const parsed = parseOne(
       WithdrawPrizeSchema,
-      await sdk.client.fetch('/store/rewards/withdraw', {
+      await authedFetch(token, '/store/rewards/withdraw', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
         body: { pull_id: pullId, address: addrResult.data },
       }),
     );

@@ -9,7 +9,7 @@
  *   { level, highest_level_ever, spend, next: { level, threshold, remaining,
  *     reward: { voucher_amount, box_tier, frame_unlock } } | null }
  */
-import { sdk } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
 import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
@@ -67,10 +67,7 @@ export async function getVip(): Promise<VipResult> {
   }
 
   try {
-    const raw = await sdk.client.fetch('/store/vip', {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
+    const raw = await authedFetch(token, '/store/vip');
 
     const v = parseOne(VipSchema, raw);
     if (!v) {

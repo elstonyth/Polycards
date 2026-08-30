@@ -18,6 +18,7 @@
  * backend/packages/api/src/api/utils/rate-limit.ts.
  */
 import { sdk } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
 import {
@@ -202,11 +203,10 @@ export async function changePhone(input: {
   const authToken = await getAuthToken();
   if (!authToken) return fail('Please log in first.');
   try {
-    const { customer } = await sdk.client.fetch<{
+    const { customer } = await authedFetch<{
       customer: { phone: string };
-    }>('/store/phone-verification/change', {
+    }>(authToken, '/store/phone-verification/change', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${authToken}` },
       // Omitted rather than sent empty when absent: the backend distinguishes
       // "no password supplied" from "wrong password" only by presence.
       body: {

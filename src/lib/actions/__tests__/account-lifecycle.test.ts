@@ -49,6 +49,10 @@ describe('deleteAccount', () => {
       {
         method: 'POST',
         headers: { Authorization: 'Bearer tok' },
+        // `cache` is authedFetch's default, not a choice this action makes —
+        // inert on a POST (Next never caches those). Pinned only because these
+        // two assertions match the WHOLE options object.
+        cache: 'no-store',
         body: { password: 'pw' },
       },
     );
@@ -59,7 +63,12 @@ describe('deleteAccount', () => {
     await deleteAccount(null);
     expect(mocks.clientFetch).toHaveBeenCalledWith(
       '/store/customers/me/delete',
-      { method: 'POST', headers: { Authorization: 'Bearer tok' }, body: {} },
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer tok' },
+        cache: 'no-store',
+        body: {},
+      },
     );
   });
 
