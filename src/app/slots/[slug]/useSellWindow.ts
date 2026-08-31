@@ -13,6 +13,16 @@ import {
   sellSecondsLeft,
   sharedDeadlineMs,
 } from '@/lib/sell-countdown';
+// Every per-card state transition below is pure and lives in reveal-phase.ts,
+// where it is unit-tested. What stays here is the React shell: the batch reset,
+// the reveal ping, the wall clock, and the server round-trip.
+import {
+  allConcluded as allStatesConcluded,
+  beginSellAt,
+  expirySweep,
+  keepAt,
+  type SellState,
+} from '@/lib/reveal-phase';
 export type SellBackOffer = {
   pullId: string;
   fmv: number;
@@ -41,13 +51,6 @@ export type SellBackFn = (
 export type RevealFn = (
   pullId: string,
 ) => Promise<{ ok: true; instantDeadlineMs: number } | { ok: false }>;
-
-export type SellState =
-  | { phase: 'idle' }
-  | { phase: 'selling' }
-  | { phase: 'sold'; amount: number }
-  | { phase: 'error'; message: string }
-  | { phase: 'vaulted' };
 
 export function useSellWindow({
   offers,
@@ -120,11 +123,10 @@ export function useSellWindow({
   // Expiry: every unsold card becomes 'vaulted' (server enforces the same).
   useEffect(() => {
     if (!expired) return;
-    setStates((prev) =>
-      prev.map((s) =>
-        s.phase === 'sold' || s.phase === 'selling' ? s : { phase: 'vaulted' },
-      ),
-    );
+    // Wrapped, not point-free: React hands an updater exactly one argument, so
+    // a second parameter added to expirySweep later would silently bind to
+    // React's own value instead of failing to compile.
+    setStates((prev) => expirySweep(prev));
   }, [expired]);
 
   // "Keep in vault" (spec decision #26): conclude this card immediately without
@@ -132,20 +134,7 @@ export function useSellWindow({
   // pure client-side state flip to 'vaulted'. Mirrors the sell guard: a no-op
   // once the card is selling/sold/vaulted.
   const keep = useCallback((index: number) => {
-    setStates((prev) => {
-      const cur = prev[index];
-      if (
-        !cur ||
-        cur.phase === 'selling' ||
-        cur.phase === 'sold' ||
-        cur.phase === 'vaulted'
-      ) {
-        return prev;
-      }
-      const next = [...prev];
-      next[index] = { phase: 'vaulted' };
-      return next;
-    });
+    setStates((prev) => keepAt(prev, index));
   }, []);
 
   // Returns true only on a successful server sell — lets the caller chirp
@@ -158,23 +147,16 @@ export function useSellWindow({
       // sell with "Exchange rate unavailable" — never fire it. The reveal UI
       // hides the Sell CTA too; this guard is defense in depth.
       if (!offer.firm) return false;
+      // Block re-entry while selling/sold AND once vaulted — a confirm modal
+      // left open across expiry must not fire a sell (server enforces the
+      // deadline too; this is client honesty). beginSellAt returns `prev`
+      // BY IDENTITY when it refuses, which is how the block is read back out
+      // of the updater — the guard has to run against the freshest states, so
+      // it cannot be hoisted above setStates.
       let blocked = false;
       setStates((prev) => {
-        const cur = prev[index];
-        // Block re-entry while selling/sold AND once vaulted — a confirm modal
-        // left open across expiry must not fire a sell (server enforces the
-        // deadline too; this is client honesty).
-        if (
-          !cur ||
-          cur.phase === 'selling' ||
-          cur.phase === 'sold' ||
-          cur.phase === 'vaulted'
-        ) {
-          blocked = true;
-          return prev;
-        }
-        const next = [...prev];
-        next[index] = { phase: 'selling' };
+        const next = beginSellAt(prev, index);
+        blocked = next === prev;
         return next;
       });
       if (blocked) return false;
@@ -211,12 +193,10 @@ export function useSellWindow({
   // Every card is terminal (sold | vaulted) — drives the reveal auto-conclude
   // (spec decision #27). Only real offers count; a null offer (no pull) is
   // treated as already-concluded so it never blocks the conclusion.
-  const allConcluded =
-    states.length > 0 &&
-    states.every((s, i) => {
-      if (!offers[i]) return true;
-      return s.phase === 'sold' || s.phase === 'vaulted';
-    });
+  const allConcluded = allStatesConcluded(
+    states,
+    offers.map((o) => o !== null),
+  );
 
   return { deadlineMs, secondsLeft, expired, states, sell, keep, allConcluded };
 }

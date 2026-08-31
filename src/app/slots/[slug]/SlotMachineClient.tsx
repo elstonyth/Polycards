@@ -51,6 +51,13 @@ import {
   SETTLE_MS,
   CRAWL_MS,
 } from '@/lib/vault-reel';
+import {
+  nextPhase,
+  isRevealPhase,
+  revealTimings,
+  blastMs,
+  type Phase,
+} from '@/lib/reveal-phase';
 import { SELL_COUNTDOWN_SECS } from '@/lib/sell-countdown';
 import { resolveCardPokemon } from '@/lib/resolve-card-pokemon';
 import { spriteGif } from '@/lib/mock/pokedex';
@@ -82,9 +89,6 @@ const POKEBALL_PLACEHOLDER =
   encodeURIComponent(
     "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='46' fill='#f5f5f5' stroke='#171717' stroke-width='4'/><path d='M5 50a45 45 0 0 1 90 0Z' fill='#ef4444'/><rect x='4' y='46' width='92' height='8' fill='#171717'/><circle cx='50' cy='50' r='13' fill='#f5f5f5' stroke='#171717' stroke-width='4'/></svg>",
   );
-
-type Phase =
-  'idle' | 'resolving' | 'spinning' | 'flood' | 'transform' | 'review';
 
 /** Highest-rarity tier present in a batch, for the room flood color. */
 function topRarityOf(cards: WonCard[]): Rarity {
@@ -432,7 +436,7 @@ export default function SlotMachineClient({
         locked: false,
       };
       setSpin({ nonce: spinAt, cards, winners: cards.map(winnerFor) });
-      setPhase('spinning');
+      setPhase((p) => nextPhase(p, 'demo-spin'));
       return;
     }
 
@@ -456,7 +460,7 @@ export default function SlotMachineClient({
     setAnnounce('');
     winnerRects.current = [];
     setHasSpun(true);
-    setPhase('resolving');
+    setPhase((p) => nextPhase(p, 'spin'));
     sfx('ratchet');
 
     // openBatch handles BACKEND failures itself ({ok:false}); what escapes here
@@ -564,7 +568,7 @@ export default function SlotMachineClient({
         );
       } finally {
         setHasSpun(false);
-        setPhase('idle');
+        setPhase((p) => nextPhase(p, 'abort'));
       }
       return;
     }
@@ -588,7 +592,7 @@ export default function SlotMachineClient({
           }
         }
       }
-      setPhase('idle');
+      setPhase((p) => nextPhase(p, 'abort'));
       return;
     }
 
@@ -672,7 +676,7 @@ export default function SlotMachineClient({
         locked: lockedOpen,
       };
       setSpin({ nonce: spinAt, cards, winners });
-      setPhase('spinning');
+      setPhase((p) => nextPhase(p, 'rolled'));
     } catch (err) {
       // A cosmetic mapping step threw after the charge. Surface the result the
       // user paid for (authoritative server balance + won cards) and move to a
@@ -718,7 +722,7 @@ export default function SlotMachineClient({
     // (the provider re-fetches per identity).
     if (held.forId !== customerIdRef.current) {
       setSpin(null);
-      setPhase('idle');
+      setPhase((p) => nextPhase(p, 'abort'));
       return;
     }
 
@@ -754,10 +758,11 @@ export default function SlotMachineClient({
     // Big-win / haptics now fire on the card flip inside RevealStage; here we
     // keep only the announce text (and the phase handoff into the reveal).
     const big = held.cards.some((c) => isTopRarity(c.rarity));
-    if (big && !reduced) {
+    const blastFor = blastMs(big, reduced);
+    if (blastFor > 0) {
       setBlast(true);
       if (blastTimer.current !== null) clearTimeout(blastTimer.current);
-      blastTimer.current = window.setTimeout(() => setBlast(false), 950);
+      blastTimer.current = window.setTimeout(() => setBlast(false), blastFor);
     }
     const bigPrefix = isDemo ? 'Demo — ' : big ? 'Big win! ' : '';
     const first = held.cards[0];
@@ -771,9 +776,11 @@ export default function SlotMachineClient({
 
     // Enter the reveal: flood the room (rarity wash + swell), then morph the
     // landed tiles into slabs (transform), then unlock the sell window (review).
-    // Reduced motion collapses the theater to an immediate cut to review.
-    const heldCardsCount = held.cards.length;
-    setPhase('flood');
+    // Both beats are scheduled NOW as absolute delays from this settle — see
+    // revealTimings, which also owns the reduced-motion collapse to an immediate
+    // cut to review.
+    const beats = revealTimings(held.cards.length, reduced);
+    setPhase((p) => nextPhase(p, 'settle'));
     // One rising gesture, not two: the `riser` sweep alone carries the flood
     // beat. The old synth `swell` was a second, redundant rise stacked on top —
     // dropped so the lead-up reads as one swell. (The looping reveal bed that
@@ -783,13 +790,12 @@ export default function SlotMachineClient({
     if (floodTimer.current !== null) clearTimeout(floodTimer.current);
     if (transformTimer.current !== null) clearTimeout(transformTimer.current);
     floodTimer.current = window.setTimeout(
-      () => setPhase('transform'),
-      reduced ? 0 : 1650,
+      () => setPhase((p) => nextPhase(p, 'morph')),
+      beats.floodMs,
     );
     transformTimer.current = window.setTimeout(
-      () => setPhase('review'),
-      // 1650 flood → morph (600) + settle margin (250) + per-card stagger (150).
-      reduced ? 0 : 1650 + 600 + 250 + (heldCardsCount - 1) * 150,
+      () => setPhase((p) => nextPhase(p, 'reveal')),
+      beats.reviewMs,
     );
 
     setCooldown(true);
@@ -809,7 +815,7 @@ export default function SlotMachineClient({
   const skipToCards = useCallback(() => {
     if (floodTimer.current !== null) clearTimeout(floodTimer.current);
     if (transformTimer.current !== null) clearTimeout(transformTimer.current);
-    setPhase('review');
+    setPhase((p) => nextPhase(p, 'skip'));
   }, []);
 
   // Reveal concluded — every card sold/kept/expired (spec decision #27). Clear
@@ -820,7 +826,7 @@ export default function SlotMachineClient({
     setSpin(null);
     setOffers([]);
     setLockedReveal(false);
-    setPhase('idle');
+    setPhase((p) => nextPhase(p, 'conclude'));
   }, []);
 
   // The concluded reveal used to offer "Spin again" (conclude + replay in one
@@ -983,8 +989,10 @@ export default function SlotMachineClient({
     setSellToast(null);
   }, []);
 
-  const inReveal =
-    phase === 'flood' || phase === 'transform' || phase === 'review';
+  // Type predicate, not an inline comparison: it narrows `phase` to RevealPhase
+  // at the <RevealStage> call site below, so the overlay can never be handed a
+  // phase it does not render.
+  const inReveal = isRevealPhase(phase);
   // Machine fully fades out once the reveal moves past the flood beat (spec #19).
   const machineHidden = inReveal && phase !== 'flood';
   // No rarity color anywhere until the reel settles: flood derives from phase.
