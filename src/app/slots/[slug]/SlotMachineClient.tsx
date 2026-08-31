@@ -58,6 +58,7 @@ import {
   blastMs,
   type Phase,
 } from '@/lib/reveal-phase';
+import { SELL_COUNTDOWN_SECS } from '@/lib/sell-countdown';
 import { resolveCardPokemon } from '@/lib/resolve-card-pokemon';
 import { spriteGif } from '@/lib/mock/pokedex';
 import { SlotReelStack, type ColumnWinner } from './SlotReelStack';
@@ -656,7 +657,8 @@ export default function SlotMachineClient({
                   roll.buyback?.vaultAmount ??
                   Math.round(displayFmv * FLAT_BUYBACK_PERCENT) / 100,
                 instantDeadlineMs:
-                  roll.buyback?.instantDeadlineMs ?? spinAt + 30_000,
+                  roll.buyback?.instantDeadlineMs ??
+                  spinAt + SELL_COUNTDOWN_SECS * 1000,
                 firm: roll.buyback?.firm ?? true,
               }
             : null;
