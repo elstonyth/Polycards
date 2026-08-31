@@ -17,7 +17,7 @@ import {
   closeInstantWindow,
 } from '@/lib/actions/packs';
 import { spinTaskReward } from '@/lib/actions/tasks';
-import type { WonCard, OpenBatchResult } from '@/lib/actions/packs';
+import type { WonCard } from '@/lib/actions/packs';
 import { sellBackPull } from '@/lib/actions/vault';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { useVaultDot } from '@/components/app-shell/VaultDotProvider';
@@ -30,12 +30,20 @@ import {
   type Pack,
   type PackCard,
   type Rarity,
-  FLAT_BUYBACK_PERCENT,
   FREE_WELCOME_CATEGORY,
   ODDS,
 } from '@/lib/packs-data';
 import type { RecentPull } from '@/lib/data/packs';
-import { demoDraw } from '@/lib/demo-spin';
+// The spin/open seam. Every route a press can take — the paid batch Open, the
+// free welcome pack, a task's free rip, and the guest demo Spin — comes back
+// from here in ONE shape, so nothing below this line re-forks on "is it a demo".
+import {
+  rollBatch,
+  rollBlocker,
+  rollMode,
+  type RolledBatch,
+  type RollRequest,
+} from '@/lib/roll-batch';
 import {
   pickDemoOdds,
   publishedOddsRows,
@@ -58,7 +66,6 @@ import {
   blastMs,
   type Phase,
 } from '@/lib/reveal-phase';
-import { SELL_COUNTDOWN_SECS } from '@/lib/sell-countdown';
 import { resolveCardPokemon } from '@/lib/resolve-card-pokemon';
 import { spriteGif } from '@/lib/mock/pokedex';
 import { SlotReelStack, type ColumnWinner } from './SlotReelStack';
@@ -150,24 +157,18 @@ export default function SlotMachineClient({
   useChromeInert(true);
   const { customer, isLoading: authLoading } = useAuth();
   // Live customer id for the settle guard. handleSettled can be invoked from a
-  // STALE closure — the reel prop, the watchdog, or handleSpin's own catch path
-  // captured at spin time — so reading `customer` from a closure could compare
-  // against the account that spun rather than the one signed in NOW. A ref
-  // mirrored every render always holds the current id, closing that bypass.
+  // STALE closure — the reel prop, the watchdog, or handleRoll's own mapping
+  // catch captured at press time — so reading `customer` from a closure could
+  // compare against the account that rolled rather than the one signed in NOW.
+  // A ref mirrored every render always holds the current id, closing that
+  // bypass. (What it compares against is the ROLL's own forId, and it steps
+  // aside entirely for a demo — see handleSettled.)
   const customerIdRef = useRef<string | null>(customer?.id ?? null);
   customerIdRef.current = customer?.id ?? null;
   const { muted, toggleMuted, play, loop, halt, vibrate, sfx } = useSound();
   // Ambient bed starts on the first real spin gesture (autoplay-safe) and
   // persists across spins; mute kills it and the next spin restarts it.
   const ambientOn = useRef(false);
-
-  // Guest-only demo: a logged-in customer on ?demo=1 gets the real machine —
-  // the demo exists purely as a pre-signup taste, never a mode for players.
-  const isDemo = demoPool !== null && !customer;
-  // Auth still hydrating on ?demo=1: identity (and therefore the mode) is
-  // unknown, so hold the spin — otherwise a logged-in customer could fire a
-  // "demo" spin whose result the settle identity-guard then silently drops.
-  const modeUndecided = demoPool !== null && !customer && authLoading;
 
   // The one-time free welcome pack. It is opened SINGLY through the single-open
   // route — the backend rejects a batch on this category outright — so the reel
@@ -177,6 +178,25 @@ export default function SlotMachineClient({
   // but it spends an entitlement rather than a one-time eligibility, and the
   // card it yields is a reward pull — vaultable and shippable, never sellable.
   const isFreeRip = freeRipClaimId !== null && freeRipClaimId !== '';
+
+  // Which of the four routes a press takes — decided ONCE, here, by the seam
+  // that also performs it. Guest-only demo: a logged-in customer on ?demo=1
+  // gets the real machine, because the demo exists purely as a pre-signup
+  // taste and never as a mode for players.
+  const mode = rollMode({
+    demoPool,
+    signedIn: customer != null,
+    freeRipClaimId,
+    freeWelcome: isFreePack,
+  });
+  // Presentational only: the DEMO badge, the honesty copy, the button label.
+  // Everything about the RESULT of a roll reads the mode off the roll itself
+  // (RolledBatch.mode) — this value can flip mid-flight when someone logs in.
+  const isDemo = mode === 'demo';
+  // Auth still hydrating on ?demo=1: identity (and therefore the mode) is
+  // unknown, so hold the spin — otherwise a logged-in customer could fire a
+  // "demo" spin whose result the settle identity-guard then silently drops.
+  const modeUndecided = demoPool !== null && !customer && authLoading;
 
   // Real backend price, never re-parsed from the rounded display string.
   const cost = pack.priceValue;
@@ -303,25 +323,21 @@ export default function SlotMachineClient({
     cards: WonCard[];
     winners: ColumnWinner[];
   } | null>(null);
-  // Held until the reel settles (spoiler guard). Carries the won cards too, so
-  // handleSettled reads the result from this ref (always current) instead of
-  // closing over `spin` — the callback stays stable and double-fire-safe.
-  const pending = useRef<{
-    balance: number | null;
-    /** Customer the charge/balance belongs to — settle drops it on mismatch. */
-    forId: string | null;
-    offers: (SellBackOffer | null)[];
-    cards: WonCard[];
-    /** The server said this pull cannot be sold or delivered yet (open
-     *  response's `locked`) — the reveal then offers no sell, only the unlock
-     *  note. NOT the same as `free`: a welcome pack claimed after a paid open
-     *  comes back unlocked, with a real sell offer. */
-    locked: boolean;
-  } | null>(null);
+  // Held until the reel settles (spoiler guard) — the whole batch exactly as
+  // the seam returned it, so handleSettled reads the result from this ref
+  // (always current) instead of closing over `spin`: the callback stays stable
+  // and double-fire-safe.
+  const pending = useRef<RolledBatch | null>(null);
   const [offers, setOffers] = useState<(SellBackOffer | null)[]>([]);
   // Mirrors the settled batch's `locked` — held in state (not a ref) because the
   // reveal renders from it.
   const [lockedReveal, setLockedReveal] = useState(false);
+  // Same idea, same reason: the reveal must render the mode of the roll it is
+  // SHOWING, not the mode the machine is in now. A guest who takes the demo's
+  // "Sign up & pull for real" CTA becomes a customer mid-reveal, which flips
+  // the live `isDemo` false — and the reveal would then drop its sign-up
+  // footer and start treating a theater card as a real, sellable pull.
+  const [demoReveal, setDemoReveal] = useState(false);
   const [announce, setAnnounce] = useState('');
   const cooldownTimer = useRef<number | null>(null);
   const meterTimer = useRef<number | null>(null);
@@ -383,196 +399,114 @@ export default function SlotMachineClient({
     cueMeter('down');
   }, [canAdjustReels, sfx, cueMeter]);
 
-  async function handleSpin() {
+  // One press, one roll — whichever of the four routes this machine is on.
+  // Named for the seam, not for the demo: what happens here is an Open on
+  // every route but one, and the demo Spin is the exception, not the shape.
+  async function handleRoll() {
     if (spinGuarded || modeUndecided) return;
     play('tap');
     // Clear any in-flight reveal-theater timers (same as skipToCards) so a
-    // stale flood→transform→review handoff can't fire over the new spin.
+    // stale flood→transform→review handoff can't fire over the new roll.
     if (floodTimer.current !== null) clearTimeout(floodTimer.current);
     if (transformTimer.current !== null) clearTimeout(transformTimer.current);
 
-    // Demo spin — sample client-side from the public pool over odds SET 3
-    // (backend-aggregated per tier), falling back to the published odds and
-    // then the static ODDS. No backend call, no charge, no Pull row, no
-    // sell-back; the reveal shows a sign-up CTA instead.
-    if (isDemo) {
-      // Impure read is safe here: user-click event handler, never render (same
-      // as the real spin's Date.now below).
-      const spinAt = Date.now();
-      const drawOdds = pickDemoOdds(demoOdds, publishedOdds);
-      const rows = drawOdds ? publishedOddsRows(drawOdds) : null;
-      const cards: WonCard[] = [];
-      for (let i = 0; i < reels; i++) {
-        const drawn = demoDraw(
-          demoPool,
-          rows?.length ? rows : ODDS,
-          // see above; nothing real is at stake in a demo draw
-          Math.random(),
-          Math.random(),
-        );
-        if (!drawn) {
-          setError('No cards in this pack yet — check back soon.');
-          return;
-        }
-        cards.push({
-          ...drawn,
-          slab_image: drawn.slabImage,
-          pokemon_dex: null,
-          sprite_image: null,
-          marketPriceMyr: null,
-        });
+    // Which odds a demo Spin samples on: odds SET 3 (backend-aggregated per
+    // tier), falling back to the published display odds and then the static
+    // ODDS. Ignored by every paying route.
+    const drawOdds = pickDemoOdds(demoOdds, publishedOdds);
+    const rows = drawOdds ? publishedOddsRows(drawOdds) : null;
+    const request: RollRequest = {
+      mode,
+      packId: pack.id,
+      reels,
+      freeRipClaimId,
+      demoPool: demoPool ?? [],
+      demoOdds: rows?.length ? rows : ODDS,
+      forId: customer?.id ?? null,
+    };
+
+    // The credit guards, and the ONLY place the route still matters before the
+    // roll: a guest demo touches neither auth nor credit, every other route
+    // touches both.
+    if (mode !== 'demo') {
+      if (!customer) {
+        openAuth('login');
+        return;
       }
-      setError(null);
-      setOffers([]);
-      setAnnounce('');
-      winnerRects.current = [];
-      setHasSpun(true);
-      sfx('ratchet');
-      pending.current = {
-        balance: null,
-        forId: null,
-        offers: cards.map(() => null),
-        cards,
-        locked: false,
-      };
-      setSpin({ nonce: spinAt, cards, winners: cards.map(winnerFor) });
-      setPhase((p) => nextPhase(p, 'demo-spin'));
+      if (
+        mode === 'paid' &&
+        balance !== null &&
+        !affordable(balance, cost * reels)
+      ) {
+        setNeedsTopUp(true);
+        setError('Not enough credits to spin.');
+        return;
+      }
+    }
+    // Refused before a single piece of state moves, so a blocked press leaves
+    // the machine exactly as it found it.
+    const blocked = rollBlocker(request);
+    if (blocked) {
+      setError(blocked);
       return;
     }
 
-    if (!customer) {
-      openAuth('login');
-      return;
-    }
-    if (
-      !isFreePack &&
-      !isFreeRip &&
-      balance !== null &&
-      !affordable(balance, cost * reels)
-    ) {
-      setNeedsTopUp(true);
-      setError('Not enough credits to spin.');
-      return;
-    }
     setError(null);
     setNeedsTopUp(false);
     setOffers([]);
     setAnnounce('');
     winnerRects.current = [];
     setHasSpun(true);
-    setPhase((p) => nextPhase(p, 'spin'));
     sfx('ratchet');
+    // The paying routes lock the button across the server round-trip; the demo
+    // has no round-trip to cover and goes straight to 'spinning' below, once
+    // its cards exist.
+    if (mode !== 'demo') setPhase((p) => nextPhase(p, 'spin'));
 
-    // openBatch handles BACKEND failures itself ({ok:false}); what escapes here
-    // is the Server Action RPC itself rejecting (offline, action endpoint 5xx,
-    // deployment-ID mismatch). Unhandled, phase stays 'resolving' forever and
-    // the Spin button never re-enables (spinGuarded). Whether the charge landed
-    // is genuinely unknown at this point, so the copy must claim NEITHER a free
-    // spin nor a charge — it points the player at their balance instead.
-    let res: OpenBatchResult;
-    // Free welcome pack → the SINGLE-open route (open-batch 400s this category:
-    // the claim pays for exactly one pull). Its result carries the same
-    // per-roll fields, so it is adapted to a one-roll batch and every beat
-    // below — charge paint, vault dot, offers, reveal — stays one code path.
-    // Sell/deliver lock for THIS open, straight off the response — never
-    // derived from `isFreePack`: a welcome pack claimed after a paid open comes
-    // back unlocked and must keep its sell button.
-    let lockedOpen = false;
-    try {
-      if (isFreeRip) {
-        // Spends the task entitlement. `already_redeemed` is NOT an error: it
-        // means an earlier attempt committed (a retry, a double-tap, a lost
-        // response) and the card is already in the vault. Reload so the reveal
-        // is not invented client-side from a roll that did not happen here.
-        const spun = await spinTaskReward(freeRipClaimId!);
-        if (!spun.ok) {
-          res = { ok: false, error: spun.error };
-        } else if (!spun.redeemed) {
-          res = {
-            ok: false,
-            error:
-              spun.reason === 'already_redeemed'
-                ? 'This free rip was already spun — the card is in your vault.'
-                : 'That free rip is no longer available.',
-          };
-        } else {
-          res = {
-            ok: true,
-            rolls: [
-              {
-                card: spun.card,
-                pullId: spun.pullId,
-                marketValue: spun.marketValue,
-                // A reward pull is never sellable, so no offer is quoted — the
-                // reveal shows "Keep in vault" and says why.
-                buyback: null,
-              },
-            ],
-            price: 0,
-            total: 0,
-            balance: null,
-          };
-        }
-        // The card is unsellable, not un-shippable — the reveal keys its
-        // no-sell branch off `locked`, so this is what suppresses the offer.
-        lockedOpen = true;
-      } else if (isFreePack) {
-        const one = await openPack(pack.id);
-        lockedOpen = one.ok && one.locked;
-        res = one.ok
-          ? {
-              ok: true,
-              rolls: [
-                {
-                  card: one.card,
-                  pullId: one.pullId,
-                  marketValue: one.marketValue,
-                  buyback: one.buyback,
-                },
-              ],
-              price: one.price,
-              total: one.price,
-              balance: one.balance,
-            }
-          : one;
-      } else {
-        res = await openBatch(pack.id, reels);
-      }
-    } catch (err) {
-      logger.error('[slots] openBatch transport failure', err);
-      // The charge may well have landed (the server executed, the response did
-      // not transport back). Telling the player to check their balance while
-      // showing the STALE pre-charge figure invites a second, real charge, so
-      // refetch before re-enabling Spin. Nothing spun, so hasSpun goes back.
-      // Show the error NOW, before the refetch — this path fires when the
-      // server is unreachable, so awaiting a second call to it would leave the
-      // screen looking dead (no message, button still disabled) for the whole
-      // fetch timeout. The message lands immediately instead.
-      setError(
-        "Couldn't reach the machine. Check your balance before spinning again.",
-      );
-      // Then refetch BEFORE re-enabling Spin. Deliberately awaited, not
-      // fire-and-forget: the on-screen balance is the stale PRE-charge figure
-      // and the charge may have landed, so re-enabling over it invites a second
-      // real charge. Keeping phase on 'resolving' through the refetch holds the
-      // button disabled; when the refetch resolves (to the fresh value, or to
-      // null on failure — TopUpProvider swallows its own errors) canAfford is
-      // recomputed and the button gates correctly. finally guarantees the reset
-      // even if the refetch somehow rejects.
-      try {
-        await refetchBalance();
-      } catch (refetchErr) {
-        logger.error(
-          '[slots] balance refetch after transport failure',
-          refetchErr,
-        );
-      } finally {
-        setHasSpun(false);
-        setPhase((p) => nextPhase(p, 'abort'));
-      }
-      return;
-    }
+    // ONE call. Nothing below retries it: a rejection or a transport failure
+    // may already have debited, and a second attempt would charge twice.
+    const res = await rollBatch(request, {
+      openBatch,
+      openPack,
+      spinTaskReward,
+      now: () => Date.now(),
+      random: () => Math.random(),
+    });
+
     if (!res.ok) {
+      if (res.kind === 'unreachable') {
+        // The charge may well have landed (the server executed, the response
+        // did not transport back). Telling the player to check their balance
+        // while showing the STALE pre-charge figure invites a second, real
+        // charge, so refetch before re-enabling Spin. Nothing spun, so hasSpun
+        // goes back. Show the error NOW, before the refetch — this path fires
+        // when the server is unreachable, so awaiting a second call to it would
+        // leave the screen looking dead (no message, button still disabled) for
+        // the whole fetch timeout. The message lands immediately instead.
+        setError(
+          "Couldn't reach the machine. Check your balance before spinning again.",
+        );
+        // Then refetch BEFORE re-enabling Spin. Deliberately awaited, not
+        // fire-and-forget: the on-screen balance is the stale PRE-charge figure
+        // and the charge may have landed, so re-enabling over it invites a
+        // second real charge. Keeping phase on 'resolving' through the refetch
+        // holds the button disabled; when the refetch resolves (to the fresh
+        // value, or to null on failure — TopUpProvider swallows its own errors)
+        // canAfford is recomputed and the button gates correctly. finally
+        // guarantees the reset even if the refetch somehow rejects.
+        try {
+          await refetchBalance();
+        } catch (refetchErr) {
+          logger.error(
+            '[slots] balance refetch after transport failure',
+            refetchErr,
+          );
+        } finally {
+          setHasSpun(false);
+          setPhase((p) => nextPhase(p, 'abort'));
+        }
+        return;
+      }
       if (res.needsAuth) openAuth('login');
       else {
         setError(res.error);
@@ -596,14 +530,17 @@ export default function SlotMachineClient({
       return;
     }
 
-    // Paint the debit now, not at settle: openBatch already charged (the saga
+    const batch = res.batch;
+
+    // Paint the debit now, not at settle: the open already charged (the saga
     // commits the charge before recording pulls), so the bet is spent before a
     // single reel turns — deferring this made a paid spin look free mid-flight.
     // The cards/offers below are spoilers; the balance never is.
-    // Guard: the await can span an account switch — never paint the spun
-    // account's balance onto whoever is signed in now.
-    if (res.balance != null && customer.id === customerIdRef.current) {
-      applyBalance(res.balance);
+    // Guard: the await can span an account switch — never paint the rolled
+    // account's balance onto whoever is signed in now. A demo carries no
+    // balance and no account, so both guards below simply never fire for it.
+    if (batch.balance != null && batch.forId === customerIdRef.current) {
+      applyBalance(batch.balance);
     }
 
     // The cards are in the vault as of this response — the open workflow writes
@@ -611,96 +548,36 @@ export default function SlotMachineClient({
     // Vault tab now: it otherwise only re-reads on login and on window focus,
     // and a spin is neither, so the dot could not light until the customer
     // switched tabs away and back or reloaded. Same identity guard as the
-    // balance above — never light the spun account's dot for whoever is signed
-    // in now.
-    if (customer.id === customerIdRef.current) {
+    // balance above — never light the rolled account's dot for whoever is
+    // signed in now.
+    if (batch.forId !== null && batch.forId === customerIdRef.current) {
       refreshVaultDot();
     }
 
-    // Build (but don't yet apply) the post-spin state — spoiler guard.
-    // One entry per roll. The customer is ALREADY charged here, so if any
-    // cosmetic mapping below throws we must still surface the result (see the
-    // catch) rather than dying in phase='resolving'.
-    const builtOffers: (SellBackOffer | null)[] = [];
+    // The last mapping left: cosmetic reel winners. The customer is ALREADY
+    // charged here, so a throw must still surface the result they paid for —
+    // hand the (possibly partial) winners to the idempotent settle rather than
+    // dying in phase='resolving'. The batch itself is already built, so there
+    // is nothing to reconstruct.
     const winners: ColumnWinner[] = [];
-    const cards: WonCard[] = [];
-    // Single spin timestamp: unique per spin (drives the reel nonce) and the
-    // fallback instant-offer deadline. handleSpin is a user-click async event
-    // handler (never render), so this impure read is safe.
-    const spinAt = Date.now();
-
+    let mappingFailed = false;
     try {
-      for (const roll of res.rolls) {
-        // MYR display price; marketValue is raw USD FMV and must NEVER
-        // render behind "RM" — when an older backend omits marketPriceMyr,
-        // fall back to 0 (the vault seam's policy, actions/vault.ts) and let
-        // SellConfirmModal show "—" for an unknown value. The offer's amount
-        // fallbacks derive from this SAME figure so a single offer can never
-        // mix currencies.
-        const displayFmv = roll.card.marketPriceMyr ?? 0;
-        // Build the sell-back offer for this roll.
-        const builtOffer: SellBackOffer | null =
-          roll.pullId !== null
-            ? {
-                pullId: roll.pullId,
-                fmv: displayFmv,
-                cardName: roll.card.name,
-                image: roll.card.image,
-                slabImage: roll.card.slab_image,
-                percent: roll.buyback?.percent ?? FLAT_BUYBACK_PERCENT,
-                amount:
-                  roll.buyback?.amount ??
-                  Math.round(displayFmv * FLAT_BUYBACK_PERCENT) / 100,
-                vaultPercent:
-                  roll.buyback?.vaultPercent ?? FLAT_BUYBACK_PERCENT,
-                vaultAmount:
-                  roll.buyback?.vaultAmount ??
-                  Math.round(displayFmv * FLAT_BUYBACK_PERCENT) / 100,
-                instantDeadlineMs:
-                  roll.buyback?.instantDeadlineMs ??
-                  spinAt + SELL_COUNTDOWN_SECS * 1000,
-                firm: roll.buyback?.firm ?? true,
-              }
-            : null;
-        builtOffers.push(builtOffer);
-
-        winners.push(winnerFor(roll.card));
-        cards.push(roll.card);
-      }
-
-      pending.current = {
-        balance: res.balance,
-        forId: customer?.id ?? null,
-        offers: builtOffers,
-        cards,
-        locked: lockedOpen,
-      };
-      setSpin({ nonce: spinAt, cards, winners });
-      setPhase((p) => nextPhase(p, 'rolled'));
+      for (const card of batch.cards) winners.push(winnerFor(card));
     } catch (err) {
-      // A cosmetic mapping step threw after the charge. Surface the result the
-      // user paid for (authoritative server balance + won cards) and move to a
-      // terminal phase via the idempotent settle — never strand them. The landed
-      // reveal reads `spin` (not pending), so set it too — reconstructing the
-      // cards from res.rolls if the winners loop didn't finish — otherwise it
-      // would render a stale/previous spin's cards.
       logger.error('[slots] post-charge mapping failed', err);
-      const settledCards =
-        cards.length === res.rolls.length
-          ? cards
-          : res.rolls.map((roll) => roll.card);
-      if (!pending.current) {
-        pending.current = {
-          balance: res.balance,
-          forId: customer?.id ?? null,
-          offers: builtOffers,
-          cards: settledCards,
-          locked: lockedOpen,
-        };
-      }
-      setSpin({ nonce: spinAt, cards: settledCards, winners });
-      handleSettled();
+      mappingFailed = true;
     }
+
+    pending.current = batch;
+    setSpin({ nonce: batch.spinAt, cards: batch.cards, winners });
+    if (mappingFailed) handleSettled();
+    // The ROLL's own mode, never the machine's: past this await the live one
+    // can have flipped, and every decision about a result reads it off the
+    // result (same rule as handleSettled below).
+    else
+      setPhase((p) =>
+        nextPhase(p, batch.mode === 'demo' ? 'demo-spin' : 'rolled'),
+      );
   }
 
   // Fired by the stack once the last column settles. Reads the result from the
@@ -713,31 +590,43 @@ export default function SlotMachineClient({
     // Don't cut the bed here — the spin is now timed to the ~6s bed and the
     // asset's own tail-fade lands on this lock, so it finishes on the beat.
 
-    // Identity switched mid-spin (token refresh, multi-tab login): the charge
-    // and the won cards belong to the account that spun, not whoever is signed
+    // Identity switched mid-roll (token refresh, multi-tab login): the charge
+    // and the won cards belong to the account that rolled, not whoever is signed
     // in now. Drop the ENTIRE result — balance, cards, offers, reveal — because
     // suppressing only the balance would still show the previous account's
-    // prizes (and sell-back offers referencing their pulls). The spun account
-    // keeps its cards (server-side vault) and sees its real balance on next load
-    // (the provider re-fetches per identity).
-    if (held.forId !== customerIdRef.current) {
+    // prizes (and sell-back offers referencing their pulls). That account keeps
+    // its cards (server-side vault) and sees its real balance on next load (the
+    // provider re-fetches per identity).
+    //
+    // A roll bound to no account is exempt, and must be: a demo has no charge,
+    // no pull and no offer, so there is nothing here to protect — while the
+    // guard, comparing null against a live customer id, would silently discard
+    // the result of any demo a login happened to land in the middle of.
+    //
+    // Tested as `forId !== null`, NOT `mode !== 'demo'`, so this reads the same
+    // invariant the same way as the vault-dot guard above. roll-batch pins a
+    // demo batch's forId to null structurally, so the two cannot disagree.
+    if (held.forId !== null && held.forId !== customerIdRef.current) {
       setSpin(null);
       setPhase((p) => nextPhase(p, 'abort'));
       return;
     }
 
-    // Usually a no-op — handleSpin applied this same value at charge time. It
-    // only lands when identity left and came back across the spin (A→B→A): the
+    // Usually a no-op — handleRoll applied this same value at charge time. It
+    // only lands when identity left and came back across the roll (A→B→A): the
     // charge-time guard skipped B, and the guard above just confirmed A is back.
     if (held.balance != null) {
       applyBalance(held.balance);
     }
     setOffers(held.offers);
     setLockedReveal(held.locked);
+    setDemoReveal(held.mode === 'demo');
 
     // Prepend one RecentPull per card won in this batch — real wins only; a
-    // demo draw is theater and must never appear in the live pull ticker.
-    if (!isDemo) {
+    // demo draw is theater and must never appear in the live pull ticker. Read
+    // off the ROLL, not the machine: a login mid-flight flips the live isDemo
+    // and would push theater cards into the live ticker.
+    if (held.mode !== 'demo') {
       const now = Date.now();
       const justPulled: RecentPull[] = held.cards.map((won, i) => ({
         id: `${won.id}-${now}-${i}`,
@@ -764,7 +653,7 @@ export default function SlotMachineClient({
       if (blastTimer.current !== null) clearTimeout(blastTimer.current);
       blastTimer.current = window.setTimeout(() => setBlast(false), blastFor);
     }
-    const bigPrefix = isDemo ? 'Demo — ' : big ? 'Big win! ' : '';
+    const bigPrefix = held.mode === 'demo' ? 'Demo — ' : big ? 'Big win! ' : '';
     const first = held.cards[0];
     if (held.cards.length === 1 && first) {
       const firstValue =
@@ -806,8 +695,11 @@ export default function SlotMachineClient({
     );
     // customerIdRef (a ref) is intentionally not a dep — the guard reads its
     // live value, so handleSettled stays stable and every caller (reel prop,
-    // watchdog, stale catch closure) checks the CURRENT identity.
-  }, [pack.name, pack.image, play, applyBalance, reduced, isDemo]);
+    // watchdog, stale catch closure) checks the CURRENT identity. `isDemo` is
+    // no longer a dep either: every demo/real decision above reads the ROLL's
+    // own mode, which makes this callback stabler still (the settle watchdog
+    // depends on it).
+  }, [pack.name, pack.image, play, applyBalance, reduced]);
 
   // Fast-forward the post-landing theater. Lands on 'review' with card backs
   // unflipped (beat 5's skip). Never affects the spin itself — the spin is not
@@ -826,14 +718,15 @@ export default function SlotMachineClient({
     setSpin(null);
     setOffers([]);
     setLockedReveal(false);
+    setDemoReveal(false);
     setPhase((p) => nextPhase(p, 'conclude'));
   }, []);
 
   // The concluded reveal used to offer "Spin again" (conclude + replay in one
   // press) and "Done". Both are gone — RevealStage auto-concludes to the idle
   // machine now — so the conclude→replay chaining that lived here (a ref flag,
-  // a handleSpin ref, and a phase effect to fire the replay one render later)
-  // went with them. A new spin is a press on the Spin button again, nothing else.
+  // a handleRoll ref, and a phase effect to fire the replay one render later)
+  // went with them. A new roll is a press on the Spin button again, nothing else.
 
   // Settle watchdog: the customer is charged the moment openBatch returns ok,
   // but the reveal only lands when the reel engine reports completion. If that
@@ -1145,9 +1038,9 @@ export default function SlotMachineClient({
                   winnerRects={winnerRects.current}
                   spriteSrcs={spriteSrcs}
                   reduced={reduced}
-                  demo={isDemo}
+                  demo={demoReveal}
                   locked={lockedReveal}
-                  onSignUp={isDemo ? () => openAuth('signup') : undefined}
+                  onSignUp={demoReveal ? () => openAuth('signup') : undefined}
                   onSkip={skipToCards}
                   onConclude={handleConclude}
                   onCloseInstant={closeInstantWindow}
@@ -1221,7 +1114,7 @@ export default function SlotMachineClient({
                         : 'Spin'
             }
             muted={muted}
-            onSpin={handleSpin}
+            onSpin={handleRoll}
             onToggleMute={toggleMuted}
             onOpenOdds={() => setOddsOpen(true)}
             onAddReel={addReel}
