@@ -7,7 +7,7 @@
  * check-in, per-period claim), so every non-throwing outcome returns a
  * result object for the tab to render, never an exception.
  */
-import { sdk } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
 import {
@@ -23,10 +23,7 @@ export async function getTaskHub(): Promise<TaskHub | null> {
   const token = await getAuthToken();
   if (!token) return null;
   try {
-    const raw = await sdk.client.fetch('/store/tasks', {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
+    const raw = await authedFetch(token, '/store/tasks');
     return parseOne(TaskHubSchema, raw);
   } catch (error) {
     logger.error('[tasks] hub load failed:', error);
@@ -41,12 +38,11 @@ export async function checkInToday(): Promise<CheckInResult> {
   const token = await getAuthToken();
   if (!token) return { ok: false, error: 'Please log in first.' };
   try {
-    const raw = await sdk.client.fetch<{ checked: boolean }>(
+    const raw = await authedFetch<{ checked: boolean }>(
+      token,
       '/store/tasks/checkin',
       {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store',
       },
     );
     return { ok: true, checked: Boolean(raw.checked) };
@@ -83,17 +79,15 @@ export async function claimTaskReward(taskId: string): Promise<ClaimResult> {
   const token = await getAuthToken();
   if (!token) return { ok: false, error: 'Please log in first.' };
   try {
-    const raw = await sdk.client.fetch<
+    const raw = await authedFetch<
       | {
           claimed: true;
           reward: { type: string; pack_id?: string };
           claimId?: string;
         }
       | { claimed: false; reason: ClaimFailure }
-    >(`/store/tasks/${encodeURIComponent(taskId)}/claim`, {
+    >(token, `/store/tasks/${encodeURIComponent(taskId)}/claim`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
     });
     if (raw.claimed) {
       const spin =
@@ -150,15 +144,13 @@ export async function spinTaskReward(
   const token = await getAuthToken();
   if (!token) return { ok: false, error: 'Please log in first.' };
   try {
-    const raw = await sdk.client.fetch<{
+    const raw = await authedFetch<{
       redeemed?: boolean;
       reason?: 'not_found' | 'already_redeemed' | 'not_a_pack_reward';
       pullId?: string;
       card?: Record<string, unknown>;
-    }>(`/store/tasks/claims/${encodeURIComponent(claimId)}/spin`, {
+    }>(token, `/store/tasks/claims/${encodeURIComponent(claimId)}/spin`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
     });
     if (raw.redeemed && typeof raw.pullId === 'string') {
       // The fetch generic is an assertion, not a runtime guard — validate the

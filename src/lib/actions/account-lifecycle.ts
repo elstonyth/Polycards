@@ -17,7 +17,7 @@
  * `'use server'` and may only export async functions.
  */
 
-import { sdk } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { clearAuthToken, getAuthToken } from '@/lib/data/customer';
 import { GENERIC_ERROR } from './account-lifecycle-map';
@@ -106,9 +106,8 @@ export async function deleteAccount(
   const token = await getAuthToken();
   if (!token) return { ok: false, error: LOGGED_OUT, reason: null };
   try {
-    await sdk.client.fetch('/store/customers/me/delete', {
+    await authedFetch(token, '/store/customers/me/delete', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
       body: password === null ? {} : { password },
     });
   } catch (error) {

@@ -13,7 +13,7 @@
  * token or an unreachable backend both resolve to `hidden` and the page
  * renders exactly as it does today.
  */
-import { sdk } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
 import { parseOne, FreePackSchema } from '@/lib/data/schemas';
@@ -68,10 +68,7 @@ export async function getFreePackState(): Promise<FreePackState> {
   try {
     const parsed = parseOne(
       FreePackSchema,
-      await sdk.client.fetch('/store/free-pack', {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        cache: 'no-store',
-      }),
+      await authedFetch(token, '/store/free-pack'),
     );
     return mapFreePackState(Boolean(token), parsed);
   } catch (error) {

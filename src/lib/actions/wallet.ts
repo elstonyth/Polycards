@@ -9,7 +9,7 @@
  * The nested `wallet` block is extracted before parsing so WalletSchema only
  * needs to validate the inner object (not the outer envelope).
  */
-import { sdk } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
 import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
@@ -49,10 +49,7 @@ export async function getWallet(): Promise<WalletResult> {
   }
 
   try {
-    const raw = await sdk.client.fetch('/store/credits', {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
+    const raw = await authedFetch(token, '/store/credits');
 
     // Extract the nested wallet block then validate it.
     const w = parseOne(WalletSchema, (raw as { wallet?: unknown }).wallet);
