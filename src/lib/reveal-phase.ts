@@ -129,6 +129,18 @@ export const BLAST_MS = 950;
 export const CONCLUDE_DELAY_MS = 1400;
 
 /**
+ * How long the top-rarity room blast runs, or 0 when it must not run at all.
+ *
+ * Reduced motion SKIPS the blast rather than shortening it — a room-wide colour
+ * flood is the thing the setting exists to suppress, and a brief one is worse
+ * than none. Returning 0 rather than a shorter duration is what says so, and
+ * makes the rule testable here instead of living in an `if` in the component.
+ */
+export function blastMs(isBigWin: boolean, reduced: boolean): number {
+  return isBigWin && !reduced ? BLAST_MS : 0;
+}
+
+/**
  * The two reveal beats, as ABSOLUTE delays measured from the settle — not a
  * nested chain. Both are scheduled at once when the reel lands, so `reviewMs`
  * already contains `floodMs`; collapsing them into `setTimeout(…, reviewMs -

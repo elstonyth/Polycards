@@ -8,6 +8,7 @@ import {
   MORPH_SETTLE_MS,
   CARD_STAGGER_MS,
   BLAST_MS,
+  blastMs,
   CONCLUDE_DELAY_MS,
   expirySweep,
   keepAt,
@@ -252,7 +253,16 @@ describe('revealTimings', () => {
   });
 
   test('the big-win blast is a fixed length — reduced motion skips it, never shortens it', () => {
-    expect(BLAST_MS).toBeGreaterThan(0);
+    // The gate lives in blastMs, not in an `if` in the component, so this can
+    // assert the RULE rather than just the constant. 0 means "do not run it at
+    // all": a room-wide colour flood is what reduced motion exists to suppress,
+    // and a brief one is worse than none.
+    expect(blastMs(true, false)).toBe(BLAST_MS);
+    expect(blastMs(true, true)).toBe(0);
+    expect(blastMs(false, false)).toBe(0);
+    expect(blastMs(false, true)).toBe(0);
+    // A shortened blast would still pass a `> 0` check; this pins the length.
+    expect(BLAST_MS).toBe(950);
   });
 });
 

@@ -55,7 +55,7 @@ import {
   nextPhase,
   isRevealPhase,
   revealTimings,
-  BLAST_MS,
+  blastMs,
   type Phase,
 } from '@/lib/reveal-phase';
 import { resolveCardPokemon } from '@/lib/resolve-card-pokemon';
@@ -756,10 +756,11 @@ export default function SlotMachineClient({
     // Big-win / haptics now fire on the card flip inside RevealStage; here we
     // keep only the announce text (and the phase handoff into the reveal).
     const big = held.cards.some((c) => isTopRarity(c.rarity));
-    if (big && !reduced) {
+    const blastFor = blastMs(big, reduced);
+    if (blastFor > 0) {
       setBlast(true);
       if (blastTimer.current !== null) clearTimeout(blastTimer.current);
-      blastTimer.current = window.setTimeout(() => setBlast(false), BLAST_MS);
+      blastTimer.current = window.setTimeout(() => setBlast(false), blastFor);
     }
     const bigPrefix = isDemo ? 'Demo — ' : big ? 'Big win! ' : '';
     const first = held.cards[0];
