@@ -57,7 +57,14 @@ async function settle(page) {
       null,
       { timeout: 30_000 },
     )
-    .catch(() => console.warn('  ! slab images did not all settle'));
+    .catch((error) => {
+      // MUST throw. A blank capture compares byte-identical to another blank
+      // capture, so swallowing this would let the script report "pixel-
+      // preserving" on a run where no slab ever rendered — the exact false
+      // pass this harness exists to rule out.
+      console.error('  ! slab images did not all settle — refusing to capture');
+      throw error;
+    });
   await page.waitForTimeout(600);
 }
 
@@ -141,7 +148,10 @@ async function capture() {
       null,
       { timeout: 30_000 },
     )
-    .catch(() => console.warn('  ! reel sprites did not load'));
+    .catch((error) => {
+      console.error('  ! reel sprites did not load — refusing to capture');
+      throw error;
+    });
   await page.waitForTimeout(1500);
   await shot('reel-idle', { fullPage: false });
 
@@ -152,7 +162,14 @@ async function diff() {
   const files = (await readdir(OUT)).filter((f) =>
     f.startsWith('slab-framing-before-'),
   );
+  // No evidence is not a pass. Without this, `--diff` run before any capture
+  // prints IDENTICAL over an empty loop.
+  if (files.length === 0) {
+    console.error('no before-captures found — run --tag before first');
+    process.exit(1);
+  }
   let worst = 0;
+  let failed = 0;
   for (const f of files) {
     const name = f.replace('slab-framing-before-', '');
     const a = path.join(OUT, f);
@@ -184,8 +201,17 @@ async function diff() {
         `${name}: maxDelta=${maxDelta} differingChannels=${differing} (${pct}%)`,
       );
     } catch (e) {
-      console.log(`${name}: ${e.message}`);
+      // An unreadable pair is a FAILED comparison, not a passing one — a
+      // missing after-file must never leave `worst` at 0 and read as identical.
+      console.log(`${name}: UNREADABLE — ${e.message}`);
+      failed++;
     }
+  }
+  if (failed > 0) {
+    console.error(
+      `${failed} pair(s) could not be compared — verification failed`,
+    );
+    process.exit(1);
   }
   console.log(worst === 0 ? 'IDENTICAL' : `WORST CHANNEL DELTA ${worst}`);
 }
