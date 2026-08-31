@@ -43,6 +43,29 @@ export type VaultItem = {
   };
 };
 
+/**
+ * The raw /store/vault row as this mapper reads it.
+ *
+ * NOT a twin of `VaultItemSchema`: the schema declares only the fields whose
+ * absence must DROP the row (pull_id, card.name, buyback.amount/percent), plus
+ * the `.catch()`-defaulted source/locked/sellable and optional showcased. Every
+ * other field the mapper reads rides through the `looseObject` unguarded on
+ * purpose — requiring them would let a stale field delete a card from the
+ * customer's own vault — so `parseList`'s output type cannot describe them and
+ * the two declarations genuinely differ. Keep the names below in step with
+ * `VaultItemSchema` by hand.
+ *
+ * WHICH `??` DEFAULTS BELOW ARE DEAD, exactly — do not generalise this:
+ * only `source`, `locked` and `sellable` are guaranteed by the schema's
+ * `.catch()` (which defaults a MISSING key, not just an invalid one), so only
+ * those three coalesces are unreachable in production. Every other `??` here is
+ * LIVE and load-bearing: `challenge_prize` is not in `VaultItemSchema` at all,
+ * `showcased` and `buyback.firm` are `.optional()` (no default), and
+ * `card.slab_image` / `card.marketPriceMyr` are unguarded. Dropping
+ * `challenge_prize ?? false` would put `undefined` behind a `boolean` for any
+ * backend predating the field — every customer's vault silently loses the prism
+ * frame on challenge prizes, with no type error to catch it.
+ */
 export interface BackendVaultItem {
   pull_id: string;
   rolled_at: string;
@@ -50,6 +73,9 @@ export interface BackendVaultItem {
   pack_title: string;
   /** Absent on an older backend → false (the pre-prism behaviour). */
   challenge_prize?: boolean;
+  /** Guarded by VaultItemSchema (optional there too) — declared here so the
+   *  mapper reads it directly instead of casting past its own input type. */
+  showcased?: boolean;
   /** Absent on an older backend → 'pack' / false (see VaultItemSchema). */
   source?: 'pack' | 'reward' | 'free';
   locked?: boolean;
@@ -73,7 +99,7 @@ export function mapVaultItem(i: BackendVaultItem): VaultItem {
     packId: i.pack_id,
     packTitle: i.pack_title,
     challengePrize: i.challenge_prize ?? false,
-    showcased: (i as unknown as { showcased?: boolean }).showcased ?? false,
+    showcased: i.showcased ?? false,
     source: i.source ?? 'pack',
     locked: i.locked ?? false,
     // Defaults true — a backend without the field behaves as it always did.

@@ -84,25 +84,13 @@ export type OpenPackResult =
   | { ok: false; error: string; needsAuth?: boolean; needsTopUp?: boolean };
 
 // Shape of the `card` returned by the open route (normalized server-side).
+// Declares ONLY the two fields read straight off the raw object — the rest come
+// from parseOne(WonCardSchema, card), which stays their single declaration
+// (same split as RawBatchRollItem; openPack and openBatch map identically).
 interface BackendWonCard {
-  handle: string;
-  name: string;
   image: string;
   slab_image?: string | null;
-  market_value: number;
-  rarity: string;
-  pokemon_dex?: number | null;
-  sprite_image?: string | null;
-  marketPriceMyr?: number;
-}
-
-// Shape of the `buyback` offer returned by the open route.
-interface BackendBuyback {
-  percent?: unknown;
-  amount?: unknown;
-  vault_percent?: unknown;
-  vault_amount?: unknown;
-  instant_deadline_ms?: unknown;
+  [key: string]: unknown;
 }
 
 // Patterns local to the open-pack action; never surface raw errors.
@@ -145,7 +133,8 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
         card: BackendWonCard;
         balance?: unknown;
         price?: unknown;
-        buyback?: BackendBuyback;
+        // Untyped on purpose: only ever handed to parseOne(OpenBuybackSchema).
+        buyback?: unknown;
         free?: unknown;
         locked?: unknown;
       }>(token, `/store/packs/${encodeURIComponent(slug)}/open`, {
