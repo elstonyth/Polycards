@@ -497,6 +497,15 @@ export const WalletSchema = z.looseObject({
 
 // --- actions/vip.ts ---------------------------------------------------------
 
+/** One rung's reward payload. The `next` teaser and every `levels` row carry
+ *  the SAME block, so it is declared once here — a renamed reward field is one
+ *  edit, not two silently-diverging ones. */
+const vipReward = z.looseObject({
+  voucher_amount: finite,
+  box_tier: z.string(),
+  frame_unlock: z.boolean(),
+});
+
 /** GET /store/vip — VIP level, cumulative spend, and next-rung teaser.
  *  Fields mirror the route's `res.json(...)` shape exactly (snake_case). */
 export const VipSchema = z.looseObject({
@@ -508,11 +517,7 @@ export const VipSchema = z.looseObject({
       level: finite,
       threshold: finite,
       remaining: finite,
-      reward: z.looseObject({
-        voucher_amount: finite,
-        box_tier: z.string(),
-        frame_unlock: z.boolean(),
-      }),
+      reward: vipReward,
     })
     .nullable(),
   levels: z
@@ -520,15 +525,16 @@ export const VipSchema = z.looseObject({
       z.looseObject({
         level: finite,
         threshold: finite,
-        reward: z.looseObject({
-          voucher_amount: finite,
-          box_tier: z.string(),
-          frame_unlock: z.boolean(),
-        }),
+        reward: vipReward,
       }),
     )
     .default([]),
 });
+
+/** One parsed `levels[]` row — `mapVipLevels`' input (actions/vip-map.ts).
+ *  Derived, not re-typed there: the schema is the wire shape's sole
+ *  declaration, and zod may only be imported here (the jitless CSP config). */
+export type VipLevelRow = z.infer<typeof VipSchema>['levels'][number];
 
 // --- actions/notifications.ts -----------------------------------------------
 

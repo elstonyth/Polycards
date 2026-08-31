@@ -31,19 +31,20 @@ export type BatchRoll = {
   buyback: BuybackOffer | null;
 };
 
-/** Raw shape of a single element inside the backend `rolls` array. */
+/**
+ * Raw shape of a single element inside the backend `rolls` array.
+ *
+ * Declares ONLY what is read straight off the raw object — `pull.id`, and the
+ * two card fields `WonCardSchema` omits. Everything else the mapper needs comes
+ * out of `parseOne(WonCardSchema, …)`, so `WonCardSchema` stays the single
+ * declaration of those fields instead of being re-typed here; the index
+ * signature carries them (unread and untyped) to the parse call.
+ */
 export interface RawBatchRollItem {
   pull?: { id?: unknown };
   card: {
-    handle: string;
-    name: string;
     image: string;
     slab_image?: string | null;
-    market_value: number;
-    rarity: string;
-    pokemon_dex?: number | null;
-    sprite_image?: string | null;
-    marketPriceMyr?: number;
     [key: string]: unknown;
   };
   buyback?: unknown;

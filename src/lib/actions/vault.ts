@@ -77,6 +77,12 @@ export async function getVault(): Promise<VaultResult> {
       authedFetch(token, '/store/credits/balance'),
     ]);
 
+    // The assertion widens the parse output to the fields the mapper also
+    // READS but the schema deliberately does NOT guard (rolled_at, pack_title,
+    // card.image/rarity/market_value, …). They ride the `looseObject` typed
+    // `unknown`, so this is the seam where guarded and merely-carried fields
+    // meet. Tightening VaultItemSchema to erase it would make a stale field
+    // drop the row — i.e. delete a card from the customer's own vault.
     const items = (
       parseList(
         VaultItemSchema,

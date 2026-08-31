@@ -8,6 +8,12 @@
  *
  * Nothing in here is server-only — no SDK, no auth, no secrets.
  */
+// The raw ladder row is DERIVED from `VipSchema` (`VipLevelRow`) rather than
+// re-typed here: the schema is the wire shape's single declaration, so a
+// renamed backend field fails this typecheck instead of quietly diverging from
+// the guard. `import type` is fully erased — no zod reaches the bundle of
+// `me/page.tsx`, which imports `levelProgressPct` from this module.
+import type { VipLevelRow } from '@/lib/data/schemas';
 
 export type VipLevel = {
   level: number;
@@ -16,16 +22,6 @@ export type VipLevel = {
     voucherAmount: number;
     boxTier: string;
     frameUnlock: boolean;
-  };
-};
-
-export type RawVipLevel = {
-  level: number;
-  threshold: number;
-  reward: {
-    voucher_amount: number;
-    box_tier: string;
-    frame_unlock: boolean;
   };
 };
 
@@ -47,7 +43,7 @@ export function levelProgressPct(
   );
 }
 
-export function mapVipLevels(raw: RawVipLevel[]): VipLevel[] {
+export function mapVipLevels(raw: VipLevelRow[]): VipLevel[] {
   return raw.map((r) => ({
     level: r.level,
     threshold: r.threshold,
