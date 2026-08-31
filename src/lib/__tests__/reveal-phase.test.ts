@@ -11,6 +11,7 @@ import {
   blastMs,
   CONCLUDE_DELAY_MS,
   expirySweep,
+  resolvedStates,
   keepAt,
   beginSellAt,
   allConcluded,
@@ -308,6 +309,39 @@ describe('expirySweep', () => {
   });
 });
 
+describe('resolvedStates — what a render reads at the deadline', () => {
+  test('before expiry the states pass through by identity', () => {
+    const states = [idle, selling];
+    expect(resolvedStates(states, false)).toBe(states);
+  });
+
+  test('a sell on the wire at the deadline still reads as selling (#511)', () => {
+    // The bug: the footer ORed the raw clock in, so an in-flight sell was
+    // announced as "Stored in your vault" and then contradicted by "+RM x
+    // credited" when the request landed. The card's own resolved state must
+    // stay 'selling' — the deadline is not that card's answer.
+    expect(resolvedStates([selling], true)).toEqual([selling]);
+  });
+
+  test('every other card is vaulted in the SAME render the clock reads out', () => {
+    // Not one render later: the sweep effect is keyed on `expired`, so it
+    // cannot run in the commit where `expired` flips. Without this, that render
+    // shows a live Sell button on a closed window.
+    expect(resolvedStates([idle, sold, errored, selling], true)).toEqual([
+      vaulted,
+      sold,
+      vaulted,
+      selling,
+    ]);
+  });
+
+  test('does not mutate the states it was given', () => {
+    const before: SellState[] = [idle, selling];
+    resolvedStates(before, true);
+    expect(before).toEqual([idle, selling]);
+  });
+});
+
 describe('keepAt — "Keep in vault"', () => {
   test('concludes an untouched card with no server call', () => {
     expect(keepAt([idle, idle], 0)).toEqual([vaulted, idle]);
@@ -394,8 +428,9 @@ describe('allConcluded — drives the reveal auto-conclude', () => {
   });
 
   test('a FAILED sell holds the reveal open — this is why expiry is also an exit', () => {
-    // 'error' is never terminal here, so without RevealStage's `|| expired`
-    // branch a player whose sell failed would have no way off the stage.
+    // 'error' is never terminal here, so without RevealStage's AUTO-CONCLUDE
+    // `|| expired` term (not the footer branch, which #511 removed) a player
+    // whose sell failed would have no way off the stage.
     expect(allConcluded([errored], [true])).toBe(false);
     expect(allConcluded([sold, errored], [true, true])).toBe(false);
   });

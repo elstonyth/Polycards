@@ -201,6 +201,27 @@ export function expirySweep(states: readonly SellState[]): SellState[] {
 }
 
 /**
+ * What a RENDER must read once the clock is out — the sweep applied eagerly.
+ *
+ * expirySweep is committed from an effect keyed on `expired`, and an effect
+ * cannot run in the commit where its dep flips: there is always one render with
+ * `expired === true` and states still raw. A view that ORs the raw clock into
+ * its own copy ("expired ⇒ vaulted") overrides the sweep's mid-sell exemption
+ * and tells a player whose sell is still on the wire that the card was vaulted
+ * instead; a view that reads raw states in that render shows a live Sell button
+ * on a closed window. Resolving here closes both — `expired` and the states are
+ * then computed in the same render body, so they can never disagree.
+ *
+ * Returns `states` UNCHANGED (same reference) before expiry.
+ */
+export function resolvedStates(
+  states: SellState[],
+  expired: boolean,
+): SellState[] {
+  return expired ? expirySweep(states) : states;
+}
+
+/**
  * "Keep in vault" — concludes the card with no server call (the pull is already
  * vaulted server-side). Returns `states` UNCHANGED (same reference) when the
  * card is committed, so a caller can detect the no-op by identity.
