@@ -21,6 +21,7 @@ import {
   beginSellAt,
   expirySweep,
   keepAt,
+  resolvedStates,
   type SellState,
 } from '@/lib/reveal-phase';
 export type SellBackOffer = {
@@ -120,6 +121,15 @@ export function useSellWindow({
 
   const expired = active && secondsLeft <= 0;
 
+  // What CONSUMERS see. The effect below cannot run in the render where
+  // `expired` flips (it is keyed on it), so the raw states are one beat stale
+  // exactly when the clock reads out. Sweeping here as well makes the pair
+  // atomic: a card mid-sale keeps saying "Selling…" across the deadline instead
+  // of flashing "Stored in your vault", and nothing else can show a live Sell
+  // button on a closed window. The effect still runs — it is what the sell/keep
+  // re-entry guards read (they see `prev`, not this).
+  const resolved = resolvedStates(states, expired);
+
   // Expiry: every unsold card becomes 'vaulted' (server enforces the same).
   useEffect(() => {
     if (!expired) return;
@@ -194,9 +204,17 @@ export function useSellWindow({
   // (spec decision #27). Only real offers count; a null offer (no pull) is
   // treated as already-concluded so it never blocks the conclusion.
   const allConcluded = allStatesConcluded(
-    states,
+    resolved,
     offers.map((o) => o !== null),
   );
 
-  return { deadlineMs, secondsLeft, expired, states, sell, keep, allConcluded };
+  return {
+    deadlineMs,
+    secondsLeft,
+    expired,
+    states: resolved,
+    sell,
+    keep,
+    allConcluded,
+  };
 }

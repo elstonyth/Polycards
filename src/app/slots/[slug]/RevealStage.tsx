@@ -140,13 +140,14 @@ export function RevealStage({
   // stick: useSellWindow.sell sets a terminal phase in both try and catch.
   // Demo has its own explicit exit buttons AND reads as concluded instantly
   // (all-null offers), so it must never enter this path.
-  // `|| expired`, not `allConcluded` alone. Expiry normally flips every unsold
-  // card to 'vaulted' (useSellWindow) and satisfies allConcluded on its own —
-  // but a sell that FAILED sits at phase 'error', which allConcluded never
-  // accepts. That used to mean "the Done button shows up late"; with the button
-  // gone it would mean the player is stranded on the reveal with no exit. Once
-  // the clock is out the window is closed and the card is vaulted server-side
-  // anyway, so leaving is always the right move.
+  // `|| expired`, not `allConcluded` alone — but NOT for the reason this
+  // comment used to give. It said a FAILED sell sits at 'error', which
+  // allConcluded never accepts; that stopped being true when allConcluded
+  // started deriving from resolvedStates, since expirySweep maps 'error' to
+  // 'vaulted' (#511). The term still decides one case: the seeding frame, where
+  // `states` is empty and allConcluded([]) is false. Keep it — it is also an
+  // honest belt on the clock itself, and once the window is closed the card is
+  // vaulted server-side anyway, so leaving is always the right move.
   //
   // `onConclude` is depended on directly rather than mirrored through a ref:
   // SlotMachineClient's handleConclude is a useCallback with no deps, so it is
@@ -289,7 +290,13 @@ export function RevealStage({
         </p>
       );
     }
-    if (state.phase === 'vaulted' || expired) {
+    // The card's OWN state, never `|| expired` — do not put the raw clock back
+    // in. useSellWindow hands these already swept for the deadline (see
+    // resolvedStates), so 'vaulted' here covers expiry AND keeps the sweep's
+    // mid-sale exemption: a sell still on the wire when the clock runs out must
+    // keep reading "Selling…" until it lands, not claim the card was vaulted
+    // and then contradict itself with "+RM x credited" (#511).
+    if (state.phase === 'vaulted') {
       return (
         <p className="text-center text-[12px] text-white/60">
           {offer.firm
