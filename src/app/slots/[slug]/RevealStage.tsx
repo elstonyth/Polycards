@@ -17,11 +17,14 @@ import { rarityRgb, isTopRarity, rarityWinVolume } from '@/lib/rarity';
 import type { SoundName } from '@/lib/use-sound';
 import type { SfxName } from '@/lib/slot-sfx';
 import { useSellWindow } from './useSellWindow';
+import {
+  CARD_STAGGER_MS,
+  CONCLUDE_DELAY_MS,
+  type RevealPhase,
+} from '@/lib/reveal-phase';
 import { SlabCard } from './SlabCard';
 import { GalleryRail } from './GalleryRail';
 import { AuctionClock } from './AuctionClock';
-
-export type RevealPhase = 'flood' | 'transform' | 'review';
 
 export function RevealStage({
   phase,
@@ -122,12 +125,13 @@ export function RevealStage({
   //
   // The delay is what makes it read as a conclusion instead of a yank: the last
   // footer state ("+RM x credited", "Stored in your vault") gets to land first.
-  // ~1.4s, not exactly: if `expired` turns true a render after `allConcluded`
-  // (the expiry effect flips idle states to 'vaulted', which satisfies both) the
-  // deps change and the timer restarts once. Harmless — the ceiling is 2.8s, and
-  // the alternative is latching state to shave a beat off a wait nobody times.
+  // ~CONCLUDE_DELAY_MS, not exactly: if `expired` turns true a render after
+  // `allConcluded` (the expiry effect flips idle states to 'vaulted', which
+  // satisfies both) the deps change and the timer restarts once. Harmless — the
+  // ceiling is 2 × CONCLUDE_DELAY_MS, and the alternative is latching state to
+  // shave a beat off a wait nobody times.
   // `!selling` holds the stage open for a sell still on the wire when the clock
-  // runs out. Without it, expiry starts the 1.4s teardown regardless and the
+  // runs out. Without it, expiry starts the CONCLUDE_DELAY_MS teardown and the
   // player watching the confirm modal's spinner gets the whole stage yanked
   // mid-action. (Before the modal stayed mounted across the request this only
   // cost the "+RM x credited" footer, which is what the note here used to say.)
@@ -167,7 +171,7 @@ export function RevealStage({
     ) {
       return;
     }
-    const id = window.setTimeout(onConclude, 1400);
+    const id = window.setTimeout(onConclude, CONCLUDE_DELAY_MS);
     return () => clearTimeout(id);
   }, [demo, flipped, phase, selling, allConcluded, expired, onConclude]);
 
@@ -376,7 +380,9 @@ export function RevealStage({
           onFlip={phase === 'review' && !flipped ? flipAll : undefined}
           reduced={reduced}
           entering={phase === 'transform'}
-          enterDelayMs={i * 150}
+          // Same stagger the transform→review timer waits out (revealTimings),
+          // so the sell window never opens over a still-growing slab.
+          enterDelayMs={i * CARD_STAGGER_MS}
           fromRect={winnerRects[i] ?? null}
           spriteSrc={spriteSrcs[i]}
         />
