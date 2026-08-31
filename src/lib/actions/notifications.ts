@@ -17,7 +17,7 @@
  * `getUnreadCount()` returns 0 when the user is logged out (used in nav badge)
  * so it never throws and never requires auth.
  */
-import { sdk } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { sanePage } from '@/lib/page-param';
 import { getAuthToken } from '@/lib/data/customer';
@@ -94,10 +94,8 @@ export async function getNotifications(
   }
 
   try {
-    const raw = await sdk.client.fetch('/store/notifications', {
-      headers: { Authorization: `Bearer ${token}` },
+    const raw = await authedFetch(token, '/store/notifications', {
       query: { limit: PAGE_SIZE, offset: (safePage - 1) * PAGE_SIZE },
-      cache: 'no-store',
     });
 
     const envelope = parseOne(NotificationsEnvelopeSchema, raw);
@@ -142,11 +140,11 @@ export async function markRead(id: string): Promise<MarkReadResult> {
   }
 
   try {
-    const raw = await sdk.client.fetch(
+    const raw = await authedFetch(
+      token,
       `/store/notifications/${encodeURIComponent(id)}/read`,
       {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
         body: {},
       },
     );
@@ -183,12 +181,10 @@ export async function getUnreadCount(): Promise<number> {
   if (!token) return 0;
 
   try {
-    const raw = await sdk.client.fetch('/store/notifications', {
-      headers: { Authorization: `Bearer ${token}` },
+    const raw = await authedFetch(token, '/store/notifications', {
       // unread_count is a TRUE total (not page-scoped), so the badge only
       // needs the envelope — fetch the smallest legal page.
       query: { limit: 1 },
-      cache: 'no-store',
     });
     const envelope = parseOne(NotificationsEnvelopeSchema, raw);
     return envelope?.unread_count ?? 0;
@@ -211,9 +207,8 @@ export async function markAllRead(): Promise<MarkAllReadResult> {
   }
 
   try {
-    const raw = await sdk.client.fetch('/store/notifications/read-all', {
+    const raw = await authedFetch(token, '/store/notifications/read-all', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
       body: {},
     });
 

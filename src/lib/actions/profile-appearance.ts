@@ -6,7 +6,8 @@
  * JSON-encodes bodies); the JWT stays in the httpOnly cookie, read server-side.
  */
 import { revalidatePath } from 'next/cache';
-import { MEDUSA_BACKEND_URL, sdk } from '@/lib/medusa';
+import { MEDUSA_BACKEND_URL } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
@@ -90,9 +91,8 @@ export async function setAvatarFrame(
   const token = await getAuthToken();
   if (!token) return { ok: false, error: 'Please log in first.' };
   try {
-    await sdk.client.fetch('/store/profile/frame', {
+    await authedFetch(token, '/store/profile/frame', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
       body: { level },
     });
     revalidatePath('/me');

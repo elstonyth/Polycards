@@ -13,6 +13,7 @@ import { cache } from 'react';
 import { cookies } from 'next/headers';
 import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 
 const AUTH_COOKIE = '_polycards_jwt';
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
@@ -37,8 +38,13 @@ export async function clearAuthToken(): Promise<void> {
 
 /**
  * The raw customer JWT from the httpOnly cookie, or undefined when logged out.
- * Server-only — used by data getters and server actions to send an explicit
- * `Authorization: Bearer` to the backend (browser auth is CORS-blocked at :4000).
+ * Server-only — data getters and server actions pass it to `authedFetch`
+ * (src/lib/authed-fetch.ts), which attaches the explicit `Authorization: Bearer`
+ * the backend needs (browser auth is CORS-blocked at :4000).
+ *
+ * The `if (!token) return …` that follows every call is NOT boilerplate: what a
+ * logged-out caller answers with differs on purpose per module, which is why
+ * this read stays at the call site rather than inside `authedFetch`.
  */
 export async function getAuthToken(): Promise<string | undefined> {
   const store = await cookies();
@@ -104,10 +110,7 @@ export async function getAccountInfo(): Promise<AccountInfo> {
   const token = await getAuthToken();
   if (!token) return { hasPassword: true };
   try {
-    return await sdk.client.fetch<AccountInfo>('/store/customers/me/account', {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
+    return await authedFetch<AccountInfo>(token, '/store/customers/me/account');
   } catch {
     return { hasPassword: true };
   }
