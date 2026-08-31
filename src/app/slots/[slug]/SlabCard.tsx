@@ -13,7 +13,13 @@ import { motion } from 'motion/react';
 import type { WonCard } from '@/lib/actions/packs';
 import { rm } from '@/lib/format';
 import { isTopRarity } from '@/lib/rarity';
-import { SlabImage, SLAB_ASPECT, FRAME_BAND } from '@/components/SlabImage';
+import {
+  SlabImage,
+  SLAB_ASPECT,
+  FRAME_BAND,
+  isGraded,
+  slabAmbient,
+} from '@/components/SlabImage';
 import { cn } from '@/lib/utils';
 import { useCardTilt } from '@/lib/use-card-tilt';
 
@@ -56,13 +62,10 @@ export function SlabCard({
   const top = isTopRarity(card.rarity);
   const value =
     card.marketPriceMyr != null ? rm(card.marketPriceMyr) : card.value;
-  // Same predicate the FRONT branches on (SlabImage renders the bare-card path
-  // when `slabSrc` is falsy). Deliberately not `pack.group === 'RAW'`: a RAW
-  // pack's cards are all raw anyway, and any other signal could pair a card
-  // back with a slab front. Also covers a graded card whose bake failed —
-  // matching the front is the point, and a case-back over a bare card photo is
-  // the worse of the two mismatches.
-  const raw = !card.slab_image;
+  // Literally the predicate the FRONT branches on — SlabImage exports it, so
+  // the back can never end up on the other side of that decision (why it is
+  // not `pack.group === 'RAW'` is documented there).
+  const raw = !isGraded(card.slab_image);
 
   // The slab turns under the pointer and catches a highlight as it turns, so
   // the hold before the flip is something to handle rather than sit through.
@@ -274,19 +277,18 @@ export function SlabCard({
           )}
         </span>
         {/* FRONT — the pull as a graded slab: raw card photo inside the
-            admin-configurable case overlay. drop-shadow (not box-shadow)
-            follows the slab's alpha silhouette instead of drawing a rectangle
-            behind the transparent frame margins. */}
+            admin-configurable case overlay. The ambient bloom is SlabImage's
+            `reveal` tuning: a drop-shadow (not box-shadow) that follows the
+            slab's alpha silhouette instead of drawing a rectangle behind the
+            transparent frame margins. It sits OUTSIDE the component's own halo
+            on purpose — at this size the halo alone does not carry the depth,
+            and the two are tuned together in SlabImage rather than here. */}
         <span
           className={cn(
             'absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)]',
             reduced && !flipped && 'hidden',
           )}
-          style={
-            {
-              filter: `drop-shadow(0 18px 30px rgba(0,0,0,0.6)) drop-shadow(0 0 26px rgba(${rarityRgb}, 0.35))`,
-            } as CSSProperties
-          }
+          style={{ filter: slabAmbient('reveal', rarityRgb) } as CSSProperties}
         >
           <SlabImage
             src={card.image}

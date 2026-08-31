@@ -3,8 +3,6 @@
 
 import { useEffect, useState, type CSSProperties } from 'react';
 import { spriteGif, spritePng } from '@/lib/mock/pokedex';
-import { TIER_COLOR, type Tier } from '@/lib/price-tier';
-import { cn } from '@/lib/utils';
 
 // Neutral poké-ball outline shown when a sprite can't load (remote showdown gif
 // AND static png both 404, or a custom sprite 404s) — so a cell never renders a
@@ -19,20 +17,12 @@ const POKEBALL_FALLBACK =
 type PokemonTokenProps = {
   dex: number;
   name: string;
-  tier: Tier;
   /** Cell pixel size (square). Default 96. */
   size?: number;
-  /** When true, the winner grows + glows (the reveal beat). */
-  landed?: boolean;
-  /** prefers-reduced-motion: no pulse/scale transition; static glow only. */
-  reduced?: boolean;
   /** Eager-load this cell's image (winner + cells resting in the visible window). */
   eager?: boolean;
   /** Render this exact image instead of a dex sprite (non-Pokémon card fallback, §2/G5). */
   imageSrc?: string;
-  /** Extra CSS filter applied to the sprite itself (e.g. a landed rarity glow
-   *  drop-shadow that hugs the sprite's silhouette — spec decision #17). */
-  filter?: string;
 };
 
 /** Opaque footprint of a sprite's figure, in natural image pixels. */
@@ -148,9 +138,15 @@ function useFigureBox(src: string): FigureBox | null {
 
 /**
  * A single Pokémon reel cell (spec §2). Animated showdown sprite with a static
- * PNG fallback (same pattern as PokedexClient's PokeSprite). On `landed`, the
- * sprite scales up and gains a glow ring colored by the card's price tier (§3).
- * Under reduced motion the glow is shown statically with no scale/pulse.
+ * PNG fallback (same pattern as PokedexClient's PokeSprite).
+ *
+ * The sprite carries NO light of its own. It used to grow and gain a ring on
+ * `landed`, coloured from the price **Tier** (`TIER_COLOR`) — while its only
+ * caller hard-coded `tier="common"` and `landed={false}`, so the ring never
+ * rendered and, had it, would have lit a Tier colour inside a cell lit from the
+ * **Rarity** colour. The cell's frame + bloom is CardTile's, on the Rarity
+ * axis; removed here rather than re-pointed, because re-pointing it would have
+ * been a visible change nobody asked for (2026-08-31).
  *
  * Centering is FIGURE-based, not image-based: showdown gifs (and custom uploads)
  * sit off-centre inside a padded/transparent canvas, so we measure the opaque
@@ -162,13 +158,9 @@ function useFigureBox(src: string): FigureBox | null {
 export function PokemonToken({
   dex,
   name,
-  tier,
   size = 96,
-  landed = false,
-  reduced = false,
   eager = false,
   imageSrc,
-  filter,
 }: PokemonTokenProps) {
   const [src, setSrc] = useState(imageSrc ?? spriteGif(dex));
   // Re-sync if a recycled cell receives a new dex or image override.
@@ -176,7 +168,6 @@ export function PokemonToken({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- v7 false positive: deriving src from props for recycled cells (same pattern as SlotReelColumn)
     setSrc(imageSrc ?? spriteGif(dex));
   }, [dex, imageSrc]);
-  const rgb = TIER_COLOR[tier];
   const figure = useFigureBox(src);
 
   // Figure-centred transform (preferred) vs box-contain fallback. The fallback
@@ -208,19 +199,8 @@ export function PokemonToken({
 
   return (
     <div
-      className={cn(
-        'relative flex h-[var(--token-size)] w-[var(--token-size)] items-center justify-center rounded-2xl',
-        !reduced && 'transition-transform duration-300 ease-out',
-        landed && !reduced && 'scale-110',
-      )}
-      style={
-        {
-          '--token-size': `${size}px`,
-          boxShadow: landed
-            ? `0 0 18px 4px rgba(${rgb}, 0.85), 0 0 42px 10px rgba(${rgb}, 0.45)`
-            : 'none',
-        } as CSSProperties
-      }
+      className="relative flex h-[var(--token-size)] w-[var(--token-size)] items-center justify-center rounded-2xl"
+      style={{ '--token-size': `${size}px` } as CSSProperties}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
@@ -240,7 +220,7 @@ export function PokemonToken({
           });
         }}
         className={imgClassName}
-        style={filter ? { ...imgStyle, filter } : imgStyle}
+        style={imgStyle}
       />
     </div>
   );
