@@ -9,12 +9,12 @@
  * never sends an id — so a pull can't be forged for another account. The route
  * is POST /store/packs/:slug/open (customer-authenticated).
  */
-import { sdk } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
 import { formatValue } from '@/lib/packs-format';
 import type { Rarity } from '@/lib/packs-data';
-import { friendlyError, type ErrorRule } from '@/lib/errors';
+import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
 import { parseOne, WonCardSchema, OpenBuybackSchema } from '@/lib/data/schemas';
 import { mapBatchRoll, clampCount } from './pack-batch-map';
 import type { RawBatchRollItem, BatchRoll } from './pack-batch-map';
@@ -140,7 +140,7 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
 
   try {
     const { pull, card, balance, price, buyback, free, locked } =
-      await sdk.client.fetch<{
+      await authedFetch<{
         pull?: { id?: unknown };
         card: BackendWonCard;
         balance?: unknown;
@@ -148,9 +148,8 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
         buyback?: BackendBuyback;
         free?: unknown;
         locked?: unknown;
-      }>(`/store/packs/${encodeURIComponent(slug)}/open`, {
+      }>(token, `/store/packs/${encodeURIComponent(slug)}/open`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
         body: {},
       });
 
@@ -209,9 +208,12 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
     };
   } catch (error) {
     logger.error(`[packs] open-pack failed for '${slug}':`, error);
-    const text = error instanceof Error ? error.message : String(error);
-    const needsAuth = /unauthorized|401/i.test(text);
-    const needsTopUp = /not enough credits/i.test(text);
+    const needsAuth = isAuthError(error);
+    // No status distinguishes "broke" from any other 400 — this one stays a
+    // prose probe on purpose (see the note on friendlyError in lib/errors.ts).
+    const needsTopUp = /not enough credits/i.test(
+      error instanceof Error ? error.message : String(error),
+    );
     return {
       ok: false,
       error: friendlyError(error, PACKS_RULES, PACKS_FALLBACK),
@@ -261,14 +263,13 @@ export async function openBatch(
       balance,
       price,
       total_charged,
-    } = await sdk.client.fetch<{
+    } = await authedFetch<{
       rolls: RawBatchRollItem[];
       balance?: unknown;
       price?: unknown;
       total_charged?: unknown;
-    }>(`/store/packs/${encodeURIComponent(slug)}/open-batch`, {
+    }>(token, `/store/packs/${encodeURIComponent(slug)}/open-batch`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
       body: { count: clampedCount },
     });
 
@@ -300,9 +301,12 @@ export async function openBatch(
     };
   } catch (error) {
     logger.error(`[packs] open-batch failed for '${slug}':`, error);
-    const text = error instanceof Error ? error.message : String(error);
-    const needsAuth = /unauthorized|401/i.test(text);
-    const needsTopUp = /not enough credits/i.test(text);
+    const needsAuth = isAuthError(error);
+    // No status distinguishes "broke" from any other 400 — this one stays a
+    // prose probe on purpose (see the note on friendlyError in lib/errors.ts).
+    const needsTopUp = /not enough credits/i.test(
+      error instanceof Error ? error.message : String(error),
+    );
     return {
       ok: false,
       error: friendlyError(error, PACKS_RULES, PACKS_FALLBACK),
@@ -335,9 +339,8 @@ export async function closeInstantWindow(pullIds: string[]): Promise<void> {
   const token = await getAuthToken();
   if (!token) return;
   try {
-    await sdk.client.fetch('/store/pulls/close-instant', {
+    await authedFetch(token, '/store/pulls/close-instant', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
       body: { pull_ids: ids },
     });
   } catch (error) {
@@ -350,11 +353,11 @@ export async function revealPull(pullId: string): Promise<RevealResult> {
   const token = await getAuthToken();
   if (!token) return { ok: false };
   try {
-    const data = await sdk.client.fetch<{ instant_deadline_ms?: unknown }>(
+    const data = await authedFetch<{ instant_deadline_ms?: unknown }>(
+      token,
       `/store/pulls/${encodeURIComponent(pullId)}/reveal`,
       {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
         body: {},
       },
     );

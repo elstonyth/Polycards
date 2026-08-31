@@ -5,7 +5,7 @@
  * instead of crashing.
  */
 import 'server-only';
-import { sdk } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
 import {
@@ -18,10 +18,7 @@ export async function getReferralSummary(): Promise<ReferralSummary | null> {
   const token = await getAuthToken();
   if (!token) return null;
   try {
-    const raw = await sdk.client.fetch('/store/referral', {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
+    const raw = await authedFetch(token, '/store/referral');
     return parseOne(ReferralSummarySchema, raw);
   } catch (error) {
     logger.error('[referral] summary load failed:', error);

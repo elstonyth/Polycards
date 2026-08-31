@@ -5,7 +5,7 @@
  */
 import 'server-only';
 import { cookies } from 'next/headers';
-import { sdk } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
 
@@ -51,11 +51,9 @@ export async function bindReferralFromCookie(): Promise<void> {
     if (!handle) return;
     const token = await getAuthToken();
     if (!token) return;
-    await sdk.client.fetch('/store/referral/bind', {
+    await authedFetch(token, '/store/referral/bind', {
       method: 'POST',
       body: { referrer_handle: handle },
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
     });
   } catch (error) {
     logger.error('[referral] bind after signup failed:', error);

@@ -11,9 +11,10 @@
  */
 import 'server-only';
 import { cache } from 'react';
-import { FetchError } from '@medusajs/js-sdk';
 import { sdk } from '@/lib/medusa';
+import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
+import { httpStatus } from '@/lib/errors';
 import { getAuthToken } from '@/lib/data/customer';
 import {
   parseOne,
@@ -102,12 +103,12 @@ export const getPublicProfile = cache(
       return { status: 'ok', profile: valid as unknown as PublicProfile };
     } catch (error) {
       // 404 = not a collector handle (e.g. a mock-pool username) — expected.
-      if (error instanceof FetchError && error.status === 404) {
+      if (httpStatus(error) === 404) {
         return { status: 'notfound' };
       }
       // 410 = a real handle the backend is deliberately hiding (disabled
       // account). Not an error, and never the mock pool.
-      if (error instanceof FetchError && error.status === 410) {
+      if (httpStatus(error) === 410) {
         return { status: 'unavailable' };
       }
       logger.error(`[profiles] failed to load profile "${handle}":`, error);
@@ -123,9 +124,7 @@ export async function fetchProfileHandle(
   try {
     const parsed = parseOne(
       ProfileHandleSchema,
-      await sdk.client.fetch('/store/profiles/me', {
-        headers: { Authorization: `Bearer ${token}` },
-      }),
+      await authedFetch(token, '/store/profiles/me'),
     );
     return parsed ? parsed.handle : null;
   } catch (error) {
