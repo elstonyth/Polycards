@@ -2,10 +2,15 @@
 'use client';
 
 // A reel cell: a bordered GRID box (spec §2) holding one bare pixel Pokémon.
-// The box glows its reward-tier color — a decoy color that flickers during the
+// The box glows its RARITY color (the odds axis — ReelStrip feeds it
+// `rarityRgb`, never a price Tier): a decoy color that flickers during the
 // spin, the winner's real rarity color once its strip settles, neutral for
 // faded decoys after settle (spec §5). Box stays CARD_ASPECT so the winner
 // cell's measured rect still drives the tile→slab reveal morph.
+//
+// NOT a slab surface, so deliberately not SlabImage: there is no card photo and
+// no baked composite here, only a sprite in a lit box, and the aspect + bloom
+// are tuned for a ~110px cell. Don't fold this into the slab framing.
 import type { CSSProperties } from 'react';
 import { CARD_ASPECT } from '@/lib/vault-reel';
 import { PokemonToken } from './PokemonToken';
@@ -26,9 +31,9 @@ export function CardTile({
   size: number;
   eager: boolean;
   imageSrc?: string;
-  /** "r,g,b" tier color for the cell frame/glow. */
+  /** "r,g,b" RARITY color for the cell frame/glow. */
   glowRgb?: string;
-  /** Show the tier glow (spinning decoy flicker, or the settled winner). */
+  /** Show the rarity glow (spinning decoy flicker, or the settled winner). */
   lit?: boolean;
   /** Winner emphasis after settle: stronger glow + slight scale. */
   landed?: boolean;
@@ -55,8 +60,8 @@ export function CardTile({
           borderColor: lit
             ? `rgba(${rgb}, ${landed ? 1 : 0.7})`
             : 'rgba(255,255,255,0.10)',
-          // Tier LIGHTING: a real colored bloom (outer + inner) so each cell
-          // reads as lit by its reward tier, not just outlined. Winner blooms
+          // RARITY LIGHTING: a real colored bloom (outer + inner) so each cell
+          // reads as lit by its rarity, not just outlined. Winner blooms
           // hardest on settle.
           boxShadow: lit
             ? landed
@@ -70,10 +75,7 @@ export function CardTile({
       <PokemonToken
         dex={dex}
         name={name}
-        tier="common"
         size={Math.round(size * 0.72)}
-        landed={false}
-        reduced
         eager={eager}
         imageSrc={imageSrc}
       />

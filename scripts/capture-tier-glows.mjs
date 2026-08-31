@@ -1,8 +1,14 @@
-// Render the exact PokemonToken `landed` glow for all 6 price tiers and screenshot
-// each + a combined grid. Self-contained (no server) — mirrors the real styling
-// from src/app/slots/[slug]/PokemonToken.tsx + src/lib/price-tier.ts so the glow
-// colors/spread match the live reel 1:1. Same sprite across all cells so the only
-// visual difference IS the tier color.
+// Render a Tier glow for all 6 price tiers and screenshot each + a combined
+// grid. Self-contained (no server) — the RGB triples are hardcoded here, so this
+// runs without importing from src/.
+//
+// STALE ANCHOR, kept deliberately: this used to mirror PokemonToken's `landed`
+// glow 1:1. That glow no longer exists — its sole caller passed `landed={false}`
+// so it never rendered a pixel, and it was drawing the price-Tier axis inside a
+// cell lit from the Rarity axis, so it was removed rather than re-pointed. The
+// script now stands as a reference render of src/lib/price-tier.ts's TIER_COLOR
+// for the tier ladder specced in the 2026-07-14 home redesign but not yet built.
+// Do not read it as documenting a live reel surface.
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 

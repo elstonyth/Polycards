@@ -149,6 +149,36 @@ export const VARIANT_RGB: Record<FrameVariant, string> = {
 };
 
 /**
+ * THE colour a slab is wearing — the one place that knows a variant overrides
+ * the card's rarity. Exported so a surface lighting something ELSE from the
+ * slab's colour (the card page's ambient bloom) asks rather than re-derives:
+ * the rule used to be spelled out at the call site too, where a future variant
+ * could have set the frame one colour and the page glow another.
+ *
+ * No rarity and no variant → Common gray, which is what an unframed slab's
+ * (absent) halo would have been. A caller that renders a bloom where SlabImage
+ * renders NO frame at all wants its own neutral instead — see CardDetail.
+ */
+export function slabGlowRgb(
+  rarity?: string | null,
+  frameVariant?: FrameVariant,
+): string {
+  return frameVariant ? VARIANT_RGB[frameVariant] : rarityRgb(rarity ?? '');
+}
+
+/**
+ * Is there a baked composite to show? THE graded/raw predicate — deliberately
+ * not `pack.group === 'RAW'`, because a graded card whose bake failed renders
+ * on the raw path too. Exported because the reveal has to pick a card BACK
+ * that matches the face this component picks (a case-back over a bare card
+ * photo is the worse of the two mismatches).
+ *
+ * The JSX below still tests `slabSrc` directly: that test is what narrows the
+ * type for `<Image src={slabSrc}>`, and this is `Boolean(slabSrc)`.
+ */
+export const isGraded = (slabSrc?: string | null): boolean => Boolean(slabSrc);
+
+/**
  * Static outer halo (box-shadow only — no animation, operator 2026-07-17).
  *
  * GEOMETRY CONTRACT: this glow reaches ~44px past the slab edge (the primary
@@ -180,6 +210,37 @@ function rawGlowStyle(rgb: string, scale: number): React.CSSProperties {
     boxShadow: glowShadow(rgb, scale),
   };
 }
+
+/**
+ * AMBIENT bloom — the halo above is a box-shadow on the frame box; this is a
+ * `filter` the CALLER puts on its own wrapper, so it follows the slab's ALPHA
+ * silhouette (transparent frame margins included) instead of drawing a
+ * rectangle behind them, and it carries the black depth shadow with it.
+ *
+ * Only the two surfaces showing ONE slab as the hero wear one, and they are
+ * tuned apart on purpose: `hero` is the card page's ~420px slab floating on an
+ * empty page; `reveal` is the ~300px slab being turned in your hand, dimmer
+ * because it also lifts off a lit stage. Both tunings live HERE so neither
+ * surface spells out `rgba(…)` again and drifts from the halo it is sitting on.
+ * (Whitespace inside rgba() is insignificant — these are the strings the two
+ * call sites used, normalised.)
+ *
+ * The COLOUR is only centralised for `hero`: CardDetail resolves it through
+ * slabGlowRgb, while SlabCard still passes its own `rarityRgb` prop (sourcing
+ * it there would mean editing RevealStage). They provably agree today —
+ * RevealStage hands SlabCard `rarityRgb(card.rarity)` and the same `rarity`,
+ * with no frameVariant, and a WonCard has no frameVariant field to carry one.
+ * If SlabCard ever learns about frame variants, route it through slabGlowRgb.
+ */
+export type SlabAmbient = 'hero' | 'reveal';
+const AMBIENT: Record<SlabAmbient, (rgb: string) => string> = {
+  hero: (rgb) =>
+    `drop-shadow(0 24px 60px rgba(0,0,0,0.7)) drop-shadow(0 0 46px rgba(${rgb},0.28))`,
+  reveal: (rgb) =>
+    `drop-shadow(0 18px 30px rgba(0,0,0,0.6)) drop-shadow(0 0 26px rgba(${rgb},0.35))`,
+};
+export const slabAmbient = (preset: SlabAmbient, rgb: string): string =>
+  AMBIENT[preset](rgb);
 
 /**
  * One card image. Graded cards pass `slabSrc` — the backend-baked
@@ -225,9 +286,7 @@ export function SlabImage({
     : rarity
       ? frameSrc(rarity)
       : null;
-  const glowRgb = frameVariant
-    ? VARIANT_RGB[frameVariant]
-    : rarityRgb(rarity ?? '');
+  const glowRgb = slabGlowRgb(rarity, frameVariant);
   return (
     <span
       // Stable hook for the QA scripts, which assert this box still measures

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type CSSProperties } from 'react';
-import { SlabImage, VARIANT_RGB } from '@/components/SlabImage';
+import { SlabImage, slabAmbient, slabGlowRgb } from '@/components/SlabImage';
 import { cn } from '@/lib/utils';
 import { initialPriceTick, nextPriceTick } from '@/lib/price-tick';
 import { rarityRgb } from '@/lib/rarity';
@@ -39,10 +39,13 @@ export function CardDetail({
   // own rarity — a prize frame changes the presentation, not the fact.
   const rarityRgbValue = rarity ? rarityRgb(rarity) : '255,255,255';
   // The ambient page glow follows whatever frame the slab is actually WEARING,
-  // or the two disagree — an orange bloom around a prism-framed slab. Read from
-  // SlabImage's own table so a future variant can't set the frame one colour
-  // and the page glow another.
-  const rgb = frameVariant ? VARIANT_RGB[frameVariant] : rarityRgbValue;
+  // or the two disagree — an orange bloom around a prism-framed slab. SlabImage
+  // resolves it, so a future variant can't set the frame one colour and the page
+  // glow another. The no-rarity-no-variant case keeps the neutral white above
+  // instead of SlabImage's Common-gray fallback: with neither, SlabImage draws
+  // no band and no halo at all, so there is nothing for gray to match.
+  const rgb =
+    rarity || frameVariant ? slabGlowRgb(rarity, frameVariant) : rarityRgbValue;
   const priceLabel = detail ? rm(detail.marketPriceMyr) : seed.value;
 
   // Entrance slot helpers — see globals.css "Shared first-paint entrance".
@@ -85,11 +88,7 @@ export function CardDetail({
           entrance && 'slab-arrive',
         )}
       >
-        <div
-          style={{
-            filter: `drop-shadow(0 24px 60px rgba(0,0,0,0.7)) drop-shadow(0 0 46px rgba(${rgb},0.28))`,
-          }}
-        >
+        <div style={{ filter: slabAmbient('hero', rgb) }}>
           <SlabImage
             src={seed.image}
             slabSrc={detail?.slab_image ?? seed.slabImage}
