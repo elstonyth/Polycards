@@ -87,6 +87,17 @@ ARG NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=true
 # form). Same rule as the ARGs above: this default is what reaches the bundle;
 # moves together with the .do/storefront.app.yaml value.
 ARG NEXT_PUBLIC_WITHDRAWALS_ENABLED=true
+# NOT a NEXT_PUBLIC_ var — server-side only, but it MUST be present at BUILD
+# time all the same. next.config.ts picks the CSP header NAME via cspEnforced()
+# and Next serialises headers() into routes-manifest.json during `npm run build`,
+# so the value is frozen into the image. That makes a spec-only
+# `do-apply.ps1 storefront` unable to flip it: the env reaches the RUNNING
+# container but never the BUILD, and DO may skip the build entirely on an
+# "app spec updated" deployment. Missing from this block is why production sat
+# on Content-Security-Policy-Report-Only while .do/storefront.app.yaml had
+# CSP_ENFORCE: 'true' (audit 2026-09-01). Same rule as the ARGs above: this
+# default is what reaches the build; moves together with the spec value.
+ARG CSP_ENFORCE=true
 ENV NEXT_PUBLIC_MEDUSA_BACKEND_URL=$NEXT_PUBLIC_MEDUSA_BACKEND_URL
 ENV NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=$NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY
 ENV NEXT_PUBLIC_MEDIA_HOST=$NEXT_PUBLIC_MEDIA_HOST
@@ -94,6 +105,7 @@ ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 ENV NEXT_PUBLIC_PAYMENTS_PROVIDER=$NEXT_PUBLIC_PAYMENTS_PROVIDER
 ENV NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=$NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED
 ENV NEXT_PUBLIC_WITHDRAWALS_ENABLED=$NEXT_PUBLIC_WITHDRAWALS_ENABLED
+ENV CSP_ENFORCE=$CSP_ENFORCE
 
 # Next.js collects completely anonymous telemetry data about general usage.
 # Learn more here: https://nextjs.org/telemetry

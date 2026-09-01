@@ -109,8 +109,16 @@ Ad-hoc dumps (local Docker dev DB or remote): `pwsh scripts/db-dump.ps1`
 
 - [ ] `ALLOW_MOCK_TOPUP` env **deleted** from `backend.app.yaml` + real PSP live
       (see the GO-LIVE BLOCKER box in the spec)
-- [ ] `CSP_ENFORCE=true` confirmed live on the storefront (in the spec; applies
-      via `do-apply.ps1 storefront`)
+- [ ] `CSP_ENFORCE=true` confirmed live on the storefront — verify the RESPONSE
+      HEADER, not the spec. Setting it in `storefront.app.yaml` is necessary but
+      NOT sufficient and `do-apply.ps1 storefront` alone can never flip it:
+      `next.config.ts` bakes the header NAME into the build, the storefront
+      builds from a Dockerfile (so the value must also be declared as
+      `ARG CSP_ENFORCE` there), and DO skips the build entirely on an
+      "app spec updated" deployment. Needs a real rebuild — a push to `master`
+      does one. Then confirm:
+      `curl -sI https://polycards.gg | grep -i content-security-policy`
+      must return `content-security-policy` with NO `-report-only` suffix.
 - [ ] A staging App Platform app (cheap `basic-xxs` pair) in front of prod —
       today every master push deploys straight to prod
 - [ ] Backend error tracking (see Observability)
