@@ -404,6 +404,21 @@ describe('beginSellAt — sell re-entry guards', () => {
     expect(beginSellAt(swept, 0)).toBe(swept);
   });
 
+  test('a Confirm landing in the expiry-flip render is blocked (#514)', () => {
+    // The composition useSellWindow.sell now guards with. The sweep is
+    // committed from an effect, so there is one render where `expired` is true
+    // and `raw` is still untouched — a Confirm tap in exactly that frame used
+    // to reach beginSellAt on a still-'idle' card and fire a request the server
+    // had already refused. Resolving first is what closes it.
+    const raw: SellState[] = [idle];
+    const base = resolvedStates(raw, true);
+    expect(beginSellAt(base, 0)).toBe(base);
+    // And the identity has to be read off `base`, NOT off `raw`: past the
+    // deadline `base` is a fresh array, so comparing to `raw` reads a block as
+    // a pass and fires the doomed request anyway.
+    expect(base).not.toBe(raw);
+  });
+
   test('an index past the end changes nothing', () => {
     const states = [idle];
     expect(beginSellAt(states, 2)).toBe(states);

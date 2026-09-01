@@ -855,6 +855,7 @@ export default function SlotMachineClient({
   const [sellToast, setSellToast] = useState<{
     text: string;
     seq: number;
+    tone: 'success' | 'error';
   } | null>(null);
   const sellRun = useRef({ count: 0, total: 0, seq: 0 });
   const handleSold = useCallback(
@@ -870,10 +871,25 @@ export default function SlotMachineClient({
             ? `Sold — ${rm(amount)} credited to your balance.`
             : `Sold ${run.count} cards — ${rm(run.total)} credited to your balance.`,
         seq: run.seq,
+        tone: 'success',
       });
     },
     [applyBalance],
   );
+  // The failure half of the same channel (#514). A sell that fails AFTER the
+  // 30s clock runs out is swept to 'vaulted' with every other unsold card, so
+  // the reveal's own red line never renders and the footer says only "Stored in
+  // your vault" — true, but silent about the thing the player needs to know and
+  // identical to a card they never touched. Reporting it here puts it on a
+  // surface that survives the stage's auto-conclude, exactly as handleSold does.
+  //
+  // Bumps `seq` ONLY — never count/total. A failure is not a sale, and folding
+  // it into the run would make the next real sale read "Sold 2 cards".
+  const handleSellFailed = useCallback((message: string) => {
+    const run = sellRun.current;
+    run.seq += 1;
+    setSellToast({ text: message, seq: run.seq, tone: 'error' });
+  }, []);
   // Dismissal ends the run: the next sale starts counting from one again. `seq`
   // is NOT reset — it only has to keep changing, and reusing a value could
   // collide with the key React is still holding.
@@ -1047,6 +1063,7 @@ export default function SlotMachineClient({
                   onSellBack={sellBackPull}
                   onReveal={revealPull}
                   onSold={handleSold}
+                  onSellFailed={handleSellFailed}
                   sfx={sfx}
                   vibrate={vibrate}
                   play={play}
@@ -1157,6 +1174,7 @@ export default function SlotMachineClient({
       <SuccessToast
         message={sellToast?.text ?? null}
         nonce={sellToast?.seq}
+        tone={sellToast?.tone}
         onClose={closeSellToast}
       />
 
