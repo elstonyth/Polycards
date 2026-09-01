@@ -22,6 +22,7 @@ const TOAST_MS = 4000;
 export function SuccessToast({
   message,
   nonce,
+  tone = 'success',
   onClose,
 }: {
   message: string | null;
@@ -31,6 +32,13 @@ export function SuccessToast({
    *  previous one and the progress bar doesn't reset. Optional: callers that
    *  never repeat a message can omit it and behave exactly as before. */
   nonce?: number;
+  /** 'error' recolours the glyph + progress bar and swaps the tick for a
+   *  warning mark. It stays THIS component rather than becoming a second one so
+   *  a caller that raises both tones (the reveal's sell outcomes) keeps ONE
+   *  live region: `role` is not swapped with the tone either, because changing
+   *  role on a live element is as unreliable as inserting the region with its
+   *  content. Default 'success' — existing callers are unchanged. */
+  tone?: 'success' | 'error';
   onClose: () => void;
 }) {
   // Latest-ref so an unstable onClose (an inline arrow in the parent) can't
@@ -64,15 +72,25 @@ export function SuccessToast({
     >
       {message && (
         <>
+          {/* Full literal class strings in the ternary, not an interpolated
+              `text-${…}` — Tailwind only ships classes it can see as text. */}
           <svg
             viewBox="0 0 20 20"
             fill="currentColor"
             aria-hidden="true"
-            className="h-5 w-5 shrink-0 text-buyback-fg"
+            className={
+              tone === 'error'
+                ? 'h-5 w-5 shrink-0 text-red-400'
+                : 'h-5 w-5 shrink-0 text-buyback-fg'
+            }
           >
             <path
               fillRule="evenodd"
-              d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm3.7-9.3a1 1 0 0 0-1.4-1.4L9 10.6 7.7 9.3a1 1 0 0 0-1.4 1.4l2 2a1 1 0 0 0 1.4 0l4-4z"
+              d={
+                tone === 'error'
+                  ? 'M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM9 5.5h2V11H9V5.5zM9 13h2v2H9v-2z'
+                  : 'M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm3.7-9.3a1 1 0 0 0-1.4-1.4L9 10.6 7.7 9.3a1 1 0 0 0-1.4 1.4l2 2a1 1 0 0 0 1.4 0l4-4z'
+              }
               clipRule="evenodd"
             />
           </svg>
@@ -102,7 +120,11 @@ export function SuccessToast({
           <span
             key={nonce}
             aria-hidden="true"
-            className="absolute inset-x-0 bottom-0 h-0.5 origin-left bg-buyback-fg motion-safe:animate-[toastBar_4s_linear_forwards]"
+            className={
+              tone === 'error'
+                ? 'absolute inset-x-0 bottom-0 h-0.5 origin-left bg-red-400 motion-safe:animate-[toastBar_4s_linear_forwards]'
+                : 'absolute inset-x-0 bottom-0 h-0.5 origin-left bg-buyback-fg motion-safe:animate-[toastBar_4s_linear_forwards]'
+            }
             style={{ animationDuration: `${TOAST_MS}ms` }}
           />
         </>

@@ -520,15 +520,36 @@ export const VipSchema = z.looseObject({
       reward: vipReward,
     })
     .nullable(),
-  levels: z
-    .array(
-      z.looseObject({
-        level: finite,
-        threshold: finite,
-        reward: vipReward,
-      }),
-    )
-    .default([]),
+  /**
+   * A malformed rung drops that rung, not the whole response (#516).
+   *
+   * The tradeoff a holey ladder normally loses — a customer reading a wrong
+   * threshold and thinking they are closer to the next level than they are —
+   * barely applies here, because `levels[]` has exactly ONE consumer in the
+   * storefront: `me/page.tsx` looks up the CURRENT level's row for `levelStart`,
+   * the progress bar's segment floor, and already tolerates a miss with `?? 0`.
+   * No ladder list is rendered anywhere. So a dropped rung that is not the
+   * customer's own changes literally nothing on screen, and a dropped current
+   * rung floors the bar at 0 — reading optimistically full beside the numbers
+   * printed directly beneath it, which come from `next` and stay correct.
+   *
+   * What one bad rung costs today is the entire block: parseOne returns null,
+   * getVip returns ok:false, and `{vipResult.ok && …}` deletes the LV card —
+   * level number, progress bar and "RM x more to LV y" all gone, for every
+   * customer, over a row that customer never sees. Degrading one bar beats
+   * deleting the card.
+   *
+   * `.default([])` carries over unchanged — an omitted ladder still parses to
+   * []. A non-array `levels` is a route shape change, not this bug; leave it
+   * for whoever hits it.
+   */
+  levels: droppableArray(
+    z.looseObject({
+      level: finite,
+      threshold: finite,
+      reward: vipReward,
+    }),
+  ).default([]),
 });
 
 /** One parsed `levels[]` row — `mapVipLevels`' input (actions/vip-map.ts).

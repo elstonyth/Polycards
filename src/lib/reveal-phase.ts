@@ -193,6 +193,15 @@ function isCommitted(state: SellState | undefined): boolean {
  * 'vaulted' (the server enforces the same). A 'selling' card is deliberately
  * left alone — the request is still in flight and its own resolution writes the
  * terminal state, which is what keeps the reveal open across the deadline.
+ *
+ * 'error' IS swept, and that is not an oversight: an errored card really is
+ * vaulted server-side, so "vaulted" is the honest state. Do NOT exempt it the
+ * way 'selling' is exempted — an exempt 'error' renders the footer's live Sell
+ * CTA again on a closed window (isCommitted doesn't cover 'error', so a
+ * re-tap fires a second doomed request), and it would still be torn down
+ * CONCLUDE_DELAY_MS later by the auto-conclude that `expired` alone triggers.
+ * What the sweep loses is the NOTIFICATION, and that is carried out of the
+ * stage entirely by useSellWindow's `onSellFailed` (#514).
  */
 export function expirySweep(states: readonly SellState[]): SellState[] {
   return states.map((s) =>

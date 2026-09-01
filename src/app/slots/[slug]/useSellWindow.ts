@@ -59,12 +59,19 @@ export function useSellWindow({
   onReveal,
   onSellBack,
   onSold,
+  onSellFailed,
 }: {
   offers: (SellBackOffer | null)[];
   active: boolean;
   onReveal?: RevealFn;
   onSellBack: SellBackFn;
   onSold?: (balance: number, amount: number) => void;
+  /** The failure twin of `onSold` — same reason, same requirement: a surface
+   *  that OUTLIVES this stage. A sell that fails across the deadline is swept
+   *  to 'vaulted' with everything else, so the card's inline error never
+   *  renders and the player is told only "Stored in your vault" — true, but
+   *  indistinguishable from a card they never tried to sell (#514). */
+  onSellFailed?: (message: string) => void;
 }) {
   const [states, setStates] = useState<SellState[]>(() =>
     offers.map(() => ({ phase: 'idle' })),
@@ -153,23 +160,63 @@ export function useSellWindow({
     async (index: number): Promise<boolean> => {
       const offer = offers[index];
       if (!offer) return false;
+      // Whether a failure raised AFTER the await will be masked by the sweep.
+      // Reads the raw clock rather than `expired`, whose closure value is stale
+      // exactly when the deadline crossed mid-request — the #514 case itself.
+      const sweptAway = () => deadlineMs !== null && Date.now() >= deadlineMs;
       // Non-firm quote (FX display fallback): the server would refuse the
       // sell with "Exchange rate unavailable" — never fire it. The reveal UI
       // hides the Sell CTA too; this guard is defense in depth.
       if (!offer.firm) return false;
       // Block re-entry while selling/sold AND once vaulted — a confirm modal
-      // left open across expiry must not fire a sell (server enforces the
-      // deadline too; this is client honesty). beginSellAt returns `prev`
-      // BY IDENTITY when it refuses, which is how the block is read back out
-      // of the updater — the guard has to run against the freshest states, so
-      // it cannot be hoisted above setStates.
-      let blocked = false;
-      setStates((prev) => {
-        const next = beginSellAt(prev, index);
-        blocked = next === prev;
-        return next;
-      });
-      if (blocked) return false;
+      // left open across expiry must not fire a sell (the server enforces the
+      // deadline too; this is client honesty). beginSellAt returns its input BY
+      // IDENTITY when it refuses, which is how "blocked" is read.
+      //
+      // The guard runs HERE, not inside the setStates updater it used to live
+      // in. Two independent reasons, either one fatal:
+      //   1. The old shape leaned on React's EAGER-STATE BAILOUT: dispatchSetState
+      //      runs the updater at dispatch only while the fiber has no pending
+      //      lanes, to decide whether it can skip a render. Any concurrent
+      //      update on this fiber skips that path — and there is always one
+      //      available, the 250ms countdown tick — leaving `blocked` false and
+      //      firing a request the updater had already refused. (Probed on
+      //      19.2.8: clean fiber runs it, pre-dirtied fiber does not.) Reading
+      //      `states` directly depends on no such optimization.
+      //   2. `resolvedStates` is what a render sees, and the raw states are one
+      //      beat stale exactly at the deadline (the sweep below is committed
+      //      from an effect keyed on `expired`, which cannot run in the commit
+      //      where its dep flips). A Confirm tap landing in that one frame
+      //      found a still-'idle' card and fired a sell the server had already
+      //      refused (#514).
+      // `states` is this render's committed value, which is fresh enough: React
+      // flushes a discrete click's update before the next event can dispatch,
+      // so a second tap already sees 'selling' — and by then the Sell button
+      // and the modal's Confirm are both disabled on it anyway.
+      const base = resolvedStates(states, expired);
+      if (beginSellAt(base, index) === base) {
+        // Blocked BY THE CLOCK, not by a double-tap: the player pressed Sell
+        // and got silence. The card is fine — it is vaulted server-side — but
+        // "nothing happened" is the same #514 silence by another route, so it
+        // gets the same out-of-stage surface.
+        //
+        // Gated on the card's RESOLVED phase, not on bare `expired`: a batch
+        // can hold a card that already sold, or one whose own request is still
+        // on the wire (the sweep exempts 'selling'), and neither wants this
+        // message — the first sold fine and the second will report itself.
+        // Every remaining block arrives from a control that is already
+        // disabled, so it needs no message either.
+        if (base[index]?.phase === 'vaulted') {
+          onSellFailed?.(
+            'The instant offer closed — the card is safe in your vault.',
+          );
+        }
+        return false;
+      }
+      // Written through an updater even though the guard above used `states`:
+      // the write must compose with anything React has queued since this
+      // render, and re-resolving costs nothing.
+      setStates((prev) => beginSellAt(resolvedStates(prev, expired), index));
       try {
         const res = await onSellBack(offer.pullId);
         setStates((prev) => {
@@ -183,21 +230,30 @@ export function useSellWindow({
         // the sale OUTSIDE this stage. The in-card "+RM x credited" footer is
         // torn down with the reveal (auto-conclude, or expiry mid-flight), and
         // a player who never saw it has no on-screen proof the money landed.
+        //
+        // The failure branch reports the same way, but ONLY when the inline
+        // error is about to be swept away. `expired` cannot be consulted here —
+        // that closure value is stale exactly when the deadline crossed
+        // mid-request, which IS the bug — so this reads the raw clock instead,
+        // the idiom #515 established for precisely this. An ordinary mid-window
+        // failure keeps its red line on the card and raises no toast; only a
+        // failure the sweep is about to mask as "Stored in your vault" needs a
+        // surface that outlives the stage (#514).
         if (res.ok) onSold?.(res.balance, res.amount);
+        else if (sweptAway()) onSellFailed?.(res.error);
         return res.ok;
       } catch {
+        const message = 'Something went wrong. Please try again.';
         setStates((prev) => {
           const next = [...prev];
-          next[index] = {
-            phase: 'error',
-            message: 'Something went wrong. Please try again.',
-          };
+          next[index] = { phase: 'error', message };
           return next;
         });
+        if (sweptAway()) onSellFailed?.(message);
         return false;
       }
     },
-    [offers, onSellBack, onSold],
+    [offers, onSellBack, onSold, onSellFailed, expired, states, deadlineMs],
   );
 
   // Every card is terminal (sold | vaulted) — drives the reveal auto-conclude

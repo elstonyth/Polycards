@@ -42,6 +42,7 @@ export function RevealStage({
   onSellBack,
   onReveal,
   onSold,
+  onSellFailed,
   sfx,
   vibrate,
   play,
@@ -76,6 +77,11 @@ export function RevealStage({
   /** Fired after a confirmed sell-back: the new balance, and what this card
    *  credited (so the parent can raise a toast that outlives this stage). */
   onSold?: (balance: number, amount: number) => void;
+  /** Fired when a sell-back does NOT land, for the same reason as `onSold`:
+   *  past the deadline this stage reports an errored card as plain "Stored in
+   *  your vault" and then tears itself down, so the failure needs a surface the
+   *  parent owns (#514). */
+  onSellFailed?: (message: string) => void;
   sfx: (name: SfxName) => void;
   vibrate: (p: number | number[]) => void;
   play: (name: SoundName, volume?: number) => void;
@@ -93,6 +99,7 @@ export function RevealStage({
       onReveal,
       onSellBack,
       onSold,
+      onSellFailed,
     });
 
   // A sell that is still on the wire. useSellWindow's expiry sweep deliberately
@@ -296,6 +303,10 @@ export function RevealStage({
     // mid-sale exemption: a sell still on the wire when the clock runs out must
     // keep reading "Selling…" until it lands, not claim the card was vaulted
     // and then contradict itself with "+RM x credited" (#511).
+    // A sell that FAILED across the deadline lands here too, and this copy is
+    // still true — the card really is vaulted. What it can't say is that the
+    // sell failed, so that goes out through onSellFailed instead of being
+    // wedged in here, where the stage's own teardown would eat it (#514).
     if (state.phase === 'vaulted') {
       return (
         <p className="text-center text-[12px] text-white/60">
