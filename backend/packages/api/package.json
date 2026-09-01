@@ -48,9 +48,9 @@
     "@mercurjs/types": "2.3.1",
     "http-proxy-middleware": "^3.0.7",
     "ioredis": "^5.4.1",
-    "multer": "^2.2.0",
-    "resend": "^6.22.0",
-    "sharp": "^0.35.3",
+    "multer": "^2.3.0",
+    "resend": "^6.25.0",
+    "sharp": "^0.35.4",
     "write-excel-file": "^4.1.1"
   },
   "devDependencies": {
@@ -61,7 +61,7 @@
     "@types/multer": "^2.2.0",
     "@types/node": "^24.13.3",
     "fflate": "^0.8.2",
-    "jest": "^30.4.2",
+    "jest": "^30.5.0",
     "prop-types": "^15.8.1",
     "yalc": "^1.0.0-pre.53"
   },
