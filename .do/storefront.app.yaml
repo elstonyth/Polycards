@@ -147,8 +147,18 @@ services:
       # Enforce the CSP. Without this, next.config.ts serves
       # Content-Security-Policy-Report-Only — report-only had a clean run
       # (qa:csp + Sentry), flip assessed safe. GO-LIVE checklist: must be true.
-      # NOTE: takes effect on the next `do-apply.ps1 storefront` (spec envs
-      # apply via doctl, not on git push).
+      # NOTE: setting it here is NECESSARY BUT NOT SUFFICIENT. next.config.ts
+      # picks the CSP header NAME via cspEnforced() and Next bakes headers()
+      # into routes-manifest.json at BUILD time, so this value only lands if it
+      # reaches the BUILD — and this app builds from a Dockerfile, which sees
+      # only env it declares as ARG. The matching `ARG CSP_ENFORCE` / `ENV
+      # CSP_ENFORCE` in ./Dockerfile is the other half; the two move together.
+      # A `do-apply.ps1 storefront` alone can NEVER flip it: spec envs reach the
+      # running container, not the build, and DO skips the build entirely on an
+      # "app spec updated" deployment (observed 2026-09-01 — the header stayed
+      # report-only through both a spec apply and a --force-rebuild until the
+      # Dockerfile ARG existed). Same caveat applies to any other build-time
+      # next.config.ts input (redirects, rewrites, `env` inlining).
       - key: CSP_ENFORCE
         scope: RUN_AND_BUILD_TIME
         value: 'true'
