@@ -43,6 +43,21 @@ export function payoutCents(basisCents: number, rateBp: number): number {
 // all (security review 2026-08-25).
 export const MAX_SETTLEMENT_LINE_MYR = 50_000;
 
+// How long after a week's end the close must WAIT before snapshotting it. The
+// hourly cron fires at the exact boundary, and a pack_open whose transaction
+// began a moment before it can still commit after the close's SELECT (READ
+// COMMITTED) — the unique week_start then blocks any recompute, so that
+// commission is gone for good (review 2026-09). The next hourly tick pays the
+// delay back; nothing reads the draft in those minutes.
+export const REFERRAL_CLOSE_GRACE_MS = 5 * 60 * 1000;
+
+// bindReferral's signup window. Attribution binds AT SIGNUP (spec) and the
+// storefront fires the bind the moment the account is created, so a customer
+// row older than this is not a signup whatever its spend says — the pack_open
+// heuristic alone let a months-old, deposited-but-unopened account attach a
+// referrer (review 2026-09). adminSetReferral stays the override.
+export const REFERRAL_BIND_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 const MYT_OFFSET_MS = 8 * 60 * 60 * 1000; // Asia/Kuala_Lumpur, no DST
 const DAY_MS = 24 * 60 * 60 * 1000;
 

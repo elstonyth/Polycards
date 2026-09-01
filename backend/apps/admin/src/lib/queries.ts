@@ -514,6 +514,8 @@ export const useAdjustCredits = () => {
       qc.invalidateQueries({ queryKey: qk.customerGacha(vars.id) });
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
       qc.invalidateQueries({ queryKey: qk.customerTransactionsKey(vars.id) });
+      // The Players list shows the wallet column this just moved.
+      qc.invalidateQueries({ queryKey: qk.playersKey });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
@@ -1413,10 +1415,11 @@ export const useSetCustomerReferrer = () => {
       referrerId: string | null;
       reason: string;
     }) => setCustomerReferrer(vars.customerId, vars.referrerId, vars.reason),
-    onSuccess: (_data, vars) =>
-      qc.invalidateQueries({
-        queryKey: qk.customerReferral(vars.customerId),
-      }),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: qk.customerReferral(vars.customerId) });
+      // The server writes an audit row — the History tab must see it.
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.customerId) });
+    },
   });
 };
 
@@ -1445,10 +1448,11 @@ export const useSetPartnerRate = () => {
       rateBp: number | null;
       reason: string;
     }) => setPartnerRate(vars.customerId, vars.rateBp, vars.reason),
-    onSuccess: (_data, vars) =>
-      qc.invalidateQueries({
-        queryKey: qk.customerReferral(vars.customerId),
-      }),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: qk.customerReferral(vars.customerId) });
+      // The server writes an audit row — the History tab must see it.
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.customerId) });
+    },
   });
 };
 

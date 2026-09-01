@@ -1,4 +1,5 @@
 import { randomInt, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import {
   MedusaService,
   MedusaError,
@@ -77,12 +78,15 @@ import {
   lastClosedReferralWeek,
   MAX_SETTLEMENT_LINE_MYR,
   payoutCents,
+  REFERRAL_BIND_WINDOW_MS,
+  REFERRAL_CLOSE_GRACE_MS,
   referralWeekFor,
   taskWeekFor,
   resolveRateBp,
   type ReferralTier,
   type ReferralWeek,
 } from './referral';
+import { asPixelPokemonCrud } from './pixel-pokemon-service';
 import {
   taskIsLive,
   taskProgress,
@@ -681,7 +685,16 @@ class PacksModuleService extends MedusaService({
   // unique customer_id index: the loser's 23505 reads as already_bound.
   @InjectTransactionManager()
   async bindReferral(
-    input: { customerId: string; referrerId: string },
+    input: {
+      customerId: string;
+      referrerId: string;
+      /** The customer row's created_at, injected by the route (this module
+       *  cannot see the customer module). REQUIRED, like adminSetReferral's
+       *  referrerExists: an optional guard is one careless caller away from
+       *  being skipped. */
+      createdAt: Date;
+      now?: Date;
+    },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
     | { bound: true }
@@ -702,9 +715,15 @@ class PacksModuleService extends MedusaService({
     // Attribution binds AT SIGNUP (spec). The endpoint alone only proves
     // "not yet bound", so an established customer could otherwise attach a
     // referrer retroactively and hand them a cut of turnover they had no
-    // part in (security review 2026-08-25). Any prior pack spend means this
-    // is not a signup. The admin path (adminSetReferral) is the deliberate
+    // part in (security review 2026-08-25). Two tests, both required: the
+    // account must be young (REFERRAL_BIND_WINDOW_MS — a deposited, never-
+    // opened account is otherwise still "new" months later), and it must have
+    // no pack spend. The admin path (adminSetReferral) is the deliberate
     // override for genuine support cases.
+    const nowMs = (input.now ?? new Date()).getTime();
+    if (nowMs - input.createdAt.getTime() > REFERRAL_BIND_WINDOW_MS) {
+      return { bound: false, reason: 'not_a_new_account' };
+    }
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const [spent] = await em.execute<{ n: string }[]>(
@@ -984,15 +1003,33 @@ class PacksModuleService extends MedusaService({
   async closeReferralWeek(
     input: { weekStartIso?: string; now?: Date } = {},
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ settlementId: string; created: boolean; lines: number }> {
+  ): Promise<{
+    /** null = deferred: the week ended too recently to snapshot (see the
+     *  grace below); the next hourly tick closes it. */
+    settlementId: string | null;
+    created: boolean;
+    lines: number;
+  }> {
+    const now = input.now ?? new Date();
     const week = input.weekStartIso
       ? referralWeekFor(new Date(`${input.weekStartIso}T00:00:00+08:00`))
-      : lastClosedReferralWeek(input.now ?? new Date());
+      : lastClosedReferralWeek(now);
     if (input.weekStartIso && week.weekStartIso !== input.weekStartIso) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
         `weekStartIso ${input.weekStartIso} is not an MYT Tuesday (nearest week starts ${week.weekStartIso}).`,
       );
+    }
+    // The cron path waits until the boundary is safely behind us: an open
+    // committing a few ms after the close's turnover SELECT would be missed,
+    // and the unique week_start makes that permanent (REFERRAL_CLOSE_GRACE_MS).
+    // An explicit weekStartIso is the operator's "close it now" lever and is
+    // not held back.
+    if (
+      !input.weekStartIso &&
+      now.getTime() < week.endUtcExcl.getTime() + REFERRAL_CLOSE_GRACE_MS
+    ) {
+      return { settlementId: null, created: false, lines: 0 };
     }
 
     const [existing] = await this.listWeeklySettlements(
@@ -1158,19 +1195,26 @@ class PacksModuleService extends MedusaService({
         `Only a draft run can be approved (this one is '${run.status}').`,
       );
     }
-    await this.updateWeeklySettlements(
-      {
-        // re-assert draft: a void racing this approve must win or lose
-        // cleanly, never leave an approved run full of voided lines.
-        selector: { id: run.id, status: 'draft' as const },
-        data: {
-          status: 'approved' as const,
-          approved_by: input.adminId,
-          approved_at: new Date(),
-        },
-      },
-      sharedContext,
+    // ONE conditional UPDATE, answered by RETURNING (the
+    // claimGlobePayWithdrawalStatus idiom): the generated selector-update is a
+    // find-then-write that reports nothing, so a void committing between the
+    // read above and the write left the run 'void' and still wrote an
+    // approve_settlement audit row (review 2026-09). No row = the race was
+    // lost; refuse rather than audit an approval that never happened.
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const approved = await em.execute<{ id: string }[]>(
+      'UPDATE weekly_settlement ' +
+        "SET status = 'approved', approved_by = ?, approved_at = now(), updated_at = now() " +
+        "WHERE id = ? AND status = 'draft' AND deleted_at IS NULL " +
+        'RETURNING id',
+      [input.adminId, run.id],
     );
+    if (approved.length !== 1) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'That run changed state while you were approving it — reload the page.',
+      );
+    }
     await this.createAdminActionAudits(
       [
         {
@@ -1377,30 +1421,26 @@ class PacksModuleService extends MedusaService({
         `Only a pending line can be voided (this one is '${line.status}').`,
       );
     }
-    // selector re-asserts `pending`: without it, a void racing the pay job
-    // could stamp 'voided' over a line whose money already moved (bug review
-    // 2026-08-25). A no-match means the race was lost — bail before the
-    // totals deduction so it can't double-subtract.
-    await this.updateWeeklySettlementLines(
-      {
-        selector: { id: line.id, status: 'pending' as const },
-        data: {
-          status: 'voided' as const,
-          void_reason: input.reason,
-          voided_by: input.adminId,
-        },
-      },
-      sharedContext,
+    // ONE conditional UPDATE, answered by RETURNING — the same claim
+    // payWeeklySettlement makes before it moves money, and for the same
+    // reason claimGlobePayWithdrawalStatus exists: the generated selector-
+    // update is a find-then-write with no row lock, so a void racing the pay
+    // job could stamp 'voided' over a line whose credit was already written
+    // (bug review 2026-08-25; race confirmed 2026-09). Here the row lock
+    // makes pay's claim wait and then see 'voided'. No row = the race was
+    // lost — bail before the totals deduction so it can't double-subtract.
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const voided = await em.execute<{ id: string }[]>(
+      'UPDATE weekly_settlement_line ' +
+        "SET status = 'voided', void_reason = ?, voided_by = ?, updated_at = now() " +
+        "WHERE id = ? AND status = 'pending' AND deleted_at IS NULL " +
+        'RETURNING id',
+      [input.reason, input.adminId, line.id],
     );
-    const [afterVoid] = await this.listWeeklySettlementLines(
-      { id: line.id },
-      { take: 1 },
-      sharedContext,
-    );
-    if (afterVoid?.status !== 'voided') {
+    if (voided.length !== 1) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        'That line changed state while you were voting on it — reload the run.',
+        'That line changed state while you were voiding it — reload the run.',
       );
     }
     // Keep the run totals live — the approve dialog quotes them as "will pay
@@ -1490,18 +1530,30 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
 
+    // Every line flip below is ONE conditional UPDATE answered by RETURNING
+    // (the claimGlobePayWithdrawalStatus idiom), never the generated
+    // selector-update: that one is a find-then-write with no row lock, so it
+    // could not stop an admin void from landing between this run's list and
+    // its money write — the credit was minted, then the "status guard" after
+    // it silently matched nothing, and the customer was paid on a line that
+    // read 'voided' (review 2026-09). The claim now comes FIRST and holds the
+    // row lock until this transaction commits; a concurrent void either
+    // committed already (no row here, no money) or waits and then sees 'paid'.
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     let paid = 0;
     let skipped = 0;
     const paidCustomerIds: string[] = [];
     for (const line of pending) {
       if (skip.has(line.customer_id)) {
-        await this.updateWeeklySettlementLines(
-          {
-            selector: { id: line.id },
-            data: { status: 'voided' as const, void_reason: 'account_deleted' },
-          },
-          sharedContext,
+        const voided = await em.execute<{ id: string }[]>(
+          'UPDATE weekly_settlement_line ' +
+            "SET status = 'voided', void_reason = 'account_deleted', updated_at = now() " +
+            "WHERE id = ? AND status = 'pending' AND deleted_at IS NULL " +
+            'RETURNING id',
+          [line.id],
         );
+        // An admin void got there first — and already took its deduction.
+        if (voided.length !== 1) continue;
         await this.deductRunTotal(
           { settlementId: run.id, amountCents: line.amount_cents },
           sharedContext,
@@ -1509,7 +1561,17 @@ class PacksModuleService extends MedusaService({
         skipped++;
         continue;
       }
-      // Ledger FIRST, and its `replayed` flag is load-bearing: an RF row
+      const claimed = await em.execute<{ id: string }[]>(
+        'UPDATE weekly_settlement_line ' +
+          "SET status = 'paid', updated_at = now() " +
+          "WHERE id = ? AND status = 'pending' AND deleted_at IS NULL " +
+          'RETURNING id',
+        [line.id],
+      );
+      // Voided since the list above (or claimed by a concurrent pay) — no
+      // money for this line from this run.
+      if (claimed.length !== 1) continue;
+      // Ledger next, and its `replayed` flag is load-bearing: an RF row
       // already carrying this line's ref_id means the money moved on an
       // earlier run whose line update was lost. Minting the credit before
       // this check would pay that customer twice — recordLedgerEntry returns
@@ -1530,14 +1592,8 @@ class PacksModuleService extends MedusaService({
         },
         sharedContext,
       );
-      if (entry.replayed) {
-        // Already paid; just repair the line's status and move on.
-        await this.updateWeeklySettlementLines(
-          { selector: { id: line.id }, data: { status: 'paid' as const } },
-          sharedContext,
-        );
-        continue;
-      }
+      // Already paid: the claim above repaired the line's status; move on.
+      if (entry.replayed) continue;
       const [txn] = await this.createCreditTransactions(
         [
           {
@@ -1548,13 +1604,10 @@ class PacksModuleService extends MedusaService({
         ],
         sharedContext,
       );
+      // The row is ours (claimed above, lock held), so the stamp needs no
+      // guard — the ledger row is still the authority on whether money moved.
       await this.updateWeeklySettlementLines(
-        {
-          // status guard: a concurrent void must not be overwritten (the
-          // ledger row above is still the authority on whether money moved).
-          selector: { id: line.id, status: 'pending' as const },
-          data: { status: 'paid' as const, paid_transaction_id: txn.id },
-        },
+        { selector: { id: line.id }, data: { paid_transaction_id: txn.id } },
         sharedContext,
       );
       paid++;
@@ -1800,9 +1853,14 @@ class PacksModuleService extends MedusaService({
             '  AND created_at >= ? AND created_at < ? GROUP BY pack_id',
           [input.customerId, input.week.startUtc, input.week.endUtcExcl],
         ),
+        // highest_level_ever, NOT current_level: that one is the net basis
+        // and drops after reverseOpen (ADR 0003), which would UN-complete a
+        // reach_level achievement the customer already saw as done — the
+        // same never-un-complete rule the vault counts below follow
+        // (review 2026-09).
         this.listVipMemberStates(
           { customer_id: input.customerId },
-          { select: ['current_level'], take: 1 },
+          { select: ['highest_level_ever'], take: 1 },
           sharedContext,
         ),
         // Lifetime counts, NOT current status: every pull STARTS vaulted
@@ -1839,7 +1897,7 @@ class PacksModuleService extends MedusaService({
       checkinDaysThisWeek: checkins.length,
       ripsThisWeek: [...byPack.values()].reduce((a, b) => a + b, 0),
       ripsThisWeekByPack: byPack,
-      vipLevel: stateRow ? Number(stateRow.current_level) : 1,
+      vipLevel: stateRow ? Number(stateRow.highest_level_ever) : 1,
       vaultCount: Number(vaultRows[0]?.n ?? 0),
       vaultPixelCount: [...byPixel.values()].reduce((a, b) => a + b, 0),
       vaultPixelCountById: byPixel,
@@ -1978,16 +2036,16 @@ class PacksModuleService extends MedusaService({
   // on top (mutateCreditAtomic replay) so a crash between claim-insert and
   // grant can be re-driven safely by support. Card/pack rewards mint a
   // source='reward' pull (vault entry; no recorded pulled value — reward
-  // pulls never move the boards, same stance as reward boxes). decrementStock
-  // and rollPack are injected by the route (card-stock helper / rollOne) so
-  // this module doesn't import the workflow layer.
+  // pulls never move the boards, same stance as reward boxes). rollPack is
+  // injected by the route (rollOne) so this module doesn't import the
+  // workflow layer. The card-stock take is the ROUTE's job, AFTER this
+  // transaction committed — see the claim route.
   @InjectTransactionManager()
   async claimTask(
     input: {
       customerId: string;
       taskId: string;
       now?: Date;
-      decrementStock?: (handle: string, qty: number) => Promise<boolean>;
       rollPack?: (packId: string) => Promise<{ handle: string }>;
     },
     @MedusaContext() sharedContext: Context = {},
@@ -2103,19 +2161,12 @@ class PacksModuleService extends MedusaService({
           `Task reward card '${reward.card_handle}' no longer exists.`,
         );
       }
-      // Fulfillment counter, never a gate — negative = units owed (same
-      // stance as challenge grants). Guarded: the take runs on the inventory
-      // module's own connection, so a throw here would 500 the claim, roll
-      // back the claim row AND leave the decrement committed — every retry
-      // then loses another unit (the decrement-card-stock step's rule: the
-      // TAKE does not belong in this transaction). A failed take is an
-      // operator concern, never a customer error.
-      try {
-        await input.decrementStock?.(reward.card_handle, 1);
-      } catch {
-        // stock counter drift is operator-visible in inventory; the claim
-        // must proceed.
-      }
+      // No stock take HERE: it runs on the inventory module's own connection
+      // and commits at once, so a claim that then lost the IDX_task_claim_unique
+      // race at flush rolled back the claim and the pull but not the unit
+      // taken — a double-tap cost two units for one card (review 2026-09).
+      // The route takes the unit after this transaction committed, the
+      // reserveSettledStock shape.
       const [pull] = await this.createPulls(
         [
           {
@@ -2190,32 +2241,91 @@ class PacksModuleService extends MedusaService({
     }
     const requirement = validateTaskRequirement(input.kind, input.requirement);
     const reward = validateTaskReward(input.reward);
-    // Reward targets must EXIST at save time — a typo'd pack slug or card
-    // handle otherwise surfaces only at claim time, as a permanent generic
-    // failure for every completed customer (review 2026-08-25 finding 4).
-    if (reward.type === 'card') {
-      const [card] = await this.listCards(
-        { handle: reward.card_handle },
-        { select: ['handle'], take: 1 },
-        sharedContext,
+    const [existing] = input.id
+      ? await this.listTaskDefinitions(
+          { id: input.id },
+          { take: 1 },
+          sharedContext,
+        )
+      : [];
+    if (input.id && !existing) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Task ${input.id} not found.`,
       );
-      if (!card) {
-        throw new MedusaError(
-          MedusaError.Types.INVALID_DATA,
-          `Reward card '${reward.card_handle}' does not exist.`,
+    }
+    // kind drives period_key, which drives BOTH the claim unique index and
+    // the credit idempotency key — flipping it in place re-opens already
+    // claimed rewards (review 2026-08-25 finding 5). New cadence = new task.
+    if (existing && existing.kind !== input.kind) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        "A task's kind cannot change after creation — retire this one and create a new task instead.",
+      );
+    }
+    // Reward and requirement targets must EXIST at save time — a typo'd pack
+    // slug or card handle otherwise surfaces only at claim time, as a
+    // permanent generic failure for every completed customer (review
+    // 2026-08-25 finding 4). Only when the target CHANGED, though: Retire and
+    // the active toggle re-POST the whole definition, and a card or pack
+    // deleted since the save must not 400 the very action that fixes it
+    // (review 2026-09).
+    if (!existing || !isDeepStrictEqual(existing.reward, reward)) {
+      if (reward.type === 'card') {
+        const [card] = await this.listCards(
+          { handle: reward.card_handle },
+          { select: ['handle'], take: 1 },
+          sharedContext,
         );
+        if (!card) {
+          throw new MedusaError(
+            MedusaError.Types.INVALID_DATA,
+            `Reward card '${reward.card_handle}' does not exist.`,
+          );
+        }
+      } else if (reward.type === 'pack') {
+        const [pack] = await this.listPacks(
+          { slug: reward.pack_id },
+          { select: ['slug'], take: 1 },
+          sharedContext,
+        );
+        if (!pack) {
+          throw new MedusaError(
+            MedusaError.Types.INVALID_DATA,
+            `Reward pack '${reward.pack_id}' does not exist.`,
+          );
+        }
       }
-    } else if (reward.type === 'pack') {
-      const [pack] = await this.listPacks(
-        { slug: reward.pack_id },
-        { select: ['slug'], take: 1 },
-        sharedContext,
-      );
-      if (!pack) {
-        throw new MedusaError(
-          MedusaError.Types.INVALID_DATA,
-          `Reward pack '${reward.pack_id}' does not exist.`,
+    }
+    if (!existing || !isDeepStrictEqual(existing.requirement, requirement)) {
+      if (requirement.type === 'rip_count' && requirement.pack_id) {
+        const [pack] = await this.listPacks(
+          { slug: requirement.pack_id },
+          { select: ['slug'], take: 1 },
+          sharedContext,
         );
+        if (!pack) {
+          throw new MedusaError(
+            MedusaError.Types.INVALID_DATA,
+            `Requirement pack '${requirement.pack_id}' does not exist.`,
+          );
+        }
+      } else if (
+        requirement.type === 'vault_pixel_count' &&
+        requirement.pixel_pokemon_id
+      ) {
+        // SINGULAR runtime name — see pixel-pokemon-service.ts.
+        const [pixel] = await asPixelPokemonCrud(this).listPixelPokemon(
+          { id: requirement.pixel_pokemon_id },
+          { select: ['id'], take: 1 },
+          sharedContext,
+        );
+        if (!pixel) {
+          throw new MedusaError(
+            MedusaError.Types.INVALID_DATA,
+            `Requirement pixel Pokémon '${requirement.pixel_pokemon_id}' does not exist.`,
+          );
+        }
       }
     }
     const data = {
@@ -2230,27 +2340,8 @@ class PacksModuleService extends MedusaService({
     };
     let id = input.id;
     let before: Record<string, unknown> | null = null;
-    if (id) {
-      const [existing] = await this.listTaskDefinitions(
-        { id },
-        { take: 1 },
-        sharedContext,
-      );
-      if (!existing) {
-        throw new MedusaError(
-          MedusaError.Types.NOT_FOUND,
-          `Task ${id} not found.`,
-        );
-      }
-      // kind drives period_key, which drives BOTH the claim unique index and
-      // the credit idempotency key — flipping it in place re-opens already
-      // claimed rewards (review 2026-08-25 finding 5). New cadence = new task.
-      if (existing.kind !== input.kind) {
-        throw new MedusaError(
-          MedusaError.Types.NOT_ALLOWED,
-          "A task's kind cannot change after creation — retire this one and create a new task instead.",
-        );
-      }
+    if (existing) {
+      id = existing.id;
       before = {
         kind: existing.kind,
         title: existing.title,
@@ -3757,8 +3848,11 @@ class PacksModuleService extends MedusaService({
       [{ delivery_order_id: order.id, pull_id: pullId }],
       sharedContext,
     );
-    await this.updatePulls(
-      { selector: { id: pullId }, data: { status: 'delivering' } },
+    // Guarded flip (vaulted → delivering ONLY): a buyback committing between
+    // the read above and this write must lose, not be overwritten into a pull
+    // that is both credited and in a live shipment.
+    await this.transitionPullStatus(
+      { ids: [pullId], from: 'vaulted', to: 'delivering' },
       sharedContext,
     );
 
@@ -6040,12 +6134,18 @@ class PacksModuleService extends MedusaService({
   /** `first_reveal` is true ONLY for the call that stamped revealed_at — the
    *  one moment the player actually saw the card. It gates the public
    *  announcement; see the reveal route. */
+  @InjectManager()
   async revealPull(
     pullId: string,
     customerId: string,
     nowMs: number = Date.now(),
+    @MedusaContext() sharedContext: Context = {},
   ): Promise<RevealPullResult> {
-    const [pull] = await this.listPulls({ id: pullId }, { take: 1 });
+    const [pull] = await this.listPulls(
+      { id: pullId },
+      { take: 1 },
+      sharedContext,
+    );
     if (!pull || pull.customer_id !== customerId) {
       throw new MedusaError(
         MedusaError.Types.NOT_FOUND,
@@ -6053,21 +6153,31 @@ class PacksModuleService extends MedusaService({
       );
     }
     if (pull.revealed_at == null) {
-      // First-write-wins under concurrent reveals: the FILTERED update only
-      // stamps while revealed_at IS NULL (atomic at the DB), so racing calls
-      // can't shift the anchor. Re-read to return whichever value persisted.
-      const stamped = await this.updatePulls({
-        selector: { id: pull.id, revealed_at: null },
-        data: { revealed_at: new Date(nowMs) },
-      });
-      const [fresh] = await this.listPulls({ id: pull.id }, { take: 1 });
+      // First-write-wins under concurrent reveals — ONE conditional UPDATE.
+      // Not `updatePulls({ selector })`: the generated selector-update is a
+      // find-then-write with no WHERE on the write, so two racing calls would
+      // both "win" and Telegram (no dedupe) would post the same hit twice.
+      // Re-read to return whichever value persisted.
+      const em = (sharedContext.transactionManager ??
+        sharedContext.manager) as unknown as LedgerSqlManager;
+      const stamped = await em.execute<{ id: string }[]>(
+        'UPDATE pull SET revealed_at = ?, updated_at = NOW() ' +
+          'WHERE id = ? AND revealed_at IS NULL AND deleted_at IS NULL ' +
+          'RETURNING id',
+        [new Date(nowMs), pull.id],
+      );
+      const [fresh] = await this.listPulls(
+        { id: pull.id },
+        { take: 1 },
+        sharedContext,
+      );
       return {
         instant_deadline_ms: instantDeadlineMs(
           fresh.rolled_at,
           fresh.revealed_at,
         ),
         // The rows the FILTERED update actually touched — empty for the loser
-        // of a race, because its selector no longer matched. That is the whole
+        // of a race, because its WHERE no longer matched. That is the whole
         // exactly-once guarantee behind the announcement: Telegram has no
         // dedupe, so a second caller believing it revealed the pull would mean
         // the same hit posted twice to a public channel.
@@ -6078,6 +6188,29 @@ class PacksModuleService extends MedusaService({
       instant_deadline_ms: instantDeadlineMs(pull.rolled_at, pull.revealed_at),
       first_reveal: false,
     };
+  }
+
+  // Showcase toggle as ONE conditional UPDATE: stamps only while the pull is
+  // still vaulted and owned by the caller, so a sell/deliver landing between
+  // the route's check and this write loses (0 rows) instead of starring a
+  // sold pull. Same reason as revealPull — `updatePulls({ selector })` is a
+  // find-then-write and cannot give this guarantee.
+  @InjectManager()
+  async setShowcasedIfVaulted(
+    pullId: string,
+    customerId: string,
+    showcased: boolean,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ id: string }[]>(
+      'UPDATE pull SET showcased = ?, updated_at = NOW() ' +
+        "WHERE id = ? AND customer_id = ? AND status = 'vaulted' " +
+        'AND deleted_at IS NULL RETURNING id',
+      [showcased, pullId, customerId],
+    );
+    return rows.length > 0;
   }
 
   // Close the instant-buyback window for the caller's OWN pulls — called when

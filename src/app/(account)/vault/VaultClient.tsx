@@ -186,6 +186,27 @@ export default function VaultClient({
     if (latestAt) markSeen();
   }, [latestAt, markSeen]);
 
+  // Same Back-nav staleness the notifications feed had (NotificationsClient):
+  // browser Back can restore the RSC payload rendered BEFORE a sell/ship, so
+  // `initial` re-seeds sold cards into the grid, selectable and sellable
+  // again. Re-sync from the server on mount — never revalidatePath() from the
+  // action (measured to clobber the history entry). A transport failure or
+  // !ok keeps the server-rendered seed; the balance stat already prefers the
+  // provider's live figure, so only the grid needs the fresh read.
+  useEffect(() => {
+    let live = true;
+    void getVault()
+      .then((r) => {
+        if (!live || !r.ok) return;
+        setItems(r.items);
+        setBalance(r.balance);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+
   // Select All operates on the SELECTABLE visible set — a locked row filtered
   // out here as well as in `toggleSelect`, or Select All would re-add it and
   // re-arm the sell CTA behind the per-row guard.

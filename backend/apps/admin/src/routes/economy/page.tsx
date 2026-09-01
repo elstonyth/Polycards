@@ -132,6 +132,11 @@ const EconomyPage = () => {
         },
         { key: "topups", value: rm(data.totals.topups) },
         { key: "adjustments", value: rm(data.totals.adjustments) },
+        { key: "deliveryFees", value: rm(data.totals.deliveryFees) },
+        {
+          key: "referralCommission",
+          value: rm(data.totals.referralCommission),
+        },
       ]
     : [];
 

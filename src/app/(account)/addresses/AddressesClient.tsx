@@ -1,10 +1,11 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MapPin, Plus } from 'lucide-react';
 import {
   addAddress,
   deleteAddress,
+  getAddresses,
   updateAddress,
   type AddressView,
   type AddAddressInput,
@@ -162,6 +163,26 @@ export function AddressesClient({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<AddAddressInput>(EMPTY_FORM);
+
+  // Browser Back can restore the RSC payload rendered BEFORE a remove, so
+  // `initialAddresses` re-seeds the deleted row. Re-sync on mount, as
+  // NotificationsClient does — never revalidatePath() from the action. A
+  // transport failure keeps the server seed. (getAddresses has no !ok: it
+  // reads [] for a lost session, which on this auth-gated page is the truth.)
+  useEffect(() => {
+    let live = true;
+    void getAddresses()
+      .then((list) => {
+        if (!live) return;
+        setAddresses(list);
+        // Same rule as onRemoved: an empty book renders the form, not a pill.
+        if (list.length === 0) setAdding(true);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
 
   // Open for a NEW address, or for an existing one. Only one form is ever
   // mounted, so opening either closes the other by construction.

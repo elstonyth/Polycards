@@ -332,6 +332,10 @@ export interface EconomyReport {
     payouts: number;
     topups: number;
     adjustments: number;
+    /** Shipping + insurance fees collected from customer wallets (fee line, not pack revenue). */
+    deliveryFees: number;
+    /** Weekly referral commissions paid out (operator promo cost, like rewardPromo). */
+    referralCommission: number;
     net: number;
   };
   liability: { count: number; market_value: number };

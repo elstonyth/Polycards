@@ -1,5 +1,9 @@
 import type { NextRequest } from 'next/server';
-import { getPackCategories, getRecentPulls } from '@/lib/data/packs';
+import {
+  getPackBySlug,
+  getPackCategories,
+  getRecentPulls,
+} from '@/lib/data/packs';
 import { cached } from '@/lib/ttl-cache';
 
 // Same-origin endpoint the "Recent Pulls" feeds poll for live updates — a
@@ -40,10 +44,22 @@ export async function GET(request: NextRequest) {
   // adds no backend hop. A slug not in the catalog scopes to the global feed —
   // the same rows getRecentPulls returns for an unknown pack anyway, now
   // without minting a per-garbage-key cache entry.
+  //
+  // One pack is reachable but never LISTED: the free welcome pack (GET
+  // /store/packs filters free_welcome out — see getUncatalogedPack). A catalog
+  // miss therefore falls through to the detail route before the slug is
+  // discarded, or that pack's spin page flips to the global feed on its first
+  // poll. Garbage slugs still mint no key: the detail route 404s them.
   const raw = request.nextUrl.searchParams.get('pack_id')?.trim() ?? '';
   const cats = await getPackCategories();
   const known = new Set(cats.flatMap((c) => c.packs.map((p) => p.id)));
-  const pack = raw && known.has(raw) ? raw : '';
+  // Shape-gate before the detail hop: this endpoint is public, so a garbage
+  // pack_id must not cost a backend round-trip (and an error log) per request.
+  const slugShaped = /^[a-z0-9-]{1,64}$/.test(raw);
+  const pack =
+    slugShaped && (known.has(raw) || (await getPackBySlug(raw)) !== null)
+      ? raw
+      : '';
   const body = await cached(`recent-pulls:${pack}`, CACHE_TTL_MS, async () =>
     JSON.stringify({ pulls: await getRecentPulls(pack || undefined) }),
   );

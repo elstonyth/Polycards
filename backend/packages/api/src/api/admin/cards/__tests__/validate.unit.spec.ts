@@ -168,3 +168,56 @@ describe('optional text fields — length cap', () => {
     }
   });
 });
+
+// PC linkage tri-state on the edit body (update-card.ts): undefined = keep the
+// stored link, null = unlink, string = link. Unlink is atomic — an explicit
+// null on either side clears BOTH, so `{ pc_product_id: null }` alone (what the
+// admin's Unlink sends) can't leave the stored pc_grade behind as a half-link.
+describe('coerceUpdateCardBody — pc_product_id / pc_grade tri-state', () => {
+  const base = {
+    name: 'Charizard',
+    set: 'Base',
+    grader: 'PSA',
+    grade: '10',
+    market_value: 100,
+    image: '/x.png',
+    for_sale: true,
+  };
+
+  it('both omitted → both undefined (leave the stored link as-is)', () => {
+    const out = coerceUpdateCardBody(base, 'charizard');
+    expect(out.pc_product_id).toBeUndefined();
+    expect(out.pc_grade).toBeUndefined();
+    expect(out.market_multiplier).toBeUndefined();
+  });
+
+  it('both set → both pass through', () => {
+    const out = coerceUpdateCardBody(
+      { ...base, pc_product_id: ' 123 ', pc_grade: 'psa-10' },
+      'charizard',
+    );
+    expect(out.pc_product_id).toBe('123');
+    expect(out.pc_grade).toBe('psa-10');
+  });
+
+  it('null on either side alone → both null (atomic unlink)', () => {
+    const a = coerceUpdateCardBody({ ...base, pc_product_id: null }, 'charizard');
+    expect(a.pc_product_id).toBeNull();
+    expect(a.pc_grade).toBeNull();
+    const b = coerceUpdateCardBody({ ...base, pc_grade: null }, 'charizard');
+    expect(b.pc_product_id).toBeNull();
+    expect(b.pc_grade).toBeNull();
+  });
+
+  it('id without a grade (or vice versa) is still rejected as a half-link', () => {
+    expect(() =>
+      coerceUpdateCardBody({ ...base, pc_product_id: '123' }, 'charizard'),
+    ).toThrow(/must both be set or both be null\/omitted/);
+    expect(() =>
+      coerceUpdateCardBody(
+        { ...base, pc_product_id: '123', pc_grade: null },
+        'charizard',
+      ),
+    ).toThrow(/must both be set or both be null\/omitted/);
+  });
+});

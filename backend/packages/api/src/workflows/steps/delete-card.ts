@@ -2,6 +2,7 @@ import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
+import { pageAll } from '../../api/utils/page-all';
 import type { OddsRarity } from '@acme/odds-math';
 import {
   deleteSlabFile,
@@ -77,9 +78,10 @@ export const deleteCardStep = createStep(
       );
     }
 
-    const oddsRows = await packs.listPackOdds(
-      { card_id: input.handle },
-      { take: 1000 },
+    // PAGED — the compensation snapshot must hold EVERY pack row this card
+    // sits in, not the first 1,000.
+    const oddsRows = await pageAll((opts) =>
+      packs.listPackOdds({ card_id: input.handle }, opts),
     );
     // Queried by a single card handle, so every row is a card row: card_id and
     // rarity are non-null by that invariant (reward rows have card_id null).

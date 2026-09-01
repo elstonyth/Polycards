@@ -70,6 +70,15 @@ describe('buildCsp', () => {
     expect(csp).toMatch(/img-src[^;]*https:\/\/cdn\.jsdelivr\.net/);
   });
 
+  // next.config.ts allowlists these two for the optimizer because catalog rows
+  // can hot-link them; several surfaces render `image` as a bare <img> (or
+  // `unoptimized`), so the enforced policy must allow them too.
+  it('allows the hot-linked card/pack art hosts in img-src', () => {
+    const csp = buildCsp();
+    expect(csp).toMatch(/img-src[^;]*https:\/\/storage\.googleapis\.com/);
+    expect(csp).toMatch(/img-src[^;]*https:\/\/www\.pokemoncenter\.com/);
+  });
+
   it('includes the media CDN host when set', () => {
     process.env.NEXT_PUBLIC_MEDIA_HOST = 'cdn.example.com';
     const csp = buildCsp();

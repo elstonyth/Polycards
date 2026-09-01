@@ -15,8 +15,15 @@ type Notif = Record<string, unknown>;
 
 function harness(order: Record<string, unknown> | undefined) {
   const notifications: Notif[] = [];
+  const audits: Record<string, unknown>[] = [];
   const packsService = {
     listDeliveryOrders: async () => (order ? [order] : []),
+    // The single-order route audits a status change (mirrors bulk); capture
+    // the row so the notify specs can also pin "audited once" / "not audited".
+    createAdminActionAudits: async (rows: Record<string, unknown>[]) => {
+      audits.push(...rows);
+      return rows;
+    },
   };
   const scope = {
     resolve: (key: string) => {
@@ -34,13 +41,19 @@ function harness(order: Record<string, unknown> | undefined) {
   const json = jest.fn();
   return {
     notifications,
+    audits,
     // A body with none of status/tracking_number/proof_images fails
     // coerceDeliveryUpdateBody's "provide something" guard before this
     // route's notification wiring is ever reached. `status: 'shipped'` is
     // inert here (the workflow is mocked and ignores `input`) and, unlike a
     // `tracking_number` key, doesn't disturb the input.tracking_number
     // undefined check the route uses to decide "unchanged".
-    req: { params: { id: 'do_1' }, body: { status: 'shipped' }, scope } as never,
+    req: {
+      params: { id: 'do_1' },
+      body: { status: 'shipped' },
+      scope,
+      auth_context: { actor_id: 'admin_1' },
+    } as never,
     res: { json } as never,
     json,
   };
@@ -71,6 +84,16 @@ it('notifies the order owner when an admin ships it', async () => {
     data: { order_id: 'do_1', status: 'shipped', tracking_number: 'TRK1' },
     idempotency_key: 'delivery:do_1:shipped',
   });
+  // One audit row per status change, same shape as the bulk route.
+  expect(h.audits).toEqual([
+    expect.objectContaining({
+      admin_id: 'admin_1',
+      entity_type: 'delivery_order',
+      entity_id: 'do_1',
+      before: { status: 'processed' },
+      after: { status: 'shipped' },
+    }),
+  ]);
   expect(h.json).toHaveBeenCalledWith({
     order_id: 'do_1',
     status: 'shipped',

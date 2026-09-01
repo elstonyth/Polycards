@@ -3,6 +3,7 @@ import { Modules } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import { toOptionalMoney } from '../../../../modules/packs/money';
+import { pageAll } from '../../../utils/page-all';
 
 // GET /admin/gacha/eligible-products — inventory products that can be registered
 // as gacha cards (i.e. catalog products whose handle is not already a Card).
@@ -16,21 +17,12 @@ export async function GET(
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
   const productModule = req.scope.resolve(Modules.PRODUCT);
 
-  // Soft ceiling on the picker query. If either list hits it we're silently
-  // dropping rows (partial catalog). Log so the gap is visible; a follow-up can
-  // add real pagination here.
-  const CATALOG_CAP = 1000;
+  // Page both to exhaustion — a capped `registered` set would let already-
+  // registered products reappear as eligible past the cap (409 on register).
   const [products, cards] = await Promise.all([
-    productModule.listProducts({}, { take: CATALOG_CAP }),
-    packs.listCards({}, { take: CATALOG_CAP }),
+    pageAll((opts) => productModule.listProducts({}, opts)),
+    pageAll((opts) => packs.listCards({}, opts)),
   ]);
-  if (products.length === CATALOG_CAP || cards.length === CATALOG_CAP) {
-    (req.scope.resolve('logger') as { warn: (m: string) => void }).warn(
-      `[admin/gacha/eligible-products] hit the ${CATALOG_CAP}-row cap ` +
-        `(products=${products.length}, cards=${cards.length}); the picker may be ` +
-        `showing a partial catalog — add pagination.`,
-    );
-  }
 
   const registered = new Set(cards.map((c) => c.handle));
 

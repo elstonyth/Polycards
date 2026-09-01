@@ -59,6 +59,7 @@ export type RollMode = 'demo' | 'free-rip' | 'free-pack' | 'paid';
 const EMPTY_DEMO_POOL = 'No cards in this pack yet — check back soon.';
 const NO_FREE_RIP_CLAIM =
   'That free rip is no longer available — open the task again.';
+const NOTHING_OPENED = 'Nothing was opened — your balance is unchanged.';
 
 /**
  * The route this press takes, in priority order.
@@ -356,6 +357,12 @@ async function openRolls(
         needsAuth: res.needsAuth,
         needsTopUp: res.needsTopUp,
       };
+    }
+    // A 200 with no rolls (a stock race, a rule that filtered every roll) is
+    // a refusal, not a win: with no winner no reel settles, and the watchdog
+    // would park the machine in an empty review it can never leave.
+    if (res.rolls.length === 0) {
+      return { ok: false, kind: 'rejected', error: NOTHING_OPENED };
     }
     return {
       ok: true,

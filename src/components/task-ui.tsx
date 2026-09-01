@@ -6,8 +6,8 @@
  * banner + stat + history shapes, and a second copy would have drifted.
  */
 import Image from 'next/image';
-import Link from 'next/link';
-import { pillVariants } from '@/components/ui/pill';
+import { Pill } from '@/components/ui/pill';
+import { openAuth } from '@/components/AuthButton';
 import { cn } from '@/lib/utils';
 import { rm } from '@/lib/format';
 import type { ReferralSummary } from '@/lib/data/schemas';
@@ -118,12 +118,12 @@ export function SignInPrompt({ what }: { what: string }) {
       <p className="text-sm leading-relaxed text-neutral-400">
         Sign in to see {what}.
       </p>
-      <Link
-        href="/settings"
-        className={cn(pillVariants({ size: 'sm' }), 'mt-4')}
-      >
+      {/* The auth modal, not a link to /settings: the (account) layout would
+          bounce a guest to /?auth=login, landing them on Home after login
+          instead of the tab they were on. */}
+      <Pill size="sm" className="mt-4" onClick={() => openAuth('login')}>
         Sign in
-      </Link>
+      </Pill>
     </Panel>
   );
 }

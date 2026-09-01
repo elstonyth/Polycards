@@ -1,4 +1,5 @@
 import { generateKeyPairSync } from 'node:crypto';
+import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { aesEncrypt, signPayload } from '../../../../../modules/packs/globepay';
 import { POST } from '../route';
 
@@ -46,12 +47,24 @@ function harness(withdrawal: Record<string, unknown> | null) {
     listGlobePayWithdrawals: jest
       .fn()
       .mockResolvedValue(withdrawal ? [withdrawal] : []),
+    // Present only so the guard below can prove the recorder no longer goes
+    // through it — the generated update bumps updated_at, the sweep's submit
+    // clock (review 2026-09).
     updateGlobePayWithdrawals: jest.fn().mockResolvedValue(undefined),
   };
+  // The breadcrumb's raw writer.
+  const pg = { raw: jest.fn().mockResolvedValue(undefined) };
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const req = {
     body: {},
-    scope: { resolve: (k: string) => (k === 'logger' ? logger : packs) },
+    scope: {
+      resolve: (k: string) =>
+        k === 'logger'
+          ? logger
+          : k === ContainerRegistrationKeys.PG_CONNECTION
+            ? pg
+            : packs,
+    },
   } as never;
   const res = {
     statusCode: 0,
@@ -65,8 +78,11 @@ function harness(withdrawal: Record<string, unknown> | null) {
       return this;
     },
   };
-  return { packs, logger, req, res };
+  return { packs, pg, logger, req, res };
 }
+
+/** The recorder's write, as [sql, bindings]. */
+const recorded = (h: ReturnType<typeof harness>) => h.pg.raw.mock.calls;
 
 const run = async (
   h: ReturnType<typeof harness>,
@@ -135,11 +151,12 @@ describe('payout verification', () => {
     // no lookup at all — the property worth keeping is that a mismatched
     // merchant never reaches an approval, which the two assertions above
     // cover.
-    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
-      expect.objectContaining({
-        verify_outcome: expect.stringContaining('rejected: names merchant'),
-      }),
-    );
+    expect(recorded(h)).toEqual([
+      [
+        expect.stringContaining('verify_outcome'),
+        [expect.stringContaining('rejected: names merchant'), 'gpw_1'],
+      ],
+    ]);
   });
 
   it('approves a merchant code differing only in case', async () => {
@@ -160,21 +177,36 @@ describe('payout verification', () => {
     it('stamps success on an approved payout', async () => {
       const h = harness(pendingRow);
       await run(h, body(verification));
-      expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
-        id: 'gpw_1',
-        verify_outcome: expect.stringContaining('success'),
-      });
+      expect(recorded(h)).toEqual([
+        [
+          expect.stringMatching(
+            /^UPDATE globepay_withdrawal SET verify_outcome = \?/,
+          ),
+          [expect.stringContaining('success'), 'gpw_1'],
+        ],
+      ]);
+    });
+
+    // The sweep reads a pending row's updated_at as its SUBMIT clock, and
+    // the not-found refund of an ambiguous submit waits on it. A verification
+    // landing on such a row used to push that refund out by up to an hour
+    // per call (review 2026-09): the breadcrumb must not move the clock.
+    it('writes the breadcrumb WITHOUT touching updated_at, and not through the generated update', async () => {
+      const h = harness(pendingRow);
+      await run(h, body(verification));
+      const [sql] = recorded(h)[0];
+      expect(sql).not.toMatch(/updated_at/);
+      expect(sql).toContain('WHERE id = ?');
+      expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
     });
 
     it('names the amount when that is what refused it', async () => {
       const h = harness(pendingRow);
       await run(h, body({ ...verification, Amount: 500 }));
-      expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
-        id: 'gpw_1',
-        verify_outcome: expect.stringContaining(
-          'rejected: amount 500 != debited 50',
-        ),
-      });
+      expect(recorded(h)[0][1]).toEqual([
+        expect.stringContaining('rejected: amount 500 != debited 50'),
+        'gpw_1',
+      ]);
     });
 
     it('names the currency rather than blaming the amount', async () => {
@@ -183,31 +215,31 @@ describe('payout verification', () => {
       // The pre-095 route collapsed both checks into one message that always
       // said "amount", which would have sent an operator hunting a mismatch
       // that did not exist.
-      expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
-        id: 'gpw_1',
-        verify_outcome: expect.stringContaining('rejected: currency VND'),
-      });
+      expect(recorded(h)[0][1]).toEqual([
+        expect.stringContaining('rejected: currency VND'),
+        'gpw_1',
+      ]);
     });
 
     it('names the status when the row has already closed', async () => {
       const h = harness({ ...pendingRow, status: 'failed' });
       await run(h, body(verification));
-      expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
-        id: 'gpw_1',
-        verify_outcome: expect.stringContaining('rejected: row status is'),
-      });
+      expect(recorded(h)[0][1]).toEqual([
+        expect.stringContaining('rejected: row status is'),
+        'gpw_1',
+      ]);
     });
 
     it('writes nothing when no row matches the reference', async () => {
       const h = harness(null);
       const res = await run(h, body(verification));
       expect(res.statusCode).toBe(400);
-      expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+      expect(h.pg.raw).not.toHaveBeenCalled();
     });
 
     it('still approves when the recording write fails', async () => {
       const h = harness(pendingRow);
-      h.packs.updateGlobePayWithdrawals.mockRejectedValue(new Error('db down'));
+      h.pg.raw.mockRejectedValue(new Error('db down'));
       const res = await run(h, body(verification));
       // A breadcrumb must never cost a payout: anything but "success" here
       // makes GlobePay reject a withdrawal we had already debited.

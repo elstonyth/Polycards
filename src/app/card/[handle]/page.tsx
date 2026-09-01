@@ -11,9 +11,9 @@ import { CardDetailHydrated } from './CardDetailHydrated';
 export const dynamic = 'force-dynamic';
 
 // Dedupe the lookup across generateMetadata + the page render (one request).
-const resolveCard = cache((handle: string) =>
-  getCardResult(decodeURIComponent(handle)),
-);
+// The param is already percent-decoded by Next's route matcher — a second
+// decode threw URIError (→ 500) on a literal `%` where a 404 was meant.
+const resolveCard = cache((handle: string) => getCardResult(handle));
 
 export async function generateMetadata({
   params,

@@ -18,7 +18,12 @@ export function AuctionClock({
   reduced: boolean;
 }) {
   if (deadlineMs === null) return null;
-  const pct = Math.max(0, (secondsLeft / SELL_COUNTDOWN_SECS) * 100);
+  // Clamped both ways: sellSecondsLeft CEILS, so a deadline 30.4s out reads
+  // 31 and would paint the first frame wider than the track.
+  const pct = Math.min(
+    100,
+    Math.max(0, (secondsLeft / SELL_COUNTDOWN_SECS) * 100),
+  );
   const amber = secondsLeft <= 10;
   const pulsing = secondsLeft <= 5 && secondsLeft > 0;
   return (

@@ -1,4 +1,8 @@
-import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import type {
+  AuthenticatedMedusaRequest,
+  MedusaRequest,
+  MedusaResponse,
+} from '@medusajs/framework/http';
 import { Modules } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../modules/packs';
@@ -34,7 +38,7 @@ export async function GET(
 
 // POST /admin/delivery-orders/:id — advance status and/or set tracking.
 export async function POST(
-  req: MedusaRequest,
+  req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
   const { id } = req.params;
@@ -50,6 +54,25 @@ export async function POST(
   const { result } = await updateDeliveryOrderWorkflow(req.scope).run({
     input: { order_id: id, ...input },
   });
+
+  // Same audit row the bulk route writes, so a Manage-modal transition is as
+  // traceable as a bulk-bar one. Only on a status CHANGE — a tracking-only
+  // update returns the unchanged status and has nothing to record. 'edit' is
+  // the model's generic single-entity action (a new 'status' value would need
+  // an enum migration); the reason names the transition.
+  if (before && before.status !== result.status) {
+    await packs.createAdminActionAudits([
+      {
+        admin_id: req.auth_context.actor_id,
+        entity_type: 'delivery_order',
+        entity_id: id,
+        action: 'edit',
+        before: { status: before.status },
+        after: { status: result.status },
+        reason: `mark as ${result.status}`,
+      },
+    ]);
+  }
 
   await notifyDeliveryChange(req.scope, before, result, input.tracking_number);
 

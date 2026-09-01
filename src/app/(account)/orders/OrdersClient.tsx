@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Badge, INPUT_CLASS } from '@/components/account/ui';
 import { SlabImage } from '@/components/SlabImage';
@@ -9,6 +9,7 @@ import {
   addAddress,
   cancelDeliveryOrder,
   editDeliveryAddress,
+  getDeliveryOrders,
   type DeliveryOrderView,
   type AddressView,
   type AddAddressInput,
@@ -716,6 +717,22 @@ export default function OrdersClient({
   const [canceledIds, setCanceledIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
+
+  // Browser Back can restore the RSC payload rendered BEFORE a cancel, so
+  // `orders` re-seeds a canceled row as "Requested" with a live Cancel button.
+  // Re-sync on mount, as NotificationsClient does — never revalidatePath()
+  // from the action. A transport failure or !ok keeps the server seed.
+  useEffect(() => {
+    let live = true;
+    void getDeliveryOrders()
+      .then((r) => {
+        if (live && r.ok) setOrders(r.orders);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
 
   return (
     <>
