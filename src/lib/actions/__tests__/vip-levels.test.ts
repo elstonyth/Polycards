@@ -38,6 +38,59 @@ describe('mapVipLevels', () => {
   });
 });
 
+describe('VipSchema.next — a malformed teaser reward is harmless (#523)', () => {
+  const reward = { voucher_amount: 2, box_tier: 'a', frame_unlock: false };
+  const base = {
+    level: 2,
+    highest_level_ever: 2,
+    spend: 500,
+    levels: [{ level: 1, threshold: 0, reward }],
+  };
+
+  it('parses when next.reward is malformed, instead of blanking the card', () => {
+    const v = parseOne(VipSchema, {
+      ...base,
+      // frame_unlock missing and box_tier the wrong type. Before #523 `reward`
+      // was a required, un-caught field on `next`, so this failed the WHOLE
+      // parse -- parseOne null, getVip ok:false, and `{vipResult.ok && …}` on
+      // /me removed the level, the bar and "RM x more to LV y" outright, over
+      // data no surface has ever rendered.
+      next: {
+        level: 3,
+        threshold: 1000,
+        remaining: 500,
+        reward: { voucher_amount: 5, box_tier: 42 },
+      },
+    });
+    expect(v).not.toBeNull();
+    // The three fields /me actually reads all survive intact.
+    expect(v!.next).toMatchObject({
+      level: 3,
+      threshold: 1000,
+      remaining: 500,
+    });
+  });
+
+  it('parses when next.reward is missing entirely', () => {
+    const v = parseOne(VipSchema, {
+      ...base,
+      next: { level: 3, threshold: 1000, remaining: 500 },
+    });
+    expect(v!.next?.remaining).toBe(500);
+  });
+
+  it('still fails on a teaser field /me DOES read', () => {
+    // The looseObject is not a free pass: threshold feeds aria-valuemax and the
+    // bar's denominator, so a missing one must still refuse rather than render
+    // a nonsense bar.
+    const v = parseOne(VipSchema, {
+      ...base,
+      next: { level: 3, remaining: 500, reward },
+    });
+    expect(v).toBeNull();
+  });
+});
+
 describe('VipSchema.levels — one bad rung must not blank the card (#516)', () => {
   const reward = { voucher_amount: 2, box_tier: 'a', frame_unlock: false };
   const base = {

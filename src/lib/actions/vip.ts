@@ -2,12 +2,16 @@
 
 /**
  * VIP server action — reads the customer's VIP level, cumulative spend, and
- * next-rung reward teaser.
+ * next-rung threshold.
  *
  * Backend route: GET /store/vip
  * Wire shape (snake_case, all at root level):
  *   { level, highest_level_ever, spend, next: { level, threshold, remaining,
  *     reward: { voucher_amount, box_tier, frame_unlock } } | null }
+ *
+ * `next.reward` is on the wire but is neither validated nor mapped — nothing
+ * renders it, and declaring it let a malformed reward blank the LV card (#523).
+ * It stays documented here so the wire shape above is still the truth.
  */
 import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
@@ -20,17 +24,20 @@ import { parseOne, VipSchema } from '@/lib/data/schemas';
 import { mapVipLevels, type VipLevel } from './vip-map';
 export type { VipLevel } from './vip-map';
 
-export type VipReward = {
-  voucherAmount: number;
-  boxTier: string;
-  frameUnlock: boolean;
-};
-
+/**
+ * The next-rung teaser.
+ *
+ * No `reward`, deliberately. The backend sends one and every `levels` row
+ * carries the same block, but nothing on any surface has ever rendered the
+ * TEASER's copy of it -- me/page.tsx reads only level, threshold and
+ * remaining. Declaring it made a required, un-caught schema field out of dead
+ * data, which is how a malformed reward could blank the whole LV card (#523).
+ * VipLevel keeps its own reward: vip-benefits.ts genuinely reads that one.
+ */
 export type VipNext = {
   level: number;
   threshold: number;
   remaining: number;
-  reward: VipReward;
 };
 
 export type Vip = {
@@ -88,11 +95,6 @@ export async function getVip(): Promise<VipResult> {
               level: v.next.level,
               threshold: v.next.threshold,
               remaining: v.next.remaining,
-              reward: {
-                voucherAmount: v.next.reward.voucher_amount,
-                boxTier: v.next.reward.box_tier,
-                frameUnlock: v.next.reward.frame_unlock,
-              },
             }
           : null,
         levels: mapVipLevels(v.levels),
