@@ -49,8 +49,9 @@ medusaIntegrationTestRunner({
       // The runner resets the database between `it` blocks, so the publishable
       // key, the gacha fixtures, and any customers are recreated per test.
       beforeEach(async () => {
-        // The delivery paths resolve FX through the LENIENT resolveFxRate
-        // (pricing.ts), which caches for 30s process-wide — clear it so an
+        // The delivery FEE is priced on the STRICT resolveFxRateStrict now
+        // (review 2026-09), but sibling reads still go through the LENIENT
+        // resolveFxRate, which caches for 30s process-wide — clear it so an
         // earlier ledger spec's manual rate can't outlive its own file under
         // --runInBand and shadow the MANUAL_RATE seeded at the end of this
         // hook (same fix as Task 7's SP spec).

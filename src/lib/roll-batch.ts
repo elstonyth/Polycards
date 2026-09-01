@@ -139,8 +139,8 @@ export type RollResult =
    *  the caller must re-read the balance before re-enabling the button, and
    *  must never claim either a free spin or a charge. */
   | { ok: false; kind: 'unreachable' }
-  /** The server answered no. `needsTopUp` still implies a possible debit —
-   *  `openBatch` maps a post-charge enrichment failure to this too. */
+  /** The server answered no (or, for the batch route, answered yes with no
+   *  rolls). `needsTopUp` still implies a possible debit. */
   | {
       ok: false;
       kind: 'rejected';

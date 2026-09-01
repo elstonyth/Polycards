@@ -47,8 +47,9 @@ export const MAX_SETTLEMENT_LINE_MYR = 50_000;
 // hourly cron fires at the exact boundary, and a pack_open whose transaction
 // began a moment before it can still commit after the close's SELECT (READ
 // COMMITTED) — the unique week_start then blocks any recompute, so that
-// commission is gone for good (review 2026-09). The next hourly tick pays the
-// delay back; nothing reads the draft in those minutes.
+// commission is gone for good (review 2026-09). On the `0 * * * *` cron the
+// draft therefore lands on the NEXT tick (01:00 MYT, not 00:05); nothing reads
+// it in that hour.
 export const REFERRAL_CLOSE_GRACE_MS = 5 * 60 * 1000;
 
 // bindReferral's signup window. Attribution binds AT SIGNUP (spec) and the
