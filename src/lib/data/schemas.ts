@@ -497,9 +497,16 @@ export const WalletSchema = z.looseObject({
 
 // --- actions/vip.ts ---------------------------------------------------------
 
-/** One rung's reward payload. The `next` teaser and every `levels` row carry
- *  the SAME block, so it is declared once here — a renamed reward field is one
- *  edit, not two silently-diverging ones. */
+/** One rung's reward payload, as carried by every `levels` row.
+ *
+ *  The `next` teaser carries this block on the wire too, and used to declare it
+ *  here as well — as a REQUIRED, un-caught field. That gave a malformed teaser
+ *  reward the same blast radius #516 had: the whole VipSchema parse fails,
+ *  `parseOne` returns null, and `{vipResult.ok && …}` on /me deletes the LV
+ *  card. Unlike `levels[]`, which at least feeds the progress bar's floor,
+ *  nothing ever read `next.reward` — so it is no longer declared, mapped, or
+ *  typed (#523). `looseObject` still lets the field through untouched; it is
+ *  simply not validated, and cannot take the card down with it. */
 const vipReward = z.looseObject({
   voucher_amount: finite,
   box_tier: z.string(),
@@ -512,12 +519,14 @@ export const VipSchema = z.looseObject({
   level: finite,
   highest_level_ever: finite,
   spend: finite,
+  // `reward` is deliberately NOT declared here — see vipReward above. The
+  // backend still sends it and looseObject still passes it through; declaring
+  // it only gave a field nothing reads the power to blank the LV card (#523).
   next: z
     .looseObject({
       level: finite,
       threshold: finite,
       remaining: finite,
-      reward: vipReward,
     })
     .nullable(),
   /**
