@@ -2,10 +2,13 @@
 
 import Link from 'next/link';
 import { useState, type CSSProperties } from 'react';
+import { ChartNoAxesColumn } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
 import { FramedAvatar } from '@/components/FramedAvatar';
 import { SlabImage } from '@/components/SlabImage';
+import { TierBadge } from '@/components/TierBadge';
+import { PullGapsChart } from '@/components/PullGapsChart';
 import {
   isTopRarity,
   rarityRgb,
@@ -35,27 +38,10 @@ import type { RecentFeed, RecentPull } from '@/lib/data/packs';
  * the tier badge, the tab dot, the counter it describes, and — Glow Is
  * Earned — the border/glow of a chase-tier row.
  */
-type Tab = 'All' | Rarity;
-const TABS: readonly Tab[] = ['All', ...TOP_RARITIES];
-
-/** Badge ink: black on the light tiers, white on the one dark one (Rare's
- *  blue-600) — both sides clear 4.5:1 on their own tier fill. */
-function badgeInk(rgb: string): string {
-  const [r = 0, g = 0, b = 0] = rgb.split(',').map(Number);
-  return 0.299 * r + 0.587 * g + 0.114 * b > 120 ? '#0a0a0a' : '#fafafa';
-}
-
-function TierBadge({ rarity }: { rarity: Rarity }) {
-  const rgb = rarityRgb(rarity);
-  return (
-    <span
-      className="rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide"
-      style={{ backgroundColor: `rgb(${rgb})`, color: badgeInk(rgb) }}
-    >
-      {rarity}
-    </span>
-  );
-}
+/** The filter tabs, plus the stats chart (showgo's histogram sheet) as the
+ *  last, icon-only tab. */
+type Tab = 'All' | Rarity | 'Stats';
+const TABS: readonly Tab[] = ['All', ...TOP_RARITIES, 'Stats'];
 
 function Row({
   pull,
@@ -170,7 +156,7 @@ export function PullHistory({
   const { pulls, drought, pending } = useLiveRecentPulls(
     initial,
     packSlug,
-    tab === 'All' ? null : tab,
+    tab === 'All' || tab === 'Stats' ? null : tab,
   );
   const droughts = RARITY_ORDER.flatMap((r) => {
     const n = drought[r];
@@ -212,60 +198,76 @@ export function PullHistory({
       <div
         role="group"
         aria-label="Filter pulls by tier"
-        className="grid grid-cols-4 gap-1 rounded-full border border-white/10 bg-neutral-900 p-1 @2xl:max-w-md"
+        className="grid grid-cols-[repeat(4,minmax(0,1fr))_auto] gap-1 rounded-full border border-white/10 bg-neutral-900 p-1 @2xl:max-w-lg"
       >
         {TABS.map((t) => (
           <button
             key={t}
             type="button"
             aria-pressed={tab === t}
+            aria-label={t === 'Stats' ? 'Stats' : undefined}
             onClick={() => setTab(t)}
             className={cn(
-              'flex min-h-10 items-center justify-center gap-1.5 rounded-full px-2 text-[13px] font-semibold transition-colors',
+              'flex min-h-10 items-center justify-center gap-1 rounded-full px-1.5 text-[12px] font-semibold transition-colors',
+              t === 'Stats' && 'w-11',
               tab === t
                 ? 'bg-neutral-50 text-neutral-950'
                 : 'text-neutral-400 hover:text-white',
             )}
           >
-            {t !== 'All' && (
-              <span
-                aria-hidden
-                className="h-1.5 w-1.5 shrink-0 rounded-full"
-                style={{ backgroundColor: `rgb(${rarityRgb(t)})` }}
-              />
+            {t === 'Stats' ? (
+              <ChartNoAxesColumn className="h-4 w-4" aria-hidden />
+            ) : (
+              <>
+                {t !== 'All' && (
+                  <span
+                    aria-hidden
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: `rgb(${rarityRgb(t)})` }}
+                  />
+                )}
+                {t}
+              </>
             )}
-            {t}
           </button>
         ))}
       </div>
 
-      <div
-        aria-busy={pending}
-        className={cn(
-          'transition-opacity duration-300',
-          pending && 'opacity-50',
-        )}
-      >
-        {pulls.length === 0 ? (
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/60">
-            {tab === 'All'
-              ? 'No pulls yet — be the first to open a pack.'
-              : `No ${tab} pulls yet — the next rip could be the one.`}
-          </div>
-        ) : (
-          <ol key={tab} className="grid gap-2 @3xl:grid-cols-2">
-            {pulls.map((pull, i) => (
-              <li
-                key={pull.id}
-                className="pull-row-in motion-reduce:animate-none"
-                style={{ '--i': i } as CSSProperties}
-              >
-                <Row pull={pull} showPack={!packSlug} onSelect={onSelect} />
-              </li>
-            ))}
-          </ol>
-        )}
-      </div>
+      {tab === 'Stats' ? (
+        // Re-fetches when a drought counter moves — a new pull landed.
+        <PullGapsChart
+          packSlug={packSlug}
+          refreshKey={JSON.stringify(drought)}
+        />
+      ) : (
+        <div
+          aria-busy={pending}
+          className={cn(
+            'transition-opacity duration-300',
+            pending && 'opacity-50',
+          )}
+        >
+          {pulls.length === 0 ? (
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/60">
+              {tab === 'All'
+                ? 'No pulls yet — be the first to open a pack.'
+                : `No ${tab} pulls yet — the next rip could be the one.`}
+            </div>
+          ) : (
+            <ol key={tab} className="grid gap-2 @3xl:grid-cols-2">
+              {pulls.map((pull, i) => (
+                <li
+                  key={pull.id}
+                  className="pull-row-in motion-reduce:animate-none"
+                  style={{ '--i': i } as CSSProperties}
+                >
+                  <Row pull={pull} showPack={!packSlug} onSelect={onSelect} />
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
     </div>
   );
 }

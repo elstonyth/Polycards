@@ -267,6 +267,14 @@ One panel for the global feed and a pack's own history:
   (`pull-row-in`, keyed by pull id so the rest never re-run); a tab switch
   re-keys the list so the tier staggers in; a changed drought numeral
   re-lands. Pending refetches dim the list instead of blanking it.
+- **Stats tab** (`PullGapsChart.tsx`, the icon-only last tab) — one
+  horizontal bar per hit of a chase tier (pulls since the previous hit, the
+  winner's framed avatar beside it) under the current drought bar, against a
+  dashed reference line at the expected gap (1 / the pack's published rate,
+  else the observed mean) with the axis in its multiples. Winners' bars are
+  one neutral series; the tier hue marks only the drought bar, the line and
+  its tick (dataviz: text never wears the series colour). Bars grow from the
+  baseline (`bar-grow`), re-keyed per tier.
 
 ## 6. Do's and Don'ts
 

@@ -121,6 +121,30 @@ export const RecentPullSchema = z.looseObject({
   frame_url: z.string().nullable().optional(),
 });
 
+/** GET /store/pulls/gaps — the stats chart: a known tier, a finite current
+ *  drought, and hits with finite gaps. The header numbers are optional
+ *  nullables (no rate on the global feed, no mean with no hits). */
+export const PullGapsSchema = z.looseObject({
+  rarity,
+  current: finite,
+  pct: finite.nullable().optional(),
+  expected: finite.nullable().optional(),
+  avg: finite.nullable().optional(),
+  last20: finite.nullable().optional(),
+  hits: z.array(
+    z.looseObject({
+      id: z.string(),
+      gap: finite,
+      rolled_at: z.string(),
+      who: z.string().optional(),
+      seed: finite.nullable().optional(),
+      profile_handle: z.string().nullable().optional(),
+      avatar_url: z.string().nullable().optional(),
+      frame_url: z.string().nullable().optional(),
+    }),
+  ),
+});
+
 // --- data/leaderboard.ts ----------------------------------------------------
 
 /** GET /store/leaderboard row — name + finite points/volume/pulls. */
@@ -788,7 +812,14 @@ export const TaskEntrySchema = z.looseObject({
   kind: z.enum(['weekly', 'achievement']),
   title: z.string(),
   requirement: z.looseObject({ type: z.string() }),
-  reward: z.looseObject({ type: z.string() }),
+  reward: z.looseObject({
+    type: z.string(),
+    pack_id: z.string().optional(),
+    // A pack reward names its pack. Optional AND nullable: a backend that
+    // predates the field omits it, a deleted pack nulls it — both fall back
+    // to the bare "Free rip" label.
+    pack_title: z.string().nullable().optional(),
+  }),
   progress: z.looseObject({
     current: finite,
     target: finite,
@@ -805,6 +836,7 @@ export const PendingSpinSchema = z.looseObject({
   task_id: z.string(),
   title: z.string(),
   pack_id: z.string(),
+  pack_title: z.string().nullable().optional(),
 });
 
 export const TaskHubSchema = z.looseObject({

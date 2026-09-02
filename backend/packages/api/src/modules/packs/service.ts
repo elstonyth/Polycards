@@ -94,6 +94,7 @@ import {
   validateTaskReward,
   type TaskFacts,
   type TaskRequirement,
+  type HubReward,
   type TaskReward,
 } from './tasks';
 import ReferralAttribution from './models/referral-attribution';
@@ -1928,13 +1929,15 @@ class PacksModuleService extends MedusaService({
       task_id: string;
       title: string;
       pack_id: string;
+      /** The pack's title, so the row can say WHICH pack; null = pack gone. */
+      pack_title: string | null;
     }[];
     tasks: {
       id: string;
       kind: 'weekly' | 'achievement';
       title: string;
       requirement: TaskRequirement;
-      reward: TaskReward;
+      reward: HubReward;
       progress: { current: number; target: number; completed: boolean };
       claimed: boolean;
     }[];
@@ -2013,27 +2016,56 @@ class PacksModuleService extends MedusaService({
           (c.reward_snapshot as { pack_id?: string }).pack_id ?? '',
         ),
       }));
+    const live = defs.filter((d) => taskIsLive(d, at));
+    // Name every pack on show. "Free rip" alone told the player nothing about
+    // WHAT they were working towards; the row now carries the pack's title.
+    // One IN query, bounded by the task count, never the catalog. A missing
+    // pack resolves to null — the storefront falls back to the bare label,
+    // and the admin console is where "(missing)" gets said.
+    const packSlugs = new Set<string>(pendingSpins.map((s) => s.pack_id));
+    for (const d of live) {
+      const r = d.reward as { type?: string; pack_id?: string };
+      if (r.type === 'pack' && typeof r.pack_id === 'string') {
+        packSlugs.add(r.pack_id);
+      }
+    }
+    const packTitle = new Map<string, string>(
+      packSlugs.size
+        ? (
+            await this.listPacks(
+              { slug: [...packSlugs] },
+              { select: ['slug', 'title'], take: packSlugs.size },
+              sharedContext,
+            )
+          ).map((p) => [p.slug, p.title])
+        : [],
+    );
+    const hubReward = (reward: TaskReward): HubReward =>
+      reward.type === 'pack'
+        ? { ...reward, pack_title: packTitle.get(reward.pack_id) ?? null }
+        : reward;
     return {
       week_start: week.weekStartIso,
       // The Achievements & VIP tab shows the rung the reach_level tasks are
       // measured against; taskFactsFor already loaded it.
       vip_level: facts.vipLevel,
-      pending_spins: pendingSpins,
-      tasks: defs
-        .filter((d) => taskIsLive(d, at))
-        .map((d) => {
-          const requirement = d.requirement as unknown as TaskRequirement;
-          const periodKey = d.kind === 'weekly' ? week.weekStartIso : '';
-          return {
-            id: d.id,
-            kind: d.kind,
-            title: d.title,
-            requirement,
-            reward: d.reward as unknown as TaskReward,
-            progress: taskProgress(requirement, facts),
-            claimed: claimed.has(`${d.id}:${periodKey}`),
-          };
-        }),
+      pending_spins: pendingSpins.map((s) => ({
+        ...s,
+        pack_title: packTitle.get(s.pack_id) ?? null,
+      })),
+      tasks: live.map((d) => {
+        const requirement = d.requirement as unknown as TaskRequirement;
+        const periodKey = d.kind === 'weekly' ? week.weekStartIso : '';
+        return {
+          id: d.id,
+          kind: d.kind,
+          title: d.title,
+          requirement,
+          reward: hubReward(d.reward as unknown as TaskReward),
+          progress: taskProgress(requirement, facts),
+          claimed: claimed.has(`${d.id}:${periodKey}`),
+        };
+      }),
     };
   }
 
@@ -5586,6 +5618,88 @@ class PacksModuleService extends MedusaService({
       opts.packId ? [opts.packId, opts.packId, opts.rarity] : [opts.rarity],
     );
     return Number(rows[0]?.n ?? 0);
+  }
+
+  // The tier's hit history for the pull-history stats chart: every pull in
+  // scope numbered in roll order, each hit of the tier tagged with its GAP
+  // (pulls since the previous hit — the first hit counts from the start of
+  // the ledger). Returns the newest `limit` hits plus the scalars the chart
+  // header prints: the observed mean gap over ALL hits, the mean over the
+  // last 20, and the current drought (pulls since the newest hit — the same
+  // number pullDrought reports, derived here from the sequence instead).
+  // Two full scans of the scope's ledger per call — bounded by the route's
+  // 5s cache and by the chart only being fetched while its tab is open.
+  @InjectManager()
+  async pullGaps(
+    opts: { packId: string | null; rarity: string; limit: number },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    current: number;
+    avg: number | null;
+    last20: number | null;
+    hits: {
+      id: string;
+      customer_id: string | null;
+      rolled_at: string | Date;
+      gap: number;
+    }[];
+  }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const packSql = opts.packId ? ' AND p.pack_id = ?' : '';
+    const scopeParams = opts.packId
+      ? [opts.rarity, opts.packId]
+      : [opts.rarity];
+    const ctes =
+      'WITH seq AS (' +
+      '  SELECT p.id, p.customer_id, p.rolled_at, ' +
+      '         ROW_NUMBER() OVER (ORDER BY p.rolled_at ASC, p.id ASC) AS n, ' +
+      '         ' +
+      PULL_TIER_SQL +
+      ' AS hit ' +
+      '    FROM pull p ' +
+      "   WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
+      packSql +
+      '), hits AS (' +
+      '  SELECT id, customer_id, rolled_at, n, ' +
+      '         (n - COALESCE(LAG(n) OVER (ORDER BY n), 0))::int AS gap ' +
+      '    FROM seq WHERE hit ' +
+      ') ';
+    const [scalars] = await em.execute<
+      {
+        total: number | string;
+        last_n: number | string | null;
+        avg_gap: number | string | null;
+        last20_gap: number | string | null;
+      }[]
+    >(
+      ctes +
+        'SELECT (SELECT COUNT(*) FROM seq)::int AS total, ' +
+        '       (SELECT MAX(n) FROM hits)::int AS last_n, ' +
+        '       (SELECT AVG(gap) FROM hits)::float AS avg_gap, ' +
+        '       (SELECT AVG(gap) FROM (SELECT gap FROM hits ORDER BY n DESC LIMIT 20) t)::float AS last20_gap',
+      scopeParams,
+    );
+    const hits = await em.execute<
+      {
+        id: string;
+        customer_id: string | null;
+        rolled_at: string | Date;
+        gap: number | string;
+      }[]
+    >(
+      ctes +
+        'SELECT id, customer_id, rolled_at, gap FROM hits ORDER BY n DESC LIMIT ?',
+      [...scopeParams, opts.limit],
+    );
+    const num = (v: number | string | null | undefined): number | null =>
+      v == null ? null : Number(v);
+    return {
+      current: Number(scalars?.total ?? 0) - Number(scalars?.last_n ?? 0),
+      avg: num(scalars?.avg_gap),
+      last20: num(scalars?.last20_gap),
+      hits: hits.map((h) => ({ ...h, gap: Number(h.gap) })),
+    };
   }
 
   // Public-profile stats aggregated in the DB (plan 022) — replaces the

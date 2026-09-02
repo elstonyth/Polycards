@@ -59,3 +59,32 @@ for (const [w, h] of [
   await shoot(`${BASE}/slots/${SLUG}`, 'pack', w, h);
 }
 await b.close();
+
+// Stats tab — the gaps chart: header numbers, bars, the reference line.
+{
+  const b2 = await chromium.launch();
+  for (const [w, h] of [
+    [390, 844],
+    [1440, 900],
+  ]) {
+    const p = await b2.newPage({ viewport: { width: w, height: h } });
+    await p.goto(`${BASE}/slots/${SLUG}`, {
+      waitUntil: 'load',
+      timeout: 60_000,
+    });
+    const panel = p.locator('[aria-label="Filter pulls by tier"]').first();
+    await panel.waitFor({ timeout: 30_000 });
+    await panel.scrollIntoViewIfNeeded();
+    await panel.getByRole('button', { name: 'Stats' }).click();
+    const chart = panel.locator('xpath=following-sibling::div[1]');
+    await chart.locator('ol:not([aria-busy])').waitFor({ timeout: 15_000 });
+    await p.waitForTimeout(1_200);
+    const header = (await chart.locator('p').first().textContent())?.trim();
+    const bars = await chart.locator('ol > li').count();
+    const out = `docs/research/pull-history-pack-${w}-stats.png`;
+    await panel.locator('xpath=..').screenshot({ path: out });
+    console.log(`[stats ${w}] header="${header}" bars=${bars} -> ${out}`);
+    await p.close();
+  }
+  await b2.close();
+}

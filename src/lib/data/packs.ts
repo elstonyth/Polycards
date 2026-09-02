@@ -26,6 +26,7 @@ import {
   PackRowSchema,
   OddsEntrySchema,
   RecentPullSchema,
+  PullGapsSchema,
 } from '@/lib/data/schemas';
 import {
   CATEGORIES as CATEGORY_META,
@@ -568,5 +569,75 @@ export async function getRecentPulls(
   } catch (error) {
     logger.error('[packs] failed to load recent pulls:', error);
     return EMPTY_FEED;
+  }
+}
+
+// --- Pull gaps: the stats chart (GET /store/pulls/gaps) ---------------------
+
+/** One hit of the tier on the chart: how many pulls it took since the
+ *  previous hit, and who landed it (the feed's display fields). */
+export interface PullGapHit {
+  id: string;
+  gap: number;
+  rolledAt: string;
+  who: string;
+  profileHandle: string | null;
+  avatar: string | null;
+  frame: string | null;
+}
+
+export interface PullGaps {
+  rarity: Rarity;
+  /** The pack's published rate for the tier (%); null on the global feed. */
+  pct: number | null;
+  /** 1 / pct in draws — where the reference line sits; null without a rate. */
+  expected: number | null;
+  /** Observed mean gap over every hit on record; null with no hits. */
+  avg: number | null;
+  /** Observed mean over the newest 20 hits. */
+  last20: number | null;
+  /** Pulls since the newest hit — the drought bar. */
+  current: number;
+  /** Newest first. */
+  hits: PullGapHit[];
+}
+
+/**
+ * The tier's hit history for the stats chart — the global ledger, or one
+ * pack's with `packSlug`. Null (never mock) on a backend failure or a
+ * malformed body: the chart renders its unavailable state.
+ */
+export async function getPullGaps(
+  rarity: Rarity,
+  packSlug?: string,
+): Promise<PullGaps | null> {
+  try {
+    const q = new URLSearchParams({ rarity });
+    if (packSlug) q.set('pack_id', packSlug);
+    const parsed = parseOne(
+      PullGapsSchema,
+      await sdk.client.fetch(`/store/pulls/gaps?${q.toString()}`),
+    );
+    if (!parsed) return null;
+    return {
+      rarity: parsed.rarity as Rarity,
+      pct: parsed.pct ?? null,
+      expected: parsed.expected ?? null,
+      avg: parsed.avg ?? null,
+      last20: parsed.last20 ?? null,
+      current: parsed.current,
+      hits: parsed.hits.map((h) => ({
+        id: h.id,
+        gap: h.gap,
+        rolledAt: h.rolled_at,
+        who: h.who ?? 'Anonymous',
+        profileHandle: h.profile_handle ?? null,
+        avatar: h.avatar_url ?? (h.seed != null ? avatarForSeed(h.seed) : null),
+        frame: h.frame_url ?? null,
+      })),
+    };
+  } catch (error) {
+    logger.error('[packs] failed to load pull gaps:', error);
+    return null;
   }
 }

@@ -292,6 +292,25 @@
   }
 }
 
+/* Stats chart bars (PullGapsChart.tsx) grow out of the baseline, staggered
+   by row — a scale, so the bar's final width (the data) never changes, only
+   how it arrives. Re-keyed per tier so a toggle replays it. */
+@keyframes barGrow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@layer utilities {
+  .bar-grow {
+    transform-origin: left center;
+    animation: barGrow 640ms var(--ease-out-expo) backwards;
+    animation-delay: calc(var(--i, 0) * 40ms);
+  }
+}
+
 /* Modal enter animations */
 @keyframes fadeIn {
   from {
