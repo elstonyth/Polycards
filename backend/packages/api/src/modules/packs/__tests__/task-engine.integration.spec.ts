@@ -224,7 +224,17 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // can come back to it.
         const hub = await service.taskHubFor({ customerId: 'cus_t4' });
         expect(hub.pending_spins).toHaveLength(1);
-        expect(hub.pending_spins[0]).toMatchObject({ pack_id: 'bronze' });
+        // Both surfaces NAME the pack — the player must know which pack the
+        // free rip is, not just that there is one.
+        expect(hub.pending_spins[0]).toMatchObject({
+          pack_id: 'bronze',
+          pack_title: 'Bronze Pack',
+        });
+        expect(hub.tasks.find((t) => t.id === id)?.reward).toEqual({
+          type: 'pack',
+          pack_id: 'bronze',
+          pack_title: 'Bronze Pack',
+        });
       });
 
       it('spinning rolls exactly once, however many times it is retried', async () => {
