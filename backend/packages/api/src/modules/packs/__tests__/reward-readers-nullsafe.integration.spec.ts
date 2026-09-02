@@ -40,6 +40,7 @@ import AdminActionAudit from '../models/admin-action-audit';
 import VipMemberState from '../models/vip-member-state';
 import VipRewardGrant from '../models/vip-reward-grant';
 import NotificationRead from '../models/notification-read';
+import SiteSettings from '../models/site-settings';
 
 // Import route handlers under test (same pattern as C2)
 import { GET as vaultGET } from '../../../api/store/vault/route';
@@ -70,6 +71,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
     VipMemberState,
     VipRewardGrant,
     NotificationRead,
+    // pulls/recent resolves the avatar-frame catalog (siteSettings) per row.
+    SiteSettings,
   ],
   testSuite: ({ service }) => {
     const mkIds = (tag: string) => ({

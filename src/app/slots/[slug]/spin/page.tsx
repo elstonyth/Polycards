@@ -46,7 +46,7 @@ export default async function SlotSpinPage({
   return (
     <SlotMachineClient
       pack={base.pack}
-      recentPulls={recentPulls}
+      recentPulls={recentPulls.pulls}
       count={count}
       publishedOdds={detail?.publishedOdds ?? null}
       // The reel flickers ONLY these cards' Pokémon (decoys tied to a reward),

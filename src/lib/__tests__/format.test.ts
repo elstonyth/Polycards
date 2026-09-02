@@ -6,6 +6,7 @@ import {
   num,
   relativeTime,
   timeUntil,
+  pullTime,
   affordable,
 } from '../format';
 
@@ -115,5 +116,21 @@ describe('timeUntil', () => {
     expect(timeUntil('2026-06-16T12:00:00Z', now)).toBeNull();
     expect(timeUntil('2026-06-16T11:00:00Z', now)).toBeNull();
     expect(timeUntil('not-a-date', now)).toBeNull();
+  });
+});
+
+describe('pullTime — fixed-MYT absolute roll time', () => {
+  it('prints day, short month and a 12h clock with seconds in UTC+8', () => {
+    // 13:38 UTC = 21:38 MYT, same day.
+    expect(pullTime('2026-09-02T13:38:44.000Z')).toBe('02 Sep, 09:38:44 PM');
+    // 17:05 UTC = 01:05 MYT next day — the date rolls with the shift.
+    expect(pullTime('2026-12-31T17:05:00.000Z')).toBe('01 Jan, 01:05:00 AM');
+    // Noon and midnight read 12, never 0.
+    expect(pullTime('2026-09-02T04:00:00.000Z')).toBe('02 Sep, 12:00:00 PM');
+    expect(pullTime('2026-09-02T16:00:00.000Z')).toBe('03 Sep, 12:00:00 AM');
+  });
+
+  it('is empty for garbage rather than "NaN NaN"', () => {
+    expect(pullTime('not-a-date')).toBe('');
   });
 });

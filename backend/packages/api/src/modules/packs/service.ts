@@ -11,6 +11,7 @@ import {
 import type { Context, HttpTypes } from '@medusajs/framework/types';
 import { PCT_SCALE } from '@acme/odds-math';
 import type { OddsRarity, TierRangeMap } from '@acme/odds-math';
+import type { Rarity } from './rarity';
 import {
   validateDeliveryRequest,
   validateDeliveryStatusTransition,
@@ -287,6 +288,12 @@ export type AuditRow = {
 type LedgerSqlManager = {
   execute<T = unknown>(query: string, params?: unknown[]): Promise<T>;
 };
+
+/** Tier predicate for a `pull p` row: its (pack, card) odds row carries the
+ *  given rarity (`?`). Rarity is PER-PACK, so the join is on both keys. */
+const PULL_TIER_SQL =
+  'EXISTS (SELECT 1 FROM pack_odds o WHERE o.pack_id = p.pack_id ' +
+  '  AND o.card_id = p.card_id AND o.deleted_at IS NULL AND o.rarity = ?)';
 
 /** The globepay_withdrawal.status domain, derived from the model's
  *  WITHDRAWAL_STATUSES for the raw-SQL claim below (raw SQL carries no model
@@ -2062,10 +2069,7 @@ class PacksModuleService extends MedusaService({
     | {
         claimed: false;
         reason:
-          | 'not_found'
-          | 'not_completed'
-          | 'already_claimed'
-          | 'window_closed';
+          'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
       }
   > {
     // Deliberately NOT filtered on active: retiring a task must never strand
@@ -5515,6 +5519,166 @@ class PacksModuleService extends MedusaService({
     }));
   }
 
+  // The public live-pulls feed (GET /store/pulls/recent), newest first, with
+  // an optional TIER filter. Raw SQL rather than listPulls because the tier is
+  // a join: rarity is a PACK-level property (pack_odds), not a column on pull,
+  // so "the last N Immortal pulls" needs the (pack_id, card_id) odds row.
+  // Only source='pack' rows — the same positive filter as leaderboardTop
+  // (reward prizes are private vault items, free welcome pulls a signup gift).
+  // The scan rides IDX_pull_rolled_at and stops at `limit` matches; a tier
+  // nobody has hit yet walks the whole ledger, once per 5s (the route's cache).
+  @InjectManager()
+  async recentPullRows(
+    opts: { packId: string | null; rarity: Rarity | null; limit: number },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    {
+      id: string;
+      customer_id: string | null;
+      pack_id: string;
+      card_id: string;
+      rolled_at: string | Date;
+    }[]
+  > {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const params: unknown[] = [];
+    let where = "p.deleted_at IS NULL AND p.source = 'pack'";
+    if (opts.packId) {
+      where += ' AND p.pack_id = ?';
+      params.push(opts.packId);
+    }
+    if (opts.rarity) {
+      where += ' AND ' + PULL_TIER_SQL;
+      params.push(opts.rarity);
+    }
+    params.push(opts.limit);
+    // id as the tie-break: a batch open stamps its cards with one timestamp,
+    // and without it those rows could reorder between polls.
+    return await em.execute(
+      'SELECT p.id, p.customer_id, p.pack_id, p.card_id, p.rolled_at ' +
+        '  FROM pull p WHERE ' +
+        where +
+        ' ORDER BY p.rolled_at DESC, p.id DESC LIMIT ?',
+      params,
+    );
+  }
+
+  // "N packs without <tier>": pulls (one per pack opened) since the last pull
+  // of that tier — over the whole ledger, or one pack. A tier never hit counts
+  // every pull on record, which is the honest number. "Since" is in
+  // (rolled_at, id) order — the same order pullGaps numbers the ledger in —
+  // so a hit inside a batch open (siblings share one rolled_at) counts the
+  // same siblings here as on the chart's drought bar.
+  @InjectManager()
+  async pullDrought(
+    opts: { packId: string | null; rarity: Rarity },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<number> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const packSql = opts.packId ? ' AND p.pack_id = ?' : '';
+    const rows = await em.execute<{ n: number | string }[]>(
+      'WITH last_hit AS (' +
+        '  SELECT p.rolled_at, p.id FROM pull p ' +
+        "   WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
+        packSql +
+        '     AND ' +
+        PULL_TIER_SQL +
+        '   ORDER BY p.rolled_at DESC, p.id DESC LIMIT 1' +
+        ') ' +
+        'SELECT COUNT(*)::int AS n FROM pull p ' +
+        " WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
+        packSql +
+        '   AND (NOT EXISTS (SELECT 1 FROM last_hit) ' +
+        '        OR (p.rolled_at, p.id) > (SELECT rolled_at, id FROM last_hit))',
+      opts.packId ? [opts.packId, opts.rarity, opts.packId] : [opts.rarity],
+    );
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  // The tier's hit history for the pull-history stats chart: every pull in
+  // scope numbered in roll order, each hit of the tier tagged with its GAP
+  // (pulls since the previous hit — the first hit counts from the start of
+  // the ledger). Returns the newest `limit` hits plus the scalars the chart
+  // header prints: the observed mean gap over ALL hits, the mean over the
+  // last 20, and the current drought (pulls since the newest hit — the same
+  // number pullDrought reports, derived here from the sequence instead).
+  // Two full scans of the scope's ledger per call — bounded by the route's
+  // 5s cache and by the chart only being fetched while its tab is open.
+  @InjectManager()
+  async pullGaps(
+    opts: { packId: string | null; rarity: Rarity; limit: number },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    current: number;
+    avg: number | null;
+    last20: number | null;
+    hits: {
+      id: string;
+      customer_id: string | null;
+      rolled_at: string | Date;
+      gap: number;
+    }[];
+  }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const packSql = opts.packId ? ' AND p.pack_id = ?' : '';
+    const scopeParams = opts.packId
+      ? [opts.rarity, opts.packId]
+      : [opts.rarity];
+    const ctes =
+      'WITH seq AS (' +
+      '  SELECT p.id, p.customer_id, p.rolled_at, ' +
+      '         ROW_NUMBER() OVER (ORDER BY p.rolled_at ASC, p.id ASC) AS n, ' +
+      '         ' +
+      PULL_TIER_SQL +
+      ' AS hit ' +
+      '    FROM pull p ' +
+      "   WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
+      packSql +
+      '), hits AS (' +
+      '  SELECT id, customer_id, rolled_at, n, ' +
+      '         (n - COALESCE(LAG(n) OVER (ORDER BY n), 0))::int AS gap ' +
+      '    FROM seq WHERE hit ' +
+      ') ';
+    const [scalars] = await em.execute<
+      {
+        total: number | string;
+        last_n: number | string | null;
+        avg_gap: number | string | null;
+        last20_gap: number | string | null;
+      }[]
+    >(
+      ctes +
+        'SELECT (SELECT COUNT(*) FROM seq)::int AS total, ' +
+        '       (SELECT MAX(n) FROM hits)::int AS last_n, ' +
+        '       (SELECT AVG(gap) FROM hits)::float AS avg_gap, ' +
+        '       (SELECT AVG(gap) FROM (SELECT gap FROM hits ORDER BY n DESC LIMIT 20) t)::float AS last20_gap',
+      scopeParams,
+    );
+    const hits = await em.execute<
+      {
+        id: string;
+        customer_id: string | null;
+        rolled_at: string | Date;
+        gap: number | string;
+      }[]
+    >(
+      ctes +
+        'SELECT id, customer_id, rolled_at, gap FROM hits ORDER BY n DESC LIMIT ?',
+      [...scopeParams, opts.limit],
+    );
+    const num = (v: number | string | null | undefined): number | null =>
+      v == null ? null : Number(v);
+    return {
+      current: Number(scalars?.total ?? 0) - Number(scalars?.last_n ?? 0),
+      avg: num(scalars?.avg_gap),
+      last20: num(scalars?.last20_gap),
+      hits: hits.map((h) => ({ ...h, gap: Number(h.gap) })),
+    };
+  }
+
   // Public-profile stats aggregated in the DB (plan 022) — replaces the
   // route's 20k-row JS fold. Same execution shape as leaderboardTop, scoped
   // to one customer. Semantics pinned to the old in-route fold:
@@ -8120,8 +8284,7 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      | SettleSnapshot
-      | undefined;
+      SettleSnapshot | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME
@@ -8536,8 +8699,7 @@ class PacksModuleService extends MedusaService({
   private async reserveSettledStock(
     winner: SettledWinner,
     decrementStock:
-      | ((handle: string, qty: number) => Promise<boolean>)
-      | undefined,
+      ((handle: string, qty: number) => Promise<boolean>) | undefined,
     weekStartIso: string,
   ): Promise<void> {
     if (!decrementStock) return;
