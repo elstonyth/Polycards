@@ -2018,10 +2018,8 @@ class PacksModuleService extends MedusaService({
     // and the admin console is where "(missing)" gets said.
     const packSlugs = new Set<string>(pendingSpins.map((s) => s.pack_id));
     for (const d of live) {
-      const r = d.reward as { type?: string; pack_id?: string };
-      if (r.type === 'pack' && typeof r.pack_id === 'string') {
-        packSlugs.add(r.pack_id);
-      }
+      const r = d.reward as unknown as TaskReward;
+      if (r.type === 'pack') packSlugs.add(r.pack_id);
     }
     const packTitle = new Map<string, string>(
       packSlugs.size

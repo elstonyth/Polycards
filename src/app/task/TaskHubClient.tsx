@@ -41,38 +41,25 @@ function rewardLabel(reward: TaskEntry['reward']): string {
     return rm(reward.amount_myr);
   }
   // A free rip names its pack — "Free rip · Bronze Pack" — so the player
-  // knows what they are working towards before they claim it.
-  if (reward.type === 'pack' && reward.pack_title) {
-    return `Free rip · ${reward.pack_title}`;
+  // knows what they are working towards before they claim it. The slug is
+  // the fallback (a backend that predates pack_title, or a pack that has
+  // since been deleted): never a bare "Free rip" again.
+  if (reward.type === 'pack' && (reward.pack_title || reward.pack_id)) {
+    return `Free rip · ${reward.pack_title || reward.pack_id}`;
   }
   return REWARD_LABEL[reward.type] ?? 'Reward';
 }
 
-const REWARD_CHIP =
-  'inline-flex min-w-0 items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-neutral-300';
-
+// Deliberately NOT a link to the pack page: a draft or deleted pack 404s
+// there, and an 11px inline chip cannot meet the focus-ring / 44px tap-target
+// rules DESIGN.md sets for interactive elements. The name is the point.
 function RewardChip({ reward }: { reward: TaskEntry['reward'] }) {
-  const label = rewardLabel(reward);
-  const body = (
-    <>
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-neutral-300">
       <Gift className="h-3 w-3 shrink-0" aria-hidden />
-      <span className="truncate">{label}</span>
-    </>
+      <span className="truncate">{rewardLabel(reward)}</span>
+    </span>
   );
-  // A pack reward links to its pack page — the cards, the odds, the chase —
-  // so "which pack?" is one tap away instead of a guess.
-  if (reward.type === 'pack' && reward.pack_id) {
-    return (
-      <Link
-        href={`/slots/${encodeURIComponent(reward.pack_id)}`}
-        className={cn(REWARD_CHIP, 'hover:bg-white/10 hover:text-white')}
-        aria-label={`${label} — view pack`}
-      >
-        {body}
-      </Link>
-    );
-  }
-  return <span className={REWARD_CHIP}>{body}</span>;
 }
 
 // Every way a claim can decline, in the customer's words.
@@ -266,9 +253,9 @@ function WeeklyTab({
                 >
                   <span className="min-w-0 flex-1 text-xs text-neutral-400">
                     <span className="block truncate">{s.title}</span>
-                    {s.pack_title && (
+                    {(s.pack_title || s.pack_id) && (
                       <span className="block truncate text-neutral-200">
-                        {s.pack_title}
+                        {s.pack_title || s.pack_id}
                       </span>
                     )}
                   </span>
