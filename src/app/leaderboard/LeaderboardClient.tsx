@@ -150,7 +150,7 @@ export default function LeaderboardClient({
                       {entry.handle ? (
                         <Link
                           href={`/profile/${entry.handle}`}
-                          className="block truncate text-sm font-semibold text-white hover:underline"
+                          className="-my-1 block truncate py-1 text-sm font-semibold text-white hover:underline"
                         >
                           {entry.name}
                           {isOwn && (

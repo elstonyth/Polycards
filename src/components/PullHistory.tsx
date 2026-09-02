@@ -196,7 +196,10 @@ export function PullHistory({
       <div
         role="group"
         aria-label="Filter pulls by tier"
-        className="grid grid-cols-[repeat(4,minmax(0,1fr))_auto] gap-1 rounded-full border border-white/10 bg-neutral-900 p-1 @2xl:max-w-lg"
+        // Below a 320px container (iPhone SE) five equal columns can't hold
+        // "Legendary", so the strip scrolls sideways instead of bleeding into
+        // its neighbours; from @xs up it is the equal-column grid.
+        className="flex gap-1 overflow-x-auto rounded-full border border-white/10 bg-neutral-900 p-1 @xs:grid @xs:grid-cols-[repeat(4,minmax(0,1fr))_auto] @xs:overflow-visible @2xl:max-w-lg [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {TABS.map((t) => (
           <button
@@ -205,8 +208,11 @@ export function PullHistory({
             aria-pressed={tab === t}
             aria-label={t === 'Stats' ? 'Stats' : undefined}
             onClick={() => setTab(t)}
+            // 11px under a 384px container is a deliberate step below the
+            // 12px Label token: five tabs share ~300px at 360-wide phones
+            // and "Legendary" doesn't fit at 12px.
             className={cn(
-              'flex min-h-10 items-center justify-center gap-1 rounded-full px-1 text-[11px] font-semibold transition-colors @sm:text-[12px]',
+              'flex min-h-10 shrink-0 items-center justify-center gap-1 rounded-full px-1.5 text-[11px] font-semibold transition-colors @xs:px-1 @sm:text-[12px]',
               'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
               t === 'Stats' && 'w-11',
               tab === t

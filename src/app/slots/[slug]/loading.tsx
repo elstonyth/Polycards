@@ -12,7 +12,7 @@ export default function PackDetailLoading() {
 
       <div className="mb-4 h-4 w-24 rounded bg-white/10" />
 
-      <div className="grid items-start gap-6 lg:grid-cols-[1.55fr_1fr]">
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[1.55fr_1fr]">
         {/* Stage */}
         <div className="aspect-[4/3] rounded-2xl border border-white/10 bg-white/5" />
         {/* Configurator */}
