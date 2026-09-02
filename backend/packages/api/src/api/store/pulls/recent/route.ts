@@ -102,7 +102,10 @@ export async function GET(
           packs.pullDrought({ packId, rarity: tier }),
         ),
       ),
-      packs.siteSettings(),
+      // Frame catalog — display chrome only, so a failed read degrades the
+      // rows to frameless rather than 500ing a public feed (same stance as
+      // the customer-module resolve below).
+      packs.siteSettings().catch(() => ({ avatar_frames: {} })),
     ]);
   const drought = Object.fromEntries(
     DROUGHT_TIERS.map((tier, i) => [tier, droughtCounts[i]]),
