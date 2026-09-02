@@ -36,6 +36,10 @@ const eslintConfig = defineConfig([
     // only import form, so @typescript-eslint/no-require-imports flagged it as
     // two hard errors and made `npm run lint` exit 1 on a clean checkout.
     '.agents/**',
+    // Promo-video capture scratch (gitignored, .gitignore:154) — one-off
+    // Playwright shoot scripts and their asset output, same local-only
+    // category as the entries above.
+    'videos/**',
   ]),
   // The scripts/ dir is one-off Playwright capture/measure/QA tooling (see
   // CLAUDE.md "the clone workflow"), not product code. Linting it for unused

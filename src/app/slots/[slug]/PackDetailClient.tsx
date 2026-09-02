@@ -44,7 +44,6 @@ import {
 import { isTopRarity } from '@/lib/rarity';
 import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
-import { CardTile } from '@/components/cards/CardTile';
 import {
   CardDetailOverlay,
   type CardSeed,
