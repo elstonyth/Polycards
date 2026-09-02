@@ -94,7 +94,6 @@ import {
   validateTaskReward,
   type TaskFacts,
   type TaskRequirement,
-  type HubReward,
   type TaskReward,
 } from './tasks';
 import ReferralAttribution from './models/referral-attribution';
@@ -1929,15 +1928,13 @@ class PacksModuleService extends MedusaService({
       task_id: string;
       title: string;
       pack_id: string;
-      /** The pack's title, so the row can say WHICH pack; null = pack gone. */
-      pack_title: string | null;
     }[];
     tasks: {
       id: string;
       kind: 'weekly' | 'achievement';
       title: string;
       requirement: TaskRequirement;
-      reward: HubReward;
+      reward: TaskReward;
       progress: { current: number; target: number; completed: boolean };
       claimed: boolean;
     }[];
@@ -2016,56 +2013,27 @@ class PacksModuleService extends MedusaService({
           (c.reward_snapshot as { pack_id?: string }).pack_id ?? '',
         ),
       }));
-    const live = defs.filter((d) => taskIsLive(d, at));
-    // Name every pack on show. "Free rip" alone told the player nothing about
-    // WHAT they were working towards; the row now carries the pack's title.
-    // One IN query, bounded by the task count, never the catalog. A missing
-    // pack resolves to null — the storefront falls back to the bare label,
-    // and the admin console is where "(missing)" gets said.
-    const packSlugs = new Set<string>(pendingSpins.map((s) => s.pack_id));
-    for (const d of live) {
-      const r = d.reward as { type?: string; pack_id?: string };
-      if (r.type === 'pack' && typeof r.pack_id === 'string') {
-        packSlugs.add(r.pack_id);
-      }
-    }
-    const packTitle = new Map<string, string>(
-      packSlugs.size
-        ? (
-            await this.listPacks(
-              { slug: [...packSlugs] },
-              { select: ['slug', 'title'], take: packSlugs.size },
-              sharedContext,
-            )
-          ).map((p) => [p.slug, p.title])
-        : [],
-    );
-    const hubReward = (reward: TaskReward): HubReward =>
-      reward.type === 'pack'
-        ? { ...reward, pack_title: packTitle.get(reward.pack_id) ?? null }
-        : reward;
     return {
       week_start: week.weekStartIso,
       // The Achievements & VIP tab shows the rung the reach_level tasks are
       // measured against; taskFactsFor already loaded it.
       vip_level: facts.vipLevel,
-      pending_spins: pendingSpins.map((s) => ({
-        ...s,
-        pack_title: packTitle.get(s.pack_id) ?? null,
-      })),
-      tasks: live.map((d) => {
-        const requirement = d.requirement as unknown as TaskRequirement;
-        const periodKey = d.kind === 'weekly' ? week.weekStartIso : '';
-        return {
-          id: d.id,
-          kind: d.kind,
-          title: d.title,
-          requirement,
-          reward: hubReward(d.reward as unknown as TaskReward),
-          progress: taskProgress(requirement, facts),
-          claimed: claimed.has(`${d.id}:${periodKey}`),
-        };
-      }),
+      pending_spins: pendingSpins,
+      tasks: defs
+        .filter((d) => taskIsLive(d, at))
+        .map((d) => {
+          const requirement = d.requirement as unknown as TaskRequirement;
+          const periodKey = d.kind === 'weekly' ? week.weekStartIso : '';
+          return {
+            id: d.id,
+            kind: d.kind,
+            title: d.title,
+            requirement,
+            reward: d.reward as unknown as TaskReward,
+            progress: taskProgress(requirement, facts),
+            claimed: claimed.has(`${d.id}:${periodKey}`),
+          };
+        }),
     };
   }
 
