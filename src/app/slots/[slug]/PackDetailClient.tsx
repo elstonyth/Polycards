@@ -19,7 +19,7 @@ import { rm, affordable } from '@/lib/format';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { openAuth } from '@/components/AuthButton';
 import Reveal from '@/components/Reveal';
-import type { PackDetail, RecentPull } from '@/lib/data/packs';
+import type { PackDetail, RecentFeed } from '@/lib/data/packs';
 import {
   type Pack,
   type ResolvedPack,
@@ -42,14 +42,13 @@ import {
   tierValueRanges,
 } from '@/lib/packs-format';
 import { isTopRarity } from '@/lib/rarity';
-import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
+import { PullHistory } from '@/components/PullHistory';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import {
   CardDetailOverlay,
   type CardSeed,
 } from '@/components/cards/CardDetailOverlay';
 import { usePackDetailPoll } from '@/lib/use-pack-detail-poll';
-import { SlabImage } from '@/components/SlabImage';
 
 /**
  * Shown where the gift offer would be, when this visitor cannot claim it.
@@ -183,8 +182,9 @@ export default function PackDetailClient({
   siblings: Pack[];
   /** Backend gacha pool (Top Hits + Pull Odds); null when the backend is down. */
   detail: PackDetail | null;
-  /** Live pull ledger feed; empty array when there are no pulls / backend down. */
-  recentPulls: RecentPull[];
+  /** Live pull history for this pack; an empty feed when there are no pulls /
+   *  backend down. */
+  recentPulls: RecentFeed;
   /** Clamped 1–3 from the URL's `?count=` (the catalog stepper's choice). */
   initialQty?: number;
   /**
@@ -232,15 +232,6 @@ export default function PackDetailClient({
   // Credit balance (A2: opens debit the pack price) — read from the app-shell
   // TopUpProvider (identity-tagged; null = logged out / loading), so this page,
   // the header chip, and the top-up sheet can never disagree.
-  // Live Recent Pulls for THIS pack — seeded from the server snapshot, then
-  // polled (~4s) so anyone's pull shows up here without a reload. Keyed on the
-  // active sibling: the sibling row switches packs in place, no navigation.
-  // Deliberately NOT blanked on that switch (unlike usePackDetailPoll above):
-  // the previous pack's rows show for the one in-flight poll, but the rows
-  // carry no pack label, so nothing on screen contradicts itself — whereas
-  // blanking would flash "No pulls yet" on a pack that demonstrably has pulls.
-  const recent = useLiveRecentPulls(recentPulls, active.id);
-
   // The one-time free welcome pack: no price, no quantity, no batch — the claim
   // pays for exactly ONE open (the backend rejects a batch on this category), so
   // every money/quantity control is removed rather than merely zeroed. Its
@@ -764,55 +755,27 @@ export default function PackDetailClient({
               Recent Pulls
             </h2>
           </div>
-          <ul className="divide-y divide-white/5 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
-            {recent.length === 0 ? (
-              <li className="px-4 py-8 text-center text-[13px] text-white/60">
-                No pulls yet — be the first to open a pack.
-              </li>
-            ) : (
-              recent.map((c) => (
-                <li key={c.id}>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setOpenCard({
-                        handle: c.handle,
-                        name: c.name,
-                        image: c.image,
-                        slabImage: c.slabImage,
-                        value: c.value,
-                        rarity: c.rarity,
-                      })
-                    }
-                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-white/[0.04]"
-                    // The label carries EVERYTHING sighted users see in the
-                    // row — an aria-label REPLACES the content for SR users.
-                    aria-label={`View details for ${c.name} — pulled by ${c.who}, ${c.value}, ${c.agoLabel}`}
-                  >
-                    <SlabImage
-                      src={c.image}
-                      slabSrc={c.slabImage}
-                      alt=""
-                      sizes="32px"
-                      className="w-8 shrink-0"
-                    />
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-white/80">
-                      {c.name}
-                    </span>
-                    <span className="shrink-0 text-[11px] text-white/60">
-                      {c.who}
-                    </span>
-                    <span className="shrink-0 text-[12px] tabular-nums text-white/60">
-                      {c.value}
-                    </span>
-                    <span className="hidden shrink-0 text-[11px] text-white/60 sm:inline">
-                      {c.agoLabel}
-                    </span>
-                  </button>
-                </li>
-              ))
-            )}
-          </ul>
+          {/* THIS pack's history — seeded from the server snapshot, then
+              polled so anyone's pull shows up here without a reload. Keyed on
+              the active sibling: the sibling row switches packs in place, no
+              navigation. Deliberately NOT blanked on that switch (unlike
+              usePackDetailPoll above): the previous pack's rows show for the
+              one in-flight poll (dimmed as pending), whereas blanking would
+              flash "No pulls yet" on a pack that demonstrably has pulls. */}
+          <PullHistory
+            initial={recentPulls}
+            packSlug={active.id}
+            onSelect={(c) =>
+              setOpenCard({
+                handle: c.handle,
+                name: c.name,
+                image: c.image,
+                slabImage: c.slabImage,
+                value: c.value,
+                rarity: c.rarity,
+              })
+            }
+          />
         </Reveal>
       </div>
 

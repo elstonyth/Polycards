@@ -110,6 +110,15 @@ export const RecentPullSchema = z.looseObject({
   rarity,
   market_value: finite,
   marketPriceMyr: finite.optional(),
+  // The puller's public display fields (2026-09-02, pull-history panel) —
+  // the leaderboard's own PII-safe set. All optional (this schema is no
+  // stricter than the getter's old checks): an older backend still renders a
+  // row, just faceless.
+  id: z.string().optional(),
+  seed: finite.optional(),
+  profile_handle: z.string().nullable().optional(),
+  avatar_url: z.string().nullable().optional(),
+  frame_url: z.string().nullable().optional(),
 });
 
 // --- data/leaderboard.ts ----------------------------------------------------

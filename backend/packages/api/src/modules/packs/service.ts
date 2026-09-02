@@ -288,6 +288,12 @@ type LedgerSqlManager = {
   execute<T = unknown>(query: string, params?: unknown[]): Promise<T>;
 };
 
+/** Tier predicate for a `pull p` row: its (pack, card) odds row carries the
+ *  given rarity (`?`). Rarity is PER-PACK, so the join is on both keys. */
+const PULL_TIER_SQL =
+  'EXISTS (SELECT 1 FROM pack_odds o WHERE o.pack_id = p.pack_id ' +
+  '  AND o.card_id = p.card_id AND o.deleted_at IS NULL AND o.rarity = ?)';
+
 /** The globepay_withdrawal.status domain, derived from the model's
  *  WITHDRAWAL_STATUSES for the raw-SQL claim below (raw SQL carries no model
  *  types). */
@@ -2062,10 +2068,7 @@ class PacksModuleService extends MedusaService({
     | {
         claimed: false;
         reason:
-          | 'not_found'
-          | 'not_completed'
-          | 'already_claimed'
-          | 'window_closed';
+          'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
       }
   > {
     // Deliberately NOT filtered on active: retiring a task must never strand
@@ -5515,6 +5518,76 @@ class PacksModuleService extends MedusaService({
     }));
   }
 
+  // The public live-pulls feed (GET /store/pulls/recent), newest first, with
+  // an optional TIER filter. Raw SQL rather than listPulls because the tier is
+  // a join: rarity is a PACK-level property (pack_odds), not a column on pull,
+  // so "the last N Immortal pulls" needs the (pack_id, card_id) odds row.
+  // Only source='pack' rows — the same positive filter as leaderboardTop
+  // (reward prizes are private vault items, free welcome pulls a signup gift).
+  // The scan rides IDX_pull_rolled_at and stops at `limit` matches; a tier
+  // nobody has hit yet walks the whole ledger, once per 5s (the route's cache).
+  @InjectManager()
+  async recentPullRows(
+    opts: { packId: string | null; rarity: string | null; limit: number },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    {
+      id: string;
+      customer_id: string | null;
+      pack_id: string;
+      card_id: string;
+      rolled_at: string | Date;
+    }[]
+  > {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const params: unknown[] = [];
+    let where = "p.deleted_at IS NULL AND p.source = 'pack'";
+    if (opts.packId) {
+      where += ' AND p.pack_id = ?';
+      params.push(opts.packId);
+    }
+    if (opts.rarity) {
+      where += ' AND ' + PULL_TIER_SQL;
+      params.push(opts.rarity);
+    }
+    params.push(opts.limit);
+    return await em.execute(
+      'SELECT p.id, p.customer_id, p.pack_id, p.card_id, p.rolled_at ' +
+        '  FROM pull p WHERE ' +
+        where +
+        ' ORDER BY p.rolled_at DESC LIMIT ?',
+      params,
+    );
+  }
+
+  // "N packs without <tier>": pulls (one per pack opened) since the last pull
+  // of that tier — over the whole ledger, or one pack. A tier never hit counts
+  // every pull on record (the -infinity floor), which is the honest number.
+  @InjectManager()
+  async pullDrought(
+    opts: { packId: string | null; rarity: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<number> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const packSql = opts.packId ? ' AND p.pack_id = ?' : '';
+    const rows = await em.execute<{ n: number | string }[]>(
+      'SELECT COUNT(*)::int AS n FROM pull p ' +
+        " WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
+        packSql +
+        '   AND p.rolled_at > COALESCE((' +
+        '     SELECT MAX(p.rolled_at) FROM pull p ' +
+        "      WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
+        packSql +
+        '        AND ' +
+        PULL_TIER_SQL +
+        "   ), '-infinity'::timestamptz)",
+      opts.packId ? [opts.packId, opts.packId, opts.rarity] : [opts.rarity],
+    );
+    return Number(rows[0]?.n ?? 0);
+  }
+
   // Public-profile stats aggregated in the DB (plan 022) — replaces the
   // route's 20k-row JS fold. Same execution shape as leaderboardTop, scoped
   // to one customer. Semantics pinned to the old in-route fold:
@@ -8120,8 +8193,7 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      | SettleSnapshot
-      | undefined;
+      SettleSnapshot | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME
@@ -8536,8 +8608,7 @@ class PacksModuleService extends MedusaService({
   private async reserveSettledStock(
     winner: SettledWinner,
     decrementStock:
-      | ((handle: string, qty: number) => Promise<boolean>)
-      | undefined,
+      ((handle: string, qty: number) => Promise<boolean>) | undefined,
     weekStartIso: string,
   ): Promise<void> {
     if (!decrementStock) return;

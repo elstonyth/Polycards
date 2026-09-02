@@ -18,6 +18,7 @@ import { cached } from '@/lib/ttl-cache';
 import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { formatValue, isRarity, type PublishedOdds } from '@/lib/packs-format';
+import { avatarForSeed } from '@/lib/profile-view';
 import { money, relativeTime } from '@/lib/format';
 import {
   parseList,
@@ -440,6 +441,14 @@ interface BackendRecentPull {
   /** Puller display name (first_name, full); absent on an older backend. */
   who?: string;
   rolled_at: string;
+  /** Pull row id — the feed's stable key; absent on an older backend. */
+  id?: string;
+  /** The leaderboard's PII-safe display fields (see publicProfileFields). */
+  seed?: number;
+  profile_handle?: string | null;
+  avatar_url?: string | null;
+  /** Equipped milestone frame, resolved backend-side. */
+  frame_url?: string | null;
 }
 
 export interface RecentPull {
@@ -456,44 +465,71 @@ export interface RecentPull {
   packIcon: string;
   /** Puller display name (first_name in full — never email/id). */
   who: string;
+  /** Puller's public handle (→ /profile/<handle>); null before assignment. */
+  profileHandle: string | null;
+  /** Puller avatar — uploaded photo, else the seed-derived pfp; null = the
+   *  initial-letter fallback (the reel's own "You" rows). */
+  avatar: string | null;
+  /** Equipped milestone frame overlay; null = none. */
+  frame: string | null;
+  /** ISO roll time — the absolute timestamp the history rows print. */
+  rolledAt: string;
   /** Relative timestamp, e.g. "4m ago" (computed at render). */
   agoLabel: string;
 }
+
+/** The pull-history feed: rows + the drought counters ("N packs without
+ *  Immortal" — pulls since that tier last hit, in the same pack scope). The
+ *  backend chooses which tiers it counts; the panel renders whatever arrives. */
+export interface RecentFeed {
+  pulls: RecentPull[];
+  drought: Partial<Record<Rarity, number>>;
+}
+
+const EMPTY_FEED: RecentFeed = { pulls: [], drought: {} };
 
 // Fallback pack label when a pull's pack_id isn't in the static catalog.
 const FALLBACK_PACK_ICON = '/images/polycards/bronze-pack.webp';
 
 /**
- * The most recent pulls for the "Recent Pulls" feed — across all packs, or, with
- * `packSlug`, only that pack's own history (the /slots/[slug] pages; filtering
- * backend-side, so a quiet pack still shows its real history instead of nothing).
- * Returns `[]` (not mock) on any backend failure or empty ledger — an
+ * The pull-history feed — across all packs, or, with `packSlug`, only that
+ * pack's own history (the /slots/[slug] pages; filtering backend-side, so a
+ * quiet pack still shows its real history instead of nothing). `rarity` keeps
+ * only that tier's pulls (the panel's tier tabs; the drought counters stay
+ * unfiltered).
+ * Returns an empty feed (not mock) on any backend failure or empty ledger — an
  * empty feed is a meaningful, truthful state for a live ledger (the component
  * renders a "no pulls yet" empty state), unlike the catalog/detail getters that
  * fall back to mock to keep the page populated.
  */
-export async function getRecentPulls(packSlug?: string): Promise<RecentPull[]> {
+export async function getRecentPulls(
+  packSlug?: string,
+  rarity?: Rarity,
+): Promise<RecentFeed> {
   try {
-    const { pulls } = await sdk.client.fetch<{ pulls: BackendRecentPull[] }>(
-      packSlug
-        ? `/store/pulls/recent?pack_id=${encodeURIComponent(packSlug)}`
-        : '/store/pulls/recent',
-    );
-    if (!Array.isArray(pulls)) return [];
+    const q = new URLSearchParams();
+    if (packSlug) q.set('pack_id', packSlug);
+    if (rarity) q.set('rarity', rarity);
+    const qs = q.toString();
+    const raw = await sdk.client.fetch<{
+      pulls: BackendRecentPull[];
+      drought?: unknown;
+    }>(`/store/pulls/recent${qs ? `?${qs}` : ''}`);
+    if (!Array.isArray(raw.pulls)) return EMPTY_FEED;
 
-    // Stable ids: suffix with a per-(handle, rolled_at) occurrence counter,
-    // NOT the array index — index-suffixed ids shift whenever the poll
-    // prepends a new pull, remounting every feed card (and replaying entry
-    // animations) instead of just adding one.
+    // Stable ids: the pull row id, else (older backend) a per-(handle,
+    // rolled_at) occurrence counter — NOT the array index, which shifts
+    // whenever the poll prepends a new pull, remounting every feed row (and
+    // replaying entry animations) instead of just adding one.
     const seen = new Map<string, number>();
-    return (
-      parseList(RecentPullSchema, pulls) as unknown as BackendRecentPull[]
+    const pulls = (
+      parseList(RecentPullSchema, raw.pulls) as unknown as BackendRecentPull[]
     ).map((p) => {
       const key = `${p.handle}-${p.rolled_at}`;
       const n = seen.get(key) ?? 0;
       seen.set(key, n + 1);
       return {
-        id: `${key}-${n}`,
+        id: p.id ?? `${key}-${n}`,
         handle: p.handle,
         name: p.name,
         image: p.image,
@@ -507,11 +543,30 @@ export async function getRecentPulls(packSlug?: string): Promise<RecentPull[]> {
         packName: p.pack_title ?? 'Mystery Pack',
         packIcon: p.pack_image ?? FALLBACK_PACK_ICON,
         who: p.who ?? 'Anonymous',
+        profileHandle: p.profile_handle ?? null,
+        // The same seed → pfp mapping as the leaderboard / public profile.
+        avatar: p.avatar_url ?? (p.seed != null ? avatarForSeed(p.seed) : null),
+        frame: p.frame_url ?? null,
+        rolledAt: p.rolled_at,
         agoLabel: relativeTime(p.rolled_at),
       };
     });
+    // Trust boundary: only known tiers with a finite non-negative count.
+    const drought: RecentFeed['drought'] = {};
+    if (raw.drought && typeof raw.drought === 'object') {
+      for (const [k, v] of Object.entries(raw.drought)) {
+        if (
+          isRarity(k) &&
+          typeof v === 'number' &&
+          Number.isFinite(v) &&
+          v >= 0
+        )
+          drought[k] = v;
+      }
+    }
+    return { pulls, drought };
   } catch (error) {
     logger.error('[packs] failed to load recent pulls:', error);
-    return [];
+    return EMPTY_FEED;
   }
 }

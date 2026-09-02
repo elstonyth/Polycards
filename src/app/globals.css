@@ -270,6 +270,28 @@
   }
 }
 
+/* Pull history (PullHistory.tsx) — a row drops in from above when it is NEW
+   in the DOM: first paint (staggered by --i), a poll that prepends one pull
+   (that row only — the others keep their keys and never re-run), a tab switch
+   (the list is re-keyed). The drought numeral reuses it, keyed on its value.
+   Same @layer rule as riseIn so motion-reduce:animate-none can override. */
+@keyframes pullRowIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -10px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+@layer utilities {
+  .pull-row-in {
+    animation: pullRowIn 520ms var(--ease-out-expo) backwards;
+    animation-delay: calc(var(--i, 0) * 45ms);
+  }
+}
+
 /* Modal enter animations */
 @keyframes fadeIn {
   from {

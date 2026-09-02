@@ -95,6 +95,34 @@ describe('GET /api/recent-pulls — catalog-bounded key gate (plan 117 step 2)',
     );
   });
 
+  it('a known tier is forwarded on its own key; a garbage tier collapses to the unfiltered memo', async () => {
+    await GET(req('?pack_id=bronze-pack&rarity=Immortal'));
+    await GET(req('?pack_id=bronze-pack&rarity=Shiny'));
+    await GET(req('?pack_id=bronze-pack'));
+
+    // Immortal minted its own call; Shiny and the bare request shared one.
+    expect(pullsCallsOf()).toHaveLength(2);
+    expect(pullsCallsOf()[0]![0]).toBe(
+      '/store/pulls/recent?pack_id=bronze-pack&rarity=Immortal',
+    );
+    expect(pullsCallsOf()[1]![0]).toBe(
+      '/store/pulls/recent?pack_id=bronze-pack',
+    );
+  });
+
+  it('the body carries the drought counters alongside the rows', async () => {
+    fetchMock.mockImplementation(async (path: string) => {
+      if (path.startsWith('/store/packs')) return { packs: [packRow()] };
+      if (path.startsWith('/store/pulls/recent'))
+        return { pulls: [], drought: { Immortal: 303, Shiny: 1, Rare: -1 } };
+      throw new Error(`unexpected fetch path in test: ${path}`);
+    });
+
+    const body = await (await GET(req())).json();
+    // Unknown tiers and negative counts are dropped at the trust boundary.
+    expect(body).toEqual({ pulls: [], drought: { Immortal: 303 } });
+  });
+
   it('resolving the catalog costs no extra backend hop (getPackCategories is already cached)', async () => {
     await GET(req());
     const packsCallsBefore = fetchMock.mock.calls.filter(([path]) =>

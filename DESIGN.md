@@ -246,6 +246,28 @@ The home page is a six-board editorial scroll story (spec:
   starter/silver/gold/diamond band in §2 — packs use the six-tier axis in
   shipped code.)
 
+### Signature: Pull History (home board 03 + pack detail)
+
+`src/components/PullHistory.tsx` (2026-09-02, after showgo's HISTORY sheet).
+One panel for the global feed and a pack's own history:
+
+- **Drought counters** — "303 packs without IMMORTAL": Nekst numeral on a
+  charcoal card whose hairline and inset glow take the tier's own hue (Glow
+  Is Earned — the counter is about that tier). Two counters, the apex tiers;
+  the backend chooses which tiers it counts.
+- **Tier tabs** — the leaderboard's segmented pill (selected = Paper White
+  on Ink), `All` plus the three chase tiers, each with its rarity dot. The
+  filter is a refetch, not a client filter — the last 12 pulls never contain
+  a tier; the last 12 _Immortals_ do.
+- **Rows** — framed avatar + name (the leaderboard's PII-safe fields), the
+  fixed-MYT roll time, slab thumb, card name, solid tier badge, Nekst value.
+  Chase-tier rows wear a tinted hairline + soft glow in their rarity hue;
+  everything else stays hairline-neutral.
+- **Motion** — DOM-insertion driven: a fresh pull drops in from above
+  (`pull-row-in`, keyed by pull id so the rest never re-run); a tab switch
+  re-keys the list so the tier staggers in; a changed drought numeral
+  re-lands. Pending refetches dim the list instead of blanking it.
+
 ## 6. Do's and Don'ts
 
 ### Do:

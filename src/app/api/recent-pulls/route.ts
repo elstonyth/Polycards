@@ -5,6 +5,7 @@ import {
   getRecentPulls,
 } from '@/lib/data/packs';
 import { cached } from '@/lib/ttl-cache';
+import { isRarity } from '@/lib/packs-format';
 
 // Same-origin endpoint the "Recent Pulls" feeds poll for live updates — a
 // direct Store-API call from the browser (:4000 -> :9000) would be CORS-blocked,
@@ -60,8 +61,15 @@ export async function GET(request: NextRequest) {
     slugShaped && (known.has(raw) || (await getPackBySlug(raw)) !== null)
       ? raw
       : '';
-  const body = await cached(`recent-pulls:${pack}`, CACHE_TTL_MS, async () =>
-    JSON.stringify({ pulls: await getRecentPulls(pack || undefined) }),
+  // ?rarity=<tier> — the history panel's tier tabs. Gated to the known tiers
+  // for the same reason as pack_id: the key space must stay bounded, and a
+  // garbage value collapses to the unfiltered feed instead of minting a key.
+  const rarityRaw = request.nextUrl.searchParams.get('rarity') ?? '';
+  const rarity = isRarity(rarityRaw) ? rarityRaw : undefined;
+  const body = await cached(
+    `recent-pulls:${pack}:${rarity ?? ''}`,
+    CACHE_TTL_MS,
+    async () => JSON.stringify(await getRecentPulls(pack || undefined, rarity)),
   );
   return new Response(body, {
     headers: { 'content-type': 'application/json' },
