@@ -101,7 +101,7 @@ async function render(freePackEligible?: boolean): Promise<string> {
         pack: FREE_PACK,
         siblings: [],
         detail: null,
-        recentPulls: [],
+        recentPulls: { pulls: [], drought: {} },
         freePackEligible,
       }),
     );

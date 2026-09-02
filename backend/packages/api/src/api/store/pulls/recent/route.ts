@@ -1,5 +1,4 @@
 import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
-import { Modules } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import {
@@ -12,29 +11,43 @@ import {
   displayMarketPrice,
   resolveFxRate,
 } from '../../../../modules/packs/pricing';
+import { RARITY_ORDER, type Rarity } from '../../../../modules/packs/rarity';
+import { loadPullerProfiles } from '../pullers';
 
 // GET /store/pulls/recent — the most recent pulls across all packs, for the
-// "Recent Pulls" live feed. A plain publishable-key-scoped store route (no
-// customer auth). PUBLIC-feed PII policy (operator decision 2026-08-01,
-// reversing the 2026-07-04 masking): each row carries the puller's FULL
-// display name (first_name only — the same field the leaderboard already
-// shows in full; never email, never customer_id), the won card, the source
-// pack's title/image, and when it was rolled. Each pull is joined to its Card
-// by handle; orphaned rows (card removed) are dropped. `?pack_id=<Pack.slug>`
-// scopes the feed to a single pack — the pack pages show that pack's own
-// history, not the global one.
+// pull-history feed. A plain publishable-key-scoped store route (no customer
+// auth). PUBLIC-feed PII policy (operator decision 2026-08-01, reversing the
+// 2026-07-04 masking): each row carries the puller's FULL display name
+// (first_name only — the same field the leaderboard already shows in full;
+// never email, never customer_id), their public handle / avatar / equipped
+// frame (the leaderboard's own display fields, via loadPullerProfiles), the
+// won card, the source pack's title/image, and when it was rolled. Each pull
+// is joined to its Card by handle; orphaned rows (card removed) are dropped.
+//
+//  ?pack_id=<Pack.slug>  scopes the feed to a single pack — the pack pages show
+//                        that pack's own history, not the global one. An
+//                        unknown or draft slug is an EMPTY feed, answered
+//                        before any ledger query (see the gate below).
+//  ?rarity=<tier>        only pulls of that tier (rarity is per-pack, resolved
+//                        through pack_odds) — the history panel's tier tabs.
+//
+// The body also carries `drought`: for each chase tier, how many packs have
+// been opened since that tier last hit (in the same scope). Always unfiltered
+// by ?rarity — it is the state of the pack, not of the tab.
 const RECENT_LIMIT = 12;
 // Over-fetch, because the disabled filter below runs AFTER the query — same
 // reason (and same 2x bound) as the leaderboard's FETCH_N: a disabled puller
 // among the latest 12 must not shorten the feed to 11. A window where more than
 // half the pulls are disabled players renders short, which is the honest outcome.
 const FETCH_LIMIT = RECENT_LIMIT * 2;
+// The tiers the drought counters track — the two apex tiers, one counter each.
+const DROUGHT_TIERS: readonly Rarity[] = ['Immortal', 'Legendary'];
 
 // ponytail: per-process 5s cache — mirrors the leaderboard's boardCache. This
-// feed is polled every 4s per open tab (use-recent-pulls); a 5s TTL collapses
-// ~6 queries/poll to one compute per 5s window PER PROCESS, regardless of how
-// many tabs poll. Keyed by the ?pack_id filter (absent = the global feed) —
-// a single key would serve one pack's rows to every other pack for the window.
+// feed is polled every 10s per open tab (use-recent-pulls); a 5s TTL collapses
+// the queries to one compute per 5s window PER PROCESS, regardless of how many
+// tabs poll. Keyed by (pack_id, rarity) — a single key would serve one pack's
+// rows to every other pack for the window.
 // A new pull surfaces ≤5s later than before — invisible on a "recent" feed.
 const CACHE_TTL_MS = 5_000;
 const ALL_PACKS_KEY = 'recent';
@@ -49,23 +62,26 @@ export function clearRecentPullsCache(): void {
   recentCache.clear();
 }
 
-// Full display name; blank/missing first_name → "Anonymous".
-const displayName = (name: string | null | undefined): string => {
-  const n = (name ?? '').trim();
-  return n || 'Anonymous';
-};
+const EMPTY_BODY = { pulls: [], drought: {} };
 
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
   // ?pack_id=<Pack.slug> scopes the feed to one pack (the /slots/[slug] pages);
-  // absent = the global feed (home). An unknown slug yields an empty feed.
+  // absent = the global feed (home).
   const packId =
     typeof req.query.pack_id === 'string' && req.query.pack_id.trim()
       ? req.query.pack_id.trim()
       : null;
-  const cacheKey = packId ?? ALL_PACKS_KEY;
+  // An unknown tier is ignored (the unfiltered feed), not 400'd — the storefront
+  // proxy already gates the value, so anything else is a hand-typed URL.
+  const rarity =
+    typeof req.query.rarity === 'string' &&
+    (RARITY_ORDER as readonly string[]).includes(req.query.rarity)
+      ? (req.query.rarity as Rarity)
+      : null;
+  const cacheKey = `${packId ?? ALL_PACKS_KEY}|${rarity ?? ''}`;
 
   const cached = recentCache.get(cacheKey);
   if (cached && cached.expires > Date.now()) {
@@ -74,35 +90,52 @@ export async function GET(
   }
 
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
-  const fxRate = await resolveFxRate(packs);
 
-  const fetched = await packs.listPulls(
-    // ponytail: $nin filter mirrors the leaderboard SQL exclusion — reward
-    // prizes are private vault items, and free welcome pulls are a signup gift
-    // rather than a played pack; neither is a public feed entry.
-    {
-      source: { $nin: ['reward', 'free'] },
-      // Pull.pack_id IS Pack.slug (see the model), so the query param is the slug.
-      ...(packId ? { pack_id: packId } : {}),
-    } as Parameters<typeof packs.listPulls>[0],
-    { order: { rolled_at: 'DESC' }, take: FETCH_LIMIT },
+  // Gate the slug BEFORE any ledger work: pack_id is caller-supplied and the
+  // publishable key ships in the storefront bundle, so without this a loop of
+  // garbage slugs would cost a fresh drought scan per request. One indexed
+  // pack lookup instead; a draft pack answers the same as a missing one (its
+  // ledger is not public until it is).
+  if (packId) {
+    const [pack] = await packs.listPacks(
+      { slug: packId, status: 'active' },
+      { take: 1 },
+    );
+    if (!pack) {
+      remember(cacheKey, EMPTY_BODY);
+      res.json(EMPTY_BODY);
+      return;
+    }
+  }
+
+  const [fxRate, fetched, droughtCounts] = await Promise.all([
+    resolveFxRate(packs),
+    packs.recentPullRows({ packId, rarity, limit: FETCH_LIMIT }),
+    Promise.all(
+      DROUGHT_TIERS.map((tier) => packs.pullDrought({ packId, rarity: tier })),
+    ),
+  ]);
+  const drought = Object.fromEntries(
+    DROUGHT_TIERS.map((tier, i) => [tier, droughtCounts[i]]),
   );
 
-  // An administratively disabled player is hidden from every public surface —
-  // the same rule (and the same helper) the leaderboard applies, so a disable
-  // taken in the dashboard removes the player here too. DROPPED, not renamed to
+  // Puller display fields, resolved once for the window. An administratively
+  // disabled player is hidden from every public surface — the same rule (and
+  // the same helper) the leaderboard applies, so a disable taken in the
+  // dashboard removes the player here too. DROPPED, not renamed to
   // "Anonymous": that is what the boards chose, and an anonymised row would
-  // still publish the pull. The filter runs BEFORE the response is cached, so a
-  // disable can never be served for the rest of a cache window. Pulls with no
-  // customer_id are kept — there is nobody to hide.
-  const pullerIds = [
-    ...new Set(
-      fetched.map((p) => p.customer_id).filter((id): id is string => !!id),
-    ),
-  ];
-  const disabled = await packs.disabledCustomerIds(pullerIds);
+  // still publish the pull. The filter runs BEFORE the response is cached, so
+  // a disable is served for at most the remainder of ONE 5s window (plus the
+  // storefront proxy's own 5s memo) — the same bound the leaderboard accepts
+  // for a name that was public seconds earlier. Pulls with no customer_id
+  // are kept — there is nobody to hide.
+  const pullers = await loadPullerProfiles(
+    req,
+    packs,
+    fetched.map((p) => p.customer_id),
+  );
   const pulls = fetched
-    .filter((p) => !p.customer_id || !disabled.has(p.customer_id))
+    .filter((p) => !p.customer_id || !pullers.disabled.has(p.customer_id))
     .slice(0, RECENT_LIMIT);
 
   const handles = [...new Set(pulls.map((p) => p.card_id))];
@@ -131,35 +164,13 @@ export async function GET(
     : [];
   const packBySlug = new Map(packRows.map((p) => [p.slug, p]));
 
-  // Puller display names — first_name ONLY (leaderboard's PII rule), shown in
-  // full. Missing customer/first_name reads as "Anonymous".
-  // ponytail: resolve() is wrapped nullsafe — if the customer module can't be
-  // resolved (or resolves to something without listCustomers, e.g. a test
-  // harness that only registers this module) the feed degrades to masking
-  // every puller as "Anonymous" rather than 500ing.
-  const customerIds = [
-    ...new Set(pulls.map((p) => p.customer_id).filter((id): id is string => !!id)),
-  ];
-  let customers: { id: string; first_name: string | null }[] = [];
-  if (customerIds.length) {
-    try {
-      const customerService = req.scope.resolve(Modules.CUSTOMER);
-      customers = await customerService.listCustomers(
-        { id: customerIds },
-        { take: customerIds.length },
-      );
-    } catch {
-      customers = [];
-    }
-  }
-  const firstNameById = new Map(customers.map((c) => [c.id, c.first_name]));
-
   const recent = pulls
     .map((p) => {
       const card = byHandle.get(p.card_id);
       if (!card) return null;
       const pack = packBySlug.get(p.pack_id);
       return {
+        id: p.id,
         handle: card.handle,
         name: card.name,
         rarity: rarityOf(p.pack_id, p.card_id),
@@ -176,26 +187,30 @@ export async function GET(
         pack_id: p.pack_id,
         pack_title: pack?.title ?? null,
         pack_image: pack?.image ?? null,
-        // Full display name — never customer_id/email (see header).
-        who: displayName(p.customer_id ? firstNameById.get(p.customer_id) : null),
+        // Full display name + handle/avatar/frame — never customer_id/email.
+        ...pullers.profileOf(p.customer_id, p.id),
         rolled_at: p.rolled_at,
       };
     })
     .filter((e): e is NonNullable<typeof e> => e !== null);
 
-  const body = { pulls: recent };
-  // ponytail: pack_id is caller-supplied, so the key space is unbounded (the
-  // storefront proxy forwards any ?pack=) — cap the map instead of letting
-  // unknown slugs accrete entries. Map iterates in insertion order, so this
-  // evicts oldest-inserted first — not LRU, but the real catalog is ~10 packs
-  // + the global key, so anything evicted under pressure is a garbage key or
-  // long-expired (a full clear() would instead thunder-herd every hot key on
-  // the same request that trips the bound). Not "don't cache empties": a
-  // legitimately quiet pack returns [] too, and that is the case the TTL
-  // exists to protect.
+  const body = { pulls: recent, drought };
+  remember(cacheKey, body);
+  res.json(body);
+}
+
+// ponytail: pack_id is caller-supplied, so the key space is unbounded (the
+// storefront proxy forwards any ?pack=) — cap the map instead of letting
+// unknown slugs accrete entries. Map iterates in insertion order, so this
+// evicts oldest-inserted first — not LRU, but the real catalog is ~10 packs
+// × 4 tabs + the global keys, so anything evicted under pressure is a
+// garbage key or long-expired (a full clear() would instead thunder-herd
+// every hot key on the same request that trips the bound). Not "don't cache
+// empties": a legitimately quiet pack returns [] too, and that is the case
+// the TTL exists to protect.
+function remember(key: string, body: unknown): void {
   if (recentCache.size > MAX_ENTRIES) {
     recentCache.delete(recentCache.keys().next().value as string);
   }
-  recentCache.set(cacheKey, { expires: Date.now() + CACHE_TTL_MS, body });
-  res.json(body);
+  recentCache.set(key, { expires: Date.now() + CACHE_TTL_MS, body });
 }

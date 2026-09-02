@@ -35,12 +35,13 @@ export const revalidate = 15;
 const CHASE_LOOKUPS = 16;
 
 export default async function HomePage() {
-  const [categories, pulls, topRippers] = await Promise.all([
+  const [categories, feed, topRippers] = await Promise.all([
     getPackCategories(),
     getRecentPulls(),
     // [] on any backend failure — TheGame hides the podium then.
     getLeaderboard('weekly'),
   ]);
+  const pulls = feed.pulls;
   const packs = categories.flatMap((c) => c.packs);
   const inStock = packs.filter((p) => p.inStock !== false);
   const featured = [...inStock].sort(
@@ -82,7 +83,7 @@ export default async function HomePage() {
       <TierShelf packs={packs} chaseByPack={chaseByPack} />
 
       {/* 03 — live proof */}
-      <RecentPullsSection initialPulls={pulls} />
+      <RecentPullsSection initial={feed} />
 
       {/* 04 — podium + loop teaser */}
       <TheGame topRippers={topRippers} />

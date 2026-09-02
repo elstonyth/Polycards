@@ -71,6 +71,41 @@ export function relativeTime(iso: string, now: Date = new Date()): string {
   return `${Math.floor(days / 365)}y ago`;
 }
 
+const MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+const MYT_OFFSET_MS = 8 * 3_600_000;
+
+// Absolute roll time for the pull-history rows: "02 Sep, 09:38:44 PM". Fixed to
+// Malaysian time (UTC+8, never DST — the same fixed shift the backend ledger
+// uses) rather than the viewer's zone, so the server render and the client
+// hydration print the SAME string: a zone-dependent format mismatches whenever
+// the server (UTC) and the phone (MYT) disagree, and React would leave the
+// server's text on screen. Hand-rolled over Intl for the same determinism —
+// ICU's en-GB gives "Sept" / "pm" and varies by node build. Unparsable → "".
+export function pullTime(iso: string): string {
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return '';
+  const d = new Date(ms + MYT_OFFSET_MS);
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  const h24 = d.getUTCHours();
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  const minute = String(d.getUTCMinutes()).padStart(2, '0');
+  const second = String(d.getUTCSeconds()).padStart(2, '0');
+  return `${day} ${MONTHS[d.getUTCMonth()]}, ${String(h12).padStart(2, '0')}:${minute}:${second} ${h24 < 12 ? 'AM' : 'PM'}`;
+}
+
 // The mirror of relativeTime for a FUTURE instant ("in 45m", "in 23h", "in 2d")
 // — used by the saved-payout-account surfaces to say when a cooling-off
 // destination becomes usable. Returns null for a time that has already passed

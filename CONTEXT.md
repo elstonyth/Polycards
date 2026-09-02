@@ -66,6 +66,21 @@ legal pre-ship). A shipment reaching _completed_ (the customer is told
 the two lifecycles.
 _Avoid_: order (a DeliveryOrder is not a Medusa checkout order)
 
+**Drought** (pull history):
+For one chase tier in one scope (a pack, or the whole ledger), how many
+pack-source Pulls have been rolled since that tier last hit — "303 packs
+without Immortal". Counted in (rolled*at, id) order; a tier never hit counts
+every pull on record. Public display, unfiltered by the feed's tier tab.
+\_Avoid*: streak, dry run (a Drought is the operator-facing number, not luck)
+
+**Gap** (pull history):
+For one hit of a chase tier, how many pack-source Pulls it took since the
+previous hit of that tier (the first hit counts from the start of the ledger).
+The stats chart draws one bar per hit; its reference line sits at the
+_expected_ gap = 1 / the pack's published rate for the tier (never the secret
+weight), falling back to the observed mean gap when no rate is published.
+_Avoid_: interval, pity
+
 ## Two six-name axes — do not conflate
 
 Both use the same six words. They are different measurements.

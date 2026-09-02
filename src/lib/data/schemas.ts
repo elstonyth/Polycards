@@ -110,6 +110,40 @@ export const RecentPullSchema = z.looseObject({
   rarity,
   market_value: finite,
   marketPriceMyr: finite.optional(),
+  // The puller's public display fields (2026-09-02, pull-history panel) —
+  // the leaderboard's own PII-safe set. All optional (this schema is no
+  // stricter than the getter's old checks): an older backend still renders a
+  // row, just faceless.
+  id: z.string().optional(),
+  seed: finite.optional(),
+  profile_handle: z.string().nullable().optional(),
+  avatar_url: z.string().nullable().optional(),
+  frame_url: z.string().nullable().optional(),
+});
+
+/** GET /store/pulls/gaps — the stats chart: a known tier, a finite current
+ *  drought, and hits with finite gaps. The header numbers are optional
+ *  nullables (no rate on the global feed, no mean with no hits). */
+const count = finite.refine((n) => n >= 0);
+export const PullGapsSchema = z.looseObject({
+  rarity,
+  current: count,
+  pct: finite.nullable().optional(),
+  expected: finite.nullable().optional(),
+  avg: finite.nullable().optional(),
+  last20: finite.nullable().optional(),
+  hits: z.array(
+    z.looseObject({
+      id: z.string(),
+      gap: count,
+      rolled_at: z.string(),
+      who: z.string().optional(),
+      seed: finite.nullable().optional(),
+      profile_handle: z.string().nullable().optional(),
+      avatar_url: z.string().nullable().optional(),
+      frame_url: z.string().nullable().optional(),
+    }),
+  ),
 });
 
 // --- data/leaderboard.ts ----------------------------------------------------
