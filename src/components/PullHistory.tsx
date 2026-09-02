@@ -55,7 +55,7 @@ function Row({
   const rgb = rarityRgb(pull.rarity);
   const top = isTopRarity(pull.rarity);
   const className = cn(
-    'flex w-full items-center gap-3 rounded-xl border bg-neutral-900 px-3 py-2.5 text-left',
+    'flex w-full items-center gap-2 rounded-xl border bg-neutral-900 px-3 py-2.5 text-left @xs:gap-3',
     'transition-[background-color,transform] hover:bg-neutral-800 active:scale-[0.99]',
     'motion-reduce:transition-none motion-reduce:active:scale-100',
     'outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950',
@@ -83,16 +83,31 @@ function Row({
           The pack label only fits on wider containers — on a phone it
           truncated to "Silver…" beside a clipped value. */}
       <span className="min-w-0 flex-1">
-        <span className="flex min-w-0 items-center gap-1.5">
+        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
           <span className="truncate text-sm font-semibold text-white">
             {pull.who}
           </span>
-          <TierBadge rarity={pull.rarity} />
+          {/* Wraps under the name when the two don't fit side by side (a long
+              name on a 360-412px phone) instead of running under the slab
+              thumb. Below a 320px container it is dropped: the ~60px left for
+              this column can't hold "UNCOMMON". */}
+          <span className="hidden @xs:contents">
+            <TierBadge rarity={pull.rarity} />
+          </span>
         </span>
-        <span className="block truncate text-[12px] text-neutral-400 tabular-nums">
+        {/* Wraps rather than truncates: "02 Sep, 04:48:26 AM" needs ~150px and a
+            360px phone gives this column ~80px — an ellipsised time reads as
+            broken, two short lines don't. */}
+        <span className="block text-[12px] text-neutral-400 tabular-nums">
           <time dateTime={pull.rolledAt}>{pullTime(pull.rolledAt)}</time>
           {showPack && (
-            <span className="hidden @sm:inline"> · {pull.packName}</span>
+            <>
+              {/* The space sits OUTSIDE the nowrap span so the line may break
+                  before "· Pack" — inside it, the break moved to before "AM". */}{' '}
+              <span className="hidden whitespace-nowrap @sm:inline">
+                · {pull.packName}
+              </span>
+            </>
           )}
         </span>
       </span>
@@ -104,12 +119,17 @@ function Row({
         className="w-9 shrink-0"
       />
       {/* Card name over the value — the value owns the right edge and never
-          wraps; the card name is what truncates. */}
-      <span className="flex max-w-[40%] shrink-0 flex-col items-end gap-1">
+          wraps; the card name is what truncates. The column is FIXED-width
+          (not sized to its content) so it, and the slab thumb beside it, sit
+          at the same x on every row instead of each row shifting with its own
+          card name. Each width step holds a six-figure "RM 184,828.54" at
+          that step's font size; seven figures would spill left over the
+          thumb. */}
+      <span className="flex w-[6.5rem] shrink-0 flex-col items-end gap-1 @xs:w-[7.25rem] @sm:w-[7.75rem]">
         <span className="max-w-full truncate text-[11px] text-neutral-300">
           {pull.name}
         </span>
-        <span className="whitespace-nowrap font-heading text-[15px] leading-none text-white tabular-nums @sm:text-base">
+        <span className="whitespace-nowrap font-heading text-[13px] leading-none text-white tabular-nums @xs:text-[15px] @sm:text-base">
           {pull.value}
         </span>
       </span>
