@@ -62,8 +62,9 @@ export const clampCount = (n: number): number =>
 /**
  * Map one raw roll item into a `BatchRoll`.
  *
- * Returns `null` if `WonCardSchema` validation fails — callers must treat a
- * null as a whole-batch failure (never return a partial batch).
+ * Returns `null` if `WonCardSchema` validation fails. The charge is already
+ * committed by the time a caller sees this, so `openBatch` DROPS the bad roll
+ * and keeps the rest — it refuses the batch only when nothing mapped.
  *
  * `image`/`slab_image` are intentionally read from the raw object
  * (`rawRoll.card`), NOT from the validated `wonCard`, because `WonCardSchema`

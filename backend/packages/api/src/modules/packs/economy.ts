@@ -99,6 +99,12 @@ export type LedgerTotals = {
   cashout: number;
   /** Σ voucher_claim + reward_credit + daily_reward — promo credits granted; excluded from net/revenue. */
   rewardPromo: number;
+  /** −Σ delivery_fee — shipping + insurance collected from wallets, net of cancel
+   *  refunds. A pass-through fee line, not pack revenue; excluded from net. */
+  deliveryFees: number;
+  /** Σ referral_commission — the weekly referrer payout; operator promo cost
+   *  like rewardPromo, excluded from net/revenue. */
+  referralCommission: number;
 };
 
 /** Lifetime ledger totals bucketed by reason (exact cent math). */
@@ -109,6 +115,8 @@ export function ledgerTotals(rows: LedgerRow[]): LedgerTotals {
   let adjustmentCents = 0;
   let cashoutCents = 0;
   let rewardPromoCents = 0;
+  let deliveryFeeCents = 0;
+  let referralCommissionCents = 0;
 
   for (const row of rows) {
     if (!Number.isFinite(row.amount)) continue;
@@ -118,6 +126,9 @@ export function ledgerTotals(rows: LedgerRow[]): LedgerTotals {
     else if (row.reason === 'topup') topupCents += cents;
     else if (row.reason === 'adjustment') adjustmentCents += cents;
     else if (row.reason === 'cashout') cashoutCents += cents;
+    else if (row.reason === 'delivery_fee') deliveryFeeCents += cents;
+    else if (row.reason === 'referral_commission')
+      referralCommissionCents += cents;
     else if (
       row.reason === 'voucher_claim' ||
       row.reason === 'reward_credit' ||
@@ -143,8 +154,13 @@ export function ledgerTotals(rows: LedgerRow[]): LedgerTotals {
     cashout: cashoutCents / 100,
     // Promo grants: excluded from net/revenue (operator-funded, not customer cash).
     rewardPromo: rewardPromoCents / 100,
-    // Cashout is a balance move, excluded. rewardPromo is also excluded (it's
-    // operator cost tracked separately).
+    // Charged negative at request, refunded positive on cancel — negate so the
+    // line reads "collected" (same -0 collapse as revenue).
+    deliveryFees: -deliveryFeeCents / 100 || 0,
+    referralCommission: referralCommissionCents / 100,
+    // Cashout is a balance move, excluded. rewardPromo / referralCommission are
+    // also excluded (operator cost tracked separately); deliveryFees is a
+    // courier pass-through, not gacha margin.
     net: (-openCents - buybackCents) / 100 || 0,
   };
 }

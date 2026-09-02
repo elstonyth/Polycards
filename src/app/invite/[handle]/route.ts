@@ -28,11 +28,16 @@ export async function GET(
 ): Promise<NextResponse> {
   const { handle } = await params;
   const normalized = handle?.toLowerCase() ?? '';
-  const home = (invite: string) => {
-    const url = new URL('/', request.url);
-    url.searchParams.set('invite', invite);
-    return NextResponse.redirect(url);
-  };
+  // Bare RELATIVE Location, written by hand — never `new URL('/', request.url)`.
+  // Behind the DO proxy `request.url`'s origin is the standalone server's own
+  // BIND origin (http://0.0.0.0:3000), so an absolute redirect sent every
+  // shared link to a connection error (the trap #311 fixed for the Google
+  // callback, recreated here). The browser resolves a relative Location
+  // against the origin IT requested.
+  const redirect = (path: string) =>
+    new NextResponse(null, { status: 302, headers: { Location: path } });
+  const home = (invite: string) =>
+    redirect(`/?invite=${encodeURIComponent(invite)}`);
 
   const mode = request.headers.get('sec-fetch-mode');
   const dest = request.headers.get('sec-fetch-dest');
@@ -40,7 +45,7 @@ export async function GET(
     (mode === null || mode === 'navigate') &&
     (dest === null || dest === 'document');
   if (!isTopLevelNavigation || !INVITE_HANDLE_RE.test(normalized)) {
-    return NextResponse.redirect(new URL('/', request.url));
+    return redirect('/');
   }
 
   // Already a customer? Attribution binds at signup and never after, so

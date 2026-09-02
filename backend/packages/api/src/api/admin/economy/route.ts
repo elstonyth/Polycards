@@ -1,4 +1,5 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { ledgerTotals, packTheoreticalRtp } from '../../../modules/packs/economy';
@@ -40,7 +41,19 @@ export async function GET(
   // fold (incl. its loud throw on an unrecognized reason).
   const from = isoOrUndefined(req.query.from);
   const to = isoOrUndefined(req.query.to);
-  const totals = ledgerTotals(await packs.ledgerReasonTotals(from, to));
+  const reasonRows = await packs.ledgerReasonTotals(from, to);
+  let totals: ReturnType<typeof ledgerTotals>;
+  try {
+    totals = ledgerTotals(reasonRows);
+  } catch (err) {
+    // Keep the tripwire loud, but say WHY: UNEXPECTED_STATE is a 500 whose
+    // message survives the framework's error handler (a bare Error is masked
+    // as "An unknown error occurred.").
+    throw new MedusaError(
+      MedusaError.Types.UNEXPECTED_STATE,
+      `Economy report cannot be built (${(err as Error).message}); add the reason to ledgerTotals.`,
+    );
+  }
 
   // Vault liability: display value of every card customers still hold, summed
   // in SQL (audit 2026-07-07 #5b) instead of paging every vaulted pull into

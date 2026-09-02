@@ -3,7 +3,9 @@ import { MedusaError } from '@medusajs/framework/utils';
 // The gateway's HTTP seam is the only thing stubbed — every decision under
 // test is the routes' own. Same seam and same reason as the sweep spec.
 jest.mock('../../../../../modules/packs/globepay-client', () => {
-  const actual = jest.requireActual('../../../../../modules/packs/globepay-client');
+  const actual = jest.requireActual(
+    '../../../../../modules/packs/globepay-client',
+  );
   return {
     ...actual,
     globepayConfigFromEnv: jest.fn(() => ({
@@ -66,6 +68,7 @@ const heldRow = () => ({
   account_holder_name: 'AHMAD BIN ALI',
   status: 'held',
   gateway_status: null as number | null,
+  failure_reason: null as string | null,
   created_at: new Date(Date.now() - 5 * 60 * 1000),
   settled_at: null,
 });
@@ -156,7 +159,11 @@ const allLogLines = (logger: {
   warn: jest.Mock;
   error: jest.Mock;
 }) =>
-  [...logger.info.mock.calls, ...logger.warn.mock.calls, ...logger.error.mock.calls]
+  [
+    ...logger.info.mock.calls,
+    ...logger.warn.mock.calls,
+    ...logger.error.mock.calls,
+  ]
     .map((c) => String(c[0]))
     .join('\n');
 
@@ -495,6 +502,34 @@ describe('POST /admin/globepay/withdrawals/:id/deny', () => {
     await DENY(h.req, res);
     expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
     expect(out.body).toMatchObject({ status: 'failed', refunded: true });
+    // The crash-window re-run finds NO reason on the row (the claim writes
+    // none), so this is the run that stamps the admin's.
+    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          failure_reason: expect.stringContaining('denied by admin'),
+        }),
+      }),
+    );
+  });
+
+  // Deny accepts 'failed' so the crash window above is recoverable — which
+  // also lets an operator click it on a row the bank already refused. That
+  // replay is harmless to the money (one anchor) but used to overwrite the
+  // bank's diagnostic with "denied by admin", and the deploy's logs have
+  // rotated by then (review 2026-09).
+  it("a mistaken Deny on a row the gateway closed keeps the gateway's failure_reason", async () => {
+    const h = harness({
+      ...heldRow(),
+      status: 'failed',
+      gateway_status: 5,
+      failure_reason: 'sweep: requery statusId 5',
+    });
+    await DENY(h.req, mkRes().res);
+    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
+      selector: { id: 'gpw_1', status: 'failed' },
+      data: { status: 'failed', gateway_status: 5 },
+    });
   });
 
   it('refuses a settled row — nothing moves', async () => {

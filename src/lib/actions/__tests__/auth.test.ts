@@ -5,6 +5,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mocks = vi.hoisted(() => ({
   setAuthToken: vi.fn(),
   clearAuthToken: vi.fn(),
+  setOauthState: vi.fn(),
+  takeOauthState: vi.fn(),
   fetchProfileHandle: vi.fn(),
   clientFetch: vi.fn(),
   customerRetrieve: vi.fn(),
@@ -22,6 +24,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/data/customer', () => ({
   setAuthToken: mocks.setAuthToken,
   clearAuthToken: mocks.clearAuthToken,
+  setOauthState: mocks.setOauthState,
+  takeOauthState: mocks.takeOauthState,
   getAuthToken: vi.fn(),
 }));
 vi.mock('@/lib/phone-verification', () => ({
@@ -343,12 +347,12 @@ const setHeaders = (rec: Record<string, string>) =>
   mocks.headers.mockReturnValue({ get: (k: string) => rec[k] ?? null });
 
 describe('googleCallback — OAuth callback branches', () => {
+  // Failures come back as a short REASON CODE, never copy: the callback route
+  // forwards it as `?reason=` and the failed page owns the text, so no free
+  // text ever rides that query string onto a first-party page.
   it('missing code/state → cancelled, never touches the backend', async () => {
     const r = await googleCallback({});
-    expect(r).toEqual({
-      ok: false,
-      error: 'Google sign-in was cancelled or failed.',
-    });
+    expect(r).toEqual({ ok: false, reason: 'cancelled' });
     expect(mocks.clientFetch).not.toHaveBeenCalled();
   });
 
@@ -440,10 +444,7 @@ describe('googleCallback — OAuth callback branches', () => {
 
       const r = await googleCallback({ code: 'c', state: 's' });
 
-      expect(r).toEqual({
-        ok: false,
-        error: 'Google did not share a verified email.',
-      });
+      expect(r).toEqual({ ok: false, reason: 'email' });
       expect(mocks.customerCreate).not.toHaveBeenCalled();
       expect(mocks.logError).toHaveBeenCalledTimes(1);
       const errorCall = mocks.logError.mock.calls[0]!;
@@ -461,17 +462,27 @@ describe('googleCallback — OAuth callback branches', () => {
     },
   );
 
-  it('callback fetch rejects → friendly error, NEITHER setAuthToken NOR clearAuthToken', async () => {
+  it('callback fetch rejects → generic reason, NEITHER setAuthToken NOR clearAuthToken', async () => {
     mocks.clientFetch.mockRejectedValueOnce(new Error('network down'));
 
     const r = await googleCallback({ code: 'c', state: 's' });
 
-    expect(r).toEqual({
-      ok: false,
-      error: 'Could not complete Google sign-in. Please try again.',
-    });
+    expect(r).toEqual({ ok: false, reason: 'failed' });
     expect(mocks.setAuthToken).not.toHaveBeenCalled();
     expect(mocks.clearAuthToken).not.toHaveBeenCalled();
+  });
+
+  it('first login colliding with an emailpass account → exists', async () => {
+    mocks.clientFetch.mockResolvedValueOnce({
+      token: makeToken({ actor_id: '', user_metadata: { email: 'x@y.com' } }),
+    });
+    mocks.customerCreate.mockRejectedValueOnce(
+      new Error('Customer with email x@y.com already exists'),
+    );
+
+    const r = await googleCallback({ code: 'c', state: 's' });
+
+    expect(r).toEqual({ ok: false, reason: 'exists' });
   });
 
   it('retrieve fails after setAuthToken → clearAuthToken (no broken cookie left)', async () => {
@@ -536,6 +547,24 @@ describe('googleLoginStart — callback_url host guard', () => {
     expect(path).toBe('/auth/customer/google');
     expect(opts.body.callback_url).toBe(
       'https://polycards.gg/auth/google/callback',
+    );
+    // The provider's `state` is bound to THIS browser for the return leg —
+    // without it any browser holding a valid code+state pair is logged in as
+    // whoever completed the consent (login-CSRF).
+    expect(mocks.setOauthState).toHaveBeenCalledWith('opaque-state-key');
+  });
+
+  it('x-forwarded-proto is clamped, never interpolated verbatim', async () => {
+    setHeaders({ host: 'polycards.gg', 'x-forwarded-proto': 'javascript' });
+    mocks.clientFetch.mockResolvedValueOnce({
+      location: 'https://accounts.google.com/o/oauth2/v2/auth?state=s',
+    });
+
+    await googleLoginStart();
+
+    const [, opts] = mocks.clientFetch.mock.calls[0]!;
+    expect(opts.body.callback_url).toBe(
+      'http://polycards.gg/auth/google/callback',
     );
   });
 
@@ -640,6 +669,51 @@ describe("callback route origin guard — resolveCallbackOrigin + the route's fa
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe(
       '/auth/google/failed?reason=origin',
+    );
+    expect(mocks.clientFetch).not.toHaveBeenCalled();
+  });
+
+  // Allowlisted host from here on — these exercise what happens AFTER the
+  // origin guard: the state binding and the reason codes the page maps.
+  const prodRequest = (query = '?code=c&state=s') =>
+    new NextRequest(`http://0.0.0.0:41234/auth/google/callback${query}`, {
+      headers: {
+        'x-forwarded-host': 'polycards.gg',
+        'x-forwarded-proto': 'https',
+      },
+    });
+
+  it('state not bound to this browser → expired, the exchange never runs', async () => {
+    mocks.takeOauthState.mockResolvedValueOnce('someone-elses-state');
+
+    const res = await googleCallbackGET(prodRequest());
+
+    expect(res.headers.get('location')).toBe(
+      'https://polycards.gg/auth/google/failed?reason=expired',
+    );
+    expect(mocks.clientFetch).not.toHaveBeenCalled();
+  });
+
+  it('bound state matches → exchange runs; a failure lands as a reason CODE', async () => {
+    mocks.takeOauthState.mockResolvedValueOnce('s');
+    mocks.clientFetch.mockRejectedValueOnce(new Error('network down'));
+
+    const res = await googleCallbackGET(prodRequest());
+
+    expect(mocks.clientFetch).toHaveBeenCalledWith(
+      '/auth/customer/google/callback',
+      expect.objectContaining({ query: { code: 'c', state: 's' } }),
+    );
+    expect(res.headers.get('location')).toBe(
+      'https://polycards.gg/auth/google/failed?reason=failed',
+    );
+  });
+
+  it('?error from Google → cancelled', async () => {
+    const res = await googleCallbackGET(prodRequest('?error=access_denied'));
+
+    expect(res.headers.get('location')).toBe(
+      'https://polycards.gg/auth/google/failed?reason=cancelled',
     );
     expect(mocks.clientFetch).not.toHaveBeenCalled();
   });

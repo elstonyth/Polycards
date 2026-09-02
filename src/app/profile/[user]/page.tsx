@@ -10,14 +10,17 @@ import ProfileClient from './ProfileClient';
 // mock-pool usernames, dead links — fall back to the deterministic mock pool
 // so every /profile/<user> URL keeps rendering, exactly as before. Dynamic
 // now (no generateStaticParams): profiles change with every pull.
+//
+// The param arrives already percent-decoded (Next's route matcher decodes
+// each segment), so it is used as-is: a second decodeURIComponent turned a
+// literal `%` (/profile/%25) into a URIError → 500 where a 404 was meant.
 
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ user: string }>;
 }): Promise<Metadata> {
-  const { user } = await params;
-  const handle = decodeURIComponent(user);
+  const { user: handle } = await params;
   const result = await getPublicProfile(handle); // cache()d — shared with the page
   // Metadata must never throw, and the mock persona's name is only ever correct
   // for `notfound` — the one status where the handle really is a mock-pool
@@ -46,8 +49,7 @@ export default async function ProfilePage({
 }: {
   params: Promise<{ user: string }>;
 }) {
-  const { user } = await params;
-  const handle = decodeURIComponent(user);
+  const { user: handle } = await params;
   const [result, avatarFrames] = await Promise.all([
     getPublicProfile(handle),
     getAvatarFrames(),

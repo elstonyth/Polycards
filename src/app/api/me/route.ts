@@ -1,12 +1,17 @@
 import { NextResponse } from 'next/server';
-import { getCustomer } from '@/lib/data/customer';
+import { clearAuthToken, getCustomerSession } from '@/lib/data/customer';
 import { getOwnProfileHandle } from '@/lib/data/profiles';
 
 // Same-origin endpoint the client AuthProvider polls once on mount to learn the
 // logged-in customer — the browser can't read the httpOnly JWT cookie directly,
 // and a direct Store-API call from :4000 would be CORS-blocked.
 export async function GET() {
-  const customer = await getCustomer();
+  const { customer, stale } = await getCustomerSession();
+  // A token the backend rejected outright (401) is dead weight: nothing else
+  // ever deletes it, and every surface that only checks cookie PRESENCE keeps
+  // reading it as "logged in" while the header says logged out. This is the
+  // one request every load makes AND a Route Handler, so reap it here.
+  if (stale) await clearAuthToken();
   // The backend lazily assigns the public profile handle on this call, so
   // every logged-in session ends up with a working "My Profile" link.
   const handle = customer ? await getOwnProfileHandle() : null;

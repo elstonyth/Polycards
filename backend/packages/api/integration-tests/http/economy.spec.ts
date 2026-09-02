@@ -183,6 +183,10 @@ medusaIntegrationTestRunner({
           // Task A5 (audit #59) added the non-revenue rewardPromo bucket to the
           // report; no reward credits are seeded here, so it must be 0.
           rewardPromo: 0,
+          // 2026-09 review: shipping-fee and referral-commission buckets (both
+          // outside revenue/net); nothing seeded here, so both read 0.
+          deliveryFees: 0,
+          referralCommission: 0,
           net: 38.39,
         });
 

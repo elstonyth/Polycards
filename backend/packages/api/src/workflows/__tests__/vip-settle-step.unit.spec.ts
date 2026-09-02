@@ -175,7 +175,9 @@ describe('open-batch settles VIP synchronously (sim day-3 vip-integrity)', () =>
       receiver_id: 'cus_1',
       template: 'vip_level_up',
       data: { levels: [23] },
-      idempotency_key: `${calls.grantLevelUpRewards[0].openId}:levelup`,
+      // Keyed on the RUNG, not the open: two concurrent settles crossing the
+      // same rung must collapse to one feed row (review 2026-09).
+      idempotency_key: 'vip:cus_1:L23',
     });
   });
 

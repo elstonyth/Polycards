@@ -589,6 +589,8 @@
     "liabilityHint": "{{count}} cards owed · display value (FMV × markup, the buyback basis)",
     "topups": "Top-ups",
     "adjustments": "Adjustments (net)",
+    "deliveryFees": "Delivery fees (collected)",
+    "referralCommission": "Referral commissions (paid)",
     "rtpTitle": "Pack RTP (theoretical)",
     "rtpSubtitle": "Expected payout per open from the current odds × card display values (FMV × markup, default +20%) — the value buyback rates apply to. Above 100% means the pack loses money.",
     "pack": "Pack",

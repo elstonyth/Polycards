@@ -146,9 +146,12 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
     // shape so a renamed field can't render "$NaN" / an undefined rarity ring.
     const wonCard = parseOne(WonCardSchema, card);
     if (!wonCard) {
+      // The open is committed and the pull vaulted by now — never say "try
+      // again" over a charged open (a retry would charge twice).
       return {
         ok: false,
-        error: 'Got an unexpected response. Please try again.',
+        error:
+          "Your pack opened and the card is in your Vault, but we couldn't show it here.",
       };
     }
 
@@ -262,17 +265,23 @@ export async function openBatch(
       body: { count: clampedCount },
     });
 
-    // Validate and map every roll — fail the WHOLE batch on any bad card parse.
+    // Validate and map every roll. The charge is committed and every pull is
+    // already `vaulted` by the time this runs, so a roll that fails
+    // WonCardSchema is DROPPED, not fatal: the customer sees the cards that did
+    // map. Only when none map is the batch refused — and the copy then says
+    // where the card went, never "try again" (a retry would charge twice).
     const rolls: BatchRoll[] = [];
     for (const rawRoll of rawRolls) {
       const mapped = mapBatchRoll(rawRoll);
-      if (!mapped) {
-        return {
-          ok: false,
-          error: 'Got an unexpected response. Please try again.',
-        };
-      }
-      rolls.push(mapped);
+      if (mapped) rolls.push(mapped);
+      else logger.error(`[packs] open-batch roll failed to map for '${slug}'`);
+    }
+    if (rolls.length === 0 && rawRolls.length > 0) {
+      return {
+        ok: false,
+        error:
+          "Your pack opened and the card is in your Vault, but we couldn't show it here.",
+      };
     }
 
     return {

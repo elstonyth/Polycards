@@ -38,13 +38,19 @@ export const settleVipStep = createStep(
       if (gained.length > 0) {
         // Same consolidated notification (and idempotency key) the
         // vip-spend-settled subscriber sends, so whichever path settles first
-        // notifies exactly once. notifyFeedNonfatal never throws, so the
-        // surrounding try/catch here exists to guard the GRANT call, not this.
+        // notifies exactly once. Keyed on the RUNG, not the open: two opens
+        // settling concurrently (open-batch, two tabs) both read the same
+        // highest_level_ever and both gain the rung — the grant insert dedupes
+        // at the DB, and this key dedupes the feed row (review 2026-09). A
+        // rung is gained once per customer, ever (GREATEST ratchet), so the
+        // key can never suppress a real level-up. notifyFeedNonfatal never
+        // throws, so the surrounding try/catch here exists to guard the GRANT
+        // call, not this.
         await notifyFeedNonfatal(container, 'settle-vip', {
           receiverId: input.customer_id,
           template: 'vip_level_up',
           data: { levels: gained },
-          idempotencyKey: `${input.open_id}:levelup`,
+          idempotencyKey: `vip:${input.customer_id}:L${Math.max(...gained)}`,
         });
       }
     } catch (error) {

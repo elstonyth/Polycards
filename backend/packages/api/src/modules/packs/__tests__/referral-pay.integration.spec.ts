@@ -50,7 +50,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(r.created).toBe(true);
       // Tier 1 (0.5%): R 50bp x 100,000c = 500c; R2 50bp x 200,000c = 1000c.
       expect(r.lines).toBe(2);
-      return r.settlementId;
+      return r.settlementId!;
     }
 
     it('approve flips draft→approved and audits; re-approve is rejected', async () => {
@@ -332,16 +332,27 @@ moduleIntegrationTestRunner<PacksModuleService>({
         await service.bindReferral({
           customerId: 'cus_old',
           referrerId: 'cus_r9',
+          createdAt: new Date(),
         }),
       ).toEqual({ bound: false, reason: 'not_a_new_account' });
       expect(
         await service.listReferralAttributions({ customer_id: 'cus_old' }),
       ).toHaveLength(0);
+      // An account past the signup window is refused even with NO spend — a
+      // deposited-but-unopened whale is not a signup (review 2026-09).
+      expect(
+        await service.bindReferral({
+          customerId: 'cus_aged',
+          referrerId: 'cus_r9',
+          createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+        }),
+      ).toEqual({ bound: false, reason: 'not_a_new_account' });
       // A brand-new account still binds.
       expect(
         await service.bindReferral({
           customerId: 'cus_new',
           referrerId: 'cus_r9',
+          createdAt: new Date(),
         }),
       ).toEqual({ bound: true });
     });
@@ -374,12 +385,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
       await service.bindReferral({
         customerId: 'cus_x',
         referrerId: 'cus_r1',
+        createdAt: new Date(),
       });
       // Customer path is permanent…
       expect(
         await service.bindReferral({
           customerId: 'cus_x',
           referrerId: 'cus_r2',
+          createdAt: new Date(),
         }),
       ).toEqual({ bound: false, reason: 'already_bound' });
       // …the admin path can fix it.

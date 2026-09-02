@@ -257,7 +257,10 @@ the ledger `(type='RF', ref_id)` index.
 **VIP Level**:
 A customer's rung 1–100, reached by cumulative pack-open turnover (winnings-funded
 opens count too, #254/ADR 0003 — not external-funded spend). Unlocks a Reward Box
-tier and avatar frames.
+tier and avatar frames. Two readings exist: `current_level` (net — drops after a
+`reverseOpen`, what /me shows) and `highest_level_ever` (the ratchet — what
+level-up grants and the `reach_level` achievements are measured against, so an
+achievement never un-completes).
 _Avoid_: rank, tier (Tier is the price axis)
 
 **Reward Box**:

@@ -506,10 +506,15 @@ export const WalletSchema = z.looseObject({
  *  card. Unlike `levels[]`, which at least feeds the progress bar's floor,
  *  nothing ever read `next.reward` — so it is no longer declared, mapped, or
  *  typed (#523). `looseObject` still lets the field through untouched; it is
- *  simply not validated, and cannot take the card down with it. */
+ *  simply not validated, and cannot take the card down with it.
+ *
+ *  `box_tier` left the wire with #490 (Migration20260825120000 dropped the
+ *  column); requiring it made EVERY rung fail, so the whole ladder parsed to
+ *  [] and /me floored each progress bar at 0. Optional, not removed: only the
+ *  SUSPENDED vip-benefits.ts still reads the mapped field. */
 const vipReward = z.looseObject({
   voucher_amount: finite,
-  box_tier: z.string(),
+  box_tier: z.string().optional(),
   frame_unlock: z.boolean(),
 });
 

@@ -15,7 +15,6 @@ describe('mapVipLevels', () => {
         threshold: 3.09,
         reward: {
           voucher_amount: 2,
-          box_tier: 'a',
           frame_unlock: false,
         },
       },
@@ -26,7 +25,7 @@ describe('mapVipLevels', () => {
         threshold: 3.09,
         reward: {
           voucherAmount: 2,
-          boxTier: 'a',
+          boxTier: '',
           frameUnlock: false,
         },
       },
@@ -39,7 +38,9 @@ describe('mapVipLevels', () => {
 });
 
 describe('VipSchema.next — a malformed teaser reward is harmless (#523)', () => {
-  const reward = { voucher_amount: 2, box_tier: 'a', frame_unlock: false };
+  // The REAL wire shape: `box_tier` left the backend with #490
+  // (Migration20260825120000 dropped the column).
+  const reward = { voucher_amount: 2, frame_unlock: false };
   const base = {
     level: 2,
     highest_level_ever: 2,
@@ -92,13 +93,26 @@ describe('VipSchema.next — a malformed teaser reward is harmless (#523)', () =
 });
 
 describe('VipSchema.levels — one bad rung must not blank the card (#516)', () => {
-  const reward = { voucher_amount: 2, box_tier: 'a', frame_unlock: false };
+  const reward = { voucher_amount: 2, frame_unlock: false };
   const base = {
     level: 2,
     highest_level_ever: 2,
     spend: 500,
     next: { level: 3, threshold: 1000, remaining: 500, reward },
   };
+
+  it('keeps a rung shaped exactly as the backend sends it (no box_tier)', () => {
+    // Every rung used to fail on the dropped `box_tier` column, so the whole
+    // ladder parsed to [] and /me floored every progress bar at 0 (review C).
+    const v = parseOne(VipSchema, {
+      ...base,
+      levels: [
+        { level: 1, threshold: 0, reward },
+        { level: 2, threshold: 500, reward },
+      ],
+    });
+    expect(v!.levels.map((l) => l.threshold)).toEqual([0, 500]);
+  });
 
   it('drops the malformed rung and keeps the rest', () => {
     const v = parseOne(VipSchema, {
@@ -110,7 +124,7 @@ describe('VipSchema.levels — one bad rung must not blank the card (#516)', () 
         {
           level: 2,
           threshold: 500,
-          reward: { voucher_amount: 5, box_tier: 'b' },
+          reward: { voucher_amount: 5 },
         },
         { level: 3, threshold: 1000, reward },
       ],
@@ -143,7 +157,7 @@ describe('VipSchema.levels — one bad rung must not blank the card (#516)', () 
       {
         level: 1,
         threshold: 0,
-        reward: { voucherAmount: 2, boxTier: 'a', frameUnlock: false },
+        reward: { voucherAmount: 2, boxTier: '', frameUnlock: false },
       },
     ]);
   });

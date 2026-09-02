@@ -59,6 +59,7 @@ export type RollMode = 'demo' | 'free-rip' | 'free-pack' | 'paid';
 const EMPTY_DEMO_POOL = 'No cards in this pack yet — check back soon.';
 const NO_FREE_RIP_CLAIM =
   'That free rip is no longer available — open the task again.';
+const NOTHING_OPENED = 'Nothing was opened — your balance is unchanged.';
 
 /**
  * The route this press takes, in priority order.
@@ -138,8 +139,8 @@ export type RollResult =
    *  the caller must re-read the balance before re-enabling the button, and
    *  must never claim either a free spin or a charge. */
   | { ok: false; kind: 'unreachable' }
-  /** The server answered no. `needsTopUp` still implies a possible debit —
-   *  `openBatch` maps a post-charge enrichment failure to this too. */
+  /** The server answered no (or, for the batch route, answered yes with no
+   *  rolls). `needsTopUp` still implies a possible debit. */
   | {
       ok: false;
       kind: 'rejected';
@@ -356,6 +357,12 @@ async function openRolls(
         needsAuth: res.needsAuth,
         needsTopUp: res.needsTopUp,
       };
+    }
+    // A 200 with no rolls (a stock race, a rule that filtered every roll) is
+    // a refusal, not a win: with no winner no reel settles, and the watchdog
+    // would park the machine in an empty review it can never leave.
+    if (res.rolls.length === 0) {
+      return { ok: false, kind: 'rejected', error: NOTHING_OPENED };
     }
     return {
       ok: true,

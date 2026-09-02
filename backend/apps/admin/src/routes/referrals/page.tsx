@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import {
   Badge,
   Button,
@@ -406,8 +406,12 @@ function RunsCard() {
           </Table.Header>
           <Table.Body>
             {data.map((run) => (
-              <>
-                <Table.Row key={run.id}>
+              // Key on the mapped Fragment itself, not the inner row — `<>`
+              // can't carry one, and React then reconciles by index, so the
+              // expanded lines panel could attach to the wrong run after
+              // approve/void reorders the list.
+              <Fragment key={run.id}>
+                <Table.Row>
                   <Table.Cell>{run.week_start}</Table.Cell>
                   <Table.Cell>
                     <Badge size="2xsmall" color={STATUS_COLOR[run.status]}>
@@ -460,7 +464,7 @@ function RunsCard() {
                   </Table.Cell>
                 </Table.Row>
                 {openId === run.id && (
-                  <Table.Row key={`${run.id}-detail`}>
+                  <Table.Row>
                     {/* @medusajs/ui's Cell type omits colSpan — span via the
                         native attribute through props spread instead. */}
                     <Table.Cell {...{ colSpan: 5 }}>
@@ -468,7 +472,7 @@ function RunsCard() {
                     </Table.Cell>
                   </Table.Row>
                 )}
-              </>
+              </Fragment>
             ))}
           </Table.Body>
         </Table>

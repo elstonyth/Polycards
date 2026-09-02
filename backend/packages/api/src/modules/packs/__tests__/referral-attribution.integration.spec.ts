@@ -28,6 +28,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         const first = await service.bindReferral({
           customerId: 'cus_a',
           referrerId: 'cus_r',
+          createdAt: new Date(),
         });
         expect(first).toEqual({ bound: true });
 
@@ -36,6 +37,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         const second = await service.bindReferral({
           customerId: 'cus_a',
           referrerId: 'cus_other',
+          createdAt: new Date(),
         });
         expect(second).toEqual({ bound: false, reason: 'already_bound' });
 
@@ -50,6 +52,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         const r = await service.bindReferral({
           customerId: 'cus_self',
           referrerId: 'cus_self',
+          createdAt: new Date(),
         });
         expect(r).toEqual({ bound: false, reason: 'self' });
         expect(

@@ -32,11 +32,13 @@ export default async function vipSpendSettledHandler({
 
   // Non-fatal: the grant rows and state upsert are already committed — a
   // notification failure is logged (best-effort) and swallowed, never thrown.
+  // Keyed on the rung, not the open — the same key settleVipStep uses, and
+  // for the reason given there.
   await notifyFeedNonfatal(container, 'vip-spend-settled', {
     receiverId: data.customer_id,
     template: 'vip_level_up',
     data: { levels: gained },
-    idempotencyKey: `${data.open_id}:levelup`,
+    idempotencyKey: `vip:${data.customer_id}:L${Math.max(...gained)}`,
   });
 }
 

@@ -1,4 +1,5 @@
 import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { openCallback } from '../../../../modules/packs/globepay';
@@ -61,16 +62,25 @@ async function recordVerifyOutcome(
       );
     }
     if (!row) return;
-    await packs.updateGlobePayWithdrawals({
-      id: row.id,
-      // Truncated: this column is a breadcrumb, not a transcript, and the
-      // gateway's own text is the only part we do not compose. The REASON is
-      // what gets cut, never the timestamp in front of it — slicing the joined
-      // string would spend the budget on a fixed 24-char prefix and could, on
-      // a long enough gateway message, leave a row stamped with a time and
-      // half a word.
-      verify_outcome: `${new Date().toISOString()} ${outcome.slice(0, 400)}`,
-    });
+    // Raw, NOT the generated update: that one stamps updated_at, and the
+    // withdrawal sweep reads updated_at as a pending row's SUBMIT clock
+    // (globepay-withdrawal-reconcile.ts: "adding a write that leaves a row
+    // 'pending' without a gateway id BREAKS this"). A verification landing on
+    // an ambiguous submit pushed its not-found refund out by up to an hour per
+    // call (review 2026-09). This column is a breadcrumb; it must not move
+    // that clock.
+    //
+    // Truncated: this column is a breadcrumb, not a transcript, and the
+    // gateway's own text is the only part we do not compose. The REASON is
+    // what gets cut, never the timestamp in front of it — slicing the joined
+    // string would spend the budget on a fixed 24-char prefix and could, on
+    // a long enough gateway message, leave a row stamped with a time and
+    // half a word.
+    const pg = scope.resolve(ContainerRegistrationKeys.PG_CONNECTION);
+    await pg.raw(
+      'UPDATE globepay_withdrawal SET verify_outcome = ? WHERE id = ? AND deleted_at IS NULL',
+      [`${new Date().toISOString()} ${outcome.slice(0, 400)}`, row.id],
+    );
   } catch (error) {
     // Swallowed for the money path's sake — see the doc comment — but not
     // silently. A recorder that fails on an APPROVED verification leaves a row

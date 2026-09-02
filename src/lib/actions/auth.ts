@@ -16,12 +16,16 @@ import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
 import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
-import { setAuthToken, clearAuthToken } from '@/lib/data/customer';
+import {
+  setAuthToken,
+  clearAuthToken,
+  setOauthState,
+} from '@/lib/data/customer';
 import { fetchProfileHandle } from '@/lib/data/profiles';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
 import { bindReferralFromCookie } from '@/lib/referral-cookie';
 import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
-import { ALLOWED_SELF_HOSTS } from '@/lib/allowed-hosts';
+import { resolveCallbackOrigin } from '@/lib/allowed-hosts';
 import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -40,6 +44,26 @@ export type AuthCustomer = {
 
 export type AuthResult =
   { ok: true; customer: AuthCustomer } | { ok: false; error: string };
+
+/**
+ * Why a Google sign-in did not complete — a short CODE, never copy. The
+ * callback route forwards it as `?reason=` and /auth/google/failed maps it to
+ * text, so no free text ever rides that query string onto a first-party page
+ * (`?reason=Your+wallet+is+frozen…` under the Polycards header was a phishing
+ * line waiting to happen). Unknown codes fall back to the page's default.
+ */
+export type GoogleFailReason =
+  | 'origin'
+  | 'cancelled'
+  | 'expired'
+  | 'email'
+  | 'exists'
+  | 'disabled'
+  | 'failed';
+
+export type GoogleCallbackResult =
+  | { ok: true; customer: AuthCustomer }
+  | { ok: false; reason: GoogleFailReason };
 
 type TokenResponse = { token: string };
 
@@ -265,17 +289,16 @@ export async function googleLoginStart(): Promise<
   try {
     const h = await headers();
     const host = h.get('x-forwarded-host') ?? h.get('host');
-    // Host / X-Forwarded-Host are client-supplied. Only build the OAuth callback
-    // from a host we actually registered with Google — a spoofed one would be
-    // rejected by Google anyway, but validating here keeps attacker-controlled
-    // values out of the backend token exchange. This set mirrors the Authorised
-    // redirect URIs on the OAuth client (keep the two in sync).
-    if (!host || !ALLOWED_SELF_HOSTS.has(host))
+    // Host / X-Forwarded-Host / X-Forwarded-Proto are client-supplied. Only
+    // build the OAuth callback from a host we actually registered with Google
+    // and a scheme clamped to http|https — a spoofed one would be rejected by
+    // Google anyway, but validating here keeps attacker-controlled values out
+    // of the backend token exchange. Same helper the callback route uses, so
+    // the two legs can't resolve the origin differently.
+    const origin = resolveCallbackOrigin(host, h.get('x-forwarded-proto'));
+    if (!origin)
       return { ok: false, error: 'Could not determine site origin.' };
-    const proto =
-      h.get('x-forwarded-proto') ??
-      (process.env.NODE_ENV === 'production' ? 'https' : 'http');
-    const callback_url = `${proto}://${host}/auth/google/callback`;
+    const callback_url = `${origin}/auth/google/callback`;
 
     const { location } = await sdk.client.fetch<{ location?: string }>(
       '/auth/customer/google',
@@ -292,6 +315,13 @@ export async function googleLoginStart(): Promise<
     // wouldn't survive a reinstall.
     const url = new URL(location);
     url.searchParams.set('prompt', 'select_account');
+    // Bind the provider's `state` to this browser; the callback route refuses
+    // a return leg whose state it did not start (login-CSRF — see
+    // setOauthState).
+    const state = url.searchParams.get('state');
+    if (!state)
+      return { ok: false, error: 'Google sign-in is currently unavailable.' };
+    await setOauthState(state);
     return { ok: true, location: url.toString() };
   } catch (error) {
     logger.error('[auth] google login start failed:', error);
@@ -305,9 +335,8 @@ export async function googleLoginStart(): Promise<
 export async function googleCallback(query: {
   code?: string;
   state?: string;
-}): Promise<AuthResult> {
-  if (!query.code || !query.state)
-    return { ok: false, error: 'Google sign-in was cancelled or failed.' };
+}): Promise<GoogleCallbackResult> {
+  if (!query.code || !query.state) return { ok: false, reason: 'cancelled' };
 
   try {
     const { token } = await sdk.client.fetch<TokenResponse>(
@@ -331,7 +360,7 @@ export async function googleCallback(query: {
           payloadKeys: Object.keys(payload),
           userMetadataKeys: Object.keys(payload.user_metadata ?? {}),
         });
-        return { ok: false, error: 'Google did not share a verified email.' };
+        return { ok: false, reason: 'email' };
       }
       await sdk.store.customer.create(
         {
@@ -371,14 +400,15 @@ export async function googleCallback(query: {
     }
   } catch (error) {
     logger.error('[auth] google callback failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(
-        error,
-        AUTH_RULES,
-        'Could not complete Google sign-in. Please try again.',
-      ),
-    };
+    // Same two backend refusals AUTH_RULES names, as codes (the page owns the
+    // copy). Everything else — network, refresh, retrieve — is just 'failed'.
+    const text = error instanceof Error ? error.message : String(error);
+    const reason: GoogleFailReason = /already exists/i.test(text)
+      ? 'exists'
+      : /account has been disabled/i.test(text)
+        ? 'disabled'
+        : 'failed';
+    return { ok: false, reason };
   }
 }
 

@@ -76,7 +76,25 @@ export function buildCsp(): string {
   // jsDelivr hosts the pixel-Pokémon sprites (src/lib/mock/pokedex.ts) — an
   // enforced policy must allow it or every reel/pokédex sprite is blocked.
   const spriteCdn = 'https://cdn.jsdelivr.net';
-  const img = ["'self'", 'data:', 'blob:', backend, media, spriteCdn, fbTrack]
+  // Hot-linked card/pack art — the two hosts next.config.ts `remotePatterns`
+  // allowlists because catalog rows can reference them directly (the
+  // Add-from-PriceCharting flow). Several surfaces render `image` as a bare
+  // <img> or `unoptimized`, bypassing /_next/image, so the enforced policy
+  // must name them too or those tiles go blank. Keep in step with next.config.
+  const hotlinks = [
+    'https://storage.googleapis.com',
+    'https://www.pokemoncenter.com',
+  ];
+  const img = [
+    "'self'",
+    'data:',
+    'blob:',
+    backend,
+    media,
+    spriteCdn,
+    fbTrack,
+    ...hotlinks,
+  ]
     .filter(Boolean)
     .join(' ');
 

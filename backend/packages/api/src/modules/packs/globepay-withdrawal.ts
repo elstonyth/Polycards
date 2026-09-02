@@ -767,6 +767,9 @@ export async function refundGlobePayWithdrawal(
     amount: unknown;
     bank_code: string;
     account_number: string;
+    /** The reason already on the row, if any — a row closed by the gateway
+     *  or the sweep keeps it (see the terminal update below). */
+    failure_reason?: string | null;
   },
   gatewayStatus: number | null,
   fromStatus: 'pending' | 'held' | 'failed' = 'pending',
@@ -836,7 +839,12 @@ export async function refundGlobePayWithdrawal(
     data: {
       status: 'failed',
       gateway_status: gatewayStatus,
-      ...(failureReason
+      // First writer wins. The admin deny route is re-runnable on a 'failed'
+      // row by design, so a mistaken Deny on a row the bank already refused
+      // would otherwise replace the bank's diagnostic with "denied by admin"
+      // — and the deploy's logs have rotated by then (review 2026-09). Same
+      // stance as gateway_status, which deny passes back unchanged.
+      ...(failureReason && !withdrawal.failure_reason
         ? { failure_reason: failureReason.slice(0, 400) }
         : {}),
     },

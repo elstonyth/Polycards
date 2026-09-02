@@ -72,12 +72,14 @@ export async function POST(
   // showcased ONLY while the pull is still vaulted and owned by this customer,
   // so a sell/deliver that flips status the instant after validateShowcaseRequest
   // loses — it matches 0 rows instead of stamping the flag onto a sold pull.
-  // (Mirrors revealPull's first-write-wins filtered update.)
-  const updated = await packs.updatePulls({
-    selector: { id: pullId, customer_id: customerId, status: 'vaulted' },
-    data: { showcased },
-  });
-  if (updated.length === 0) {
+  // (One conditional UPDATE — see setShowcasedIfVaulted; the generated
+  // selector-update is a find-then-write and cannot give that guarantee.)
+  const updated = await packs.setShowcasedIfVaulted(
+    pullId,
+    customerId,
+    showcased,
+  );
+  if (!updated) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
       'Only vaulted pulls can be showcased',
