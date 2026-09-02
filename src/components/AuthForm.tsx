@@ -10,6 +10,7 @@ import {
   googleLoginStart,
   type AuthResult,
 } from '@/lib/actions/auth';
+import { leaveFor } from '@/lib/navigation';
 import { useAuth } from './auth/AuthProvider';
 import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
 import { PhoneField } from '@/components/PhoneField';
@@ -281,7 +282,7 @@ export default function AuthForm({
         // Full-page redirect to Google's consent screen; the /auth/google/callback
         // route finishes the exchange on return. We're navigating away, so leave
         // `busy` true (no reset) to keep the button disabled until unload.
-        window.location.assign(result.location);
+        leaveFor(result.location);
         return;
       }
       setBusy(false);
@@ -396,7 +397,10 @@ export default function AuthForm({
                 token: proofToken,
               });
               if (result.ok) {
-                window.location.assign(
+                // Full-page load on purpose: AuthForm only ever renders
+                // inside AuthModal, so a client-side push would navigate the
+                // page behind a still-mounted overlay.
+                leaveFor(
                   `/reset-password?token=${encodeURIComponent(result.token)}&email=${encodeURIComponent(result.maskedEmail)}`,
                 );
                 return;
