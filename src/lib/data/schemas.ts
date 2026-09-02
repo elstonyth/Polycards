@@ -813,7 +813,14 @@ export const TaskEntrySchema = z.looseObject({
   kind: z.enum(['weekly', 'achievement']),
   title: z.string(),
   requirement: z.looseObject({ type: z.string() }),
-  reward: z.looseObject({ type: z.string() }),
+  reward: z.looseObject({
+    type: z.string(),
+    pack_id: z.string().optional(),
+    // A pack reward names its pack. Optional AND nullable: a backend that
+    // predates the field omits it, a deleted pack nulls it — both fall back
+    // to the bare "Free rip" label.
+    pack_title: z.string().nullable().optional(),
+  }),
   progress: z.looseObject({
     current: finite,
     target: finite,
@@ -830,6 +837,7 @@ export const PendingSpinSchema = z.looseObject({
   task_id: z.string(),
   title: z.string(),
   pack_id: z.string(),
+  pack_title: z.string().nullable().optional(),
 });
 
 export const TaskHubSchema = z.looseObject({

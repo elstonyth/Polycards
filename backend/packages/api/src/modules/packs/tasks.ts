@@ -23,6 +23,14 @@ export type TaskReward =
   | { type: 'pack'; pack_id: string }
   | { type: 'card'; card_handle: string };
 
+/** A reward as GET /store/tasks sends it: a pack reward also carries the
+ *  pack's title, so the row can name the pack instead of a bare "Free rip".
+ *  null = the pack row is gone (the claim will fail at claim time; the admin
+ *  console is where that gets flagged). */
+export type HubReward =
+  | Exclude<TaskReward, { type: 'pack' }>
+  | { type: 'pack'; pack_id: string; pack_title: string | null };
+
 export type TaskKind = 'weekly' | 'achievement';
 
 // Weekly cadence only makes sense for facts that reset with the week;

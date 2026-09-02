@@ -40,7 +40,26 @@ function rewardLabel(reward: TaskEntry['reward']): string {
   if (reward.type === 'credit' && typeof reward.amount_myr === 'number') {
     return rm(reward.amount_myr);
   }
+  // A free rip names its pack — "Free rip · Bronze Pack" — so the player
+  // knows what they are working towards before they claim it. The slug is
+  // the fallback (a backend that predates pack_title, or a pack that has
+  // since been deleted): never a bare "Free rip" again.
+  if (reward.type === 'pack' && (reward.pack_title || reward.pack_id)) {
+    return `Free rip · ${reward.pack_title || reward.pack_id}`;
+  }
   return REWARD_LABEL[reward.type] ?? 'Reward';
+}
+
+// Deliberately NOT a link to the pack page: a draft or deleted pack 404s
+// there, and an 11px inline chip cannot meet the focus-ring / 44px tap-target
+// rules DESIGN.md sets for interactive elements. The name is the point.
+function RewardChip({ reward }: { reward: TaskEntry['reward'] }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-neutral-300">
+      <Gift className="h-3 w-3 shrink-0" aria-hidden />
+      <span className="truncate">{rewardLabel(reward)}</span>
+    </span>
+  );
 }
 
 // Every way a claim can decline, in the customer's words.
@@ -96,7 +115,7 @@ function TaskRow({
     <li className="flex items-center gap-3 py-3">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm text-white">{task.title}</p>
-        <div className="mt-1.5 flex items-center gap-2">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
           <div
             className="h-1.5 w-28 overflow-hidden rounded-full bg-neutral-800"
             role="progressbar"
@@ -113,10 +132,7 @@ function TaskRow({
           <span className="text-xs text-white/40 tabular-nums">
             {task.progress.current}/{task.progress.target}
           </span>
-          <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-neutral-300">
-            <Gift className="h-3 w-3" aria-hidden />
-            {rewardLabel(task.reward)}
-          </span>
+          <RewardChip reward={task.reward} />
         </div>
       </div>
       {task.claimed ? (
@@ -235,8 +251,13 @@ function WeeklyTab({
                   key={s.claim_id}
                   className="flex items-center justify-between gap-3"
                 >
-                  <span className="min-w-0 flex-1 truncate text-xs text-neutral-400">
-                    {s.title}
+                  <span className="min-w-0 flex-1 text-xs text-neutral-400">
+                    <span className="block truncate">{s.title}</span>
+                    {(s.pack_title || s.pack_id) && (
+                      <span className="block truncate text-neutral-200">
+                        {s.pack_title || s.pack_id}
+                      </span>
+                    )}
                   </span>
                   <Link
                     href={`/slots/${encodeURIComponent(s.pack_id)}/spin?freeRip=${encodeURIComponent(s.claim_id)}`}
