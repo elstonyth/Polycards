@@ -30,6 +30,12 @@ const eslintConfig = defineConfig([
     // Scratch / orphaned tool worktree copies (gitignored) — same nested-repo
     // pollution as above. CI never sees these.
     '.clone/**',
+    // Agent skill tooling (excluded via .git/info/exclude, so it is local-only
+    // and CI never sees it either). These are standalone scripts on their own
+    // conventions — validate-findings.cjs is CommonJS, where `require()` is the
+    // only import form, so @typescript-eslint/no-require-imports flagged it as
+    // two hard errors and made `npm run lint` exit 1 on a clean checkout.
+    '.agents/**',
   ]),
   // The scripts/ dir is one-off Playwright capture/measure/QA tooling (see
   // CLAUDE.md "the clone workflow"), not product code. Linting it for unused
