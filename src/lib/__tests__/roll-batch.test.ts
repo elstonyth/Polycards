@@ -42,7 +42,10 @@ function deps(over: Partial<RollDeps> = {}) {
   return {
     openBatch: vi.fn(async () => ({
       ok: true as const,
-      rolls: [],
+      // One real roll: an empty `rolls` is itself a refusal now (see below).
+      rolls: [
+        { card: won('a'), pullId: 'pull_a', marketValue: 1, buyback: null },
+      ],
       price: 0,
       total: 0,
       balance: null,
@@ -369,6 +372,27 @@ describe('rollBatch — paid open', () => {
       kind: 'rejected',
       needsTopUp: true,
     });
+  });
+
+  it('refuses a 200 with no rolls instead of handing the machine an empty batch', async () => {
+    // With no winner no reel ever settles; the watchdog would force an empty
+    // review the machine can never leave. Refuse it as a rejection — the
+    // caller's rejected path re-reads the balance and returns to idle.
+    const openBatch = vi.fn(async () => ({
+      ok: true as const,
+      rolls: [],
+      price: 10,
+      total: 0,
+      balance: 7,
+    }));
+
+    const res = await rollBatch(req({ mode: 'paid' }), deps({ openBatch }));
+
+    expect(openBatch).toHaveBeenCalledTimes(1);
+    expect(res).toMatchObject({ ok: false, kind: 'rejected' });
+    if (res.ok || res.kind !== 'rejected') return;
+    expect(res.error).toMatch(/Nothing was opened/);
+    expect(res.needsTopUp).toBeUndefined();
   });
 
   it('turns a transport throw into `unreachable` without re-calling', async () => {

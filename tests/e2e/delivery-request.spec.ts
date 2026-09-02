@@ -57,6 +57,12 @@ test('customer requests delivery of a vaulted card via the UI', async ({
     .locator('input[aria-label="Address"]')
     .fill(`${stamp()} Pallet Town Rd`);
   await modal.locator('input[aria-label="City"]').fill('Kuala Lumpur');
+  // State became required with the composite delivery zone (postcode AND
+  // state/city decide West vs East, 2026-08-25) — the form refuses to save
+  // without it.
+  await modal
+    .locator('select[aria-label="State"]')
+    .selectOption('W.P. Kuala Lumpur');
   await modal.locator('input[aria-label="Postal code"]').fill('50000');
   await modal.locator('input[aria-label="Country code"]').fill('MY');
   await modal.getByRole('button', { name: /save address/i }).click();

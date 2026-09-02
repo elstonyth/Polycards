@@ -7,7 +7,8 @@
  * Backend route: GET /store/vip
  * Wire shape (snake_case, all at root level):
  *   { level, highest_level_ever, spend, next: { level, threshold, remaining,
- *     reward: { voucher_amount, box_tier, frame_unlock } } | null }
+ *     reward: { voucher_amount, frame_unlock } } | null }
+ *   (`box_tier` left the wire with #490; the schema tolerates it as optional)
  *
  * `next.reward` is on the wire but is neither validated nor mapped — nothing
  * renders it, and declaring it let a malformed reward blank the LV card (#523).

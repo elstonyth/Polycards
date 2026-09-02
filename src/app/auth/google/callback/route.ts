@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { googleCallback } from '@/lib/actions/auth';
+import { googleCallback, type GoogleFailReason } from '@/lib/actions/auth';
+import { takeOauthState } from '@/lib/data/customer';
 import { resolveCallbackOrigin } from '@/lib/allowed-hosts';
 
 /**
@@ -10,7 +11,8 @@ import { resolveCallbackOrigin } from '@/lib/allowed-hosts';
  * Route Handler or an action-dispatched Server Action — never during a Server
  * Component render. On success the customer lands on their account; on failure
  * we bounce to the storefront's Google-error page (route handlers can't render
- * JSX, so the human-readable reason travels as a query param).
+ * JSX, so a short reason CODE travels as a query param — never free text, see
+ * GoogleFailReason).
  *
  * Origin resolution (resolveCallbackOrigin) lives in @/lib/allowed-hosts, not
  * here: a Route Handler module may only export the recognised HTTP-method/
@@ -43,32 +45,39 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
   }
 
-  const failed = (reason: string): NextResponse =>
+  const failed = (reason: GoogleFailReason): NextResponse =>
     NextResponse.redirect(
-      new URL(
-        `/auth/google/failed?reason=${encodeURIComponent(reason)}`,
-        origin,
-      ),
+      new URL(`/auth/google/failed?reason=${reason}`, origin),
     );
 
   if (searchParams.get('error')) {
-    return failed('Google sign-in was cancelled. You can try again.');
+    return failed('cancelled');
   }
 
-  // googleCallback is written to return an AuthResult rather than throw, but a
+  // Login-CSRF guard: the `state` must be the one THIS browser started with
+  // (googleLoginStart binds it in a cookie). The backend only checks that a
+  // state exists in its store, so without this an attacker could hand their
+  // own half-finished callback URL to a victim and have the victim's browser
+  // logged into the attacker's account. Single-use: the read clears it.
+  const state = searchParams.get('state');
+  if (!state || (await takeOauthState()) !== state) {
+    return failed('expired');
+  }
+
+  // googleCallback is written to return a result rather than throw, but a
   // try/catch here is cheap insurance: any unexpected throw still lands on the
   // friendly failure page instead of a raw 500.
   try {
     const result = await googleCallback({
       code: searchParams.get('code') ?? undefined,
-      state: searchParams.get('state') ?? undefined,
+      state,
     });
 
     if (result.ok) {
       return NextResponse.redirect(new URL('/me', origin));
     }
-    return failed(result.error);
+    return failed(result.reason);
   } catch {
-    return failed('Google sign-in could not be completed. Please try again.');
+    return failed('failed');
   }
 }

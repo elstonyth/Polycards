@@ -2,6 +2,7 @@ import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
+import { pageAll } from '../../api/utils/page-all';
 
 export type DeletePackInput = { slug: string };
 
@@ -72,9 +73,10 @@ export const deletePackStep = createStep(
       );
     }
 
-    const oddsRows = await packs.listPackOdds(
-      { pack_id: input.slug },
-      { take: 1000 },
+    // PAGED — a bare take:1000 would delete (and snapshot for compensation)
+    // only the first 1,000 rows of a larger pool.
+    const oddsRows = await pageAll((opts) =>
+      packs.listPackOdds({ pack_id: input.slug }, opts),
     );
 
     const snapshot: CompensateData = {

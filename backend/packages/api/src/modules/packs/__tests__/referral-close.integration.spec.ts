@@ -177,11 +177,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(run.total_commission_cents).toBe(0);
       // A quarantined line pays nothing even after approve.
       await service.approveWeeklySettlement({
-        settlementId: r.settlementId,
+        settlementId: r.settlementId!,
         adminId: 'admin_1',
       });
       const paid = await service.payWeeklySettlement({
-        settlementId: r.settlementId,
+        settlementId: r.settlementId!,
       });
       expect(paid.paid).toBe(0);
       expect(

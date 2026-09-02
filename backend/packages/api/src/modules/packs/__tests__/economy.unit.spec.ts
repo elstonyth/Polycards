@@ -104,6 +104,8 @@ describe('ledgerTotals', () => {
       net: 13.69, // revenue - payouts
       cashout: 0,
       rewardPromo: 0,
+      deliveryFees: 0,
+      referralCommission: 0,
     });
   });
 
@@ -116,6 +118,8 @@ describe('ledgerTotals', () => {
       net: 0,
       cashout: 0,
       rewardPromo: 0,
+      deliveryFees: 0,
+      referralCommission: 0,
     });
   });
 

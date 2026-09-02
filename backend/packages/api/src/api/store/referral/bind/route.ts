@@ -38,10 +38,17 @@ export async function POST(
     return;
   }
 
+  // The signup-window fact the service needs and cannot read itself (the
+  // packs module cannot see the customer module).
+  const me = await customers.retrieveCustomer(customerId, {
+    select: ['id', 'created_at'],
+  });
+
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const result = await packs.bindReferral({
     customerId,
     referrerId: referrer.id,
+    createdAt: new Date(me.created_at),
   });
   res.json(result);
 }

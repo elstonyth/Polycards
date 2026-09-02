@@ -71,6 +71,30 @@ describe('GET /api/recent-pulls — catalog-bounded key gate (plan 117 step 2)',
     expect(pullsCallsOf()[1]![0]).toBe('/store/pulls/recent');
   });
 
+  // The free welcome pack is reachable (GET /store/packs/:slug) but never
+  // listed (GET /store/packs filters free_welcome out), so a catalog-only gate
+  // flipped its spin page to the GLOBAL feed on the first poll.
+  it('an unlisted-but-reachable pack (the free pack) keeps its own scoped key', async () => {
+    fetchMock.mockImplementation(async (path: string) => {
+      if (path === '/store/packs/free-welcome-pack')
+        return {
+          pack: packRow({
+            slug: 'free-welcome-pack',
+            category: 'free_welcome',
+          }),
+        };
+      if (path.startsWith('/store/packs')) return { packs: [packRow()] };
+      if (path.startsWith('/store/pulls/recent')) return { pulls: [] };
+      throw new Error(`unexpected fetch path in test: ${path}`);
+    });
+
+    await GET(req('?pack_id=free-welcome-pack'));
+
+    expect(pullsCallsOf()[0]![0]).toBe(
+      '/store/pulls/recent?pack_id=free-welcome-pack',
+    );
+  });
+
   it('resolving the catalog costs no extra backend hop (getPackCategories is already cached)', async () => {
     await GET(req());
     const packsCallsBefore = fetchMock.mock.calls.filter(([path]) =>

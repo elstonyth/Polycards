@@ -223,9 +223,12 @@ const GachaCardsPage = () => {
         form.pixel_pokemon_id !== loadedPixelId
           ? form.pixel_pokemon_id
           : undefined,
-      // pc_product_id stays untouched (undefined) unless the operator hits
-      // Unlink, which submits null explicitly and closes the form immediately.
+      // pc_product_id stays untouched (undefined = backend keeps the stored
+      // link) unless the operator hits Unlink, which submits null explicitly
+      // and closes the form immediately.
       pc_product_id: undefined,
+      // undefined = backend keeps the stored markup (the input only renders
+      // for a PC-linked card, so an unlinked card's custom margin survives).
       market_multiplier:
         form.pc_product_id === null || form.market_multiplier_pct.trim() === ''
           ? undefined
@@ -272,9 +275,11 @@ const GachaCardsPage = () => {
         // silently wipe the slab label.
         label_year: card.label_year,
         label_note: card.label_note,
-        // pixel_pokemon_id omitted (undefined) → the pokemon link + its mirror
-        // stay untouched; unlink only clears the PriceCharting link.
+        // pixel_pokemon_id and market_multiplier omitted (undefined) → the
+        // pokemon link + its mirror and the stored markup stay untouched;
+        // unlink only clears the PriceCharting link (both halves, explicitly).
         pc_product_id: null,
+        pc_grade: null,
       });
       toast.success(t('cards.toast.unlinked'));
       setForm(null);

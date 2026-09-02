@@ -123,7 +123,8 @@ describe('vip-spend-settled subscriber', () => {
     expect(warns).toHaveLength(1);
     expect(warns[0]).toContain('vip_level_up');
     expect(warns[0]).toContain('cus_1');
-    expect(warns[0]).toContain('open_1');
+    // The idempotency key names the RUNG, not the open (review 2026-09).
+    expect(warns[0]).toContain('vip:cus_1:L3');
     expect(warns[0]).toContain('provider exploded');
   });
 

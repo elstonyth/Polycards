@@ -20,6 +20,8 @@ export type VipLevel = {
   threshold: number;
   reward: {
     voucherAmount: number;
+    /** Always '' since #490 dropped the column — kept only because the
+     *  SUSPENDED vip-benefits.ts reads it; drop both together. */
     boxTier: string;
     frameUnlock: boolean;
   };
@@ -49,7 +51,7 @@ export function mapVipLevels(raw: VipLevelRow[]): VipLevel[] {
     threshold: r.threshold,
     reward: {
       voucherAmount: r.reward.voucher_amount,
-      boxTier: r.reward.box_tier,
+      boxTier: r.reward.box_tier ?? '',
       frameUnlock: r.reward.frame_unlock,
     },
   }));

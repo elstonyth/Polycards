@@ -140,23 +140,21 @@ moduleIntegrationTestRunner<PacksModuleService>({
         adminId: 'admin_1',
         reason: 'seed',
       });
-      const decremented: string[] = [];
+      // No stock hook: the route takes the unit AFTER this commits (a take
+      // inside the transaction outlived a rolled-back claim).
       const claim = await service.claimTask({
         customerId: 'cus_t3',
         taskId: id,
-        decrementStock: async (h) => {
-          decremented.push(h);
-          return true;
-        },
       });
       expect(claim.claimed).toBe(true);
-      expect(decremented).toEqual(['reward-card']);
       const rewardPulls = await service.listPulls({
         customer_id: 'cus_t3',
         source: 'reward',
       });
       expect(rewardPulls).toHaveLength(1);
       expect(rewardPulls[0].status).toBe('vaulted');
+      // The minted pull is what the route's post-commit take is keyed off.
+      expect(claim.claimed && claim.ref).toBe(rewardPulls[0].id);
       // Achievements are once EVER — a re-claim is refused.
       expect(
         await service.claimTask({ customerId: 'cus_t3', taskId: id }),
@@ -538,9 +536,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // A task id that does not exist is still 'not_found' — the two must not
       // collapse into one message.
       expect(
-        await service.claimTask({ customerId: 'cus_win', taskId: 'task_ghost' }),
+        await service.claimTask({
+          customerId: 'cus_win',
+          taskId: 'task_ghost',
+        }),
       ).toEqual({ claimed: false, reason: 'not_found' });
     });
-
   },
 });

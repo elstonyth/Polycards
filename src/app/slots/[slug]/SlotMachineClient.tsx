@@ -193,10 +193,12 @@ export default function SlotMachineClient({
   // Everything about the RESULT of a roll reads the mode off the roll itself
   // (RolledBatch.mode) — this value can flip mid-flight when someone logs in.
   const isDemo = mode === 'demo';
-  // Auth still hydrating on ?demo=1: identity (and therefore the mode) is
-  // unknown, so hold the spin — otherwise a logged-in customer could fire a
-  // "demo" spin whose result the settle identity-guard then silently drops.
-  const modeUndecided = demoPool !== null && !customer && authLoading;
+  // Auth still hydrating: identity (and therefore the mode) is unknown, so
+  // hold the spin — on ?demo=1 a logged-in customer could otherwise fire a
+  // "demo" spin whose result the settle identity-guard then silently drops,
+  // and on every other route the press would open the login modal over the
+  // customer's own session.
+  const modeUndecided = !customer && authLoading;
 
   // Real backend price, never re-parsed from the rounded display string.
   const cost = pack.priceValue;
@@ -474,15 +476,18 @@ export default function SlotMachineClient({
     });
 
     if (!res.ok) {
+      // Nothing spun on any failure path, so the button must not read "Spin
+      // again" over the error.
+      setHasSpun(false);
       if (res.kind === 'unreachable') {
         // The charge may well have landed (the server executed, the response
         // did not transport back). Telling the player to check their balance
         // while showing the STALE pre-charge figure invites a second, real
-        // charge, so refetch before re-enabling Spin. Nothing spun, so hasSpun
-        // goes back. Show the error NOW, before the refetch — this path fires
-        // when the server is unreachable, so awaiting a second call to it would
-        // leave the screen looking dead (no message, button still disabled) for
-        // the whole fetch timeout. The message lands immediately instead.
+        // charge, so refetch before re-enabling Spin. Show the error NOW,
+        // before the refetch — this path fires when the server is unreachable,
+        // so awaiting a second call to it would leave the screen looking dead
+        // (no message, button still disabled) for the whole fetch timeout. The
+        // message lands immediately instead.
         setError(
           "Couldn't reach the machine. Check your balance before spinning again.",
         );
@@ -502,7 +507,6 @@ export default function SlotMachineClient({
             refetchErr,
           );
         } finally {
-          setHasSpun(false);
           setPhase((p) => nextPhase(p, 'abort'));
         }
         return;
@@ -511,11 +515,13 @@ export default function SlotMachineClient({
       else {
         setError(res.error);
         setNeedsTopUp(res.needsTopUp === true);
-        // Same hazard, narrower: openBatch maps a post-charge enrichment
-        // failure to {ok:false} ("try again"), so the debit can already be
-        // real here too. Never invite a retry over a stale balance — but a
-        // failing refetch must not block the state reset below either.
+        // Same hazard, narrower: openBatch maps a post-charge mapping failure
+        // to {ok:false} ("the card is in your Vault"), so the debit — and the
+        // pull — can already be real here too. Light the Vault tab so the
+        // card has a signpost, and never invite a retry over a stale balance;
+        // a failing refetch must not block the state reset below either.
         if (res.needsTopUp !== true) {
+          refreshVaultDot();
           try {
             await refetchBalance();
           } catch (refetchErr) {
@@ -1156,11 +1162,14 @@ export default function SlotMachineClient({
                   {balance !== null && cost * reels - balance > 0 && (
                     <>You&apos;re {rm(cost * reels - balance)} short. </>
                   )}
+                  {/* A link, not openTopUp(): the sheet renders at z-[70]
+                      under this z-[100] room. /me is the page that carries
+                      the TopUpButton — the vault has no top-up control. */}
                   <Link
-                    href="/vault"
+                    href="/me"
                     className="font-bold text-buyback-fg underline underline-offset-2 hover:text-buyback-fg"
                   >
-                    Add credits in your Vault →
+                    Top up your balance →
                   </Link>
                 </>
               )}

@@ -353,3 +353,125 @@ describe('updateCardInvoke rollback when the product mirror fails', () => {
     expect(packs.updateCards).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('updateCardInvoke PC link / multiplier tri-state', () => {
+  beforeEach(() => {
+    jest.mocked(bakeSlabImage).mockReset().mockResolvedValue(null);
+    jest.mocked(deleteSlabFile).mockReset().mockResolvedValue(undefined);
+  });
+
+  // A PriceCharting-linked card with a custom markup. The regression: a
+  // name-only edit (no pc_* / multiplier in the body) used to write null /
+  // 1.2, silently unlinking the card from the nightly price sync and resetting
+  // its margin.
+  const LINKED = {
+    ...CARD,
+    pc_product_id: 'pc_1',
+    pc_grade: 'psa-10',
+    market_multiplier: 1.5,
+  };
+  const linkedStub = () => ({
+    ...packsStub(),
+    listCards: jest.fn().mockResolvedValue([LINKED]),
+  });
+  const mirrorMetadata = () => {
+    const run = jest.mocked(updateProductsWorkflow).mock.results.at(-1)!.value
+      .run as jest.Mock;
+    return run.mock.calls[0][0].input.products[0].metadata;
+  };
+
+  it('omitted pc_* and multiplier keep the stored link and markup (card AND product mirror)', async () => {
+    const packs = linkedStub();
+    await updateCardInvoke(INPUT, { container: buildContainer(packs) });
+    expect(packs.updateCards).toHaveBeenCalledWith([
+      expect.objectContaining({
+        pc_product_id: 'pc_1',
+        pc_grade: 'psa-10',
+        market_multiplier: 1.5,
+      }),
+    ]);
+    expect(mirrorMetadata()).toMatchObject({
+      pc_product_id: 'pc_1',
+      pc_grade: 'psa-10',
+      market_multiplier: 1.5,
+    });
+  });
+
+  it('omitted multiplier prices the NULL-price mirror at the STORED markup, not 1.2', async () => {
+    const packs = linkedStub();
+    await updateCardInvoke(INPUT, { container: buildContainer(packs) });
+    const run = jest.mocked(updateProductsWorkflow).mock.results.at(-1)!.value
+      .run as jest.Mock;
+    const variant = run.mock.calls[0][0].input.products[0].variants[0];
+    // 25 USD × 4.5 × 1.5 = 168.75 (1.2 would give 135).
+    expect(variant.prices).toEqual([{ currency_code: 'myr', amount: 168.75 }]);
+  });
+
+  it('explicit null unlinks both pc fields and leaves the markup alone', async () => {
+    const packs = linkedStub();
+    await updateCardInvoke(
+      { ...INPUT, pc_product_id: null, pc_grade: null },
+      { container: buildContainer(packs) },
+    );
+    expect(packs.updateCards).toHaveBeenCalledWith([
+      expect.objectContaining({
+        pc_product_id: null,
+        pc_grade: null,
+        market_multiplier: 1.5,
+      }),
+    ]);
+    expect(mirrorMetadata()).toMatchObject({
+      pc_product_id: null,
+      pc_grade: null,
+      market_multiplier: 1.5,
+    });
+  });
+
+  it('explicit multiplier sets it', async () => {
+    const packs = linkedStub();
+    await updateCardInvoke(
+      { ...INPUT, market_multiplier: 1.3 },
+      { container: buildContainer(packs) },
+    );
+    expect(packs.updateCards).toHaveBeenCalledWith([
+      expect.objectContaining({
+        pc_product_id: 'pc_1',
+        pc_grade: 'psa-10',
+        market_multiplier: 1.3,
+      }),
+    ]);
+  });
+
+  it('a card with no stored multiplier still defaults to 1.2 when omitted', async () => {
+    const packs = {
+      ...packsStub(),
+      listCards: jest
+        .fn()
+        .mockResolvedValue([{ ...CARD, market_multiplier: null }]),
+    };
+    await updateCardInvoke(INPUT, { container: buildContainer(packs) });
+    expect(packs.updateCards).toHaveBeenCalledWith([
+      expect.objectContaining({ market_multiplier: 1.2 }),
+    ]);
+  });
+
+  it('mirror throws after an unlink → the restore puts the link and markup back', async () => {
+    jest.mocked(updateProductsWorkflow).mockReturnValueOnce({
+      run: jest.fn().mockRejectedValue(new Error('mirror boom')),
+    } as unknown as ReturnType<typeof updateProductsWorkflow>);
+    const packs = linkedStub();
+    await expect(
+      updateCardInvoke(
+        { ...INPUT, pc_product_id: null, pc_grade: null, market_multiplier: 2 },
+        { container: buildContainer(packs) },
+      ),
+    ).rejects.toThrow('mirror boom');
+    expect(packs.updateCards).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        pc_product_id: 'pc_1',
+        pc_grade: 'psa-10',
+        market_multiplier: 1.5,
+      }),
+    ]);
+  });
+});

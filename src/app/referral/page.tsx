@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { getReferralSummary } from '@/lib/data/referral';
-import { getAuthToken } from '@/lib/data/customer';
+import { getAuthToken, getCustomerSession } from '@/lib/data/customer';
 import { ReferralClient } from './ReferralClient';
 
 export const metadata: Metadata = {
@@ -13,10 +13,17 @@ export const metadata: Metadata = {
 // reached from the Me quick-access grid. Deliberately NOT under (account):
 // a logged-out visitor should see the sign-in prompt (and the pitch) rather
 // than be bounced to the auth modal.
+//
+// isLoggedIn comes from the customer read, not cookie presence — same reason
+// as /task: an expired JWT in the cookie must fall through to the sign-in
+// prompt, not the "couldn't load" panel; a token the backend did NOT reject
+// (5xx / network) still counts as logged in.
 export default async function ReferralPage() {
-  const [referral, token] = await Promise.all([
+  const [referral, { customer, stale }, token] = await Promise.all([
     getReferralSummary(),
+    getCustomerSession(),
     getAuthToken(),
   ]);
-  return <ReferralClient data={referral} isLoggedIn={Boolean(token)} />;
+  const isLoggedIn = customer !== null || (Boolean(token) && !stale);
+  return <ReferralClient data={referral} isLoggedIn={isLoggedIn} />;
 }

@@ -82,7 +82,9 @@ async function publishedOddsSnapshot(
   // strict-mode error: this helper exists to resolve exactly one list, so a
   // layout change that reintroduces the ambiguity should say so by name.
   expect(panelCount).toBe(1);
-  return (await panel.innerText()).trim();
+  // innerText is layout-dependent (line breaks appear only once the list has
+  // painted), so compare with whitespace stripped — the VALUES are the claim.
+  return (await panel.innerText()).replace(/\s+/g, '');
 }
 
 async function assertEveryPullIs(

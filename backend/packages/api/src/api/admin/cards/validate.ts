@@ -80,8 +80,8 @@ export const optPixelPokemonId = (
 
 // PriceCharting linkage fields (Task 5). pc_product_id is nullable — an
 // explicit null in the update body means "unlink"; undefined means "not
-// provided" (create falls back to the product's metadata; update falls back
-// to null via the `?? null` in update-card.ts).
+// provided" (create falls back to the product's metadata; update keeps the
+// stored value — tri-state in update-card.ts).
 const optPcId = (b: Record<string, unknown>): string | null | undefined => {
   const v = b.pc_product_id;
   if (v === undefined) return undefined;
@@ -207,9 +207,16 @@ export function coerceUpdateCardBody(
       ? undefined
       : reqNum(b, 'price');
 
-  const pc_product_id = optPcId(b);
-  const pc_grade = optPcGrade(b);
+  let pc_product_id = optPcId(b);
+  let pc_grade = optPcGrade(b);
   checkPcPairing(pc_product_id, pc_grade);
+  // Unlink is atomic: update-card.ts keeps an omitted field as stored, so
+  // `{ pc_product_id: null }` alone (what the admin's Unlink sends) would
+  // otherwise leave the old pc_grade behind as a half-link.
+  if (pc_product_id === null || pc_grade === null) {
+    pc_product_id = null;
+    pc_grade = null;
+  }
 
   return {
     handle,

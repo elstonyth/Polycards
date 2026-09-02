@@ -2,6 +2,7 @@ import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
+import { pageAll } from '../../api/utils/page-all';
 import {
   computeSetWeights,
   PCT_SCALE,
@@ -66,9 +67,11 @@ export const savePackOddsStep = createStep(
       );
     }
 
-    const allExisting = await packs.listPackOdds(
-      { pack_id: input.pack_id },
-      { take: 1000 },
+    // PAGED, not take:1000 — the set-equality guard below must see EVERY
+    // existing row, or a >1,000-card pool can never be saved again (the GET
+    // route and set-pack-members already page for the same reason).
+    const allExisting = await pageAll((opts) =>
+      packs.listPackOdds({ pack_id: input.pack_id }, opts),
     );
     // The win-rate editor only ever touches card rows — reward rows (card_id
     // null) are managed elsewhere and must not be matched/normalized here.

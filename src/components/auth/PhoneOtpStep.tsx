@@ -44,13 +44,20 @@ export function PhoneOtpStep({
     setError(null);
     const code = String(new FormData(e.currentTarget).get('code') ?? '').trim();
     setBusy(true);
-    const result = await checkPhoneOtp({ phone, purpose, code });
-    if (result.ok) {
-      await onVerified(result.token); // parent owns the next transition
-      return; // parent unmounts us; don't touch state after
+    // The actions catch BACKEND errors themselves; the try is for the action
+    // CALL rejecting (offline, a mid-deploy action-id mismatch), which would
+    // otherwise leave Verify and Resend disabled for good.
+    try {
+      const result = await checkPhoneOtp({ phone, purpose, code });
+      if (result.ok) {
+        await onVerified(result.token); // parent owns the next transition
+        return; // parent unmounts us; don't touch state after
+      }
+      setError(result.error);
+    } catch {
+      setError('Something went wrong. Please try again.');
     }
     setBusy(false);
-    setError(result.error);
   }
 
   async function onResend() {
@@ -61,9 +68,14 @@ export function PhoneOtpStep({
     // first request is in flight must not fire a second SMS (the start route
     // is budgeted at 3/60s and each send costs real money).
     setCooldown(RESEND_COOLDOWN_S);
-    const result = await startPhoneOtp({ phone, purpose });
-    setBusy(false);
-    if (!result.ok) setError(result.error);
+    try {
+      const result = await startPhoneOtp({ phone, purpose });
+      if (!result.ok) setError(result.error);
+    } catch {
+      setError('Something went wrong. Please try again.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (

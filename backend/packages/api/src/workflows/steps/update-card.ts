@@ -42,10 +42,11 @@ export type UpdateCardInput = {
   // the mirror, string = link + mirror. resolvePixelPokemonPatch turns it into
   // the exact columns to write.
   pixel_pokemon_id?: string | null;
-  // PriceCharting linkage — optional. Omitted/undefined defaults to
-  // null/1.2 below (NOT "leave as-is"); the edit form round-trips the card's
-  // current values from GET so a save that doesn't touch PC linkage still
-  // preserves it in practice.
+  // PriceCharting linkage + markup. Tri-state like pixel_pokemon_id:
+  // undefined = leave the stored value as-is, null = unlink (clear), value =
+  // set. A name-only edit therefore can't drop the PC link (which would stop
+  // the nightly price sync) or reset a custom markup to 1.2. The validate
+  // layer makes unlink atomic (null on either pc field clears both).
   pc_product_id?: string | null;
   pc_grade?: string | null;
   market_multiplier?: number;
@@ -150,6 +151,17 @@ export const updateCardInvoke = async (
     label_note: card.label_note ?? null,
   };
 
+  // Tri-state resolution (see UpdateCardInput): undefined keeps the snapshot
+  // value. The snapshot multiplier already falls back to 1.2 for a card that
+  // has none stored, so an omitted multiplier can never write null.
+  const nextPcProductId =
+    input.pc_product_id === undefined
+      ? snapshot.pc_product_id
+      : input.pc_product_id;
+  const nextPcGrade =
+    input.pc_grade === undefined ? snapshot.pc_grade : input.pc_grade;
+  const nextMultiplier = input.market_multiplier ?? snapshot.market_multiplier;
+
   // MYR listing amount for the Product mirror. Card.price is MYR (the admin
   // renders it with rm()); the NULL-price "use FMV" fallback must CONVERT —
   // market_value is raw USD — at the card's own multiplier, matching the
@@ -164,7 +176,7 @@ export const updateCardInvoke = async (
     displayMarketPrice(
       input.market_value,
       await resolveFxRate(packs),
-      input.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER,
+      nextMultiplier,
     );
 
   // Slab bake (spec §C): re-bake on EVERY save (no dirty-check — one
@@ -218,9 +230,9 @@ export const updateCardInvoke = async (
         ...pixelPatch,
         slab_image: nextSlabImage,
         slab_image_key: nextSlabKey,
-        pc_product_id: input.pc_product_id ?? null,
-        pc_grade: input.pc_grade ?? null,
-        market_multiplier: input.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER,
+        pc_product_id: nextPcProductId,
+        pc_grade: nextPcGrade,
+        market_multiplier: nextMultiplier,
         label_year: input.label_year ?? null,
         label_note: input.label_note ?? null,
       },
@@ -269,10 +281,9 @@ export const updateCardInvoke = async (
                 // the listing price reads market_multiplier off
                 // product.metadata, so an edit here must not leave it stale.
                 // (The storefront reader was removed with /marketplace.)
-                pc_product_id: input.pc_product_id ?? null,
-                pc_grade: input.pc_grade ?? null,
-                market_multiplier:
-                  input.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER,
+                pc_product_id: nextPcProductId,
+                pc_grade: nextPcGrade,
+                market_multiplier: nextMultiplier,
                 slab_image: nextSlabImage,
               },
               ...(variantId

@@ -10,7 +10,7 @@ import {
   MY_ONLY_MESSAGE,
 } from '../../modules/packs/delivery';
 import { FREE_PULL_LOCKED_MESSAGE } from '../../modules/packs/free-pack';
-import { resolveFxRate } from '../../modules/packs/pricing';
+import { resolveFxRateStrict } from '../../modules/packs/pricing';
 
 export type RequestDeliveryInput = {
   customer_id: string; // from the authenticated token — NEVER the request body
@@ -174,7 +174,9 @@ export const requestDeliveryStep = createStep(
     //    record-pull.ts's precedent — see createDeliveryOrderWithLedger's
     //    own comment for why resolving it INSIDE that method would risk a
     //    second pool connection while its transaction is open.
-    const fx = await resolveFxRate(packs);
+    // STRICT: the insurance fee is a real wallet debit — never price it on the
+    // cached/fallback rate (buyback applies the same rule).
+    const fx = await resolveFxRateStrict(packs);
     const { orderId, itemIds } = await packs.createDeliveryOrderWithLedger({
       customerId: input.customer_id,
       snapshot,

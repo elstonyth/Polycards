@@ -139,7 +139,7 @@ const gatewayHookRateLimit = createGatewayHookRateLimit();
 // name "files" matches the FormData the admin client sends.
 const mediaUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 },
+  limits: { fileSize: 20 * 1024 * 1024, files: 1 },
 });
 
 // multer returns an Express RequestHandler whose generics don't line up with
