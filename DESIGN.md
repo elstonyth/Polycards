@@ -265,8 +265,10 @@ One panel for the global feed and a pack's own history:
   everything else stays hairline-neutral.
 - **Motion** — DOM-insertion driven: a fresh pull drops in from above
   (`pull-row-in`, keyed by pull id so the rest never re-run); a tab switch
-  re-keys the list so the tier staggers in; a changed drought numeral
-  re-lands. Pending refetches dim the list instead of blanking it.
+  re-keys the list once the new tier's rows LAND (keyed on the hook's
+  `shownScope`, not the tab — keying on the tab replayed the old rows first);
+  a changed drought numeral re-lands. Pending refetches dim the list instead
+  of blanking it.
 - **Stats tab** (`PullGapsChart.tsx`, the icon-only last tab) — one
   horizontal bar per hit of a chase tier (pulls since the previous hit, the
   winner's framed avatar beside it) under the current drought bar, against a

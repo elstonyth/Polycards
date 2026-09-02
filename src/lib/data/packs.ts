@@ -466,8 +466,6 @@ export interface RecentPull {
   packIcon: string;
   /** Puller display name (first_name in full — never email/id). */
   who: string;
-  /** Puller's public handle (→ /profile/<handle>); null before assignment. */
-  profileHandle: string | null;
   /** Puller avatar — uploaded photo, else the seed-derived pfp; null = the
    *  initial-letter fallback (the reel's own "You" rows). */
   avatar: string | null;
@@ -544,7 +542,6 @@ export async function getRecentPulls(
         packName: p.pack_title ?? 'Mystery Pack',
         packIcon: p.pack_image ?? FALLBACK_PACK_ICON,
         who: p.who ?? 'Anonymous',
-        profileHandle: p.profile_handle ?? null,
         // The same seed → pfp mapping as the leaderboard / public profile.
         avatar: p.avatar_url ?? (p.seed != null ? avatarForSeed(p.seed) : null),
         frame: p.frame_url ?? null,
@@ -572,6 +569,32 @@ export async function getRecentPulls(
   }
 }
 
+/**
+ * The pack scope a public feed proxy (/api/recent-pulls, /api/pull-gaps) may
+ * cache under: the given slug when it is a real, reachable pack, else '' (the
+ * global feed). Cache keys must be bounded to the real catalog, not just
+ * kebab-shaped — an unbounded valid-shaped namespace still fills the TTL Map
+ * and evicts the hot keys. getPackCategories is already cached (same 30s
+ * window), so this adds no backend hop for a catalog slug.
+ *
+ * One pack is reachable but never LISTED: the free welcome pack (GET
+ * /store/packs filters free_welcome out — see getUncatalogedPack). A catalog
+ * miss therefore falls through to the detail route before the slug is
+ * discarded, or that pack's spin page would flip to the global feed on its
+ * first poll. Garbage slugs still mint no key: the shape gate runs first (a
+ * public endpoint must not pay a backend round-trip, and an error log, per
+ * garbage request), and the detail route 404s the rest.
+ */
+export async function resolveFeedPackSlug(
+  raw: string | null | undefined,
+): Promise<string> {
+  const slug = raw?.trim() ?? '';
+  if (!/^[a-z0-9-]{1,64}$/.test(slug)) return '';
+  const cats = await getPackCategories();
+  const known = cats.some((c) => c.packs.some((p) => p.id === slug));
+  return known || (await getPackBySlug(slug)) !== null ? slug : '';
+}
+
 // --- Pull gaps: the stats chart (GET /store/pulls/gaps) ---------------------
 
 /** One hit of the tier on the chart: how many pulls it took since the
@@ -581,7 +604,6 @@ export interface PullGapHit {
   gap: number;
   rolledAt: string;
   who: string;
-  profileHandle: string | null;
   avatar: string | null;
   frame: string | null;
 }
@@ -631,7 +653,6 @@ export async function getPullGaps(
         gap: h.gap,
         rolledAt: h.rolled_at,
         who: h.who ?? 'Anonymous',
-        profileHandle: h.profile_handle ?? null,
         avatar: h.avatar_url ?? (h.seed != null ? avatarForSeed(h.seed) : null),
         frame: h.frame_url ?? null,
       })),

@@ -1,10 +1,9 @@
 import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
-import { Modules } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import { RARITY_ORDER, type Rarity } from '../../../../modules/packs/rarity';
-import { publicProfileFields, seedOf } from '../../../../utils/profile-handle';
 import { normalizePublishedOdds } from '../../../../workflows/steps/create-pack';
+import { ANONYMOUS_PULLER, loadPullerProfiles } from '../pullers';
 
 // GET /store/pulls/gaps?rarity=<tier>[&pack_id=<Pack.slug>] — the pull-history
 // STATS chart: for one tier, the gap (pulls since the previous hit) behind
@@ -23,7 +22,9 @@ import { normalizePublishedOdds } from '../../../../workflows/steps/create-pack'
 // hit row carries the winner's first_name, handle, avatar and frame — the
 // leaderboard's display set — never email/id. A DISABLED player's hit stays
 // on the chart (removing it would corrupt every neighbouring gap) but is
-// anonymised: no name, no face, no link.
+// anonymised: no name, no face, no link. An unknown or DRAFT pack_id answers
+// the empty chart before any ledger query (a draft pack's odds and ledger are
+// not public until it is active).
 const HITS_LIMIT = 20;
 const CACHE_TTL_MS = 5_000;
 const MAX_ENTRIES = 256;
@@ -58,63 +59,49 @@ export async function GET(
   }
 
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
-  const [gaps, packRows, { avatar_frames: frames }] = await Promise.all([
-    packs.pullGaps({ packId, rarity, limit: HITS_LIMIT }),
-    packId ? packs.listPacks({ slug: packId }, { take: 1 }) : [],
-    packs.siteSettings().catch(() => ({ avatar_frames: {} })),
-  ]);
-  const pct = packRows[0]
-    ? (normalizePublishedOdds(packRows[0].published_odds)?.tiers[rarity] ??
-      null)
+
+  // Gate the slug BEFORE the two full-ledger scans below — same reason as the
+  // recent route: caller-supplied, public key, so garbage slugs must cost one
+  // indexed pack lookup, not a window-function pass over every pull.
+  const pack = packId
+    ? (
+        await packs.listPacks({ slug: packId, status: 'active' }, { take: 1 })
+      )[0]
+    : null;
+  if (packId && !pack) {
+    const empty = {
+      rarity,
+      pct: null,
+      expected: null,
+      avg: null,
+      last20: null,
+      current: 0,
+      hits: [],
+    };
+    remember(cacheKey, empty);
+    res.json(empty);
+    return;
+  }
+
+  const gaps = await packs.pullGaps({ packId, rarity, limit: HITS_LIMIT });
+  const pct = pack
+    ? (normalizePublishedOdds(pack.published_odds)?.tiers[rarity] ?? null)
     : null;
   const expected = pct != null && pct > 0 ? Math.round(100 / pct) : null;
 
-  const customerIds = [
-    ...new Set(
-      gaps.hits.map((h) => h.customer_id).filter((id): id is string => !!id),
-    ),
-  ];
-  const disabled = await packs.disabledCustomerIds(customerIds);
-  let customers: {
-    id: string;
-    first_name: string | null;
-    metadata?: Record<string, unknown> | null;
-  }[] = [];
-  if (customerIds.length) {
-    try {
-      const customerService = req.scope.resolve(Modules.CUSTOMER);
-      customers = await customerService.listCustomers(
-        { id: customerIds },
-        { take: customerIds.length },
-      );
-    } catch {
-      customers = [];
-    }
-  }
-  const customerById = new Map(customers.map((c) => [c.id, c]));
-
-  const hits = gaps.hits.map((h) => {
-    const hidden = !!h.customer_id && disabled.has(h.customer_id);
-    const customer =
-      h.customer_id && !hidden ? customerById.get(h.customer_id) : undefined;
-    const seed = seedOf(h.customer_id ?? h.id);
-    const profile = publicProfileFields(customer, seed);
-    const meta = (customer?.metadata ?? {}) as Record<string, unknown>;
-    const frameLevel = meta['equipped_frame_level'];
-    return {
-      id: h.id,
-      gap: h.gap,
-      rolled_at: h.rolled_at,
-      who: hidden ? 'Anonymous' : customer?.first_name?.trim() || 'Anonymous',
-      seed: hidden ? null : seed,
-      profile_handle: hidden ? null : profile.handle,
-      avatar_url: hidden ? null : profile.avatarUrl,
-      frame_url:
-        !hidden && typeof frameLevel === 'number'
-          ? (frames[String(frameLevel)] ?? null)
-          : null,
-    };
-  });
+  const pullers = await loadPullerProfiles(
+    req,
+    packs,
+    gaps.hits.map((h) => h.customer_id),
+  );
+  const hits = gaps.hits.map((h) => ({
+    id: h.id,
+    gap: h.gap,
+    rolled_at: h.rolled_at,
+    ...(h.customer_id && pullers.disabled.has(h.customer_id)
+      ? ANONYMOUS_PULLER
+      : pullers.profileOf(h.customer_id, h.id)),
+  }));
 
   const body = {
     rarity,
@@ -125,9 +112,14 @@ export async function GET(
     current: gaps.current,
     hits,
   };
+  remember(cacheKey, body);
+  res.json(body);
+}
+
+// ponytail: same bounded map as the recent route — see its `remember`.
+function remember(key: string, body: unknown): void {
   if (gapsCache.size > MAX_ENTRIES) {
     gapsCache.delete(gapsCache.keys().next().value as string);
   }
-  gapsCache.set(cacheKey, { expires: Date.now() + CACHE_TTL_MS, body });
-  res.json(body);
+  gapsCache.set(key, { expires: Date.now() + CACHE_TTL_MS, body });
 }

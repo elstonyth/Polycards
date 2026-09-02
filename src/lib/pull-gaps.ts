@@ -29,11 +29,15 @@ export function gapScale(
     const mid = Math.ceil(max / 2);
     return { max, ticks: max > 1 ? [0, mid, max] : [0, max], line: null };
   }
-  const steps = Math.max(3, Math.ceil((longest * 1.05) / line));
-  const tick = Math.round(line);
+  // The axis unit is the ROUNDED line (ticks print as whole draws) and max is
+  // laid out in that same unit — a fractional line with an unrounded max put
+  // the last tick past the right edge. The line itself keeps its precise
+  // value, so the dashed marker sits exactly where the mean is.
+  const unit = Math.max(1, Math.round(line));
+  const steps = Math.max(3, Math.ceil((longest * 1.05) / unit));
   const ticks: number[] = [];
-  for (let i = 0; i <= steps; i++) ticks.push(i * tick);
-  return { max: steps * line, ticks, line };
+  for (let i = 0; i <= steps; i++) ticks.push(i * unit);
+  return { max: steps * unit, ticks, line };
 }
 
 /** Bar width as a percentage of the column, clamped so a zero-gap row still

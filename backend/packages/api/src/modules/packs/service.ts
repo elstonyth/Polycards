@@ -11,6 +11,7 @@ import {
 import type { Context, HttpTypes } from '@medusajs/framework/types';
 import { PCT_SCALE } from '@acme/odds-math';
 import type { OddsRarity, TierRangeMap } from '@acme/odds-math';
+import type { Rarity } from './rarity';
 import {
   validateDeliveryRequest,
   validateDeliveryStatusTransition,
@@ -5528,7 +5529,7 @@ class PacksModuleService extends MedusaService({
   // nobody has hit yet walks the whole ledger, once per 5s (the route's cache).
   @InjectManager()
   async recentPullRows(
-    opts: { packId: string | null; rarity: string | null; limit: number },
+    opts: { packId: string | null; rarity: Rarity | null; limit: number },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
     {
@@ -5552,38 +5553,46 @@ class PacksModuleService extends MedusaService({
       params.push(opts.rarity);
     }
     params.push(opts.limit);
+    // id as the tie-break: a batch open stamps its cards with one timestamp,
+    // and without it those rows could reorder between polls.
     return await em.execute(
       'SELECT p.id, p.customer_id, p.pack_id, p.card_id, p.rolled_at ' +
         '  FROM pull p WHERE ' +
         where +
-        ' ORDER BY p.rolled_at DESC LIMIT ?',
+        ' ORDER BY p.rolled_at DESC, p.id DESC LIMIT ?',
       params,
     );
   }
 
   // "N packs without <tier>": pulls (one per pack opened) since the last pull
   // of that tier — over the whole ledger, or one pack. A tier never hit counts
-  // every pull on record (the -infinity floor), which is the honest number.
+  // every pull on record, which is the honest number. "Since" is in
+  // (rolled_at, id) order — the same order pullGaps numbers the ledger in —
+  // so a hit inside a batch open (siblings share one rolled_at) counts the
+  // same siblings here as on the chart's drought bar.
   @InjectManager()
   async pullDrought(
-    opts: { packId: string | null; rarity: string },
+    opts: { packId: string | null; rarity: Rarity },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<number> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const packSql = opts.packId ? ' AND p.pack_id = ?' : '';
     const rows = await em.execute<{ n: number | string }[]>(
-      'SELECT COUNT(*)::int AS n FROM pull p ' +
+      'WITH last_hit AS (' +
+        '  SELECT p.rolled_at, p.id FROM pull p ' +
+        "   WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
+        packSql +
+        '     AND ' +
+        PULL_TIER_SQL +
+        '   ORDER BY p.rolled_at DESC, p.id DESC LIMIT 1' +
+        ') ' +
+        'SELECT COUNT(*)::int AS n FROM pull p ' +
         " WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
         packSql +
-        '   AND p.rolled_at > COALESCE((' +
-        '     SELECT MAX(p.rolled_at) FROM pull p ' +
-        "      WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
-        packSql +
-        '        AND ' +
-        PULL_TIER_SQL +
-        "   ), '-infinity'::timestamptz)",
-      opts.packId ? [opts.packId, opts.packId, opts.rarity] : [opts.rarity],
+        '   AND (NOT EXISTS (SELECT 1 FROM last_hit) ' +
+        '        OR (p.rolled_at, p.id) > (SELECT rolled_at, id FROM last_hit))',
+      opts.packId ? [opts.packId, opts.rarity, opts.packId] : [opts.rarity],
     );
     return Number(rows[0]?.n ?? 0);
   }
@@ -5599,7 +5608,7 @@ class PacksModuleService extends MedusaService({
   // 5s cache and by the chart only being fetched while its tab is open.
   @InjectManager()
   async pullGaps(
-    opts: { packId: string | null; rarity: string; limit: number },
+    opts: { packId: string | null; rarity: Rarity; limit: number },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
     current: number;

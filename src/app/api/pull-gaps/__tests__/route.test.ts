@@ -80,18 +80,29 @@ describe('GET /api/pull-gaps', () => {
         gap: 42,
         rolledAt: '2026-09-02T13:38:44.000Z',
         who: 'Anonymous',
-        profileHandle: null,
         avatar: '/images/pfps/pfp-8.webp',
         frame: null,
       },
     ]);
   });
 
-  it('a malformed body is null, not a crash', async () => {
+  it('a malformed body is a 503 null that is NOT memoised (the next request retries)', async () => {
     fetchMock.mockImplementation(async (path: string) => {
       if (path.startsWith('/store/packs')) return { packs: [packRow] };
       return { rarity: 'Immortal', hits: 'nope' };
     });
-    expect(await (await GET(req())).json()).toBeNull();
+    const bad = await GET(req());
+    expect(bad.status).toBe(503);
+    expect(await bad.json()).toBeNull();
+
+    // The backend recovers inside the same 5s window — a memoised null would
+    // have kept every viewer on "unavailable" until it expired.
+    fetchMock.mockImplementation(async (path: string) => {
+      if (path.startsWith('/store/packs')) return { packs: [packRow] };
+      return gapsBody;
+    });
+    const good = await GET(req());
+    expect(good.status).toBe(200);
+    expect((await good.json()).current).toBe(27);
   });
 });

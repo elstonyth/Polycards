@@ -3,6 +3,7 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { clearPullGapsCache } from '../../src/api/store/pulls/gaps/route';
+import { clearRecentPullsCache } from '../../src/api/store/pulls/recent/route';
 import { unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -145,6 +146,98 @@ medusaIntegrationTestRunner({
         ).toEqual([4, 3]);
         expect(globalImmortal.data.pct).toBeNull();
         expect(globalImmortal.data.expected).toBeNull();
+
+        // A draft / unknown pack answers the empty chart before any ledger
+        // scan — and never leaks its published rate.
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.createPacks([
+          {
+            slug: `${PACK}-draft`,
+            title: 'Draft Gaps Pack',
+            category: 'pokemon',
+            price: 10,
+            image: '/cdn/draft.webp',
+            status: 'draft',
+            published_odds: { tiers: { Immortal: 5 } },
+          } as Parameters<typeof packs.createPacks>[0][number],
+        ]);
+        for (const slug of [`${PACK}-draft`, 'no-such-pack']) {
+          const r = await unwrapResponse(
+            api.get(`/store/pulls/gaps?pack_id=${slug}&rarity=Immortal`, {
+              headers: storeHeaders,
+            }),
+          );
+          expect(r.status).toBe(200);
+          expect(r.data).toEqual({
+            rarity: 'Immortal',
+            pct: null,
+            expected: null,
+            avg: null,
+            last20: null,
+            current: 0,
+            hits: [],
+          });
+        }
+
+        // A batch open stamps its cards with ONE rolled_at. The chart's drought
+        // bar and the feed's drought counter must still agree on "pulls since
+        // the last hit" — both count in (rolled_at, id) order.
+        const tBatch = new Date();
+        await packs.createPulls(
+          [IMMORTAL, COMMON, COMMON].map((card) => ({
+            customer_id: 'cus_gaps',
+            pack_id: PACK,
+            card_id: card,
+            order_id: null,
+            rolled_at: tBatch,
+            source: 'pack' as const,
+          })),
+        );
+        clearPullGapsCache();
+        clearRecentPullsCache();
+        const [afterBatch, feed] = await Promise.all([
+          unwrapResponse(
+            api.get(`/store/pulls/gaps?pack_id=${PACK}&rarity=Immortal`, {
+              headers: storeHeaders,
+            }),
+          ),
+          unwrapResponse(
+            api.get(`/store/pulls/recent?pack_id=${PACK}`, {
+              headers: storeHeaders,
+            }),
+          ),
+        ]);
+        expect(afterBatch.data.hits).toHaveLength(3);
+        expect(afterBatch.data.current).toBe(feed.data.drought.Immortal);
+        // Whatever the id order inside the batch, the three new rows land as
+        // one hit plus its trailing drought: gap + current = 3 + the one pull
+        // (#8) that followed the previous hit.
+        expect(afterBatch.data.hits[0].gap + afterBatch.data.current).toBe(4);
+
+        // A disabled player's hits STAY (dropping one would corrupt the
+        // neighbouring gaps) but are anonymised — no name, face or handle.
+        await packs.setAccountDisabled({
+          customerId: 'cus_gaps',
+          adminId: 'user_gaps_admin',
+          disabled: true,
+          reason: 'test disable',
+        });
+        clearPullGapsCache();
+        const anon = await unwrapResponse(
+          api.get(`/store/pulls/gaps?pack_id=${PACK}&rarity=Immortal`, {
+            headers: storeHeaders,
+          }),
+        );
+        expect(anon.data.hits).toHaveLength(3);
+        for (const hit of anon.data.hits) {
+          expect(hit).toMatchObject({
+            who: 'Anonymous',
+            seed: null,
+            profile_handle: null,
+            avatar_url: null,
+            frame_url: null,
+          });
+        }
       });
     });
   },

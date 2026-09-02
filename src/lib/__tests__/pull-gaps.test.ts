@@ -16,6 +16,16 @@ describe('gapScale — the stats chart axis', () => {
     expect(s.max).toBe(364);
   });
 
+  it('lays a fractional line out in whole-draw ticks that never pass the right edge', () => {
+    const s = gapScale(90.6, null, [50]);
+    expect(s.ticks).toEqual([0, 91, 182, 273]);
+    expect(s.max).toBe(273);
+    expect(s.line).toBe(90.6);
+    expect(Math.max(...s.ticks)).toBeLessThanOrEqual(s.max);
+    // A sub-1 mean still gets a usable unit.
+    expect(gapScale(0.4, null, [1]).ticks).toEqual([0, 1, 2, 3]);
+  });
+
   it('falls back to the observed mean when the pack publishes no rate', () => {
     expect(gapScale(null, 40, [10, 70])).toEqual({
       max: 120,

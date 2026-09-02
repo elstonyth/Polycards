@@ -141,7 +141,6 @@ export function PullHistory({
   initial,
   packSlug,
   onSelect,
-  className,
 }: {
   initial: RecentFeed;
   /** Scope to one pack's history; omit for the global feed (rows then also
@@ -150,10 +149,9 @@ export function PullHistory({
   /** Row tap handler (the pack page opens its card overlay); absent = the row
    *  links to /card/[handle]. */
   onSelect?: (pull: RecentPull) => void;
-  className?: string;
 }) {
   const [tab, setTab] = useState<Tab>('All');
-  const { pulls, drought, pending } = useLiveRecentPulls(
+  const { pulls, drought, pending, shownScope } = useLiveRecentPulls(
     initial,
     packSlug,
     tab === 'All' || tab === 'Stats' ? null : tab,
@@ -164,7 +162,7 @@ export function PullHistory({
   });
 
   return (
-    <div className={cn('@container flex flex-col gap-4', className)}>
+    <div className="@container flex flex-col gap-4">
       {droughts.length > 0 && (
         <div className="grid grid-cols-2 gap-3">
           {droughts.map(([r, n]) => {
@@ -209,6 +207,7 @@ export function PullHistory({
             onClick={() => setTab(t)}
             className={cn(
               'flex min-h-10 items-center justify-center gap-1 rounded-full px-1.5 text-[12px] font-semibold transition-colors',
+              'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
               t === 'Stats' && 'w-11',
               tab === t
                 ? 'bg-neutral-50 text-neutral-950'
@@ -254,7 +253,10 @@ export function PullHistory({
                 : `No ${tab} pulls yet — the next rip could be the one.`}
             </div>
           ) : (
-            <ol key={tab} className="grid gap-2 @3xl:grid-cols-2">
+            // Keyed on the scope whose rows are on screen, NOT the tab: the
+            // list re-enters once, when the new tier's rows land. Keyed on
+            // the tab it replayed the old rows first, then the new ones.
+            <ol key={shownScope} className="grid gap-2 @3xl:grid-cols-2">
               {pulls.map((pull, i) => (
                 <li
                   key={pull.id}

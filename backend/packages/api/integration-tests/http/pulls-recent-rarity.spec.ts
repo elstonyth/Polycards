@@ -173,6 +173,67 @@ medusaIntegrationTestRunner({
           globalImmortal.data.pulls.map((p: { handle: string }) => p.handle),
         ).toEqual([IMMORTAL]);
         expect(globalImmortal.data.drought.Immortal).toBe(2);
+
+        // A draft pack's ledger is not public: it answers the empty feed (no
+        // counters either) — and so does a slug that does not exist — BEFORE
+        // any ledger query, so a garbage-slug loop costs one pack lookup each.
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.createPacks([
+          {
+            slug: `${PACK}-draft`,
+            title: 'Draft Pack',
+            category: 'pokemon',
+            price: 10,
+            image: '/cdn/draft.webp',
+            status: 'draft',
+          } as Parameters<typeof packs.createPacks>[0][number],
+        ]);
+        await packs.createPackOdds([
+          {
+            pack_id: `${PACK}-draft`,
+            card_id: COMMON,
+            rarity: 'Common',
+            weight: 1,
+          },
+        ]);
+        await packs.createPulls([
+          {
+            customer_id: 'cus_recent_rarity',
+            pack_id: `${PACK}-draft`,
+            card_id: COMMON,
+            order_id: null,
+            rolled_at: new Date(),
+            source: 'pack',
+          },
+        ]);
+        for (const slug of [`${PACK}-draft`, 'no-such-pack']) {
+          const r = await unwrapResponse(
+            api.get(`/store/pulls/recent?pack_id=${slug}`, {
+              headers: storeHeaders,
+            }),
+          );
+          expect(r.status).toBe(200);
+          expect(r.data).toEqual({ pulls: [], drought: {} });
+        }
+
+        // An administratively disabled player is DROPPED from the feed (not
+        // anonymised — the boards' rule), before the response is cached; the
+        // drought counters still count their pulls, which did happen.
+        await packs.setAccountDisabled({
+          customerId: 'cus_recent_rarity',
+          adminId: 'user_recent_admin',
+          disabled: true,
+          reason: 'test disable',
+        });
+        clearRecentPullsCache();
+        const hidden = await unwrapResponse(
+          api.get(`/store/pulls/recent?pack_id=${PACK}`, {
+            headers: storeHeaders,
+          }),
+        );
+        expect(hidden.status).toBe(200);
+        expect(hidden.data.pulls).toEqual([]);
+        expect(hidden.data.drought).toEqual({ Immortal: 2, Legendary: 3 });
       });
     });
   },

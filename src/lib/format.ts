@@ -87,7 +87,7 @@ const MONTHS = [
 ];
 const MYT_OFFSET_MS = 8 * 3_600_000;
 
-// Absolute roll time for the pull-history rows: "02 Sep, 09:38 PM". Fixed to
+// Absolute roll time for the pull-history rows: "02 Sep, 09:38:44 PM". Fixed to
 // Malaysian time (UTC+8, never DST — the same fixed shift the backend ledger
 // uses) rather than the viewer's zone, so the server render and the client
 // hydration print the SAME string: a zone-dependent format mismatches whenever
@@ -102,7 +102,8 @@ export function pullTime(iso: string): string {
   const h24 = d.getUTCHours();
   const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
   const minute = String(d.getUTCMinutes()).padStart(2, '0');
-  return `${day} ${MONTHS[d.getUTCMonth()]}, ${String(h12).padStart(2, '0')}:${minute} ${h24 < 12 ? 'AM' : 'PM'}`;
+  const second = String(d.getUTCSeconds()).padStart(2, '0');
+  return `${day} ${MONTHS[d.getUTCMonth()]}, ${String(h12).padStart(2, '0')}:${minute}:${second} ${h24 < 12 ? 'AM' : 'PM'}`;
 }
 
 // The mirror of relativeTime for a FUTURE instant ("in 45m", "in 23h", "in 2d")

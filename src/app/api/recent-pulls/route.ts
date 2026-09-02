@@ -1,9 +1,5 @@
 import type { NextRequest } from 'next/server';
-import {
-  getPackBySlug,
-  getPackCategories,
-  getRecentPulls,
-} from '@/lib/data/packs';
+import { getRecentPulls, resolveFeedPackSlug } from '@/lib/data/packs';
 import { cached } from '@/lib/ttl-cache';
 import { isRarity } from '@/lib/packs-format';
 
@@ -51,16 +47,9 @@ export async function GET(request: NextRequest) {
   // miss therefore falls through to the detail route before the slug is
   // discarded, or that pack's spin page flips to the global feed on its first
   // poll. Garbage slugs still mint no key: the detail route 404s them.
-  const raw = request.nextUrl.searchParams.get('pack_id')?.trim() ?? '';
-  const cats = await getPackCategories();
-  const known = new Set(cats.flatMap((c) => c.packs.map((p) => p.id)));
-  // Shape-gate before the detail hop: this endpoint is public, so a garbage
-  // pack_id must not cost a backend round-trip (and an error log) per request.
-  const slugShaped = /^[a-z0-9-]{1,64}$/.test(raw);
-  const pack =
-    slugShaped && (known.has(raw) || (await getPackBySlug(raw)) !== null)
-      ? raw
-      : '';
+  const pack = await resolveFeedPackSlug(
+    request.nextUrl.searchParams.get('pack_id'),
+  );
   // ?rarity=<tier> — the history panel's tier tabs. Gated to the known tiers
   // for the same reason as pack_id: the key space must stay bounded, and a
   // garbage value collapses to the unfiltered feed instead of minting a key.

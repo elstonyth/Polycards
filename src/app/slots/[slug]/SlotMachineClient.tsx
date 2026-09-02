@@ -647,7 +647,6 @@ export default function SlotMachineClient({
         packIcon: pack.image,
         // The ticker prints none of the profile fields — a faceless row is
         // exact, not a placeholder.
-        profileHandle: null,
         avatar: null,
         frame: null,
         rolledAt: new Date(now).toISOString(),

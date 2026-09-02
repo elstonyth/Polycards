@@ -273,7 +273,8 @@
 /* Pull history (PullHistory.tsx) — a row drops in from above when it is NEW
    in the DOM: first paint (staggered by --i), a poll that prepends one pull
    (that row only — the others keep their keys and never re-run), a tab switch
-   (the list is re-keyed). The drought numeral reuses it, keyed on its value.
+   (the list is re-keyed when the new tier's rows land). The drought numeral
+   reuses it, keyed on its value.
    Same @layer rule as riseIn so motion-reduce:animate-none can override. */
 @keyframes pullRowIn {
   from {

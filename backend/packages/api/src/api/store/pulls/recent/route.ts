@@ -1,5 +1,4 @@
 import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
-import { Modules } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import {
@@ -13,7 +12,7 @@ import {
   resolveFxRate,
 } from '../../../../modules/packs/pricing';
 import { RARITY_ORDER, type Rarity } from '../../../../modules/packs/rarity';
-import { publicProfileFields, seedOf } from '../../../../utils/profile-handle';
+import { loadPullerProfiles } from '../pullers';
 
 // GET /store/pulls/recent — the most recent pulls across all packs, for the
 // pull-history feed. A plain publishable-key-scoped store route (no customer
@@ -21,12 +20,14 @@ import { publicProfileFields, seedOf } from '../../../../utils/profile-handle';
 // 2026-07-04 masking): each row carries the puller's FULL display name
 // (first_name only — the same field the leaderboard already shows in full;
 // never email, never customer_id), their public handle / avatar / equipped
-// frame (the leaderboard's own display fields, via publicProfileFields), the
+// frame (the leaderboard's own display fields, via loadPullerProfiles), the
 // won card, the source pack's title/image, and when it was rolled. Each pull
 // is joined to its Card by handle; orphaned rows (card removed) are dropped.
 //
 //  ?pack_id=<Pack.slug>  scopes the feed to a single pack — the pack pages show
-//                        that pack's own history, not the global one.
+//                        that pack's own history, not the global one. An
+//                        unknown or draft slug is an EMPTY feed, answered
+//                        before any ledger query (see the gate below).
 //  ?rarity=<tier>        only pulls of that tier (rarity is per-pack, resolved
 //                        through pack_odds) — the history panel's tier tabs.
 //
@@ -61,18 +62,14 @@ export function clearRecentPullsCache(): void {
   recentCache.clear();
 }
 
-// Full display name; blank/missing first_name → "Anonymous".
-const displayName = (name: string | null | undefined): string => {
-  const n = (name ?? '').trim();
-  return n || 'Anonymous';
-};
+const EMPTY_BODY = { pulls: [], drought: {} };
 
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
   // ?pack_id=<Pack.slug> scopes the feed to one pack (the /slots/[slug] pages);
-  // absent = the global feed (home). An unknown slug yields an empty feed.
+  // absent = the global feed (home).
   const packId =
     typeof req.query.pack_id === 'string' && req.query.pack_id.trim()
       ? req.query.pack_id.trim()
@@ -93,39 +90,52 @@ export async function GET(
   }
 
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
-  const [fxRate, fetched, droughtCounts, { avatar_frames: frames }] =
-    await Promise.all([
-      resolveFxRate(packs),
-      packs.recentPullRows({ packId, rarity, limit: FETCH_LIMIT }),
-      Promise.all(
-        DROUGHT_TIERS.map((tier) =>
-          packs.pullDrought({ packId, rarity: tier }),
-        ),
-      ),
-      // Frame catalog — display chrome only, so a failed read degrades the
-      // rows to frameless rather than 500ing a public feed (same stance as
-      // the customer-module resolve below).
-      packs.siteSettings().catch(() => ({ avatar_frames: {} })),
-    ]);
+
+  // Gate the slug BEFORE any ledger work: pack_id is caller-supplied and the
+  // publishable key ships in the storefront bundle, so without this a loop of
+  // garbage slugs would cost a fresh drought scan per request. One indexed
+  // pack lookup instead; a draft pack answers the same as a missing one (its
+  // ledger is not public until it is).
+  if (packId) {
+    const [pack] = await packs.listPacks(
+      { slug: packId, status: 'active' },
+      { take: 1 },
+    );
+    if (!pack) {
+      remember(cacheKey, EMPTY_BODY);
+      res.json(EMPTY_BODY);
+      return;
+    }
+  }
+
+  const [fxRate, fetched, droughtCounts] = await Promise.all([
+    resolveFxRate(packs),
+    packs.recentPullRows({ packId, rarity, limit: FETCH_LIMIT }),
+    Promise.all(
+      DROUGHT_TIERS.map((tier) => packs.pullDrought({ packId, rarity: tier })),
+    ),
+  ]);
   const drought = Object.fromEntries(
     DROUGHT_TIERS.map((tier, i) => [tier, droughtCounts[i]]),
   );
 
-  // An administratively disabled player is hidden from every public surface —
-  // the same rule (and the same helper) the leaderboard applies, so a disable
-  // taken in the dashboard removes the player here too. DROPPED, not renamed to
+  // Puller display fields, resolved once for the window. An administratively
+  // disabled player is hidden from every public surface — the same rule (and
+  // the same helper) the leaderboard applies, so a disable taken in the
+  // dashboard removes the player here too. DROPPED, not renamed to
   // "Anonymous": that is what the boards chose, and an anonymised row would
-  // still publish the pull. The filter runs BEFORE the response is cached, so a
-  // disable can never be served for the rest of a cache window. Pulls with no
-  // customer_id are kept — there is nobody to hide.
-  const pullerIds = [
-    ...new Set(
-      fetched.map((p) => p.customer_id).filter((id): id is string => !!id),
-    ),
-  ];
-  const disabled = await packs.disabledCustomerIds(pullerIds);
+  // still publish the pull. The filter runs BEFORE the response is cached, so
+  // a disable is served for at most the remainder of ONE 5s window (plus the
+  // storefront proxy's own 5s memo) — the same bound the leaderboard accepts
+  // for a name that was public seconds earlier. Pulls with no customer_id
+  // are kept — there is nobody to hide.
+  const pullers = await loadPullerProfiles(
+    req,
+    packs,
+    fetched.map((p) => p.customer_id),
+  );
   const pulls = fetched
-    .filter((p) => !p.customer_id || !disabled.has(p.customer_id))
+    .filter((p) => !p.customer_id || !pullers.disabled.has(p.customer_id))
     .slice(0, RECENT_LIMIT);
 
   const handles = [...new Set(pulls.map((p) => p.card_id))];
@@ -154,50 +164,11 @@ export async function GET(
     : [];
   const packBySlug = new Map(packRows.map((p) => [p.slug, p]));
 
-  // Puller display fields — first_name ONLY (leaderboard's PII rule), shown in
-  // full, plus the public handle / avatar / equipped frame the leaderboard
-  // already publishes. Missing customer/first_name reads as "Anonymous".
-  // ponytail: resolve() is wrapped nullsafe — if the customer module can't be
-  // resolved (or resolves to something without listCustomers, e.g. a test
-  // harness that only registers this module) the feed degrades to masking
-  // every puller as "Anonymous" rather than 500ing.
-  const customerIds = [
-    ...new Set(
-      pulls.map((p) => p.customer_id).filter((id): id is string => !!id),
-    ),
-  ];
-  let customers: {
-    id: string;
-    first_name: string | null;
-    metadata?: Record<string, unknown> | null;
-  }[] = [];
-  if (customerIds.length) {
-    try {
-      const customerService = req.scope.resolve(Modules.CUSTOMER);
-      customers = await customerService.listCustomers(
-        { id: customerIds },
-        { take: customerIds.length },
-      );
-    } catch {
-      customers = [];
-    }
-  }
-  const customerById = new Map(customers.map((c) => [c.id, c]));
-
   const recent = pulls
     .map((p) => {
       const card = byHandle.get(p.card_id);
       if (!card) return null;
       const pack = packBySlug.get(p.pack_id);
-      const customer = p.customer_id
-        ? customerById.get(p.customer_id)
-        : undefined;
-      // The same seed → avatar mapping as the leaderboard and the public
-      // profile, so one collector wears one face across every surface.
-      const seed = seedOf(p.customer_id ?? p.id);
-      const profile = publicProfileFields(customer, seed);
-      const meta = (customer?.metadata ?? {}) as Record<string, unknown>;
-      const frameLevel = meta['equipped_frame_level'];
       return {
         id: p.id,
         handle: card.handle,
@@ -216,35 +187,30 @@ export async function GET(
         pack_id: p.pack_id,
         pack_title: pack?.title ?? null,
         pack_image: pack?.image ?? null,
-        // Full display name — never customer_id/email (see header).
-        who: displayName(customer?.first_name),
-        seed,
-        profile_handle: profile.handle,
-        avatar_url: profile.avatarUrl,
-        // Resolved here (the catalog is one in-process read) so the storefront
-        // needs no frame catalog of its own on this path.
-        frame_url:
-          typeof frameLevel === 'number'
-            ? (frames[String(frameLevel)] ?? null)
-            : null,
+        // Full display name + handle/avatar/frame — never customer_id/email.
+        ...pullers.profileOf(p.customer_id, p.id),
         rolled_at: p.rolled_at,
       };
     })
     .filter((e): e is NonNullable<typeof e> => e !== null);
 
   const body = { pulls: recent, drought };
-  // ponytail: pack_id is caller-supplied, so the key space is unbounded (the
-  // storefront proxy forwards any ?pack=) — cap the map instead of letting
-  // unknown slugs accrete entries. Map iterates in insertion order, so this
-  // evicts oldest-inserted first — not LRU, but the real catalog is ~10 packs
-  // × 4 tabs + the global keys, so anything evicted under pressure is a
-  // garbage key or long-expired (a full clear() would instead thunder-herd
-  // every hot key on the same request that trips the bound). Not "don't cache
-  // empties": a legitimately quiet pack returns [] too, and that is the case
-  // the TTL exists to protect.
+  remember(cacheKey, body);
+  res.json(body);
+}
+
+// ponytail: pack_id is caller-supplied, so the key space is unbounded (the
+// storefront proxy forwards any ?pack=) — cap the map instead of letting
+// unknown slugs accrete entries. Map iterates in insertion order, so this
+// evicts oldest-inserted first — not LRU, but the real catalog is ~10 packs
+// × 4 tabs + the global keys, so anything evicted under pressure is a
+// garbage key or long-expired (a full clear() would instead thunder-herd
+// every hot key on the same request that trips the bound). Not "don't cache
+// empties": a legitimately quiet pack returns [] too, and that is the case
+// the TTL exists to protect.
+function remember(key: string, body: unknown): void {
   if (recentCache.size > MAX_ENTRIES) {
     recentCache.delete(recentCache.keys().next().value as string);
   }
-  recentCache.set(cacheKey, { expires: Date.now() + CACHE_TTL_MS, body });
-  res.json(body);
+  recentCache.set(key, { expires: Date.now() + CACHE_TTL_MS, body });
 }

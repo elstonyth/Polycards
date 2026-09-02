@@ -133,7 +133,15 @@ describe('GET /api/recent-pulls — catalog-bounded key gate (plan 117 step 2)',
       String(path).startsWith('/store/packs'),
     ).length;
 
-    expect(packsCallsBefore).toBe(1);
-    expect(packsCallsAfter).toBe(1); // still 1 — the 30s catalog memo served it
+    // No pack_id → the shape gate short-circuits before any catalog read.
+    expect(packsCallsBefore).toBe(0);
+    // A catalog slug costs ONE read, served by the 30s memo from then on.
+    expect(packsCallsAfter).toBe(1);
+    await GET(req('?pack_id=bronze-pack&rarity=Legendary'));
+    expect(
+      fetchMock.mock.calls.filter(([path]) =>
+        String(path).startsWith('/store/packs'),
+      ),
+    ).toHaveLength(1);
   });
 });

@@ -26,7 +26,12 @@ export function useLiveRecentPulls(
   initial: RecentFeed,
   packSlug?: string,
   rarity?: Rarity | null,
-): RecentFeed & { pending: boolean } {
+): RecentFeed & {
+  pending: boolean;
+  /** The (pack, tier) scope the rows on screen belong to — changes exactly
+   *  when a new scope's rows land, so a list keyed on it re-enters once. */
+  shownScope: string;
+} {
   const scope = `${packSlug ?? ''}|${rarity ?? ''}`;
   const [feed, setFeed] = useState<RecentFeed>(initial);
   // Which (pack, tier) the rows on screen belong to (the seed came from the
@@ -37,6 +42,9 @@ export function useLiveRecentPulls(
   // mirror is what `pending` renders from.
   const shownRef = useRef(scope);
   const [shownScope, setShownScope] = useState(scope);
+  // Ticks can overlap (a visibility refetch during a slow poll); only the
+  // newest request may write, or an older response would roll the feed back.
+  const revRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -45,6 +53,7 @@ export function useLiveRecentPulls(
       // (mirrors usePackDetailPoll / useCardPrice); the 5s caches on both hops
       // mean even visible tabs collapse to one compute per window.
       if (document.visibilityState !== 'visible') return;
+      const rev = ++revRef.current;
       try {
         const q = new URLSearchParams();
         if (packSlug) q.set('pack_id', packSlug);
@@ -55,7 +64,8 @@ export function useLiveRecentPulls(
         });
         if (!res.ok) return;
         const data = (await res.json()) as Partial<RecentFeed>;
-        if (!active || !Array.isArray(data.pulls)) return;
+        if (!active || rev !== revRef.current || !Array.isArray(data.pulls))
+          return;
         if (data.pulls.length > 0 || shownRef.current !== scope) {
           shownRef.current = scope;
           setShownScope(scope);
@@ -83,5 +93,5 @@ export function useLiveRecentPulls(
     // mounted with.
   }, [packSlug, rarity, scope]);
 
-  return { ...feed, pending: shownScope !== scope };
+  return { ...feed, pending: shownScope !== scope, shownScope };
 }

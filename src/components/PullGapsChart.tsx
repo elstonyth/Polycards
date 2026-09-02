@@ -21,13 +21,17 @@ import type { PullGaps } from '@/lib/data/packs';
  * Data comes from /api/pull-gaps — fetched when the tab opens, on a tier
  * toggle, and when `refreshKey` (the panel's drought counters) moves, never
  * on a timer. The previous tier's chart stays up, dimmed, until the next one
- * lands.
+ * lands; a toggle whose fetch fails shows the unavailable state rather than
+ * the old tier's bars under the new tier's header.
  *
  * Color (dataviz + Signal Rule): winners' bars are ONE neutral series; the
  * tier hue marks only the drought bar (the thing being chased), the reference
- * line and its tick. Text stays in text tokens.
+ * line and its ▼/▲ markers. Text — values, ticks, names — stays in text
+ * tokens.
  */
-const ROW = 'h-9';
+const ROW_H = 'h-9';
+/** Skeleton bar widths while the first fetch is in flight. */
+const SKELETON = ['w-[52%]', 'w-[28%]', 'w-[74%]', 'w-[16%]', 'w-[40%]'];
 
 export function PullGapsChart({
   packSlug,
@@ -39,7 +43,12 @@ export function PullGapsChart({
 }) {
   const [tier, setTier] = useState<Rarity>(TOP_RARITIES[0]!);
   const [data, setData] = useState<PullGaps | null>(null);
+  // The request scope the chart on screen was loaded for — tier, pack AND
+  // refresh key — so a pack switch or a drought move dims the stale chart
+  // exactly like a tier toggle does, not just when the tier differs.
+  const [loadedScope, setLoadedScope] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const scope = `${tier}|${packSlug ?? ''}|${refreshKey}`;
 
   useEffect(() => {
     let active = true;
@@ -49,7 +58,10 @@ export function PullGapsChart({
       .then((r) => (r.ok ? (r.json() as Promise<PullGaps | null>) : null))
       .then((body) => {
         if (!active) return;
-        if (body) setData(body);
+        if (body) {
+          setData(body);
+          setLoadedScope(scope);
+        }
         setFailed(!body);
       })
       .catch(() => {
@@ -58,16 +70,19 @@ export function PullGapsChart({
     return () => {
       active = false;
     };
-  }, [tier, packSlug, refreshKey]);
+  }, [tier, packSlug, refreshKey, scope]);
 
   const rgb = rarityRgb(tier);
-  const pending = data?.rarity !== tier;
-  const scale = data
-    ? gapScale(data.expected, data.avg, [
-        data.current,
-        ...data.hits.map((h) => h.gap),
-      ])
-    : null;
+  // What is on screen was loaded for another scope until this one lands.
+  const stale = loadedScope !== scope;
+  const unavailable = failed && (!data || stale);
+  const scale =
+    data && !unavailable
+      ? gapScale(data.expected, data.avg, [
+          data.current,
+          ...data.hits.map((h) => h.gap),
+        ])
+      : null;
   const linePos =
     scale && scale.line != null ? (scale.line / scale.max) * 100 : null;
   const lineStyle: CSSProperties = { borderColor: `rgba(${rgb}, 0.75)` };
@@ -79,10 +94,10 @@ export function PullGapsChart({
         <div>
           <p className="flex flex-wrap items-center gap-x-1.5 text-sm text-white">
             <TierBadge rarity={tier} />
-            {data?.pct != null && (
+            {scale && data?.pct != null && (
               <>
                 <span className="font-semibold tabular-nums">{data.pct}%</span>
-                <span aria-hidden className="text-neutral-500">
+                <span aria-hidden className="text-neutral-400">
                   |
                 </span>
               </>
@@ -96,7 +111,7 @@ export function PullGapsChart({
           <p className="mt-1.5 text-[12px] text-neutral-400">
             Last 20 {tier} avg:{' '}
             <span className="font-semibold tabular-nums text-neutral-200">
-              {data?.last20 != null ? Math.round(data.last20) : '—'}
+              {scale && data?.last20 != null ? Math.round(data.last20) : '—'}
             </span>{' '}
             draws
           </p>
@@ -113,7 +128,8 @@ export function PullGapsChart({
               aria-pressed={tier === r}
               onClick={() => setTier(r)}
               className={cn(
-                'rounded-full px-2.5 py-1.5 text-[12px] font-semibold transition-colors',
+                'min-h-10 rounded-full px-3 text-[12px] font-semibold transition-colors',
+                'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
                 tier === r
                   ? 'bg-neutral-50 text-neutral-950'
                   : 'text-neutral-400 hover:text-white',
@@ -125,29 +141,31 @@ export function PullGapsChart({
         </div>
       </div>
 
-      {failed && !data ? (
+      {unavailable ? (
         <p className="py-10 text-center text-[13px] text-white/60">
           Stats unavailable right now — the feed still works.
         </p>
       ) : !data || !scale ? (
         <ol aria-busy className="mt-5 flex flex-col gap-2" aria-label="Loading">
-          {[52, 28, 74, 16, 40].map((w, i) => (
-            <li key={i} className={cn(ROW, 'flex items-center gap-2')}>
+          {SKELETON.map((w) => (
+            <li key={w} className={cn(ROW_H, 'flex items-center gap-2')}>
               <span className="h-7 w-7 animate-pulse rounded-full bg-white/10 motion-reduce:animate-none" />
               <span className="w-16 shrink-0" />
               <span
-                className="h-6 animate-pulse rounded-r bg-white/10 motion-reduce:animate-none"
-                style={{ width: `${w}%` }}
+                className={cn(
+                  'h-6 animate-pulse rounded-r bg-white/10 motion-reduce:animate-none',
+                  w,
+                )}
               />
             </li>
           ))}
         </ol>
       ) : (
         <div
-          aria-busy={pending}
+          aria-busy={stale}
           className={cn(
             'mt-4 transition-opacity duration-300',
-            pending && 'opacity-50',
+            stale && 'opacity-50',
           )}
         >
           {/* ▼ marker over the reference line */}
@@ -163,17 +181,17 @@ export function PullGapsChart({
             )}
           </div>
 
-          <ol key={tier} className="flex flex-col gap-2">
+          <ol key={data.rarity} className="flex flex-col gap-2">
             {/* The drought bar: pulls since the newest hit, nobody's yet. */}
             <BarRow
               i={0}
-              label={<TierBadge rarity={tier} />}
+              label={<TierBadge rarity={data.rarity} />}
               gap={data.current}
               max={scale.max}
               linePos={linePos}
               lineStyle={lineStyle}
               fill={`rgb(${rgb})`}
-              title={`${data.current} pulls since the last ${tier}`}
+              title={`${data.current} pulls since the last ${data.rarity}`}
               emphasis
             />
             {data.hits.map((h, i) => (
@@ -198,13 +216,15 @@ export function PullGapsChart({
                 linePos={linePos}
                 lineStyle={lineStyle}
                 fill="rgba(255, 255, 255, 0.72)"
-                title={`${h.who} · ${pullTime(h.rolledAt)} · ${h.gap} pulls since the previous ${tier}`}
+                title={`${h.who} · ${pullTime(h.rolledAt)} · ${h.gap} pulls since the previous ${data.rarity}`}
               />
             ))}
           </ol>
 
-          {/* Axis — ticks in multiples of the reference gap */}
-          <div className="mt-2 grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-2 text-[12px] tabular-nums text-neutral-500">
+          {/* Axis — ticks in multiples of the reference gap. The reference
+              tick carries the ▲ marker in the tier hue; the numeral itself
+              stays a text token. */}
+          <div className="mt-2 grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-2 text-[12px] tabular-nums text-neutral-400">
             <span>Winners</span>
             <div className="relative h-5">
               {scale.ticks.map((t, i) => {
@@ -220,15 +240,16 @@ export function PullGapsChart({
                         : last
                           ? '-translate-x-full'
                           : '-translate-x-1/2',
-                      isLine ? 'font-semibold' : '',
+                      isLine && 'font-semibold text-neutral-200',
                     )}
-                    style={{
-                      left: `${(t / scale.max) * 100}%`,
-                      color: isLine ? `rgb(${rgb})` : undefined,
-                    }}
+                    style={{ left: `${(t / scale.max) * 100}%` }}
                   >
                     {isLine && (
-                      <span aria-hidden className="mr-0.5 text-[10px]">
+                      <span
+                        aria-hidden
+                        className="mr-0.5 text-[10px]"
+                        style={{ color: `rgb(${rgb})` }}
+                      >
                         ▲
                       </span>
                     )}
@@ -255,6 +276,7 @@ function BarRow({
   title,
   emphasis = false,
 }: {
+  /** Row index — drives the bar's entrance stagger (`--i`). */
   i: number;
   label: React.ReactNode;
   gap: number;
@@ -270,7 +292,7 @@ function BarRow({
       title={title}
       aria-label={title}
       className={cn(
-        ROW,
+        ROW_H,
         'grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-x-2',
       )}
     >
