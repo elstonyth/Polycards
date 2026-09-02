@@ -126,7 +126,10 @@ function Row({
           that step's font size; seven figures would spill left over the
           thumb. */}
       <span className="flex w-[6.5rem] shrink-0 flex-col items-end gap-1 @xs:w-[7.25rem] @sm:w-[7.75rem]">
-        <span className="max-w-full truncate text-[11px] text-neutral-300">
+        {/* Two lines, not an ellipsis: "Pretend Comedian Pikachu #…" cut to
+            one line hid the very words that name the card. overflow-wrap
+            keeps a single long token inside the column. */}
+        <span className="line-clamp-2 max-w-full text-right text-[11px] leading-tight text-neutral-300 [overflow-wrap:anywhere]">
           {pull.name}
         </span>
         <span className="whitespace-nowrap font-heading text-[13px] leading-none text-white tabular-nums @xs:text-[15px] @sm:text-base">
