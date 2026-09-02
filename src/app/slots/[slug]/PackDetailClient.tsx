@@ -351,7 +351,7 @@ export default function PackDetailClient({
       {/* Back link */}
       <Link
         href="/slots"
-        className="mb-4 inline-flex items-center gap-1.5 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
+        className="-mt-2.5 mb-1.5 inline-flex items-center gap-1.5 py-2.5 text-[13px] font-medium text-white/55 transition-colors hover:text-white"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden />
         All packs
@@ -361,7 +361,7 @@ export default function PackDetailClient({
           Mobile order (single column) is stage → configurator → Top Hits →
           pool, so buy/spin is one small swipe away instead of below the whole
           card pool; on lg the configurator becomes the sticky right column. */}
-      <div className="grid items-start gap-6 lg:grid-cols-[1.55fr_1fr]">
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[1.55fr_1fr]">
         {/* ---- Stage ---- */}
         {active.displayImage ? (
           /* Admin-uploaded hero scene (display_image) — a wide render that
@@ -730,7 +730,7 @@ export default function PackDetailClient({
           backend; a pack with no published odds shows no panel at all. Nor does
           a pack whose published odds carry no per-tier rows AND nothing priced
           — that would be a bare heading over an empty box. */}
-      <div className="mb-10 mt-8 grid gap-6 lg:grid-cols-2">
+      <div className="mb-10 mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
         {hasPublishedOddsContent(publishedRows, valueRange) && (
           <Reveal as="section" className="h-full min-w-0">
             <div className="mb-3 flex items-center gap-2">

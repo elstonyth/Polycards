@@ -91,9 +91,13 @@ export function PrizeCard({
       href={`/card/${encodeURIComponent(card.handle)}?prize=weekly`}
       aria-label={`View details for ${card.name}`}
       className={cn(
-        'group relative mx-auto block w-fit',
-        ring &&
-          'rounded-md ring-white/70 transition-shadow hover:ring-2 focus-visible:ring-2',
+        'group relative block w-fit',
+        // Rank-row thumbnails are 24x40: the padding (cancelled by the negative
+        // margin, so nothing moves) lifts the tap target over the WCAG 2.2
+        // 24px minimum.
+        ring
+          ? '-m-0.5 rounded-md p-0.5 ring-white/70 transition-shadow hover:ring-2 focus-visible:ring-2'
+          : 'mx-auto',
       )}
     >
       <span

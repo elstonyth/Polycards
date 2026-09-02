@@ -83,7 +83,7 @@ export default function ProfileClient({ user }: { user: ProfileViewUser }) {
                     {s.label}
                   </span>
                 </div>
-                <p className="mt-1 font-heading text-xl font-bold text-white">
+                <p className="mt-1 font-heading text-[clamp(0.8rem,4.2vw,1.25rem)] font-bold text-white tabular-nums">
                   {s.value}
                 </p>
               </div>

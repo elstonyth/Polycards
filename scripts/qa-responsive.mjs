@@ -6,6 +6,7 @@
 //   - an element sticking out past the viewport, ignoring anything inside an
 //     overflow-clipped scroller (carousels park neighbours offscreen by design)
 //   - text clipped by its own box (no ellipsis, no line-clamp)
+//   - text running past its box into a neighbour (overflow visible, no ellipsis)
 //   - an interactive control below the WCAG 2.2 AA 24px target size
 //   - the fixed tab bar covering the last footer content
 //
@@ -72,6 +73,7 @@ const DEVICES = [
   { key: 'iphone-se', w: 320, h: 568 },
   { key: 'iphone-15', w: 390, h: 844 },
   { key: 'pixel-9', w: 412, h: 915 },
+  { key: 'iphone-16-pro-max', w: 440, h: 956 },
   { key: 'ipad-mini', w: 768, h: 1024 },
   { key: 'ipad-pro', w: 1024, h: 1366 },
   { key: 'desktop', w: 1440, h: 900 },
@@ -107,6 +109,7 @@ function audit() {
 
   const overflowing = [];
   const clipped = [];
+  const spilling = [];
   const smallTargets = [];
   const tinyText = [];
   const smallInputs = [];
@@ -134,6 +137,21 @@ function audit() {
       style.webkitLineClamp === 'none'
     ) {
       clipped.push({
+        el: label(el),
+        content: el.scrollWidth,
+        box: el.clientWidth,
+      });
+    }
+    // Text wider than its box with overflow VISIBLE runs past the box into
+    // whatever sits beside it (a nowrap price over the next rail tile) — no
+    // page scroll, no clipping, just overlap. Same fix list as clipped.
+    if (
+      hasText &&
+      el.scrollWidth > el.clientWidth + 2 &&
+      style.overflowX === 'visible' &&
+      style.textOverflow !== 'ellipsis'
+    ) {
+      spilling.push({
         el: label(el),
         content: el.scrollWidth,
         box: el.clientWidth,
@@ -198,6 +216,7 @@ function audit() {
       tabTop != null && lastBottom != null ? lastBottom > tabTop + 1 : null,
     overflowing: overflowing.slice(0, 5),
     clipped: clipped.slice(0, 5),
+    spilling: spilling.slice(0, 5),
     smallTargets: smallTargets.slice(0, 5),
     tinyText: tinyText.slice(0, 3),
     smallInputs: smallInputs.slice(0, 3),
@@ -322,6 +341,7 @@ for (const d of DEVICES) {
       r.hScroll ||
       r.overflowing.length > 0 ||
       r.clipped.length > 0 ||
+      r.spilling.length > 0 ||
       r.smallTargets.length > 0 ||
       r.tabBarCoversLast === true;
     rows.push({ path, device: d.key, width: d.w, status, fail, ...r });

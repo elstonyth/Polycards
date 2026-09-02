@@ -87,7 +87,7 @@ export function HelpTip({
         aria-expanded={open}
         aria-describedby={open ? id : undefined}
         onClick={toggle}
-        className="rounded-full p-0.5 text-neutral-500 transition-colors hover:text-white"
+        className="-m-3 rounded-full p-3.5 text-neutral-500 transition-colors hover:text-white"
       >
         <Info className="h-3.5 w-3.5" aria-hidden />
       </button>

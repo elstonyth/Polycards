@@ -134,7 +134,7 @@ export default function ContactPage() {
                 />
               </div>
               <div>
-                <p className="font-heading text-4xl leading-none text-white sm:text-5xl">
+                <p className="font-heading text-[clamp(1.75rem,5vw,3rem)] leading-none text-white">
                   @POLYCARDSGG
                 </p>
                 <p className="mt-3 max-w-sm text-[13px] leading-relaxed text-neutral-400">

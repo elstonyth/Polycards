@@ -38,20 +38,24 @@ export default function CookieSettings() {
           {accepted ? 'Currently allowed.' : 'Currently blocked.'}
         </p>
       </div>
-      <div className="flex shrink-0 gap-2">
+      <div
+        role="group"
+        aria-label="Analytics cookies"
+        className="flex shrink-0 gap-2"
+      >
         <button
           type="button"
           onClick={() => choose('rejected')}
           className="inline-flex h-9 items-center justify-center rounded-lg border border-white/10 px-3 text-sm font-medium text-neutral-300 hover:text-white"
         >
-          Reject analytics cookies
+          Reject
         </button>
         <button
           type="button"
           onClick={() => choose('accepted')}
           className="inline-flex h-9 items-center justify-center rounded-lg bg-white px-3 text-sm font-medium text-neutral-900 hover:bg-neutral-200"
         >
-          Allow analytics cookies
+          Accept
         </button>
       </div>
     </div>
