@@ -48,8 +48,10 @@ export function CardTile({
       <span className="line-clamp-2 min-h-[2.5em] text-[12px] font-medium leading-tight text-white/80">
         {card.name}
       </span>
-      <span className="whitespace-nowrap text-[13px] font-bold tabular-nums text-white">
-        {card.value}{' '}
+      {/* Only the amount is nowrap — "est." may drop to its own line so a
+          six-figure value never spills past a 38%-wide rail tile. */}
+      <span className="text-[13px] font-bold tabular-nums text-white">
+        <span className="whitespace-nowrap">{card.value}</span>{' '}
         <span className="text-[11px] font-normal text-white/50">est.</span>
       </span>
     </button>

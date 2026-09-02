@@ -206,7 +206,7 @@ export function PullHistory({
             aria-label={t === 'Stats' ? 'Stats' : undefined}
             onClick={() => setTab(t)}
             className={cn(
-              'flex min-h-10 items-center justify-center gap-1 rounded-full px-1.5 text-[12px] font-semibold transition-colors',
+              'flex min-h-10 items-center justify-center gap-1 rounded-full px-1 text-[11px] font-semibold transition-colors @sm:text-[12px]',
               'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
               t === 'Stats' && 'w-11',
               tab === t
@@ -256,7 +256,13 @@ export function PullHistory({
             // Keyed on the scope whose rows are on screen, NOT the tab: the
             // list re-enters once, when the new tier's rows land. Keyed on
             // the tab it replayed the old rows first, then the new ones.
-            <ol key={shownScope} className="grid gap-2 @3xl:grid-cols-2">
+            <ol
+              key={shownScope}
+              // grid-cols-1: without an explicit minmax(0,1fr) track the
+              // implicit `auto` column grows to the rows' nowrap min-content
+              // (time · pack · value) and the whole page pans sideways on phones.
+              className="grid grid-cols-1 gap-2 @3xl:grid-cols-2"
+            >
               {pulls.map((pull, i) => (
                 <li
                   key={pull.id}
