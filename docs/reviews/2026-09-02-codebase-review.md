@@ -157,11 +157,14 @@ plus agents on real money. The problems are:
 4. **The withdrawal path has 3–4 hand-copied refund orderings** (submit error,
    callback, sweep, admin approve). Collapse to one `settleOrRefundWithdrawal`
    when the next change there lands.
-5. **Config drift is silent.** `.do/backend.app.yaml` sets
-   `PAYOUT_DESTINATION_COOLDOWN_HOURS: "0"` while `CONTEXT.md` calls that
-   cooldown the control on the steal-a-token → add-a-destination → cash-out
-   chain and says 0 is never the default. Reconcile, and log the resolved money
-   controls at boot next to the existing `[phone-gate]` line.
+5. **Money controls have no boot evidence.** `.do/backend.app.yaml` sets
+   `PAYOUT_DESTINATION_COOLDOWN_HOURS: "0"` — a recorded operator decision
+   (spec comment, 2026-08-11, #422: the 24h wait blocked real customers' first
+   withdrawal; the add-a-destination email + feed alert is the compensating
+   control, so `RESEND_API_KEY` breaking is a security incident). Re-confirmed
+   2026-09-02: stays 0. The gap is that nothing logs the resolved money controls
+   at boot the way `[phone-gate]` does — add a `[money-gate]` line for cooldown,
+   approval threshold, withdrawals-enabled and mock top-up.
 6. **Store-route auth coverage has no probe** (the admin side has one because
    the omission happened four times). Copy
    `admin-rate-limit-coverage.unit.spec.ts` into a store variant with an
@@ -176,15 +179,16 @@ with `use cache`; prune the SUSPENDED holders.
 
 - **Session length.** The cookie now matches the backend JWT default (1 day).
   Before this change the cookie claimed 7 days but every backend call 401ed
-  after day one, so nothing customer-facing got shorter — but if week-long
-  sessions are wanted, set `http.jwtExpiresIn: '7d'` in `medusa-config.ts` and
-  `COOKIE_MAX_AGE` in `src/lib/data/customer.ts` together.
+  after day one, so nothing customer-facing got shorter. Re-confirmed
+  2026-09-02: stays 1 day (raise `http.jwtExpiresIn` in `medusa-config.ts` and
+  `COOKIE_MAX_AGE` in `src/lib/data/customer.ts` together if that changes).
 - **Referral bind window.** Binding now requires the account to be < 24h old.
   The storefront binds at signup, so no legitimate flow is affected; an
   operator can still attach a referrer to any account through the admin
-  override.
-- **`PAYOUT_DESTINATION_COOLDOWN_HOURS`** is `0` in prod (see architecture
-  point 5) — decide and record.
+  override. Re-confirmed 2026-09-02.
+- **`PAYOUT_DESTINATION_COOLDOWN_HOURS`** stays `0` in prod — re-confirmed
+  2026-09-02 against the 2026-08-11 reason recorded in the spec comment (see
+  architecture point 5).
 - **`apps/vendor`** — remove after confirming nothing hits `/seller`.
 
 ## Follow-ups (not on this branch)
