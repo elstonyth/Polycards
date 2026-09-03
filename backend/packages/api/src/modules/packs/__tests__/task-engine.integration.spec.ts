@@ -253,11 +253,17 @@ moduleIntegrationTestRunner<PacksModuleService>({
           rolls++;
           return { handle: 'rolled-card' };
         };
+        let takes = 0;
+        const decrementStock = async () => {
+          takes++;
+          return true; // a tracked unit really came off the shelf
+        };
 
         const first = await service.redeemTaskPackClaim({
           customerId: 'cus_t5',
           claimId,
           rollPack,
+          decrementStock,
         });
         expect(first).toMatchObject({ redeemed: true });
         const pulls = await service.listPulls({
@@ -267,6 +273,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(pulls).toHaveLength(1);
         expect(pulls[0].pack_id).toBe('bronze');
         expect(pulls[0].card_id).toBe('rolled-card');
+        // The taken unit is earmarked on the pull, so selling the card back
+        // restores it (buyback-pull.ts restores earmarked pulls only).
+        expect(takes).toBe(1);
+        expect(pulls[0].stock_earmarked).toBe(true);
 
         // THE POINT. A retry — a double-tap, a lost response, a reconnect after
         // the tab was closed mid-spin — must not mint a second card, and must

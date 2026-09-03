@@ -29,9 +29,10 @@
  *     it, and it is what makes the invariant that matters most assertable: a
  *     demo Spin issues ZERO server calls.
  *   • Every roll — paid, free or demo — goes through the SAME offer builder.
- *     A free rip carries a real `pullId` and therefore a real (flat-rate)
- *     offer: it is `locked`, not offer-less, that suppresses its sell UI.
- *     Special-casing its offer to null would silently kill the sell countdown,
+ *     A free rip carries a real `pullId` and the backend's real quote (or the
+ *     flat-rate fallback when it sent none); `locked` is the backend's call
+ *     and is what would suppress a sell UI, never a missing offer.
+ *     Special-casing an offer to null would silently kill the sell countdown,
  *     the instant-window close on unmount, and the auto-conclude guard — all
  *     of which key off a non-null offer.
  */

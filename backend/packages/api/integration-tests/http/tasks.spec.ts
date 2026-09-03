@@ -5,6 +5,13 @@
 //           claims → credited once; double actions are polite no-ops
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
+import { PACKS_MODULE } from '../../src/modules/packs';
+import type PacksModuleService from '../../src/modules/packs/service';
+import { buybackAmount } from '../../src/modules/packs/buyback-rate';
+import {
+  DEFAULT_MARKET_MULTIPLIER,
+  displayMarketPrice,
+} from '../../src/modules/packs/pricing';
 import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(300 * 1000);
@@ -148,6 +155,124 @@ medusaIntegrationTestRunner({
           type: 'credit',
           amount_myr: 3,
         });
+      });
+
+      // A pack reward is a free rip; the card it yields sells on the spot like
+      // any pulled card (completing the task IS the requirement — operator
+      // decision 2026-09-03). The spin response must carry the authoritative
+      // instant quote, and selling must credit EXACTLY that number: the quote
+      // and the credit come from the same helper, and this is the tier that
+      // proves they agree end to end.
+      it('pack reward → spin quotes a real instant sell-back, and selling pays exactly that', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        // Single-card pool, so the roll is deterministic. Pinned FX so the
+        // amounts are too (the sell path refuses without a firm rate).
+        await packs.createPacks([
+          {
+            slug: 'tasks-rip-pack',
+            title: 'Tasks Rip Pack',
+            category: 'pokemon',
+            price: 10,
+            image: '/cdn/tasks-rip-pack.webp',
+            buyback_percent: 95,
+          },
+        ]);
+        await packs.createCards([
+          {
+            handle: 'tasks-rip-card',
+            name: 'Tasks Rip Card',
+            set: 'Test Set',
+            grader: 'PSA',
+            grade: '10',
+            market_value: 20,
+            image: '/cdn/tasks-rip-card.webp',
+          },
+        ]);
+        await packs.createPackOdds([
+          {
+            pack_id: 'tasks-rip-pack',
+            card_id: 'tasks-rip-card',
+            weight: 100,
+            locked: false,
+            rarity: 'Rare' as const,
+          },
+        ]);
+        await packs.createFxRates([
+          {
+            pair: 'USD_MYR',
+            rate: 4,
+            source: 'test',
+            manual_override: true,
+            manual_rate: 4,
+          },
+        ]);
+
+        const created = await unwrapResponse(
+          api.post(
+            '/admin/tasks',
+            {
+              kind: 'weekly',
+              title: 'Check in for a free rip',
+              requirement: { type: 'checkin_days', days: 1 },
+              reward: { type: 'pack', pack_id: 'tasks-rip-pack' },
+              reason: 'http test seed',
+            },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(created.status).toBe(200);
+        const taskId: string = created.data.id;
+
+        await unwrapResponse(
+          api.post('/store/tasks/checkin', {}, { headers: authed() }),
+        );
+        const claim = await unwrapResponse(
+          api.post(`/store/tasks/${taskId}/claim`, {}, { headers: authed() }),
+        );
+        expect(claim.data.claimed).toBe(true);
+        const claimId: string = claim.data.claimId;
+
+        const spin = await unwrapResponse(
+          api.post(
+            `/store/tasks/claims/${claimId}/spin`,
+            {},
+            { headers: authed() },
+          ),
+        );
+        expect(spin.status).toBe(200);
+        expect(spin.data.redeemed).toBe(true);
+        expect(spin.data.card.handle).toBe('tasks-rip-card');
+        expect(spin.data.price).toBe(0);
+        expect(spin.data.free).toBe(true);
+        // Not the welcome-pack lock: sellable right now, with a real quote at
+        // the pack's instant rate off the MYR display value (USD 20 × FX 4 ×
+        // the default market multiplier — the number the reveal shows).
+        expect(spin.data.locked).toBe(false);
+        expect(spin.data.sellable).toBe(true);
+        expect(spin.data.buyback.rate_type).toBe('instant');
+        expect(spin.data.buyback.percent).toBe(95);
+        expect(spin.data.buyback.amount).toBe(
+          buybackAmount(
+            displayMarketPrice(20, 4, DEFAULT_MARKET_MULTIPLIER),
+            95,
+          ),
+        );
+        expect(spin.data.buyback.firm).toBe(true);
+        expect(spin.data.buyback.vault_amount).toBeGreaterThan(0);
+        expect(spin.data.buyback.instant_deadline_ms).toBeGreaterThan(0);
+
+        // Selling inside the window credits exactly the quoted amount.
+        const sell = await unwrapResponse(
+          api.post(
+            `/store/vault/${spin.data.pullId}/buyback`,
+            {},
+            { headers: authed() },
+          ),
+        );
+        expect(sell.status).toBe(200);
+        expect(sell.data.amount).toBe(spin.data.buyback.amount);
+        expect(sell.data.rate_type).toBe('instant');
+        expect(sell.data.balance).toBe(spin.data.buyback.amount);
       });
     });
   },

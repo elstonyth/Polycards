@@ -7644,8 +7644,13 @@ class PacksModuleService extends MedusaService({
     }
 
     const rolled = await input.rollPack(snapshot.pack_id);
+    // Did this rip actually take a unit? Recorded on the pull as
+    // stock_earmarked, so a later sell-back restores the unit (buyback-pull.ts
+    // restores ONLY earmarked pulls — a false here on a taken unit leaks one
+    // per sold reward card; a true on an untaken one mints a phantom).
+    let taken = false;
     try {
-      await input.decrementStock?.(rolled.handle, 1);
+      taken = (await input.decrementStock?.(rolled.handle, 1)) ?? false;
     } catch {
       // Fulfillment counter, never a gate — the take runs on the inventory
       // module's own connection, so a throw here would roll back the pull the
@@ -7660,6 +7665,7 @@ class PacksModuleService extends MedusaService({
           order_id: null,
           rolled_at: new Date(),
           source: 'reward' as const,
+          stock_earmarked: taken,
         },
       ],
       sharedContext,

@@ -76,7 +76,17 @@ export async function POST(
   // drops marketPriceMyr and the quote degrades to UNQUOTED_BUYBACK (firm:
   // false), so the reveal never presents a number the sell would not honour.
   let card: Record<string, unknown> = result.card;
-  let buyback: Record<string, unknown> = { ...UNQUOTED_BUYBACK };
+  // The open route's reveal quote shape, so a dropped field fails tsc rather
+  // than silently reaching the storefront as undefined.
+  let buyback: {
+    percent: number;
+    amount: number;
+    firm: boolean;
+    vault_percent: number;
+    vault_amount: number;
+    rate_type?: string;
+    instant_deadline_ms?: number;
+  } = { ...UNQUOTED_BUYBACK };
   try {
     const [{ rate: fxRate, firm: fxFirm }, [row]] = await Promise.all([
       resolveFxRateInfo(packs),
@@ -98,7 +108,11 @@ export async function POST(
     // so this is inside the instant window.
     const quoted = await packs.quoteBuyback(
       result.packId,
-      { rolled_at: result.rolledAt, revealed_at: null, instant_closed_at: null },
+      {
+        rolled_at: result.rolledAt,
+        revealed_at: null,
+        instant_closed_at: null,
+      },
       marketPriceMyr,
     );
     buyback = {
@@ -119,7 +133,7 @@ export async function POST(
 
   res.json({
     ...result,
-    pull: { id: result.pullId, rolled_at: result.rolledAt },
+    pull: { id: result.pullId },
     card,
     // Free by definition, so no charge and no balance change.
     price: 0,

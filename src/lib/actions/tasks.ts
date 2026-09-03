@@ -11,14 +11,14 @@ import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
 import {
-  OpenBuybackSchema,
   parseOne,
   TaskHubSchema,
   WonCardSchema,
   type TaskHub,
 } from '@/lib/data/schemas';
 import { formatValue } from '@/lib/packs-format';
-import type { OpenPackResult, WonCard } from '@/lib/actions/packs';
+import { toBuybackOffer } from '@/lib/actions/pack-batch-map';
+import type { BuybackOffer, WonCard } from '@/lib/actions/packs';
 
 export async function getTaskHub(): Promise<TaskHub | null> {
   const token = await getAuthToken();
@@ -125,7 +125,7 @@ export type SpinTaskRewardResult =
       locked: boolean;
       /** The backend's instant sell-back quote — the same shape the paid open
        *  carries, so the reveal is one code path. Null when it sent none. */
-      buyback: Extract<OpenPackResult, { ok: true }>['buyback'];
+      buyback: BuybackOffer | null;
     }
   | {
       ok: true;
@@ -171,24 +171,14 @@ export async function spinTaskReward(
         return { ok: false, error: 'Got an unexpected response. Try again.' };
       }
       const src = (raw.card ?? {}) as Record<string, unknown>;
-      // Same mapping openPack applies to its quote — one offer shape.
-      const offer = parseOne(OpenBuybackSchema, raw.buyback);
       return {
         ok: true,
         redeemed: true,
         pullId: raw.pullId,
         marketValue: won.market_value,
         locked: typeof raw.locked === 'boolean' ? raw.locked : true,
-        buyback: offer
-          ? {
-              percent: offer.percent,
-              amount: offer.amount,
-              vaultPercent: offer.vault_percent ?? null,
-              vaultAmount: offer.vault_amount ?? null,
-              instantDeadlineMs: offer.instant_deadline_ms ?? null,
-              firm: offer.firm ?? true,
-            }
-          : null,
+        // The same mapping the paid open uses — one offer shape for the reveal.
+        buyback: toBuybackOffer(raw.buyback),
         card: {
           id: won.handle,
           name: won.name,

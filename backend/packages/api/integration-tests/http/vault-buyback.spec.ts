@@ -648,7 +648,10 @@ medusaIntegrationTestRunner({
         expect(sell.status).toBe(400);
         expect(sell.data.message).toMatch(/no longer in the catalog/);
         expect(
-          await packs.listCreditTransactions({ pull_id: prize.id }, { take: 1 }),
+          await packs.listCreditTransactions(
+            { pull_id: prize.id },
+            { take: 1 },
+          ),
         ).toHaveLength(0);
       });
     });

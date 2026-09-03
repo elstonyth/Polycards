@@ -15,8 +15,8 @@ import { getAuthToken } from '@/lib/data/customer';
 import { formatValue } from '@/lib/packs-format';
 import type { Rarity } from '@/lib/packs-data';
 import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
-import { parseOne, WonCardSchema, OpenBuybackSchema } from '@/lib/data/schemas';
-import { mapBatchRoll, clampCount } from './pack-batch-map';
+import { parseOne, WonCardSchema } from '@/lib/data/schemas';
+import { mapBatchRoll, clampCount, toBuybackOffer } from './pack-batch-map';
 import type { RawBatchRollItem, BatchRoll } from './pack-batch-map';
 export type { BatchRoll, BuybackOffer } from './pack-batch-map';
 
@@ -155,8 +155,6 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
       };
     }
 
-    const offer = parseOne(OpenBuybackSchema, buyback);
-
     return {
       ok: true,
       card: {
@@ -177,16 +175,7 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
       },
       pullId: typeof pull?.id === 'string' ? pull.id : null,
       marketValue: wonCard.market_value,
-      buyback: offer
-        ? {
-            percent: offer.percent,
-            amount: offer.amount,
-            vaultPercent: offer.vault_percent ?? null,
-            vaultAmount: offer.vault_amount ?? null,
-            instantDeadlineMs: offer.instant_deadline_ms ?? null,
-            firm: offer.firm ?? true,
-          }
-        : null,
+      buyback: toBuybackOffer(buyback),
       balance:
         typeof balance === 'number' && Number.isFinite(balance)
           ? balance

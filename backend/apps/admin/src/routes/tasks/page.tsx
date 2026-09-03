@@ -539,7 +539,7 @@ function TaskEditor({
                     </Field>
                     <Field
                       label="Which card"
-                      hint="Goes straight to the vault. It cannot be sold back."
+                      hint="Goes straight to the vault. Sellable like any pulled card."
                       className="w-72"
                     >
                       <StaleAwareSelect

@@ -23,6 +23,26 @@ export type BuybackOffer = {
   firm: boolean;
 };
 
+/**
+ * Parse a backend buyback block into the reveal's offer shape. ONE mapping for
+ * the single open, the batch open and the task free rip — the reveal is one
+ * code path, so the three server actions must agree on it. Null when the
+ * backend sent nothing parseable (an older backend, or a dropped block).
+ */
+export function toBuybackOffer(raw: unknown): BuybackOffer | null {
+  const offer = parseOne(OpenBuybackSchema, raw);
+  return offer
+    ? {
+        percent: offer.percent,
+        amount: offer.amount,
+        vaultPercent: offer.vault_percent ?? null,
+        vaultAmount: offer.vault_amount ?? null,
+        instantDeadlineMs: offer.instant_deadline_ms ?? null,
+        firm: offer.firm ?? true,
+      }
+    : null;
+}
+
 /** One roll in an open-batch response, mapped for the client reveal. */
 export type BatchRoll = {
   card: WonCard;
@@ -74,8 +94,6 @@ export function mapBatchRoll(rawRoll: RawBatchRollItem): BatchRoll | null {
   const wonCard = parseOne(WonCardSchema, rawRoll.card);
   if (!wonCard) return null;
 
-  const offer = parseOne(OpenBuybackSchema, rawRoll.buyback);
-
   return {
     card: {
       id: wonCard.handle,
@@ -95,15 +113,6 @@ export function mapBatchRoll(rawRoll: RawBatchRollItem): BatchRoll | null {
     },
     pullId: typeof rawRoll.pull?.id === 'string' ? rawRoll.pull.id : null,
     marketValue: wonCard.market_value,
-    buyback: offer
-      ? {
-          percent: offer.percent,
-          amount: offer.amount,
-          vaultPercent: offer.vault_percent ?? null,
-          vaultAmount: offer.vault_amount ?? null,
-          instantDeadlineMs: offer.instant_deadline_ms ?? null,
-          firm: offer.firm ?? true,
-        }
-      : null,
+    buyback: toBuybackOffer(rawRoll.buyback),
   };
 }
