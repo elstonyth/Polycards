@@ -59,7 +59,12 @@ export default function FreePackBadge({
       // content, so it keeps a real alt; priority is deliberately off (it must
       // never compete with the catalog art for bandwidth).
       className={cn(
-        'h-auto w-[112px] drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)]',
+        // Fluid, capped at the art's natural 112px. A fixed 112px is ~30% of
+        // a 375px viewport, which reads as an overlay rather than a badge;
+        // 18vw holds it at a constant ~18% of the screen and reaches the
+        // 7rem cap at 622px, so tablet/desktop are unchanged. The 4rem floor
+        // (64px, still well over a 44px tap target) catches 320px screens.
+        'h-auto w-[clamp(4rem,18vw,7rem)] drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)]',
         // Gentle idle bob — reuses globals.css's `slabFloat` (±8px) rather
         // than minting a second identical keyframe. No fill-mode (repo rule:
         // never `both`), and `infinite`, so settle-then-read QA must filter it
