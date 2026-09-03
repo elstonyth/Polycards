@@ -74,6 +74,9 @@ function fake(returned: Row[] | (() => Row[])) {
     deductRunTotal: jest.fn(async () => undefined),
     listReferralAttributions: jest.fn(async () => []),
     createReferralAttributions: jest.fn(async () => []),
+    // bindReferral rechecks the referrer's disabled flag inside its
+    // transaction (review 2026-09-03); no state row = not disabled.
+    listCustomerAccountStates: jest.fn(async () => []),
   };
   Object.assign(svc, fns);
   const ctx = { manager: em, transactionManager: em } as never;
@@ -316,6 +319,24 @@ describe('bindReferral signup window', () => {
     );
     expect(res).toEqual({ bound: true });
     expect(f.createReferralAttributions).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a referrer disabled between the route check and the write', async () => {
+    const f = fake([{ n: '0' }]);
+    f.listCustomerAccountStates.mockResolvedValue([
+      { customer_id: 'cus_r', disabled: true },
+    ]);
+    const res = await f.svc.bindReferral(
+      {
+        customerId: 'cus_new',
+        referrerId: 'cus_r',
+        createdAt: new Date(NOW.getTime() - 60_000),
+        now: NOW,
+      },
+      f.ctx,
+    );
+    expect(res).toEqual({ bound: false, reason: 'referrer_disabled' });
+    expect(f.createReferralAttributions).not.toHaveBeenCalled();
   });
 
   it('still refuses a young account that already opened a pack', async () => {
