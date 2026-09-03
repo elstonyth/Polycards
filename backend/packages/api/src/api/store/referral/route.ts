@@ -2,10 +2,10 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { MedusaError, Modules } from '@medusajs/framework/utils';
+import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
-import { ensureReferralCode } from '../../../utils/referral-code';
+import { generateReferralCode } from '../../../utils/referral-code';
 import { ensureProfileHandleWorkflow } from '../../../workflows/ensure-profile-handle';
 
 // GET /store/referral — the logged-in customer's referral panel: their
@@ -24,14 +24,13 @@ export async function GET(
   }
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const customers = req.scope.resolve(Modules.CUSTOMER);
-  // Both metadata writers go through the per-customer advisory lock
-  // (mutateCustomerMetadata), so running them side by side cannot lose a key.
+  // Both metadata writers go through the per-customer advisory lock, so
+  // running them side by side cannot lose a key.
   const [{ result }, code, summary] = await Promise.all([
     ensureProfileHandleWorkflow(req.scope).run({
       input: { customer_id: customerId },
     }),
-    ensureReferralCode(customers, packs, customerId),
+    packs.assignReferralCode({ customerId, generate: generateReferralCode }),
     packs.referralStorefrontSummary({ customerId }),
   ]);
 

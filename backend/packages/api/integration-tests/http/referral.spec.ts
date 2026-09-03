@@ -103,6 +103,33 @@ medusaIntegrationTestRunner({
         }
       });
 
+      it('never hands two customers the same code, and never re-rolls one', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const customers = getContainer().resolve(Modules.CUSTOMER);
+        const [a] = await customers.listCustomers({
+          email: 'referrer@test.dev',
+        });
+        const [b] = await customers.listCustomers({
+          email: 'recruit@test.dev',
+        });
+        // Scripted generator: the second customer's first candidate collides
+        // with the first customer's code and must be skipped.
+        const script = ['AAAAAAAA', 'AAAAAAAA', 'BBBBBBBB'];
+        const generate = () => script.shift() ?? 'CCCCCCCC';
+
+        expect(
+          await packs.assignReferralCode({ customerId: a.id, generate }),
+        ).toBe('AAAAAAAA');
+        expect(
+          await packs.assignReferralCode({ customerId: b.id, generate }),
+        ).toBe('BBBBBBBB');
+        // Idempotent: the generator is not even consulted once a code exists.
+        expect(
+          await packs.assignReferralCode({ customerId: a.id, generate }),
+        ).toBe('AAAAAAAA');
+        expect(script).toEqual([]);
+      });
+
       it('bind → close → approve → pay round-trips through every surface', async () => {
         // Referrer's code from their own panel — assigned on first read,
         // stable after that.
@@ -139,7 +166,9 @@ medusaIntegrationTestRunner({
         );
         expect(missing.status).toBe(404);
         const junk = await unwrapResponse(
-          api.get('/store/referral/codes/not-a-code', { headers: storeHeaders }),
+          api.get('/store/referral/codes/not-a-code', {
+            headers: storeHeaders,
+          }),
         );
         expect(junk.status).toBe(404);
 

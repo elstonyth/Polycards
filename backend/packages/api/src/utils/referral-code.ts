@@ -1,5 +1,4 @@
 import { randomInt } from 'node:crypto';
-import { MedusaError } from '@medusajs/framework/utils';
 import type { CustomerDTO, ICustomerModuleService } from '@medusajs/types';
 import type PacksModuleService from '../modules/packs/service';
 import { findCustomerByReferralCode } from './customer-by-metadata';
@@ -7,7 +6,9 @@ import { findCustomerByReferralCode } from './customer-by-metadata';
 // The public referral code — the short identity a recruit arrives with via
 // /r/<code> or pastes into the signup form. Lives in customer
 // metadata.referral_code beside metadata.handle and is assigned lazily the
-// first time the customer opens their referral panel (ensureReferralCode).
+// first time the customer opens their referral panel
+// (PacksModuleService.assignReferralCode, which serializes allocation so no
+// two customers ever share a code).
 //
 // Random, not derived from the id like the handle: the handle is printed on
 // every public profile, and a code anyone could compute from it would let a
@@ -42,6 +43,8 @@ export function normalizeReferralCode(input: unknown): string | null {
  * The referrer a code may bind to, or null. A disabled account is hidden
  * here — the ONE place — so the public lookup (GET /store/referral/codes/:code)
  * and the bind (POST /store/referral/bind) can never disagree about a code.
+ * (bindReferral rechecks the disable inside its own transaction; this is the
+ * request-time answer, that is the write-time one.)
  */
 export async function findBindableReferrer(
   customers: ICustomerModuleService,
@@ -51,54 +54,4 @@ export async function findBindableReferrer(
   const referrer = await findCustomerByReferralCode(customers, code);
   if (!referrer || (await packs.isAccountDisabled(referrer.id))) return null;
   return referrer;
-}
-
-const MAX_ATTEMPTS = 5;
-
-/**
- * The customer's referral code, assigned on first call. Idempotent: an
- * existing metadata.referral_code is returned untouched. The write goes
- * through the `metadata:<customer>` advisory lock like every other metadata
- * writer (see the ensure-profile-handle step) and re-checks inside the lock,
- * so two concurrent first requests converge on one code.
- *
- * A plain util rather than a workflow like ensure-profile-handle on purpose:
- * this is one idempotent write under a lock with nothing to compensate — a
- * failed attempt leaves no partial state — so the workflow ceremony would buy
- * only a second file.
- *
- * ponytail: uniqueness is a pre-check on the same unindexed JSONB scan the
- * handle lookup uses, not a constraint — move both to a keyed table if the
- * customer count ever makes that scan slow.
- */
-export async function ensureReferralCode(
-  customers: ICustomerModuleService,
-  packs: PacksModuleService,
-  customerId: string,
-): Promise<string> {
-  const customer = await customers.retrieveCustomer(customerId, {
-    select: ['id', 'metadata'],
-  });
-  const existing = (customer.metadata ?? {}).referral_code;
-  if (typeof existing === 'string' && REFERRAL_CODE_RE.test(existing)) {
-    return existing;
-  }
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const candidate = generateReferralCode();
-    if (await findCustomerByReferralCode(customers, candidate)) continue;
-    const metadata = await packs.mutateCustomerMetadata({
-      customerId,
-      mutate: (locked) =>
-        typeof locked.referral_code === 'string'
-          ? null // a concurrent first request won — keep theirs
-          : { ...locked, referral_code: candidate },
-    });
-    const code = metadata.referral_code;
-    if (typeof code === 'string') return code;
-  }
-  // Five random collisions in a 40-bit space — practically unreachable.
-  throw new MedusaError(
-    MedusaError.Types.CONFLICT,
-    'Could not assign a referral code',
-  );
 }

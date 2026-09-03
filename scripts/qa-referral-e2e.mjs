@@ -160,7 +160,11 @@ const CODE = panel.code;
 
 // ── 2. logged-in referrer opens their own link ──────────────────────────────
 await a.goto(`${BASE}/r/${CODE}`, { waitUntil: 'domcontentloaded' });
-await a.waitForTimeout(1500);
+// Poll for the observable signal instead of a fixed sleep (review 2026-09-03).
+await a
+  .getByText('You already have an account')
+  .waitFor({ timeout: 15_000 })
+  .catch(() => {});
 ok(
   (await a.getByText('You already have an account').count()) === 1,
   'logged-in visitor: "already have an account" banner',
@@ -218,7 +222,10 @@ await fillSignup(d, bad, 'ZZZZZZZZ');
 await d
   .locator('[role="dialog"][aria-modal="true"] button[type="submit"]')
   .click();
-await d.waitForTimeout(2500);
+await d
+  .locator('#auth-form-error', { hasText: /couldn't find that referral code/i })
+  .waitFor({ timeout: 15_000 })
+  .catch(() => {});
 ok(
   /couldn't find that referral code/i.test(await errorNote(d)),
   `unknown code refused: "${await errorNote(d)}"`,
@@ -232,7 +239,10 @@ await d.fill('input[name="referralCode"]', 'ABC');
 await d
   .locator('[role="dialog"][aria-modal="true"] button[type="submit"]')
   .click();
-await d.waitForTimeout(2500);
+await d
+  .locator('#auth-form-error', { hasText: /8 letters and numbers/i })
+  .waitFor({ timeout: 15_000 })
+  .catch(() => {});
 ok(
   /8 letters and numbers/i.test(await errorNote(d)),
   `malformed code refused: "${await errorNote(d)}"`,
@@ -243,7 +253,10 @@ await ctxD.close();
 const ctxE = await browser.newContext({ viewport });
 const e = await ctxE.newPage();
 await e.goto(`${BASE}/r/ZZZZZZZZ`, { waitUntil: 'domcontentloaded' });
-await e.waitForTimeout(1500);
+await e
+  .getByText("That referral link isn't valid")
+  .waitFor({ timeout: 15_000 })
+  .catch(() => {});
 ok(
   (await e.getByText("That referral link isn't valid").count()) === 1,
   'unknown link: "isn\'t valid" banner',

@@ -708,7 +708,11 @@ class PacksModuleService extends MedusaService({
     | { bound: true }
     | {
         bound: false;
-        reason: 'self' | 'already_bound' | 'not_a_new_account';
+        reason:
+          | 'self'
+          | 'already_bound'
+          | 'not_a_new_account'
+          | 'referrer_disabled';
       }
   > {
     if (input.customerId === input.referrerId) {
@@ -741,6 +745,13 @@ class PacksModuleService extends MedusaService({
     );
     if (Number(spent?.n ?? 0) > 0) {
       return { bound: false, reason: 'not_a_new_account' };
+    }
+    // The route already resolved the referrer through findBindableReferrer,
+    // but an admin disable can commit between that read and this write —
+    // recheck inside the transaction so a shut account never gains a downline
+    // (review 2026-09-03).
+    if (await this.isAccountDisabled(input.referrerId, sharedContext)) {
+      return { bound: false, reason: 'referrer_disabled' };
     }
     try {
       await this.createReferralAttributions(
@@ -2099,7 +2110,10 @@ class PacksModuleService extends MedusaService({
     | {
         claimed: false;
         reason:
-          'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
+          | 'not_found'
+          | 'not_completed'
+          | 'already_claimed'
+          | 'window_closed';
       }
   > {
     // Deliberately NOT filtered on active: retiring a task must never strand
@@ -4628,6 +4642,70 @@ class PacksModuleService extends MedusaService({
       [JSON.stringify(next), input.customerId],
     );
     return next;
+  }
+
+  /**
+   * The customer's referral code, assigned on first call and returned
+   * unchanged after that. Allocation is serialized GLOBALLY (advisory lock
+   * `referral_code:alloc`) and the uniqueness probe runs inside that lock in
+   * the same transaction as the write, so two customers can never be handed
+   * the same code — the per-customer metadata lock alone protects one row,
+   * not the code space (review 2026-09-03). Raw SQL on `customer` for the
+   * same reasons as mutateCustomerMetadata; `generate` is injected so a test
+   * can script the candidates.
+   *
+   * ponytail: the probe is an unindexed JSONB scan like the handle lookup —
+   * add an expression index on metadata->>'referral_code' if it ever shows.
+   */
+  @InjectTransactionManager()
+  async assignReferralCode(
+    input: { customerId: string; generate: () => string; maxAttempts?: number },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    // Global first, then the per-customer lock mutateCustomerMetadata takes —
+    // always in this order, so the two can never deadlock.
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      'referral_code:alloc',
+    ]);
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `metadata:${input.customerId}`,
+    ]);
+    const rows = await em.execute<
+      { metadata: Record<string, unknown> | null }[]
+    >('SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL', [
+      input.customerId,
+    ]);
+    if (rows.length === 0) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Customer with id: ${input.customerId} was not found`,
+      );
+    }
+    const current = rows[0].metadata ?? {};
+    if (typeof current.referral_code === 'string') return current.referral_code;
+
+    for (let attempt = 0; attempt < (input.maxAttempts ?? 5); attempt++) {
+      const candidate = input.generate();
+      const [taken] = await em.execute<{ n: string }[]>(
+        "SELECT COUNT(*)::int AS n FROM customer WHERE metadata->>'referral_code' = ? AND deleted_at IS NULL",
+        [candidate],
+      );
+      if (Number(taken?.n ?? 0) > 0) continue;
+      await em.execute(
+        'UPDATE customer SET metadata = ?::jsonb, updated_at = now() WHERE id = ? AND deleted_at IS NULL',
+        [
+          JSON.stringify({ ...current, referral_code: candidate }),
+          input.customerId,
+        ],
+      );
+      return candidate;
+    }
+    // Five collisions in a 40-bit space — practically unreachable.
+    throw new MedusaError(
+      MedusaError.Types.CONFLICT,
+      'Could not assign a referral code',
+    );
   }
 
   // FX manual-override edit + audit row in the same transaction. The audit row
@@ -8324,7 +8402,8 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      SettleSnapshot | undefined;
+      | SettleSnapshot
+      | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME
@@ -8739,7 +8818,8 @@ class PacksModuleService extends MedusaService({
   private async reserveSettledStock(
     winner: SettledWinner,
     decrementStock:
-      ((handle: string, qty: number) => Promise<boolean>) | undefined,
+      | ((handle: string, qty: number) => Promise<boolean>)
+      | undefined,
     weekStartIso: string,
   ): Promise<void> {
     if (!decrementStock) return;
