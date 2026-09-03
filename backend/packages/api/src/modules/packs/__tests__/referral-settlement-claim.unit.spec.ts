@@ -76,7 +76,9 @@ function fake(returned: Row[] | (() => Row[])) {
     createReferralAttributions: jest.fn(async () => []),
     // bindReferral rechecks the referrer's disabled flag inside its
     // transaction (review 2026-09-03); no state row = not disabled.
-    listCustomerAccountStates: jest.fn(async () => []),
+    listCustomerAccountStates: jest.fn(
+      async (): Promise<{ customer_id: string; disabled: boolean }[]> => [],
+    ),
   };
   Object.assign(svc, fns);
   const ctx = { manager: em, transactionManager: em } as never;
