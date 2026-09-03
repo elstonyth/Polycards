@@ -1,24 +1,21 @@
 /**
- * Referral invite cookie (rebuild, spec 2026-08-24). /invite/<handle> plants
- * it; signup consumes it. Attribution is permanent and binds at signup only,
- * so the cookie is short-lived state, not an account property.
+ * Referral cookie (rebuild, spec 2026-08-24; code-based since 2026-09-03).
+ * /r/<code> plants it; signup consumes it. Attribution is permanent and binds
+ * at signup only, so the cookie is short-lived state, not an account property.
  */
 import 'server-only';
 import { cookies } from 'next/headers';
 import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
+import { normalizeReferralCode } from '@/lib/referral-code';
 
 export const REFERRAL_COOKIE = '_polycards_ref';
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
-/** Mirrors the backend's HANDLE_RE (utils/profile-handle.ts) — the backend
- *  re-validates, this just keeps junk out of the cookie. */
-export const INVITE_HANDLE_RE = /^[a-z0-9](?:[a-z0-9-]{1,58})[a-z0-9]$/;
-
-export async function setReferralCookie(handle: string): Promise<void> {
+export async function setReferralCookie(code: string): Promise<void> {
   const store = await cookies();
-  store.set(REFERRAL_COOKIE, handle, {
+  store.set(REFERRAL_COOKIE, code, {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
@@ -27,10 +24,11 @@ export async function setReferralCookie(handle: string): Promise<void> {
   });
 }
 
+/** The planted code, or null — a pre-2026-09 handle cookie normalizes to
+ *  null and is simply ignored. */
 export async function readReferralCookie(): Promise<string | null> {
   const store = await cookies();
-  const v = store.get(REFERRAL_COOKIE)?.value;
-  return v && INVITE_HANDLE_RE.test(v) ? v : null;
+  return normalizeReferralCode(store.get(REFERRAL_COOKIE)?.value);
 }
 
 export async function clearReferralCookie(): Promise<void> {
@@ -40,20 +38,22 @@ export async function clearReferralCookie(): Promise<void> {
 
 /**
  * Fire the one-shot attribution bind for the just-signed-up customer. Called
- * from the signup action AFTER login succeeded; every failure path is
- * swallowed (logged) — signup must NEVER fail on a referral hiccup. The
- * cookie is cleared whatever the outcome: the backend refuses a second bind
+ * from the signup paths AFTER login succeeded. `code` is what the form carried
+ * (already normalized by the action); when absent — the Google path, or a
+ * form left blank — the /r/<code> cookie is the fallback. Every failure path
+ * is swallowed (logged): signup must NEVER fail on a referral hiccup. The
+ * cookie is cleared whatever the outcome — the backend refuses a second bind
  * anyway, so retrying a stale cookie only burns rate-limit budget.
  */
-export async function bindReferralFromCookie(): Promise<void> {
+export async function bindReferral(code: string | null = null): Promise<void> {
   try {
-    const handle = await readReferralCookie();
-    if (!handle) return;
+    const referrerCode = code ?? (await readReferralCookie());
+    if (!referrerCode) return;
     const token = await getAuthToken();
     if (!token) return;
     await authedFetch(token, '/store/referral/bind', {
       method: 'POST',
-      body: { referrer_handle: handle },
+      body: { referrer_code: referrerCode },
     });
   } catch (error) {
     logger.error('[referral] bind after signup failed:', error);

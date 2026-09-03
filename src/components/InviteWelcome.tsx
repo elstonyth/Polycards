@@ -4,11 +4,13 @@ import { useEffect, useState } from 'react';
 import { Gift, Info, X } from 'lucide-react';
 import { openAuth } from '@/components/AuthButton';
 import { Pill } from '@/components/ui/pill';
+import { normalizeReferralCode } from '@/lib/referral-code';
 
 /**
- * The landing half of the referral link. `/invite/<handle>` redirects to
+ * The landing half of the referral link. `/r/<code>` redirects to
  * `/?invite=…`; this greets the visitor and — for a genuine invite — opens the
- * signup form, because the whole point of the link is a new account.
+ * signup form with the code already filled in, because the whole point of the
+ * link is a new account.
  *
  * Reads `window.location.search` in an effect rather than `useSearchParams()`
  * ON PURPOSE: the home page is ISR-cached and visitor-agnostic (see the note
@@ -19,7 +21,7 @@ import { Pill } from '@/components/ui/pill';
  * screenshot-URL doesn't re-open the modal.
  */
 type InviteState =
-  { kind: 'invited'; handle: string } | { kind: 'has-account' | 'unknown' };
+  { kind: 'invited'; code: string } | { kind: 'has-account' | 'unknown' };
 
 export default function InviteWelcome() {
   const [state, setState] = useState<InviteState | null>(null);
@@ -38,10 +40,16 @@ export default function InviteWelcome() {
       window.location.pathname + (qs ? `?${qs}` : ''),
     );
 
-    const next: InviteState =
+    // Only the route's three shapes are honoured; anything else in the param
+    // (a hand-edited URL) is ignored rather than echoed into the page.
+    const code = normalizeReferralCode(invite);
+    const next: InviteState | null =
       invite === 'has-account' || invite === 'unknown'
         ? { kind: invite }
-        : { kind: 'invited', handle: invite };
+        : code
+          ? { kind: 'invited', code }
+          : null;
+    if (!next) return;
 
     // Deliberate post-mount sync read: the invite lives in the URL, which does
     // not exist during SSR, so this cannot be a lazy initialiser. Same pattern
@@ -51,28 +59,29 @@ export default function InviteWelcome() {
     if (next.kind !== 'invited') return;
 
     // Give the header a beat to mount its auth listener before dispatching.
-    const t = setTimeout(() => openAuth('signup'), 400);
+    const referralCode = next.code;
+    const t = setTimeout(() => openAuth('signup', { referralCode }), 400);
     return () => clearTimeout(t);
   }, []);
 
   if (!state) return null;
 
-  const invited = state.kind === 'invited';
-  const copy = invited
+  const code = state.kind === 'invited' ? state.code : null;
+  const copy = code
     ? {
-        title: `${state.handle} invited you`,
-        body: 'Create your account to join their crew — you both earn as you rip.',
+        title: "You've been invited to Polycards",
+        body: `Referral code ${code} is filled in for you — create your account and you both earn as you rip.`,
         cta: 'Create account',
       }
     : state.kind === 'has-account'
       ? {
           title: 'You already have an account',
-          body: 'Invite links only apply to brand-new signups, so this one has no effect on your account.',
+          body: 'Referral links and codes only apply to brand-new signups, so this one has no effect on your account.',
           cta: null,
         }
       : {
-          title: "That invite link isn't valid",
-          body: 'The link may be mistyped or the account is gone. You can still sign up normally.',
+          title: "That referral link isn't valid",
+          body: 'The code may be mistyped or the account is gone. You can still sign up normally.',
           cta: null,
         };
 
@@ -80,7 +89,7 @@ export default function InviteWelcome() {
     <div role="status" className="px-fluid pt-4">
       <div className="mx-auto flex w-full max-w-2xl items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
         <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-neutral-900">
-          {invited ? (
+          {code ? (
             <Gift className="text-chase h-4.5 w-4.5" aria-hidden />
           ) : (
             <Info className="h-4.5 w-4.5 text-neutral-400" aria-hidden />
@@ -91,8 +100,12 @@ export default function InviteWelcome() {
           <p className="mt-0.5 text-xs leading-relaxed text-neutral-400">
             {copy.body}
           </p>
-          {copy.cta && (
-            <Pill size="sm" className="mt-3" onClick={() => openAuth('signup')}>
+          {copy.cta && code && (
+            <Pill
+              size="sm"
+              className="mt-3"
+              onClick={() => openAuth('signup', { referralCode: code })}
+            >
               {copy.cta}
             </Pill>
           )}

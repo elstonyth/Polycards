@@ -2,10 +2,11 @@
 
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { Mail, Lock, User as UserIcon, Loader2 } from 'lucide-react';
+import { Mail, Lock, Ticket, User as UserIcon, Loader2 } from 'lucide-react';
 import {
   login,
   signup,
+  checkReferralCode,
   requestPasswordReset,
   googleLoginStart,
   type AuthResult,
@@ -33,17 +34,22 @@ const PHONE_INPUT_CLASS =
 // auth server action returns a customer.
 
 // Error notes. `field` marks which input caused the error (wires
-// aria-invalid/-describedby): the password pair or the signup phone.
-type Note = { text: string; field?: 'password' | 'phone' };
+// aria-invalid/-describedby): the password pair, the signup phone, or the
+// optional referral code.
+type Note = { text: string; field?: 'password' | 'phone' | 'referral' };
 
 export default function AuthForm({
   mode,
   onSwitchMode,
   onSuccess,
+  initialReferralCode,
 }: {
   mode: 'login' | 'signup';
   onSwitchMode: (m: 'login' | 'signup') => void;
   onSuccess?: () => void;
+  /** Prefills the signup form's referral code — the /r/<code> landing passes
+   *  it through openAuth so the visitor sees it applied, not just a cookie. */
+  initialReferralCode?: string;
 }) {
   const isSignup = mode === 'signup';
   const router = useRouter();
@@ -63,7 +69,12 @@ export default function AuthForm({
   // form's values here so `onVerified` can finish the real signup() call.
   const [otp, setOtp] = useState<{
     phone: string;
-    pending: { email: string; password: string; first_name: string };
+    pending: {
+      email: string;
+      password: string;
+      first_name: string;
+      referral_code: string;
+    };
   } | null>(null);
   // Snapshot of the signup form's values, taken the moment the OTP step is
   // entered. Unlike `otp`, this SURVIVES `setOtp(null)` (Back, or a
@@ -77,6 +88,7 @@ export default function AuthForm({
     password: string;
     first_name: string;
     phone: string;
+    referral_code: string;
     // A still-valid proof token from a signup() that failed AFTER the OTP
     // passed (e.g. duplicate email). Reused on the next submit for the SAME
     // phone so the user isn't texted (and billed) twice; cleared when the
@@ -200,6 +212,26 @@ export default function AuthForm({
       return;
     }
     const first_name = String(form.get('username') ?? '');
+    const referral_code = String(form.get('referralCode') ?? '').trim();
+
+    if (referral_code) {
+      // Shape + existence check BEFORE any OTP is sent, so a mistyped code is
+      // corrected here rather than after a paid SMS (signup() re-checks — a
+      // server action is a public endpoint).
+      setBusy(true);
+      try {
+        const check = await checkReferralCode({ code: referral_code });
+        if (!check.ok) {
+          setNote({ text: check.error, field: 'referral' });
+          return;
+        }
+      } catch {
+        setNote({ text: 'Something went wrong. Please try again.' });
+        return;
+      } finally {
+        setBusy(false);
+      }
+    }
 
     if (PHONE_VERIFICATION_REQUIRED) {
       setBusy(true);
@@ -214,6 +246,7 @@ export default function AuthForm({
             password,
             first_name,
             phone,
+            referral_code,
             phone_verification_token: signupDraft.proofToken,
           });
           if (retry.ok || !/verif/i.test(retry.error)) {
@@ -224,6 +257,7 @@ export default function AuthForm({
               password,
               first_name,
               phone,
+              referral_code,
               proofToken: signupDraft.proofToken,
             });
             finishAuth(retry);
@@ -242,12 +276,16 @@ export default function AuthForm({
         // fields ride along in state for onVerified to use. signupDraft is
         // the same values, but kept around after setOtp(null) (see its
         // comment).
-        setOtp({ phone, pending: { email, password, first_name } });
+        setOtp({
+          phone,
+          pending: { email, password, first_name, referral_code },
+        });
         setSignupDraft({
           email,
           password,
           first_name,
           phone,
+          referral_code,
           proofToken: null,
         });
       } catch {
@@ -260,7 +298,13 @@ export default function AuthForm({
 
     setBusy(true);
     try {
-      const result = await signup({ email, password, first_name, phone });
+      const result = await signup({
+        email,
+        password,
+        first_name,
+        phone,
+        referral_code,
+      });
       finishAuth(result);
     } catch {
       setNote({ text: 'Something went wrong. Please try again.' });
@@ -569,6 +613,26 @@ export default function AuthForm({
             aria-invalid={note?.field === 'password' || undefined}
             aria-describedby={
               note?.field === 'password' ? 'auth-form-error' : undefined
+            }
+          />
+        )}
+        {isSignup && (
+          <Field
+            icon={Ticket}
+            name="referralCode"
+            type="text"
+            placeholder="Referral code (optional)"
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            // 8 chars plus room for a pasted dash/space — the action strips them.
+            maxLength={12}
+            // The OTP-step draft wins over the landing's prefill: it is what the
+            // user last typed.
+            defaultValue={signupDraft?.referral_code ?? initialReferralCode}
+            aria-invalid={note?.field === 'referral' || undefined}
+            aria-describedby={
+              note?.field === 'referral' ? 'auth-form-error' : undefined
             }
           />
         )}

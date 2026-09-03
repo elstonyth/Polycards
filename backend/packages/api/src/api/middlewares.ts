@@ -703,6 +703,15 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), referralBindRateLimit],
     },
     {
+      // PUBLIC referral-code lookup (GET /store/referral/codes/:code) — the
+      // /r/<code> link and the signup form validate a code before relying on
+      // it. No auth, so the limiter keys on the request IP like the public
+      // profile read.
+      matcher: '/store/referral/codes/*',
+      method: 'GET',
+      middlewares: [createProfileReadRateLimit()],
+    },
+    {
       // Spend a task's free-rip entitlement (POST /store/tasks/claims/:id/spin).
       // It MINTS a card, so it shares the write-tier budget with the paid open
       // rather than the store-read one.

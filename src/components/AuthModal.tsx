@@ -21,6 +21,8 @@ type AuthMode = 'login' | 'signup';
 export default function AuthModal() {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<AuthMode>('login');
+  // Carried by the /r/<code> landing (openAuth options) into the signup form.
+  const [referralCode, setReferralCode] = useState<string | undefined>();
   const panelRef = useRef<HTMLDivElement>(null);
 
   const dismiss = () => setOpen(false);
@@ -31,10 +33,13 @@ export default function AuthModal() {
 
   useEffect(() => {
     const onOpen = (e: Event) => {
-      const detail = (e as CustomEvent<{ mode?: AuthMode }>).detail;
+      const detail = (
+        e as CustomEvent<{ mode?: AuthMode; referralCode?: string }>
+      ).detail;
       // Whatever has focus now is the trigger; useModalA11y captures it when
       // the open flip reaches its effect and restores it on close.
       setMode(detail?.mode ?? 'login');
+      setReferralCode(detail?.referralCode);
       setOpen(true);
     };
     window.addEventListener('polycards:auth', onOpen);
@@ -97,6 +102,7 @@ export default function AuthModal() {
           mode={mode}
           onSwitchMode={setMode}
           onSuccess={() => setOpen(false)}
+          initialReferralCode={referralCode}
         />
       </div>
     </div>,
