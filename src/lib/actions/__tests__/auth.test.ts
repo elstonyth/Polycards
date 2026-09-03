@@ -36,7 +36,12 @@ vi.mock('@/lib/phone-verification', () => ({
 vi.mock('@/lib/referral-cookie', () => ({
   // The bind is fire-and-forget after a successful signup; these tests cover
   // auth outcomes, so the referral seam is stubbed inert.
-  bindReferralFromCookie: vi.fn(async () => {}),
+  bindReferral: vi.fn(async () => {}),
+}));
+vi.mock('@/lib/data/referral', () => ({
+  // signup()'s referral-code pre-check. Only reached when a test passes a
+  // referral_code; none here do, so the stub is inert.
+  lookupReferralCode: vi.fn(async () => ({ status: 'notfound' })),
 }));
 vi.mock('@/lib/data/profiles', () => ({
   fetchProfileHandle: mocks.fetchProfileHandle,
