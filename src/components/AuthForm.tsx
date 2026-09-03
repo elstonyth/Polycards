@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Mail, Lock, Ticket, User as UserIcon, Loader2 } from 'lucide-react';
 import {
@@ -38,6 +38,15 @@ const PHONE_INPUT_CLASS =
 // optional referral code.
 type Note = { text: string; field?: 'password' | 'phone' | 'referral' };
 
+// The signup form's values as they travel through the OTP detour: held for
+// the deferred signup() call and re-seeded into the remounted form.
+type SignupFields = {
+  email: string;
+  password: string;
+  first_name: string;
+  referral_code: string;
+};
+
 export default function AuthForm({
   mode,
   onSwitchMode,
@@ -69,12 +78,7 @@ export default function AuthForm({
   // form's values here so `onVerified` can finish the real signup() call.
   const [otp, setOtp] = useState<{
     phone: string;
-    pending: {
-      email: string;
-      password: string;
-      first_name: string;
-      referral_code: string;
-    };
+    pending: SignupFields;
   } | null>(null);
   // Snapshot of the signup form's values, taken the moment the OTP step is
   // entered. Unlike `otp`, this SURVIVES `setOtp(null)` (Back, or a
@@ -83,18 +87,20 @@ export default function AuthForm({
   // `defaultValue` instead of rendering empty. Only ever set from the
   // PHONE_VERIFICATION_REQUIRED branch of onSubmit, so it stays null (no
   // behavior change) on the flag-off path.
-  const [signupDraft, setSignupDraft] = useState<{
-    email: string;
-    password: string;
-    first_name: string;
-    phone: string;
-    referral_code: string;
-    // A still-valid proof token from a signup() that failed AFTER the OTP
-    // passed (e.g. duplicate email). Reused on the next submit for the SAME
-    // phone so the user isn't texted (and billed) twice; cleared when the
-    // backend rejects it or the phone changes.
-    proofToken: string | null;
-  } | null>(null);
+  const [signupDraft, setSignupDraft] = useState<
+    | (SignupFields & {
+        phone: string;
+        // A still-valid proof token from a signup() that failed AFTER the OTP
+        // passed (e.g. duplicate email). Reused on the next submit for the
+        // SAME phone so the user isn't texted (and billed) twice; cleared when
+        // the backend rejects it or the phone changes.
+        proofToken: string | null;
+      })
+    | null
+  >(null);
+  // The Google button sits outside the <form>; it reads the referral code
+  // through this ref so a pasted code survives the OAuth hop.
+  const formRef = useRef<HTMLFormElement>(null);
 
   function switchMode(m: 'login' | 'signup') {
     setForgot('none');
@@ -316,12 +322,22 @@ export default function AuthForm({
   async function onGoogle() {
     if (busy) return;
     setNote(null);
+    // A code pasted into the signup form must survive the Google hop: the
+    // action validates it and parks it in the referral cookie, which the
+    // OAuth callback's post-signup bind consumes like a /r/<code> landing.
+    const referral_code = isSignup
+      ? String(
+          new FormData(formRef.current ?? undefined).get('referralCode') ?? '',
+        ).trim()
+      : '';
     setBusy(true);
     // No `finally` here, deliberately: on success we navigate away and must
     // leave `busy` true (see comment below) — a finally would re-enable the
     // button mid-redirect. Both the !ok branch and the catch reset it.
     try {
-      const result = await googleLoginStart();
+      const result = await googleLoginStart(
+        referral_code ? { referral_code } : undefined,
+      );
       if (result.ok) {
         // Full-page redirect to Google's consent screen; the /auth/google/callback
         // route finishes the exchange on return. We're navigating away, so leave
@@ -330,7 +346,7 @@ export default function AuthForm({
         return;
       }
       setBusy(false);
-      setNote({ text: result.error });
+      setNote({ text: result.error, field: result.field });
     } catch {
       setBusy(false);
       setNote({ text: 'Something went wrong. Please try again.' });
@@ -552,7 +568,7 @@ export default function AuthForm({
         <span className="h-px flex-1 bg-white/10" />
       </div>
 
-      <form onSubmit={onSubmit} className="flex flex-col gap-3">
+      <form ref={formRef} onSubmit={onSubmit} className="flex flex-col gap-3">
         {isSignup && (
           <Field
             icon={UserIcon}
@@ -625,8 +641,8 @@ export default function AuthForm({
             autoComplete="off"
             autoCapitalize="characters"
             spellCheck={false}
-            // 8 chars plus room for a pasted dash/space — the action strips them.
-            maxLength={12}
+            // 8 chars plus room for pasted dashes/spaces — the action strips them.
+            maxLength={16}
             // The OTP-step draft wins over the landing's prefill: it is what the
             // user last typed.
             defaultValue={signupDraft?.referral_code ?? initialReferralCode}

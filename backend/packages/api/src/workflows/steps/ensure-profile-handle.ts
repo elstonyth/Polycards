@@ -1,7 +1,7 @@
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk";
 import { MedusaError, Modules } from "@medusajs/framework/utils";
 import { HANDLE_RE, deriveHandle } from "../../utils/profile-handle";
-import { findCustomerByHandle } from "../../utils/customer-by-handle";
+import { findCustomerByHandle } from "../../utils/customer-by-metadata";
 import PacksModuleService from "../../modules/packs/service";
 import { PACKS_MODULE } from "../../modules/packs";
 

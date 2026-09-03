@@ -99,16 +99,15 @@ async function login(page, a) {
     .waitFor({ state: 'detached', timeout: 25_000 });
 }
 
-async function logout(page) {
-  await page.goto(`${BASE}/me`, { waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: /^log out$/i }).click();
-  await page.waitForURL((u) => u.pathname === '/', { timeout: 15_000 });
-}
-
 async function readPanel(page) {
   await page.goto(`${BASE}/referral`, { waitUntil: 'domcontentloaded' });
   await page
     .getByRole('button', { name: /copy code/i })
+    .waitFor({ timeout: 15_000 });
+  // The QR and the absolute link render after hydration (the origin is a
+  // client-only read) — wait for the SVG so the rows are read post-mount.
+  await page
+    .locator('[role="img"][aria-label^="QR code"] svg')
     .waitFor({ timeout: 15_000 });
   const code = (
     await page

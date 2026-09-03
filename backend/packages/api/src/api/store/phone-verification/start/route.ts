@@ -19,7 +19,7 @@ import {
 type Body = { phone?: unknown; purpose?: unknown };
 
 // `phone` isn't declared on FilterableCustomerProps (only has_account is) —
-// same cast pattern as findCustomerByHandle (utils/customer-by-handle.ts).
+// same cast pattern as findCustomerByHandle (utils/customer-by-metadata.ts).
 type CustomerFilters = Parameters<ICustomerModuleService['listCustomers']>[0];
 
 export async function POST(

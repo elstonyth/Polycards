@@ -23,7 +23,7 @@ import {
 } from '@/lib/data/customer';
 import { fetchProfileHandle } from '@/lib/data/profiles';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
-import { bindReferral } from '@/lib/referral-cookie';
+import { bindReferral, setReferralCookie } from '@/lib/referral-cookie';
 import { normalizeReferralCode } from '@/lib/referral-code';
 import { lookupReferralCode } from '@/lib/data/referral';
 import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
@@ -183,8 +183,10 @@ const REFERRAL_UNKNOWN_ERROR =
 export async function checkReferralCode(input: {
   code: string;
 }): Promise<{ ok: true; code: string | null } | { ok: false; error: string }> {
-  if (!input.code.trim()) return { ok: true, code: null };
-  const code = normalizeReferralCode(input.code);
+  // A server action is a public endpoint: the body is typed but not trusted.
+  const raw = typeof input?.code === 'string' ? input.code : '';
+  if (!raw.trim()) return { ok: true, code: null };
+  const code = normalizeReferralCode(raw);
   if (!code) return { ok: false, error: REFERRAL_SHAPE_ERROR };
   const lookup = await lookupReferralCode(code);
   if (lookup.status === 'notfound') {
@@ -317,10 +319,24 @@ function decodeJwtPayload(token: string): GoogleTokenPayload {
   ) as GoogleTokenPayload;
 }
 
-export async function googleLoginStart(): Promise<
-  { ok: true; location: string } | { ok: false; error: string }
+export async function googleLoginStart(input?: {
+  /** A code pasted into the signup form before "Continue with Google". It
+   *  cannot ride the OAuth round-trip, so it is parked in the referral cookie
+   *  and the callback's post-signup bind consumes it exactly like a /r/<code>
+   *  landing. Validated first: a typo is refused here, before Google. */
+  referral_code?: string;
+}): Promise<
+  | { ok: true; location: string }
+  | { ok: false; error: string; field?: 'referral' }
 > {
+  const referral = await checkReferralCode({
+    code: input?.referral_code ?? '',
+  });
+  if (!referral.ok) return { ...referral, field: 'referral' };
   try {
+    // Harmless if the redirect never happens — the cookie only matters after
+    // a Google SIGNUP, and only for 30 days.
+    if (referral.code) await setReferralCookie(referral.code);
     const h = await headers();
     const host = h.get('x-forwarded-host') ?? h.get('host');
     // Host / X-Forwarded-Host / X-Forwarded-Proto are client-supplied. Only

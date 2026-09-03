@@ -7,7 +7,7 @@ import {
   getCachedProfile,
   setCachedProfile,
 } from '../../../../utils/profile-cache';
-import { findCustomerByHandle } from '../../../../utils/customer-by-handle';
+import { findCustomerByHandle } from '../../../../utils/customer-by-metadata';
 import {
   cardByHandle,
   makeRarityOf,

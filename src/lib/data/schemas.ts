@@ -794,8 +794,9 @@ export const SettlementHistoryRowSchema = z.looseObject({
 export const ReferralSummarySchema = z.looseObject({
   handle: z.string(),
   /** The 8-character public referral code — what /r/<code>, the QR and the
-   *  signup form's field all carry. */
-  code: z.string(),
+   *  signup form's field all carry. Optional (deploy-skew rule): a backend
+   *  that predates codes must still render the stats, not blank the page. */
+  code: z.string().optional(),
   downline_count: finite,
   week: z.looseObject({
     start: z.string(),

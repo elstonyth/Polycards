@@ -6,8 +6,10 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/types';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
-import { findCustomerByReferralCode } from '../../../../utils/customer-by-handle';
-import { normalizeReferralCode } from '../../../../utils/referral-code';
+import {
+  findBindableReferrer,
+  normalizeReferralCode,
+} from '../../../../utils/referral-code';
 
 // POST /store/referral/bind { referrer_code } — permanent one-shot
 // attribution of the LOGGED-IN customer to the referrer whose code they
@@ -34,11 +36,10 @@ export async function POST(
 
   const customers = req.scope.resolve<ICustomerModuleService>(Modules.CUSTOMER);
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const referrer = await findCustomerByReferralCode(customers, code);
-  // A disabled referrer is hidden by the public lookup; the bind must agree,
-  // or a code validated before the disable still attaches a downline to an
-  // account the operator shut (review 2026-09-03).
-  if (!referrer || (await packs.isAccountDisabled(referrer.id))) {
+  // Same resolution as the public lookup, disabled-referrer hide included, so
+  // a code validated before a disable cannot still attach a downline.
+  const referrer = await findBindableReferrer(customers, packs, code);
+  if (!referrer) {
     res.json({ bound: false, reason: 'referrer_not_found' });
     return;
   }

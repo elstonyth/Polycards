@@ -688,7 +688,7 @@ class PacksModuleService extends MedusaService({
   // (close/approve/void/pay) lives further down with the other money writers.
 
   // Permanent one-shot attribution. The route layer resolves the referral
-  // code (a profile handle) to referrerId — this module never reaches into
+  // code (customer metadata.referral_code) to referrerId — this module never reaches into
   // another module's tables. Races on the same customer are settled by the
   // unique customer_id index: the loser's 23505 reads as already_bound.
   @InjectTransactionManager()
