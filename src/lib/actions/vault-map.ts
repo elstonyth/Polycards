@@ -22,8 +22,9 @@ export type VaultItem = {
    *  account's first PAID open). EVERY lock affordance must key off THIS, never
    *  `source`: a weekly-challenge prize is source='reward' and fully sellable. */
   locked: boolean;
-  /** Can it be SOLD? Narrower than `locked`: a reward card is unsellable but
-   *  still shippable, so the two must not be collapsed. */
+  /** Can it be SOLD? The backend's answer; since 2026-09-03 it equals
+   *  `!locked` (task/achievement rewards sell like any card), but the vault
+   *  keys its Sell affordance off THIS so the backend stays the authority. */
   sellable: boolean;
   card: {
     handle: string;

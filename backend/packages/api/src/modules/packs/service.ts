@@ -7597,6 +7597,9 @@ class PacksModuleService extends MedusaService({
     | {
         redeemed: true;
         pullId: string;
+        /** The pull's rolled_at — the instant-window anchor the spin route
+         *  quotes the reveal's sell-back from, exactly as the open route does. */
+        rolledAt: Date;
         card: { handle: string } & Record<string, unknown>;
         packId: string;
       }
@@ -7668,6 +7671,7 @@ class PacksModuleService extends MedusaService({
     return {
       redeemed: true,
       pullId: pull.id,
+      rolledAt: pull.rolled_at,
       card: rolled,
       packId: snapshot.pack_id,
     };

@@ -307,18 +307,20 @@ async function openRolls(
               : 'That free rip is no longer available.',
         };
       }
-      // A reward pull is never sellable, so the backend quotes no buyback —
-      // the flat-rate fallback in buildOffer still yields a real offer, and
-      // `locked: true` is what makes the reveal show "Keep in vault" instead.
-      // The card is unsellable, not un-shippable.
+      // A task reward sells like any pulled card (completing the task IS the
+      // requirement), so the backend quotes it and reports `locked: false` —
+      // the same `locked` + `buyback` pair a paid open carries, passed through
+      // rather than hardcoded here. `locked: true` is what would make the
+      // reveal show "Keep in vault"; buildOffer's flat-rate fallback still
+      // yields a real offer when the backend quotes none.
       return {
         ok: true,
         batch: batchOf(
           req,
-          [{ card: spun.card, pullId: spun.pullId, buyback: null }],
+          [{ card: spun.card, pullId: spun.pullId, buyback: spun.buyback }],
           deps.now(),
           null,
-          true,
+          spun.locked,
         ),
       };
     }

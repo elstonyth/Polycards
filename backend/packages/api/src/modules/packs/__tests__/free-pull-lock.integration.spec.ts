@@ -250,6 +250,22 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect((await pullById(packId)).status).toBe('bought_back');
       });
 
+      // A task/achievement reward (source='reward') sells with NO paid open:
+      // completing the task is the requirement. The old C1 guard refused every
+      // non-challenge reward pull outright, which left task free rips and card
+      // rewards quoting RM 0.00 in the vault forever — the report this pins.
+      it('sells a task reward pull with no paid open at all', async () => {
+        const rewardId = await seedPull('reward');
+
+        const { result } = await sell(rewardId);
+
+        expect(result.amount).toBeGreaterThan(0);
+        expect((await pullById(rewardId)).status).toBe('bought_back');
+        expect(
+          await service.listCreditTransactions({ pull_id: rewardId }),
+        ).toHaveLength(1);
+      });
+
       // buyback-batch (POST /store/vault/buyback-batch) runs this SAME guarded
       // step per id with throwOnError:false and reports each failure's reason
       // instead of aborting the loop — so the lock needs no batch-side filter,

@@ -102,11 +102,12 @@ export async function GET(
     fx: { rate: fx, firm: fxFirm },
     items: rows.map((p: any) => {
       const card = cardByHandle.get(p.card_id);
-      // Payable-now quote — vaulted card pulls only (reward pulls can't be
-      // sold back, a locked free welcome pull can't yet; other statuses have
-      // nothing to pay). Uses the per-card multiplier exactly like GET
-      // /store/vault, so this amount is the same number the customer sees on
-      // their sell button.
+      // Payable-now quote — vaulted card pulls only (a locked free welcome
+      // pull can't sell yet; other statuses have nothing to pay). Reward
+      // pulls — challenge prizes, task free rips, task card rewards — sell
+      // like any pulled card since 2026-09-03 and quote here too. Uses the
+      // per-card multiplier exactly like GET /store/vault, so this amount is
+      // the same number the customer sees on their sell button.
       let quote: {
         percent: number;
         amount: number;
@@ -116,7 +117,6 @@ export async function GET(
       } | null = null;
       if (
         p.status === 'vaulted' &&
-        p.source !== 'reward' &&
         (p.source !== 'free' || freeUnlocked) &&
         card
       ) {

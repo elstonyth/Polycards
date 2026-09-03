@@ -11,13 +11,14 @@ import { authedFetch } from '@/lib/authed-fetch';
 import { logger } from '@/lib/logger';
 import { getAuthToken } from '@/lib/data/customer';
 import {
+  OpenBuybackSchema,
   parseOne,
   TaskHubSchema,
   WonCardSchema,
   type TaskHub,
 } from '@/lib/data/schemas';
 import { formatValue } from '@/lib/packs-format';
-import type { WonCard } from '@/lib/actions/packs';
+import type { OpenPackResult, WonCard } from '@/lib/actions/packs';
 
 export async function getTaskHub(): Promise<TaskHub | null> {
   const token = await getAuthToken();
@@ -117,6 +118,14 @@ export type SpinTaskRewardResult =
       card: WonCard;
       /** Raw USD FMV, for the reveal's display fallback. */
       marketValue: number;
+      /** Sell/deliver lock, the BACKEND's answer — never a client constant.
+       *  A task reward sells like any pulled card, so this is false on a
+       *  current backend; it defaults true when absent so an older backend
+       *  can only under-offer, never advertise a sell that 400s. */
+      locked: boolean;
+      /** The backend's instant sell-back quote — the same shape the paid open
+       *  carries, so the reveal is one code path. Null when it sent none. */
+      buyback: Extract<OpenPackResult, { ok: true }>['buyback'];
     }
   | {
       ok: true;
@@ -149,6 +158,8 @@ export async function spinTaskReward(
       reason?: 'not_found' | 'already_redeemed' | 'not_a_pack_reward';
       pullId?: string;
       card?: Record<string, unknown>;
+      locked?: unknown;
+      buyback?: unknown;
     }>(token, `/store/tasks/claims/${encodeURIComponent(claimId)}/spin`, {
       method: 'POST',
     });
@@ -160,11 +171,24 @@ export async function spinTaskReward(
         return { ok: false, error: 'Got an unexpected response. Try again.' };
       }
       const src = (raw.card ?? {}) as Record<string, unknown>;
+      // Same mapping openPack applies to its quote — one offer shape.
+      const offer = parseOne(OpenBuybackSchema, raw.buyback);
       return {
         ok: true,
         redeemed: true,
         pullId: raw.pullId,
         marketValue: won.market_value,
+        locked: typeof raw.locked === 'boolean' ? raw.locked : true,
+        buyback: offer
+          ? {
+              percent: offer.percent,
+              amount: offer.amount,
+              vaultPercent: offer.vault_percent ?? null,
+              vaultAmount: offer.vault_amount ?? null,
+              instantDeadlineMs: offer.instant_deadline_ms ?? null,
+              firm: offer.firm ?? true,
+            }
+          : null,
         card: {
           id: won.handle,
           name: won.name,

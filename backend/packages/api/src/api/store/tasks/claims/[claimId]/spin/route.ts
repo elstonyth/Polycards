@@ -12,7 +12,12 @@ import { takeCardStock } from '../../../../../../modules/packs/card-stock';
 import { rollOne } from '../../../../../../workflows/steps/roll-pack';
 import { resolveOddsSetForCustomer } from '../../../../../../modules/packs/odds-sets';
 import { toMoney } from '../../../../../../modules/packs/money';
-import { UNQUOTED_BUYBACK } from '../../../../../../modules/packs/buyback-rate';
+import {
+  FLAT_PERCENT,
+  UNQUOTED_BUYBACK,
+  buybackAmount,
+  instantDeadlineMs,
+} from '../../../../../../modules/packs/buyback-rate';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   displayMarketPrice,
@@ -33,9 +38,10 @@ import {
 // inside the service — the claim id is client-supplied.
 //
 // The response mirrors POST /store/packs/:slug/open closely enough that the
-// storefront reuses one reveal path, with two deliberate differences: `price`
-// is 0 and nothing is quoted for sell-back, because a reward pull is not
-// sellable (see `sellable`).
+// storefront reuses one reveal path. `price` is 0 (nothing was charged), and
+// the card is sellable on the spot: a task reward sells like any pulled card
+// (completing the task IS the requirement — no free-welcome lock applies), so
+// the reveal gets the same authoritative instant quote a paid open gets.
 export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
@@ -66,47 +72,64 @@ export async function POST(
   // ⚠ POST-COMMIT from here down. The pull exists and the entitlement is spent;
   // nothing below can undo that, so a failure must degrade rather than throw —
   // the player has the card either way, and an error page would read as a lost
-  // free rip. Same stance as the open route's enrichment block.
-  //
-  // The rolled card already carries everything the reveal needs EXCEPT the MYR
-  // display price, which needs the live FX rate.
+  // free rip. Same stance as the open route's enrichment block: the card
+  // drops marketPriceMyr and the quote degrades to UNQUOTED_BUYBACK (firm:
+  // false), so the reveal never presents a number the sell would not honour.
   let card: Record<string, unknown> = result.card;
+  let buyback: Record<string, unknown> = { ...UNQUOTED_BUYBACK };
   try {
-    const { rate: fxRate } = await resolveFxRateInfo(packs);
-    const [row] = await packs.listCards(
-      { handle: result.card.handle },
-      { select: ['handle', 'market_multiplier'], take: 1 },
-    );
-    card = {
-      ...result.card,
-      marketPriceMyr: displayMarketPrice(
-        toMoney(result.card.market_value),
-        fxRate,
-        Number(row?.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
+    const [{ rate: fxRate, firm: fxFirm }, [row]] = await Promise.all([
+      resolveFxRateInfo(packs),
+      packs.listCards(
+        { handle: result.card.handle },
+        { select: ['handle', 'market_multiplier'], take: 1 },
       ),
+    ]);
+    // MYR display Value (raw USD × FX × per-card markup) — what the reveal
+    // shows, and the base the buyback percent applies to.
+    const marketPriceMyr = displayMarketPrice(
+      toMoney(result.card.market_value),
+      fxRate,
+      Number(row?.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
+    );
+    card = { ...result.card, marketPriceMyr };
+    // Quote from the SAME helper the buyback workflow credits with, so the
+    // reveal's "sell on the spot" number is what selling pays. Freshly rolled,
+    // so this is inside the instant window.
+    const quoted = await packs.quoteBuyback(
+      result.packId,
+      { rolled_at: result.rolledAt, revealed_at: null, instant_closed_at: null },
+      marketPriceMyr,
+    );
+    buyback = {
+      ...quoted,
+      firm: fxFirm,
+      vault_percent: FLAT_PERCENT,
+      vault_amount: buybackAmount(marketPriceMyr, FLAT_PERCENT),
+      instant_deadline_ms: instantDeadlineMs(result.rolledAt, null),
     };
   } catch (err) {
     req.scope
       .resolve(ContainerRegistrationKeys.LOGGER)
       .error(
-        `[task-spin] post-commit enrichment failed for claim '${req.params.claimId}' (customer ${customerId}) — serving the pull with a degraded card`,
+        `[task-spin] post-commit enrichment failed for claim '${req.params.claimId}' (customer ${customerId}) — serving the pull with a degraded card and quote`,
         err instanceof Error ? err : new Error(String(err)),
       );
   }
 
   res.json({
     ...result,
-    pull: { id: result.pullId },
+    pull: { id: result.pullId, rolled_at: result.rolledAt },
     card,
     // Free by definition, so no charge and no balance change.
     price: 0,
     balance: null,
     free: true,
-    // NOT locked: a reward card ships (recordRewardWithdrawal). It is simply
-    // never sellable, which is what suppresses the reveal's sell offer — the
-    // same split GET /store/vault makes.
+    // Never locked: the free-welcome lock is keyed on source='free', and a
+    // task reward is source='reward'. Sellable AND shippable (the latter via
+    // the reward withdraw path) — same as GET /store/vault reports it.
     locked: false,
-    sellable: false,
-    buyback: UNQUOTED_BUYBACK,
+    sellable: true,
+    buyback,
   });
 }

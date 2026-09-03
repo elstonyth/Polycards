@@ -190,17 +190,20 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // path that works and put the free-pull explainer ("rip a paid pack to
         // unlock") over a card that never unlocks that way.
         expect(rewardItem!.locked).toBe(false);
-        // NOT sellable — buyback-pull.ts refuses any source='reward' pull that
-        // is not a weekly-challenge prize, so the row must quote nothing
-        // payable or the vault offers money the sell rejects.
-        expect(rewardItem!.sellable).toBe(false);
+        // SELLABLE — a task reward sells like any pulled card (completing the
+        // task is the requirement; buyback-pull.ts no longer refuses
+        // source='reward'). Before 2026-09-03 this row quoted RM 0.00 with
+        // Sell greyed out, forever — the "free pack card can't be sold" report.
+        expect(rewardItem!.sellable).toBe(true);
         expect(normalItem.sellable).toBe(true);
         const buyback = rewardItem!.buyback as Record<string, unknown>;
         expect(buyback).toBeDefined();
-        expect(buyback.amount).toBe(0);
+        // A real payable quote off the card's FMV. The synthetic 'task-reward'
+        // pack has no row, so the rate resolves to the flat vault percent.
+        expect(Number(buyback.amount)).toBeGreaterThan(0);
+        expect(Number(buyback.percent)).toBeGreaterThan(0);
         // `firm` is a GLOBAL fact about the FX rate, never a per-row signal:
-        // it must match every other row's, or one unsellable row would blame
-        // the whole vault's pricing and block selling the rest.
+        // it must match every other row's.
         expect(buyback.firm).toBe(
           (normalItem.buyback as Record<string, unknown>).firm,
         );
