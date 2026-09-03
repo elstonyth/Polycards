@@ -103,14 +103,22 @@ export function CardDetail({
         </div>
         {/* Same reel↔card key as the grid tile. Sibling of the ambient-glow
             div, not a child: that div carries a `filter`, which would bloom
-            the badge along with the slab. */}
+            the badge along with the slab.
+            Seed first, endpoint second: the seed carries the pack's context
+            (and arrives instantly), the endpoint covers every surface that
+            opens a card WITHOUT one — the vault, a direct /card/<handle>
+            visit, a reload of this overlay. Before the endpoint carried these
+            the same card showed one Pokémon from the pool and another after a
+            reload of its own URL. */}
         <PokemonBadge
           card={{
             name: seed.name,
-            pokemonDex: seed.pokemonDex,
-            spriteImage: seed.spriteImage,
+            pokemonDex: seed.pokemonDex ?? detail?.pokemon_dex,
+            spriteImage: seed.spriteImage ?? detail?.sprite_image,
           }}
           rarity={rarity}
+          frameVariant={frameVariant}
+          slabSrc={detail?.slab_image ?? seed.slabImage}
           className="w-[20%]"
         />
       </div>

@@ -23,6 +23,9 @@ export interface CardDetailData {
   grade: string;
   image: string;
   slab_image: string | null;
+  /** Configured pixel-Pokémon; optional — an older backend omits both. */
+  pokemon_dex?: number | null;
+  sprite_image?: string | null;
   marketPriceMyr: number;
   rarity: Rarity | null;
   pcSyncedAt: string | null;

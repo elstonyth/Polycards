@@ -60,6 +60,12 @@ medusaIntegrationTestRunner({
             market_value: FMV,
             market_multiplier: MULTIPLIER,
             image: '/cdn/test-card.webp',
+            // Deliberately a dex the card's NAME cannot derive: the storefront
+            // badge falls back to name-derivation whenever these are missing,
+            // so a route that silently dropped them would still render a
+            // (different) Pokémon rather than fail visibly.
+            pokemon_dex: 25,
+            sprite_image: '/cdn/custom-sprite.gif',
           },
         ]);
         await packs.createPackOdds([
@@ -95,6 +101,12 @@ medusaIntegrationTestRunner({
           marketPriceMyr: 480,
         });
         expect(card).toHaveProperty('slab_image');
+        // The configured pixel-Pokémon must reach the storefront here, not
+        // only via /store/packs/:slug — otherwise one card shows the admin's
+        // sprite when opened from a pack and a name-derived one when opened
+        // by URL (a reload, the vault, a profile link).
+        expect(card.pokemon_dex).toBe(25);
+        expect(card.sprite_image).toBe('/cdn/custom-sprite.gif');
         expect(card.pcSyncedAt).toBeNull();
         expect(card.priceHistory).toHaveLength(2);
         expect(

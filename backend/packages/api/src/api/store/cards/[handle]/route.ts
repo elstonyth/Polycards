@@ -75,6 +75,13 @@ export async function GET(
       grade: card.grade,
       image: card.image,
       slab_image: card.slab_image ?? null,
+      // The card's configured pixel-Pokémon, mirrored from its PixelPokemon
+      // link (same pair /store/packs/:slug already sends). Without it a card
+      // opened from a pack shows the ADMIN's sprite while the same card opened
+      // by URL — a reload of that overlay, the vault, a profile link — falls to
+      // name-derivation and can show a DIFFERENT Pokémon for one card.
+      pokemon_dex: card.pokemon_dex ?? null,
+      sprite_image: card.sprite_image ?? null,
       rarity,
       marketPriceMyr: toMyr(card.market_value),
       pcSyncedAt: card.pc_synced_at ?? null,

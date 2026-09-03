@@ -35,6 +35,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,mjs,cjs,js,json,yml,yaml,css}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,mjs,cjs,js,json,yml,yaml,css}\"",
     "test": "vitest run",
+    "qa:pokemon-badge": "node scripts/qa-pokemon-badge.mjs",
     "qa:csp": "node scripts/qa-csp.mjs",
     "test:a11y": "node scripts/qa-a11y.mjs",
     "qa:free-pack": "node scripts/qa-free-pack.mjs",
