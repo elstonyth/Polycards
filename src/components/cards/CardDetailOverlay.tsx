@@ -25,6 +25,11 @@ export interface CardSeed {
    *  still reads as a challenge prize rather than as a pack pull. Travels on
    *  the seed so every surface that opens a card carries it automatically. */
   frameVariant?: 'prism';
+  /** The card's CONFIGURED pixel-Pokémon (mirror of its linked library entry),
+   *  for the reel↔card key badge. Optional: surfaces whose grid data lacks it
+   *  (vault, a direct /card/<handle> visit) fall back to name-derivation. */
+  pokemonDex?: number | null;
+  spriteImage?: string | null;
 }
 
 /**

@@ -228,6 +228,8 @@ export default function PackDetailClient({
     slabImage: c.slabImage,
     value: c.value,
     rarity: c.rarity,
+    pokemonDex: c.pokemonDex,
+    spriteImage: c.spriteImage,
   });
   // Credit balance (A2: opens debit the pack price) — read from the app-shell
   // TopUpProvider (identity-tagged; null = logged out / loading), so this page,

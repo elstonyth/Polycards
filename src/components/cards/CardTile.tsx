@@ -1,6 +1,7 @@
 'use client';
 
 import { SlabImage } from '@/components/SlabImage';
+import { PokemonBadge } from '@/components/cards/PokemonBadge';
 import type { PackCard } from '@/lib/packs-data';
 
 /**
@@ -36,6 +37,10 @@ export function CardTile({
           sizes={sizes}
           className="w-full transition-opacity duration-200 group-hover:opacity-60 group-focus-visible:opacity-60"
         />
+        {/* The pixel-Pokémon this card is represented by on the slot reel. Sits
+            OUTSIDE the dimming SlabImage so it stays legible under the hover
+            wash — it is the reel↔card key, not part of the art. */}
+        <PokemonBadge card={card} rarity={card.rarity} />
         <span
           aria-hidden
           className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100"

@@ -2,6 +2,7 @@
 
 import { useState, type CSSProperties } from 'react';
 import { SlabImage, slabAmbient, slabGlowRgb } from '@/components/SlabImage';
+import { PokemonBadge } from '@/components/cards/PokemonBadge';
 import { cn } from '@/lib/utils';
 import { initialPriceTick, nextPriceTick } from '@/lib/price-tick';
 import { rarityRgb } from '@/lib/rarity';
@@ -84,7 +85,7 @@ export function CardDetail({
           by the operator — this is a one-shot arrival, not their return. */}
       <div
         className={cn(
-          'mx-auto w-[min(62vw,26dvh)] max-w-[320px] md:w-full md:max-w-[420px]',
+          'relative mx-auto w-[min(62vw,26dvh)] max-w-[320px] md:w-full md:max-w-[420px]',
           entrance && 'slab-arrive',
         )}
       >
@@ -100,6 +101,18 @@ export function CardDetail({
             className="w-full"
           />
         </div>
+        {/* Same reel↔card key as the grid tile. Sibling of the ambient-glow
+            div, not a child: that div carries a `filter`, which would bloom
+            the badge along with the slab. */}
+        <PokemonBadge
+          card={{
+            name: seed.name,
+            pokemonDex: seed.pokemonDex,
+            spriteImage: seed.spriteImage,
+          }}
+          rarity={rarity}
+          className="w-[20%]"
+        />
       </div>
 
       {/* Facts — phone sizes sit two steps down the scale so a long graded-
