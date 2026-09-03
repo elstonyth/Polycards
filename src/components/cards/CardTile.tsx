@@ -1,6 +1,8 @@
 'use client';
 
 import { SlabImage } from '@/components/SlabImage';
+import { PokemonBadge } from '@/components/cards/PokemonBadge';
+import { badgeSprite } from '@/lib/pokemon-badge-sprite';
 import type { PackCard } from '@/lib/packs-data';
 
 /**
@@ -17,11 +19,19 @@ export function CardTile({
   onOpen: (card: PackCard) => void;
   sizes?: string;
 }) {
+  // The badge is the reel↔card key, and the reel states its sprite's name
+  // (PokemonToken's alt). Naming it here too keeps the mapping reachable
+  // without sight — it is the ONLY channel for a card whose admin-configured
+  // sprite differs from its name. The button's aria-label overrides descendant
+  // content, so an sr-only span inside the badge would be silently dropped;
+  // it has to be spliced into the label itself. Every QA selector matches this
+  // label by PREFIX, so the suffix is safe to append.
+  const pokeName = badgeSprite(card).name;
   return (
     <button
       type="button"
       onClick={() => onOpen(card)}
-      aria-label={`View details for ${card.name}`}
+      aria-label={`View details for ${card.name}${pokeName ? ` — reel sprite ${pokeName}` : ''}`}
       className="group flex w-full flex-col gap-1.5 text-left"
     >
       {/* No wrapper frame: the SlabImage already carries the tier band + halo
@@ -35,6 +45,14 @@ export function CardTile({
           alt=""
           sizes={sizes}
           className="w-full transition-opacity duration-200 group-hover:opacity-60 group-focus-visible:opacity-60"
+        />
+        {/* The pixel-Pokémon this card is represented by on the slot reel. Sits
+            OUTSIDE the dimming SlabImage so it stays legible under the hover
+            wash — it is the reel↔card key, not part of the art. */}
+        <PokemonBadge
+          card={card}
+          rarity={card.rarity}
+          slabSrc={card.slabImage}
         />
         <span
           aria-hidden

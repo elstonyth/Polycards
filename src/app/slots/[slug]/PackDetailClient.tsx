@@ -228,6 +228,8 @@ export default function PackDetailClient({
     slabImage: c.slabImage,
     value: c.value,
     rarity: c.rarity,
+    pokemonDex: c.pokemonDex,
+    spriteImage: c.spriteImage,
   });
   // Credit balance (A2: opens debit the pack price) — read from the app-shell
   // TopUpProvider (identity-tagged; null = logged out / loading), so this page,
@@ -765,6 +767,11 @@ export default function PackDetailClient({
           <PullHistory
             initial={recentPulls}
             packSlug={active.id}
+            // No pokemonDex/spriteImage here: RecentPull doesn't carry them
+            // and neither does /store/pulls/recent, so threading them is a
+            // backend change, not an omission. The badge falls to
+            // name-derivation for a card opened from this feed — visible only
+            // on a card whose admin-configured sprite differs from its name.
             onSelect={(c) =>
               setOpenCard({
                 handle: c.handle,

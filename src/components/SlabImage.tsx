@@ -167,6 +167,31 @@ export function slabGlowRgb(
 }
 
 /**
+ * CSS `inset` of the VISIBLE artwork inside the slab box, for an overlay that
+ * has to land ON the card rather than in the transparent margin around it.
+ *
+ * The box this component draws is always SLAB_ASPECT, but only a graded
+ * composite fills it. A RAW card is inset to the measured graded card-art size
+ * (RAW_CARD_INSET / RAW_BARE_INSET above), so an overlay pinned to the box's
+ * own bottom-right corner hangs almost entirely off the card — which is what a
+ * bottom-right badge did on the raw pack before this existed. Exported for the
+ * same reason as slabGlowRgb: the four branches below are the only place that
+ * knows this geometry, so a caller asks instead of hardcoding a fifth copy.
+ *
+ * Raw + framed anchors to the BAND, not the card: the glass band is the card's
+ * visible silhouette there, exactly as the slab case is on the graded path.
+ */
+export function slabArtInset(
+  slabSrc?: string | null,
+  rarity?: string | null,
+  frameVariant?: FrameVariant,
+): string {
+  const framed = frameVariant ?? rarity;
+  if (slabSrc) return framed ? `${FRAME_BAND}%` : '0%';
+  return framed ? RAW_BAND_INSET : RAW_BARE_INSET;
+}
+
+/**
  * Is there a baked composite to show? THE graded/raw predicate — deliberately
  * not `pack.group === 'RAW'`, because a graded card whose bake failed renders
  * on the raw path too. Exported because the reveal has to pick a card BACK

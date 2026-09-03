@@ -773,6 +773,10 @@ export const CardDetailSchema = z.looseObject({
   grade: z.string(),
   image: z.string(),
   slab_image: z.string().nullable().catch(null),
+  /** The card's configured pixel-Pokémon; absent on an older backend, which
+   *  degrades the badge to name-derivation rather than breaking the payload. */
+  pokemon_dex: z.number().int().positive().nullable().catch(null).optional(),
+  sprite_image: z.string().nullable().catch(null).optional(),
   marketPriceMyr: finite,
   rarity: rarity.nullable().catch(null),
   pcSyncedAt: z.string().nullable().catch(null),
