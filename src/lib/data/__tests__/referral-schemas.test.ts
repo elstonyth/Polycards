@@ -13,6 +13,7 @@ const historyRow = {
 describe('ReferralSummarySchema', () => {
   const valid = {
     handle: 'collector-abc123',
+    code: 'F42B0700',
     downline_count: 3,
     week: {
       start: '2026-08-25',

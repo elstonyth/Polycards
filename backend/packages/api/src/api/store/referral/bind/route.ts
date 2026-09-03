@@ -6,16 +6,19 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/types';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
-import { findCustomerByHandle } from '../../../../utils/customer-by-handle';
-import { HANDLE_RE } from '../../../../utils/profile-handle';
+import {
+  findBindableReferrer,
+  normalizeReferralCode,
+} from '../../../../utils/referral-code';
 
-// POST /store/referral/bind { referrer_handle } — permanent one-shot
-// attribution of the LOGGED-IN customer to the referrer whose handle they
-// signed up through. The storefront fires this blind right after signup when
-// an invite cookie is present, so every outcome is a 200 with a result body —
-// only a malformed handle is a 400. Rate-limited in middlewares.ts.
+// POST /store/referral/bind { referrer_code } — permanent one-shot
+// attribution of the LOGGED-IN customer to the referrer whose code they
+// signed up with (typed into the form, or carried by the /r/<code> cookie).
+// The storefront fires this right after signup, so every outcome is a 200
+// with a result body — only a malformed code is a 400. Rate-limited in
+// middlewares.ts.
 export async function POST(
-  req: AuthenticatedMedusaRequest<{ referrer_handle?: string }>,
+  req: AuthenticatedMedusaRequest<{ referrer_code?: unknown }>,
   res: MedusaResponse,
 ): Promise<void> {
   const customerId = req.auth_context?.actor_id;
@@ -23,16 +26,19 @@ export async function POST(
     throw new MedusaError(MedusaError.Types.UNAUTHORIZED, 'Unauthorized');
   }
 
-  const handle = req.body?.referrer_handle;
-  if (typeof handle !== 'string' || !HANDLE_RE.test(handle)) {
+  const code = normalizeReferralCode(req.body?.referrer_code);
+  if (!code) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      'referrer_handle must be a valid profile handle.',
+      'referrer_code must be an 8-character referral code.',
     );
   }
 
   const customers = req.scope.resolve<ICustomerModuleService>(Modules.CUSTOMER);
-  const referrer = await findCustomerByHandle(customers, handle);
+  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  // Same resolution as the public lookup, disabled-referrer hide included, so
+  // a code validated before a disable cannot still attach a downline.
+  const referrer = await findBindableReferrer(customers, packs, code);
   if (!referrer) {
     res.json({ bound: false, reason: 'referrer_not_found' });
     return;
@@ -44,7 +50,6 @@ export async function POST(
     select: ['id', 'created_at'],
   });
 
-  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const result = await packs.bindReferral({
     customerId,
     referrerId: referrer.id,

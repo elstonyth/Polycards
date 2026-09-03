@@ -62,7 +62,7 @@ import {
 type Body = { token?: unknown };
 
 // `phone` isn't declared on FilterableCustomerProps (only has_account is) —
-// same cast pattern as findCustomerByHandle (utils/customer-by-handle.ts) and
+// same cast pattern as findCustomerByHandle (utils/customer-by-metadata.ts) and
 // store/phone-verification/start/route.ts.
 type CustomerFilters = Parameters<ICustomerModuleService['listCustomers']>[0];
 

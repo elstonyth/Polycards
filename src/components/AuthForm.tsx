@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { Mail, Lock, User as UserIcon, Loader2 } from 'lucide-react';
+import { Mail, Lock, Ticket, User as UserIcon, Loader2 } from 'lucide-react';
 import {
   login,
   signup,
+  checkReferralCode,
   requestPasswordReset,
   googleLoginStart,
   type AuthResult,
@@ -33,17 +34,31 @@ const PHONE_INPUT_CLASS =
 // auth server action returns a customer.
 
 // Error notes. `field` marks which input caused the error (wires
-// aria-invalid/-describedby): the password pair or the signup phone.
-type Note = { text: string; field?: 'password' | 'phone' };
+// aria-invalid/-describedby): the password pair, the signup phone, or the
+// optional referral code.
+type Note = { text: string; field?: 'password' | 'phone' | 'referral' };
+
+// The signup form's values as they travel through the OTP detour: held for
+// the deferred signup() call and re-seeded into the remounted form.
+type SignupFields = {
+  email: string;
+  password: string;
+  first_name: string;
+  referral_code: string;
+};
 
 export default function AuthForm({
   mode,
   onSwitchMode,
   onSuccess,
+  initialReferralCode,
 }: {
   mode: 'login' | 'signup';
   onSwitchMode: (m: 'login' | 'signup') => void;
   onSuccess?: () => void;
+  /** Prefills the signup form's referral code — the /r/<code> landing passes
+   *  it through openAuth so the visitor sees it applied, not just a cookie. */
+  initialReferralCode?: string;
 }) {
   const isSignup = mode === 'signup';
   const router = useRouter();
@@ -63,7 +78,7 @@ export default function AuthForm({
   // form's values here so `onVerified` can finish the real signup() call.
   const [otp, setOtp] = useState<{
     phone: string;
-    pending: { email: string; password: string; first_name: string };
+    pending: SignupFields;
   } | null>(null);
   // Snapshot of the signup form's values, taken the moment the OTP step is
   // entered. Unlike `otp`, this SURVIVES `setOtp(null)` (Back, or a
@@ -72,17 +87,20 @@ export default function AuthForm({
   // `defaultValue` instead of rendering empty. Only ever set from the
   // PHONE_VERIFICATION_REQUIRED branch of onSubmit, so it stays null (no
   // behavior change) on the flag-off path.
-  const [signupDraft, setSignupDraft] = useState<{
-    email: string;
-    password: string;
-    first_name: string;
-    phone: string;
-    // A still-valid proof token from a signup() that failed AFTER the OTP
-    // passed (e.g. duplicate email). Reused on the next submit for the SAME
-    // phone so the user isn't texted (and billed) twice; cleared when the
-    // backend rejects it or the phone changes.
-    proofToken: string | null;
-  } | null>(null);
+  const [signupDraft, setSignupDraft] = useState<
+    | (SignupFields & {
+        phone: string;
+        // A still-valid proof token from a signup() that failed AFTER the OTP
+        // passed (e.g. duplicate email). Reused on the next submit for the
+        // SAME phone so the user isn't texted (and billed) twice; cleared when
+        // the backend rejects it or the phone changes.
+        proofToken: string | null;
+      })
+    | null
+  >(null);
+  // The Google button sits outside the <form>; it reads the referral code
+  // through this ref so a pasted code survives the OAuth hop.
+  const formRef = useRef<HTMLFormElement>(null);
 
   function switchMode(m: 'login' | 'signup') {
     setForgot('none');
@@ -200,6 +218,26 @@ export default function AuthForm({
       return;
     }
     const first_name = String(form.get('username') ?? '');
+    const referral_code = String(form.get('referralCode') ?? '').trim();
+
+    if (referral_code) {
+      // Shape + existence check BEFORE any OTP is sent, so a mistyped code is
+      // corrected here rather than after a paid SMS (signup() re-checks — a
+      // server action is a public endpoint).
+      setBusy(true);
+      try {
+        const check = await checkReferralCode({ code: referral_code });
+        if (!check.ok) {
+          setNote({ text: check.error, field: 'referral' });
+          return;
+        }
+      } catch {
+        setNote({ text: 'Something went wrong. Please try again.' });
+        return;
+      } finally {
+        setBusy(false);
+      }
+    }
 
     if (PHONE_VERIFICATION_REQUIRED) {
       setBusy(true);
@@ -214,6 +252,7 @@ export default function AuthForm({
             password,
             first_name,
             phone,
+            referral_code,
             phone_verification_token: signupDraft.proofToken,
           });
           if (retry.ok || !/verif/i.test(retry.error)) {
@@ -224,6 +263,7 @@ export default function AuthForm({
               password,
               first_name,
               phone,
+              referral_code,
               proofToken: signupDraft.proofToken,
             });
             finishAuth(retry);
@@ -242,12 +282,16 @@ export default function AuthForm({
         // fields ride along in state for onVerified to use. signupDraft is
         // the same values, but kept around after setOtp(null) (see its
         // comment).
-        setOtp({ phone, pending: { email, password, first_name } });
+        setOtp({
+          phone,
+          pending: { email, password, first_name, referral_code },
+        });
         setSignupDraft({
           email,
           password,
           first_name,
           phone,
+          referral_code,
           proofToken: null,
         });
       } catch {
@@ -260,7 +304,13 @@ export default function AuthForm({
 
     setBusy(true);
     try {
-      const result = await signup({ email, password, first_name, phone });
+      const result = await signup({
+        email,
+        password,
+        first_name,
+        phone,
+        referral_code,
+      });
       finishAuth(result);
     } catch {
       setNote({ text: 'Something went wrong. Please try again.' });
@@ -272,12 +322,22 @@ export default function AuthForm({
   async function onGoogle() {
     if (busy) return;
     setNote(null);
+    // A code pasted into the signup form must survive the Google hop: the
+    // action validates it and parks it in the referral cookie, which the
+    // OAuth callback's post-signup bind consumes like a /r/<code> landing.
+    const referral_code = isSignup
+      ? String(
+          new FormData(formRef.current ?? undefined).get('referralCode') ?? '',
+        ).trim()
+      : '';
     setBusy(true);
     // No `finally` here, deliberately: on success we navigate away and must
     // leave `busy` true (see comment below) — a finally would re-enable the
     // button mid-redirect. Both the !ok branch and the catch reset it.
     try {
-      const result = await googleLoginStart();
+      const result = await googleLoginStart(
+        referral_code ? { referral_code } : undefined,
+      );
       if (result.ok) {
         // Full-page redirect to Google's consent screen; the /auth/google/callback
         // route finishes the exchange on return. We're navigating away, so leave
@@ -286,7 +346,7 @@ export default function AuthForm({
         return;
       }
       setBusy(false);
-      setNote({ text: result.error });
+      setNote({ text: result.error, field: result.field });
     } catch {
       setBusy(false);
       setNote({ text: 'Something went wrong. Please try again.' });
@@ -508,7 +568,7 @@ export default function AuthForm({
         <span className="h-px flex-1 bg-white/10" />
       </div>
 
-      <form onSubmit={onSubmit} className="flex flex-col gap-3">
+      <form ref={formRef} onSubmit={onSubmit} className="flex flex-col gap-3">
         {isSignup && (
           <Field
             icon={UserIcon}
@@ -569,6 +629,26 @@ export default function AuthForm({
             aria-invalid={note?.field === 'password' || undefined}
             aria-describedby={
               note?.field === 'password' ? 'auth-form-error' : undefined
+            }
+          />
+        )}
+        {isSignup && (
+          <Field
+            icon={Ticket}
+            name="referralCode"
+            type="text"
+            placeholder="Referral code (optional)"
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            // 8 chars plus room for pasted dashes/spaces — the action strips them.
+            maxLength={16}
+            // The OTP-step draft wins over the landing's prefill: it is what the
+            // user last typed.
+            defaultValue={signupDraft?.referral_code ?? initialReferralCode}
+            aria-invalid={note?.field === 'referral' || undefined}
+            aria-describedby={
+              note?.field === 'referral' ? 'auth-form-error' : undefined
             }
           />
         )}

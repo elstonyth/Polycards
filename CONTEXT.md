@@ -218,10 +218,13 @@ they think in. The two-anchor split is the most confusable thing in this
 engine — when a doc or a comment says "the week", check which one it means.
 
 **Referrer / Downline**:
-The customer whose invite handle a signup came through, and the set of
-customers they referred. Attribution (`referral_attribution`) is one row per
-referred customer, bound once at signup, permanent. Direct referrals only — no
-generations.
+The customer whose referral code a signup came through, and the set of
+customers they referred. The **referral code** is an 8-character public code
+in `customer.metadata.referral_code` (assigned lazily, beside the profile
+handle), shared as the `/r/<code>` link, a QR of that link, or typed into the
+signup form's optional field. Attribution (`referral_attribution`) is one row
+per referred customer, bound once at signup, permanent. Direct referrals only
+— no generations.
 
 **Referral Commission**:
 The referrer's weekly payout: a tier rate (whole-amount, from

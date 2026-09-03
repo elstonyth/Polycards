@@ -19,6 +19,18 @@ const mocks = vi.hoisted(() => ({
   // mock it as a live getter so individual tests can flip it (a plain
   // vi.stubEnv wouldn't work: the real module already resolved the env var).
   phoneVerificationRequired: false,
+  setReferralCookie: vi.fn(async () => {}),
+  bindReferral: vi.fn(async (_code?: string | null) => {}),
+  lookupReferralCode: vi.fn(
+    async (
+      _code: string,
+    ): Promise<{
+      status: string;
+      code?: string;
+      handle?: string | null;
+      name?: string;
+    }> => ({ status: 'notfound' }),
+  ),
 }));
 
 vi.mock('@/lib/data/customer', () => ({
@@ -36,7 +48,13 @@ vi.mock('@/lib/phone-verification', () => ({
 vi.mock('@/lib/referral-cookie', () => ({
   // The bind is fire-and-forget after a successful signup; these tests cover
   // auth outcomes, so the referral seam is stubbed inert.
-  bindReferralFromCookie: vi.fn(async () => {}),
+  bindReferral: mocks.bindReferral,
+  setReferralCookie: mocks.setReferralCookie,
+}));
+vi.mock('@/lib/data/referral', () => ({
+  // signup()'s referral-code pre-check. Only reached when a test passes a
+  // referral_code; none here do, so the stub is inert.
+  lookupReferralCode: mocks.lookupReferralCode,
 }));
 vi.mock('@/lib/data/profiles', () => ({
   fetchProfileHandle: mocks.fetchProfileHandle,
@@ -69,6 +87,7 @@ import {
   resetPassword,
   googleLoginStart,
   googleCallback,
+  checkReferralCode,
 } from '../auth';
 import { resolveCallbackOrigin } from '@/lib/allowed-hosts';
 import { NextRequest } from 'next/server';
@@ -737,5 +756,167 @@ describe("callback route origin guard — resolveCallbackOrigin + the route's fa
     expect(resolveCallbackOrigin('polycards.gg', 'https')).toBe(
       'https://polycards.gg',
     );
+  });
+});
+
+describe("checkReferralCode — the signup form's optional code", () => {
+  beforeEach(() => {
+    mocks.lookupReferralCode.mockReset();
+    mocks.lookupReferralCode.mockResolvedValue({ status: 'notfound' });
+  });
+
+  it('blank → ok with no code, and no lookup', async () => {
+    expect(await checkReferralCode({ code: '   ' })).toEqual({
+      ok: true,
+      code: null,
+    });
+    expect(mocks.lookupReferralCode).not.toHaveBeenCalled();
+  });
+
+  it('malformed → shape error before any lookup', async () => {
+    const r = await checkReferralCode({ code: 'ABC' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/8 letters and numbers/);
+    expect(mocks.lookupReferralCode).not.toHaveBeenCalled();
+  });
+
+  it('unknown → "couldn\'t find" error', async () => {
+    const r = await checkReferralCode({ code: 'ZZZZZZZZ' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/couldn't find that referral code/);
+  });
+
+  it('known → the normalized code (pasted lowercase + dash accepted)', async () => {
+    mocks.lookupReferralCode.mockResolvedValue({
+      status: 'ok',
+      code: 'F42B0700',
+      handle: 'kenji-2c7f',
+      name: 'Kenji',
+    });
+    expect(await checkReferralCode({ code: ' f42b-0700 ' })).toEqual({
+      ok: true,
+      code: 'F42B0700',
+    });
+    expect(mocks.lookupReferralCode).toHaveBeenCalledWith('F42B0700');
+  });
+
+  it('lookup outage → passes through (the post-signup bind re-validates)', async () => {
+    mocks.lookupReferralCode.mockResolvedValue({ status: 'error' });
+    expect(await checkReferralCode({ code: 'F42B0700' })).toEqual({
+      ok: true,
+      code: 'F42B0700',
+    });
+  });
+
+  it('a non-string body is treated as blank, never a throw', async () => {
+    expect(await checkReferralCode({ code: 42 as unknown as string })).toEqual({
+      ok: true,
+      code: null,
+    });
+  });
+});
+
+describe('googleLoginStart — a typed referral code is parked for the callback', () => {
+  const googleLocation =
+    'https://accounts.google.com/o/oauth2/v2/auth?state=opaque-state-key';
+
+  beforeEach(() => {
+    mocks.clientFetch.mockReset();
+    mocks.setReferralCookie.mockClear();
+    mocks.lookupReferralCode.mockReset();
+    mocks.lookupReferralCode.mockResolvedValue({ status: 'notfound' });
+    setHeaders({ host: 'polycards.gg', 'x-forwarded-proto': 'https' });
+  });
+
+  it('a bad code is refused before Google is contacted', async () => {
+    const r = await googleLoginStart({ referral_code: 'ZZZZZZZZ' });
+
+    expect(r).toEqual({
+      ok: false,
+      error: expect.stringMatching(/couldn't find/),
+      field: 'referral',
+    });
+    expect(mocks.clientFetch).not.toHaveBeenCalled();
+    expect(mocks.setReferralCookie).not.toHaveBeenCalled();
+  });
+
+  it('a known code is written to the referral cookie before the redirect', async () => {
+    mocks.lookupReferralCode.mockResolvedValue({
+      status: 'ok',
+      code: 'F42B0700',
+      handle: 'kenji-2c7f',
+      name: 'Kenji',
+    });
+    mocks.clientFetch.mockResolvedValueOnce({ location: googleLocation });
+
+    const r = await googleLoginStart({ referral_code: 'f42b-0700' });
+
+    expect(r.ok).toBe(true);
+    expect(mocks.setReferralCookie).toHaveBeenCalledWith('F42B0700');
+  });
+
+  it('no code → no cookie write', async () => {
+    mocks.clientFetch.mockResolvedValueOnce({ location: googleLocation });
+
+    const r = await googleLoginStart();
+
+    expect(r.ok).toBe(true);
+    expect(mocks.setReferralCookie).not.toHaveBeenCalled();
+  });
+});
+
+describe('signup — referral attribution precedence', () => {
+  const happySignup = () => {
+    mocks.clientFetch
+      .mockResolvedValueOnce({ token: 'reg-tok' }) // register
+      .mockResolvedValueOnce({ token: 'sess-tok' }); // login exchange
+    mocks.customerCreate.mockResolvedValueOnce({ customer: { id: 'c1' } });
+    mocks.customerRetrieve.mockResolvedValueOnce({
+      customer: {
+        id: 'c1',
+        email: 'new@polycards.app',
+        first_name: 'N',
+        last_name: null,
+      },
+    });
+    mocks.fetchProfileHandle.mockResolvedValueOnce(null);
+  };
+  const form = {
+    email: 'new@polycards.app',
+    password: 'PolycardsTest123!',
+    phone: '010-766 7787',
+  };
+
+  beforeEach(() => {
+    mocks.bindReferral.mockClear();
+    mocks.lookupReferralCode.mockReset();
+    mocks.lookupReferralCode.mockResolvedValue({
+      status: 'ok',
+      code: 'F42B0700',
+      handle: 'kenji-2c7f',
+      name: 'Kenji',
+    });
+  });
+
+  it('a typed code reaches the bind normalized (it wins over the cookie)', async () => {
+    happySignup();
+    const r = await signup({ ...form, referral_code: ' f42b-0700 ' });
+    expect(r.ok).toBe(true);
+    expect(mocks.bindReferral).toHaveBeenCalledWith('F42B0700');
+  });
+
+  it('no typed code → the bind falls back to the cookie (called with null)', async () => {
+    happySignup();
+    const r = await signup(form);
+    expect(r.ok).toBe(true);
+    expect(mocks.bindReferral).toHaveBeenCalledWith(null);
+  });
+
+  it('an unknown typed code fails BEFORE any account is created', async () => {
+    mocks.lookupReferralCode.mockResolvedValue({ status: 'notfound' });
+    const r = await signup({ ...form, referral_code: 'ZZZZZZZZ' });
+    expect(r.ok).toBe(false);
+    expect(mocks.clientFetch).not.toHaveBeenCalled();
+    expect(mocks.bindReferral).not.toHaveBeenCalled();
   });
 });

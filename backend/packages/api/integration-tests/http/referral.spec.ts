@@ -85,7 +85,7 @@ medusaIntegrationTestRunner({
               ? api.get(path, { headers: storeHeaders })
               : api.post(
                   path,
-                  { referrer_handle: 'x-000000' },
+                  { referrer_code: 'ZZZZZZZZ' },
                   { headers: storeHeaders },
                 ),
           );
@@ -103,29 +103,109 @@ medusaIntegrationTestRunner({
         }
       });
 
+      it('never hands two customers the same code, and never re-rolls one', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const customers = getContainer().resolve(Modules.CUSTOMER);
+        const [a] = await customers.listCustomers({
+          email: 'referrer@test.dev',
+        });
+        const [b] = await customers.listCustomers({
+          email: 'recruit@test.dev',
+        });
+        // Scripted generator: the second customer's first candidate collides
+        // with the first customer's code and must be skipped.
+        const script = ['AAAAAAAA', 'AAAAAAAA', 'BBBBBBBB'];
+        const generate = () => script.shift() ?? 'CCCCCCCC';
+
+        expect(
+          await packs.assignReferralCode({ customerId: a.id, generate }),
+        ).toBe('AAAAAAAA');
+        expect(
+          await packs.assignReferralCode({ customerId: b.id, generate }),
+        ).toBe('BBBBBBBB');
+        // Idempotent: the generator is not even consulted once a code exists.
+        expect(
+          await packs.assignReferralCode({ customerId: a.id, generate }),
+        ).toBe('AAAAAAAA');
+        expect(script).toEqual([]);
+      });
+
       it('bind → close → approve → pay round-trips through every surface', async () => {
-        // Referrer's handle from their own panel.
+        // Referrer's code from their own panel — assigned on first read,
+        // stable after that.
         const rPanel = await unwrapResponse(
           api.get('/store/referral', { headers: authed(referrerToken) }),
         );
         expect(rPanel.status).toBe(200);
-        const handle: string = rPanel.data.handle;
-        expect(handle).toBeTruthy();
+        const code: string = rPanel.data.code;
+        expect(code).toMatch(/^[A-Z0-9]{8}$/);
+        expect(rPanel.data.handle).toBeTruthy();
         expect(rPanel.data.downline_count).toBe(0);
+        const rRead = await unwrapResponse(
+          api.get('/store/referral', { headers: authed(referrerToken) }),
+        );
+        expect(rRead.data.code).toBe(code);
 
-        // Self-bind refused; recruit binds; double bind refused.
+        // Public lookup (no auth): a known code — however it was pasted —
+        // answers with public display fields only; unknown and malformed
+        // codes are both 404.
+        const found = await unwrapResponse(
+          api.get(`/store/referral/codes/${code.toLowerCase()}`, {
+            headers: storeHeaders,
+          }),
+        );
+        expect(found.status).toBe(200);
+        expect(found.data).toEqual({
+          code,
+          handle: rPanel.data.handle,
+          name: expect.any(String),
+        });
+        expect(JSON.stringify(found.data)).not.toContain('referrer@test.dev');
+        const missing = await unwrapResponse(
+          api.get('/store/referral/codes/ZZZZZZZZ', { headers: storeHeaders }),
+        );
+        expect(missing.status).toBe(404);
+        const junk = await unwrapResponse(
+          api.get('/store/referral/codes/not-a-code', {
+            headers: storeHeaders,
+          }),
+        );
+        expect(junk.status).toBe(404);
+
+        // Bind: malformed → 400; self → refused; unknown → not found; the
+        // recruit binds with a pasted-looking code; double bind refused.
+        // (Spread across the two tokens — the bind limiter allows 3/min each.)
+        const malformed = await unwrapResponse(
+          api.post(
+            '/store/referral/bind',
+            { referrer_code: 'abc' },
+            { headers: authed(referrerToken) },
+          ),
+        );
+        expect(malformed.status).toBe(400);
         const self = await unwrapResponse(
           api.post(
             '/store/referral/bind',
-            { referrer_handle: handle },
+            { referrer_code: code },
             { headers: authed(referrerToken) },
           ),
         );
         expect(self.data).toEqual({ bound: false, reason: 'self' });
+        const nobody = await unwrapResponse(
+          api.post(
+            '/store/referral/bind',
+            { referrer_code: 'ZZZZZZZZ' },
+            { headers: authed(recruitToken) },
+          ),
+        );
+        expect(nobody.data).toEqual({
+          bound: false,
+          reason: 'referrer_not_found',
+        });
         const bind = await unwrapResponse(
           api.post(
             '/store/referral/bind',
-            { referrer_handle: handle },
+            { referrer_code: ` ${code.toLowerCase()} ` },
             { headers: authed(recruitToken) },
           ),
         );
@@ -133,7 +213,7 @@ medusaIntegrationTestRunner({
         const again = await unwrapResponse(
           api.post(
             '/store/referral/bind',
-            { referrer_handle: handle },
+            { referrer_code: code },
             { headers: authed(recruitToken) },
           ),
         );

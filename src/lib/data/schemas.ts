@@ -790,9 +790,13 @@ export const SettlementHistoryRowSchema = z.looseObject({
   status: z.string(),
 });
 
-/** GET /store/referral — the /task Referral tab payload. */
+/** GET /store/referral — the /referral page payload. */
 export const ReferralSummarySchema = z.looseObject({
   handle: z.string(),
+  /** The 8-character public referral code — what /r/<code>, the QR and the
+   *  signup form's field all carry. Optional (deploy-skew rule): a backend
+   *  that predates codes must still render the stats, not blank the page. */
+  code: z.string().optional(),
   downline_count: finite,
   week: z.looseObject({
     start: z.string(),
@@ -804,6 +808,15 @@ export const ReferralSummarySchema = z.looseObject({
   history: z.array(SettlementHistoryRowSchema),
 });
 export type ReferralSummary = z.infer<typeof ReferralSummarySchema>;
+
+/** GET /store/referral/codes/:code — public owner-of-code check (display
+ *  fields only; the backend never puts PII here). */
+export const ReferralCodeLookupSchema = z.looseObject({
+  code: z.string(),
+  handle: z.string().nullable(),
+  name: z.string(),
+});
+export type ReferralCodeLookup = z.infer<typeof ReferralCodeLookupSchema>;
 
 /** One task row of GET /store/tasks (Phase B). requirement/reward are the
  *  backend's discriminated unions; the tab renders from progress + reward, so

@@ -23,7 +23,9 @@ import {
 } from '@/lib/data/customer';
 import { fetchProfileHandle } from '@/lib/data/profiles';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
-import { bindReferralFromCookie } from '@/lib/referral-cookie';
+import { bindReferral, setReferralCookie } from '@/lib/referral-cookie';
+import { normalizeReferralCode } from '@/lib/referral-code';
+import { lookupReferralCode } from '@/lib/data/referral';
 import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
 import { resolveCallbackOrigin } from '@/lib/allowed-hosts';
 import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
@@ -166,12 +168,41 @@ export async function login(input: {
   }
 }
 
+const REFERRAL_SHAPE_ERROR =
+  'Referral codes are 8 letters and numbers — check it or leave it blank.';
+const REFERRAL_UNKNOWN_ERROR =
+  "We couldn't find that referral code. Check it or leave it blank.";
+
+/**
+ * Pre-flight for the signup form's optional referral code: shape, then the
+ * public existence check, so a typo is caught BEFORE the phone OTP is sent
+ * and the account created. `signup()` runs the same check (a server action is
+ * a public endpoint). A backend outage is not the user's fault: it passes
+ * through and the post-signup bind re-validates.
+ */
+export async function checkReferralCode(input: {
+  code: string;
+}): Promise<{ ok: true; code: string | null } | { ok: false; error: string }> {
+  // A server action is a public endpoint: the body is typed but not trusted.
+  const raw = typeof input?.code === 'string' ? input.code : '';
+  if (!raw.trim()) return { ok: true, code: null };
+  const code = normalizeReferralCode(raw);
+  if (!code) return { ok: false, error: REFERRAL_SHAPE_ERROR };
+  const lookup = await lookupReferralCode(code);
+  if (lookup.status === 'notfound') {
+    return { ok: false, error: REFERRAL_UNKNOWN_ERROR };
+  }
+  return { ok: true, code };
+}
+
 export async function signup(input: {
   email: string;
   password: string;
   first_name?: string;
   phone?: string;
   phone_verification_token?: string;
+  /** Optional code typed into the form; the /r/<code> cookie is the fallback. */
+  referral_code?: string;
 }): Promise<AuthResult> {
   const email = input.email.trim().toLowerCase();
   if (!EMAIL_RE.test(email))
@@ -207,6 +238,10 @@ export async function signup(input: {
   // for the common case where the storefront flag matches the backend's.
   if (PHONE_VERIFICATION_REQUIRED && !input.phone_verification_token)
     return { ok: false, error: 'Please verify your phone number first.' };
+  // Optional referral code: reject a bad one BEFORE the account exists, or
+  // the typo would silently cost the referrer their recruit.
+  const referral = await checkReferralCode({ code: input.referral_code ?? '' });
+  if (!referral.ok) return referral;
 
   try {
     const registerToken = await exchangeToken(
@@ -227,9 +262,10 @@ export async function signup(input: {
     // The register token isn't a session token — log in to get the real one.
     const result = await login({ email, password: input.password });
     if (result.ok) {
-      // One-shot referral attribution from the invite cookie. Swallows every
-      // failure internally — a referral hiccup must never fail a signup.
-      await bindReferralFromCookie();
+      // One-shot referral attribution: the code from the form, else the
+      // /r/<code> cookie. Swallows every failure internally — a referral
+      // hiccup must never fail a signup.
+      await bindReferral(referral.code);
     }
     return result;
   } catch (error) {
@@ -283,10 +319,24 @@ function decodeJwtPayload(token: string): GoogleTokenPayload {
   ) as GoogleTokenPayload;
 }
 
-export async function googleLoginStart(): Promise<
-  { ok: true; location: string } | { ok: false; error: string }
+export async function googleLoginStart(input?: {
+  /** A code pasted into the signup form before "Continue with Google". It
+   *  cannot ride the OAuth round-trip, so it is parked in the referral cookie
+   *  and the callback's post-signup bind consumes it exactly like a /r/<code>
+   *  landing. Validated first: a typo is refused here, before Google. */
+  referral_code?: string;
+}): Promise<
+  | { ok: true; location: string }
+  | { ok: false; error: string; field?: 'referral' }
 > {
+  const referral = await checkReferralCode({
+    code: input?.referral_code ?? '',
+  });
+  if (!referral.ok) return { ...referral, field: 'referral' };
   try {
+    // Harmless if the redirect never happens — the cookie only matters after
+    // a Google SIGNUP, and only for 30 days.
+    if (referral.code) await setReferralCookie(referral.code);
     const h = await headers();
     const host = h.get('x-forwarded-host') ?? h.get('host');
     // Host / X-Forwarded-Host / X-Forwarded-Proto are client-supplied. Only
@@ -391,7 +441,7 @@ export async function googleCallback(query: {
         // First Google login IS a signup — consume the invite cookie exactly
         // like the emailpass path, or every Google recruit's link is dropped
         // (review 2026-08-25, spec finding 2). Swallows failures internally.
-        await bindReferralFromCookie();
+        await bindReferral();
       }
       return { ok: true, customer: toAuthCustomer(customer, handle) };
     } catch (error) {

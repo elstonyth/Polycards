@@ -1,9 +1,12 @@
 import { chromium } from 'playwright';
 const BASE = process.env.PW_BASE ?? 'http://localhost:4100';
+// A real code, read from a logged-in /referral panel (REF_CODE=F42B0700);
+// the unknown case needs nothing.
+const CODE = process.env.REF_CODE ?? 'F42B0700';
 const browser = await chromium.launch();
 for (const [path, name] of [
-  ['/invite/demo-wozs', 'invite-valid'],
-  ['/invite/ghost-nobody-999', 'invite-unknown'],
+  [`/r/${CODE}`, 'invite-valid'],
+  ['/r/ZZZZZZZZ', 'invite-unknown'],
 ]) {
   const page = await browser.newPage({ viewport: { width: 430, height: 932 } });
   await page.goto(BASE + path, { waitUntil: 'domcontentloaded' });
@@ -20,14 +23,17 @@ for (const [path, name] of [
     '| url:',
     new URL(page.url()).search || '(cleaned)',
     '| signupOpen:',
-    txt.includes('Create your account') ||
-      txt.includes('Join Polycards') ||
-      txt.includes('Sign up'),
+    txt.includes('Create your account'),
+    '| codeField:',
+    await page
+      .locator('input[name="referralCode"]')
+      .inputValue()
+      .catch(() => 'NONE'),
     '| banner:',
     txt
       .split('\n')
       .filter((l) =>
-        /invited you|already have an account|isn't valid/i.test(l),
+        /been invited|already have an account|isn't valid/i.test(l),
       )[0] ?? 'NONE',
   );
   await page.screenshot({ path: `docs/research/${name}.png`, fullPage: false });
