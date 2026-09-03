@@ -750,6 +750,12 @@ class PacksModuleService extends MedusaService({
     // but an admin disable can commit between that read and this write —
     // recheck inside the transaction so a shut account never gains a downline
     // (review 2026-09-03).
+    // Under the same per-account lock setAccountDisabled holds, so the recheck
+    // and the attribution write cannot interleave with a disable committing
+    // between them (CodeRabbit, 2026-09-03).
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${input.referrerId}`,
+    ]);
     if (await this.isAccountDisabled(input.referrerId, sharedContext)) {
       return { bound: false, reason: 'referrer_disabled' };
     }
