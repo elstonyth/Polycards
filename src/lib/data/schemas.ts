@@ -277,7 +277,8 @@ export const VaultItemSchema = z.looseObject({
   // is source='reward' with a live, sellable quote.
   source: z.enum(['pack', 'reward', 'free']).catch('pack'),
   locked: z.boolean().catch(false),
-  // Narrower than `locked`: a reward card cannot be SOLD but can be SHIPPED.
+  // The backend's "can this row be SOLD" answer (since 2026-09-03 it equals
+  // `!locked` — reward cards sell like any other — but the backend decides).
   // Defaults TRUE so a backend that predates the field behaves exactly as it
   // did before — the sell then refuses server-side rather than the vault
   // hiding a card the customer owns.

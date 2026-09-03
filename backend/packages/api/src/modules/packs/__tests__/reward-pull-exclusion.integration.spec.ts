@@ -310,13 +310,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(fp!.recorded_value_usd).toBeNull();
       });
 
-      it('buyback guard: reward Pull has source=reward + vaulted so the C1 gate fires', async () => {
+      it('reward Pull is minted source=reward + vaulted (excluded from boards, sellable like any card)', async () => {
         const ids = mkIds('buyback');
         const { rewardPull } = await seed(ids);
 
-        // Confirm the Pull attributes that the C1 gate in buyback-pull.ts reads.
-        // The gate throws "Reward prizes can't be sold back" before listCards —
-        // we verify the Pull is in the right state so the guard would trigger.
+        // `source` is what the board/feed exclusions above key off. It is NOT
+        // a sell gate any more: the old C1 refusal in buyback-pull.ts went on
+        // 2026-09-03 (free-pull-lock.integration.spec.ts covers the sell).
         const [rp] = await service.listPulls({ id: rewardPull.id }, { take: 1 });
         expect(rp).toBeDefined();
         expect(rp!.source).toBe('reward');

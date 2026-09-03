@@ -580,16 +580,60 @@ medusaIntegrationTestRunner({
         expect(sell.data.amount).toBeGreaterThan(0);
       });
 
-      // The reward-box guard must still refuse an actual reward-box prize —
-      // widening it for challenge prizes must not open the sentinel path.
-      it('still refuses to sell a reward-box prize', async () => {
-        const token = await registerCustomer('vb-rewardbox@test.dev');
+      // A task/achievement reward (source='reward' on the 'task-reward'
+      // sentinel pack, or a real pack for a free rip) sells like any pulled
+      // card, with NO paid open: completing the task is the requirement
+      // (operator decision 2026-09-03). The old reward-box guard refused every
+      // such pull and left the vault quoting RM 0.00 forever. The vault quote
+      // and the credit must agree, and the synthetic pack (no Pack row) must
+      // resolve to the flat rate rather than NaN.
+      it('sells a task/achievement reward card with no paid open, at the vault quote', async () => {
+        const token = await registerCustomer('vb-taskreward@test.dev');
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
-        const [prize] = await packs.createPulls([
+        const [reward] = await packs.createPulls([
           {
             customer_id: await customerIdOf(token),
-            pack_id: 'reward-box-gold',
+            pack_id: 'task-reward',
             card_id: CARD_HANDLE,
+            order_id: null,
+            rolled_at: new Date(),
+            status: 'vaulted' as const,
+            source: 'reward' as const,
+          },
+        ]);
+
+        const vault = await request('get', '/store/vault', authed(token));
+        expect(vault.status).toBe(200);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const row = vault.data.items.find((i: any) => i.pull_id === reward.id);
+        expect(row).toBeDefined();
+        expect(row.source).toBe('reward');
+        expect(row.locked).toBe(false);
+        expect(row.sellable).toBe(true);
+        expect(row.buyback.amount).toBeGreaterThan(0);
+
+        const sell = await request(
+          'post',
+          `/store/vault/${reward.id}/buyback`,
+          authed(token),
+        );
+        expect(sell.status).toBe(200);
+        expect(sell.data.amount).toBe(row.buyback.amount);
+        expect(sell.data.balance).toBe(row.buyback.amount);
+      });
+
+      // Dropping the source guard must not open the old sentinel path: a
+      // reward pull whose card_id is not a catalog card is still refused at
+      // the card lookup and never credited.
+      it('still refuses a reward pull whose card is not in the catalog', async () => {
+        const token = await registerCustomer('vb-sentinel@test.dev');
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const customerId = await customerIdOf(token);
+        const [prize] = await packs.createPulls([
+          {
+            customer_id: customerId,
+            pack_id: 'reward-box-gold',
+            card_id: 'vb-sentinel-product-handle',
             order_id: null,
             rolled_at: new Date(),
             status: 'vaulted' as const,
@@ -602,6 +646,13 @@ medusaIntegrationTestRunner({
           authed(token),
         );
         expect(sell.status).toBe(400);
+        expect(sell.data.message).toMatch(/no longer in the catalog/);
+        expect(
+          await packs.listCreditTransactions(
+            { pull_id: prize.id },
+            { take: 1 },
+          ),
+        ).toHaveLength(0);
       });
     });
   },

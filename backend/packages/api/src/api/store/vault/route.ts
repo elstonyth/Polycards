@@ -34,10 +34,10 @@ import {
 // per request): it can be neither sold nor delivered until then, so it carries
 // NO sellable quote — see the buyback block below.
 //
-// Reward Pulls (source='reward') are included here — they are rendered from
-// the matching reward_draw.prize_snapshot (keyed by vault_pull_id) rather than
-// a Card row. No buyback block is emitted for reward prizes (they can't be sold
-// back — see the C1 guard in buyback-pull.ts).
+// Reward pulls (source='reward' — weekly-challenge prizes, task free rips, task
+// card rewards) are included here with a live quote like any other card: they
+// sell (buyback-pull.ts no longer refuses them; completing the task is the
+// requirement) and ship via the reward withdraw path.
 //
 // AUTH: matcher registered in src/api/middlewares.ts with authenticate(); the
 // customer id comes ONLY from the verified token, so a caller can never read
@@ -128,13 +128,13 @@ export async function GET(
       // `locked` = neither sellable NOR shippable. That is the free welcome
       // pull before the first PAID open, and only that.
       const locked = p.source === 'free' && !freeUnlocked;
-      // Sellable is the NARROWER fact: buyback-pull.ts refuses any
-      // source='reward' pull that is not a weekly-challenge prize. Those cards
-      // still SHIP — through recordRewardWithdrawal, which carries its own
-      // daily cap — so folding them into `locked` would have hidden a path
-      // that works.
-      const sellable =
-        !locked && !(p.source === 'reward' && !isChallengePrizePack(p.pack_id));
+      // `sellable` used to be narrower than `!locked` — buyback-pull.ts refused
+      // every source='reward' pull that was not a challenge prize, so a task
+      // reward quoted RM 0.00 in the vault forever. That refusal is gone (task
+      // and achievement rewards sell like any pulled card — completing the
+      // task is the requirement), so the two facts coincide. The field stays:
+      // the storefront keys its Sell affordance off it.
+      const sellable = !locked;
       const { percent, rate_type } = resolveBuybackRate(pack, {
         rolled_at: p.rolled_at,
         revealed_at: p.revealed_at,
@@ -182,13 +182,12 @@ export async function GET(
         // the sell/deliver lock must be keyed off `locked`, NEVER off `source`.
         source: p.source ?? 'pack',
         locked,
-        // Can this row be SOLD? False for a reward card, which still ships.
-        // Split from `locked` so the vault stops advertising a sell price the
-        // buyback step rejects without also hiding the shipping it allows.
+        // Can this row be SOLD? Now exactly `!locked` — a reward card sells
+        // like any other (and still ships via the reward path). Kept as its
+        // own field: the storefront's Sell affordance keys off it.
         sellable,
         // A LOCKED pull must advertise NOTHING payable: selling it 400s
-        // (FREE_PULL_LOCKED_MESSAGE for a free pull, "Reward prizes can't be
-        // sold back" for a task reward), so quoting a price here would offer
+        // (FREE_PULL_LOCKED_MESSAGE), so quoting a price here would offer
         // the customer money the sell then refuses. UNQUOTED_BUYBACK is the same
         // "no quote" block the open route degrades to — deliberately NOT an
         // omitted/null field, because the storefront drops any vault row

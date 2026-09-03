@@ -17,7 +17,8 @@ import {
   type TaskHub,
 } from '@/lib/data/schemas';
 import { formatValue } from '@/lib/packs-format';
-import type { WonCard } from '@/lib/actions/packs';
+import { toBuybackOffer } from '@/lib/actions/pack-batch-map';
+import type { BuybackOffer, WonCard } from '@/lib/actions/packs';
 
 export async function getTaskHub(): Promise<TaskHub | null> {
   const token = await getAuthToken();
@@ -117,6 +118,14 @@ export type SpinTaskRewardResult =
       card: WonCard;
       /** Raw USD FMV, for the reveal's display fallback. */
       marketValue: number;
+      /** Sell/deliver lock, the BACKEND's answer — never a client constant.
+       *  A task reward sells like any pulled card, so this is false on a
+       *  current backend; it defaults true when absent so an older backend
+       *  can only under-offer, never advertise a sell that 400s. */
+      locked: boolean;
+      /** The backend's instant sell-back quote — the same shape the paid open
+       *  carries, so the reveal is one code path. Null when it sent none. */
+      buyback: BuybackOffer | null;
     }
   | {
       ok: true;
@@ -149,6 +158,8 @@ export async function spinTaskReward(
       reason?: 'not_found' | 'already_redeemed' | 'not_a_pack_reward';
       pullId?: string;
       card?: Record<string, unknown>;
+      locked?: unknown;
+      buyback?: unknown;
     }>(token, `/store/tasks/claims/${encodeURIComponent(claimId)}/spin`, {
       method: 'POST',
     });
@@ -165,6 +176,9 @@ export async function spinTaskReward(
         redeemed: true,
         pullId: raw.pullId,
         marketValue: won.market_value,
+        locked: typeof raw.locked === 'boolean' ? raw.locked : true,
+        // The same mapping the paid open uses — one offer shape for the reveal.
+        buyback: toBuybackOffer(raw.buyback),
         card: {
           id: won.handle,
           name: won.name,

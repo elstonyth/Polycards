@@ -7,7 +7,6 @@ import {
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import { findCardInventoryTarget } from '../../modules/packs/card-stock';
-import { isChallengePrizePack } from '../../modules/packs/challenge-prize';
 import { FREE_PULL_LOCKED_MESSAGE } from '../../modules/packs/free-pack';
 import {
   buybackAmount,
@@ -77,17 +76,16 @@ export const buybackPullStep = createStep(
           : 'This card was already sold back.';
       throw new MedusaError(MedusaError.Types.NOT_ALLOWED, reason);
     }
-    // C1: reward-BOX prizes are not sellable — guard before listCards so the
-    // sentinel card_id (a product handle, not a card) never reaches the card
-    // lookup. Weekly-challenge prizes share source='reward' but not that
-    // shape: they carry a real card handle and are sellable like any pulled
-    // card (operator decision), so the sentinel rationale doesn't apply.
-    if (pull.source === 'reward' && !isChallengePrizePack(pull.pack_id)) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        "Reward prizes can't be sold back",
-      );
-    }
+    // There is deliberately NO source='reward' refusal here any more. The old
+    // C1 guard existed for daily-box prizes, whose card_id was a product-handle
+    // sentinel with no Card row behind it; the daily box went 2026-08-25 and
+    // every surviving reward pull — weekly-challenge prize, task free rip, task
+    // card reward — carries a real card handle. Task and achievement rewards
+    // sell like any pulled card: completing the task IS the requirement
+    // (operator decision 2026-09-03; the old guard left them quoting RM 0.00
+    // forever). A stale sentinel row, should one exist, still fails safely at
+    // the listCards check below — it is refused, never credited.
+    //
     // Free welcome pull: fully locked (no buyback, no delivery) until the
     // customer's first PAID open — computed, never stored, so the first
     // source='pack' pull unlocks it with zero writes (spec 2026-08-14).

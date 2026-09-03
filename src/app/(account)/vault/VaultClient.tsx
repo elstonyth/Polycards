@@ -109,9 +109,10 @@ export default function VaultClient({
     (s, i) => s + (i.card.marketPriceMyr ?? 0),
     0,
   );
-  // A reward card is selectable and shippable but never sellable, so the sell
-  // math runs over a NARROWER list than the selection. Keeping one list would
-  // quote a total that includes cards the buyback step refuses.
+  // The sell math runs over the backend's `sellable` subset of the selection,
+  // never the selection itself, so the total can only ever include cards the
+  // buyback step will honour. (Since 2026-09-03 that subset is every unlocked
+  // card — reward cards sell too — but the backend stays the authority.)
   const sellableSelected = selectedItems.filter((i) => i.sellable);
   const sellableFmv = sellableSelected.reduce(
     (s, i) => s + (i.card.marketPriceMyr ?? 0),
@@ -280,7 +281,8 @@ export default function VaultClient({
     setError(null);
     setNotice(null);
     setBulkSelling(true);
-    // Only the sellable ones — sending a reward card here is a guaranteed 400.
+    // Only the sellable ones — a row the backend marked unsellable is a
+    // guaranteed 400 here.
     const ids = sellableSelected.map((i) => i.pullId);
     try {
       const res = await sellBackPullsBatch(ids);
@@ -484,8 +486,8 @@ export default function VaultClient({
             const glow = rarityRgb(item.card.rarity);
             // Locked = the backend refuses BOTH sell and ship — the free
             // welcome pull before the first PAID open, and only that. NOT
-            // `source`: a reward card is unsellable but ships fine, which is
-            // `sellable`, and a challenge prize is source='reward' and sells.
+            // `source`: every reward card (task, achievement, challenge prize)
+            // is source='reward' and sells like any pulled card.
             const showLock = item.locked && !lockDismissed.has(item.pullId);
             const art = (
               // Pass `rarity` so the slab renders its tier frame + halo, matching

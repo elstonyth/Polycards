@@ -42,7 +42,17 @@ export async function POST(
   // operator concern, never a customer error — the card is already vaulted.
   if (result.claimed && result.reward.type === 'card') {
     try {
-      await takeCardStock(req.scope)(result.reward.card_handle, 1);
+      const taken = await takeCardStock(req.scope)(
+        result.reward.card_handle,
+        1,
+      );
+      // A unit really came off the shelf: earmark the pull so a later
+      // sell-back puts it back (buyback-pull.ts restores earmarked pulls only —
+      // reward cards sell like any other since 2026-09-03). Same shape as
+      // reserveSettledStock. false = untracked product, nothing to flag.
+      if (taken && result.ref) {
+        await packs.updatePulls([{ id: result.ref, stock_earmarked: true }]);
+      }
     } catch (error) {
       req.scope
         .resolve<{ warn: (message: string) => void }>('logger')

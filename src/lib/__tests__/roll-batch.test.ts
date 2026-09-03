@@ -202,6 +202,9 @@ describe('rollBatch — free rip', () => {
     pullId: 'pull_1',
     card: won('charizard'),
     marketValue: 5,
+    // An older backend that sent no quote: the reveal must still build one.
+    locked: false,
+    buyback: null,
   };
 
   it('spends the entitlement once and never batches, even at 3 reels', async () => {
@@ -222,7 +225,7 @@ describe('rollBatch — free rip', () => {
     expect(res.batch.cards).toHaveLength(1);
   });
 
-  it('still quotes a REAL flat-rate offer — `locked` is what hides the sell', async () => {
+  it('quotes a REAL flat-rate offer when the backend sends none', async () => {
     const res = await rollBatch(
       req({ mode: 'free-rip', freeRipClaimId: 'claim_1' }),
       deps({ spinTaskReward: vi.fn(async () => redeemed) }),
@@ -240,8 +243,40 @@ describe('rollBatch — free rip', () => {
     expect(offer?.instantDeadlineMs).toBe(
       1_000_000 + SELL_COUNTDOWN_SECS * 1000,
     );
-    expect(res.batch.locked).toBe(true);
+    expect(res.batch.locked).toBe(false);
     expect(res.batch.balance).toBeNull();
+  });
+
+  // `locked` and the quote are the BACKEND's call, never client constants: a
+  // task reward sells like any pulled card, so the reveal must offer the
+  // backend's instant quote rather than hiding the sell behind "Keep in
+  // vault" (which is what a hardcoded `locked: true` used to do).
+  it('passes the backend lock state and its quote through to the reveal', async () => {
+    const res = await rollBatch(
+      req({ mode: 'free-rip', freeRipClaimId: 'claim_1' }),
+      deps({
+        spinTaskReward: vi.fn(async () => ({
+          ...redeemed,
+          locked: false,
+          buyback: {
+            percent: 95,
+            amount: 19,
+            vaultPercent: FLAT_BUYBACK_PERCENT,
+            vaultAmount: 18,
+            instantDeadlineMs: 2_000_000,
+            firm: true,
+          },
+        })),
+      }),
+    );
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.batch.locked).toBe(false);
+    const offer = res.batch.offers[0];
+    expect(offer?.percent).toBe(95);
+    expect(offer?.amount).toBe(19);
+    expect(offer?.instantDeadlineMs).toBe(2_000_000);
   });
 
   it('reports an already-redeemed claim as a rejection, with no second call', async () => {

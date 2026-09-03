@@ -37,7 +37,12 @@ import { asValue } from 'awilix';
 import { PACKS_MODULE } from '../index';
 import type PacksModuleService from '../service';
 import { FREE_PULL_LOCKED_MESSAGE } from '../free-pack';
-import { clearFxDisplayCache } from '../pricing';
+import { FLAT_PERCENT, buybackAmount } from '../buyback-rate';
+import {
+  DEFAULT_MARKET_MULTIPLIER,
+  clearFxDisplayCache,
+  displayMarketPrice,
+} from '../pricing';
 import { buybackPullWorkflow } from '../../../workflows/buyback-pull';
 import { requestDeliveryWorkflow } from '../../../workflows/request-delivery';
 import Pack from '../models/pack';
@@ -160,11 +165,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
         },
       });
 
-    const seedPull = async (source: 'free' | 'pack' | 'reward') => {
+    const seedPull = async (
+      source: 'free' | 'pack' | 'reward',
+      packId: string = source === 'free' ? FREE_SLUG : PAID_SLUG,
+    ) => {
       const [pull] = await service.createPulls([
         {
           customer_id: customerId,
-          pack_id: source === 'free' ? FREE_SLUG : PAID_SLUG,
+          pack_id: packId,
           card_id: 'card-1',
           rolled_at: new Date(),
           // Past the 30s instant window — the flat vault rate, like a real sell
@@ -248,6 +256,43 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
         expect(result.amount).toBeGreaterThan(0);
         expect((await pullById(packId)).status).toBe('bought_back');
+      });
+
+      // A task/achievement reward (source='reward') sells with NO paid open:
+      // completing the task is the requirement. The old C1 guard refused every
+      // non-challenge reward pull outright, which left task free rips and card
+      // rewards quoting RM 0.00 in the vault forever — the report this pins.
+      it('sells a task reward pull with no paid open at all', async () => {
+        const rewardId = await seedPull('reward');
+
+        const { result } = await sell(rewardId);
+
+        expect(result.amount).toBeGreaterThan(0);
+        expect((await pullById(rewardId)).status).toBe('bought_back');
+        expect(
+          await service.listCreditTransactions({ pull_id: rewardId }),
+        ).toHaveLength(1);
+      });
+
+      // A direct card reward rides the 'task-reward' sentinel pack, which has
+      // no Pack row. resolveBuybackRate(undefined) must resolve to the flat
+      // vault percent — a real credit, never NaN or a throw.
+      it('sells a task card reward on the pack-less sentinel at the flat rate', async () => {
+        const rewardId = await seedPull('reward', 'task-reward');
+
+        const { result } = await sell(rewardId);
+
+        expect(result.percent).toBe(FLAT_PERCENT);
+        expect(result.rate_type).toBe('vault');
+        // The flat cut of card-1's MYR display value (USD 20 × FX 4 × the
+        // default market multiplier) — the same number the vault shows.
+        expect(result.amount).toBe(
+          buybackAmount(
+            displayMarketPrice(20, 4, DEFAULT_MARKET_MULTIPLIER),
+            FLAT_PERCENT,
+          ),
+        );
+        expect((await pullById(rewardId)).status).toBe('bought_back');
       });
 
       // buyback-batch (POST /store/vault/buyback-batch) runs this SAME guarded

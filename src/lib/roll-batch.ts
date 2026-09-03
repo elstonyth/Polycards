@@ -29,9 +29,10 @@
  *     it, and it is what makes the invariant that matters most assertable: a
  *     demo Spin issues ZERO server calls.
  *   • Every roll — paid, free or demo — goes through the SAME offer builder.
- *     A free rip carries a real `pullId` and therefore a real (flat-rate)
- *     offer: it is `locked`, not offer-less, that suppresses its sell UI.
- *     Special-casing its offer to null would silently kill the sell countdown,
+ *     A free rip carries a real `pullId` and the backend's real quote (or the
+ *     flat-rate fallback when it sent none); `locked` is the backend's call
+ *     and is what would suppress a sell UI, never a missing offer.
+ *     Special-casing an offer to null would silently kill the sell countdown,
  *     the instant-window close on unmount, and the auto-conclude guard — all
  *     of which key off a non-null offer.
  */
@@ -307,18 +308,20 @@ async function openRolls(
               : 'That free rip is no longer available.',
         };
       }
-      // A reward pull is never sellable, so the backend quotes no buyback —
-      // the flat-rate fallback in buildOffer still yields a real offer, and
-      // `locked: true` is what makes the reveal show "Keep in vault" instead.
-      // The card is unsellable, not un-shippable.
+      // A task reward sells like any pulled card (completing the task IS the
+      // requirement), so the backend quotes it and reports `locked: false` —
+      // the same `locked` + `buyback` pair a paid open carries, passed through
+      // rather than hardcoded here. `locked: true` is what would make the
+      // reveal show "Keep in vault"; buildOffer's flat-rate fallback still
+      // yields a real offer when the backend quotes none.
       return {
         ok: true,
         batch: batchOf(
           req,
-          [{ card: spun.card, pullId: spun.pullId, buyback: null }],
+          [{ card: spun.card, pullId: spun.pullId, buyback: spun.buyback }],
           deps.now(),
           null,
-          true,
+          spun.locked,
         ),
       };
     }
