@@ -46,10 +46,12 @@ export async function generateMetadata({
 
 export default async function ProfilePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ user: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
-  const { user: handle } = await params;
+  const [{ user: handle }, { tab }] = await Promise.all([params, searchParams]);
   const [result, avatarFrames] = await Promise.all([
     getPublicProfile(handle),
     getAvatarFrames(),
@@ -81,5 +83,10 @@ export default async function ProfilePage({
     result.status === 'ok'
       ? toProfileView(result.profile, avatarFrames)
       : mockProfileView(userOrGeneric(handle));
-  return <ProfileClient user={view} />;
+  return (
+    <ProfileClient
+      user={view}
+      initialTab={tab === 'activity' ? 'Activity' : 'Collection'}
+    />
+  );
 }

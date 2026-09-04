@@ -54,13 +54,6 @@ function Row({
 }) {
   const rgb = rarityRgb(pull.rarity);
   const top = isTopRarity(pull.rarity);
-  const className = cn(
-    'flex w-full items-center gap-2 rounded-xl border bg-neutral-900 px-3 py-2.5 text-left @xs:gap-3',
-    'transition-[background-color,transform] hover:bg-neutral-800 active:scale-[0.99]',
-    'motion-reduce:transition-none motion-reduce:active:scale-100',
-    'outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950',
-    !top && 'border-white/10',
-  );
   // Chase-tier rows wear their own hue — the glow is inherited from the pull.
   const style = top
     ? {
@@ -71,14 +64,22 @@ function Row({
   // The label carries EVERYTHING sighted users see in the row — an aria-label
   // REPLACES the content for SR users.
   const label = `${pull.who} pulled ${pull.name} — ${pull.rarity}, ${pull.value}, ${pull.agoLabel}`;
+  const focusRing =
+    'outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950';
+  const cardClass = cn(
+    'flex min-w-0 flex-1 items-center gap-2 rounded-lg text-left @xs:gap-3',
+    focusRing,
+  );
+  const avatar = (
+    <FramedAvatar
+      src={pull.avatar}
+      initial={pull.who.charAt(0).toUpperCase() || '?'}
+      frameSrc={pull.frame}
+      size={40}
+    />
+  );
   const inner = (
     <>
-      <FramedAvatar
-        src={pull.avatar}
-        initial={pull.who.charAt(0).toUpperCase() || '?'}
-        frameSrc={pull.frame}
-        size={40}
-      />
       {/* Name + tier badge (showgo's name-then-chip lockup), time under it.
           The pack label only fits on wider containers — on a phone it
           truncated to "Silver…" beside a clipped value. */}
@@ -138,25 +139,52 @@ function Row({
       </span>
     </>
   );
-  return onSelect ? (
-    <button
-      type="button"
-      onClick={() => onSelect(pull)}
-      aria-label={label}
-      className={className}
+  // The chrome lives on the row CONTAINER, not on the card control: the
+  // avatar is its own link (to the puller's activity) and one interactive
+  // element may not nest inside another. :active still lands the press-scale
+  // — it applies to the pressed element's ancestors too.
+  return (
+    <div
       style={style}
+      className={cn(
+        'flex w-full items-center gap-2 rounded-xl border bg-neutral-900 px-3 py-2.5 @xs:gap-3',
+        'transition-[background-color,transform] hover:bg-neutral-800 active:scale-[0.99]',
+        'motion-reduce:transition-none motion-reduce:active:scale-100',
+        !top && 'border-white/10',
+      )}
     >
-      {inner}
-    </button>
-  ) : (
-    <Link
-      href={`/card/${pull.handle}`}
-      aria-label={label}
-      className={className}
-      style={style}
-    >
-      {inner}
-    </Link>
+      {pull.profileHandle ? (
+        <Link
+          href={`/profile/${pull.profileHandle}?tab=activity`}
+          aria-label={`View ${pull.who}'s activity`}
+          className={cn('shrink-0 rounded-full', focusRing)}
+        >
+          {avatar}
+        </Link>
+      ) : (
+        // No public profile (anonymised row, or the reel's own "You" rows) —
+        // a dead link would be worse than a plain face.
+        avatar
+      )}
+      {onSelect ? (
+        <button
+          type="button"
+          onClick={() => onSelect(pull)}
+          aria-label={label}
+          className={cardClass}
+        >
+          {inner}
+        </button>
+      ) : (
+        <Link
+          href={`/card/${pull.handle}`}
+          aria-label={label}
+          className={cardClass}
+        >
+          {inner}
+        </Link>
+      )}
+    </div>
   );
 }
 

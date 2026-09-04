@@ -56,6 +56,7 @@ const pull = (
   name: `Card ${id}`,
   image: '/c.png',
   slabImage: null,
+  profileHandle: null,
   value: 'RM 1.00',
   rarity,
   packName: 'Bronze Pack',

@@ -13,8 +13,16 @@ import { type ProfileViewUser } from '@/lib/profile-view';
 const TABS = ['Collection', 'Activity'] as const;
 type Tab = (typeof TABS)[number];
 
-export default function ProfileClient({ user }: { user: ProfileViewUser }) {
-  const [tab, setTab] = useState<Tab>('Collection');
+export default function ProfileClient({
+  user,
+  initialTab = 'Collection',
+}: {
+  user: ProfileViewUser;
+  /** Which tab opens first — the pull feed links here with ?tab=activity so a
+   *  tapped avatar lands on that collector's activity, not their collection. */
+  initialTab?: Tab;
+}) {
+  const [tab, setTab] = useState<Tab>(initialTab);
   const stats = [
     // Real profiles carry no global rank (a leaderboard concern) — render "—".
     {
