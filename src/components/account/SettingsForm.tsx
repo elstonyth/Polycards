@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type FormEvent } from 'react';
+import { useId, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { parsePhoneNumberFromString } from 'libphonenumber-js/min';
@@ -16,6 +16,12 @@ import { PhoneField } from '@/components/PhoneField';
 import { PhoneOtpStep } from '@/components/auth/PhoneOtpStep';
 import { startPhoneOtp, changePhone } from '@/lib/actions/phone-verification';
 import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
+import { SITE_URL } from '@/lib/site';
+
+// The profile-link preview shows a host, not a full URL — the deployed origin
+// where there is one, so a dev build doesn't promise a polycards.gg link it
+// isn't serving.
+const SITE_HOST = SITE_URL.replace(/^https?:\/\//, '');
 
 // Read-only treatment shared by the email field and (under enforcement) the
 // phone field — copied from the email input's classes below.
@@ -560,7 +566,7 @@ function UsernameField({
         error ??
         (trimmed === ''
           ? 'This is also your public profile link.'
-          : `Your profile link: polycards.gg/profile/${trimmed} — changing it retires the old one.`)
+          : `Your profile link: ${SITE_HOST}/profile/${trimmed} — changing it retires the old one.`)
       }
       hintTone={error ? 'error' : 'muted'}
     />
@@ -577,6 +583,10 @@ function Field({
   hint?: string;
   hintTone?: 'muted' | 'error';
 } & React.InputHTMLAttributes<HTMLInputElement>) {
+  // The hint carries the validation error (see UsernameField), so it has to be
+  // announced with the input rather than read as loose text after it —
+  // aria-invalid alone says "wrong" without saying what is wrong.
+  const hintId = useId();
   return (
     <label className="block">
       <span className="mb-1.5 block text-[12px] font-medium text-white/55">
@@ -584,11 +594,13 @@ function Field({
       </span>
       <input
         aria-label={props['aria-label'] ?? label}
+        aria-describedby={hint ? hintId : undefined}
         {...props}
         className={INPUT_CLASS}
       />
       {hint && (
         <span
+          id={hintId}
           className={`mt-1 block text-[11px] ${
             hintTone === 'error' ? 'text-red-400' : 'text-white/55'
           }`}

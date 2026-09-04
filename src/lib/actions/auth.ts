@@ -26,7 +26,11 @@ import { friendlyError, httpStatus, type ErrorRule } from '@/lib/errors';
 import { bindReferral, setReferralCookie } from '@/lib/referral-cookie';
 import { normalizeReferralCode } from '@/lib/referral-code';
 import { lookupReferralCode } from '@/lib/data/referral';
-import { normalizePhone, usernameError } from '@/lib/profile-validation';
+import {
+  normalizePhone,
+  usernameError,
+  USERNAME_TAKEN,
+} from '@/lib/profile-validation';
 import { resolveCallbackOrigin } from '@/lib/allowed-hosts';
 import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
 
@@ -108,7 +112,7 @@ const AUTH_RULES: ErrorRule[] = [
   // instead of to the login screen.
   [
     /display name is already taken|IDX_customer_first_name_lower_unique/i,
-    'That username is taken — please pick another.',
+    USERNAME_TAKEN,
   ],
   [
     /already exists/i,
@@ -300,10 +304,7 @@ export async function signup(input: {
       first_name &&
       (httpStatus(error) === 409 || httpStatus(error) === 422)
     ) {
-      return {
-        ok: false,
-        error: 'That username is taken — please pick another.',
-      };
+      return { ok: false, error: USERNAME_TAKEN };
     }
     return {
       ok: false,

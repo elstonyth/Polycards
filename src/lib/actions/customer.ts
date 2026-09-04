@@ -18,6 +18,7 @@ import {
   NAME_MAX,
   normalizePhone,
   usernameError,
+  USERNAME_TAKEN,
 } from '@/lib/profile-validation';
 import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
 
@@ -46,8 +47,6 @@ const clean = (v: string | undefined): string | null | undefined => {
   const trimmed = v.trim();
   return trimmed === '' ? null : trimmed.slice(0, NAME_MAX);
 };
-
-const USERNAME_TAKEN = 'That username is taken — please pick another.';
 
 const PROFILE_RULES: ErrorRule[] = [
   [

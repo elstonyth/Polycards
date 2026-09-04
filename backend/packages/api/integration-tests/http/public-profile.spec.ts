@@ -98,9 +98,9 @@ medusaIntegrationTestRunner({
           },
         ]);
 
-        // A "seeded demo collector": customer with a pre-assigned
-        // metadata.handle (exactly what seed.ts does) and a pull history
-        // written straight to the ledger — no opens/credits needed.
+        // A "seeded demo collector": a customer whose display name IS their
+        // profile URL (exactly what seed.ts writes) plus a pull history put
+        // straight on the ledger — no opens/credits needed.
         const customerModule = container.resolve(Modules.CUSTOMER);
         const seeded = await customerModule.createCustomers({
           email: SEEDED_EMAIL,
@@ -576,6 +576,63 @@ medusaIntegrationTestRunner({
         expect(cleared.status).toBe(400);
       });
 
+      // A signup that sends an EMPTY name must not store one. '' is a real
+      // index value under IDX_customer_first_name_lower_unique, so storing it
+      // would make the second nameless signup a duplicate-key failure — and
+      // the storefront maps that index to "That username is taken", told to
+      // someone who typed no username at all. The guard drops the key so both
+      // accounts fall through to lazy naming, like a signup that never sent
+      // the field.
+      it('lets two nameless signups through and names them apart', async () => {
+        const signUpNameless = async (email: string): Promise<string> => {
+          const reg = await api.post('/auth/customer/emailpass/register', {
+            email,
+            password: PASSWORD,
+          });
+          const created = await unwrapResponse(
+            postStoreCustomer(
+              api,
+              getContainer(),
+              { email, first_name: '   ' },
+              {
+                headers: {
+                  ...storeHeaders,
+                  authorization: `Bearer ${reg.data.token}`,
+                },
+              },
+            ),
+          );
+          expect(created.status).toBe(200);
+          // Not '' — nothing at all. A stored empty string is the collision.
+          expect(created.data.customer.first_name ?? null).toBeNull();
+          const login = await api.post('/auth/customer/emailpass', {
+            email,
+            password: PASSWORD,
+          });
+          return login.data.token as string;
+        };
+
+        const names: string[] = [];
+        for (const email of [
+          'pp-nameless-a@test.dev',
+          'pp-nameless-b@test.dev',
+        ]) {
+          const token = await signUpNameless(email);
+          const me = await unwrapResponse(
+            api.get('/store/profiles/me', {
+              headers: { ...storeHeaders, authorization: `Bearer ${token}` },
+            }),
+          );
+          expect(me.status).toBe(200);
+          names.push(me.data.handle);
+        }
+        expect(names[0]).not.toBe(names[1]);
+        for (const name of names) {
+          expect(name).toMatch(/^[A-Za-z0-9_-]{3,30}$/);
+          expect((await getProfile(name)).status).toBe(200);
+        }
+      });
+
       // The username guard must NOT reach /store/customers/me/addresses. An
       // address `first_name` is a real person's name — spaces and all — and it
       // is not unique; two customers may ship to the same Ada. Medusa keeps
@@ -614,14 +671,18 @@ medusaIntegrationTestRunner({
             { headers: authedHeaders },
           ),
         );
+        // Surrounding whitespace is trimmed BEFORE the write, not just before
+        // the checks: a stored ' RECASE_ME ' would be one character off from
+        // every URL that has to match it.
         const same = await unwrapResponse(
           api.post(
             '/store/customers/me',
-            { first_name: 'RECASE_ME' },
+            { first_name: '  RECASE_ME  ' },
             { headers: authedHeaders },
           ),
         );
         expect(same.status).toBe(200);
+        expect(same.data.customer.first_name).toBe('RECASE_ME');
         const pub = await getProfile('recase_me');
         expect(pub.status).toBe(200);
         expect(pub.data.handle).toBe('RECASE_ME');

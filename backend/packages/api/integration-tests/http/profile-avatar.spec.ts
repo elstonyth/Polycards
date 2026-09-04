@@ -89,13 +89,20 @@ medusaIntegrationTestRunner({
       it('stores the photo and writes metadata.avatar_url (merged)', async () => {
         const token = await registerCustomer('avatar-happy@test.dev');
 
-        // Seed a pre-existing metadata key (lazily assigned handle) so the
-        // upload's read-modify-write can be proven to MERGE, not clobber.
-        const profile = await unwrapResponse(
-          api.get('/store/profiles/me', { headers: authed(token) }),
+        // Seed a pre-existing metadata key so the upload's read-modify-write
+        // can be proven to MERGE, not clobber. This used to lean on the lazily
+        // assigned `metadata.handle`; nothing writes that any more (the display
+        // name IS the profile URL). Seeded through the module rather than the
+        // API on purpose: rejectCustomerMetadata refuses client-supplied
+        // metadata on /store/customers/me, which is the whole reason the
+        // reserved keys in this blob are worth protecting.
+        const whoami = await unwrapResponse(
+          api.get('/store/customers/me', { headers: authed(token) }),
         );
-        const handle = profile.data.handle as string;
-        expect(typeof handle).toBe('string');
+        const customerModule = getContainer().resolve(Modules.CUSTOMER);
+        await customerModule.updateCustomers(whoami.data.customer.id, {
+          metadata: { seeded_before_upload: 'keep-me' },
+        });
 
         const res = await unwrapResponse(
           uploadAvatar(await png(256, 256), authed(token)),
@@ -107,14 +114,13 @@ medusaIntegrationTestRunner({
           api.get('/store/customers/me', { headers: authed(token) }),
         );
         expect(me.data.customer.metadata.avatar_url).toBe(res.data.avatar_url);
-        expect(me.data.customer.metadata.handle).toBe(handle);
+        expect(me.data.customer.metadata.seeded_before_upload).toBe('keep-me');
 
         // The stored file must be the re-encoded webp (EXIF/GPS stripped), not
         // the original bytes.
-        const stored = await api.get(
-          new URL(res.data.avatar_url).pathname,
-          { responseType: 'arraybuffer' },
-        );
+        const stored = await api.get(new URL(res.data.avatar_url).pathname, {
+          responseType: 'arraybuffer',
+        });
         const meta = await sharp(Buffer.from(stored.data)).metadata();
         expect(meta.format).toBe('webp');
         expect(meta.exif).toBeUndefined();

@@ -813,8 +813,9 @@ export default defineMiddlewares({
     },
     {
       // The customer's own profile handle (GET /store/profiles/me) — lazily
-      // assigns metadata.handle, so it must be authed. Shares the vault/
-      // credits read budget (the account UI fetches them together).
+      // NAMES a nameless account (it writes customer.first_name, which is the
+      // profile URL), so it must be authed. Shares the vault/credits read
+      // budget (the account UI fetches them together).
       matcher: '/store/profiles/me',
       method: 'GET',
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],

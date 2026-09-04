@@ -4750,17 +4750,16 @@ class PacksModuleService extends MedusaService({
    * the real backstop — this lock is what turns a raced INSERT from a 500 into
    * a name.
    *
-   * `strict` is the difference between a name the USER typed and one we derived
-   * for them. A user asking for a taken name gets a CONFLICT they can act on; a
-   * signup or a backfill gets the suffixed variant, because there is nobody to
-   * show an error to.
+   * A taken name is never an error here: this runs for names WE derived (lazy
+   * naming at signup), where there is nobody to show a message to, so it takes
+   * the next free suffixed variant. A name the user typed is refused by the
+   * username guard long before it reaches this method.
    */
   @InjectTransactionManager()
   async claimUsername(
     input: {
       customerId: string;
       desired: string;
-      strict?: boolean;
       maxAttempts?: number;
     },
     @MedusaContext() sharedContext: Context = {},
@@ -4783,13 +4782,6 @@ class PacksModuleService extends MedusaService({
     let chosen: string | null = null;
     if (await free(input.desired)) {
       chosen = input.desired;
-    } else if (input.strict) {
-      // DUPLICATE_ERROR, not CONFLICT — CONFLICT is the one type whose message
-      // Medusa's error handler discards. See the username guard.
-      throw new MedusaError(
-        MedusaError.Types.DUPLICATE_ERROR,
-        'That display name is already taken.',
-      );
     } else {
       for (let attempt = 0; attempt < (input.maxAttempts ?? 8); attempt++) {
         const candidate = suffixedUsername(

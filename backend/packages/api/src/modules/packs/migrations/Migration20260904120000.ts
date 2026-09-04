@@ -35,6 +35,8 @@ export class Migration20260904120000 extends Migration {
         base text;
         cand text;
         n int;
+        renamed int := 0;
+        total int := 0;
       begin
         for r in
           select id, first_name from customer
@@ -55,7 +57,7 @@ export class Migration20260904120000 extends Migration {
           -- anonymous name shaped like every other one rather than a marker
           -- that announces itself as a fallback.
           if length(base) < 3 then
-            base := 'Collector' || lpad((abs(hashtext(r.id)) % 10000)::text, 4, '0');
+            base := 'Collector' || lpad((abs(hashtext(r.id) % 10000))::text, 4, '0');
           end if;
 
           -- Probed against EVERY other live row, settled or not. Rows already
@@ -81,13 +83,21 @@ export class Migration20260904120000 extends Migration {
             cand := left(base, 26);
             cand := regexp_replace(cand, '[_-]+$', '');
             if length(cand) = 0 then cand := 'Collector'; end if;
-            cand := cand || lpad((abs(hashtext(r.id || '#' || n::text)) % 10000)::text, 4, '0');
+            cand := cand || lpad(abs(hashtext(r.id || '#' || n::text) % 10000)::text, 4, '0');
           end loop;
 
+          total := total + 1;
           if cand is distinct from r.first_name then
             update customer set first_name = cand, updated_at = now() where id = r.id;
+            renamed := renamed + 1;
           end if;
         end loop;
+
+        -- The only record of the blast radius: the rename is irreversible (see
+        -- down()), and after it runs the before-state is gone. The deploy log
+        -- of the migrate job is where "how many players had their name
+        -- changed" gets answered.
+        raise notice 'username backfill: % of % live customers renamed', renamed, total;
       end $$;
     `);
 

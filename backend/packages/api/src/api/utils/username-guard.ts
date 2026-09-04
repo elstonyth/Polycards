@@ -34,7 +34,9 @@ import { PACKS_MODULE } from '../../modules/packs';
 // index refuses the loser; this middleware exists so that the overwhelmingly
 // common case gets a sentence a person can act on instead of a database error.
 //
-// Coverage: integration-tests/http/username-guard.spec.ts.
+// Coverage: integration-tests/http/public-profile.spec.ts (the "username
+// guard" describe — signup, rename, case-only edits, and the address form the
+// guard must NOT reach).
 /**
  * The authenticated customer id, or undefined. Read off a widened request
  * rather than typing these guards as authenticated: signup is anonymous, and
@@ -43,6 +45,28 @@ import { PACKS_MODULE } from '../../modules/packs';
 function actorOf(req: MedusaRequest): string | undefined {
   const auth = (req as { auth_context?: { actor_id?: string } }).auth_context;
   return typeof auth?.actor_id === 'string' ? auth.actor_id : undefined;
+}
+
+/**
+ * Rewrite `first_name` on EVERY copy of the body the route may read.
+ *
+ * Medusa's core store routes are validated by `validateAndTransformBody`, which
+ * parses `req.body` into a separate `req.validatedBody` — and that is the object
+ * .../store/customers/route.js and .../customers/me/route.js hand to the
+ * workflow. Touching only `req.body` is therefore invisible downstream: it was,
+ * until this function, why a signup sending "   " stored three spaces and why a
+ * name saved as " MOONBREON " could sit in the database one character off from
+ * the URL that has to match it. Whether the validator has run yet depends on
+ * registration order, so write through to both and let whichever exists win.
+ */
+function rewriteName(req: MedusaRequest, value: unknown): void {
+  const bodies = [req.body, (req as { validatedBody?: unknown }).validatedBody];
+  for (const body of bodies) {
+    if (!body || typeof body !== 'object') continue;
+    const record = body as Record<string, unknown>;
+    if (value === undefined) delete record.first_name;
+    else record.first_name = value;
+  }
 }
 
 export const CHARSET_MESSAGE =
@@ -72,7 +96,13 @@ export function validateUsernameWrite(mode: 'signup' | 'update') {
 
       if (value === null || value === '' || value === undefined) {
         if (mode === 'signup') {
-          // Same as absent: let the lazy assignment name them.
+          // Same as absent — but the key has to GO, not merely be tolerated.
+          // '' is a real index value, so leaving it in the body stores it, and
+          // the SECOND nameless signup trips
+          // IDX_customer_first_name_lower_unique: someone who typed no name at
+          // all would be told their username was taken. Dropping it hands the
+          // account to the lazy assignment, same as if it were never sent.
+          rewriteName(req, undefined);
           next();
           return;
         }
@@ -95,7 +125,7 @@ export function validateUsernameWrite(mode: 'signup' | 'update') {
       // Normalize the stored value to the trimmed form the checks ran against,
       // so a name saved as " MOONBREON " cannot sit in the DB one character off
       // from the URL that has to match it.
-      body.first_name = value;
+      rewriteName(req, value);
 
       const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
       const ownerId = await packs.findCustomerIdByUsername(value);

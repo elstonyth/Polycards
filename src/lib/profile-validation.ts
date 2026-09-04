@@ -27,7 +27,13 @@ export const NAME_MAX = 30;
  * rejects just moves the error later. Widen both together, or neither.
  */
 export const USERNAME_MIN = 3;
-export const USERNAME_RE = /^[A-Za-z0-9_-]{3,30}$/;
+export const USERNAME_RE = new RegExp(
+  `^[A-Za-z0-9_-]{${USERNAME_MIN},${NAME_MAX}}$`,
+);
+
+/** One sentence for a name someone else already holds, shared by the signup
+ *  and the settings paths so the two can't drift apart. */
+export const USERNAME_TAKEN = 'That username is taken — please pick another.';
 
 /**
  * Why this display name can't be used, or null when it's fine. Deliberately

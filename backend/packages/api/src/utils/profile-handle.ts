@@ -26,7 +26,9 @@ export const USERNAME_MAX = 30;
  * is allowed (it is a DISPLAY name), which is exactly why matching must fold
  * case everywhere; see `normalizeUsername`.
  */
-export const USERNAME_RE = /^[A-Za-z0-9_-]{3,30}$/;
+export const USERNAME_RE = new RegExp(
+  `^[A-Za-z0-9_-]{${USERNAME_MIN},${USERNAME_MAX}}$`,
+);
 
 /**
  * The comparison key for a username: uniqueness, lookup and the DB index all
