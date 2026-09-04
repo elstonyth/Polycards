@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import LeaderboardClient from './LeaderboardClient';
 import { WeeklyChallenge, ChallengeRules } from './WeeklyChallenge';
-import { getLeaderboard } from '@/lib/data/leaderboard';
+import { getLeaderboard, getOwnWeekly } from '@/lib/data/leaderboard';
 import { getChallenge } from '@/lib/data/challenge';
 import { getOwnProfileHandle } from '@/lib/data/profiles';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
@@ -23,9 +23,14 @@ export default async function LeaderboardPage() {
   // All fetches run concurrently — getLeaderboard awaits the catalog promise
   // internally, only for post-fetch frame enrichment.
   const framesPromise = getAvatarFrames();
-  const [ownHandle, challenge, weekly, alltime] = await Promise.all([
+  const [ownHandle, ownWeekly, challenge, weekly, alltime] = await Promise.all([
     // null when logged out — the client hides the "your rank" card then.
     getOwnProfileHandle().catch(() => null),
+    // The caller's own weekly pulled value — the only way to say how far a
+    // player BELOW the top-10 slice is from reaching it. Authenticated and
+    // uncached, so it can never be a field on the public board. null when
+    // logged out or the hop fails; the card then reads as it does today.
+    getOwnWeekly().catch(() => null),
     // null when the challenge is off or the backend hop fails — the standings
     // must still render.
     getChallenge().catch(() => null),
@@ -45,6 +50,7 @@ export default async function LeaderboardPage() {
         weekly={weekly}
         alltime={alltime}
         ownHandle={ownHandle}
+        ownWeekly={ownWeekly}
         weeklyPrizes={challenge?.rankPrizes ?? []}
       />
       {challenge && <ChallengeRules />}

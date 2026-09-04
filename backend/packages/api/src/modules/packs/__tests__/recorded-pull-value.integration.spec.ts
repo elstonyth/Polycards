@@ -217,6 +217,47 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(again).toBe(0);
         expect(Number((await service.listPulls({ id: pull.id }, { take: 1 }))[0]!.recorded_value_usd)).toBe(24);
       });
+
+      // The rank-gap line on /leaderboard subtracts this single-customer figure
+      // from a board row. If the two aggregates ever drift, the storefront
+      // quotes a distance to a row that was measured differently — so the
+      // contract under test is EQUALITY with challengeWeekTop, not a literal.
+      it('challengeWeekVolumeFor matches that customer’s challengeWeekTop row', async () => {
+        const ids = mkIds('own-week');
+        await seed(ids, 24);
+        // A reward pull must not inflate the personal figure either — same
+        // source = 'pack' filter as the board.
+        await service.createPulls([
+          {
+            customer_id: ids.customer,
+            pack_id: 'reward-box-bronze',
+            card_id: ids.cardHandle,
+            order_id: null,
+            rolled_at: new Date(),
+            source: 'reward',
+            recorded_value_usd: 9999,
+          },
+        ]);
+
+        const mine = await service.challengeWeekVolumeFor({
+          ...WEEK,
+          customerId: ids.customer,
+        });
+        expect(mine.volumeMyr).toBe(await weekTopFor(ids.customer));
+        expect(mine.volumeMyr).toBe(myr(24));
+        expect(mine.pulls).toBe(1);
+      });
+
+      it('a customer with no pulls this week reads 0, not NULL', async () => {
+        // SUM over no rows is NULL in SQL — without the COALESCE this returns
+        // NaN and the storefront renders "RM NaN to top 10".
+        expect(
+          await service.challengeWeekVolumeFor({
+            ...WEEK,
+            customerId: 'cus_never_pulled',
+          }),
+        ).toEqual({ pulls: 0, volumeMyr: 0 });
+      });
     });
   },
 });

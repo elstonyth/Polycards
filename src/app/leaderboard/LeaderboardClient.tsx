@@ -7,21 +7,49 @@ import { pillVariants } from '@/components/ui/pill';
 import { FramedAvatar } from '@/components/FramedAvatar';
 import { RankGlyph } from '@/components/RankGlyph';
 import { PrizeCard } from './PrizeCard';
-import type { LeaderboardEntry } from '@/lib/data/leaderboard';
+import { rm } from '@/lib/format';
+import { rankGap, type RankGap } from '@/lib/leaderboard-gap';
+import type { LeaderboardEntry, OwnWeekly } from '@/lib/data/leaderboard';
 import type { ChallengeRankPrize } from '@/lib/data/challenge';
 
 const PERIODS = ['This Week', 'All Time'] as const;
 type Period = (typeof PERIODS)[number];
 
+/** The one line the your-rank card adds: what it costs to move up one place,
+ *  or the lead being defended. Null when there is nothing honest to say. */
+function gapLabel(gap: RankGap): string | null {
+  switch (gap.kind) {
+    case 'climb':
+      return `${rm(gap.gapMyr)} to #${gap.toRank}`;
+    case 'leader':
+      return gap.leadMyr == null
+        ? 'Leading the board'
+        : `Leading by ${rm(gap.leadMyr)}`;
+    case 'enter':
+      // "top 10" reads better than "#10" for the common full board; a board
+      // shortened by the disabled filter names the rank it actually ends on.
+      return gap.toRank === 10
+        ? `${rm(gap.gapMyr)} to top 10`
+        : `${rm(gap.gapMyr)} to #${gap.toRank}`;
+    default:
+      return null;
+  }
+}
+
 export default function LeaderboardClient({
   weekly,
   alltime,
   ownHandle,
+  ownWeekly = null,
   weeklyPrizes = [],
 }: {
   weekly: LeaderboardEntry[];
   alltime: LeaderboardEntry[];
   ownHandle: string | null;
+  /** The caller's own pulled value this challenge week — the figure that makes
+   *  a gap statable for a player the top-10 slice cut off. null when logged out
+   *  or the hop failed. */
+  ownWeekly?: OwnWeekly | null;
   /** Sparse per-rank CURRENT challenge prizes (unlocked stages, cumulative) —
    *  rendered on the This Week rows only, since that IS the challenge board. */
   weeklyPrizes?: ChallengeRankPrize[];
@@ -37,6 +65,14 @@ export default function LeaderboardClient({
     ownHandle == null
       ? null
       : (entries.find((e) => e.handle === ownHandle) ?? null);
+
+  // This Week only. All Time ranks by pack-open spend while displaying pulled
+  // value, so the difference between two adjacent All Time rows is not what
+  // separates them — see leaderboard-gap.ts.
+  const gap =
+    period === 'This Week'
+      ? rankGap(entries, ownHandle, ownWeekly)
+      : ({ kind: 'none' } as const);
 
   return (
     <div className="px-fluid mx-auto w-full max-w-md pt-6 lg:max-w-3xl">
@@ -236,32 +272,47 @@ export default function LeaderboardClient({
       {ownHandle != null && (
         <div className="fixed inset-x-4 bottom-24 z-40 mx-auto max-w-md rounded-2xl border border-white/10 bg-neutral-900 p-4 shadow-[0_8px_32px_rgba(0,0,0,0.6)] lg:bottom-8">
           {own ? (
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
-                  Your rank
-                </p>
-                <p className="font-heading text-2xl tabular-nums text-white">
-                  #{own.rank}
-                </p>
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+                    Your rank
+                  </p>
+                  <p className="font-heading text-2xl tabular-nums text-white">
+                    #{own.rank}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+                    Pulled
+                  </p>
+                  <p className="font-heading text-chase text-2xl tabular-nums">
+                    {own.volume}
+                  </p>
+                </div>
               </div>
-              <div className="text-right">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
-                  Pulled
+              {/* The climb. Its own row under both figures rather than beside
+                  one of them: it belongs to neither column, and the card is
+                  fixed above the tab bar with no width to spare. */}
+              {gapLabel(gap) && (
+                <p className="mt-2 border-t border-white/5 pt-2 text-[12px] tabular-nums text-neutral-400">
+                  {gapLabel(gap)}
                 </p>
-                <p className="font-heading text-chase text-2xl tabular-nums">
-                  {own.volume}
-                </p>
-              </div>
-            </div>
+              )}
+            </>
           ) : (
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
                   Your rank
                 </p>
+                {/* A player who has ripped this week gets the distance instead
+                    of the bare "not on the board": the gap is the number that
+                    makes the next rip feel reachable. A cold start (no pulls
+                    yet) keeps the invitation — quoting the whole #10 figure at
+                    someone with nothing on the board reads as a wall. */}
                 <p className="text-sm font-semibold text-white">
-                  Not on the board yet
+                  {gapLabel(gap) ?? 'Not on the board yet'}
                 </p>
               </div>
               <Link

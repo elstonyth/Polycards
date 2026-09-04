@@ -158,6 +158,12 @@ export const LeaderboardEntrySchema = z.looseObject({
   equipped_frame_level: finite.nullable().optional(),
 });
 
+/** GET /store/leaderboard/me — the caller's OWN weekly pulled value + pulls. */
+export const OwnWeeklySchema = z.looseObject({
+  volume: finite,
+  pulls: finite,
+});
+
 // --- data/challenge.ts ------------------------------------------------------
 
 /** GET /store/challenge — the Weekly Challenge structure. This seam is

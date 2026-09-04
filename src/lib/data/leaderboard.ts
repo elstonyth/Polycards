@@ -16,8 +16,15 @@ import { sdk } from '@/lib/medusa';
 import { logger } from '@/lib/logger';
 import { avatarForSeed } from '@/lib/profile-view';
 import { rm } from '@/lib/format';
-import { parseList, LeaderboardEntrySchema } from '@/lib/data/schemas';
+import {
+  parseList,
+  parseOne,
+  LeaderboardEntrySchema,
+  OwnWeeklySchema,
+} from '@/lib/data/schemas';
 import { cached } from '@/lib/ttl-cache';
+import { getAuthToken } from '@/lib/data/customer';
+import { authedFetch } from '@/lib/authed-fetch';
 
 export type LeaderboardPeriod = 'weekly' | 'alltime';
 
@@ -31,6 +38,11 @@ export interface LeaderboardEntry {
   handle?: string | null;
   /** Formatted MYR winnings, e.g. "RM 8,173.26". */
   volume: string;
+  /** The same figure UNFORMATTED, because a rank gap is subtraction and
+   *  "RM 8,173.26" is not a number. Weekly only is meaningful: All Time ranks
+   *  by spend while displaying pulled value, so deltas between All Time rows
+   *  can come out negative. See leaderboard-gap.ts. */
+  volumeMyr: number;
   pulls: string;
   avatar: string;
   frame: string | null;
@@ -102,6 +114,7 @@ export async function getLeaderboard(
       name: e.name,
       handle: typeof e.handle === 'string' ? e.handle : null,
       volume: rm(e.volume),
+      volumeMyr: e.volume,
       pulls: String(e.pulls),
       avatar: e.avatar_url ?? avatarForSeed(e.seed),
       frame: e.equipped_frame_level
@@ -111,5 +124,40 @@ export async function getLeaderboard(
   } catch (error) {
     logger.error(`[leaderboard] failed to load (${period}):`, error);
     return [];
+  }
+}
+
+/** The caller's own weekly pulled value + pull count, or null when logged out
+ *  or the backend hop fails. */
+export interface OwnWeekly {
+  volumeMyr: number;
+  pulls: number;
+}
+
+/**
+ * The caller's OWN standing in the current challenge week — the figure the
+ * weekly board ranks by, for the player whose row the top-10 slice cut off.
+ *
+ * Deliberately NOT cached, and deliberately not a field on getLeaderboard():
+ * that board memoises per period under a shared process-wide key, so a
+ * per-customer number folded into it would be served to the next visitor for
+ * the rest of the window.
+ *
+ * Never throws — the standings must render for a logged-in player even if this
+ * hop fails; the card then falls back to the copy it shows today.
+ */
+export async function getOwnWeekly(): Promise<OwnWeekly | null> {
+  const token = await getAuthToken();
+  if (!token) return null;
+  try {
+    const parsed = parseOne(
+      OwnWeeklySchema,
+      await authedFetch(token, '/store/leaderboard/me'),
+    );
+    if (!parsed) return null;
+    return { volumeMyr: parsed.volume, pulls: parsed.pulls };
+  } catch (error) {
+    logger.error('[leaderboard] own weekly standing failed to load:', error);
+    return null;
   }
 }
