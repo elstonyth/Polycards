@@ -119,21 +119,21 @@ export async function updateProfile(input: {
     return { ok: true, customer: toProfileCustomer(customer) };
   } catch (error) {
     logger.error('[profile] update failed:', error);
-    // Belt to the message rules' braces. The only thing this route can conflict
-    // on is the username, and matching the status means the copy survives even
-    // if the backend's wording drifts — which it already did once: a CONFLICT's
-    // message is replaced wholesale by Medusa's error handler, so the first
-    // version of this reached the user as "Could not save your changes."
+    // Message rules first, status second — same order as signup(), so neither
+    // action can label one failure as another. Here the status check is pure
+    // belt-and-braces: the only thing this route conflicts on is the username,
+    // but it means the copy survives the backend's wording drifting, which it
+    // already did once — a CONFLICT's message is replaced wholesale by Medusa's
+    // error handler, so the first version of this reached the user as the
+    // generic "Could not save your changes."
+    const matched = friendlyError(error, PROFILE_RULES, '');
+    if (matched) return { ok: false, error: matched };
     if (httpStatus(error) === 409 || httpStatus(error) === 422) {
       return { ok: false, error: USERNAME_TAKEN };
     }
     return {
       ok: false,
-      error: friendlyError(
-        error,
-        PROFILE_RULES,
-        'Could not save your changes. Please try again.',
-      ),
+      error: 'Could not save your changes. Please try again.',
     };
   }
 }

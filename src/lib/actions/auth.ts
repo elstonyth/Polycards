@@ -280,10 +280,17 @@ export async function signup(input: {
     return result;
   } catch (error) {
     logger.error('[auth] signup failed:', error);
-    // A 409/422 out of customer-create means the username is taken — the email
-    // and phone collisions above are message-matched and land on 400. Checked
-    // by status because Medusa's error handler replaces a CONFLICT's message
-    // with boilerplate, so the backend's own sentence may not survive the trip.
+    // Message rules FIRST, status second, and the order is load-bearing.
+    // Signup can fail on a taken email, a claimed phone, or a taken username,
+    // and this route is not the only thing that can answer 422 — a duplicate
+    // email is Medusa's own DUPLICATE_ERROR. Leading with the status would tell
+    // someone whose EMAIL is already registered that their username is taken,
+    // and send them off inventing new ones instead of to the login screen.
+    // The rules match on specific sentences, so they can only fire for the
+    // failure they name; the status check picks up only what none of them
+    // recognised, which is where a message Medusa rewrote ends up.
+    const matched = friendlyError(error, AUTH_RULES, '');
+    if (matched) return { ok: false, error: matched };
     if (
       first_name &&
       (httpStatus(error) === 409 || httpStatus(error) === 422)
@@ -295,11 +302,7 @@ export async function signup(input: {
     }
     return {
       ok: false,
-      error: friendlyError(
-        error,
-        AUTH_RULES,
-        'Could not create your account. Please try again.',
-      ),
+      error: 'Could not create your account. Please try again.',
     };
   }
 }

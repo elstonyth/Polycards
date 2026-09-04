@@ -6,8 +6,18 @@ import type { MedusaContainer } from '@medusajs/framework/types';
 // pull/ledger history, too expensive to recompute on every render of /me and
 // /profile/:handle. >1 instance since #473: per-process is accepted — the
 // invalidation below only clears the writing instance's Map, so a second
-// instance still serves its own copy for up to the TTL, display-only either
-// way. Decision + upgrade path recorded in plan 116.
+// instance still serves its own copy for up to the TTL. Decision + upgrade
+// path recorded in plan 116.
+//
+// That trade-off got SHARPER when the display name became the profile URL, and
+// the old note ("display-only either way") no longer covers it. A rename now
+// retires a URL, and the instance that did not handle the rename can keep
+// answering 200 on the retired username for the rest of the TTL instead of
+// 404ing. Still bounded at 30s and still not a correctness issue for anything
+// downstream — but it is a stale PAGE, not just stale stats, so it is the first
+// thing to look at if someone reports "the old link still works for a bit".
+// ponytail: fix is a shared invalidation channel (Valkey pub/sub, plan 116's
+// upgrade path) — worth it only if the 30s window is actually reported.
 //
 // It lives here rather than inside the route module so the MUTATIONS that must
 // be visible immediately (the vault showcase toggle) can evict the entry
