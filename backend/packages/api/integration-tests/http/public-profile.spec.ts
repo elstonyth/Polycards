@@ -576,6 +576,31 @@ medusaIntegrationTestRunner({
         expect(cleared.status).toBe(400);
       });
 
+      // The username guard must NOT reach /store/customers/me/addresses. An
+      // address `first_name` is a real person's name — spaces and all — and it
+      // is not unique; two customers may ship to the same Ada. Medusa keeps
+      // them apart because a middleware that names a method registers as
+      // app.post(exact path) while a method-less one prefix-matches, so this
+      // holds only as long as the guard's entry keeps its `method: 'POST'`.
+      it('does not police address names, only the profile username', async () => {
+        const token = await registerCustomer('pp-address@test.dev');
+        const res = await unwrapResponse(
+          api.post(
+            '/store/customers/me/addresses',
+            {
+              first_name: 'Ada Lovelace',
+              last_name: 'Byron',
+              address_1: '1 Analytical Engine Way',
+              city: 'Kuala Lumpur',
+              country_code: 'my',
+              postal_code: '50450',
+            },
+            { headers: { ...storeHeaders, authorization: `Bearer ${token}` } },
+          ),
+        );
+        expect(res.status).toBe(200);
+      });
+
       it('keeps your own name claimable — a case-only edit is not a collision', async () => {
         const token = await registerCustomer('pp-recase@test.dev');
         const authedHeaders = {

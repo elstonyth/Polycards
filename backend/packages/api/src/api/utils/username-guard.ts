@@ -18,6 +18,15 @@ import { PACKS_MODULE } from '../../modules/packs';
 // it as free text, so without this guard a rename could put a space, a slash or
 // a duplicate of someone else's name straight into a URL.
 //
+// Registered with an explicit `method`, which is what keeps it OFF
+// /store/customers/me/addresses. Medusa registers a middleware that names a
+// method with `app.post(matcher, …)` — exact in Express — and only a
+// method-less one with `app.use(matcher, …)`, which prefix-matches
+// (@medusajs/framework/dist/http/router.js). Dropping the method here would
+// silently extend this guard over delivery addresses, whose `first_name` is a
+// real person's name with spaces in it, and whose uniqueness check would then
+// refuse to save an address because some OTHER customer is called Ada.
+//
 // This guard is the FRIENDLY layer, not the invariant. The invariant is the
 // partial unique index on lower(first_name) (Migration20260904120000): these
 // routes are Medusa's own, a public endpoint is a public endpoint, and two
