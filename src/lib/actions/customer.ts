@@ -14,7 +14,11 @@ import type { HttpTypes } from '@medusajs/types';
 import { logger } from '@/lib/logger';
 import { updateCustomerProfile } from '@/lib/data/customer';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
-import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
+import {
+  NAME_MAX,
+  normalizePhone,
+  usernameError,
+} from '@/lib/profile-validation';
 import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
 
 export type ProfileCustomer = {
@@ -43,10 +47,22 @@ const clean = (v: string | undefined): string | null | undefined => {
   return trimmed === '' ? null : trimmed.slice(0, NAME_MAX);
 };
 
+const USERNAME_TAKEN = 'That username is taken — please pick another.';
+
 const PROFILE_RULES: ErrorRule[] = [
   [
     /not authenticated|unauthorized|401/i,
     'Your session has expired. Please log in again.',
+  ],
+  // The backend's username guard answers a taken name with this sentence.
+  [/display name is already taken|username is taken/i, USERNAME_TAKEN],
+  // …and the SAME outcome arrives as a raw Postgres error when two renames
+  // race past that guard and the unique index refuses the loser. Without this
+  // rule that user sees a database string; the guard cannot close the window
+  // itself, so the copy has to cover both doors.
+  [
+    /IDX_customer_first_name_lower_unique|duplicate key value|unique constraint/i,
+    USERNAME_TAKEN,
   ],
 ];
 
@@ -64,6 +80,13 @@ export async function updateProfile(input: {
         error: `Names must be ${NAME_MAX} characters or fewer.`,
       };
     }
+  }
+  // The display name is the public profile URL, so its shape is a hard rule,
+  // not a preference. Checked here as well as in the backend's username guard
+  // because a server action is a public endpoint in its own right.
+  if (input.first_name !== undefined) {
+    const bad = usernameError(input.first_name);
+    if (bad) return { ok: false, error: bad };
   }
   const body: HttpTypes.StoreUpdateCustomer = {
     first_name: clean(input.first_name),

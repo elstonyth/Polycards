@@ -2,7 +2,7 @@ import { medusaIntegrationTestRunner } from "@medusajs/test-utils";
 import { Modules } from "@medusajs/framework/utils";
 import { PACKS_MODULE } from "../../src/modules/packs";
 import type PacksModuleService from "../../src/modules/packs/service";
-import { HANDLE_RE } from "../../src/utils/profile-handle";
+import { USERNAME_RE } from "../../src/utils/profile-handle";
 import { clearProfileCache } from "../../src/api/store/profiles/[handle]/route";
 import { myrDisplay as MYR, postStoreCustomer, unwrapResponse } from "./utils";
 
@@ -23,9 +23,10 @@ const EPIC_FMV = 10;
 // leaderboard. No FxRate row is seeded and cards carry the model-default
 // multiplier, so values follow the shared myrDisplay helper (see utils).
 
-const SEEDED_HANDLE = "kenji-test";
+// The display name IS the handle now — one value, deliberately not two.
+const SEEDED_NAME = "Kenji_Test";
+const SEEDED_HANDLE = SEEDED_NAME;
 const SEEDED_EMAIL = "pp-collector@test.dev";
-const SEEDED_NAME = "Kenji";
 
 medusaIntegrationTestRunner({
   inApp: true,
@@ -104,7 +105,6 @@ medusaIntegrationTestRunner({
         const seeded = await customerModule.createCustomers({
           email: SEEDED_EMAIL,
           first_name: SEEDED_NAME,
-          metadata: { handle: SEEDED_HANDLE },
         });
         seededCustomerId = seeded.id;
 
@@ -244,7 +244,6 @@ medusaIntegrationTestRunner({
         const parity = await customerModule.createCustomers({
           email: "pp-parity@test.dev",
           first_name: "Parity",
-          metadata: { handle: "parity-test" },
         });
         await packs.createPulls([
           {
@@ -289,7 +288,7 @@ medusaIntegrationTestRunner({
           })) as Parameters<typeof packs.createCreditTransactions>[0],
         );
 
-        const res = await getProfile("parity-test");
+        const res = await getProfile("Parity");
         expect(res.status).toBe(200);
         expect(res.data.stats).toEqual({
           pulls: 4, // reward pull excluded
@@ -323,7 +322,6 @@ medusaIntegrationTestRunner({
         const customer = await customerModule.createCustomers({
           email: "pp-recent@test.dev",
           first_name: "Recent",
-          metadata: { handle: "recent-test" },
         });
 
         // A card that will be deleted AFTER its pulls are recorded. 30 pulls
@@ -356,7 +354,7 @@ medusaIntegrationTestRunner({
         await packs.createPulls([...doomedPulls, ...rarePulls]);
         await packs.softDeleteCards([doomed.id]);
 
-        const res = await getProfile("recent-test");
+        const res = await getProfile("Recent");
         expect(res.status).toBe(200);
 
         // Filter-before-slice: the 30 newest (deleted-card) pulls are skipped
@@ -446,8 +444,20 @@ medusaIntegrationTestRunner({
 
       it("404s an unknown or malformed handle", async () => {
         expect((await getProfile("no-such-collector-zz")).status).toBe(404);
-        // Malformed param (uppercase / junk) is also a 404, not a 500.
+        // Outside the username charset — a 404, not a 500.
         expect((await getProfile("NOT%20a%20handle")).status).toBe(404);
+        expect((await getProfile("%E7%88%B1%E5%8A%A8")).status).toBe(404);
+      });
+
+      it("resolves the handle case-insensitively but answers in the stored case", async () => {
+        // Two spellings of one name must be ONE profile — the whole point of
+        // folding case in the uniqueness index. And the body has to echo the
+        // owner's own capitalisation, not the visitor's URL, or every link
+        // rendered off it drifts from the name on the page.
+        const res = await getProfile(SEEDED_HANDLE.toLowerCase());
+        expect(res.status).toBe(200);
+        expect(res.data.handle).toBe(SEEDED_HANDLE);
+        expect(res.data.name).toBe(SEEDED_NAME);
       });
 
       it("GET /store/profiles/me requires auth and lazily assigns a stable handle", async () => {
@@ -466,7 +476,7 @@ medusaIntegrationTestRunner({
           api.get("/store/profiles/me", { headers: authedHeaders }),
         );
         expect(first.status).toBe(200);
-        expect(first.data.handle).toMatch(HANDLE_RE);
+        expect(first.data.handle).toMatch(USERNAME_RE);
 
         // Stable across calls (persisted, not re-rolled).
         const second = await unwrapResponse(
@@ -479,6 +489,113 @@ medusaIntegrationTestRunner({
         expect(pub.status).toBe(200);
         expect(pub.data.stats.pulls).toBe(0);
         expect(pub.data.recent).toEqual([]);
+      });
+
+      // THE regression this whole change exists for. Before it, a handle was
+      // derived once and frozen: production on 2026-09-04 was serving
+      // /profile/wei-nguan-5ren for an account displaying "MOONBREON", and not
+      // one of the ten linked handles still matched its own display name.
+      //
+      // Both halves are asserted deliberately. A rename that lights up the new
+      // URL while the old one keeps working has not moved the profile — it has
+      // published the same collector at two addresses, which is the duplicate
+      // link the operator asked us to make impossible.
+      it("a rename MOVES the profile URL — new one resolves, old one 404s", async () => {
+        const token = await registerCustomer("pp-rename@test.dev");
+        const authedHeaders = {
+          ...storeHeaders,
+          authorization: `Bearer ${token}`,
+        };
+        const before = await unwrapResponse(
+          api.get("/store/profiles/me", { headers: authedHeaders }),
+        );
+        const oldHandle = before.data.handle as string;
+        expect((await getProfile(oldHandle)).status).toBe(200);
+
+        const renamed = await unwrapResponse(
+          api.post(
+            "/store/customers/me",
+            { first_name: "RenamedCollector" },
+            { headers: authedHeaders },
+          ),
+        );
+        expect(renamed.status).toBe(200);
+
+        expect((await getProfile("RenamedCollector")).status).toBe(200);
+        expect((await getProfile(oldHandle)).status).toBe(404);
+
+        // …and /me agrees, so the "My profile" link never points at the 404.
+        const after = await unwrapResponse(
+          api.get("/store/profiles/me", { headers: authedHeaders }),
+        );
+        expect(after.data.handle).toBe("RenamedCollector");
+      });
+
+      it("refuses a display name that is taken, or that is not a URL", async () => {
+        const token = await registerCustomer("pp-dupe@test.dev");
+        const authedHeaders = {
+          ...storeHeaders,
+          authorization: `Bearer ${token}`,
+        };
+
+        // Someone else's name, in a different case: still the same link, so
+        // still refused. Case-insensitivity is the point — matching on the
+        // exact string would hand two people one URL.
+        const taken = await unwrapResponse(
+          api.post(
+            "/store/customers/me",
+            { first_name: SEEDED_HANDLE.toUpperCase() },
+            { headers: authedHeaders },
+          ),
+        );
+        expect(taken.status).toBe(409);
+
+        for (const bad of ["has space", "爱动漫的", "no/slashes", "ab"]) {
+          const res = await unwrapResponse(
+            api.post(
+              "/store/customers/me",
+              { first_name: bad },
+              { headers: authedHeaders },
+            ),
+          );
+          expect(res.status).toBe(400);
+        }
+
+        // Clearing it would leave a live profile with no address at all.
+        const cleared = await unwrapResponse(
+          api.post(
+            "/store/customers/me",
+            { first_name: "" },
+            { headers: authedHeaders },
+          ),
+        );
+        expect(cleared.status).toBe(400);
+      });
+
+      it("keeps your own name claimable — a case-only edit is not a collision", async () => {
+        const token = await registerCustomer("pp-recase@test.dev");
+        const authedHeaders = {
+          ...storeHeaders,
+          authorization: `Bearer ${token}`,
+        };
+        await unwrapResponse(
+          api.post(
+            "/store/customers/me",
+            { first_name: "ReCase_Me" },
+            { headers: authedHeaders },
+          ),
+        );
+        const same = await unwrapResponse(
+          api.post(
+            "/store/customers/me",
+            { first_name: "RECASE_ME" },
+            { headers: authedHeaders },
+          ),
+        );
+        expect(same.status).toBe(200);
+        const pub = await getProfile("recase_me");
+        expect(pub.status).toBe(200);
+        expect(pub.data.handle).toBe("RECASE_ME");
       });
 
       // The storefront draws the tier frame from collection[].rarity, so it
@@ -514,7 +631,6 @@ medusaIntegrationTestRunner({
         const collector = await customerModule.createCustomers({
           email: "pp-showcase@test.dev",
           first_name: "Showcase",
-          metadata: { handle: "showcase-test" },
         });
         await packs.createPulls([
           {
@@ -535,7 +651,7 @@ medusaIntegrationTestRunner({
           },
         ]);
 
-        const res = await getProfile("showcase-test");
+        const res = await getProfile("Showcase");
         expect(res.status).toBe(200);
         expect(res.data.collection).toHaveLength(1);
         expect(res.data.collection[0]).toMatchObject({
@@ -568,7 +684,6 @@ medusaIntegrationTestRunner({
         const collector = await customerModule.createCustomers({
           email: "pp-orphan@test.dev",
           first_name: "Orphan",
-          metadata: { handle: "orphan-test" },
         });
         await packs.createPulls([
           {
@@ -581,7 +696,7 @@ medusaIntegrationTestRunner({
           },
         ]);
 
-        const res = await getProfile("orphan-test");
+        const res = await getProfile("Orphan");
         expect(res.status).toBe(200);
         expect(res.data.collection).toHaveLength(1);
         expect(res.data.collection[0]).toMatchObject({

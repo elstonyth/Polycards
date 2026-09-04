@@ -37,6 +37,10 @@ import {
   rejectAdminBankAccountsMetadata,
 } from './utils/customer-metadata-guard';
 import {
+  renameProfileCacheEviction,
+  validateUsernameWrite,
+} from './utils/username-guard';
+import {
   requireSignupPhoneProof,
   blockUnverifiedPhoneWrite,
   requirePhoneVerified,
@@ -460,9 +464,19 @@ export default defineMiddlewares({
       // account already holds, and that half runs whatever the flag says (one
       // phone = one account is a business rule, not part of the OTP rollback
       // lever) — see api/utils/phone-claim.ts.
+      //
+      // validateUsernameWrite('signup') (see utils/username-guard.ts):
+      // `first_name` is the public profile URL, so it is charset-checked and
+      // uniqueness-checked here rather than accepted as the free text Medusa's
+      // validator allows. Omitting it is still fine — the account is named
+      // anonymously on its first GET /store/profiles/me.
       matcher: '/store/customers',
       method: 'POST',
-      middlewares: [rejectCustomerMetadata, requireSignupPhoneProof],
+      middlewares: [
+        rejectCustomerMetadata,
+        validateUsernameWrite('signup'),
+        requireSignupPhoneProof,
+      ],
     },
     {
       // /store/customers/me is framework-authenticated; this guard rejects
@@ -474,9 +488,20 @@ export default defineMiddlewares({
       // here is rejected — phone CHANGES must go through the verified
       // store/phone-verification/change route (Task 4); clearing to null
       // stays allowed.
+      //
+      // validateUsernameWrite('update'): a rename MOVES the profile URL, so the
+      // new name must be a legal URL segment and unclaimed. Clearing it is
+      // refused here (unlike on signup) — a live profile cannot lose its
+      // address. The cache eviction that must follow a successful rename is in
+      // renameProfileCacheEviction below, not here: this runs before the write.
       matcher: '/store/customers/me',
       method: 'POST',
-      middlewares: [rejectCustomerMetadata, blockUnverifiedPhoneWrite],
+      middlewares: [
+        rejectCustomerMetadata,
+        blockUnverifiedPhoneWrite,
+        validateUsernameWrite('update'),
+        renameProfileCacheEviction,
+      ],
     },
     // Medusa's stock address routes silently accept null country_code +
     // postal_code (sim finding P3-8) — reject undeliverable addresses before
@@ -709,7 +734,10 @@ export default defineMiddlewares({
       // present; tiny per-customer budget — one legitimate call per lifetime.
       matcher: '/store/referral/bind',
       method: 'POST',
-      middlewares: [authenticate('customer', ['bearer']), referralBindRateLimit],
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        referralBindRateLimit,
+      ],
     },
     {
       // PUBLIC referral-code lookup (GET /store/referral/codes/:code) — the
@@ -1279,10 +1307,7 @@ export default defineMiddlewares({
     // have missed.
     {
       matcher: '/store/*',
-      middlewares: [
-        noStoreForAuthenticatedStore,
-        blockDisabledCustomerSession,
-      ],
+      middlewares: [noStoreForAuthenticatedStore, blockDisabledCustomerSession],
     },
     // The /admin twin of the entry above — read the two as a pair. Same
     // blanket-matcher rationale: the framework registers

@@ -32,6 +32,7 @@ import { FRAME_LEVELS } from './avatar-frames';
 import { challengePackId } from './challenge-prize';
 import { FREE_WELCOME_CATEGORY } from './free-pack';
 import { isGraded, isPsa10, type PoolComposition } from './card-view';
+import { suffixedUsername } from '../../utils/profile-handle';
 import Pack from './models/pack';
 import Card from './models/card';
 import CardPriceHistory from './models/card-price-history';
@@ -4713,6 +4714,107 @@ class PacksModuleService extends MedusaService({
       MedusaError.Types.CONFLICT,
       'Could not assign a referral code',
     );
+  }
+
+  /**
+   * The customer id whose display name IS this username, case-insensitively.
+   * Raw SQL for the same reasons as mutateCustomerMetadata, plus one specific
+   * to this lookup: the customer module's `$ilike` filter treats `_` as a
+   * single-character WILDCARD, and `_` is in the username charset — `ash_red`
+   * would then also match `ashXred` and hand one URL two owners. `lower(x) =
+   * lower(?)` is exact, and matches the partial unique index built on
+   * lower(first_name) so PG can use it.
+   */
+  @InjectManager()
+  async findCustomerIdByUsername(
+    username: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string | null> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ id: string }[]>(
+      'SELECT id FROM customer WHERE lower(first_name) = lower(?) AND deleted_at IS NULL LIMIT 1',
+      [username],
+    );
+    return rows[0]?.id ?? null;
+  }
+
+  /**
+   * Claim `desired` as this customer's display name — and therefore their
+   * profile URL — or the next free deterministic variant of it.
+   *
+   * Allocation is serialized GLOBALLY (advisory lock `username:alloc`) with the
+   * uniqueness probe inside that lock and in the same transaction as the write,
+   * exactly like assignReferralCode above: two simultaneous signups picking the
+   * same name must not both pass a check-then-write. The unique index remains
+   * the real backstop — this lock is what turns a raced INSERT from a 500 into
+   * a name.
+   *
+   * `strict` is the difference between a name the USER typed and one we derived
+   * for them. A user asking for a taken name gets a CONFLICT they can act on; a
+   * signup or a backfill gets the suffixed variant, because there is nobody to
+   * show an error to.
+   */
+  @InjectTransactionManager()
+  async claimUsername(
+    input: {
+      customerId: string;
+      desired: string;
+      strict?: boolean;
+      maxAttempts?: number;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      'username:alloc',
+    ]);
+
+    // `id <> ?` so re-claiming your own name (a case-only edit, or a no-op
+    // save) reads as free instead of colliding with yourself.
+    const free = async (candidate: string): Promise<boolean> => {
+      const [row] = await em.execute<{ n: string }[]>(
+        'SELECT COUNT(*)::int AS n FROM customer WHERE lower(first_name) = lower(?) AND deleted_at IS NULL AND id <> ?',
+        [candidate, input.customerId],
+      );
+      return Number(row?.n ?? 0) === 0;
+    };
+
+    let chosen: string | null = null;
+    if (await free(input.desired)) {
+      chosen = input.desired;
+    } else if (input.strict) {
+      throw new MedusaError(
+        MedusaError.Types.CONFLICT,
+        'That display name is taken.',
+      );
+    } else {
+      for (let attempt = 0; attempt < (input.maxAttempts ?? 8); attempt++) {
+        const candidate = suffixedUsername(
+          input.desired,
+          input.customerId,
+          attempt,
+        );
+        if (await free(candidate)) {
+          chosen = candidate;
+          break;
+        }
+      }
+    }
+    if (!chosen) {
+      // Eight deterministic 4-digit variants of one stem all taken —
+      // unreachable short of an adversary squatting that stem.
+      throw new MedusaError(
+        MedusaError.Types.CONFLICT,
+        'Could not assign a display name',
+      );
+    }
+
+    await em.execute(
+      'UPDATE customer SET first_name = ?, updated_at = now() WHERE id = ? AND deleted_at IS NULL',
+      [chosen, input.customerId],
+    );
+    return chosen;
   }
 
   // FX manual-override edit + audit row in the same transaction. The audit row

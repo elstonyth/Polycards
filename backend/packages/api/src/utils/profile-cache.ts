@@ -37,11 +37,25 @@ export function clearProfileCache(): void {
 }
 
 /**
+ * Drop one username's entry. Case-folded to match the key the route writes —
+ * anything else evicts a spelling nobody cached and leaves the live one stale.
+ *
+ * A RENAME must call this for the OLD name as well as the new one: the old
+ * username's body is not merely stale, it belongs to a URL that must now 404,
+ * and leaving it in the Map keeps the abandoned profile answering for another
+ * 30 seconds.
+ */
+export function evictProfileUsername(username: string | null | undefined): void {
+  const key = (username ?? '').trim().toLowerCase();
+  if (key !== '') profileCache.delete(key);
+}
+
+/**
  * Drop the cached profile of the customer that just changed something the
  * public profile renders (showcase toggle, avatar, frame). Best-effort: a
- * customer without a handle has nothing cached, and a failed lookup only
- * means the old ≤30s staleness — never a failed mutation, so callers don't
- * need to guard it.
+ * customer whose name is not yet a valid username has nothing cached, and a
+ * failed lookup only means the old ≤30s staleness — never a failed mutation,
+ * so callers don't need to guard it.
  */
 export async function invalidateProfileForCustomer(
   scope: MedusaContainer,
@@ -50,14 +64,11 @@ export async function invalidateProfileForCustomer(
   try {
     const customers = scope.resolve(Modules.CUSTOMER);
     const customer = await customers.retrieveCustomer(customerId, {
-      select: ['id', 'metadata'],
+      select: ['id', 'first_name'],
     });
-    const handle = ((customer?.metadata ?? {}) as Record<string, unknown>)[
-      'handle'
-    ];
-    if (typeof handle === 'string' && handle !== '') {
-      profileCache.delete(handle);
-    }
+    // The display name IS the cache key — there is no separate handle to look
+    // up any more (utils/profile-handle.ts).
+    evictProfileUsername(customer?.first_name);
   } catch {
     // Swallowed on purpose — see the doc comment.
   }

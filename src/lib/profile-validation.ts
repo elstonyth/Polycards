@@ -18,6 +18,36 @@ import {
  *  enough that the header/user menu and admin tables never overflow. */
 export const NAME_MAX = 30;
 
+/**
+ * The display name doubles as the public profile URL (/profile/<name>), so its
+ * charset is a hard constraint rather than a preference: ASCII letters, digits,
+ * underscore and hyphen, 3..NAME_MAX. MUST stay identical to USERNAME_RE in
+ * `backend/packages/api/src/utils/profile-handle.ts` — the backend guard is the
+ * one that actually refuses a bad name, and a form that accepts what the API
+ * rejects just moves the error later. Widen both together, or neither.
+ */
+export const USERNAME_MIN = 3;
+export const USERNAME_RE = /^[A-Za-z0-9_-]{3,30}$/;
+
+/**
+ * Why this display name can't be used, or null when it's fine. Deliberately
+ * specific about which rule was broken — "invalid username" tells someone with
+ * a space in their name nothing about what to do next.
+ */
+export function usernameError(raw: string): string | null {
+  const value = raw.trim();
+  if (value === '') return 'Please choose a username.';
+  if (value.length < USERNAME_MIN)
+    return `Your username must be at least ${USERNAME_MIN} characters.`;
+  if (value.length > NAME_MAX)
+    return `Your username must be ${NAME_MAX} characters or fewer.`;
+  if (/\s/.test(value))
+    return 'Your username can’t contain spaces — try an underscore instead.';
+  if (!USERNAME_RE.test(value))
+    return 'Your username can use letters, numbers, underscores and hyphens only.';
+  return null;
+}
+
 /** Default country for the phone picker and for bare local numbers
  *  (`010-766 7787` → +60…). Malaysia is the primary market. */
 export const DEFAULT_PHONE_COUNTRY: CountryCode = 'MY';

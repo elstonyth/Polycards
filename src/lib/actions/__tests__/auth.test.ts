@@ -160,7 +160,7 @@ describe('signup — required phone', () => {
       customer: {
         id: 'c1',
         email: 'new@polycards.app',
-        first_name: 'N',
+        first_name: 'Nova',
         last_name: null,
       },
     });
@@ -169,7 +169,7 @@ describe('signup — required phone', () => {
     const r = await signup({
       email: 'new@polycards.app',
       password: 'PolycardsTest123!',
-      first_name: 'N',
+      first_name: 'Nova',
       phone: '010-766 7787',
     });
 
@@ -210,7 +210,7 @@ describe('signup — phone verification enforcement (PHONE_VERIFICATION_REQUIRED
       customer: {
         id: 'c1',
         email: 'new@polycards.app',
-        first_name: 'N',
+        first_name: 'Nova',
         last_name: null,
       },
     });
@@ -219,7 +219,7 @@ describe('signup — phone verification enforcement (PHONE_VERIFICATION_REQUIRED
     const r = await signup({
       email: 'new@polycards.app',
       password: 'PolycardsTest123!',
-      first_name: 'N',
+      first_name: 'Nova',
       phone: '010-766 7787',
       phone_verification_token: 'proof-tok',
     });
@@ -276,7 +276,7 @@ describe('login — handle lookup is non-fatal (#9)', () => {
       customer: {
         id: 'c1',
         email: 'a@polycards.app',
-        first_name: 'A',
+        first_name: 'Ada',
         last_name: null,
       },
     });
@@ -292,7 +292,7 @@ describe('login — handle lookup is non-fatal (#9)', () => {
       customer: {
         id: 'c1',
         email: 'a@polycards.app',
-        first_name: 'A',
+        first_name: 'Ada',
         last_name: null,
         handle: null,
         avatar_url: null,
@@ -382,7 +382,7 @@ describe('googleCallback — OAuth callback branches', () => {
       customer: {
         id: 'cus_1',
         email: 'ret@polycards.app',
-        first_name: 'R',
+        first_name: 'Rex',
         last_name: null,
       },
     });
@@ -415,7 +415,7 @@ describe('googleCallback — OAuth callback branches', () => {
       customer: {
         id: 'cus_new',
         email: 'mixed@example.com',
-        first_name: 'A',
+        first_name: 'Ada',
         last_name: 'B',
       },
     });
@@ -875,7 +875,7 @@ describe('signup — referral attribution precedence', () => {
       customer: {
         id: 'c1',
         email: 'new@polycards.app',
-        first_name: 'N',
+        first_name: 'Nova',
         last_name: null,
       },
     });

@@ -26,7 +26,7 @@ import { friendlyError, type ErrorRule } from '@/lib/errors';
 import { bindReferral, setReferralCookie } from '@/lib/referral-cookie';
 import { normalizeReferralCode } from '@/lib/referral-code';
 import { lookupReferralCode } from '@/lib/data/referral';
-import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
+import { normalizePhone, usernameError } from '@/lib/profile-validation';
 import { resolveCallbackOrigin } from '@/lib/allowed-hosts';
 import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
 
@@ -96,6 +96,14 @@ const AUTH_RULES: ErrorRule[] = [
   [
     /phone number is already in use/i,
     'This phone number is already registered to another account. Log in instead, or use a different number.',
+  ],
+  // One username = one profile URL (the username guard, and the unique index
+  // under it). Must sit ABOVE the /already exists/ email rule: this message is
+  // about the username, and the generic "account with this email" copy would
+  // send them to a login screen for an account that does not exist.
+  [
+    /display name is already taken|IDX_customer_first_name_lower_unique|duplicate key value/i,
+    'That username is taken — please pick another.',
   ],
   [
     /already exists/i,
@@ -225,14 +233,16 @@ export async function signup(input: {
       ok: false,
       error: 'Please enter a valid phone number for the selected country.',
     };
-  // Reject (not truncate) an over-long name — same rule as updateProfile, so a
-  // name accepted at signup can never be refused later on the settings page.
+  // The username is the public profile URL, so it is validated by the same rule
+  // updateProfile applies — a name accepted at signup can never be refused
+  // later on the settings page. Left optional: an account created without one
+  // is named anonymously on its first profile read, and refusing the whole
+  // signup over a blank optional field would be a worse trade.
   const first_name = input.first_name?.trim() || undefined;
-  if (first_name && first_name.length > NAME_MAX)
-    return {
-      ok: false,
-      error: `Names must be ${NAME_MAX} characters or fewer.`,
-    };
+  if (first_name) {
+    const bad = usernameError(first_name);
+    if (bad) return { ok: false, error: bad };
+  }
   // Enforcement is mirrored client-side for UX only — the backend gate
   // (requireSignupPhoneProof) is authoritative; this just avoids a round trip
   // for the common case where the storefront flag matches the backend's.
@@ -412,10 +422,19 @@ export async function googleCallback(query: {
         });
         return { ok: false, reason: 'email' };
       }
+      // Deliberately NO first_name. It is the public profile URL now, and
+      // Google's `given_name` is a legal first name — "Wei Nguan", spaces and
+      // all. Forwarding it would either fail the username guard outright, or
+      // publish someone's real name as their permanent public address, which is
+      // the exact shape of the URL this change exists to get rid of. It would
+      // also collide for the second Googler with a common first name and 409
+      // the whole signup. Instead the account is named anonymously
+      // ("Collector4809") on its first profile read, and the user picks a real
+      // username in settings. `last_name` is not public and not the URL, so it
+      // rides along unchanged.
       await sdk.store.customer.create(
         {
           email,
-          first_name: payload.user_metadata?.given_name,
           last_name: payload.user_metadata?.family_name,
         },
         {},
