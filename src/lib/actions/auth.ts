@@ -101,8 +101,13 @@ const AUTH_RULES: ErrorRule[] = [
   // under it). Must sit ABOVE the /already exists/ email rule: this message is
   // about the username, and the generic "account with this email" copy would
   // send them to a login screen for an account that does not exist.
+  //
+  // The raw-Postgres arm names the INDEX, never a bare /duplicate key value/:
+  // signup can also collide on email and on phone, and a generic pattern would
+  // send someone whose EMAIL is already registered off inventing usernames
+  // instead of to the login screen.
   [
-    /display name is already taken|IDX_customer_first_name_lower_unique|duplicate key value/i,
+    /display name is already taken|IDX_customer_first_name_lower_unique/i,
     'That username is taken — please pick another.',
   ],
   [

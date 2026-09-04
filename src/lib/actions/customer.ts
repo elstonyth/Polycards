@@ -60,10 +60,12 @@ const PROFILE_RULES: ErrorRule[] = [
   // race past that guard and the unique index refuses the loser. Without this
   // rule that user sees a database string; the guard cannot close the window
   // itself, so the copy has to cover both doors.
-  [
-    /IDX_customer_first_name_lower_unique|duplicate key value|unique constraint/i,
-    USERNAME_TAKEN,
-  ],
+  //
+  // Matched on the INDEX NAME, never on a bare /duplicate key value/ or
+  // /unique constraint/: this route also writes `phone`, which has uniqueness
+  // of its own, and a generic pattern would answer a phone collision by
+  // telling the user their username was taken.
+  [/IDX_customer_first_name_lower_unique/i, USERNAME_TAKEN],
 ];
 
 export async function updateProfile(input: {
