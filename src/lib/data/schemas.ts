@@ -158,6 +158,14 @@ export const LeaderboardEntrySchema = z.looseObject({
   equipped_frame_level: finite.nullable().optional(),
 });
 
+/** GET /store/leaderboard/me — the caller's OWN weekly pulled value, pull
+ *  count, and the PII-safe seed that locates their row on the public board. */
+export const OwnWeeklySchema = z.looseObject({
+  volume: finite,
+  pulls: finite.int(),
+  seed: finite.int(),
+});
+
 // --- data/challenge.ts ------------------------------------------------------
 
 /** GET /store/challenge — the Weekly Challenge structure. This seam is

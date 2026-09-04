@@ -564,6 +564,15 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
+      // The customer's own weekly pulled value (GET /store/leaderboard/me),
+      // for the rank-gap line. Its own entry because GET /store/leaderboard
+      // itself is deliberately ANONYMOUS — the board is public — so this
+      // sub-path is the only authenticated thing under that prefix. Shares the
+      // read budget: one indexed single-customer aggregate per page load.
+      matcher: '/store/leaderboard/me',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       // The customer's vault list (GET /store/vault).
       matcher: '/store/vault',
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],

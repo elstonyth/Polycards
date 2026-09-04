@@ -185,8 +185,7 @@ medusaIntegrationTestRunner({
       // survivors are re-numbered 1..N because a gap in the ranks would itself
       // publish that someone was removed.
       it('hides an administratively disabled player and re-numbers the ranks', async () => {
-        const packs =
-          getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         await packs.setAccountDisabled({
           customerId: 'cus_lb_1',
           adminId: 'user_lb_admin',
@@ -261,6 +260,159 @@ medusaIntegrationTestRunner({
           seedOf('cus_lb_1'),
         ]);
         expect(entries[3]).toMatchObject({ points: 1000 });
+      });
+
+      // GET /store/leaderboard/me — the caller's OWN weekly figure, which the
+      // storefront subtracts from a board row to say "RM x to top 10". The
+      // board itself is a top-10 slice, so a player below it has no row there;
+      // this is the only surface that can answer for them.
+      describe('own weekly standing', () => {
+        const PASSWORD = 'supersecret';
+
+        const authed = (token: string): Record<string, string> => ({
+          ...storeHeaders,
+          authorization: `Bearer ${token}`,
+        });
+
+        // The register JWT carries actor_id: '' until POST /store/customers
+        // links it — log in AGAIN afterwards, or the route reads an empty
+        // customer id and every assertion below passes vacuously.
+        const registerCustomer = async (
+          email: string,
+        ): Promise<{ token: string; id: string }> => {
+          const reg = await api.post('/auth/customer/emailpass/register', {
+            email,
+            password: PASSWORD,
+          });
+          await api.post(
+            '/store/customers',
+            { email },
+            {
+              headers: {
+                ...storeHeaders,
+                authorization: `Bearer ${reg.data.token}`,
+              },
+            },
+          );
+          const login = await api.post('/auth/customer/emailpass', {
+            email,
+            password: PASSWORD,
+          });
+          const token = login.data.token as string;
+          const me = await unwrapResponse(
+            api.get('/store/customers/me', { headers: authed(token) }),
+          );
+          const id = me.data.customer.id as string;
+          expect(id).toBeTruthy();
+          return { token, id };
+        };
+
+        const own = (token: string) =>
+          unwrapResponse(
+            api.get('/store/leaderboard/me', { headers: authed(token) }),
+          );
+
+        it('rejects an unauthenticated caller with 401', async () => {
+          // The sibling board is deliberately public; this sub-path is not.
+          const res = await unwrapResponse(
+            api.get('/store/leaderboard/me', { headers: storeHeaders }),
+          );
+          expect(res.status).toBe(401);
+        });
+
+        it('answers 0/0 for a customer who has not pulled this week', async () => {
+          const { token, id } = await registerCustomer('lb-me-empty@test.dev');
+          const res = await own(token);
+          expect(res.status).toBe(200);
+          expect(res.data).toEqual({ volume: 0, pulls: 0, seed: seedOf(id) });
+        });
+
+        it('answers the caller’s own weekly value, excluding reward pulls and last week', async () => {
+          const { token, id } = await registerCustomer('lb-me@test.dev');
+          const packs =
+            getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+          await packs.createPulls([
+            // 2 × cardX (50 USD each) inside the week → 100 USD.
+            {
+              customer_id: id,
+              pack_id: PACK_A,
+              card_id: CARD_X,
+              rolled_at: new Date(),
+            },
+            {
+              customer_id: id,
+              pack_id: PACK_A,
+              card_id: CARD_X,
+              rolled_at: new Date(),
+            },
+            // A reward-box draw: never counts toward the board, so it must not
+            // count here either — otherwise the gap is measured against a
+            // figure the board never saw.
+            {
+              customer_id: id,
+              pack_id: 'reward-box-bronze',
+              card_id: CARD_X,
+              rolled_at: new Date(),
+              source: 'reward',
+            },
+            // Outside the challenge week.
+            {
+              customer_id: id,
+              pack_id: PACK_A,
+              card_id: CARD_X,
+              rolled_at: new Date(Date.now() - 8 * DAY_MS),
+            },
+          ] as Parameters<typeof packs.createPulls>[0]);
+
+          const res = await own(token);
+          expect(res.status).toBe(200);
+          // The seed is how the storefront finds this caller's own row on the
+          // public board: a handle is assigned lazily on first render, so for
+          // one board window a genuine top-10 row carries handle: null and
+          // matches nobody. Same value the board already publishes per row.
+          expect(res.data).toEqual({
+            volume: MYR(100),
+            pulls: 2,
+            seed: seedOf(id),
+          });
+
+          // And it agrees with the row the public board publishes for them —
+          // the gap the storefront renders is a subtraction across these two
+          // responses, so a drift here quotes a distance to a differently
+          // measured row.
+          clearLeaderboardCache();
+          const entries = await board();
+          const mine = entries.find((e) => e.seed === seedOf(id));
+          expect(mine).toMatchObject({ volume: MYR(100), pulls: 2 });
+        });
+
+        it('is not cached across callers', async () => {
+          const a = await registerCustomer('lb-me-a@test.dev');
+          const b = await registerCustomer('lb-me-b@test.dev');
+          const packs =
+            getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+          await packs.createPulls([
+            {
+              customer_id: a.id,
+              pack_id: PACK_A,
+              card_id: CARD_X,
+              rolled_at: new Date(),
+            },
+          ] as Parameters<typeof packs.createPulls>[0]);
+
+          // B reading straight after A must see B's own zero, not A's board
+          // figure — the whole reason this lives outside the cached board.
+          expect((await own(a.token)).data).toEqual({
+            volume: MYR(50),
+            pulls: 1,
+            seed: seedOf(a.id),
+          });
+          expect((await own(b.token)).data).toEqual({
+            volume: 0,
+            pulls: 0,
+            seed: seedOf(b.id),
+          });
+        });
       });
     });
   },

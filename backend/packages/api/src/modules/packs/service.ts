@@ -322,12 +322,13 @@ export type LedgerEntryRow = {
 const LIVE_VALUE_USD_SQL = 'c.market_value * COALESCE(c.market_multiplier, ?)';
 
 // Pulled value of one pull row in USD: the draw-time snapshot when stamped,
-// live fallback for pre-backfill rows. Shared by the three pulled-value
-// aggregates (leaderboardTop wins CTE, challengeWeekPool, challengeWeekTop)
-// so the expression can't drift between boards. Requires aliases `pull pu` /
-// `card c` and binds ONE `?`. Snapshot semantics: a stamped pull KEEPS its
-// value even if the card row is later deleted (the snapshot outlives the
-// LEFT JOIN); an un-stamped one drops to NULL — the pre-snapshot behavior.
+// live fallback for pre-backfill rows. Shared by every pulled-value aggregate
+// (leaderboardTop wins CTE, challengeWeekPool, challengeWeekTop,
+// challengeWeekVolumeFor) so the expression can't drift between boards.
+// Requires aliases `pull pu` / `card c` and binds ONE `?`. Snapshot semantics:
+// a stamped pull KEEPS its value even if the card row is later deleted (the
+// snapshot outlives the LEFT JOIN); an un-stamped one drops to NULL — the
+// pre-snapshot behavior.
 const PULLED_VALUE_USD_SQL =
   'COALESCE(pu.recorded_value_usd, ' + LIVE_VALUE_USD_SQL + ')';
 
@@ -8330,6 +8331,52 @@ class PacksModuleService extends MedusaService({
       pulls: Number(r.pulls ?? 0),
       volumeMyr: Number(r.volume_myr ?? 0),
     }));
+  }
+
+  // The SAME weekly pulled-value figure as challengeWeekTop, for ONE customer.
+  // Exists because the board is a top-10 SLICE: a player below it has no row
+  // there, so nothing can say how far off they are. Shares the anchor CTE, the
+  // pulled-value expression and the source = 'pack' filter with the board and
+  // the pool, so the gap the storefront renders can never disagree with the
+  // row it is measured against.
+  //
+  // `pulls` is not decoration: volume alone cannot distinguish "ripped nothing
+  // this week" from "ripped a card with no price on file" (an unstamped pull
+  // with a NULL market value COALESCEs to 0). The storefront branches its copy
+  // on the pull count, not the money.
+  @InjectManager()
+  async challengeWeekVolumeFor(
+    opts: ChallengeWeekAnchor & { customerId: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ pulls: number; volumeMyr: number }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const fxRate = await resolveFxRate(this);
+    const [row] = await em.execute<
+      { pulls: string; volume_myr: string | null }[]
+    >(
+      CHALLENGE_WEEK_ANCHOR_CTE +
+        'SELECT COUNT(*) AS pulls, ' +
+        '       ROUND(COALESCE(SUM(' +
+        PULLED_VALUE_USD_SQL +
+        '), 0) * ? * 100) / 100 AS volume_myr ' +
+        '  FROM pull pu ' +
+        '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
+        " WHERE pu.deleted_at IS NULL AND pu.source = 'pack' " +
+        '   AND pu.customer_id = ? ' +
+        '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
+        '   AND pu.rolled_at <  (SELECT end_utc FROM anchor)',
+      [
+        ...challengeWeekAnchorParams(opts),
+        DEFAULT_MARKET_MULTIPLIER,
+        fxRate,
+        opts.customerId,
+      ],
+    );
+    return {
+      pulls: Number(row?.pulls ?? 0),
+      volumeMyr: Number(row?.volume_myr ?? 0),
+    };
   }
 
   // Resolve one challenge week's UTC [start, end) — settlement's payout key

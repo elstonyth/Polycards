@@ -7,21 +7,57 @@ import { pillVariants } from '@/components/ui/pill';
 import { FramedAvatar } from '@/components/FramedAvatar';
 import { RankGlyph } from '@/components/RankGlyph';
 import { PrizeCard } from './PrizeCard';
-import type { LeaderboardEntry } from '@/lib/data/leaderboard';
+import { findOwnRow, gapLockup, rankGap } from '@/lib/leaderboard-gap';
+import type { LeaderboardEntry, OwnWeekly } from '@/lib/data/leaderboard';
 import type { ChallengeRankPrize } from '@/lib/data/challenge';
 
 const PERIODS = ['This Week', 'All Time'] as const;
 type Period = (typeof PERIODS)[number];
 
+/** One label/value column of the Sticky Stat Card — uppercase Label over a
+ *  Nekst Black value (DESIGN.md §"Signature: Sticky Stat Card"). */
+function StatCell({
+  label,
+  value,
+  className,
+  valueClassName,
+}: {
+  label: string;
+  value: string;
+  className?: string;
+  valueClassName?: string;
+}) {
+  return (
+    <div className={className}>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+        {label}
+      </p>
+      <p
+        className={cn(
+          'font-heading text-2xl tabular-nums text-white',
+          valueClassName,
+        )}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
 export default function LeaderboardClient({
   weekly,
   alltime,
   ownHandle,
+  ownWeekly = null,
   weeklyPrizes = [],
 }: {
   weekly: LeaderboardEntry[];
   alltime: LeaderboardEntry[];
   ownHandle: string | null;
+  /** The caller's own pulled value this challenge week — the figure that makes
+   *  a gap statable for a player the top-10 slice cut off. null when logged out
+   *  or the hop failed. */
+  ownWeekly?: OwnWeekly | null;
   /** Sparse per-rank CURRENT challenge prizes (unlocked stages, cumulative) —
    *  rendered on the This Week rows only, since that IS the challenge board. */
   weeklyPrizes?: ChallengeRankPrize[];
@@ -33,10 +69,18 @@ export default function LeaderboardClient({
   // width, empty spacer on prizeless rows) so the RM figures stay aligned.
   const showPrizeCol = period === 'This Week' && weeklyPrizes.length > 0;
 
-  const own =
-    ownHandle == null
-      ? null
-      : (entries.find((e) => e.handle === ownHandle) ?? null);
+  // Resolved through the SAME lookup rankGap uses (seed first, handle second),
+  // so the card's rank figure and its gap can never disagree about whether the
+  // viewer is on the board.
+  const own = findOwnRow(entries, ownHandle, ownWeekly)?.row ?? null;
+
+  // This Week only. All Time ranks by pack-open spend while displaying pulled
+  // value, so the difference between two adjacent All Time rows is not what
+  // separates them — see leaderboard-gap.ts.
+  const lockup =
+    period === 'This Week'
+      ? gapLockup(rankGap(entries, ownHandle, ownWeekly))
+      : null;
 
   return (
     <div className="px-fluid mx-auto w-full max-w-md pt-6 lg:max-w-3xl">
@@ -109,7 +153,7 @@ export default function LeaderboardClient({
             </div>
             <ol className="mt-2 overflow-hidden rounded-2xl border border-white/10 bg-neutral-900">
               {entries.map((entry, i) => {
-                const isOwn = own != null && entry.handle === ownHandle;
+                const isOwn = own != null && entry.seed === own.seed;
                 const prize =
                   period === 'This Week'
                     ? prizeByRank.get(entry.rank)
@@ -236,44 +280,64 @@ export default function LeaderboardClient({
       {ownHandle != null && (
         <div className="fixed inset-x-4 bottom-24 z-40 mx-auto max-w-md rounded-2xl border border-white/10 bg-neutral-900 p-4 shadow-[0_8px_32px_rgba(0,0,0,0.6)] lg:bottom-8">
           {own ? (
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
-                  Your rank
-                </p>
-                <p className="font-heading text-2xl tabular-nums text-white">
-                  #{own.rank}
-                </p>
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <StatCell label="Your rank" value={`#${own.rank}`} />
+                <StatCell
+                  label="Pulled"
+                  value={own.volume}
+                  className="text-right"
+                  valueClassName="text-chase"
+                />
               </div>
-              <div className="text-right">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
-                  Pulled
-                </p>
-                <p className="font-heading text-chase text-2xl tabular-nums">
-                  {own.volume}
-                </p>
-              </div>
-            </div>
+              {/* The climb, as its own label/value row under both figures: it
+                  belongs to neither column, and the card is fixed above the tab
+                  bar with no width to spare. */}
+              {lockup && (
+                <StatCell
+                  label={lockup.label}
+                  value={lockup.value}
+                  className="mt-3 border-t border-white/5 pt-3"
+                />
+              )}
+            </>
           ) : (
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
-                  Your rank
-                </p>
-                <p className="text-sm font-semibold text-white">
-                  Not on the board yet
-                </p>
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+                    Your rank
+                  </p>
+                  {/* Stays "Not on the board yet" — that is still the true
+                      answer to this label, and replacing it with a money figure
+                      made the eyebrow lie. The distance gets its own row
+                      below. */}
+                  <p className="text-sm font-semibold text-white">
+                    Not on the board yet
+                  </p>
+                </div>
+                <Link
+                  href="/"
+                  className={cn(
+                    pillVariants({ size: 'md' }),
+                    'shrink-0 text-[13px]',
+                  )}
+                >
+                  Rip a pack
+                </Link>
               </div>
-              <Link
-                href="/"
-                className={cn(
-                  pillVariants({ size: 'md' }),
-                  'shrink-0 text-[13px]',
-                )}
-              >
-                Rip a pack
-              </Link>
-            </div>
+              {/* A player who has ripped this week gets the distance: the gap
+                  is the number that makes the next rip feel reachable. A cold
+                  start (no pulls yet) has no row here — quoting the whole #10
+                  figure at someone with nothing on the board reads as a wall. */}
+              {lockup && (
+                <StatCell
+                  label={lockup.label}
+                  value={lockup.value}
+                  className="mt-3 border-t border-white/5 pt-3"
+                />
+              )}
+            </>
           )}
         </div>
       )}
