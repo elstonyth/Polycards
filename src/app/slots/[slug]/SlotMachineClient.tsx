@@ -650,6 +650,7 @@ export default function SlotMachineClient({
         // exact, not a placeholder.
         avatar: null,
         frame: null,
+        profileHandle: null,
         rolledAt: new Date(now).toISOString(),
         agoLabel: 'just now',
       }));

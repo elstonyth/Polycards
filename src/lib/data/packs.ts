@@ -466,6 +466,10 @@ export interface RecentPull {
   packIcon: string;
   /** Puller display name (first_name in full — never email/id). */
   who: string;
+  /** Puller's public profile handle — the avatar links to /profile/<handle>.
+   *  null = no public profile (anonymised row, or a customer without one):
+   *  the avatar then renders unlinked. */
+  profileHandle: string | null;
   /** Puller avatar — uploaded photo, else the seed-derived pfp; null = the
    *  initial-letter fallback (the reel's own "You" rows). */
   avatar: string | null;
@@ -542,6 +546,7 @@ export async function getRecentPulls(
         packName: p.pack_title ?? 'Mystery Pack',
         packIcon: p.pack_image ?? FALLBACK_PACK_ICON,
         who: p.who ?? 'Anonymous',
+        profileHandle: p.profile_handle ?? null,
         // The same seed → pfp mapping as the leaderboard / public profile.
         avatar: p.avatar_url ?? (p.seed != null ? avatarForSeed(p.seed) : null),
         frame: p.frame_url ?? null,

@@ -9,12 +9,18 @@ import { SlabImage } from '@/components/SlabImage';
 import { FramedAvatar } from '@/components/FramedAvatar';
 import { rm, num } from '@/lib/format';
 import { type ProfileViewUser } from '@/lib/profile-view';
+import { TABS, type Tab } from './tabs';
 
-const TABS = ['Collection', 'Activity'] as const;
-type Tab = (typeof TABS)[number];
-
-export default function ProfileClient({ user }: { user: ProfileViewUser }) {
-  const [tab, setTab] = useState<Tab>('Collection');
+export default function ProfileClient({
+  user,
+  initialTab = 'Collection',
+}: {
+  user: ProfileViewUser;
+  /** Which tab opens first — the pull feed links here with ?tab=activity so a
+   *  tapped avatar lands on that collector's activity, not their collection. */
+  initialTab?: Tab;
+}) {
+  const [tab, setTab] = useState<Tab>(initialTab);
   const stats = [
     // Real profiles carry no global rank (a leaderboard concern) — render "—".
     {
@@ -165,7 +171,16 @@ export default function ProfileClient({ user }: { user: ProfileViewUser }) {
           </div>
         ))}
 
-      {tab === 'Activity' && (
+      {/* Empty state: Activity is now a LANDING tab (the pull feed's avatars
+          deep-link to ?tab=activity), and an empty <ul> renders as a bare
+          hairline box — Collection has always had one. */}
+      {tab === 'Activity' && activity.length === 0 && (
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/60">
+          No activity yet.
+        </div>
+      )}
+
+      {tab === 'Activity' && activity.length > 0 && (
         <ul className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
           {activity.map((a, i) => (
             <li
