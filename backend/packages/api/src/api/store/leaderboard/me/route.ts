@@ -4,6 +4,7 @@ import {
 } from '@medusajs/framework/http';
 import PacksModuleService from '../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../modules/packs';
+import { seedOf } from '../../../../utils/profile-handle';
 
 // GET /store/leaderboard/me — the authenticated customer's OWN weekly pulled
 // value, for the "how far off the board am I" line on /leaderboard.
@@ -37,5 +38,12 @@ export async function GET(
   // `pulls` ships alongside the money because volume alone cannot tell "ripped
   // nothing this week" apart from "ripped a card with no price on file" — both
   // read as 0. The storefront branches its copy on the count.
-  res.json({ volume: volumeMyr, pulls });
+  //
+  // `seed` is how the storefront finds the caller's own row on the public
+  // board. It is the same PII-safe value that board already publishes for every
+  // row, so this exposes nothing new — and unlike the public handle, which the
+  // ensure-profile-handle workflow assigns lazily on a player's first render,
+  // it exists from the moment the customer does. Matching on the handle alone
+  // told a player sitting at #3 they were not on the board.
+  res.json({ volume: volumeMyr, pulls, seed: seedOf(customerId) });
 }

@@ -44,6 +44,10 @@ export interface LeaderboardEntry {
    *  can come out negative. See leaderboard-gap.ts. */
   volumeMyr: number;
   pulls: string;
+  /** PII-safe avatar seed, also the stable key for "is this row me?". Unlike
+   *  `handle`, which is assigned lazily on a player's first render, it exists
+   *  from the moment the customer does. See leaderboard-gap.ts#findOwnRow. */
+  seed: number;
   avatar: string;
   frame: string | null;
 }
@@ -116,6 +120,7 @@ export async function getLeaderboard(
       volume: rm(e.volume),
       volumeMyr: e.volume,
       pulls: String(e.pulls),
+      seed: e.seed,
       avatar: e.avatar_url ?? avatarForSeed(e.seed),
       frame: e.equipped_frame_level
         ? (frames[String(e.equipped_frame_level)] ?? null)
@@ -132,6 +137,9 @@ export async function getLeaderboard(
 export interface OwnWeekly {
   volumeMyr: number;
   pulls: number;
+  /** The caller's PII-safe seed — the key that finds their row on the public
+   *  board (see leaderboard-gap.ts#findOwnRow). */
+  seed: number;
 }
 
 /**
@@ -147,15 +155,15 @@ export interface OwnWeekly {
  * hop fails; the card then falls back to the copy it shows today.
  */
 export async function getOwnWeekly(): Promise<OwnWeekly | null> {
-  const token = await getAuthToken();
-  if (!token) return null;
   try {
+    const token = await getAuthToken();
+    if (!token) return null;
     const parsed = parseOne(
       OwnWeeklySchema,
       await authedFetch(token, '/store/leaderboard/me'),
     );
     if (!parsed) return null;
-    return { volumeMyr: parsed.volume, pulls: parsed.pulls };
+    return { volumeMyr: parsed.volume, pulls: parsed.pulls, seed: parsed.seed };
   } catch (error) {
     logger.error('[leaderboard] own weekly standing failed to load:', error);
     return null;

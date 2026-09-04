@@ -325,9 +325,10 @@ const LIVE_VALUE_USD_SQL = 'c.market_value * COALESCE(c.market_multiplier, ?)';
 // live fallback for pre-backfill rows. Shared by every pulled-value aggregate
 // (leaderboardTop wins CTE, challengeWeekPool, challengeWeekTop,
 // challengeWeekVolumeFor) so the expression can't drift between boards.
-// Requires aliases `pull pu` / `card c` and binds ONE `?`. Snapshot semantics: a stamped pull KEEPS its
-// value even if the card row is later deleted (the snapshot outlives the
-// LEFT JOIN); an un-stamped one drops to NULL — the pre-snapshot behavior.
+// Requires aliases `pull pu` / `card c` and binds ONE `?`. Snapshot semantics:
+// a stamped pull KEEPS its value even if the card row is later deleted (the
+// snapshot outlives the LEFT JOIN); an un-stamped one drops to NULL — the
+// pre-snapshot behavior.
 const PULLED_VALUE_USD_SQL =
   'COALESCE(pu.recorded_value_usd, ' + LIVE_VALUE_USD_SQL + ')';
 

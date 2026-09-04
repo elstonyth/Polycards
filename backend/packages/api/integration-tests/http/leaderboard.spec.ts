@@ -321,10 +321,10 @@ medusaIntegrationTestRunner({
         });
 
         it('answers 0/0 for a customer who has not pulled this week', async () => {
-          const { token } = await registerCustomer('lb-me-empty@test.dev');
+          const { token, id } = await registerCustomer('lb-me-empty@test.dev');
           const res = await own(token);
           expect(res.status).toBe(200);
-          expect(res.data).toEqual({ volume: 0, pulls: 0 });
+          expect(res.data).toEqual({ volume: 0, pulls: 0, seed: seedOf(id) });
         });
 
         it('answers the caller’s own weekly value, excluding reward pulls and last week', async () => {
@@ -366,7 +366,15 @@ medusaIntegrationTestRunner({
 
           const res = await own(token);
           expect(res.status).toBe(200);
-          expect(res.data).toEqual({ volume: MYR(100), pulls: 2 });
+          // The seed is how the storefront finds this caller's own row on the
+          // public board: a handle is assigned lazily on first render, so for
+          // one board window a genuine top-10 row carries handle: null and
+          // matches nobody. Same value the board already publishes per row.
+          expect(res.data).toEqual({
+            volume: MYR(100),
+            pulls: 2,
+            seed: seedOf(id),
+          });
 
           // And it agrees with the row the public board publishes for them —
           // the gap the storefront renders is a subtraction across these two
@@ -397,8 +405,13 @@ medusaIntegrationTestRunner({
           expect((await own(a.token)).data).toEqual({
             volume: MYR(50),
             pulls: 1,
+            seed: seedOf(a.id),
           });
-          expect((await own(b.token)).data).toEqual({ volume: 0, pulls: 0 });
+          expect((await own(b.token)).data).toEqual({
+            volume: 0,
+            pulls: 0,
+            seed: seedOf(b.id),
+          });
         });
       });
     });
