@@ -4784,9 +4784,11 @@ class PacksModuleService extends MedusaService({
     if (await free(input.desired)) {
       chosen = input.desired;
     } else if (input.strict) {
+      // DUPLICATE_ERROR, not CONFLICT — CONFLICT is the one type whose message
+      // Medusa's error handler discards. See the username guard.
       throw new MedusaError(
-        MedusaError.Types.CONFLICT,
-        'That display name is taken.',
+        MedusaError.Types.DUPLICATE_ERROR,
+        'That display name is already taken.',
       );
     } else {
       for (let attempt = 0; attempt < (input.maxAttempts ?? 8); attempt++) {

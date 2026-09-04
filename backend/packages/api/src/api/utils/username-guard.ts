@@ -95,9 +95,17 @@ export function validateUsernameWrite(mode: 'signup' | 'update') {
       // id and not by string.
       const selfId = actorOf(req);
       if (ownerId && ownerId !== selfId) {
+        // DUPLICATE_ERROR (422), NOT CONFLICT (409), and the difference is not
+        // cosmetic: CONFLICT is the one type Medusa's error handler REPLACES
+        // the message on, substituting "The request conflicted with another
+        // request. You may retry the request with the provided
+        // Idempotency-Key." Verified in
+        // @medusajs/framework/dist/http/middlewares/error-handler.js — this
+        // sentence is unreachable under CONFLICT, and a player renaming
+        // themselves would be told about idempotency keys.
         next(
           new MedusaError(
-            MedusaError.Types.CONFLICT,
+            MedusaError.Types.DUPLICATE_ERROR,
             'That display name is already taken.',
           ),
         );

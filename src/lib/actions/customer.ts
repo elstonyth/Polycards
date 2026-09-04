@@ -13,7 +13,7 @@
 import type { HttpTypes } from '@medusajs/types';
 import { logger } from '@/lib/logger';
 import { updateCustomerProfile } from '@/lib/data/customer';
-import { friendlyError, type ErrorRule } from '@/lib/errors';
+import { friendlyError, httpStatus, type ErrorRule } from '@/lib/errors';
 import {
   NAME_MAX,
   normalizePhone,
@@ -119,6 +119,14 @@ export async function updateProfile(input: {
     return { ok: true, customer: toProfileCustomer(customer) };
   } catch (error) {
     logger.error('[profile] update failed:', error);
+    // Belt to the message rules' braces. The only thing this route can conflict
+    // on is the username, and matching the status means the copy survives even
+    // if the backend's wording drifts — which it already did once: a CONFLICT's
+    // message is replaced wholesale by Medusa's error handler, so the first
+    // version of this reached the user as "Could not save your changes."
+    if (httpStatus(error) === 409 || httpStatus(error) === 422) {
+      return { ok: false, error: USERNAME_TAKEN };
+    }
     return {
       ok: false,
       error: friendlyError(

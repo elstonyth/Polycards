@@ -22,7 +22,7 @@ import {
   setOauthState,
 } from '@/lib/data/customer';
 import { fetchProfileHandle } from '@/lib/data/profiles';
-import { friendlyError, type ErrorRule } from '@/lib/errors';
+import { friendlyError, httpStatus, type ErrorRule } from '@/lib/errors';
 import { bindReferral, setReferralCookie } from '@/lib/referral-cookie';
 import { normalizeReferralCode } from '@/lib/referral-code';
 import { lookupReferralCode } from '@/lib/data/referral';
@@ -280,6 +280,19 @@ export async function signup(input: {
     return result;
   } catch (error) {
     logger.error('[auth] signup failed:', error);
+    // A 409/422 out of customer-create means the username is taken — the email
+    // and phone collisions above are message-matched and land on 400. Checked
+    // by status because Medusa's error handler replaces a CONFLICT's message
+    // with boilerplate, so the backend's own sentence may not survive the trip.
+    if (
+      first_name &&
+      (httpStatus(error) === 409 || httpStatus(error) === 422)
+    ) {
+      return {
+        ok: false,
+        error: 'That username is taken — please pick another.',
+      };
+    }
     return {
       ok: false,
       error: friendlyError(
