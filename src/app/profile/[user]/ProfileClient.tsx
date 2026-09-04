@@ -9,9 +9,7 @@ import { SlabImage } from '@/components/SlabImage';
 import { FramedAvatar } from '@/components/FramedAvatar';
 import { rm, num } from '@/lib/format';
 import { type ProfileViewUser } from '@/lib/profile-view';
-
-const TABS = ['Collection', 'Activity'] as const;
-type Tab = (typeof TABS)[number];
+import { TABS, type Tab } from './tabs';
 
 export default function ProfileClient({
   user,
@@ -173,7 +171,16 @@ export default function ProfileClient({
           </div>
         ))}
 
-      {tab === 'Activity' && (
+      {/* Empty state: Activity is now a LANDING tab (the pull feed's avatars
+          deep-link to ?tab=activity), and an empty <ul> renders as a bare
+          hairline box — Collection has always had one. */}
+      {tab === 'Activity' && activity.length === 0 && (
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/60">
+          No activity yet.
+        </div>
+      )}
+
+      {tab === 'Activity' && activity.length > 0 && (
         <ul className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
           {activity.map((a, i) => (
             <li

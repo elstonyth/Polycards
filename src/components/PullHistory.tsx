@@ -160,15 +160,19 @@ function Row({
         <Link
           href={`/profile/${pull.profileHandle}?tab=activity`}
           aria-label={`View ${pull.who}'s activity`}
-          className={cn('shrink-0 rounded-full', focusRing)}
+          // p-0.5/-m-0.5: the 40px face is the smallest control on the row, and
+          // a bare 40px box misses the 44px tap target DESIGN.md asks for. The
+          // padding buys the 4px; the negative margin keeps the row's geometry
+          // exactly where it was.
+          className={cn(
+            '-m-0.5 shrink-0 rounded-full p-0.5',
+            'transition-opacity hover:opacity-75 motion-reduce:transition-none',
+            focusRing,
+          )}
         >
           {avatar}
         </Link>
-      ) : (
-        // No public profile (anonymised row, or the reel's own "You" rows) —
-        // a dead link would be worse than a plain face.
-        avatar
-      )}
+      ) : null}
       {onSelect ? (
         <button
           type="button"
@@ -176,6 +180,11 @@ function Row({
           aria-label={label}
           className={cardClass}
         >
+          {/* A row with no public profile (anonymised, or the reel's own "You"
+              rows) keeps its face INSIDE the card control — before this
+              change that 40px opened the card, and a link-less span sitting
+              outside would have turned it into dead space. */}
+          {!pull.profileHandle && avatar}
           {inner}
         </button>
       ) : (
@@ -184,6 +193,7 @@ function Row({
           aria-label={label}
           className={cardClass}
         >
+          {!pull.profileHandle && avatar}
           {inner}
         </Link>
       )}

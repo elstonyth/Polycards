@@ -4,6 +4,7 @@ import { getPublicProfile } from '@/lib/data/profiles';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
 import { mockProfileView, toProfileView } from '@/lib/profile-view';
 import ProfileClient from './ProfileClient';
+import { tabFromParam } from './tabs';
 
 // Real public profiles (Task B): the param is a collector handle resolved via
 // GET /store/profiles/:handle (safe-public subset, no PII). Unknown handles —
@@ -83,10 +84,5 @@ export default async function ProfilePage({
     result.status === 'ok'
       ? toProfileView(result.profile, avatarFrames)
       : mockProfileView(userOrGeneric(handle));
-  return (
-    <ProfileClient
-      user={view}
-      initialTab={tab === 'activity' ? 'Activity' : 'Collection'}
-    />
-  );
+  return <ProfileClient user={view} initialTab={tabFromParam(tab)} />;
 }

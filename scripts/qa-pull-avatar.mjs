@@ -35,6 +35,13 @@ if ((await feed.locator('a[aria-label*="activity"]').count()) === 0) {
 } else {
   console.log('avatar link label:', await avatar.getAttribute('aria-label'));
   console.log('avatar href:', await avatar.getAttribute('href'));
+  // Measure the control this change CREATED: the 40px face is the smallest
+  // thing on the row and misses DESIGN.md's 44px tap target unless it carries
+  // padding, and no other check in this repo would catch that.
+  const box = await avatar.boundingBox();
+  console.log(`avatar tap target: ${box?.width}x${box?.height}`);
+  if (!box || box.width < 44 || box.height < 44)
+    fails.push(`avatar tap target ${box?.width}x${box?.height} is under 44x44`);
   await avatar.click();
   await page.waitForURL(/\/profile\//, { timeout: 15000 });
   console.log('after avatar click:', page.url());
@@ -56,6 +63,27 @@ await row.scrollIntoViewIfNeeded();
 await row.click();
 await page.waitForURL(/\/card\//, { timeout: 15000 });
 console.log('after row click:', page.url());
+
+// A row WITHOUT a public handle keeps its face inside the card control, so
+// that 40px still opens the card — before this change every avatar did, and
+// leaving an unlinked face outside the control would make it dead space.
+await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+await feed.scrollIntoViewIfNeeded();
+await page.waitForTimeout(1500);
+const facelessFace = feed
+  .locator(
+    'li:not(:has(a[aria-label*="activity"])) a[aria-label*="pulled"] img',
+  )
+  .first();
+if ((await facelessFace.count()) === 0) {
+  skips.push(
+    'every row in this feed has a public handle — unlinked-face check skipped',
+  );
+} else {
+  await facelessFace.click();
+  await page.waitForURL(/\/card\//, { timeout: 15000 });
+  console.log('unlinked face opens the card:', page.url());
+}
 
 // Pack detail: the same rows are BUTTONS (onSelect opens the card overlay).
 await page.goto(`${BASE}/slots/bronze-pack`, { waitUntil: 'domcontentloaded' });
@@ -106,5 +134,15 @@ for (const width of [320, 375, 412, 1280]) {
 
 await browser.close();
 for (const s of skips) console.log(`SKIPPED: ${s}`);
-console.log(fails.length ? `FAIL\n- ${fails.join('\n- ')}` : 'PASS');
-process.exit(fails.length ? 1 : 0);
+// A skipped check is NOT a pass: printing PASS after skipping the avatar
+// assertions reports an unverified feature as verified — the same vacuous
+// shape as an axe run with zero passes.
+if (fails.length) {
+  console.log(`FAIL\n- ${fails.join('\n- ')}`);
+  process.exit(1);
+}
+if (skips.length) {
+  console.log('INCONCLUSIVE — the checks above were skipped, nothing proven');
+  process.exit(2);
+}
+console.log('PASS');
