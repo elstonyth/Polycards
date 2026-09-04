@@ -56,16 +56,31 @@ function actorOf(req: MedusaRequest): string | undefined {
  * workflow. Touching only `req.body` is therefore invisible downstream: it was,
  * until this function, why a signup sending "   " stored three spaces and why a
  * name saved as " MOONBREON " could sit in the database one character off from
- * the URL that has to match it. Whether the validator has run yet depends on
- * registration order, so write through to both and let whichever exists win.
+ * the URL that has to match it.
+ *
+ * The validator runs BEFORE this guard on those routes — measured, not assumed:
+ * with only the `req.body` write, the nameless-signup spec stored the untouched
+ * value, which can only happen if `validatedBody` had already been parsed off
+ * it. `req.body` is written too because a route without a validator has nothing
+ * else, and the count is asserted: a Medusa version that renames or freezes
+ * `validatedBody` must fail loudly here rather than degrade this guard into a
+ * no-op that silently stores what it was written to reject.
  */
 function rewriteName(req: MedusaRequest, value: unknown): void {
   const bodies = [req.body, (req as { validatedBody?: unknown }).validatedBody];
+  let written = 0;
   for (const body of bodies) {
     if (!body || typeof body !== 'object') continue;
     const record = body as Record<string, unknown>;
     if (value === undefined) delete record.first_name;
     else record.first_name = value;
+    written += 1;
+  }
+  if (written === 0) {
+    throw new MedusaError(
+      MedusaError.Types.UNEXPECTED_STATE,
+      'Could not apply the display-name rules to this request.',
+    );
   }
 }
 
