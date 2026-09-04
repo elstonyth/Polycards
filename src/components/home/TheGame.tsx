@@ -1,15 +1,8 @@
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import Reveal from '@/components/Reveal';
+import { RankGlyph } from '@/components/RankGlyph';
 import type { LeaderboardEntry } from '@/lib/data/leaderboard';
-
-/** Medal disc classes, rank 1→3 — mirrors the leaderboard's medalStyle()
- *  (chase gold / silver / bronze) so "See ranks" lands on the same golds. */
-const MEDAL = [
-  'bg-chase text-neutral-950',
-  'bg-neutral-300 text-neutral-950',
-  'bg-amber-700 text-amber-50',
-] as const;
 
 /**
  * Board 05 — THE FLOOR PAYS OUT. Renders the top-3 weekly rippers; the whole
@@ -49,13 +42,9 @@ export default function TheGame({
               </Link>
             </div>
             <ol className="mt-2 flex flex-col gap-2">
-              {podium.map((entry, i) => (
+              {podium.map((entry) => (
                 <li key={entry.rank} className="flex items-center gap-3">
-                  <span
-                    className={`font-heading flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm ${MEDAL[i] ?? MEDAL[2]}`}
-                  >
-                    {entry.rank}
-                  </span>
+                  <RankGlyph rank={entry.rank} />
                   <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-white">
                     {entry.name}
                   </span>
