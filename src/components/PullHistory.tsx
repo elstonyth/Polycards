@@ -64,8 +64,11 @@ function Row({
   // The label carries EVERYTHING sighted users see in the row — an aria-label
   // REPLACES the content for SR users.
   const label = `${pull.who} pulled ${pull.name} — ${pull.rarity}, ${pull.value}, ${pull.agoLabel}`;
+  // No ring-offset: both controls now sit INSIDE the neutral-900 row (which
+  // goes neutral-800 on hover), where the old page-ground offset color drew a
+  // dark band around the ring.
   const focusRing =
-    'outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950';
+    'outline-none focus-visible:ring-2 focus-visible:ring-white/40';
   const cardClass = cn(
     'flex min-w-0 flex-1 items-center gap-2 rounded-lg text-left @xs:gap-3',
     focusRing,
