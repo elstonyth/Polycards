@@ -267,6 +267,13 @@ module.exports = defineConfig({
     // storefront also overrides it per-request via body.callback_url so one build
     // works local + prod); it must exactly match an Authorised redirect URI on the
     // Google OAuth client (Cloud project `polycards`).
+    //
+    // The provider is OUR subclass of @medusajs/auth-google, not the package
+    // itself: upstream POSTs the authorization code to Google exactly once with
+    // no retry, so a transient transport failure is a dead sign-in (prod
+    // incident 2026-09-04). Same id, same options, same validateOptions —
+    // see src/modules/auth-google/service.ts. Resolved through path.join for
+    // the same reason as resend/packs below.
     {
       resolve: '@medusajs/medusa/auth',
       options: {
@@ -280,7 +287,7 @@ module.exports = defineConfig({
           process.env.GOOGLE_CALLBACK_URL
             ? [
                 {
-                  resolve: '@medusajs/auth-google',
+                  resolve: path.join(__dirname, 'src/modules/auth-google'),
                   id: 'google',
                   options: {
                     clientId: process.env.GOOGLE_CLIENT_ID,
