@@ -5,20 +5,13 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
 import { FramedAvatar } from '@/components/FramedAvatar';
+import { RankGlyph } from '@/components/RankGlyph';
 import { PrizeCard } from './PrizeCard';
 import type { LeaderboardEntry } from '@/lib/data/leaderboard';
 import type { ChallengeRankPrize } from '@/lib/data/challenge';
 
 const PERIODS = ['This Week', 'All Time'] as const;
 type Period = (typeof PERIODS)[number];
-
-/** Medal colors for ranks 1–3 (chase gold / silver / bronze), neutral after. */
-function medalStyle(rank: number): { bg: string; text: string } {
-  if (rank === 1) return { bg: 'bg-chase', text: 'text-neutral-950' };
-  if (rank === 2) return { bg: 'bg-neutral-300', text: 'text-neutral-950' };
-  if (rank === 3) return { bg: 'bg-amber-700', text: 'text-amber-50' };
-  return { bg: 'bg-neutral-800', text: 'text-neutral-400' };
-}
 
 export default function LeaderboardClient({
   weekly,
@@ -116,7 +109,6 @@ export default function LeaderboardClient({
             </div>
             <ol className="mt-2 overflow-hidden rounded-2xl border border-white/10 bg-neutral-900">
               {entries.map((entry, i) => {
-                const medal = medalStyle(entry.rank);
                 const isOwn = own != null && entry.handle === ownHandle;
                 const prize =
                   period === 'This Week'
@@ -131,16 +123,7 @@ export default function LeaderboardClient({
                       isOwn && 'bg-white/[0.04]',
                     )}
                   >
-                    <span
-                      className={cn(
-                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[13px] font-bold',
-                        medal.bg,
-                        medal.text,
-                      )}
-                      aria-label={`Rank ${entry.rank}`}
-                    >
-                      {entry.rank}
-                    </span>
+                    <RankGlyph rank={entry.rank} />
                     <FramedAvatar
                       src={entry.avatar}
                       frameSrc={entry.frame}
