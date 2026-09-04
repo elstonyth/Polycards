@@ -31,8 +31,9 @@ export default function ProfileClient({
     { icon: Layers, label: 'Pulls', value: num(user.pulls) },
     { icon: TrendingUp, label: 'Volume', value: rm(user.volume) },
   ];
-  // Real profiles ship their pull activity; the mock pool derives a synthetic
-  // feed from the collection (unchanged legacy behavior).
+  // Profiles ship their pull activity. The fallback below derives a feed from
+  // the collection — it survives the mock pool's removal because a real profile
+  // fetched from an older backend can still arrive without `activity`.
   const activity = useMemo(
     () =>
       user.activity ??

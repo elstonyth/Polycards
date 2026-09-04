@@ -245,7 +245,8 @@ async function mintCustomer() {
   });
   await call('/store/customers', {
     token: reg.token,
-    body: { email, first_name: 'QA' },
+    // Unique per run — the username is the profile URL, so it cannot repeat.
+    body: { email, first_name: `QAResp${Date.now()}`.slice(0, 30) },
   });
   const { token } = await call('/auth/customer/emailpass', {
     body: { email, password },

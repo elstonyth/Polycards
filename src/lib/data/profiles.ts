@@ -1,5 +1,6 @@
 /**
- * Public-profile data seam (Task B).
+ * Public-profile data seam. The handle in these URLs is the collector's
+ * DISPLAY NAME — one value, so a rename moves the profile.
  *
  * `GET /store/profiles/:handle` is the custom PUBLIC backend route (safe
  * subset only — display name, avatar seed, join date, pull stats, recent
@@ -67,17 +68,22 @@ export interface PublicProfile {
 }
 
 /**
- * Result of a public-profile lookup. `notfound` (404 / unknown handle) and
- * `error` (5xx, network, schema-invalid) are distinct on purpose: the page
- * falls back to the deterministic mock pool for `notfound` (a legacy-handle
- * product choice) but must NOT do so for `error` — a backend outage on a real
- * handle would otherwise render a fabricated persona under the real user's name.
+ * Result of a public-profile lookup. Three failure states, three different
+ * pages, and they must stay distinct.
  *
- * `unavailable` (410) is the third case and exists for the same reason: the
- * backend returns it for an administratively DISABLED player, whose profile is
- * meant to disappear. Folding it into `notfound` would hand that handle the
- * mock persona — publishing a made-up collector exactly where an operator just
- * asked for nothing to be shown.
+ * `notfound` (404) means nobody holds this display name — a typo, or the old
+ * URL of somebody who has since renamed. It is a real 404 page. It used to be
+ * answered with a deterministic MOCK persona so every /profile/<x> link kept
+ * rendering; that is what got reported as leftover data on 2026-09-04, because
+ * /profile/MOONBREON returned an invented collector and so did every other
+ * string anyone typed.
+ *
+ * `error` (5xx, network, schema-invalid) is a real profile we could not load,
+ * and says so — retryable, and never conflated with "does not exist".
+ *
+ * `unavailable` (410) is an administratively DISABLED player. Distinct from
+ * `notfound` because a 404 now means the name is FREE: showing one for a
+ * disabled account would advertise a name its owner still holds.
  */
 export type ProfileResult =
   | { status: 'ok'; profile: PublicProfile }
@@ -102,12 +108,12 @@ export const getPublicProfile = cache(
       }
       return { status: 'ok', profile: valid as unknown as PublicProfile };
     } catch (error) {
-      // 404 = not a collector handle (e.g. a mock-pool username) — expected.
+      // 404 = nobody holds this display name (typo, or a retired URL).
       if (httpStatus(error) === 404) {
         return { status: 'notfound' };
       }
-      // 410 = a real handle the backend is deliberately hiding (disabled
-      // account). Not an error, and never the mock pool.
+      // 410 = a real name the backend is deliberately hiding (disabled
+      // account). Not an error, and never a 404 — the name is still taken.
       if (httpStatus(error) === 410) {
         return { status: 'unavailable' };
       }

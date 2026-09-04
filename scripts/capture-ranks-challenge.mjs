@@ -93,7 +93,9 @@ const reg = await backend('/auth/customer/emailpass/register', {
 });
 await backend('/store/customers', {
   token: reg.token,
-  body: { email, first_name: 'PW' },
+  // Username is the public profile URL and unique — keep it per-run like the
+  // email above, or the next run collides with this one's customer.
+  body: { email, first_name: `PWRanks${Date.now()}`.slice(0, 30) },
 });
 const { token } = await backend('/auth/customer/emailpass', {
   body: { email, password },

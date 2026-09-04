@@ -13,7 +13,11 @@ import {
 } from '@/lib/actions/auth';
 import { leaveFor } from '@/lib/navigation';
 import { useAuth } from './auth/AuthProvider';
-import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
+import {
+  NAME_MAX,
+  normalizePhone,
+  usernameError,
+} from '@/lib/profile-validation';
 import { PhoneField } from '@/components/PhoneField';
 import { PhoneOtpStep } from '@/components/auth/PhoneOtpStep';
 import {
@@ -36,7 +40,10 @@ const PHONE_INPUT_CLASS =
 // Error notes. `field` marks which input caused the error (wires
 // aria-invalid/-describedby): the password pair, the signup phone, or the
 // optional referral code.
-type Note = { text: string; field?: 'password' | 'phone' | 'referral' };
+type Note = {
+  text: string;
+  field?: 'password' | 'phone' | 'referral' | 'username';
+};
 
 // The signup form's values as they travel through the OTP detour: held for
 // the deferred signup() call and re-seeded into the remounted form.
@@ -218,6 +225,18 @@ export default function AuthForm({
       return;
     }
     const first_name = String(form.get('username') ?? '');
+    // Shape-checked here for the same reason the referral code below is: the
+    // username is now the public profile URL, so a bad one fails the signup —
+    // and failing it AFTER a paid SMS, at the end of the OTP flow, is the worst
+    // possible moment to say "no spaces". Uniqueness still can't be settled
+    // client-side; signup() surfaces that.
+    if (first_name.trim()) {
+      const bad = usernameError(first_name);
+      if (bad) {
+        setNote({ text: bad, field: 'username' });
+        return;
+      }
+    }
     const referral_code = String(form.get('referralCode') ?? '').trim();
 
     if (referral_code) {
@@ -575,10 +594,16 @@ export default function AuthForm({
             name="username"
             type="text"
             placeholder="Username"
-            // Submitted as first_name (a display name), not a login identifier.
+            // Submitted as first_name — which is both the display name AND the
+            // public profile URL (/profile/<username>), so it is unique and
+            // restricted to URL-safe characters. Not a login identifier.
             autoComplete="nickname"
             maxLength={NAME_MAX}
             defaultValue={signupDraft?.first_name}
+            aria-invalid={note?.field === 'username' || undefined}
+            aria-describedby={
+              note?.field === 'username' ? 'auth-form-error' : undefined
+            }
           />
         )}
         <Field

@@ -13,8 +13,13 @@
 import type { HttpTypes } from '@medusajs/types';
 import { logger } from '@/lib/logger';
 import { updateCustomerProfile } from '@/lib/data/customer';
-import { friendlyError, type ErrorRule } from '@/lib/errors';
-import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
+import { friendlyError, httpStatus, type ErrorRule } from '@/lib/errors';
+import {
+  NAME_MAX,
+  normalizePhone,
+  usernameError,
+  USERNAME_TAKEN,
+} from '@/lib/profile-validation';
 import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
 
 export type ProfileCustomer = {
@@ -48,6 +53,18 @@ const PROFILE_RULES: ErrorRule[] = [
     /not authenticated|unauthorized|401/i,
     'Your session has expired. Please log in again.',
   ],
+  // The backend's username guard answers a taken name with this sentence.
+  [/display name is already taken|username is taken/i, USERNAME_TAKEN],
+  // …and the SAME outcome arrives as a raw Postgres error when two renames
+  // race past that guard and the unique index refuses the loser. Without this
+  // rule that user sees a database string; the guard cannot close the window
+  // itself, so the copy has to cover both doors.
+  //
+  // Matched on the INDEX NAME, never on a bare /duplicate key value/ or
+  // /unique constraint/: this route also writes `phone`, which has uniqueness
+  // of its own, and a generic pattern would answer a phone collision by
+  // telling the user their username was taken.
+  [/IDX_customer_first_name_lower_unique/i, USERNAME_TAKEN],
 ];
 
 export async function updateProfile(input: {
@@ -64,6 +81,13 @@ export async function updateProfile(input: {
         error: `Names must be ${NAME_MAX} characters or fewer.`,
       };
     }
+  }
+  // The display name is the public profile URL, so its shape is a hard rule,
+  // not a preference. Checked here as well as in the backend's username guard
+  // because a server action is a public endpoint in its own right.
+  if (input.first_name !== undefined) {
+    const bad = usernameError(input.first_name);
+    if (bad) return { ok: false, error: bad };
   }
   const body: HttpTypes.StoreUpdateCustomer = {
     first_name: clean(input.first_name),
@@ -96,13 +120,21 @@ export async function updateProfile(input: {
     return { ok: true, customer: toProfileCustomer(customer) };
   } catch (error) {
     logger.error('[profile] update failed:', error);
+    // Message rules first, status second — same order as signup(), so neither
+    // action can label one failure as another. Here the status check is pure
+    // belt-and-braces: the only thing this route conflicts on is the username,
+    // but it means the copy survives the backend's wording drifting, which it
+    // already did once — a CONFLICT's message is replaced wholesale by Medusa's
+    // error handler, so the first version of this reached the user as the
+    // generic "Could not save your changes."
+    const matched = friendlyError(error, PROFILE_RULES, '');
+    if (matched) return { ok: false, error: matched };
+    if (httpStatus(error) === 409 || httpStatus(error) === 422) {
+      return { ok: false, error: USERNAME_TAKEN };
+    }
     return {
       ok: false,
-      error: friendlyError(
-        error,
-        PROFILE_RULES,
-        'Could not save your changes. Please try again.',
-      ),
+      error: 'Could not save your changes. Please try again.',
     };
   }
 }

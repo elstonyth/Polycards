@@ -19,17 +19,12 @@ async function findCustomerByMetadata(
   return matches[0] ?? null;
 }
 
-/**
- * By public profile handle (metadata.handle — written by the
- * ensure-profile-handle workflow and the seed script). Exercised by
- * public-profile.spec.ts.
- */
-export async function findCustomerByHandle(
-  customers: ICustomerModuleService,
-  handle: string,
-): Promise<CustomerDTO | null> {
-  return findCustomerByMetadata(customers, "handle", handle);
-}
+// There is no by-handle lookup here any more. A profile handle is the
+// customer's display name (`first_name`), not a metadata key, and it must be
+// matched case-insensitively against an expression index — see
+// PacksModuleService.findCustomerIdByUsername. Routing it through this file's
+// JSON-path equality would also have made `_` a LIKE wildcard on the way, which
+// is how `ash_red` could have resolved someone else's profile.
 
 /**
  * By referral code (metadata.referral_code — written by ensureReferralCode,

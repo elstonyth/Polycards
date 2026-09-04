@@ -1,0 +1,217 @@
+import type {
+  MedusaNextFunction,
+  MedusaRequest,
+  MedusaResponse,
+} from '@medusajs/framework/http';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
+import { evictProfileUsername } from '../../utils/profile-cache';
+import {
+  USERNAME_MAX,
+  USERNAME_MIN,
+  isValidUsername,
+} from '../../utils/profile-handle';
+import PacksModuleService from '../../modules/packs/service';
+import { PACKS_MODULE } from '../../modules/packs';
+
+// `customer.first_name` is the storefront's "Username"/"Display name" AND the
+// public profile URL (/profile/<name>). Medusa's stock customer routes accept
+// it as free text, so without this guard a rename could put a space, a slash or
+// a duplicate of someone else's name straight into a URL.
+//
+// Registered with an explicit `method`, which is what keeps it OFF
+// /store/customers/me/addresses. Medusa registers a middleware that names a
+// method with `app.post(matcher, …)` — exact in Express — and only a
+// method-less one with `app.use(matcher, …)`, which prefix-matches
+// (@medusajs/framework/dist/http/router.js). Dropping the method here would
+// silently extend this guard over delivery addresses, whose `first_name` is a
+// real person's name with spaces in it, and whose uniqueness check would then
+// refuse to save an address because some OTHER customer is called Ada.
+//
+// This guard is the FRIENDLY layer, not the invariant. The invariant is the
+// partial unique index on lower(first_name) (Migration20260904120000): these
+// routes are Medusa's own, a public endpoint is a public endpoint, and two
+// simultaneous renames can both pass the probe below before either writes. The
+// index refuses the loser; this middleware exists so that the overwhelmingly
+// common case gets a sentence a person can act on instead of a database error.
+//
+// Coverage: integration-tests/http/public-profile.spec.ts (the "username
+// guard" describe — signup, rename, case-only edits, and the address form the
+// guard must NOT reach).
+/**
+ * The authenticated customer id, or undefined. Read off a widened request
+ * rather than typing these guards as authenticated: signup is anonymous, and
+ * "no actor" is the right reading there — nobody owns the name yet.
+ */
+function actorOf(req: MedusaRequest): string | undefined {
+  const auth = (req as { auth_context?: { actor_id?: string } }).auth_context;
+  return typeof auth?.actor_id === 'string' ? auth.actor_id : undefined;
+}
+
+/**
+ * Rewrite `first_name` on EVERY copy of the body the route may read.
+ *
+ * Medusa's core store routes are validated by `validateAndTransformBody`, which
+ * parses `req.body` into a separate `req.validatedBody` — and that is the object
+ * .../store/customers/route.js and .../customers/me/route.js hand to the
+ * workflow. Touching only `req.body` is therefore invisible downstream: it was,
+ * until this function, why a signup sending "   " stored three spaces and why a
+ * name saved as " MOONBREON " could sit in the database one character off from
+ * the URL that has to match it.
+ *
+ * The validator runs BEFORE this guard on those routes — measured, not assumed:
+ * with only the `req.body` write, the nameless-signup spec stored the untouched
+ * value, which can only happen if `validatedBody` had already been parsed off
+ * it. `req.body` is written too because a route without a validator has nothing
+ * else, and the count is asserted: a Medusa version that renames or freezes
+ * `validatedBody` must fail loudly here rather than degrade this guard into a
+ * no-op that silently stores what it was written to reject.
+ */
+function rewriteName(req: MedusaRequest, value: unknown): void {
+  const bodies = [req.body, (req as { validatedBody?: unknown }).validatedBody];
+  let written = 0;
+  for (const body of bodies) {
+    if (!body || typeof body !== 'object') continue;
+    const record = body as Record<string, unknown>;
+    if (value === undefined) delete record.first_name;
+    else record.first_name = value;
+    written += 1;
+  }
+  if (written === 0) {
+    throw new MedusaError(
+      MedusaError.Types.UNEXPECTED_STATE,
+      'Could not apply the display-name rules to this request.',
+    );
+  }
+}
+
+export const CHARSET_MESSAGE =
+  `Your display name can use letters, numbers, underscores and hyphens only, ` +
+  `and must be ${USERNAME_MIN}-${USERNAME_MAX} characters. It is also your ` +
+  `profile link.`;
+
+export function validateUsernameWrite(mode: 'signup' | 'update') {
+  return async function usernameGuard(
+    req: MedusaRequest,
+    _res: MedusaResponse,
+    next: MedusaNextFunction,
+  ): Promise<void> {
+    try {
+      const body = req.body as Record<string, unknown> | null | undefined;
+      if (!body || typeof body !== 'object' || !('first_name' in body)) {
+        // Absent means "don't touch it". On signup the account is created
+        // without a name and gets an anonymous one on its first
+        // GET /store/profiles/me — an unnamed account is allowed, an
+        // unreachable one is not.
+        next();
+        return;
+      }
+
+      const raw = body.first_name;
+      const value = typeof raw === 'string' ? raw.trim() : raw;
+
+      if (value === null || value === '' || value === undefined) {
+        if (mode === 'signup') {
+          // Same as absent — but the key has to GO, not merely be tolerated.
+          // '' is a real index value, so leaving it in the body stores it, and
+          // the SECOND nameless signup trips
+          // IDX_customer_first_name_lower_unique: someone who typed no name at
+          // all would be told their username was taken. Dropping it hands the
+          // account to the lazy assignment, same as if it were never sent.
+          rewriteName(req, undefined);
+          next();
+          return;
+        }
+        // On update, clearing it would delete a live profile URL out from under
+        // every link pointing at it.
+        next(
+          new MedusaError(
+            MedusaError.Types.INVALID_DATA,
+            'A display name is required — it is your profile link.',
+          ),
+        );
+        return;
+      }
+
+      if (!isValidUsername(value)) {
+        next(new MedusaError(MedusaError.Types.INVALID_DATA, CHARSET_MESSAGE));
+        return;
+      }
+
+      // Normalize the stored value to the trimmed form the checks ran against,
+      // so a name saved as " MOONBREON " cannot sit in the DB one character off
+      // from the URL that has to match it.
+      rewriteName(req, value);
+
+      const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+      const ownerId = await packs.findCustomerIdByUsername(value);
+      // Case-only edits of your own name (moonbreon -> MOONBREON) are a rename
+      // of the display, not a claim on someone else's, so the owner check is by
+      // id and not by string.
+      const selfId = actorOf(req);
+      if (ownerId && ownerId !== selfId) {
+        // DUPLICATE_ERROR (422), NOT CONFLICT (409), and the difference is not
+        // cosmetic: CONFLICT is the one type Medusa's error handler REPLACES
+        // the message on, substituting "The request conflicted with another
+        // request. You may retry the request with the provided
+        // Idempotency-Key." Verified in
+        // @medusajs/framework/dist/http/middlewares/error-handler.js — this
+        // sentence is unreachable under CONFLICT, and a player renaming
+        // themselves would be told about idempotency keys.
+        next(
+          new MedusaError(
+            MedusaError.Types.DUPLICATE_ERROR,
+            'That display name is already taken.',
+          ),
+        );
+        return;
+      }
+      next();
+    } catch (error) {
+      next(error as Error);
+    }
+  };
+}
+
+/**
+ * Evict BOTH sides of a rename from the 30s public-profile cache.
+ *
+ * The new name is obvious; the old one is the half that bites. After a rename
+ * the old username's URL must 404, but its cached body is still in the Map and
+ * keeps that abandoned profile answering — which reads exactly like "the fix
+ * didn't work", for half a minute, on the one URL somebody is most likely to
+ * re-check first.
+ *
+ * The old name is captured BEFORE the write (it is gone afterwards) and both
+ * are dropped on `finish`, so a rejected or failed request evicts nothing.
+ */
+export async function renameProfileCacheEviction(
+  req: MedusaRequest,
+  res: MedusaResponse,
+  next: MedusaNextFunction,
+): Promise<void> {
+  const body = req.body as Record<string, unknown> | null | undefined;
+  const desired =
+    typeof body?.first_name === 'string' ? body.first_name.trim() : '';
+  const customerId = actorOf(req);
+  if (desired === '' || !customerId) {
+    next();
+    return;
+  }
+  let previous: string | null = null;
+  try {
+    const customers = req.scope.resolve(Modules.CUSTOMER);
+    const customer = await customers.retrieveCustomer(customerId, {
+      select: ['id', 'first_name'],
+    });
+    previous = customer?.first_name ?? null;
+  } catch {
+    // Best-effort, like invalidateProfileForCustomer: a missed eviction costs
+    // ≤30s of staleness and must never fail the rename itself.
+  }
+  res.on('finish', () => {
+    if (res.statusCode >= 400) return;
+    evictProfileUsername(previous);
+    evictProfileUsername(desired);
+  });
+  next();
+}

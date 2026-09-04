@@ -58,7 +58,8 @@ await api('/store/customers', {
   token: reg.token,
   body: {
     email: EMAIL,
-    first_name: 'Qa',
+    // Unique per run — the username is the profile URL, so it cannot repeat.
+    first_name: `QaFee${stamp}`.slice(0, 30),
     last_name: 'Fee',
     // Phone is unique per customer (registration gate) — derive it from the
     // run stamp so reruns never collide on an already-used number.

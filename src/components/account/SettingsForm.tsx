@@ -1,17 +1,27 @@
 'use client';
 
-import { useRef, useState, type FormEvent } from 'react';
+import { useId, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { parsePhoneNumberFromString } from 'libphonenumber-js/min';
 import { updateProfile, type ProfileCustomer } from '@/lib/actions/customer';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { INPUT_CLASS } from '@/components/account/ui';
-import { NAME_MAX, normalizePhone } from '@/lib/profile-validation';
+import {
+  NAME_MAX,
+  normalizePhone,
+  usernameError,
+} from '@/lib/profile-validation';
 import { PhoneField } from '@/components/PhoneField';
 import { PhoneOtpStep } from '@/components/auth/PhoneOtpStep';
 import { startPhoneOtp, changePhone } from '@/lib/actions/phone-verification';
 import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
+import { SITE_URL } from '@/lib/site';
+
+// The profile-link preview shows a host, not a full URL — the deployed origin
+// where there is one, so a dev build doesn't promise a polycards.gg link it
+// isn't serving.
+const SITE_HOST = SITE_URL.replace(/^https?:\/\//, '');
 
 // Read-only treatment shared by the email field and (under enforcement) the
 // phone field — copied from the email input's classes below.
@@ -31,6 +41,11 @@ export default function SettingsForm({ customer }: Props) {
   const { customer: authCustomer, setCustomer } = useAuth();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  // The username is the profile URL, so the field shows the link it is about to
+  // become as you type. Tracked rather than read on submit because the point is
+  // to make the consequence visible BEFORE saving — someone renaming themselves
+  // is also retiring their old link, and nothing else on this page says so.
+  const [nameDraft, setNameDraft] = useState(customer.first_name ?? '');
   // Local phone display, so a verified change reflects immediately without
   // waiting on the router.refresh() below to re-fetch the server component.
   const [phone, setPhone] = useState(customer.phone ?? null);
@@ -94,16 +109,19 @@ export default function SettingsForm({ customer }: Props) {
 
       if (result.ok) {
         // Sync the header's user menu (AuthCustomer has no phone — drop it).
-        // The profile handle and avatar are name-independent — carry the
-        // current ones over.
+        // The handle is NOT name-independent any more: it IS the display name,
+        // so it has to be re-read from the saved customer. Carrying the old one
+        // over — which this did — left the "My profile" link pointing at the
+        // URL the rename had just vacated, i.e. a 404.
         setCustomer({
           id: result.customer.id,
           email: result.customer.email,
           first_name: result.customer.first_name,
           last_name: result.customer.last_name,
-          handle: authCustomer?.handle ?? null,
+          handle: result.customer.first_name,
           avatar_url: authCustomer?.avatar_url ?? null,
         });
+        setNameDraft(result.customer.first_name ?? '');
         setNote({ ok: true, text: 'Changes saved.' });
         router.refresh();
         return;
@@ -223,14 +241,7 @@ export default function SettingsForm({ customer }: Props) {
   if (!PHONE_VERIFICATION_REQUIRED) {
     return (
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
-        <Field
-          label="Display name"
-          name="first_name"
-          defaultValue={customer.first_name ?? ''}
-          autoComplete="given-name"
-          placeholder="Your name"
-          maxLength={NAME_MAX}
-        />
+        <UsernameField value={nameDraft} onValueChange={setNameDraft} />
         <Field
           label="Last name"
           name="last_name"
@@ -276,14 +287,10 @@ export default function SettingsForm({ customer }: Props) {
   return (
     <div className="flex flex-col gap-4">
       <form id="settings-profile" onSubmit={onSubmit} hidden />
-      <Field
-        label="Display name"
-        name="first_name"
+      <UsernameField
+        value={nameDraft}
+        onValueChange={setNameDraft}
         form="settings-profile"
-        defaultValue={customer.first_name ?? ''}
-        autoComplete="given-name"
-        placeholder="Your name"
-        maxLength={NAME_MAX}
       />
       <Field
         label="Last name"
@@ -519,14 +526,67 @@ function SaveRow({
   );
 }
 
+/**
+ * The username field — the one input on this page that also rewrites a URL.
+ *
+ * It shows the link live rather than describing it, because the consequence is
+ * not obvious from a text box: changing this retires the old /profile/<name>
+ * address, and anyone who bookmarked or shared it lands on a 404. Saying so
+ * next to the value being typed is the only place that warning is actually read.
+ *
+ * Validation is local and immediate (`usernameError`), but it is a courtesy —
+ * the backend's username guard is what refuses a bad or taken name, and the
+ * unique index behind it is what makes "no two people, one link" true.
+ */
+function UsernameField({
+  value,
+  onValueChange,
+  form,
+}: {
+  value: string;
+  onValueChange: (next: string) => void;
+  form?: string;
+}) {
+  const trimmed = value.trim();
+  // Only complain about a name they have actually started typing; an empty
+  // field on first paint is not yet a mistake.
+  const error = trimmed === '' ? null : usernameError(trimmed);
+  return (
+    <Field
+      label="Username"
+      name="first_name"
+      form={form}
+      value={value}
+      onChange={(e) => onValueChange(e.target.value)}
+      autoComplete="nickname"
+      placeholder="Your username"
+      maxLength={NAME_MAX}
+      aria-invalid={error ? true : undefined}
+      hint={
+        error ??
+        (trimmed === ''
+          ? 'This is also your public profile link.'
+          : `Your profile link: ${SITE_HOST}/profile/${trimmed} — changing it retires the old one.`)
+      }
+      hintTone={error ? 'error' : 'muted'}
+    />
+  );
+}
+
 function Field({
   label,
   hint,
+  hintTone = 'muted',
   ...props
 }: {
   label: string;
   hint?: string;
+  hintTone?: 'muted' | 'error';
 } & React.InputHTMLAttributes<HTMLInputElement>) {
+  // The hint carries the validation error (see UsernameField), so it has to be
+  // announced with the input rather than read as loose text after it —
+  // aria-invalid alone says "wrong" without saying what is wrong.
+  const hintId = useId();
   return (
     <label className="block">
       <span className="mb-1.5 block text-[12px] font-medium text-white/55">
@@ -534,11 +594,19 @@ function Field({
       </span>
       <input
         aria-label={props['aria-label'] ?? label}
+        aria-describedby={hint ? hintId : undefined}
         {...props}
         className={INPUT_CLASS}
       />
       {hint && (
-        <span className="mt-1 block text-[11px] text-white/55">{hint}</span>
+        <span
+          id={hintId}
+          className={`mt-1 block text-[11px] ${
+            hintTone === 'error' ? 'text-red-400' : 'text-white/55'
+          }`}
+        >
+          {hint}
+        </span>
       )}
     </label>
   );
