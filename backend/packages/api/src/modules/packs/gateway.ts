@@ -4,6 +4,7 @@ import type { SettlementState } from './globepay';
 import type { GlobePayConfig } from './globepay-client';
 import type { TgpayConfig, TgpayCustomer } from './tgpay-client';
 import { PACKS_MODULE } from './index';
+import { banksFor, findBank, gatewayBankCode, TGPAY_SANDBOX_BANK } from './banks';
 
 // The gateway seam. Every caller that used to import the HTTP client from
 // globepay-client imports it from here instead; the functions keep GlobePay's
@@ -305,9 +306,25 @@ type GatewayAdapter<C extends GatewayConfig> = {
 const globepayAdapter: GatewayAdapter<GlobePayConfig> = {
   submitDeposit: globepay.submitDeposit,
   getDepositDetail: globepay.getDepositDetail,
-  submitWithdrawal: globepay.submitWithdrawal,
+  // Saved accounts and rows carry the canonical bank id; GlobePay wants its
+  // own code. A code the registry does not know passes through untouched —
+  // that is exactly what every pre-registry row and metadata entry carries,
+  // and GlobePay is the gateway that issued it.
+  submitWithdrawal: (input, config) =>
+    globepay.submitWithdrawal(
+      {
+        ...input,
+        destinationBankCode:
+          gatewayBankCode(input.destinationBankCode, 'globepay')?.code ??
+          input.destinationBankCode,
+      },
+      config,
+    ),
   getWithdrawalDetail: globepay.getWithdrawalDetail,
-  getSupportedBanks: globepay.getSupportedBanks,
+  // The registry snapshot of GetSupportedBanks (31 MYR banks, 2026-09-05)
+  // rather than the live call: the picker must hand out canonical ids, and
+  // GlobePay is on its way out.
+  getSupportedBanks: async () => banksFor('globepay'),
   checkBalance: globepay.checkBalance,
 };
 
@@ -381,12 +398,16 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
   },
 
   async submitWithdrawal(input, config) {
-    const bank = tgpay
-      .tgpayBanks(config)
-      .find((b) => b.bankCode === input.destinationBankCode);
+    // Canonical id (or any legacy alias) → TGPay's SWIFT code + the exact
+    // name TGPay pairs with it. The sandbox dummy bank exists only there.
+    const known = findBank(input.destinationBankCode);
+    const bank =
+      known && (known.id !== TGPAY_SANDBOX_BANK.id || tgpay.tgpayIsSandbox(config))
+        ? gatewayBankCode(input.destinationBankCode, 'tgpay')
+        : null;
     if (!bank) {
       throw new tgpay.TgpayError(
-        `TGPay: unknown payout bank code ${input.destinationBankCode}`,
+        `TGPay: cannot pay to bank ${input.destinationBankCode} — not in its SWIFT table`,
         ['TGPAY_UNKNOWN_BANK'],
         400,
         true,
@@ -407,8 +428,8 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
         email: input.email,
         userName: input.destinationAccountHolderName,
         bankAccNumber: input.destinationAccountNumber,
-        bankCode: bank.bankCode,
-        bankName: bank.bankName,
+        bankCode: bank.code,
+        bankName: bank.name,
         notifyUrl: input.notifyUrl,
       },
       config,
@@ -438,7 +459,7 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
   },
 
   async getSupportedBanks(config) {
-    return [...tgpay.tgpayBanks(config)];
+    return banksFor('tgpay', { sandbox: tgpay.tgpayIsSandbox(config) });
   },
 
   /**

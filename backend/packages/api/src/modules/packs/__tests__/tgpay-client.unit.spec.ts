@@ -5,13 +5,11 @@ import {
   createPayout,
   orderFromCheckoutLink,
   queryPayment,
-  tgpayBanks,
   tgpayCallbackAuthorized,
   tgpayConfigFromEnv,
   tgpayPaymentState,
   TgpayError,
   TGPAY_NOT_FOUND,
-  TGPAY_SANDBOX_BANK,
   type TgpayConfig,
 } from '../tgpay-client';
 
@@ -216,15 +214,6 @@ describe('pure helpers', () => {
     expect(tgpayPaymentState('PENDING')).toBe('pending');
     expect(tgpayPaymentState('SOMETHING_NEW')).toBe('pending');
     expect(tgpayPaymentState('')).toBe('pending');
-  });
-
-  it('the sandbox bank appears only for a sandbox base URL', () => {
-    expect(tgpayBanks(config)[0]).toEqual(TGPAY_SANDBOX_BANK);
-    expect(
-      tgpayBanks({ baseUrl: 'https://api.example.test/api/v2' }).some(
-        (b) => b.bankCode === TGPAY_SANDBOX_BANK.bankCode,
-      ),
-    ).toBe(false);
   });
 
   it('callback auth needs BOTH headers to match exactly', () => {

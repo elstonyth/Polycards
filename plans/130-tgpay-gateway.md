@@ -154,3 +154,37 @@ local env file, so `integration-tests/setup.js` now deletes
 - Verified locally: card renders, a fresh deposit is stamped `gateway=tgpay`
   and redirects to TGPay. Switching TO GlobePay cannot be exercised locally
   (not configured here) — covered by unit tests.
+
+## Bank preservation across gateways (same day, user request)
+
+Saved payout accounts must survive any gateway switch, so nobody re-enters
+bank details when gateways two and three arrive.
+
+- `modules/packs/banks.ts`: a gateway-neutral registry of Malaysian banks.
+  Canonical id = SWIFT/BIC where TGPay publishes one, else an uppercase slug;
+  each entry carries every gateway's own code AND the exact name that gateway
+  pairs with it (TGPay validates the pair). Sources: TGPay's SWIFT table (20)
+  and GlobePay's live GetSupportedBanks for Testpolycard (31, 2026-09-05).
+- Saved accounts and withdrawal rows store the canonical id. The adapters
+  translate at payout time (`gatewayBankCode`); a bank the active gateway
+  cannot pay to is a definite refusal → refund, never a silent misroute.
+- Legacy metadata and rows carry GlobePay's own codes: `findBank` accepts any
+  gateway code as an alias, `parseSavedBankAccounts` canonicalises on read
+  (recomputing the id, which is derived from the bank code), and the GlobePay
+  adapter passes unknown codes through unchanged (they are its own). No
+  backfill needed; the next write persists the canonical form.
+- The bank picker (`/store/credits/withdraw/banks`) lists the active gateway's
+  banks with canonical ids and neutral names; `POST …/accounts` normalises any
+  alias and refuses unknown banks. Saved-account views carry `supported` for
+  the active gateway; the storefront keeps an unsupported account listed but
+  disabled ("not available with the current payout provider").
+- Verified on the sandbox: account saved on /bank stored as
+  `DUMMYBANKVERIFIED`; a RM 50 customer withdrawal through /bank-withdrawal
+  (after clearing playthrough via `scripts/qa-open-pack-api.mjs` + a
+  sell-back) was accepted by TGPay and settled by its callback: row
+  `settled`, `amount_settled` 50, `net_amount` 49, ledger `WD` −50. Unit
+  tests cover the switch both ways (GlobePay code → TGPay SWIFT pair, and
+  canonical → GlobePay code).
+
+Jest note: `integration-tests/setup.js` also strips
+`PAYOUT_DESTINATION_COOLDOWN_HOURS` and `PAYMENT_CALLBACK_BASE` now.

@@ -326,53 +326,6 @@ export function tgpayPaymentState(
 export const tgpayPayoutState = tgpayPaymentState;
 
 // ---------------------------------------------------------------------------
-// Payout bank table (docs "Malaysia bank SWIFT codes"). TGPay has no list
-// endpoint, and requires bankName to match bankCode exactly.
-
-export const TGPAY_BANKS: readonly { bankCode: string; bankName: string }[] = [
-  { bankCode: 'PHBMMYKL', bankName: 'Affin Bank Berhad' },
-  {
-    bankCode: 'AGOBMYKL',
-    bankName: 'AGROBANK / BANK PERTANIAN MALAYSIA BERHAD',
-  },
-  { bankCode: 'MFBBMYKL', bankName: 'Alliance Bank Malaysia Berhad' },
-  {
-    bankCode: 'RJHIMYKL',
-    bankName: 'AL RAJHI BANKING & INVESTMENT CORPORATION (MALAYSIA) BERHAD',
-  },
-  { bankCode: 'ARBKMYKL', bankName: 'AmBank (M) Berhad' },
-  { bankCode: 'BIMBMYKL', bankName: 'Bank Islam Malaysia Berhad' },
-  { bankCode: 'BKRMMYKL', bankName: 'Bank Kerjasama Rakyat Malaysia Berhad' },
-  { bankCode: 'BMMBMYKL', bankName: 'Bank Muamalat (Malaysia) Berhad' },
-  { bankCode: 'BSNAMYK1', bankName: 'Bank Simpanan Nasional Berhad' },
-  { bankCode: 'CIBBMYKL', bankName: 'CIMB Bank Berhad' },
-  { bankCode: 'CITIMYKL', bankName: 'Citibank Berhad' },
-  { bankCode: 'HLBBMYKL', bankName: 'Hong Leong Bank Berhad' },
-  { bankCode: 'HBMBMYKL', bankName: 'HSBC Bank Malaysia Berhad' },
-  { bankCode: 'KFHOMYKL', bankName: 'Kuwait Finance House' },
-  { bankCode: 'MBBEMYKL', bankName: 'Maybank / Malayan Banking Berhad' },
-  { bankCode: 'OCBCMYKL', bankName: 'OCBC Bank (Malaysia) Berhad' },
-  { bankCode: 'PBBEMYKL', bankName: 'Public Bank Berhad' },
-  { bankCode: 'RHBBMYKL', bankName: 'RHB Bank Berhad' },
-  {
-    bankCode: 'SCBLMYKX',
-    bankName: 'Standard Chartered Bank (Malaysia) Berhad',
-  },
-  { bankCode: 'UOVBMYKL', bankName: 'United Overseas Bank (Malaysia) Berhad' },
-];
-
-export const TGPAY_SANDBOX_BANK = {
-  bankCode: 'DUMMYBANKVERIFIED',
-  bankName: 'Dummy Bank Verified',
-} as const;
-
-export function tgpayBanks(config: Pick<TgpayConfig, 'baseUrl'>) {
-  return tgpayIsSandbox(config)
-    ? [TGPAY_SANDBOX_BANK, ...TGPAY_BANKS]
-    : TGPAY_BANKS;
-}
-
-// ---------------------------------------------------------------------------
 // Inbound callbacks. TGPay authenticates its server-notify POSTs with the SAME
 // two headers we send outbound. Constant-time compare, and both must match —
 // the public key alone is visible to anyone who has seen a request from us.

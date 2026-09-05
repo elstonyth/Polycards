@@ -476,6 +476,9 @@ export const SavedBankAccountsSchema = z.looseObject({
       accountNumber: z.string(),
       accountHolderName: z.string(),
       usableFrom: z.string().nullish(),
+      // Can the active payout provider pay to this bank? Optional so an
+      // older backend still parses; absent reads as supported.
+      supported: z.boolean().optional(),
     }),
   ),
 });

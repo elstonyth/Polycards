@@ -6,8 +6,8 @@ import {
   tgpayConfigFromEnv,
   tgpayIsSandbox,
   TgpayError,
-  TGPAY_SANDBOX_BANK,
 } from '../modules/packs/tgpay-client';
+import { TGPAY_SANDBOX_BANK } from '../modules/packs/banks';
 
 /**
  * SANDBOX-ONLY payout probe: submits one RM 50 payout to TGPay's dummy bank
@@ -39,8 +39,8 @@ export default async function tgpayPayoutProbe({ container }: ExecArgs) {
         email: 'probe@polycards.test',
         userName: 'Michael Yap',
         bankAccNumber: '543478924652',
-        bankCode: TGPAY_SANDBOX_BANK.bankCode,
-        bankName: TGPAY_SANDBOX_BANK.bankName,
+        bankCode: TGPAY_SANDBOX_BANK.codes.tgpay!.code,
+        bankName: TGPAY_SANDBOX_BANK.codes.tgpay!.name,
         notifyUrl,
       },
       config,

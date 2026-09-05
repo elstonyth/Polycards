@@ -8,3 +8,8 @@ MetadataStorage.clear();
 // unit test onto the TGPay branch. Specs that want TGPay set PAYMENT_GATEWAY
 // themselves (they already set TGPAY_* the same way).
 delete process.env.PAYMENT_GATEWAY;
+// Same trap for the other per-call operator levers: a developer's local
+// value (e.g. cooldown 0 for sandbox testing) must not rewrite the defaults
+// these specs assert. Specs that need a value set it themselves.
+delete process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS;
+delete process.env.PAYMENT_CALLBACK_BASE;

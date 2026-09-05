@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
 import { MedusaError } from '@medusajs/framework/utils';
+import { findBank, gatewayBankCode } from './banks';
+// Type-only: a value import of gateway.ts from here would cycle through the
+// module index into the service, which imports this file.
+import type { PaymentGateway } from './gateway';
 
 // The customer's saved payout destinations — the shape, the deterministic id,
 // the defensive parse, and the cooling-off rule that decides whether one may
@@ -37,6 +41,10 @@ export type SavedBankAccountView = SavedBankAccount & {
   /** ISO instant this destination becomes usable, or null when it never will
    *  without being re-saved (no `savedAt`). */
   usableFrom: string | null;
+  /** Can the ACTIVE payment gateway pay to this bank? Saved accounts survive
+   *  a gateway switch; one the new gateway cannot reach is kept, shown, and
+   *  refused until a gateway that serves the bank is active again. */
+  supported: boolean;
 };
 
 /**
@@ -77,10 +85,20 @@ export function parseSavedBankAccounts(value: unknown): SavedBankAccount[] {
       typeof e.accountNumber === 'string' &&
       typeof e.accountHolderName === 'string'
     ) {
+      // Entries written before the bank registry carry a gateway's own code
+      // (GlobePay's, historically). Read them as the canonical bank, with the
+      // id recomputed to match — the id is derived from (bankCode, account),
+      // and resolveWithdrawalDestination enforces that derivation. The next
+      // write persists the canonical form; until then every read converts.
+      const bank = findBank(e.bankCode);
+      const bankCode = bank?.id ?? e.bankCode;
       accounts.push({
-        id: e.id,
-        bankCode: e.bankCode,
-        bankName: e.bankName,
+        id:
+          bankCode === e.bankCode
+            ? e.id
+            : savedBankAccountId(bankCode, e.accountNumber),
+        bankCode,
+        bankName: bank?.name ?? e.bankName,
         accountNumber: e.accountNumber,
         accountHolderName: e.accountHolderName,
         ...(typeof e.savedAt === 'string' ? { savedAt: e.savedAt } : {}),
@@ -146,12 +164,29 @@ export function destinationUsableAt(
 /** Project a stored list for a store response. */
 export function savedBankAccountViews(
   accounts: SavedBankAccount[],
+  gateway: PaymentGateway,
   cooldownHours: number = payoutDestinationCooldownHours(),
 ): SavedBankAccountView[] {
   return accounts.map((account) => {
     const usableAt = destinationUsableAt(account, cooldownHours);
-    return { ...account, usableFrom: usableAt ? usableAt.toISOString() : null };
+    return {
+      ...account,
+      usableFrom: usableAt ? usableAt.toISOString() : null,
+      supported: bankSupportedBy(account.bankCode, gateway),
+    };
   });
+}
+
+/**
+ * Can `gateway` pay to this bank? Unknown codes count as supported on GlobePay
+ * only — they are its own pre-registry codes, passed through as-is.
+ */
+export function bankSupportedBy(
+  bankCode: string,
+  gateway: PaymentGateway,
+): boolean {
+  if (gatewayBankCode(bankCode, gateway)) return true;
+  return gateway === 'globepay' && !findBank(bankCode);
 }
 
 /** "about 3 hours" / "about 20 minutes" — a wait, not a wall-clock time, so the

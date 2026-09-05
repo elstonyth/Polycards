@@ -323,6 +323,12 @@ export type SavedBankAccount = {
    * as visible-and-disabled; neither is hidden, which would read as a bug.
    */
   usableFrom?: string | null;
+  /**
+   * Whether the payout provider currently in use can pay to this bank. Saved
+   * accounts survive a provider switch; one the new provider cannot reach
+   * stays listed but disabled, with the reason, until it can be paid again.
+   */
+  supported?: boolean;
 };
 
 export type SavedBankAccountsResult =

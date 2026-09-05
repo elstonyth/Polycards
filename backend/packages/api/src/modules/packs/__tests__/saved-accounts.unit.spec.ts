@@ -160,3 +160,74 @@ describe('payoutDestinationCooldownHours — 0 is the only off switch', () => {
     expect(error.message).toMatch(/not available for withdrawals yet/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Bank preservation across gateways (plan 130 §bank preservation)
+
+import {
+  bankSupportedBy,
+  parseSavedBankAccounts,
+  savedBankAccountViews,
+} from '../saved-accounts';
+
+describe('parseSavedBankAccounts — legacy gateway codes read as the canonical bank', () => {
+  const legacy = {
+    // Written while GlobePay was the only gateway: its code, its name, an id
+    // derived from that code.
+    id: savedBankAccountId('MYMB2U', OWNER_NUMBER),
+    bankCode: 'MYMB2U',
+    bankName: 'Maybank Berhad',
+    accountNumber: OWNER_NUMBER,
+    accountHolderName: 'Real Owner',
+    savedAt: SAVED_AT,
+  };
+
+  it('canonicalises the bank and recomputes the id, keeping everything else', () => {
+    const [account] = parseSavedBankAccounts([legacy]);
+    expect(account).toEqual({
+      id: savedBankAccountId('MBBEMYKL', OWNER_NUMBER),
+      bankCode: 'MBBEMYKL',
+      bankName: 'Maybank',
+      accountNumber: OWNER_NUMBER,
+      accountHolderName: 'Real Owner',
+      savedAt: SAVED_AT,
+    });
+    // …and the money path still accepts it: the id matches its derivation.
+    expect(resolve([account], account.id).bankCode).toBe('MBBEMYKL');
+  });
+
+  it('leaves a code the registry does not know untouched (nothing to convert)', () => {
+    const [account] = parseSavedBankAccounts([genuine()]);
+    expect(account).toEqual(genuine());
+  });
+
+  it('an already-canonical entry is a no-op', () => {
+    const canonical = { ...legacy, id: savedBankAccountId('MBBEMYKL', OWNER_NUMBER), bankCode: 'MBBEMYKL', bankName: 'Maybank' };
+    expect(parseSavedBankAccounts([canonical])).toEqual([canonical]);
+  });
+});
+
+describe('bankSupportedBy / savedBankAccountViews — the same account across gateways', () => {
+  it('a bank both gateways serve is supported on both; a GlobePay-only wallet is not on TGPay', () => {
+    expect(bankSupportedBy('MBBEMYKL', 'globepay')).toBe(true);
+    expect(bankSupportedBy('MBBEMYKL', 'tgpay')).toBe(true);
+    expect(bankSupportedBy('BOOSTMY', 'globepay')).toBe(true);
+    expect(bankSupportedBy('BOOSTMY', 'tgpay')).toBe(false);
+  });
+
+  it('an unknown legacy code stays supported on GlobePay (its own code) and unsupported elsewhere', () => {
+    expect(bankSupportedBy('MBB', 'globepay')).toBe(true);
+    expect(bankSupportedBy('MBB', 'tgpay')).toBe(false);
+  });
+
+  it('views carry the verdict for the gateway they are rendered under', () => {
+    const boost: SavedBankAccount = {
+      ...genuine(),
+      id: savedBankAccountId('BOOSTMY', OWNER_NUMBER),
+      bankCode: 'BOOSTMY',
+      bankName: 'Boost',
+    };
+    expect(savedBankAccountViews([boost], 'globepay', 0)[0].supported).toBe(true);
+    expect(savedBankAccountViews([boost], 'tgpay', 0)[0].supported).toBe(false);
+  });
+});

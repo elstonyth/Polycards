@@ -27,11 +27,15 @@ const WD_MAX_RM = 50000;
  *  without re-saving", which is also the safe reading of a backend that has not
  *  shipped the field. */
 const isUsable = (account: SavedBankAccount, now: Date) =>
+  account.supported !== false &&
   typeof account.usableFrom === 'string' &&
   new Date(account.usableFrom).getTime() <= now.getTime();
 
 /** Why a destination cannot be picked yet, in the customer's terms. */
 function unusableReason(account: SavedBankAccount, now: Date): string | null {
+  if (account.supported === false) {
+    return 'not available with the current payout provider';
+  }
   if (typeof account.usableFrom !== 'string') {
     return 'save it again to use it';
   }

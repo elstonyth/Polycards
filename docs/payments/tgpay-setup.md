@@ -89,6 +89,14 @@ explicit `GLOBEPAY_*_URL` is honoured only when it already names that
 gateway's hook, and the switch refuses a gateway with no callback URL. Every
 deposit/withdrawal row records its gateway, and the sweeps use the row's.
 
+## Bank accounts survive a switch
+
+Saved payout accounts store a gateway-neutral bank id (`modules/packs/banks.ts`,
+SWIFT where TGPay has one); each adapter translates to its own code at payout
+time. Legacy GlobePay codes are read as aliases, so nothing needs re-entering.
+An account whose bank the active gateway cannot pay to stays listed but
+disabled on the storefront until a gateway that serves it is active.
+
 ## Local test loop
 
 1. Backend `.env`: the TGPay block (see `.env.template`). Callbacks need a
@@ -119,7 +127,13 @@ On the sandbox their `transactionRefNum` equals our `merchantRefNum`.
 
 Playwright smokes: `scripts/qa-tgpay-deposit.mjs` (top-up sheet → checkout),
 `scripts/qa-tgpay-statement.mjs` (/transactions + /wallet),
-`scripts/qa-tgpay-admin-audit.mjs` (admin Settlement page).
+`scripts/qa-tgpay-admin-audit.mjs` (admin Settlement page),
+`scripts/qa-tgpay-bank-account.mjs` (save a bank on /bank),
+`scripts/qa-tgpay-withdraw.mjs` (customer withdrawal), and
+`scripts/qa-open-pack-api.mjs` (open a pack / sell back via the store API to
+clear the playthrough gate — set `PAYOUT_DESTINATION_COOLDOWN_HOURS=0`
+locally for a same-day withdrawal). A full customer withdrawal ran end to
+end on the sandbox 2026-09-05: accepted, callback settled it, ledger −50.
 
 ## Open questions for TGPay
 

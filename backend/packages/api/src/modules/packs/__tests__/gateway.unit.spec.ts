@@ -7,6 +7,7 @@ jest.mock('../globepay-client', () => {
       url: 'https://cashier',
     })),
     getDepositDetail: jest.fn(),
+    submitWithdrawal: jest.fn(),
   };
 });
 
@@ -203,6 +204,44 @@ describe('TGPay payouts', () => {
       notifyUrl: 'https://us/wd',
     });
     expect(r.transactionId).toBe('tx-9');
+  });
+
+  it('pays a bank saved under GlobePay through TGPay after a switch (legacy code → SWIFT pair)', async () => {
+    (tgpay.createPayout as jest.Mock).mockResolvedValue({
+      transactionRefNum: 'tx-10',
+    });
+    await submitWithdrawal({ ...wd, destinationBankCode: 'MYMB2U' }, tgpayConfig);
+    expect((tgpay.createPayout as jest.Mock).mock.calls[0][0]).toMatchObject({
+      bankCode: 'MBBEMYKL',
+      bankName: 'Maybank / Malayan Banking Berhad',
+    });
+  });
+
+  it('pays a bank saved under TGPay through GlobePay after a switch back (canonical → GlobePay code)', async () => {
+    (globepay.submitWithdrawal as jest.Mock).mockResolvedValue({
+      transactionId: 'W1',
+    });
+    await submitWithdrawal(
+      { ...wd, destinationBankCode: 'MBBEMYKL' },
+      globepayConfig,
+    );
+    expect(
+      (globepay.submitWithdrawal as jest.Mock).mock.calls[0][0]
+        .destinationBankCode,
+    ).toBe('MYMB2U');
+    // A code the registry does not know is GlobePay's own; pass it through.
+    await submitWithdrawal({ ...wd, destinationBankCode: 'MBB' }, globepayConfig);
+    expect(
+      (globepay.submitWithdrawal as jest.Mock).mock.calls[1][0]
+        .destinationBankCode,
+    ).toBe('MBB');
+  });
+
+  it('the sandbox dummy bank is refused off the sandbox', async () => {
+    const prod = { ...tgpayConfig, baseUrl: 'https://api.tgpay365.test/api/v2' };
+    const err = await submitWithdrawal(wd, prod).catch((e: unknown) => e);
+    expect((err as tgpay.TgpayError).definite).toBe(true);
+    expect(tgpay.createPayout).not.toHaveBeenCalled();
   });
 
   it('an unknown bank code or a missing email is refused before any HTTP', async () => {
