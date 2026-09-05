@@ -375,12 +375,15 @@ export function parseCallbackAllowlist(
   if (!raw) return [];
   const entries: CallbackAllowEntry[] = [];
   for (const token of raw.split(/[\s,]+/).filter(Boolean)) {
-    const [ip, maskRaw] = token.split('/');
+    const parts = token.split('/');
+    if (parts.length > 2) continue;
+    const [ip, maskRaw] = parts;
     const base = ipv4ToInt(ip);
+    // The mask must be 1–2 plain digits: `Number('')` is 0, so a trailing
+    // slash would otherwise read as /0 and allow the whole internet.
+    if (maskRaw !== undefined && !/^\d{1,2}$/.test(maskRaw)) continue;
     const bits = maskRaw === undefined ? 32 : Number(maskRaw);
-    if (base === null || !Number.isInteger(bits) || bits < 0 || bits > 32) {
-      continue;
-    }
+    if (base === null || bits > 32) continue;
     entries.push({ base, bits });
   }
   return entries;
@@ -399,15 +402,32 @@ export function callbackIpAllowed(
   });
 }
 
+export type CallbackIpVerdict =
+  | { allowed: true }
+  | { allowed: false; reason: 'not-listed' | 'unset-in-production' | 'unparseable' }
+  /** Header-only: no list configured AND the gateway is the sandbox. */
+  | { allowed: true; reason: 'sandbox-no-list' };
+
 /**
- * The hooks' verdict: null when no allowlist is configured (header-only),
- * true/false otherwise. Read per call so an env change needs no redeploy.
+ * Whether a callback source may proceed. Fail-closed everywhere it matters:
+ * a list that is set but yields no entries (typo, wrong separator) refuses
+ * everything rather than quietly turning the check off, and production
+ * without a list refuses too — TGPay asked for the allowlist, so its absence
+ * is a misconfiguration, not a mode. Only the sandbox may run header-only.
  */
 export function tgpayCallbackIpVerdict(
   ip: string,
-  env: { TGPAY_CALLBACK_IPS?: string } = process.env,
-): boolean | null {
-  const entries = parseCallbackAllowlist(env.TGPAY_CALLBACK_IPS);
-  if (entries.length === 0) return null;
-  return callbackIpAllowed(ip, entries);
+  env: { TGPAY_CALLBACK_IPS?: string; TGPAY_API_BASE?: string } = process.env,
+): CallbackIpVerdict {
+  const raw = env.TGPAY_CALLBACK_IPS?.trim() ?? '';
+  if (raw === '') {
+    return tgpayIsSandbox({ baseUrl: env.TGPAY_API_BASE ?? '' })
+      ? { allowed: true, reason: 'sandbox-no-list' }
+      : { allowed: false, reason: 'unset-in-production' };
+  }
+  const entries = parseCallbackAllowlist(raw);
+  if (entries.length === 0) return { allowed: false, reason: 'unparseable' };
+  return callbackIpAllowed(ip, entries)
+    ? { allowed: true }
+    : { allowed: false, reason: 'not-listed' };
 }

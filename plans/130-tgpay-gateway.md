@@ -204,6 +204,16 @@ dead `bank_name` validation is gone (the registry supplies the name).
 Both TGPay hooks refuse (403) any source not in `TGPAY_CALLBACK_IPS` when that
 env is set; entries are IPv4 or CIDR. The address judged is Express's
 `req.ip` (trust proxy 1 → the hop DigitalOcean's balancer appended), never
-`X-Forwarded-For`. Unset = header-only, for the sandbox. Production value =
-the 12 addresses TGPay listed; set it on the DO backend at cutover together
-with the TGPAY_* keys and `PAYMENT_CALLBACK_BASE`.
+`X-Forwarded-For`. It is one middleware on `/hooks/tgpay/*`, after the hook
+rate limiter. Fail-closed: a list that is set but yields no entries refuses
+everything, and so does production with the list unset — only the sandbox
+(base URL containing "sandbox") may run header-only. A mask must be 1–2
+digits, so a trailing slash cannot read as `/0`. `.do/backend.app.yaml` now
+carries `TGPAY_CALLBACK_IPS` (TGPay's 12 addresses) and
+`PAYMENT_CALLBACK_BASE`; only the three TGPAY_* secrets remain for cutover.
+Open with TGPay: whether `188.114.96.0` / `188.114.97.0` mean single hosts
+or Cloudflare's `/20` — the value accepts CIDR either way.
+
+Production hosts found by probing 2026-09-05 evening: admin
+`https://admin.tgpay365.com`, API `https://api.tgpay365.com/api/v2` (answers
+the key-headers 401), hosted checkout `https://checkout.tgpay365.com`.

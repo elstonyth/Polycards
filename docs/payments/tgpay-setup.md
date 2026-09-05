@@ -12,9 +12,9 @@ URLs blank; the values below were confirmed by probing.
 
 |                 | Sandbox                                                                            | Production                 |
 | --------------- | ---------------------------------------------------------------------------------- | -------------------------- |
-| Admin           | <https://sandbox.tgpay365.com/>                                                    | ask TGPay (not shared yet) |
-| API base        | `https://sandbox-api.tgpay365.com/api/v2`                                          | ask TGPay                  |
-| Hosted checkout | `https://sandbox-checkout.tgpay365.com/checkout?order=…` (absolute link, verified) | ask TGPay                  |
+| Admin           | <https://sandbox.tgpay365.com/>                                                    | <https://admin.tgpay365.com/> (probed; login pending) |
+| API base        | `https://sandbox-api.tgpay365.com/api/v2`                                          | `https://api.tgpay365.com/api/v2` (probed: key-headers 401) |
+| Hosted checkout | `https://sandbox-checkout.tgpay365.com/checkout?order=…` (absolute link, verified) | `https://checkout.tgpay365.com` (probed) |
 
 `/api/v1` is a 404 on the sandbox; `/api/v2` answers. Without key headers the
 API returns `401 x-public-key and x-secret-key headers are required`, which is

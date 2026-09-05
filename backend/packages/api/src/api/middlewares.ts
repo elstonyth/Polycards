@@ -1,3 +1,4 @@
+import { createTgpayCallbackAllowlist } from './utils/payer-ip';
 import {
   defineMiddlewares,
   authenticate,
@@ -132,6 +133,8 @@ const adminActionRateLimit = createAdminActionRateLimit();
 // gateway's traffic against one abuse ceiling, so one budget and one Redis
 // connection (see createGatewayHookRateLimit for the sizing rationale).
 const gatewayHookRateLimit = createGatewayHookRateLimit();
+// TGPay's source allowlist (src/api/utils/payer-ip.ts) — after the limiter.
+const tgpayCallbackAllowlist = createTgpayCallbackAllowlist();
 
 // In-memory multipart parsing for the custom image-upload route. memoryStorage
 // hands the route a Buffer (no temp files); the 20 MB cap is the hard edge gate
@@ -369,7 +372,7 @@ export default defineMiddlewares({
       // exposure, same limiter (src/api/hooks/tgpay/*).
       matcher: '/hooks/tgpay/*',
       method: 'POST',
-      middlewares: [gatewayHookRateLimit],
+      middlewares: [gatewayHookRateLimit, tgpayCallbackAllowlist],
     },
     {
       // OTP send — TWO independent limiter tiers, per-phone FIRST so a

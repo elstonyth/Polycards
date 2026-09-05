@@ -249,12 +249,34 @@ describe('callback source allowlist', () => {
     expect(callbackIpAllowed('not-an-ip', entries)).toBe(false);
   });
 
-  it('verdict is null (header-only) when nothing is configured, else a strict yes/no', () => {
-    expect(tgpayCallbackIpVerdict('1.2.3.4', {})).toBeNull();
-    expect(tgpayCallbackIpVerdict('1.2.3.4', { TGPAY_CALLBACK_IPS: ' ' })).toBeNull();
-    const env = { TGPAY_CALLBACK_IPS: '1.32.102.19,54.251.58.7' };
-    expect(tgpayCallbackIpVerdict('54.251.58.7', env)).toBe(true);
-    expect(tgpayCallbackIpVerdict('54.251.58.8', env)).toBe(false);
-    expect(tgpayCallbackIpVerdict('', env)).toBe(false);
+  it('a trailing slash or an odd mask is dropped, never read as /0', () => {
+    expect(parseCallbackAllowlist('1.32.102.19/')).toEqual([]);
+    expect(parseCallbackAllowlist('1.32.102.19/0x10 1.32.102.19/1e1')).toEqual([]);
+    expect(parseCallbackAllowlist('1.32.102.19/33')).toEqual([]);
+    expect(parseCallbackAllowlist('1.32.102.19/a/b')).toEqual([]);
+    expect(parseCallbackAllowlist('0.0.0.0/0')).toHaveLength(1);
+  });
+
+  it('verdict: sandbox may run header-only; production without a list, or with a garbage list, refuses', () => {
+    const sandbox = { TGPAY_API_BASE: 'https://sandbox-api.x/api/v2' };
+    const prod = { TGPAY_API_BASE: 'https://api.x/api/v2' };
+    expect(tgpayCallbackIpVerdict('1.2.3.4', sandbox)).toEqual({
+      allowed: true,
+      reason: 'sandbox-no-list',
+    });
+    expect(tgpayCallbackIpVerdict('1.2.3.4', prod)).toEqual({
+      allowed: false,
+      reason: 'unset-in-production',
+    });
+    expect(
+      tgpayCallbackIpVerdict('1.2.3.4', { ...prod, TGPAY_CALLBACK_IPS: '1.2.3.4;5.6.7.8' }),
+    ).toEqual({ allowed: false, reason: 'unparseable' });
+    const env = { ...prod, TGPAY_CALLBACK_IPS: '1.32.102.19,54.251.58.7' };
+    expect(tgpayCallbackIpVerdict('54.251.58.7', env)).toEqual({ allowed: true });
+    expect(tgpayCallbackIpVerdict('54.251.58.8', env)).toEqual({
+      allowed: false,
+      reason: 'not-listed',
+    });
+    expect(tgpayCallbackIpVerdict('2001:db8::1', env).allowed).toBe(false);
   });
 });

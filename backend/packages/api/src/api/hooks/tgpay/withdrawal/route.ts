@@ -3,13 +3,11 @@ import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import {
   tgpayCallbackAuthorized,
-  tgpayCallbackIpVerdict,
   tgpayConfigFromEnv,
   tgpayPayoutState,
 } from '../../../../modules/packs/tgpay-client';
 import { refundGlobePayWithdrawal } from '../../../../modules/packs/globepay-withdrawal';
 import { rowGateway } from '../../../../modules/packs/gateway';
-import { callbackSourceIp } from '../../../utils/payer-ip';
 import { netOfFee, toOptionalMoney } from '../../../../modules/packs/money';
 import { notifyFeed } from '../../../../modules/packs/notify-feed';
 import { withdrawalFeedKey } from '../../../../modules/packs/feed-events';
@@ -39,17 +37,6 @@ export async function POST(
 ): Promise<void> {
   const logger = req.scope.resolve<Logger>('logger');
   const config = tgpayConfigFromEnv();
-
-  // Source allowlist first (TGPay's requirement), then the key headers. The
-  // IP is the proxy-established one, never the spoofable header.
-  const sourceIp = callbackSourceIp(req);
-  if (tgpayCallbackIpVerdict(sourceIp) === false) {
-    logger.warn(
-      `[tgpay] rejected withdrawal callback from ${sourceIp || 'unknown'}: not in TGPAY_CALLBACK_IPS`,
-    );
-    res.status(403).send('rejected');
-    return;
-  }
 
   if (
     !tgpayCallbackAuthorized(req.headers as Record<string, unknown>, config)

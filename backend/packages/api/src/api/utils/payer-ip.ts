@@ -1,3 +1,4 @@
+import { tgpayCallbackIpVerdict } from '../../modules/packs/tgpay-client';
 // The IP a money route reports to GlobePay365 in its `IPAddress` field.
 //
 // THEIR requirement is the paying customer's IP, not ours. req.ip FIRST:
@@ -59,4 +60,42 @@ export function callbackSourceIp(req: {
 }): string {
   const raw = req.ip || req.socket?.remoteAddress || '';
   return raw.replace(/^::ffff:/i, '');
+}
+
+/**
+ * Express middleware for `/hooks/tgpay/*`: TGPay's source allowlist, applied
+ * once for every TGPay callback route so the two hooks cannot drift. Runs
+ * after the hook rate limiter (IP-keyed, so a flood from a foreign address
+ * is throttled before it is even judged) and before any handler work. A
+ * refusal is a constant 403 body plus one log line naming the address and
+ * the reason — never a header or a key.
+ */
+export function createTgpayCallbackAllowlist(): (
+  req: {
+    ip?: string;
+    socket?: { remoteAddress?: string };
+    scope: { resolve: <T>(key: string) => T };
+  },
+  res: { status: (code: number) => { send: (body: string) => unknown } },
+  next: () => void,
+) => void {
+  return (req, res, next) => {
+    const sourceIp = callbackSourceIp(req);
+    const verdict = tgpayCallbackIpVerdict(sourceIp);
+    if (verdict.allowed) {
+      next();
+      return;
+    }
+    req.scope
+      .resolve<{ warn: (m: string) => void }>('logger')
+      .warn(
+        `[tgpay] rejected callback from ${sourceIp || 'unknown'}: ${verdict.reason}` +
+          (verdict.reason === 'unset-in-production'
+            ? ' — TGPAY_CALLBACK_IPS is not set; refusing outside the sandbox'
+            : verdict.reason === 'unparseable'
+              ? ' — TGPAY_CALLBACK_IPS has no valid entries'
+              : ''),
+      );
+    res.status(403).send('rejected');
+  };
 }
