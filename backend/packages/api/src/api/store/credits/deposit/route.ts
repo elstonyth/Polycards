@@ -8,9 +8,8 @@ import type PacksModuleService from '../../../../modules/packs/service';
 import { startGlobePayDeposit } from '../../../../modules/packs/globepay-deposit';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../../../modules/packs/globepay-reconcile';
 import { payerIpOf } from '../../../utils/payer-ip';
-import { customerContact } from '../../../utils/customer-contact';
+import { contactIfNeeded } from '../../../utils/customer-contact';
 import {
-  GATEWAYS,
   gatewayUrls,
   resolveActiveGateway,
 } from '../../../../modules/packs/gateway';
@@ -67,9 +66,12 @@ export async function POST(
   // Some gateways (TGPay) require the payer's contact on create-payment;
   // GlobePay does not, and its route tests run with an empty scope, so only
   // look it up when the active gateway asks for it.
-  const customer = GATEWAYS[gateway].needsCustomerContact
-    ? await customerContact(req.scope, customerId)
-    : undefined;
+  const customer = await contactIfNeeded(
+    req.scope,
+    gateway,
+    customerId,
+    'payment',
+  );
   const result = await startGlobePayDeposit(
     req.scope,
     {

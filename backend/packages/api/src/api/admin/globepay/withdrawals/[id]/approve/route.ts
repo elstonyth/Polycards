@@ -13,7 +13,6 @@ import {
 } from '../../../../../../modules/packs/globepay-withdrawal';
 import {
   GlobePayError,
-  GATEWAYS,
   gatewayConfigFor,
   gatewayUrls,
   resolveActiveGateway,
@@ -21,7 +20,7 @@ import {
   submitWithdrawal,
   type GatewayConfig,
 } from '../../../../../../modules/packs/gateway';
-import { customerContact } from '../../../../../utils/customer-contact';
+import { contactIfNeeded } from '../../../../../utils/customer-contact';
 import { payerIpOf } from '../../../../../utils/payer-ip';
 
 // POST /admin/globepay/withdrawals/:id/approve — release a HELD payout to the
@@ -214,9 +213,9 @@ export async function POST(
   // TGPay needs the recipient email; looked up only on that gateway so the
   // GlobePay path (and its tests, whose scope has no customer module) is
   // untouched.
-  const email = GATEWAYS[gatewayId].needsCustomerContact
-    ? (await customerContact(req.scope, row.customer_id)).email
-    : undefined;
+  const email = (
+    await contactIfNeeded(req.scope, gatewayId, row.customer_id, 'payout')
+  )?.email;
 
   let result;
   try {

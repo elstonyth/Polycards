@@ -879,7 +879,16 @@ export default defineMiddlewares({
       // public unauthenticated endpoint.
       matcher: '/store/credits/withdraw/banks',
       method: 'GET',
-      middlewares: [authenticate('customer', ['bearer'])],
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // The active gateway's money bands (GET /store/payments/config), read by
+      // the top-up sheet and the withdrawal form on open. Public — nothing
+      // secret, and the sheet must know the floor before the customer types —
+      // but every endpoint is throttled, so it shares the store read budget.
+      matcher: '/store/payments/config',
+      method: 'GET',
+      middlewares: [storeReadRateLimit],
     },
     {
       // Saved payout accounts (GET /store/credits/withdraw/accounts) — the

@@ -95,9 +95,7 @@ export function globepayWithdrawalsEnabled(
     TGPAY_SECRET_KEY?: string;
   } = process.env,
 ): boolean {
-  const configured = GATEWAYS[paymentGateway(env)].configured(
-    env as NodeJS.ProcessEnv,
-  );
+  const configured = GATEWAYS[paymentGateway(env)].configured(env);
   return (
     env.GLOBEPAY_ENABLED === 'true' &&
     env.GLOBEPAY_WITHDRAWALS_ENABLED === 'true' &&

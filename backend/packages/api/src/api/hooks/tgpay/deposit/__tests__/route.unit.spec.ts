@@ -196,8 +196,8 @@ describe('tgpay deposit callback — settlement', () => {
     expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
   });
 
-  it('refuses a non-positive or above-ceiling amount', async () => {
-    for (const amount of [0, -5, 'abc', GLOBEPAY_MAX_RM + 1]) {
+  it('refuses an amount that is not the row amount (forged, wrong, non-positive)', async () => {
+    for (const amount of [0, -5, 'abc', 49, 51, GLOBEPAY_MAX_RM + 1]) {
       const h = harness(pendingRow);
       const res = await run(h, notify({ ...approved, amount }));
       expect(res.statusCode).toBe(400);

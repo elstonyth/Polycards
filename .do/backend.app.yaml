@@ -242,7 +242,7 @@ envs:
   # permissions. Re-arm is storefront ARG first, this second.
   - key: PHONE_VERIFICATION_REQUIRED
     scope: RUN_TIME
-    value: 'true'
+    value: "true"
   - key: TWILIO_ACCOUNT_SID
     scope: RUN_TIME
     type: SECRET
@@ -308,7 +308,7 @@ envs:
   # never arrives. Twilio's own SMS geo permissions are the upstream half.
   - key: ALLOWED_SMS_COUNTRIES
     scope: RUN_TIME
-    value: 'MY'
+    value: "MY"
   # ── Telegram apex-pull board (Legendary+ pulls → the public channel) ────────
   # Both keys were applied straight to the live app on 2026-08-21 (a surgical
   # `doctl apps update`, because this integration shipped after that day's spec
@@ -333,7 +333,7 @@ envs:
     value: __SECRET__TELEGRAM_BOT_TOKEN__
   - key: TELEGRAM_CHAT_ID
     scope: RUN_TIME
-    value: '-1003945115527'
+    value: "-1003945115527"
   # ╔═══════════════════════════════════════════════════════════════════════╗
   # ║ DO NOT APPLY THIS SPEC UNTIL PR #252 IS MERGED.                        ║
   # ║ ALLOW_MOCK_TOPUP is GONE (the go-live blocker is cleared) and the      ║
@@ -349,7 +349,7 @@ envs:
   # value rather than half-configuring itself.
   - key: GLOBEPAY_ENABLED
     scope: RUN_TIME
-    value: 'true'
+    value: "true"
   - key: GLOBEPAY_MERCHANT_CODE
     scope: RUN_TIME
     value: Polycard
@@ -451,7 +451,7 @@ envs:
   # (Dockerfile ARG default + .do/storefront.app.yaml, both).
   - key: GLOBEPAY_WITHDRAWALS_ENABLED
     scope: RUN_TIME
-    value: 'true'
+    value: "true"
   # Origin hostname for the same reason as GLOBEPAY_NOTIFY_URL above — and it
   # matters more here: payout-verify is the gate their §1.7 flow waits on, so a
   # Cloudflare challenge on it stalls a payout rather than merely delaying a
@@ -479,7 +479,7 @@ envs:
   # deleting this key (back to 24) or setting a positive number of hours.
   - key: PAYOUT_DESTINATION_COOLDOWN_HOURS
     scope: RUN_TIME
-    value: '0'
+    value: "0"
 
   # ── TGPay (plan 130). Inert until an admin switches the active gateway to
   # TGPay on the Settlement page. The key pair comes from the production back
@@ -499,11 +499,11 @@ envs:
   - key: TGPAY_PUBLIC_KEY
     scope: RUN_TIME
     type: SECRET
-    value: '__SECRET__TGPAY_PUBLIC_KEY__'
+    value: "__SECRET__TGPAY_PUBLIC_KEY__"
   - key: TGPAY_SECRET_KEY
     scope: RUN_TIME
     type: SECRET
-    value: '__SECRET__TGPAY_SECRET_KEY__'
+    value: "__SECRET__TGPAY_SECRET_KEY__"
   - key: PAYMENT_CALLBACK_BASE
     scope: RUN_TIME
     value: https://polycards-backend-gce6p.ondigitalocean.app

@@ -78,8 +78,9 @@ export function callbackSourceIp(req: {
 /**
  * Express middleware for `/hooks/tgpay/*`: TGPay's source allowlist, applied
  * once for every TGPay callback route so the two hooks cannot drift. Runs
- * after the hook rate limiter (IP-keyed, so a flood from a foreign address
- * is throttled before it is even judged) and before any handler work. A
+ * after the hook rate limiter (keyed on the same source address, so a flood
+ * from a foreign address is throttled before it is even judged) and before
+ * any handler work. A
  * refusal is a constant 403 body plus one log line naming the address and
  * the reason — never a header or a key.
  */

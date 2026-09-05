@@ -220,6 +220,14 @@ describe('bankSupportedBy / savedBankAccountViews — the same account across ga
     expect(bankSupportedBy('MBB', 'tgpay')).toBe(false);
   });
 
+  it('the sandbox dummy bank is payable only while the sandbox is configured', () => {
+    const sandbox = { TGPAY_API_BASE: 'https://sandbox-api.tgpay365.com/api/v2' };
+    const production = { TGPAY_API_BASE: 'https://api.tgpay365.com/api/v2' };
+    expect(bankSupportedBy('DUMMYBANKVERIFIED', 'tgpay', sandbox)).toBe(true);
+    expect(bankSupportedBy('DUMMYBANKVERIFIED', 'tgpay', production)).toBe(false);
+    expect(bankSupportedBy('DUMMYBANKVERIFIED', 'globepay', {})).toBe(false);
+  });
+
   it('views carry the verdict for the gateway they are rendered under', () => {
     const boost: SavedBankAccount = {
       ...genuine(),

@@ -197,5 +197,14 @@ end on the sandbox 2026-09-05: accepted, callback settled it, ledger −50.
   them: are `188.114.96.0` / `188.114.97.0` single hosts or Cloudflare's
   `188.114.96.0/20`? The value accepts CIDR either way. Our egress `188.166.181.61` /
   `188.166.181.204` is whitelisted on their production as of the same day.
-- Whether the hosted checkout link is ever absolute; if it moves off the admin
-  host, set `TGPAY_CHECKOUT_BASE`.
+- Whether the hosted checkout link is ever absolute. A relative link is
+  resolved against the checkout host paired with the API host
+  (`sandbox-api.` → `sandbox-checkout.`, `api.` → `checkout.`); any other
+  layout needs `TGPAY_CHECKOUT_BASE`.
+- Payout status vocabulary beyond `pending | success | reject`: the client
+  treats the whole terminal-failure family (reject/fail/cancel/expire/void/
+  declined) as a refund, anything else as still pending. Ask them for the
+  full list before relying on it.
+- Payouts carry no customer id: `/transaction/payout/withdraw` has no
+  free-text field (deposits use `additionalData`). The `merchantRefNum` is
+  our withdrawal row id, which names the customer on our side.

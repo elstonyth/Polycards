@@ -87,9 +87,7 @@ export function globepayEnabled(
 ): boolean {
   // GLOBEPAY_ENABLED stays the master "real gateway" switch for both gateways;
   // the credential that proves one is configured differs per gateway.
-  const configured = GATEWAYS[paymentGateway(env)].configured(
-    env as NodeJS.ProcessEnv,
-  );
+  const configured = GATEWAYS[paymentGateway(env)].configured(env);
   return env.GLOBEPAY_ENABLED === 'true' && configured;
 }
 

@@ -4,7 +4,12 @@ import type { SettlementState } from './globepay';
 import type { GlobePayConfig } from './globepay-client';
 import type { TgpayConfig, TgpayCustomer } from './tgpay-client';
 import { PACKS_MODULE } from './index';
-import { banksFor, findBank, gatewayBankCode, TGPAY_SANDBOX_BANK } from './banks';
+import {
+  banksFor,
+  findBank,
+  gatewayBankCode,
+  TGPAY_SANDBOX_BANK,
+} from './banks';
 import { netOfFee } from './money';
 
 // The gateway seam. Every caller that used to import the HTTP client from
@@ -27,7 +32,9 @@ export type GatewayDefinition = {
   /** Operator-facing name for the admin switch. */
   label: string;
   /** Are the credentials for this gateway present in the environment? */
-  configured: (env: NodeJS.ProcessEnv) => boolean;
+  configured: (env: Partial<NodeJS.ProcessEnv>) => boolean;
+  /** Its client config from env; throws when `configured` would be false. */
+  configFromEnv: (env: NodeJS.ProcessEnv) => GatewayConfig;
   /** Does create-payment/payout need the customer's name/email/phone? */
   needsCustomerContact: boolean;
   /** Their server-to-server callback targets on OUR backend. */
@@ -52,6 +59,7 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
     id: 'globepay',
     label: 'GlobePay365',
     configured: (env) => Boolean(env.GLOBEPAY_MERCHANT_CODE),
+    configFromEnv: (env) => globepay.globepayConfigFromEnv(env),
     needsCustomerContact: false,
     hooks: {
       deposit: '/hooks/globepay/deposit',
@@ -71,6 +79,7 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
     id: 'tgpay',
     label: 'TGPay',
     configured: (env) => Boolean(env.TGPAY_SECRET_KEY),
+    configFromEnv: (env) => tgpay.tgpayConfigFromEnv(env),
     needsCustomerContact: true,
     hooks: {
       deposit: '/hooks/tgpay/deposit',
@@ -130,7 +139,9 @@ export function paymentGateway(
   env: { PAYMENT_GATEWAY?: string } = process.env,
 ): PaymentGateway {
   if (activeSetting) return activeSetting;
-  return isPaymentGateway(env.PAYMENT_GATEWAY) ? env.PAYMENT_GATEWAY : 'globepay';
+  return isPaymentGateway(env.PAYMENT_GATEWAY)
+    ? env.PAYMENT_GATEWAY
+    : 'globepay';
 }
 
 /** Set the cached active gateway (admin switch, boot, tests). null = forget. */
@@ -171,14 +182,9 @@ export function gatewayConfigFor(
   id: string,
   env: NodeJS.ProcessEnv = process.env,
 ): GatewayConfig {
-  switch (id) {
-    case 'tgpay':
-      return tgpay.tgpayConfigFromEnv(env);
-    case 'globepay':
-      return globepay.globepayConfigFromEnv(env);
-    default:
-      throw new Error(`Unknown payment gateway "${id}".`);
-  }
+  if (!isPaymentGateway(id))
+    throw new Error(`Unknown payment gateway "${id}".`);
+  return GATEWAYS[id].configFromEnv(env);
 }
 
 /**
@@ -245,7 +251,10 @@ export function gatewayUrls(
   return {
     notifyUrl: hook(def.hooks.deposit, env.GLOBEPAY_NOTIFY_URL),
     returnUrl: env.GLOBEPAY_RETURN_URL ?? '',
-    withdrawNotifyUrl: hook(def.hooks.withdrawal, env.GLOBEPAY_WITHDRAW_NOTIFY_URL),
+    withdrawNotifyUrl: hook(
+      def.hooks.withdrawal,
+      env.GLOBEPAY_WITHDRAW_NOTIFY_URL,
+    ),
     payoutVerifyUrl: def.hooks.payoutVerify
       ? hook(def.hooks.payoutVerify, env.GLOBEPAY_PAYOUT_VERIFY_URL)
       : '',
@@ -259,8 +268,10 @@ function isTgpay(config: GatewayConfig): config is TgpayConfig {
 
 /**
  * Where TGPay's hosted checkout lives when create-payment hands back a
- * relative link ("/checkout?order=…"). Defaults to the API host with its
- * "-api" and path prefix removed — the sandbox admin serves the page.
+ * relative link ("/checkout?order=…"). Their hosts pair the API with a
+ * checkout site — `sandbox-api.` ↔ `sandbox-checkout.`, `api.` ↔ `checkout.`
+ * (both verified 2026-09-05/06) — so the fallback swaps that label; any
+ * other layout needs TGPAY_CHECKOUT_BASE.
  */
 export function tgpayCheckoutBase(
   config: Pick<TgpayConfig, 'baseUrl'>,
@@ -269,7 +280,11 @@ export function tgpayCheckoutBase(
   if (env.TGPAY_CHECKOUT_BASE)
     return env.TGPAY_CHECKOUT_BASE.replace(/\/+$/, '');
   const { protocol, host } = new URL(config.baseUrl);
-  return `${protocol}//${host.replace(/-api\./, '.')}`;
+  const checkoutHost = host.replace(
+    /^(?:([a-z0-9-]+)-)?api\./i,
+    (_m, prefix) => (prefix ? `${prefix}-checkout.` : 'checkout.'),
+  );
+  return `${protocol}//${checkoutHost}`;
 }
 
 function absoluteLink(link: string, config: TgpayConfig): string {
@@ -362,10 +377,26 @@ const globepayAdapter: GatewayAdapter<GlobePayConfig> = {
     );
   },
   getWithdrawalDetail: globepay.getWithdrawalDetail,
-  // The registry snapshot of GetSupportedBanks (31 MYR banks, 2026-09-05)
-  // rather than the live call: the picker must hand out canonical ids, and
-  // GlobePay is on its way out.
-  getSupportedBanks: async () => banksFor('globepay'),
+  // Still the LIVE GetSupportedBanks, as before the registry — a bank
+  // GlobePay adds or drops must show up without a deploy — with each entry
+  // translated to its canonical id so the picker hands out the same ids
+  // under every gateway. A code the registry does not know passes through
+  // (GlobePay can pay to it; bankSupportedBy treats it as GlobePay's own).
+  // If the live call fails the registry snapshot stands in, so a gateway
+  // hiccup never blanks the picker.
+  getSupportedBanks: async (config) => {
+    try {
+      const live = await globepay.getSupportedBanks(config);
+      return live.map((b) => {
+        const known = findBank(b.bankCode);
+        return known
+          ? { bankCode: known.id, bankName: known.name }
+          : { bankCode: b.bankCode, bankName: b.bankName };
+      });
+    } catch {
+      return banksFor('globepay');
+    }
+  },
   checkBalance: globepay.checkBalance,
 };
 
@@ -443,7 +474,8 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
     // name TGPay pairs with it. The sandbox dummy bank exists only there.
     const known = findBank(input.destinationBankCode);
     const bank =
-      known && (known.id !== TGPAY_SANDBOX_BANK.id || tgpay.tgpayIsSandbox(config))
+      known &&
+      (known.id !== TGPAY_SANDBOX_BANK.id || tgpay.tgpayIsSandbox(config))
         ? gatewayBankCode(input.destinationBankCode, 'tgpay')
         : null;
     if (!bank) {
@@ -528,9 +560,9 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
  * here is sound because `kind` is exactly what selected them.
  */
 function adapterFor(config: GatewayConfig): GatewayAdapter<GatewayConfig> {
-  return (
-    isTgpay(config) ? tgpayAdapter : globepayAdapter
-  ) as unknown as GatewayAdapter<GatewayConfig>;
+  return (isTgpay(config)
+    ? tgpayAdapter
+    : globepayAdapter) as unknown as GatewayAdapter<GatewayConfig>;
 }
 
 export function submitDeposit(

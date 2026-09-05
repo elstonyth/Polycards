@@ -100,14 +100,14 @@ export const GlobePayWithdrawal = model
     // message from a definite submit refusal. Never the request envelope
     // (signed and encrypted) and never the account number or holder name.
     failure_reason: model.text().nullable(),
-    // Gateway audit (plan 130): when the audit sweep last requeried the
-    // gateway for this row, and what it disagreed about. NULL note = the
-    // gateway agrees with the row. The audit is a second, independent check
-    // on top of the reconcile sweep: it re-reads rows that are already final.
     // Which gateway this row was created under. The sweeps and the admin
     // approve route talk to THIS gateway, not the active one, so switching
     // gateways never strands money already in flight on the old one.
     gateway: model.text().default('globepay'),
+    // Gateway audit (plan 130): when the audit sweep last requeried the
+    // gateway for this row, and what it disagreed about. NULL note = the
+    // gateway agrees with the row. The audit is a second, independent check
+    // on top of the reconcile sweep: it re-reads rows that are already final.
     audited_at: model.dateTime().nullable(),
     audit_note: model.text().nullable(),
   })

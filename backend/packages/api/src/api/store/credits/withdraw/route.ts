@@ -5,9 +5,8 @@ import {
 import { MedusaError } from '@medusajs/framework/utils';
 import { startGlobePayWithdrawal } from '../../../../modules/packs/globepay-withdrawal';
 import { payerIpOf } from '../../../utils/payer-ip';
-import { customerContact } from '../../../utils/customer-contact';
+import { contactIfNeeded } from '../../../utils/customer-contact';
 import {
-  GATEWAYS,
   gatewayUrls,
   resolveActiveGateway,
 } from '../../../../modules/packs/gateway';
@@ -83,9 +82,9 @@ export async function POST(
   // Some gateways (TGPay) want the recipient email on the payout request;
   // GlobePay does not, and this route's tests run with an empty scope, so
   // look it up only when the active gateway asks for it.
-  const email = GATEWAYS[gateway].needsCustomerContact
-    ? (await customerContact(req.scope, customerId)).email
-    : undefined;
+  const email = (
+    await contactIfNeeded(req.scope, gateway, customerId, 'payout')
+  )?.email;
 
   const result = await startGlobePayWithdrawal(
     req.scope,

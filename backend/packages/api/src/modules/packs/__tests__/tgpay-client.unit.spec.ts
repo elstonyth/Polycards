@@ -214,6 +214,10 @@ describe('pure helpers', () => {
     expect(tgpayPaymentState('APPROVED')).toBe('success');
     expect(tgpayPaymentState('success')).toBe('success');
     expect(tgpayPaymentState('reject')).toBe('failed');
+    // A payout that cancels or expires must release the customer's debit,
+    // so the whole terminal-failure family closes the row.
+    for (const s of ['CANCELLED', 'canceled', 'EXPIRED', 'void', 'DECLINED'])
+      expect(tgpayPaymentState(s)).toBe('failed');
     expect(tgpayPaymentState('PENDING')).toBe('pending');
     expect(tgpayPaymentState('SOMETHING_NEW')).toBe('pending');
     expect(tgpayPaymentState('')).toBe('pending');
@@ -254,7 +258,8 @@ describe('callback source allowlist', () => {
     expect(parseCallbackAllowlist('1.32.102.19/0x10 1.32.102.19/1e1')).toEqual([]);
     expect(parseCallbackAllowlist('1.32.102.19/33')).toEqual([]);
     expect(parseCallbackAllowlist('1.32.102.19/a/b')).toEqual([]);
-    expect(parseCallbackAllowlist('0.0.0.0/0')).toHaveLength(1);
+    expect(parseCallbackAllowlist('0.0.0.0/0')).toEqual([]);
+    expect(parseCallbackAllowlist('0.0.0.0/1 128.0.0.0/1')).toHaveLength(2);
   });
 
   it('verdict: sandbox may run header-only; production without a list, or with a garbage list, refuses', () => {

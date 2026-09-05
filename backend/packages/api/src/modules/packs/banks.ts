@@ -88,6 +88,22 @@ export const TGPAY_SANDBOX_BANK: Bank = bank(
   { code: 'DUMMYBANKVERIFIED', name: 'Dummy Bank Verified' },
 );
 
+/**
+ * The dummy bank is a payable destination only while TGPay's SANDBOX is the
+ * configured base — on production it is a name nothing can pay to, so the
+ * picker, the saved-account writer and the withdrawal precheck all refuse it
+ * there (the adapter refuses it too, but that is after the debit).
+ */
+export function sandboxOnlyBank(
+  alias: string,
+  env: { TGPAY_API_BASE?: string } = process.env,
+): boolean {
+  return (
+    findBank(alias)?.id === TGPAY_SANDBOX_BANK.id &&
+    !/sandbox/i.test(env.TGPAY_API_BASE ?? '')
+  );
+}
+
 const byAlias = new Map<string, Bank>();
 for (const b of [...MY_BANKS, TGPAY_SANDBOX_BANK]) {
   byAlias.set(b.id.toUpperCase(), b);

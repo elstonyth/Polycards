@@ -514,6 +514,19 @@ const SettlementPage = () => {
                 </Text>
               </div>
             ) : null}
+            {audit.data.history.map((h) => (
+              <div key={h.gateway} className="border-t px-6 py-3">
+                <Text size="small" className="text-ui-fg-subtle">
+                  {t('settlement.auditHistory', {
+                    gateway: h.gateway,
+                    deposits: h.deposits.count,
+                    depositsGross: rm(h.deposits.gross),
+                    withdrawals: h.withdrawals.count,
+                    withdrawalsGross: rm(h.withdrawals.gross),
+                  })}
+                </Text>
+              </div>
+            ))}
             <div className="flex items-center gap-3 border-t px-6 py-3">
               <Text size="small" className="text-ui-fg-subtle">
                 {audit.data.last_audited_at
@@ -563,7 +576,10 @@ const SettlementPage = () => {
                 <Table.Body>
                   {audit.data.findings.map((f) => (
                     <Table.Row key={`${f.kind}-${f.id}`}>
-                      <Table.Cell>{f.kind}</Table.Cell>
+                      <Table.Cell>
+                        {f.kind}
+                        <span className="text-ui-fg-muted"> · {f.gateway}</span>
+                      </Table.Cell>
                       <Table.Cell className="font-mono text-xs">
                         {f.gateway_transaction_id ?? f.merchant_transaction_id}
                       </Table.Cell>

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { MedusaError } from '@medusajs/framework/utils';
-import { findBank, gatewayBankCode } from './banks';
+import { findBank, gatewayBankCode, sandboxOnlyBank } from './banks';
 // Type-only: a value import of gateway.ts from here would cycle through the
 // module index into the service, which imports this file.
 import type { PaymentGateway } from './gateway';
@@ -179,12 +179,15 @@ export function savedBankAccountViews(
 
 /**
  * Can `gateway` pay to this bank? Unknown codes count as supported on GlobePay
- * only — they are its own pre-registry codes, passed through as-is.
+ * only — they are its own pre-registry codes, passed through as-is. The
+ * sandbox dummy bank is supported only while the sandbox is configured.
  */
 export function bankSupportedBy(
   bankCode: string,
   gateway: PaymentGateway,
+  env: { TGPAY_API_BASE?: string } = process.env,
 ): boolean {
+  if (sandboxOnlyBank(bankCode, env)) return false;
   if (gatewayBankCode(bankCode, gateway)) return true;
   return gateway === 'globepay' && !findBank(bankCode);
 }

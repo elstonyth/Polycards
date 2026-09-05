@@ -6,8 +6,7 @@ import {
   tgpayConfigFromEnv,
   tgpayPaymentState,
 } from '../../../../modules/packs/tgpay-client';
-import { GLOBEPAY_MAX_RM } from '../../../../modules/packs/globepay-deposit';
-import { rowGateway } from '../../../../modules/packs/gateway';
+import { GATEWAYS, rowGateway } from '../../../../modules/packs/gateway';
 import { topupIdempotencyReference } from '../../../../modules/packs/topup';
 import { sendTopupReceipt } from '../../../../modules/packs/topup-receipt';
 import { notifyFeed } from '../../../../modules/packs/notify-feed';
@@ -132,9 +131,17 @@ export async function POST(
     res.status(400).send('rejected');
     return;
   }
-  if (creditedAmount > GLOBEPAY_MAX_RM) {
+  // The hosted checkout fixes the sum at create-payment, so the callback can
+  // only disagree with the row if it is forged or TGPay is wrong — and either
+  // way it must not turn into withdrawable balance. Refuse and leave the row
+  // pending; the reconcile sweep re-reads /transaction/query and settles it
+  // with the row's own amount. Same rule, expressed against the gateway's
+  // ceiling, as a second fence.
+  const requested = Number(deposit.amount_requested);
+  const ceiling = GATEWAYS.tgpay.limits.depositMax;
+  if (creditedAmount !== requested || creditedAmount > ceiling) {
     logger.error(
-      `[tgpay] settled callback for ${merchantTransactionId} claims ${creditedAmount}, above the RM ${GLOBEPAY_MAX_RM} deposit ceiling — refusing to credit; the row remains ${deposit.status} for manual settlement`,
+      `[tgpay] settled callback for ${merchantTransactionId} claims RM ${creditedAmount} but the row asked for RM ${requested} (ceiling RM ${ceiling}) — refusing to credit; the row remains ${deposit.status} for the sweep`,
     );
     res.status(400).send('rejected');
     return;

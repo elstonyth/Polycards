@@ -41,6 +41,12 @@ export function fromSen(sen: number): number {
  * modules/packs/inventory-view) so the same field cannot mean different things
  * on two screens.
  */
+export function toOptionalMoney(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 /**
  * What a payout cost us less what the recipient got, for the settlement
  * report's fee = gross − net rule. NULL (unknown) when either side is
@@ -50,12 +56,6 @@ export function netOfFee(amount: unknown, fee: unknown): number | null {
   const a = toOptionalMoney(amount);
   const f = toOptionalMoney(fee);
   return a === null || f === null ? null : Number((a - f).toFixed(2));
-}
-
-export function toOptionalMoney(value: unknown): number | null {
-  if (value === null || value === undefined || value === '') return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
 }
 
 /** Whole-percent of a sen amount, staying in sen, half-up. */

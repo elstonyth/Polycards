@@ -309,18 +309,35 @@ export async function balances(config: TgpayConfig): Promise<{
 /**
  * Pay-in `status` strings seen in the docs: APPROVED, PENDING, and "other
  * values your integration defines". Only APPROVED credits; only an explicit
- * reject/fail closes the row. Anything unknown stays pending — the same
- * never-write-off-on-doubt rule as GlobePay's depositState.
+ * terminal failure closes the row — reject/fail plus the cancelled / expired
+ * / voided / declined family, because a payout left "pending" on one of those
+ * strands the customer's debit with no sweep to release it. Anything unknown
+ * stays pending — the same never-write-off-on-doubt rule as GlobePay's
+ * depositState.
  */
 export function tgpayPaymentState(
   status: string,
 ): 'success' | 'failed' | 'pending' {
   const s = status.trim().toUpperCase();
   if (s === 'APPROVED' || s === 'SUCCESS') return 'success';
-  if (s === 'REJECT' || s === 'REJECTED' || s === 'FAILED' || s === 'FAIL')
-    return 'failed';
+  if (TERMINAL_FAILURES.has(s)) return 'failed';
   return 'pending';
 }
+
+const TERMINAL_FAILURES = new Set([
+  'REJECT',
+  'REJECTED',
+  'FAILED',
+  'FAIL',
+  'CANCEL',
+  'CANCELLED',
+  'CANCELED',
+  'EXPIRE',
+  'EXPIRED',
+  'VOID',
+  'VOIDED',
+  'DECLINED',
+]);
 
 /** Payout callback states are documented lowercase: pending | success | reject. */
 export const tgpayPayoutState = tgpayPaymentState;
@@ -380,10 +397,12 @@ export function parseCallbackAllowlist(
     const [ip, maskRaw] = parts;
     const base = ipv4ToInt(ip);
     // The mask must be 1–2 plain digits: `Number('')` is 0, so a trailing
-    // slash would otherwise read as /0 and allow the whole internet.
+    // slash would otherwise read as /0 and allow the whole internet. An
+    // explicit /0 is refused for the same reason — an allowlist that allows
+    // everything is a typo, not a policy; unset the variable to disable.
     if (maskRaw !== undefined && !/^\d{1,2}$/.test(maskRaw)) continue;
     const bits = maskRaw === undefined ? 32 : Number(maskRaw);
-    if (base === null || bits > 32) continue;
+    if (base === null || bits < 1 || bits > 32) continue;
     entries.push({ base, bits });
   }
   return entries;

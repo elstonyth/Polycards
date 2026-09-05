@@ -254,6 +254,20 @@ describe('POST /store/credits/withdraw/accounts', () => {
     expect(updateCustomers).not.toHaveBeenCalled();
   });
 
+  it('refuses the sandbox dummy bank unless the sandbox is configured', async () => {
+    const prev = process.env.TGPAY_API_BASE;
+    process.env.TGPAY_API_BASE = 'https://api.tgpay365.com/api/v2';
+    try {
+      await expect(
+        POST(mkReq({ ...VALID_BODY, bank_code: 'DUMMYBANKVERIFIED' }), mkRes()),
+      ).rejects.toThrow(/pick a bank/i);
+      expect(updateCustomers).not.toHaveBeenCalled();
+    } finally {
+      if (prev === undefined) delete process.env.TGPAY_API_BASE;
+      else process.env.TGPAY_API_BASE = prev;
+    }
+  });
+
   it('401s a register-phase token (empty actor_id) before touching the DB', async () => {
     const req = {
       auth_context: { actor_id: '' },

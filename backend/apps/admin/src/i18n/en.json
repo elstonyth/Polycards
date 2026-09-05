@@ -645,6 +645,7 @@
     "auditAmount": "Amount",
     "auditNote": "Gateway says",
     "auditLoadError": "Could not load the gateway audit.",
+    "auditHistory": "{{gateway}} (not active): {{deposits}} settled deposit(s) {{depositsGross}} gross · {{withdrawals}} settled payout(s) {{withdrawalsGross}} gross",
     "gatewayTitle": "Payment gateway",
     "gatewaySubtitle": "Which gateway customers pay through and are paid out from. Takes effect immediately for new top-ups and withdrawals; money already in flight finishes on the gateway it started on.",
     "gatewayActive": "Active: {{label}}",
