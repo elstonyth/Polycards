@@ -79,6 +79,25 @@ is `null` for TGPay rows (their statuses are strings, the column is numeric).
   account `543478924652`, name `Michael Yap`. The bank picker lists it first
   whenever `TGPAY_API_BASE` contains "sandbox".
 
+## Production tenant (read 2026-09-06, logged in as `polycards`)
+
+- Back office `https://admin.tgpay365.com` (the sandbox login works there);
+  API `https://api.tgpay365.com/api/v2` (the admin itself calls it); hosted
+  checkout `https://checkout.tgpay365.com`.
+- **API keys are gated on 2FA**: the reveal buttons open "Two-factor
+  authentication required — set it up first" (Settings → Two-factor
+  authentication). Keys are not issued until then.
+- Currency shows "—" (unset), tenant credit and payout credit 0.00 — ask
+  TGPay to set MYR and fund the payout wallet before go-live (same trap as
+  the sandbox's currency-less payout wallet).
+- Bands differ from the sandbox: FPX / e-wallet / DuitNow **RM 50 – 30,000**
+  per transaction (sandbox had no RM 50 floor); payout RM 50 – 30,000. The
+  registry carries these per gateway (`GATEWAYS.tgpay.limits`) and the
+  storefront reads them from `GET /store/payments/config` when the sheet
+  opens, so a switch never offers a floor the gateway refuses.
+- Settlement to us: fixed RM 10 fee, minimum RM 3,000; owner name / ID /
+  bank fields are empty — fill them so pay-in balance can be settled out.
+
 ## Which gateway is active
 
 An admin setting, not an env var: Settlement page → **Payment gateway**
