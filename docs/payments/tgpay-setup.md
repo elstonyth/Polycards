@@ -10,11 +10,11 @@ URLs blank; the values below were confirmed by probing.
 
 ## Environments
 
-|               | Sandbox                                       | Production                     |
-| ------------- | --------------------------------------------- | ------------------------------ |
-| Admin         | <https://sandbox.tgpay365.com/>               | ask TGPay (not shared yet)     |
-| API base      | `https://sandbox-api.tgpay365.com/api/v2`     | ask TGPay                      |
-| Hosted checkout | `https://sandbox-checkout.tgpay365.com/checkout?order=…` (absolute link, verified) | ask TGPay |
+|                 | Sandbox                                                                            | Production                 |
+| --------------- | ---------------------------------------------------------------------------------- | -------------------------- |
+| Admin           | <https://sandbox.tgpay365.com/>                                                    | ask TGPay (not shared yet) |
+| API base        | `https://sandbox-api.tgpay365.com/api/v2`                                          | ask TGPay                  |
+| Hosted checkout | `https://sandbox-checkout.tgpay365.com/checkout?order=…` (absolute link, verified) | ask TGPay                  |
 
 `/api/v1` is a 404 on the sandbox; `/api/v2` answers. Without key headers the
 API returns `401 x-public-key and x-secret-key headers are required`, which is
@@ -30,13 +30,13 @@ the cheapest connectivity probe.
 - Success is HTTP 200 + `{ status: 1, msg, data }`; errors are 4xx/5xx with
   `{ statusCode, message, error }` or `{ message, errors }`.
 
-| Call | Endpoint | Notes |
-| --- | --- | --- |
-| Create payment | `POST /transaction/create-payment` | returns only `data.checkoutLink`; the `order` query param is their txn id |
-| Query payment / payout | `POST /transaction/query` | by `merchantRefNum`; unknown → `404 Transaction not found` |
-| Create payout | `POST /transaction/payout/withdraw` | needs `email`, `userName`, `bankAccNumber`, `bankCode` (SWIFT) + matching `bankName` |
-| Pay-in balance | `POST /tenant-credits/balance` | `{ epoch, currency }` |
-| Payout balance | `POST /tenant-payout-credits/balance` | separate wallet |
+| Call                   | Endpoint                              | Notes                                                                                |
+| ---------------------- | ------------------------------------- | ------------------------------------------------------------------------------------ |
+| Create payment         | `POST /transaction/create-payment`    | returns only `data.checkoutLink`; the `order` query param is their txn id            |
+| Query payment / payout | `POST /transaction/query`             | by `merchantRefNum`; unknown → `404 Transaction not found`                           |
+| Create payout          | `POST /transaction/payout/withdraw`   | needs `email`, `userName`, `bankAccNumber`, `bankCode` (SWIFT) + matching `bankName` |
+| Pay-in balance         | `POST /tenant-credits/balance`        | `{ epoch, currency }`                                                                |
+| Payout balance         | `POST /tenant-payout-credits/balance` | separate wallet                                                                      |
 
 Callbacks: payment notify is `{ status, msg, data: { amount, transactionRefNum,
 merchantRefNum, paymentMethod, bankName, status: 'APPROVED' } }`; payout notify
@@ -148,6 +148,13 @@ end on the sandbox 2026-09-05: accepted, callback settled it, ledger −50.
   **Resolved 2026-09-05**: CS set the wallet currency to MYR; payout works.
 - Production admin + API base URLs, and whether production payout is enabled
   (`501 Payout not available in production yet` otherwise).
-- Callback source IPs, if they publish any (we rely on the key headers).
+- ~~Callback source IPs~~ — given by TGPay 2026-09-05 (production callbacks
+  may come from): `1.32.102.191`, `1.32.102.19`, `1.32.102.35`, `1.32.102.1`,
+  `60.48.120.36`, `219.95.78.237`, `219.94.46.237`, `18.142.49.112`,
+  `188.114.96.0`, `188.114.97.0` (Cloudflare range), `47.131.132.118`,
+  `54.251.58.7`. **Reference only**: our hooks do not filter by source IP
+  (they asked us not to whitelist via `X-Forwarded-For`, and we never did);
+  the key headers are the authentication. Our egress `188.166.181.61` /
+  `188.166.181.204` is whitelisted on their production as of the same day.
 - Whether the hosted checkout link is ever absolute; if it moves off the admin
   host, set `TGPAY_CHECKOUT_BASE`.
