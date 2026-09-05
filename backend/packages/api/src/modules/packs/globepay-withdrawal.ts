@@ -326,10 +326,12 @@ export async function startGlobePayWithdrawal(
       'Enter a valid amount.',
     );
   }
-  if (amount < GLOBEPAY_WD_MIN_RM || amount > GLOBEPAY_WD_MAX_RM) {
+  const gateway = input.gateway ?? paymentGateway();
+  const { withdrawalMin, withdrawalMax } = GATEWAYS[gateway].limits;
+  if (amount < withdrawalMin || amount > withdrawalMax) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      `Withdrawals must be between RM ${GLOBEPAY_WD_MIN_RM} and RM ${GLOBEPAY_WD_MAX_RM.toLocaleString('en-US')}.`,
+      `Withdrawals must be between RM ${withdrawalMin} and RM ${withdrawalMax.toLocaleString('en-US')}.`,
     );
   }
 
@@ -340,7 +342,6 @@ export async function startGlobePayWithdrawal(
       ? input.idempotencyKey.trim()
       : undefined;
 
-  const gateway = input.gateway ?? paymentGateway();
   const config = gatewayConfigFor(gateway);
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
 

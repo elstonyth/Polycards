@@ -170,10 +170,12 @@ export async function startGlobePayDeposit(
   // already refused as "at most RM 10,000 per top-up". Both bounds stay
   // asserted anyway: TOPUP_MAX_RM is an anti-typo guard that answers to us,
   // the band answers to them, and they are free to move apart again.
-  if (amount < GLOBEPAY_MIN_RM || amount > GLOBEPAY_MAX_RM) {
+  const gateway = input.gateway ?? paymentGateway();
+  const { depositMin, depositMax } = GATEWAYS[gateway].limits;
+  if (amount < depositMin || amount > depositMax) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      `Top-ups must be between RM ${GLOBEPAY_MIN_RM} and RM ${GLOBEPAY_MAX_RM.toLocaleString('en-US')}.`,
+      `Top-ups must be between RM ${depositMin} and RM ${depositMax.toLocaleString('en-US')}.`,
     );
   }
 
@@ -209,7 +211,6 @@ export async function startGlobePayDeposit(
     );
   }
 
-  const gateway = input.gateway ?? paymentGateway();
   const config = gatewayConfigFor(gateway);
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
 

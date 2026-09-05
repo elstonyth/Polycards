@@ -32,6 +32,19 @@ export type GatewayDefinition = {
   needsCustomerContact: boolean;
   /** Their server-to-server callback targets on OUR backend. */
   hooks: { deposit: string; withdrawal: string; payoutVerify?: string };
+  /**
+   * The gateway's own per-transaction band, RM. Enforced BEFORE any row or
+   * gateway call so an amount that cannot succeed never costs a round trip or
+   * leaves a failed row behind, and the customer reads the bounds instead of
+   * the gateway's bare refusal. Ceilings are additionally capped by our own
+   * site-wide TOPUP_MAX_RM / withdrawal daily cap.
+   */
+  limits: {
+    depositMin: number;
+    depositMax: number;
+    withdrawalMin: number;
+    withdrawalMax: number;
+  };
 };
 
 export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
@@ -45,6 +58,14 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
       withdrawal: '/hooks/globepay/withdrawal',
       payoutVerify: '/hooks/globepay/payout-verify',
     },
+    // Production merchant band confirmed by the provider 2026-07-29 (deposits)
+    // and the WD channel's documented range (withdrawals).
+    limits: {
+      depositMin: 30,
+      depositMax: 10000,
+      withdrawalMin: 50,
+      withdrawalMax: 50000,
+    },
   },
   tgpay: {
     id: 'tgpay',
@@ -54,6 +75,15 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
     hooks: {
       deposit: '/hooks/tgpay/deposit',
       withdrawal: '/hooks/tgpay/withdrawal',
+    },
+    // Read from the PRODUCTION tenant's settings 2026-09-06: FPX / e-wallet /
+    // DuitNow RM 50 – 30,000 per transaction, payout RM 50 – 30,000. The
+    // deposit ceiling is our own TOPUP_MAX_RM (10,000), the lower of the two.
+    limits: {
+      depositMin: 50,
+      depositMax: 10000,
+      withdrawalMin: 50,
+      withdrawalMax: 30000,
     },
   },
 };
