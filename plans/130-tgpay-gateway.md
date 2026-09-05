@@ -18,9 +18,9 @@ selects the new client; unset/`globepay` keeps today's behaviour byte-for-byte.
   Hosted checkout (no `channelId`): `paymentMethod` `FPX` | `EWALLET` or
   omitted. `checkoutLink` carries `?order=<txn id>`.
 - `POST /transaction/query` with `merchantRefNum` → `{data:{order, amount,
-  fee, amountAfterFee, status:'APPROVED'|'PENDING'|…}}`; payouts return
+fee, amountAfterFee, status:'APPROVED'|'PENDING'|…}}`; payouts return
   `{data:{status, order:{payoutRefNum, merchantRefNum, amount, fee,
-  amountIncludeFee}}}`. Unknown ref → HTTP 404 `Transaction not found`.
+amountIncludeFee}}}`. Unknown ref → HTTP 404 `Transaction not found`.
 - `POST /transaction/payout/withdraw` needs `email`, `userName`,
   `bankAccNumber`, `bankCode` (SWIFT) + matching `bankName`; sandbox uses the
   pair `DUMMYBANKVERIFIED` / `Dummy Bank Verified`. Returns
@@ -29,9 +29,9 @@ selects the new client; unset/`globepay` keeps today's behaviour byte-for-byte.
   `POST /tenant-payout-credits/balance` (payout), body `{epoch, currency}`.
 - Payment callback: POST to our `notifyUrl`, same two key headers, body
   `{status, msg, data:{amount, transactionRefNum, merchantRefNum,
-  paymentMethod, bankName, status:'APPROVED'}}`. At-least-once.
+paymentMethod, bankName, status:'APPROVED'}}`. At-least-once.
 - Payout callback: flat body `{transactionId, status:'pending'|'success'|
-  'reject', amount, fee, paymentAt, orderno, payType:'PAYOUT'}` — carries NO
+'reject', amount, fee, paymentAt, orderno, payType:'PAYOUT'}` — carries NO
   merchantRefNum, so the row is found by `gateway_transaction_id`.
 - Errors: 4xx/5xx with `{statusCode, message, error}` or `{message, errors}`.
 

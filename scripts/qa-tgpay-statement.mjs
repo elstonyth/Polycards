@@ -27,7 +27,10 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 430, height: 932 } });
 try {
   await page.goto(`${STORE}/`, { waitUntil: 'domcontentloaded' });
-  const loginBtn = page.locator('header').getByRole('button', { name: /^login$/i }).first();
+  const loginBtn = page
+    .locator('header')
+    .getByRole('button', { name: /^login$/i })
+    .first();
   await loginBtn.waitFor({ state: 'visible', timeout: 60000 });
   await loginBtn.click();
   const email = page.locator('input[name="email"]');
@@ -39,13 +42,25 @@ try {
 
   await page.goto(`${STORE}/transactions`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2500);
-  await page.screenshot({ path: path.join(OUT, 'tgpay-statement.png'), fullPage: true });
+  await page.screenshot({
+    path: path.join(OUT, 'tgpay-statement.png'),
+    fullPage: true,
+  });
   const rows = await page.locator('tbody tr').allInnerTexts();
-  console.log('rows:', rows.slice(0, 5).map((r) => r.replace(/\s+/g, ' ')).join('\n      '));
+  console.log(
+    'rows:',
+    rows
+      .slice(0, 5)
+      .map((r) => r.replace(/\s+/g, ' '))
+      .join('\n      '),
+  );
 
   await page.goto(`${STORE}/wallet`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2500);
-  await page.screenshot({ path: path.join(OUT, 'tgpay-wallet.png'), fullPage: true });
+  await page.screenshot({
+    path: path.join(OUT, 'tgpay-wallet.png'),
+    fullPage: true,
+  });
 } finally {
   await browser.close();
 }
