@@ -45,6 +45,10 @@ import {
   PaymentConfigSchema,
 } from '@/lib/data/schemas';
 import { mapVaultItem, type BackendVaultItem } from './vault-map';
+import {
+  DEFAULT_PAYMENT_LIMITS,
+  type PaymentLimits,
+} from '@/lib/payment-limits';
 export type { VaultItem } from './vault-map';
 
 import type { VaultItem } from './vault-map';
@@ -186,20 +190,6 @@ export type StartDepositResult =
  * time — the retract switch would work on dynamic pages and silently do nothing
  * on static ones. An action runs per request everywhere.
  */
-export type PaymentLimits = {
-  gateway: string;
-  deposit: { minRm: number; maxRm: number };
-  withdrawal: { minRm: number; maxRm: number };
-};
-
-/** The GlobePay production band, used until the backend answers (and if it
- *  never does): the sheet must never offer a floor the gateway will refuse. */
-export const DEFAULT_PAYMENT_LIMITS: PaymentLimits = {
-  gateway: 'unknown',
-  deposit: { minRm: 30, maxRm: 10000 },
-  withdrawal: { minRm: 50, maxRm: 50000 },
-};
-
 /**
  * The ACTIVE gateway's money bands, read from the backend per call — an
  * admin can switch gateways at runtime, and TGPay's floor (RM 50) is not

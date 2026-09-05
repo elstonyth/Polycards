@@ -5,12 +5,12 @@ import { CheckCircle2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { rm, rm0 } from '@/lib/format';
 import {
-  DEFAULT_PAYMENT_LIMITS,
   getDepositMethods,
   getPaymentLimits,
   startDeposit,
   topUpCredits,
 } from '@/lib/actions/vault';
+import { DEFAULT_PAYMENT_LIMITS } from '@/lib/payment-limits';
 import { leaveFor } from '@/lib/navigation';
 import { markDepositInFlight } from '@/lib/deposit-return';
 import { Pill } from '@/components/ui/pill';

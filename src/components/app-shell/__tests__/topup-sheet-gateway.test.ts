@@ -28,11 +28,6 @@ vi.mock('@/lib/actions/vault', () => ({
   getDepositMethods: () => getDepositMethods(),
   // The sheet reads the active gateway's band per open; the tests keep the
   // GlobePay defaults (RM 30 – 10,000) that their amounts were written for.
-  DEFAULT_PAYMENT_LIMITS: {
-    gateway: 'globepay',
-    deposit: { minRm: 30, maxRm: 10000 },
-    withdrawal: { minRm: 50, maxRm: 50000 },
-  },
   getPaymentLimits: async () => ({
     gateway: 'globepay',
     deposit: { minRm: 30, maxRm: 10000 },
