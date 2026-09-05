@@ -333,6 +333,17 @@ describe('startGlobePayWithdrawal — money ordering', () => {
   });
 
   // Test-plan case 3.
+  it("refuses a bank the active gateway cannot pay to BEFORE any debit, in the customer's words", async () => {
+    // The saved account is a legacy GlobePay-coded row ('MBB' is not in the
+    // registry); GlobePay passes it through, TGPay has no code for it.
+    const h = harness([SAVED_ACCOUNT]);
+    await expect(start(h, { gateway: 'tgpay' })).rejects.toThrow(
+      /not available with the current payout provider/i,
+    );
+    expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+  });
+
   it('refuses an account still inside the cooling-off window', async () => {
     const h = harness([
       {

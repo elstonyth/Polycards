@@ -40,6 +40,14 @@ function payoutStatus(
   account: SavedBankAccount,
   now: Date,
 ): { label: string; ready: boolean } {
+  if (account.supported === false) {
+    // Kept, not lost: the current payout provider cannot pay to this bank.
+    // It becomes usable again when a provider that serves it is active.
+    return {
+      label: 'Not available with the current payout provider',
+      ready: false,
+    };
+  }
   if (typeof account.usableFrom !== 'string') {
     // Saved before the cooling-off rule existed: waiting will never arm it.
     return { label: 'Remove and save again to withdraw to it', ready: false };

@@ -77,7 +77,12 @@ export async function POST(
   // GlobePay URLs cannot be switched to TGPay by accident.
   const urls = gatewayUrls(wanted);
   const withdrawalsOn = process.env.GLOBEPAY_WITHDRAWALS_ENABLED === 'true';
-  if (!urls.notifyUrl || (withdrawalsOn && !urls.withdrawNotifyUrl)) {
+  if (
+    !urls.notifyUrl ||
+    (withdrawalsOn &&
+      (!urls.withdrawNotifyUrl ||
+        (urls.hasPayoutVerify && !urls.payoutVerifyUrl)))
+  ) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       `${GATEWAYS[wanted].label} has no callback URL in this environment — set PAYMENT_CALLBACK_BASE (or notify URLs ending in ${GATEWAYS[wanted].hooks.deposit}) first.`,

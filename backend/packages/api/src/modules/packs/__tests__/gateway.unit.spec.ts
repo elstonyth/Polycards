@@ -237,6 +237,18 @@ describe('TGPay payouts', () => {
     ).toBe('MBB');
   });
 
+  it('GlobePay refuses a bank the registry knows but it cannot pay to, instead of misrouting the id', async () => {
+    for (const code of ['CITIMYKL', 'KFHOMYKL', 'DUMMYBANKVERIFIED']) {
+      const err = await submitWithdrawal(
+        { ...wd, destinationBankCode: code },
+        globepayConfig,
+      ).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(globepay.GlobePayError);
+      expect((err as globepay.GlobePayError).definite).toBe(true);
+    }
+    expect(globepay.submitWithdrawal).not.toHaveBeenCalled();
+  });
+
   it('the sandbox dummy bank is refused off the sandbox', async () => {
     const prod = { ...tgpayConfig, baseUrl: 'https://api.tgpay365.test/api/v2' };
     const err = await submitWithdrawal(wd, prod).catch((e: unknown) => e);

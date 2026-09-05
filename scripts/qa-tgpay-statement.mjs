@@ -5,23 +5,12 @@
 //   node scripts/qa-tgpay-statement.mjs        # STORE_BASE defaults to :4000
 
 import { chromium } from '@playwright/test';
-import fs from 'node:fs';
 import path from 'node:path';
+import { devCustomer } from './lib/dev-logins.mjs';
 
 const STORE = process.env.STORE_BASE ?? 'http://127.0.0.1:4000';
 const OUT = path.resolve('docs/research');
-const raw = fs.readFileSync(path.resolve('scripts/.dev-logins'), 'utf8');
-const env = Object.fromEntries(
-  raw
-    .split(/\r?\n/)
-    .map((l) => l.match(/^([A-Z_]+)=(.*)$/))
-    .filter(Boolean)
-    .map((m) => [m[1], m[2]]),
-);
-const CUST = {
-  email: process.env.CUST_EMAIL ?? env.CUST_EMAIL ?? 'test@polycards.app',
-  password: process.env.CUST_PW ?? env.CUST_PW ?? '',
-};
+const CUST = devCustomer();
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 430, height: 932 } });

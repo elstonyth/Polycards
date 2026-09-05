@@ -93,6 +93,25 @@ describe('POST /admin/payments/gateway', () => {
     delete process.env.GLOBEPAY_NOTIFY_URL;
   });
 
+  it('requires the payout-verify URL too, for a gateway that has that step, when withdrawals are on', async () => {
+    delete process.env.PAYMENT_CALLBACK_BASE;
+    process.env.GLOBEPAY_MERCHANT_CODE = 'Testpolycard';
+    process.env.GLOBEPAY_WITHDRAWALS_ENABLED = 'true';
+    process.env.GLOBEPAY_NOTIFY_URL = 'https://old/hooks/globepay/deposit';
+    process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL =
+      'https://old/hooks/globepay/withdrawal';
+    delete process.env.GLOBEPAY_PAYOUT_VERIFY_URL;
+    const h = harness(null);
+    h.req.body = { gateway: 'globepay', reason: 'x' };
+    await expect(POST(h.req as never, h.res as never)).rejects.toThrow(
+      /callback URL/,
+    );
+    expect(h.packs.editPaymentGateway).not.toHaveBeenCalled();
+    delete process.env.GLOBEPAY_WITHDRAWALS_ENABLED;
+    delete process.env.GLOBEPAY_NOTIFY_URL;
+    delete process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL;
+  });
+
   it('refuses an unknown gateway, an unconfigured one, and a missing reason — without writing', async () => {
     for (const body of [
       { gateway: 'stripe', reason: 'x' },

@@ -6,10 +6,10 @@ import {
 } from '../../../../../modules/packs/gateway';
 import { globepayWithdrawalsEnabled } from '../../../../../modules/packs/globepay-withdrawal';
 
-// GET /store/credits/withdraw/banks — the payout bank picker's source. Proxied
-// (never called from the browser) because GetSupportedBanks carries our
-// merchant code, and cached because the list changes rarely while the picker
-// renders on every visit.
+// GET /store/credits/withdraw/banks — the payout bank picker's source: the
+// banks the ACTIVE gateway can pay to, as canonical ids (banks.ts). Cached
+// per gateway because the picker renders on every visit and the list only
+// changes with a switch.
 const CACHE_MS = 10 * 60 * 1000;
 // Keyed by gateway: a switch must not serve the old gateway's bank codes.
 let cache: {

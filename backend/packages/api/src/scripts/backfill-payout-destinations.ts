@@ -47,6 +47,7 @@ import {
   getSupportedBanks,
   globepayConfigFromEnv,
 } from '../modules/packs/globepay-client';
+import { findBank } from '../modules/packs/banks';
 
 type SettledDestination = {
   customer_id: string;
@@ -140,10 +141,12 @@ export default async function backfillPayoutDestinations({
           let changed = false;
 
           for (const destination of destinations) {
-            const id = savedBankAccountId(
-              destination.bank_code,
-              destination.account_number,
-            );
+            // Rows carry whatever code the gateway of the day used; the saved
+            // list is canonical (banks.ts), so derive the id from that or the
+            // lookup below never matches and a duplicate entry is appended.
+            const bank = findBank(destination.bank_code);
+            const bankCode = bank?.id ?? destination.bank_code;
+            const id = savedBankAccountId(bankCode, destination.account_number);
             const savedAt = destination.first_settled_at.toISOString();
             const existing = accounts.findIndex((a) => a.id === id);
 
@@ -164,9 +167,11 @@ export default async function backfillPayoutDestinations({
             }
             accounts.push({
               id,
-              bankCode: destination.bank_code,
+              bankCode,
               bankName:
-                bankNames.get(destination.bank_code) ?? destination.bank_code,
+                bank?.name ??
+                bankNames.get(destination.bank_code) ??
+                destination.bank_code,
               accountNumber: destination.account_number,
               accountHolderName: destination.account_holder_name,
               savedAt,

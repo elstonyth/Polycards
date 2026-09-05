@@ -8,7 +8,7 @@ import {
 } from '../../../../modules/packs/tgpay-client';
 import { refundGlobePayWithdrawal } from '../../../../modules/packs/globepay-withdrawal';
 import { rowGateway } from '../../../../modules/packs/gateway';
-import { toOptionalMoney } from '../../../../modules/packs/money';
+import { netOfFee, toOptionalMoney } from '../../../../modules/packs/money';
 import { notifyFeed } from '../../../../modules/packs/notify-feed';
 import { withdrawalFeedKey } from '../../../../modules/packs/feed-events';
 import { sendWithdrawalReceipt } from '../../../../modules/packs/withdrawal-receipt';
@@ -30,12 +30,6 @@ type PayoutNotify = {
 };
 
 type Logger = { warn: (m: string) => void; error: (m: string) => void };
-
-function netOfFee(amount: unknown, fee: unknown): number | null {
-  const a = toOptionalMoney(amount);
-  const f = toOptionalMoney(fee);
-  return a === null || f === null ? null : Number((a - f).toFixed(2));
-}
 
 export async function POST(
   req: MedusaRequest,
@@ -92,6 +86,8 @@ export async function POST(
     res.status(200).send('success');
     return;
   }
+  // Belt and braces with the gateway filter on both selectors above: a row
+  // that somehow answered without being TGPay's is refused, not paid.
   if (rowGateway(withdrawal) !== 'tgpay') {
     logger.error(
       `[tgpay] callback names payout ${withdrawal.merchant_transaction_id}, which belongs to gateway "${withdrawal.gateway}" — ignored`,

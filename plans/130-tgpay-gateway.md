@@ -132,8 +132,10 @@ local env file, so `integration-tests/setup.js` now deletes
 ## Runtime switch (same day, user request: gateways selectable from the admin)
 
 - `GATEWAYS` registry in `modules/packs/gateway.ts` (id, label, `configured(env)`,
-  `needsCustomerContact`, hook paths). A new gateway = client file + hooks
-  folder + one registry entry.
+  `needsCustomerContact`, hook paths). A new gateway = a client file, a hooks
+  folder, the id in the `PaymentGateway` union, a registry entry, an adapter
+  in `gateway.ts`, and its bank codes in `banks.ts`. Nothing in the
+  orchestration, sweeps, routes or storefront.
 - Active gateway = `site_settings.payment_gateway` (admin choice, audited as
   `edit_payment_gateway`) → `PAYMENT_GATEWAY` env → GlobePay. Cached
   in-process, refreshed by `resolveActiveGateway()` at every money entry point
@@ -188,3 +190,11 @@ bank details when gateways two and three arrive.
 
 Jest note: `integration-tests/setup.js` also strips
 `PAYOUT_DESTINATION_COOLDOWN_HOURS` and `PAYMENT_CALLBACK_BASE` now.
+
+Second review (2026-09-05, post-bank-preservation) fixed: GlobePay adapter
+now refuses a registry-known bank it has no code for (was a pass-through
+misroute); an unsupported bank is refused before the debit with the reason;
+saved-account views resolve the active gateway first; the admin switch also
+requires the payout-verify URL when the gateway has that step; the backfill
+script canonicalises row codes; `/bank` shows the not-available state; the
+dead `bank_name` validation is gone (the registry supplies the name).

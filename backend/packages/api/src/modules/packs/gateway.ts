@@ -5,6 +5,7 @@ import type { GlobePayConfig } from './globepay-client';
 import type { TgpayConfig, TgpayCustomer } from './tgpay-client';
 import { PACKS_MODULE } from './index';
 import { banksFor, findBank, gatewayBankCode, TGPAY_SANDBOX_BANK } from './banks';
+import { netOfFee } from './money';
 
 // The gateway seam. Every caller that used to import the HTTP client from
 // globepay-client imports it from here instead; the functions keep GlobePay's
@@ -160,7 +161,8 @@ export function rowGatewayConfigs(
 ): (gateway: string | null | undefined) => GatewayConfig | null {
   const cache = new Map<string, GatewayConfig | null>();
   return (raw) => {
-    const gateway = rowGateway({ gateway: raw }) ?? String(raw);
+    const gateway = rowGateway({ gateway: raw });
+    if (!gateway) return null;
     if (!cache.has(gateway)) {
       try {
         cache.set(gateway, gatewayConfigFor(gateway, env));
@@ -309,17 +311,26 @@ const globepayAdapter: GatewayAdapter<GlobePayConfig> = {
   // Saved accounts and rows carry the canonical bank id; GlobePay wants its
   // own code. A code the registry does not know passes through untouched —
   // that is exactly what every pre-registry row and metadata entry carries,
-  // and GlobePay is the gateway that issued it.
-  submitWithdrawal: (input, config) =>
-    globepay.submitWithdrawal(
-      {
-        ...input,
-        destinationBankCode:
-          gatewayBankCode(input.destinationBankCode, 'globepay')?.code ??
-          input.destinationBankCode,
-      },
+  // and GlobePay is the gateway that issued it. A bank the registry KNOWS
+  // but GlobePay cannot pay to (Citibank, KFH, the TGPay sandbox bank) is a
+  // definite refusal: passing its canonical id through would be a misroute.
+  // async so a refusal is a rejection, like every other adapter error.
+  submitWithdrawal: async (input, config) => {
+    const known = findBank(input.destinationBankCode);
+    const own = gatewayBankCode(input.destinationBankCode, 'globepay');
+    if (known && !own) {
+      throw new globepay.GlobePayError(
+        `GlobePay365: cannot pay to bank ${input.destinationBankCode} — not in its supported list`,
+        ['GLOBEPAY_UNKNOWN_BANK'],
+        400,
+        true,
+      );
+    }
+    return globepay.submitWithdrawal(
+      { ...input, destinationBankCode: own?.code ?? input.destinationBankCode },
       config,
-    ),
+    );
+  },
   getWithdrawalDetail: globepay.getWithdrawalDetail,
   // The registry snapshot of GetSupportedBanks (31 MYR banks, 2026-09-05)
   // rather than the live call: the picker must hand out canonical ids, and
@@ -440,17 +451,15 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
   async getWithdrawalDetail(merchantTransactionId, config) {
     const q = await tgpay.queryPayout(merchantTransactionId, config);
     const amount = Number(q.order?.amount);
-    const fee = Number(q.order?.fee);
     return {
       transactionId: q.order?.payoutRefNum ?? '',
       merchantTransactionId,
       statusId: null,
       status: q.status,
       amount,
-      // fee = gross − net in the settlement report, so net = amount − fee.
-      // NaN when either is missing: toOptionalMoney turns that into NULL.
-      netAmount:
-        Number.isFinite(amount) && Number.isFinite(fee) ? amount - fee : NaN,
+      // Same rule as the payout callback (money.ts netOfFee); NaN when
+      // unknown, which toOptionalMoney turns into NULL on the row.
+      netAmount: netOfFee(q.order?.amount, q.order?.fee) ?? NaN,
       paymentMethodCode: 'WD',
       bankReferenceNo: null,
       uniqueReferenceNo: null,

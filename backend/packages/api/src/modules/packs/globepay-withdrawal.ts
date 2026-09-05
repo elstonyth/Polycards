@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from './index';
 import type PacksModuleService from './service';
-import { resolveWithdrawalDestination } from './saved-accounts';
+import {
+  bankSupportedBy,
+  resolveWithdrawalDestination,
+} from './saved-accounts';
 import {
   GATEWAYS,
   gatewayConfigFor,
@@ -409,6 +412,18 @@ export async function startGlobePayWithdrawal(
   const detailsInvalid = withdrawalDetailsError(precheckDestination);
   if (detailsInvalid) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, detailsInvalid);
+  }
+  // A bank the active gateway cannot pay to is refused HERE, before any
+  // debit, with the reason. The adapter would refuse it too, but only after
+  // the row and the debit exist — a refund, a failed row on the admin queue
+  // and a "check your details" email for something that is not the
+  // customer's mistake. Saved accounts survive a switch; this is the one
+  // moment they are not payable.
+  if (!bankSupportedBy(precheckDestination.bankCode, gateway)) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'This bank account is not available with the current payout provider. Pick another saved account, or try again later.',
+    );
   }
 
   // 0b) PRECHECK — NOT the gate. This is an unlocked, read-only fast path whose

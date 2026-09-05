@@ -211,11 +211,14 @@ describe('POST /store/credits/withdraw/accounts', () => {
     expect(updateCustomers).not.toHaveBeenCalled();
   });
 
-  it('refuses a missing or blank bank name (its own gate, not the shared one)', async () => {
-    await expect(
-      POST(mkReq({ ...VALID_BODY, bank_name: ' ' }), mkRes()),
-    ).rejects.toThrow(/choose a bank/i);
-    expect(updateCustomers).not.toHaveBeenCalled();
+  it('ignores any submitted bank name — the registry supplies it', async () => {
+    retrieveCustomer.mockResolvedValue({ metadata: { bank_accounts: [] } });
+    await POST(mkReq({ ...VALID_BODY, bank_name: 'evil\nline' }), mkRes());
+    expect(updateCustomers).toHaveBeenCalledWith('cus_1', {
+      metadata: expect.objectContaining({
+        bank_accounts: [expect.objectContaining({ bankName: 'Maybank' })],
+      }),
+    });
   });
 
   it("normalises a gateway's own bank code to the canonical bank and its neutral name", async () => {
@@ -224,7 +227,11 @@ describe('POST /store/credits/withdraw/accounts', () => {
     // would send it — the saved account must not depend on which gateway was
     // active when it was saved.
     await POST(
-      mkReq({ ...VALID_BODY, bank_code: 'MYMB2U', bank_name: 'Maybank Berhad' }),
+      mkReq({
+        ...VALID_BODY,
+        bank_code: 'MYMB2U',
+        bank_name: 'Maybank Berhad',
+      }),
       mkRes(),
     );
     expect(updateCustomers).toHaveBeenCalledWith('cus_1', {
