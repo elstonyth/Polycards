@@ -1,8 +1,9 @@
 import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import {
   checkBalance,
-  globepayConfigFromEnv,
-} from '../../../../modules/packs/globepay-client';
+  gatewayConfigFromEnv,
+  resolveActiveGateway,
+} from '../../../../modules/packs/gateway';
 import { globepayEnabled } from '../../../../modules/packs/globepay-deposit';
 
 // GET /admin/globepay/balance — the live merchant balance at GlobePay365
@@ -26,6 +27,7 @@ export async function GET(
   res: MedusaResponse,
 ): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
+  await resolveActiveGateway(req.scope);
 
   if (!globepayEnabled()) {
     res.json({ enabled: false, balance: null, error: null });
@@ -33,7 +35,7 @@ export async function GET(
   }
 
   try {
-    const balance = await checkBalance(globepayConfigFromEnv());
+    const balance = await checkBalance(gatewayConfigFromEnv());
     res.json({
       enabled: true,
       balance: {

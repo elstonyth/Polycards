@@ -50,11 +50,12 @@ export const VAULT_RULES: ErrorRule[] = [
     // was refusing everything, because the old copy read as their mistake.
     'Your withdrawal was refused by the payment provider and your balance has been returned. Check your bank details are correct — if they are, contact support rather than retrying.',
   ],
-  [
-    /withdrawals must be between/i,
-    'Withdrawals must be between RM 30 and RM 1,000.',
-  ],
   [/withdrawals are not open/i, 'Withdrawals are not open yet.'],
+  // The band message names the ACTIVE gateway's own floor and ceiling
+  // (TGPay and GlobePay differ), so it passes through verbatim — a fixed
+  // rewrite here once told a customer "RM 30 – RM 1,000" for a refusal that
+  // was really "RM 50 – RM 30,000". Above the broad /amount/ rule on purpose.
+  [/(top-ups|withdrawals) must be between/i, (text) => text],
   [/insufficient/i, 'Not enough balance for that.'],
   // The operator kill switch, thrown by startGlobePayDeposit when
   // GLOBEPAY_ENABLED is off and by the deposit route when a callback URL is

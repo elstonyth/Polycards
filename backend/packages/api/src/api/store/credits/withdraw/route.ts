@@ -5,6 +5,11 @@ import {
 import { MedusaError } from '@medusajs/framework/utils';
 import { startGlobePayWithdrawal } from '../../../../modules/packs/globepay-withdrawal';
 import { payerIpOf } from '../../../utils/payer-ip';
+import { contactIfNeeded } from '../../../utils/customer-contact';
+import {
+  gatewayUrls,
+  resolveActiveGateway,
+} from '../../../../modules/packs/gateway';
 
 // POST /store/credits/withdraw — start a real GlobePay365 payout (method WD).
 // The ledger is debited HERE, before the gateway call; a refused or failed
@@ -54,9 +59,13 @@ export async function POST(
     );
   }
 
-  const notifyUrl = process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL;
-  const verifyUrl = process.env.GLOBEPAY_PAYOUT_VERIFY_URL;
-  if (!notifyUrl || !verifyUrl) {
+  const gateway = await resolveActiveGateway(req.scope);
+  const {
+    withdrawNotifyUrl: notifyUrl,
+    payoutVerifyUrl: verifyUrl,
+    hasPayoutVerify,
+  } = gatewayUrls(gateway);
+  if (!notifyUrl || (hasPayoutVerify && !verifyUrl)) {
     // Fail closed: without a reachable NotifyUrl a failed payout could never
     // refund, and without a verify URL their Payout Verification (if active)
     // would reject every payout with nothing in our logs explaining why.
@@ -70,6 +79,12 @@ export async function POST(
   // client-settable header. See src/api/utils/payer-ip.ts for why the order
   // matters.
   const ipAddress = payerIpOf(req);
+  // Some gateways (TGPay) want the recipient email on the payout request;
+  // GlobePay does not, and this route's tests run with an empty scope, so
+  // look it up only when the active gateway asks for it.
+  const email = (
+    await contactIfNeeded(req.scope, gateway, customerId, 'payout')
+  )?.email;
 
   const result = await startGlobePayWithdrawal(
     req.scope,
@@ -78,6 +93,8 @@ export async function POST(
       amount: body.amount,
       accountId: body.account_id,
       ipAddress,
+      email,
+      gateway,
       idempotencyKey: trimmedKey !== '' ? trimmedKey : undefined,
     },
     notifyUrl,

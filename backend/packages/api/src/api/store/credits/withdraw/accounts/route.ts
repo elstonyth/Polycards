@@ -3,6 +3,11 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
+import {
+  findBank,
+  sandboxOnlyBank,
+} from '../../../../../modules/packs/banks';
+import { resolveActiveGateway } from '../../../../../modules/packs/gateway';
 import { withdrawalDetailsError } from '../../../../../modules/packs/globepay-withdrawal';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
@@ -138,7 +143,7 @@ export async function GET(
   res: MedusaResponse,
 ): Promise<void> {
   const accounts = await loadAccounts(req, req.auth_context.actor_id);
-  noStore(res).json({ accounts: savedBankAccountViews(accounts) });
+  noStore(res).json({ accounts: savedBankAccountViews(accounts, await resolveActiveGateway(req.scope)) });
 }
 
 export async function POST(
@@ -148,7 +153,6 @@ export async function POST(
   const customerId = requireCustomerId(req.auth_context.actor_id);
   const body = (req.body ?? {}) as {
     bank_code?: unknown;
-    bank_name?: unknown;
     account_number?: unknown;
     account_holder_name?: unknown;
   };
@@ -163,38 +167,23 @@ export async function POST(
   if (invalid) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, invalid);
   }
-  // bankName is display-only (the picker label); the code is what pays. Still
-  // bounded so metadata can't be stuffed through the free-text field.
-  const bankName = body.bank_name;
-  // Control characters are rejected, not just length-bounded. This value is
-  // interpolated RAW into the text/plain half of the added/removed security
-  // alert (resend/templates.ts) — the HTML half escapes, the plain-text half
-  // cannot — so an interior newline lets attacker-authored text prepend
-  // reassuring lines above the real warning. \p{Cc} covers CR/LF/TAB, \p{Cf}
-  // covers the bidi and zero-width formatting characters.
-  if (typeof bankName === 'string' && /[\p{Cc}\p{Cf}]/u.test(bankName)) {
+  // The picker hands out canonical bank ids (banks.ts); any gateway's own
+  // code is accepted as an alias and normalised, so a saved account never
+  // depends on which gateway was active when it was saved. An unknown bank
+  // is refused: nothing could ever pay to it.
+  const bank = findBank(body.bank_code as string);
+  if (!bank || sandboxOnlyBank(bank.id)) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      'Choose a bank from the list.',
+      'Pick a bank from the list.',
     );
   }
-  if (
-    typeof bankName !== 'string' ||
-    bankName.trim().length < 2 ||
-    bankName.trim().length > 120
-  ) {
-    throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      'Choose a bank from the list.',
-    );
-  }
-
-  const bankCode = body.bank_code as string;
+  const bankCode = bank.id;
   const accountNumber = body.account_number as string;
   const account: SavedBankAccount = {
     id: savedBankAccountId(bankCode, accountNumber),
     bankCode,
-    bankName: bankName.trim(),
+    bankName: bank.name,
     accountNumber,
     accountHolderName: (body.account_holder_name as string).trim(),
     savedAt: new Date().toISOString(),
@@ -245,7 +234,7 @@ export async function POST(
       savedAt: account.savedAt as string,
     });
   }
-  noStore(res).json({ accounts: savedBankAccountViews(saved) });
+  noStore(res).json({ accounts: savedBankAccountViews(saved, await resolveActiveGateway(req.scope)) });
 }
 
 export async function DELETE(
@@ -285,5 +274,5 @@ export async function DELETE(
       removedAt: new Date().toISOString(),
     });
   }
-  noStore(res).json({ accounts: savedBankAccountViews(saved) });
+  noStore(res).json({ accounts: savedBankAccountViews(saved, await resolveActiveGateway(req.scope)) });
 }

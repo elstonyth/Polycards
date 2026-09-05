@@ -34,7 +34,7 @@ const ORIGINAL_ENV = {
 
 beforeEach(() => {
   startMock.mockClear();
-  process.env.GLOBEPAY_NOTIFY_URL = 'https://us/notify';
+  process.env.GLOBEPAY_NOTIFY_URL = 'https://us/hooks/globepay/deposit';
   process.env.GLOBEPAY_RETURN_URL = 'https://us/return';
 });
 

@@ -426,6 +426,80 @@ export async function getGlobePayBalance(): Promise<GlobePayBalance> {
   return getJson<GlobePayBalance>('/admin/globepay/balance');
 }
 
+// ── Payment gateways (plan 130) ─────────────────────────────────────────────
+
+/** Mirrors the backend's PaymentGateway union; the switch and the audit share it. */
+export type PaymentGatewayId = 'globepay' | 'tgpay';
+
+// ── Gateway audit (plan 130): gateway = source of truth for money in/out ─────
+
+export interface GatewayAuditTotals {
+  count: number;
+  gross: number;
+  /** Σ net over rows whose net is known — a FLOOR when missing_net > 0. */
+  net: number;
+  missing_net: number;
+}
+
+export interface GatewayAuditFinding {
+  kind: 'deposit' | 'withdrawal';
+  /** The gateway the row was created under — not necessarily the active one. */
+  gateway: PaymentGatewayId;
+  id: string;
+  merchant_transaction_id: string;
+  gateway_transaction_id: string | null;
+  customer_id: string;
+  status: string;
+  amount: number | null;
+  note: string;
+  audited_at: string | null;
+}
+
+export interface GatewayAudit {
+  gateway: PaymentGatewayId;
+  enabled: boolean;
+  /** Live wallet read; null when the gateway is off or unreachable. */
+  wallet: { current: number; available: number; currency_code: string } | null;
+  wallet_error: string | null;
+  last_audited_at: string | null;
+  findings_total: number;
+  totals: { deposits: GatewayAuditTotals; withdrawals: GatewayAuditTotals };
+  /** Settled totals of every OTHER gateway that ever moved money, so a switch
+   *  never hides the previous gateway's history from this page. */
+  history: {
+    gateway: PaymentGatewayId;
+    deposits: GatewayAuditTotals;
+    withdrawals: GatewayAuditTotals;
+  }[];
+  findings: GatewayAuditFinding[];
+}
+
+export async function getGatewayAudit(): Promise<GatewayAudit> {
+  return getJson<GatewayAudit>('/admin/globepay/audit');
+}
+
+// ── Active payment gateway switch (plan 130 §runtime switch) ────────────────
+
+export interface PaymentGatewaySetting {
+  /** What the backend is using right now. */
+  active: PaymentGatewayId;
+  /** The persisted admin choice; null = env default applies. */
+  setting: string | null;
+  env_default: PaymentGatewayId;
+  gateways: { id: PaymentGatewayId; label: string; configured: boolean }[];
+}
+
+export async function getPaymentGateway(): Promise<PaymentGatewaySetting> {
+  return getJson<PaymentGatewaySetting>('/admin/payments/gateway');
+}
+
+export async function savePaymentGateway(input: {
+  gateway: PaymentGatewayId;
+  reason: string;
+}): Promise<PaymentGatewaySetting> {
+  return postJson<PaymentGatewaySetting>('/admin/payments/gateway', input);
+}
+
 // PriceCharting proxies (the API token lives server-side only). A 503 from the
 // proxy means PRICECHARTING_API_TOKEN is not configured — surface the message
 // and fall back to manual FMV entry.
@@ -1378,15 +1452,7 @@ export const setCustomerGroup = (customerId: string, groupId: string | null) =>
 // ── Epic 4 (Ledger) ──────────────────────────────────────────────────────────
 
 /** The ledger event types (POLYCARD-BACK §5.1). */
-export type LedgerType =
-  | 'TP'
-  | 'SP'
-  | 'SE'
-  | 'OD'
-  | 'AD'
-  | 'WP'
-  | 'WD'
-  | 'RF';
+export type LedgerType = 'TP' | 'SP' | 'SE' | 'OD' | 'AD' | 'WP' | 'WD' | 'RF';
 
 /** One row of GET /admin/ledger. Deltas are MYR and NULLABLE — an event that
  *  touches only one side leaves the other null (not 0). `payload` is the raw

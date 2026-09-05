@@ -42,8 +42,13 @@ import {
   SavedBankAccountsSchema,
   CreditsSchema,
   CreditTransactionSchema,
+  PaymentConfigSchema,
 } from '@/lib/data/schemas';
 import { mapVaultItem, type BackendVaultItem } from './vault-map';
+import {
+  DEFAULT_PAYMENT_LIMITS,
+  type PaymentLimits,
+} from '@/lib/payment-limits';
 export type { VaultItem } from './vault-map';
 
 import type { VaultItem } from './vault-map';
@@ -185,6 +190,33 @@ export type StartDepositResult =
  * time — the retract switch would work on dynamic pages and silently do nothing
  * on static ones. An action runs per request everywhere.
  */
+/**
+ * The ACTIVE gateway's money bands, read from the backend per call — an
+ * admin can switch gateways at runtime, and TGPay's floor (RM 50) is not
+ * GlobePay's (RM 30). Public route, publishable key only. Any failure yields
+ * the defaults so the sheet still opens.
+ */
+export async function getPaymentLimits(): Promise<PaymentLimits> {
+  try {
+    const parsed = parseOne(
+      PaymentConfigSchema,
+      await authedFetch(undefined, '/store/payments/config'),
+    );
+    if (!parsed) return DEFAULT_PAYMENT_LIMITS;
+    return {
+      gateway: parsed.gateway,
+      deposit: { minRm: parsed.deposit.min_rm, maxRm: parsed.deposit.max_rm },
+      withdrawal: {
+        minRm: parsed.withdrawal.min_rm,
+        maxRm: parsed.withdrawal.max_rm,
+      },
+    };
+  } catch (error) {
+    logger.error('[vault] payment limits load failed:', error);
+    return DEFAULT_PAYMENT_LIMITS;
+  }
+}
+
 export async function getDepositMethods(): Promise<DepositMethodCode[]> {
   const raw = process.env.DEPOSIT_METHODS_ENABLED;
   const enabled = enabledDepositMethods(raw);
@@ -211,8 +243,9 @@ export async function getDepositMethods(): Promise<DepositMethodCode[]> {
  * Idempotency-Key here — the backend mints a fresh reference per attempt and a
  * re-clicked button costs nothing but an abandoned deposit row.
  *
- * Which gateway the UI uses is decided by NEXT_PUBLIC_PAYMENTS_PROVIDER; this
- * action is only called when it is 'globepay'.
+ * Whether the UI uses a real gateway is decided by NEXT_PUBLIC_PAYMENTS_PROVIDER
+ * (anything but 'mock'); WHICH gateway is the backend's admin setting. This
+ * action is only called in gateway mode.
  *
  * Both parameters are typed as what can actually ARRIVE, not what is allowed.
  * A server action is a public endpoint: the compiler constrains our own call
@@ -322,6 +355,12 @@ export type SavedBankAccount = {
    * as visible-and-disabled; neither is hidden, which would read as a bug.
    */
   usableFrom?: string | null;
+  /**
+   * Whether the payout provider currently in use can pay to this bank. Saved
+   * accounts survive a provider switch; one the new provider cannot reach
+   * stays listed but disabled, with the reason, until it can be paid again.
+   */
+  supported?: boolean;
 };
 
 export type SavedBankAccountsResult =
@@ -611,6 +650,9 @@ export type CreditTxn = {
   // Gateway reference on topup/cashout rows (what support quotes); null on
   // pack opens, buybacks and other internal rows.
   reference: string | null;
+  // Channel + gateway-confirmed outcome behind that reference, so every money
+  // row on the statement traces to the gateway record. Null when unknown.
+  gateway: { method: string; status: string } | null;
 };
 
 export type TransactionsResult =
@@ -669,6 +711,7 @@ export async function getTransactions(
         reason: r.reason,
         createdAt: r.created_at,
         reference: r.reference ?? null,
+        gateway: r.gateway ?? null,
       })),
       page: safePage,
       hasMore: totals?.has_more ?? false,

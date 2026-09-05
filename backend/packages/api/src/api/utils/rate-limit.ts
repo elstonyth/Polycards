@@ -6,6 +6,7 @@ import type {
 } from '@medusajs/framework/http';
 import Redis from 'ioredis';
 import { E164_RE } from '../../utils/phone-verification';
+import { callbackSourceIp } from './payer-ip';
 
 // Sliding-window rate limiting for the pack-open endpoint (and reusable for
 // any future endpoint — the factory at the bottom is the only pack-specific
@@ -316,8 +317,7 @@ export function createRateLimitMiddleware(
     let decision: RateLimitDecision;
     try {
       const auth = (req as AuthenticatedMedusaRequest).auth_context as
-        | AuthenticatedMedusaRequest['auth_context']
-        | undefined;
+        AuthenticatedMedusaRequest['auth_context'] | undefined;
       const own = keyOf?.(req);
       // Falsy entries dropped (not just undefined) so the skip and the
       // fallback agree on what "no key" means — an extractor returning ''
@@ -554,8 +554,7 @@ const MAX_EMAIL_LEN = 254;
  */
 export const emailBodyKeyOf = (req: MedusaRequest): string[] | undefined => {
   const body = req.body as
-    | { email?: unknown; identifier?: unknown }
-    | undefined;
+    { email?: unknown; identifier?: unknown } | undefined;
   const toKey = (raw: unknown): string | undefined => {
     if (typeof raw !== 'string') return undefined;
     const normalized = raw.trim().toLowerCase();
@@ -1031,6 +1030,10 @@ export function createGatewayHookRateLimit(): MiddlewareHandler {
   return createEnvRateLimit({
     name: 'gateway-hook',
     message: 'Too many callback requests.',
+    // Keyed on the CALLER's address, not req.ip: on App Platform req.ip is
+    // DigitalOcean's ingress, so every gateway callback would otherwise share
+    // one bucket and a flood from anywhere would 429 the real gateway.
+    keyOf: (req) => `ip:${callbackSourceIp(req) || 'unknown'}`,
     defaults: {
       burstLimit: 100,
       burstWindowMs: 10_000,

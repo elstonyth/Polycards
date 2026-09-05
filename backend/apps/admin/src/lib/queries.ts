@@ -39,9 +39,14 @@ import {
   getEconomyReport,
   getSettlementReport,
   getGlobePayBalance,
+  getGatewayAudit,
+  getPaymentGateway,
+  savePaymentGateway,
   type SettlementGranularity,
   type SettlementReport,
   type GlobePayBalance,
+  type GatewayAudit,
+  type PaymentGatewaySetting,
   getFxHistory,
   getFxRate,
   getPulls,
@@ -235,6 +240,31 @@ export const useGlobePayBalance = (): UseQueryResult<GlobePayBalance> =>
     refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
+
+export const useGatewayAudit = (): UseQueryResult<GatewayAudit> =>
+  useQuery({
+    queryKey: qk.gatewayAudit,
+    queryFn: getGatewayAudit,
+    refetchInterval: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+
+export const usePaymentGateway = (): UseQueryResult<PaymentGatewaySetting> =>
+  useQuery({ queryKey: qk.paymentGateway, queryFn: getPaymentGateway });
+
+export const useSavePaymentGateway = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: savePaymentGateway,
+    onSuccess: () => {
+      toast.success('Payment gateway switched');
+      qc.invalidateQueries({ queryKey: qk.paymentGateway });
+      qc.invalidateQueries({ queryKey: qk.globepayBalance });
+      qc.invalidateQueries({ queryKey: qk.gatewayAudit });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
 
 export const usePackOdds = (slug: string): UseQueryResult<PackOddsResponse> =>
   useQuery({

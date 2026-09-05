@@ -47,26 +47,58 @@ export async function GET(
     usedCents: Math.round(summary.externalFundedSpendTotal * 100),
   });
 
+  // Gateway facts for the money rows on this page: which channel, and what
+  // the gateway's own outcome was. The ledger row is written only from a
+  // gateway-confirmed settlement, so this is the customer-facing trace back
+  // to the gateway record (the reference is the gateway's id, or our merchant
+  // reference when the gateway never issued one).
+  const isMoneyRow = (reason: string) =>
+    reason === "topup" || reason === "cashout";
+  const refs = transactions
+    .filter((t) => isMoneyRow(t.reason) && t.reference)
+    .map((t) => t.reference as string);
+  const gatewayByRef = new Map<string, { method: string; status: string }>();
+  if (refs.length > 0) {
+    const byRef = {
+      $or: [{ gateway_transaction_id: refs }, { merchant_transaction_id: refs }],
+    };
+    const [deposits, withdrawals] = await Promise.all([
+      packs.listGlobePayDeposits(byRef, { take: refs.length * 2 }),
+      packs.listGlobePayWithdrawals(byRef, { take: refs.length * 2 }),
+    ]);
+    for (const d of deposits) {
+      const fact = { method: d.payment_method_code, status: d.status };
+      if (d.gateway_transaction_id) gatewayByRef.set(d.gateway_transaction_id, fact);
+      gatewayByRef.set(d.merchant_transaction_id, fact);
+    }
+    for (const w of withdrawals) {
+      const fact = { method: "WD", status: w.status };
+      if (w.gateway_transaction_id) gatewayByRef.set(w.gateway_transaction_id, fact);
+      gatewayByRef.set(w.merchant_transaction_id, fact);
+    }
+  }
+
   res.json({
     balance: summary.balance,
     topup_total: summary.topupTotal,
     spend_total: summary.spendTotal,
-    transactions: transactions.map((t) => ({
-      id: t.id,
-      amount: Number(t.amount),
-      reason: t.reason,
+    transactions: transactions.map((t) => {
       // Payment-gateway reference — the id support and the customer quote to
       // the gateway; same value the admin pages and receipt emails show.
       // WHITELISTED by reason, not passed through: adjustment rows carry the
       // admin's free-text note (also the audit reason) in this column, and
       // reversal rows carry internal txn ids — neither may reach a customer.
-      reference:
-        t.reason === "topup" || t.reason === "cashout"
-          ? t.reference || null
-          : null,
-      pull_id: t.pull_id,
-      created_at: t.created_at,
-    })),
+      const reference = isMoneyRow(t.reason) ? t.reference || null : null;
+      return {
+        id: t.id,
+        amount: Number(t.amount),
+        reason: t.reason,
+        reference,
+        gateway: reference ? (gatewayByRef.get(reference) ?? null) : null,
+        pull_id: t.pull_id,
+        created_at: t.created_at,
+      };
+    }),
     has_more: hasMore,
     wallet: {
       balance: wallet.balance,

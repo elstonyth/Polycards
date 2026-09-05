@@ -175,8 +175,10 @@ beforeEach(() => {
   process.env.GLOBEPAY_ENABLED = 'true';
   process.env.GLOBEPAY_WITHDRAWALS_ENABLED = 'true';
   process.env.GLOBEPAY_MERCHANT_CODE = 'Testpolycard';
-  process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL = 'https://us/notify-wd';
-  process.env.GLOBEPAY_PAYOUT_VERIFY_URL = 'https://us/payout-verify';
+  process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL =
+    'https://us/hooks/globepay/withdrawal';
+  process.env.GLOBEPAY_PAYOUT_VERIFY_URL =
+    'https://us/hooks/globepay/payout-verify';
 });
 
 describe('POST /admin/globepay/withdrawals/:id/approve', () => {

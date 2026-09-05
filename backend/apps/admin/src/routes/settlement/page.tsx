@@ -5,14 +5,26 @@ import {
   Button,
   Container,
   Heading,
+  Input,
+  RadioGroup,
   Table,
   Text,
   Tooltip,
+  usePrompt,
 } from '@medusajs/ui';
 import { Receipt } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
-import { useGlobePayBalance, useSettlementReport } from '../../lib/queries';
-import type { SettlementGranularity } from '../../lib/admin-rest';
+import {
+  useGatewayAudit,
+  useGlobePayBalance,
+  usePaymentGateway,
+  useSavePaymentGateway,
+  useSettlementReport,
+} from '../../lib/queries';
+import type {
+  PaymentGatewayId,
+  SettlementGranularity,
+} from '../../lib/admin-rest';
 import { rm } from '../../lib/format';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
@@ -72,6 +84,39 @@ const SettlementPage = () => {
     useState<SettlementGranularity>('month');
   const { data, isError } = useSettlementReport(granularity, 12);
   const balance = useGlobePayBalance();
+  const audit = useGatewayAudit();
+  const gateway = usePaymentGateway();
+  const saveGateway = useSavePaymentGateway();
+  const prompt = usePrompt();
+  const [chosen, setChosen] = useState<PaymentGatewayId | null>(null);
+  const [gatewayReason, setGatewayReason] = useState('');
+  const activeGateway = gateway.data?.active ?? null;
+  const wantedGateway = chosen ?? activeGateway;
+  const gatewayDirty =
+    wantedGateway !== null && wantedGateway !== activeGateway;
+  const canSwitch =
+    gatewayDirty && !saveGateway.isPending && gatewayReason.trim().length > 0;
+  const switchGateway = async () => {
+    if (!canSwitch || !wantedGateway) return;
+    const label =
+      gateway.data?.gateways.find((g) => g.id === wantedGateway)?.label ??
+      wantedGateway;
+    const confirmed = await prompt({
+      title: t('settlement.gatewayTitle'),
+      description: t('settlement.gatewayConfirm', { label }),
+      confirmText: t('settlement.gatewaySave'),
+    });
+    if (!confirmed) return;
+    saveGateway.mutate(
+      { gateway: wantedGateway, reason: gatewayReason.trim() },
+      {
+        onSuccess: () => {
+          setChosen(null);
+          setGatewayReason('');
+        },
+      },
+    );
+  };
 
   const missingNetTotal = (data?.periods ?? []).reduce(
     (sum, p) => sum + p.deposits.missingNet + p.withdrawals.missingNet,
@@ -86,6 +131,93 @@ const SettlementPage = () => {
 
   return (
     <div className="flex flex-col gap-y-3">
+      {/* Active payment gateway (plan 130 §runtime switch). Sits above the
+          report because everything below it is "the gateway's" numbers. */}
+      <Container className="p-0">
+        <div className="flex flex-col gap-1 px-6 py-4">
+          <Heading level="h2">{t('settlement.gatewayTitle')}</Heading>
+          <Text size="small" className="text-ui-fg-subtle">
+            {t('settlement.gatewaySubtitle')}
+          </Text>
+        </div>
+        {gateway.isError ? (
+          <div className="border-t px-6 py-3">
+            <Text size="small" className="text-ui-fg-error">
+              {t('settlement.gatewayLoadError')}
+            </Text>
+          </div>
+        ) : !gateway.data ? (
+          <div className="border-t px-6 py-6">
+            <LoadingSkeleton />
+          </div>
+        ) : (
+          <div className="flex flex-col gap-4 border-t px-6 py-4">
+            <div className="flex items-center gap-3">
+              <Badge size="2xsmall" color="blue">
+                {t('settlement.gatewayActive', {
+                  label:
+                    gateway.data.gateways.find(
+                      (g) => g.id === gateway.data?.active,
+                    )?.label ?? gateway.data.active,
+                })}
+              </Badge>
+              {gateway.data.setting === null ? (
+                <Text size="small" className="text-ui-fg-subtle">
+                  ({t('settlement.gatewayEnvDefault')})
+                </Text>
+              ) : null}
+            </div>
+            <RadioGroup
+              value={wantedGateway ?? undefined}
+              onValueChange={(value) => setChosen(value as PaymentGatewayId)}
+              className="flex flex-col gap-2"
+            >
+              {gateway.data.gateways.map((g) => (
+                <label
+                  key={g.id}
+                  className="flex items-center gap-3"
+                  htmlFor={`gateway-${g.id}`}
+                >
+                  <RadioGroup.Item
+                    id={`gateway-${g.id}`}
+                    value={g.id}
+                    disabled={!g.configured}
+                  />
+                  <Text size="small" weight="plus">
+                    {g.label}
+                  </Text>
+                  {!g.configured ? (
+                    <Text size="small" className="text-ui-fg-muted">
+                      {t('settlement.gatewayNotConfigured')}
+                    </Text>
+                  ) : null}
+                </label>
+              ))}
+            </RadioGroup>
+            <div className="flex items-end gap-4">
+              <div className="flex min-w-64 flex-1 flex-col gap-y-1">
+                <Text size="small" weight="plus">
+                  {t('settlement.gatewayReason')}
+                </Text>
+                <Input
+                  value={gatewayReason}
+                  onChange={(e) => setGatewayReason(e.target.value)}
+                  placeholder={t('settlement.gatewayReasonPlaceholder')}
+                  disabled={!gatewayDirty}
+                />
+              </div>
+              <Button
+                onClick={switchGateway}
+                isLoading={saveGateway.isPending}
+                disabled={!canSwitch}
+              >
+                {t('settlement.gatewaySave')}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Container>
+
       <Container className="p-0">
         <div className="flex flex-wrap items-start justify-between gap-3 px-6 py-4">
           <div>
@@ -318,6 +450,154 @@ const SettlementPage = () => {
                 </Badge>
               </div>
             )}
+          </>
+        )}
+      </Container>
+
+      {/* Gateway audit (plan 130) — the gateway is the source of truth for
+          money in/out; this is where its disagreements with our rows surface.
+          Own endpoint, so a gateway outage degrades the wallet tiles only. */}
+      <Container className="p-0">
+        <div className="flex flex-col gap-1 px-6 py-4">
+          <Heading level="h2">{t('settlement.auditTitle')}</Heading>
+          <Text size="small" className="text-ui-fg-subtle">
+            {t('settlement.auditSubtitle')}
+          </Text>
+        </div>
+        {audit.isError ? (
+          <div className="border-t px-6 py-3">
+            <Text size="small" className="text-ui-fg-error">
+              {t('settlement.auditLoadError')}
+            </Text>
+          </div>
+        ) : !audit.data ? (
+          <div className="border-t px-6 py-8">
+            <LoadingSkeleton />
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-px border-t bg-ui-border-base md:grid-cols-4">
+              {(
+                [
+                  ['auditWalletPayin', audit.data.wallet?.current],
+                  ['auditWalletPayout', audit.data.wallet?.available],
+                  [
+                    'auditOurDeposits',
+                    audit.data.totals.deposits.net,
+                    audit.data.totals.deposits.gross,
+                  ],
+                  ['auditOurWithdrawals', audit.data.totals.withdrawals.gross],
+                ] as const
+              ).map(([key, value, secondary]) => (
+                <div key={key} className="bg-ui-bg-subtle px-6 py-3">
+                  <Text size="small" className="text-ui-fg-subtle">
+                    {t(`settlement.${key}`)}
+                  </Text>
+                  <Heading level="h3" className="mt-0.5 tabular-nums">
+                    {value === undefined || value === null ? '—' : rm(value)}
+                    {secondary !== undefined ? (
+                      <span className="text-ui-fg-muted">
+                        {' '}
+                        / {rm(secondary)}
+                      </span>
+                    ) : null}
+                  </Heading>
+                </div>
+              ))}
+            </div>
+            {audit.data.wallet_error ? (
+              <div className="border-t px-6 py-3">
+                <Text size="small" className="text-ui-fg-error">
+                  {t('settlement.balanceError', {
+                    message: audit.data.wallet_error,
+                  })}
+                </Text>
+              </div>
+            ) : null}
+            {audit.data.history.map((h) => (
+              <div key={h.gateway} className="border-t px-6 py-3">
+                <Text size="small" className="text-ui-fg-subtle">
+                  {t('settlement.auditHistory', {
+                    gateway: h.gateway,
+                    deposits: h.deposits.count,
+                    depositsGross: rm(h.deposits.gross),
+                    withdrawals: h.withdrawals.count,
+                    withdrawalsGross: rm(h.withdrawals.gross),
+                  })}
+                </Text>
+              </div>
+            ))}
+            <div className="flex items-center gap-3 border-t px-6 py-3">
+              <Text size="small" className="text-ui-fg-subtle">
+                {audit.data.last_audited_at
+                  ? t('settlement.auditLastRun', {
+                      when: new Date(
+                        audit.data.last_audited_at,
+                      ).toLocaleString(),
+                    })
+                  : t('settlement.auditNeverRun')}
+              </Text>
+              {audit.data.findings_total > 0 ? (
+                <Badge size="2xsmall" color="red">
+                  {t('settlement.auditFindings', {
+                    count: audit.data.findings_total,
+                  })}
+                </Badge>
+              ) : audit.data.last_audited_at ? (
+                <Badge size="2xsmall" color="green">
+                  {t('settlement.auditNoFindings')}
+                </Badge>
+              ) : null}
+            </div>
+            {audit.data.findings.length > 0 ? (
+              <Table>
+                <Table.Header>
+                  <Table.Row>
+                    <Table.HeaderCell>
+                      {t('settlement.auditKind')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell>
+                      {t('settlement.auditRef')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell>
+                      {t('settlement.auditCustomer')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell>
+                      {t('settlement.auditStatus')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell className="text-right">
+                      {t('settlement.auditAmount')}
+                    </Table.HeaderCell>
+                    <Table.HeaderCell>
+                      {t('settlement.auditNote')}
+                    </Table.HeaderCell>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {audit.data.findings.map((f) => (
+                    <Table.Row key={`${f.kind}-${f.id}`}>
+                      <Table.Cell>
+                        {f.kind}
+                        <span className="text-ui-fg-muted"> · {f.gateway}</span>
+                      </Table.Cell>
+                      <Table.Cell className="font-mono text-xs">
+                        {f.gateway_transaction_id ?? f.merchant_transaction_id}
+                      </Table.Cell>
+                      <Table.Cell className="font-mono text-xs">
+                        {f.customer_id}
+                      </Table.Cell>
+                      <Table.Cell>{f.status}</Table.Cell>
+                      <Table.Cell className="text-right tabular-nums">
+                        {f.amount === null ? '—' : rm(f.amount)}
+                      </Table.Cell>
+                      <Table.Cell className="text-ui-fg-error">
+                        {f.note}
+                      </Table.Cell>
+                    </Table.Row>
+                  ))}
+                </Table.Body>
+              </Table>
+            ) : null}
           </>
         )}
       </Container>

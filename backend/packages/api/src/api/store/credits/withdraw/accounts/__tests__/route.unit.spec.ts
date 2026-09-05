@@ -75,7 +75,7 @@ const mkReq = (body: Record<string, unknown> | null = null) =>
   }) as never;
 
 const VALID_BODY = {
-  bank_code: 'MBB',
+  bank_code: 'MBBEMYKL',
   bank_name: 'Maybank',
   account_number: '1234567890',
   account_holder_name: 'Tan Ah Kow',
@@ -92,8 +92,8 @@ const fullList = () =>
 const SAVED_AT = '2026-01-01T00:00:00.000Z';
 
 const savedShape = (over: Partial<Record<string, unknown>> = {}) => ({
-  id: savedBankAccountId('MBB', '1234567890'),
-  bankCode: 'MBB',
+  id: savedBankAccountId('MBBEMYKL', '1234567890'),
+  bankCode: 'MBBEMYKL',
   bankName: 'Maybank',
   accountNumber: '1234567890',
   accountHolderName: 'Tan Ah Kow',
@@ -106,6 +106,8 @@ const savedShape = (over: Partial<Record<string, unknown>> = {}) => ({
  *  rather than recomputing the window, so it is part of the response contract. */
 const viewOf = (account: Record<string, unknown>) => ({
   ...account,
+  // Maybank is payable on every gateway, so the view marks it supported.
+  supported: true,
   usableFrom:
     typeof account.savedAt === 'string'
       ? new Date(
@@ -178,6 +180,7 @@ describe('POST /store/credits/withdraw/accounts', () => {
         savedShape({
           savedAt: expect.any(String),
           usableFrom: expect.any(String),
+          supported: true,
         }),
       ],
     });
@@ -208,11 +211,61 @@ describe('POST /store/credits/withdraw/accounts', () => {
     expect(updateCustomers).not.toHaveBeenCalled();
   });
 
-  it('refuses a missing or blank bank name (its own gate, not the shared one)', async () => {
+  it('ignores any submitted bank name — the registry supplies it', async () => {
+    retrieveCustomer.mockResolvedValue({ metadata: { bank_accounts: [] } });
+    await POST(mkReq({ ...VALID_BODY, bank_name: 'evil\nline' }), mkRes());
+    expect(updateCustomers).toHaveBeenCalledWith('cus_1', {
+      metadata: expect.objectContaining({
+        bank_accounts: [expect.objectContaining({ bankName: 'Maybank' })],
+      }),
+    });
+  });
+
+  it("normalises a gateway's own bank code to the canonical bank and its neutral name", async () => {
+    retrieveCustomer.mockResolvedValue({ metadata: { bank_accounts: [] } });
+    // GlobePay's code for Maybank, as an older storefront (or a legacy picker)
+    // would send it — the saved account must not depend on which gateway was
+    // active when it was saved.
+    await POST(
+      mkReq({
+        ...VALID_BODY,
+        bank_code: 'MYMB2U',
+        bank_name: 'Maybank Berhad',
+      }),
+      mkRes(),
+    );
+    expect(updateCustomers).toHaveBeenCalledWith('cus_1', {
+      metadata: expect.objectContaining({
+        bank_accounts: [
+          expect.objectContaining({
+            id: savedBankAccountId('MBBEMYKL', '1234567890'),
+            bankCode: 'MBBEMYKL',
+            bankName: 'Maybank',
+          }),
+        ],
+      }),
+    });
+  });
+
+  it('refuses a bank no gateway can pay to', async () => {
     await expect(
-      POST(mkReq({ ...VALID_BODY, bank_name: ' ' }), mkRes()),
-    ).rejects.toThrow(/choose a bank/i);
+      POST(mkReq({ ...VALID_BODY, bank_code: 'MBB' }), mkRes()),
+    ).rejects.toThrow(/pick a bank/i);
     expect(updateCustomers).not.toHaveBeenCalled();
+  });
+
+  it('refuses the sandbox dummy bank unless the sandbox is configured', async () => {
+    const prev = process.env.TGPAY_API_BASE;
+    process.env.TGPAY_API_BASE = 'https://api.tgpay365.com/api/v2';
+    try {
+      await expect(
+        POST(mkReq({ ...VALID_BODY, bank_code: 'DUMMYBANKVERIFIED' }), mkRes()),
+      ).rejects.toThrow(/pick a bank/i);
+      expect(updateCustomers).not.toHaveBeenCalled();
+    } finally {
+      if (prev === undefined) delete process.env.TGPAY_API_BASE;
+      else process.env.TGPAY_API_BASE = prev;
+    }
   });
 
   it('401s a register-phase token (empty actor_id) before touching the DB', async () => {

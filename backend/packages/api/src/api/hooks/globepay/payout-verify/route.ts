@@ -57,7 +57,7 @@ async function recordVerifyOutcome(
     let row = known;
     if (!row) {
       [row] = await packs.listGlobePayWithdrawals(
-        { merchant_transaction_id: merchantTransactionId },
+        { merchant_transaction_id: merchantTransactionId, gateway: 'globepay' },
         { take: 1 },
       );
     }
@@ -155,8 +155,13 @@ export async function POST(
   }
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  // Only a row THIS gateway created (see the deposit hook); a TGPay row
+  // named here reads as unknown and is rejected like any other.
   const [withdrawal] = await packs.listGlobePayWithdrawals(
-    { merchant_transaction_id: data.MerchantTransactionId ?? '' },
+    {
+      merchant_transaction_id: data.MerchantTransactionId ?? '',
+      gateway: 'globepay',
+    },
     { take: 1 },
   );
 

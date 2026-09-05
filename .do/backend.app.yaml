@@ -481,6 +481,36 @@ envs:
     scope: RUN_TIME
     value: "0"
 
+  # ── TGPay (plan 130). Inert until an admin switches the active gateway to
+  # TGPay on the Settlement page. The key pair comes from the production back
+  # office (admin.tgpay365.com → Settings → General → API keys, 2FA-gated) and
+  # is injected by scripts/do-apply.ps1 like the GlobePay values above. The
+  # production keys are short opaque strings, not the sandbox's pk-/sk- shape —
+  # quoted because an all-digit value would otherwise parse as a YAML number
+  # and doctl refuses it ("cannot unmarshal number into ... value of type string").
+  # PAYMENT_CALLBACK_BASE derives each gateway's notify URLs from its hook
+  # paths on the direct hostname (same reason as GLOBEPAY_NOTIFY_URL above).
+  # TGPAY_CALLBACK_IPS is the source allowlist TGPay asked for — their servers
+  # as listed 2026-09-05. Outside the sandbox the TGPay hooks refuse every
+  # callback while this is unset, so it ships alongside the code.
+  - key: TGPAY_API_BASE
+    scope: RUN_TIME
+    value: https://api.tgpay365.com/api/v2
+  - key: TGPAY_PUBLIC_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: "__SECRET__TGPAY_PUBLIC_KEY__"
+  - key: TGPAY_SECRET_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: "__SECRET__TGPAY_SECRET_KEY__"
+  - key: PAYMENT_CALLBACK_BASE
+    scope: RUN_TIME
+    value: https://polycards-backend-gce6p.ondigitalocean.app
+  - key: TGPAY_CALLBACK_IPS
+    scope: RUN_TIME
+    value: 1.32.102.191,1.32.102.19,60.48.120.36,219.95.78.237,1.32.102.35,219.94.46.237,1.32.102.1,18.142.49.112,188.114.96.0,188.114.97.0,47.131.132.118,54.251.58.7
+
 # Dedicated outbound IPs. DO assigns one per component (the service makes the
 # customer-facing calls, the worker runs the reconciliation sweeps) and
 # GlobePay365 runs an ACTIVE API whitelist keyed on those exact addresses, so

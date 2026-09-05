@@ -6,20 +6,23 @@ import { CheckCircle2, Clock, Landmark } from 'lucide-react';
 import { rm, rm0, timeUntil } from '@/lib/format';
 import {
   fetchSavedBankAccounts,
+  getPaymentLimits,
   startWithdrawal,
   type SavedBankAccount,
 } from '@/lib/actions/vault';
+import { DEFAULT_PAYMENT_LIMITS } from '@/lib/payment-limits';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { cn } from '@/lib/utils';
 
-// The real payout band (mirrors the backend's GLOBEPAY_WD_MIN/MAX): RM 50 –
-// RM 50,000, confirmed by the provider 2026-07-29. NOT the same band as
-// deposits — the payout floor is higher. The gateway's own rejection names no
-// numbers, so the form does.
-const WD_MIN_RM = 50;
-const WD_MAX_RM = 50000;
+// The payout band belongs to whichever gateway the admin has active (TGPay
+// caps at RM 30,000, GlobePay at RM 50,000), so it is read from the backend
+// when the form mounts; these are only the until-it-answers defaults. NOT the
+// same band as deposits — the payout floor is higher. The gateway's own
+// rejection names no numbers, so the form does.
+const WD_MIN_RM = DEFAULT_PAYMENT_LIMITS.withdrawal.minRm;
+const WD_MAX_RM = DEFAULT_PAYMENT_LIMITS.withdrawal.maxRm;
 
 /** Can this destination receive money right now? The server's `usableFrom` is
  *  the only input — the cooling-off duration is never duplicated here, so
@@ -27,11 +30,15 @@ const WD_MAX_RM = 50000;
  *  without re-saving", which is also the safe reading of a backend that has not
  *  shipped the field. */
 const isUsable = (account: SavedBankAccount, now: Date) =>
+  account.supported !== false &&
   typeof account.usableFrom === 'string' &&
   new Date(account.usableFrom).getTime() <= now.getTime();
 
 /** Why a destination cannot be picked yet, in the customer's terms. */
 function unusableReason(account: SavedBankAccount, now: Date): string | null {
+  if (account.supported === false) {
+    return 'not available with the current payout provider';
+  }
   if (typeof account.usableFrom !== 'string') {
     return 'save it again to use it';
   }
@@ -81,8 +88,15 @@ export default function WithdrawForm({
   // next withdrawal starts a fresh attempt. Mirrors TopUpSheet's attemptKey.
   const attemptKey = useRef<string | null>(null);
 
+  const [band, setBand] = useState({ min: WD_MIN_RM, max: WD_MAX_RM });
   useEffect(() => {
     let cancelled = false;
+    getPaymentLimits()
+      .then((l) => {
+        if (!cancelled)
+          setBand({ min: l.withdrawal.minRm, max: l.withdrawal.maxRm });
+      })
+      .catch(() => {});
     fetchSavedBankAccounts().then((res) => {
       if (cancelled) return;
       if (!res.ok) {
@@ -123,9 +137,9 @@ export default function WithdrawForm({
   async function submit() {
     if (submitting || !formValid) return;
     setError(null);
-    if (amount < WD_MIN_RM || amount > WD_MAX_RM) {
+    if (amount < band.min || amount > band.max) {
       setError(
-        `Withdrawals must be between ${rm0(WD_MIN_RM)} and ${rm0(WD_MAX_RM)}.`,
+        `Withdrawals must be between ${rm0(band.min)} and ${rm0(band.max)}.`,
       );
       return;
     }

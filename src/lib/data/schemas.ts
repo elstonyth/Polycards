@@ -363,6 +363,13 @@ export const CREDIT_REASONS = [
 ] as const;
 export type CreditReason = (typeof CREDIT_REASONS)[number];
 
+/** GET /store/payments/config — the active gateway's money bands. */
+export const PaymentConfigSchema = z.looseObject({
+  gateway: z.string(),
+  deposit: z.looseObject({ min_rm: finite, max_rm: finite }),
+  withdrawal: z.looseObject({ min_rm: finite, max_rm: finite }),
+});
+
 /** GET /store/credits transaction row. `amount` is signed (credit +, spend −).
  *  `reason` is any string, not `z.enum(CREDIT_REASONS)` — a backend reason
  *  added before the storefront redeploys must still RENDER (generic label)
@@ -376,6 +383,12 @@ export const CreditTransactionSchema = z.looseObject({
   // Payment-gateway reference (topup/cashout rows; null otherwise). Optional
   // so an older backend that omits the field still parses.
   reference: z.string().nullable().optional(),
+  // Gateway channel + our settlement outcome for that reference (topup/cashout
+  // rows; null otherwise). Optional for the same older-backend reason.
+  gateway: z
+    .object({ method: z.string(), status: z.string() })
+    .nullable()
+    .optional(),
 });
 
 /** POST /store/credits/topup response — finite amount + balance. `replayed`
@@ -470,6 +483,9 @@ export const SavedBankAccountsSchema = z.looseObject({
       accountNumber: z.string(),
       accountHolderName: z.string(),
       usableFrom: z.string().nullish(),
+      // Can the active payout provider pay to this bank? Optional so an
+      // older backend still parses; absent reads as supported.
+      supported: z.boolean().optional(),
     }),
   ),
 });

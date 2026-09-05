@@ -6,9 +6,11 @@ import { cn } from '@/lib/utils';
 import { rm, rm0 } from '@/lib/format';
 import {
   getDepositMethods,
+  getPaymentLimits,
   startDeposit,
   topUpCredits,
 } from '@/lib/actions/vault';
+import { DEFAULT_PAYMENT_LIMITS } from '@/lib/payment-limits';
 import { leaveFor } from '@/lib/navigation';
 import { markDepositInFlight } from '@/lib/deposit-return';
 import { Pill } from '@/components/ui/pill';
@@ -22,20 +24,26 @@ import {
   type DepositMethodCode,
 } from '@/lib/deposit-methods';
 
-// Which gateway backs the sheet. 'globepay' sends the customer to the
-// provider's cashier page and credits nothing here — the balance updates later,
-// when their signed callback settles the deposit. Anything else keeps the mock
-// gateway, which credits synchronously and stays the local/dev path.
-const USE_GATEWAY = process.env.NEXT_PUBLIC_PAYMENTS_PROVIDER === 'globepay';
+// Does a real gateway back the sheet? Any value except 'mock' (or unset)
+// sends the customer to the provider's checkout page and credits nothing here
+// — the balance updates later, when the gateway's callback settles the
+// deposit. WHICH gateway is the backend's decision (admin switch, plan 130):
+// the storefront never needs to know, since every real gateway is a redirect.
+// 'mock' / unset keeps the mock gateway, which credits synchronously and stays
+// the local/dev path. Historical values 'globepay' and 'tgpay' still work.
+// An EMPTY value counts as unset (a blank build arg must not send customers
+// to a gateway the deploy never chose).
+const PROVIDER = process.env.NEXT_PUBLIC_PAYMENTS_PROVIDER || 'mock';
+const USE_GATEWAY = PROVIDER !== 'mock';
 
 // The gateway's band is narrower than the mock's on both ends, and it rejects
 // anything outside it with a generic "Invalid Transaction Amount" that names no
 // numbers. Catch it in the sheet so the customer gets a message they can act on.
-// Production band, confirmed by the provider 2026-07-29: RM 30 – RM 10,000 for
-// both Online Banking and QR (docs/payments/globepay365-setup.md). Mirrors the
-// backend's GLOBEPAY_MIN_RM/GLOBEPAY_MAX_RM.
-const GATEWAY_MIN_RM = 30;
-const GATEWAY_MAX_RM = 10000;
+// The band belongs to whichever gateway the admin has active, so it is
+// fetched per open (getPaymentLimits); these are only the until-it-answers
+// defaults, which sit inside every gateway's band.
+const GATEWAY_MIN_RM = DEFAULT_PAYMENT_LIMITS.deposit.minRm;
+const GATEWAY_MAX_RM = DEFAULT_PAYMENT_LIMITS.deposit.maxRm;
 
 // The mock's 10/25 rungs are below the gateway's floor, so offering them would
 // guarantee a rejection on the real path. The gateway rungs span the production
@@ -121,9 +129,23 @@ export default function TopUpSheet({
   // Ask the server which channels are on offer, per open. Gateway path only —
   // the mock has no channels — and failure keeps the compiled list, since the
   // action re-checks the code anyway and a refused channel shows its own error.
+  const [limits, setLimits] = useState({
+    min: GATEWAY_MIN_RM,
+    max: GATEWAY_MAX_RM,
+  });
   useEffect(() => {
     if (!open || !USE_GATEWAY) return;
     let cancelled = false;
+    // Back to the safe defaults on every open: the admin may have switched
+    // gateways since the last one, and a band the previous gateway answered
+    // with must not judge this open's amount before the fresh answer lands.
+    setLimits({ min: GATEWAY_MIN_RM, max: GATEWAY_MAX_RM });
+    getPaymentLimits()
+      .then((l) => {
+        if (!cancelled)
+          setLimits({ min: l.deposit.minRm, max: l.deposit.maxRm });
+      })
+      .catch(() => {});
     getDepositMethods()
       .then((codes) => {
         if (cancelled) return;
@@ -150,9 +172,9 @@ export default function TopUpSheet({
     setSubmitting(true);
     try {
       if (USE_GATEWAY) {
-        if (amount < GATEWAY_MIN_RM || amount > GATEWAY_MAX_RM) {
+        if (amount < limits.min || amount > limits.max) {
           setError(
-            `Top-ups must be between ${rm0(GATEWAY_MIN_RM)} and ${rm0(GATEWAY_MAX_RM)}.`,
+            `Top-ups must be between ${rm0(limits.min)} and ${rm0(limits.max)}.`,
           );
           return;
         }
@@ -423,7 +445,7 @@ export default function TopUpSheet({
 
             <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">
               {USE_GATEWAY
-                ? 'You’ll finish paying on GlobePay365, then come back here. Credits appear once your payment is confirmed — usually within a minute.'
+                ? 'You’ll finish paying on our payment provider’s page, then come back here. Credits appear once your payment is confirmed — usually within a minute.'
                 : 'Demo checkout: only the amount leaves your browser. Amounts ending in .13 are declined on purpose so you can see the error path.'}
             </p>
           </>

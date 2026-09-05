@@ -2,12 +2,18 @@ import { createHash } from 'node:crypto';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from './index';
 import type PacksModuleService from './service';
-import { resolveWithdrawalDestination } from './saved-accounts';
 import {
-  globepayConfigFromEnv,
+  bankSupportedBy,
+  resolveWithdrawalDestination,
+} from './saved-accounts';
+import {
+  GATEWAYS,
+  gatewayConfigFor,
+  paymentGateway,
   submitWithdrawal,
   GlobePayError,
-} from './globepay-client';
+  type PaymentGateway,
+} from './gateway';
 import { newMerchantTransactionId } from './globepay-deposit';
 import { withdrawalGateError } from './withdrawable';
 import { nonNegativeIntFromEnv } from '../../api/utils/rate-limit';
@@ -85,12 +91,16 @@ export function globepayWithdrawalsEnabled(
     GLOBEPAY_ENABLED?: string;
     GLOBEPAY_WITHDRAWALS_ENABLED?: string;
     GLOBEPAY_MERCHANT_CODE?: string;
+    PAYMENT_GATEWAY?: string;
+    TGPAY_SECRET_KEY?: string;
   } = process.env,
+  gateway: PaymentGateway = paymentGateway(env),
 ): boolean {
+  const configured = GATEWAYS[gateway].configured(env);
   return (
     env.GLOBEPAY_ENABLED === 'true' &&
     env.GLOBEPAY_WITHDRAWALS_ENABLED === 'true' &&
-    Boolean(env.GLOBEPAY_MERCHANT_CODE)
+    configured
   );
 }
 
@@ -235,6 +245,10 @@ export type StartWithdrawalInput = {
    * instead of minting a second one.
    */
   idempotencyKey?: string;
+  /** TGPay requires the recipient email on payout; GlobePay ignores it. */
+  email?: string;
+  /** Resolved once by the route; see StartDepositInput.gateway. */
+  gateway?: PaymentGateway;
 };
 
 export type StartWithdrawalResult = {
@@ -292,7 +306,8 @@ export async function startGlobePayWithdrawal(
   notifyUrl: string,
   verifyUrl: string,
 ): Promise<StartWithdrawalResult> {
-  if (!globepayWithdrawalsEnabled()) {
+  const gateway = input.gateway ?? paymentGateway();
+  if (!globepayWithdrawalsEnabled(process.env, gateway)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'Withdrawals are not open yet.',
@@ -311,10 +326,11 @@ export async function startGlobePayWithdrawal(
       'Enter a valid amount.',
     );
   }
-  if (amount < GLOBEPAY_WD_MIN_RM || amount > GLOBEPAY_WD_MAX_RM) {
+  const { withdrawalMin, withdrawalMax } = GATEWAYS[gateway].limits;
+  if (amount < withdrawalMin || amount > withdrawalMax) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      `Withdrawals must be between RM ${GLOBEPAY_WD_MIN_RM} and RM ${GLOBEPAY_WD_MAX_RM.toLocaleString('en-US')}.`,
+      `Withdrawals must be between RM ${withdrawalMin} and RM ${withdrawalMax.toLocaleString('en-US')}.`,
     );
   }
 
@@ -325,7 +341,7 @@ export async function startGlobePayWithdrawal(
       ? input.idempotencyKey.trim()
       : undefined;
 
-  const config = globepayConfigFromEnv();
+  const config = gatewayConfigFor(gateway);
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
 
   // Scoped OFF 'failed' on purpose, matching the partial unique index. A failed
@@ -397,6 +413,28 @@ export async function startGlobePayWithdrawal(
   if (detailsInvalid) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, detailsInvalid);
   }
+  // A bank the active gateway cannot pay to is refused HERE, before any
+  // debit, with the reason. The adapter would refuse it too, but only after
+  // the row and the debit exist — a refund, a failed row on the admin queue
+  // and a "check your details" email for something that is not the
+  // customer's mistake. Saved accounts survive a switch; this is the one
+  // moment they are not payable.
+  if (!bankSupportedBy(precheckDestination.bankCode, gateway)) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'This bank account is not available with the current payout provider. Pick another saved account, or try again later.',
+    );
+  }
+  // Same rule for the recipient email a TGPay payout needs: the adapter
+  // would refuse a blank one as a definite error, but only after the row and
+  // the debit exist — a refund and a failed row for something the customer
+  // fixes in Account settings.
+  if (GATEWAYS[gateway].needsCustomerContact && !input.email) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Add an email address to your account before withdrawing.',
+    );
+  }
 
   // 0b) PRECHECK — NOT the gate. This is an unlocked, read-only fast path whose
   // only job is to avoid writing a row for a refusal that is already certain.
@@ -459,6 +497,7 @@ export async function startGlobePayWithdrawal(
           account_number: precheckDestination.accountNumber,
           account_holder_name: precheckDestination.accountHolderName.trim(),
           status: held ? 'held' : 'pending',
+          gateway,
         },
       ])
     )[0];
@@ -551,6 +590,7 @@ export async function startGlobePayWithdrawal(
         notifyUrl,
         returnUrl: verifyUrl,
         ipAddress: input.ipAddress,
+        email: input.email,
       },
       config,
     );

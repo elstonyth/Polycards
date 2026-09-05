@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { rm } from '@/lib/format';
+import { gatewayMethodLabel } from '@/lib/transactions';
 import type { PendingDeposit } from '@/lib/actions/vault';
 
 /** How often to re-ask the server while a payment is confirming. The deposit
@@ -58,7 +59,8 @@ export function PendingDeposits({ deposits }: { deposits: PendingDeposit[] }) {
               : `Confirming your ${rm(deposit.amount)} top-up…`}
           </span>
           <span className="text-[13px] text-white/50">
-            started {deposit.startedLabel}
+            {deposit.method ? `${gatewayMethodLabel(deposit.method)} · ` : ''}
+            started {deposit.startedLabel} · awaiting gateway
           </span>
           <span className="ml-auto font-mono text-[12px] break-all text-white/40">
             {deposit.reference}

@@ -1,3 +1,4 @@
+import { DEPOSIT_METHODS } from '@/lib/deposit-methods';
 // Pure presentation helpers for the Transactions account page. Isomorphic (no
 // server-only imports) so the server component can call them directly.
 import type { CreditReason } from '@/lib/data/schemas';
@@ -17,6 +18,31 @@ const REASON_LABEL: Record<CreditReason, string> = {
   daily_reward: 'Daily reward',
   referral_commission: 'Referral commission',
   delivery_fee: 'Delivery fee',
+};
+
+/** Customer-facing wording for the gateway row's settlement outcome. */
+export const gatewayStatusLabel = (status: string): string =>
+  (
+    ({
+      settled: 'Confirmed by gateway',
+      pending: 'Awaiting gateway',
+      held: 'Awaiting approval',
+      failed: 'Failed',
+      expired: 'Expired',
+    }) as Record<string, string>
+  )[status] ?? status;
+
+/** Channel wording, mirroring the top-up sheet's own labels. */
+export const gatewayMethodLabel = (method: string): string =>
+  DEPOSIT_METHODS.find((m) => m.code === method)?.label ??
+  EXTRA_METHOD_LABEL[method] ??
+  method;
+
+// Rails that never appear in the top-up sheet (payouts, gateway-side codes).
+const EXTRA_METHOD_LABEL: Record<string, string> = {
+  FPX: 'Online banking',
+  DN: 'DuitNow',
+  WD: 'Bank payout',
 };
 
 // A backend reason added before the storefront redeploys has no entry in

@@ -626,10 +626,12 @@ class PacksModuleService extends MedusaService({
   async siteSettings(@MedusaContext() sharedContext: Context = {}): Promise<{
     slab_frame_url: string | null;
     avatar_frames: Record<string, string>;
+    payment_gateway: string | null;
   }> {
     const [row] = await this.listSiteSettings({}, { take: 1 }, sharedContext);
     return {
       slab_frame_url: row?.slab_frame_url ?? null,
+      payment_gateway: row?.payment_gateway ?? null,
       // Cleared levels are persisted as explicit nulls (see editAvatarFrames)
       // — filter them out so consumers only ever see level → URL strings.
       avatar_frames: Object.fromEntries(
@@ -646,6 +648,44 @@ class PacksModuleService extends MedusaService({
   // row. Named `editSiteSettings` to avoid shadowing the MedusaService-
   // generated `updateSiteSettings` CRUD method (same convention as
   // editRewardsSettings).
+  /**
+   * Switch the active payment gateway (plan 130 §runtime switch). Audited
+   * like every other admin edit. The caller validates the id against
+   * GATEWAYS and that the gateway is configured; this only persists.
+   */
+  @InjectTransactionManager()
+  async editPaymentGateway(
+    input: { gateway: string | null; adminId: string; reason: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ payment_gateway: string | null }> {
+    const [row] = await this.listSiteSettings({}, { take: 1 }, sharedContext);
+    const before = { payment_gateway: row?.payment_gateway ?? null };
+    const data = { payment_gateway: input.gateway };
+    if (row) {
+      await this.updateSiteSettings(
+        { selector: { id: row.id }, data },
+        sharedContext,
+      );
+    } else {
+      await this.createSiteSettings([{ id: 'global', ...data }], sharedContext);
+    }
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'site_settings',
+          entity_id: row?.id ?? 'singleton',
+          action: 'edit_payment_gateway',
+          before,
+          after: data,
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
+    );
+    return data;
+  }
+
   @InjectTransactionManager()
   async editSiteSettings(
     input: {
@@ -711,10 +751,7 @@ class PacksModuleService extends MedusaService({
     | {
         bound: false;
         reason:
-          | 'self'
-          | 'already_bound'
-          | 'not_a_new_account'
-          | 'referrer_disabled';
+          'self' | 'already_bound' | 'not_a_new_account' | 'referrer_disabled';
       }
   > {
     if (input.customerId === input.referrerId) {
@@ -2118,10 +2155,7 @@ class PacksModuleService extends MedusaService({
     | {
         claimed: false;
         reason:
-          | 'not_found'
-          | 'not_completed'
-          | 'already_claimed'
-          | 'window_closed';
+          'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
       }
   > {
     // Deliberately NOT filtered on active: retiring a task must never strand
@@ -6112,6 +6146,8 @@ class PacksModuleService extends MedusaService({
         amount_requested: number;
         payment_method_code: string;
         status: 'pending';
+        /** Which gateway the row is created under; column defaults to GlobePay. */
+        gateway?: string;
       };
       maxRecentPending: number;
       windowMs: number;
@@ -6165,6 +6201,84 @@ class PacksModuleService extends MedusaService({
   // are counted out loud instead of being left to deflate the figure they
   // were skipped from — see globepay-settlement.ts's header for the full
   // rule.
+  /**
+   * All-time gateway money totals from OUR rows, for the audit page to set
+   * beside the gateway's live wallet balances (plan 130). Same NULL rule as
+   * globepaySettlementRows: a NULL net is counted, not zeroed.
+   */
+  @InjectManager()
+  async gatewayAuditTotals(
+    gateway: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    deposits: {
+      count: number;
+      grossCents: number;
+      netCents: number;
+      missingNet: number;
+    };
+    withdrawals: {
+      count: number;
+      grossCents: number;
+      netCents: number;
+      missingNet: number;
+    };
+    findings: number;
+    lastAuditedAt: string | null;
+  }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    type Raw = {
+      n: string;
+      gross_cents: string;
+      net_cents: string;
+      missing_net: string;
+    };
+    const toTotals = (r: Raw) => ({
+      count: Number(r.n),
+      grossCents: Number(r.gross_cents),
+      netCents: Number(r.net_cents),
+      missingNet: Number(r.missing_net),
+    });
+    const [dep] = await em.execute<Raw[]>(
+      `SELECT COUNT(*)::bigint AS n,
+              COALESCE(SUM(ROUND(amount_settled * 100)), 0)::bigint AS gross_cents,
+              COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
+              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
+         FROM globepay_deposit
+        WHERE deleted_at IS NULL AND status = 'settled' AND gateway = ?`,
+      [gateway],
+    );
+    const [wd] = await em.execute<Raw[]>(
+      `SELECT COUNT(*)::bigint AS n,
+              COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS gross_cents,
+              COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
+              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
+         FROM globepay_withdrawal
+        WHERE deleted_at IS NULL AND status = 'settled' AND gateway = ?`,
+      [gateway],
+    );
+    // Scoped to the same gateway as the money totals, so one gateway's
+    // findings and freshness never show up on the other's panel.
+    const [audit] = await em.execute<
+      { findings: string; last: string | null }[]
+    >(
+      `SELECT (SELECT COUNT(*) FROM globepay_deposit WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND gateway = ?)
+            + (SELECT COUNT(*) FROM globepay_withdrawal WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND gateway = ?) AS findings,
+              GREATEST(
+                (SELECT MAX(audited_at) FROM globepay_deposit WHERE deleted_at IS NULL AND gateway = ?),
+                (SELECT MAX(audited_at) FROM globepay_withdrawal WHERE deleted_at IS NULL AND gateway = ?)
+              ) AS last`,
+      [gateway, gateway, gateway, gateway],
+    );
+    return {
+      deposits: toTotals(dep),
+      withdrawals: toTotals(wd),
+      findings: Number(audit?.findings ?? 0),
+      lastAuditedAt: audit?.last ? new Date(audit.last).toISOString() : null,
+    };
+  }
+
   @InjectManager()
   async globepaySettlementRows(
     granularity: 'week' | 'month',
@@ -8551,8 +8665,7 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      | SettleSnapshot
-      | undefined;
+      SettleSnapshot | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME
@@ -8967,8 +9080,7 @@ class PacksModuleService extends MedusaService({
   private async reserveSettledStock(
     winner: SettledWinner,
     decrementStock:
-      | ((handle: string, qty: number) => Promise<boolean>)
-      | undefined,
+      ((handle: string, qty: number) => Promise<boolean>) | undefined,
     weekStartIso: string,
   ): Promise<void> {
     if (!decrementStock) return;
