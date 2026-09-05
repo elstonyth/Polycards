@@ -86,7 +86,19 @@ is `null` for TGPay rows (their statuses are strings, the column is numeric).
   checkout `https://checkout.tgpay365.com`.
 - **API keys are gated on 2FA**: the reveal buttons open "Two-factor
   authentication required — set it up first" (Settings → Two-factor
-  authentication). Keys are not issued until then.
+  authentication). Keys are not issued until then. Once 2FA is on, each
+  reveal asks for an emailed code ("Skip verification for 5 minutes" covers
+  both keys). **The production keys are short opaque strings** (10 and 8
+  characters, one of them digit-only), not the sandbox's 51-character
+  `pk-`/`sk-` pair — the client never checks a prefix, and the spec quotes
+  the placeholders so a digit-only value stays a YAML string.
+- **Their API is IP-allowlisted per tenant**: from a workstation
+  `check-tgpay` gets `403 Request IP is not allowed for this tenant`, so the
+  keys can only be proven from the DO egress IPs (run the preflight through
+  `scripts/do-exec.mjs` after the apply, or watch the first switch attempt).
+- Keys live in the gitignored deploy secrets file (`TGPAY_PUBLIC_KEY`,
+  `TGPAY_SECRET_KEY`); `scripts/do-apply.ps1 backend` injects them with
+  `TGPAY_API_BASE=https://api.tgpay365.com/api/v2` (2026-09-06).
 - Currency shows "—" (unset), tenant credit and payout credit 0.00 — ask
   TGPay to set MYR and fund the payout wallet before go-live (same trap as
   the sandbox's currency-less payout wallet).

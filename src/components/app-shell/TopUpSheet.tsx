@@ -5,7 +5,9 @@ import { CheckCircle2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { rm, rm0 } from '@/lib/format';
 import {
+  DEFAULT_PAYMENT_LIMITS,
   getDepositMethods,
+  getPaymentLimits,
   startDeposit,
   topUpCredits,
 } from '@/lib/actions/vault';
@@ -38,8 +40,10 @@ const USE_GATEWAY = PROVIDER !== 'mock';
 // Production band, confirmed by the provider 2026-07-29: RM 30 – RM 10,000 for
 // both Online Banking and QR (docs/payments/globepay365-setup.md). Mirrors the
 // backend's GLOBEPAY_MIN_RM/GLOBEPAY_MAX_RM.
-const GATEWAY_MIN_RM = 30;
-const GATEWAY_MAX_RM = 10000;
+// Defaults only; the real band is fetched per open (getPaymentLimits) because
+// it belongs to whichever gateway the admin has active.
+const GATEWAY_MIN_RM = DEFAULT_PAYMENT_LIMITS.deposit.minRm;
+const GATEWAY_MAX_RM = DEFAULT_PAYMENT_LIMITS.deposit.maxRm;
 
 // The mock's 10/25 rungs are below the gateway's floor, so offering them would
 // guarantee a rejection on the real path. The gateway rungs span the production
@@ -125,9 +129,19 @@ export default function TopUpSheet({
   // Ask the server which channels are on offer, per open. Gateway path only —
   // the mock has no channels — and failure keeps the compiled list, since the
   // action re-checks the code anyway and a refused channel shows its own error.
+  const [limits, setLimits] = useState({
+    min: GATEWAY_MIN_RM,
+    max: GATEWAY_MAX_RM,
+  });
   useEffect(() => {
     if (!open || !USE_GATEWAY) return;
     let cancelled = false;
+    getPaymentLimits()
+      .then((l) => {
+        if (!cancelled)
+          setLimits({ min: l.deposit.minRm, max: l.deposit.maxRm });
+      })
+      .catch(() => {});
     getDepositMethods()
       .then((codes) => {
         if (cancelled) return;
@@ -154,9 +168,9 @@ export default function TopUpSheet({
     setSubmitting(true);
     try {
       if (USE_GATEWAY) {
-        if (amount < GATEWAY_MIN_RM || amount > GATEWAY_MAX_RM) {
+        if (amount < limits.min || amount > limits.max) {
           setError(
-            `Top-ups must be between ${rm0(GATEWAY_MIN_RM)} and ${rm0(GATEWAY_MAX_RM)}.`,
+            `Top-ups must be between ${rm0(limits.min)} and ${rm0(limits.max)}.`,
           );
           return;
         }

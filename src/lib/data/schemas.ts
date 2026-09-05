@@ -368,6 +368,13 @@ export type CreditReason = (typeof CREDIT_REASONS)[number];
  *  added before the storefront redeploys must still RENDER (generic label)
  *  — parseList dropping it made history rows silently vanish (audit
  *  2026-07-07 #11; repeat-offender class). */
+/** GET /store/payments/config — the active gateway's money bands. */
+export const PaymentConfigSchema = z.looseObject({
+  gateway: z.string(),
+  deposit: z.looseObject({ min_rm: finite, max_rm: finite }),
+  withdrawal: z.looseObject({ min_rm: finite, max_rm: finite }),
+});
+
 export const CreditTransactionSchema = z.looseObject({
   id: z.string(),
   amount: finite,

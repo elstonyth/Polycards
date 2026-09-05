@@ -42,6 +42,7 @@ import {
   SavedBankAccountsSchema,
   CreditsSchema,
   CreditTransactionSchema,
+  PaymentConfigSchema,
 } from '@/lib/data/schemas';
 import { mapVaultItem, type BackendVaultItem } from './vault-map';
 export type { VaultItem } from './vault-map';
@@ -185,6 +186,47 @@ export type StartDepositResult =
  * time — the retract switch would work on dynamic pages and silently do nothing
  * on static ones. An action runs per request everywhere.
  */
+export type PaymentLimits = {
+  gateway: string;
+  deposit: { minRm: number; maxRm: number };
+  withdrawal: { minRm: number; maxRm: number };
+};
+
+/** The GlobePay production band, used until the backend answers (and if it
+ *  never does): the sheet must never offer a floor the gateway will refuse. */
+export const DEFAULT_PAYMENT_LIMITS: PaymentLimits = {
+  gateway: 'unknown',
+  deposit: { minRm: 30, maxRm: 10000 },
+  withdrawal: { minRm: 50, maxRm: 50000 },
+};
+
+/**
+ * The ACTIVE gateway's money bands, read from the backend per call — an
+ * admin can switch gateways at runtime, and TGPay's floor (RM 50) is not
+ * GlobePay's (RM 30). Public route, publishable key only. Any failure yields
+ * the defaults so the sheet still opens.
+ */
+export async function getPaymentLimits(): Promise<PaymentLimits> {
+  try {
+    const parsed = parseOne(
+      PaymentConfigSchema,
+      await authedFetch(undefined, '/store/payments/config'),
+    );
+    if (!parsed) return DEFAULT_PAYMENT_LIMITS;
+    return {
+      gateway: parsed.gateway,
+      deposit: { minRm: parsed.deposit.min_rm, maxRm: parsed.deposit.max_rm },
+      withdrawal: {
+        minRm: parsed.withdrawal.min_rm,
+        maxRm: parsed.withdrawal.max_rm,
+      },
+    };
+  } catch (error) {
+    logger.error('[vault] payment limits load failed:', error);
+    return DEFAULT_PAYMENT_LIMITS;
+  }
+}
+
 export async function getDepositMethods(): Promise<DepositMethodCode[]> {
   const raw = process.env.DEPOSIT_METHODS_ENABLED;
   const enabled = enabledDepositMethods(raw);
