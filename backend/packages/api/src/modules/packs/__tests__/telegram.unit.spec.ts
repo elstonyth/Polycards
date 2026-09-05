@@ -248,8 +248,9 @@ const fakeContainer = (rows: {
   resolve: (key: string) => {
     if (key === 'customer') {
       return {
-        // Real shape: a lowercase kebab handle (HANDLE_RE) derived from the
-        // name at signup, and a first_name the customer has since changed.
+        // Real shape: the display name IS the handle. A stale `metadata.handle`
+        // is left here on purpose — production rows still carry one from the
+        // old derived-slug model, and it must NOT be what the link points at.
         retrieveCustomer: async () => ({
           first_name: 'Elston',
           metadata: { handle: 'old-name-1a2b' },
@@ -334,11 +335,12 @@ describe('postApexPull', () => {
     const [call] = sent as { url: string; body: { caption: string } }[];
     expect(call.url).toContain('/sendPhoto');
     expect(call.body.caption).toContain('LEGENDARY PULL');
-    // Name = first_name, handle = link target only. Regression: the handle is
-    // a slug of the name at SIGNUP and is never re-derived, so posting it as
-    // the display name announces a renamed customer under their old name.
+    // The link target is the CURRENT display name, not the stale
+    // `metadata.handle` the fixture still carries. That stale value is the old
+    // model's leftover: it was a slug of the name at signup, never re-derived,
+    // so linking it announced a renamed customer at a URL that is now a 404.
     expect(call.body.caption).toContain(
-      '<a href="https://polycards.gg/profile/old-name-1a2b">Elston</a>',
+      '<a href="https://polycards.gg/profile/Elston">Elston</a>',
     );
   });
 

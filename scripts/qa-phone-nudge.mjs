@@ -36,7 +36,8 @@ const reg = await post('/auth/customer/emailpass/register', {
 });
 const created = await post(
   '/store/customers',
-  { email: EMAIL, first_name: 'Phoneless' },
+  // Unique per run — the username is the profile URL, so it cannot repeat.
+  { email: EMAIL, first_name: `Phoneless${Date.now()}`.slice(0, 30) },
   { authorization: `Bearer ${reg.token}` },
 );
 log(

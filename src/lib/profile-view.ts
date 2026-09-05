@@ -1,10 +1,11 @@
 /**
- * View-model the profile page renders — one shape for BOTH sources: the real
- * public profile (`/store/profiles/:handle`) and the deterministic mock pool
- * (unknown handles / backend down), so `ProfileClient` stays purely
- * presentational and pixel-identical across the two.
+ * View-model the profile page renders, mapped from the public profile
+ * (`/store/profiles/:handle`) so `ProfileClient` stays purely presentational.
+ *
+ * It used to serve a second source too — a deterministic mock pool for unknown
+ * handles — which is why the shape is source-agnostic. That fallback is gone:
+ * an unknown name is a 404, not an invented collector.
  */
-import type { MockUser } from '@/lib/mock/users';
 import type { PublicProfile } from '@/lib/data/profiles';
 import { relativeTime } from '@/lib/format';
 
@@ -121,20 +122,5 @@ export function toProfileView(
       // so index i is always in bounds
       card: activityCards[i]!,
     })),
-  };
-}
-
-/** Mock-pool user → the same view (fallback/skeleton path). */
-export function mockProfileView(user: MockUser): ProfileViewUser {
-  return {
-    username: user.username,
-    pfp: user.pfp,
-    frame: null,
-    frameLevel: null,
-    rank: user.rank,
-    pulls: user.pulls,
-    volume: user.volume,
-    joined: user.joined,
-    collection: user.collection,
   };
 }

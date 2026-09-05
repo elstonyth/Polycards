@@ -332,26 +332,33 @@ moduleIntegrationTestRunner<PacksModuleService>({
         const ids = mkIds('profilerte');
         await seed(ids);
 
-        // Stub the Modules.CUSTOMER service: findCustomerByHandle calls
-        // customers.listCustomers({metadata:{handle}},{take:1}). Return a
-        // minimal customer so the route proceeds past the 404 guard. This lets
-        // us call the actual GET handler without the real cross-module
-        // ICustomerModuleService being present in moduleIntegrationTestRunner.
+        // The route resolves a username to a customer id via the packs service
+        // (raw SQL on `customer`) and then retrieves that customer. Neither can
+        // run here: moduleIntegrationTestRunner builds a schema from the packs
+        // models alone, so there IS no `customer` table, and no real
+        // ICustomerModuleService either. Stub both halves so the actual GET
+        // handler still runs against real pull/odds rows, which is what this
+        // spec is about.
         //
-        // The handle must satisfy HANDLE_RE (/^[a-z0-9](?:[a-z0-9-]{1,58})[a-z0-9]$/)
-        // and must match the customer_id seeded above so listPulls returns the
-        // correct rows.
-        const testHandle = 'c3-profile-rt'; // valid HANDLE_RE shape
+        // The handle must satisfy USERNAME_RE and its stubbed id must be the
+        // seeded customer_id, or listPulls returns the wrong rows.
+        const testHandle = 'C3_profile_rt';
         const stubCustomer = {
           id: ids.customer, // same id used in seed() → listPulls hits the right rows
-          first_name: 'C3Test',
+          first_name: testHandle, // the display name IS the handle
           created_at: new Date().toISOString(),
-          metadata: { handle: testHandle },
+          metadata: {},
         };
-        // ponytail: minimal stub — only the methods findCustomerByHandle calls
         const stubCustomerModule = {
-          listCustomers: async () => [stubCustomer],
+          retrieveCustomer: async () => stubCustomer,
         };
+        // ponytail: prototype-preserving override — the route calls plenty of
+        // other real service methods, so only the one DB-bound lookup is faked.
+        const stubPacks = Object.create(service) as typeof service;
+        stubPacks.findCustomerIdByUsername = async (username: string) =>
+          username.toLowerCase() === testHandle.toLowerCase()
+            ? ids.customer
+            : null;
 
         const captured: Record<string, unknown> = {};
         const res = { json: (body: unknown) => { captured.body = body; } };
@@ -360,7 +367,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           scope: {
             resolve: (name: string) => {
               if (name === Modules.CUSTOMER) return stubCustomerModule;
-              return service; // PACKS_MODULE + anything else → real service
+              return stubPacks; // PACKS_MODULE + anything else → real service
             },
           },
         };

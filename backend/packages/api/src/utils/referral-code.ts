@@ -5,12 +5,13 @@ import { findCustomerByReferralCode } from './customer-by-metadata';
 
 // The public referral code — the short identity a recruit arrives with via
 // /r/<code> or pastes into the signup form. Lives in customer
-// metadata.referral_code beside metadata.handle and is assigned lazily the
-// first time the customer opens their referral panel
+// metadata.referral_code — now the only thing in that blob besides the avatar
+// keys, since the profile handle became the display name itself — and is
+// assigned lazily the first time the customer opens their referral panel
 // (PacksModuleService.assignReferralCode, which serializes allocation so no
 // two customers ever share a code).
 //
-// Random, not derived from the id like the handle: the handle is printed on
+// Random, not derived from the id or the name: the display name is printed on
 // every public profile, and a code anyone could compute from it would let a
 // stranger claim a downline they never recruited. 8 symbols from a 32-symbol
 // alphabet (no 0/O/1/I look-alikes) is 40 bits — unguessable at the bind

@@ -24,7 +24,6 @@ import { MercurModules, SellerStatus } from '@mercurjs/types';
 import PacksModuleService from '../modules/packs/service';
 import { PACKS_MODULE } from '../modules/packs';
 import type { HouseSellerService } from '../modules/packs/card-product';
-import { HANDLE_RE, deriveHandle } from '../utils/profile-handle';
 import { VIP_LEVELS_SEED } from './vip-levels.data';
 
 const updateStoreCurrencies = createWorkflow(
@@ -694,21 +693,10 @@ export default async function seedDemoData({ container }: ExecArgs) {
     demoByEmail.get(d.email),
   ).filter((c): c is NonNullable<typeof c> => !!c);
 
-  // Public profile handles (Task B): every demo collector gets a stable
-  // metadata.handle so /store/profiles/:handle resolves them. Idempotent —
-  // derivation is deterministic and existing handles are left untouched.
-  for (const c of orderedDemo) {
-    const metadata = (c.metadata ?? {}) as Record<string, unknown>;
-    if (
-      typeof metadata.handle === 'string' &&
-      HANDLE_RE.test(metadata.handle)
-    ) {
-      continue;
-    }
-    await customerModuleService.updateCustomers(c.id, {
-      metadata: { ...metadata, handle: deriveHandle(c.first_name, c.id) },
-    });
-  }
+  // No handle assignment: a collector's display name IS their profile URL, so
+  // /store/profiles/Kenji resolves the moment the row exists. Every name in
+  // DEMO_COLLECTORS above is already a valid username (see
+  // utils/profile-handle.ts) — keep it that way when editing the roster.
 
   logger.info('Finished seeding demo gacha activity.');
 
@@ -741,10 +729,8 @@ export default async function seedDemoData({ container }: ExecArgs) {
       const [testCustomer] = await customerModuleService.createCustomers([
         { email: TEST_EMAIL, first_name: 'tester' },
       ]);
-      // Public profile handle (Task B) so /store/profiles/:handle resolves.
-      await customerModuleService.updateCustomers(testCustomer.id, {
-        metadata: { handle: deriveHandle('tester', testCustomer.id) },
-      });
+      // 'tester' is itself the profile URL (/profile/tester) — nothing to
+      // assign.
       // Link the auth identity to the customer (actor_type customer) — mirrors
       // create-admin.ts's user_id linkage. Without this the login resolves no
       // actor and /store/customers/me returns nothing.

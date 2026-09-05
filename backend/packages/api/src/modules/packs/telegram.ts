@@ -114,8 +114,8 @@ function clipEscaped(escaped: string, max: number): string {
 // force BOTH conditional branches on), rarity = 'Legendary' (the longer of
 // the two apex tiers that can reach this function, ties 'Immortal' at
 // uppercase length 9), a 7-figure MYR price, and a 90-char profileUrl
-// (default site origin + '/profile/' + a 60-char handle — HANDLE_RE's own
-// max; deriveHandle's real ceiling is 45) measured 317 total; subtracting
+// (default site origin + '/profile/' + a 60-char handle — comfortably above
+// USERNAME_MAX, which is 30) measured 317 total; subtracting
 // the 2 placeholder chars from grade/set gives a fixed cost of 315. The
 // 'scaffolding stays inside SCAFFOLD_MAX' spec in telegram.unit.spec.ts
 // re-measures this on every run — it is the drift guard if anyone adds a
@@ -586,13 +586,11 @@ export async function postApexPull(
     ]);
     if (!card) return null; // card removed since the roll — nothing to show
 
-    // Public identity: the SAME name/handle split every other public surface
-    // uses (publicProfileFields — leaderboard, weekly challenge, profile page).
-    // The NAME is first_name, else the anonymous "Collector ####"; the handle
-    // is only the /profile/<handle> link target. Never the other way round:
-    // a handle is a slug of the name at signup and is NEVER re-derived on a
-    // rename, so showing it as the display name announces a renamed customer
-    // under the name they signed up with.
+    // Public identity: the SAME source every other public surface uses
+    // (publicProfileFields — leaderboard, weekly challenge, profile page). Name
+    // and link target are now one value, the display name; `handle` comes back
+    // null when that name is not URL-usable, and the caption then shows the
+    // name without linking it rather than linking a 404.
     // Never email, never customer_id. A customer-module failure degrades to
     // 'Anonymous'.
     const siteUrl = (

@@ -2,12 +2,15 @@ import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../modules/packs';
-import { HANDLE_RE, seedOf } from '../../../../utils/profile-handle';
+import {
+  USERNAME_RE,
+  normalizeUsername,
+  seedOf,
+} from '../../../../utils/profile-handle';
 import {
   getCachedProfile,
   setCachedProfile,
 } from '../../../../utils/profile-cache';
-import { findCustomerByHandle } from '../../../../utils/customer-by-metadata';
 import {
   cardByHandle,
   makeRarityOf,
@@ -58,26 +61,32 @@ export async function GET(
 ): Promise<void> {
   const handle = req.params.handle;
   // Malformed params resolve like unknown ones — a 404, never a 500 (and the
-  // regex gate keeps junk out of the JSONB lookup).
-  if (typeof handle !== 'string' || !HANDLE_RE.test(handle)) {
+  // regex gate keeps junk out of the lookup).
+  if (typeof handle !== 'string' || !USERNAME_RE.test(handle)) {
     throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Profile not found');
   }
 
+  // Cache key folds case, like every other username comparison: /MOONBREON and
+  // /moonbreon are one profile, so they must be one entry — otherwise a rename
+  // evicts one spelling and leaves the other serving the old body for 30s.
+  const cacheKey = normalizeUsername(handle);
   // Only successful bodies are ever stored (404 paths throw before the set
   // below), so a cache hit is always a real profile.
-  const cached = getCachedProfile(handle);
+  const cached = getCachedProfile(cacheKey);
   if (cached !== undefined) {
     res.json(cached);
     return;
   }
 
-  const customers = req.scope.resolve(Modules.CUSTOMER);
-  const customer = await findCustomerByHandle(customers, handle);
-  if (!customer) {
+  const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
+  // The username IS the display name — no stored handle to resolve through, so
+  // a rename moves the profile's URL with it by construction.
+  const customerId = await packs.findCustomerIdByUsername(handle);
+  if (!customerId) {
     throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Profile not found');
   }
-
-  const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
+  const customers = req.scope.resolve(Modules.CUSTOMER);
+  const customer = await customers.retrieveCustomer(customerId);
 
   // An administratively disabled player is hidden from every public surface,
   // this page included. Checked here rather than above the cache read: a hit
@@ -85,10 +94,10 @@ export async function GET(
   // the same window the boards' own caches carry, and not worth two extra
   // queries on every cache hit to close.
   //
-  // 410, NOT 404, and this is load-bearing: the storefront answers a 404 with a
-  // deterministic MOCK persona (unknown/legacy handles are a product choice —
-  // app/profile/[user]/page.tsx), so 404-ing here would publish a fabricated
-  // collector under this real handle instead of hiding anything. The status is
+  // 410, NOT 404, and still load-bearing after the storefront's mock-persona
+  // fallback was removed: 404 now means "this name belongs to nobody", which
+  // frees the name for the next person to claim. A disabled account still HOLDS
+  // its name, so answering 404 would advertise it as available. The status is
   // written directly because MedusaError has no 410 mapping.
   if (await packs.isAccountDisabled(customer.id)) {
     res.status(410).json({ message: 'Profile unavailable' });
@@ -298,7 +307,9 @@ export async function GET(
       : null;
 
   const body = {
-    handle,
+    // The stored spelling, not the URL's: a visitor arriving at /moonbreon
+    // gets links and copy that read MOONBREON, the way its owner wrote it.
+    handle: first.length > 0 ? first : handle,
     name: first.length > 0 ? first : `Collector ${String(seed).slice(0, 4)}`,
     seed,
     avatar_url: avatarUrl,
@@ -312,6 +323,6 @@ export async function GET(
     collection,
     recent,
   };
-  setCachedProfile(handle, body);
+  setCachedProfile(cacheKey, body);
   res.json(body);
 }
