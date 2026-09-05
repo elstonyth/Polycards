@@ -41,3 +41,22 @@ export function payerIpOf(req: {
     '0.0.0.0'
   );
 }
+
+/**
+ * The address a CALLBACK really came from, for allow-listing. Only what the
+ * trusted proxy chain established: Express's `req.ip` (Medusa sets
+ * `trust proxy` 1, so this is the hop DigitalOcean's load balancer appended)
+ * or, without a proxy, the socket peer. The raw X-Forwarded-For header is
+ * deliberately NOT a fallback here — a caller writes that header, so it can
+ * name any address it likes; payerIpOf tolerates it only because the payer
+ * IP is informational. An allowlist that trusted it would be theatre, which
+ * is exactly what TGPay warned about ("不要用 x-forwarded-for 做白名单").
+ * IPv4-mapped IPv6 ("::ffff:1.2.3.4") is unwrapped so it compares as IPv4.
+ */
+export function callbackSourceIp(req: {
+  ip?: string;
+  socket?: { remoteAddress?: string };
+}): string {
+  const raw = req.ip || req.socket?.remoteAddress || '';
+  return raw.replace(/^::ffff:/i, '');
+}

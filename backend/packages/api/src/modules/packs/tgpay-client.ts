@@ -346,3 +346,68 @@ export function tgpayCallbackAuthorized(
     sameSecret(headers['x-secret-key'], config.secretKey)
   );
 }
+
+// ---------------------------------------------------------------------------
+// Callback source allowlist. TGPay asked for one on top of the key headers
+// ("请做 IP 白名单校验"). Enforced by the hooks whenever TGPAY_CALLBACK_IPS is
+// set; entries are IPv4 addresses or CIDR blocks, comma/space separated.
+// Unset = header-only (the sandbox calls from addresses they did not list).
+
+export type CallbackAllowEntry = { base: number; bits: number };
+
+function ipv4ToInt(ip: string): number | null {
+  const parts = ip.trim().split('.');
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const p of parts) {
+    if (!/^\d{1,3}$/.test(p)) return null;
+    const v = Number(p);
+    if (v > 255) return null;
+    n = n * 256 + v;
+  }
+  return n;
+}
+
+/** Parse "1.2.3.4, 5.6.7.0/24" → entries; garbage entries are dropped. */
+export function parseCallbackAllowlist(
+  raw: string | undefined,
+): CallbackAllowEntry[] {
+  if (!raw) return [];
+  const entries: CallbackAllowEntry[] = [];
+  for (const token of raw.split(/[\s,]+/).filter(Boolean)) {
+    const [ip, maskRaw] = token.split('/');
+    const base = ipv4ToInt(ip);
+    const bits = maskRaw === undefined ? 32 : Number(maskRaw);
+    if (base === null || !Number.isInteger(bits) || bits < 0 || bits > 32) {
+      continue;
+    }
+    entries.push({ base, bits });
+  }
+  return entries;
+}
+
+export function callbackIpAllowed(
+  ip: string,
+  entries: readonly CallbackAllowEntry[],
+): boolean {
+  const n = ipv4ToInt(ip);
+  if (n === null) return false;
+  return entries.some(({ base, bits }) => {
+    if (bits === 0) return true;
+    const mask = bits === 32 ? 0xffffffff : (0xffffffff << (32 - bits)) >>> 0;
+    return ((n & mask) >>> 0) === ((base & mask) >>> 0);
+  });
+}
+
+/**
+ * The hooks' verdict: null when no allowlist is configured (header-only),
+ * true/false otherwise. Read per call so an env change needs no redeploy.
+ */
+export function tgpayCallbackIpVerdict(
+  ip: string,
+  env: { TGPAY_CALLBACK_IPS?: string } = process.env,
+): boolean | null {
+  const entries = parseCallbackAllowlist(env.TGPAY_CALLBACK_IPS);
+  if (entries.length === 0) return null;
+  return callbackIpAllowed(ip, entries);
+}

@@ -3,11 +3,13 @@ import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import {
   tgpayCallbackAuthorized,
+  tgpayCallbackIpVerdict,
   tgpayConfigFromEnv,
   tgpayPaymentState,
 } from '../../../../modules/packs/tgpay-client';
 import { GLOBEPAY_MAX_RM } from '../../../../modules/packs/globepay-deposit';
 import { rowGateway } from '../../../../modules/packs/gateway';
+import { callbackSourceIp } from '../../../utils/payer-ip';
 import { topupIdempotencyReference } from '../../../../modules/packs/topup';
 import { sendTopupReceipt } from '../../../../modules/packs/topup-receipt';
 import { notifyFeed } from '../../../../modules/packs/notify-feed';
@@ -35,6 +37,17 @@ export async function POST(
 ): Promise<void> {
   const logger = req.scope.resolve<Logger>('logger');
   const config = tgpayConfigFromEnv();
+
+  // Source allowlist first (TGPay's requirement), then the key headers. The
+  // IP is the proxy-established one, never the spoofable header.
+  const sourceIp = callbackSourceIp(req);
+  if (tgpayCallbackIpVerdict(sourceIp) === false) {
+    logger.warn(
+      `[tgpay] rejected deposit callback from ${sourceIp || 'unknown'}: not in TGPAY_CALLBACK_IPS`,
+    );
+    res.status(403).send('rejected');
+    return;
+  }
 
   if (
     !tgpayCallbackAuthorized(req.headers as Record<string, unknown>, config)

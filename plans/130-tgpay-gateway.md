@@ -198,3 +198,12 @@ saved-account views resolve the active gateway first; the admin switch also
 requires the payout-verify URL when the gateway has that step; the backfill
 script canonicalises row codes; `/bank` shows the not-available state; the
 dead `bank_name` validation is gone (the registry supplies the name).
+
+## Callback source allowlist (2026-09-05 evening, TGPay's request)
+
+Both TGPay hooks refuse (403) any source not in `TGPAY_CALLBACK_IPS` when that
+env is set; entries are IPv4 or CIDR. The address judged is Express's
+`req.ip` (trust proxy 1 → the hop DigitalOcean's balancer appended), never
+`X-Forwarded-For`. Unset = header-only, for the sandbox. Production value =
+the 12 addresses TGPay listed; set it on the DO backend at cutover together
+with the TGPAY_* keys and `PAYMENT_CALLBACK_BASE`.

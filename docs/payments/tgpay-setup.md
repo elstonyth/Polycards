@@ -147,14 +147,20 @@ end on the sandbox 2026-09-05: accepted, callback settled it, ledger −50.
   real MYR pay-in row (id 22) only appeared when the first payment settled.
   **Resolved 2026-09-05**: CS set the wallet currency to MYR; payout works.
 - Production admin + API base URLs, and whether production payout is enabled
-  (`501 Payout not available in production yet` otherwise).
+  (`501 Payout not available in production yet` otherwise). Per TGPay
+  2026-09-05: the production API keys are read from the production back
+  office; its login is sent by email after the account is provisioned.
 - ~~Callback source IPs~~ — given by TGPay 2026-09-05 (production callbacks
   may come from): `1.32.102.191`, `1.32.102.19`, `1.32.102.35`, `1.32.102.1`,
   `60.48.120.36`, `219.95.78.237`, `219.94.46.237`, `18.142.49.112`,
   `188.114.96.0`, `188.114.97.0` (Cloudflare range), `47.131.132.118`,
-  `54.251.58.7`. **Reference only**: our hooks do not filter by source IP
-  (they asked us not to whitelist via `X-Forwarded-For`, and we never did);
-  the key headers are the authentication. Our egress `188.166.181.61` /
+  `54.251.58.7`. TGPay then asked for an allowlist on our side ("请做 IP 白名单
+  校验"), so both TGPay hooks now enforce `TGPAY_CALLBACK_IPS` when it is set
+  (403 otherwise), judged on the proxy-established `req.ip` — never on
+  `X-Forwarded-For`, which they explicitly warned against. Leave it unset on
+  the sandbox (their sandbox calls from unlisted addresses). Open question for
+  them: are `188.114.96.0` / `188.114.97.0` single hosts or Cloudflare's
+  `188.114.96.0/20`? The value accepts CIDR either way. Our egress `188.166.181.61` /
   `188.166.181.204` is whitelisted on their production as of the same day.
 - Whether the hosted checkout link is ever absolute; if it moves off the admin
   host, set `TGPAY_CHECKOUT_BASE`.

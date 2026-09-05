@@ -81,6 +81,42 @@ const run = async (
   return h.res;
 };
 
+describe('tgpay withdrawal callback — source allowlist', () => {
+  afterEach(() => {
+    delete process.env.TGPAY_CALLBACK_IPS;
+  });
+
+  it('with TGPAY_CALLBACK_IPS set, a foreign source is refused with 403 before any lookup', async () => {
+    process.env.TGPAY_CALLBACK_IPS = '1.32.102.19, 54.251.58.7';
+    const h = harness(pendingRow);
+    (h.req as { ip?: string }).ip = '9.9.9.9';
+    // A spoofed header must not rescue it.
+    h.req.headers = { ...AUTH, 'x-forwarded-for': '1.32.102.19' } as never;
+    const res = await run(h, success);
+    expect(res.statusCode).toBe(403);
+    expect(h.packs.listGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h.logger.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/rejected withdrawal callback from 9\.9\.9\.9/),
+    );
+  });
+
+  it('a listed source passes on to the key check', async () => {
+    process.env.TGPAY_CALLBACK_IPS = '1.32.102.19, 54.251.58.7';
+    const h = harness(pendingRow);
+    (h.req as { ip?: string }).ip = '::ffff:54.251.58.7';
+    const res = await run(h, success);
+    expect(res.statusCode).toBe(200);
+    expect(h.packs.listGlobePayWithdrawals).toHaveBeenCalled();
+  });
+
+  it('unset means header-only, as on the sandbox', async () => {
+    const h = harness(pendingRow);
+    (h.req as { ip?: string }).ip = '9.9.9.9';
+    const res = await run(h, success);
+    expect(res.statusCode).toBe(200);
+  });
+});
+
 describe('tgpay payout callback', () => {
   it('rejects bad key headers with 401 before any lookup', async () => {
     const h = harness(pendingRow);

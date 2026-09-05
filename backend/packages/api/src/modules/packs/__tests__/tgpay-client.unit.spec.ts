@@ -6,6 +6,9 @@ import {
   orderFromCheckoutLink,
   queryPayment,
   tgpayCallbackAuthorized,
+  tgpayCallbackIpVerdict,
+  parseCallbackAllowlist,
+  callbackIpAllowed,
   tgpayConfigFromEnv,
   tgpayPaymentState,
   TgpayError,
@@ -229,5 +232,29 @@ describe('pure helpers', () => {
       tgpayCallbackAuthorized({ ...ok, 'x-secret-key': ['sk-test'] }, config),
     ).toBe(false);
     expect(tgpayCallbackAuthorized({}, config)).toBe(false);
+  });
+});
+
+describe('callback source allowlist', () => {
+  it('parses plain IPs and CIDR blocks, dropping garbage', () => {
+    const entries = parseCallbackAllowlist(
+      '1.32.102.191, 188.114.96.0/20 nonsense 300.1.1.1 54.251.58.7/33 47.131.132.118',
+    );
+    expect(entries).toHaveLength(3);
+    expect(callbackIpAllowed('1.32.102.191', entries)).toBe(true);
+    expect(callbackIpAllowed('1.32.102.192', entries)).toBe(false);
+    expect(callbackIpAllowed('188.114.100.7', entries)).toBe(true); // inside /20
+    expect(callbackIpAllowed('188.114.112.1', entries)).toBe(false); // outside /20
+    expect(callbackIpAllowed('47.131.132.118', entries)).toBe(true);
+    expect(callbackIpAllowed('not-an-ip', entries)).toBe(false);
+  });
+
+  it('verdict is null (header-only) when nothing is configured, else a strict yes/no', () => {
+    expect(tgpayCallbackIpVerdict('1.2.3.4', {})).toBeNull();
+    expect(tgpayCallbackIpVerdict('1.2.3.4', { TGPAY_CALLBACK_IPS: ' ' })).toBeNull();
+    const env = { TGPAY_CALLBACK_IPS: '1.32.102.19,54.251.58.7' };
+    expect(tgpayCallbackIpVerdict('54.251.58.7', env)).toBe(true);
+    expect(tgpayCallbackIpVerdict('54.251.58.8', env)).toBe(false);
+    expect(tgpayCallbackIpVerdict('', env)).toBe(false);
   });
 });
