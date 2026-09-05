@@ -3,10 +3,14 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from './index';
 import type PacksModuleService from './service';
 import {
-  globepayConfigFromEnv,
+  GATEWAYS,
+  gatewayConfigFor,
+  paymentGateway,
   submitDeposit,
   GlobePayError,
-} from './globepay-client';
+  type PaymentGateway,
+} from './gateway';
+import type { TgpayCustomer } from './tgpay-client';
 import { topUpAmountError } from './topup';
 
 // The submit half of the GlobePay365 deposit loop: record intent, ask the
@@ -77,9 +81,16 @@ export function globepayEnabled(
   env: {
     GLOBEPAY_ENABLED?: string;
     GLOBEPAY_MERCHANT_CODE?: string;
+    PAYMENT_GATEWAY?: string;
+    TGPAY_SECRET_KEY?: string;
   } = process.env,
+  gateway: PaymentGateway = paymentGateway(env),
 ): boolean {
-  return env.GLOBEPAY_ENABLED === 'true' && Boolean(env.GLOBEPAY_MERCHANT_CODE);
+  // GLOBEPAY_ENABLED stays the master "real gateway" switch for both gateways;
+  // the credential that proves one is configured differs per gateway. Callers
+  // that already pinned a gateway for the request pass it, so the check and
+  // the submit cannot straddle an admin switch.
+  return env.GLOBEPAY_ENABLED === 'true' && GATEWAYS[gateway].configured(env);
 }
 
 /**
@@ -100,6 +111,15 @@ export type StartDepositInput = {
   /** The CUSTOMER's IP (they require it), not our server's. */
   ipAddress: string;
   paymentMethodCode?: string;
+  /** Name/email/phone — TGPay requires it on create-payment; GlobePay ignores it. */
+  customer?: TgpayCustomer;
+  /**
+   * The gateway this deposit goes through. The route resolves it ONCE and
+   * passes it down so the config, the row stamp and the callback URLs all
+   * name the same gateway even if an admin flips the switch mid-request.
+   * Defaults to the active gateway for callers that have no opinion.
+   */
+  gateway?: PaymentGateway;
 };
 
 export type StartDepositResult = {
@@ -130,7 +150,8 @@ export async function startGlobePayDeposit(
   notifyUrl: string,
   returnUrl: string,
 ): Promise<StartDepositResult> {
-  if (!globepayEnabled()) {
+  const gateway = input.gateway ?? paymentGateway();
+  if (!globepayEnabled(process.env, gateway)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'Top-ups are temporarily unavailable.',
@@ -150,10 +171,11 @@ export async function startGlobePayDeposit(
   // already refused as "at most RM 10,000 per top-up". Both bounds stay
   // asserted anyway: TOPUP_MAX_RM is an anti-typo guard that answers to us,
   // the band answers to them, and they are free to move apart again.
-  if (amount < GLOBEPAY_MIN_RM || amount > GLOBEPAY_MAX_RM) {
+  const { depositMin, depositMax } = GATEWAYS[gateway].limits;
+  if (amount < depositMin || amount > depositMax) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      `Top-ups must be between RM ${GLOBEPAY_MIN_RM} and RM ${GLOBEPAY_MAX_RM.toLocaleString('en-US')}.`,
+      `Top-ups must be between RM ${depositMin} and RM ${depositMax.toLocaleString('en-US')}.`,
     );
   }
 
@@ -189,7 +211,7 @@ export async function startGlobePayDeposit(
     );
   }
 
-  const config = globepayConfigFromEnv();
+  const config = gatewayConfigFor(gateway);
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
 
   const merchantTransactionId = newMerchantTransactionId();
@@ -211,6 +233,7 @@ export async function startGlobePayDeposit(
       amount_requested: amount,
       payment_method_code: paymentMethodCode,
       status: 'pending',
+      gateway,
     },
     maxRecentPending: GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER,
     windowMs: GLOBEPAY_PENDING_WINDOW_MS,
@@ -235,6 +258,7 @@ export async function startGlobePayDeposit(
         returnUrl,
         ipAddress: input.ipAddress,
         paymentMethodCode,
+        customer: input.customer,
       },
       config,
     );

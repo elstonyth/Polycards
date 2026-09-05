@@ -70,6 +70,16 @@ export const GlobePayDeposit = model
     // Their raw numeric status from the last callback/requery, for support.
     gateway_status: model.number().nullable(),
     settled_at: model.dateTime().nullable(),
+    // Which gateway this row was created under. The sweeps and the admin
+    // approve route talk to THIS gateway, not the active one, so switching
+    // gateways never strands money already in flight on the old one.
+    gateway: model.text().default('globepay'),
+    // Gateway audit (plan 130): when the audit sweep last requeried the
+    // gateway for this row, and what it disagreed about. NULL note = the
+    // gateway agrees with the row. The audit is a second, independent check
+    // on top of the reconcile sweep: it re-reads rows that are already final.
+    audited_at: model.dateTime().nullable(),
+    audit_note: model.text().nullable(),
   })
   .indexes([
     // Callback lookup path: they hand us a MerchantTransactionId and we must

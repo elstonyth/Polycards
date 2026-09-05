@@ -333,6 +333,50 @@ describe('startGlobePayWithdrawal — money ordering', () => {
   });
 
   // Test-plan case 3.
+  it("refuses a bank the active gateway cannot pay to BEFORE any debit, in the customer's words", async () => {
+    // The saved account is a legacy GlobePay-coded row ('MBB' is not in the
+    // registry); GlobePay passes it through, TGPay has no code for it.
+    // The gateway's config is read before the precheck, so give the spec
+    // a TGPay config of its own rather than borrowing the developer's env.
+    const saved = {
+      TGPAY_API_BASE: process.env.TGPAY_API_BASE,
+      TGPAY_PUBLIC_KEY: process.env.TGPAY_PUBLIC_KEY,
+      TGPAY_SECRET_KEY: process.env.TGPAY_SECRET_KEY,
+    };
+    process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
+    process.env.TGPAY_PUBLIC_KEY = 'pk-test';
+    process.env.TGPAY_SECRET_KEY = 'sk-test';
+    try {
+      const h = harness([SAVED_ACCOUNT]);
+      await expect(start(h, { gateway: 'tgpay' })).rejects.toThrow(
+        /not available with the current payout provider/i,
+      );
+      expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+      expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+      expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+      expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+
+      // Same fence for the recipient email TGPay needs: a payable bank but
+      // no email is refused before any row or debit, not after.
+      const payable = {
+        ...SAVED_ACCOUNT,
+        id: savedBankAccountId('MBBEMYKL', '1234567890'),
+        bankCode: 'MBBEMYKL',
+      };
+      const h2 = harness([payable]);
+      await expect(
+        start(h2, { gateway: 'tgpay', email: '', accountId: payable.id }),
+      ).rejects.toThrow(/email address/i);
+      expect(h2.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+      expect(h2.packs.withdrawForCashout.mock.calls.length).toBe(0);
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
   it('refuses an account still inside the cooling-off window', async () => {
     const h = harness([
       {

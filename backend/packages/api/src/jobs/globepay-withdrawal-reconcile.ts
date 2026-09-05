@@ -9,8 +9,9 @@ import {
 } from '../modules/packs/globepay-withdrawal';
 import {
   getWithdrawalDetail,
-  globepayConfigFromEnv,
-} from '../modules/packs/globepay-client';
+  resolveActiveGateway,
+  rowGatewayConfigs,
+} from '../modules/packs/gateway';
 import { toOptionalMoney } from '../modules/packs/money';
 import { notifyFeed } from '../modules/packs/notify-feed';
 import { withdrawalFeedKey } from '../modules/packs/feed-events';
@@ -40,10 +41,12 @@ export default async function globepayWithdrawalReconcileJob(
   container: MedusaContainer,
 ) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
+  await resolveActiveGateway(container);
   if (!globepayWithdrawalsEnabled()) return;
 
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-  const config = globepayConfigFromEnv();
+  // Per-row gateway, same reasoning as the deposit sweep.
+  const configFor = rowGatewayConfigs();
   const now = new Date();
 
   // HELD-ROW STALENESS WATCH (plan 094 review fix). Read-only: this must
@@ -100,6 +103,13 @@ export default async function globepayWithdrawalReconcileJob(
       // settlement facts the requery carries (settled amount, net, bank
       // references — audit 2026-08-17 B1/B2/C2). Null on the error paths.
       let detail: Awaited<ReturnType<typeof getWithdrawalDetail>> | null = null;
+      const config = configFor(withdrawal.gateway);
+      if (!config) {
+        logger.warn(
+          `[globepay-withdrawal-reconcile] ${withdrawal.merchant_transaction_id} belongs to gateway "${withdrawal.gateway}", which is not configured here — skipped`,
+        );
+        continue;
+      }
       try {
         detail = await getWithdrawalDetail(
           withdrawal.merchant_transaction_id,

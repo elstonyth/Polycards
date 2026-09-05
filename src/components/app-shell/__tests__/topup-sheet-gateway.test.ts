@@ -26,6 +26,13 @@ vi.mock('@/lib/actions/vault', () => ({
   startDeposit: (...args: unknown[]) => startDeposit(...args),
   topUpCredits: (...args: unknown[]) => topUpCredits(...args),
   getDepositMethods: () => getDepositMethods(),
+  // The sheet reads the active gateway's band per open; the tests keep the
+  // GlobePay defaults (RM 30 – 10,000) that their amounts were written for.
+  getPaymentLimits: async () => ({
+    gateway: 'globepay',
+    deposit: { minRm: 30, maxRm: 10000 },
+    withdrawal: { minRm: 50, maxRm: 50000 },
+  }),
 }));
 // jsdom's window.location is unforgeable, so navigation is observed through
 // the leaveFor seam instead of a location spy.
@@ -167,7 +174,8 @@ describe('TopUpSheet gateway branch', () => {
     const text = container.textContent ?? '';
     expect(text).toContain('Balance once paid');
     expect(text).not.toContain('New balance');
-    expect(text).toContain('GlobePay365');
+    expect(text).toContain('payment provider');
+    expect(text).not.toContain('GlobePay');
     expect(payButton().textContent).toBe('Pay RM 300.00');
     expect(text).not.toContain('add RM');
     // The mock sheet's "Demo" badge must not ride along on a flow that takes

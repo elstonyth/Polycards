@@ -47,6 +47,17 @@ export function toOptionalMoney(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * What a payout cost us less what the recipient got, for the settlement
+ * report's fee = gross − net rule. NULL (unknown) when either side is
+ * missing — never a zero fee by omission. 2-dp inputs, 2-dp result.
+ */
+export function netOfFee(amount: unknown, fee: unknown): number | null {
+  const a = toOptionalMoney(amount);
+  const f = toOptionalMoney(fee);
+  return a === null || f === null ? null : Number((a - f).toFixed(2));
+}
+
 /** Whole-percent of a sen amount, staying in sen, half-up. */
 export function pctOfSen(sen: number, percent: number): number {
   return Math.round((sen * percent) / 100);

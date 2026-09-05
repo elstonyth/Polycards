@@ -1,3 +1,4 @@
+import { createTgpayCallbackAllowlist } from './utils/payer-ip';
 import {
   defineMiddlewares,
   authenticate,
@@ -136,6 +137,8 @@ const adminActionRateLimit = createAdminActionRateLimit();
 // gateway's traffic against one abuse ceiling, so one budget and one Redis
 // connection (see createGatewayHookRateLimit for the sizing rationale).
 const gatewayHookRateLimit = createGatewayHookRateLimit();
+// TGPay's source allowlist (src/api/utils/payer-ip.ts) — after the limiter.
+const tgpayCallbackAllowlist = createTgpayCallbackAllowlist();
 
 // In-memory multipart parsing for the custom image-upload route. memoryStorage
 // hands the route a Buffer (no temp files); the 20 MB cap is the hard edge gate
@@ -367,6 +370,13 @@ export default defineMiddlewares({
       matcher: '/hooks/globepay/*',
       method: 'POST',
       middlewares: [gatewayHookRateLimit],
+    },
+    {
+      // TGPay's payment/payout server-notify callbacks — same anonymous-POST
+      // exposure, same limiter (src/api/hooks/tgpay/*).
+      matcher: '/hooks/tgpay/*',
+      method: 'POST',
+      middlewares: [gatewayHookRateLimit, tgpayCallbackAllowlist],
     },
     {
       // OTP send — TWO independent limiter tiers, per-phone FIRST so a
@@ -898,7 +908,16 @@ export default defineMiddlewares({
       // public unauthenticated endpoint.
       matcher: '/store/credits/withdraw/banks',
       method: 'GET',
-      middlewares: [authenticate('customer', ['bearer'])],
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // The active gateway's money bands (GET /store/payments/config), read by
+      // the top-up sheet and the withdrawal form on open. Public — nothing
+      // secret, and the sheet must know the floor before the customer types —
+      // but every endpoint is throttled, so it shares the store read budget.
+      matcher: '/store/payments/config',
+      method: 'GET',
+      middlewares: [storeReadRateLimit],
     },
     {
       // Saved payout accounts (GET /store/credits/withdraw/accounts) — the
@@ -1202,6 +1221,13 @@ export default defineMiddlewares({
       // Site-settings write (slab-frame overlay URL). Not a money mutation,
       // but it repaints every card on the storefront — same admin budget.
       matcher: '/admin/site-settings',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Active payment gateway switch (plan 130). Flips where every customer
+      // pays and is paid out — same admin budget as the other settings writes.
+      matcher: '/admin/payments/gateway',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

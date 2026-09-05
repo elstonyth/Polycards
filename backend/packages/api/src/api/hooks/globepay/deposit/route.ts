@@ -141,8 +141,11 @@ export async function POST(
   const state = depositState(data.Status);
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  // Only a row THIS gateway created: a GlobePay-signed callback naming a
+  // TGPay reference reads as unknown, exactly as the TGPay hooks refuse
+  // GlobePay rows. Rows from before the gateway column default to globepay.
   const [deposit] = await packs.listGlobePayDeposits(
-    { merchant_transaction_id: merchantTransactionId },
+    { merchant_transaction_id: merchantTransactionId, gateway: 'globepay' },
     { take: 1 },
   );
 

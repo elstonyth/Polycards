@@ -19,8 +19,15 @@
  */
 import { FetchError } from '@medusajs/js-sdk';
 
-/** A [pattern, message] pair: if `test` matches the error text, return `message`. */
-export type ErrorRule = readonly [test: RegExp, message: string];
+/**
+ * A [pattern, message] pair: if `test` matches the error text, return
+ * `message` — or, when the backend's own wording is the right answer (it
+ * carries figures the storefront cannot know), a function of that text.
+ */
+export type ErrorRule = readonly [
+  test: RegExp,
+  message: string | ((text: string) => string),
+];
 
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -33,7 +40,8 @@ export function friendlyError(
 ): string {
   const text = errorText(error);
   for (const [test, message] of rules) {
-    if (test.test(text)) return message;
+    if (test.test(text))
+      return typeof message === 'function' ? message(text) : message;
   }
   return fallback;
 }

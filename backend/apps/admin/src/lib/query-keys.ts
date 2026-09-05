@@ -32,6 +32,8 @@ export const qk = {
   settlement: (granularity: string, periods: number) =>
     ['admin', 'globepay-settlement', granularity, periods] as const,
   globepayBalance: ['admin', 'globepay-balance'] as const,
+  gatewayAudit: ['admin', 'gateway-audit'] as const,
+  paymentGateway: ['admin', 'payment-gateway'] as const,
   // Referral rebuild (spec 2026-08-24).
   referralSettings: ['admin', 'referral-settings'] as const,
   taskDefinitions: ['admin', 'task-definitions'] as const,

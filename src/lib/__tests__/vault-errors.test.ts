@@ -53,8 +53,13 @@ describe('VAULT_RULES backend-message contract', () => {
   });
 
   it('keeps the withdrawal rules ahead of the broad ones', () => {
-    expect(map('Withdrawals must be between RM 30 and RM 1,000.')).toBe(
-      'Withdrawals must be between RM 30 and RM 1,000.',
+    // The backend's band message carries the active gateway's own figures,
+    // so it must reach the customer unchanged.
+    expect(map('Withdrawals must be between RM 50 and RM 30,000.')).toBe(
+      'Withdrawals must be between RM 50 and RM 30,000.',
+    );
+    expect(map('Top-ups must be between RM 50 and RM 10,000.')).toBe(
+      'Top-ups must be between RM 50 and RM 10,000.',
     );
     const refused =
       'Your withdrawal was refused by the payment provider and your balance has been returned. Check your bank details are correct — if they are, contact support rather than retrying.';

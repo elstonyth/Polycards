@@ -2,7 +2,12 @@ import type { Metadata } from 'next';
 import { AccountHeader, Pager, StatCards } from '@/components/account/ui';
 import { rm } from '@/lib/format';
 import { getPendingDeposits, getTransactions } from '@/lib/actions/vault';
-import { reasonLabel, signedRm } from '@/lib/transactions';
+import {
+  gatewayMethodLabel,
+  gatewayStatusLabel,
+  reasonLabel,
+  signedRm,
+} from '@/lib/transactions';
 import { MarkCreditsSeen } from '@/components/account/credit-dot';
 import { PendingDeposits } from '@/components/account/PendingDeposits';
 import { DepositAutoRefresh } from '@/components/account/deposit-autorefresh';
@@ -133,8 +138,16 @@ export default async function TransactionsPage({
                     {/* The gateway id support asks for — same value the
                         receipt email and the admin pages show. Internal rows
                         (pack opens, buybacks) have none. */}
-                    <td className="px-4 py-3 font-mono text-[12px] text-white/50 break-all">
-                      {t.reference ?? '—'}
+                    <td className="px-4 py-3 text-[12px] text-white/50">
+                      <span className="font-mono break-all">
+                        {t.reference ?? '—'}
+                      </span>
+                      {t.gateway ? (
+                        <span className="mt-0.5 block text-[11px] text-white/40">
+                          {gatewayMethodLabel(t.gateway.method)} ·{' '}
+                          {gatewayStatusLabel(t.gateway.status)}
+                        </span>
+                      ) : null}
                     </td>
                     <td
                       className={`whitespace-nowrap px-4 py-3 text-right font-medium tabular-nums ${

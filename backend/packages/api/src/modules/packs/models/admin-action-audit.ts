@@ -50,6 +50,7 @@ export const AdminActionAudit = model
       'edit_voucher_ladder',
       'edit_fx_rate',
       'edit_site_settings',
+      'edit_payment_gateway',
       'edit_avatar_frames',
       'replace',
       'edit',
