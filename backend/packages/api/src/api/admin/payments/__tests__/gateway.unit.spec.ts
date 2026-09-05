@@ -10,6 +10,7 @@ beforeEach(() => {
   delete process.env.PAYMENT_GATEWAY;
   delete process.env.GLOBEPAY_MERCHANT_CODE;
   process.env.TGPAY_SECRET_KEY = 'sk-test';
+  process.env.PAYMENT_CALLBACK_BASE = 'https://api.example';
   setActiveGateway(null);
 });
 
@@ -78,6 +79,18 @@ describe('POST /admin/payments/gateway', () => {
     expect(h.logger.warn).toHaveBeenCalledWith(
       expect.stringMatching(/switched .* to tgpay/),
     );
+  });
+
+  it('refuses a gateway whose callbacks could not reach us', async () => {
+    delete process.env.PAYMENT_CALLBACK_BASE;
+    process.env.GLOBEPAY_NOTIFY_URL = 'https://old/hooks/globepay/deposit';
+    const h = harness(null);
+    h.req.body = { gateway: 'tgpay', reason: 'x' };
+    await expect(POST(h.req as never, h.res as never)).rejects.toThrow(
+      /callback URL/,
+    );
+    expect(h.packs.editPaymentGateway).not.toHaveBeenCalled();
+    delete process.env.GLOBEPAY_NOTIFY_URL;
   });
 
   it('refuses an unknown gateway, an unconfigured one, and a missing reason — without writing', async () => {

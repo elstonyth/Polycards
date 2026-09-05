@@ -95,6 +95,7 @@ export async function POST(
       accountId: body.account_id,
       ipAddress,
       email,
+      gateway,
       idempotencyKey: trimmedKey !== '' ? trimmedKey : undefined,
     },
     notifyUrl,

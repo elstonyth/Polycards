@@ -16,7 +16,7 @@ import { PACKS_MODULE } from './index';
 // reconcile jobs and the admin/store routes are gateway-agnostic through this
 // file. The inbound hooks are NOT — each gateway signs its callbacks its own
 // way, so they live at src/api/hooks/<gateway>/. Adding a gateway = a client
-// file, a hooks folder, and one entry in GATEWAYS below.
+// file, a hooks folder, an entry in GATEWAYS and an adapter below.
 
 export type PaymentGateway = 'globepay' | 'tgpay';
 
@@ -198,8 +198,17 @@ export function gatewayUrls(
 } {
   const def = GATEWAYS[id];
   const base = env.PAYMENT_CALLBACK_BASE?.replace(/\/+$/, '');
-  const hook = (path: string | undefined, explicit: string | undefined) =>
-    path && base ? `${base}${path}` : (explicit ?? '');
+  // An explicit URL is honoured only when it points at THIS gateway's hook.
+  // Production predates the switch and names the GlobePay hooks explicitly;
+  // handing those to TGPay would send every callback to a route that rejects
+  // it. Better to fail closed ('' → "temporarily unavailable") than misroute.
+  const hook = (path: string | undefined, explicit: string | undefined) => {
+    if (path && base) return `${base}${path}`;
+    if (path && explicit && explicit.replace(/\/+$/, '').endsWith(path)) {
+      return explicit;
+    }
+    return '';
+  };
   return {
     notifyUrl: hook(def.hooks.deposit, env.GLOBEPAY_NOTIFY_URL),
     returnUrl: env.GLOBEPAY_RETURN_URL ?? '',
@@ -237,7 +246,70 @@ function absoluteLink(link: string, config: TgpayConfig): string {
 }
 
 // ---------------------------------------------------------------------------
-// Deposits
+// Adapters. One object per gateway with the six operations the money paths
+// need, all in GlobePay's shapes. The exported functions below only pick the
+// adapter for the config's `kind` — adding a gateway is a registry entry
+// PLUS an adapter here, nothing in the orchestration, sweeps or routes.
+
+export type SubmitDepositInput = globepay.SubmitDepositInput & {
+  /** Required by TGPay's create-payment; ignored by GlobePay. */
+  customer?: TgpayCustomer;
+};
+export type SubmitDepositResult = globepay.SubmitDepositResult;
+
+export type DepositDetail = Omit<globepay.DepositDetail, 'statusId'> & {
+  /** GlobePay's numeric code; null for TGPay, whose statuses are strings. */
+  statusId: number | null;
+  state: SettlementState;
+};
+
+export type SubmitWithdrawalInput = globepay.SubmitWithdrawalInput & {
+  /** Required by TGPay's payout; ignored by GlobePay. */
+  email?: string;
+};
+export type SubmitWithdrawalResult = globepay.SubmitWithdrawalResult;
+
+export type WithdrawalDetail = Omit<globepay.WithdrawalDetail, 'statusId'> & {
+  statusId: number | null;
+  state: SettlementState;
+};
+
+export type SupportedBank = globepay.SupportedBank;
+
+export type MerchantBalance = globepay.MerchantBalance & {
+  /** Human-readable caveats (e.g. a wallet the gateway has no row for). */
+  notes?: string[];
+};
+
+type GatewayAdapter<C extends GatewayConfig> = {
+  submitDeposit: (
+    input: SubmitDepositInput,
+    config: C,
+  ) => Promise<SubmitDepositResult>;
+  getDepositDetail: (
+    merchantTransactionId: string,
+    config: C,
+  ) => Promise<DepositDetail>;
+  submitWithdrawal: (
+    input: SubmitWithdrawalInput,
+    config: C,
+  ) => Promise<SubmitWithdrawalResult>;
+  getWithdrawalDetail: (
+    merchantTransactionId: string,
+    config: C,
+  ) => Promise<WithdrawalDetail>;
+  getSupportedBanks: (config: C) => Promise<SupportedBank[]>;
+  checkBalance: (config: C) => Promise<MerchantBalance>;
+};
+
+const globepayAdapter: GatewayAdapter<GlobePayConfig> = {
+  submitDeposit: globepay.submitDeposit,
+  getDepositDetail: globepay.getDepositDetail,
+  submitWithdrawal: globepay.submitWithdrawal,
+  getWithdrawalDetail: globepay.getWithdrawalDetail,
+  getSupportedBanks: globepay.getSupportedBanks,
+  checkBalance: globepay.checkBalance,
+};
 
 /**
  * Storefront method codes (BQR / OB, plus the wider GlobePay MYR set) mapped
@@ -250,195 +322,193 @@ const TGPAY_METHOD: Record<string, 'FPX' | 'EWALLET' | undefined> = {
   BQR: 'EWALLET',
 };
 
-export type SubmitDepositInput = globepay.SubmitDepositInput & {
-  /** Required by TGPay's create-payment; ignored by GlobePay. */
-  customer?: TgpayCustomer;
+const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
+  async submitDeposit(input, config) {
+    const paymentMethod = TGPAY_METHOD[input.paymentMethodCode];
+    if (!paymentMethod) {
+      throw new tgpay.TgpayError(
+        `TGPay: no hosted-checkout rail for method ${input.paymentMethodCode}`,
+        ['TGPAY_UNSUPPORTED_METHOD'],
+        400,
+        true,
+      );
+    }
+    if (!input.customer) {
+      throw new tgpay.TgpayError(
+        'TGPay: create-payment needs the customer contact (name/email/phone)',
+        ['TGPAY_CUSTOMER_REQUIRED'],
+        400,
+        true,
+      );
+    }
+    const result = await tgpay.createPayment(
+      {
+        merchantRefNum: input.merchantTransactionId,
+        amount: input.amount,
+        notifyUrl: input.notifyUrl,
+        redirectUrl: input.returnUrl,
+        customer: input.customer,
+        paymentMethod,
+        // Shown on their checkout and stored on their transaction, so the
+        // operator can tie a TGPay row to a customer without opening our
+        // admin. The id is opaque (it cannot reach the account), unlike an
+        // email.
+        additionalData: `Customer ${input.merchantClientId}`,
+      },
+      config,
+    );
+    return {
+      transactionId: result.order ?? '',
+      url: absoluteLink(result.checkoutLink, config),
+      depositActualAmount: input.amount,
+    };
+  },
+
+  async getDepositDetail(merchantTransactionId, config) {
+    const q = await tgpay.queryPayment(merchantTransactionId, config);
+    return {
+      transactionId: q.order,
+      merchantTransactionId,
+      statusId: null,
+      status: q.status,
+      amount: Number(q.amount),
+      netAmount: Number(q.amountAfterFee),
+      paymentMethodCode: q.paymentMethod,
+      bankReferenceNo: null,
+      uniqueReferenceNo: null,
+      state: tgpay.tgpayPaymentState(q.status),
+    };
+  },
+
+  async submitWithdrawal(input, config) {
+    const bank = tgpay
+      .tgpayBanks(config)
+      .find((b) => b.bankCode === input.destinationBankCode);
+    if (!bank) {
+      throw new tgpay.TgpayError(
+        `TGPay: unknown payout bank code ${input.destinationBankCode}`,
+        ['TGPAY_UNKNOWN_BANK'],
+        400,
+        true,
+      );
+    }
+    if (!input.email) {
+      throw new tgpay.TgpayError(
+        'TGPay: payout needs the customer email',
+        ['TGPAY_CUSTOMER_REQUIRED'],
+        400,
+        true,
+      );
+    }
+    const result = await tgpay.createPayout(
+      {
+        merchantRefNum: input.merchantTransactionId,
+        amount: input.amount,
+        email: input.email,
+        userName: input.destinationAccountHolderName,
+        bankAccNumber: input.destinationAccountNumber,
+        bankCode: bank.bankCode,
+        bankName: bank.bankName,
+        notifyUrl: input.notifyUrl,
+      },
+      config,
+    );
+    return { transactionId: result.transactionRefNum };
+  },
+
+  async getWithdrawalDetail(merchantTransactionId, config) {
+    const q = await tgpay.queryPayout(merchantTransactionId, config);
+    const amount = Number(q.order?.amount);
+    const fee = Number(q.order?.fee);
+    return {
+      transactionId: q.order?.payoutRefNum ?? '',
+      merchantTransactionId,
+      statusId: null,
+      status: q.status,
+      amount,
+      // fee = gross − net in the settlement report, so net = amount − fee.
+      // NaN when either is missing: toOptionalMoney turns that into NULL.
+      netAmount:
+        Number.isFinite(amount) && Number.isFinite(fee) ? amount - fee : NaN,
+      paymentMethodCode: 'WD',
+      bankReferenceNo: null,
+      uniqueReferenceNo: null,
+      state: tgpay.tgpayPayoutState(q.status),
+    };
+  },
+
+  async getSupportedBanks(config) {
+    return [...tgpay.tgpayBanks(config)];
+  },
+
+  /**
+   * TGPay keeps two wallets. Pay-in credit is what deposits accrue into
+   * (`current`), the payout wallet is what withdrawals draw from
+   * (`available`). There is no T+1 concept; it reports 0.
+   */
+  async checkBalance(config) {
+    const b = await tgpay.balances(config);
+    return {
+      merchantCode: 'tgpay',
+      currencyCode: b.currencyCode,
+      currentBalance: b.payin,
+      availableBalance: b.payout,
+      t1Balance: 0,
+      notes: b.missing.map(
+        (w) =>
+          `TGPay has no ${w === 'payin' ? 'pay-in' : 'payout'} wallet for ${b.currencyCode} — shown as 0, actually unknown`,
+      ),
+    };
+  },
 };
 
-export type SubmitDepositResult = globepay.SubmitDepositResult;
+/**
+ * Pick the adapter for a config. GlobePay configs carry no `kind`. The
+ * adapters are typed against their own config; the union-typed call through
+ * here is sound because `kind` is exactly what selected them.
+ */
+function adapterFor(config: GatewayConfig): GatewayAdapter<GatewayConfig> {
+  return (
+    isTgpay(config) ? tgpayAdapter : globepayAdapter
+  ) as unknown as GatewayAdapter<GatewayConfig>;
+}
 
-export async function submitDeposit(
+export function submitDeposit(
   input: SubmitDepositInput,
   config: GatewayConfig,
 ): Promise<SubmitDepositResult> {
-  if (!isTgpay(config)) return globepay.submitDeposit(input, config);
-
-  const paymentMethod = TGPAY_METHOD[input.paymentMethodCode];
-  if (!paymentMethod) {
-    throw new tgpay.TgpayError(
-      `TGPay: no hosted-checkout rail for method ${input.paymentMethodCode}`,
-      ['TGPAY_UNSUPPORTED_METHOD'],
-      400,
-      true,
-    );
-  }
-  if (!input.customer) {
-    throw new tgpay.TgpayError(
-      'TGPay: create-payment needs the customer contact (name/email/phone)',
-      ['TGPAY_CUSTOMER_REQUIRED'],
-      400,
-      true,
-    );
-  }
-  const result = await tgpay.createPayment(
-    {
-      merchantRefNum: input.merchantTransactionId,
-      amount: input.amount,
-      notifyUrl: input.notifyUrl,
-      redirectUrl: input.returnUrl,
-      customer: input.customer,
-      paymentMethod,
-      // Shown on their checkout and stored on their transaction, so the
-      // operator can tie a TGPay row to a customer without opening our admin.
-      // The id is opaque (it cannot reach the account), unlike an email.
-      additionalData: `Customer ${input.merchantClientId}`,
-    },
-    config,
-  );
-  return {
-    transactionId: result.order ?? '',
-    url: absoluteLink(result.checkoutLink, config),
-    depositActualAmount: input.amount,
-  };
+  return adapterFor(config).submitDeposit(input, config);
 }
 
-export type DepositDetail = Omit<globepay.DepositDetail, 'statusId'> & {
-  /** GlobePay's numeric code; null for TGPay, whose statuses are strings. */
-  statusId: number | null;
-  state: SettlementState;
-};
-
-export async function getDepositDetail(
+export function getDepositDetail(
   merchantTransactionId: string,
   config: GatewayConfig,
 ): Promise<DepositDetail> {
-  if (!isTgpay(config)) {
-    return globepay.getDepositDetail(merchantTransactionId, config);
-  }
-  const q = await tgpay.queryPayment(merchantTransactionId, config);
-  return {
-    transactionId: q.order,
-    merchantTransactionId,
-    statusId: null,
-    status: q.status,
-    amount: Number(q.amount),
-    netAmount: Number(q.amountAfterFee),
-    paymentMethodCode: q.paymentMethod,
-    bankReferenceNo: null,
-    uniqueReferenceNo: null,
-    state: tgpay.tgpayPaymentState(q.status),
-  };
+  return adapterFor(config).getDepositDetail(merchantTransactionId, config);
 }
 
-// ---------------------------------------------------------------------------
-// Withdrawals
-
-export type SubmitWithdrawalInput = globepay.SubmitWithdrawalInput & {
-  /** Required by TGPay's payout; ignored by GlobePay. */
-  email?: string;
-};
-
-export type SubmitWithdrawalResult = globepay.SubmitWithdrawalResult;
-
-export async function submitWithdrawal(
+export function submitWithdrawal(
   input: SubmitWithdrawalInput,
   config: GatewayConfig,
 ): Promise<SubmitWithdrawalResult> {
-  if (!isTgpay(config)) return globepay.submitWithdrawal(input, config);
-
-  const bank = tgpay
-    .tgpayBanks(config)
-    .find((b) => b.bankCode === input.destinationBankCode);
-  if (!bank) {
-    throw new tgpay.TgpayError(
-      `TGPay: unknown payout bank code ${input.destinationBankCode}`,
-      ['TGPAY_UNKNOWN_BANK'],
-      400,
-      true,
-    );
-  }
-  if (!input.email) {
-    throw new tgpay.TgpayError(
-      'TGPay: payout needs the customer email',
-      ['TGPAY_CUSTOMER_REQUIRED'],
-      400,
-      true,
-    );
-  }
-  const result = await tgpay.createPayout(
-    {
-      merchantRefNum: input.merchantTransactionId,
-      amount: input.amount,
-      email: input.email,
-      userName: input.destinationAccountHolderName,
-      bankAccNumber: input.destinationAccountNumber,
-      bankCode: bank.bankCode,
-      bankName: bank.bankName,
-      notifyUrl: input.notifyUrl,
-    },
-    config,
-  );
-  return { transactionId: result.transactionRefNum };
+  return adapterFor(config).submitWithdrawal(input, config);
 }
 
-export type WithdrawalDetail = Omit<globepay.WithdrawalDetail, 'statusId'> & {
-  statusId: number | null;
-  state: SettlementState;
-};
-
-export async function getWithdrawalDetail(
+export function getWithdrawalDetail(
   merchantTransactionId: string,
   config: GatewayConfig,
 ): Promise<WithdrawalDetail> {
-  if (!isTgpay(config)) {
-    return globepay.getWithdrawalDetail(merchantTransactionId, config);
-  }
-  const q = await tgpay.queryPayout(merchantTransactionId, config);
-  return {
-    transactionId: q.order?.payoutRefNum ?? '',
-    merchantTransactionId,
-    statusId: null,
-    status: q.status,
-    amount: Number(q.order?.amount),
-    netAmount: Number(q.order?.amount),
-    paymentMethodCode: 'WD',
-    bankReferenceNo: null,
-    uniqueReferenceNo: null,
-    state: tgpay.tgpayPayoutState(q.status),
-  };
+  return adapterFor(config).getWithdrawalDetail(merchantTransactionId, config);
 }
 
-export type SupportedBank = globepay.SupportedBank;
-
-export async function getSupportedBanks(
+export function getSupportedBanks(
   config: GatewayConfig,
 ): Promise<SupportedBank[]> {
-  if (!isTgpay(config)) return globepay.getSupportedBanks(config);
-  return [...tgpay.tgpayBanks(config)];
+  return adapterFor(config).getSupportedBanks(config);
 }
 
-// ---------------------------------------------------------------------------
-// Balance
-
-export type MerchantBalance = globepay.MerchantBalance;
-
-/**
- * TGPay keeps two wallets. Pay-in credit is what deposits accrue into
- * (`current`), the payout wallet is what withdrawals draw from (`available`).
- * There is no T+1 concept; it reports 0.
- */
-export async function checkBalance(
-  config: GatewayConfig,
-): Promise<MerchantBalance> {
-  if (!isTgpay(config)) return globepay.checkBalance(config);
-  const b = await tgpay.balances(config);
-  return {
-    merchantCode: 'tgpay',
-    currencyCode: b.currencyCode,
-    currentBalance: b.payin,
-    availableBalance: b.payout,
-    t1Balance: 0,
-  };
+export function checkBalance(config: GatewayConfig): Promise<MerchantBalance> {
+  return adapterFor(config).checkBalance(config);
 }
 
 export { GlobePayError } from './globepay-client';

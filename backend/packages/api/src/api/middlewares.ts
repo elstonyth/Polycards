@@ -1184,6 +1184,13 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Active payment gateway switch (plan 130). Flips where every customer
+      // pays and is paid out — same admin budget as the other settings writes.
+      matcher: '/admin/payments/gateway',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Avatar-frame catalog write — cosmetic but repaints avatars storefront
       // -wide; same admin money-mutation budget as site-settings.
       matcher: '/admin/avatar-frames',

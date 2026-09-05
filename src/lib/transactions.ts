@@ -1,3 +1,4 @@
+import { DEPOSIT_METHODS } from '@/lib/deposit-methods';
 // Pure presentation helpers for the Transactions account page. Isomorphic (no
 // server-only imports) so the server component can call them directly.
 import type { CreditReason } from '@/lib/data/schemas';
@@ -36,15 +37,16 @@ export const gatewayStatusLabel = (status: string): string =>
 
 /** Channel wording, mirroring the top-up sheet's own labels. */
 export const gatewayMethodLabel = (method: string): string =>
-  (
-    ({
-      OB: 'Online banking',
-      FPX: 'Online banking',
-      BQR: 'QR / e-wallet',
-      DN: 'DuitNow',
-      WD: 'Bank payout',
-    }) as Record<string, string>
-  )[method] ?? method;
+  DEPOSIT_METHODS.find((m) => m.code === method)?.label ??
+  EXTRA_METHOD_LABEL[method] ??
+  method;
+
+// Rails that never appear in the top-up sheet (payouts, gateway-side codes).
+const EXTRA_METHOD_LABEL: Record<string, string> = {
+  FPX: 'Online banking',
+  DN: 'DuitNow',
+  WD: 'Bank payout',
+};
 
 export const reasonLabel = (reason: string): string =>
   (REASON_LABEL as Record<string, string>)[reason] ??

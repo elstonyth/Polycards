@@ -268,9 +268,13 @@ export function queryPayout(
 
 type Balance = { balance: number; currency: { code: string; name: string } };
 
-export async function balances(
-  config: TgpayConfig,
-): Promise<{ payin: number; payout: number; currencyCode: string }> {
+export async function balances(config: TgpayConfig): Promise<{
+  payin: number;
+  payout: number;
+  currencyCode: string;
+  /** Wallets the API has no row for (a fresh tenant, or a currency mismatch). */
+  missing: ('payin' | 'payout')[];
+}> {
   const body = { currency: config.currencyCode };
   // A wallet row only exists once it has been funded — a fresh sandbox tenant
   // has no pay-in credit row until its first payment settles. That 404 is
@@ -287,11 +291,15 @@ export async function balances(
     read('/tenant-credits/balance'),
     read('/tenant-payout-credits/balance'),
   ]);
+  const missing: ('payin' | 'payout')[] = [];
+  if (!payin) missing.push('payin');
+  if (!payout) missing.push('payout');
   return {
     payin: Number(payin?.balance ?? 0),
     payout: Number(payout?.balance ?? 0),
     currencyCode:
       payin?.currency?.code ?? payout?.currency?.code ?? config.currencyCode,
+    missing,
   };
 }
 

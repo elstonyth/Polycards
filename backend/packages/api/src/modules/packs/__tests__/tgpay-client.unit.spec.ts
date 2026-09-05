@@ -182,7 +182,19 @@ describe('createPayout / balances', () => {
       data: { balance: 12.5, currency: { code: 'MYR', name: 'x' } },
     });
     const b = await balances(config);
-    expect(b).toEqual({ payin: 12.5, payout: 12.5, currencyCode: 'MYR' });
+    expect(b).toEqual({
+      payin: 12.5,
+      payout: 12.5,
+      currencyCode: 'MYR',
+      missing: [],
+    });
+  });
+
+  it('a wallet the API has no row for reads as 0 but is named as missing', async () => {
+    stubFetch({ statusCode: 404, message: 'Payout credit not found' }, 404);
+    const b = await balances(config);
+    expect(b.payin).toBe(0);
+    expect(b.missing).toEqual(['payin', 'payout']);
   });
 });
 

@@ -79,20 +79,28 @@ describe('resolveActiveGateway', () => {
 
 describe('gatewayUrls', () => {
   const explicit = {
-    GLOBEPAY_NOTIFY_URL: 'https://old/notify',
+    GLOBEPAY_NOTIFY_URL: 'https://old/hooks/globepay/deposit',
     GLOBEPAY_RETURN_URL: 'https://shop/wallet',
-    GLOBEPAY_WITHDRAW_NOTIFY_URL: 'https://old/wd',
-    GLOBEPAY_PAYOUT_VERIFY_URL: 'https://old/verify',
+    GLOBEPAY_WITHDRAW_NOTIFY_URL: 'https://old/hooks/globepay/withdrawal/',
+    GLOBEPAY_PAYOUT_VERIFY_URL: 'https://old/hooks/globepay/payout-verify',
   } as NodeJS.ProcessEnv;
 
-  it('without PAYMENT_CALLBACK_BASE the explicit URLs apply unchanged', () => {
+  it('without PAYMENT_CALLBACK_BASE the explicit URLs apply unchanged — for the gateway they name', () => {
     expect(gatewayUrls('globepay', explicit)).toEqual({
-      notifyUrl: 'https://old/notify',
+      notifyUrl: 'https://old/hooks/globepay/deposit',
       returnUrl: 'https://shop/wallet',
-      withdrawNotifyUrl: 'https://old/wd',
-      payoutVerifyUrl: 'https://old/verify',
+      withdrawNotifyUrl: 'https://old/hooks/globepay/withdrawal/',
+      payoutVerifyUrl: 'https://old/hooks/globepay/payout-verify',
       hasPayoutVerify: true,
     });
+  });
+
+  it('never hands one gateway the explicit URLs of another', () => {
+    // A production deploy still carrying the GlobePay URLs must fail closed
+    // for TGPay, not send TGPay callbacks to the GlobePay hook.
+    const urls = gatewayUrls('tgpay', explicit);
+    expect(urls.notifyUrl).toBe('');
+    expect(urls.withdrawNotifyUrl).toBe('');
   });
 
   it('with PAYMENT_CALLBACK_BASE each gateway gets its own hook paths', () => {

@@ -7,6 +7,7 @@ import {
   tgpayPaymentState,
 } from '../../../../modules/packs/tgpay-client';
 import { GLOBEPAY_MAX_RM } from '../../../../modules/packs/globepay-deposit';
+import { rowGateway } from '../../../../modules/packs/gateway';
 import { topupIdempotencyReference } from '../../../../modules/packs/topup';
 import { sendTopupReceipt } from '../../../../modules/packs/topup-receipt';
 import { notifyFeed } from '../../../../modules/packs/notify-feed';
@@ -69,6 +70,16 @@ export async function POST(
   if (!deposit) {
     logger.error(
       `[tgpay] verified callback for UNKNOWN deposit ${merchantTransactionId} (gateway ${gatewayTransactionId}, status ${String(data.status)}) — nothing credited`,
+    );
+    res.status(200).send('success');
+    return;
+  }
+  // A TGPay-authenticated callback may only ever touch a TGPay row. The
+  // references are random and cannot collide in practice; this is the cheap
+  // guarantee that a switch between gateways cannot cross-credit.
+  if (rowGateway(deposit) !== 'tgpay') {
+    logger.error(
+      `[tgpay] callback names deposit ${merchantTransactionId}, which belongs to gateway "${deposit.gateway}" — ignored`,
     );
     res.status(200).send('success');
     return;
@@ -157,10 +168,9 @@ export async function POST(
         gateway_transaction_id:
           gatewayTransactionId || deposit.gateway_transaction_id,
         amount_settled: creditedAmount,
-        bank_reference_no:
-          typeof data.bankName === 'string' && data.bankName
-            ? data.bankName
-            : null,
+        // The callback carries no fee; the audit sweep backfills net_amount
+        // from /transaction/query. bankName is a display name, not a bank
+        // reference, so it is not stored in the reference columns.
         settled_at: new Date(),
       },
     });

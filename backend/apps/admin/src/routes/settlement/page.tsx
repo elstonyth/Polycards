@@ -10,6 +10,7 @@ import {
   Table,
   Text,
   Tooltip,
+  usePrompt,
 } from '@medusajs/ui';
 import { Receipt } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
@@ -86,6 +87,7 @@ const SettlementPage = () => {
   const audit = useGatewayAudit();
   const gateway = usePaymentGateway();
   const saveGateway = useSavePaymentGateway();
+  const prompt = usePrompt();
   const [chosen, setChosen] = useState<PaymentGatewayId | null>(null);
   const [gatewayReason, setGatewayReason] = useState('');
   const activeGateway = gateway.data?.active ?? null;
@@ -94,12 +96,17 @@ const SettlementPage = () => {
     wantedGateway !== null && wantedGateway !== activeGateway;
   const canSwitch =
     gatewayDirty && !saveGateway.isPending && gatewayReason.trim().length > 0;
-  const switchGateway = () => {
+  const switchGateway = async () => {
     if (!canSwitch || !wantedGateway) return;
     const label =
       gateway.data?.gateways.find((g) => g.id === wantedGateway)?.label ??
       wantedGateway;
-    if (!window.confirm(t('settlement.gatewayConfirm', { label }))) return;
+    const confirmed = await prompt({
+      title: t('settlement.gatewayTitle'),
+      description: t('settlement.gatewayConfirm', { label }),
+      confirmText: t('settlement.gatewaySave'),
+    });
+    if (!confirmed) return;
     saveGateway.mutate(
       { gateway: wantedGateway, reason: gatewayReason.trim() },
       {

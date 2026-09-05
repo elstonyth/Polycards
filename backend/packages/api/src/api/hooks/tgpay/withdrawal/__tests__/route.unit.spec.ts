@@ -41,6 +41,7 @@ const pendingRow = {
   account_holder_name: 'Michael Yap',
   status: 'pending',
   failure_reason: null,
+  gateway: 'tgpay',
 };
 
 function harness(row: Record<string, unknown> | null) {
@@ -93,7 +94,7 @@ describe('tgpay payout callback', () => {
     const res = await run(h, success);
     expect(res.statusCode).toBe(200);
     expect(h.packs.listGlobePayWithdrawals).toHaveBeenCalledWith(
-      { gateway_transaction_id: 'tx-9' },
+      { gateway_transaction_id: 'tx-9', gateway: 'tgpay' },
       { take: 1 },
     );
     expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
@@ -102,9 +103,50 @@ describe('tgpay payout callback', () => {
         data: expect.objectContaining({
           status: 'settled',
           amount_settled: 100,
+          // fee = gross − net in the settlement report, so net = 100 − 1.
+          net_amount: 99,
         }),
       }),
     );
+    expect(refundGlobePayWithdrawal).not.toHaveBeenCalled();
+  });
+
+  it('falls back to OUR reference when the gateway id is not stored yet, and stores it', async () => {
+    const h = harness({ ...pendingRow, gateway_transaction_id: null });
+    h.packs.listGlobePayWithdrawals
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ ...pendingRow, gateway_transaction_id: null }]);
+    const res = await run(h, { ...success, transactionId: 'PC-w1' });
+    expect(res.statusCode).toBe(200);
+    expect(h.packs.listGlobePayWithdrawals).toHaveBeenLastCalledWith(
+      { merchant_transaction_id: 'PC-w1', gateway: 'tgpay' },
+      { take: 1 },
+    );
+    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'settled',
+          gateway_transaction_id: 'PC-w1',
+        }),
+      }),
+    );
+  });
+
+  it('a missing fee leaves net unknown (null), never a zero fee', async () => {
+    const h = harness(pendingRow);
+    await run(h, { ...success, fee: undefined });
+    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ net_amount: null }),
+      }),
+    );
+  });
+
+  it('never touches a row that belongs to another gateway', async () => {
+    const h = harness({ ...pendingRow, gateway: 'globepay' });
+    const res = await run(h, success);
+    expect(res.statusCode).toBe(200);
+    expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
     expect(refundGlobePayWithdrawal).not.toHaveBeenCalled();
   });
 

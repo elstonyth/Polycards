@@ -11,6 +11,7 @@ import type PacksModuleService from '../../../../modules/packs/service';
 import {
   GATEWAYS,
   GATEWAY_IDS,
+  gatewayUrls,
   isPaymentGateway,
   paymentGateway,
   resolveActiveGateway,
@@ -67,6 +68,19 @@ export async function POST(
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       `${GATEWAYS[wanted].label} is not configured in this environment — set its credentials first.`,
+    );
+  }
+  // Credentials alone are not enough: the gateway must be able to call us
+  // back, or every payment would sit unsettled until the sweep. Without
+  // PAYMENT_CALLBACK_BASE the explicit URLs only count when they name THIS
+  // gateway's hooks (gatewayUrls), so a production deploy still carrying the
+  // GlobePay URLs cannot be switched to TGPay by accident.
+  const urls = gatewayUrls(wanted);
+  const withdrawalsOn = process.env.GLOBEPAY_WITHDRAWALS_ENABLED === 'true';
+  if (!urls.notifyUrl || (withdrawalsOn && !urls.withdrawNotifyUrl)) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      `${GATEWAYS[wanted].label} has no callback URL in this environment — set PAYMENT_CALLBACK_BASE (or notify URLs ending in ${GATEWAYS[wanted].hooks.deposit}) first.`,
     );
   }
 

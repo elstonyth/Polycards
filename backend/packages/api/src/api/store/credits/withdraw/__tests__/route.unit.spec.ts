@@ -42,8 +42,10 @@ const ORIGINAL_ENV = {
 
 beforeEach(() => {
   startMock.mockClear();
-  process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL = 'https://us/withdraw-notify';
-  process.env.GLOBEPAY_PAYOUT_VERIFY_URL = 'https://us/payout-verify';
+  process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL =
+    'https://us/hooks/globepay/withdrawal';
+  process.env.GLOBEPAY_PAYOUT_VERIFY_URL =
+    'https://us/hooks/globepay/payout-verify';
 });
 
 // These are process-wide: leaving them set leaks into whatever runs next and

@@ -26,8 +26,14 @@ export type GatewayAnswer =
   | { kind: 'detail'; state: SettlementState; amount: number }
   | { kind: 'not-found' };
 
+/**
+ * Amounts agree when both are known and equal to the cent. A gateway that
+ * reports no amount (NaN) cannot contradict ours — the STATE still can — so
+ * an unreadable figure is treated as agreement, never as a mismatch.
+ */
 const sameMoney = (a: number | null, b: number): boolean =>
-  a !== null && Number.isFinite(a) && Math.abs(a - b) < 0.005;
+  !Number.isFinite(b) ||
+  (a !== null && Number.isFinite(a) && Math.abs(a - b) < 0.005);
 
 /**
  * What, if anything, the gateway disagrees with. `null` means agreement.

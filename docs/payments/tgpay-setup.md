@@ -79,6 +79,16 @@ is `null` for TGPay rows (their statuses are strings, the column is numeric).
   account `543478924652`, name `Michael Yap`. The bank picker lists it first
   whenever `TGPAY_API_BASE` contains "sandbox".
 
+## Which gateway is active
+
+An admin setting, not an env var: Settlement page → **Payment gateway**
+(`GET/POST /admin/payments/gateway`, audited). `PAYMENT_GATEWAY` is only the
+boot/fallback value. Set `PAYMENT_CALLBACK_BASE` (the backend's public origin)
+so the notify URLs derive from each gateway's hook paths; without it an
+explicit `GLOBEPAY_*_URL` is honoured only when it already names that
+gateway's hook, and the switch refuses a gateway with no callback URL. Every
+deposit/withdrawal row records its gateway, and the sweeps use the row's.
+
 ## Local test loop
 
 1. Backend `.env`: the TGPay block (see `.env.template`). Callbacks need a
@@ -101,9 +111,11 @@ is `null` for TGPay rows (their statuses are strings, the column is numeric).
 Deposit leg end to end on the sandbox: create-payment → hosted checkout →
 FPX simulator → callback → ledger credit (plan 130 has the trace). Their
 wallet page records net MYR 49.00 for a RM 50 FPX pay-in (fee RM 1.00: 1.2 %
-floored at RM 1). Payout leg NOT yet possible: the API answers
-`No payout credit wallet found` for tenant `polycards` although the admin
-shows a payout credit of 300.00 — raised with TGPay CS.
+floored at RM 1). Payout leg: after TGPay set the payout wallet's currency to
+MYR (see below), `scripts/tgpay-payout-probe.ts` got a RM 50 payout ACCEPTED
+(fee RM 1, `amountIncludeFee` 51) and its `success` callback reached
+`/hooks/tgpay/withdrawal` within a minute; the payout wallet dropped 300 → 249.
+On the sandbox their `transactionRefNum` equals our `merchantRefNum`.
 
 Playwright smokes: `scripts/qa-tgpay-deposit.mjs` (top-up sheet → checkout),
 `scripts/qa-tgpay-statement.mjs` (/transactions + /wallet),
@@ -119,7 +131,7 @@ Playwright smokes: `scripts/qa-tgpay-deposit.mjs` (top-up sheet → checkout),
   (id 18, balance 300) has `currencyId: null`, so a lookup by MYR finds
   nothing. The tenant's original credit row (id 21) is currency-less too; a
   real MYR pay-in row (id 22) only appeared when the first payment settled.
-  Asked CS to set the payout wallet's currency to MYR.
+  **Resolved 2026-09-05**: CS set the wallet currency to MYR; payout works.
 - Production admin + API base URLs, and whether production payout is enabled
   (`501 Payout not available in production yet` otherwise).
 - Callback source IPs, if they publish any (we rely on the key headers).

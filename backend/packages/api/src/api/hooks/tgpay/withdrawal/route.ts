@@ -7,6 +7,7 @@ import {
   tgpayPayoutState,
 } from '../../../../modules/packs/tgpay-client';
 import { refundGlobePayWithdrawal } from '../../../../modules/packs/globepay-withdrawal';
+import { rowGateway } from '../../../../modules/packs/gateway';
 import { toOptionalMoney } from '../../../../modules/packs/money';
 import { notifyFeed } from '../../../../modules/packs/notify-feed';
 import { withdrawalFeedKey } from '../../../../modules/packs/feed-events';
@@ -29,6 +30,12 @@ type PayoutNotify = {
 };
 
 type Logger = { warn: (m: string) => void; error: (m: string) => void };
+
+function netOfFee(amount: unknown, fee: unknown): number | null {
+  const a = toOptionalMoney(amount);
+  const f = toOptionalMoney(fee);
+  return a === null || f === null ? null : Number((a - f).toFixed(2));
+}
 
 export async function POST(
   req: MedusaRequest,
@@ -63,13 +70,31 @@ export async function POST(
   const state = tgpayPayoutState(String(data.status ?? ''));
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const [withdrawal] = await packs.listGlobePayWithdrawals(
-    { gateway_transaction_id: gatewayTransactionId },
+  // Primary key: the transactionRefNum stored right after create-payout. If
+  // the callback outruns that write (their id is issued in the same response
+  // we are still handling), fall back to OUR reference — on the sandbox the
+  // two are the same string. A miss after both is acknowledged and left to
+  // the payout sweep, which queries by our reference.
+  let [withdrawal] = await packs.listGlobePayWithdrawals(
+    { gateway_transaction_id: gatewayTransactionId, gateway: 'tgpay' },
     { take: 1 },
   );
   if (!withdrawal) {
+    [withdrawal] = await packs.listGlobePayWithdrawals(
+      { merchant_transaction_id: gatewayTransactionId, gateway: 'tgpay' },
+      { take: 1 },
+    );
+  }
+  if (!withdrawal) {
     logger.error(
-      `[tgpay] verified withdrawal callback for UNKNOWN payout ${gatewayTransactionId} (status ${String(data.status)}) — nothing changed`,
+      `[tgpay] verified withdrawal callback for UNKNOWN payout ${gatewayTransactionId} (status ${String(data.status)}) — nothing changed; the sweep will requery`,
+    );
+    res.status(200).send('success');
+    return;
+  }
+  if (rowGateway(withdrawal) !== 'tgpay') {
+    logger.error(
+      `[tgpay] callback names payout ${withdrawal.merchant_transaction_id}, which belongs to gateway "${withdrawal.gateway}" — ignored`,
     );
     res.status(200).send('success');
     return;
@@ -131,8 +156,13 @@ export async function POST(
     selector: { id: withdrawal.id, status: 'pending' },
     data: {
       status: 'settled',
+      gateway_transaction_id:
+        withdrawal.gateway_transaction_id ?? gatewayTransactionId,
       amount_settled: toOptionalMoney(data.amount),
-      net_amount: toOptionalMoney(data.amount),
+      // The settlement report reads fee = gross − net, so net here is what
+      // the payout cost us less what the recipient got: amount − fee. NULL
+      // (unknown) when either is missing — never a zero fee by omission.
+      net_amount: netOfFee(data.amount, data.fee),
       settled_at: new Date(),
     },
   });

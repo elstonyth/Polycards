@@ -19,6 +19,7 @@ import {
   resolveActiveGateway,
   rowGateway,
   submitWithdrawal,
+  type GatewayConfig,
 } from '../../../../../../modules/packs/gateway';
 import { customerContact } from '../../../../../utils/customer-contact';
 import { payerIpOf } from '../../../../../utils/payer-ip';
@@ -85,7 +86,7 @@ export async function POST(
   // been unconfigured: the row stays held for a human, nothing moves.
   await resolveActiveGateway(req.scope);
   const gatewayId = rowGateway(row);
-  let config;
+  let config: GatewayConfig | null;
   try {
     config = gatewayId ? gatewayConfigFor(gatewayId) : null;
   } catch {

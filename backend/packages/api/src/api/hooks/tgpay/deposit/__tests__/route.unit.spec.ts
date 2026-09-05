@@ -82,6 +82,7 @@ const pendingRow = {
   amount_requested: 50,
   payment_method_code: 'OB',
   status: 'pending',
+  gateway: 'tgpay',
 };
 
 describe('tgpay deposit callback — authentication', () => {
@@ -173,6 +174,19 @@ describe('tgpay deposit callback — settlement', () => {
     expect(h.logger.error).toHaveBeenCalledWith(
       expect.stringMatching(/UNKNOWN deposit/),
     );
+  });
+
+  it('never touches a row that belongs to another gateway', async () => {
+    for (const gateway of ['globepay', undefined]) {
+      const h = harness({ ...pendingRow, gateway });
+      const res = await run(h, notify(approved));
+      expect(res.statusCode).toBe(200);
+      expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
+      expect(h.packs.updateGlobePayDeposits).not.toHaveBeenCalled();
+      expect(h.logger.error).toHaveBeenCalledWith(
+        expect.stringMatching(/belongs to gateway/),
+      );
+    }
   });
 
   it('a replayed APPROVED on an already-settled row is a no-op', async () => {

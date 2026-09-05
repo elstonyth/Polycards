@@ -63,7 +63,14 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     let netAmount: number | null = null;
     const config = configFor(row.gateway);
     if (!config) {
-      skipped += 1;
+      // Money we cannot check is a finding in itself. Stamping it also keeps
+      // an orphaned gateway's rows from occupying the batch forever.
+      await packs.updateGlobePayDeposits({
+        id: row.id,
+        audited_at: now,
+        audit_note: `gateway "${row.gateway}" is not configured here — not audited`,
+      });
+      findings += 1;
       continue;
     }
     try {
@@ -116,7 +123,12 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     let answer: GatewayAnswer;
     const config = configFor(row.gateway);
     if (!config) {
-      skipped += 1;
+      await packs.updateGlobePayWithdrawals({
+        id: row.id,
+        audited_at: now,
+        audit_note: `gateway "${row.gateway}" is not configured here — not audited`,
+      });
+      findings += 1;
       continue;
     }
     try {

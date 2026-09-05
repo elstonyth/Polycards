@@ -5,10 +5,11 @@ import type PacksModuleService from './service';
 import { resolveWithdrawalDestination } from './saved-accounts';
 import {
   GATEWAYS,
-  gatewayConfigFromEnv,
+  gatewayConfigFor,
   paymentGateway,
   submitWithdrawal,
   GlobePayError,
+  type PaymentGateway,
 } from './gateway';
 import { newMerchantTransactionId } from './globepay-deposit';
 import { withdrawalGateError } from './withdrawable';
@@ -244,6 +245,8 @@ export type StartWithdrawalInput = {
   idempotencyKey?: string;
   /** TGPay requires the recipient email on payout; GlobePay ignores it. */
   email?: string;
+  /** Resolved once by the route; see StartDepositInput.gateway. */
+  gateway?: PaymentGateway;
 };
 
 export type StartWithdrawalResult = {
@@ -334,7 +337,8 @@ export async function startGlobePayWithdrawal(
       ? input.idempotencyKey.trim()
       : undefined;
 
-  const config = gatewayConfigFromEnv();
+  const gateway = input.gateway ?? paymentGateway();
+  const config = gatewayConfigFor(gateway);
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
 
   // Scoped OFF 'failed' on purpose, matching the partial unique index. A failed
@@ -468,7 +472,7 @@ export async function startGlobePayWithdrawal(
           account_number: precheckDestination.accountNumber,
           account_holder_name: precheckDestination.accountHolderName.trim(),
           status: held ? 'held' : 'pending',
-          gateway: paymentGateway(),
+          gateway,
         },
       ])
     )[0];

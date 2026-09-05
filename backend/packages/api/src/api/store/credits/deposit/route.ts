@@ -78,6 +78,7 @@ export async function POST(
       ipAddress,
       paymentMethodCode: method,
       customer,
+      gateway,
     },
     notifyUrl,
     returnUrl,

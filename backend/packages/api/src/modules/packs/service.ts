@@ -6118,6 +6118,7 @@ class PacksModuleService extends MedusaService({
    */
   @InjectManager()
   async gatewayAuditTotals(
+    gateway: string,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
     deposits: { count: number; grossCents: number; netCents: number; missingNet: number };
@@ -6140,7 +6141,8 @@ class PacksModuleService extends MedusaService({
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
               COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
          FROM globepay_deposit
-        WHERE deleted_at IS NULL AND status = 'settled'`,
+        WHERE deleted_at IS NULL AND status = 'settled' AND gateway = ?`,
+      [gateway],
     );
     const [wd] = await em.execute<Raw[]>(
       `SELECT COUNT(*)::bigint AS n,
@@ -6148,7 +6150,8 @@ class PacksModuleService extends MedusaService({
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
               COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
          FROM globepay_withdrawal
-        WHERE deleted_at IS NULL AND status = 'settled'`,
+        WHERE deleted_at IS NULL AND status = 'settled' AND gateway = ?`,
+      [gateway],
     );
     const [audit] = await em.execute<{ findings: string; last: string | null }[]>(
       `SELECT (SELECT COUNT(*) FROM globepay_deposit WHERE deleted_at IS NULL AND audit_note IS NOT NULL)

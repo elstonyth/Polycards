@@ -4,10 +4,11 @@ import { PACKS_MODULE } from './index';
 import type PacksModuleService from './service';
 import {
   GATEWAYS,
-  gatewayConfigFromEnv,
+  gatewayConfigFor,
   paymentGateway,
   submitDeposit,
   GlobePayError,
+  type PaymentGateway,
 } from './gateway';
 import type { TgpayCustomer } from './tgpay-client';
 import { topUpAmountError } from './topup';
@@ -112,6 +113,13 @@ export type StartDepositInput = {
   paymentMethodCode?: string;
   /** Name/email/phone — TGPay requires it on create-payment; GlobePay ignores it. */
   customer?: TgpayCustomer;
+  /**
+   * The gateway this deposit goes through. The route resolves it ONCE and
+   * passes it down so the config, the row stamp and the callback URLs all
+   * name the same gateway even if an admin flips the switch mid-request.
+   * Defaults to the active gateway for callers that have no opinion.
+   */
+  gateway?: PaymentGateway;
 };
 
 export type StartDepositResult = {
@@ -201,7 +209,8 @@ export async function startGlobePayDeposit(
     );
   }
 
-  const config = gatewayConfigFromEnv();
+  const gateway = input.gateway ?? paymentGateway();
+  const config = gatewayConfigFor(gateway);
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
 
   const merchantTransactionId = newMerchantTransactionId();
@@ -223,7 +232,7 @@ export async function startGlobePayDeposit(
       amount_requested: amount,
       payment_method_code: paymentMethodCode,
       status: 'pending',
-      gateway: paymentGateway(),
+      gateway,
     },
     maxRecentPending: GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER,
     windowMs: GLOBEPAY_PENDING_WINDOW_MS,

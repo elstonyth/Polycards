@@ -22,9 +22,11 @@ export async function GET(
 ): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  await resolveActiveGateway(req.scope);
+  const active = await resolveActiveGateway(req.scope);
 
-  const totals = await packs.gatewayAuditTotals();
+  // Totals for the ACTIVE gateway only, so they sit beside that gateway's
+  // wallet; after a switch the old gateway's history is not mixed in.
+  const totals = await packs.gatewayAuditTotals(active);
 
   // Live wallet read is best-effort: a gateway hiccup must not blank the
   // findings list, which is the part that can name a real money problem.
@@ -42,6 +44,7 @@ export async function GET(
         available: b.availableBalance,
         currency_code: b.currencyCode,
       };
+      if (b.notes?.length) walletError = b.notes.join('; ');
     } catch (error) {
       walletError = error instanceof Error ? error.message : String(error);
     }
