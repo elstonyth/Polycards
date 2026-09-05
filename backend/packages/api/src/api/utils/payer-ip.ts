@@ -44,21 +44,34 @@ export function payerIpOf(req: {
 }
 
 /**
- * The address a CALLBACK really came from, for allow-listing. Only what the
- * trusted proxy chain established: Express's `req.ip` (Medusa sets
- * `trust proxy` 1, so this is the hop DigitalOcean's load balancer appended)
- * or, without a proxy, the socket peer. The raw X-Forwarded-For header is
- * deliberately NOT a fallback here — a caller writes that header, so it can
- * name any address it likes; payerIpOf tolerates it only because the payer
- * IP is informational. An allowlist that trusted it would be theatre, which
- * is exactly what TGPay warned about ("不要用 x-forwarded-for 做白名单").
+ * The address a CALLBACK really came from, for allow-listing.
+ *
+ * On DigitalOcean App Platform the client's address is in the
+ * `do-connecting-ip` header the ingress sets on every request; there,
+ * `x-forwarded-for` (and therefore Express's `req.ip`) names the DigitalOcean
+ * ingress server, not the caller (docs.digitalocean.com/support/where-can-i-
+ * find-the-client-ip-address-of-a-request-connecting-to-my-app). So the
+ * order is: the ingress's header, then `req.ip` (Medusa sets `trust proxy`
+ * 1, so behind a single ordinary proxy that is the proxy-appended client),
+ * then the socket peer. The raw x-forwarded-for value is never read here — a
+ * caller writes that header and can name any address, which is exactly what
+ * TGPay warned against ("不要用 x-forwarded-for 做白名单"). The same holds
+ * for a caller-written `do-connecting-ip` OUTSIDE App Platform; in
+ * production every request reaches us through the ingress, which sets it.
  * IPv4-mapped IPv6 ("::ffff:1.2.3.4") is unwrapped so it compares as IPv4.
  */
 export function callbackSourceIp(req: {
   ip?: string;
+  headers?: Record<string, string | string[] | undefined>;
   socket?: { remoteAddress?: string };
 }): string {
-  const raw = req.ip || req.socket?.remoteAddress || '';
+  const fromIngress = req.headers?.['do-connecting-ip'];
+  const ingress = Array.isArray(fromIngress) ? fromIngress[0] : fromIngress;
+  const raw =
+    (typeof ingress === 'string' && ingress.trim()) ||
+    req.ip ||
+    req.socket?.remoteAddress ||
+    '';
   return raw.replace(/^::ffff:/i, '');
 }
 
@@ -73,6 +86,7 @@ export function callbackSourceIp(req: {
 export function createTgpayCallbackAllowlist(): (
   req: {
     ip?: string;
+    headers?: Record<string, string | string[] | undefined>;
     socket?: { remoteAddress?: string };
     scope: { resolve: <T>(key: string) => T };
   },
@@ -83,6 +97,11 @@ export function createTgpayCallbackAllowlist(): (
     const sourceIp = callbackSourceIp(req);
     const verdict = tgpayCallbackIpVerdict(sourceIp);
     if (verdict.allowed) {
+      // One line per accepted callback: this is how the first production
+      // callback proves which address the ingress really reports.
+      req.scope
+        .resolve<{ info: (m: string) => void }>('logger')
+        .info(`[tgpay] callback from ${sourceIp || 'unknown'} accepted`);
       next();
       return;
     }

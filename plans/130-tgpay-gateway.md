@@ -205,7 +205,10 @@ Both TGPay hooks refuse (403) any source not in `TGPAY_CALLBACK_IPS` when that
 env is set; entries are IPv4 or CIDR. The address judged is Express's
 `req.ip` (trust proxy 1 → the hop DigitalOcean's balancer appended), never
 `X-Forwarded-For`. It is one middleware on `/hooks/tgpay/*`, after the hook
-rate limiter. Fail-closed: a list that is set but yields no entries refuses
+rate limiter. The source is DigitalOcean's `do-connecting-ip` header first
+(on App Platform `x-forwarded-for`/`req.ip` are the ingress server, per DO
+docs — verified 2026-09-06; the first draft used `req.ip` and would have
+refused every production callback), then `req.ip`, then the socket. Fail-closed: a list that is set but yields no entries refuses
 everything, and so does production with the list unset — only the sandbox
 (base URL containing "sandbox") may run header-only. A mask must be 1–2
 digits, so a trailing slash cannot read as `/0`. `.do/backend.app.yaml` now

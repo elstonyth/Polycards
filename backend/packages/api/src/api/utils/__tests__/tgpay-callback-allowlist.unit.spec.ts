@@ -12,7 +12,7 @@ afterEach(() => {
 });
 
 function run(req: Record<string, unknown>) {
-  const logger = { warn: jest.fn() };
+  const logger = { warn: jest.fn(), info: jest.fn() };
   const res = {
     statusCode: 0,
     body: '',
@@ -31,7 +31,18 @@ function run(req: Record<string, unknown>) {
 }
 
 describe('callbackSourceIp — allowlist input', () => {
-  it('takes the proxy-established address, unwraps IPv4-mapped IPv6, never the header', () => {
+  it('prefers the App Platform ingress header, then req.ip, unwrapping IPv4-mapped IPv6 — never x-forwarded-for', () => {
+    // On App Platform req.ip is the DigitalOcean ingress; the client is in
+    // do-connecting-ip.
+    expect(
+      callbackSourceIp({
+        ip: '10.244.0.7',
+        headers: {
+          'do-connecting-ip': '54.251.58.7',
+          'x-forwarded-for': '9.9.9.9',
+        },
+      }),
+    ).toBe('54.251.58.7');
     expect(
       callbackSourceIp({ ip: '::ffff:1.32.102.19', socket: { remoteAddress: '10.0.0.1' } }),
     ).toBe('1.32.102.19');
@@ -46,6 +57,15 @@ describe('TGPay callback allowlist middleware', () => {
     process.env.TGPAY_CALLBACK_IPS = '1.32.102.19, 54.251.58.7';
     const ok = run({ ip: '::ffff:54.251.58.7' });
     expect(ok.next).toHaveBeenCalled();
+    expect(ok.logger.info).toHaveBeenCalledWith(
+      expect.stringMatching(/callback from 54\.251\.58\.7 accepted/),
+    );
+    // App Platform shape: ingress in req.ip, client in do-connecting-ip.
+    const viaIngress = run({
+      ip: '10.244.0.7',
+      headers: { 'do-connecting-ip': '1.32.102.19' },
+    });
+    expect(viaIngress.next).toHaveBeenCalled();
     // A spoofed forwarded header changes nothing: it is never read.
     const bad = run({ ip: '9.9.9.9', headers: { 'x-forwarded-for': '1.32.102.19' } });
     expect(bad.next).not.toHaveBeenCalled();

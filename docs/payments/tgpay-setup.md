@@ -156,8 +156,12 @@ end on the sandbox 2026-09-05: accepted, callback settled it, ledger −50.
   `188.114.96.0`, `188.114.97.0` (Cloudflare range), `47.131.132.118`,
   `54.251.58.7`. TGPay then asked for an allowlist on our side ("请做 IP 白名单
   校验"), so both TGPay hooks now enforce `TGPAY_CALLBACK_IPS` when it is set
-  (403 otherwise), judged on the proxy-established `req.ip` — never on
-  `X-Forwarded-For`, which they explicitly warned against. Leave it unset on
+  (403 otherwise), judged on the client address DigitalOcean's ingress sets in
+  `do-connecting-ip` (on App Platform, `x-forwarded-for` / `req.ip` name the
+  ingress server itself — DO docs) — never on a caller-written
+  `X-Forwarded-For`, which they explicitly warned against. The first accepted
+  production callback logs `[tgpay] callback from <ip> accepted`; check it
+  after cutover to confirm the address really is theirs. Leave it unset on
   the sandbox (their sandbox calls from unlisted addresses). Open question for
   them: are `188.114.96.0` / `188.114.97.0` single hosts or Cloudflare's
   `188.114.96.0/20`? The value accepts CIDR either way. Our egress `188.166.181.61` /
