@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { elapsedLabel, reasonLabel, signedRm } from '@/lib/transactions';
+import {
+  elapsedLabel,
+  gatewayMethodLabel,
+  gatewayStatusLabel,
+  reasonLabel,
+  signedRm,
+} from '@/lib/transactions';
 
 describe('reasonLabel', () => {
   it('maps each reason to a human label', () => {
@@ -18,6 +24,24 @@ describe('reasonLabel', () => {
   it('falls back to a prettified label for an unknown reason', () => {
     expect(reasonLabel('refund_x')).toBe('Refund x');
     expect(reasonLabel('some_new_reason')).toBe('Some new reason');
+  });
+});
+
+describe('gateway facts on the statement', () => {
+  it('words each settlement outcome for the customer, passing an unknown one through', () => {
+    expect(gatewayStatusLabel('settled')).toBe('Confirmed by gateway');
+    expect(gatewayStatusLabel('pending')).toBe('Awaiting gateway');
+    expect(gatewayStatusLabel('held')).toBe('Awaiting approval');
+    expect(gatewayStatusLabel('failed')).toBe('Failed');
+    expect(gatewayStatusLabel('expired')).toBe('Expired');
+    expect(gatewayStatusLabel('brand_new')).toBe('brand_new');
+  });
+
+  it('names the rail from the top-up sheet labels, then the payout/gateway-side codes', () => {
+    expect(gatewayMethodLabel('BQR')).toBe('QR / e-wallet');
+    expect(gatewayMethodLabel('FPX')).toBe('Online banking');
+    expect(gatewayMethodLabel('WD')).toBe('Bank payout');
+    expect(gatewayMethodLabel('XYZ')).toBe('XYZ');
   });
 });
 

@@ -14,9 +14,12 @@ import { createRoot, type Root } from 'react-dom/client';
 
 const startWithdrawal = vi.fn();
 const fetchSavedBankAccounts = vi.fn();
+const getPaymentLimits = vi.fn();
 vi.mock('@/lib/actions/vault', () => ({
   startWithdrawal: (...args: unknown[]) => startWithdrawal(...args),
   fetchSavedBankAccounts: () => fetchSavedBankAccounts(),
+  // The band is the active gateway's; the tests below pin GlobePay's.
+  getPaymentLimits: () => getPaymentLimits(),
 }));
 
 // The form repaints the header balance on success, so it now reads useTopUp —
@@ -81,6 +84,11 @@ async function render(accounts: unknown[] = [READY_ACCOUNT]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  getPaymentLimits.mockResolvedValue({
+    gateway: 'globepay',
+    deposit: { minRm: 30, maxRm: 10000 },
+    withdrawal: { minRm: 50, maxRm: 50000 },
+  });
 });
 
 afterEach(() => {
@@ -207,6 +215,21 @@ describe('WithdrawForm', () => {
       expect(startWithdrawal).not.toHaveBeenCalled();
     },
   );
+
+  it('reads the band from the active gateway: RM 40,000 is refused under TGPay (max 30,000)', async () => {
+    getPaymentLimits.mockResolvedValue({
+      gateway: 'tgpay',
+      deposit: { minRm: 50, maxRm: 10000 },
+      withdrawal: { minRm: 50, maxRm: 30000 },
+    });
+    await render();
+    fillValidForm('40000');
+    await submit();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'Withdrawals must be between RM 50 and RM 30,000.',
+    );
+    expect(startWithdrawal).not.toHaveBeenCalled();
+  });
 
   it('rejects an amount above the withdrawable figure without touching the backend', async () => {
     await render();

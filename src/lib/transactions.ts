@@ -20,9 +20,6 @@ const REASON_LABEL: Record<CreditReason, string> = {
   delivery_fee: 'Delivery fee',
 };
 
-// A backend reason added before the storefront redeploys has no entry in
-// REASON_LABEL — prettify it generically ('refund_x' -> 'Refund x') instead
-// of the row being unlabeled or dropped (audit 2026-07-07 #11).
 /** Customer-facing wording for the gateway row's settlement outcome. */
 export const gatewayStatusLabel = (status: string): string =>
   (
@@ -48,6 +45,9 @@ const EXTRA_METHOD_LABEL: Record<string, string> = {
   WD: 'Bank payout',
 };
 
+// A backend reason added before the storefront redeploys has no entry in
+// REASON_LABEL — prettify it generically ('refund_x' -> 'Refund x') instead
+// of the row being unlabeled or dropped (audit 2026-07-07 #11).
 export const reasonLabel = (reason: string): string =>
   (REASON_LABEL as Record<string, string>)[reason] ??
   reason.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());

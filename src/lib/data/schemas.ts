@@ -363,11 +363,6 @@ export const CREDIT_REASONS = [
 ] as const;
 export type CreditReason = (typeof CREDIT_REASONS)[number];
 
-/** GET /store/credits transaction row. `amount` is signed (credit +, spend −).
- *  `reason` is any string, not `z.enum(CREDIT_REASONS)` — a backend reason
- *  added before the storefront redeploys must still RENDER (generic label)
- *  — parseList dropping it made history rows silently vanish (audit
- *  2026-07-07 #11; repeat-offender class). */
 /** GET /store/payments/config — the active gateway's money bands. */
 export const PaymentConfigSchema = z.looseObject({
   gateway: z.string(),
@@ -375,6 +370,11 @@ export const PaymentConfigSchema = z.looseObject({
   withdrawal: z.looseObject({ min_rm: finite, max_rm: finite }),
 });
 
+/** GET /store/credits transaction row. `amount` is signed (credit +, spend −).
+ *  `reason` is any string, not `z.enum(CREDIT_REASONS)` — a backend reason
+ *  added before the storefront redeploys must still RENDER (generic label)
+ *  — parseList dropping it made history rows silently vanish (audit
+ *  2026-07-07 #11; repeat-offender class). */
 export const CreditTransactionSchema = z.looseObject({
   id: z.string(),
   amount: finite,

@@ -31,17 +31,17 @@ import {
 // the storefront never needs to know, since every real gateway is a redirect.
 // 'mock' / unset keeps the mock gateway, which credits synchronously and stays
 // the local/dev path. Historical values 'globepay' and 'tgpay' still work.
-const PROVIDER = process.env.NEXT_PUBLIC_PAYMENTS_PROVIDER ?? 'mock';
+// An EMPTY value counts as unset (a blank build arg must not send customers
+// to a gateway the deploy never chose).
+const PROVIDER = process.env.NEXT_PUBLIC_PAYMENTS_PROVIDER || 'mock';
 const USE_GATEWAY = PROVIDER !== 'mock';
 
 // The gateway's band is narrower than the mock's on both ends, and it rejects
 // anything outside it with a generic "Invalid Transaction Amount" that names no
 // numbers. Catch it in the sheet so the customer gets a message they can act on.
-// Production band, confirmed by the provider 2026-07-29: RM 30 – RM 10,000 for
-// both Online Banking and QR (docs/payments/globepay365-setup.md). Mirrors the
-// backend's GLOBEPAY_MIN_RM/GLOBEPAY_MAX_RM.
-// Defaults only; the real band is fetched per open (getPaymentLimits) because
-// it belongs to whichever gateway the admin has active.
+// The band belongs to whichever gateway the admin has active, so it is
+// fetched per open (getPaymentLimits); these are only the until-it-answers
+// defaults, which sit inside every gateway's band.
 const GATEWAY_MIN_RM = DEFAULT_PAYMENT_LIMITS.deposit.minRm;
 const GATEWAY_MAX_RM = DEFAULT_PAYMENT_LIMITS.deposit.maxRm;
 
