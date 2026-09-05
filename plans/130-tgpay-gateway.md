@@ -1,0 +1,156 @@
+# 130 — TGPay sandbox gateway behind a `PAYMENT_GATEWAY` switch
+
+Status: **built and sandbox-verified 2026-09-05** (deposit leg end to end; payout leg blocked on TGPay's side — see below). Not yet merged.
+
+## Why
+
+The operator is moving the payment gateway from GlobePay365 to TGPay
+(sandbox `https://sandbox.tgpay365.com`, API base
+`https://sandbox-api.tgpay365.com/api/v2`). Production still runs GlobePay,
+so the swap must be a runtime switch, not a rewrite: `PAYMENT_GATEWAY=tgpay`
+selects the new client; unset/`globepay` keeps today's behaviour byte-for-byte.
+
+## What TGPay looks like (read from the sandbox docs, 2026-09-05)
+
+- Auth: `x-public-key` (`pk-…`) + `x-secret-key` (`sk-…`) headers, JSON body
+  with `epoch` (unix seconds, ±5 min). No AES, no RSA.
+- `POST /transaction/create-payment` → `{status:1, data:{checkoutLink}}`.
+  Hosted checkout (no `channelId`): `paymentMethod` `FPX` | `EWALLET` or
+  omitted. `checkoutLink` carries `?order=<txn id>`.
+- `POST /transaction/query` with `merchantRefNum` → `{data:{order, amount,
+  fee, amountAfterFee, status:'APPROVED'|'PENDING'|…}}`; payouts return
+  `{data:{status, order:{payoutRefNum, merchantRefNum, amount, fee,
+  amountIncludeFee}}}`. Unknown ref → HTTP 404 `Transaction not found`.
+- `POST /transaction/payout/withdraw` needs `email`, `userName`,
+  `bankAccNumber`, `bankCode` (SWIFT) + matching `bankName`; sandbox uses the
+  pair `DUMMYBANKVERIFIED` / `Dummy Bank Verified`. Returns
+  `data.transactionRefNum`.
+- Balances: `POST /tenant-credits/balance` (pay-in) and
+  `POST /tenant-payout-credits/balance` (payout), body `{epoch, currency}`.
+- Payment callback: POST to our `notifyUrl`, same two key headers, body
+  `{status, msg, data:{amount, transactionRefNum, merchantRefNum,
+  paymentMethod, bankName, status:'APPROVED'}}`. At-least-once.
+- Payout callback: flat body `{transactionId, status:'pending'|'success'|
+  'reject', amount, fee, paymentAt, orderno, payType:'PAYOUT'}` — carries NO
+  merchantRefNum, so the row is found by `gateway_transaction_id`.
+- Errors: 4xx/5xx with `{statusCode, message, error}` or `{message, errors}`.
+
+## Design
+
+Keep every table, model, orchestration file, admin route and reconcile job.
+Swap only the HTTP client and the inbound hooks.
+
+1. `modules/packs/tgpay-client.ts` — pure HTTP: config from env
+   (`TGPAY_API_BASE`, `TGPAY_PUBLIC_KEY`, `TGPAY_SECRET_KEY`,
+   `TGPAY_CURRENCY`), `createPayment`, `queryPayment`, `createPayout`,
+   `queryPayout`, `balances`. Throws `TgpayError extends GlobePayError` so
+   the orchestration's `definite`/`httpStatus`/`has()` branches keep working
+   (`TGPAY_NOT_FOUND` code on 404).
+2. `modules/packs/gateway.ts` — the seam. Exports the GlobePay-shaped
+   functions (`submitDeposit`, `getDepositDetail`, `submitWithdrawal`,
+   `getWithdrawalDetail`, `getSupportedBanks`, `checkBalance`,
+   `gatewayConfigFromEnv`, `paymentGateway`) and dispatches on
+   `PAYMENT_GATEWAY`. Method mapping for TGPay: `OB`/`FPX` → `FPX`,
+   `BQR` → `EWALLET`, `DN` → refused. Bank list for TGPay: the static SWIFT
+   table from the docs, plus the dummy bank when the base URL is a sandbox.
+3. Orchestration, jobs, admin/store routes import from `./gateway` instead of
+   `./globepay-client`. `globepayEnabled()` / `globepayWithdrawalsEnabled()`
+   accept the TGPay secret in place of `GLOBEPAY_MERCHANT_CODE` when the
+   switch is `tgpay`.
+4. New hooks `api/hooks/tgpay/deposit` and `api/hooks/tgpay/withdrawal`:
+   timing-safe key-header check, then the same transitions as the GlobePay
+   hooks (settle / fail+refund), idempotent.
+5. Store deposit/withdraw routes pass the customer's contact
+   (name/email/phone) when the switch is `tgpay` — TGPay requires it.
+6. Storefront: `NEXT_PUBLIC_PAYMENTS_PROVIDER=tgpay` behaves like
+   `globepay` (both are redirect flows).
+7. `scripts/check-tgpay.ts` — balance smoke test for credentials/base URL.
+
+## Env (backend, sandbox)
+
+```
+PAYMENT_GATEWAY=tgpay
+TGPAY_API_BASE=https://sandbox-api.tgpay365.com/api/v2
+TGPAY_PUBLIC_KEY=pk-…            # Platform → Settings → General
+TGPAY_SECRET_KEY=sk-…            # needs 2FA on the TGPay account to reveal
+GLOBEPAY_ENABLED=true            # master "real gateway" switch, unchanged
+GLOBEPAY_NOTIFY_URL=https://<tunnel>/hooks/tgpay/deposit
+GLOBEPAY_RETURN_URL=http://localhost:4000/wallet
+GLOBEPAY_WITHDRAWALS_ENABLED=true
+GLOBEPAY_WITHDRAW_NOTIFY_URL=https://<tunnel>/hooks/tgpay/withdrawal
+GLOBEPAY_PAYOUT_VERIFY_URL=unused-by-tgpay   # route only checks presence
+```
+
+Local callbacks need a public URL: `cloudflared tunnel --url http://localhost:9000`.
+The 1-minute deposit reconcile sweep (query by `merchantRefNum`) is the
+fallback when callbacks cannot reach us.
+
+## Out of scope
+
+- Renaming `globepay_*` tables/models/routes. Cosmetic; revisit at cutover.
+- Custom-checkout channels (`channelId`) / DuitNow QR. Hosted checkout only.
+- Migrating existing saved payout destinations from GlobePay bank codes to
+  SWIFT codes — production cutover task.
+
+## Verified 2026-09-05 (sandbox)
+
+- `POST /store/credits/deposit` → TGPay create-payment → absolute link on
+  `https://sandbox-checkout.tgpay365.com/checkout?order=…&pm=FPX` (so the
+  relative-link fallback never fired; `TGPAY_CHECKOUT_BASE` stays unused).
+- Hosted checkout → FPX simulator ("TGPay Bank", dummy login printed on the
+  page) → `Approved — 00` → payment callback reached our tunnel within
+  ~1 minute → row `settled`, ledger `TP` +RM 50 with the TGPay order id as
+  `gateway_ref`, receipt + feed fired once.
+- TGPay's own wallet page shows the pay-in as MYR 49.00 (RM 1 FPX fee, the
+  1.2 % rate floored at RM 1), Merchant Ref = our `PC-…`, Txn Ref = the
+  order id. The audit sweep backfilled `net_amount = 49` from
+  `/transaction/query` (`amountAfterFee`); the callback carries no fee.
+- Payout: `POST /transaction/payout/withdraw` answers
+  `400 No payout credit wallet found` and `/tenant-payout-credits/balance`
+  is 404, even though the sandbox admin shows a payout credit of 300.00
+  (topped up by TGPay at 12:03 MYT). **Relay to TGPay CS** — the API cannot
+  see the payout wallet for tenant `polycards`. Until then the payout hook
+  and reconcile path are covered by unit tests only.
+
+## Source-of-truth additions (same day, user request)
+
+1. Customer id rides on create-payment as `additionalData: Customer <id>`
+   (payouts already carry the customer email; TGPay has no free-text field).
+2. `jobs/gateway-audit.ts` (hourly): every settled/failed deposit and payout
+   from the last 7 days is re-read from the gateway; disagreements land in
+   `audit_note` (Migration20260905120000 adds `audited_at`/`audit_note` to
+   both tables); `GET /admin/globepay/audit` + a "Gateway audit" panel on the
+   admin Settlement page show the live wallet balances beside our all-time
+   settled totals and the findings list.
+3. `/transactions` shows channel + gateway outcome under each money row's
+   reference (`GET /store/credits` gained `transactions[].gateway`).
+
+Jest note: `jest.config.js` runs `loadEnv('test')`, which falls back to the
+local env file, so `integration-tests/setup.js` now deletes
+`PAYMENT_GATEWAY` before any spec runs.
+
+## Runtime switch (same day, user request: gateways selectable from the admin)
+
+- `GATEWAYS` registry in `modules/packs/gateway.ts` (id, label, `configured(env)`,
+  `needsCustomerContact`, hook paths). A new gateway = client file + hooks
+  folder + one registry entry.
+- Active gateway = `site_settings.payment_gateway` (admin choice, audited as
+  `edit_payment_gateway`) → `PAYMENT_GATEWAY` env → GlobePay. Cached
+  in-process, refreshed by `resolveActiveGateway()` at every money entry point
+  at most every 30 s; the admin POST flips its own instance at once.
+- Every deposit/withdrawal row carries `gateway` (Migration20260905130000,
+  existing rows default to GlobePay). Sweeps, the audit and the admin approve
+  route use the ROW's gateway (`rowGatewayConfigs` / `rowGateway`), so a switch
+  never strands in-flight money on the old gateway. Unconfigured → skipped
+  with a log (sweeps) or refused (approve).
+- `gatewayUrls()`: with `PAYMENT_CALLBACK_BASE` the notify/verify URLs derive
+  from the registry per gateway; without it the explicit `GLOBEPAY_*_URL`
+  values apply unchanged (prod safe).
+- `GET/POST /admin/payments/gateway`; "Payment gateway" card at the top of the
+  admin Settlement page (radio of registered gateways, unconfigured ones
+  disabled, reason required, confirm dialog).
+- Storefront: `NEXT_PUBLIC_PAYMENTS_PROVIDER` is now just "real gateway vs
+  mock" (any value but `mock`); which gateway is the backend's business.
+- Verified locally: card renders, a fresh deposit is stamped `gateway=tgpay`
+  and redirects to TGPay. Switching TO GlobePay cannot be exercised locally
+  (not configured here) — covered by unit tests.

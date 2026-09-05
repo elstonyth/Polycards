@@ -22,11 +22,15 @@ import {
   type DepositMethodCode,
 } from '@/lib/deposit-methods';
 
-// Which gateway backs the sheet. 'globepay' sends the customer to the
-// provider's cashier page and credits nothing here — the balance updates later,
-// when their signed callback settles the deposit. Anything else keeps the mock
-// gateway, which credits synchronously and stays the local/dev path.
-const USE_GATEWAY = process.env.NEXT_PUBLIC_PAYMENTS_PROVIDER === 'globepay';
+// Does a real gateway back the sheet? Any value except 'mock' (or unset)
+// sends the customer to the provider's checkout page and credits nothing here
+// — the balance updates later, when the gateway's callback settles the
+// deposit. WHICH gateway is the backend's decision (admin switch, plan 130):
+// the storefront never needs to know, since every real gateway is a redirect.
+// 'mock' / unset keeps the mock gateway, which credits synchronously and stays
+// the local/dev path. Historical values 'globepay' and 'tgpay' still work.
+const PROVIDER = process.env.NEXT_PUBLIC_PAYMENTS_PROVIDER ?? 'mock';
+const USE_GATEWAY = PROVIDER !== 'mock';
 
 // The gateway's band is narrower than the mock's on both ends, and it rejects
 // anything outside it with a generic "Invalid Transaction Amount" that names no

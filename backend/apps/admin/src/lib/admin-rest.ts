@@ -426,6 +426,68 @@ export async function getGlobePayBalance(): Promise<GlobePayBalance> {
   return getJson<GlobePayBalance>('/admin/globepay/balance');
 }
 
+// ── Gateway audit (plan 130): gateway = source of truth for money in/out ─────
+
+export interface GatewayAuditTotals {
+  count: number;
+  gross: number;
+  /** Σ net over rows whose net is known — a FLOOR when missing_net > 0. */
+  net: number;
+  missing_net: number;
+}
+
+export interface GatewayAuditFinding {
+  kind: 'deposit' | 'withdrawal';
+  id: string;
+  merchant_transaction_id: string;
+  gateway_transaction_id: string | null;
+  customer_id: string;
+  status: string;
+  amount: number | null;
+  note: string;
+  audited_at: string | null;
+}
+
+export interface GatewayAudit {
+  gateway: 'globepay' | 'tgpay';
+  enabled: boolean;
+  /** Live wallet read; null when the gateway is off or unreachable. */
+  wallet: { current: number; available: number; currency_code: string } | null;
+  wallet_error: string | null;
+  last_audited_at: string | null;
+  findings_total: number;
+  totals: { deposits: GatewayAuditTotals; withdrawals: GatewayAuditTotals };
+  findings: GatewayAuditFinding[];
+}
+
+export async function getGatewayAudit(): Promise<GatewayAudit> {
+  return getJson<GatewayAudit>('/admin/globepay/audit');
+}
+
+// ── Active payment gateway switch (plan 130 §runtime switch) ────────────────
+
+export type PaymentGatewayId = 'globepay' | 'tgpay';
+
+export interface PaymentGatewaySetting {
+  /** What the backend is using right now. */
+  active: PaymentGatewayId;
+  /** The persisted admin choice; null = env default applies. */
+  setting: string | null;
+  env_default: PaymentGatewayId;
+  gateways: { id: PaymentGatewayId; label: string; configured: boolean }[];
+}
+
+export async function getPaymentGateway(): Promise<PaymentGatewaySetting> {
+  return getJson<PaymentGatewaySetting>('/admin/payments/gateway');
+}
+
+export async function savePaymentGateway(input: {
+  gateway: PaymentGatewayId;
+  reason: string;
+}): Promise<PaymentGatewaySetting> {
+  return postJson<PaymentGatewaySetting>('/admin/payments/gateway', input);
+}
+
 // PriceCharting proxies (the API token lives server-side only). A 503 from the
 // proxy means PRICECHARTING_API_TOKEN is not configured — surface the message
 // and fall back to manual FMV entry.

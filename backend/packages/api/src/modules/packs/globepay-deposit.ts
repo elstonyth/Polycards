@@ -3,10 +3,13 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from './index';
 import type PacksModuleService from './service';
 import {
-  globepayConfigFromEnv,
+  GATEWAYS,
+  gatewayConfigFromEnv,
+  paymentGateway,
   submitDeposit,
   GlobePayError,
-} from './globepay-client';
+} from './gateway';
+import type { TgpayCustomer } from './tgpay-client';
 import { topUpAmountError } from './topup';
 
 // The submit half of the GlobePay365 deposit loop: record intent, ask the
@@ -77,9 +80,16 @@ export function globepayEnabled(
   env: {
     GLOBEPAY_ENABLED?: string;
     GLOBEPAY_MERCHANT_CODE?: string;
+    PAYMENT_GATEWAY?: string;
+    TGPAY_SECRET_KEY?: string;
   } = process.env,
 ): boolean {
-  return env.GLOBEPAY_ENABLED === 'true' && Boolean(env.GLOBEPAY_MERCHANT_CODE);
+  // GLOBEPAY_ENABLED stays the master "real gateway" switch for both gateways;
+  // the credential that proves one is configured differs per gateway.
+  const configured = GATEWAYS[paymentGateway(env)].configured(
+    env as NodeJS.ProcessEnv,
+  );
+  return env.GLOBEPAY_ENABLED === 'true' && configured;
 }
 
 /**
@@ -100,6 +110,8 @@ export type StartDepositInput = {
   /** The CUSTOMER's IP (they require it), not our server's. */
   ipAddress: string;
   paymentMethodCode?: string;
+  /** Name/email/phone — TGPay requires it on create-payment; GlobePay ignores it. */
+  customer?: TgpayCustomer;
 };
 
 export type StartDepositResult = {
@@ -189,7 +201,7 @@ export async function startGlobePayDeposit(
     );
   }
 
-  const config = globepayConfigFromEnv();
+  const config = gatewayConfigFromEnv();
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
 
   const merchantTransactionId = newMerchantTransactionId();
@@ -211,6 +223,7 @@ export async function startGlobePayDeposit(
       amount_requested: amount,
       payment_method_code: paymentMethodCode,
       status: 'pending',
+      gateway: paymentGateway(),
     },
     maxRecentPending: GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER,
     windowMs: GLOBEPAY_PENDING_WINDOW_MS,
@@ -235,6 +248,7 @@ export async function startGlobePayDeposit(
         returnUrl,
         ipAddress: input.ipAddress,
         paymentMethodCode,
+        customer: input.customer,
       },
       config,
     );

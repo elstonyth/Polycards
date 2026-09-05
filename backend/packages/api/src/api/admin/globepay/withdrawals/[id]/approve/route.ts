@@ -13,9 +13,14 @@ import {
 } from '../../../../../../modules/packs/globepay-withdrawal';
 import {
   GlobePayError,
-  globepayConfigFromEnv,
+  GATEWAYS,
+  gatewayConfigFor,
+  gatewayUrls,
+  resolveActiveGateway,
+  rowGateway,
   submitWithdrawal,
-} from '../../../../../../modules/packs/globepay-client';
+} from '../../../../../../modules/packs/gateway';
+import { customerContact } from '../../../../../utils/customer-contact';
 import { payerIpOf } from '../../../../../utils/payer-ip';
 
 // POST /admin/globepay/withdrawals/:id/approve — release a HELD payout to the
@@ -64,18 +69,6 @@ export async function POST(
       'The payout channel is closed — a held withdrawal cannot be approved right now.',
     );
   }
-  const notifyUrl = process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL;
-  const verifyUrl = process.env.GLOBEPAY_PAYOUT_VERIFY_URL;
-  if (!notifyUrl || !verifyUrl) {
-    // Fail closed, same reasoning as the store route: without a reachable
-    // NotifyUrl a failed payout could never refund itself.
-    throw new MedusaError(
-      MedusaError.Types.NOT_ALLOWED,
-      'The payout channel is closed — a held withdrawal cannot be approved right now.',
-    );
-  }
-  const config = globepayConfigFromEnv();
-
   const [row] = await packs.listGlobePayWithdrawals(
     { id: req.params.id },
     { take: 1 },
@@ -84,6 +77,34 @@ export async function POST(
     throw new MedusaError(
       MedusaError.Types.NOT_FOUND,
       `Withdrawal '${req.params.id}' not found.`,
+    );
+  }
+
+  // A held row is paid out through the gateway it was CREATED under, which
+  // may no longer be the active one. Fail closed if that gateway has since
+  // been unconfigured: the row stays held for a human, nothing moves.
+  await resolveActiveGateway(req.scope);
+  const gatewayId = rowGateway(row);
+  let config;
+  try {
+    config = gatewayId ? gatewayConfigFor(gatewayId) : null;
+  } catch {
+    config = null;
+  }
+  const urls = gatewayId ? gatewayUrls(gatewayId) : null;
+  const notifyUrl = urls?.withdrawNotifyUrl ?? '';
+  const verifyUrl = urls?.payoutVerifyUrl ?? '';
+  if (
+    !config ||
+    !gatewayId ||
+    !notifyUrl ||
+    (urls?.hasPayoutVerify && !verifyUrl)
+  ) {
+    // Fail closed, same reasoning as the store route: without a reachable
+    // NotifyUrl a failed payout could never refund itself.
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'The payout channel is closed — a held withdrawal cannot be approved right now.',
     );
   }
   const amount = Number(row.amount);
@@ -189,10 +210,18 @@ export async function POST(
     `[globepay] admin ${adminId} APPROVED withdrawal ${row.id} (${row.merchant_transaction_id}) — RM ${amount} to bank ${row.bank_code}`,
   );
 
+  // TGPay needs the recipient email; looked up only on that gateway so the
+  // GlobePay path (and its tests, whose scope has no customer module) is
+  // untouched.
+  const email = GATEWAYS[gatewayId].needsCustomerContact
+    ? (await customerContact(req.scope, row.customer_id)).email
+    : undefined;
+
   let result;
   try {
     result = await submitWithdrawal(
       {
+        email,
         merchantTransactionId: row.merchant_transaction_id,
         merchantClientId: row.customer_id,
         // bigNumber column — it arrives as a string, and submitWithdrawal

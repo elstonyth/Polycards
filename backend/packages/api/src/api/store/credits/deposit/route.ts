@@ -8,6 +8,12 @@ import type PacksModuleService from '../../../../modules/packs/service';
 import { startGlobePayDeposit } from '../../../../modules/packs/globepay-deposit';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../../../modules/packs/globepay-reconcile';
 import { payerIpOf } from '../../../utils/payer-ip';
+import { customerContact } from '../../../utils/customer-contact';
+import {
+  GATEWAYS,
+  gatewayUrls,
+  resolveActiveGateway,
+} from '../../../../modules/packs/gateway';
 
 // POST /store/credits/deposit — start a real GlobePay365 top-up. Returns a
 // cashier URL; NO credit is issued here. The customer pays on their page, and
@@ -35,8 +41,10 @@ export async function POST(
     payment_method_code?: unknown;
   };
 
-  const notifyUrl = process.env.GLOBEPAY_NOTIFY_URL;
-  const returnUrl = process.env.GLOBEPAY_RETURN_URL;
+  // Which gateway is active is an admin setting; refresh the cache (TTL'd)
+  // before reading anything derived from it.
+  const gateway = await resolveActiveGateway(req.scope);
+  const { notifyUrl, returnUrl } = gatewayUrls(gateway);
   if (!notifyUrl || !returnUrl) {
     // Fail closed: without a reachable NotifyUrl the customer could pay and we
     // would never hear about it — money in, no credit.
@@ -56,9 +64,21 @@ export async function POST(
       ? body.payment_method_code
       : undefined;
 
+  // Some gateways (TGPay) require the payer's contact on create-payment;
+  // GlobePay does not, and its route tests run with an empty scope, so only
+  // look it up when the active gateway asks for it.
+  const customer = GATEWAYS[gateway].needsCustomerContact
+    ? await customerContact(req.scope, customerId)
+    : undefined;
   const result = await startGlobePayDeposit(
     req.scope,
-    { customerId, amount: body.amount, ipAddress, paymentMethodCode: method },
+    {
+      customerId,
+      amount: body.amount,
+      ipAddress,
+      paymentMethodCode: method,
+      customer,
+    },
     notifyUrl,
     returnUrl,
   );

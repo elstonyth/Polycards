@@ -211,8 +211,9 @@ export async function getDepositMethods(): Promise<DepositMethodCode[]> {
  * Idempotency-Key here — the backend mints a fresh reference per attempt and a
  * re-clicked button costs nothing but an abandoned deposit row.
  *
- * Which gateway the UI uses is decided by NEXT_PUBLIC_PAYMENTS_PROVIDER; this
- * action is only called when it is 'globepay'.
+ * Whether the UI uses a real gateway is decided by NEXT_PUBLIC_PAYMENTS_PROVIDER
+ * (anything but 'mock'); WHICH gateway is the backend's admin setting. This
+ * action is only called in gateway mode.
  *
  * Both parameters are typed as what can actually ARRIVE, not what is allowed.
  * A server action is a public endpoint: the compiler constrains our own call
@@ -611,6 +612,9 @@ export type CreditTxn = {
   // Gateway reference on topup/cashout rows (what support quotes); null on
   // pack opens, buybacks and other internal rows.
   reference: string | null;
+  // Channel + gateway-confirmed outcome behind that reference, so every money
+  // row on the statement traces to the gateway record. Null when unknown.
+  gateway: { method: string; status: string } | null;
 };
 
 export type TransactionsResult =
@@ -669,6 +673,7 @@ export async function getTransactions(
         reason: r.reason,
         createdAt: r.created_at,
         reference: r.reference ?? null,
+        gateway: r.gateway ?? null,
       })),
       page: safePage,
       hasMore: totals?.has_more ?? false,

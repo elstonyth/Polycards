@@ -13,6 +13,10 @@ export const SiteSettings = model.define('site_settings', {
   // Avatar-frame catalog keyed by milestone level ("10".."100") → uploaded
   // image URL (via /admin/media kind 'avatar-frame'). null → none configured.
   avatar_frames: model.json().nullable(),
+  // Active payment gateway id (plan 130 §runtime switch). NULL = fall back
+  // to the PAYMENT_GATEWAY env (then GlobePay). Validated against GATEWAYS
+  // in gateway.ts on write; read into a process cache, never per request.
+  payment_gateway: model.text().nullable(),
 });
 
 export default SiteSettings;

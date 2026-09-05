@@ -8,8 +8,9 @@ import {
 } from '../modules/packs/globepay-deposit';
 import {
   getDepositDetail,
-  globepayConfigFromEnv,
-} from '../modules/packs/globepay-client';
+  resolveActiveGateway,
+  rowGatewayConfigs,
+} from '../modules/packs/gateway';
 import { toOptionalMoney } from '../modules/packs/money';
 import { topupIdempotencyReference } from '../modules/packs/topup';
 import { notifyFeed } from '../modules/packs/notify-feed';
@@ -67,10 +68,13 @@ export function __resetFullSweepMarkerForTests(): void {
 
 export default async function globepayReconcileJob(container: MedusaContainer) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
+  await resolveActiveGateway(container);
   if (!globepayEnabled()) return;
 
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-  const config = globepayConfigFromEnv();
+  // Each row is requeried at the gateway it was CREATED under — a switch
+  // must not make the sweep ask the new gateway about the old one's rows.
+  const configFor = rowGatewayConfigs();
   const now = new Date();
 
   // TWO cadences in one job. Most runs are the fast tier: only deposits young
@@ -147,6 +151,13 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
       // settlement facts the requery carries (net, bank references — audit
       // 2026-08-17 B1/B2). Null on the error paths, where no detail exists.
       let detail: Awaited<ReturnType<typeof getDepositDetail>> | null = null;
+      const config = configFor(deposit.gateway);
+      if (!config) {
+        logger.warn(
+          `[globepay-reconcile] ${deposit.merchant_transaction_id} belongs to gateway "${deposit.gateway}", which is not configured here — skipped`,
+        );
+        continue;
+      }
       try {
         detail = await getDepositDetail(
           deposit.merchant_transaction_id,

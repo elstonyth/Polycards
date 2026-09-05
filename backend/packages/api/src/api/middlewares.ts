@@ -365,6 +365,13 @@ export default defineMiddlewares({
       middlewares: [gatewayHookRateLimit],
     },
     {
+      // TGPay's payment/payout server-notify callbacks — same anonymous-POST
+      // exposure, same limiter (src/api/hooks/tgpay/*).
+      matcher: '/hooks/tgpay/*',
+      method: 'POST',
+      middlewares: [gatewayHookRateLimit],
+    },
+    {
       // OTP send — TWO independent limiter tiers, per-phone FIRST so a
       // hammered number 429s before spending the sitewide budget. The
       // storefront proxies every OTP request server-side (one egress IP in

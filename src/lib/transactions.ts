@@ -22,6 +22,30 @@ const REASON_LABEL: Record<CreditReason, string> = {
 // A backend reason added before the storefront redeploys has no entry in
 // REASON_LABEL — prettify it generically ('refund_x' -> 'Refund x') instead
 // of the row being unlabeled or dropped (audit 2026-07-07 #11).
+/** Customer-facing wording for the gateway row's settlement outcome. */
+export const gatewayStatusLabel = (status: string): string =>
+  (
+    ({
+      settled: 'Confirmed by gateway',
+      pending: 'Awaiting gateway',
+      held: 'Awaiting approval',
+      failed: 'Failed',
+      expired: 'Expired',
+    }) as Record<string, string>
+  )[status] ?? status;
+
+/** Channel wording, mirroring the top-up sheet's own labels. */
+export const gatewayMethodLabel = (method: string): string =>
+  (
+    ({
+      OB: 'Online banking',
+      FPX: 'Online banking',
+      BQR: 'QR / e-wallet',
+      DN: 'DuitNow',
+      WD: 'Bank payout',
+    }) as Record<string, string>
+  )[method] ?? method;
+
 export const reasonLabel = (reason: string): string =>
   (REASON_LABEL as Record<string, string>)[reason] ??
   reason.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());

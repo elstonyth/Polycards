@@ -4,10 +4,12 @@ import { PACKS_MODULE } from './index';
 import type PacksModuleService from './service';
 import { resolveWithdrawalDestination } from './saved-accounts';
 import {
-  globepayConfigFromEnv,
+  GATEWAYS,
+  gatewayConfigFromEnv,
+  paymentGateway,
   submitWithdrawal,
   GlobePayError,
-} from './globepay-client';
+} from './gateway';
 import { newMerchantTransactionId } from './globepay-deposit';
 import { withdrawalGateError } from './withdrawable';
 import { nonNegativeIntFromEnv } from '../../api/utils/rate-limit';
@@ -85,12 +87,17 @@ export function globepayWithdrawalsEnabled(
     GLOBEPAY_ENABLED?: string;
     GLOBEPAY_WITHDRAWALS_ENABLED?: string;
     GLOBEPAY_MERCHANT_CODE?: string;
+    PAYMENT_GATEWAY?: string;
+    TGPAY_SECRET_KEY?: string;
   } = process.env,
 ): boolean {
+  const configured = GATEWAYS[paymentGateway(env)].configured(
+    env as NodeJS.ProcessEnv,
+  );
   return (
     env.GLOBEPAY_ENABLED === 'true' &&
     env.GLOBEPAY_WITHDRAWALS_ENABLED === 'true' &&
-    Boolean(env.GLOBEPAY_MERCHANT_CODE)
+    configured
   );
 }
 
@@ -235,6 +242,8 @@ export type StartWithdrawalInput = {
    * instead of minting a second one.
    */
   idempotencyKey?: string;
+  /** TGPay requires the recipient email on payout; GlobePay ignores it. */
+  email?: string;
 };
 
 export type StartWithdrawalResult = {
@@ -325,7 +334,7 @@ export async function startGlobePayWithdrawal(
       ? input.idempotencyKey.trim()
       : undefined;
 
-  const config = globepayConfigFromEnv();
+  const config = gatewayConfigFromEnv();
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
 
   // Scoped OFF 'failed' on purpose, matching the partial unique index. A failed
@@ -459,6 +468,7 @@ export async function startGlobePayWithdrawal(
           account_number: precheckDestination.accountNumber,
           account_holder_name: precheckDestination.accountHolderName.trim(),
           status: held ? 'held' : 'pending',
+          gateway: paymentGateway(),
         },
       ])
     )[0];
@@ -551,6 +561,7 @@ export async function startGlobePayWithdrawal(
         notifyUrl,
         returnUrl: verifyUrl,
         ipAddress: input.ipAddress,
+        email: input.email,
       },
       config,
     );
