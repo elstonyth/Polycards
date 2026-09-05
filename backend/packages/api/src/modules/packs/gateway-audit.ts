@@ -53,7 +53,7 @@ export function depositAuditNote(
     if (state === 'success') {
       return sameMoney(row.amount, amount)
         ? null
-        : `gateway paid ${amount.toFixed(2)}, row credited ${Number(row.amount).toFixed(2)}`;
+        : `gateway paid ${amount.toFixed(2)}, row credited ${rowMoney(row.amount)}`;
     }
     if (state === 'failed') {
       return 'gateway says FAILED but the row is settled — credit issued without gateway confirmation, investigate';
@@ -84,7 +84,7 @@ export function withdrawalAuditNote(
     if (state === 'success') {
       return sameMoney(row.amount, amount)
         ? null
-        : `gateway paid out ${amount.toFixed(2)}, row debited ${Number(row.amount).toFixed(2)}`;
+        : `gateway paid out ${amount.toFixed(2)}, row debited ${rowMoney(row.amount)}`;
     }
     if (state === 'failed') {
       return 'gateway says the payout FAILED but the row is settled — customer was not refunded, investigate';
@@ -99,4 +99,11 @@ export function withdrawalAuditNote(
     return 'gateway still reports pending for a payout we refunded';
   }
   return null;
+}
+
+/** Our side of a disagreement: an absent amount reads as absent, never as 0.00. */
+function rowMoney(amount: number | null): string {
+  return amount === null
+    ? 'nothing (row records no amount)'
+    : amount.toFixed(2);
 }

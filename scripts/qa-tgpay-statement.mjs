@@ -6,9 +6,9 @@
 
 import { chromium } from '@playwright/test';
 import path from 'node:path';
-import { devCustomer } from './lib/dev-logins.mjs';
+import { devCustomer, safeBase } from './lib/dev-logins.mjs';
 
-const STORE = process.env.STORE_BASE ?? 'http://127.0.0.1:4000';
+const STORE = safeBase(process.env.STORE_BASE, 'http://127.0.0.1:4000');
 const OUT = path.resolve('docs/research');
 const CUST = devCustomer();
 

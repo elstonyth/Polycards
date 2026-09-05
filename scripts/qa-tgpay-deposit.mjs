@@ -17,8 +17,9 @@
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { safeBase } from './lib/dev-logins.mjs';
 
-const STORE = process.env.STORE_BASE ?? 'http://127.0.0.1:4000';
+const STORE = safeBase(process.env.STORE_BASE, 'http://127.0.0.1:4000');
 const AMOUNT = Number(process.env.AMOUNT ?? 50);
 const METHOD = process.env.METHOD ?? 'OB';
 const CUST = {

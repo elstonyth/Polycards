@@ -114,7 +114,15 @@ async function post<T>(
       parsed.msg ??
       `HTTP ${response.status}`;
     const codes: string[] = [];
-    if (response.status === 404) codes.push(TGPAY_NOT_FOUND);
+    // Only THEIR "Transaction not found" is a not-found: the withdrawal sweep
+    // refunds a stale row on that answer, so a routing 404 (wrong base URL,
+    // a path they renamed) must stay an ambiguous 4xx, never a refund trigger.
+    if (
+      response.status === 404 &&
+      /transaction not found/i.test(String(parsed.message ?? parsed.msg ?? ''))
+    ) {
+      codes.push(TGPAY_NOT_FOUND);
+    }
     if (response.status === 401) codes.push('TGPAY_UNAUTHORIZED');
     throw new TgpayError(
       `TGPay ${path} failed (HTTP ${response.status}): ${detail}`,
@@ -279,11 +287,19 @@ export async function balances(config: TgpayConfig): Promise<{
   // A wallet row only exists once it has been funded — a fresh sandbox tenant
   // has no pay-in credit row until its first payment settles. That 404 is
   // "zero", not "unreachable"; any other error still throws.
+  // (A wallet 404 is a different not-found from a transaction's, so it is
+  // matched on its own message here rather than via TGPAY_NOT_FOUND, which
+  // the sweeps treat as a refund trigger.)
   const read = async (path: string): Promise<Balance | null> => {
     try {
       return await post<Balance>(path, body, config);
     } catch (error) {
-      if (error instanceof TgpayError && error.has(TGPAY_NOT_FOUND)) return null;
+      if (
+        error instanceof TgpayError &&
+        error.httpStatus === 404 &&
+        /credit not found|wallet/i.test(error.message)
+      )
+        return null;
       throw error;
     }
   };
@@ -417,13 +433,16 @@ export function callbackIpAllowed(
   return entries.some(({ base, bits }) => {
     if (bits === 0) return true;
     const mask = bits === 32 ? 0xffffffff : (0xffffffff << (32 - bits)) >>> 0;
-    return ((n & mask) >>> 0) === ((base & mask) >>> 0);
+    return (n & mask) >>> 0 === (base & mask) >>> 0;
   });
 }
 
 export type CallbackIpVerdict =
   | { allowed: true }
-  | { allowed: false; reason: 'not-listed' | 'unset-in-production' | 'unparseable' }
+  | {
+      allowed: false;
+      reason: 'not-listed' | 'unset-in-production' | 'unparseable';
+    }
   /** Header-only: no list configured AND the gateway is the sandbox. */
   | { allowed: true; reason: 'sandbox-no-list' };
 

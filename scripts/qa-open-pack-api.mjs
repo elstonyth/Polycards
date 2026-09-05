@@ -8,8 +8,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { safeBase } from './lib/dev-logins.mjs';
 
-const BACKEND = process.env.BACKEND_BASE ?? 'http://127.0.0.1:9000';
+const BACKEND = safeBase(process.env.BACKEND_BASE, 'http://127.0.0.1:9000');
 const slug = process.argv[2] ?? 'raw-demo-pack';
 
 const kv = (file) =>

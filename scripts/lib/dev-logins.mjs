@@ -27,3 +27,20 @@ export function devCustomer() {
     password: process.env.CUST_PW ?? env.CUST_PW ?? '',
   };
 }
+
+/**
+ * A base URL these scripts may send a login to: plain http only on loopback,
+ * https anywhere else. Passwords ride in the body, so an `http://` override
+ * pointing off the machine would put them on the wire in the clear.
+ */
+export function safeBase(value, fallback) {
+  const raw = (value ?? fallback).replace(/\/+$/, '');
+  const url = new URL(raw);
+  const loopback = /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(url.hostname);
+  if (url.protocol !== 'https:' && !loopback) {
+    throw new Error(
+      `${raw}: plain http is allowed only on loopback — use https for a remote target`,
+    );
+  }
+  return raw;
+}

@@ -352,7 +352,23 @@ describe('startGlobePayWithdrawal — money ordering', () => {
         /not available with the current payout provider/i,
       );
       expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+      expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
       expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+      expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+
+      // Same fence for the recipient email TGPay needs: a payable bank but
+      // no email is refused before any row or debit, not after.
+      const payable = {
+        ...SAVED_ACCOUNT,
+        id: savedBankAccountId('MBBEMYKL', '1234567890'),
+        bankCode: 'MBBEMYKL',
+      };
+      const h2 = harness([payable]);
+      await expect(
+        start(h2, { gateway: 'tgpay', email: '', accountId: payable.id }),
+      ).rejects.toThrow(/email address/i);
+      expect(h2.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+      expect(h2.packs.withdrawForCashout.mock.calls.length).toBe(0);
     } finally {
       for (const [k, v] of Object.entries(saved)) {
         if (v === undefined) delete process.env[k];

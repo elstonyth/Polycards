@@ -166,17 +166,19 @@ clear the playthrough gate — set `PAYOUT_DESTINATION_COOLDOWN_HOURS=0`
 locally for a same-day withdrawal). A full customer withdrawal ran end to
 end on the sandbox 2026-09-05: accepted, callback settled it, ledger −50.
 
+## Resolved with TGPay (kept for the pattern)
+
+- **Payout wallet not visible to the API** (sandbox, 2026-09-05 morning):
+  `/transaction/payout/withdraw` → `400 No payout credit wallet found`,
+  `/tenant-payout-credits/balance` → 404, while the admin showed payout credit
+  300.00. Root cause on their side (their admin API
+  `GET /api/v2/tenant-payout-credits/my`): the payout credit row had
+  `currencyId: null`, so a lookup by MYR found nothing. CS set the wallet
+  currency to MYR the same afternoon and payouts worked. **Watch for the same
+  on the production tenant** — its Currency still shows "—".
+
 ## Open questions for TGPay
 
-- **Payout wallet not visible to the API** (sandbox): `/transaction/payout/withdraw`
-  → `400 No payout credit wallet found`, `/tenant-payout-credits/balance` → 404,
-  while the admin shows payout credit 300.00. Blocks the payout test.
-  **Root cause is on their side** (read from their admin API
-  `GET /api/v2/tenant-payout-credits/my`, 2026-09-05): the payout credit row
-  (id 18, balance 300) has `currencyId: null`, so a lookup by MYR finds
-  nothing. The tenant's original credit row (id 21) is currency-less too; a
-  real MYR pay-in row (id 22) only appeared when the first payment settled.
-  **Resolved 2026-09-05**: CS set the wallet currency to MYR; payout works.
 - Production admin + API base URLs, and whether production payout is enabled
   (`501 Payout not available in production yet` otherwise). Per TGPay
   2026-09-05: the production API keys are read from the production back

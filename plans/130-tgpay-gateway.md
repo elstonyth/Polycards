@@ -1,14 +1,17 @@
 # 130 — TGPay sandbox gateway behind a `PAYMENT_GATEWAY` switch
 
-Status: **built and sandbox-verified 2026-09-05** (deposit leg end to end; payout leg blocked on TGPay's side — see below). Not yet merged.
+Status: **built and sandbox-verified 2026-09-05** (deposit and payout legs end to end; the payout wallet fault of that morning was fixed on TGPay's side the same day). Production keys applied to the backend 2026-09-06; cutover pending the PR merge and the admin switch.
 
 ## Why
 
 The operator is moving the payment gateway from GlobePay365 to TGPay
 (sandbox `https://sandbox.tgpay365.com`, API base
 `https://sandbox-api.tgpay365.com/api/v2`). Production still runs GlobePay,
-so the swap must be a runtime switch, not a rewrite: `PAYMENT_GATEWAY=tgpay`
-selects the new client; unset/`globepay` keeps today's behaviour byte-for-byte.
+so the swap must be a runtime switch, not a rewrite. As built, the ADMIN
+setting is the switch — Settlement page → Payment gateway, stored in
+`site_settings.payment_gateway` — and `PAYMENT_GATEWAY=tgpay` is only the
+boot/fallback value read while that setting is NULL; unset/`globepay` keeps
+today's behaviour byte-for-byte. (§"Runtime switch" below has the precedence.)
 
 ## What TGPay looks like (read from the sandbox docs, 2026-09-05)
 
@@ -68,7 +71,7 @@ Swap only the HTTP client and the inbound hooks.
 
 ## Env (backend, sandbox)
 
-```
+```dotenv
 PAYMENT_GATEWAY=tgpay
 TGPAY_API_BASE=https://sandbox-api.tgpay365.com/api/v2
 TGPAY_PUBLIC_KEY=pk-…            # Platform → Settings → General
@@ -105,12 +108,12 @@ fallback when callbacks cannot reach us.
   1.2 % rate floored at RM 1), Merchant Ref = our `PC-…`, Txn Ref = the
   order id. The audit sweep backfilled `net_amount = 49` from
   `/transaction/query` (`amountAfterFee`); the callback carries no fee.
-- Payout: `POST /transaction/payout/withdraw` answers
-  `400 No payout credit wallet found` and `/tenant-payout-credits/balance`
-  is 404, even though the sandbox admin shows a payout credit of 300.00
-  (topped up by TGPay at 12:03 MYT). **Relay to TGPay CS** — the API cannot
-  see the payout wallet for tenant `polycards`. Until then the payout hook
-  and reconcile path are covered by unit tests only.
+- Payout: at first `POST /transaction/payout/withdraw` answered
+  `400 No payout credit wallet found` (their payout wallet row had no
+  currency — a TGPay-side fault, fixed by their CS the same afternoon).
+  **Resolved 2026-09-05**: the RM 50 payout probe was accepted and its
+  `success` callback settled it; a full customer withdrawal then ran end to
+  end (see "Verified" in docs/payments/tgpay-setup.md).
 
 ## Source-of-truth additions (same day, user request)
 

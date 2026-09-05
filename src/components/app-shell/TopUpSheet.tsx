@@ -136,6 +136,10 @@ export default function TopUpSheet({
   useEffect(() => {
     if (!open || !USE_GATEWAY) return;
     let cancelled = false;
+    // Back to the safe defaults on every open: the admin may have switched
+    // gateways since the last one, and a band the previous gateway answered
+    // with must not judge this open's amount before the fresh answer lands.
+    setLimits({ min: GATEWAY_MIN_RM, max: GATEWAY_MAX_RM });
     getPaymentLimits()
       .then((l) => {
         if (!cancelled)
@@ -441,7 +445,7 @@ export default function TopUpSheet({
 
             <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">
               {USE_GATEWAY
-                ? 'You’ll finish paying on GlobePay365, then come back here. Credits appear once your payment is confirmed — usually within a minute.'
+                ? 'You’ll finish paying on our payment provider’s page, then come back here. Credits appear once your payment is confirmed — usually within a minute.'
                 : 'Demo checkout: only the amount leaves your browser. Amounts ending in .13 are declined on purpose so you can see the error path.'}
             </p>
           </>

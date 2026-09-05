@@ -84,11 +84,13 @@ export function globepayEnabled(
     PAYMENT_GATEWAY?: string;
     TGPAY_SECRET_KEY?: string;
   } = process.env,
+  gateway: PaymentGateway = paymentGateway(env),
 ): boolean {
   // GLOBEPAY_ENABLED stays the master "real gateway" switch for both gateways;
-  // the credential that proves one is configured differs per gateway.
-  const configured = GATEWAYS[paymentGateway(env)].configured(env);
-  return env.GLOBEPAY_ENABLED === 'true' && configured;
+  // the credential that proves one is configured differs per gateway. Callers
+  // that already pinned a gateway for the request pass it, so the check and
+  // the submit cannot straddle an admin switch.
+  return env.GLOBEPAY_ENABLED === 'true' && GATEWAYS[gateway].configured(env);
 }
 
 /**
@@ -148,7 +150,8 @@ export async function startGlobePayDeposit(
   notifyUrl: string,
   returnUrl: string,
 ): Promise<StartDepositResult> {
-  if (!globepayEnabled()) {
+  const gateway = input.gateway ?? paymentGateway();
+  if (!globepayEnabled(process.env, gateway)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'Top-ups are temporarily unavailable.',
@@ -168,7 +171,6 @@ export async function startGlobePayDeposit(
   // already refused as "at most RM 10,000 per top-up". Both bounds stay
   // asserted anyway: TOPUP_MAX_RM is an anti-typo guard that answers to us,
   // the band answers to them, and they are free to move apart again.
-  const gateway = input.gateway ?? paymentGateway();
   const { depositMin, depositMax } = GATEWAYS[gateway].limits;
   if (amount < depositMin || amount > depositMax) {
     throw new MedusaError(

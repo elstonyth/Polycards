@@ -13,6 +13,7 @@ import {
 } from '../../../../../../modules/packs/globepay-withdrawal';
 import {
   GlobePayError,
+  GATEWAYS,
   gatewayConfigFor,
   gatewayUrls,
   resolveActiveGateway,
@@ -108,6 +109,22 @@ export async function POST(
     );
   }
   const amount = Number(row.amount);
+
+  // TGPay needs the recipient email; looked up only on that gateway so the
+  // GlobePay path (and its tests, whose scope has no customer module) is
+  // untouched. Resolved BEFORE the claim below, like every other
+  // precondition: a customer-module failure here must not strand a row that
+  // was claimed to 'pending' and never submitted. A customer with no email
+  // is refused for the same reason the store route refuses one pre-debit.
+  const email = (
+    await contactIfNeeded(req.scope, gatewayId, row.customer_id, 'payout')
+  )?.email;
+  if (GATEWAYS[gatewayId].needsCustomerContact && !email) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'This customer has no email address on file, which the payout provider requires.',
+    );
+  }
 
   // FREEZE, re-read at approval time. This is the ONE piece of the
   // request-time gate that must be re-checked: the whole point of a held
@@ -209,13 +226,6 @@ export async function POST(
   logger.info(
     `[globepay] admin ${adminId} APPROVED withdrawal ${row.id} (${row.merchant_transaction_id}) — RM ${amount} to bank ${row.bank_code}`,
   );
-
-  // TGPay needs the recipient email; looked up only on that gateway so the
-  // GlobePay path (and its tests, whose scope has no customer module) is
-  // untouched.
-  const email = (
-    await contactIfNeeded(req.scope, gatewayId, row.customer_id, 'payout')
-  )?.email;
 
   let result;
   try {

@@ -750,10 +750,7 @@ class PacksModuleService extends MedusaService({
     | {
         bound: false;
         reason:
-          | 'self'
-          | 'already_bound'
-          | 'not_a_new_account'
-          | 'referrer_disabled';
+          'self' | 'already_bound' | 'not_a_new_account' | 'referrer_disabled';
       }
   > {
     if (input.customerId === input.referrerId) {
@@ -2157,10 +2154,7 @@ class PacksModuleService extends MedusaService({
     | {
         claimed: false;
         reason:
-          | 'not_found'
-          | 'not_completed'
-          | 'already_claimed'
-          | 'window_closed';
+          'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
       }
   > {
     // Deliberately NOT filtered on active: retiring a task must never strand
@@ -6121,14 +6115,29 @@ class PacksModuleService extends MedusaService({
     gateway: string,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
-    deposits: { count: number; grossCents: number; netCents: number; missingNet: number };
-    withdrawals: { count: number; grossCents: number; netCents: number; missingNet: number };
+    deposits: {
+      count: number;
+      grossCents: number;
+      netCents: number;
+      missingNet: number;
+    };
+    withdrawals: {
+      count: number;
+      grossCents: number;
+      netCents: number;
+      missingNet: number;
+    };
     findings: number;
     lastAuditedAt: string | null;
   }> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    type Raw = { n: string; gross_cents: string; net_cents: string; missing_net: string };
+    type Raw = {
+      n: string;
+      gross_cents: string;
+      net_cents: string;
+      missing_net: string;
+    };
     const toTotals = (r: Raw) => ({
       count: Number(r.n),
       grossCents: Number(r.gross_cents),
@@ -6153,13 +6162,18 @@ class PacksModuleService extends MedusaService({
         WHERE deleted_at IS NULL AND status = 'settled' AND gateway = ?`,
       [gateway],
     );
-    const [audit] = await em.execute<{ findings: string; last: string | null }[]>(
-      `SELECT (SELECT COUNT(*) FROM globepay_deposit WHERE deleted_at IS NULL AND audit_note IS NOT NULL)
-            + (SELECT COUNT(*) FROM globepay_withdrawal WHERE deleted_at IS NULL AND audit_note IS NOT NULL) AS findings,
+    // Scoped to the same gateway as the money totals, so one gateway's
+    // findings and freshness never show up on the other's panel.
+    const [audit] = await em.execute<
+      { findings: string; last: string | null }[]
+    >(
+      `SELECT (SELECT COUNT(*) FROM globepay_deposit WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND gateway = ?)
+            + (SELECT COUNT(*) FROM globepay_withdrawal WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND gateway = ?) AS findings,
               GREATEST(
-                (SELECT MAX(audited_at) FROM globepay_deposit WHERE deleted_at IS NULL),
-                (SELECT MAX(audited_at) FROM globepay_withdrawal WHERE deleted_at IS NULL)
+                (SELECT MAX(audited_at) FROM globepay_deposit WHERE deleted_at IS NULL AND gateway = ?),
+                (SELECT MAX(audited_at) FROM globepay_withdrawal WHERE deleted_at IS NULL AND gateway = ?)
               ) AS last`,
+      [gateway, gateway, gateway, gateway],
     );
     return {
       deposits: toTotals(dep),
@@ -8555,8 +8569,7 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      | SettleSnapshot
-      | undefined;
+      SettleSnapshot | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME
@@ -8971,8 +8984,7 @@ class PacksModuleService extends MedusaService({
   private async reserveSettledStock(
     winner: SettledWinner,
     decrementStock:
-      | ((handle: string, qty: number) => Promise<boolean>)
-      | undefined,
+      ((handle: string, qty: number) => Promise<boolean>) | undefined,
     weekStartIso: string,
   ): Promise<void> {
     if (!decrementStock) return;

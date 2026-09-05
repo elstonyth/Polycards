@@ -143,6 +143,18 @@ describe('createPayment', () => {
     expect(err.httpStatus).toBe(404);
   });
 
+  it('a routing 404 (no such path) is NOT a transaction not-found — no refund on a wrong base URL', async () => {
+    stubFetch(
+      { statusCode: 404, message: 'Cannot POST /api/v3/transaction/query' },
+      404,
+    );
+    const err = (await queryPayment('PC-x', config).catch(
+      (e: unknown) => e,
+    )) as TgpayError;
+    expect(err.has(TGPAY_NOT_FOUND)).toBe(false);
+    expect(err.httpStatus).toBe(404);
+  });
+
   it('a non-JSON body (WAF page) is ambiguous and quotes the body', async () => {
     stubFetch('<html>blocked</html>', 403);
     const err = (await queryPayment('PC-x', config).catch(
@@ -255,7 +267,9 @@ describe('callback source allowlist', () => {
 
   it('a trailing slash or an odd mask is dropped, never read as /0', () => {
     expect(parseCallbackAllowlist('1.32.102.19/')).toEqual([]);
-    expect(parseCallbackAllowlist('1.32.102.19/0x10 1.32.102.19/1e1')).toEqual([]);
+    expect(parseCallbackAllowlist('1.32.102.19/0x10 1.32.102.19/1e1')).toEqual(
+      [],
+    );
     expect(parseCallbackAllowlist('1.32.102.19/33')).toEqual([]);
     expect(parseCallbackAllowlist('1.32.102.19/a/b')).toEqual([]);
     expect(parseCallbackAllowlist('0.0.0.0/0')).toEqual([]);
@@ -274,10 +288,15 @@ describe('callback source allowlist', () => {
       reason: 'unset-in-production',
     });
     expect(
-      tgpayCallbackIpVerdict('1.2.3.4', { ...prod, TGPAY_CALLBACK_IPS: '1.2.3.4;5.6.7.8' }),
+      tgpayCallbackIpVerdict('1.2.3.4', {
+        ...prod,
+        TGPAY_CALLBACK_IPS: '1.2.3.4;5.6.7.8',
+      }),
     ).toEqual({ allowed: false, reason: 'unparseable' });
     const env = { ...prod, TGPAY_CALLBACK_IPS: '1.32.102.19,54.251.58.7' };
-    expect(tgpayCallbackIpVerdict('54.251.58.7', env)).toEqual({ allowed: true });
+    expect(tgpayCallbackIpVerdict('54.251.58.7', env)).toEqual({
+      allowed: true,
+    });
     expect(tgpayCallbackIpVerdict('54.251.58.8', env)).toEqual({
       allowed: false,
       reason: 'not-listed',

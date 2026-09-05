@@ -94,8 +94,9 @@ export function globepayWithdrawalsEnabled(
     PAYMENT_GATEWAY?: string;
     TGPAY_SECRET_KEY?: string;
   } = process.env,
+  gateway: PaymentGateway = paymentGateway(env),
 ): boolean {
-  const configured = GATEWAYS[paymentGateway(env)].configured(env);
+  const configured = GATEWAYS[gateway].configured(env);
   return (
     env.GLOBEPAY_ENABLED === 'true' &&
     env.GLOBEPAY_WITHDRAWALS_ENABLED === 'true' &&
@@ -305,7 +306,8 @@ export async function startGlobePayWithdrawal(
   notifyUrl: string,
   verifyUrl: string,
 ): Promise<StartWithdrawalResult> {
-  if (!globepayWithdrawalsEnabled()) {
+  const gateway = input.gateway ?? paymentGateway();
+  if (!globepayWithdrawalsEnabled(process.env, gateway)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'Withdrawals are not open yet.',
@@ -324,7 +326,6 @@ export async function startGlobePayWithdrawal(
       'Enter a valid amount.',
     );
   }
-  const gateway = input.gateway ?? paymentGateway();
   const { withdrawalMin, withdrawalMax } = GATEWAYS[gateway].limits;
   if (amount < withdrawalMin || amount > withdrawalMax) {
     throw new MedusaError(
@@ -422,6 +423,16 @@ export async function startGlobePayWithdrawal(
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'This bank account is not available with the current payout provider. Pick another saved account, or try again later.',
+    );
+  }
+  // Same rule for the recipient email a TGPay payout needs: the adapter
+  // would refuse a blank one as a definite error, but only after the row and
+  // the debit exist — a refund and a failed row for something the customer
+  // fixes in Account settings.
+  if (GATEWAYS[gateway].needsCustomerContact && !input.email) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Add an email address to your account before withdrawing.',
     );
   }
 
