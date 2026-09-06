@@ -27,13 +27,6 @@ import {
   RecentPullsPageSchema,
   PullGapsSchema,
 } from '@/lib/data/schemas';
-
-// Every route in this file is PUBLIC, and both halves of this matter: no
-// bearer, and `cache: 'auto'` — no cache key on the wire, which is what the
-// bare sdk.client.fetch calls sent. An explicit `no-store` would make a
-// statically prerenderable route dynamic, and src/app/page.tsx renders this
-// catalog, this feed and (via getPackChase) this detail under `revalidate = 15`.
-const PUBLIC = { auth: 'none', cache: 'auto' } as const;
 import {
   CATEGORIES as CATEGORY_META,
   CAT_ICON,
@@ -43,6 +36,13 @@ import {
   type Rarity,
   type ResolvedPack,
 } from '@/lib/packs-data';
+
+// Every route in this file is PUBLIC, and both halves of this matter: no
+// bearer, and `cache: 'auto'` — no cache key on the wire, which is what the
+// bare sdk.client.fetch calls sent. An explicit `no-store` would make a
+// statically prerenderable route dynamic, and src/app/page.tsx renders this
+// catalog, this feed and (via getPackChase) this detail under `revalidate = 15`.
+const PUBLIC = { auth: 'none', cache: 'auto' } as const;
 
 // Shape of a pack row from GET /store/packs (backend Pack model).
 interface BackendPack {
@@ -313,46 +313,44 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
     PUBLIC,
   );
   if (!r.ok) return null;
-  {
-    const { published_odds, demo_odds } = r.data;
-    const valid = r.data.odds as unknown as BackendOddsEntry[];
-    if (valid.length === 0) return null;
+  const { published_odds, demo_odds } = r.data;
+  const valid = r.data.odds as unknown as BackendOddsEntry[];
+  if (valid.length === 0) return null;
 
-    const toCard = (o: BackendOddsEntry): PackCard => ({
-      id: o.handle,
-      name: o.name,
-      image: o.image,
-      slabImage: o.slab_image ?? null,
-      // Raw USD market_value must never render behind "RM" — an older
-      // backend without marketPriceMyr shows "—" instead of a fake price.
-      value: o.marketPriceMyr != null ? formatValue(o.marketPriceMyr) : '—',
-      rarity: o.rarity as Rarity,
-      pokemonDex: o.pokemon_dex ?? null,
-      spriteImage: o.sprite_image ?? null,
-    });
-    const sorted = [...valid].sort(
-      (a, b) =>
-        (b.marketPriceMyr ?? b.market_value) -
-        (a.marketPriceMyr ?? a.market_value),
-    );
-    const pool: PackCard[] = sorted.map(toCard);
+  const toCard = (o: BackendOddsEntry): PackCard => ({
+    id: o.handle,
+    name: o.name,
+    image: o.image,
+    slabImage: o.slab_image ?? null,
+    // Raw USD market_value must never render behind "RM" — an older
+    // backend without marketPriceMyr shows "—" instead of a fake price.
+    value: o.marketPriceMyr != null ? formatValue(o.marketPriceMyr) : '—',
+    rarity: o.rarity as Rarity,
+    pokemonDex: o.pokemon_dex ?? null,
+    spriteImage: o.sprite_image ?? null,
+  });
+  const sorted = [...valid].sort(
+    (a, b) =>
+      (b.marketPriceMyr ?? b.market_value) -
+      (a.marketPriceMyr ?? a.market_value),
+  );
+  const pool: PackCard[] = sorted.map(toCard);
 
-    // Top Hits = the admin-ordered cards (order 1 renders first/leftmost).
-    // No ordered cards on this pack → EMPTY (the page hides the section);
-    // the old highest-value fallback made un-curated packs look curated.
-    const topHits = valid
-      .filter((o) => o.top_hit_order != null)
-      .sort((a, b) => (a.top_hit_order ?? 0) - (b.top_hit_order ?? 0))
-      .map(toCard);
+  // Top Hits = the admin-ordered cards (order 1 renders first/leftmost).
+  // No ordered cards on this pack → EMPTY (the page hides the section);
+  // the old highest-value fallback made un-curated packs look curated.
+  const topHits = valid
+    .filter((o) => o.top_hit_order != null)
+    .sort((a, b) => (a.top_hit_order ?? 0) - (b.top_hit_order ?? 0))
+    .map(toCard);
 
-    return {
-      topHits,
-      pool,
-      publishedOdds: parsePublishedOdds(published_odds),
-      // Same { tiers } shape from the backend, so the same sanitizer applies.
-      demoOdds: parsePublishedOdds(demo_odds),
-    };
-  }
+  return {
+    topHits,
+    pool,
+    publishedOdds: parsePublishedOdds(published_odds),
+    // Same { tiers } shape from the backend, so the same sanitizer applies.
+    demoOdds: parsePublishedOdds(demo_odds),
+  };
 }
 
 /**
@@ -499,71 +497,64 @@ export async function getRecentPulls(
   packSlug?: string,
   rarity?: Rarity,
 ): Promise<RecentFeed> {
-  {
-    // Same two params, same order (`?pack_id=…&rarity=…`) — the SDK
-    // serializes this object to the querystring the path carried before, and
-    // an absent pair omits the key entirely rather than sending a bare "?".
-    const query = {
-      ...(packSlug ? { pack_id: packSlug } : {}),
-      ...(rarity ? { rarity } : {}),
-    };
-    const r = await store.get('/store/pulls/recent', RecentPullsPageSchema, {
-      ...PUBLIC,
-      ...(Object.keys(query).length > 0 ? { query } : {}),
-    });
-    // An empty feed is a truthful state for a live ledger, and so is the
-    // answer to a failure or a non-array `pulls` — the component renders "no
-    // pulls yet" either way, and never mock rows.
-    if (!r.ok) return EMPTY_FEED;
-    const raw = r.data;
+  // Same two params, same order (`?pack_id=…&rarity=…`) — the SDK
+  // serializes this object to the querystring the path carried before, and
+  // an absent pair omits the key entirely rather than sending a bare "?".
+  const query = {
+    ...(packSlug ? { pack_id: packSlug } : {}),
+    ...(rarity ? { rarity } : {}),
+  };
+  const r = await store.get('/store/pulls/recent', RecentPullsPageSchema, {
+    ...PUBLIC,
+    ...(Object.keys(query).length > 0 ? { query } : {}),
+  });
+  // An empty feed is a truthful state for a live ledger, and so is the
+  // answer to a failure or a non-array `pulls` — the component renders "no
+  // pulls yet" either way, and never mock rows.
+  if (!r.ok) return EMPTY_FEED;
+  const raw = r.data;
 
-    // Stable ids: the pull row id, else (older backend) a per-(handle,
-    // rolled_at) occurrence counter — NOT the array index, which shifts
-    // whenever the poll prepends a new pull, remounting every feed row (and
-    // replaying entry animations) instead of just adding one.
-    const seen = new Map<string, number>();
-    const pulls = (raw.pulls as unknown as BackendRecentPull[]).map((p) => {
-      const key = `${p.handle}-${p.rolled_at}`;
-      const n = seen.get(key) ?? 0;
-      seen.set(key, n + 1);
-      return {
-        id: p.id ?? `${key}-${n}`,
-        handle: p.handle,
-        name: p.name,
-        image: p.image,
-        slabImage: p.slab_image ?? null,
-        // Raw USD market_value must never render behind "RM" (same contract
-        // as the odds-row toCard above).
-        value: p.marketPriceMyr != null ? formatValue(p.marketPriceMyr) : '—',
-        rarity: p.rarity as Rarity,
-        // Pack label straight from the backend catalog (source of truth) — a
-        // since-deleted pack degrades to the neutral label, never a wrong one.
-        packName: p.pack_title ?? 'Mystery Pack',
-        packIcon: p.pack_image ?? FALLBACK_PACK_ICON,
-        who: p.who ?? 'Anonymous',
-        profileHandle: p.profile_handle ?? null,
-        // The same seed → pfp mapping as the leaderboard / public profile.
-        avatar: p.avatar_url ?? (p.seed != null ? avatarForSeed(p.seed) : null),
-        frame: p.frame_url ?? null,
-        rolledAt: p.rolled_at,
-        agoLabel: relativeTime(p.rolled_at),
-      };
-    });
-    // Trust boundary: only known tiers with a finite non-negative count.
-    const drought: RecentFeed['drought'] = {};
-    if (raw.drought && typeof raw.drought === 'object') {
-      for (const [k, v] of Object.entries(raw.drought)) {
-        if (
-          isRarity(k) &&
-          typeof v === 'number' &&
-          Number.isFinite(v) &&
-          v >= 0
-        )
-          drought[k] = v;
-      }
+  // Stable ids: the pull row id, else (older backend) a per-(handle,
+  // rolled_at) occurrence counter — NOT the array index, which shifts
+  // whenever the poll prepends a new pull, remounting every feed row (and
+  // replaying entry animations) instead of just adding one.
+  const seen = new Map<string, number>();
+  const pulls = (raw.pulls as unknown as BackendRecentPull[]).map((p) => {
+    const key = `${p.handle}-${p.rolled_at}`;
+    const n = seen.get(key) ?? 0;
+    seen.set(key, n + 1);
+    return {
+      id: p.id ?? `${key}-${n}`,
+      handle: p.handle,
+      name: p.name,
+      image: p.image,
+      slabImage: p.slab_image ?? null,
+      // Raw USD market_value must never render behind "RM" (same contract
+      // as the odds-row toCard above).
+      value: p.marketPriceMyr != null ? formatValue(p.marketPriceMyr) : '—',
+      rarity: p.rarity as Rarity,
+      // Pack label straight from the backend catalog (source of truth) — a
+      // since-deleted pack degrades to the neutral label, never a wrong one.
+      packName: p.pack_title ?? 'Mystery Pack',
+      packIcon: p.pack_image ?? FALLBACK_PACK_ICON,
+      who: p.who ?? 'Anonymous',
+      profileHandle: p.profile_handle ?? null,
+      // The same seed → pfp mapping as the leaderboard / public profile.
+      avatar: p.avatar_url ?? (p.seed != null ? avatarForSeed(p.seed) : null),
+      frame: p.frame_url ?? null,
+      rolledAt: p.rolled_at,
+      agoLabel: relativeTime(p.rolled_at),
+    };
+  });
+  // Trust boundary: only known tiers with a finite non-negative count.
+  const drought: RecentFeed['drought'] = {};
+  if (raw.drought && typeof raw.drought === 'object') {
+    for (const [k, v] of Object.entries(raw.drought)) {
+      if (isRarity(k) && typeof v === 'number' && Number.isFinite(v) && v >= 0)
+        drought[k] = v;
     }
-    return { pulls, drought };
   }
+  return { pulls, drought };
 }
 
 /**
@@ -630,33 +621,31 @@ export async function getPullGaps(
   rarity: Rarity,
   packSlug?: string,
 ): Promise<PullGaps | null> {
-  {
-    // `?rarity=…&pack_id=…`, in that order, as the hand-built querystring had
-    // it — the SDK serializes to the same URL.
-    const r = await store.get('/store/pulls/gaps', PullGapsSchema, {
-      ...PUBLIC,
-      query: { rarity, ...(packSlug ? { pack_id: packSlug } : {}) },
-    });
-    // Null (never mock) for a backend failure AND for a malformed body: the
-    // chart renders its unavailable state, and /api/pull-gaps turns that null
-    // into a 503 rather than memoising it.
-    if (!r.ok) return null;
-    const parsed = r.data;
-    return {
-      rarity: parsed.rarity as Rarity,
-      pct: parsed.pct ?? null,
-      expected: parsed.expected ?? null,
-      avg: parsed.avg ?? null,
-      last20: parsed.last20 ?? null,
-      current: parsed.current,
-      hits: parsed.hits.map((h) => ({
-        id: h.id,
-        gap: h.gap,
-        rolledAt: h.rolled_at,
-        who: h.who ?? 'Anonymous',
-        avatar: h.avatar_url ?? (h.seed != null ? avatarForSeed(h.seed) : null),
-        frame: h.frame_url ?? null,
-      })),
-    };
-  }
+  // `?rarity=…&pack_id=…`, in that order, as the hand-built querystring had
+  // it — the SDK serializes to the same URL.
+  const r = await store.get('/store/pulls/gaps', PullGapsSchema, {
+    ...PUBLIC,
+    query: { rarity, ...(packSlug ? { pack_id: packSlug } : {}) },
+  });
+  // Null (never mock) for a backend failure AND for a malformed body: the
+  // chart renders its unavailable state, and /api/pull-gaps turns that null
+  // into a 503 rather than memoising it.
+  if (!r.ok) return null;
+  const parsed = r.data;
+  return {
+    rarity: parsed.rarity as Rarity,
+    pct: parsed.pct ?? null,
+    expected: parsed.expected ?? null,
+    avg: parsed.avg ?? null,
+    last20: parsed.last20 ?? null,
+    current: parsed.current,
+    hits: parsed.hits.map((h) => ({
+      id: h.id,
+      gap: h.gap,
+      rolledAt: h.rolled_at,
+      who: h.who ?? 'Anonymous',
+      avatar: h.avatar_url ?? (h.seed != null ? avatarForSeed(h.seed) : null),
+      frame: h.frame_url ?? null,
+    })),
+  };
 }
