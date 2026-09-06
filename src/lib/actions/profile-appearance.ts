@@ -2,15 +2,25 @@
 
 /**
  * Profile appearance server actions — photo upload + frame equip/unequip.
- * The photo POST is multipart, so it uses raw fetch (sdk.client.fetch
- * JSON-encodes bodies); the JWT stays in the httpOnly cookie, read server-side.
+ *
+ * The frame POST goes through the `Store` port (src/lib/store.ts) like every
+ * other backend call. The photo POST cannot: it is MULTIPART, and the port's
+ * transport is `sdk.client.fetch`, which JSON-stringifies a body whenever the
+ * content type is JSON and cannot be handed a `FormData` with its boundary
+ * intact. So it stays a raw `fetch` against MEDUSA_BACKEND_URL, building the
+ * two headers itself — the one exception the pre-port transport module already
+ * carved out for the same reason. It reads the JWT straight from the cookie
+ * the port owns the name of (`AUTH_COOKIE`), so there is still exactly one
+ * declaration of which cookie carries the session.
  */
 import { revalidatePath } from 'next/cache';
+import { cookies } from 'next/headers';
 import { MEDUSA_BACKEND_URL } from '@/lib/medusa';
-import { authedFetch } from '@/lib/authed-fetch';
+import { store, type Failure } from '@/lib/store';
+import { AUTH_COOKIE } from '@/lib/store-port';
 import { logger } from '@/lib/logger';
-import { getAuthToken } from '@/lib/data/customer';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
+import { UncheckedSchema } from '@/lib/data/schemas';
 import { FRAME_LEVELS } from '@/lib/frame-levels';
 
 const APPEARANCE_RULES: ErrorRule[] = [
@@ -33,6 +43,7 @@ const APPEARANCE_RULES: ErrorRule[] = [
   [/unauthorized|not authenticated|401/i, 'Please log in again.'],
 ];
 const FALLBACK = 'Something went wrong. Please try again.';
+const LOGIN_FIRST = 'Please log in first.';
 
 export type AppearanceResult = { ok: true } | { ok: false; error: string };
 
@@ -47,8 +58,8 @@ export async function uploadAvatar(
   if (file.size > 5 * 1024 * 1024) {
     return { ok: false, error: 'Photo is too large — keep it under 5 MB.' };
   }
-  const token = await getAuthToken();
-  if (!token) return { ok: false, error: 'Please log in first.' };
+  const token = (await cookies()).get(AUTH_COOKIE)?.value;
+  if (!token) return { ok: false, error: LOGIN_FIRST };
   try {
     const body = new FormData();
     body.append('files', file);
@@ -88,20 +99,21 @@ export async function setAvatarFrame(
   if (level !== null && !(FRAME_LEVELS as readonly number[]).includes(level)) {
     return { ok: false, error: 'Invalid frame.' };
   }
-  const token = await getAuthToken();
-  if (!token) return { ok: false, error: 'Please log in first.' };
-  try {
-    await authedFetch(token, '/store/profile/frame', {
-      method: 'POST',
-      body: { level },
-    });
-    revalidatePath('/me');
-    return { ok: true };
-  } catch (error) {
-    logger.error('[appearance] frame set failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, APPEARANCE_RULES, FALLBACK),
-    };
+  // The response is not read — a 2xx IS the answer.
+  const r = await store.post('/store/profile/frame', UncheckedSchema, {
+    level,
+  });
+  if (!r.ok) return { ok: false, error: frameError(r) };
+  revalidatePath('/me');
+  return { ok: true };
+}
+
+/** No cookie at all (the call never left — `status` is undefined) keeps the
+ *  logged-out sentence; anything the backend actually said goes through
+ *  APPEARANCE_RULES, the same table the upload's own refusals use. */
+function frameError(f: Failure): string {
+  if (f.kind === 'unauthenticated' && f.status === undefined) {
+    return LOGIN_FIRST;
   }
+  return friendlyError(f.text, APPEARANCE_RULES, FALLBACK);
 }
