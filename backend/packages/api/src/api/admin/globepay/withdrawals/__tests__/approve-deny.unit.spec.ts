@@ -1,11 +1,5 @@
 import { MedusaError } from '@medusajs/framework/utils';
 
-// The gateway's HTTP seam is the only thing stubbed — every decision under
-// test is the routes' own. Same seam and same reason as the sweep spec.
-jest.mock('../../../../../modules/packs/gateway', () => {
-  const actual = jest.requireActual('../../../../../modules/packs/gateway');
-  return { ...actual, submitWithdrawal: jest.fn() };
-});
 // The refund helper's steps 2 and 4. Mocked for the same reason the sweep
 // spec mocks them: unmocked, sendWithdrawalReceipt's real body fails silently
 // against a bare fake container, so nothing could assert on it.
@@ -18,8 +12,9 @@ jest.mock('../../../../../modules/packs/withdrawal-receipt', () => ({
 
 import {
   GatewayError,
-  submitWithdrawal,
+  setActiveGateway,
 } from '../../../../../modules/packs/gateway';
+import { fakeGateway } from '../../../../../modules/packs/fake-gateway';
 import { notifyFeed } from '../../../../../modules/packs/notify-feed';
 import { sendWithdrawalReceipt } from '../../../../../modules/packs/withdrawal-receipt';
 import {
@@ -34,7 +29,10 @@ import type {
 } from '../../../../../modules/packs/facets';
 import type PacksModuleService from '../../../../../modules/packs/service';
 
-const submitMock = submitWithdrawal as jest.Mock;
+// The gateway is NOT mocked. The approve route reads the ROW's gateway
+// (rowGateway -> gatewayConfigFor), so a row that names the fake gateway makes
+// the seam dispatch to fake-gateway.ts — the same dispatch production takes,
+// with only the HTTP replaced. Every decision under test is the routes' own.
 const notifyFeedMock = notifyFeed as jest.Mock;
 const receipt = sendWithdrawalReceipt as jest.Mock;
 
@@ -56,7 +54,7 @@ const heldRow = () => ({
   customer_id: 'cus_1',
   amount: '1500.00',
   bank_code: 'MBBEMYKL',
-  gateway: 'tgpay',
+  gateway: 'fake',
   account_number: ACCOUNT_NUMBER,
   account_holder_name: 'AHMAD BIN ALI',
   status: 'held',
@@ -84,6 +82,9 @@ const heldRow = () => ({
  * method at all, which is exactly what the unlocked version got wrong.
  */
 function harness(row = heldRow(), debitExists = true, frozen = false) {
+  // Step order, for the one test that pins claim-before-gateway. The gateway
+  // half is pushed by a scripted outcome in that test.
+  const order: string[] = [];
   const packs = {
     listGlobePayWithdrawals: jest.fn(async (selector: { id?: string }) =>
       selector.id === row.id ? [row] : [],
@@ -98,6 +99,7 @@ function harness(row = heldRow(), debitExists = true, frozen = false) {
     ),
     claimWithdrawalAgainstDebit: jest.fn(
       async (input: { id: string; from: string[]; to: string }) => {
+        order.push('claim');
         const to = debitExists ? input.to : 'failed';
         if (input.id !== row.id) return { debited: debitExists, claimed: true };
         if (!input.from.includes(row.status)) {
@@ -150,7 +152,7 @@ function harness(row = heldRow(), debitExists = true, frozen = false) {
     headers: {},
     ip: '10.0.0.7',
   } as never;
-  return { packs, logger, scope, req, row };
+  return { packs, logger, scope, req, row, order };
 }
 
 const mkRes = () => {
@@ -165,6 +167,8 @@ const mkRes = () => {
 };
 
 /** Every log line this pair writes, flattened — the "never the number" scan. */
+const ORIGINAL = { ...process.env };
+
 const allLogLines = (logger: {
   info: jest.Mock;
   warn: jest.Mock;
@@ -179,26 +183,39 @@ const allLogLines = (logger: {
     .join('\n');
 
 beforeEach(() => {
-  submitMock.mockReset();
-  submitMock.mockResolvedValue({ transactionId: 'W2026081200000001' });
+  fakeGateway.reset();
+  fakeGateway.script({
+    submitWithdrawal: { transactionId: 'W2026081200000001' },
+  });
+  setActiveGateway(null);
   notifyFeedMock.mockClear();
   receipt.mockClear();
   process.env.GLOBEPAY_ENABLED = 'true';
   process.env.GLOBEPAY_WITHDRAWALS_ENABLED = 'true';
-  process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
-  process.env.TGPAY_PUBLIC_KEY = 'pk-test';
-  process.env.TGPAY_SECRET_KEY = 'sk-test';
   process.env.PAYMENT_CALLBACK_BASE = 'https://us';
+  // The fake gateway needs no credentials; the row names it directly.
+  process.env.PAYMENT_GATEWAY = 'fake';
+});
+
+afterAll(() => {
+  process.env = ORIGINAL;
+  setActiveGateway(null);
 });
 
 describe('POST /admin/globepay/withdrawals/:id/approve', () => {
   it('submits the row’s OWN stored destination and stamps the gateway id', async () => {
     const h = harness();
+    fakeGateway.script({
+      submitWithdrawal: () => {
+        h.order.push('gateway');
+        return { transactionId: 'W2026081200000001' };
+      },
+    });
     const { res, out } = mkRes();
     await APPROVE(h.req, res);
 
-    expect(submitMock).toHaveBeenCalledTimes(1);
-    const [payload] = submitMock.mock.calls[0];
+    expect(fakeGateway.calls.withdrawals).toHaveLength(1);
+    const [payload] = fakeGateway.calls.withdrawals;
     expect(payload).toMatchObject({
       merchantTransactionId: 'PW-HELD-1',
       merchantClientId: 'cus_1',
@@ -219,9 +236,7 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
       from: ['held'],
       to: 'pending',
     });
-    expect(
-      h.packs.claimWithdrawalAgainstDebit.mock.invocationCallOrder[0],
-    ).toBeLessThan(submitMock.mock.invocationCallOrder[0]);
+    expect(h.order).toEqual(['claim', 'gateway']);
     // Their W… id lands on the row — scoped to 'pending', so a sweep that
     // closed the row while the submit was in flight cannot end up with a
     // refunded row wearing a payout's gateway id.
@@ -246,7 +261,7 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
     await APPROVE(h.req, first.res);
     await APPROVE(h.req, second.res);
 
-    expect(submitMock).toHaveBeenCalledTimes(1);
+    expect(fakeGateway.calls.withdrawals).toHaveLength(1);
     expect(h.packs.claimWithdrawalAgainstDebit).toHaveBeenCalledTimes(2);
     expect(second.out.body).toMatchObject({ approved: false });
     // The status flip must be the CLAIM's, never a find-then-write: an
@@ -262,15 +277,20 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
     const h = harness({ ...heldRow(), status: 'pending' });
     const { res, out } = mkRes();
     await APPROVE(h.req, res);
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
     expect(out.body).toMatchObject({ approved: false, status: 'pending' });
   });
 
   it('a DEFINITE refusal refunds on the shared anchor and closes the row failed', async () => {
     const h = harness();
-    submitMock.mockRejectedValue(
-      new GatewayError('Insufficient payout float', ['PMT10013'], 400, true),
-    );
+    fakeGateway.script({
+      submitWithdrawal: new GatewayError(
+        'Insufficient payout float',
+        ['PMT10013'],
+        400,
+        true,
+      ),
+    });
     const { res } = mkRes();
 
     await expect(APPROVE(h.req, res)).rejects.toMatchObject({
@@ -322,7 +342,7 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
 
   it('an AMBIGUOUS submit error leaves the row pending for the sweep — never a refund', async () => {
     const h = harness();
-    submitMock.mockRejectedValue(new Error('socket hang up'));
+    fakeGateway.script({ submitWithdrawal: new Error('socket hang up') });
     const { res, out } = mkRes();
 
     await APPROVE(h.req, res);
@@ -354,7 +374,7 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
       type: MedusaError.Types.INVALID_DATA,
     });
 
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
     expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
     // Closed through the locked claim, so it can race neither a concurrent
     // deny nor the debit itself.
@@ -412,7 +432,7 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
       type: MedusaError.Types.NOT_ALLOWED,
     });
     expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
     expect(h.row.status).toBe('held');
     // Cause-agnostic, like the request-time gate (walletSummary.isFrozen) —
     // an auto clawback-debt freeze must block a payout too, which is why this
@@ -431,7 +451,7 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
       type: MedusaError.Types.NOT_ALLOWED,
     });
     expect(h.packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
   });
 });
 

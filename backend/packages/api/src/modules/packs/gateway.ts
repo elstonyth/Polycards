@@ -1,5 +1,6 @@
 import * as tgpay from './tgpay-client';
 import type { TgpayConfig } from './tgpay-client';
+import { fakeGateway, type FakeConfig } from './fake-gateway';
 import { PACKS_MODULE } from './index';
 import {
   banksFor,
@@ -50,7 +51,13 @@ export type {
 // way, so they live at src/api/hooks/<gateway>/. Adding a gateway = a client
 // file, a hooks folder, an entry in GATEWAYS and an adapter below.
 
-export type PaymentGateway = 'tgpay';
+// 'fake' is the in-process adapter the specs drive (fake-gateway.ts). It is
+// in the union so the compiler forces a registry entry AND an adapter for it
+// like any other gateway, and it is unreachable outside NODE_ENV=test: see
+// testOnly() below, which gates isPaymentGateway (and therefore
+// gatewayConfigFor, resolveActiveGateway and the admin switch), plus the
+// registry entry's own `configured` / `configFromEnv`.
+export type PaymentGateway = 'tgpay' | 'fake';
 
 export type GatewayDefinition = {
   id: PaymentGateway;
@@ -100,9 +107,50 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
       withdrawalMax: 30000,
     },
   },
+
+  // Test-only. Mirrors TGPay's limits and contact requirement field for
+  // field, so a spec that selects it exercises the SAME orchestration
+  // branches the production gateway takes — only the I/O is replaced. Its
+  // hook paths are real strings (nothing serves them) because gatewayUrls
+  // returns '' for an empty path and the money routes fail closed on that.
+  fake: {
+    id: 'fake',
+    label: 'Fake gateway (tests)',
+    configured: () => testOnly(),
+    configFromEnv: () => {
+      if (!testOnly())
+        throw new Error(
+          'The fake payment gateway is available under NODE_ENV=test only.',
+        );
+      return { kind: 'fake' };
+    },
+    needsCustomerContact: true,
+    hooks: {
+      deposit: '/hooks/fake/deposit',
+      withdrawal: '/hooks/fake/withdrawal',
+    },
+    limits: {
+      depositMin: 50,
+      depositMax: 10000,
+      withdrawalMin: 50,
+      withdrawalMax: 30000,
+    },
+  },
 };
 
-export const GATEWAY_IDS = Object.keys(GATEWAYS) as PaymentGateway[];
+/**
+ * The gateways an OPERATOR may be shown and may choose. Never the fake, in
+ * any environment — a test selects it by env or by setActiveGateway, not from
+ * the admin switch, and this list is also what the audit page walks.
+ */
+export const GATEWAY_IDS = (Object.keys(GATEWAYS) as PaymentGateway[]).filter(
+  (id) => id !== 'fake',
+);
+
+/** The fake gateway exists for specs; nothing else may ever select it. */
+function testOnly(): boolean {
+  return process.env.NODE_ENV === 'test';
+}
 
 /**
  * Gateways that no longer exist in this codebase but whose rows still do.
@@ -112,10 +160,16 @@ export const GATEWAY_IDS = Object.keys(GATEWAYS) as PaymentGateway[];
 export const RETIRED_GATEWAYS: readonly string[] = ['globepay'];
 
 export function isPaymentGateway(value: unknown): value is PaymentGateway {
-  return (
-    typeof value === 'string' &&
-    Object.prototype.hasOwnProperty.call(GATEWAYS, value)
-  );
+  if (
+    typeof value !== 'string' ||
+    !Object.prototype.hasOwnProperty.call(GATEWAYS, value)
+  )
+    return false;
+  // THE guard. Every road to an adapter runs through here — the admin switch,
+  // gatewayConfigFor, resolveActiveGateway, paymentGateway(env), rowGateway —
+  // so a deploy that is not `test` cannot name the fake by env var, by admin
+  // click, or by a row someone wrote 'fake' into.
+  return value !== 'fake' || testOnly();
 }
 
 /**
@@ -184,7 +238,7 @@ export async function resolveActiveGateway(
   return paymentGateway();
 }
 
-export type GatewayConfig = TgpayConfig;
+export type GatewayConfig = TgpayConfig | FakeConfig;
 
 /** Config for a SPECIFIC gateway, from env. Throws when it is not configured. */
 export function gatewayConfigFor(
@@ -295,7 +349,7 @@ function absoluteLink(link: string, config: TgpayConfig): string {
 // a registry entry PLUS an adapter here, nothing in the orchestration,
 // sweeps or routes.
 
-type GatewayAdapter<C extends GatewayConfig> = {
+export type GatewayAdapter<C extends GatewayConfig> = {
   submitDeposit: (
     input: SubmitDepositInput,
     config: C,
@@ -470,13 +524,23 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
   },
 };
 
+// Total over the kinds by construction: a new member of the GatewayConfig
+// union has no entry here until someone writes its adapter, and the compiler
+// says so.
 const ADAPTERS: {
-  [K in GatewayConfig['kind']]: GatewayAdapter<GatewayConfig>;
-} = { tgpay: tgpayAdapter };
+  [K in GatewayConfig['kind']]: GatewayAdapter<
+    Extract<GatewayConfig, { kind: K }>
+  >;
+} = { tgpay: tgpayAdapter, fake: fakeGateway };
 
-/** Pick the adapter for a config by its `kind`. */
+/**
+ * Pick the adapter for a config by its `kind`. The cast re-widens what the
+ * lookup narrowed: each adapter accepts only ITS config (that is what makes
+ * the table above type-safe), and the runtime pairing of kind to adapter is
+ * exactly what guarantees the config handed on is the one it expects.
+ */
 function adapterFor(config: GatewayConfig): GatewayAdapter<GatewayConfig> {
-  return ADAPTERS[config.kind];
+  return ADAPTERS[config.kind] as GatewayAdapter<GatewayConfig>;
 }
 
 export function submitDeposit(

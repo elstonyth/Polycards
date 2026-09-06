@@ -16,17 +16,14 @@ import PacksModuleService from '../service';
 import { POST as withdrawRoute } from '../../../api/store/credits/withdraw/route';
 
 // startGlobePayWithdrawal talks to the gateway through the seam in
-// gateway.ts; stub that so these tests cover the MONEY ORDERING (row -> debit
-// -> gateway, refund on refusal) rather than the adapter or the HTTP layer.
-jest.mock('../gateway', () => {
-  const actual = jest.requireActual('../gateway');
-  return { ...actual, submitWithdrawal: jest.fn() };
-});
-
-import { GatewayError, submitWithdrawal } from '../gateway';
+// gateway.ts. Nothing here replaces that seam: these tests select the FAKE
+// gateway the way production selects a real one (PAYMENT_GATEWAY ->
+// paymentGateway() -> gatewayConfigFor -> the adapter for that config's
+// kind), so what they cover is the MONEY ORDERING (row -> debit -> gateway,
+// refund on refusal) with only the adapter's I/O replaced.
+import { GatewayError, setActiveGateway } from '../gateway';
+import { fakeGateway } from '../fake-gateway';
 import type { FakeFacet, GatewayWithdrawals } from '../facets';
-
-const submitMock = submitWithdrawal as jest.Mock;
 
 /** The destination the customer saved two days ago — past its cooling-off
  *  window, so it is the "happy path" account every ordering test pays to. The
@@ -122,14 +119,23 @@ const start = (
     'https://us/payout-verify',
   );
 
+const ORIGINAL = { ...process.env };
+
 beforeEach(() => {
-  submitMock.mockReset();
-  submitMock.mockResolvedValue({ transactionId: 'W2026072200000001' });
+  fakeGateway.reset();
+  fakeGateway.script({
+    submitWithdrawal: { transactionId: 'W2026072200000001' },
+  });
+  setActiveGateway(null);
   process.env.GLOBEPAY_ENABLED = 'true';
   process.env.GLOBEPAY_WITHDRAWALS_ENABLED = 'true';
-  process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
-  process.env.TGPAY_PUBLIC_KEY = 'pk-test';
-  process.env.TGPAY_SECRET_KEY = 'sk-test';
+  // The fake gateway mirrors TGPay's band and needs no credentials.
+  process.env.PAYMENT_GATEWAY = 'fake';
+});
+
+afterAll(() => {
+  process.env = ORIGINAL;
+  setActiveGateway(null);
 });
 
 describe('globepayWithdrawalsEnabled', () => {
@@ -203,9 +209,11 @@ describe('startGlobePayWithdrawal — money ordering', () => {
         destination: SAVED_ACCOUNT,
       };
     });
-    submitMock.mockImplementation(async () => {
-      order.push('gateway');
-      return { transactionId: 'W1' };
+    fakeGateway.script({
+      submitWithdrawal: () => {
+        order.push('gateway');
+        return { transactionId: 'W1' };
+      },
     });
 
     await start(h);
@@ -260,8 +268,8 @@ describe('startGlobePayWithdrawal — money ordering', () => {
       destination: lockedDestination,
     });
     await start(h);
-    expect(submitMock).toHaveBeenCalledTimes(1);
-    expect(submitMock.mock.calls[0][0]).toMatchObject({
+    expect(fakeGateway.calls.withdrawals).toHaveLength(1);
+    expect(fakeGateway.calls.withdrawals[0]).toMatchObject({
       destinationBankCode: 'CIMB',
       destinationAccountNumber: '9999999999',
       destinationAccountHolderName: 'SITI BINTI OMAR',
@@ -273,7 +281,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
   it('pays a saved, cooled-off account with its STORED details', async () => {
     const h = harness();
     const result = await start(h);
-    expect(submitMock.mock.calls[0][0]).toMatchObject({
+    expect(fakeGateway.calls.withdrawals[0]).toMatchObject({
       merchantClientId: 'cus_1',
       destinationBankCode: SAVED_ACCOUNT.bankCode,
       destinationAccountNumber: SAVED_ACCOUNT.accountNumber,
@@ -311,7 +319,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     // pretty-print the recorded arguments, and those carry a full account
     // number on this path.
     expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
-    expect(submitMock.mock.calls.length).toBe(0);
+    expect(fakeGateway.calls.withdrawals.length).toBe(0);
   });
 
   // Test-plan case 2 at the CALLER level (the authoritative one is under the
@@ -402,9 +410,9 @@ describe('startGlobePayWithdrawal — money ordering', () => {
   it('REFUNDS the debit and closes the row when the gateway DEFINITELY refuses', async () => {
     const h = harness();
     // definite: a parsed isSuccess:false response — no payout exists there.
-    submitMock.mockRejectedValue(
-      new GatewayError('nope', ['PMT10013'], 200, true),
-    );
+    fakeGateway.script({
+      submitWithdrawal: new GatewayError('nope', ['PMT10013'], 200, true),
+    });
     await expect(start(h)).rejects.toThrow(/refused by the payment provider/i);
 
     // The debit went through withdrawForCashout, so the ONLY
@@ -463,14 +471,14 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     // nobody reads as PII. The log beside this write is a different audience
     // and stays unredacted, deliberately.
     const h = harness();
-    submitMock.mockRejectedValue(
-      new GatewayError(
+    fakeGateway.script({
+      submitWithdrawal: new GatewayError(
         'invalid beneficiary account 1234567890 for AHMAD BIN ALI',
         ['PMT10021'],
         200,
         true,
       ),
-    );
+    });
     await expect(start(h)).rejects.toThrow(/refused by the payment provider/i);
 
     const [{ failure_reason: reason }] =
@@ -490,14 +498,14 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     // version of this redaction matched contiguous digits only, so a gateway
     // that pretty-printed the number back at us defeated it entirely.
     const h = harness();
-    submitMock.mockRejectedValue(
-      new GatewayError(
+    fakeGateway.script({
+      submitWithdrawal: new GatewayError(
         'beneficiary 1234-5678-9012 rejected by receiving bank',
         ['PMT10021'],
         200,
         true,
       ),
-    );
+    });
     await expect(start(h)).rejects.toThrow(/refused by the payment provider/i);
 
     const [{ failure_reason: reason }] =
@@ -515,9 +523,9 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     h.logger.warn.mockImplementation(() => {
       throw new Error('logger exploded');
     });
-    submitMock.mockRejectedValue(
-      new GatewayError('nope', ['PMT10013'], 200, true),
-    );
+    fakeGateway.script({
+      submitWithdrawal: new GatewayError('nope', ['PMT10013'], 200, true),
+    });
     await expect(start(h)).rejects.toThrow(/refused by the payment provider/i);
     // Self-contained on purpose: without this the test would still pass if the
     // log were deleted outright, and the deletion is the regression it exists
@@ -542,7 +550,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     h.logger.error.mockImplementation(() => {
       throw new Error('logger exploded');
     });
-    submitMock.mockRejectedValue(new Error('socket hang up'));
+    fakeGateway.script({ submitWithdrawal: new Error('socket hang up') });
     await expect(start(h)).resolves.toMatchObject({ transactionId: null });
     expect(h.logger.error).toHaveBeenCalled();
     // No refund, and the row was never closed — the sweep still owns this one.
@@ -563,7 +571,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     'does NOT refund on %s — ambiguous outcome stays pending for the sweep',
     async (_label, error) => {
       const h = harness();
-      submitMock.mockRejectedValue(error);
+      fakeGateway.script({ submitWithdrawal: error });
       const result = await start(h);
       // Ambiguity is not an error to the caller: the debit stands and the
       // sweep resolves the payout, exactly like a slow-processing one.
@@ -597,7 +605,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
   });
 
   it('a playthrough refusal also leaves no row behind', async () => {
@@ -641,7 +649,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     });
     // No money moved and nothing was refunded (there was no debit to refund).
     expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
   });
 
   it('closes the row WITHOUT refunding when the debit itself fails (insufficient balance)', async () => {
@@ -652,7 +660,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     await expect(start(h)).rejects.toThrow(/insufficient/i);
     // Nothing was debited, so nothing to refund.
     expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
     expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith({
       id: 'gpw_1',
       status: 'failed',
@@ -739,7 +747,7 @@ describe('startGlobePayWithdrawal — approval threshold (held)', () => {
     const h = harness();
     h.packs.walletSummary.mockResolvedValue(roomyWallet);
     const result = await start(h, { amount: 1000 });
-    expect(submitMock).toHaveBeenCalledTimes(1);
+    expect(fakeGateway.calls.withdrawals).toHaveLength(1);
     expect(result.status).toBe('pending');
     expect(h.packs.createGlobePayWithdrawals.mock.calls[0][0][0].status).toBe(
       'pending',
@@ -751,7 +759,7 @@ describe('startGlobePayWithdrawal — approval threshold (held)', () => {
     h.packs.walletSummary.mockResolvedValue(roomyWallet);
     const result = await start(h, { amount: 1000.01 });
 
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
     expect(result.status).toBe('held');
     expect(result.transactionId).toBeNull();
 
@@ -786,7 +794,7 @@ describe('startGlobePayWithdrawal — approval threshold (held)', () => {
     // per-call read (not a module-load-time latch) can see this, since the
     // module was imported long before this assignment.
     const result = await start(h, { amount: 1500 });
-    expect(submitMock).toHaveBeenCalledTimes(1);
+    expect(fakeGateway.calls.withdrawals).toHaveLength(1);
     expect(result.status).toBe('pending');
   });
 
@@ -797,7 +805,7 @@ describe('startGlobePayWithdrawal — approval threshold (held)', () => {
     const h = harness();
     h.packs.walletSummary.mockResolvedValue(roomyWallet);
     const result = await start(h, { amount: 100 });
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
     expect(result.status).toBe('held');
   });
 
@@ -812,7 +820,7 @@ describe('startGlobePayWithdrawal — approval threshold (held)', () => {
     const h = harness();
     h.packs.walletSummary.mockResolvedValue(roomyWallet);
     const result = await start(h, { amount: GLOBEPAY_WD_MIN_RM });
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
     expect(result.status).toBe('held');
   });
 
@@ -827,7 +835,7 @@ describe('startGlobePayWithdrawal — approval threshold (held)', () => {
     await expect(start(h, { amount: 2000 })).rejects.toThrow(/under review/i);
     expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
   });
 
   it('a held-sized withdrawal is still refused BEFORE any row is written on a playthrough refusal', async () => {
@@ -1571,7 +1579,7 @@ describe('startGlobePayWithdrawal — Idempotency-Key', () => {
     // The three things that must NOT happen twice.
     expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
   });
 
   // Asserted as EXCLUDE-failed, not as a list of live statuses. An allowlist
@@ -1610,7 +1618,7 @@ describe('startGlobePayWithdrawal — Idempotency-Key', () => {
     // The retry must actually go through: new row, real debit, real submit.
     expect(h.packs.createGlobePayWithdrawals).toHaveBeenCalled();
     expect(h.packs.withdrawForCashout).toHaveBeenCalled();
-    expect(submitMock).toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toHaveLength(1);
   });
 
   // Two requests with the same key can both pass the read before either
@@ -1649,7 +1657,7 @@ describe('startGlobePayWithdrawal — Idempotency-Key', () => {
     expect(res.merchantTransactionId).toBe('PC-winner');
     // The loser must not debit or submit — the winner owns the payout.
     expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
   });
 
   // A duplicate key with no visible active row means the winner failed and
@@ -1710,6 +1718,6 @@ describe('startGlobePayWithdrawal — Idempotency-Key', () => {
     expect(res.replayed).toBeUndefined();
     expect(h.packs.listGlobePayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.createGlobePayWithdrawals).toHaveBeenCalled();
-    expect(submitMock).toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toHaveLength(1);
   });
 });

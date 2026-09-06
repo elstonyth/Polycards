@@ -1,20 +1,17 @@
-jest.mock('../../../../../modules/packs/gateway', () => {
-  const actual = jest.requireActual('../../../../../modules/packs/gateway');
-  return { ...actual, checkBalance: jest.fn(), gatewayConfigFor: jest.fn() };
-});
-
 import { GET } from '../route';
-import {
-  checkBalance,
-  gatewayConfigFor,
-  setActiveGateway,
-} from '../../../../../modules/packs/gateway';
+import { setActiveGateway } from '../../../../../modules/packs/gateway';
+import { GatewayError } from '../../../../../modules/packs/gateway-types';
+import { fakeGateway } from '../../../../../modules/packs/fake-gateway';
 import type {
   FakeFacet,
   GatewayReports,
 } from '../../../../../modules/packs/facets';
 import type PacksModuleService from '../../../../../modules/packs/service';
 
+// The wallet read runs through the REAL seam: the route resolves the active
+// gateway, asks gatewayConfigFor for its config and calls checkBalance, which
+// dispatches on that config's kind. Selecting the fake gateway is therefore
+// the whole substitution — nothing here replaces a module.
 const ORIGINAL = { ...process.env };
 
 beforeEach(() => {
@@ -23,12 +20,14 @@ beforeEach(() => {
   process.env.TGPAY_SECRET_KEY = 'sk-test';
   setActiveGateway(null);
   jest.clearAllMocks();
-  (gatewayConfigFor as jest.Mock).mockImplementation((id: string) => ({ id }));
-  (checkBalance as jest.Mock).mockResolvedValue({
-    currentBalance: 300,
-    availableBalance: 249,
-    currencyCode: 'MYR',
-    notes: [],
+  fakeGateway.reset();
+  fakeGateway.script({
+    checkBalance: {
+      currentBalance: 300,
+      availableBalance: 249,
+      currencyCode: 'MYR',
+      notes: [],
+    },
   });
 });
 
@@ -109,11 +108,14 @@ type Body = {
 
 describe('GET /admin/globepay/audit', () => {
   it('reads the ACTIVE gateway wallet and totals, and lists the other gateway history', async () => {
-    const h = harness('tgpay');
+    // Active by the ADMIN SETTING alone — PAYMENT_GATEWAY is unset here.
+    const h = harness('fake');
     await GET(h.req as never, h.res as never);
     const body = h.res.body as Body;
-    expect(body.gateway).toBe('tgpay');
-    expect(gatewayConfigFor).toHaveBeenCalledWith('tgpay');
+    expect(body.gateway).toBe('fake');
+    // The wallet came from the ACTIVE gateway's own config: only that
+    // gateway's adapter was ever asked.
+    expect(fakeGateway.calls.balances).toEqual([{ kind: 'fake' }]);
     expect(body.wallet).toEqual(
       expect.objectContaining({ current: 300, available: 249 }),
     );
@@ -134,7 +136,11 @@ describe('GET /admin/globepay/audit', () => {
   });
 
   it('a wallet read failure is reported beside the findings, never instead of them', async () => {
-    (checkBalance as jest.Mock).mockRejectedValue(new Error('403 not allowed'));
+    fakeGateway.script({
+      checkBalance: new GatewayError('403 not allowed', [], 403),
+    });
+    // No admin setting: the active gateway falls back to PAYMENT_GATEWAY.
+    process.env.PAYMENT_GATEWAY = 'fake';
     const h = harness(null);
     await GET(h.req as never, h.res as never);
     const body = h.res.body as Body;

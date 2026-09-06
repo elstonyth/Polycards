@@ -5,23 +5,19 @@ import {
   startGlobePayDeposit,
 } from '../globepay-deposit';
 
-// startGlobePayDeposit talks to the gateway through the seam in gateway.ts;
-// stub that so these tests cover the state machine (row before call, row
-// closed on failure, id stamped on success) rather than the adapter or the
-// HTTP layer, which have their own specs.
-jest.mock('../gateway', () => {
-  const actual = jest.requireActual('../gateway');
-  return { ...actual, submitDeposit: jest.fn() };
-});
-
-import { GatewayError, submitDeposit } from '../gateway';
+// startGlobePayDeposit talks to the gateway through the seam in gateway.ts.
+// Nothing here replaces that seam: the tests select the FAKE gateway the way
+// production selects a real one (PAYMENT_GATEWAY -> paymentGateway() ->
+// gatewayConfigFor -> the adapter for that config's kind), so what is covered
+// is the state machine (row before call, row closed on failure, id stamped on
+// success) with only the adapter's I/O replaced.
+import { GatewayError, setActiveGateway } from '../gateway';
+import { fakeGateway } from '../fake-gateway';
 import {
   GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER,
   GLOBEPAY_PENDING_WINDOW_MS,
 } from '../globepay-deposit';
 import type { FakeFacet, GatewayDeposits } from '../facets';
-
-const submitMock = submitDeposit as jest.Mock;
 
 function harness() {
   const packs = {
@@ -62,17 +58,26 @@ const start = (
     'https://us/return',
   );
 
+const ORIGINAL = { ...process.env };
+
 beforeEach(() => {
-  submitMock.mockReset();
-  submitMock.mockResolvedValue({
-    transactionId: 'D2026072112415767',
-    url: 'https://cashier/x',
-    depositActualAmount: 50,
+  fakeGateway.reset();
+  fakeGateway.script({
+    submitDeposit: {
+      transactionId: 'D2026072112415767',
+      url: 'https://cashier/x',
+      depositActualAmount: 50,
+    },
   });
+  setActiveGateway(null);
   process.env.GLOBEPAY_ENABLED = 'true';
-  process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
-  process.env.TGPAY_PUBLIC_KEY = 'pk-test';
-  process.env.TGPAY_SECRET_KEY = 'sk-test';
+  // The fake gateway mirrors TGPay's band and needs no credentials.
+  process.env.PAYMENT_GATEWAY = 'fake';
+});
+
+afterAll(() => {
+  process.env = ORIGINAL;
+  setActiveGateway(null);
 });
 
 describe('globepayEnabled', () => {
@@ -105,9 +110,11 @@ describe('startGlobePayDeposit', () => {
       order.push('row');
       return { id: 'gpd_1' };
     });
-    submitMock.mockImplementation(async () => {
-      order.push('gateway');
-      return { transactionId: 'D1', url: 'u', depositActualAmount: 50 };
+    fakeGateway.script({
+      submitDeposit: () => {
+        order.push('gateway');
+        return { transactionId: 'D1', url: 'u', depositActualAmount: 50 };
+      },
     });
 
     await start(h);
@@ -132,24 +139,20 @@ describe('startGlobePayDeposit', () => {
   it('defaults to the provisioned method and passes the CUSTOMER ip', async () => {
     const h = harness();
     await start(h);
-    expect(submitMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        paymentMethodCode: GLOBEPAY_DEFAULT_METHOD,
-        ipAddress: '1.2.3.4',
-        notifyUrl: 'https://us/notify',
-      }),
-      expect.anything(),
-    );
+    expect(fakeGateway.calls.deposits[0]).toMatchObject({
+      paymentMethodCode: GLOBEPAY_DEFAULT_METHOD,
+      ipAddress: '1.2.3.4',
+      notifyUrl: 'https://us/notify',
+    });
   });
 
   describe('payment method allow-list', () => {
     it('forwards a named rail', async () => {
       const h = harness();
       await start(h, { paymentMethodCode: 'FPX' });
-      expect(submitMock).toHaveBeenCalledWith(
-        expect.objectContaining({ paymentMethodCode: 'FPX' }),
-        expect.anything(),
-      );
+      expect(fakeGateway.calls.deposits[0]).toMatchObject({
+        paymentMethodCode: 'FPX',
+      });
     });
 
     it('refuses an unknown rail instead of forwarding it', async () => {
@@ -157,7 +160,7 @@ describe('startGlobePayDeposit', () => {
       await expect(start(h, { paymentMethodCode: 'NOPE' })).rejects.toThrow(
         /unsupported payment method/i,
       );
-      expect(submitMock).not.toHaveBeenCalled();
+      expect(fakeGateway.calls.deposits).toEqual([]);
     });
   });
 
@@ -165,9 +168,9 @@ describe('startGlobePayDeposit', () => {
     const h = harness();
     // definite=true — a parsed refusal. Only those close the row; see the
     // definite=false case below.
-    submitMock.mockRejectedValue(
-      new GatewayError('nope', ['PMT10005'], 200, true),
-    );
+    fakeGateway.script({
+      submitDeposit: new GatewayError('nope', ['PMT10005'], 200, true),
+    });
     await expect(start(h)).rejects.toThrow(/could not start your top-up/i);
     expect(h.packs.updateGlobePayDeposits).toHaveBeenCalledWith({
       id: 'gpd_1',
@@ -181,9 +184,14 @@ describe('startGlobePayDeposit', () => {
   // in the message.
   it('logs the gateway codes AND message before flattening the refusal', async () => {
     const h = harness();
-    submitMock.mockRejectedValue(
-      new GatewayError('Invalid Payment Method.', ['PMT10006'], 400, true),
-    );
+    fakeGateway.script({
+      submitDeposit: new GatewayError(
+        'Invalid Payment Method.',
+        ['PMT10006'],
+        400,
+        true,
+      ),
+    });
     await expect(start(h)).rejects.toThrow(/could not start your top-up/i);
     const line = h.logger.warn.mock.calls[0][0] as string;
     expect(line).toContain('codes=PMT10006');
@@ -206,9 +214,9 @@ describe('startGlobePayDeposit', () => {
     h.logger.warn.mockImplementation(() => {
       throw new Error('logger exploded');
     });
-    submitMock.mockRejectedValue(
-      new GatewayError('nope', ['PMT10005'], 200, true),
-    );
+    fakeGateway.script({
+      submitDeposit: new GatewayError('nope', ['PMT10005'], 200, true),
+    });
     await expect(start(h)).rejects.toThrow(/could not start your top-up/i);
     // Self-contained on purpose: without this the test would still pass if the
     // log were deleted outright, and the deletion is the regression it exists
@@ -226,7 +234,7 @@ describe('startGlobePayDeposit', () => {
   // only thing that ties the pending row to the cause that created it.
   it('names the reference when it leaves a row pending for the sweep', async () => {
     const h = harness();
-    submitMock.mockRejectedValue(new Error('socket hang up'));
+    fakeGateway.script({ submitDeposit: new Error('socket hang up') });
     await expect(start(h)).rejects.toThrow(/socket hang up/);
     const line = h.logger.error.mock.calls[0][0] as string;
     expect(line).toContain('AMBIGUOUS');
@@ -244,7 +252,7 @@ describe('startGlobePayDeposit', () => {
     h.logger.error.mockImplementation(() => {
       throw new Error('logger exploded');
     });
-    submitMock.mockRejectedValue(new Error('socket hang up'));
+    fakeGateway.script({ submitDeposit: new Error('socket hang up') });
     await expect(start(h)).rejects.toThrow(/socket hang up/);
     expect(h.packs.updateGlobePayDeposits).not.toHaveBeenCalled();
   });
@@ -269,7 +277,7 @@ describe('startGlobePayDeposit', () => {
     'leaves the row pending on %s, so the sweep can still requery it',
     async (_label, error) => {
       const h = harness();
-      submitMock.mockRejectedValue(error);
+      fakeGateway.script({ submitDeposit: error });
       await expect(start(h)).rejects.toThrow(error);
       expect(h.packs.updateGlobePayDeposits).not.toHaveBeenCalled();
     },
@@ -280,7 +288,7 @@ describe('startGlobePayDeposit', () => {
     await expect(start(h, { amount: -5 })).rejects.toThrow(
       /greater than zero/i,
     );
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.deposits).toEqual([]);
     expect(h.packs.createGlobePayDepositCapped).not.toHaveBeenCalled();
   });
 
@@ -294,7 +302,7 @@ describe('startGlobePayDeposit', () => {
       await expect(start(h, { amount })).rejects.toThrow(
         /between RM 50 and RM 10,000/,
       );
-      expect(submitMock).not.toHaveBeenCalled();
+      expect(fakeGateway.calls.deposits).toEqual([]);
       expect(h.packs.createGlobePayDepositCapped).not.toHaveBeenCalled();
     },
   );
@@ -310,7 +318,7 @@ describe('startGlobePayDeposit', () => {
       await expect(start(h, { amount })).rejects.toThrow(
         /at most RM 10,000 per top-up/,
       );
-      expect(submitMock).not.toHaveBeenCalled();
+      expect(fakeGateway.calls.deposits).toEqual([]);
       expect(h.packs.createGlobePayDepositCapped).not.toHaveBeenCalled();
     },
   );
@@ -330,7 +338,7 @@ describe('startGlobePayDeposit', () => {
     await expect(start(h, { paymentMethodCode: 'UPI' })).rejects.toThrow(
       /unsupported payment method/i,
     );
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.deposits).toEqual([]);
     expect(h.packs.createGlobePayDepositCapped).not.toHaveBeenCalled();
   });
 
@@ -347,7 +355,7 @@ describe('startGlobePayDeposit', () => {
     process.env.GLOBEPAY_ENABLED = 'false';
     const h = harness();
     await expect(start(h)).rejects.toThrow(/temporarily unavailable/i);
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.deposits).toEqual([]);
   });
 });
 
@@ -365,7 +373,7 @@ describe('startGlobePayDeposit — pending-deposit cap', () => {
     // Nothing was written (the service refused under its lock) and nothing
     // reached the gateway — otherwise the cap would create the very backlog it
     // exists to prevent.
-    expect(submitMock).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.deposits).toEqual([]);
   });
 
   it('proceeds when the capped insert returns a row', async () => {
@@ -373,7 +381,7 @@ describe('startGlobePayDeposit — pending-deposit cap', () => {
 
     await expect(start(h)).resolves.toBeTruthy();
     expect(h.packs.createGlobePayDepositCapped).toHaveBeenCalled();
-    expect(submitMock).toHaveBeenCalled();
+    expect(fakeGateway.calls.deposits).toHaveLength(1);
   });
 
   it('hands the service the policy: this customer, the cap, the window', async () => {

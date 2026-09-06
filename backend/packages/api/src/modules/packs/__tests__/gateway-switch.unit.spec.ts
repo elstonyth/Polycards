@@ -1,5 +1,6 @@
 import {
   ACTIVE_GATEWAY_TTL_MS,
+  GATEWAY_IDS,
   GATEWAYS,
   gatewayUrls,
   isPaymentGateway,
@@ -139,9 +140,17 @@ describe('rowGatewayConfigs', () => {
 
   it('every registered gateway declares its hooks and a configured() probe', () => {
     for (const def of Object.values(GATEWAYS)) {
+      // Every entry, the test-only fake included: gatewayUrls turns an empty
+      // hook path into '' and the money routes fail closed on that.
       expect(def.hooks.deposit).toMatch(/^\/hooks\//);
       expect(def.hooks.withdrawal).toMatch(/^\/hooks\//);
-      expect(def.configured({} as NodeJS.ProcessEnv)).toBe(false);
+    }
+    // Credentials are what make a REAL gateway selectable, so an empty
+    // environment must configure none of them. The fake gateway is excluded
+    // because it has no credentials at all — what gates it is NODE_ENV, and
+    // both sides of that are pinned in fake-gateway.unit.spec.ts.
+    for (const id of GATEWAY_IDS) {
+      expect(GATEWAYS[id].configured({} as NodeJS.ProcessEnv)).toBe(false);
     }
   });
 });

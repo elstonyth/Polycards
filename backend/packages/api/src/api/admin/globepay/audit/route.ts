@@ -5,7 +5,7 @@ import {
 } from '../../../../modules/packs/facets';
 import {
   checkBalance,
-  GATEWAYS,
+  GATEWAY_IDS,
   gatewayConfigFor,
   RETIRED_GATEWAYS,
   resolveActiveGateway,
@@ -34,7 +34,7 @@ export async function GET(
   // reconciles it.
   const totals = await packs.gatewayAuditTotals(active);
   const history: ({ gateway: string } & ReturnType<typeof moneyTotals>)[] = [];
-  for (const id of [...Object.keys(GATEWAYS), ...RETIRED_GATEWAYS]) {
+  for (const id of [...GATEWAY_IDS, ...RETIRED_GATEWAYS]) {
     if (id === active) continue;
     const t = await packs.gatewayAuditTotals(id);
     if (t.deposits.count + t.withdrawals.count > 0) {

@@ -1,12 +1,6 @@
 import { GatewayError } from '../../modules/packs/gateway-types';
 import { TGPAY_NOT_FOUND } from '../../modules/packs/tgpay-client';
 
-// The gateway's HTTP seam is the only thing mocked; every decision under test
-// is the job's own.
-jest.mock('../../modules/packs/gateway', () => {
-  const actual = jest.requireActual('../../modules/packs/gateway');
-  return { ...actual, getWithdrawalDetail: jest.fn() };
-});
 jest.mock('../../modules/packs/notify-feed', () => ({
   notifyFeed: jest.fn().mockResolvedValue(undefined),
 }));
@@ -21,7 +15,8 @@ jest.mock('../../modules/packs/withdrawal-receipt', () => ({
   sendWithdrawalReceipt: jest.fn().mockResolvedValue(true),
 }));
 
-import { getWithdrawalDetail } from '../../modules/packs/gateway';
+import { setActiveGateway } from '../../modules/packs/gateway';
+import { fakeGateway } from '../../modules/packs/fake-gateway';
 import { notifyFeed } from '../../modules/packs/notify-feed';
 import { sendWithdrawalReceipt } from '../../modules/packs/withdrawal-receipt';
 import globepayWithdrawalReconcileJob from '../globepay-withdrawal-reconcile';
@@ -29,13 +24,17 @@ import { GLOBEPAY_STALE_AFTER_MS } from '../../modules/packs/globepay-reconcile'
 import { withdrawalRefundReference } from '../../modules/packs/globepay-withdrawal';
 import type { FakeFacet, GatewayWithdrawals } from '../../modules/packs/facets';
 
-const requery = getWithdrawalDetail as jest.Mock;
-// Both are module-level mocks shared across every test in this file (Jest
-// does not reset them automatically — no resetMocks/clearMocks in
-// jest.config.js), so their call history is cleared per-test in beforeEach
-// below. requery is fully mockReset (every test sets its own resolved/
-// rejected value); these two keep their default resolved value and are only
-// mockClear'd, since nothing needs to override it per test.
+// The gateway is NOT mocked: the rows below name the fake gateway, so the
+// job's own per-row config lookup (rowGatewayConfigs) hands getWithdrawalDetail
+// a fake config and the seam dispatches to fake-gateway.ts. Every decision
+// under test is still the job's own; only the HTTP is gone.
+//
+// The two mocks that remain are module-level and shared across every test in
+// this file (Jest does not reset them automatically — no resetMocks/clearMocks
+// in jest.config.js), so their call history is cleared per-test in beforeEach
+// below. They keep their default resolved value and are only mockClear'd,
+// since nothing needs to override it per test. fakeGateway.reset() does the
+// same job for the gateway: script AND call log, every test.
 const notifyFeedMock = notifyFeed as jest.Mock;
 const receipt = sendWithdrawalReceipt as jest.Mock;
 
@@ -44,15 +43,22 @@ const receipt = sendWithdrawalReceipt as jest.Mock;
 // neither executes the sweep. So the ambiguous-refusal branch, the one standing
 // between a rotated merchant key and a refund of every in-flight payout, could
 // be deleted with the whole suite still green. On the money-OUT path.
+const ORIGINAL = { ...process.env };
+
 beforeEach(() => {
-  requery.mockReset();
+  fakeGateway.reset();
+  setActiveGateway(null);
   notifyFeedMock.mockClear();
   receipt.mockClear();
   process.env.GLOBEPAY_ENABLED = 'true';
   process.env.GLOBEPAY_WITHDRAWALS_ENABLED = 'true';
-  process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
-  process.env.TGPAY_PUBLIC_KEY = 'pk-test';
-  process.env.TGPAY_SECRET_KEY = 'sk-test';
+  // The fake gateway needs no credentials.
+  process.env.PAYMENT_GATEWAY = 'fake';
+});
+
+afterAll(() => {
+  process.env = ORIGINAL;
+  setActiveGateway(null);
 });
 
 /** An ambiguous-submit row: the debit landed, SubmitWithdrawal never returned,
@@ -64,7 +70,7 @@ const pendingRow = {
   customer_id: 'cus_1',
   merchant_transaction_id: 'PW-1',
   gateway_transaction_id: null,
-  gateway: 'tgpay',
+  gateway: 'fake',
   amount: 100,
   bank_code: 'MBB',
   account_number: '1234567890',
@@ -125,7 +131,7 @@ const ambiguous400 = () =>
 describe('withdrawal sweep — an unattributable 400 never refunds', () => {
   it('does not refund, does not close the row, and says so loudly', async () => {
     const h = harness();
-    requery.mockRejectedValue(ambiguous400());
+    fakeGateway.script({ getWithdrawalDetail: ambiguous400() });
 
     await globepayWithdrawalReconcileJob(h.container);
 
@@ -140,9 +146,14 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
 
   it('a parsed 400 carrying some OTHER error code is equally unactionable', async () => {
     const h = harness();
-    requery.mockRejectedValue(
-      new GatewayError('Invalid merchant', ['PMT10006'], 400, true),
-    );
+    fakeGateway.script({
+      getWithdrawalDetail: new GatewayError(
+        'Invalid merchant',
+        ['PMT10006'],
+        400,
+        true,
+      ),
+    });
 
     await globepayWithdrawalReconcileJob(h.container);
 
@@ -152,9 +163,14 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
 
   it('still refunds on an EXPLICIT not-found — this is a narrowing, not a removal', async () => {
     const h = harness();
-    requery.mockRejectedValue(
-      new GatewayError('Not found', [TGPAY_NOT_FOUND], 404, true),
-    );
+    fakeGateway.script({
+      getWithdrawalDetail: new GatewayError(
+        'Not found',
+        [TGPAY_NOT_FOUND],
+        404,
+        true,
+      ),
+    });
 
     await globepayWithdrawalReconcileJob(h.container);
 
@@ -168,7 +184,9 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
 
   it('still refunds when the gateway itself reports the payout failed', async () => {
     const h = harness();
-    requery.mockResolvedValue({ state: 'failed', statusId: 5 });
+    fakeGateway.script({
+      getWithdrawalDetail: { state: 'failed', statusId: 5 },
+    });
 
     await globepayWithdrawalReconcileJob(h.container);
 
@@ -181,13 +199,15 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
   // the population the settlement report leans on after any callback outage.
   it('a requery settle persists settled amount, net and bank references — never the ledger', async () => {
     const h = harness();
-    requery.mockResolvedValue({
-      state: 'success',
-      statusId: 4,
-      amount: 100,
-      netAmount: 98.5,
-      bankReferenceNo: 'BR-42',
-      uniqueReferenceNo: 'UR-43',
+    fakeGateway.script({
+      getWithdrawalDetail: {
+        state: 'success',
+        statusId: 4,
+        amount: 100,
+        netAmount: 98.5,
+        bankReferenceNo: 'BR-42',
+        uniqueReferenceNo: 'UR-43',
+      },
     });
 
     await globepayWithdrawalReconcileJob(h.container);
@@ -211,7 +231,9 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
   // NULL means UNKNOWN, never "no fee" — same rule as both callback hooks.
   it('a requery settle with no net stores null, never zero', async () => {
     const h = harness();
-    requery.mockResolvedValue({ state: 'success', statusId: 4, amount: 100 });
+    fakeGateway.script({
+      getWithdrawalDetail: { state: 'success', statusId: 4, amount: 100 },
+    });
 
     await globepayWithdrawalReconcileJob(h.container);
 
@@ -229,7 +251,9 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
 
   it('a non-400 refusal is rethrown into the per-row catch, not read as an answer', async () => {
     const h = harness();
-    requery.mockRejectedValue(new GatewayError('their outage', [], 500));
+    fakeGateway.script({
+      getWithdrawalDetail: new GatewayError('their outage', [], 500),
+    });
 
     await globepayWithdrawalReconcileJob(h.container);
 
@@ -275,9 +299,14 @@ describe('withdrawal sweep — a held row is structurally invisible to it', () =
     // withdrawCreditsWithLedger instead of crashing on an unrelated
     // `undefined.statusId` first — the failure must be caught by the RIGHT
     // mechanism, not an accidental one.
-    requery.mockRejectedValue(
-      new GatewayError('Not found', [TGPAY_NOT_FOUND], 404, true),
-    );
+    fakeGateway.script({
+      getWithdrawalDetail: new GatewayError(
+        'Not found',
+        [TGPAY_NOT_FOUND],
+        404,
+        true,
+      ),
+    });
 
     await globepayWithdrawalReconcileJob(h.container);
 
@@ -289,7 +318,7 @@ describe('withdrawal sweep — a held row is structurally invisible to it', () =
     );
     // The outcome: nothing about the held row moved. It never even reached
     // the debit-existence guard, let alone a requery or a refund.
-    expect(requery).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawalDetails).toEqual([]);
     expect(h.packs.listCreditTransactions).not.toHaveBeenCalled();
     expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
     expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
@@ -342,9 +371,14 @@ describe('withdrawal sweep — the state an admin approval could leave ambiguous
 
   it('does NOT refund a row approved minutes ago, however old the request is', async () => {
     const h = harness(approvedMinutesAgoRow);
-    requery.mockRejectedValue(
-      new GatewayError('Not found', [TGPAY_NOT_FOUND], 404, true),
-    );
+    fakeGateway.script({
+      getWithdrawalDetail: new GatewayError(
+        'Not found',
+        [TGPAY_NOT_FOUND],
+        404,
+        true,
+      ),
+    });
 
     await globepayWithdrawalReconcileJob(h.container);
 
@@ -356,9 +390,14 @@ describe('withdrawal sweep — the state an admin approval could leave ambiguous
 
   it('refunds exactly once, on the shared anchor, and closes failed', async () => {
     const h = harness(approvedThenAmbiguousRow);
-    requery.mockRejectedValue(
-      new GatewayError('Not found', [TGPAY_NOT_FOUND], 404, true),
-    );
+    fakeGateway.script({
+      getWithdrawalDetail: new GatewayError(
+        'Not found',
+        [TGPAY_NOT_FOUND],
+        404,
+        true,
+      ),
+    });
 
     await globepayWithdrawalReconcileJob(h.container);
 
@@ -450,7 +489,7 @@ describe('withdrawal sweep — the 24h slow-payout alert reads the submit clock'
 
   it('does not cry wolf on a payout approved minutes ago, however old the request', async () => {
     const h = harness(justApprovedRow);
-    requery.mockRejectedValue(ambiguous400());
+    fakeGateway.script({ getWithdrawalDetail: ambiguous400() });
 
     await globepayWithdrawalReconcileJob(h.container);
 
@@ -460,7 +499,7 @@ describe('withdrawal sweep — the 24h slow-payout alert reads the submit clock'
 
   it('still warns once the payout itself has sat at the gateway over a day', async () => {
     const h = harness(genuinelyStuckRow);
-    requery.mockRejectedValue(ambiguous400());
+    fakeGateway.script({ getWithdrawalDetail: ambiguous400() });
 
     await globepayWithdrawalReconcileJob(h.container);
 
@@ -501,7 +540,7 @@ describe('withdrawal sweep — a held row gets its own staleness watch', () => {
     expect(h.logger.error).not.toHaveBeenCalled();
     // Read-only, even though it was read: nothing about the row moved.
     expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
-    expect(requery).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawalDetails).toEqual([]);
   });
 
   // Also proves the check does not live behind the `outstanding.length === 0`
@@ -518,7 +557,7 @@ describe('withdrawal sweep — a held row gets its own staleness watch', () => {
     );
     // Still read-only past the threshold — a log line, not an action.
     expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
-    expect(requery).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawalDetails).toEqual([]);
   });
 
   // Review-fix companion: the watch sits in its own try/catch specifically so
@@ -539,7 +578,9 @@ describe('withdrawal sweep — a held row gets its own staleness watch', () => {
         );
       },
     );
-    requery.mockResolvedValue({ state: 'failed', statusId: 5 });
+    fakeGateway.script({
+      getWithdrawalDetail: { state: 'failed', statusId: 5 },
+    });
 
     await globepayWithdrawalReconcileJob(h.container);
 

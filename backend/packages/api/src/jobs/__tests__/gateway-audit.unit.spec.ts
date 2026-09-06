@@ -1,38 +1,32 @@
-// The gateway seam is the only thing mocked; every decision under test is
-// the job's own: per-row gateway config, the not-configured stamp, the
-// ambiguous-answer skip, the net_amount backfill, and the finding stamp.
-jest.mock('../../modules/packs/gateway', () => {
-  const actual = jest.requireActual('../../modules/packs/gateway');
-  return {
-    ...actual,
-    getDepositDetail: jest.fn(),
-    getWithdrawalDetail: jest.fn(),
-    resolveActiveGateway: jest.fn(async () => 'tgpay'),
-  };
-});
-
-import {
-  getDepositDetail,
-  getWithdrawalDetail,
-} from '../../modules/packs/gateway';
+import { fakeGateway } from '../../modules/packs/fake-gateway';
+import { setActiveGateway } from '../../modules/packs/gateway';
 import { GatewayError } from '../../modules/packs/gateway-types';
 import gatewayAuditJob from '../gateway-audit';
 
-const depositDetail = getDepositDetail as jest.Mock;
-const withdrawalDetail = getWithdrawalDetail as jest.Mock;
+// Nothing is mocked. The job requeries through the real seam — it resolves
+// the active gateway, looks the config up PER ROW (rowGatewayConfigs) and
+// dispatches on that config's kind — so pointing the rows at the fake
+// gateway substitutes the HTTP and nothing else. Every decision under test is
+// the job's own: the not-configured stamp, the ambiguous-answer skip, the
+// net_amount backfill, and the finding stamp.
+const ORIGINAL = { ...process.env };
 
 beforeEach(() => {
-  depositDetail.mockReset();
-  withdrawalDetail.mockReset();
+  fakeGateway.reset();
+  setActiveGateway(null);
   process.env.GLOBEPAY_ENABLED = 'true';
-  process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
-  process.env.TGPAY_PUBLIC_KEY = 'pk-test';
-  process.env.TGPAY_SECRET_KEY = 'sk-test';
+  // The fake needs no credentials; the active gateway falls back to this.
+  process.env.PAYMENT_GATEWAY = 'fake';
+});
+
+afterAll(() => {
+  process.env = ORIGINAL;
+  setActiveGateway(null);
 });
 
 const settledDeposit = {
   id: 'gpd_1',
-  gateway: 'tgpay',
+  gateway: 'fake',
   merchant_transaction_id: 'PC-1',
   status: 'settled',
   amount_settled: '50.00',
@@ -60,10 +54,8 @@ function harness(
 
 describe('gateway audit job', () => {
   it('stamps an agreeing row with no note and backfills the net the gateway reports', async () => {
-    depositDetail.mockResolvedValue({
-      state: 'success',
-      amount: 50,
-      netAmount: 49.4,
+    fakeGateway.script({
+      getDepositDetail: { state: 'success', amount: 50, netAmount: 49.4 },
     });
     const h = harness([settledDeposit]);
     await gatewayAuditJob(h.container as never);
@@ -78,7 +70,7 @@ describe('gateway audit job', () => {
   });
 
   it('records a disagreement as a finding and logs it', async () => {
-    depositDetail.mockResolvedValue({ state: 'failed', amount: 0 });
+    fakeGateway.script({ getDepositDetail: { state: 'failed', amount: 0 } });
     const h = harness([settledDeposit]);
     await gatewayAuditJob(h.container as never);
     const call = (
@@ -91,9 +83,9 @@ describe('gateway audit job', () => {
   });
 
   it('leaves an ambiguous answer un-stamped so the next run retries it', async () => {
-    depositDetail.mockRejectedValue(
-      new GatewayError('timeout', [], 500, false),
-    );
+    fakeGateway.script({
+      getDepositDetail: new GatewayError('timeout', [], 500, false),
+    });
     const h = harness([settledDeposit]);
     await gatewayAuditJob(h.container as never);
     expect(h.packs.updateGlobePayDeposits).not.toHaveBeenCalled();
@@ -115,7 +107,7 @@ describe('gateway audit job', () => {
       ],
     );
     await gatewayAuditJob(h.container as never);
-    expect(withdrawalDetail).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawalDetails).toEqual([]);
     expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'gpw_1',
