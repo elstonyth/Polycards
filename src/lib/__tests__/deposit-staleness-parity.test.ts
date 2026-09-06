@@ -15,6 +15,12 @@ import { join } from 'node:path';
 // which may only export async functions, so there is nothing to import. The
 // backend is a separate package with its own tsconfig and is not on this
 // project's module graph either.
+//
+// The path and constant name below still say "globepay"/"GLOBEPAY" on
+// purpose: that is what exists on origin/master today. The backend's own
+// GlobePay-naming removal (globepay-reconcile.ts -> gateway-reconcile.ts,
+// GLOBEPAY_STALE_AFTER_MS -> GATEWAY_STALE_AFTER_MS) lands in a separate PR;
+// update both literals here when it merges, not before.
 const STOREFRONT_SRC = join(process.cwd(), 'src/lib/actions/vault.ts');
 const BACKEND_SRC = join(
   process.cwd(),

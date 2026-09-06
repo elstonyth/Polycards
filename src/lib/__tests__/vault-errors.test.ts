@@ -10,7 +10,7 @@ import { isPhoneGateError } from '@/lib/phone-gate';
 // degrading the UI.
 //
 // The ordering case is the reason this file exists. Shipped 2026-08-04: the
-// GlobePay refusal contains the word "amount", the broad /amount/i rule sat
+// gateway refusal contains the word "amount", the broad /amount/i rule sat
 // above it, and a customer's valid RM 50 top-up was reported as a malformed
 // amount while the gateway's actual refusal never surfaced.
 const map = (msg: string) =>
@@ -90,7 +90,7 @@ describe('VAULT_RULES backend-message contract', () => {
 
   // The kill switch is the documented incident response for a dead gateway
   // (GATEWAY_ENABLED=false, an env flip with no deploy), and the 2026-08-05
-  // GlobePay outage is the case it was built for. Until this rule existed the
+  // gateway outage is the case it was built for. Until this rule existed the
   // switch was self-defeating: startDeposit's deliberate, operator-
   // chosen message matched NO rule and was flattened into VAULT_FALLBACK —
   // "Something went wrong. Please try again." So the one control we have for
