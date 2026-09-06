@@ -406,11 +406,11 @@ export async function getSettlementReport(
   periods: number,
 ): Promise<SettlementReport> {
   return getJson<SettlementReport>(
-    `/admin/globepay/settlement?granularity=${granularity}&periods=${periods}`,
+    `/admin/payments/settlement?granularity=${granularity}&periods=${periods}`,
   );
 }
 
-export interface GlobePayBalance {
+export interface GatewayBalance {
   enabled: boolean;
   balance: {
     currency_code: string;
@@ -422,8 +422,8 @@ export interface GlobePayBalance {
   error: string | null;
 }
 
-export async function getGlobePayBalance(): Promise<GlobePayBalance> {
-  return getJson<GlobePayBalance>('/admin/globepay/balance');
+export async function getGatewayBalance(): Promise<GatewayBalance> {
+  return getJson<GatewayBalance>('/admin/payments/balance');
 }
 
 // ── Payment gateways (plan 130) ─────────────────────────────────────────────
@@ -478,7 +478,7 @@ export interface GatewayAudit {
 }
 
 export async function getGatewayAudit(): Promise<GatewayAudit> {
-  return getJson<GatewayAudit>('/admin/globepay/audit');
+  return getJson<GatewayAudit>('/admin/payments/audit');
 }
 
 // ── Active payment gateway switch (plan 130 §runtime switch) ────────────────
@@ -1069,14 +1069,14 @@ export interface CreatePixelPokemonBody {
 export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
   postJson<{ pixel_pokemon: PixelPokemonRow }>('/admin/pixel-pokemon', body);
 
-// GlobePay365 deposits (GET /admin/globepay/deposits) — the operator's only
+// Gateway deposits (GET /admin/payments/deposits) — the operator's only
 // window into money-in. 'stale' means the row is still pending past the
 // reconciliation sweep's window, i.e. a payment that may have landed at the
 // gateway without ever being credited here.
-export type GlobePayDepositView =
+export type GatewayDepositView =
   'pending' | 'settled' | 'failed' | 'expired' | 'all';
 
-export interface GlobePayDeposit {
+export interface GatewayDeposit {
   id: string;
   merchant_transaction_id: string;
   gateway_transaction_id: string | null;
@@ -1088,7 +1088,7 @@ export interface GlobePayDeposit {
    *  (unknown fee), never "no fee". */
   net_amount: number | null;
   /** The BANK's own references for the transfer (gateway_transaction_id is
-   *  GlobePay's). What support quotes in a dispute. NULL on pre-mirror rows. */
+   *  the gateway's). What support quotes in a dispute. NULL on pre-mirror rows. */
   bank_reference_no: string | null;
   unique_reference_no: string | null;
   payment_method_code: string;
@@ -1103,20 +1103,20 @@ export interface GlobePayDeposit {
   stale: boolean;
 }
 
-export interface GlobePayDepositsResponse {
+export interface GatewayDepositsResponse {
   total: number;
   offset: number;
   limit: number;
-  status: GlobePayDepositView;
-  deposits: GlobePayDeposit[];
+  status: GatewayDepositView;
+  deposits: GatewayDeposit[];
 }
 
-export function getGlobePayDeposits(
+export function getGatewayDeposits(
   page: number,
-  status: GlobePayDepositView,
+  status: GatewayDepositView,
   pageSize = 50,
   sort?: string,
-): Promise<GlobePayDepositsResponse> {
+): Promise<GatewayDepositsResponse> {
   const params = new URLSearchParams({
     status,
     limit: String(pageSize),
@@ -1126,12 +1126,12 @@ export function getGlobePayDeposits(
   // route's default order is status-dependent (pending = oldest-first work
   // queue) and an always-sent sort would silently flatten that.
   if (sort) params.set('sort', sort);
-  return getJson<GlobePayDepositsResponse>(
-    `/admin/globepay/deposits?${params}`,
+  return getJson<GatewayDepositsResponse>(
+    `/admin/payments/deposits?${params}`,
   );
 }
 
-// GlobePay365 withdrawals (GET /admin/globepay/withdrawals) — the money-OUT
+// Gateway withdrawals (GET /admin/payments/withdrawals) — the money-OUT
 // mirror of the deposits window. 'stale' = still pending past the sweep's
 // window; for a withdrawal that means a customer already debited with no
 // payout confirmed and no refund, i.e. the row to chase first.
@@ -1141,12 +1141,12 @@ export function getGlobePayDeposits(
 // deny — it outranks 'pending' because a customer waiting on a HUMAN is a
 // different kind of waiting than a customer waiting on the gateway. The
 // backend's own default (parseStatusFilter) is left on 'pending' — this SPA
-// always sends `status` explicitly (see getGlobePayWithdrawals below), so the
+// always sends `status` explicitly (see getGatewayWithdrawals below), so the
 // page's default view is what actually decides what an operator sees first.
-export type GlobePayWithdrawalView =
+export type GatewayWithdrawalView =
   'held' | 'pending' | 'settled' | 'failed' | 'all';
 
-export interface GlobePayWithdrawal {
+export interface GatewayWithdrawal {
   id: string;
   merchant_transaction_id: string;
   gateway_transaction_id: string | null;
@@ -1163,7 +1163,7 @@ export interface GlobePayWithdrawal {
   unique_reference_no: string | null;
   bank_code: string;
   /** MASKED (`••••1234`) — the list never serves a full account number. The
-   *  full value comes one row at a time from getGlobePayWithdrawalAccount. */
+   *  full value comes one row at a time from getWithdrawalAccount. */
   account_number: string;
   account_holder_name: string;
   status: 'held' | 'pending' | 'settled' | 'failed';
@@ -1190,40 +1190,40 @@ export interface GlobePayWithdrawal {
   frozen: boolean;
 }
 
-export interface GlobePayWithdrawalsResponse {
+export interface GatewayWithdrawalsResponse {
   total: number;
   offset: number;
   limit: number;
-  status: GlobePayWithdrawalView;
-  withdrawals: GlobePayWithdrawal[];
+  status: GatewayWithdrawalView;
+  withdrawals: GatewayWithdrawal[];
 }
 
-export function getGlobePayWithdrawals(
+export function getGatewayWithdrawals(
   page: number,
-  status: GlobePayWithdrawalView,
+  status: GatewayWithdrawalView,
   pageSize = 50,
   sort?: string,
-): Promise<GlobePayWithdrawalsResponse> {
+): Promise<GatewayWithdrawalsResponse> {
   const params = new URLSearchParams({
     status,
     limit: String(pageSize),
     offset: String(page * pageSize),
   });
-  // Same contract as getGlobePayDeposits: omitted = status-dependent default.
+  // Same contract as getGatewayDeposits: omitted = status-dependent default.
   if (sort) params.set('sort', sort);
-  return getJson<GlobePayWithdrawalsResponse>(
-    `/admin/globepay/withdrawals?${params}`,
+  return getJson<GatewayWithdrawalsResponse>(
+    `/admin/payments/withdrawals?${params}`,
   );
 }
 
 /** Reveal ONE withdrawal's full destination account (the list masks it).
  *  Deliberately not a react-query hook and not prefetched: the backend logs
  *  and rate-limits every call, so it must fire only when an operator asks. */
-export function getGlobePayWithdrawalAccount(
+export function getWithdrawalAccount(
   id: string,
 ): Promise<{ id: string; account_number: string }> {
   return getJson<{ id: string; account_number: string }>(
-    `/admin/globepay/withdrawals/${encodeURIComponent(id)}/account`,
+    `/admin/payments/withdrawals/${encodeURIComponent(id)}/account`,
   );
 }
 
@@ -1239,7 +1239,7 @@ export function getGlobePayWithdrawalAccount(
  *  then fails to make — see approve/route.ts), so callers must not treat it
  *  as the row's current truth; see withdrawal-outcome.ts's classifier, which
  *  deliberately never reads this field. */
-export interface GlobePayWithdrawalApproveResult {
+export interface WithdrawalApproveResult {
   id: string;
   status: string;
   transaction_id: string | null;
@@ -1251,9 +1251,9 @@ export interface GlobePayWithdrawalApproveResult {
  *  or the row was never actually debited — each with its own specific
  *  MedusaError message, which is what reaches the operator's toast. No body:
  *  the route acts only on `:id` and the session's admin actor. */
-export const approveGlobePayWithdrawal = (id: string) =>
-  postJson<GlobePayWithdrawalApproveResult>(
-    `/admin/globepay/withdrawals/${encodeURIComponent(id)}/approve`,
+export const approveWithdrawal = (id: string) =>
+  postJson<WithdrawalApproveResult>(
+    `/admin/payments/withdrawals/${encodeURIComponent(id)}/approve`,
     {},
   );
 
@@ -1262,7 +1262,7 @@ export const approveGlobePayWithdrawal = (id: string) =>
  *  without minting a refund) — distinct from `refunded:true`'s normal path,
  *  and from a thrown NOT_ALLOWED (wrong status: only held/failed can be
  *  denied) or NOT_FOUND. */
-export interface GlobePayWithdrawalDenyResult {
+export interface WithdrawalDenyResult {
   id: string;
   status: string;
   refunded: boolean;
@@ -1271,9 +1271,9 @@ export interface GlobePayWithdrawalDenyResult {
 /** Claim a HELD (or already-'failed', for the crash-recovery re-run — see
  *  the route's own comment) withdrawal, refund it, and close it. No body,
  *  same reason as approve. */
-export const denyGlobePayWithdrawal = (id: string) =>
-  postJson<GlobePayWithdrawalDenyResult>(
-    `/admin/globepay/withdrawals/${encodeURIComponent(id)}/deny`,
+export const denyWithdrawal = (id: string) =>
+  postJson<WithdrawalDenyResult>(
+    `/admin/payments/withdrawals/${encodeURIComponent(id)}/deny`,
     {},
   );
 

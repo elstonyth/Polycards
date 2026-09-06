@@ -13,7 +13,7 @@ import type {
 
 // The second adapter behind the seam in gateway.ts — the one the tests use.
 //
-// Every money path (globepay-deposit, globepay-withdrawal, the sweeps, the
+// Every money path (gateway-deposit, gateway-withdrawal, the sweeps, the
 // admin routes) already dispatches on a config's `kind`. Before this file
 // there was exactly one kind, so specs reached PAST that dispatch with
 // jest.mock('…/gateway') and replaced the seam's own functions. That proves

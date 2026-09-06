@@ -339,14 +339,14 @@ envs:
   # master switches (the GlobePay365 integration itself was removed
   # 2026-09-06 — its settled rows remain as history on the audit panel).
   # Fail closed: without ENABLED the deposit route refuses every top-up.
-  - key: GLOBEPAY_ENABLED
+  - key: GATEWAY_ENABLED
     scope: RUN_TIME
     value: "true"
   # Withdrawals ARMED 2026-08-05 (operator decision). The customer withdrawal
   # route and the admin held-approval both refuse while this is off.
   # NEXT_PUBLIC_WITHDRAWALS_ENABLED flips on the storefront in the same window
   # (Dockerfile ARG default + .do/storefront.app.yaml, both).
-  - key: GLOBEPAY_WITHDRAWALS_ENABLED
+  - key: GATEWAY_WITHDRAWALS_ENABLED
     scope: RUN_TIME
     value: "true"
   # Where the customer's browser lands after the gateway's checkout — the

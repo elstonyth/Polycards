@@ -16,7 +16,7 @@ import { Receipt } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useGatewayAudit,
-  useGlobePayBalance,
+  useGatewayBalance,
   usePaymentGateway,
   useSavePaymentGateway,
   useSettlementReport,
@@ -83,7 +83,7 @@ const SettlementPage = () => {
   const [granularity, setGranularity] =
     useState<SettlementGranularity>('month');
   const { data, isError } = useSettlementReport(granularity, 12);
-  const balance = useGlobePayBalance();
+  const balance = useGatewayBalance();
   const audit = useGatewayAudit();
   const gateway = usePaymentGateway();
   const saveGateway = useSavePaymentGateway();

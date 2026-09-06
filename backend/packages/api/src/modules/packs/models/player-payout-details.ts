@@ -2,7 +2,7 @@ import { model } from '@medusajs/framework/utils';
 
 // player_payout_details — admin-entered bank destination for MANUAL cashouts
 // (POLYCARD-BACK §4.3 Profile tab). One row per customer, admin-auth-only:
-// never exposed on any /store route. Distinct from the GlobePay per-withdrawal
+// never exposed on any /store route. Distinct from the per-withdrawal
 // snapshots (those freeze what was submitted per transaction).
 export const PlayerPayoutDetails = model.define('player_payout_details', {
   id: model.id().primaryKey(),

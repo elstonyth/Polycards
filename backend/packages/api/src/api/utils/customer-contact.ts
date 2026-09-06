@@ -6,8 +6,8 @@ import type { TgpayCustomer } from '../../modules/packs/tgpay-client';
 /**
  * The name/email/phone TGPay requires on a create-payment (and the email
  * its payouts need), read from the customer record — never from the request
- * body — and only when the active gateway asks for it: GlobePay does not,
- * and its route tests run with a scope that has no customer module.
+ * body — and only when the active gateway asks for it (needsCustomerContact);
+ * the money routes' tests run with a scope that has no customer module.
  *
  * A payment for a customer without a phone is refused rather than given a
  * made-up one: the money routes carry a phone-verification gate in

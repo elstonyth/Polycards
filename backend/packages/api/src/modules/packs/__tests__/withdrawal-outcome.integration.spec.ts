@@ -1,7 +1,7 @@
 /**
  * applyWithdrawalOutcome against a REAL Postgres — integration:modules
  *
- * The settle half of the payout loop, the mirror of refundGlobePayWithdrawal.
+ * The settle half of the payout loop, the mirror of refundWithdrawal.
  * It moves no money (the debit happened at submit), so its whole correctness
  * is the row: a CONDITIONAL claim off 'pending' that a replay must lose, and
  * a settlement mirror whose bigNumber pair (amount_settled / net_amount, each
@@ -15,11 +15,11 @@ import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../index';
 import type PacksModuleService from '../service';
-import GlobePayWithdrawal from '../models/globepay-withdrawal';
+import GatewayWithdrawal from '../models/gateway-withdrawal';
 import CreditTransaction from '../models/credit-transaction';
 import LedgerEntry from '../models/ledger-entry';
 import LedgerSequence from '../models/ledger-sequence';
-import { applyWithdrawalOutcome } from '../globepay-withdrawal';
+import { applyWithdrawalOutcome } from '../gateway-withdrawal';
 
 jest.setTimeout(300 * 1000);
 
@@ -29,7 +29,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
   // The ledger tables are here to PROVE the settle path never writes them —
   // an absent table would make that assertion pass for the wrong reason.
   moduleModels: [
-    GlobePayWithdrawal,
+    GatewayWithdrawal,
     CreditTransaction,
     LedgerEntry,
     LedgerSequence,
@@ -73,7 +73,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       suffix: string,
       status: 'pending' | 'settled' | 'failed' | 'held' = 'pending',
     ) => {
-      const [row] = await service.createGlobePayWithdrawals([
+      const [row] = await service.createGatewayWithdrawals([
         {
           merchant_transaction_id: `PW-OUT-${suffix}`,
           customer_id: `cus_wout_${suffix}`,
@@ -90,7 +90,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     };
 
     const reread = async (id: string) =>
-      (await service.listGlobePayWithdrawals({ id }, { take: 1 }))[0];
+      (await service.listGatewayWithdrawals({ id }, { take: 1 }))[0];
 
     const paid = (over: Record<string, unknown> = {}) =>
       ({

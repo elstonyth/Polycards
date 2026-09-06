@@ -4,7 +4,7 @@ import {
   gatewayConfigFor,
   resolveActiveGateway,
 } from '../../../../../modules/packs/gateway';
-import { globepayWithdrawalsEnabled } from '../../../../../modules/packs/globepay-withdrawal';
+import { withdrawalsEnabled } from '../../../../../modules/packs/gateway-withdrawal';
 
 // GET /store/credits/withdraw/banks — the payout bank picker's source: the
 // banks the ACTIVE gateway can pay to, as canonical ids (banks.ts). Cached
@@ -23,15 +23,11 @@ export async function GET(
   res: MedusaResponse,
 ): Promise<void> {
   const gateway = await resolveActiveGateway(req.scope);
-  if (!globepayWithdrawalsEnabled()) {
+  if (!withdrawalsEnabled()) {
     res.json({ banks: [] });
     return;
   }
-  if (
-    !cache ||
-    cache.gateway !== gateway ||
-    Date.now() - cache.at > CACHE_MS
-  ) {
+  if (!cache || cache.gateway !== gateway || Date.now() - cache.at > CACHE_MS) {
     const banks = await getSupportedBanks(gatewayConfigFor(gateway));
     cache = { gateway, at: Date.now(), banks };
   }

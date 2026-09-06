@@ -232,7 +232,7 @@ medusaIntegrationTestRunner({
         const packs = packsOf();
 
         // A settled withdrawal so there IS a retained financial row to inspect.
-        await packs.createGlobePayWithdrawals([
+        await packs.createGatewayWithdrawals([
           {
             merchant_transaction_id: `mt-delete-${id}`,
             customer_id: id,
@@ -262,8 +262,9 @@ medusaIntegrationTestRunner({
             // array so an update replaces it wholesale instead of merging).
             // The production writer stores the same shape, and the purge's
             // `proof_images = null` is what this fixture exists to prove.
-            proof_images: ['https://example.test/doorstep.jpg'] as unknown as
-              Record<string, unknown>,
+            proof_images: [
+              'https://example.test/doorstep.jpg',
+            ] as unknown as Record<string, unknown>,
           },
         ]);
         await packs.createPlayerPayoutDetails([
@@ -303,11 +304,13 @@ medusaIntegrationTestRunner({
         // provider is registered without RESEND_*, so 'email' would throw "no
         // provider for channel". The ADDRESS is what the purge keys on, and the
         // address is what this fixture is testing.
-        const customers =
-          getContainer().resolve<ICustomerModuleService>(Modules.CUSTOMER);
-        const notifications = getContainer().resolve<INotificationModuleService>(
-          Modules.NOTIFICATION,
+        const customers = getContainer().resolve<ICustomerModuleService>(
+          Modules.CUSTOMER,
         );
+        const notifications =
+          getContainer().resolve<INotificationModuleService>(
+            Modules.NOTIFICATION,
+          );
         // A saved address — registration creates none, so without this the
         // "addresses are gone" assertion below would hold on an empty set.
         await customers.createCustomerAddresses([
@@ -384,7 +387,7 @@ medusaIntegrationTestRunner({
         expect(zombie.status).toBe(403);
 
         // The books survive, scrubbed to the minimum.
-        const [wd] = await packs.listGlobePayWithdrawals(
+        const [wd] = await packs.listGatewayWithdrawals(
           { customer_id: id },
           { take: 1 },
         );

@@ -14,7 +14,7 @@ const ORIGINAL = { ...process.env };
 beforeEach(() => {
   fakeGateway.reset();
   setActiveGateway(null);
-  process.env.GLOBEPAY_ENABLED = 'true';
+  process.env.GATEWAY_ENABLED = 'true';
   // The fake needs no credentials; the active gateway falls back to this.
   process.env.PAYMENT_GATEWAY = 'fake';
 });
@@ -40,10 +40,10 @@ function harness(
 ) {
   const packs = {
     siteSettings: jest.fn(async () => ({ payment_gateway: null })),
-    listGlobePayDeposits: jest.fn(async () => deposits),
-    listGlobePayWithdrawals: jest.fn(async () => withdrawals),
-    updateGlobePayDeposits: jest.fn(async () => []),
-    updateGlobePayWithdrawals: jest.fn(async () => []),
+    listGatewayDeposits: jest.fn(async () => deposits),
+    listGatewayWithdrawals: jest.fn(async () => withdrawals),
+    updateGatewayDeposits: jest.fn(async () => []),
+    updateGatewayWithdrawals: jest.fn(async () => []),
   };
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const container = {
@@ -59,7 +59,7 @@ describe('gateway audit job', () => {
     });
     const h = harness([settledDeposit]);
     await gatewayAuditJob(h.container as never);
-    expect(h.packs.updateGlobePayDeposits).toHaveBeenCalledWith(
+    expect(h.packs.updateGatewayDeposits).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'gpd_1',
         audit_note: null,
@@ -74,7 +74,7 @@ describe('gateway audit job', () => {
     const h = harness([settledDeposit]);
     await gatewayAuditJob(h.container as never);
     const call = (
-      h.packs.updateGlobePayDeposits.mock.calls as unknown[][]
+      h.packs.updateGatewayDeposits.mock.calls as unknown[][]
     )[0][0] as {
       audit_note: string | null;
     };
@@ -88,7 +88,7 @@ describe('gateway audit job', () => {
     });
     const h = harness([settledDeposit]);
     await gatewayAuditJob(h.container as never);
-    expect(h.packs.updateGlobePayDeposits).not.toHaveBeenCalled();
+    expect(h.packs.updateGatewayDeposits).not.toHaveBeenCalled();
     expect(h.logger.warn).toHaveBeenCalledTimes(1);
   });
 
@@ -108,7 +108,7 @@ describe('gateway audit job', () => {
     );
     await gatewayAuditJob(h.container as never);
     expect(fakeGateway.calls.withdrawalDetails).toEqual([]);
-    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
+    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'gpw_1',
         audit_note: expect.stringMatching(/not configured/),
@@ -117,9 +117,9 @@ describe('gateway audit job', () => {
   });
 
   it('does nothing while the real-gateway switch is off', async () => {
-    process.env.GLOBEPAY_ENABLED = 'false';
+    process.env.GATEWAY_ENABLED = 'false';
     const h = harness([settledDeposit]);
     await gatewayAuditJob(h.container as never);
-    expect(h.packs.listGlobePayDeposits).not.toHaveBeenCalled();
+    expect(h.packs.listGatewayDeposits).not.toHaveBeenCalled();
   });
 });

@@ -1203,7 +1203,7 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
-      // Per-row bank-account reveal (GET /admin/globepay/withdrawals/:id/account).
+      // Per-row bank-account reveal (GET /admin/payments/withdrawals/:id/account).
       // The ONE deliberate READ on this limiter — every other matcher sharing
       // adminActionRateLimit is a POST or a DELETE (checked across the whole
       // array, not just the neighbours), so do not read this as a mutation.
@@ -1214,7 +1214,7 @@ export default defineMiddlewares({
       // route that still serves one in full: throttled, it stays a per-dispute
       // lookup; unthrottled, a compromised admin token walks the table and
       // re-derives exactly the bulk view the masking removed.
-      matcher: '/admin/globepay/withdrawals/*/account',
+      matcher: '/admin/payments/withdrawals/*/account',
       method: 'GET',
       middlewares: [adminActionRateLimit],
     },
@@ -1224,7 +1224,7 @@ export default defineMiddlewares({
       // transfer. The row's own atomic status claim is what stops a
       // double-click paying twice — this budget is the outer bound on how
       // fast a compromised admin token could work the queue at all.
-      matcher: '/admin/globepay/withdrawals/*/approve',
+      matcher: '/admin/payments/withdrawals/*/approve',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },
@@ -1233,7 +1233,7 @@ export default defineMiddlewares({
       // approve twin. It mints no credit beyond the one refund the row's
       // shared idempotency anchor allows, but it is still a ledger write
       // driven by an admin token.
-      matcher: '/admin/globepay/withdrawals/*/deny',
+      matcher: '/admin/payments/withdrawals/*/deny',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

@@ -48,13 +48,13 @@ export function isDepositMethod(value: unknown): value is DepositMethodCode {
  * ~4 minutes; now the storefront always sends a code. Without this, retracting an
  * OB that turns out dead would mean a storefront image REBUILD (the provider
  * flag is a NEXT_PUBLIC baked in at build time), and the only runtime lever
- * left would be GLOBEPAY_ENABLED, which kills every top-up including the QR
+ * left would be GATEWAY_ENABLED, which kills every top-up including the QR
  * channel that works.
  *
  * `DEPOSIT_METHODS_ENABLED=BQR` on the storefront app retracts online banking
  * at the next restart. Unset, empty, or naming nothing we recognise means all
  * of them: a typo must not silently leave customers with no way to pay, and
- * killing top-ups outright is GLOBEPAY_ENABLED's job, not this one's.
+ * killing top-ups outright is GATEWAY_ENABLED's job, not this one's.
  */
 export function enabledDepositMethods(
   raw: string | undefined,

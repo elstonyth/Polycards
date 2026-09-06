@@ -228,7 +228,7 @@ describe('POST /store/credits/withdraw/accounts', () => {
 
   it("normalises a gateway's own bank code to the canonical bank and its neutral name", async () => {
     retrieveCustomer.mockResolvedValue({ metadata: { bank_accounts: [] } });
-    // GlobePay's code for Maybank, as an older storefront (or a legacy picker)
+    // the gateway's code for Maybank, as an older storefront (or a legacy picker)
     // would send it — the saved account must not depend on which gateway was
     // active when it was saved.
     await POST(

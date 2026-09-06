@@ -19,12 +19,12 @@ import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../index';
 import type PacksModuleService from '../service';
-import GlobePayDeposit from '../models/globepay-deposit';
+import GatewayDeposit from '../models/gateway-deposit';
 import CreditTransaction from '../models/credit-transaction';
 import LedgerEntry from '../models/ledger-entry';
 import LedgerSequence from '../models/ledger-sequence';
 import CustomerAccountState from '../models/customer-account-state';
-import { applyDepositOutcome } from '../globepay-deposit';
+import { applyDepositOutcome } from '../gateway-deposit';
 import { topupIdempotencyReference } from '../topup';
 
 jest.setTimeout(300 * 1000);
@@ -37,7 +37,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
   // modules-type spec builds its schema from THIS array, never from the
   // migrations, so omitting one is an unfixable "relation does not exist".
   moduleModels: [
-    GlobePayDeposit,
+    GatewayDeposit,
     CreditTransaction,
     LedgerEntry,
     LedgerSequence,
@@ -86,7 +86,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       status: 'pending' | 'settled' | 'failed' | 'expired' = 'pending',
       amountRequested = 50,
     ) => {
-      const [row] = await service.createGlobePayDeposits([
+      const [row] = await service.createGatewayDeposits([
         {
           merchant_transaction_id: `PC-OUT-${suffix}`,
           customer_id: `cus_out_${suffix}`,
@@ -101,7 +101,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     };
 
     const reread = async (id: string) =>
-      (await service.listGlobePayDeposits({ id }, { take: 1 }))[0];
+      (await service.listGatewayDeposits({ id }, { take: 1 }))[0];
 
     /** Defaults to the CALLBACK source — the fenced one. Pass
      *  `{ source: 'requery' }` for the sweep's semantics. */
@@ -306,7 +306,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
       it('loses the claim when the row already moved — the replay answer', async () => {
         const row = await seed('7');
-        await service.updateGlobePayDeposits({
+        await service.updateGatewayDeposits({
           id: row.id,
           status: 'settled' as const,
         });

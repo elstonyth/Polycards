@@ -80,10 +80,11 @@ describe('resolveActiveGateway', () => {
 });
 
 describe('gatewayUrls', () => {
-  it('with PAYMENT_CALLBACK_BASE the gateway gets its own hook paths; the return URL reads either name', () => {
+  it('with PAYMENT_CALLBACK_BASE the gateway gets its own hook paths and PAYMENT_RETURN_URL', () => {
+    // The legacy spelling of the return URL is gateway-env.unit.spec.ts's.
     const env = {
       PAYMENT_CALLBACK_BASE: 'https://api.example/',
-      GLOBEPAY_RETURN_URL: 'https://shop/wallet',
+      PAYMENT_RETURN_URL: 'https://shop/wallet',
     } as NodeJS.ProcessEnv;
     expect(gatewayUrls('tgpay', env)).toEqual({
       notifyUrl: 'https://api.example/hooks/tgpay/deposit',
@@ -92,12 +93,6 @@ describe('gatewayUrls', () => {
       payoutVerifyUrl: '',
       hasPayoutVerify: false,
     });
-    expect(
-      gatewayUrls('tgpay', {
-        ...env,
-        PAYMENT_RETURN_URL: 'https://shop/transactions',
-      }).returnUrl,
-    ).toBe('https://shop/transactions');
   });
 
   it('a plain-http or malformed callback base counts as unset — the key headers never go over cleartext', () => {
@@ -115,9 +110,9 @@ describe('gatewayUrls', () => {
     }
   });
 
-  it('without PAYMENT_CALLBACK_BASE every hook URL is empty so callers fail closed — no legacy explicit URL is honoured', () => {
+  it('without PAYMENT_CALLBACK_BASE every hook URL is empty so callers fail closed — no explicit *_NOTIFY_URL is honoured', () => {
     const urls = gatewayUrls('tgpay', {
-      GLOBEPAY_NOTIFY_URL: 'https://old/hooks/globepay/deposit',
+      GATEWAY_NOTIFY_URL: 'https://old/hooks/x/deposit',
     } as NodeJS.ProcessEnv);
     expect(urls.notifyUrl).toBe('');
     expect(urls.withdrawNotifyUrl).toBe('');
@@ -134,7 +129,7 @@ describe('rowGatewayConfigs', () => {
     const configFor = rowGatewayConfigs(env);
     expect(configFor('tgpay')).toMatchObject({ kind: 'tgpay' });
     expect(configFor('tgpay')).toBe(configFor('tgpay'));
-    expect(configFor('globepay')).toBeNull(); // no GLOBEPAY_* in env
+    expect(configFor('globepay')).toBeNull(); // retired gateway
     expect(configFor('stripe')).toBeNull();
   });
 
@@ -143,7 +138,7 @@ describe('rowGatewayConfigs', () => {
   // checks and the "needs the customer's email" refusal all read these off the
   // ACTIVE gateway's definition. The numbers are hand-copied from tgpay, so
   // pin them: a change to TGPay's band that skips the fake would silently move
-  // what the band-edge tests in globepay-deposit.unit.spec.ts assert.
+  // what the band-edge tests in gateway-deposit.unit.spec.ts assert.
   it('the fake gateway mirrors the real one where the orchestration branches', () => {
     expect(GATEWAYS.fake.limits).toEqual(GATEWAYS.tgpay.limits);
     expect(GATEWAYS.fake.needsCustomerContact).toBe(

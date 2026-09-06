@@ -9,7 +9,7 @@ import {
   tgpayPaymentState,
 } from '../../../../modules/packs/tgpay-client';
 import { GATEWAYS, rowGateway } from '../../../../modules/packs/gateway';
-import { applyDepositOutcome } from '../../../../modules/packs/globepay-deposit';
+import { applyDepositOutcome } from '../../../../modules/packs/gateway-deposit';
 
 // TGPay payment server-notify (docs "Payment callback"). The two key headers
 // are the whole authentication (plus the source allowlist in middlewares).
@@ -60,7 +60,7 @@ export async function POST(
   const state = tgpayPaymentState(String(data.status ?? ''));
 
   const packs = resolvePacks<GatewayDeposits>(req.scope);
-  const [deposit] = await packs.listGlobePayDeposits(
+  const [deposit] = await packs.listGatewayDeposits(
     { merchant_transaction_id: merchantTransactionId },
     { take: 1 },
   );

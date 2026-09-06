@@ -1,4 +1,4 @@
-// Dev fixture: seed one HELD GlobePay withdrawal so the admin /withdrawals
+// Dev fixture: seed one HELD withdrawal so the admin /withdrawals
 // page has an approvable row to demo locally (plan 094 UI). Local use only —
 // it fabricates a payout row with no matching ledger debit, so approving it
 // against a real gateway would pay out money nobody was charged for.
@@ -19,7 +19,7 @@ export default async function seedHeldWithdrawal({
   }
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const stamp = Date.now();
-  const rows = await packs.createGlobePayWithdrawals([
+  const rows = await packs.createGatewayWithdrawals([
     {
       merchant_transaction_id: `PC-helddemo${stamp}`,
       customer_id: 'cus_01KY4H64BASH0EYSN3HX0ZHT6D',
@@ -34,7 +34,7 @@ export default async function seedHeldWithdrawal({
   const row = Array.isArray(rows) ? rows[0] : rows;
   if (!row) {
     throw new Error(
-      '[seed-held-withdrawal] createGlobePayWithdrawals returned no row',
+      '[seed-held-withdrawal] createGatewayWithdrawals returned no row',
     );
   }
   console.log(`[seed-held-withdrawal] created ${row.id} status=${row.status}`);

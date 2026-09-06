@@ -72,8 +72,8 @@ export async function GET(
       ],
     };
     const [deposits, withdrawals] = await Promise.all([
-      packs.listGlobePayDeposits(byRef, { take: refs.length * 2 }),
-      packs.listGlobePayWithdrawals(byRef, { take: refs.length * 2 }),
+      packs.listGatewayDeposits(byRef, { take: refs.length * 2 }),
+      packs.listGatewayWithdrawals(byRef, { take: refs.length * 2 }),
     ]);
     for (const d of deposits) {
       const fact = { method: d.payment_method_code, status: d.status };

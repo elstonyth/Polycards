@@ -1,21 +1,22 @@
 import { POST, GET } from '../route';
-import { GLOBEPAY_STALE_AFTER_MS } from '../../../../../modules/packs/globepay-reconcile';
+import { GATEWAY_STALE_AFTER_MS } from '../../../../../modules/packs/gateway-reconcile';
+import { legacyGatewayEnvName } from '../../../../../modules/packs/gateway-env';
 
-// The IP we send as GlobePay365's `IPAddress` must be the one the proxy chain
+// The IP we send as the gateway's `IPAddress` must be the one the proxy chain
 // derived, not one the caller typed. Medusa's express-loader sets
 // `trust proxy` 1 unconditionally, so req.ip is that value; a raw
 // X-Forwarded-For header is attacker-controlled and only a fallback.
-jest.mock('../../../../../modules/packs/globepay-deposit', () => ({
-  startGlobePayDeposit: jest.fn(async () => ({ url: 'https://cashier/x' })),
+jest.mock('../../../../../modules/packs/gateway-deposit', () => ({
+  startDeposit: jest.fn(async () => ({ url: 'https://cashier/x' })),
 }));
 
-import { startGlobePayDeposit } from '../../../../../modules/packs/globepay-deposit';
+import { startDeposit } from '../../../../../modules/packs/gateway-deposit';
 import type {
   FakeFacet,
   GatewayDeposits,
 } from '../../../../../modules/packs/facets';
 
-const startMock = startGlobePayDeposit as jest.Mock;
+const startMock = startDeposit as jest.Mock;
 
 const res = { json: jest.fn() } as never;
 
@@ -44,11 +45,14 @@ const mkReq = (over: Record<string, unknown> = {}) =>
 
 const sentIp = () => startMock.mock.calls[0][1].ipAddress;
 
+// The pre-rename name is still read as a fallback (gateway-env.ts); a dev box
+// with it set in its local env would otherwise keep the fail-closed test green.
+const LEGACY_RETURN_URL = legacyGatewayEnvName('PAYMENT_RETURN_URL');
+
 const ORIGINAL_ENV = {
   PAYMENT_CALLBACK_BASE: process.env.PAYMENT_CALLBACK_BASE,
   PAYMENT_RETURN_URL: process.env.PAYMENT_RETURN_URL,
-  // The pre-removal name is still read as a fallback; clear it too.
-  GLOBEPAY_RETURN_URL: process.env.GLOBEPAY_RETURN_URL,
+  [LEGACY_RETURN_URL]: process.env[LEGACY_RETURN_URL],
   TGPAY_API_BASE: process.env.TGPAY_API_BASE,
   TGPAY_PUBLIC_KEY: process.env.TGPAY_PUBLIC_KEY,
   TGPAY_SECRET_KEY: process.env.TGPAY_SECRET_KEY,
@@ -121,7 +125,7 @@ describe('POST /store/credits/deposit — customer IP', () => {
     'fails closed when %s is unset — money in, no credit',
     async (missing) => {
       delete process.env[missing];
-      delete process.env.GLOBEPAY_RETURN_URL;
+      delete process.env[LEGACY_RETURN_URL];
       await expect(POST(mkReq({ ip: '203.0.113.7' }), res)).rejects.toThrow(
         /temporarily unavailable/i,
       );
@@ -140,7 +144,7 @@ describe('GET /store/credits/deposit — in-flight deposits', () => {
       scope: {
         resolve: () =>
           ({
-            listGlobePayDeposits: listMock,
+            listGatewayDeposits: listMock,
           }) satisfies FakeFacet<GatewayDeposits>,
       },
       ...over,
@@ -165,10 +169,10 @@ describe('GET /store/credits/deposit — in-flight deposits', () => {
     // The floor is the sweep's own window, so the page can never claim to be
     // confirming a deposit the sweep has already stopped chasing.
     expect(selector.created_at.$gte.getTime()).toBeGreaterThanOrEqual(
-      before - GLOBEPAY_STALE_AFTER_MS,
+      before - GATEWAY_STALE_AFTER_MS,
     );
     expect(selector.created_at.$gte.getTime()).toBeLessThanOrEqual(
-      after - GLOBEPAY_STALE_AFTER_MS,
+      after - GATEWAY_STALE_AFTER_MS,
     );
     expect(config.order).toEqual({ created_at: 'DESC' });
     expect(config.take).toBeGreaterThan(0);

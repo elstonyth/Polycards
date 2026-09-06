@@ -11,7 +11,7 @@ import type { PaymentGateway } from './gateway';
 //
 // Lives in the module layer (not in the API route that owns the CRUD) because
 // three callers need it and they must agree exactly: the saved-accounts route,
-// the payout money path (globepay-withdrawal.ts + PacksModuleService
+// the payout money path (gateway-withdrawal.ts + PacksModuleService
 // .withdrawForCashout), and the one-shot backfill script. A module file also
 // keeps the money path from importing an API route.
 
@@ -86,7 +86,7 @@ export function parseSavedBankAccounts(value: unknown): SavedBankAccount[] {
       typeof e.accountHolderName === 'string'
     ) {
       // Entries written before the bank registry carry a gateway's own code
-      // (GlobePay's, historically). Read them as the canonical bank, with the
+      // (the gateway's, historically). Read them as the canonical bank, with the
       // id recomputed to match — the id is derived from (bankCode, account),
       // and resolveWithdrawalDestination enforces that derivation. The next
       // write persists the canonical form; until then every read converts.
@@ -112,7 +112,7 @@ export function parseSavedBankAccounts(value: unknown): SavedBankAccount[] {
  * Hours a newly saved destination must wait before it can receive a payout.
  * `0` switches the wait OFF — a saved account can be paid immediately.
  *
- * Read PER CALL (the plan-066 convention, same as GLOBEPAY_WD_DAILY_MAX_RM) so
+ * Read PER CALL (the plan-066 convention, same as GATEWAY_WD_DAILY_MAX_RM) so
  * support can retune it without a redeploy.
  *
  * Parsed here rather than through positiveIntFromEnv, which refuses `0` on

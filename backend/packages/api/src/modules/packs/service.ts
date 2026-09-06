@@ -63,10 +63,10 @@ import ChallengeStage from './models/challenge-stage';
 import ChallengeSchedule from './models/challenge-schedule';
 import ChallengeSettings from './models/challenge-settings';
 import TierSettings from './models/tier-settings';
-import GlobePayDeposit, { DEPOSIT_STATUSES } from './models/globepay-deposit';
-import GlobePayWithdrawal, {
+import GatewayDeposit, { DEPOSIT_STATUSES } from './models/gateway-deposit';
+import GatewayWithdrawal, {
   WITHDRAWAL_STATUSES,
-} from './models/globepay-withdrawal';
+} from './models/gateway-withdrawal';
 import ChallengePayout from './models/challenge-payout';
 import LedgerEntry from './models/ledger-entry';
 import LedgerSequence from './models/ledger-sequence';
@@ -78,7 +78,8 @@ import {
   type LedgerPayload,
   type LedgerType,
 } from './ledger';
-import type { GatewayPeriodRow, LedgerPeriodRow } from './globepay-settlement';
+import type { GatewayPeriodRow, LedgerPeriodRow } from './gateway-settlement';
+import { gatewayEnvName } from './gateway-env';
 import PurchaseInvoice from './models/purchase-invoice';
 import PurchaseInvoiceLine from './models/purchase-invoice-line';
 import StockMovement from './models/stock-movement';
@@ -178,7 +179,7 @@ const DEPOSITED_PT_FILTER =
   "reason = 'topup' AND amount > 0 AND external_funded_cents IS NOT NULL";
 
 // Default rolling-24h cashout ceiling, in RM. The per-transaction payout band
-// (RM 50 – RM 50,000, globepay-withdrawal.ts) bounds ONE payout; before this
+// (RM 50 – RM 50,000, gateway-withdrawal.ts) bounds ONE payout; before this
 // cap nothing summed prior withdrawals over any window, so a compromised
 // account's blast radius was "the whole balance, as fast as the rate limiter
 // allows" with no velocity signal to alert on.
@@ -186,7 +187,7 @@ const DEPOSITED_PT_FILTER =
 // The env override is read PER CALL inside withdrawForCashout (never latched at
 // module load) so a spec can drive both cap states through one booted app —
 // the convention plan 066 established.
-const GLOBEPAY_WD_DAILY_MAX_RM_DEFAULT = 50_000;
+const GATEWAY_WD_DAILY_MAX_RM_DEFAULT = 50_000;
 
 // Postgres unique-violation detector (SQLSTATE 23505) for the open-settlement
 // idempotency index. See settleOpen's catch for the exact semantics — a 23505
@@ -298,12 +299,12 @@ const PULL_TIER_SQL =
   'EXISTS (SELECT 1 FROM pack_odds o WHERE o.pack_id = p.pack_id ' +
   '  AND o.card_id = p.card_id AND o.deleted_at IS NULL AND o.rarity = ?)';
 
-/** The globepay_withdrawal.status domain, derived from the model's
+/** The gateway_withdrawal.status domain, derived from the model's
  *  WITHDRAWAL_STATUSES for the raw-SQL claim below (raw SQL carries no model
  *  types). */
 type WithdrawalStatus = (typeof WITHDRAWAL_STATUSES)[number];
 
-/** The globepay_deposit.status domain, derived from the model's
+/** The gateway_deposit.status domain, derived from the model's
  *  DEPOSIT_STATUSES for the raw-SQL claim below. */
 type DepositStatus = (typeof DEPOSIT_STATUSES)[number];
 
@@ -538,8 +539,8 @@ class PacksModuleService extends MedusaService({
   ChallengeSchedule,
   ChallengeSettings,
   TierSettings,
-  GlobePayDeposit,
-  GlobePayWithdrawal,
+  GatewayDeposit,
+  GatewayWithdrawal,
   ChallengePayout,
   LedgerEntry,
   LedgerSequence,
@@ -2892,7 +2893,7 @@ class PacksModuleService extends MedusaService({
   // Wallet-tab join (Task 9) is a plain equality on credit_transaction.id.
   //
   // ledgerPaymentMethod/ledgerGatewayRef default to the mock gateway so the
-  // original caller is untouched; the GlobePay365 callback and its
+  // original caller is untouched; the gateway callback and its
   // reconciliation sweep pass the real method (BQR/OB) and their transaction
   // id. Those two share ONE idempotency anchor, so a callback racing the sweep
   // collapses to a single credit — and since refId is that credit's id, to a
@@ -2964,7 +2965,7 @@ class PacksModuleService extends MedusaService({
             outcome: input.ledger.outcome,
             bank_code: input.ledger.bankCode,
             // Last 4 only — the ledger is a customer- and operator-visible
-            // surface; the full number stays on globepay_withdrawal.
+            // surface; the full number stays on gateway_withdrawal.
             account_last4: input.ledger.accountNumber
               ? input.ledger.accountNumber.slice(-4)
               : null,
@@ -2981,7 +2982,7 @@ class PacksModuleService extends MedusaService({
   // gate and the debit, as a single serialized unit.
   //
   // Why the gate cannot merely PRECEDE the debit (it used to, in
-  // globepay-withdrawal.ts, with no lock held across the two): `floor: 0` in
+  // gateway-withdrawal.ts, with no lock held across the two): `floor: 0` in
   // mutateCreditAtomic guards the RAW balance. It knows nothing about `locked`
   // — walletSummary's withdrawable folds in the freeze flag and the playthrough
   // gate, and the floor cannot see either. So N concurrent
@@ -3057,7 +3058,7 @@ class PacksModuleService extends MedusaService({
     // 1a) THE ROW MUST STILL BE OPEN. Read under the lock, before anything
     //     else, and the debit half of the pact with
     //     claimWithdrawalAgainstDebit below — see that method for the full
-    //     argument. In short: globepay-withdrawal.ts commits the row at step 1
+    //     argument. In short: gateway-withdrawal.ts commits the row at step 1
     //     and debits here at step 2, so an admin approve/deny can land in
     //     between and close a row this call is about to debit. That admin
     //     close takes THIS key first and only closes a row it read as
@@ -3079,7 +3080,7 @@ class PacksModuleService extends MedusaService({
     //     'pending' is checked alongside 'held' because this guard is not
     //     held-specific: any closed row must not be debited.
     const [openRow] = await em.execute<{ status: string }[]>(
-      'SELECT status FROM globepay_withdrawal ' +
+      'SELECT status FROM gateway_withdrawal ' +
         'WHERE merchant_transaction_id = ? AND deleted_at IS NULL',
       [input.merchantTransactionId],
     );
@@ -3124,7 +3125,7 @@ class PacksModuleService extends MedusaService({
     //    wallet gate uses: a bad destination outranks a bad wallet. A frozen
     //    account naming an un-cooled destination hears about the destination,
     //    not the freeze. That is the quieter answer to someone holding a stolen
-    //    token, and it keeps this method and globepay-withdrawal.ts's precheck
+    //    token, and it keeps this method and gateway-withdrawal.ts's precheck
     //    in the same order. withdrawable.ts's own precedence rule (freeze
     //    outranks playthrough outranks the cap) is untouched — it orders the
     //    three WALLET refusals against each other, all of which sit below this.
@@ -3147,7 +3148,7 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     //    THIS is the authoritative gate — the decision that makes the payout
-    //    safe. globepay-withdrawal.ts calls the same helper unlocked before
+    //    safe. gateway-withdrawal.ts calls the same helper unlocked before
     //    writing its row, but only to avoid leaving debris on a refusal that is
     //    already certain; it decides nothing.
     const gateError = withdrawalGateError(wallet, input.amount);
@@ -3158,7 +3159,7 @@ class PacksModuleService extends MedusaService({
     //
     //    `pending` and `settled` both moved (or are still moving) money;
     //    `held` does too — the debit already posted (see
-    //    startGlobePayWithdrawal), the row is merely parked for admin approval
+    //    startWithdrawal), the row is merely parked for admin approval
     //    instead of being sent to the gateway, and the money stays out of the
     //    balance until a refund (admin deny) puts it back. So a held payout
     //    consumes the customer's daily blast radius exactly like a submitted
@@ -3170,7 +3171,7 @@ class PacksModuleService extends MedusaService({
     //    created_at) and (customer_id) partial indexes this scan uses.
     //
     //    The just-created row is EXCLUDED by merchant_transaction_id:
-    //    globepay-withdrawal.ts writes it with its final status (`pending` or
+    //    gateway-withdrawal.ts writes it with its final status (`pending` or
     //    `held`) BEFORE calling this method (the callback echoes only
     //    MerchantTransactionId, so that row is the only way back to the
     //    customer), so an unfiltered sum would count this very attempt
@@ -3190,12 +3191,12 @@ class PacksModuleService extends MedusaService({
     // ignored.
     const capCents =
       nonNegativeIntFromEnv(
-        'GLOBEPAY_WD_DAILY_MAX_RM',
-        GLOBEPAY_WD_DAILY_MAX_RM_DEFAULT,
+        gatewayEnvName('GATEWAY_WD_DAILY_MAX_RM'),
+        GATEWAY_WD_DAILY_MAX_RM_DEFAULT,
       ) * 100;
     const capRows = await em.execute<{ sum_cents: string | null }[]>(
       'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS sum_cents ' +
-        'FROM globepay_withdrawal ' +
+        'FROM gateway_withdrawal ' +
         'WHERE customer_id = ? AND deleted_at IS NULL ' +
         "AND status IN ('pending', 'settled', 'held') " +
         "AND created_at > now() - interval '24 hours' " +
@@ -3246,7 +3247,7 @@ class PacksModuleService extends MedusaService({
   }
 
   /**
-   * ATOMIC STATUS CLAIM on one globepay_withdrawal row — the mutex behind the
+   * ATOMIC STATUS CLAIM on one gateway_withdrawal row — the mutex behind the
    * admin approve/deny routes (plan 094).
    *
    * ONE conditional claim (claim.ts carries the full argument): `true` means
@@ -3254,7 +3255,7 @@ class PacksModuleService extends MedusaService({
    * a refund); `false` means someone else already did, and the caller must not
    * act.
    *
-   * Do NOT reimplement this with `updateGlobePayWithdrawals({ selector, data
+   * Do NOT reimplement this with `updateGatewayWithdrawals({ selector, data
    * })`. It type-checks and hands back an array, so `length === 0` reads like
    * the same guard, but the generated service resolves the selector with a
    * find-then-write and takes no row lock: two concurrent approves — a
@@ -3263,7 +3264,7 @@ class PacksModuleService extends MedusaService({
    * account.
    */
   @InjectTransactionManager()
-  async claimGlobePayWithdrawalStatus(
+  async claimWithdrawalStatus(
     input: {
       id: string;
       /** Statuses the row may be claimed FROM. A row in any other status is
@@ -3282,7 +3283,7 @@ class PacksModuleService extends MedusaService({
   ): Promise<boolean> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     const rows = await claimRows(em, {
-      table: 'globepay_withdrawal',
+      table: 'gateway_withdrawal',
       ids: [input.id],
       // One bound placeholder per accepted status — the list is ours (never a
       // request value) and it stays bound rather than interpolated regardless.
@@ -3291,7 +3292,7 @@ class PacksModuleService extends MedusaService({
     });
     if (rows.length === 1) {
       await this.writeSettlementMirror(
-        'globepay_withdrawal',
+        'gateway_withdrawal',
         input.id,
         input.money,
         sharedContext,
@@ -3301,9 +3302,9 @@ class PacksModuleService extends MedusaService({
   }
 
   /**
-   * ATOMIC STATUS CLAIM on one globepay_deposit row — the deposit sibling of
-   * claimGlobePayWithdrawalStatus, and every word of that method's warning
-   * applies here: `updateGlobePayDeposits({ selector: { id, status }, … })`
+   * ATOMIC STATUS CLAIM on one gateway_deposit row — the deposit sibling of
+   * claimWithdrawalStatus, and every word of that method's warning
+   * applies here: `updateGatewayDeposits({ selector: { id, status }, … })`
    * type-checks, hands back an array, and reads like the same guard, but the
    * generated service resolves the selector with a find-then-write that takes
    * no row lock. On this table the loser of that race is a second top-up
@@ -3314,7 +3315,7 @@ class PacksModuleService extends MedusaService({
    * other one won.
    */
   @InjectTransactionManager()
-  async claimGlobePayDepositStatus(
+  async claimDepositStatus(
     input: {
       id: string;
       /** Statuses the row may be claimed FROM. Callers pass the status they
@@ -3329,14 +3330,14 @@ class PacksModuleService extends MedusaService({
   ): Promise<boolean> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     const rows = await claimRows(em, {
-      table: 'globepay_deposit',
+      table: 'gateway_deposit',
       ids: [input.id],
       where: { status: input.from },
       set: { ...(input.set ?? {}), status: input.to },
     });
     if (rows.length === 1) {
       await this.writeSettlementMirror(
-        'globepay_deposit',
+        'gateway_deposit',
         input.id,
         input.money,
         sharedContext,
@@ -3349,25 +3350,25 @@ class PacksModuleService extends MedusaService({
    *  bigNumber columns cannot ride the raw statement. Runs on the claim's own
    *  transaction, and only after it was won, so a loser leaves no trace. */
   private async writeSettlementMirror(
-    table: 'globepay_deposit' | 'globepay_withdrawal',
+    table: 'gateway_deposit' | 'gateway_withdrawal',
     id: string,
     money: SettlementMirror | undefined,
     sharedContext: Context,
   ): Promise<void> {
     if (!money || Object.keys(money).length === 0) return;
-    if (table === 'globepay_deposit') {
-      await this.updateGlobePayDeposits([{ id, ...money }], sharedContext);
+    if (table === 'gateway_deposit') {
+      await this.updateGatewayDeposits([{ id, ...money }], sharedContext);
       return;
     }
-    await this.updateGlobePayWithdrawals([{ id, ...money }], sharedContext);
+    await this.updateGatewayWithdrawals([{ id, ...money }], sharedContext);
   }
 
   /**
    * The admin approve/deny claim, SERIALIZED AGAINST THE DEBIT — the whole
-   * reason this exists on top of claimGlobePayWithdrawalStatus (plan 094
+   * reason this exists on top of claimWithdrawalStatus (plan 094
    * review fix, CodeRabbit).
    *
-   * THE WINDOW. startGlobePayWithdrawal commits the withdrawal row at step 1
+   * THE WINDOW. startWithdrawal commits the withdrawal row at step 1
    * and debits at step 2, so a committed 'held' row with no debit yet is a
    * normal, expected state — not only a crash. An admin acting inside that
    * window sees "no debit" and cannot tell it from "no debit EVER": close the
@@ -3376,7 +3377,7 @@ class PacksModuleService extends MedusaService({
    * never revisits a 'held' or 'failed' row.
    *
    * WHY NOT A TIMER. This used to be an elapsed-time gate
-   * (GLOBEPAY_WD_HELD_DEBIT_GRACE_MS): wait 60s and a still-running debit was
+   * (GATEWAY_WD_HELD_DEBIT_GRACE_MS): wait 60s and a still-running debit was
    * declared impossible, on the grounds that
    * idle_in_transaction_session_timeout would have killed it. That reasoning
    * was FALSE. That timeout only fires on a session idle BETWEEN statements;
@@ -3402,7 +3403,7 @@ class PacksModuleService extends MedusaService({
    * @returns `debited` — whether a debit exists for this payout, decided
    * under the lock, so a caller may act on `false` as "no debit will ever
    * land". `claimed` — whether THIS caller moved the row (see
-   * claimGlobePayWithdrawalStatus).
+   * claimWithdrawalStatus).
    */
   @InjectTransactionManager()
   async claimWithdrawalAgainstDebit(
@@ -3470,7 +3471,7 @@ class PacksModuleService extends MedusaService({
       // carries a transactionManager instead of opening a second transaction —
       // if it did open one, the claim would land outside the lock and the whole
       // pact above would silently lapse.
-      const claimed = await this.claimGlobePayWithdrawalStatus(
+      const claimed = await this.claimWithdrawalStatus(
         { id: input.id, from: input.from, to: debited ? input.to : 'failed' },
         sharedContext,
       );
@@ -4437,7 +4438,7 @@ class PacksModuleService extends MedusaService({
    * one caller, and `false` to every other.
    *
    * ONE conditional claim (see claim.ts), for the same reason as
-   * claimGlobePayWithdrawalStatus: of two concurrent claims — a double-tapped
+   * claimWithdrawalStatus: of two concurrent claims — a double-tapped
    * "Open free pack" is the realistic trigger — exactly one matches a row. A
    * read-then-write (list the state, check free_pack_claimed_at, then update)
    * type-checks and reads like the same guard, but takes no row lock: both
@@ -4639,7 +4640,7 @@ class PacksModuleService extends MedusaService({
 
   // One customer's saved payout destinations, unlocked.
   //
-  // Exists for ONE caller: globepay-withdrawal.ts's pre-row destination
+  // Exists for ONE caller: gateway-withdrawal.ts's pre-row destination
   // precheck, which has no transaction of its own. The decision that matters
   // does not come through here — withdrawForCashout calls loadSavedBankAccounts
   // directly on its own locked transaction manager, so this method cannot be
@@ -4693,7 +4694,7 @@ class PacksModuleService extends MedusaService({
       'SELECT customer_id, bank_code, account_number, ' +
         '  MIN(account_holder_name) AS account_holder_name, ' +
         '  MIN(created_at) AS first_settled_at ' +
-        'FROM globepay_withdrawal ' +
+        'FROM gateway_withdrawal ' +
         "WHERE status = 'settled' AND deleted_at IS NULL " +
         'GROUP BY customer_id, bank_code, account_number ' +
         'ORDER BY customer_id, first_settled_at',
@@ -5380,7 +5381,7 @@ class PacksModuleService extends MedusaService({
     // FIRST, because it is the cheapest check and the most absolute: a freeze is
     // an active hold, and deletion would destroy the very evidence it preserves
     // (the purge HARD-deletes player_payout_details — bank name, full account
-    // number, holder name — and blanks globepay_withdrawal.account_holder_name).
+    // number, holder name — and blanks gateway_withdrawal.account_holder_name).
     //
     // None of the checks below catch it. `frozen` is ORTHOGONAL to `disabled`,
     // so no store-side guard rejects a frozen session, and rawLedgerBalanceCents
@@ -5411,7 +5412,7 @@ class PacksModuleService extends MedusaService({
       };
     }
 
-    const [withdrawal] = await this.listGlobePayWithdrawals(
+    const [withdrawal] = await this.listGatewayWithdrawals(
       { customer_id: customerId, status: ['pending', 'held'] },
       { take: 1 },
       sharedContext,
@@ -5433,7 +5434,7 @@ class PacksModuleService extends MedusaService({
     // failure it prevents is concrete — the transfer doesn't land, the row
     // expires, the customer deletes at balance 0, the transfer arrives, and
     // the sweep credits an ownerless account.
-    const [deposit] = await this.listGlobePayDeposits(
+    const [deposit] = await this.listGatewayDeposits(
       { customer_id: customerId, status: ['pending', 'expired'] },
       { take: 1 },
       sharedContext,
@@ -5539,7 +5540,7 @@ class PacksModuleService extends MedusaService({
   // partial failure recoverable.
   //
   // What is deliberately NOT touched: credit_transaction, ledger_entry,
-  // globepay_deposit, pull and vip_member_state. Those are the business books.
+  // gateway_deposit, pull and vip_member_state. Those are the business books.
   // They carry only a customer_id that no longer resolves to a person, so the
   // rows are already anonymous by construction.
   @InjectTransactionManager()
@@ -5568,7 +5569,7 @@ class PacksModuleService extends MedusaService({
     // number is kept for the same reason setPayoutDetails keeps it in its audit
     // row — a same-bank redirect is otherwise indistinguishable from a no-op.
     await em.execute(
-      `update "globepay_withdrawal"
+      `update "gateway_withdrawal"
           set "account_number" = right("account_number", 4),
               "account_holder_name" = ''
         where "customer_id" = ?`,
@@ -6207,9 +6208,9 @@ class PacksModuleService extends MedusaService({
     }));
   }
 
-  // Count-then-insert for a GlobePay deposit, serialized per customer.
+  // Count-then-insert for a gateway deposit, serialized per customer.
   //
-  // GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER used to be enforced by counting
+  // GATEWAY_MAX_RECENT_PENDING_PER_CUSTOMER used to be enforced by counting
   // pending rows and then inserting, on separate connections: N concurrent
   // submits could each read N−1, all pass, and all insert, so the cap was not
   // a cap (#429). The count and the insert now share ONE transaction behind a
@@ -6219,7 +6220,7 @@ class PacksModuleService extends MedusaService({
   // runs on a different connection and the lock is decoration.
   //
   // Returns null — not a throw — when the cap is reached. The customer-facing
-  // sentence belongs with the policy in globepay-deposit.ts; the lock has no
+  // sentence belongs with the policy in gateway-deposit.ts; the lock has no
   // opinion about wording. The gateway call deliberately stays OUTSIDE this
   // transaction: holding an advisory lock across a third-party HTTP timeout
   // would be worse than the race being fixed.
@@ -6232,7 +6233,7 @@ class PacksModuleService extends MedusaService({
   // commit and the cap race (#429) would silently reopen. Do not compose this
   // method into a context carrying a stricter isolation level.
   @InjectTransactionManager()
-  async createGlobePayDepositCapped(
+  async createDepositCapped(
     input: {
       data: {
         merchant_transaction_id: string;
@@ -6240,7 +6241,7 @@ class PacksModuleService extends MedusaService({
         amount_requested: number;
         payment_method_code: string;
         status: 'pending';
-        /** Which gateway the row is created under; column defaults to GlobePay. */
+        /** Which gateway the row is created under; the column default is TGPay. */
         gateway?: string;
       };
       maxRecentPending: number;
@@ -6250,9 +6251,9 @@ class PacksModuleService extends MedusaService({
   ): Promise<{ id: string } | null> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `globepay-deposit:${input.data.customer_id}`,
+      `gateway-deposit:${input.data.customer_id}`,
     ]);
-    const [, recentPending] = await this.listAndCountGlobePayDeposits(
+    const [, recentPending] = await this.listAndCountGatewayDeposits(
       {
         customer_id: input.data.customer_id,
         status: 'pending',
@@ -6262,18 +6263,15 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     if (recentPending >= input.maxRecentPending) return null;
-    const [row] = await this.createGlobePayDeposits(
-      [input.data],
-      sharedContext,
-    );
+    const [row] = await this.createGatewayDeposits([input.data], sharedContext);
     return { id: row.id };
   }
 
-  // The three grouped result sets behind /admin/globepay/settlement, one DB
+  // The three grouped result sets behind /admin/payments/settlement, one DB
   // round-trip each (audit 2026-08-17 B4/B5): settled gateway rows bucketed by
   // MYT calendar period, and the credit ledger's topup/cashout sums bucketed
   // the same way so the two records of the same money can be compared at all.
-  // The merge and the fee/delta arithmetic live in globepay-settlement.ts
+  // The merge and the fee/delta arithmetic live in gateway-settlement.ts
   // (pure, unit-tested) — this method only owns the SQL, mirroring the
   // ledgerReasonTotals / economy.ts split.
   //
@@ -6293,12 +6291,12 @@ class PacksModuleService extends MedusaService({
   // summed over whatever amount_settled rows exist, which SUM already skips
   // silently for NULL. Either way, the excluded rows get their own FILTER and
   // are counted out loud instead of being left to deflate the figure they
-  // were skipped from — see globepay-settlement.ts's header for the full
+  // were skipped from — see gateway-settlement.ts's header for the full
   // rule.
   /**
    * All-time gateway money totals from OUR rows, for the audit page to set
    * beside the gateway's live wallet balances (plan 130). Same NULL rule as
-   * globepaySettlementRows: a NULL net is counted, not zeroed.
+   * settlementRows: a NULL net is counted, not zeroed.
    */
   @InjectManager()
   async gatewayAuditTotals(
@@ -6339,7 +6337,7 @@ class PacksModuleService extends MedusaService({
               COALESCE(SUM(ROUND(amount_settled * 100)), 0)::bigint AS gross_cents,
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
               COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
-         FROM globepay_deposit
+         FROM gateway_deposit
         WHERE deleted_at IS NULL AND status = 'settled' AND gateway = ?`,
       [gateway],
     );
@@ -6348,7 +6346,7 @@ class PacksModuleService extends MedusaService({
               COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS gross_cents,
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
               COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
-         FROM globepay_withdrawal
+         FROM gateway_withdrawal
         WHERE deleted_at IS NULL AND status = 'settled' AND gateway = ?`,
       [gateway],
     );
@@ -6357,11 +6355,11 @@ class PacksModuleService extends MedusaService({
     const [audit] = await em.execute<
       { findings: string; last: string | null }[]
     >(
-      `SELECT (SELECT COUNT(*) FROM globepay_deposit WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND gateway = ?)
-            + (SELECT COUNT(*) FROM globepay_withdrawal WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND gateway = ?) AS findings,
+      `SELECT (SELECT COUNT(*) FROM gateway_deposit WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND gateway = ?)
+            + (SELECT COUNT(*) FROM gateway_withdrawal WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND gateway = ?) AS findings,
               GREATEST(
-                (SELECT MAX(audited_at) FROM globepay_deposit WHERE deleted_at IS NULL AND gateway = ?),
-                (SELECT MAX(audited_at) FROM globepay_withdrawal WHERE deleted_at IS NULL AND gateway = ?)
+                (SELECT MAX(audited_at) FROM gateway_deposit WHERE deleted_at IS NULL AND gateway = ?),
+                (SELECT MAX(audited_at) FROM gateway_withdrawal WHERE deleted_at IS NULL AND gateway = ?)
               ) AS last`,
       [gateway, gateway, gateway, gateway],
     );
@@ -6374,7 +6372,7 @@ class PacksModuleService extends MedusaService({
   }
 
   @InjectManager()
-  async globepaySettlementRows(
+  async settlementRows(
     granularity: 'week' | 'month',
     since: Date,
     @MedusaContext() sharedContext: Context = {},
@@ -6384,7 +6382,7 @@ class PacksModuleService extends MedusaService({
     ledger: LedgerPeriodRow[];
   }> {
     if (granularity !== 'week' && granularity !== 'month') {
-      throw new Error(`globepaySettlementRows: bad granularity ${granularity}`);
+      throw new Error(`settlementRows: bad granularity ${granularity}`);
     }
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
@@ -6413,7 +6411,7 @@ class PacksModuleService extends MedusaService({
     // GROSS can also be NULL on a settled deposit: a hand-settled row is
     // written by an operator outside every writer that sets amount_settled
     // (money-path-accuracy-audit-2026-08-17's "operational rule" paragraph).
-    // The quarantine branch in globepay-reconcile.ts — over-ceiling
+    // The quarantine branch in gateway-reconcile.ts — over-ceiling
     // callbacks/requeries — is the one flow that reaches manual settlement
     // today, and it leaves the row `settled` for a human with nothing written
     // back; there is no pre-emptive guard. SUM already skips those rows
@@ -6427,7 +6425,7 @@ class PacksModuleService extends MedusaService({
               COALESCE(SUM(ROUND(amount_settled * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS gross_with_net_cents,
               COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net,
               COUNT(*) FILTER (WHERE amount_settled IS NULL)::bigint AS missing_gross
-         FROM globepay_deposit
+         FROM gateway_deposit
         WHERE deleted_at IS NULL AND status = 'settled'
           AND settled_at IS NOT NULL AND settled_at >= ?::timestamptz
         GROUP BY 1`,
@@ -6452,7 +6450,7 @@ class PacksModuleService extends MedusaService({
               COALESCE(SUM(ROUND(COALESCE(amount_settled, amount) * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS gross_with_net_cents,
               COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net,
               0::bigint AS missing_gross  -- withdrawals gross on \`amount\`, never NULL
-         FROM globepay_withdrawal
+         FROM gateway_withdrawal
         WHERE deleted_at IS NULL AND status = 'settled'
           AND settled_at IS NOT NULL AND settled_at >= ?::timestamptz
         GROUP BY 1`,

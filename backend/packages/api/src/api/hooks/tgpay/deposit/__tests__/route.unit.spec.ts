@@ -6,7 +6,7 @@ jest.mock('../../../../../modules/packs/topup-receipt', () => ({
 }));
 
 import { POST } from '../route';
-import { GLOBEPAY_MAX_RM } from '../../../../../modules/packs/globepay-deposit';
+import { GATEWAY_MAX_RM } from '../../../../../modules/packs/gateway-deposit';
 import { topupIdempotencyReference } from '../../../../../modules/packs/topup';
 import type {
   FakeFacet,
@@ -36,10 +36,10 @@ const approved = {
 
 function harness(deposit: Record<string, unknown> | null) {
   const packs = {
-    listGlobePayDeposits: jest.fn().mockResolvedValue(deposit ? [deposit] : []),
+    listGatewayDeposits: jest.fn().mockResolvedValue(deposit ? [deposit] : []),
     // Every status transition on a deposit row is a conditional claim now
     // (applyDepositOutcome). `true` = this caller moved the row.
-    claimGlobePayDepositStatus: jest.fn().mockResolvedValue(true),
+    claimDepositStatus: jest.fn().mockResolvedValue(true),
     topUpCreditsWithLedger: jest.fn().mockResolvedValue({
       id: 'ct_1',
       balance: 50,
@@ -101,7 +101,7 @@ describe('tgpay deposit callback — authentication', () => {
       const h = harness(pendingRow);
       const res = await run(h, notify(approved), headers);
       expect(res.statusCode).toBe(401);
-      expect(h.packs.listGlobePayDeposits).not.toHaveBeenCalled();
+      expect(h.packs.listGatewayDeposits).not.toHaveBeenCalled();
       expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
     }
   });
@@ -132,7 +132,7 @@ describe('tgpay deposit callback — settlement', () => {
         idempotencyReference: topupIdempotencyReference('cus_1', 'PC-1'),
       }),
     );
-    expect(h.packs.claimGlobePayDepositStatus).toHaveBeenCalledWith(
+    expect(h.packs.claimDepositStatus).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'gpd_1',
         // Claimed FROM the status the route read, not a literal 'pending' —
@@ -158,7 +158,7 @@ describe('tgpay deposit callback — settlement', () => {
       const res = await run(h, notify({ ...approved, status }));
       expect(res.statusCode).toBe(200);
       expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
-      expect(h.packs.claimGlobePayDepositStatus).not.toHaveBeenCalled();
+      expect(h.packs.claimDepositStatus).not.toHaveBeenCalled();
     }
   });
 
@@ -166,7 +166,7 @@ describe('tgpay deposit callback — settlement', () => {
     const h = harness(pendingRow);
     await run(h, notify({ ...approved, status: 'REJECT' }));
     expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
-    expect(h.packs.claimGlobePayDepositStatus).toHaveBeenCalledWith(
+    expect(h.packs.claimDepositStatus).toHaveBeenCalledWith(
       expect.objectContaining({ from: ['pending'], to: 'failed' }),
     );
   });
@@ -187,7 +187,7 @@ describe('tgpay deposit callback — settlement', () => {
       const res = await run(h, notify(approved));
       expect(res.statusCode).toBe(200);
       expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
-      expect(h.packs.claimGlobePayDepositStatus).not.toHaveBeenCalled();
+      expect(h.packs.claimDepositStatus).not.toHaveBeenCalled();
       expect(h.logger.error).toHaveBeenCalledWith(
         expect.stringMatching(/belongs to gateway/),
       );
@@ -202,7 +202,7 @@ describe('tgpay deposit callback — settlement', () => {
   });
 
   it('refuses an amount that is not the row amount (forged, wrong, non-positive)', async () => {
-    for (const amount of [0, -5, 'abc', 49, 51, GLOBEPAY_MAX_RM + 1]) {
+    for (const amount of [0, -5, 'abc', 49, 51, GATEWAY_MAX_RM + 1]) {
       const h = harness(pendingRow);
       const res = await run(h, notify({ ...approved, amount }));
       expect(res.statusCode).toBe(400);

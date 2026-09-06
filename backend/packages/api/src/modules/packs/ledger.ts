@@ -53,11 +53,11 @@ export type LedgerPayload =
       sku: string | null;
       value: number;
     }
-  // WD: a GlobePay365 payout. One row when the debit is taken (negative
+  // WD: a gateway payout. One row when the debit is taken (negative
   // wallet_delta) and, if the payout later fails, one when it is refunded
   // (positive) — the pair nets to zero, which is how a bounced withdrawal
   // reads in the ledger. The account number is stored as last-4 ONLY: the
-  // full number lives on globepay_withdrawal, and the ledger is an operator-
+  // full number lives on gateway_withdrawal, and the ledger is an operator-
   // and customer-visible surface.
   | {
       type: 'WD';

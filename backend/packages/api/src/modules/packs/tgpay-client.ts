@@ -3,8 +3,8 @@ import { GatewayError } from './gateway-types';
 
 // TGPay HTTP client (sandbox docs read 2026-09-05, sandbox.tgpay365.com/docs/api).
 // Plain JSON over HTTPS: two static key headers and a unix `epoch` that must
-// be within ±5 minutes of their clock. No AES, no RSA — the whole wire format
-// GlobePay365 needed lives in globepay.ts and is not used here.
+// be within ±5 minutes of their clock. No AES, no RSA (the retired gateway's
+// signing stack went with it).
 //
 // Every function takes config explicitly so it stays unit-testable without a
 // container; the env reader is the only thing that touches process.env.
@@ -43,7 +43,7 @@ export function tgpayIsSandbox(config: Pick<TgpayConfig, 'baseUrl'>): boolean {
 }
 
 /**
- * Same error class as GlobePay so the orchestration's `definite` / `httpStatus`
+ * Extends GatewayError so the orchestration's `definite` / `httpStatus`
  * / `has()` branches keep their meaning. `codes` carries a synthetic code per
  * HTTP class so callers can branch without parsing message text.
  */
@@ -328,7 +328,7 @@ export async function balances(config: TgpayConfig): Promise<{
  * terminal failure closes the row — reject/fail plus the cancelled / expired
  * / voided / declined family, because a payout left "pending" on one of those
  * strands the customer's debit with no sweep to release it. Anything unknown
- * stays pending — the same never-write-off-on-doubt rule as GlobePay's
+ * stays pending — the same never-write-off-on-doubt rule as the gateway's
  * depositState.
  */
 export function tgpayPaymentState(

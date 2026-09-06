@@ -52,7 +52,7 @@ export function noStoreForAuthenticatedStore(
 //     only thing stating the intent. The threat is admin JSON outliving a
 //     session in the browser cache of a shared operator workstation
 //     (CWE-524/525), not cross-user CDN leakage.
-//   - admin/globepay/{deposits,withdrawals}/route.ts set this by hand and keep
+//   - admin/payments/{deposits,withdrawals}/route.ts set this by hand and keep
 //     doing so; a handler-set header still wins, so those stay a no-op overlap
 //     rather than a conflict.
 //

@@ -4,9 +4,9 @@ import { join } from 'node:path';
 
 // The storefront's DEPOSIT_OVERDUE_MS decides when a pending top-up stops
 // rendering as "confirming" and starts pointing the customer at support. The
-// backend's GLOBEPAY_STALE_AFTER_MS is when that same deposit stops being
+// backend's GATEWAY_STALE_AFTER_MS is when that same deposit stops being
 // served at all and the sweep may expire it. Only a comment links them
-// ("Mirrors the backend's GLOBEPAY_STALE_AFTER_MS"), so a one-sided edit either
+// ("Mirrors the backend's GATEWAY_STALE_AFTER_MS"), so a one-sided edit either
 // leaves a page claiming to confirm a deposit nobody is chasing any more, or
 // sends the customer to support while the sweep is still working on it.
 //
@@ -18,7 +18,7 @@ import { join } from 'node:path';
 const STOREFRONT_SRC = join(process.cwd(), 'src/lib/actions/vault.ts');
 const BACKEND_SRC = join(
   process.cwd(),
-  'backend/packages/api/src/modules/packs/globepay-reconcile.ts',
+  'backend/packages/api/src/modules/packs/gateway-reconcile.ts',
 );
 
 /**
@@ -48,7 +48,7 @@ function msConst(src: string, name: string): number {
 }
 
 describe('deposit staleness parity: storefront mirror vs backend truth', () => {
-  it('storefront DEPOSIT_OVERDUE_MS matches backend GLOBEPAY_STALE_AFTER_MS', () => {
+  it('storefront DEPOSIT_OVERDUE_MS matches backend GATEWAY_STALE_AFTER_MS', () => {
     const storefront = msConst(
       readFileSync(STOREFRONT_SRC, 'utf8'),
       'DEPOSIT_OVERDUE_MS',
@@ -56,7 +56,7 @@ describe('deposit staleness parity: storefront mirror vs backend truth', () => {
     // Guard the guard: two zero reads would agree with each other.
     expect(storefront).toBeGreaterThan(0);
     expect(storefront).toBe(
-      msConst(readFileSync(BACKEND_SRC, 'utf8'), 'GLOBEPAY_STALE_AFTER_MS'),
+      msConst(readFileSync(BACKEND_SRC, 'utf8'), 'GATEWAY_STALE_AFTER_MS'),
     );
   });
 

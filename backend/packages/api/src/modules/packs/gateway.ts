@@ -1,6 +1,7 @@
 import * as tgpay from './tgpay-client';
 import type { TgpayConfig } from './tgpay-client';
 import { fakeGateway, type FakeConfig } from './fake-gateway';
+import { gatewayEnv } from './gateway-env';
 import { PACKS_MODULE } from './index';
 import {
   banksFor,
@@ -39,13 +40,14 @@ export type {
 // (site_settings.payment_gateway, see resolveActiveGateway) with
 // PAYMENT_GATEWAY as the boot/fallback value.
 //
-// Naming note: the tables (globepay_deposit / globepay_withdrawal), the
-// orchestration files (globepay-deposit.ts / globepay-withdrawal.ts), the
-// /admin/globepay/* routes and the GLOBEPAY_ENABLED switches predate the
-// seam and kept their names when the GlobePay365 integration itself was
-// removed (2026-09-06). They are gateway-neutral; only the names are old.
+// Naming note: the tables (gateway_deposit / gateway_withdrawal), the
+// orchestration files (gateway-deposit.ts / gateway-withdrawal.ts), the
+// /admin/payments/* routes and the GATEWAY_* switches are gateway-neutral.
+// They carried the first gateway's name until 2026-09-07 (operator: "we no
+// longer use GlobePay, remove it"); the old GLOBEPAY_* env names are still
+// read as a fallback (gateway-env.ts) until the production spec moves.
 //
-// The orchestration (globepay-deposit.ts, globepay-withdrawal.ts), the
+// The orchestration (gateway-deposit.ts, gateway-withdrawal.ts), the
 // reconcile jobs and the admin/store routes are gateway-agnostic through this
 // file. The inbound hooks are NOT — each gateway signs its callbacks its own
 // way, so they live at src/api/hooks/<gateway>/. Adding a gateway = a client
@@ -186,7 +188,7 @@ export function rowGateway(row: {
 
 // ---------------------------------------------------------------------------
 // Which gateway is active. Read synchronously everywhere (routes, jobs,
-// globepayEnabled()) from a process-local cache; refreshed from the DB by
+// gatewayEnabled()) from a process-local cache; refreshed from the DB by
 // resolveActiveGateway() at the top of every money entry point, at most once
 // per ACTIVE_GATEWAY_TTL_MS. The admin switch writes the row AND the cache,
 // so the instance that took the click flips at once; other instances converge
@@ -307,8 +309,8 @@ export function gatewayUrls(
     path && base ? `${base}${path}` : '';
   return {
     notifyUrl: hook(def.hooks.deposit),
-    // PAYMENT_RETURN_URL; the pre-removal name is read until the spec moves.
-    returnUrl: env.PAYMENT_RETURN_URL ?? env.GLOBEPAY_RETURN_URL ?? '',
+    // PAYMENT_RETURN_URL, or its legacy name until the spec moves (gateway-env).
+    returnUrl: gatewayEnv('PAYMENT_RETURN_URL', env) ?? '',
     withdrawNotifyUrl: hook(def.hooks.withdrawal),
     payoutVerifyUrl: hook(def.hooks.payoutVerify),
     hasPayoutVerify: Boolean(def.hooks.payoutVerify),

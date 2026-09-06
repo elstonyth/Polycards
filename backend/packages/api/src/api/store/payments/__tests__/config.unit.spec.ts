@@ -5,8 +5,8 @@ const ORIGINAL = { ...process.env };
 
 beforeEach(() => {
   delete process.env.PAYMENT_GATEWAY;
-  process.env.GLOBEPAY_ENABLED = 'true';
-  process.env.GLOBEPAY_WITHDRAWALS_ENABLED = 'true';
+  process.env.GATEWAY_ENABLED = 'true';
+  process.env.GATEWAY_WITHDRAWALS_ENABLED = 'true';
   process.env.TGPAY_SECRET_KEY = 'sk-test';
   setActiveGateway(null);
 });
@@ -65,7 +65,7 @@ describe('GET /store/payments/config — the active gateway money bands', () => 
   });
 
   it('reports withdrawals closed when the withdrawal switch is off', async () => {
-    process.env.GLOBEPAY_WITHDRAWALS_ENABLED = 'false';
+    process.env.GATEWAY_WITHDRAWALS_ENABLED = 'false';
     const h = harness(null);
     await GET(h.req as never, h.res as never);
     expect((h.res.body as Body).withdrawals_enabled).toBe(false);

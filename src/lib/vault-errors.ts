@@ -58,7 +58,7 @@ export const VAULT_RULES: ErrorRule[] = [
   [/(top-ups|withdrawals) must be between/i, (text) => text],
   [/insufficient/i, 'Not enough balance for that.'],
   // The operator kill switch, thrown by the deposit orchestration when
-  // GLOBEPAY_ENABLED is off and by the deposit route when a callback URL is
+  // GATEWAY_ENABLED is off and by the deposit route when a callback URL is
   // missing. Without this rule the message matched NOTHING and fell through to
   // VAULT_FALLBACK ("Something went wrong. Please try again."), which made the
   // switch self-defeating: the one lever for "stop customers retrying a gateway

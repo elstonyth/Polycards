@@ -10,15 +10,15 @@ import {
 } from '../../../../modules/packs/tgpay-client';
 import {
   applyWithdrawalOutcome,
-  refundGlobePayWithdrawal,
-} from '../../../../modules/packs/globepay-withdrawal';
+  refundWithdrawal,
+} from '../../../../modules/packs/gateway-withdrawal';
 import { rowGateway } from '../../../../modules/packs/gateway';
 import { netOfFee, toOptionalMoney } from '../../../../modules/packs/money';
 
 // TGPay payout server-notify (docs "Payout callback"). Flat body, no wrapper,
 // and — unlike every other message — NO merchantRefNum: the row is found by
 // the transactionRefNum we stored at create time. Same transitions as the
-// GlobePay withdrawal hook; the refund path is the shared helper the sweep and
+// callback route before it; the refund path is the shared helper the sweep and
 // the admin deny route already use.
 
 type PayoutNotify = {
@@ -71,12 +71,12 @@ export async function POST(
   // we are still handling), fall back to OUR reference — on the sandbox the
   // two are the same string. A miss after both is acknowledged and left to
   // the payout sweep, which queries by our reference.
-  let [withdrawal] = await packs.listGlobePayWithdrawals(
+  let [withdrawal] = await packs.listGatewayWithdrawals(
     { gateway_transaction_id: gatewayTransactionId, gateway: 'tgpay' },
     { take: 1 },
   );
   if (!withdrawal) {
-    [withdrawal] = await packs.listGlobePayWithdrawals(
+    [withdrawal] = await packs.listGatewayWithdrawals(
       { merchant_transaction_id: gatewayTransactionId, gateway: 'tgpay' },
       { take: 1 },
     );
@@ -119,7 +119,7 @@ export async function POST(
 
   if (state === 'failed') {
     try {
-      await refundGlobePayWithdrawal(
+      await refundWithdrawal(
         req.scope,
         withdrawal,
         null,

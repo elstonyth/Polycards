@@ -1,6 +1,6 @@
 import { POST } from '../route';
 
-// The IP we send as GlobePay365's `IPAddress` must be the one the proxy chain
+// The IP we send as the gateway's `IPAddress` must be the one the proxy chain
 // derived, not one the caller typed. Medusa's express-loader sets
 // `trust proxy` 1 unconditionally, so req.ip is that value; a raw
 // X-Forwarded-For header is attacker-controlled and only a fallback.
@@ -8,13 +8,13 @@ import { POST } from '../route';
 // This route is the money-OUT direction, so it matters MORE here than on the
 // deposit: whatever geo/velocity/AML checks the PSP runs on a payout would
 // otherwise be evaluated against an address the payee chose.
-jest.mock('../../../../../modules/packs/globepay-withdrawal', () => ({
-  startGlobePayWithdrawal: jest.fn(async () => ({ status: 'pending' })),
+jest.mock('../../../../../modules/packs/gateway-withdrawal', () => ({
+  startWithdrawal: jest.fn(async () => ({ status: 'pending' })),
 }));
 
-import { startGlobePayWithdrawal } from '../../../../../modules/packs/globepay-withdrawal';
+import { startWithdrawal } from '../../../../../modules/packs/gateway-withdrawal';
 
-const startMock = startGlobePayWithdrawal as jest.Mock;
+const startMock = startWithdrawal as jest.Mock;
 
 const res = { json: jest.fn() } as never;
 

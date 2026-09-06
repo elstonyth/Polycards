@@ -7,8 +7,8 @@ import {
   resolvePacks,
   type GatewayDeposits,
 } from '../../../../modules/packs/facets';
-import { startGlobePayDeposit } from '../../../../modules/packs/globepay-deposit';
-import { GLOBEPAY_STALE_AFTER_MS } from '../../../../modules/packs/globepay-reconcile';
+import { startDeposit } from '../../../../modules/packs/gateway-deposit';
+import { GATEWAY_STALE_AFTER_MS } from '../../../../modules/packs/gateway-reconcile';
 import { payerIpOf } from '../../../utils/payer-ip';
 import { contactIfNeeded } from '../../../utils/customer-contact';
 import {
@@ -16,7 +16,7 @@ import {
   resolveActiveGateway,
 } from '../../../../modules/packs/gateway';
 
-// POST /store/credits/deposit — start a real GlobePay365 top-up. Returns a
+// POST /store/credits/deposit — start a real gateway top-up. Returns a
 // cashier URL; NO credit is issued here. The customer pays on their page, and
 // credit lands only when a verified callback reports success
 // (POST /hooks/tgpay/deposit).
@@ -65,16 +65,15 @@ export async function POST(
       ? body.payment_method_code
       : undefined;
 
-  // Some gateways (TGPay) require the payer's contact on create-payment;
-  // GlobePay does not, and its route tests run with an empty scope, so only
-  // look it up when the active gateway asks for it.
+  // Looked up only when the active gateway asks for it (needsCustomerContact;
+  // TGPay does) — this route's tests run with an empty scope.
   const customer = await contactIfNeeded(
     req.scope,
     gateway,
     customerId,
     'payment',
   );
-  const result = await startGlobePayDeposit(
+  const result = await startDeposit(
     req.scope,
     {
       customerId,
@@ -109,10 +108,10 @@ const PENDING_LIMIT = 5;
 // Deliberately NOT a status oracle: it reports what WE recorded, never a fresh
 // gateway requery. Requerying per page view would put an unauthenticated-ish
 // read on the gateway's rate budget and duplicate the sweep's job; the sweep
-// (globepay-reconcile, every minute) and the callback remain the only things
+// (gateway-reconcile, every minute) and the callback remain the only things
 // that resolve a deposit.
 //
-// Bounded by the same GLOBEPAY_STALE_AFTER_MS the sweep and the admin page use:
+// Bounded by the same GATEWAY_STALE_AFTER_MS the sweep and the admin page use:
 // past that window the customer has almost certainly abandoned the cashier, and
 // showing "confirming your payment" forever would be a lie with a countdown.
 // The constant is imported, not redeclared, so the three surfaces cannot drift.
@@ -128,11 +127,11 @@ export async function GET(
   const customerId = req.auth_context.actor_id;
   const packs = resolvePacks<GatewayDeposits>(req.scope);
 
-  const deposits = await packs.listGlobePayDeposits(
+  const deposits = await packs.listGatewayDeposits(
     {
       customer_id: customerId,
       status: 'pending',
-      created_at: { $gte: new Date(Date.now() - GLOBEPAY_STALE_AFTER_MS) },
+      created_at: { $gte: new Date(Date.now() - GATEWAY_STALE_AFTER_MS) },
     },
     { take: PENDING_LIMIT, order: { created_at: 'DESC' } },
   );

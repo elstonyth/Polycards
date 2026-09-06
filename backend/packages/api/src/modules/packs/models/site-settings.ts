@@ -14,7 +14,7 @@ export const SiteSettings = model.define('site_settings', {
   // image URL (via /admin/media kind 'avatar-frame'). null → none configured.
   avatar_frames: model.json().nullable(),
   // Active payment gateway id (plan 130 §runtime switch). NULL = fall back
-  // to the PAYMENT_GATEWAY env (then GlobePay). Validated against GATEWAYS
+  // to the PAYMENT_GATEWAY env (then TGPay). Validated against GATEWAYS
   // in gateway.ts on write; read into a process cache, never per request.
   payment_gateway: model.text().nullable(),
 });

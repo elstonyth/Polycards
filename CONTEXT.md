@@ -142,7 +142,7 @@ _Avoid_: sell (ambiguous between this and Buyback — say which)
 **Withdrawal**:
 Converting site credit out to real money through the active payment
 gateway's payout channel (TGPay since 2026-09-06; the table keeps its
-original name) — table `globepay_withdrawal`, route `POST /store/credits/withdraw`,
+original name) — table `gateway_withdrawal`, route `POST /store/credits/withdraw`,
 admin queue `/withdrawals`. The ledger reason string stays `cashout`
 (pre-dates the withdrawal build; `credit_transaction` is append-only, so an
 existing reason string is never renamed once rows carry it) — say
@@ -154,7 +154,7 @@ _Avoid_: "withdraw" for the physical reward-shipment flow (`rewards/withdraw`)
 below, the saved account, not the money-out event)
 
 **Held Withdrawal** / **Approval**:
-A Withdrawal above `GLOBEPAY_WD_APPROVAL_ABOVE_RM` (default RM 1,000,
+A Withdrawal above `GATEWAY_WD_APPROVAL_ABOVE_RM` (default RM 1,000,
 strictly greater-than) is written status `held` — debited from the customer
 but never submitted to the gateway — until an admin approves or denies it
 from the admin `/withdrawals` queue, whose default view is `held`. Approve
@@ -184,7 +184,7 @@ _Avoid_: deactivate, disable (Account Disable is a separate, reversible
 surface — see `disabled-guard.ts` — do not conflate the two)
 
 **Expired Deposit**:
-A top-up whose gateway status never resolved within `GLOBEPAY_STALE_AFTER_MS`
+A top-up whose gateway status never resolved within `GATEWAY_STALE_AFTER_MS`
 (1h, well past a hosted checkout's own timeout). Non-terminal: the slow
 reconciliation sweep keeps re-querying an expired deposit for up to 7 days
 rather than writing it off, because "we stopped chasing" is not "the gateway

@@ -37,7 +37,7 @@ design** — its answers are third-party console state and change without a comm
 Two standing rules:
 
 - **No credential values in this file.** Name `TWILIO_VERIFY_SERVICE_SID` and every
-  `GLOBEPAY_*` key as a variable, never its value. The same goes for service SIDs,
+  `GATEWAY_*` key as a variable, never its value. The same goes for service SIDs,
   merchant codes, and profile identifiers when you record an answer.
 - **Do not write an answer you inferred.** An open question is useful; a confidently
   wrong one is worse than none. If you did not read it in a console, leave it open.
@@ -71,8 +71,8 @@ which they must go and ask about again.
 | 5 | The RSA callback signature is the **only** gate on the deposit hook — source-IP allowlisting was deliberately rejected (DO's LB hides their address). Nothing backstops a signature that verifies, which is what makes item **C** load-bearing. | `docs/payments/globepay365-setup.md:310-317` | — | in-repo |
 | 6 | Key **direction** is settled: outbound requests are signed with our merchant private key, inbound callbacks verified with GlobePay's public key (`GLOBEPAY_PUBLIC_KEY`). Key **scoping** — one platform key or one per merchant — is not stated anywhere. | `docs/payments/globepay365-setup.md:26-28`, `:38` | — | in-repo |
 | 7 | Only the `Data` object is covered by the signature; `TransactionId`, `MerchantTransactionId` and `Version` sit outside it and are mutable on an otherwise-genuine body. | `docs/payments/globepay365-setup.md:180-190` | — | in-repo |
-| 8 | `PMT10016` is the **documented** not-found code, but staging returned a bare 400 "Not found" **without** it. Both sweeps therefore treat any 400 as not-found. Partial answer to item **D**; what an **auth** failure returns is unrecorded. | `backend/packages/api/src/jobs/globepay-reconcile.ts:69-74`, `docs/payments/globepay365-setup.md:203` | — | in-repo |
-| 9 | Known error codes: `PMT10005` amount out of range, `PMT10024` payment-method routing gap, `PMT10000` duplicate merchant transaction id. None of these is an authentication failure. | `docs/payments/globepay365-setup.md:222`, `:239-242`, `backend/packages/api/src/modules/packs/models/globepay-deposit.ts:19-21` | — | in-repo |
+| 8 | `PMT10016` is the **documented** not-found code, but staging returned a bare 400 "Not found" **without** it. Both sweeps therefore treat any 400 as not-found. Partial answer to item **D**; what an **auth** failure returns is unrecorded. | `backend/packages/api/src/jobs/deposit-reconcile.ts:69-74`, `docs/payments/globepay365-setup.md:203` | — | in-repo |
+| 9 | Known error codes: `PMT10005` amount out of range, `PMT10024` payment-method routing gap, `PMT10000` duplicate merchant transaction id. None of these is an authentication failure. | `docs/payments/globepay365-setup.md:222`, `:239-242`, `backend/packages/api/src/modules/packs/models/gateway-deposit.ts:19-21` | — | in-repo |
 | 10 | Live deposit band is RM 30 – RM 10,000; payout band RM 50 – RM 50,000. Confirmed by the provider 2026-07-29, but nobody has submitted either ceiling against the live account. | `docs/payments/globepay365-setup.md:391-417` | 2026-07-29 | in-repo (provider) |
 | 11 | The prod spec sets `PHONE_VERIFICATION_REQUIRED` only; `PHONE_GATE_REQUIRED` is deliberately **unset** and therefore follows it. So item **E** is one resolved value plus a confirmation that the second is still absent. | `.do/backend.app.yaml:235`, `:243` | — | in-repo |
 | 12 | `CONTEXT.md:175` records the OTP as valid for **10 minutes**. Treat this as **unconfirmed**: the same sentence attributes the six-digit length to "Twilio's own default", so the TTL is most likely the documented default rather than a reading of our service. Item **A** still asks for it. | `CONTEXT.md:175` | — | in-repo |
@@ -231,7 +231,7 @@ whether an override was needed. Date it.
 **Why it matters.** The sweep writes `status: 'failed'` for both "the gateway said no"
 and "too old to keep chasing", then scans `pending` only — so an expired-but-live
 deposit is never looked at again
-(`backend/packages/api/src/jobs/globepay-reconcile.ts:145-150`). Plan 084 (TODO) stops
+(`backend/packages/api/src/jobs/deposit-reconcile.ts:145-150`). Plan 084 (TODO) stops
 **new** rows entering this state; it deliberately does **not** backfill, because
 deciding which historical rows to re-open is an operator call. This query finds them.
 
@@ -245,7 +245,7 @@ decide to look.
 -- gateway never returned a final failure (7 = fail).
 select id, merchant_transaction_id, gateway_transaction_id, customer_id,
        amount_requested, gateway_status, created_at
-from globepay_deposit
+from gateway_deposit
 where status = 'failed'
   and amount_settled is null
   and gateway_transaction_id is not null
@@ -275,7 +275,7 @@ will ever refund them automatically?
 
 **Why it matters.** Plan 084 narrowed both sweeps so that only an explicit `PMT10016`
 authorises the unknown-transaction path
-(`backend/packages/api/src/modules/packs/globepay-reconcile.ts`,
+(`backend/packages/api/src/modules/packs/gateway-reconcile.ts`,
 `classifyRequeryError`). That was the right call — the alternative refunds every
 in-flight payout the moment a merchant credential breaks, while the banks still execute
 them. But item **D** records that the gateway's real not-found is a plain-text 400
@@ -296,7 +296,7 @@ and the two sides are no longer symmetric:
   ever return the customer's money. Today those rows accumulate in the sweep's
   50-row oldest-first window (starving it exactly as the deposit zombies would have),
   emit a `logger.error` every ten minutes that nothing pages on, and appear on **no**
-  operator surface — `/admin/globepay/withdrawals` has no view for them.
+  operator surface — `/admin/payments/withdrawals` has no view for them.
 
 **Proposed shape (NOT built — this needs its own plan).** A `needs_review` withdrawal
 status, reached after a bounded age of nothing but ambiguous refusals, that is
@@ -314,7 +314,7 @@ count the population in production:
 -- pending, no gateway id (so SubmitWithdrawal never returned), and older than any
 -- plausible in-flight submit.
 select id, merchant_transaction_id, customer_id, amount, created_at
-from globepay_withdrawal
+from gateway_withdrawal
 where status = 'pending'
   and gateway_transaction_id is null
   and created_at < now() - interval '1 day'

@@ -1007,7 +1007,7 @@ export function createAdminActionRateLimit(): MiddlewareHandler {
  * Sized generously, because a 429 to a genuine callback costs something:
  * - deposit / withdrawal callbacks: recoverable. The gateway retries (per the
  *   integration guide, not observed here), and — independently of whether it
- *   does — the two reconcile jobs (src/jobs/globepay-*reconcile.ts, cron every
+ *   does — the two reconcile jobs (src/jobs/{deposit,withdrawal}-reconcile.ts, cron every
  *   10 min) requery the gateway for anything still pending, so the settlement
  *   lands late rather than never.
  * - payout-verify: fails CLOSED. Anything but a literal "success" makes the

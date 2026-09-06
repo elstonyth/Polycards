@@ -20,40 +20,40 @@ import type PacksModuleService from './service';
 /** The deposit half of the gateway loop: record intent, credit on callback. */
 export type GatewayDeposits = Pick<
   PacksModuleService,
-  | 'claimGlobePayDepositStatus'
-  | 'createGlobePayDepositCapped'
-  | 'listGlobePayDeposits'
-  | 'updateGlobePayDeposits'
+  | 'claimDepositStatus'
+  | 'createDepositCapped'
+  | 'listGatewayDeposits'
+  | 'updateGatewayDeposits'
   | 'topUpCreditsWithLedger'
 >;
 
 /** The withdrawal half: hold, claim against the debit, submit, refund. */
 export type GatewayWithdrawals = Pick<
   PacksModuleService,
-  | 'claimGlobePayWithdrawalStatus'
+  | 'claimWithdrawalStatus'
   | 'claimWithdrawalAgainstDebit'
-  | 'createGlobePayWithdrawals'
+  | 'createGatewayWithdrawals'
   | 'creditBalance'
   | 'listCreditTransactions'
   | 'listCustomerAccountStates'
-  | 'listGlobePayWithdrawals'
+  | 'listGatewayWithdrawals'
   | 'savedBankAccountsFor'
-  | 'updateGlobePayWithdrawals'
+  | 'updateGatewayWithdrawals'
   | 'walletSummary'
   | 'withdrawCreditsWithLedger'
   | 'withdrawForCashout'
 >;
 
-/** The read-only /admin/globepay/* reports. Never moves money. */
+/** The read-only /admin/payments/* reports. Never moves money. */
 export type GatewayReports = Pick<
   PacksModuleService,
   | 'gatewayAuditTotals'
-  | 'globepaySettlementRows'
-  | 'listAndCountGlobePayDeposits'
-  | 'listAndCountGlobePayWithdrawals'
+  | 'settlementRows'
+  | 'listAndCountGatewayDeposits'
+  | 'listAndCountGatewayWithdrawals'
   | 'listCustomerAccountStates'
-  | 'listGlobePayDeposits'
-  | 'listGlobePayWithdrawals'
+  | 'listGatewayDeposits'
+  | 'listGatewayWithdrawals'
 >;
 
 /**
@@ -68,8 +68,8 @@ export type CustomerWallet = Pick<
   | 'creditBalance'
   | 'creditSummary'
   | 'listCreditTransactions'
-  | 'listGlobePayDeposits'
-  | 'listGlobePayWithdrawals'
+  | 'listGatewayDeposits'
+  | 'listGatewayWithdrawals'
   | 'mutateCustomerMetadata'
   | 'walletSummary'
 >;

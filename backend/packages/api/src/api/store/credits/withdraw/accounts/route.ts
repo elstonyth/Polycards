@@ -5,7 +5,7 @@ import type {
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { findBank, sandboxOnlyBank } from '../../../../../modules/packs/banks';
 import { resolveActiveGateway } from '../../../../../modules/packs/gateway';
-import { withdrawalDetailsError } from '../../../../../modules/packs/globepay-withdrawal';
+import { withdrawalDetailsError } from '../../../../../modules/packs/gateway-withdrawal';
 import {
   resolvePacks,
   type CustomerWallet,

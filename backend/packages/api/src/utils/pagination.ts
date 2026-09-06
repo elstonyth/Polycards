@@ -42,7 +42,7 @@ export function parsePaginationParams(
  * A key miss restores the caller's WHOLE default — `fallbackDir` as well as
  * `fallbackKey`. Keeping the requested direction instead would let
  * `?sort=nonsense:asc` flip a route's default order while honouring nothing the
- * caller actually asked for; on the globepay lists that would silently turn a
+ * caller actually asked for; on the deposit/withdrawal lists that would silently turn a
  * newest-first history view ascending, and on the ledger it would contradict
  * the documented `occurred_at:desc` default. An absent param is the same case.
  */

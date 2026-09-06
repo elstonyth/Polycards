@@ -19,7 +19,7 @@ import {
   submitWithdrawal,
   tgpayCheckoutBase,
 } from '../gateway';
-import { classifyRequeryError } from '../globepay-reconcile';
+import { classifyRequeryError } from '../gateway-reconcile';
 
 const tgpayConfig: tgpay.TgpayConfig = {
   kind: 'tgpay',
@@ -179,7 +179,7 @@ describe('TGPay payouts', () => {
     expect(r.transactionId).toBe('tx-9');
   });
 
-  it('pays a bank saved under GlobePay through TGPay after a switch (legacy code → SWIFT pair)', async () => {
+  it('pays a bank saved under the retired gateway code through TGPay after a switch (legacy code → SWIFT pair)', async () => {
     (tgpay.createPayout as jest.Mock).mockResolvedValue({
       transactionRefNum: 'tx-10',
     });

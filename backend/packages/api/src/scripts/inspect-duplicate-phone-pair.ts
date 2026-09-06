@@ -114,11 +114,11 @@ async function readActivity(
 
   let deposits = 'n/a';
   try {
-    const [, total] = await svc.listAndCountGlobePayDeposits(
+    const [, total] = await svc.listAndCountGatewayDeposits(
       { customer_id: customerId },
       { skip: 0, take: 1 },
     );
-    const [, settled] = await svc.listAndCountGlobePayDeposits(
+    const [, settled] = await svc.listAndCountGatewayDeposits(
       { customer_id: customerId, status: 'settled' },
       { skip: 0, take: 1 },
     );

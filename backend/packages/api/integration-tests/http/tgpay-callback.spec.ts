@@ -4,7 +4,7 @@ import type PacksModuleService from '../../src/modules/packs/service';
 import {
   withdrawalIdempotencyReference,
   withdrawalRefundReference,
-} from '../../src/modules/packs/globepay-withdrawal';
+} from '../../src/modules/packs/gateway-withdrawal';
 import { unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -23,8 +23,8 @@ jest.setTimeout(240 * 1000);
 const CUSTOMER_ID = 'cus_tgpay_integration';
 const AUTH = { 'x-public-key': 'pk-int', 'x-secret-key': 'sk-int' };
 
-process.env.GLOBEPAY_ENABLED = 'true';
-process.env.GLOBEPAY_WITHDRAWALS_ENABLED = 'true';
+process.env.GATEWAY_ENABLED = 'true';
+process.env.GATEWAY_WITHDRAWALS_ENABLED = 'true';
 process.env.PAYMENT_GATEWAY = 'tgpay';
 process.env.PAYMENT_CALLBACK_BASE = 'https://backend.example.test';
 process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
@@ -53,7 +53,7 @@ medusaIntegrationTestRunner({
         unwrapResponse(api.post('/hooks/tgpay/deposit', body, { headers }));
 
       const seedDeposit = async (merchantRefNum: string) => {
-        const [row] = await packs().createGlobePayDeposits([
+        const [row] = await packs().createGatewayDeposits([
           {
             merchant_transaction_id: merchantRefNum,
             customer_id: CUSTOMER_ID,
@@ -108,7 +108,7 @@ medusaIntegrationTestRunner({
         expect(Number(tp[0].wallet_delta)).toBe(50);
         expect(tp[0].payload).toMatchObject({ payment_method: 'BQR' });
 
-        const [after] = await packs().listGlobePayDeposits(
+        const [after] = await packs().listGatewayDeposits(
           { id: row.id },
           { take: 1 },
         );
@@ -124,7 +124,7 @@ medusaIntegrationTestRunner({
         const res = await post(approved(mtid, { amount: 5000 }));
         expect(res.status).toBe(400);
         expect(res.data).toBe('rejected');
-        const [after] = await packs().listGlobePayDeposits(
+        const [after] = await packs().listGatewayDeposits(
           { id: row.id },
           { take: 1 },
         );
@@ -140,7 +140,7 @@ medusaIntegrationTestRunner({
         unwrapResponse(api.post('/hooks/tgpay/withdrawal', body, { headers }));
 
       /** Fund the customer, debit, and seed the pending payout row exactly as
-       *  startGlobePayWithdrawal does after an accepted submit. */
+       *  startWithdrawal does after an accepted submit. */
       const seedWithdrawal = async (merchantRefNum: string, amount = 50) => {
         await packs().mutateCreditAtomic({
           customerId: CUSTOMER_ID,
@@ -159,7 +159,7 @@ medusaIntegrationTestRunner({
           ),
           floor: 0,
         });
-        const [row] = await packs().createGlobePayWithdrawals([
+        const [row] = await packs().createGatewayWithdrawals([
           {
             merchant_transaction_id: merchantRefNum,
             gateway_transaction_id: `tx-${merchantRefNum}`,
@@ -191,7 +191,7 @@ medusaIntegrationTestRunner({
         const res = await post(notify(mtid, 'success'));
         expect(res.status).toBe(200);
         expect(res.data).toBe('success');
-        const [after] = await packs().listGlobePayWithdrawals(
+        const [after] = await packs().listGatewayWithdrawals(
           { id: row.id },
           { take: 1 },
         );
@@ -207,7 +207,7 @@ medusaIntegrationTestRunner({
         expect((await post(notify(mtid, 'reject'))).data).toBe('success');
         expect((await post(notify(mtid, 'reject'))).data).toBe('success');
 
-        const [after] = await packs().listGlobePayWithdrawals(
+        const [after] = await packs().listGatewayWithdrawals(
           { id: row.id },
           { take: 1 },
         );
@@ -229,7 +229,7 @@ medusaIntegrationTestRunner({
         const { row, balanceAfterDebit } = await seedWithdrawal(mtid);
         await post(notify(mtid, 'reject'));
         expect((await post(notify(mtid, 'success'))).data).toBe('success');
-        const [after] = await packs().listGlobePayWithdrawals(
+        const [after] = await packs().listGatewayWithdrawals(
           { id: row.id },
           { take: 1 },
         );

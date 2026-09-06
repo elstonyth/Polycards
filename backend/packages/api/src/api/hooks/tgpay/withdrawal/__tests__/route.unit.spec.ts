@@ -9,16 +9,16 @@ jest.mock('../../../../../modules/packs/withdrawal-receipt', () => ({
 // is proved against a real database in
 // modules/packs/__tests__/withdrawal-outcome.integration.spec.ts and
 // withdrawal-forensics.integration.spec.ts.
-jest.mock('../../../../../modules/packs/globepay-withdrawal', () => ({
-  refundGlobePayWithdrawal: jest.fn().mockResolvedValue({ replayed: false }),
+jest.mock('../../../../../modules/packs/gateway-withdrawal', () => ({
+  refundWithdrawal: jest.fn().mockResolvedValue({ replayed: false }),
   applyWithdrawalOutcome: jest.fn().mockResolvedValue({ replayed: false }),
 }));
 
 import { POST } from '../route';
 import {
   applyWithdrawalOutcome,
-  refundGlobePayWithdrawal,
-} from '../../../../../modules/packs/globepay-withdrawal';
+  refundWithdrawal,
+} from '../../../../../modules/packs/gateway-withdrawal';
 import type {
   FakeFacet,
   GatewayWithdrawals,
@@ -28,7 +28,7 @@ beforeEach(() => {
   process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
   process.env.TGPAY_PUBLIC_KEY = 'pk-test';
   process.env.TGPAY_SECRET_KEY = 'sk-test';
-  (refundGlobePayWithdrawal as jest.Mock).mockClear();
+  (refundWithdrawal as jest.Mock).mockClear();
   (applyWithdrawalOutcome as jest.Mock).mockClear();
 });
 
@@ -60,8 +60,8 @@ const pendingRow = {
 
 function harness(row: Record<string, unknown> | null) {
   const packs = {
-    listGlobePayWithdrawals: jest.fn().mockResolvedValue(row ? [row] : []),
-    updateGlobePayWithdrawals: jest.fn().mockResolvedValue(undefined),
+    listGatewayWithdrawals: jest.fn().mockResolvedValue(row ? [row] : []),
+    updateGatewayWithdrawals: jest.fn().mockResolvedValue(undefined),
   } satisfies FakeFacet<GatewayWithdrawals>;
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const req = {
@@ -100,14 +100,14 @@ describe('tgpay payout callback', () => {
     const h = harness(pendingRow);
     const res = await run(h, success, { 'x-public-key': 'pk-test' });
     expect(res.statusCode).toBe(401);
-    expect(h.packs.listGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.listGatewayWithdrawals).not.toHaveBeenCalled();
   });
 
   it('finds the row by the GATEWAY id (the body carries no merchantRefNum) and settles it', async () => {
     const h = harness(pendingRow);
     const res = await run(h, success);
     expect(res.statusCode).toBe(200);
-    expect(h.packs.listGlobePayWithdrawals).toHaveBeenCalledWith(
+    expect(h.packs.listGatewayWithdrawals).toHaveBeenCalledWith(
       { gateway_transaction_id: 'tx-9', gateway: 'tgpay' },
       { take: 1 },
     );
@@ -121,17 +121,17 @@ describe('tgpay payout callback', () => {
         netAmount: 99,
       }),
     );
-    expect(refundGlobePayWithdrawal).not.toHaveBeenCalled();
+    expect(refundWithdrawal).not.toHaveBeenCalled();
   });
 
   it('falls back to OUR reference when the gateway id is not stored yet, and stores it', async () => {
     const h = harness({ ...pendingRow, gateway_transaction_id: null });
-    h.packs.listGlobePayWithdrawals
+    h.packs.listGatewayWithdrawals
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ ...pendingRow, gateway_transaction_id: null }]);
     const res = await run(h, { ...success, transactionId: 'PC-w1' });
     expect(res.statusCode).toBe(200);
-    expect(h.packs.listGlobePayWithdrawals).toHaveBeenLastCalledWith(
+    expect(h.packs.listGatewayWithdrawals).toHaveBeenLastCalledWith(
       { merchant_transaction_id: 'PC-w1', gateway: 'tgpay' },
       { take: 1 },
     );
@@ -157,14 +157,14 @@ describe('tgpay payout callback', () => {
     const res = await run(h, success);
     expect(res.statusCode).toBe(200);
     expect(applyWithdrawalOutcome).not.toHaveBeenCalled();
-    expect(refundGlobePayWithdrawal).not.toHaveBeenCalled();
+    expect(refundWithdrawal).not.toHaveBeenCalled();
   });
 
   it('a reject refunds through the shared helper, from status pending', async () => {
     const h = harness(pendingRow);
     const res = await run(h, { ...success, status: 'reject' });
     expect(res.statusCode).toBe(200);
-    expect(refundGlobePayWithdrawal).toHaveBeenCalledWith(
+    expect(refundWithdrawal).toHaveBeenCalledWith(
       h.req.scope,
       pendingRow,
       null,
@@ -179,7 +179,7 @@ describe('tgpay payout callback', () => {
     const res = await run(h, { ...success, status: 'pending' });
     expect(res.statusCode).toBe(200);
     expect(applyWithdrawalOutcome).not.toHaveBeenCalled();
-    expect(refundGlobePayWithdrawal).not.toHaveBeenCalled();
+    expect(refundWithdrawal).not.toHaveBeenCalled();
   });
 
   it('a replay on a settled row is a no-op, an unknown id is acknowledged', async () => {
@@ -195,9 +195,7 @@ describe('tgpay payout callback', () => {
   });
 
   it('a refund failure answers 500 so TGPay retries', async () => {
-    (refundGlobePayWithdrawal as jest.Mock).mockRejectedValueOnce(
-      new Error('db down'),
-    );
+    (refundWithdrawal as jest.Mock).mockRejectedValueOnce(new Error('db down'));
     const h = harness(pendingRow);
     const res = await run(h, { ...success, status: 'reject' });
     expect(res.statusCode).toBe(500);

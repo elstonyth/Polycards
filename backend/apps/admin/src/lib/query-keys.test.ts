@@ -187,37 +187,37 @@ describe('qk', () => {
   // mutations invalidate this 3-segment prefix rather than the single
   // (page, status, sort) key they were called from.
   it('keys the withdrawals list under a prefix that invalidates every view/page/sort', () => {
-    expect(qk.globepayWithdrawalsKey).toEqual(['admin', 'globepay-withdrawals']);
-    expect(qk.globepayWithdrawals(0, 'held')).toEqual([
+    expect(qk.gatewayWithdrawalsKey).toEqual(['admin', 'gateway-withdrawals']);
+    expect(qk.gatewayWithdrawals(0, 'held')).toEqual([
       'admin',
-      'globepay-withdrawals',
+      'gateway-withdrawals',
       'held',
       0,
       '',
     ]);
-    expect(qk.globepayWithdrawals(2, 'pending', 'amount:desc')).toEqual([
+    expect(qk.gatewayWithdrawals(2, 'pending', 'amount:desc')).toEqual([
       'admin',
-      'globepay-withdrawals',
+      'gateway-withdrawals',
       'pending',
       2,
       'amount:desc',
     ]);
     for (const key of [
-      qk.globepayWithdrawals(0, 'held'),
-      qk.globepayWithdrawals(2, 'pending', 'amount:desc'),
+      qk.gatewayWithdrawals(0, 'held'),
+      qk.gatewayWithdrawals(2, 'pending', 'amount:desc'),
     ]) {
-      expect(key.slice(0, qk.globepayWithdrawalsKey.length)).toEqual([
-        ...qk.globepayWithdrawalsKey,
+      expect(key.slice(0, qk.gatewayWithdrawalsKey.length)).toEqual([
+        ...qk.gatewayWithdrawalsKey,
       ]);
     }
     // Different views are SIBLINGS, same length, never a prefix of one
     // another — approving out of 'held' must not accidentally nuke-and-merge
     // with the 'pending' cache instead of just invalidating it too.
-    expect(qk.globepayWithdrawals(0, 'held').length).toBe(
-      qk.globepayWithdrawals(0, 'pending').length,
+    expect(qk.gatewayWithdrawals(0, 'held').length).toBe(
+      qk.gatewayWithdrawals(0, 'pending').length,
     );
-    expect(qk.globepayWithdrawals(0, 'held')).not.toEqual(
-      qk.globepayWithdrawals(0, 'pending'),
+    expect(qk.gatewayWithdrawals(0, 'held')).not.toEqual(
+      qk.gatewayWithdrawals(0, 'pending'),
     );
   });
 
