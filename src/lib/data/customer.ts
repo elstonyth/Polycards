@@ -15,8 +15,10 @@ import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
 import { authedFetch } from '@/lib/authed-fetch';
 import { httpStatus } from '@/lib/errors';
+// The cookie name lives with the port that reads it (src/lib/store.ts); this
+// module only sets and clears it.
+import { AUTH_COOKIE } from '@/lib/store-port';
 
-const AUTH_COOKIE = '_polycards_jwt';
 // Matches the backend's `jwtExpiresIn` default ("1d", medusa-config.ts sets
 // none) — a longer cookie only outlives its JWT and reads as "logged in" while
 // every backend call 401s.

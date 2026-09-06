@@ -22,6 +22,10 @@ import { isRarity } from '@/lib/packs-format';
 // Set here because this module is the app's sole `zod` importer.
 z.config({ jitless: true });
 
+/** The schema type the `Store` port (src/lib/store-port.ts) takes — re-exported
+ *  so no other module needs to import zod. */
+export type { ZodType } from 'zod';
+
 /** Matches the getters' `Number.isFinite(x)` checks exactly (rejects NaN/±∞). */
 const finite = z.number().refine((n) => Number.isFinite(n));
 /** A string that is one of the known gacha rarities (the old `isRarity` guard). */
@@ -66,6 +70,13 @@ function droppableRecord<T>(item: z.ZodType<T>) {
           Object.entries(rec).filter(([, v]) => v !== null),
         ) as Record<string, T>,
     );
+}
+
+/** `parseList` as a schema, for a `Store` port call that validates the whole
+ *  response in one place: a malformed item DROPS (one bad row never blanks the
+ *  survivors) and a non-array reads as empty. */
+function listOf<T>(item: z.ZodType<T>) {
+  return droppableArray(item).catch([]);
 }
 
 // --- data/packs.ts ----------------------------------------------------------
@@ -301,6 +312,12 @@ export const VaultItemSchema = z.looseObject({
   }),
 });
 
+/** GET /store/vault — the page. `items` keeps `parseList`'s semantics (see
+ *  VaultItemSchema: a failing row drops, never the customer's whole vault). */
+export const VaultPageSchema = z.looseObject({
+  items: listOf(VaultItemSchema),
+});
+
 // --- data/free-pack.ts ------------------------------------------------------
 
 /** GET /store/free-pack — the one-time welcome-pack claim badge's whole answer.
@@ -331,8 +348,9 @@ export const LatestEventSchema = z.looseObject({
 });
 
 /** GET /store/credits — lifetime totals (balance is also validated by BalanceSchema).
- *  `has_more` (pagination) is optional so an older backend still parses. */
-export const CreditsSchema = z.looseObject({
+ *  `has_more` (pagination) is optional so an older backend still parses.
+ *  Applied SOFTLY by CreditsPageSchema below, never on its own. */
+const CreditsSchema = z.looseObject({
   balance: finite,
   topup_total: finite,
   spend_total: finite,
@@ -391,6 +409,17 @@ export const CreditTransactionSchema = z.looseObject({
     .optional(),
 });
 
+/** GET /store/credits as the Transactions page reads it. The totals are SOFT:
+ *  a malformed block parses to null and the page shows zeros while still
+ *  listing what it can (`totals?.balance ?? 0` in actions/vault.ts); rows drop
+ *  one at a time, as every ledger list here does. */
+export const CreditsPageSchema = z
+  .looseObject({ transactions: listOf(CreditTransactionSchema) })
+  .transform((page) => ({
+    totals: parseOne(CreditsSchema, page),
+    rows: page.transactions,
+  }));
+
 /** POST /store/credits/topup response — finite amount + balance. `replayed`
  *  is true when the backend deduped an already-processed Idempotency-Key
  *  (nothing new was charged — sim P2-4); optional so an older backend that
@@ -412,6 +441,11 @@ export const PendingDepositSchema = z.looseObject({
   amount: finite,
   payment_method_code: z.string().optional(),
   created_at: z.string(),
+});
+
+/** GET /store/credits/deposit — the list of those. */
+export const PendingDepositsSchema = z.looseObject({
+  deposits: listOf(PendingDepositSchema),
 });
 
 /** POST /store/credits/deposit response — the real payment gateway. Unlike the
@@ -501,6 +535,29 @@ export const BuybackResultSchema = z.looseObject({
   percent: finite.optional(),
 });
 
+/** POST /store/vault/buyback-batch response. The backend is ours, but a
+ *  server action still validates its input at the boundary — and the client
+ *  uses `results` to decide what to REMOVE from the vault, so this must never
+ *  fail the whole batch over one odd figure: every count is soft (absent or
+ *  NaN reads as absent; actions/vault.ts falls back to 0, or to the sold
+ *  count for `sold`), a per-pull row drops only when `ok` is not a boolean,
+ *  and a malformed `pull_id`/`error` reads as absent rather than dropping the
+ *  row that carries the other one. */
+const softCount = finite.optional().catch(undefined);
+export const BuybackBatchSchema = z.looseObject({
+  sold: softCount,
+  failed: softCount,
+  credited: softCount,
+  balance: softCount,
+  results: listOf(
+    z.looseObject({
+      pull_id: z.string().optional().catch(undefined),
+      ok: z.boolean(),
+      error: z.string().optional().catch(undefined),
+    }),
+  ),
+});
+
 // --- actions/packs.ts -------------------------------------------------------
 
 /** Open-route `card` — handle + name + known rarity + finite market_value.
@@ -533,8 +590,8 @@ export const OpenBuybackSchema = z.looseObject({
 
 /** GET /store/credits — nested `wallet` block used by getWallet().
  *  The backend returns `{ wallet: { balance, available, is_frozen },
- *  transactions: [...] }`. getWallet() extracts
- *  `(raw as { wallet? }).wallet` and parses it with this schema. */
+ *  transactions: [...] }`; WalletEnvelopeSchema below reads the block out of
+ *  that envelope and validates it with this schema. */
 export const WalletSchema = z.looseObject({
   balance: finite,
   available: finite,
@@ -553,6 +610,9 @@ export const WalletSchema = z.looseObject({
     })
     .optional(),
 });
+
+/** GET /store/credits as getWallet() reads it — only the `wallet` block. */
+export const WalletEnvelopeSchema = z.looseObject({ wallet: WalletSchema });
 
 // --- actions/vip.ts ---------------------------------------------------------
 

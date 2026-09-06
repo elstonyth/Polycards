@@ -11,13 +11,17 @@
  *   POST /store/vault/:id/buyback  — instant sell-back (credits FMV × pack %)
  *   GET  /store/credits            — balance (Σ ledger) + recent transactions
  *   POST /store/credits/topup      — buy credit via the mock gateway (demo)
+ *
+ * Every call goes through the `Store` port (src/lib/store.ts), which owns the
+ * cookie read, the bearer, the schema check and the failure log. What stays
+ * here is policy: which logged-out answer each action gives, and which copy a
+ * failure maps to (`vaultFailure` below, over VAULT_RULES).
  */
-import { authedFetch } from '@/lib/authed-fetch';
+import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
 import { sanePage } from '@/lib/page-param';
 import { elapsedLabel } from '@/lib/transactions';
-import { getAuthToken } from '@/lib/data/customer';
-import { friendlyError, isAuthError } from '@/lib/errors';
+import { friendlyError } from '@/lib/errors';
 import { VAULT_RULES, VAULT_FALLBACK } from '@/lib/vault-errors';
 import {
   DEFAULT_DEPOSIT_METHOD,
@@ -27,21 +31,19 @@ import {
   type DepositMethodCode,
 } from '@/lib/deposit-methods';
 import {
-  parseList,
-  parseOne,
-  VaultItemSchema,
+  VaultPageSchema,
   VaultShowcaseSchema,
   BalanceSchema,
   LatestEventSchema,
   AmountBalanceSchema,
   BuybackResultSchema,
+  BuybackBatchSchema,
   DepositStartSchema,
-  PendingDepositSchema,
+  PendingDepositsSchema,
   WithdrawStartSchema,
   WithdrawBanksSchema,
   SavedBankAccountsSchema,
-  CreditsSchema,
-  CreditTransactionSchema,
+  CreditsPageSchema,
   PaymentConfigSchema,
 } from '@/lib/data/schemas';
 import { mapVaultItem, type BackendVaultItem } from './vault-map';
@@ -65,64 +67,69 @@ export type SellBackResult =
 // async functions, so keeping them here made the ordering contract untestable
 // (see the header there, and __tests__/vault-errors.test.ts).
 
+const LOGIN_FIRST = 'Please log in first.';
+const LOGIN_TO_VIEW_VAULT = 'Please log in to view your vault.';
+const UNEXPECTED_RESPONSE = 'Got an unexpected response. Please try again.';
+
+/**
+ * A port `Failure` in this file's vocabulary — the three answers these
+ * actions have always given. No cookie at all (the call never left — `status`
+ * is undefined) → the action's own logged-out copy. A 2xx that failed its
+ * schema → the action's "unexpected response" copy (VAULT_FALLBACK for the
+ * reads that never had one). Anything the backend actually said → the
+ * VAULT_RULES table, with `needsAuth` when it was a 401.
+ */
+function vaultFailure(
+  f: Failure,
+  loggedOut: string,
+  unexpected: string = UNEXPECTED_RESPONSE,
+): { ok: false; error: string; needsAuth?: boolean } {
+  if (f.kind === 'invalid_shape') return { ok: false, error: unexpected };
+  if (f.kind === 'unauthenticated' && f.status === undefined) {
+    return { ok: false, error: loggedOut, needsAuth: true };
+  }
+  return {
+    ok: false,
+    error: friendlyError(f.text, VAULT_RULES, VAULT_FALLBACK),
+    needsAuth: f.kind === 'unauthenticated',
+  };
+}
+
+// A balance that fails its schema reads as 0 on the vault page (as it always
+// has); only a failure the backend actually answered with is an error there.
+const BALANCE_OR_NULL = BalanceSchema.nullable().catch(null);
+
 // The vault list + the credit balance in one call (the page shows both).
 export async function getVault(): Promise<VaultResult> {
-  const token = await getAuthToken();
-  if (!token) {
-    return {
-      ok: false,
-      error: 'Please log in to view your vault.',
-      needsAuth: true,
-    };
+  const [vault, credit] = await Promise.all([
+    store.get('/store/vault', VaultPageSchema),
+    store.get('/store/credits/balance', BALANCE_OR_NULL),
+  ]);
+  if (!vault.ok)
+    return vaultFailure(vault, LOGIN_TO_VIEW_VAULT, VAULT_FALLBACK);
+  if (!credit.ok) {
+    return vaultFailure(credit, LOGIN_TO_VIEW_VAULT, VAULT_FALLBACK);
   }
 
-  try {
-    const [vaultRes, creditRes] = await Promise.all([
-      authedFetch(token, '/store/vault'),
-      authedFetch(token, '/store/credits/balance'),
-    ]);
+  // The assertion widens the parse output to the fields the mapper also
+  // READS but the schema deliberately does NOT guard (rolled_at, pack_title,
+  // card.image/rarity/market_value, …). They ride the `looseObject` typed
+  // `unknown`, so this is the seam where guarded and merely-carried fields
+  // meet. Tightening VaultItemSchema to erase it would make a stale field
+  // drop the row — i.e. delete a card from the customer's own vault.
+  const items = (vault.data.items as unknown as BackendVaultItem[]).map(
+    mapVaultItem,
+  );
 
-    // The assertion widens the parse output to the fields the mapper also
-    // READS but the schema deliberately does NOT guard (rolled_at, pack_title,
-    // card.image/rarity/market_value, …). They ride the `looseObject` typed
-    // `unknown`, so this is the seam where guarded and merely-carried fields
-    // meet. Tightening VaultItemSchema to erase it would make a stale field
-    // drop the row — i.e. delete a card from the customer's own vault.
-    const items = (
-      parseList(
-        VaultItemSchema,
-        (vaultRes as { items?: unknown }).items,
-      ) as unknown as BackendVaultItem[]
-    ).map(mapVaultItem);
-    const credit = parseOne(BalanceSchema, creditRes);
-
-    return { ok: true, items, balance: credit ? credit.balance : 0 };
-  } catch (error) {
-    logger.error('[vault] load failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  return { ok: true, items, balance: credit.data?.balance ?? 0 };
 }
 
 // The bare credit balance — for surfaces that show affordability (the pack
 // detail page) without paying for the full vault read. Null = not logged in
 // or the read failed; callers render nothing rather than a wrong $0.
 export async function getCreditBalance(): Promise<number | null> {
-  const token = await getAuthToken();
-  if (!token) return null;
-  try {
-    const credit = parseOne(
-      BalanceSchema,
-      await authedFetch(token, '/store/credits/balance'),
-    );
-    return credit ? credit.balance : null;
-  } catch (error) {
-    logger.error('[vault] balance read failed:', error);
-    return null;
-  }
+  const r = await store.get('/store/credits/balance', BalanceSchema);
+  return r.ok ? r.data.balance : null;
 }
 
 // The newest vault-visible event for the caller — the Vault tab's unread-dot
@@ -130,18 +137,8 @@ export async function getCreditBalance(): Promise<number | null> {
 // page, and must not pay for a 500-item vault list. Null = logged out, empty
 // vault, or a failed read; callers render no dot rather than a wrong one.
 export async function getVaultLatest(): Promise<string | null> {
-  const token = await getAuthToken();
-  if (!token) return null;
-  try {
-    const parsed = parseOne(
-      LatestEventSchema,
-      await authedFetch(token, '/store/vault/latest'),
-    );
-    return parsed?.latest_event_at ?? null;
-  } catch (error) {
-    logger.error('[vault] latest-event read failed:', error);
-    return null;
-  }
+  const r = await store.get('/store/vault/latest', LatestEventSchema);
+  return r.ok ? r.data.latest_event_at : null;
 }
 
 // The newest balance movement for the caller — the Me tab's money-dot signal.
@@ -151,18 +148,8 @@ export async function getVaultLatest(): Promise<string | null> {
 // Null = logged out, no transactions, or a failed read; callers render no dot
 // rather than a wrong one.
 export async function getCreditsLatest(): Promise<string | null> {
-  const token = await getAuthToken();
-  if (!token) return null;
-  try {
-    const parsed = parseOne(
-      LatestEventSchema,
-      await authedFetch(token, '/store/credits/latest'),
-    );
-    return parsed?.latest_event_at ?? null;
-  } catch (error) {
-    logger.error('[credits] latest-event read failed:', error);
-    return null;
-  }
+  const r = await store.get('/store/credits/latest', LatestEventSchema);
+  return r.ok ? r.data.latest_event_at : null;
 }
 
 export type TopUpActionResult =
@@ -197,24 +184,18 @@ export type StartDepositResult =
  * the defaults so the sheet still opens.
  */
 export async function getPaymentLimits(): Promise<PaymentLimits> {
-  try {
-    const parsed = parseOne(
-      PaymentConfigSchema,
-      await authedFetch(undefined, '/store/payments/config'),
-    );
-    if (!parsed) return DEFAULT_PAYMENT_LIMITS;
-    return {
-      gateway: parsed.gateway,
-      deposit: { minRm: parsed.deposit.min_rm, maxRm: parsed.deposit.max_rm },
-      withdrawal: {
-        minRm: parsed.withdrawal.min_rm,
-        maxRm: parsed.withdrawal.max_rm,
-      },
-    };
-  } catch (error) {
-    logger.error('[vault] payment limits load failed:', error);
-    return DEFAULT_PAYMENT_LIMITS;
-  }
+  const r = await store.get('/store/payments/config', PaymentConfigSchema, {
+    auth: 'none',
+  });
+  if (!r.ok) return DEFAULT_PAYMENT_LIMITS;
+  return {
+    gateway: r.data.gateway,
+    deposit: { minRm: r.data.deposit.min_rm, maxRm: r.data.deposit.max_rm },
+    withdrawal: {
+      minRm: r.data.withdrawal.min_rm,
+      maxRm: r.data.withdrawal.max_rm,
+    },
+  };
 }
 
 export async function getDepositMethods(): Promise<DepositMethodCode[]> {
@@ -280,34 +261,12 @@ export async function startDeposit(
     return { ok: false, error: 'Pick a payment method.' };
   }
 
-  const token = await getAuthToken();
-  if (!token) {
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-  }
-
-  try {
-    const parsed = parseOne(
-      DepositStartSchema,
-      await authedFetch(token, '/store/credits/deposit', {
-        method: 'POST',
-        body: { amount, payment_method_code: paymentMethodCode },
-      }),
-    );
-    if (!parsed) {
-      return {
-        ok: false,
-        error: 'Got an unexpected response. Please try again.',
-      };
-    }
-    return { ok: true, url: parsed.url, amount: parsed.amount };
-  } catch (error) {
-    logger.error('[vault] deposit start failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  const r = await store.post('/store/credits/deposit', DepositStartSchema, {
+    amount,
+    payment_method_code: paymentMethodCode,
+  });
+  if (!r.ok) return vaultFailure(r, LOGIN_FIRST);
+  return { ok: true, url: r.data.url, amount: r.data.amount };
 }
 
 export type WithdrawBank = { bankCode: string; bankName: string };
@@ -319,27 +278,14 @@ export type WithdrawBanksResult =
 /** Payout bank picker source — proxied through the backend (the gateway's
  *  bank-list endpoint carries our merchant code, so it never runs browser-side). */
 export async function fetchWithdrawBanks(): Promise<WithdrawBanksResult> {
-  const token = await getAuthToken();
-  if (!token) {
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
+  const r = await store.get(
+    '/store/credits/withdraw/banks',
+    WithdrawBanksSchema,
+  );
+  if (!r.ok) {
+    return vaultFailure(r, LOGIN_FIRST, 'Could not load the bank list.');
   }
-  try {
-    const parsed = parseOne(
-      WithdrawBanksSchema,
-      await authedFetch(token, '/store/credits/withdraw/banks'),
-    );
-    if (!parsed) {
-      return { ok: false, error: 'Could not load the bank list.' };
-    }
-    return { ok: true, banks: parsed.banks };
-  } catch (error) {
-    logger.error('[vault] withdraw banks failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  return { ok: true, banks: r.data.banks };
 }
 
 export type SavedBankAccount = {
@@ -369,27 +315,14 @@ export type SavedBankAccountsResult =
 
 /** The customer's saved payout accounts — the withdraw form's picker source. */
 export async function fetchSavedBankAccounts(): Promise<SavedBankAccountsResult> {
-  const token = await getAuthToken();
-  if (!token) {
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
+  const r = await store.get(
+    '/store/credits/withdraw/accounts',
+    SavedBankAccountsSchema,
+  );
+  if (!r.ok) {
+    return vaultFailure(r, LOGIN_FIRST, 'Could not load your saved accounts.');
   }
-  try {
-    const parsed = parseOne(
-      SavedBankAccountsSchema,
-      await authedFetch(token, '/store/credits/withdraw/accounts'),
-    );
-    if (!parsed) {
-      return { ok: false, error: 'Could not load your saved accounts.' };
-    }
-    return { ok: true, accounts: parsed.accounts };
-  } catch (error) {
-    logger.error('[vault] saved bank accounts failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  return { ok: true, accounts: r.data.accounts };
 }
 
 /** Save a payout account for reuse. The backend applies the same validation
@@ -409,38 +342,18 @@ export async function addSavedBankAccount(input: {
   ) {
     return { ok: false, error: 'Fill in every bank field.' };
   }
-  const token = await getAuthToken();
-  if (!token) {
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-  }
-  try {
-    const parsed = parseOne(
-      SavedBankAccountsSchema,
-      await authedFetch(token, '/store/credits/withdraw/accounts', {
-        method: 'POST',
-        body: {
-          bank_code: input.bankCode,
-          bank_name: input.bankName,
-          account_number: input.accountNumber,
-          account_holder_name: input.accountHolderName,
-        },
-      }),
-    );
-    if (!parsed) {
-      return {
-        ok: false,
-        error: 'Got an unexpected response. Please try again.',
-      };
-    }
-    return { ok: true, accounts: parsed.accounts };
-  } catch (error) {
-    logger.error('[vault] save bank account failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  const r = await store.post(
+    '/store/credits/withdraw/accounts',
+    SavedBankAccountsSchema,
+    {
+      bank_code: input.bankCode,
+      bank_name: input.bankName,
+      account_number: input.accountNumber,
+      account_holder_name: input.accountHolderName,
+    },
+  );
+  if (!r.ok) return vaultFailure(r, LOGIN_FIRST);
+  return { ok: true, accounts: r.data.accounts };
 }
 
 /** Remove a saved payout account. Idempotent server-side. */
@@ -450,33 +363,13 @@ export async function removeSavedBankAccount(
   if (typeof id !== 'string' || id.length === 0) {
     return { ok: false, error: 'Say which account to remove.' };
   }
-  const token = await getAuthToken();
-  if (!token) {
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-  }
-  try {
-    const parsed = parseOne(
-      SavedBankAccountsSchema,
-      await authedFetch(token, '/store/credits/withdraw/accounts', {
-        method: 'DELETE',
-        body: { id },
-      }),
-    );
-    if (!parsed) {
-      return {
-        ok: false,
-        error: 'Got an unexpected response. Please try again.',
-      };
-    }
-    return { ok: true, accounts: parsed.accounts };
-  } catch (error) {
-    logger.error('[vault] remove bank account failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  const r = await store.del(
+    '/store/credits/withdraw/accounts',
+    SavedBankAccountsSchema,
+    { id },
+  );
+  if (!r.ok) return vaultFailure(r, LOGIN_FIRST);
+  return { ok: true, accounts: r.data.accounts };
 }
 
 export type StartWithdrawalResult =
@@ -531,54 +424,33 @@ export async function startWithdrawal(input: {
     return { ok: false, error: 'Select a saved bank account.' };
   }
 
-  const token = await getAuthToken();
-  if (!token) {
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-  }
-
-  try {
-    const parsed = parseOne(
-      WithdrawStartSchema,
-      await authedFetch(token, '/store/credits/withdraw', {
-        method: 'POST',
-        headers: {
-          // See the doc comment above: caller-minted so a retry of the same
-          // attempt replays instead of double-debiting.
-          'Idempotency-Key': input.idempotencyKey ?? crypto.randomUUID(),
-        },
-        body: {
-          amount: input.amount,
-          account_id: input.accountId,
-        },
-      }),
-    );
-    if (!parsed) {
-      return {
-        ok: false,
-        error: 'Got an unexpected response. Please try again.',
-      };
-    }
-    return {
-      ok: true,
-      amount: parsed.amount,
-      balance: parsed.balance,
-      // Their W… id when the submit confirmed; our reference when the
-      // outcome is still resolving asynchronously.
-      reference: parsed.transactionId ?? parsed.merchantTransactionId,
-      // `parsed.status` is optional on the wire (see WithdrawStartSchema) so a
-      // storefront deployed ahead of the backend still parses. Absent means a
-      // pre-094 backend, which has no held state — 'pending' is the accurate
-      // default there, not a guess.
-      status: parsed.status ?? 'pending',
-    };
-  } catch (error) {
-    logger.error('[vault] withdrawal start failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  const r = await store.post(
+    '/store/credits/withdraw',
+    WithdrawStartSchema,
+    {
+      amount: input.amount,
+      account_id: input.accountId,
+    },
+    {
+      // See the doc comment above: caller-minted so a retry of the same
+      // attempt replays instead of double-debiting.
+      idempotencyKey: input.idempotencyKey ?? crypto.randomUUID(),
+    },
+  );
+  if (!r.ok) return vaultFailure(r, LOGIN_FIRST);
+  return {
+    ok: true,
+    amount: r.data.amount,
+    balance: r.data.balance,
+    // Their W… id when the submit confirmed; our reference when the
+    // outcome is still resolving asynchronously.
+    reference: r.data.transactionId ?? r.data.merchantTransactionId,
+    // `status` is optional on the wire (see WithdrawStartSchema) so a
+    // storefront deployed ahead of the backend still parses. Absent means a
+    // pre-094 backend, which has no held state — 'pending' is the accurate
+    // default there, not a guess.
+    status: r.data.status ?? 'pending',
+  };
 }
 
 // Buy site credit through the mock gateway (demo — no real payment). The fake
@@ -599,44 +471,23 @@ export async function topUpCredits(
     return { ok: false, error: 'Enter a valid amount.' };
   }
 
-  const token = await getAuthToken();
-  if (!token) {
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-  }
-
-  try {
-    const parsed = parseOne(
-      AmountBalanceSchema,
-      await authedFetch(token, '/store/credits/topup', {
-        method: 'POST',
-        headers: {
-          // Mandatory since the 2026-07-07 audit — a retried top-up without a
-          // key would double-credit. Node 20+: crypto.randomUUID() is global.
-          'Idempotency-Key': idempotencyKey ?? crypto.randomUUID(),
-        },
-        body: { amount },
-      }),
-    );
-    if (!parsed) {
-      return {
-        ok: false,
-        error: 'Got an unexpected response. Please try again.',
-      };
-    }
-    return {
-      ok: true,
-      amount: parsed.amount,
-      balance: parsed.balance,
-      replayed: parsed.replayed === true,
-    };
-  } catch (error) {
-    logger.error('[vault] top-up failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  const r = await store.post(
+    '/store/credits/topup',
+    AmountBalanceSchema,
+    { amount },
+    {
+      // Mandatory since the 2026-07-07 audit — a retried top-up without a
+      // key would double-credit. Node 20+: crypto.randomUUID() is global.
+      idempotencyKey: idempotencyKey ?? crypto.randomUUID(),
+    },
+  );
+  if (!r.ok) return vaultFailure(r, LOGIN_FIRST);
+  return {
+    ok: true,
+    amount: r.data.amount,
+    balance: r.data.balance,
+    replayed: r.data.replayed === true,
+  };
 }
 
 export type CreditTxn = {
@@ -680,50 +531,36 @@ export async function getTransactions(
   // Validate at the boundary — a server action is a public endpoint.
   const safePage = sanePage(page);
 
-  const token = await getAuthToken();
-  if (!token) {
-    return {
-      ok: false,
-      error: 'Please log in to view your transactions.',
-      needsAuth: true,
-    };
-  }
-  try {
-    const raw = await authedFetch(token, '/store/credits', {
-      query: {
-        limit: TXN_PAGE_SIZE,
-        offset: (safePage - 1) * TXN_PAGE_SIZE,
-      },
-    });
-    const totals = parseOne(CreditsSchema, raw);
-    const rows = parseList(
-      CreditTransactionSchema,
-      (raw as { transactions?: unknown }).transactions,
+  const r = await store.get('/store/credits', CreditsPageSchema, {
+    query: {
+      limit: TXN_PAGE_SIZE,
+      offset: (safePage - 1) * TXN_PAGE_SIZE,
+    },
+  });
+  if (!r.ok) {
+    return vaultFailure(
+      r,
+      'Please log in to view your transactions.',
+      VAULT_FALLBACK,
     );
-    return {
-      ok: true,
-      balance: totals?.balance ?? 0,
-      topupTotal: totals?.topup_total ?? 0,
-      spendTotal: totals?.spend_total ?? 0,
-      transactions: rows.map((r) => ({
-        id: r.id,
-        amount: r.amount,
-        reason: r.reason,
-        createdAt: r.created_at,
-        reference: r.reference ?? null,
-        gateway: r.gateway ?? null,
-      })),
-      page: safePage,
-      hasMore: totals?.has_more ?? false,
-    };
-  } catch (error) {
-    logger.error('[credits] transactions load failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
   }
+  const { totals, rows } = r.data;
+  return {
+    ok: true,
+    balance: totals?.balance ?? 0,
+    topupTotal: totals?.topup_total ?? 0,
+    spendTotal: totals?.spend_total ?? 0,
+    transactions: rows.map((row) => ({
+      id: row.id,
+      amount: row.amount,
+      reason: row.reason,
+      createdAt: row.created_at,
+      reference: row.reference ?? null,
+      gateway: row.gateway ?? null,
+    })),
+    page: safePage,
+    hasMore: totals?.has_more ?? false,
+  };
 }
 
 export type PendingDeposit = {
@@ -763,30 +600,21 @@ const DEPOSIT_OVERDUE_MS = 60 * 60 * 1000;
  * the (account) layout has already gated the page by the time this runs.
  */
 export async function getPendingDeposits(): Promise<PendingDeposit[]> {
-  const token = await getAuthToken();
-  if (!token) return [];
-  try {
-    const raw = await authedFetch(token, '/store/credits/deposit');
-    // One instant for the whole list, so two rows started a second apart do not
-    // read as if measured by different clocks.
-    const now = Date.now();
-    return parseList(
-      PendingDepositSchema,
-      (raw as { deposits?: unknown }).deposits,
-    ).map((deposit) => {
-      const startedAt = new Date(deposit.created_at).getTime();
-      return {
-        reference: deposit.merchant_transaction_id,
-        amount: deposit.amount,
-        method: deposit.payment_method_code ?? null,
-        startedLabel: elapsedLabel(startedAt, now),
-        overdue: now - startedAt > DEPOSIT_OVERDUE_MS,
-      };
-    });
-  } catch (error) {
-    logger.error('[credits] pending deposits load failed:', error);
-    return [];
-  }
+  const r = await store.get('/store/credits/deposit', PendingDepositsSchema);
+  if (!r.ok) return [];
+  // One instant for the whole list, so two rows started a second apart do not
+  // read as if measured by different clocks.
+  const now = Date.now();
+  return r.data.deposits.map((deposit) => {
+    const startedAt = new Date(deposit.created_at).getTime();
+    return {
+      reference: deposit.merchant_transaction_id,
+      amount: deposit.amount,
+      method: deposit.payment_method_code ?? null,
+      startedLabel: elapsedLabel(startedAt, now),
+      overdue: now - startedAt > DEPOSIT_OVERDUE_MS,
+    };
+  });
 }
 
 export type ToggleShowcaseResult =
@@ -805,48 +633,20 @@ export async function toggleShowcase(
     return { ok: false, error: 'Invalid showcase state.' };
   }
 
-  const token = await getAuthToken();
-  if (!token) {
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-  }
-
-  try {
-    const parsed = parseOne(
-      VaultShowcaseSchema,
-      await authedFetch(
-        token,
-        `/store/vault/${encodeURIComponent(pullId)}/showcase`,
-        {
-          method: 'POST',
-          body: { showcased },
-        },
-      ),
+  const r = await store.post(
+    `/store/vault/${encodeURIComponent(pullId)}/showcase`,
+    VaultShowcaseSchema,
+    { showcased },
+  );
+  if (!r.ok) return vaultFailure(r, LOGIN_FIRST);
+  // Never act on a response for a different pull (backend bug / misrouting).
+  if (r.data.pull_id !== pullId) {
+    logger.error(
+      `[vault] showcase toggle id mismatch: requested '${pullId}', got '${r.data.pull_id}'`,
     );
-    if (!parsed) {
-      return {
-        ok: false,
-        error: 'Got an unexpected response. Please try again.',
-      };
-    }
-    // Never act on a response for a different pull (backend bug / misrouting).
-    if (parsed.pull_id !== pullId) {
-      logger.error(
-        `[vault] showcase toggle id mismatch: requested '${pullId}', got '${parsed.pull_id}'`,
-      );
-      return {
-        ok: false,
-        error: 'Got an unexpected response. Please try again.',
-      };
-    }
-    return { ok: true, showcased: parsed.showcased };
-  } catch (error) {
-    logger.error(`[vault] showcase toggle failed for '${pullId}':`, error);
-    return {
-      ok: false,
-      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
+    return { ok: false, error: UNEXPECTED_RESPONSE };
   }
+  return { ok: true, showcased: r.data.showcased };
 }
 
 export type BulkSellResult =
@@ -885,58 +685,26 @@ export async function sellBackPullsBatch(
     return { ok: false, error: 'No valid cards selected.' };
   }
 
-  const token = await getAuthToken();
-  if (!token) {
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-  }
-
-  try {
-    const raw = await authedFetch(token, '/store/vault/buyback-batch', {
-      method: 'POST',
-      body: { pull_ids: ids },
-    });
-    // The backend is ours, but a server action still validates its input at the
-    // boundary — parse defensively so a shape drift can't render NaN or drop the
-    // sold set (which the client uses to decide what to remove from the vault).
-    const r = raw as {
-      sold?: unknown;
-      failed?: unknown;
-      credited?: unknown;
-      balance?: unknown;
-      results?: { pull_id?: unknown; ok?: unknown; error?: unknown }[];
-    };
-    const results = Array.isArray(r.results) ? r.results : [];
-    const soldIds = results
-      .filter(
-        (x): x is { pull_id: string; ok: true } =>
-          !!x && x.ok === true && typeof x.pull_id === 'string',
-      )
-      .map((x) => x.pull_id);
-    const firstFail = results.find(
-      (x) => !!x && x.ok === false && typeof x.error === 'string',
-    );
-    const num = (v: unknown, fallback = 0) =>
-      typeof v === 'number' && Number.isFinite(v) ? v : fallback;
-    return {
-      ok: true,
-      sold: num(r.sold, soldIds.length),
-      failed: num(r.failed),
-      credited: num(r.credited),
-      balance: num(r.balance),
-      soldIds,
-      firstError:
-        firstFail && typeof firstFail.error === 'string'
-          ? firstFail.error
-          : null,
-    };
-  } catch (error) {
-    logger.error('[vault] bulk buyback failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  // BuybackBatchSchema parses defensively (every count soft, odd rows
+  // dropped) so a shape drift can't render NaN or drop the sold set — which
+  // the client uses to decide what to remove from the vault.
+  const r = await store.post('/store/vault/buyback-batch', BuybackBatchSchema, {
+    pull_ids: ids,
+  });
+  if (!r.ok) return vaultFailure(r, LOGIN_FIRST, VAULT_FALLBACK);
+  const soldIds = r.data.results.flatMap((x) =>
+    x.ok && x.pull_id !== undefined ? [x.pull_id] : [],
+  );
+  const firstFail = r.data.results.find((x) => !x.ok && x.error !== undefined);
+  return {
+    ok: true,
+    sold: r.data.sold ?? soldIds.length,
+    failed: r.data.failed ?? 0,
+    credited: r.data.credited ?? 0,
+    balance: r.data.balance ?? 0,
+    soldIds,
+    firstError: firstFail?.error ?? null,
+  };
 }
 
 // Instant sell-back of one vaulted pull. Safe to retry: the backend enforces
@@ -947,43 +715,18 @@ export async function sellBackPull(pullId: string): Promise<SellBackResult> {
     return { ok: false, error: 'Invalid card.' };
   }
 
-  const token = await getAuthToken();
-  if (!token) {
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-  }
-
-  try {
-    const parsed = parseOne(
-      BuybackResultSchema,
-      await authedFetch(
-        token,
-        `/store/vault/${encodeURIComponent(pullId)}/buyback`,
-        {
-          method: 'POST',
-          body: {},
-        },
-      ),
-    );
-    if (!parsed) {
-      return {
-        ok: false,
-        error: 'Got an unexpected response. Please try again.',
-      };
-    }
-    return {
-      ok: true,
-      amount: parsed.amount,
-      // Not rendered on the sell path; default keeps the type honest if a
-      // backend ever omits it (the credit still landed — don't false-fail).
-      percent: parsed.percent ?? 0,
-      balance: parsed.balance,
-    };
-  } catch (error) {
-    logger.error(`[vault] buyback failed for '${pullId}':`, error);
-    return {
-      ok: false,
-      error: friendlyError(error, VAULT_RULES, VAULT_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  const r = await store.post(
+    `/store/vault/${encodeURIComponent(pullId)}/buyback`,
+    BuybackResultSchema,
+    {},
+  );
+  if (!r.ok) return vaultFailure(r, LOGIN_FIRST);
+  return {
+    ok: true,
+    amount: r.data.amount,
+    // Not rendered on the sell path; default keeps the type honest if a
+    // backend ever omits it (the credit still landed — don't false-fail).
+    percent: r.data.percent ?? 0,
+    balance: r.data.balance,
+  };
 }

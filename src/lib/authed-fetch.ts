@@ -1,4 +1,10 @@
 /**
+ * TRANSITIONAL — superseded by the `Store` port (src/lib/store.ts), which owns
+ * the cookie read, the schema check and the failure log as well. New callers
+ * use `store.get/post/del`; the remaining ones migrate in the next slices and
+ * then this file, its test and `getAuthToken` go. Everything below describes
+ * the pre-port world.
+ *
  * The one place the storefront builds an AUTHENTICATED `sdk.client.fetch` to
  * the Medusa backend. Scoped deliberately to that surface: `sdk.store.*` /
  * `sdk.auth.*` take headers positionally and still pass their own bearer.
