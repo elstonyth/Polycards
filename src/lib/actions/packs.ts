@@ -8,14 +8,22 @@
  * The backend derives the customer id from the bearer token alone — this action
  * never sends an id — so a pull can't be forged for another account. The route
  * is POST /store/packs/:slug/open (customer-authenticated).
+ *
+ * Every call goes through the `Store` port (src/lib/store.ts), which owns the
+ * cookie read, the bearer and the failure log — but NOT the envelope check.
+ * These responses read through `UncheckedSchema` on purpose: by the time one
+ * arrives the customer has been CHARGED, and a drifted field classified as
+ * `invalid_shape` would land on PACKS_FALLBACK — "Could not open the pack.
+ * Please try again." over a committed open, i.e. an invitation to pay twice.
+ * The CARD is still validated (`parseOne(WonCardSchema, …)`), and that failure
+ * has its own copy: the card is in the Vault, we just could not show it.
  */
-import { authedFetch } from '@/lib/authed-fetch';
+import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
-import { getAuthToken } from '@/lib/data/customer';
 import { formatValue } from '@/lib/packs-format';
 import type { Rarity } from '@/lib/packs-data';
-import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
-import { parseOne, WonCardSchema } from '@/lib/data/schemas';
+import { friendlyError, type ErrorRule } from '@/lib/errors';
+import { parseOne, UncheckedSchema, WonCardSchema } from '@/lib/data/schemas';
 import { mapBatchRoll, clampCount, toBuybackOffer } from './pack-batch-map';
 import type { RawBatchRollItem, BatchRoll } from './pack-batch-map';
 export type { BatchRoll, BuybackOffer } from './pack-batch-map';
@@ -110,6 +118,35 @@ const PACKS_RULES: ErrorRule[] = [
   [/not available|not found|404/i, "This pack isn't available right now."],
 ];
 const PACKS_FALLBACK = 'Could not open the pack. Please try again.';
+const LOGIN_TO_OPEN = 'Please log in to open a pack.';
+
+/**
+ * A port `Failure` in the open actions' vocabulary.
+ *
+ * No cookie at all (the call never left — `status` is undefined) keeps the
+ * logged-out shape these actions have always returned: the login copy and
+ * `needsAuth`, with no `needsTopUp` key at all. Anything the backend actually
+ * said goes through PACKS_RULES, with `needsAuth` from the port's
+ * classification and `needsTopUp` still a prose probe — no status
+ * distinguishes "broke" from any other 400 (see the note on friendlyError in
+ * lib/errors.ts).
+ */
+function openFailure(f: Failure): {
+  ok: false;
+  error: string;
+  needsAuth?: boolean;
+  needsTopUp?: boolean;
+} {
+  if (f.kind === 'unauthenticated' && f.status === undefined) {
+    return { ok: false, error: LOGIN_TO_OPEN, needsAuth: true };
+  }
+  return {
+    ok: false,
+    error: friendlyError(f.text, PACKS_RULES, PACKS_FALLBACK),
+    needsAuth: f.kind === 'unauthenticated',
+    needsTopUp: /not enough credits/i.test(f.text),
+  };
+}
 
 export async function openPack(slug: string): Promise<OpenPackResult> {
   // Validate at the boundary — a server action is a public endpoint.
@@ -117,91 +154,67 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
     return { ok: false, error: 'Invalid pack.' };
   }
 
-  const token = await getAuthToken();
-  if (!token) {
+  const r = await store.post(
+    `/store/packs/${encodeURIComponent(slug)}/open`,
+    UncheckedSchema,
+    {},
+  );
+  if (!r.ok) return openFailure(r);
+
+  const { pull, card, balance, price, buyback, free, locked } = r.data as {
+    pull?: { id?: unknown };
+    card: BackendWonCard;
+    balance?: unknown;
+    price?: unknown;
+    // Untyped on purpose: only ever handed to parseOne(OpenBuybackSchema).
+    buyback?: unknown;
+    free?: unknown;
+    locked?: unknown;
+  };
+
+  // The envelope is unchecked (see the header) — validate the CARD so a
+  // renamed field can't render "$NaN" / an undefined rarity ring.
+  const wonCard = parseOne(WonCardSchema, card);
+  if (!wonCard) {
+    // The open is committed and the pull vaulted by now — never say "try
+    // again" over a charged open (a retry would charge twice).
     return {
       ok: false,
-      error: 'Please log in to open a pack.',
-      needsAuth: true,
+      error:
+        "Your pack opened and the card is in your Vault, but we couldn't show it here.",
     };
   }
 
-  try {
-    const { pull, card, balance, price, buyback, free, locked } =
-      await authedFetch<{
-        pull?: { id?: unknown };
-        card: BackendWonCard;
-        balance?: unknown;
-        price?: unknown;
-        // Untyped on purpose: only ever handed to parseOne(OpenBuybackSchema).
-        buyback?: unknown;
-        free?: unknown;
-        locked?: unknown;
-      }>(token, `/store/packs/${encodeURIComponent(slug)}/open`, {
-        method: 'POST',
-        body: {},
-      });
-
-    // The fetch generic is a type assertion, not a runtime guard — validate the
-    // shape so a renamed field can't render "$NaN" / an undefined rarity ring.
-    const wonCard = parseOne(WonCardSchema, card);
-    if (!wonCard) {
-      // The open is committed and the pull vaulted by now — never say "try
-      // again" over a charged open (a retry would charge twice).
-      return {
-        ok: false,
-        error:
-          "Your pack opened and the card is in your Vault, but we couldn't show it here.",
-      };
-    }
-
-    return {
-      ok: true,
-      card: {
-        id: wonCard.handle,
-        name: wonCard.name,
-        image: card.image,
-        slab_image: card.slab_image ?? null,
-        // Raw USD market_value must never render behind "RM" — an older
-        // backend without marketPriceMyr shows "—" instead of a fake price.
-        value:
-          wonCard.marketPriceMyr != null
-            ? formatValue(wonCard.marketPriceMyr)
-            : '—',
-        rarity: wonCard.rarity as Rarity,
-        pokemon_dex: wonCard.pokemon_dex ?? null,
-        sprite_image: wonCard.sprite_image ?? null,
-        marketPriceMyr: wonCard.marketPriceMyr ?? null,
-      },
-      pullId: typeof pull?.id === 'string' ? pull.id : null,
-      marketValue: wonCard.market_value,
-      buyback: toBuybackOffer(buyback),
-      balance:
-        typeof balance === 'number' && Number.isFinite(balance)
-          ? balance
-          : null,
-      price: typeof price === 'number' && Number.isFinite(price) ? price : null,
-      // Only a literal true claims a free open (an older backend omits it).
-      free: free === true,
-      // A backend that predates `locked` still sends `free` — fall back to it
-      // so a free pull reads as locked rather than offering a sell that 400s.
-      locked: typeof locked === 'boolean' ? locked : free === true,
-    };
-  } catch (error) {
-    logger.error(`[packs] open-pack failed for '${slug}':`, error);
-    const needsAuth = isAuthError(error);
-    // No status distinguishes "broke" from any other 400 — this one stays a
-    // prose probe on purpose (see the note on friendlyError in lib/errors.ts).
-    const needsTopUp = /not enough credits/i.test(
-      error instanceof Error ? error.message : String(error),
-    );
-    return {
-      ok: false,
-      error: friendlyError(error, PACKS_RULES, PACKS_FALLBACK),
-      needsAuth,
-      needsTopUp,
-    };
-  }
+  return {
+    ok: true,
+    card: {
+      id: wonCard.handle,
+      name: wonCard.name,
+      image: card.image,
+      slab_image: card.slab_image ?? null,
+      // Raw USD market_value must never render behind "RM" — an older
+      // backend without marketPriceMyr shows "—" instead of a fake price.
+      value:
+        wonCard.marketPriceMyr != null
+          ? formatValue(wonCard.marketPriceMyr)
+          : '—',
+      rarity: wonCard.rarity as Rarity,
+      pokemon_dex: wonCard.pokemon_dex ?? null,
+      sprite_image: wonCard.sprite_image ?? null,
+      marketPriceMyr: wonCard.marketPriceMyr ?? null,
+    },
+    pullId: typeof pull?.id === 'string' ? pull.id : null,
+    marketValue: wonCard.market_value,
+    buyback: toBuybackOffer(buyback),
+    balance:
+      typeof balance === 'number' && Number.isFinite(balance) ? balance : null,
+    price: typeof price === 'number' && Number.isFinite(price) ? price : null,
+    // Only a literal true claims a free open (an older backend omits it).
+    free: free === true,
+    // A backend that predates `locked` still sends `free` — fall back to it
+    // so a free pull reads as locked rather than offering a sell that 400s.
+    locked: typeof locked === 'boolean' ? locked : free === true,
+  };
 }
 
 export type OpenBatchResult =
@@ -229,78 +242,55 @@ export async function openBatch(
   // Clamp count to int in [1, 3].
   const clampedCount = clampCount(count);
 
-  const token = await getAuthToken();
-  if (!token) {
+  const r = await store.post(
+    `/store/packs/${encodeURIComponent(slug)}/open-batch`,
+    UncheckedSchema,
+    { count: clampedCount },
+  );
+  if (!r.ok) return openFailure(r);
+
+  const {
+    rolls: rawRolls,
+    balance,
+    price,
+    total_charged,
+  } = r.data as {
+    rolls: RawBatchRollItem[];
+    balance?: unknown;
+    price?: unknown;
+    total_charged?: unknown;
+  };
+
+  // Validate and map every roll. The charge is committed and every pull is
+  // already `vaulted` by the time this runs, so a roll that fails
+  // WonCardSchema is DROPPED, not fatal: the customer sees the cards that did
+  // map. Only when none map is the batch refused — and the copy then says
+  // where the card went, never "try again" (a retry would charge twice).
+  const rolls: BatchRoll[] = [];
+  for (const rawRoll of rawRolls) {
+    const mapped = mapBatchRoll(rawRoll);
+    if (mapped) rolls.push(mapped);
+    else logger.error(`[packs] open-batch roll failed to map for '${slug}'`);
+  }
+  if (rolls.length === 0 && rawRolls.length > 0) {
     return {
       ok: false,
-      error: 'Please log in to open a pack.',
-      needsAuth: true,
+      error:
+        "Your pack opened and the card is in your Vault, but we couldn't show it here.",
     };
   }
 
-  try {
-    const {
-      rolls: rawRolls,
-      balance,
-      price,
-      total_charged,
-    } = await authedFetch<{
-      rolls: RawBatchRollItem[];
-      balance?: unknown;
-      price?: unknown;
-      total_charged?: unknown;
-    }>(token, `/store/packs/${encodeURIComponent(slug)}/open-batch`, {
-      method: 'POST',
-      body: { count: clampedCount },
-    });
-
-    // Validate and map every roll. The charge is committed and every pull is
-    // already `vaulted` by the time this runs, so a roll that fails
-    // WonCardSchema is DROPPED, not fatal: the customer sees the cards that did
-    // map. Only when none map is the batch refused — and the copy then says
-    // where the card went, never "try again" (a retry would charge twice).
-    const rolls: BatchRoll[] = [];
-    for (const rawRoll of rawRolls) {
-      const mapped = mapBatchRoll(rawRoll);
-      if (mapped) rolls.push(mapped);
-      else logger.error(`[packs] open-batch roll failed to map for '${slug}'`);
-    }
-    if (rolls.length === 0 && rawRolls.length > 0) {
-      return {
-        ok: false,
-        error:
-          "Your pack opened and the card is in your Vault, but we couldn't show it here.",
-      };
-    }
-
-    return {
-      ok: true,
-      rolls,
-      balance:
-        typeof balance === 'number' && Number.isFinite(balance)
-          ? balance
-          : null,
-      price: typeof price === 'number' && Number.isFinite(price) ? price : null,
-      total:
-        typeof total_charged === 'number' && Number.isFinite(total_charged)
-          ? total_charged
-          : null,
-    };
-  } catch (error) {
-    logger.error(`[packs] open-batch failed for '${slug}':`, error);
-    const needsAuth = isAuthError(error);
-    // No status distinguishes "broke" from any other 400 — this one stays a
-    // prose probe on purpose (see the note on friendlyError in lib/errors.ts).
-    const needsTopUp = /not enough credits/i.test(
-      error instanceof Error ? error.message : String(error),
-    );
-    return {
-      ok: false,
-      error: friendlyError(error, PACKS_RULES, PACKS_FALLBACK),
-      needsAuth,
-      needsTopUp,
-    };
-  }
+  return {
+    ok: true,
+    rolls,
+    balance:
+      typeof balance === 'number' && Number.isFinite(balance) ? balance : null,
+    price: typeof price === 'number' && Number.isFinite(price) ? price : null,
+    total:
+      typeof total_charged === 'number' && Number.isFinite(total_charged)
+        ? total_charged
+        : null,
+  };
 }
 
 export type RevealResult =
@@ -323,37 +313,26 @@ export async function closeInstantWindow(pullIds: string[]): Promise<void> {
     (x) => typeof x === 'string' && x.trim() !== '',
   );
   if (ids.length === 0) return;
-  const token = await getAuthToken();
-  if (!token) return;
-  try {
-    await authedFetch(token, '/store/pulls/close-instant', {
-      method: 'POST',
-      body: { pull_ids: ids },
-    });
-  } catch (error) {
-    logger.error('[packs] close-instant failed:', error);
-  }
+  // Fire-and-forget: the response is not read, and a failure (logged out, a
+  // closed window, a network drop) is already logged by the port.
+  await store.post('/store/pulls/close-instant', UncheckedSchema, {
+    pull_ids: ids,
+  });
 }
 
 export async function revealPull(pullId: string): Promise<RevealResult> {
   if (typeof pullId !== 'string' || pullId.trim() === '') return { ok: false };
-  const token = await getAuthToken();
-  if (!token) return { ok: false };
-  try {
-    const data = await authedFetch<{ instant_deadline_ms?: unknown }>(
-      token,
-      `/store/pulls/${encodeURIComponent(pullId)}/reveal`,
-      {
-        method: 'POST',
-        body: {},
-      },
-    );
-    const ms = data?.instant_deadline_ms;
-    return typeof ms === 'number' && Number.isFinite(ms)
-      ? { ok: true, instantDeadlineMs: ms }
-      : { ok: false };
-  } catch (error) {
-    logger.error(`[packs] reveal ping failed for '${pullId}':`, error);
-    return { ok: false };
-  }
+  const r = await store.post(
+    `/store/pulls/${encodeURIComponent(pullId)}/reveal`,
+    UncheckedSchema,
+    {},
+  );
+  // Best-effort: logged out, a failed ping, or a body without the deadline all
+  // fall back to the open response's deadline.
+  if (!r.ok) return { ok: false };
+  const ms = (r.data as { instant_deadline_ms?: unknown } | null | undefined)
+    ?.instant_deadline_ms;
+  return typeof ms === 'number' && Number.isFinite(ms)
+    ? { ok: true, instantDeadlineMs: ms }
+    : { ok: false };
 }
