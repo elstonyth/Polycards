@@ -104,23 +104,22 @@ describe('getAvatarFrames cache contract', () => {
 
 describe('getLeaderboard cache contract', () => {
   it('non-array entries is NOT cached: degrades to [] and the next call re-fetches', async () => {
-    fetchMock.mockResolvedValueOnce({ entries: 'garbage' });
+    const board = queued('GET /store/leaderboard');
+    board.push({ body: { entries: 'garbage' } });
     expect(await getLeaderboard('weekly')).toEqual([]);
 
-    fetchMock.mockResolvedValueOnce({ entries: [] });
+    board.push({ body: { entries: [] } });
     await getLeaderboard('weekly');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(board.mem.requests).toHaveLength(2);
   });
 
   it('a legitimately empty board IS cached: the next call does NOT re-fetch', async () => {
-    fetchMock.mockResolvedValueOnce({ entries: [] });
+    const board = queued('GET /store/leaderboard');
+    board.push({ body: { entries: [] } });
     expect(await getLeaderboard('weekly')).toEqual([]);
 
-    // No second mock queued — a re-fetch here would throw on the empty
-    // queue (vitest's default mock resolves undefined, not an error, so
-    // assert on the call count instead of relying on that failure mode).
     await getLeaderboard('weekly');
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(board.mem.requests).toHaveLength(1);
   });
 });
 
