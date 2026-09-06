@@ -244,7 +244,11 @@ export function gatewayUrls(
   hasPayoutVerify: boolean;
 } {
   const def = GATEWAYS[id];
-  const base = env.PAYMENT_CALLBACK_BASE?.replace(/\/+$/, '');
+  // https only: the gateway posts its key headers to these URLs, and a
+  // plain-http base would put those reusable credentials on the wire in the
+  // clear. Anything else counts as unset, so the money routes fail closed.
+  const raw = env.PAYMENT_CALLBACK_BASE?.trim().replace(/\/+$/, '') ?? '';
+  const base = /^https:\/\/[^/\s]+$/i.test(raw) ? raw : '';
   const hook = (path: string | undefined) =>
     path && base ? `${base}${path}` : '';
   return {

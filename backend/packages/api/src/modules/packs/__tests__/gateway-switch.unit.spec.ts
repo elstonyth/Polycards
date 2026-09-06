@@ -99,6 +99,21 @@ describe('gatewayUrls', () => {
     ).toBe('https://shop/transactions');
   });
 
+  it('a plain-http or malformed callback base counts as unset — the key headers never go over cleartext', () => {
+    for (const bad of [
+      'http://api.example',
+      'api.example',
+      'https://api.example/hooks',
+      ' ',
+    ]) {
+      const urls = gatewayUrls('tgpay', {
+        PAYMENT_CALLBACK_BASE: bad,
+      } as NodeJS.ProcessEnv);
+      expect(urls.notifyUrl).toBe('');
+      expect(urls.withdrawNotifyUrl).toBe('');
+    }
+  });
+
   it('without PAYMENT_CALLBACK_BASE every hook URL is empty so callers fail closed — no legacy explicit URL is honoured', () => {
     const urls = gatewayUrls('tgpay', {
       GLOBEPAY_NOTIFY_URL: 'https://old/hooks/globepay/deposit',

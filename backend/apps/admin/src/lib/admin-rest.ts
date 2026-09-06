@@ -428,8 +428,11 @@ export async function getGlobePayBalance(): Promise<GlobePayBalance> {
 
 // ── Payment gateways (plan 130) ─────────────────────────────────────────────
 
-/** Mirrors the backend's PaymentGateway union; the switch and the audit share it. */
+/** Mirrors the backend's PaymentGateway union — the gateways the switch can pick. */
 export type PaymentGatewayId = 'tgpay';
+/** A gateway a ROW may name: a live one, or a retired one ('globepay') whose
+ *  settled rows are still history on the audit panel. */
+export type HistoricalGatewayId = PaymentGatewayId | (string & {});
 
 // ── Gateway audit (plan 130): gateway = source of truth for money in/out ─────
 
@@ -443,8 +446,8 @@ export interface GatewayAuditTotals {
 
 export interface GatewayAuditFinding {
   kind: 'deposit' | 'withdrawal';
-  /** The gateway the row was created under — not necessarily the active one. */
-  gateway: PaymentGatewayId;
+  /** The gateway the row was created under — live or retired. */
+  gateway: HistoricalGatewayId;
   id: string;
   merchant_transaction_id: string;
   gateway_transaction_id: string | null;
@@ -467,7 +470,7 @@ export interface GatewayAudit {
   /** Settled totals of every OTHER gateway that ever moved money, so a switch
    *  never hides the previous gateway's history from this page. */
   history: {
-    gateway: PaymentGatewayId;
+    gateway: HistoricalGatewayId;
     deposits: GatewayAuditTotals;
     withdrawals: GatewayAuditTotals;
   }[];
