@@ -6,6 +6,10 @@ import {
   savedBankAccountId,
   MAX_SAVED_BANK_ACCOUNTS,
 } from '../route';
+import type {
+  FakeFacet,
+  CustomerWallet,
+} from '../../../../../../modules/packs/facets';
 
 // Saved payout accounts live in customer.metadata.bank_accounts and are the
 // picker source for the withdraw form. Three properties matter enough to pin:
@@ -47,7 +51,8 @@ const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
 
 const scope = {
   resolve: jest.fn((key: string) => {
-    if (key === 'packs') return { mutateCustomerMetadata };
+    if (key === 'packs')
+      return { mutateCustomerMetadata } satisfies FakeFacet<CustomerWallet>;
     if (key === 'notification') return { createNotifications };
     if (key === 'logger') return logger;
     return { retrieveCustomer, updateCustomers };

@@ -19,6 +19,7 @@ import {
   GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER,
   GLOBEPAY_PENDING_WINDOW_MS,
 } from '../globepay-deposit';
+import type { FakeFacet, GatewayDeposits } from '../facets';
 
 const submitMock = submitDeposit as jest.Mock;
 
@@ -29,7 +30,7 @@ function harness() {
     // successful insert so every existing case behaves as it did before the cap.
     createGlobePayDepositCapped: jest.fn().mockResolvedValue({ id: 'gpd_1' }),
     updateGlobePayDeposits: jest.fn().mockResolvedValue(undefined),
-  };
+  } satisfies FakeFacet<GatewayDeposits>;
   // Resolve BY KEY. The old stub returned `packs` for every key, which passed
   // only because the subject resolved one dependency; the first call to
   // resolve('logger') then blew up with "warn is not a function" inside the

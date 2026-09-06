@@ -24,6 +24,7 @@ jest.mock('../gateway', () => {
 });
 
 import { GatewayError, submitWithdrawal } from '../gateway';
+import type { FakeFacet, GatewayWithdrawals } from '../facets';
 
 const submitMock = submitWithdrawal as jest.Mock;
 
@@ -89,7 +90,7 @@ function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
       withdrawable: 1000,
       playthrough: { deposited: 0, used: 0, remaining: 0 },
     }),
-  };
+  } satisfies FakeFacet<GatewayWithdrawals>;
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   return {
     packs,

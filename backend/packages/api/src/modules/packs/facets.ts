@@ -55,6 +55,24 @@ export type GatewayReports = Pick<
 >;
 
 /**
+ * The customer-facing wallet surface: `/store/credits`, `/balance`,
+ * `/latest`, and the saved-payout-accounts metadata mutator. Ledger reads and
+ * a metadata write, not gateway rows — kept separate from `GatewayDeposits`/
+ * `GatewayWithdrawals` even though it shares two members with them, because
+ * this area never submits to or reconciles against the gateway itself.
+ */
+export type CustomerWallet = Pick<
+  PacksModuleService,
+  | 'creditBalance'
+  | 'creditSummary'
+  | 'listCreditTransactions'
+  | 'listGlobePayDeposits'
+  | 'listGlobePayWithdrawals'
+  | 'mutateCustomerMetadata'
+  | 'walletSummary'
+>;
+
+/**
  * Resolve the packs service narrowed to one facet.
  *
  * The cast is the whole point: the container hands back the full service and
