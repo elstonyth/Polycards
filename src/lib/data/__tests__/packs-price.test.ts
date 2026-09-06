@@ -15,7 +15,7 @@ vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
 
-import { getPackCategories } from '@/lib/data/packs';
+import { getPackCategories, getPackBySlug } from '@/lib/data/packs';
 import { clearTtlCache } from '@/lib/ttl-cache';
 
 const PACKS = 'GET /store/packs';
@@ -120,5 +120,59 @@ describe('the catalog request', () => {
       headers: {},
       cache: 'auto',
     });
+  });
+});
+
+// The UNLISTED pack path: GET /store/packs filters `free_welcome` out, so the
+// free welcome pack resolves through the detail route instead of the catalog.
+describe('getPackBySlug — the unlisted (uncataloged) pack', () => {
+  const unlisted = (over: Record<string, unknown> = {}) =>
+    backend({
+      'GET /store/packs': { body: { packs: [] } },
+      'GET /store/packs/:slug': {
+        body: {
+          pack: row({
+            slug: 'free-welcome-pack',
+            category: 'free_welcome',
+            ...over,
+          }),
+        },
+      },
+    });
+
+  it('resolves through the detail route, with no siblings', async () => {
+    unlisted();
+    const base = await getPackBySlug('free-welcome-pack');
+    expect(base?.pack.id).toBe('free-welcome-pack');
+    expect(base?.pack.categoryId).toBe('free_welcome');
+    // Title-cased from the key: the local meta has no `free_welcome` entry.
+    expect(base?.pack.categoryName).toBe('Free Welcome');
+    expect(base?.siblings).toEqual([]);
+  });
+
+  it('null when the detail route 404s it too', async () => {
+    backend({
+      'GET /store/packs': { body: { packs: [] } },
+      'GET /store/packs/:slug': { status: 404, body: { message: 'nope' } },
+    });
+    expect(await getPackBySlug('nope')).toBeNull();
+  });
+
+  // DECLARED BEHAVIOUR CHANGE (Task 3). Pre-port this path validated the row
+  // and then threw the PARSED result away, mapping the RAW body — so an
+  // out-of-enum `group` leaked straight through to Pack.group. It now maps the
+  // parsed row, where PackRowSchema's `.catch(null)` has already degraded it.
+  // Narrow (only an unlisted pack reaches here), in the safe direction, and it
+  // makes this path match the list path, which always mapped parsed rows.
+  it('degrades an out-of-enum group to null instead of leaking it', async () => {
+    unlisted({ group: 'BOGUS' });
+    expect((await getPackBySlug('free-welcome-pack'))?.pack.group).toBeNull();
+  });
+
+  it('still carries a legitimate group through', async () => {
+    unlisted({ group: 'GRADED' });
+    expect((await getPackBySlug('free-welcome-pack'))?.pack.group).toBe(
+      'GRADED',
+    );
   });
 });
