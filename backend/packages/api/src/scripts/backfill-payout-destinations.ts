@@ -43,10 +43,6 @@ import {
   parseSavedBankAccounts,
   type SavedBankAccount,
 } from '../modules/packs/saved-accounts';
-import {
-  getSupportedBanks,
-  globepayConfigFromEnv,
-} from '../modules/packs/globepay-client';
 import { findBank } from '../modules/packs/banks';
 
 type SettledDestination = {
@@ -68,22 +64,9 @@ export default async function backfillPayoutDestinations({
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
 
-  // The picker's label. It lives only in the gateway's bank list, never on the
-  // withdrawal row, so ask them once. If that call is unavailable (payouts
-  // switched off, credentials absent in the run environment) the bank CODE is
-  // used as the label — recognisable enough to pick from, and the code is what
-  // actually pays either way.
-  let bankNames = new Map<string, string>();
-  try {
-    const banks = await getSupportedBanks(globepayConfigFromEnv());
-    bankNames = new Map(banks.map((b) => [b.bankCode, b.bankName]));
-  } catch (error) {
-    logger.warn(
-      `[backfill-payout-destinations] bank list unavailable (${
-        error instanceof Error ? error.message : String(error)
-      }); falling back to bank codes as labels.`,
-    );
-  }
+  // The picker's label comes from the bank registry (banks.ts) by canonical
+  // id or any legacy alias; a code the registry does not know keeps the code
+  // as its label — recognisable enough to pick from.
 
   // One row per (customer, bank, account), carrying the EARLIEST settlement —
   // the oldest evidence the customer controls that account, and the timestamp
@@ -168,10 +151,7 @@ export default async function backfillPayoutDestinations({
             accounts.push({
               id,
               bankCode,
-              bankName:
-                bank?.name ??
-                bankNames.get(destination.bank_code) ??
-                destination.bank_code,
+              bankName: bank?.name ?? destination.bank_code,
               accountNumber: destination.account_number,
               accountHolderName: destination.account_holder_name,
               savedAt,

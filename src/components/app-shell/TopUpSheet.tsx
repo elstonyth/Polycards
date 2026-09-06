@@ -30,7 +30,7 @@ import {
 // deposit. WHICH gateway is the backend's decision (admin switch, plan 130):
 // the storefront never needs to know, since every real gateway is a redirect.
 // 'mock' / unset keeps the mock gateway, which credits synchronously and stays
-// the local/dev path. Historical values 'globepay' and 'tgpay' still work.
+// the local/dev path. Any other value ('tgpay') means the real gateway.
 // An EMPTY value counts as unset (a blank build arg must not send customers
 // to a gateway the deploy never chose).
 const PROVIDER = process.env.NEXT_PUBLIC_PAYMENTS_PROVIDER || 'mock';
@@ -326,7 +326,7 @@ export default function TopUpSheet({
 
             {/* Channel picker. Gateway only: the mock has no channels, and
                 without this the customer always landed on whichever one
-                GLOBEPAY_DEPOSIT_METHOD names (QR), with no way to pay by bank.
+                default rail (QR), with no way to pay by bank.
                 Hidden at one channel — a "choice" of one is noise, and the
                 single code still ships on submit.
 

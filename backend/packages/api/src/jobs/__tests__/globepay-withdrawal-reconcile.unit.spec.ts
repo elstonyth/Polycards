@@ -1,9 +1,10 @@
-import { GlobePayError } from '../../modules/packs/globepay-client';
+import { GatewayError } from '../../modules/packs/gateway-types';
+import { TGPAY_NOT_FOUND } from '../../modules/packs/tgpay-client';
 
 // The gateway's HTTP seam is the only thing mocked; every decision under test
 // is the job's own.
-jest.mock('../../modules/packs/globepay-client', () => {
-  const actual = jest.requireActual('../../modules/packs/globepay-client');
+jest.mock('../../modules/packs/gateway', () => {
+  const actual = jest.requireActual('../../modules/packs/gateway');
   return { ...actual, getWithdrawalDetail: jest.fn() };
 });
 jest.mock('../../modules/packs/notify-feed', () => ({
@@ -20,7 +21,7 @@ jest.mock('../../modules/packs/withdrawal-receipt', () => ({
   sendWithdrawalReceipt: jest.fn().mockResolvedValue(true),
 }));
 
-import { getWithdrawalDetail } from '../../modules/packs/globepay-client';
+import { getWithdrawalDetail } from '../../modules/packs/gateway';
 import { notifyFeed } from '../../modules/packs/notify-feed';
 import { sendWithdrawalReceipt } from '../../modules/packs/withdrawal-receipt';
 import globepayWithdrawalReconcileJob from '../globepay-withdrawal-reconcile';
@@ -48,11 +49,9 @@ beforeEach(() => {
   receipt.mockClear();
   process.env.GLOBEPAY_ENABLED = 'true';
   process.env.GLOBEPAY_WITHDRAWALS_ENABLED = 'true';
-  process.env.GLOBEPAY_MERCHANT_CODE = 'Testpolycard';
-  process.env.GLOBEPAY_API_BASE = 'https://mapi.example.test';
-  process.env.GLOBEPAY_AES_KEY = 'test-aes-key';
-  process.env.GLOBEPAY_MERCHANT_PRIVATE_KEY = 'test-private-key';
-  process.env.GLOBEPAY_PUBLIC_KEY = 'test-public-key';
+  process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
+  process.env.TGPAY_PUBLIC_KEY = 'pk-test';
+  process.env.TGPAY_SECRET_KEY = 'sk-test';
 });
 
 /** An ambiguous-submit row: the debit landed, SubmitWithdrawal never returned,
@@ -64,6 +63,7 @@ const pendingRow = {
   customer_id: 'cus_1',
   merchant_transaction_id: 'PW-1',
   gateway_transaction_id: null,
+  gateway: 'tgpay',
   amount: 100,
   bank_code: 'MBB',
   account_number: '1234567890',
@@ -115,7 +115,7 @@ function harness(withdrawal: Record<string, unknown> = pendingRow) {
 // scope — a pure move, no logic change — so the slow-payout-clock tests
 // further down can drive the same 'wait' branch without a second copy.
 const ambiguous400 = () =>
-  new GlobePayError(
+  new GatewayError(
     'GlobePay365 /api/Withdrawal/GetWithdrawalDetail: non-JSON response (HTTP 400): Not found',
     [],
     400,
@@ -140,7 +140,7 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
   it('a parsed 400 carrying some OTHER error code is equally unactionable', async () => {
     const h = harness();
     requery.mockRejectedValue(
-      new GlobePayError('Invalid merchant', ['PMT10006'], 400, true),
+      new GatewayError('Invalid merchant', ['PMT10006'], 400, true),
     );
 
     await globepayWithdrawalReconcileJob(h.container);
@@ -152,7 +152,7 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
   it('still refunds on an EXPLICIT not-found — this is a narrowing, not a removal', async () => {
     const h = harness();
     requery.mockRejectedValue(
-      new GlobePayError('Not found', ['PMT10016'], 400, true),
+      new GatewayError('Not found', [TGPAY_NOT_FOUND], 404, true),
     );
 
     await globepayWithdrawalReconcileJob(h.container);
@@ -228,7 +228,7 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
 
   it('a non-400 refusal is rethrown into the per-row catch, not read as an answer', async () => {
     const h = harness();
-    requery.mockRejectedValue(new GlobePayError('their outage', [], 500));
+    requery.mockRejectedValue(new GatewayError('their outage', [], 500));
 
     await globepayWithdrawalReconcileJob(h.container);
 
@@ -275,7 +275,7 @@ describe('withdrawal sweep — a held row is structurally invisible to it', () =
     // `undefined.statusId` first — the failure must be caught by the RIGHT
     // mechanism, not an accidental one.
     requery.mockRejectedValue(
-      new GlobePayError('Not found', ['PMT10016'], 400, true),
+      new GatewayError('Not found', [TGPAY_NOT_FOUND], 404, true),
     );
 
     await globepayWithdrawalReconcileJob(h.container);
@@ -342,7 +342,7 @@ describe('withdrawal sweep — the state an admin approval could leave ambiguous
   it('does NOT refund a row approved minutes ago, however old the request is', async () => {
     const h = harness(approvedMinutesAgoRow);
     requery.mockRejectedValue(
-      new GlobePayError('Not found', ['PMT10016'], 400, true),
+      new GatewayError('Not found', [TGPAY_NOT_FOUND], 404, true),
     );
 
     await globepayWithdrawalReconcileJob(h.container);
@@ -356,7 +356,7 @@ describe('withdrawal sweep — the state an admin approval could leave ambiguous
   it('refunds exactly once, on the shared anchor, and closes failed', async () => {
     const h = harness(approvedThenAmbiguousRow);
     requery.mockRejectedValue(
-      new GlobePayError('Not found', ['PMT10016'], 400, true),
+      new GatewayError('Not found', [TGPAY_NOT_FOUND], 404, true),
     );
 
     await globepayWithdrawalReconcileJob(h.container);

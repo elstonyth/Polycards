@@ -28,7 +28,20 @@ const mkReq = (over: Record<string, unknown> = {}) =>
       account_holder_name: 'A Customer',
     },
     headers: {},
-    scope: {},
+    // TGPay needs the payer's contact, read from the customer module.
+    scope: {
+      resolve: (k: string) =>
+        k === 'customer'
+          ? {
+              retrieveCustomer: async () => ({
+                email: 'cus1@x.test',
+                first_name: 'A',
+                last_name: 'Customer',
+                phone: '0123456789',
+              }),
+            }
+          : {},
+    },
     socket: {},
     ...over,
   }) as never;
@@ -36,16 +49,18 @@ const mkReq = (over: Record<string, unknown> = {}) =>
 const sentIp = () => startMock.mock.calls[0][1].ipAddress;
 
 const ORIGINAL_ENV = {
-  GLOBEPAY_WITHDRAW_NOTIFY_URL: process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL,
-  GLOBEPAY_PAYOUT_VERIFY_URL: process.env.GLOBEPAY_PAYOUT_VERIFY_URL,
+  PAYMENT_CALLBACK_BASE: process.env.PAYMENT_CALLBACK_BASE,
+  TGPAY_API_BASE: process.env.TGPAY_API_BASE,
+  TGPAY_PUBLIC_KEY: process.env.TGPAY_PUBLIC_KEY,
+  TGPAY_SECRET_KEY: process.env.TGPAY_SECRET_KEY,
 };
 
 beforeEach(() => {
   startMock.mockClear();
-  process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL =
-    'https://us/hooks/globepay/withdrawal';
-  process.env.GLOBEPAY_PAYOUT_VERIFY_URL =
-    'https://us/hooks/globepay/payout-verify';
+  process.env.PAYMENT_CALLBACK_BASE = 'https://us';
+  process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
+  process.env.TGPAY_PUBLIC_KEY = 'pk-test';
+  process.env.TGPAY_SECRET_KEY = 'sk-test';
 });
 
 // These are process-wide: leaving them set leaks into whatever runs next and
@@ -100,14 +115,10 @@ describe('POST /store/credits/withdraw — customer IP', () => {
     expect(sentIp()).toBe('10.0.0.1');
   });
 
-  // Either URL missing must fail closed: without a NotifyUrl a failed payout
-  // could never refund, and without a verify URL their Payout Verification
-  // would reject every payout with nothing in our logs explaining why.
-  it.each([
-    'GLOBEPAY_WITHDRAW_NOTIFY_URL',
-    'GLOBEPAY_PAYOUT_VERIFY_URL',
-  ] as const)('fails closed when %s is unset', async (missing) => {
-    delete process.env[missing];
+  // A missing callback base must fail closed: without a NotifyUrl a failed
+  // payout could never refund.
+  it('fails closed when PAYMENT_CALLBACK_BASE is unset', async () => {
+    delete process.env.PAYMENT_CALLBACK_BASE;
     await expect(POST(mkReq({ ip: '203.0.113.7' }), res)).rejects.toThrow(
       /not open yet/i,
     );

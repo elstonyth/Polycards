@@ -208,15 +208,14 @@ describe('parseSavedBankAccounts — legacy gateway codes read as the canonical 
 });
 
 describe('bankSupportedBy / savedBankAccountViews — the same account across gateways', () => {
-  it('a bank both gateways serve is supported on both; a GlobePay-only wallet is not on TGPay', () => {
-    expect(bankSupportedBy('MBBEMYKL', 'globepay')).toBe(true);
+  it('a bank TGPay pays to is supported, a wallet it has no code for is not, whichever alias saved it', () => {
     expect(bankSupportedBy('MBBEMYKL', 'tgpay')).toBe(true);
-    expect(bankSupportedBy('BOOSTMY', 'globepay')).toBe(true);
+    // Saved under the retired gateway's code: still the same bank.
+    expect(bankSupportedBy('MYMB2U', 'tgpay')).toBe(true);
     expect(bankSupportedBy('BOOSTMY', 'tgpay')).toBe(false);
   });
 
-  it('an unknown legacy code stays supported on GlobePay (its own code) and unsupported elsewhere', () => {
-    expect(bankSupportedBy('MBB', 'globepay')).toBe(true);
+  it('a code no registry entry knows is unsupported — nothing could pay to it', () => {
     expect(bankSupportedBy('MBB', 'tgpay')).toBe(false);
   });
 
@@ -225,7 +224,6 @@ describe('bankSupportedBy / savedBankAccountViews — the same account across ga
     const production = { TGPAY_API_BASE: 'https://api.tgpay365.com/api/v2' };
     expect(bankSupportedBy('DUMMYBANKVERIFIED', 'tgpay', sandbox)).toBe(true);
     expect(bankSupportedBy('DUMMYBANKVERIFIED', 'tgpay', production)).toBe(false);
-    expect(bankSupportedBy('DUMMYBANKVERIFIED', 'globepay', {})).toBe(false);
   });
 
   it('views carry the verdict for the gateway they are rendered under', () => {
@@ -235,7 +233,13 @@ describe('bankSupportedBy / savedBankAccountViews — the same account across ga
       bankCode: 'BOOSTMY',
       bankName: 'Boost',
     };
-    expect(savedBankAccountViews([boost], 'globepay', 0)[0].supported).toBe(true);
     expect(savedBankAccountViews([boost], 'tgpay', 0)[0].supported).toBe(false);
+    const maybank: SavedBankAccount = {
+      ...genuine(),
+      id: savedBankAccountId('MBBEMYKL', OWNER_NUMBER),
+      bankCode: 'MBBEMYKL',
+      bankName: 'Maybank',
+    };
+    expect(savedBankAccountViews([maybank], 'tgpay', 0)[0].supported).toBe(true);
   });
 });

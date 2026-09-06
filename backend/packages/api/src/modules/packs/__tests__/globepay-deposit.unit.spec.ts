@@ -5,27 +5,16 @@ import {
   startGlobePayDeposit,
 } from '../globepay-deposit';
 
-// startGlobePayDeposit talks to the gateway through globepay-client; stub that
-// seam so these tests cover the state machine (row before call, row closed on
-// failure, id stamped on success) rather than the HTTP layer, which has its own
-// specs.
-jest.mock('../globepay-client', () => {
-  const actual = jest.requireActual('../globepay-client');
-  return {
-    ...actual,
-    globepayConfigFromEnv: jest.fn(() => ({
-      baseUrl: 'https://mapi.example.test',
-      merchantCode: 'Testpolycard',
-      aesKey: 'test-aes-key',
-      privateKey: 'priv',
-      publicKey: 'pub',
-      currencyCode: 'MYR',
-    })),
-    submitDeposit: jest.fn(),
-  };
+// startGlobePayDeposit talks to the gateway through the seam in gateway.ts;
+// stub that so these tests cover the state machine (row before call, row
+// closed on failure, id stamped on success) rather than the adapter or the
+// HTTP layer, which have their own specs.
+jest.mock('../gateway', () => {
+  const actual = jest.requireActual('../gateway');
+  return { ...actual, submitDeposit: jest.fn() };
 });
 
-import { GlobePayError, submitDeposit } from '../globepay-client';
+import { GatewayError, submitDeposit } from '../gateway';
 import {
   GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER,
   GLOBEPAY_PENDING_WINDOW_MS,
@@ -44,7 +33,7 @@ function harness() {
   // Resolve BY KEY. The old stub returned `packs` for every key, which passed
   // only because the subject resolved one dependency; the first call to
   // resolve('logger') then blew up with "warn is not a function" inside the
-  // refusal path. Same shape as api/hooks/globepay/deposit's spec.
+  // refusal path. Same shape as api/hooks/tgpay/deposit's spec.
   const logger = { warn: jest.fn(), error: jest.fn(), info: jest.fn() };
   return {
     packs,
@@ -80,19 +69,18 @@ beforeEach(() => {
     depositActualAmount: 50,
   });
   process.env.GLOBEPAY_ENABLED = 'true';
-  process.env.GLOBEPAY_MERCHANT_CODE = 'Testpolycard';
+  process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
+  process.env.TGPAY_PUBLIC_KEY = 'pk-test';
+  process.env.TGPAY_SECRET_KEY = 'sk-test';
 });
 
 describe('globepayEnabled', () => {
-  it('is off unless explicitly enabled AND configured', () => {
+  it('is off unless explicitly enabled AND the active gateway is configured', () => {
     expect(globepayEnabled({})).toBe(false);
     expect(globepayEnabled({ GLOBEPAY_ENABLED: 'true' })).toBe(false);
-    expect(globepayEnabled({ GLOBEPAY_MERCHANT_CODE: 'M' })).toBe(false);
+    expect(globepayEnabled({ TGPAY_SECRET_KEY: 'sk' })).toBe(false);
     expect(
-      globepayEnabled({
-        GLOBEPAY_ENABLED: 'true',
-        GLOBEPAY_MERCHANT_CODE: 'M',
-      }),
+      globepayEnabled({ GLOBEPAY_ENABLED: 'true', TGPAY_SECRET_KEY: 'sk' }),
     ).toBe(true);
   });
 });
@@ -153,32 +141,21 @@ describe('startGlobePayDeposit', () => {
     );
   });
 
-  // GLOBEPAY_DEPOSIT_METHOD exists so an operator can name the channel their
-  // merchant account actually carries without a rebuild — production refused
-  // the compiled-in BQR with PMT10006 on 2026-08-04. It must still go through
-  // the allow-list, or a typo in the spec reaches the gateway instead of
-  // failing here.
-  describe('GLOBEPAY_DEPOSIT_METHOD override', () => {
-    const saved = process.env.GLOBEPAY_DEPOSIT_METHOD;
-    afterEach(() => {
-      if (saved === undefined) delete process.env.GLOBEPAY_DEPOSIT_METHOD;
-      else process.env.GLOBEPAY_DEPOSIT_METHOD = saved;
-    });
-
-    it('sends the env-named method instead of the compiled-in default', async () => {
-      process.env.GLOBEPAY_DEPOSIT_METHOD = 'FPX';
+  describe('payment method allow-list', () => {
+    it('forwards a named rail', async () => {
       const h = harness();
-      await start(h);
+      await start(h, { paymentMethodCode: 'FPX' });
       expect(submitMock).toHaveBeenCalledWith(
         expect.objectContaining({ paymentMethodCode: 'FPX' }),
         expect.anything(),
       );
     });
 
-    it('refuses an unknown env value instead of forwarding it', async () => {
-      process.env.GLOBEPAY_DEPOSIT_METHOD = 'NOPE';
+    it('refuses an unknown rail instead of forwarding it', async () => {
       const h = harness();
-      await expect(start(h)).rejects.toThrow(/unsupported payment method/i);
+      await expect(start(h, { paymentMethodCode: 'NOPE' })).rejects.toThrow(
+        /unsupported payment method/i,
+      );
       expect(submitMock).not.toHaveBeenCalled();
     });
   });
@@ -188,7 +165,7 @@ describe('startGlobePayDeposit', () => {
     // definite=true — a parsed refusal. Only those close the row; see the
     // definite=false case below.
     submitMock.mockRejectedValue(
-      new GlobePayError('nope', ['PMT10005'], 200, true),
+      new GatewayError('nope', ['PMT10005'], 200, true),
     );
     await expect(start(h)).rejects.toThrow(/could not start your top-up/i);
     expect(h.packs.updateGlobePayDeposits).toHaveBeenCalledWith({
@@ -204,7 +181,7 @@ describe('startGlobePayDeposit', () => {
   it('logs the gateway codes AND message before flattening the refusal', async () => {
     const h = harness();
     submitMock.mockRejectedValue(
-      new GlobePayError('Invalid Payment Method.', ['PMT10006'], 400, true),
+      new GatewayError('Invalid Payment Method.', ['PMT10006'], 400, true),
     );
     await expect(start(h)).rejects.toThrow(/could not start your top-up/i);
     const line = h.logger.warn.mock.calls[0][0] as string;
@@ -229,7 +206,7 @@ describe('startGlobePayDeposit', () => {
       throw new Error('logger exploded');
     });
     submitMock.mockRejectedValue(
-      new GlobePayError('nope', ['PMT10005'], 200, true),
+      new GatewayError('nope', ['PMT10005'], 200, true),
     );
     await expect(start(h)).rejects.toThrow(/could not start your top-up/i);
     // Self-contained on purpose: without this the test would still pass if the
@@ -285,7 +262,7 @@ describe('startGlobePayDeposit', () => {
     ['a timeout', new Error('ETIMEDOUT')],
     [
       'a WAF page the client could not parse',
-      new GlobePayError('<html>Access denied for this IP</html>', [], 403),
+      new GatewayError('<html>Access denied for this IP</html>', [], 403),
     ],
   ])(
     'leaves the row pending on %s, so the sweep can still requery it',
@@ -306,15 +283,15 @@ describe('startGlobePayDeposit', () => {
     expect(h.packs.createGlobePayDepositCapped).not.toHaveBeenCalled();
   });
 
-  // Provider-confirmed band (RM 30–1000, 2026-07-22). Checked before the
-  // network call: their own refusal is a bare "Invalid Transaction Amount"
-  // that names no numbers, and a doomed request would still leave a failed row.
-  it.each([29])(
+  // The active gateway's band (TGPay: RM 50 floor, read from the production
+  // tenant 2026-09-06), checked before the network call: a doomed request
+  // would still leave a failed row, and the gateway's refusal names no numbers.
+  it.each([29, 49])(
     'rejects RM %s — outside the gateway band — without calling the gateway',
     async (amount) => {
       const h = harness();
       await expect(start(h, { amount })).rejects.toThrow(
-        /between RM 30 and RM 10,000/,
+        /between RM 50 and RM 10,000/,
       );
       expect(submitMock).not.toHaveBeenCalled();
       expect(h.packs.createGlobePayDepositCapped).not.toHaveBeenCalled();
@@ -337,7 +314,7 @@ describe('startGlobePayDeposit', () => {
     },
   );
 
-  it.each([30, 1000])(
+  it.each([50, 10000])(
     'accepts RM %s — the exact band edges',
     async (amount) => {
       const h = harness();

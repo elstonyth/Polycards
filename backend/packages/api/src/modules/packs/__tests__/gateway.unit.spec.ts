@@ -1,17 +1,3 @@
-jest.mock('../globepay-client', () => {
-  const actual = jest.requireActual('../globepay-client');
-  return {
-    ...actual,
-    submitDeposit: jest.fn(async () => ({
-      transactionId: 'D1',
-      url: 'https://cashier',
-    })),
-    getDepositDetail: jest.fn(),
-    submitWithdrawal: jest.fn(),
-    getSupportedBanks: jest.fn(),
-  };
-});
-
 jest.mock('../tgpay-client', () => {
   const actual = jest.requireActual('../tgpay-client');
   return {
@@ -22,7 +8,6 @@ jest.mock('../tgpay-client', () => {
   };
 });
 
-import * as globepay from '../globepay-client';
 import * as tgpay from '../tgpay-client';
 import {
   checkBalance,
@@ -44,15 +29,6 @@ const tgpayConfig: tgpay.TgpayConfig = {
   currencyCode: 'MYR',
 };
 
-const globepayConfig: globepay.GlobePayConfig = {
-  baseUrl: 'https://mapi.example.test',
-  merchantCode: 'Testpolycard',
-  aesKey: 'k',
-  privateKey: 'p',
-  publicKey: 'pub',
-  currencyCode: 'MYR',
-};
-
 const depositInput = {
   merchantTransactionId: 'PC-1',
   merchantClientId: 'cus_1',
@@ -67,10 +43,10 @@ const depositInput = {
 afterEach(() => jest.clearAllMocks());
 
 describe('the switch', () => {
-  it('defaults to GlobePay so an unaware deploy is unchanged', () => {
-    expect(paymentGateway({})).toBe('globepay');
+  it('defaults to TGPay, and only an exact registered id changes that', () => {
+    expect(paymentGateway({})).toBe('tgpay');
     expect(paymentGateway({ PAYMENT_GATEWAY: 'tgpay' })).toBe('tgpay');
-    expect(paymentGateway({ PAYMENT_GATEWAY: 'TGPAY' })).toBe('globepay');
+    expect(paymentGateway({ PAYMENT_GATEWAY: 'TGPAY' })).toBe('tgpay');
   });
 
   it('reads the matching config family', () => {
@@ -81,15 +57,6 @@ describe('the switch', () => {
       TGPAY_SECRET_KEY: 'sk',
     } as NodeJS.ProcessEnv);
     expect('kind' in cfg && cfg.kind).toBe('tgpay');
-  });
-
-  it('a GlobePay config still goes to the GlobePay client, untouched', async () => {
-    await submitDeposit(depositInput, globepayConfig);
-    expect(globepay.submitDeposit).toHaveBeenCalledWith(
-      depositInput,
-      globepayConfig,
-    );
-    expect(tgpay.createPayment).not.toHaveBeenCalled();
   });
 });
 
@@ -224,94 +191,6 @@ describe('TGPay payouts', () => {
       bankCode: 'MBBEMYKL',
       bankName: 'Maybank / Malayan Banking Berhad',
     });
-  });
-
-  it('pays a bank saved under TGPay through GlobePay after a switch back (canonical → GlobePay code)', async () => {
-    (globepay.submitWithdrawal as jest.Mock).mockResolvedValue({
-      transactionId: 'W1',
-    });
-    await submitWithdrawal(
-      { ...wd, destinationBankCode: 'MBBEMYKL' },
-      globepayConfig,
-    );
-    expect(
-      (globepay.submitWithdrawal as jest.Mock).mock.calls[0][0]
-        .destinationBankCode,
-    ).toBe('MYMB2U');
-    // A code the registry does not know is GlobePay's own; pass it through.
-    await submitWithdrawal(
-      { ...wd, destinationBankCode: 'MBB' },
-      globepayConfig,
-    );
-    expect(
-      (globepay.submitWithdrawal as jest.Mock).mock.calls[1][0]
-        .destinationBankCode,
-    ).toBe('MBB');
-  });
-
-  it('GlobePay refuses a bank the registry knows but it cannot pay to, instead of misrouting the id', async () => {
-    for (const code of ['CITIMYKL', 'KFHOMYKL', 'DUMMYBANKVERIFIED']) {
-      const err = await submitWithdrawal(
-        { ...wd, destinationBankCode: code },
-        globepayConfig,
-      ).catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(globepay.GlobePayError);
-      expect((err as globepay.GlobePayError).definite).toBe(true);
-    }
-    expect(globepay.submitWithdrawal).not.toHaveBeenCalled();
-  });
-
-  it('the sandbox dummy bank is refused off the sandbox', async () => {
-    const prod = {
-      ...tgpayConfig,
-      baseUrl: 'https://api.tgpay365.test/api/v2',
-    };
-    const err = await submitWithdrawal(wd, prod).catch((e: unknown) => e);
-    expect((err as tgpay.TgpayError).definite).toBe(true);
-    expect(tgpay.createPayout).not.toHaveBeenCalled();
-  });
-
-  it('an unknown bank code or a missing email is refused before any HTTP', async () => {
-    const bad = await submitWithdrawal(
-      { ...wd, destinationBankCode: 'MBB' },
-      tgpayConfig,
-    ).catch((e: unknown) => e);
-    expect((bad as tgpay.TgpayError).definite).toBe(true);
-    const noEmail = await submitWithdrawal(
-      { ...wd, email: undefined },
-      tgpayConfig,
-    ).catch((e: unknown) => e);
-    expect((noEmail as tgpay.TgpayError).definite).toBe(true);
-    expect(tgpay.createPayout).not.toHaveBeenCalled();
-  });
-
-  it('the bank picker gets the sandbox dummy bank first on a sandbox host', async () => {
-    const banks = await getSupportedBanks(tgpayConfig);
-    expect(banks[0].bankCode).toBe('DUMMYBANKVERIFIED');
-    expect(banks.some((b) => b.bankCode === 'MBBEMYKL')).toBe(true);
-  });
-});
-
-describe('GlobePay bank picker', () => {
-  it('is still the LIVE list, translated to canonical ids, unknown codes passed through', async () => {
-    (globepay.getSupportedBanks as jest.Mock).mockResolvedValue([
-      { bankCode: 'MYMB2U', bankName: 'MAYBANK' },
-      { bankCode: 'NEWBANK', bankName: 'A Bank GlobePay Added' },
-    ]);
-    const banks = await getSupportedBanks(globepayConfig);
-    expect(banks).toEqual([
-      { bankCode: 'MBBEMYKL', bankName: 'Maybank' },
-      { bankCode: 'NEWBANK', bankName: 'A Bank GlobePay Added' },
-    ]);
-  });
-
-  it('falls back to the registry snapshot when the live call fails', async () => {
-    (globepay.getSupportedBanks as jest.Mock).mockRejectedValue(
-      new Error('timeout'),
-    );
-    const banks = await getSupportedBanks(globepayConfig);
-    expect(banks.length).toBeGreaterThan(20);
-    expect(banks.some((b) => b.bankCode === 'MBBEMYKL')).toBe(true);
   });
 });
 

@@ -7,7 +7,7 @@ jest.mock('../../modules/packs/gateway', () => {
     ...actual,
     getDepositDetail: jest.fn(),
     getWithdrawalDetail: jest.fn(),
-    resolveActiveGateway: jest.fn(async () => 'globepay'),
+    resolveActiveGateway: jest.fn(async () => 'tgpay'),
   };
 });
 
@@ -15,7 +15,7 @@ import {
   getDepositDetail,
   getWithdrawalDetail,
 } from '../../modules/packs/gateway';
-import { GlobePayError } from '../../modules/packs/globepay-client';
+import { GatewayError } from '../../modules/packs/gateway-types';
 import gatewayAuditJob from '../gateway-audit';
 
 const depositDetail = getDepositDetail as jest.Mock;
@@ -25,17 +25,14 @@ beforeEach(() => {
   depositDetail.mockReset();
   withdrawalDetail.mockReset();
   process.env.GLOBEPAY_ENABLED = 'true';
-  process.env.GLOBEPAY_MERCHANT_CODE = 'Testpolycard';
-  process.env.GLOBEPAY_API_BASE = 'https://mapi.example.test';
-  process.env.GLOBEPAY_AES_KEY = 'k';
-  process.env.GLOBEPAY_MERCHANT_PRIVATE_KEY = 'p';
-  process.env.GLOBEPAY_PUBLIC_KEY = 'pub';
-  delete process.env.TGPAY_SECRET_KEY;
+  process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
+  process.env.TGPAY_PUBLIC_KEY = 'pk-test';
+  process.env.TGPAY_SECRET_KEY = 'sk-test';
 });
 
 const settledDeposit = {
   id: 'gpd_1',
-  gateway: 'globepay',
+  gateway: 'tgpay',
   merchant_transaction_id: 'PC-1',
   status: 'settled',
   amount_settled: '50.00',
@@ -95,7 +92,7 @@ describe('gateway audit job', () => {
 
   it('leaves an ambiguous answer un-stamped so the next run retries it', async () => {
     depositDetail.mockRejectedValue(
-      new GlobePayError('timeout', [], 500, false),
+      new GatewayError('timeout', [], 500, false),
     );
     const h = harness([settledDeposit]);
     await gatewayAuditJob(h.container as never);
@@ -103,13 +100,13 @@ describe('gateway audit job', () => {
     expect(h.logger.warn).toHaveBeenCalledTimes(1);
   });
 
-  it('a row whose gateway is not configured here is stamped as a finding, without a gateway call', async () => {
+  it('a row from a retired gateway is stamped as a finding, without a gateway call', async () => {
     const h = harness(
       [],
       [
         {
           id: 'gpw_1',
-          gateway: 'tgpay',
+          gateway: 'globepay',
           merchant_transaction_id: 'PC-w1',
           status: 'settled',
           amount: '100.00',

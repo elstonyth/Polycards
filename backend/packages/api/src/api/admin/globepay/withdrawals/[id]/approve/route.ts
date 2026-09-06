@@ -12,7 +12,7 @@ import {
   withdrawalIdempotencyReference,
 } from '../../../../../../modules/packs/globepay-withdrawal';
 import {
-  GlobePayError,
+  GatewayError,
   GATEWAYS,
   gatewayConfigFor,
   gatewayUrls,
@@ -197,7 +197,7 @@ export async function POST(
     // The log reports what the claim did rather than asserting a close that
     // may not have landed.
     logger.warn(
-      `[globepay] admin ${adminId} approve on withdrawal ${row.id} ` +
+      `[payments] admin ${adminId} approve on withdrawal ${row.id} ` +
         `(${row.merchant_transaction_id}) REFUSED — no debit ever landed ` +
         `for it; ${claimed ? 'row closed' : `row left as '${row.status}'`}`,
     );
@@ -212,7 +212,7 @@ export async function POST(
   // overruled, and a second payout is the one outcome that cannot be undone.
   if (!claimed) {
     logger.info(
-      `[globepay] admin ${adminId} approve on withdrawal ${row.id} was a no-op — it was '${row.status}', not held`,
+      `[payments] admin ${adminId} approve on withdrawal ${row.id} was a no-op — it was '${row.status}', not held`,
     );
     res.setHeader('Cache-Control', 'no-store');
     res.json({
@@ -224,7 +224,7 @@ export async function POST(
     return;
   }
   logger.info(
-    `[globepay] admin ${adminId} APPROVED withdrawal ${row.id} (${row.merchant_transaction_id}) — RM ${amount} to bank ${row.bank_code}`,
+    `[payments] admin ${adminId} APPROVED withdrawal ${row.id} (${row.merchant_transaction_id}) — RM ${amount} to bank ${row.bank_code}`,
   );
 
   let result;
@@ -255,7 +255,7 @@ export async function POST(
     // Both branches mirror startGlobePayWithdrawal's post-#425 shape exactly.
     // There is no third path: an outcome that is not a PARSED refusal is
     // ambiguous, and ambiguity must never refund.
-    if (error instanceof GlobePayError && error.definite) {
+    if (error instanceof GatewayError && error.definite) {
       // The gateway parseably refused, so no payout exists on their side.
       // Refund (idempotent, on the shared anchor) and close the row. The
       // claim above left it 'pending', which is what the helper's terminal
@@ -294,7 +294,7 @@ export async function POST(
       // risk as the store path).
       try {
         logger.warn(
-          `[globepay] admin-approved withdrawal refused: codes=${error.codes.join(',') || 'none'} ` +
+          `[payments] admin-approved withdrawal refused: codes=${error.codes.join(',') || 'none'} ` +
             `httpStatus=${error.httpStatus} definite=${error.definite} ` +
             `bankCode=${row.bank_code} amount=${amount} ref=${row.merchant_transaction_id} ` +
             `msg=${error.message}`,
@@ -331,7 +331,7 @@ export async function POST(
     // says exactly that with a null transaction_id.
     try {
       logger.error(
-        `[globepay] admin ${adminId} approved withdrawal ${row.merchant_transaction_id} but the submit outcome is AMBIGUOUS (${(error as Error).message}) — left pending for the sweep`,
+        `[payments] admin ${adminId} approved withdrawal ${row.merchant_transaction_id} but the submit outcome is AMBIGUOUS (${(error as Error).message}) — left pending for the sweep`,
       );
     } catch {
       // Swallowed deliberately: the row stays 'pending', so the sweep still

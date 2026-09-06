@@ -12,10 +12,9 @@ import { sendTopupReceipt } from '../../../../modules/packs/topup-receipt';
 import { notifyFeed } from '../../../../modules/packs/notify-feed';
 import { topupFeedKey } from '../../../../modules/packs/feed-events';
 
-// TGPay payment server-notify (docs "Payment callback"). Same state machine as
-// the GlobePay deposit hook (src/api/hooks/globepay/deposit/route.ts), minus
-// the crypto: the two key headers are the whole authentication. Idempotent —
-// TGPay delivers at least once.
+// TGPay payment server-notify (docs "Payment callback"). The two key headers
+// are the whole authentication (plus the source allowlist in middlewares).
+// Idempotent — TGPay delivers at least once.
 
 type PaymentNotify = {
   amount?: unknown;

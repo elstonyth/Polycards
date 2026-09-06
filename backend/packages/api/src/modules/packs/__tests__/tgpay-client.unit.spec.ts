@@ -1,4 +1,4 @@
-import { GlobePayError } from '../globepay-client';
+import { GatewayError } from '../gateway-types';
 import {
   balances,
   createPayment,
@@ -123,7 +123,7 @@ describe('createPayment', () => {
       config,
     ).catch((e: unknown) => e);
     expect(refused).toBeInstanceOf(TgpayError);
-    expect(refused).toBeInstanceOf(GlobePayError);
+    expect(refused).toBeInstanceOf(GatewayError);
     expect((refused as TgpayError).definite).toBe(true);
     expect((refused as TgpayError).message).toMatch(/amount out of range/);
 

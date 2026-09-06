@@ -1,7 +1,18 @@
-# GlobePay365 payment gateway — setup notes
+# GlobePay365 payment gateway — setup notes (RETIRED)
 
-Status: **Phase 1 (onboarding) in progress.** No code written yet — MerchantCode
-is not issued until GlobePay365 finishes back-office setup.
+> **RETIRED 2026-09-06.** Production moved to TGPay (see `tgpay-setup.md`,
+> plan 130) and the GlobePay365 integration — client, AES/RSA envelope,
+> callback hooks, secrets, bank codes — was removed from the codebase the
+> same day. What remains: the settled rows in `globepay_deposit` /
+> `globepay_withdrawal` (gateway = `globepay`, listed as history on the admin
+> Settlement page), the table and route names, and the `GLOBEPAY_ENABLED` /
+> `GLOBEPAY_WITHDRAWALS_ENABLED` master switches, which are gateway-neutral.
+> Everything below is kept as the record of that integration. The merchant
+> account itself is still open with the provider; close it when its balance
+> has been settled out.
+
+Original status line: **Phase 1 (onboarding) in progress.** No code written yet —
+MerchantCode is not issued until GlobePay365 finishes back-office setup.
 
 Source: <https://api.globepay365.com/api/globepay365_api_doc.html> (Merchant
 Integration Guide v1.0.0).

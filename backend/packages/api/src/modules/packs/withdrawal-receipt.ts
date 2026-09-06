@@ -80,7 +80,7 @@ export async function sendWithdrawalReceipt(
       container
         .resolve('logger')
         .error(
-          `[globepay] withdrawal ${input.outcome} email failed for ${input.merchantTransactionId} (the ledger is unaffected): ${(error as Error).message}`,
+          `[payments] withdrawal ${input.outcome} email failed for ${input.merchantTransactionId} (the ledger is unaffected): ${(error as Error).message}`,
         );
     } catch {
       // Logger unavailable in a bare test container — swallowing is the point.

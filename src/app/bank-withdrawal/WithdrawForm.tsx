@@ -17,7 +17,7 @@ import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { cn } from '@/lib/utils';
 
 // The payout band belongs to whichever gateway the admin has active (TGPay
-// caps at RM 30,000, GlobePay at RM 50,000), so it is read from the backend
+// caps at RM 30,000; another gateway may differ), so it is read from the backend
 // when the form mounts; these are only the until-it-answers defaults. NOT the
 // same band as deposits — the payout floor is higher. The gateway's own
 // rejection names no numbers, so the form does.

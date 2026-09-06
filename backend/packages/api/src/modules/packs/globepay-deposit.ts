@@ -7,7 +7,7 @@ import {
   gatewayConfigFor,
   paymentGateway,
   submitDeposit,
-  GlobePayError,
+  GatewayError,
   type PaymentGateway,
 } from './gateway';
 import type { TgpayCustomer } from './tgpay-client';
@@ -16,7 +16,7 @@ import { topUpAmountError } from './topup';
 // The submit half of the GlobePay365 deposit loop: record intent, ask the
 // gateway for a cashier page, hand the customer the URL. NO credit is issued
 // here — that happens only when a verified callback reports status 6
-// (src/api/hooks/globepay/deposit/route.ts).
+// (src/api/hooks/tgpay/deposit/route.ts).
 
 /**
  * Fallback MYR deposit method when neither the request nor the environment
@@ -80,16 +80,15 @@ export const GLOBEPAY_MAX_RM = 10000;
 export function globepayEnabled(
   env: {
     GLOBEPAY_ENABLED?: string;
-    GLOBEPAY_MERCHANT_CODE?: string;
     PAYMENT_GATEWAY?: string;
     TGPAY_SECRET_KEY?: string;
   } = process.env,
   gateway: PaymentGateway = paymentGateway(env),
 ): boolean {
-  // GLOBEPAY_ENABLED stays the master "real gateway" switch for both gateways;
-  // the credential that proves one is configured differs per gateway. Callers
-  // that already pinned a gateway for the request pass it, so the check and
-  // the submit cannot straddle an admin switch.
+  // GLOBEPAY_ENABLED is the master "real gateway" switch (the name predates
+  // the gateway seam); the credential that proves a gateway is configured is
+  // that gateway's own. Callers that already pinned a gateway for the request
+  // pass it, so the check and the submit cannot straddle an admin switch.
   return env.GLOBEPAY_ENABLED === 'true' && GATEWAYS[gateway].configured(env);
 }
 
@@ -179,29 +178,13 @@ export async function startGlobePayDeposit(
     );
   }
 
-  // GLOBEPAY_DEPOSIT_METHOD names the channel to use when the caller does not.
-  // It was the operator's channel lever: which of FPX/DN/BQR/OB is provisioned
-  // is GlobePay's decision, differs between staging and production, and is not
-  // discoverable from our side except by being refused, so an env var (~4 minute
-  // spec apply) beat a ~10 minute build per guess.
-  //
-  // Since 2026-08-06 it is a FALLBACK ONLY for customer traffic: the storefront
-  // top-up sheet lets the customer pick, so every request from it names a
-  // method and this default can never fire. The lever moved with it — retracting
-  // a channel is now DEPOSIT_METHODS_ENABLED on the STOREFRONT app
-  // (src/lib/deposit-methods.ts), also RUN_TIME, also no rebuild. This value
-  // still covers any caller that sends no method, so keep it on a provisioned
-  // channel.
-  //
-  // Validated against the allow-list below either way, so a typo fails closed on
-  // OUR side rather than reaching the gateway. Note the allow-list is the
-  // gateway's whole MYR set, which is WIDER than what this merchant has
-  // provisioned — it will happily pass DN or FPX through to a cashier that
-  // refuses them.
-  const paymentMethodCode =
-    input.paymentMethodCode ??
-    process.env.GLOBEPAY_DEPOSIT_METHOD ??
-    GLOBEPAY_DEFAULT_METHOD;
+  // The storefront top-up sheet always names a method; the default only
+  // covers a caller that sends none. Retracting a channel is
+  // DEPOSIT_METHODS_ENABLED on the STOREFRONT app (src/lib/deposit-methods.ts).
+  // Validated against the rail allow-list below either way, so a typo fails
+  // closed on OUR side rather than reaching the gateway; each adapter then
+  // maps the rail code onto its own channels (or refuses it as definite).
+  const paymentMethodCode = input.paymentMethodCode ?? GLOBEPAY_DEFAULT_METHOD;
   if (
     !(GLOBEPAY_MYR_METHODS as readonly string[]).includes(paymentMethodCode)
   ) {
@@ -263,16 +246,16 @@ export async function startGlobePayDeposit(
       config,
     );
   } catch (error) {
-    if (error instanceof GlobePayError && error.definite) {
+    if (error instanceof GatewayError && error.definite) {
       // Only a DEFINITIVE rejection closes the row: their API answered and said
       // no, so no deposit exists on their side and no callback will ever
       // arrive. Close it out rather than leaving it pending and polluting the
       // reconciliation sweep forever.
       //
       // `definite` is load-bearing, not decoration. A timeout, socket reset or
-      // WAF page also arrives as a GlobePayError, with definite=false, and
+      // WAF page also arrives as a GatewayError, with definite=false, and
       // means the submit MAY have been accepted and only the response lost
-      // (see the class doc in globepay-client.ts). Closing those took a live
+      // (see GatewayError in gateway-types.ts). Closing those took a live
       // deposit out of the sweep's status='pending' scan permanently — the
       // sibling test at globepay-deposit.unit.spec.ts already asserted the
       // opposite of what this branch did, and passed only because it mocked a
@@ -296,7 +279,7 @@ export async function startGlobePayDeposit(
       //
       // `error.message` carries the diagnosis when `codes` is empty — a
       // non-JSON/WAF response (an un-allowlisted IP lands here) is built from
-      // the response text alone, see globepay-client.ts. Safe to log: their
+      // the response text alone, see tgpay-client.ts. Safe to log: their
       // codes and message, the HTTP status, our own opaque reference, the
       // method and the amount. NEVER the request or response envelope — those
       // carry the signed/encrypted body.
@@ -308,7 +291,7 @@ export async function startGlobePayDeposit(
         scope
           .resolve<{ warn: (message: string) => void }>('logger')
           .warn(
-            `[globepay] deposit refused: codes=${error.codes.join(',') || 'none'} ` +
+            `[payments] deposit refused: codes=${error.codes.join(',') || 'none'} ` +
               `httpStatus=${error.httpStatus} definite=${error.definite} ` +
               `method=${paymentMethodCode} amount=${amount} ref=${merchantTransactionId} ` +
               `msg=${error.message}`,
@@ -346,7 +329,7 @@ export async function startGlobePayDeposit(
       scope
         .resolve<{ error: (msg: string) => void }>('logger')
         .error(
-          `[globepay] deposit ${merchantTransactionId} submit outcome AMBIGUOUS ` +
+          `[payments] deposit ${merchantTransactionId} submit outcome AMBIGUOUS ` +
             `(${(error as Error).message}) — left pending for the sweep`,
         );
     } catch {

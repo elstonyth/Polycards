@@ -11,7 +11,7 @@ import {
 import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-// The gateway branch of TopUpSheet (NEXT_PUBLIC_PAYMENTS_PROVIDER=globepay,
+// The gateway branch of TopUpSheet (NEXT_PUBLIC_PAYMENTS_PROVIDER=tgpay,
 // read once at module load) swaps presets, copy, and submit from the
 // synchronous mock top-up to a redirect-to-cashier flow that credits nothing.
 // This branch shipped with zero tests and a misleading-copy bug was only
@@ -27,9 +27,9 @@ vi.mock('@/lib/actions/vault', () => ({
   topUpCredits: (...args: unknown[]) => topUpCredits(...args),
   getDepositMethods: () => getDepositMethods(),
   // The sheet reads the active gateway's band per open; the tests keep the
-  // GlobePay defaults (RM 30 – 10,000) that their amounts were written for.
+  // RM 30 – 10,000 band their amounts were written for.
   getPaymentLimits: async () => ({
-    gateway: 'globepay',
+    gateway: 'tgpay',
     deposit: { minRm: 30, maxRm: 10000 },
     withdrawal: { minRm: 50, maxRm: 50000 },
   }),
@@ -58,7 +58,7 @@ beforeAll(async () => {
   ).IS_REACT_ACT_ENVIRONMENT = true;
   // The provider flag is baked into module-level consts, so it must be set
   // before the module is evaluated.
-  vi.stubEnv('NEXT_PUBLIC_PAYMENTS_PROVIDER', 'globepay');
+  vi.stubEnv('NEXT_PUBLIC_PAYMENTS_PROVIDER', 'tgpay');
   vi.resetModules();
   TopUpSheet = (await import('../TopUpSheet')).default;
 });
@@ -230,7 +230,7 @@ describe('TopUpSheet gateway branch', () => {
     // break a test about which code gets sent.
     const qr = methodRadio('BQR');
     const onlineBanking = methodRadio('OB');
-    // QR is pre-selected because it mirrors GLOBEPAY_DEPOSIT_METHOD; without a
+    // QR is pre-selected because it mirrors the backend's default rail; without a
     // picker every customer got it, which is the bug this closes.
     expect(qr.checked).toBe(true);
     expect(onlineBanking.checked).toBe(false);

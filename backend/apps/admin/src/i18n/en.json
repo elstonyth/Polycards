@@ -401,7 +401,7 @@
   },
   "deposits": {
     "title": "Deposits",
-    "subtitle": "GlobePay365 top-ups — what a customer started paying, and what actually settled.",
+    "subtitle": "Gateway top-ups — what a customer started paying, and what actually settled.",
     "view": {
       "pending": "Pending",
       "settled": "Settled",
@@ -426,14 +426,14 @@
       "expired": "Expired"
     },
     "statusStale": "Overdue",
-    "staleWarning": "{{n}} row(s) on this page are past the reconcile window. Check the deposit in the GlobePay back office before crediting anyone by hand.",
+    "staleWarning": "{{n}} row(s) on this page are past the reconcile window. Check the deposit in the gateway back office before crediting anyone by hand.",
     "empty": "No deposits in this view.",
     "loadError": "Could not load deposits.",
     "tableLabel": "Deposits table"
   },
   "withdrawals": {
     "title": "Withdrawals",
-    "subtitle": "GlobePay365 payouts — money already debited from a customer, and whether the bank transfer settled or refunded.",
+    "subtitle": "Gateway payouts — money already debited from a customer, and whether the bank transfer settled or refunded.",
     "view": {
       "held": "Held",
       "pending": "Pending",
@@ -461,7 +461,7 @@
     },
     "statusStale": "Overdue",
     "noVerify": "No payout verification outcome recorded — either their verification never reached us, it was rejected before we could match it to this row, or this payout predates outcome recording.",
-    "staleWarning": "{{n}} row(s) on this page are past the reconcile window — the customer is debited with no payout confirmed. Check the withdrawal in the GlobePay back office before touching anything by hand.",
+    "staleWarning": "{{n}} row(s) on this page are past the reconcile window — the customer is debited with no payout confirmed. Check the withdrawal in the gateway back office before touching anything by hand.",
     "empty": "No withdrawals in this view.",
     "emptyView": "No {{view}} withdrawals right now. Other statuses may still have rows.",
     "emptyAll": "No withdrawals have been requested yet.",
@@ -474,7 +474,7 @@
     "approve": "Approve",
     "deny": "Deny",
     "confirmApproveTitle": "Approve this payout?",
-    "confirmApproveBody": "Send {{amount}} to {{bank}} {{account}} ({{holder}}) via GlobePay365. This submits the transfer immediately and cannot be recalled from here.",
+    "confirmApproveBody": "Send {{amount}} to {{bank}} {{account}} ({{holder}}) via the active payment gateway. This submits the transfer immediately and cannot be recalled from here.",
     "confirmDenyTitle": "Deny this withdrawal?",
     "confirmDenyBody": "Refuse this {{amount}} withdrawal. Nothing is sent to {{bank}} {{account}} ({{holder}}) — the funds are returned to the customer's in-app balance instead."
   },
@@ -603,7 +603,7 @@
   },
   "settlement": {
     "title": "Settlement",
-    "subtitle": "GlobePay's weekly and monthly result, from this database — no gateway login needed.",
+    "subtitle": "The payment gateway's weekly and monthly result, from this database — no gateway login needed.",
     "week": "Weekly",
     "month": "Monthly",
     "period": "Period",
@@ -624,7 +624,7 @@
     "balanceCurrent": "Current",
     "balanceT1": "T+1",
     "balanceDisabled": "Gateway not configured in this environment.",
-    "balanceError": "Could not reach GlobePay: {{message}}",
+    "balanceError": "Could not reach the payment gateway: {{message}}",
     "balanceFetchFailed": "balance request failed — refresh or re-login",
     "empty": "No settled gateway transactions in this window yet.",
     "loadError": "Could not load the settlement report.",

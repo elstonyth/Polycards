@@ -17,7 +17,7 @@ import {
 // POST /store/credits/deposit — start a real GlobePay365 top-up. Returns a
 // cashier URL; NO credit is issued here. The customer pays on their page, and
 // credit lands only when a verified callback reports success
-// (POST /hooks/globepay/deposit).
+// (POST /hooks/tgpay/deposit).
 //
 // This sits ALONGSIDE /store/credits/topup (the mock gateway) rather than
 // replacing it: the mock stays the local/dev path, and the storefront picks

@@ -14,7 +14,7 @@ describe('bank registry', () => {
     for (const id of ids) expect(id).toMatch(/^[A-Z0-9]{2,20}$/);
   });
 
-  it('no gateway code is claimed by two banks', () => {
+  it('no gateway code or legacy alias is claimed by two banks', () => {
     const seen = new Map<string, string>();
     for (const b of MY_BANKS) {
       for (const [gw, c] of Object.entries(b.codes)) {
@@ -22,40 +22,36 @@ describe('bank registry', () => {
         expect(seen.get(key)).toBeUndefined();
         seen.set(key, b.id);
       }
+      for (const a of b.legacyAliases) {
+        const key = `legacy:${a}`;
+        expect(seen.get(key)).toBeUndefined();
+        seen.set(key, b.id);
+      }
     }
   });
 
-  it('covers every GlobePay MYR payout bank and every TGPay SWIFT row', () => {
-    const globepay = MY_BANKS.filter((b) => b.codes.globepay).length;
+  it('covers every TGPay SWIFT row and keeps every retired-gateway code as an alias', () => {
     const tgpay = MY_BANKS.filter((b) => b.codes.tgpay).length;
-    expect(globepay).toBe(31);
+    const aliased = MY_BANKS.filter((b) => b.legacyAliases.length).length;
     expect(tgpay).toBe(20);
+    expect(aliased).toBe(31);
   });
 
-  it('resolves canonical ids and any gateway code, case-insensitively', () => {
+  it('resolves canonical ids and any legacy code, case-insensitively', () => {
     expect(findBank('MBBEMYKL')?.name).toBe('Maybank');
     expect(findBank('MYMB2U')?.id).toBe('MBBEMYKL');
     expect(findBank('mymb2u')?.id).toBe('MBBEMYKL');
     expect(canonicalBankCode('MYCIMB')).toBe('CIBBMYKL');
     expect(findBank('MBB')).toBeNull();
-    expect(findBank(undefined)).toBeNull();
-  });
-
-  it('translates a bank to each gateway, with that gateway\'s own name pairing', () => {
-    // Saved under GlobePay, paid by TGPay after a switch.
+    // Saved under the retired gateway, paid by TGPay today.
     expect(gatewayBankCode('MYMB2U', 'tgpay')).toEqual({
       code: 'MBBEMYKL',
       name: 'Maybank / Malayan Banking Berhad',
     });
-    // Saved under TGPay, paid by GlobePay after a switch back.
-    expect(gatewayBankCode('MBBEMYKL', 'globepay')).toEqual({
-      code: 'MYMB2U',
-      name: 'Maybank Berhad',
-    });
-    // A bank only one gateway serves.
-    expect(gatewayBankCode('BOOSTMY', 'globepay')?.code).toBe('BODE');
+    // A wallet TGPay has no payout code for still resolves (so a saved
+    // account under it reads as "not available", never as unknown).
     expect(gatewayBankCode('BOOSTMY', 'tgpay')).toBeNull();
-    expect(gatewayBankCode('CITIMYKL', 'globepay')).toBeNull();
+    expect(findBank('BODE')?.id).toBe('BOOSTMY');
   });
 
   it('picker lists carry canonical ids and neutral names; the dummy bank only on the TGPay sandbox', () => {
@@ -65,7 +61,6 @@ describe('bank registry', () => {
     expect(banksFor('tgpay', { sandbox: true })[0].bankCode).toBe(
       TGPAY_SANDBOX_BANK.id,
     );
-    expect(banksFor('globepay')).toHaveLength(31);
-    expect(banksFor('globepay').some((b) => b.bankCode === 'DUMMYBANKVERIFIED')).toBe(false);
+    expect(tgpay.some((b) => b.bankCode === 'DUMMYBANKVERIFIED')).toBe(false);
   });
 });

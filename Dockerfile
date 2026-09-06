@@ -69,7 +69,7 @@ ARG NEXT_PUBLIC_SITE_URL=https://polycards.gg
 # false). Moves together with the .do/storefront.app.yaml value. This ARG
 # default is the one that reaches the bundle (App Platform build-time env is
 # unreliable here), so flipping the spec alone does nothing.
-ARG NEXT_PUBLIC_PAYMENTS_PROVIDER=globepay
+ARG NEXT_PUBLIC_PAYMENTS_PROVIDER=tgpay
 # Phone-OTP UI gate (CONTEXT.md → Deploy Order step 3). Flipped 2026-08-04 with
 # the backend already serving /store/phone-verification/* and the Twilio
 # secrets live-verified. Same rule as the provider ARG above: this default is

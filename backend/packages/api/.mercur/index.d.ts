@@ -895,10 +895,5 @@ export type Routes = {
         };
     };
     hooks: {
-        globepay: {
-            deposit: typeof import("../../src/api/hooks/globepay/deposit/route");
-            payoutVerify: typeof import("../../src/api/hooks/globepay/payout-verify/route");
-            withdrawal: typeof import("../../src/api/hooks/globepay/withdrawal/route");
-        };
     };
 };

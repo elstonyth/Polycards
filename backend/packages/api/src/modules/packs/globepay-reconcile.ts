@@ -1,9 +1,9 @@
-import type { SettlementState } from './globepay';
+import type { SettlementState } from './gateway-types';
+import { GatewayError } from './gateway-types';
 import { GLOBEPAY_MAX_RM } from './globepay-deposit';
-import { GlobePayError } from './globepay-client';
 import { TGPAY_NOT_FOUND } from './tgpay-client';
 
-// Reconciliation policy for outstanding GlobePay365 deposits. Pure decisions,
+// Reconciliation policy for outstanding gateway deposits. Pure decisions,
 // no container and no HTTP, so the rules are unit-testable — the job wires them
 // to the gateway and the ledger.
 //
@@ -202,10 +202,8 @@ export type RequeryRefusal =
   | { kind: 'rethrow' };
 
 export function classifyRequeryError(error: unknown): RequeryRefusal {
-  if (!(error instanceof GlobePayError)) return { kind: 'rethrow' };
-  if (error.has('PMT10016') || error.has(TGPAY_NOT_FOUND)) {
-    return { kind: 'not-found' };
-  }
+  if (!(error instanceof GatewayError)) return { kind: 'rethrow' };
+  if (error.has(TGPAY_NOT_FOUND)) return { kind: 'not-found' };
   return error.httpStatus === 400 ? { kind: 'ambiguous' } : { kind: 'rethrow' };
 }
 

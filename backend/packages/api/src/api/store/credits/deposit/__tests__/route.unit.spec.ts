@@ -20,7 +20,20 @@ const mkReq = (over: Record<string, unknown> = {}) =>
     auth_context: { actor_id: 'cus_1' },
     body: { amount: 50 },
     headers: {},
-    scope: {},
+    // TGPay needs the payer's contact, read from the customer module.
+    scope: {
+      resolve: (k: string) =>
+        k === 'customer'
+          ? {
+              retrieveCustomer: async () => ({
+                email: 'cus1@x.test',
+                first_name: 'A',
+                last_name: 'Customer',
+                phone: '0123456789',
+              }),
+            }
+          : {},
+    },
     socket: {},
     ...over,
   }) as never;
@@ -28,14 +41,22 @@ const mkReq = (over: Record<string, unknown> = {}) =>
 const sentIp = () => startMock.mock.calls[0][1].ipAddress;
 
 const ORIGINAL_ENV = {
-  GLOBEPAY_NOTIFY_URL: process.env.GLOBEPAY_NOTIFY_URL,
+  PAYMENT_CALLBACK_BASE: process.env.PAYMENT_CALLBACK_BASE,
+  PAYMENT_RETURN_URL: process.env.PAYMENT_RETURN_URL,
+  // The pre-removal name is still read as a fallback; clear it too.
   GLOBEPAY_RETURN_URL: process.env.GLOBEPAY_RETURN_URL,
+  TGPAY_API_BASE: process.env.TGPAY_API_BASE,
+  TGPAY_PUBLIC_KEY: process.env.TGPAY_PUBLIC_KEY,
+  TGPAY_SECRET_KEY: process.env.TGPAY_SECRET_KEY,
 };
 
 beforeEach(() => {
   startMock.mockClear();
-  process.env.GLOBEPAY_NOTIFY_URL = 'https://us/hooks/globepay/deposit';
-  process.env.GLOBEPAY_RETURN_URL = 'https://us/return';
+  process.env.PAYMENT_CALLBACK_BASE = 'https://us';
+  process.env.PAYMENT_RETURN_URL = 'https://us/return';
+  process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
+  process.env.TGPAY_PUBLIC_KEY = 'pk-test';
+  process.env.TGPAY_SECRET_KEY = 'sk-test';
 });
 
 // These are process-wide: leaving them set leaks into whatever runs next and
@@ -90,12 +111,13 @@ describe('POST /store/credits/deposit — customer IP', () => {
     expect(sentIp()).toBe('10.0.0.1');
   });
 
-  // Either URL missing must fail closed. Covering only NOTIFY would let a
-  // dropped RETURN guard through — money in, no credit, no test.
-  it.each(['GLOBEPAY_NOTIFY_URL', 'GLOBEPAY_RETURN_URL'] as const)(
+  // Either URL missing must fail closed. Covering only the callback base
+  // would let a dropped RETURN guard through — money in, no credit, no test.
+  it.each(['PAYMENT_CALLBACK_BASE', 'PAYMENT_RETURN_URL'] as const)(
     'fails closed when %s is unset — money in, no credit',
     async (missing) => {
       delete process.env[missing];
+      delete process.env.GLOBEPAY_RETURN_URL;
       await expect(POST(mkReq({ ip: '203.0.113.7' }), res)).rejects.toThrow(
         /temporarily unavailable/i,
       );

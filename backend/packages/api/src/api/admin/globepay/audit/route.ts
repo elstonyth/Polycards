@@ -5,10 +5,9 @@ import {
   checkBalance,
   GATEWAYS,
   gatewayConfigFor,
-  isPaymentGateway,
+  RETIRED_GATEWAYS,
   resolveActiveGateway,
   rowGateway,
-  type PaymentGateway,
 } from '../../../../modules/packs/gateway';
 import { globepayEnabled } from '../../../../modules/packs/globepay-deposit';
 import { toOptionalMoney } from '../../../../modules/packs/money';
@@ -32,11 +31,9 @@ export async function GET(
   // never makes the old gateway's history vanish from the one page that
   // reconciles it.
   const totals = await packs.gatewayAuditTotals(active);
-  const history: ({ gateway: PaymentGateway } & ReturnType<
-    typeof moneyTotals
-  >)[] = [];
-  for (const id of Object.keys(GATEWAYS)) {
-    if (id === active || !isPaymentGateway(id)) continue;
+  const history: ({ gateway: string } & ReturnType<typeof moneyTotals>)[] = [];
+  for (const id of [...Object.keys(GATEWAYS), ...RETIRED_GATEWAYS]) {
+    if (id === active) continue;
     const t = await packs.gatewayAuditTotals(id);
     if (t.deposits.count + t.withdrawals.count > 0) {
       history.push({ gateway: id, ...moneyTotals(t) });
@@ -79,7 +76,7 @@ export async function GET(
   const findings = [
     ...deposits.map((d) => ({
       kind: 'deposit' as const,
-      gateway: rowGateway(d),
+      gateway: d.gateway ?? rowGateway(d),
       id: d.id,
       merchant_transaction_id: d.merchant_transaction_id,
       gateway_transaction_id: d.gateway_transaction_id,
@@ -93,7 +90,7 @@ export async function GET(
     })),
     ...withdrawals.map((w) => ({
       kind: 'withdrawal' as const,
-      gateway: rowGateway(w),
+      gateway: w.gateway ?? rowGateway(w),
       id: w.id,
       merchant_transaction_id: w.merchant_transaction_id,
       gateway_transaction_id: w.gateway_transaction_id,

@@ -15,26 +15,15 @@ import { savedBankAccountId } from '../saved-accounts';
 import PacksModuleService from '../service';
 import { POST as withdrawRoute } from '../../../api/store/credits/withdraw/route';
 
-// startGlobePayWithdrawal talks to the gateway through globepay-client; stub
-// that seam so these tests cover the MONEY ORDERING (row -> debit -> gateway,
-// refund on refusal) rather than the HTTP layer.
-jest.mock('../globepay-client', () => {
-  const actual = jest.requireActual('../globepay-client');
-  return {
-    ...actual,
-    globepayConfigFromEnv: jest.fn(() => ({
-      baseUrl: 'https://mapi.example.test',
-      merchantCode: 'Testpolycard',
-      aesKey: 'test-aes-key',
-      privateKey: 'priv',
-      publicKey: 'pub',
-      currencyCode: 'MYR',
-    })),
-    submitWithdrawal: jest.fn(),
-  };
+// startGlobePayWithdrawal talks to the gateway through the seam in
+// gateway.ts; stub that so these tests cover the MONEY ORDERING (row -> debit
+// -> gateway, refund on refusal) rather than the adapter or the HTTP layer.
+jest.mock('../gateway', () => {
+  const actual = jest.requireActual('../gateway');
+  return { ...actual, submitWithdrawal: jest.fn() };
 });
 
-import { GlobePayError, submitWithdrawal } from '../globepay-client';
+import { GatewayError, submitWithdrawal } from '../gateway';
 
 const submitMock = submitWithdrawal as jest.Mock;
 
@@ -43,8 +32,8 @@ const submitMock = submitWithdrawal as jest.Mock;
  *  bank code and number live HERE, in the saved list, and nowhere in a request:
  *  that is the whole point of plan 088. */
 const SAVED_ACCOUNT = {
-  id: savedBankAccountId('MBB', '1234567890'),
-  bankCode: 'MBB',
+  id: savedBankAccountId('MBBEMYKL', '1234567890'),
+  bankCode: 'MBBEMYKL',
   bankName: 'Maybank',
   accountNumber: '1234567890',
   accountHolderName: 'AHMAD BIN ALI',
@@ -117,6 +106,8 @@ const input = {
   // The ONLY thing a caller may say about the destination.
   accountId: SAVED_ACCOUNT.id,
   ipAddress: '1.2.3.4',
+  // The recipient email TGPay's payout needs; the route looks it up.
+  email: 'cus1@x.test',
 };
 
 const start = (
@@ -135,29 +126,31 @@ beforeEach(() => {
   submitMock.mockResolvedValue({ transactionId: 'W2026072200000001' });
   process.env.GLOBEPAY_ENABLED = 'true';
   process.env.GLOBEPAY_WITHDRAWALS_ENABLED = 'true';
-  process.env.GLOBEPAY_MERCHANT_CODE = 'Testpolycard';
+  process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
+  process.env.TGPAY_PUBLIC_KEY = 'pk-test';
+  process.env.TGPAY_SECRET_KEY = 'sk-test';
 });
 
 describe('globepayWithdrawalsEnabled', () => {
-  it('is off unless BOTH switches are on and the merchant is configured', () => {
+  it('is off unless BOTH switches are on and the active gateway is configured', () => {
     expect(globepayWithdrawalsEnabled({})).toBe(false);
     expect(
       globepayWithdrawalsEnabled({
         GLOBEPAY_ENABLED: 'true',
-        GLOBEPAY_MERCHANT_CODE: 'M',
+        TGPAY_SECRET_KEY: 'sk',
       }),
     ).toBe(false);
     expect(
       globepayWithdrawalsEnabled({
         GLOBEPAY_WITHDRAWALS_ENABLED: 'true',
-        GLOBEPAY_MERCHANT_CODE: 'M',
+        TGPAY_SECRET_KEY: 'sk',
       }),
     ).toBe(false);
     expect(
       globepayWithdrawalsEnabled({
         GLOBEPAY_ENABLED: 'true',
         GLOBEPAY_WITHDRAWALS_ENABLED: 'true',
-        GLOBEPAY_MERCHANT_CODE: 'M',
+        TGPAY_SECRET_KEY: 'sk',
       }),
     ).toBe(true);
   });
@@ -334,47 +327,29 @@ describe('startGlobePayWithdrawal — money ordering', () => {
 
   // Test-plan case 3.
   it("refuses a bank the active gateway cannot pay to BEFORE any debit, in the customer's words", async () => {
-    // The saved account is a legacy GlobePay-coded row ('MBB' is not in the
-    // registry); GlobePay passes it through, TGPay has no code for it.
-    // The gateway's config is read before the precheck, so give the spec
-    // a TGPay config of its own rather than borrowing the developer's env.
-    const saved = {
-      TGPAY_API_BASE: process.env.TGPAY_API_BASE,
-      TGPAY_PUBLIC_KEY: process.env.TGPAY_PUBLIC_KEY,
-      TGPAY_SECRET_KEY: process.env.TGPAY_SECRET_KEY,
+    // A wallet the registry knows but TGPay has no payout code for.
+    const unpayable = {
+      ...SAVED_ACCOUNT,
+      id: savedBankAccountId('BOOSTMY', '1234567890'),
+      bankCode: 'BOOSTMY',
     };
-    process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
-    process.env.TGPAY_PUBLIC_KEY = 'pk-test';
-    process.env.TGPAY_SECRET_KEY = 'sk-test';
-    try {
-      const h = harness([SAVED_ACCOUNT]);
-      await expect(start(h, { gateway: 'tgpay' })).rejects.toThrow(
-        /not available with the current payout provider/i,
-      );
-      expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
-      expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
-      expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
-      expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    const h = harness([unpayable]);
+    await expect(
+      start(h, { gateway: 'tgpay', accountId: unpayable.id }),
+    ).rejects.toThrow(/not available with the current payout provider/i);
+    expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
 
-      // Same fence for the recipient email TGPay needs: a payable bank but
-      // no email is refused before any row or debit, not after.
-      const payable = {
-        ...SAVED_ACCOUNT,
-        id: savedBankAccountId('MBBEMYKL', '1234567890'),
-        bankCode: 'MBBEMYKL',
-      };
-      const h2 = harness([payable]);
-      await expect(
-        start(h2, { gateway: 'tgpay', email: '', accountId: payable.id }),
-      ).rejects.toThrow(/email address/i);
-      expect(h2.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
-      expect(h2.packs.withdrawForCashout.mock.calls.length).toBe(0);
-    } finally {
-      for (const [k, v] of Object.entries(saved)) {
-        if (v === undefined) delete process.env[k];
-        else process.env[k] = v;
-      }
-    }
+    // Same fence for the recipient email TGPay needs: a payable bank but
+    // no email is refused before any row or debit, not after.
+    const h2 = harness([SAVED_ACCOUNT]);
+    await expect(start(h2, { gateway: 'tgpay', email: '' })).rejects.toThrow(
+      /email address/i,
+    );
+    expect(h2.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(h2.packs.withdrawForCashout.mock.calls.length).toBe(0);
   });
 
   it('refuses an account still inside the cooling-off window', async () => {
@@ -427,7 +402,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     const h = harness();
     // definite: a parsed isSuccess:false response — no payout exists there.
     submitMock.mockRejectedValue(
-      new GlobePayError('nope', ['PMT10013'], 200, true),
+      new GatewayError('nope', ['PMT10013'], 200, true),
     );
     await expect(start(h)).rejects.toThrow(/refused by the payment provider/i);
 
@@ -488,7 +463,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     // and stays unredacted, deliberately.
     const h = harness();
     submitMock.mockRejectedValue(
-      new GlobePayError(
+      new GatewayError(
         'invalid beneficiary account 1234567890 for AHMAD BIN ALI',
         ['PMT10021'],
         200,
@@ -515,7 +490,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     // that pretty-printed the number back at us defeated it entirely.
     const h = harness();
     submitMock.mockRejectedValue(
-      new GlobePayError(
+      new GatewayError(
         'beneficiary 1234-5678-9012 rejected by receiving bank',
         ['PMT10021'],
         200,
@@ -540,7 +515,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
       throw new Error('logger exploded');
     });
     submitMock.mockRejectedValue(
-      new GlobePayError('nope', ['PMT10013'], 200, true),
+      new GatewayError('nope', ['PMT10013'], 200, true),
     );
     await expect(start(h)).rejects.toThrow(/refused by the payment provider/i);
     // Self-contained on purpose: without this the test would still pass if the
@@ -582,7 +557,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
   // customer paid twice. The row must stay pending for the sweep.
   it.each([
     ['a timeout', new Error('The operation was aborted due to timeout')],
-    ['a WAF/non-JSON page', new GlobePayError('non-JSON response', [], 503)],
+    ['a WAF/non-JSON page', new GatewayError('non-JSON response', [], 503)],
   ])(
     'does NOT refund on %s — ambiguous outcome stays pending for the sweep',
     async (_label, error) => {
@@ -699,12 +674,12 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     expect(result.balance).toBe(50);
   });
 
-  it.each([49, 50001])(
+  it.each([49, 30001])(
     'rejects RM %s — outside the payout band — before any row or debit',
     async (amount) => {
       const h = harness();
       await expect(start(h, { amount })).rejects.toThrow(
-        /between RM 50 and RM 50,000/,
+        /between RM 50 and RM 30,000/,
       );
       expect(h.packs.createGlobePayWithdrawals).not.toHaveBeenCalled();
       expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
@@ -723,7 +698,7 @@ describe('startGlobePayWithdrawal — money ordering', () => {
     const malformed = {
       ...SAVED_ACCOUNT,
       accountNumber: 'abc',
-      id: savedBankAccountId('MBB', 'abc'),
+      id: savedBankAccountId('MBBEMYKL', 'abc'),
     };
     const h = harness([malformed]);
     await expect(start(h, { accountId: malformed.id })).rejects.toThrow(

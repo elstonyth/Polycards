@@ -364,7 +364,7 @@ export async function getEconomyReport(
   return getJson<EconomyReport>(`/admin/economy${q ? `?${q}` : ''}`);
 }
 
-// ── GlobePay settlement report (calendar weekly/monthly gateway result) ──────
+// ── Gateway settlement report (calendar weekly/monthly gateway result) ───────
 
 export type SettlementGranularity = 'week' | 'month';
 
@@ -429,7 +429,7 @@ export async function getGlobePayBalance(): Promise<GlobePayBalance> {
 // ── Payment gateways (plan 130) ─────────────────────────────────────────────
 
 /** Mirrors the backend's PaymentGateway union; the switch and the audit share it. */
-export type PaymentGatewayId = 'globepay' | 'tgpay';
+export type PaymentGatewayId = 'tgpay';
 
 // ── Gateway audit (plan 130): gateway = source of truth for money in/out ─────
 

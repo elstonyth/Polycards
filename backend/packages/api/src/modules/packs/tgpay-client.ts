@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import { GlobePayError } from './globepay-client';
+import { GatewayError } from './gateway-types';
 
 // TGPay HTTP client (sandbox docs read 2026-09-05, sandbox.tgpay365.com/docs/api).
 // Plain JSON over HTTPS: two static key headers and a unix `epoch` that must
@@ -28,7 +28,7 @@ export function tgpayConfigFromEnv(
   };
   return {
     kind: 'tgpay',
-    // Required, not defaulted, for the same reason as GLOBEPAY_API_BASE: a
+    // Required, not defaulted: a
     // default would let a production deploy silently talk to the sandbox.
     baseUrl: required('TGPAY_API_BASE').replace(/\/+$/, ''),
     publicKey: required('TGPAY_PUBLIC_KEY'),
@@ -47,7 +47,7 @@ export function tgpayIsSandbox(config: Pick<TgpayConfig, 'baseUrl'>): boolean {
  * / `has()` branches keep their meaning. `codes` carries a synthetic code per
  * HTTP class so callers can branch without parsing message text.
  */
-export class TgpayError extends GlobePayError {
+export class TgpayError extends GatewayError {
   constructor(
     message: string,
     codes: string[],

@@ -334,136 +334,26 @@ envs:
   - key: TELEGRAM_CHAT_ID
     scope: RUN_TIME
     value: "-1003945115527"
-  # ╔═══════════════════════════════════════════════════════════════════════╗
-  # ║ DO NOT APPLY THIS SPEC UNTIL PR #252 IS MERGED.                        ║
-  # ║ ALLOW_MOCK_TOPUP is GONE (the go-live blocker is cleared) and the      ║
-  # ║ GlobePay365 vars below arm the real gateway. Applied against the       ║
-  # ║ pre-merge code, that combination gives customers a storefront whose    ║
-  # ║ deposit route does not exist yet. Applied AFTER the merge it is        ║
-  # ║ correct — and it must be, because the boot guard now refuses to start  ║
-  # ║ production with ALLOW_MOCK_TOPUP set to ANY value.                     ║
-  # ╚═══════════════════════════════════════════════════════════════════════╝
-  #
-  # GlobePay365 — the real payment gateway. Fails closed: without ENABLED the
-  # deposit route refuses, and globepayConfigFromEnv throws on any missing
-  # value rather than half-configuring itself.
+  # ── Money switches. The GLOBEPAY_* names predate the gateway seam and are
+  # kept because every runbook and alert knows them; they are gateway-neutral
+  # master switches (the GlobePay365 integration itself was removed
+  # 2026-09-06 — its settled rows remain as history on the audit panel).
+  # Fail closed: without ENABLED the deposit route refuses every top-up.
   - key: GLOBEPAY_ENABLED
     scope: RUN_TIME
     value: "true"
-  - key: GLOBEPAY_MERCHANT_CODE
-    scope: RUN_TIME
-    value: Polycard
-  # Production host. There is deliberately NO default in code — a missing value
-  # used to fall back to the STAGING host, which would point live credentials at
-  # the wrong environment and "work" until someone noticed the money missing.
-  - key: GLOBEPAY_API_BASE
-    scope: RUN_TIME
-    value: https://mapi.GlobePay365.com
-  # Their server-to-server targets. Explicit, not derived: production names its
-  # storefront var MERCUR_STOREFRONT_URL, so deriving would silently produce a
-  # localhost default and the gateway would call an address that does not exist.
-  #
-  # THE APP'S OWN ORIGIN HOSTNAME, NOT admin.polycards.gg. That name is proxied
-  # through Cloudflare, and Cloudflare's Bot Fight Mode answered every one of
-  # their callbacks with a Managed Challenge — POST /hooks/globepay/deposit from
-  # 13.159.14.239 (AS16509, empty user agent), eight challenges for one RM 500
-  # deposit on 2026-08-11, none of which reached the origin. A webhook cannot
-  # solve a browser challenge, so every top-up fell back to the reconciliation
-  # sweep and the customer waited minutes for credit.
-  #
-  # On the free plan Bot Fight Mode is zone-wide and cannot be excepted per-path
-  # by a WAF skip rule, so the fix is to keep the machine-to-machine callbacks
-  # off the proxied hostname entirely. Nothing is lost: these routes are
-  # authenticated by the RSA signature over their AES payload, never by the edge.
-  # Keep customer-facing URLs (GLOBEPAY_RETURN_URL) on the pretty domain.
-  - key: GLOBEPAY_NOTIFY_URL
-    scope: RUN_TIME
-    value: https://polycards-backend-gce6p.ondigitalocean.app/hooks/globepay/deposit
-  - key: GLOBEPAY_RETURN_URL
-    scope: RUN_TIME
-    value: https://polycards.gg/transactions
-  # Which deposit channel to ask for. One of FPX / DN / BQR / OB — the code
-  # allow-list, so a typo is refused on our side rather than at the gateway.
-  #
-  # Read from GlobePay's own back office 2026-08-04 (Merchant Management →
-  # Merchant Transaction Setting), which is the ONLY authoritative list —
-  # nothing in their API enumerates it, you simply get PMT10006 until you guess
-  # right. Polycard production carries exactly two DEPOSIT channels:
-  #
-  #   OB  - Online Banking                RM 30 – 10,000, 1.70%
-  #   BQR - QR code & Bank transfer       RM 30 – 10,000, 1.70%
-  #
-  # (Withdrawal is WD/Payout, RM 50 – 5,000. FPX is NOT provisioned — it was a
-  # guess on 2026-08-04 and could never have worked.) OB is now contradicted
-  # too: PMT10006 six times 2026-08-04 10:00Z – 2026-08-05 04:04Z, including
-  # twice AFTER GlobePay (Sean) said 2026-08-05 that OB and BQR are usable. BQR
-  # is the other channel he named (its own PMT10006 was 2026-08-04 07:38Z,
-  # before his claim), so it is the one remaining untested-since-activation
-  # value. If BQR also returns PMT10006, BOTH back-office channels are dead
-  # API-side and only their support can fix it — do not rotate methods again.
-  #
-  # CORRECTION 2026-08-05: BQR did return PMT10006, but "both channels are dead"
-  # was the wrong read — the API whitelist was on the old, released IP pair.
-  #
-  # WHITELIST CLEARED 2026-08-06: GlobePay added 188.166.181.61 /
-  # 188.166.181.204 and CheckBalance now succeeds from BOTH components (worker
-  # on .61, service on .204). So the whitelist is no longer a candidate
-  # explanation for anything.
-  #
-  # THIS VAR IS NOT THE PROBLEM EITHER — stop rotating it. With the whitelist
-  # green, SubmitDeposit was swept from production across BQR/OB/DN/FPX, across
-  # each method's own bank codes, and across RM 30/50/100/500. Every single
-  # combination returns PMT10006. Meanwhile GetSupportedBanks answers 200 for
-  # BQR (1 bank) and OB (7 banks), so their system knows both codes for merchant
-  # Polycard. Deposits are disabled ACCOUNT-side and only GlobePay support can
-  # enable them; see "Deposits are dead ACCOUNT-side" in
-  # docs/payments/globepay365-setup.md for the table to send them.
-  - key: GLOBEPAY_DEPOSIT_METHOD
-    scope: RUN_TIME
-    value: BQR
-  # The three secrets. Values live in the gitignored deploy/.env.deploy and are
-  # injected by scripts/do-apply.ps1. Both KEY values are the bare base64 body
-  # on ONE line — no PEM armor, no newlines: packs/globepay.ts toPem() re-wraps
-  # them, and a multi-line value would break both this YAML and the placeholder
-  # substitution. (Verified 2026-07-29: the bare body signs and verifies.)
-  - key: GLOBEPAY_AES_KEY
-    scope: RUN_TIME
-    type: SECRET
-    value: __SECRET__GLOBEPAY_AES_KEY__
-  - key: GLOBEPAY_PUBLIC_KEY
-    scope: RUN_TIME
-    type: SECRET
-    value: __SECRET__GLOBEPAY_PUBLIC_KEY__
-  - key: GLOBEPAY_MERCHANT_PRIVATE_KEY
-    scope: RUN_TIME
-    type: SECRET
-    value: __SECRET__GLOBEPAY_MERCHANT_PRIVATE_KEY__
-  # Withdrawals ARMED 2026-08-05 (operator decision: test both money directions
-  # on production as soon as the API whitelist is fixed). They stayed OFF for
-  # the first cutover; nothing has ever been paid out through this account, so
-  # the FIRST payout is the live test of the whole loop — including Payout
-  # Verification, which the back office shows ACTIVE on this merchant
-  # (2026-08-05 portal read; the setup doc's "inactive" note was the STAGING
-  # account). Their §1.7 flow POSTs the withdrawal to GLOBEPAY_PAYOUT_VERIFY_URL
-  # and pays only on a literal "success" — hooks/globepay/payout-verify checks
-  # the row exists, is pending, and the amount+currency match what we debited.
+  # Withdrawals ARMED 2026-08-05 (operator decision). The customer withdrawal
+  # route and the admin held-approval both refuse while this is off.
   # NEXT_PUBLIC_WITHDRAWALS_ENABLED flips on the storefront in the same window
   # (Dockerfile ARG default + .do/storefront.app.yaml, both).
   - key: GLOBEPAY_WITHDRAWALS_ENABLED
     scope: RUN_TIME
     value: "true"
-  # Origin hostname for the same reason as GLOBEPAY_NOTIFY_URL above — and it
-  # matters more here: payout-verify is the gate their §1.7 flow waits on, so a
-  # Cloudflare challenge on it stalls a payout rather than merely delaying a
-  # credit. No withdrawal traffic happened to be in the window that exposed the
-  # deposit callbacks, so this half was moved on the same reasoning, not on its
-  # own evidence.
-  - key: GLOBEPAY_WITHDRAW_NOTIFY_URL
+  # Where the customer's browser lands after the gateway's checkout — the
+  # pretty storefront domain (customer-facing, unlike the callback base below).
+  - key: PAYMENT_RETURN_URL
     scope: RUN_TIME
-    value: https://polycards-backend-gce6p.ondigitalocean.app/hooks/globepay/withdrawal
-  - key: GLOBEPAY_PAYOUT_VERIFY_URL
-    scope: RUN_TIME
-    value: https://polycards-backend-gce6p.ondigitalocean.app/hooks/globepay/payout-verify
+    value: https://polycards.gg/transactions
 
   # Cooling-off window on a newly saved payout destination, in hours. The code
   # default is 24; "0" here switches it OFF, so a bank account can be withdrawn
@@ -481,15 +371,22 @@ envs:
     scope: RUN_TIME
     value: "0"
 
-  # ── TGPay (plan 130). Inert until an admin switches the active gateway to
-  # TGPay on the Settlement page. The key pair comes from the production back
-  # office (admin.tgpay365.com → Settings → General → API keys, 2FA-gated) and
-  # is injected by scripts/do-apply.ps1 like the GlobePay values above. The
-  # production keys are short opaque strings, not the sandbox's pk-/sk- shape —
-  # quoted because an all-digit value would otherwise parse as a YAML number
-  # and doctl refuses it ("cannot unmarshal number into ... value of type string").
+  # ── TGPay (plan 130) — the payment gateway since the 2026-09-06 cutover.
+  # The key pair comes from the production back office (admin.tgpay365.com →
+  # Settings → General → API keys, 2FA-gated) and is injected by
+  # scripts/do-apply.ps1. The production keys are short opaque strings, not
+  # the sandbox's pk-/sk- shape — quoted because an all-digit value would
+  # otherwise parse as a YAML number and doctl refuses it ("cannot unmarshal
+  # number into ... value of type string").
+  #
   # PAYMENT_CALLBACK_BASE derives each gateway's notify URLs from its hook
-  # paths on the direct hostname (same reason as GLOBEPAY_NOTIFY_URL above).
+  # paths. THE APP'S OWN ORIGIN HOSTNAME, NOT admin.polycards.gg: that name is
+  # proxied through Cloudflare, whose Bot Fight Mode answered every gateway
+  # callback with a Managed Challenge on 2026-08-11 (a webhook cannot solve a
+  # browser challenge, so every top-up fell back to the reconciliation sweep).
+  # On the free plan that mode is zone-wide, so machine-to-machine callbacks
+  # stay off the proxied hostname entirely; the routes are authenticated by
+  # the gateway's key headers and the source allowlist, never by the edge.
   # TGPAY_CALLBACK_IPS is the source allowlist TGPay asked for — their servers
   # as listed 2026-09-05. Outside the sandbox the TGPay hooks refuse every
   # callback while this is unset, so it ships alongside the code.

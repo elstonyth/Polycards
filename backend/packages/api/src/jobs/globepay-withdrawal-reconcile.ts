@@ -284,7 +284,7 @@ export default async function globepayWithdrawalReconcileJob(
       // refundGlobePayWithdrawal (globepay-withdrawal.ts) — one copy shared
       // with the admin deny route (plan 094 Task 5), rather than a second
       // verbatim one. The payout callback in
-      // api/hooks/globepay/withdrawal/route.ts still carries its own
+      // api/hooks/tgpay/withdrawal/route.ts still carries its own
       // separate variant of this ordering. This call site keeps only what is
       // specific to the SWEEP: the debit-existence guard above, counting the
       // result below, and the terminal update's 'pending' scope — the

@@ -30,7 +30,7 @@ import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 // Settlement — the gateway's calendar weekly/monthly result, read from this
 // database (audit 2026-08-17 B1/B3/B4/B5). This page exists so the operator
-// never has to log into GlobePay365's back office for "what did this month
+// never has to log into the gateway's back office for "what did this month
 // do": settled gross, the fee they kept, the net, and — because two records of
 // the same money exist — the delta against the credit ledger's own view of
 // the same period. Plus the live merchant balance (the payout float).

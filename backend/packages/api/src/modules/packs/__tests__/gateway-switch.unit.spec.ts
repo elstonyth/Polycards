@@ -9,31 +9,33 @@ import {
   setActiveGateway,
 } from '../gateway';
 
-const scopeWith = (setting: string | null | Error) => ({
-  resolve: <T>(): T =>
-    ({
-      siteSettings: async () => {
-        if (setting instanceof Error) throw setting;
-        return { payment_gateway: setting };
-      },
-    }) as T,
-});
+const scopeWith = (setting: string | null | Error) => {
+  const siteSettings = jest.fn(async () => {
+    if (setting instanceof Error) throw setting;
+    return { payment_gateway: setting };
+  });
+  return {
+    siteSettings,
+    resolve: <T>(): T => ({ siteSettings }) as T,
+  };
+};
 
 afterEach(() => setActiveGateway(null));
 
 describe('paymentGateway / setActiveGateway', () => {
   it('env decides until an admin setting is cached, then the setting wins', () => {
-    expect(paymentGateway({})).toBe('globepay');
-    expect(paymentGateway({ PAYMENT_GATEWAY: 'tgpay' })).toBe('tgpay');
-    expect(paymentGateway({ PAYMENT_GATEWAY: 'bogus' })).toBe('globepay');
-    setActiveGateway('tgpay');
     expect(paymentGateway({})).toBe('tgpay');
-    setActiveGateway('globepay');
-    expect(paymentGateway({ PAYMENT_GATEWAY: 'tgpay' })).toBe('globepay');
+    expect(paymentGateway({ PAYMENT_GATEWAY: 'tgpay' })).toBe('tgpay');
+    // A retired or unknown value falls back to the default, never throws.
+    expect(paymentGateway({ PAYMENT_GATEWAY: 'globepay' })).toBe('tgpay');
+    expect(paymentGateway({ PAYMENT_GATEWAY: 'bogus' })).toBe('tgpay');
+    setActiveGateway('tgpay');
+    expect(paymentGateway({ PAYMENT_GATEWAY: 'bogus' })).toBe('tgpay');
   });
 
   it('isPaymentGateway only accepts registered ids', () => {
     expect(isPaymentGateway('tgpay')).toBe(true);
+    expect(isPaymentGateway('globepay')).toBe(false);
     expect(isPaymentGateway('stripe')).toBe(false);
     expect(isPaymentGateway(null)).toBe(false);
     expect(isPaymentGateway('constructor')).toBe(false);
@@ -44,24 +46,23 @@ describe('resolveActiveGateway', () => {
   it('reads the setting once per TTL, and a DB failure keeps the last value', async () => {
     const t0 = 1_000_000;
     expect(await resolveActiveGateway(scopeWith('tgpay'), t0)).toBe('tgpay');
-    // Within the TTL the DB is not consulted, even if it changed.
-    expect(await resolveActiveGateway(scopeWith('globepay'), t0 + 1000)).toBe(
-      'tgpay',
-    );
+    // Within the TTL the DB is not consulted at all.
+    const inside = scopeWith('tgpay');
+    expect(await resolveActiveGateway(inside, t0 + 1000)).toBe('tgpay');
+    expect(inside.siteSettings).not.toHaveBeenCalled();
     // Past the TTL it is.
+    const past = scopeWith('tgpay');
     expect(
-      await resolveActiveGateway(
-        scopeWith('globepay'),
-        t0 + ACTIVE_GATEWAY_TTL_MS + 1,
-      ),
-    ).toBe('globepay');
-    // A failing read never flips the gateway.
+      await resolveActiveGateway(past, t0 + ACTIVE_GATEWAY_TTL_MS + 1),
+    ).toBe('tgpay');
+    expect(past.siteSettings).toHaveBeenCalledTimes(1);
+    // A failing read never flips the gateway (nor throws).
     expect(
       await resolveActiveGateway(
         scopeWith(new Error('db down')),
         t0 + 2 * ACTIVE_GATEWAY_TTL_MS + 2,
       ),
-    ).toBe('globepay');
+    ).toBe('tgpay');
   });
 
   it('an unknown or null setting falls back to the env default', async () => {
@@ -78,33 +79,11 @@ describe('resolveActiveGateway', () => {
 });
 
 describe('gatewayUrls', () => {
-  const explicit = {
-    GLOBEPAY_NOTIFY_URL: 'https://old/hooks/globepay/deposit',
-    GLOBEPAY_RETURN_URL: 'https://shop/wallet',
-    GLOBEPAY_WITHDRAW_NOTIFY_URL: 'https://old/hooks/globepay/withdrawal/',
-    GLOBEPAY_PAYOUT_VERIFY_URL: 'https://old/hooks/globepay/payout-verify',
-  } as NodeJS.ProcessEnv;
-
-  it('without PAYMENT_CALLBACK_BASE the explicit URLs apply unchanged — for the gateway they name', () => {
-    expect(gatewayUrls('globepay', explicit)).toEqual({
-      notifyUrl: 'https://old/hooks/globepay/deposit',
-      returnUrl: 'https://shop/wallet',
-      withdrawNotifyUrl: 'https://old/hooks/globepay/withdrawal/',
-      payoutVerifyUrl: 'https://old/hooks/globepay/payout-verify',
-      hasPayoutVerify: true,
-    });
-  });
-
-  it('never hands one gateway the explicit URLs of another', () => {
-    // A production deploy still carrying the GlobePay URLs must fail closed
-    // for TGPay, not send TGPay callbacks to the GlobePay hook.
-    const urls = gatewayUrls('tgpay', explicit);
-    expect(urls.notifyUrl).toBe('');
-    expect(urls.withdrawNotifyUrl).toBe('');
-  });
-
-  it('with PAYMENT_CALLBACK_BASE each gateway gets its own hook paths', () => {
-    const env = { ...explicit, PAYMENT_CALLBACK_BASE: 'https://api.example/' };
+  it('with PAYMENT_CALLBACK_BASE the gateway gets its own hook paths; the return URL reads either name', () => {
+    const env = {
+      PAYMENT_CALLBACK_BASE: 'https://api.example/',
+      GLOBEPAY_RETURN_URL: 'https://shop/wallet',
+    } as NodeJS.ProcessEnv;
     expect(gatewayUrls('tgpay', env)).toEqual({
       notifyUrl: 'https://api.example/hooks/tgpay/deposit',
       returnUrl: 'https://shop/wallet',
@@ -112,13 +91,20 @@ describe('gatewayUrls', () => {
       payoutVerifyUrl: '',
       hasPayoutVerify: false,
     });
-    expect(gatewayUrls('globepay', env).payoutVerifyUrl).toBe(
-      'https://api.example/hooks/globepay/payout-verify',
-    );
+    expect(
+      gatewayUrls('tgpay', {
+        ...env,
+        PAYMENT_RETURN_URL: 'https://shop/transactions',
+      }).returnUrl,
+    ).toBe('https://shop/transactions');
   });
 
-  it('missing values come back empty so callers fail closed', () => {
-    expect(gatewayUrls('tgpay', {} as NodeJS.ProcessEnv).notifyUrl).toBe('');
+  it('without PAYMENT_CALLBACK_BASE every hook URL is empty so callers fail closed — no legacy explicit URL is honoured', () => {
+    const urls = gatewayUrls('tgpay', {
+      GLOBEPAY_NOTIFY_URL: 'https://old/hooks/globepay/deposit',
+    } as NodeJS.ProcessEnv);
+    expect(urls.notifyUrl).toBe('');
+    expect(urls.withdrawNotifyUrl).toBe('');
   });
 });
 

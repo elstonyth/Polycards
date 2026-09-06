@@ -7,7 +7,6 @@ beforeEach(() => {
   delete process.env.PAYMENT_GATEWAY;
   process.env.GLOBEPAY_ENABLED = 'true';
   process.env.GLOBEPAY_WITHDRAWALS_ENABLED = 'true';
-  process.env.GLOBEPAY_MERCHANT_CODE = 'M1';
   process.env.TGPAY_SECRET_KEY = 'sk-test';
   setActiveGateway(null);
 });
@@ -56,13 +55,13 @@ describe('GET /store/payments/config — the active gateway money bands', () => 
     expect(h.res.headers['Cache-Control']).toBe('no-store');
   });
 
-  it('falls back to GlobePay band when no setting is stored', async () => {
+  it('falls back to the default gateway band when no setting is stored', async () => {
     const h = harness(null);
     await GET(h.req as never, h.res as never);
     const body = h.res.body as Body;
-    expect(body.gateway).toBe('globepay');
-    expect(body.deposit).toEqual({ min_rm: 30, max_rm: 10000 });
-    expect(body.withdrawal).toEqual({ min_rm: 50, max_rm: 50000 });
+    expect(body.gateway).toBe('tgpay');
+    expect(body.deposit).toEqual({ min_rm: 50, max_rm: 10000 });
+    expect(body.withdrawal).toEqual({ min_rm: 50, max_rm: 30000 });
   });
 
   it('reports withdrawals closed when the withdrawal switch is off', async () => {

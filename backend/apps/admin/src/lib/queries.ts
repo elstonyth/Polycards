@@ -856,7 +856,7 @@ export const useSaveTierSettings = () => {
   });
 };
 
-// GlobePay deposits. Polls once a minute: this is the money-in watch list, and a
+// Gateway deposits. Polls once a minute: this is the money-in watch list, and a
 // stranded payment should surface without an operator remembering to reload.
 export const useGlobePayDeposits = (
   page = 0,
@@ -870,7 +870,7 @@ export const useGlobePayDeposits = (
     refetchInterval: 60_000,
   });
 
-// GlobePay withdrawals — same one-minute poll as deposits: this is the
+// Gateway withdrawals — same one-minute poll as deposits: this is the
 // money-out watch list, and a debited-but-unpaid customer should surface
 // without an operator remembering to reload.
 export const useGlobePayWithdrawals = (
@@ -889,7 +889,7 @@ export const useGlobePayWithdrawals = (
     refetchInterval: 60_000,
   });
 
-// Claim a held withdrawal and submit it to GlobePay365. Three real outcomes
+// Claim a held withdrawal and submit it to the gateway. Three real outcomes
 // (classifyApproveResult) get three different toasts — a plain "Approved!"
 // on all of them would hide the two that need the operator's attention:
 // - 'submitted': the normal path.
@@ -915,7 +915,7 @@ export const useApproveGlobePayWithdrawal = () => {
       switch (classifyApproveResult(data)) {
         case 'submitted':
           toast.success('Withdrawal approved', {
-            description: `Submitted to GlobePay365 (transaction ${data.transaction_id}).`,
+            description: `Submitted to the payment gateway (transaction ${data.transaction_id}).`,
           });
           break;
         case 'ambiguous':
