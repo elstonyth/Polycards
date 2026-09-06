@@ -311,6 +311,13 @@ export const AvatarFramesSchema = z.looseObject({
 /** GET /store/profiles/me — `{ handle }`. */
 export const ProfileHandleSchema = z.looseObject({ handle: z.string() });
 
+/** GET /store/customers/me/account — the Settings page's Danger zone facts.
+ *  `hasPassword` is REQUIRED here on purpose: data/customer.ts answers `true`
+ *  for anything it cannot read, and a body missing the field would otherwise
+ *  read as `false` — dropping the password box from an account that HAS one,
+ *  whose every delete then fails PASSWORD_REQUIRED with no way to comply. */
+export const AccountInfoSchema = z.looseObject({ hasPassword: z.boolean() });
+
 // --- actions/vault.ts -------------------------------------------------------
 
 /** GET /store/vault item — pull_id + card.name + finite buyback.amount/percent.

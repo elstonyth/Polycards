@@ -13,7 +13,8 @@ import { cache } from 'react';
 import { cookies } from 'next/headers';
 import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
-import { authedFetch } from '@/lib/authed-fetch';
+import { store } from '@/lib/store';
+import { AccountInfoSchema } from '@/lib/data/schemas';
 import { httpStatus } from '@/lib/errors';
 // The cookie name lives with the port that reads it (src/lib/store.ts); this
 // module only sets and clears it.
@@ -76,13 +77,26 @@ export async function takeOauthState(): Promise<string | undefined> {
 
 /**
  * The raw customer JWT from the httpOnly cookie, or undefined when logged out.
- * Server-only — data getters and server actions pass it to `authedFetch`
- * (src/lib/authed-fetch.ts), which attaches the explicit `Authorization: Bearer`
- * the backend needs (browser auth is CORS-blocked at :4000).
+ * Server-only.
  *
- * The `if (!token) return …` that follows every call is NOT boilerplate: what a
- * logged-out caller answers with differs on purpose per module, which is why
- * this read stays at the call site rather than inside `authedFetch`.
+ * Backend CALLS no longer come through here — the `Store` port reads the same
+ * cookie itself (src/lib/store.ts). What is left are the three reasons a
+ * caller still needs the token in hand:
+ *
+ * - **Cookie PRESENCE as a fact**, not as a bearer: /task and /referral fold
+ *   it into `isLoggedIn`, /api/free-pack picks its cache regime from it,
+ *   /r/<code> refuses to plant an invite cookie for a signed-in visitor, and
+ *   data/free-pack.ts needs to know which of two answers it is reading.
+ * - **`sdk.store.*` / `sdk.auth.*` calls**, which take headers positionally
+ *   and so build their own `Authorization` (getCustomerSession and
+ *   updateCustomerProfile below; the address-book calls in actions/delivery.ts).
+ * - **The multipart avatar upload** (actions/profile-appearance.ts), which
+ *   reads the cookie directly for the same reason: `sdk.client.fetch`
+ *   JSON-stringifies bodies and cannot carry a FormData boundary.
+ *
+ * A token that must be sent as a bearer WITHOUT being the cookie's — the
+ * post-register refresh, fetchProfileHandle — uses the port's `bearer`
+ * option instead.
  */
 export async function getAuthToken(): Promise<string | undefined> {
   const store = await cookies();
@@ -159,11 +173,12 @@ export type AccountInfo = { hasPassword: boolean };
  * comply.
  */
 export async function getAccountInfo(): Promise<AccountInfo> {
-  const token = await getAuthToken();
-  if (!token) return { hasPassword: true };
-  try {
-    return await authedFetch<AccountInfo>(token, '/store/customers/me/account');
-  } catch {
-    return { hasPassword: true };
-  }
+  const r = await store.get(
+    '/store/customers/me/account',
+    AccountInfoSchema,
+    // Explicit, though it is the default — this one is per-customer and must
+    // never be cached or answered for a guest.
+    { auth: 'required' },
+  );
+  return r.ok ? r.data : { hasPassword: true };
 }
