@@ -17,6 +17,11 @@
  * Please try again." over a committed open, i.e. an invitation to pay twice.
  * The CARD is still validated (`parseOne(WonCardSchema, …)`), and that failure
  * has its own copy: the card is in the Vault, we just could not show it.
+ * One exception, inherited from the pre-port behaviour on purpose: `openBatch`
+ * answers PACKS_FALLBACK when `rolls` isn't an array at all (see the guard
+ * below) — that IS what the pre-port TypeError, caught by the old try/catch,
+ * used to answer, so keeping it is behaviour-preserving, not a regression of
+ * the rule above.
  */
 import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
@@ -262,16 +267,21 @@ export async function openBatch(
   };
 
   // The envelope is unchecked (see the header), so `rolls` might not be an
-  // array at all. Iterating a missing one would throw INSIDE a 'use server'
-  // action — an error page over a charged batch, i.e. the exact outcome the
-  // unchecked envelope exists to avoid. An explicit `rolls: []` is left alone:
-  // that is a legal (if odd) 2xx and has always answered ok with no rolls.
+  // array at all. Pre-port this was a TypeError — `for (const rawRoll of
+  // rawRolls)` over `undefined` — caught by the action's own try/catch and
+  // answered with PACKS_FALLBACK; the port has no try/catch, so guard
+  // explicitly and keep that answer. A non-JSON 200 never reaches here — the
+  // adapter turns it into a Failure before `r.data` exists — but a JSON 200
+  // that simply omits `rolls` does, which is what the test below pins. An
+  // explicit `rolls: []` is left alone: that is a legal (if odd) 2xx and has
+  // always answered ok with no rolls.
   if (!Array.isArray(rawRolls)) {
     logger.error(`[packs] open-batch returned no rolls array for '${slug}'`);
     return {
       ok: false,
-      error:
-        "Your pack opened and the card is in your Vault, but we couldn't show it here.",
+      error: PACKS_FALLBACK,
+      needsAuth: false,
+      needsTopUp: false,
     };
   }
 

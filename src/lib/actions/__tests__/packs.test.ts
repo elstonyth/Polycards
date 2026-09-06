@@ -241,16 +241,19 @@ describe('openBatch', () => {
   });
 
   // The envelope is unchecked on purpose, so nothing upstream catches a body
-  // without `rolls` — iterating it would throw inside a 'use server' action and
-  // surface as an error page over a CHARGED batch.
+  // without `rolls` — iterating it would throw inside a 'use server' action.
+  // Pre-port that was a TypeError caught by the action's own try/catch,
+  // answered with the generic PACKS_FALLBACK copy (needsAuth/needsTopUp both
+  // false) — the guard exists to keep that exact answer without throwing.
   it('a body with no rolls array answers, never throws, over a charged batch', async () => {
     backend({
       'POST /store/packs/:slug/open-batch': { body: { balance: 880 } },
     });
     expect(await openBatch('bronze', 2)).toEqual({
       ok: false,
-      error:
-        "Your pack opened and the card is in your Vault, but we couldn't show it here.",
+      error: 'Could not open the pack. Please try again.',
+      needsAuth: false,
+      needsTopUp: false,
     });
     expect(mocks.logError).toHaveBeenCalledWith(
       "[packs] open-batch returned no rolls array for 'bronze'",
