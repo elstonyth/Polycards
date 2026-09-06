@@ -5,17 +5,21 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // once the same value, because the cost model re-parsed the display string --
 // so a RM 1.50 pack displayed "RM 2", refused to spin under RM 2, and charged
 // RM 1.50. Today's catalog is whole-ringgit, so nothing in the app would notice
-// a regression to that. This test is the tripwire. sdk + logger are mocked; the
-// real schema/parse path runs.
-const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
+// a regression to that. This test is the tripwire. The catalog reads through
+// the `Store` port, so an in-memory backend seeds it and the real schema/parse
+// path runs.
+import { storeShim, backend } from '@/lib/__tests__/store-shim';
 
-vi.mock('@/lib/medusa', () => ({ sdk: { client: { fetch: fetchMock } } }));
+vi.mock('@/lib/store', () => ({ store: storeShim }));
 vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
 
 import { getPackCategories } from '@/lib/data/packs';
 import { clearTtlCache } from '@/lib/ttl-cache';
+
+const PACKS = 'GET /store/packs';
+const seed = (body: unknown) => backend({ [PACKS]: { body } });
 
 const row = (over: Record<string, unknown> = {}) => ({
   slug: 'bronze-pack',
@@ -39,7 +43,6 @@ const firstPack = async () => {
 };
 
 beforeEach(() => {
-  fetchMock.mockReset();
   // getPackCategories is memoised per process for one backend cache window, so
   // without this the FIRST fixture's catalog is served to every later case.
   clearTtlCache();
@@ -47,7 +50,7 @@ beforeEach(() => {
 
 describe('pack price: display vs charge', () => {
   it('keeps the exact backend price in priceValue for a fractional price', async () => {
-    fetchMock.mockResolvedValue({ packs: [row({ price: 1.5 })] });
+    seed({ packs: [row({ price: 1.5 })] });
     const pack = await firstPack();
 
     // The number every money decision reads: affordability, bet meter,
@@ -58,12 +61,12 @@ describe('pack price: display vs charge', () => {
   });
 
   it('rounds only the display string, and rounds half-up', async () => {
-    fetchMock.mockResolvedValue({ packs: [row({ price: 1.5 })] });
+    seed({ packs: [row({ price: 1.5 })] });
     expect((await firstPack()).price).toBe('RM 2');
   });
 
   it('does not change display for whole-ringgit prices', async () => {
-    fetchMock.mockResolvedValue({ packs: [row({ price: 25 })] });
+    seed({ packs: [row({ price: 25 })] });
     const pack = await firstPack();
     expect(pack.price).toBe('RM 25');
     expect(pack.priceValue).toBe(25);
@@ -71,14 +74,14 @@ describe('pack price: display vs charge', () => {
 
   it('rounds a fractional price DOWN in display while charging the real value', async () => {
     // The direction that under-displays: 1.4 shows as "RM 1", charges 1.40.
-    fetchMock.mockResolvedValue({ packs: [row({ price: 1.4 })] });
+    seed({ packs: [row({ price: 1.4 })] });
     const pack = await firstPack();
     expect(pack.price).toBe('RM 1');
     expect(pack.priceValue).toBe(1.4);
   });
 
   it('drops rows whose price is not finite rather than emitting NaN money', async () => {
-    fetchMock.mockResolvedValue({
+    seed({
       packs: [
         row({ slug: 'bad-null', price: null }),
         row({ slug: 'bad-string', price: '5' }),
@@ -96,11 +99,26 @@ describe('pack price: display vs charge', () => {
     // the memo, the empty fallback would resolve successfully and be served for
     // the whole window — one blip would blank /slots for 30s. It is caught
     // outside instead, so the rejection evicts and the next read retries.
-    fetchMock.mockRejectedValueOnce(new Error('backend down'));
+    backend({ [PACKS]: { status: 502, body: { message: 'backend down' } } });
     expect((await getPackCategories()).flatMap((c) => c.packs)).toEqual([]);
 
-    fetchMock.mockResolvedValue({ packs: [row()] });
+    seed({ packs: [row()] });
     const packs = (await getPackCategories()).flatMap((c) => c.packs);
     expect(packs.map((p) => p.id)).toEqual(['bronze-pack']);
+  });
+});
+
+describe('the catalog request', () => {
+  it('is public: no bearer, and no cache key on the wire', async () => {
+    // The home page prerenders this catalog under `revalidate = 15`; an
+    // explicit cache mode would make that route dynamic.
+    const mem = seed({ packs: [] });
+    await getPackCategories();
+    expect(mem.requests[0]).toEqual({
+      method: 'GET',
+      path: '/store/packs',
+      headers: {},
+      cache: 'auto',
+    });
   });
 });

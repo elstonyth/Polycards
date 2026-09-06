@@ -8,10 +8,10 @@
  * Anyone adding a new `cached()` adopter should add a case here pinning
  * which failures throw (evict) vs which values are legitimately cacheable.
  *
- * The adopters that have moved to the `Store` port seed `memoryStore` through
- * the shared shim; the rest still mock `sdk.client.fetch` directly. Either
- * way the real schema/parse path runs. avatar-frames.ts imports 'server-only'
- * (throws outside an RSC) at module load — stub it, mirroring profiles.test.ts.
+ * Every adopter reads through the `Store` port, so each seeds `memoryStore`
+ * via the shared shim and the real schema/parse path runs. avatar-frames.ts
+ * imports 'server-only' (throws outside an RSC) at module load — stub it,
+ * mirroring profiles.test.ts.
  *
  * A port-backed adopter expresses "this call failed" as a NON-2xx rather than
  * a rejected promise: the HTTP adapter catches the SDK's rejection and turns
@@ -26,9 +26,6 @@ import type { MemoryResponse } from '@/lib/store-memory';
 
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/store', () => ({ store: storeShim }));
-
-const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
-vi.mock('@/lib/medusa', () => ({ sdk: { client: { fetch: fetchMock } } }));
 vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
@@ -51,15 +48,15 @@ const queued = (route: string) => {
 };
 
 beforeEach(() => {
-  fetchMock.mockReset();
   // Every adopter below shares the one module-level TTL store — without
   // this, the first case's memo would be served to every later one.
   clearTtlCache();
 });
 
 describe('getPackCategories cache contract', () => {
-  it('a rejected fetch is NOT cached: returns [] and the next call re-fetches', async () => {
-    fetchMock.mockRejectedValueOnce(new Error('backend down'));
+  it('a failed fetch is NOT cached: returns [] and the next call re-fetches', async () => {
+    const catalog = queued('GET /store/packs');
+    catalog.push({ status: 502, body: { message: 'backend down' } });
     expect(await getPackCategories()).toEqual([
       {
         id: 'pokemon',
@@ -70,22 +67,25 @@ describe('getPackCategories cache contract', () => {
       },
     ]);
 
-    fetchMock.mockResolvedValueOnce({ packs: [] });
+    catalog.push({ body: { packs: [] } });
     await getPackCategories();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(catalog.mem.requests).toHaveLength(2);
   });
 
   it('a malformed 200 (non-array packs) is NOT cached: degrades to empty categories and the next call re-fetches', async () => {
     // This case FAILS before plan 117 step 4 — loadPackCategories used to
     // silently coerce a non-array `packs` to [] INSIDE the memo, so the
     // degraded empty catalog would cache successfully for the full 30s TTL.
-    fetchMock.mockResolvedValueOnce({ packs: 'garbage' });
+    // PacksPageSchema's droppableArray is what keeps that true through the
+    // port: `listOf` would have coerced it right back to [].
+    const catalog = queued('GET /store/packs');
+    catalog.push({ body: { packs: 'garbage' } });
     const first = await getPackCategories();
     expect(first.flatMap((c) => c.packs)).toEqual([]);
 
-    fetchMock.mockResolvedValueOnce({ packs: [] });
+    catalog.push({ body: { packs: [] } });
     await getPackCategories();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(catalog.mem.requests).toHaveLength(2);
   });
 });
 

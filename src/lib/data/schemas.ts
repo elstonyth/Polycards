@@ -116,6 +116,19 @@ export const PackRowSchema = z.looseObject({
   psa10: z.boolean().catch(false).optional(),
 });
 
+/** GET /store/packs — the catalog list. `droppableArray`, not `listOf`: a bad
+ *  ROW drops on its own, but a non-array `packs` must FAIL the parse. That is
+ *  a malformed 200 (deploy skew, a proxy error page, a schema rename), and
+ *  this loader lives inside `cached()` — reading it as empty would memoise an
+ *  all-empty catalog for the window instead of evicting. */
+export const PacksPageSchema = z.looseObject({
+  packs: droppableArray(PackRowSchema),
+});
+
+/** GET /store/packs/:slug as data/packs.ts#getUncatalogedPack reads it — the
+ *  same runtime guard the list path applies, on the single row. */
+export const UncatalogedPackSchema = z.looseObject({ pack: PackRowSchema });
+
 /** GET /store/packs/:slug odds row — handle + known rarity + finite value.
  *  marketPriceMyr (live MYR display price: FMV × FX × margin, computed by the
  *  backend at request time) is optional — an older backend without it falls
@@ -132,6 +145,20 @@ export const OddsEntrySchema = z.looseObject({
    *  a malformed value degrades to null so the reel falls back to name-derive. */
   pokemon_dex: z.number().int().positive().nullable().catch(null).optional(),
   sprite_image: z.string().nullable().catch(null).optional(),
+});
+
+/** GET /store/packs/:slug as data/packs.ts#getPackDetail reads it.
+ *
+ *  `published_odds` / `demo_odds` stay UNVALIDATED here on purpose: they are
+ *  jsonb passthrough, and parsePublishedOdds sanitizes them field by field
+ *  (dropping unknown tiers and out-of-range percentages) rather than
+ *  rejecting the whole response over one bad number. `odds` is a
+ *  droppableArray for the same reason as the catalog: a bad row drops, a
+ *  non-array response does not read as "this pack has no pool". */
+export const PackDetailPageSchema = z.looseObject({
+  odds: droppableArray(OddsEntrySchema),
+  published_odds: z.unknown().optional(),
+  demo_odds: z.unknown().optional(),
 });
 
 /** GET /store/pulls/recent row — handle + name + known rarity + finite value.
@@ -151,6 +178,15 @@ export const RecentPullSchema = z.looseObject({
   profile_handle: z.string().nullable().optional(),
   avatar_url: z.string().nullable().optional(),
   frame_url: z.string().nullable().optional(),
+});
+
+/** GET /store/pulls/recent — the feed. `drought` stays unvalidated here: the
+ *  getter walks it entry by entry against the known tiers, so one bad counter
+ *  costs its own counter, not the feed. Rows drop one at a time; a non-array
+ *  `pulls` fails, which is the getter's empty-feed answer. */
+export const RecentPullsPageSchema = z.looseObject({
+  pulls: droppableArray(RecentPullSchema),
+  drought: z.unknown().optional(),
 });
 
 /** GET /store/pulls/gaps — the stats chart: a known tier, a finite current

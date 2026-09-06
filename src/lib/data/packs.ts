@@ -15,19 +15,25 @@
 
 import { unstable_cache } from 'next/cache';
 import { cached } from '@/lib/ttl-cache';
-import { sdk } from '@/lib/medusa';
+import { store } from '@/lib/store';
 import { logger } from '@/lib/logger';
 import { formatValue, isRarity, type PublishedOdds } from '@/lib/packs-format';
 import { avatarForSeed } from '@/lib/profile-view';
 import { money, relativeTime } from '@/lib/format';
 import {
-  parseList,
-  parseOne,
-  PackRowSchema,
-  OddsEntrySchema,
-  RecentPullSchema,
+  PacksPageSchema,
+  UncatalogedPackSchema,
+  PackDetailPageSchema,
+  RecentPullsPageSchema,
   PullGapsSchema,
 } from '@/lib/data/schemas';
+
+// Every route in this file is PUBLIC, and both halves of this matter: no
+// bearer, and `cache: 'auto'` — no cache key on the wire, which is what the
+// bare sdk.client.fetch calls sent. An explicit `no-store` would make a
+// statically prerenderable route dynamic, and src/app/page.tsx renders this
+// catalog, this feed and (via getPackChase) this detail under `revalidate = 15`.
+const PUBLIC = { auth: 'none', cache: 'auto' } as const;
 import {
   CATEGORIES as CATEGORY_META,
   CAT_ICON,
@@ -92,52 +98,43 @@ const titleCase = (key: string): string =>
  * labels/icons come from the local category meta.
  */
 async function loadPackCategories(): Promise<PackCategory[]> {
-  {
-    const { packs } = await sdk.client.fetch<{ packs: BackendPack[] }>(
-      '/store/packs',
-    );
+  // orThrow, and PacksPageSchema rejects a non-array `packs`: that is a
+  // malformed 200 (deploy skew, proxy error page, schema rename), not a
+  // legitimately empty catalog, and it must reject so the TTL memo evicts
+  // instead of caching an all-empty catalog for the window. Malformed ROWS
+  // still drop one at a time, so a renamed field on one pack can't render
+  // "$NaN" or a category-less pack — and can't blank the rest either.
+  const { packs } = store.orThrow(
+    await store.get('/store/packs', PacksPageSchema, PUBLIC),
+  );
 
-    // A non-array packs field is a malformed 200 (deploy skew, proxy error
-    // page, schema rename), not a legitimately empty catalog — throw so the
-    // TTL memo evicts instead of caching an all-empty catalog for the window.
-    if (!Array.isArray(packs)) {
-      throw new Error('/store/packs returned a non-array packs field');
-    }
-
-    // Group backend packs by category key (response is already rank-ordered).
-    // Skip malformed rows defensively — the fetch generic is a type assertion,
-    // not a runtime guard, so a renamed/absent field can't silently render
-    // "$NaN" or a category-less pack.
-    const byCategory = new Map<string, Pack[]>();
-    for (const p of parseList(
-      PackRowSchema,
-      packs,
-    ) as unknown as BackendPack[]) {
-      const list = byCategory.get(p.category) ?? [];
-      list.push(toPack(p));
-      byCategory.set(p.category, list);
-    }
-
-    // Known categories keep the live-site order + presentational meta (empty
-    // ones still render a chip; the client shows empty states). A backend pack
-    // in a category the local meta doesn't know still renders — title-cased
-    // label + fallback icon — instead of silently disappearing.
-    const known = CATEGORY_META.map((cat) => ({
-      ...cat,
-      packs: byCategory.get(cat.id) ?? [],
-    }));
-    const knownIds = new Set(known.map((c) => c.id));
-    const extras = [...byCategory.entries()]
-      .filter(([id]) => !knownIds.has(id))
-      .map(([id, list]) => ({
-        id,
-        tab: titleCase(id),
-        heading: `${titleCase(id)} Packs`,
-        icon: CAT_ICON.pokemon,
-        packs: list,
-      }));
-    return [...known, ...extras];
+  // Group backend packs by category key (response is already rank-ordered).
+  const byCategory = new Map<string, Pack[]>();
+  for (const p of packs as unknown as BackendPack[]) {
+    const list = byCategory.get(p.category) ?? [];
+    list.push(toPack(p));
+    byCategory.set(p.category, list);
   }
+
+  // Known categories keep the live-site order + presentational meta (empty
+  // ones still render a chip; the client shows empty states). A backend pack
+  // in a category the local meta doesn't know still renders — title-cased
+  // label + fallback icon — instead of silently disappearing.
+  const known = CATEGORY_META.map((cat) => ({
+    ...cat,
+    packs: byCategory.get(cat.id) ?? [],
+  }));
+  const knownIds = new Set(known.map((c) => c.id));
+  const extras = [...byCategory.entries()]
+    .filter(([id]) => !knownIds.has(id))
+    .map(([id, list]) => ({
+      id,
+      tab: titleCase(id),
+      heading: `${titleCase(id)} Packs`,
+      icon: CAT_ICON.pokemon,
+      packs: list,
+    }));
+  return [...known, ...extras];
 }
 
 // Matches the backend's own 30s window on GET /store/packs. The catalog is the
@@ -213,30 +210,27 @@ export async function getPackBySlug(slug: string): Promise<PackBase | null> {
  * empty. Returns null on 404 / any failure — the page then 404s as before.
  */
 async function getUncatalogedPack(slug: string): Promise<PackBase | null> {
-  try {
-    const { pack } = await sdk.client.fetch<{ pack?: BackendPack }>(
-      `/store/packs/${encodeURIComponent(slug)}`,
-    );
-    // Same runtime guard the list path applies (category + finite price) — the
-    // fetch generic is a type assertion, not a validator.
-    if (!parseOne(PackRowSchema, pack) || !pack) return null;
-    const meta = CATEGORY_META.find((c) => c.id === pack.category);
-    return {
-      pack: {
-        ...toPack(pack),
-        categoryId: pack.category,
-        categoryName: meta?.tab ?? titleCase(pack.category),
-        icon: meta?.icon ?? CAT_ICON.pokemon,
-      },
-      siblings: [],
-    };
-  } catch (error) {
-    logger.error(
-      `[packs] uncataloged pack lookup failed for '${slug}':`,
-      error,
-    );
-    return null;
-  }
+  // UncatalogedPackSchema applies the same runtime guard the list path does
+  // (category + finite price) to the single row, so a 404, an outage and a
+  // 200 with no usable pack all answer null — as before. The port logged it,
+  // with the slug in the path it names.
+  const r = await store.get(
+    `/store/packs/${encodeURIComponent(slug)}`,
+    UncatalogedPackSchema,
+    PUBLIC,
+  );
+  if (!r.ok) return null;
+  const pack = r.data.pack as unknown as BackendPack;
+  const meta = CATEGORY_META.find((c) => c.id === pack.category);
+  return {
+    pack: {
+      ...toPack(pack),
+      categoryId: pack.category,
+      categoryName: meta?.tab ?? titleCase(pack.category),
+      icon: meta?.icon ?? CAT_ICON.pokemon,
+    },
+    siblings: [],
+  };
 }
 
 // --- Pack detail: Top Hits + Pull Odds (GET /store/packs/:slug) -------------
@@ -309,20 +303,19 @@ const parsePublishedOdds = (raw: unknown): PublishedOdds | null => {
  * published `ODDS` display in packs-data.ts (see PackDetailClient).
  */
 export async function getPackDetail(slug: string): Promise<PackDetail | null> {
-  try {
-    const { odds, published_odds, demo_odds } = await sdk.client.fetch<{
-      odds: BackendOddsEntry[];
-      published_odds?: unknown;
-      demo_odds?: unknown;
-    }>(`/store/packs/${encodeURIComponent(slug)}`);
-    if (!Array.isArray(odds) || odds.length === 0) return null;
-
-    // The fetch generic is a type assertion, not a runtime guard — drop rows
-    // with an unknown rarity or non-finite value so the UI can't render NaN.
-    const valid = parseList(
-      OddsEntrySchema,
-      odds,
-    ) as unknown as BackendOddsEntry[];
+  // Every no-pool answer is the same null the page's empty gacha state reads:
+  // a 404, an outage, a non-array `odds`, an empty pool, or a pool whose rows
+  // all failed the schema (unknown rarity / non-finite value — dropped so the
+  // UI can't render NaN).
+  const r = await store.get(
+    `/store/packs/${encodeURIComponent(slug)}`,
+    PackDetailPageSchema,
+    PUBLIC,
+  );
+  if (!r.ok) return null;
+  {
+    const { published_odds, demo_odds } = r.data;
+    const valid = r.data.odds as unknown as BackendOddsEntry[];
     if (valid.length === 0) return null;
 
     const toCard = (o: BackendOddsEntry): PackCard => ({
@@ -359,9 +352,6 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
       // Same { tiers } shape from the backend, so the same sanitizer applies.
       demoOdds: parsePublishedOdds(demo_odds),
     };
-  } catch (error) {
-    logger.error(`[packs] failed to load pack detail for '${slug}':`, error);
-    return null;
   }
 }
 
@@ -509,25 +499,30 @@ export async function getRecentPulls(
   packSlug?: string,
   rarity?: Rarity,
 ): Promise<RecentFeed> {
-  try {
-    const q = new URLSearchParams();
-    if (packSlug) q.set('pack_id', packSlug);
-    if (rarity) q.set('rarity', rarity);
-    const qs = q.toString();
-    const raw = await sdk.client.fetch<{
-      pulls: BackendRecentPull[];
-      drought?: unknown;
-    }>(`/store/pulls/recent${qs ? `?${qs}` : ''}`);
-    if (!Array.isArray(raw.pulls)) return EMPTY_FEED;
+  {
+    // Same two params, same order (`?pack_id=…&rarity=…`) — the SDK
+    // serializes this object to the querystring the path carried before, and
+    // an absent pair omits the key entirely rather than sending a bare "?".
+    const query = {
+      ...(packSlug ? { pack_id: packSlug } : {}),
+      ...(rarity ? { rarity } : {}),
+    };
+    const r = await store.get('/store/pulls/recent', RecentPullsPageSchema, {
+      ...PUBLIC,
+      ...(Object.keys(query).length > 0 ? { query } : {}),
+    });
+    // An empty feed is a truthful state for a live ledger, and so is the
+    // answer to a failure or a non-array `pulls` — the component renders "no
+    // pulls yet" either way, and never mock rows.
+    if (!r.ok) return EMPTY_FEED;
+    const raw = r.data;
 
     // Stable ids: the pull row id, else (older backend) a per-(handle,
     // rolled_at) occurrence counter — NOT the array index, which shifts
     // whenever the poll prepends a new pull, remounting every feed row (and
     // replaying entry animations) instead of just adding one.
     const seen = new Map<string, number>();
-    const pulls = (
-      parseList(RecentPullSchema, raw.pulls) as unknown as BackendRecentPull[]
-    ).map((p) => {
+    const pulls = (raw.pulls as unknown as BackendRecentPull[]).map((p) => {
       const key = `${p.handle}-${p.rolled_at}`;
       const n = seen.get(key) ?? 0;
       seen.set(key, n + 1);
@@ -568,9 +563,6 @@ export async function getRecentPulls(
       }
     }
     return { pulls, drought };
-  } catch (error) {
-    logger.error('[packs] failed to load recent pulls:', error);
-    return EMPTY_FEED;
   }
 }
 
@@ -638,14 +630,18 @@ export async function getPullGaps(
   rarity: Rarity,
   packSlug?: string,
 ): Promise<PullGaps | null> {
-  try {
-    const q = new URLSearchParams({ rarity });
-    if (packSlug) q.set('pack_id', packSlug);
-    const parsed = parseOne(
-      PullGapsSchema,
-      await sdk.client.fetch(`/store/pulls/gaps?${q.toString()}`),
-    );
-    if (!parsed) return null;
+  {
+    // `?rarity=…&pack_id=…`, in that order, as the hand-built querystring had
+    // it — the SDK serializes to the same URL.
+    const r = await store.get('/store/pulls/gaps', PullGapsSchema, {
+      ...PUBLIC,
+      query: { rarity, ...(packSlug ? { pack_id: packSlug } : {}) },
+    });
+    // Null (never mock) for a backend failure AND for a malformed body: the
+    // chart renders its unavailable state, and /api/pull-gaps turns that null
+    // into a 503 rather than memoising it.
+    if (!r.ok) return null;
+    const parsed = r.data;
     return {
       rarity: parsed.rarity as Rarity,
       pct: parsed.pct ?? null,
@@ -662,8 +658,5 @@ export async function getPullGaps(
         frame: h.frame_url ?? null,
       })),
     };
-  } catch (error) {
-    logger.error('[packs] failed to load pull gaps:', error);
-    return null;
   }
 }
