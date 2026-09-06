@@ -13,6 +13,13 @@ import { PCT_SCALE } from '@acme/odds-math';
 import type { OddsRarity, TierRangeMap } from '@acme/odds-math';
 import type { Rarity } from './rarity';
 import {
+  claimOne,
+  claimRows,
+  NOT_NULL,
+  NOW,
+  type LedgerSqlManager,
+} from './claim';
+import {
   validateDeliveryRequest,
   validateDeliveryStatusTransition,
   snapshotAddress,
@@ -283,12 +290,6 @@ export type AuditRow = {
   reason: string | null;
   created_at: string;
   admin_id: string;
-};
-
-/** The transactional MikroORM manager surface we use for the advisory lock +
- *  the Σ-ledger read. `?` placeholders are inlined by MikroORM's formatQuery. */
-type LedgerSqlManager = {
-  execute<T = unknown>(query: string, params?: unknown[]): Promise<T>;
 };
 
 /** Tier predicate for a `pull p` row: its (pack, card) odds row carries the
@@ -1259,20 +1260,22 @@ class PacksModuleService extends MedusaService({
         `Only a draft run can be approved (this one is '${run.status}').`,
       );
     }
-    // ONE conditional UPDATE, answered by RETURNING (the
-    // claimGlobePayWithdrawalStatus idiom): the generated selector-update is a
+    // ONE conditional claim (see claim.ts): the generated selector-update is a
     // find-then-write that reports nothing, so a void committing between the
     // read above and the write left the run 'void' and still wrote an
     // approve_settlement audit row (review 2026-09). No row = the race was
     // lost; refuse rather than audit an approval that never happened.
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    const approved = await em.execute<{ id: string }[]>(
-      'UPDATE weekly_settlement ' +
-        "SET status = 'approved', approved_by = ?, approved_at = now(), updated_at = now() " +
-        "WHERE id = ? AND status = 'draft' AND deleted_at IS NULL " +
-        'RETURNING id',
-      [input.adminId, run.id],
-    );
+    const approved = await claimRows(em, {
+      table: 'weekly_settlement',
+      ids: [run.id],
+      where: { status: 'draft' },
+      set: {
+        status: 'approved',
+        approved_by: input.adminId,
+        approved_at: NOW,
+      },
+    });
     if (approved.length !== 1) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
@@ -1485,22 +1488,24 @@ class PacksModuleService extends MedusaService({
         `Only a pending line can be voided (this one is '${line.status}').`,
       );
     }
-    // ONE conditional UPDATE, answered by RETURNING — the same claim
-    // payWeeklySettlement makes before it moves money, and for the same
-    // reason claimGlobePayWithdrawalStatus exists: the generated selector-
-    // update is a find-then-write with no row lock, so a void racing the pay
-    // job could stamp 'voided' over a line whose credit was already written
-    // (bug review 2026-08-25; race confirmed 2026-09). Here the row lock
-    // makes pay's claim wait and then see 'voided'. No row = the race was
-    // lost — bail before the totals deduction so it can't double-subtract.
+    // ONE conditional claim (see claim.ts) — the same one payWeeklySettlement
+    // makes before it moves money: the generated selector-update is a
+    // find-then-write with no row lock, so a void racing the pay job could
+    // stamp 'voided' over a line whose credit was already written (bug review
+    // 2026-08-25; race confirmed 2026-09). Here the row lock makes pay's claim
+    // wait and then see 'voided'. No row = the race was lost — bail before the
+    // totals deduction so it can't double-subtract.
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    const voided = await em.execute<{ id: string }[]>(
-      'UPDATE weekly_settlement_line ' +
-        "SET status = 'voided', void_reason = ?, voided_by = ?, updated_at = now() " +
-        "WHERE id = ? AND status = 'pending' AND deleted_at IS NULL " +
-        'RETURNING id',
-      [input.reason, input.adminId, line.id],
-    );
+    const voided = await claimRows(em, {
+      table: 'weekly_settlement_line',
+      ids: [line.id],
+      where: { status: 'pending' },
+      set: {
+        status: 'voided',
+        void_reason: input.reason,
+        voided_by: input.adminId,
+      },
+    });
     if (voided.length !== 1) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
@@ -1594,28 +1599,27 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
 
-    // Every line flip below is ONE conditional UPDATE answered by RETURNING
-    // (the claimGlobePayWithdrawalStatus idiom), never the generated
-    // selector-update: that one is a find-then-write with no row lock, so it
-    // could not stop an admin void from landing between this run's list and
-    // its money write — the credit was minted, then the "status guard" after
-    // it silently matched nothing, and the customer was paid on a line that
-    // read 'voided' (review 2026-09). The claim now comes FIRST and holds the
-    // row lock until this transaction commits; a concurrent void either
-    // committed already (no row here, no money) or waits and then sees 'paid'.
+    // Every line flip below is ONE conditional claim (see claim.ts), never the
+    // generated selector-update: that one is a find-then-write with no row
+    // lock, so it could not stop an admin void from landing between this run's
+    // list and its money write — the credit was minted, then the "status
+    // guard" after it silently matched nothing, and the customer was paid on a
+    // line that read 'voided' (review 2026-09). The claim comes FIRST and
+    // holds the row lock until this transaction commits; a concurrent void
+    // either committed already (no row here, no money) or waits and then sees
+    // 'paid'.
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     let paid = 0;
     let skipped = 0;
     const paidCustomerIds: string[] = [];
     for (const line of pending) {
       if (skip.has(line.customer_id)) {
-        const voided = await em.execute<{ id: string }[]>(
-          'UPDATE weekly_settlement_line ' +
-            "SET status = 'voided', void_reason = 'account_deleted', updated_at = now() " +
-            "WHERE id = ? AND status = 'pending' AND deleted_at IS NULL " +
-            'RETURNING id',
-          [line.id],
-        );
+        const voided = await claimRows(em, {
+          table: 'weekly_settlement_line',
+          ids: [line.id],
+          where: { status: 'pending' },
+          set: { status: 'voided', void_reason: 'account_deleted' },
+        });
         // An admin void got there first — and already took its deduction.
         if (voided.length !== 1) continue;
         await this.deductRunTotal(
@@ -1625,13 +1629,12 @@ class PacksModuleService extends MedusaService({
         skipped++;
         continue;
       }
-      const claimed = await em.execute<{ id: string }[]>(
-        'UPDATE weekly_settlement_line ' +
-          "SET status = 'paid', updated_at = now() " +
-          "WHERE id = ? AND status = 'pending' AND deleted_at IS NULL " +
-          'RETURNING id',
-        [line.id],
-      );
+      const claimed = await claimRows(em, {
+        table: 'weekly_settlement_line',
+        ids: [line.id],
+        where: { status: 'pending' },
+        set: { status: 'paid' },
+      });
       // Voided since the list above (or claimed by a concurrent pay) — no
       // money for this line from this run.
       if (claimed.length !== 1) continue;
@@ -3228,12 +3231,10 @@ class PacksModuleService extends MedusaService({
    * ATOMIC STATUS CLAIM on one globepay_withdrawal row — the mutex behind the
    * admin approve/deny routes (plan 094).
    *
-   * ONE conditional UPDATE, and that is the whole point: Postgres re-evaluates
-   * the predicate against committed state AFTER the row lock is released, so
-   * of two concurrent claims exactly one matches a row and the other matches
-   * none. `RETURNING id` is that answer. `true` means THIS caller moved the
-   * row and owns whatever follows it (a gateway submit, a refund); `false`
-   * means someone else already did, and the caller must not act.
+   * ONE conditional claim (claim.ts carries the full argument): `true` means
+   * THIS caller moved the row and owns whatever follows it (a gateway submit,
+   * a refund); `false` means someone else already did, and the caller must not
+   * act.
    *
    * Do NOT reimplement this with `updateGlobePayWithdrawals({ selector, data
    * })`. It type-checks and hands back an array, so `length === 0` reads like
@@ -3241,8 +3242,7 @@ class PacksModuleService extends MedusaService({
    * find-then-write and takes no row lock: two concurrent approves — a
    * double-clicked button is the realistic trigger — both read 'held', both
    * see one row, and both submit. That is a duplicate payout to a real bank
-   * account. Raw SQL for the same reason the rolling-24h cap above uses it:
-   * the module-service layer has no conditional-write primitive.
+   * account.
    */
   @InjectTransactionManager()
   async claimGlobePayWithdrawalStatus(
@@ -3256,15 +3256,14 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<boolean> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    // One placeholder per accepted status. The list is ours (never a request
-    // value) and it stays BOUND rather than interpolated regardless.
-    const accepted = input.from.map(() => '?').join(', ');
-    const rows = await em.execute<{ id: string }[]>(
-      'UPDATE globepay_withdrawal SET status = ?, updated_at = now() ' +
-        `WHERE id = ? AND status IN (${accepted}) AND deleted_at IS NULL ` +
-        'RETURNING id',
-      [input.to, input.id, ...input.from],
-    );
+    const rows = await claimRows(em, {
+      table: 'globepay_withdrawal',
+      ids: [input.id],
+      // One bound placeholder per accepted status — the list is ours (never a
+      // request value) and it stays bound rather than interpolated regardless.
+      where: { status: input.from },
+      set: { status: input.to },
+    });
     return rows.length === 1;
   }
 
@@ -3345,7 +3344,7 @@ class PacksModuleService extends MedusaService({
 
     // The try spans the WHOLE locked section, not just the advisory lock.
     // SET LOCAL applies to every statement left in this transaction, and the
-    // claim's `UPDATE … RETURNING id` takes a ROW lock that can time out too
+    // claim's conditional UPDATE takes a ROW lock that can time out too
     // — wrapping only the acquisition would let that one reach the operator
     // as a raw `canceling statement due to lock timeout`, which is exactly
     // what the translation below exists to prevent, one statement later.
@@ -4342,14 +4341,13 @@ class PacksModuleService extends MedusaService({
    * ATOMIC ONE-SHOT CLAIM of the free welcome pack — answers `true` to exactly
    * one caller, and `false` to every other.
    *
-   * ONE conditional UPDATE, for the same reason as
-   * claimGlobePayWithdrawalStatus: Postgres re-evaluates the predicate against
-   * committed state AFTER the row lock is released, so of two concurrent
-   * claims — a double-tapped "Open free pack" is the realistic trigger —
-   * exactly one matches a row. A read-then-write (list the state, check
-   * free_pack_claimed_at, then update) type-checks and reads like the same
-   * guard, but takes no row lock: both callers see NULL and both open a free
-   * pack. `true` means THIS caller owns the free open that follows.
+   * ONE conditional claim (see claim.ts), for the same reason as
+   * claimGlobePayWithdrawalStatus: of two concurrent claims — a double-tapped
+   * "Open free pack" is the realistic trigger — exactly one matches a row. A
+   * read-then-write (list the state, check free_pack_claimed_at, then update)
+   * type-checks and reads like the same guard, but takes no row lock: both
+   * callers see NULL and both open a free pack. `true` means THIS caller owns
+   * the free open that follows.
    *
    * No row is lazily created here: an unstamped account has no
    * free_pack_available_at, so the WHERE matches nothing and the claim is
@@ -4361,15 +4359,16 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<boolean> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    const rows = await em.execute<{ id: string }[]>(
-      'UPDATE customer_account_state ' +
-        'SET free_pack_claimed_at = now(), updated_at = now() ' +
-        'WHERE customer_id = ? AND free_pack_available_at IS NOT NULL ' +
-        'AND free_pack_claimed_at IS NULL AND deleted_at IS NULL ' +
-        'RETURNING id',
-      [customerId],
-    );
-    return rows.length > 0;
+    return claimOne(em, {
+      table: 'customer_account_state',
+      ids: [customerId],
+      idColumn: 'customer_id',
+      where: {
+        free_pack_available_at: NOT_NULL,
+        free_pack_claimed_at: null,
+      },
+      set: { free_pack_claimed_at: NOW },
+    });
   }
 
   // Compensation for a free open that failed after the claim was won: hand the
@@ -6642,19 +6641,19 @@ class PacksModuleService extends MedusaService({
       );
     }
     if (pull.revealed_at == null) {
-      // First-write-wins under concurrent reveals — ONE conditional UPDATE.
-      // Not `updatePulls({ selector })`: the generated selector-update is a
-      // find-then-write with no WHERE on the write, so two racing calls would
-      // both "win" and Telegram (no dedupe) would post the same hit twice.
-      // Re-read to return whichever value persisted.
+      // First-write-wins under concurrent reveals — ONE conditional claim
+      // (see claim.ts). Not `updatePulls({ selector })`: the generated
+      // selector-update is a find-then-write with no WHERE on the write, so
+      // two racing calls would both "win" and Telegram (no dedupe) would post
+      // the same hit twice. Re-read to return whichever value persisted.
       const em = (sharedContext.transactionManager ??
         sharedContext.manager) as unknown as LedgerSqlManager;
-      const stamped = await em.execute<{ id: string }[]>(
-        'UPDATE pull SET revealed_at = ?, updated_at = NOW() ' +
-          'WHERE id = ? AND revealed_at IS NULL AND deleted_at IS NULL ' +
-          'RETURNING id',
-        [new Date(nowMs), pull.id],
-      );
+      const stamped = await claimOne(em, {
+        table: 'pull',
+        ids: [pull.id],
+        where: { revealed_at: null },
+        set: { revealed_at: new Date(nowMs) },
+      });
       const [fresh] = await this.listPulls(
         { id: pull.id },
         { take: 1 },
@@ -6665,12 +6664,12 @@ class PacksModuleService extends MedusaService({
           fresh.rolled_at,
           fresh.revealed_at,
         ),
-        // The rows the FILTERED update actually touched — empty for the loser
-        // of a race, because its WHERE no longer matched. That is the whole
-        // exactly-once guarantee behind the announcement: Telegram has no
-        // dedupe, so a second caller believing it revealed the pull would mean
-        // the same hit posted twice to a public channel.
-        first_reveal: stamped.length > 0,
+        // Whether the FILTERED update actually touched a row — false for the
+        // loser of a race, because its WHERE no longer matched. That is the
+        // whole exactly-once guarantee behind the announcement: Telegram has
+        // no dedupe, so a second caller believing it revealed the pull would
+        // mean the same hit posted twice to a public channel.
+        first_reveal: stamped,
       };
     }
     return {
@@ -6679,10 +6678,10 @@ class PacksModuleService extends MedusaService({
     };
   }
 
-  // Showcase toggle as ONE conditional UPDATE: stamps only while the pull is
-  // still vaulted and owned by the caller, so a sell/deliver landing between
-  // the route's check and this write loses (0 rows) instead of starring a
-  // sold pull. Same reason as revealPull — `updatePulls({ selector })` is a
+  // Showcase toggle as ONE conditional claim (see claim.ts): stamps only while
+  // the pull is still vaulted and owned by the caller, so a sell/deliver
+  // landing between the route's check and this write loses instead of starring
+  // a sold pull. Same reason as revealPull — `updatePulls({ selector })` is a
   // find-then-write and cannot give this guarantee.
   @InjectManager()
   async setShowcasedIfVaulted(
@@ -6693,13 +6692,12 @@ class PacksModuleService extends MedusaService({
   ): Promise<boolean> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const rows = await em.execute<{ id: string }[]>(
-      'UPDATE pull SET showcased = ?, updated_at = NOW() ' +
-        "WHERE id = ? AND customer_id = ? AND status = 'vaulted' " +
-        'AND deleted_at IS NULL RETURNING id',
-      [showcased, pullId, customerId],
-    );
-    return rows.length > 0;
+    return claimOne(em, {
+      table: 'pull',
+      ids: [pullId],
+      where: { customer_id: customerId, status: 'vaulted' },
+      set: { showcased },
+    });
   }
 
   // Close the instant-buyback window for the caller's OWN pulls — called when
@@ -6737,12 +6735,13 @@ class PacksModuleService extends MedusaService({
   }
 
   // Atomic, guarded pull-status transition — THE seam every vaulted→X flip must
-  // use (buyback, delivery request, deliver/cancel). One conditional UPDATE
-  // (`WHERE status = from`) inside a transaction: if ANY requested pull is not
-  // currently in `from`, the whole batch throws and rolls back — closing the
-  // read-then-unconditional-write race that let one pull be sold back AND
-  // shipped (2026-07-07 audit #1). `set` carries the buyback snapshot columns
-  // so the flip and its money stamp are one atomic statement.
+  // use (buyback, delivery request, deliver/cancel). One conditional claim
+  // (`WHERE status = from`, see claim.ts) inside a transaction: if ANY
+  // requested pull is not currently in `from`, the whole batch throws and
+  // rolls back — closing the read-then-unconditional-write race that let one
+  // pull be sold back AND shipped (2026-07-07 audit #1). `set` carries the
+  // buyback snapshot columns so the flip and its money stamp are one atomic
+  // statement.
   @InjectTransactionManager()
   async transitionPullStatus(
     input: {
@@ -6755,23 +6754,19 @@ class PacksModuleService extends MedusaService({
   ): Promise<void> {
     if (input.ids.length === 0) return;
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    const setCols = ['status = ?', 'updated_at = NOW()'];
-    const params: unknown[] = [input.to];
+    const set: Record<string, unknown> = { status: input.to };
     if (input.set?.buyback_amount !== undefined) {
-      setCols.splice(1, 0, 'buyback_amount = ?');
-      params.push(input.set.buyback_amount);
+      set.buyback_amount = input.set.buyback_amount;
     }
     if (input.set?.buyback_at !== undefined) {
-      setCols.splice(setCols.length - 1, 0, 'buyback_at = ?');
-      params.push(input.set.buyback_at);
+      set.buyback_at = input.set.buyback_at;
     }
-    const placeholders = input.ids.map(() => '?').join(', ');
-    const rows = await em.execute<{ id: string }[]>(
-      `UPDATE pull SET ${setCols.join(', ')} ` +
-        `WHERE id IN (${placeholders}) AND status = ? AND deleted_at IS NULL ` +
-        'RETURNING id',
-      [...params, ...input.ids, input.from],
-    );
+    const rows = await claimRows(em, {
+      table: 'pull',
+      ids: input.ids,
+      where: { status: input.from },
+      set,
+    });
     if (rows.length !== input.ids.length) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,

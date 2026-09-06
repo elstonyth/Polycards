@@ -8,11 +8,10 @@ import { REFERRAL_BIND_WINDOW_MS, REFERRAL_CLOSE_GRACE_MS } from '../referral';
  * a provided transactionManager and call the original method).
  *
  * What these own (review 2026-09):
- *  1. pay and void CLAIM a line with ONE conditional UPDATE … RETURNING id
- *     before any money moves — the generated selector-update is a
- *     find-then-write with no row lock, so a void racing the pay job could
- *     land between the credit and the "status guard" and leave a paid line
- *     reading 'voided'.
+ *  1. pay and void CLAIM a line with ONE conditional UPDATE (claim.ts) before
+ *     any money moves — the generated selector-update is a find-then-write
+ *     with no row lock, so a void racing the pay job could land between the
+ *     credit and the "status guard" and leave a paid line reading 'voided'.
  *  2. approve refuses (and does not audit) when the conditional UPDATE
  *     matched nothing.
  *  3. the cron close defers inside REFERRAL_CLOSE_GRACE_MS of the boundary;
@@ -98,15 +97,18 @@ describe('payWeeklySettlement claims a line before it moves money', () => {
       skipped: 0,
       paid_customer_ids: ['cus_r'],
     });
+    // The whole statement, because every clause in it is load-bearing: ONE
+    // UPDATE, the FROM-state inside the predicate (so the write and the check
+    // cannot be separated by another transaction), the soft-delete guard, and
+    // RETURNING as the answer to "did I move it". Values are BOUND (claim.ts
+    // never interpolates one), so the states live in `params`.
     const [sql, params] = f.em.execute.mock.calls[0];
-    expect(sql).toMatch(/^UPDATE weekly_settlement_line/);
-    expect(sql).toContain("SET status = 'paid'");
-    // The FROM-state is part of the predicate — the write and the check
-    // cannot be separated by another transaction.
-    expect(sql).toContain("status = 'pending'");
-    expect(sql).toContain('deleted_at IS NULL');
-    expect(sql).toContain('RETURNING id');
-    expect(params).toEqual(['wsl_1']);
+    expect(sql).toBe(
+      'UPDATE weekly_settlement_line SET status = ?, updated_at = now() ' +
+        'WHERE id = ? AND status = ? AND deleted_at IS NULL ' +
+        'RETURNING id',
+    );
+    expect(params).toEqual(['paid', 'wsl_1', 'pending']);
     expect(f.ops).toEqual(['claim', 'ledger', 'credit']);
     // The stamp needs no status guard any more — the row is ours.
     expect(f.updateWeeklySettlementLines).toHaveBeenCalledWith(
@@ -157,12 +159,13 @@ describe('payWeeklySettlement claims a line before it moves money', () => {
     );
     expect(r1).toEqual({ paid: 0, skipped: 1, paid_customer_ids: [] });
     const [sql, params] = won.em.execute.mock.calls[0];
-    expect(sql).toContain(
-      "SET status = 'voided', void_reason = 'account_deleted'",
+    expect(sql).toBe(
+      'UPDATE weekly_settlement_line ' +
+        'SET status = ?, void_reason = ?, updated_at = now() ' +
+        'WHERE id = ? AND status = ? AND deleted_at IS NULL ' +
+        'RETURNING id',
     );
-    expect(sql).toContain("status = 'pending'");
-    expect(sql).toContain('RETURNING id');
-    expect(params).toEqual(['wsl_1']);
+    expect(params).toEqual(['voided', 'account_deleted', 'wsl_1', 'pending']);
     expect(won.deductRunTotal).toHaveBeenCalledTimes(1);
     expect(won.recordLedgerEntry).not.toHaveBeenCalled();
 
@@ -186,11 +189,19 @@ describe('voidSettlementLine claims the line the same way', () => {
       f.ctx,
     );
     const [sql, params] = f.em.execute.mock.calls[0];
-    expect(sql).toMatch(/^UPDATE weekly_settlement_line/);
-    expect(sql).toContain("SET status = 'voided'");
-    expect(sql).toContain("status = 'pending'");
-    expect(sql).toContain('RETURNING id');
-    expect(params).toEqual(['suspicious', 'adm_1', 'wsl_1']);
+    expect(sql).toBe(
+      'UPDATE weekly_settlement_line ' +
+        'SET status = ?, void_reason = ?, voided_by = ?, updated_at = now() ' +
+        'WHERE id = ? AND status = ? AND deleted_at IS NULL ' +
+        'RETURNING id',
+    );
+    expect(params).toEqual([
+      'voided',
+      'suspicious',
+      'adm_1',
+      'wsl_1',
+      'pending',
+    ]);
     expect(f.deductRunTotal).toHaveBeenCalledWith(
       { settlementId: 'ws_1', amountCents: 500 },
       expect.anything(),
@@ -223,11 +234,13 @@ describe('approveWeeklySettlement', () => {
       f.ctx,
     );
     const [sql, params] = f.em.execute.mock.calls[0];
-    expect(sql).toMatch(/^UPDATE weekly_settlement /);
-    expect(sql).toContain("SET status = 'approved'");
-    expect(sql).toContain("status = 'draft'");
-    expect(sql).toContain('RETURNING id');
-    expect(params).toEqual(['adm_1', 'ws_1']);
+    expect(sql).toBe(
+      'UPDATE weekly_settlement ' +
+        'SET status = ?, approved_by = ?, approved_at = now(), updated_at = now() ' +
+        'WHERE id = ? AND status = ? AND deleted_at IS NULL ' +
+        'RETURNING id',
+    );
+    expect(params).toEqual(['approved', 'adm_1', 'ws_1', 'draft']);
     expect(f.createAdminActionAudits).toHaveBeenCalledTimes(1);
   });
 
