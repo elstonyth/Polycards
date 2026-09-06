@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { storeShim } from '@/lib/__tests__/store-shim';
 
 // Unit-test the address-book server actions (add / update / delete) at the
 // boundary that unit tests can actually see: what SHAPE reaches the Medusa SDK.
@@ -17,6 +18,10 @@ const { createMock, updateMock, deleteMock, getAuthTokenMock } = vi.hoisted(
   }),
 );
 
+// The address-book actions still go through the SDK; the port's HTTP adapter
+// imports 'server-only' and is pulled in by the file's OTHER actions, so it is
+// shimmed too — nothing here reaches it.
+vi.mock('@/lib/store', () => ({ store: storeShim }));
 vi.mock('@/lib/medusa', () => ({
   sdk: {
     client: { fetch: vi.fn() },

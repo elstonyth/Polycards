@@ -15,9 +15,12 @@
  * Only the COPY still matches on text, and only against each caller's own rules.
  *
  * Imports the `FetchError` class but never `@/lib/medusa` — this module must
- * stay free of the SDK singleton so tests that touch it need no sdk mock.
+ * stay free of the SDK singleton so tests that touch it need no sdk mock. The
+ * same goes for `StoreError`: it comes from src/lib/store-port.ts, which has no
+ * runtime imports of its own, not from the port's HTTP adapter.
  */
 import { FetchError } from '@medusajs/js-sdk';
+import { StoreError } from '@/lib/store-port';
 
 /**
  * A [pattern, message] pair: if `test` matches the error text, return
@@ -50,12 +53,17 @@ export function friendlyError(
  * HTTP status of a failed backend call, or undefined when the failure never
  * reached a response (network drop, or an error we threw ourselves).
  *
- * `sdk.client.fetch` — and therefore `authedFetch` — rejects a non-2xx with
- * `FetchError`, which carries the status. Prefer this over matching the error's
- * message whenever the status is what actually decides the branch.
+ * `sdk.client.fetch` rejects a non-2xx with `FetchError`, which carries the
+ * status; `store.orThrow` (src/lib/store-port.ts) throws `StoreError`, whose
+ * `failure.status` is the same number — undefined there too when the call never
+ * reached a response, or never left at all for want of a cookie. Prefer this
+ * over matching the error's message whenever the status is what actually
+ * decides the branch.
  */
-export const httpStatus = (error: unknown): number | undefined =>
-  error instanceof FetchError ? error.status : undefined;
+export const httpStatus = (error: unknown): number | undefined => {
+  if (error instanceof StoreError) return error.failure.status;
+  return error instanceof FetchError ? error.status : undefined;
+};
 
 /**
  * The broad 401 probe used by the vault actions to set `needsAuth`.
