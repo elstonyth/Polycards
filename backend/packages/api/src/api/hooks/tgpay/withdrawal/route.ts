@@ -1,6 +1,8 @@
 import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
-import { PACKS_MODULE } from '../../../../modules/packs';
-import type PacksModuleService from '../../../../modules/packs/service';
+import {
+  resolvePacks,
+  type GatewayWithdrawals,
+} from '../../../../modules/packs/facets';
 import {
   tgpayCallbackAuthorized,
   tgpayConfigFromEnv,
@@ -63,7 +65,7 @@ export async function POST(
   }
   const state = tgpayPayoutState(String(data.status ?? ''));
 
-  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const packs = resolvePacks<GatewayWithdrawals>(req.scope);
   // Primary key: the transactionRefNum stored right after create-payout. If
   // the callback outruns that write (their id is issued in the same response
   // we are still handling), fall back to OUR reference — on the sandbox the

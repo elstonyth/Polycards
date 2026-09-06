@@ -1,6 +1,8 @@
 import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
-import { PACKS_MODULE } from '../../../../modules/packs';
-import type PacksModuleService from '../../../../modules/packs/service';
+import {
+  resolvePacks,
+  type GatewayDeposits,
+} from '../../../../modules/packs/facets';
 import {
   tgpayCallbackAuthorized,
   tgpayConfigFromEnv,
@@ -60,7 +62,7 @@ export async function POST(
   }
   const state = tgpayPaymentState(String(data.status ?? ''));
 
-  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const packs = resolvePacks<GatewayDeposits>(req.scope);
   const [deposit] = await packs.listGlobePayDeposits(
     { merchant_transaction_id: merchantTransactionId },
     { take: 1 },

@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { MedusaError } from '@medusajs/framework/utils';
-import { PACKS_MODULE } from './index';
-import type PacksModuleService from './service';
+import { resolvePacks, type GatewayDeposits } from './facets';
 import {
   GATEWAYS,
   gatewayConfigFor,
@@ -195,7 +194,7 @@ export async function startGlobePayDeposit(
   }
 
   const config = gatewayConfigFor(gateway);
-  const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const packs = resolvePacks<GatewayDeposits>(scope);
 
   const merchantTransactionId = newMerchantTransactionId();
 

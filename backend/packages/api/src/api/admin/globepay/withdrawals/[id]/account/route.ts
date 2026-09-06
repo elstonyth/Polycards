@@ -3,8 +3,10 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
-import { PACKS_MODULE } from '../../../../../../modules/packs';
-import type PacksModuleService from '../../../../../../modules/packs/service';
+import {
+  resolvePacks,
+  type GatewayReports,
+} from '../../../../../../modules/packs/facets';
 
 // GET /admin/globepay/withdrawals/:id/account — the full destination bank
 // account for ONE withdrawal.
@@ -31,7 +33,7 @@ export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const packs = resolvePacks<GatewayReports>(req.scope);
   const [row] = await packs.listGlobePayWithdrawals(
     { id: req.params.id },
     { take: 1 },

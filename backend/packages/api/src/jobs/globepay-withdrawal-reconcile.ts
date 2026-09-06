@@ -1,7 +1,6 @@
 import { MedusaContainer } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
-import { PACKS_MODULE } from '../modules/packs';
-import type PacksModuleService from '../modules/packs/service';
+import { resolvePacks, type GatewayWithdrawals } from '../modules/packs/facets';
 import {
   globepayWithdrawalsEnabled,
   refundGlobePayWithdrawal,
@@ -44,7 +43,7 @@ export default async function globepayWithdrawalReconcileJob(
   await resolveActiveGateway(container);
   if (!globepayWithdrawalsEnabled()) return;
 
-  const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+  const packs = resolvePacks<GatewayWithdrawals>(container);
   // Per-row gateway, same reasoning as the deposit sweep.
   const configFor = rowGatewayConfigs();
   const now = new Date();

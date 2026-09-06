@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { MedusaError } from '@medusajs/framework/utils';
-import { PACKS_MODULE } from './index';
-import type PacksModuleService from './service';
+import { resolvePacks, type GatewayWithdrawals } from './facets';
 import {
   bankSupportedBy,
   resolveWithdrawalDestination,
@@ -341,7 +340,7 @@ export async function startGlobePayWithdrawal(
       : undefined;
 
   const config = gatewayConfigFor(gateway);
-  const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const packs = resolvePacks<GatewayWithdrawals>(scope);
 
   // Scoped OFF 'failed' on purpose, matching the partial unique index. A failed
   // attempt never moved money and its cause is usually the customer's to fix —
@@ -822,8 +821,8 @@ export async function refundGlobePayWithdrawal(
    * whole change exists to abolish, so the type refuses it.
    */
   failureReason: string,
-): ReturnType<PacksModuleService['withdrawCreditsWithLedger']> {
-  const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
+): ReturnType<GatewayWithdrawals['withdrawCreditsWithLedger']> {
+  const packs = resolvePacks<GatewayWithdrawals>(scope);
   const refund = await packs.withdrawCreditsWithLedger({
     customerId: withdrawal.customer_id,
     amount: Number(withdrawal.amount),

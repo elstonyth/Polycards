@@ -1,7 +1,6 @@
 import { MedusaContainer } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
-import { PACKS_MODULE } from '../modules/packs';
-import type PacksModuleService from '../modules/packs/service';
+import { resolvePacks, type GatewayDeposits } from '../modules/packs/facets';
 import {
   GLOBEPAY_MAX_RM,
   globepayEnabled,
@@ -71,7 +70,7 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
   await resolveActiveGateway(container);
   if (!globepayEnabled()) return;
 
-  const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+  const packs = resolvePacks<GatewayDeposits>(container);
   // Each row is requeried at the gateway it was CREATED under — a switch
   // must not make the sweep ask the new gateway about the old one's rows.
   const configFor = rowGatewayConfigs();
@@ -264,8 +263,7 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
           // the template fails closed AFTER the idempotency key is burned and
           // the email is permanently unsent.
           reference:
-            deposit.gateway_transaction_id ||
-            deposit.merchant_transaction_id,
+            deposit.gateway_transaction_id || deposit.merchant_transaction_id,
           merchantTransactionId: deposit.merchant_transaction_id,
           paymentMethodCode: deposit.payment_method_code,
         });

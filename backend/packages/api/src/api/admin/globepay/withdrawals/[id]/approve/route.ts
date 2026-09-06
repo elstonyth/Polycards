@@ -3,8 +3,10 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
-import { PACKS_MODULE } from '../../../../../../modules/packs';
-import type PacksModuleService from '../../../../../../modules/packs/service';
+import {
+  resolvePacks,
+  type GatewayWithdrawals,
+} from '../../../../../../modules/packs/facets';
 import {
   formatGatewayFailureReason,
   globepayWithdrawalsEnabled,
@@ -51,7 +53,7 @@ export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const packs = resolvePacks<GatewayWithdrawals>(req.scope);
   const logger = req.scope.resolve<{
     info: (message: string) => void;
     warn: (message: string) => void;

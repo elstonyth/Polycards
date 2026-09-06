@@ -1,6 +1,8 @@
 import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
-import { PACKS_MODULE } from '../../../../modules/packs';
-import type PacksModuleService from '../../../../modules/packs/service';
+import {
+  resolvePacks,
+  type GatewayReports,
+} from '../../../../modules/packs/facets';
 import {
   checkBalance,
   GATEWAYS,
@@ -23,7 +25,7 @@ export async function GET(
   res: MedusaResponse,
 ): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
-  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const packs = resolvePacks<GatewayReports>(req.scope);
   const active = await resolveActiveGateway(req.scope);
 
   // Totals for the ACTIVE gateway sit beside that gateway's wallet; every

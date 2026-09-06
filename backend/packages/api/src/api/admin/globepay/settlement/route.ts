@@ -1,6 +1,8 @@
 import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
-import { PACKS_MODULE } from '../../../../modules/packs';
-import type PacksModuleService from '../../../../modules/packs/service';
+import {
+  resolvePacks,
+  type GatewayReports,
+} from '../../../../modules/packs/facets';
 import {
   mergeSettlementPeriods,
   settlementSince,
@@ -48,7 +50,7 @@ export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const packs = resolvePacks<GatewayReports>(req.scope);
 
   const granularity = parseGranularity(req.query.granularity);
   const periods = parsePeriods(req.query.periods);

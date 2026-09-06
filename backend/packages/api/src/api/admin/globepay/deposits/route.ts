@@ -1,7 +1,9 @@
 import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { Modules } from '@medusajs/framework/utils';
-import { PACKS_MODULE } from '../../../../modules/packs';
-import type PacksModuleService from '../../../../modules/packs/service';
+import {
+  resolvePacks,
+  type GatewayReports,
+} from '../../../../modules/packs/facets';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../../../modules/packs/globepay-reconcile';
 import {
   parsePaginationParams,
@@ -58,7 +60,7 @@ export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const packs = resolvePacks<GatewayReports>(req.scope);
   const customerService = req.scope.resolve(Modules.CUSTOMER);
 
   const { limit, offset } = parsePaginationParams(

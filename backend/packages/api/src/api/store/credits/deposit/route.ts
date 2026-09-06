@@ -3,8 +3,10 @@ import {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
-import { PACKS_MODULE } from '../../../../modules/packs';
-import type PacksModuleService from '../../../../modules/packs/service';
+import {
+  resolvePacks,
+  type GatewayDeposits,
+} from '../../../../modules/packs/facets';
 import { startGlobePayDeposit } from '../../../../modules/packs/globepay-deposit';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../../../modules/packs/globepay-reconcile';
 import { payerIpOf } from '../../../utils/payer-ip';
@@ -124,7 +126,7 @@ export async function GET(
   res: MedusaResponse,
 ): Promise<void> {
   const customerId = req.auth_context.actor_id;
-  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const packs = resolvePacks<GatewayDeposits>(req.scope);
 
   const deposits = await packs.listGlobePayDeposits(
     {
