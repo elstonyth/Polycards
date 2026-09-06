@@ -35,10 +35,20 @@ import {
 
 export type { Store, Result, Failure, StoreOptions } from '@/lib/store-port';
 
-async function send({ path, body, ...init }: StoreRequest): Promise<Sent> {
+async function send({
+  path,
+  body,
+  cache,
+  ...init
+}: StoreRequest): Promise<Sent> {
   try {
     const data: unknown = await sdk.client.fetch<unknown>(path, {
       ...init,
+      // 'auto' means send no `cache` key at all — the framework default. An
+      // explicit 'no-store' would make a statically prerenderable route
+      // dynamic, which is not free: it is what `src/app/page.tsx`'s
+      // `revalidate = 15` route cache costs. See StoreOptions['cache'].
+      ...(cache === 'auto' ? {} : { cache }),
       ...(body !== undefined ? { body: body as FetchArgs['body'] } : {}),
     });
     return { ok: true, body: data };

@@ -57,10 +57,32 @@ export type StoreOptions = {
    * read — reading it would make a public route dynamic.
    */
   auth?: 'required' | 'optional' | 'none';
+  /**
+   * Send THIS bearer instead of the cookie's — for the handful of calls whose
+   * token is not the session cookie: the post-register Google refresh and the
+   * profile-handle read that runs before the cookie is set
+   * (actions/auth.ts, data/profiles.ts#fetchProfileHandle).
+   *
+   * Alternative to `auth`, not a modifier of it: when it is given the cookie
+   * jar is never opened and the `required` short-circuit cannot fire, whatever
+   * `auth` says.
+   */
+  bearer?: string;
   query?: Record<string, string | number | boolean>;
   idempotencyKey?: string;
-  /** `no-store` by default: these are per-customer reads. */
-  cache?: 'no-store' | 'force-cache';
+  /**
+   * `no-store` by default: these are per-customer reads.
+   *
+   * `auto` sends NO `cache` key at all — the framework default ("auto no
+   * cache"), which is what a PUBLIC loader on a statically prerenderable route
+   * needs. An explicit `no-store` fetches on every request "even if
+   * Request-time APIs are not detected on the route" (Next 16 docs,
+   * functions/fetch.md), i.e. it makes that route dynamically rendered — which
+   * would silently cost `src/app/page.tsx` its `revalidate = 15` route cache.
+   * Pair it with `auth: 'none'`: either one alone still forces the route
+   * dynamic.
+   */
+  cache?: 'no-store' | 'force-cache' | 'auto';
 };
 
 export interface Store {
@@ -98,7 +120,10 @@ export class StoreError extends Error {
 export type StoreMethod = 'GET' | 'POST' | 'DELETE';
 
 /** One call as the port hands it to an adapter — everything that reaches the
- *  wire. `body` and `query` are present only when the caller gave one. */
+ *  wire. `body` and `query` are present only when the caller gave one.
+ *  `cache: 'auto'` is the adapter's instruction to send NO cache key (see
+ *  `StoreOptions['cache']`), so it is the one field here that is a mode rather
+ *  than a literal wire value. */
 export type StoreRequest = {
   method: StoreMethod;
   path: string;
@@ -147,7 +172,8 @@ export function createStore(transport: Transport, log: Log): Store {
     o: StoreOptions = {},
   ): Promise<Result<T>> {
     const auth = o.auth ?? 'required';
-    const token = auth === 'none' ? null : await transport.token();
+    const token =
+      o.bearer ?? (auth === 'none' ? null : await transport.token());
     if (auth === 'required' && !token) {
       return { ok: false, kind: 'unauthenticated', text: NOT_AUTHENTICATED };
     }

@@ -129,6 +129,59 @@ describe('store — what reaches the wire', () => {
       cache: 'force-cache',
     });
   });
+
+  // What this buys: `src/app/page.tsx` is prerendered with `revalidate = 15`,
+  // and an explicit `cache: 'no-store'` fetches "on every request, even if
+  // Request-time APIs are not detected on the route" (Next 16 fetch docs) —
+  // i.e. it would make the home route dynamic and cost it that route cache.
+  // The public loaders it renders therefore ask for 'auto', which must reach
+  // the SDK as NO cache key at all, not as the string 'auto'.
+  it('cache auto sends no cache key at all, so a prerenderable route stays static', async () => {
+    await store.get('/store/packs', BalanceSchema, {
+      auth: 'none',
+      cache: 'auto',
+    });
+    expect(mocks.fetch).toHaveBeenCalledWith('/store/packs', {
+      method: 'GET',
+      headers: {},
+    });
+    expect(Object.keys(mocks.fetch.mock.calls[0]![1] as object)).not.toContain(
+      'cache',
+    );
+  });
+});
+
+describe('store — an explicit bearer', () => {
+  // The post-register Google refresh and the profile-handle read that runs
+  // before the cookie is set both carry a token that is NOT the session
+  // cookie. Opening the jar for them would send the WRONG bearer (or none).
+  it('sends the given token and never opens the cookie jar', async () => {
+    const r = await store.post(
+      '/auth/token/refresh',
+      BalanceSchema,
+      undefined,
+      { bearer: 'register-token' },
+    );
+    expect(r).toEqual({ ok: true, data: { balance: 12 } });
+    expect(mocks.cookies).not.toHaveBeenCalled();
+    expect(mocks.fetch).toHaveBeenCalledWith('/auth/token/refresh', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer register-token' },
+      cache: 'no-store',
+    });
+  });
+
+  it('satisfies auth required on its own — no cookie is needed', async () => {
+    mocks.cookieValue = undefined;
+    const r = await store.get('/store/profiles/me', BalanceSchema, {
+      bearer: 'fresh',
+    });
+    expect(r.ok).toBe(true);
+    expect(mocks.fetch).toHaveBeenCalledWith('/store/profiles/me', {
+      ...GET_INIT,
+      headers: { Authorization: 'Bearer fresh' },
+    });
+  });
 });
 
 describe('store — classification (never throws)', () => {
