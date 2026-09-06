@@ -232,14 +232,18 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
         // Credit -> receipt -> row claim -> feed lives in applyDepositOutcome
         // (globepay-deposit.ts), one copy shared with the callback route —
         // including the SAME idempotency anchor, so a callback arriving while
-        // this sweep runs cannot produce a second credit, and the same
-        // amount fences. This call site keeps only what is specific to the
-        // SWEEP: the settlement facts the requery carries (`detail` cannot be
-        // null on this branch — 'settle' is only produced from a successful
-        // requery — but the guards keep tsc honest rather than asserting),
-        // the counters, and the log lines.
+        // this sweep runs cannot produce a second credit. NOT the same amount
+        // policy: `source: 'requery'` credits what the gateway's own record
+        // says, exactly as this sweep always did, while the callback route
+        // refuses anything but the row's amount. The one guard on this path is
+        // reconcileAction's ceiling, above. This call site keeps only what is
+        // specific to the SWEEP: the settlement facts the requery carries
+        // (`detail` cannot be null on this branch — 'settle' is only produced
+        // from a successful requery — but the guards keep tsc honest rather
+        // than asserting), the counters, and the log lines.
         const outcome = await applyDepositOutcome(container, deposit, {
           state: 'settled',
+          source: 'requery',
           amount: action.amount,
           // `||`, not `??` — an empty-string gateway id must fall through, or
           // the receipt template fails closed AFTER the idempotency key is
@@ -253,16 +257,18 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
           settledAt: now,
         });
 
-        // The requery disagrees with what the row asked for. Quarantine,
-        // exactly like the over-ceiling branch above and like the callback
-        // route's 400: no credit, and NOT written off — the row keeps its
-        // status so an operator can settle it by hand. Unreachable while the
-        // hosted checkout fixes the sum at create-payment, which is why it is
-        // counted rather than merely logged.
+        // The requery reported something that is not a payable amount at all —
+        // zero, negative, or an unparseable one read as NaN, which slips past
+        // the ceiling comparison above. NOT a disagreement with the row: a
+        // requery that says a different sum was paid is credited (see the
+        // `source` note above). Quarantine, exactly like the over-ceiling
+        // branch: no credit, and NOT written off — the row keeps its status so
+        // an operator can settle it by hand. Counted rather than merely
+        // logged, because it means the gateway answered us with nonsense.
         if (!outcome.applied) {
           quarantined += 1;
           logger.error(
-            `[globepay-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount} but the row asked for RM ${Number(deposit.amount_requested)} (${outcome.reason}) — not credited, not written off; left ${deposit.status} for manual settlement`,
+            `[globepay-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, which is not a creditable amount (${outcome.reason}) — not credited, not written off; left ${deposit.status} for manual settlement`,
           );
           continue;
         }

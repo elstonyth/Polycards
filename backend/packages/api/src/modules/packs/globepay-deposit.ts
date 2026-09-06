@@ -385,8 +385,26 @@ export type DepositOutcomeRow = {
 export type DepositOutcome =
   | {
       state: 'settled';
-      /** What the gateway says was paid — fenced against the row, then
-       *  credited verbatim. */
+      /**
+       * WHERE this observation came from, which is what decides whether the
+       * amount is fenced against the row. The two are not interchangeable:
+       *
+       * - `'callback'` — an unsolicited POST from the public internet. Its
+       *   amount is attacker-influenced (only the signature says it came from
+       *   the gateway, and a replayed or forged sum converts 1:1 into
+       *   withdrawable balance), so it must EQUAL what the row asked for and
+       *   sit under the gateway's ceiling, or nothing is written.
+       * - `'requery'` — a server-initiated read of the gateway's own record,
+       *   the provider's documented source of truth. It is trusted verbatim:
+       *   the customer may genuinely have paid a different sum, and this is
+       *   production's only crediting path, so refusing here strands the
+       *   payment with no automatic remedy at all. Its ceiling guard lives
+       *   upstream in `reconcileAction`, which quarantines before the sweep
+       *   ever gets here.
+       */
+      source: 'callback' | 'requery';
+      /** What the gateway says was paid. Credited verbatim (a `'callback'`
+       *  is fenced against the row first). */
       amount: number;
       /** The reference the ledger row, the receipt and the feed row all
        *  carry. Composed by the caller, because the two of them know
@@ -430,10 +448,12 @@ export type DepositOutcomeResult =
  *   fence the amount -> credit (idempotent) -> receipt -> claim the row ->
  *   feed row (best-effort, and only when the credit was ours)
  *
- * Each caller used to carry its own copy, which is how the amount fence ended
- * up on only one of them. It lives HERE now, so a deposit settled from a
- * requery is fenced exactly like one settled from a callback — and since the
- * sweep is production's only crediting path, that was the half that mattered.
+ * Each caller used to carry its own copy. One copy does NOT mean one policy:
+ * `outcome.source` keeps the per-site amount fence the two of them had for a
+ * reason (see `DepositOutcome`). A callback's amount is attacker-influenced
+ * and must match the row; a requery is the gateway's own authoritative record
+ * and is credited verbatim, because the sweep is production's only crediting
+ * path and refusing there strands a real payment with no automatic remedy.
  *
  * The receipt sits BEFORE the row claim and outside any replay guard — the
  * same ordering, for the same reason, as refundGlobePayWithdrawal: once the
@@ -469,21 +489,38 @@ export async function applyDepositOutcome(
   }
 
   const { amount } = outcome;
+  // BOTH sources. Not the per-site fence below: a zero, negative or
+  // unparseable amount is never a payment from anyone, and `Number(q.amount)`
+  // on a malformed requery yields NaN, which slips past every `>` comparison
+  // upstream and would otherwise be credited into a bigNumber column.
   if (!Number.isFinite(amount) || amount <= 0) {
     return { applied: false, reason: 'amount-not-positive' };
   }
-  // The hosted checkout fixes the sum at create-payment, so an observation can
-  // only disagree with the row if it is forged or the gateway is wrong — and
-  // either way it must not become withdrawable balance. Refuse and leave the
-  // row where it is. The gateway's own ceiling is the second fence, read off
-  // the gateway the ROW was created under (the same number as GLOBEPAY_MAX_RM
-  // today; the row's is the honest one to ask).
-  const gateway = rowGateway(deposit);
-  const ceiling = gateway
-    ? GATEWAYS[gateway].limits.depositMax
-    : GLOBEPAY_MAX_RM;
-  if (amount !== Number(deposit.amount_requested) || amount > ceiling) {
-    return { applied: false, reason: 'amount-mismatch' };
+  // CALLBACK ONLY. The hosted checkout fixes the sum at create-payment, so an
+  // unsolicited callback can only disagree with the row if it is forged or the
+  // gateway is wrong — and either way it must not become withdrawable balance.
+  // Refuse and leave the row where it is; the sweep's requery then settles the
+  // deposit on the gateway's own record. The gateway's own ceiling is the
+  // second fence, read off the gateway the ROW was created under (the same
+  // number as GLOBEPAY_MAX_RM today; the row's is the honest one to ask).
+  //
+  // A `'requery'` reaches neither fence — see `DepositOutcome.source` for why
+  // trusting it is the deliberate choice, and `reconcileAction` for the
+  // ceiling guard that still bounds it, upstream.
+  //
+  // Written as "not the trusted source" rather than "is the fenced source" so
+  // it FAILS CLOSED: only the one value that has an argued reason to skip the
+  // fence skips it. A typo at a boundary that casts (the specs' options
+  // helper does), or a third source added later, is fenced by default rather
+  // than silently credited verbatim.
+  if (outcome.source !== 'requery') {
+    const gateway = rowGateway(deposit);
+    const ceiling = gateway
+      ? GATEWAYS[gateway].limits.depositMax
+      : GLOBEPAY_MAX_RM;
+    if (amount !== Number(deposit.amount_requested) || amount > ceiling) {
+      return { applied: false, reason: 'amount-mismatch' };
+    }
   }
 
   const mutation = await packs.topUpCreditsWithLedger({

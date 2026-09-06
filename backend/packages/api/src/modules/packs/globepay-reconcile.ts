@@ -126,14 +126,22 @@ export type ReconcileInput = {
  */
 export function reconcileAction(input: ReconcileInput): ReconcileAction {
   if (input.state === 'success') {
-    // Trust the requery's amount over our requested one, for the same reason
-    // the callback path does: the customer may have paid a different sum.
+    // Trust the requery's amount over our requested one: the customer may
+    // have paid a different sum, and this is the gateway's own record of what
+    // it collected — a server-initiated read, not something a caller can
+    // influence. applyDepositOutcome credits it verbatim on `source:
+    // 'requery'` for exactly that reason.
     //
-    // Bounded by the submit path's own ceiling, though — the same guard the
-    // callback route applies, for the same reason: an inflated amount from the
-    // gateway converts 1:1 into withdrawable balance, and nothing downstream
-    // caps a top-up. Over it we quarantine rather than settle or write off,
-    // because the customer may genuinely have paid.
+    // The CALLBACK path is deliberately stricter and refuses any amount that
+    // is not the row's, because an unsolicited POST is attacker-influenced in
+    // a way this read is not. That asymmetry is the policy, not an oversight —
+    // see DepositOutcome.source.
+    //
+    // Bounded by the submit path's own ceiling either way: an inflated amount
+    // converts 1:1 into withdrawable balance, and nothing downstream caps a
+    // top-up. THIS is the sweep's only amount guard, so it is what keeps a
+    // wrong requery from minting balance. Over it we quarantine rather than
+    // settle or write off, because the customer may genuinely have paid.
     if (input.amount > GLOBEPAY_MAX_RM) {
       return { kind: 'quarantine', amount: input.amount };
     }
@@ -243,7 +251,9 @@ export function classifyRequeryError(error: unknown): RequeryRefusal {
  */
 export const GLOBEPAY_AMBIGUOUS_GIVEUP_DEFAULT_MS = 7 * 24 * 60 * 60 * 1000;
 
-export function ambiguousGiveUpMs(env: NodeJS.ProcessEnv = process.env): number {
+export function ambiguousGiveUpMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
   const raw = Number(env.GLOBEPAY_AMBIGUOUS_GIVEUP_MS);
   return Number.isFinite(raw) && raw > 0
     ? raw

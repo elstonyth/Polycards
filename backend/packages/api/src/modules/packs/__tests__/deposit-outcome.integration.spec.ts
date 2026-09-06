@@ -103,9 +103,12 @@ moduleIntegrationTestRunner<PacksModuleService>({
     const reread = async (id: string) =>
       (await service.listGlobePayDeposits({ id }, { take: 1 }))[0];
 
+    /** Defaults to the CALLBACK source — the fenced one. Pass
+     *  `{ source: 'requery' }` for the sweep's semantics. */
     const settled = (over: Record<string, unknown> = {}) =>
       ({
         state: 'settled' as const,
+        source: 'callback' as const,
         amount: 50,
         gatewayRef: 'tx-1',
         settledAt: new Date('2026-09-06T10:00:00.000Z'),
@@ -192,7 +195,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(sent.length).toBe(firstSendCount + 1);
       });
 
-      it('refuses an amount that is not the row amount — no credit, no row change', async () => {
+      // The two sources, side by side. They are NOT interchangeable and the
+      // difference is the whole reason `source` exists: a callback is an
+      // unsolicited POST whose amount is attacker-influenced, a requery is the
+      // gateway's own record read by us. Swap either expectation and you have
+      // either a forgeable credit or a stranded payment on production's only
+      // crediting path.
+      it("source 'callback': refuses an amount that is not the row amount — no credit, no row change", async () => {
         const row = await seed('3');
 
         for (const amount of [49, 51, 10001]) {
@@ -211,18 +220,52 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(sent).toEqual([]);
       });
 
-      it('refuses a non-positive or unparseable amount before the mismatch fence', async () => {
+      it("source 'requery': credits the OBSERVED amount when it disagrees with the row", async () => {
+        const row = await seed('3b');
+
+        const result = await applyDepositOutcome(
+          scope,
+          row,
+          settled({ source: 'requery', amount: 60 }),
+        );
+
+        expect(result).toEqual({ applied: true, replayed: false });
+        // The observed sum, in the ledger AND in the row mirror — the row
+        // asked for 50.
+        const credits = await service.listCreditTransactions(
+          { customer_id: row.customer_id },
+          { take: 10 },
+        );
+        expect(credits).toHaveLength(1);
+        expect(Number(credits[0].amount)).toBe(60);
+        const after = await reread(row.id);
+        expect(after.status).toBe('settled');
+        expect(Number(after.amount_settled)).toBe(60);
+      });
+
+      it('refuses a non-positive or unparseable amount from EITHER source', async () => {
         const row = await seed('4');
 
-        for (const amount of [0, -5, Number('abc')]) {
-          await expect(
-            applyDepositOutcome(scope, row, settled({ amount })),
-          ).resolves.toEqual({
-            applied: false,
-            reason: 'amount-not-positive',
-          });
+        // The one guard both sources share: no sum a caller can name here is
+        // a payment, and NaN (an unparseable requery) passes every `>` test
+        // upstream, so nothing else would stop it reaching the ledger.
+        for (const source of ['callback', 'requery'] as const) {
+          for (const amount of [0, -5, Number('abc')]) {
+            await expect(
+              applyDepositOutcome(scope, row, settled({ source, amount })),
+            ).resolves.toEqual({
+              applied: false,
+              reason: 'amount-not-positive',
+            });
+          }
         }
         expect((await reread(row.id)).status).toBe('pending');
+        expect(
+          await service.listCreditTransactions(
+            { customer_id: row.customer_id },
+            { take: 10 },
+          ),
+        ).toHaveLength(0);
       });
 
       it('settles a written-off row from the status the caller read, not from pending', async () => {

@@ -132,6 +132,9 @@ export async function POST(
     // net_amount is left for the audit sweep to backfill.
     const outcome = await applyDepositOutcome(req.scope, deposit, {
       state: 'settled',
+      // An unsolicited POST: its amount is fenced against the row. The sweep
+      // passes 'requery' and is trusted verbatim — see DepositOutcome.source.
+      source: 'callback',
       amount: creditedAmount,
       gatewayRef: gatewayTransactionId || merchantTransactionId,
       gatewayTransactionId: learnedId,
