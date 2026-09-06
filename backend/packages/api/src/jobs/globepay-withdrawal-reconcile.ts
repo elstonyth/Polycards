@@ -2,6 +2,7 @@ import { MedusaContainer } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { resolvePacks, type GatewayWithdrawals } from '../modules/packs/facets';
 import {
+  applyWithdrawalOutcome,
   globepayWithdrawalsEnabled,
   refundGlobePayWithdrawal,
   withdrawalIdempotencyReference,
@@ -12,9 +13,6 @@ import {
   rowGatewayConfigs,
 } from '../modules/packs/gateway';
 import { toOptionalMoney } from '../modules/packs/money';
-import { notifyFeed } from '../modules/packs/notify-feed';
-import { withdrawalFeedKey } from '../modules/packs/feed-events';
-import { sendWithdrawalReceipt } from '../modules/packs/withdrawal-receipt';
 import {
   GLOBEPAY_RECONCILE_BATCH,
   GLOBEPAY_WD_HELD_STALE_AFTER_MS,
@@ -195,61 +193,32 @@ export default async function globepayWithdrawalReconcileJob(
       }
 
       if (action.kind === 'settle') {
-        // The emailed record — BEFORE the terminal row update: once the row
-        // leaves 'pending' this sweep never selects it again and a retried
-        // callback early-returns, so a crash between the update and a later
-        // send would lose the email forever. A crash after this send re-runs
-        // the branch next sweep and the notification module's unique
-        // idempotency_key dedupes. Non-throwing.
-        await sendWithdrawalReceipt(container, {
-          customerId: withdrawal.customer_id,
-          amount: Number(withdrawal.amount),
+        // The receipt/claim/feed ordering lives in applyWithdrawalOutcome
+        // (globepay-withdrawal.ts), one copy shared with the payout callback
+        // — the mirror of refundGlobePayWithdrawal on the other branch. This
+        // call site keeps only what is specific to the SWEEP: the settlement
+        // facts the requery carries, the counter, and the log line saying the
+        // callback never arrived. `detail` is non-null on this branch
+        // ('settle' only comes from a successful requery); the guards keep
+        // tsc honest rather than asserting.
+        await applyWithdrawalOutcome(container, withdrawal, {
           // `||`, not `??` — an empty-string gateway id must fall through, or
-          // the template fails closed AFTER the idempotency key is burned and
-          // the email is permanently unsent.
-          reference:
+          // the receipt template fails closed AFTER the idempotency key is
+          // burned and the email is permanently unsent.
+          gatewayRef:
             withdrawal.gateway_transaction_id ||
             withdrawal.merchant_transaction_id,
-          merchantTransactionId: withdrawal.merchant_transaction_id,
-          outcome: 'paid',
-        });
-        await packs.updateGlobePayWithdrawals({
-          selector: { id: withdrawal.id, status: 'pending' },
-          data: {
-            status: 'settled',
-            gateway_status: gatewayStatus,
-            // Same settlement mirror the callback route writes; `detail` is
-            // non-null on this branch ('settle' only comes from a successful
-            // requery) — the guard keeps tsc honest rather than asserting.
-            amount_settled: toOptionalMoney(detail?.amount),
-            net_amount: toOptionalMoney(detail?.netAmount),
-            bank_reference_no: detail?.bankReferenceNo || null,
-            unique_reference_no: detail?.uniqueReferenceNo || null,
-            settled_at: now,
-          },
+          gatewayStatus,
+          amountSettled: toOptionalMoney(detail?.amount),
+          netAmount: toOptionalMoney(detail?.netAmount),
+          bankReferenceNo: detail?.bankReferenceNo || null,
+          uniqueReferenceNo: detail?.uniqueReferenceNo || null,
+          settledAt: now,
         });
         settled += 1;
         logger.warn(
           `[globepay-wd-reconcile] settled ${withdrawal.merchant_transaction_id} from a REQUERY — the callback for this payout was never received`,
         );
-        try {
-          await notifyFeed(container, {
-            receiverId: withdrawal.customer_id,
-            template: 'withdrawal_paid',
-            data: {
-              amount_myr: Number(withdrawal.amount),
-              reference:
-                withdrawal.gateway_transaction_id ??
-                withdrawal.merchant_transaction_id,
-            },
-            idempotencyKey: withdrawalFeedKey(
-              withdrawal.merchant_transaction_id,
-              'paid',
-            ),
-          });
-        } catch {
-          // Never fail a committed settle over a notification.
-        }
         continue;
       }
 
@@ -281,13 +250,12 @@ export default async function globepayWithdrawalReconcileJob(
       }
       // The four-step refund/receipt/close/notify ordering lives in
       // refundGlobePayWithdrawal (globepay-withdrawal.ts) — one copy shared
-      // with the admin deny route (plan 094 Task 5), rather than a second
-      // verbatim one. The payout callback in
-      // api/hooks/tgpay/withdrawal/route.ts still carries its own
-      // separate variant of this ordering. This call site keeps only what is
-      // specific to the SWEEP: the debit-existence guard above, counting the
-      // result below, and the terminal update's 'pending' scope — the
-      // helper's default, because that is the status this loop selected on.
+      // with the admin deny route (plan 094 Task 5) and with the payout
+      // callback, rather than a verbatim copy each. This call site keeps only
+      // what is specific to the SWEEP: the debit-existence guard above,
+      // counting the result below, and the terminal update's 'pending' scope
+      // — the helper's default, because that is the status this loop selected
+      // on.
       await refundGlobePayWithdrawal(
         container,
         withdrawal,

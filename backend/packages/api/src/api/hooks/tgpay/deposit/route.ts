@@ -9,10 +9,7 @@ import {
   tgpayPaymentState,
 } from '../../../../modules/packs/tgpay-client';
 import { GATEWAYS, rowGateway } from '../../../../modules/packs/gateway';
-import { topupIdempotencyReference } from '../../../../modules/packs/topup';
-import { sendTopupReceipt } from '../../../../modules/packs/topup-receipt';
-import { notifyFeed } from '../../../../modules/packs/notify-feed';
-import { topupFeedKey } from '../../../../modules/packs/feed-events';
+import { applyDepositOutcome } from '../../../../modules/packs/globepay-deposit';
 
 // TGPay payment server-notify (docs "Payment callback"). The two key headers
 // are the whole authentication (plus the source allowlist in middlewares).
@@ -111,88 +108,43 @@ export async function POST(
     return;
   }
 
+  // Their id, when this callback carries one; never blanking what the row
+  // already holds. Both branches below write it.
+  const learnedId = gatewayTransactionId || deposit.gateway_transaction_id;
+
   if (state === 'failed') {
-    await packs.updateGlobePayDeposits({
-      selector: { id: deposit.id, status: 'pending' },
-      data: {
-        status: 'failed',
-        gateway_transaction_id:
-          gatewayTransactionId || deposit.gateway_transaction_id,
-      },
+    await applyDepositOutcome(req.scope, deposit, {
+      state: 'failed',
+      gatewayTransactionId: learnedId,
     });
     res.status(200).send('success');
     return;
   }
 
   const creditedAmount = Number(data.amount);
-  if (!Number.isFinite(creditedAmount) || creditedAmount <= 0) {
-    logger.error(
-      `[tgpay] settled callback for ${merchantTransactionId} carried a non-positive amount (${String(data.amount)}) — refusing to credit`,
-    );
-    res.status(400).send('rejected');
-    return;
-  }
-  // The hosted checkout fixes the sum at create-payment, so the callback can
-  // only disagree with the row if it is forged or TGPay is wrong — and either
-  // way it must not turn into withdrawable balance. Refuse and leave the row
-  // pending; the reconcile sweep re-reads /transaction/query and settles it
-  // with the row's own amount. Same rule, expressed against the gateway's
-  // ceiling, as a second fence.
-  const requested = Number(deposit.amount_requested);
-  const ceiling = GATEWAYS.tgpay.limits.depositMax;
-  if (creditedAmount !== requested || creditedAmount > ceiling) {
-    logger.error(
-      `[tgpay] settled callback for ${merchantTransactionId} claims RM ${creditedAmount} but the row asked for RM ${requested} (ceiling RM ${ceiling}) — refusing to credit; the row remains ${deposit.status} for the sweep`,
-    );
-    res.status(400).send('rejected');
-    return;
-  }
-
-  const reference = gatewayTransactionId || merchantTransactionId;
   try {
-    const mutation = await packs.topUpCreditsWithLedger({
-      customerId: deposit.customer_id,
+    // The whole settle sequence — fences, credit, receipt, row claim, feed —
+    // lives in applyDepositOutcome, shared verbatim with the reconcile sweep.
+    // The amount fences are its first two steps and write nothing, so a
+    // refusal here is the same 400-and-leave-it-alone this route always
+    // answered. bankName is a display name, not a bank reference, so it is
+    // not stored in the reference columns; the callback carries no fee, so
+    // net_amount is left for the audit sweep to backfill.
+    const outcome = await applyDepositOutcome(req.scope, deposit, {
+      state: 'settled',
       amount: creditedAmount,
-      reason: 'topup',
-      ledgerPaymentMethod: deposit.payment_method_code,
-      ledgerGatewayRef: reference,
-      reference,
-      idempotencyReference: topupIdempotencyReference(
-        deposit.customer_id,
-        merchantTransactionId,
-      ),
+      gatewayRef: gatewayTransactionId || merchantTransactionId,
+      gatewayTransactionId: learnedId,
+      settledAt: new Date(),
     });
-    await sendTopupReceipt(req.scope, {
-      customerId: deposit.customer_id,
-      amount: creditedAmount,
-      reference,
-      merchantTransactionId,
-      paymentMethodCode: deposit.payment_method_code,
-    });
-    await packs.updateGlobePayDeposits({
-      selector: { id: deposit.id, status: deposit.status },
-      data: {
-        status: 'settled',
-        gateway_transaction_id:
-          gatewayTransactionId || deposit.gateway_transaction_id,
-        amount_settled: creditedAmount,
-        // The callback carries no fee; the audit sweep backfills net_amount
-        // from /transaction/query. bankName is a display name, not a bank
-        // reference, so it is not stored in the reference columns.
-        settled_at: new Date(),
-      },
-    });
-    if (!mutation.replayed) {
-      try {
-        await notifyFeed(req.scope, {
-          receiverId: deposit.customer_id,
-          template: 'topup_credited',
-          data: { amount_myr: creditedAmount, reference },
-          idempotencyKey: topupFeedKey(merchantTransactionId),
-        });
-      } catch {
-        // Feed is best-effort; the credit already landed.
-      }
+    if (!outcome.applied) {
+      logger.error(
+        outcome.reason === 'amount-not-positive'
+          ? `[tgpay] settled callback for ${merchantTransactionId} carried a non-positive amount (${String(data.amount)}) — refusing to credit`
+          : `[tgpay] settled callback for ${merchantTransactionId} claims RM ${creditedAmount} but the row asked for RM ${Number(deposit.amount_requested)} (ceiling RM ${GATEWAYS.tgpay.limits.depositMax}) — refusing to credit; the row remains ${deposit.status} for the sweep`,
+      );
+      res.status(400).send('rejected');
+      return;
     }
   } catch (error) {
     logger.error(

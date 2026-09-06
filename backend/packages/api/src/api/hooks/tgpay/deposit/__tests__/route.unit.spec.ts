@@ -37,7 +37,9 @@ const approved = {
 function harness(deposit: Record<string, unknown> | null) {
   const packs = {
     listGlobePayDeposits: jest.fn().mockResolvedValue(deposit ? [deposit] : []),
-    updateGlobePayDeposits: jest.fn().mockResolvedValue(undefined),
+    // Every status transition on a deposit row is a conditional claim now
+    // (applyDepositOutcome). `true` = this caller moved the row.
+    claimGlobePayDepositStatus: jest.fn().mockResolvedValue(true),
     topUpCreditsWithLedger: jest.fn().mockResolvedValue({
       id: 'ct_1',
       balance: 50,
@@ -130,14 +132,15 @@ describe('tgpay deposit callback — settlement', () => {
         idempotencyReference: topupIdempotencyReference('cus_1', 'PC-1'),
       }),
     );
-    expect(h.packs.updateGlobePayDeposits).toHaveBeenCalledWith(
+    expect(h.packs.claimGlobePayDepositStatus).toHaveBeenCalledWith(
       expect.objectContaining({
-        selector: { id: 'gpd_1', status: 'pending' },
-        data: expect.objectContaining({
-          status: 'settled',
-          amount_settled: 50,
-          gateway_transaction_id: 'tx-1',
-        }),
+        id: 'gpd_1',
+        // Claimed FROM the status the route read, not a literal 'pending' —
+        // the recovery branch below arrives with a written-off row.
+        from: ['pending'],
+        to: 'settled',
+        set: expect.objectContaining({ gateway_transaction_id: 'tx-1' }),
+        money: expect.objectContaining({ amount_settled: 50 }),
       }),
     );
   });
@@ -155,7 +158,7 @@ describe('tgpay deposit callback — settlement', () => {
       const res = await run(h, notify({ ...approved, status }));
       expect(res.statusCode).toBe(200);
       expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
-      expect(h.packs.updateGlobePayDeposits).not.toHaveBeenCalled();
+      expect(h.packs.claimGlobePayDepositStatus).not.toHaveBeenCalled();
     }
   });
 
@@ -163,10 +166,8 @@ describe('tgpay deposit callback — settlement', () => {
     const h = harness(pendingRow);
     await run(h, notify({ ...approved, status: 'REJECT' }));
     expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
-    expect(h.packs.updateGlobePayDeposits).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ status: 'failed' }),
-      }),
+    expect(h.packs.claimGlobePayDepositStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ from: ['pending'], to: 'failed' }),
     );
   });
 
@@ -186,7 +187,7 @@ describe('tgpay deposit callback — settlement', () => {
       const res = await run(h, notify(approved));
       expect(res.statusCode).toBe(200);
       expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
-      expect(h.packs.updateGlobePayDeposits).not.toHaveBeenCalled();
+      expect(h.packs.claimGlobePayDepositStatus).not.toHaveBeenCalled();
       expect(h.logger.error).toHaveBeenCalledWith(
         expect.stringMatching(/belongs to gateway/),
       );

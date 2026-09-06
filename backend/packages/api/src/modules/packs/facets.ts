@@ -20,6 +20,7 @@ import type PacksModuleService from './service';
 /** The deposit half of the gateway loop: record intent, credit on callback. */
 export type GatewayDeposits = Pick<
   PacksModuleService,
+  | 'claimGlobePayDepositStatus'
   | 'createGlobePayDepositCapped'
   | 'listGlobePayDeposits'
   | 'updateGlobePayDeposits'
@@ -29,6 +30,7 @@ export type GatewayDeposits = Pick<
 /** The withdrawal half: hold, claim against the debit, submit, refund. */
 export type GatewayWithdrawals = Pick<
   PacksModuleService,
+  | 'claimGlobePayWithdrawalStatus'
   | 'claimWithdrawalAgainstDebit'
   | 'createGlobePayWithdrawals'
   | 'creditBalance'

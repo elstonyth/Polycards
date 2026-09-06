@@ -760,10 +760,9 @@ export async function startGlobePayWithdrawal(
  * rows (plan 094 Task 5). Extracted here, the module that already owns the
  * refund's idempotency anchor, so those two paths share ONE copy of this
  * four-step money ordering instead of a second verbatim one that a bug fix
- * could land in without the other ever finding out. A THIRD near-copy still
- * lives in api/hooks/tgpay/withdrawal/route.ts (the payout callback) and
- * has not been folded in — the next change to this ordering still needs two
- * edits, not one.
+ * could land in without the other ever finding out. The payout callback
+ * (api/hooks/tgpay/withdrawal/route.ts) is the third caller; its settle half
+ * is applyWithdrawalOutcome below, the mirror of this function.
  *
  * The caller owns two preconditions this function does not re-check:
  *   - a debit actually exists for `withdrawal` — both callers verify this
@@ -908,4 +907,128 @@ export async function refundGlobePayWithdrawal(
     }
   }
   return refund;
+}
+
+/** The columns applyWithdrawalOutcome reads. */
+export type WithdrawalOutcomeRow = {
+  id: string;
+  customer_id: string;
+  merchant_transaction_id: string;
+  gateway_transaction_id: string | null;
+  amount: unknown;
+};
+
+/**
+ * What the caller observed about a payout that reached the bank. Everything
+ * except `gatewayRef` and `settledAt` is optional and written ONLY when
+ * passed: `null` is a value ("unknown" — a NULL net is never a zero fee),
+ * `undefined` means "leave the column alone". The payout callback carries no
+ * bank references; the requery does.
+ */
+export type WithdrawalSettlement = {
+  /** The reference the receipt and the feed row carry. Composed by the
+   *  caller — the callback holds an id the row may not carry yet, the sweep
+   *  holds only the row. */
+  gatewayRef: string;
+  /** Their id, when this observation learned one. An empty value is ignored
+   *  rather than clearing what the row already has. */
+  gatewayTransactionId?: string | null;
+  gatewayStatus?: number | null;
+  amountSettled?: number | null;
+  netAmount?: number | null;
+  bankReferenceNo?: string | null;
+  uniqueReferenceNo?: string | null;
+  settledAt: Date;
+};
+
+/**
+ * Settle and close a withdrawal row the bank actually paid — the OTHER half
+ * of refundGlobePayWithdrawal above, extracted here for the same reason and
+ * on the same terms: the payout callback and the reconcile sweep each carried
+ * a verbatim copy of this three-step ordering, so a fix to it needed two
+ * edits and got one.
+ *
+ *   receipt -> claim the row 'pending' -> settled -> feed row (best-effort)
+ *
+ * NO MONEY MOVES HERE. The debit happened at submit; settling only records
+ * that it reached its destination. That is why `replayed` means something
+ * different from its namesake on the refund/deposit paths: there is no ledger
+ * anchor to ask, so it is the ROW CLAIM's answer — `true` says another writer
+ * (a callback racing the sweep) got there first and this call wrote nothing
+ * but the receipt.
+ *
+ * The receipt goes out BEFORE the claim and outside that guard, exactly as in
+ * refundGlobePayWithdrawal: once the row leaves 'pending' nothing re-runs
+ * this branch, so a crash between the claim and a later send loses the email
+ * forever, while a crash after the send costs at most a re-send that the
+ * notification module's unique idempotency_key drops.
+ *
+ * The claim is scoped to 'pending' — not to whatever the caller read —
+ * because that is the only status a settle may start from. A row the sweep
+ * refunded a moment ago must not be flipped to 'settled' by a late callback:
+ * that is a report saying the bank paid a payout we handed back.
+ */
+export async function applyWithdrawalOutcome(
+  scope: { resolve: <T>(key: string) => T },
+  withdrawal: WithdrawalOutcomeRow,
+  outcome: WithdrawalSettlement,
+): Promise<{ replayed: boolean }> {
+  const packs = resolvePacks<GatewayWithdrawals>(scope);
+  const amount = Number(withdrawal.amount);
+  const gatewayTransactionId = outcome.gatewayTransactionId || null;
+
+  await sendWithdrawalReceipt(scope, {
+    customerId: withdrawal.customer_id,
+    amount,
+    reference: outcome.gatewayRef,
+    merchantTransactionId: withdrawal.merchant_transaction_id,
+    outcome: 'paid',
+  });
+
+  const claimed = await packs.claimGlobePayWithdrawalStatus({
+    id: withdrawal.id,
+    from: ['pending'],
+    to: 'settled',
+    set: {
+      settled_at: outcome.settledAt,
+      ...(gatewayTransactionId
+        ? { gateway_transaction_id: gatewayTransactionId }
+        : {}),
+      ...(outcome.gatewayStatus !== undefined
+        ? { gateway_status: outcome.gatewayStatus }
+        : {}),
+      ...(outcome.bankReferenceNo !== undefined
+        ? { bank_reference_no: outcome.bankReferenceNo }
+        : {}),
+      ...(outcome.uniqueReferenceNo !== undefined
+        ? { unique_reference_no: outcome.uniqueReferenceNo }
+        : {}),
+    },
+    money: {
+      ...(outcome.amountSettled !== undefined
+        ? { amount_settled: outcome.amountSettled }
+        : {}),
+      ...(outcome.netAmount !== undefined
+        ? { net_amount: outcome.netAmount }
+        : {}),
+    },
+  });
+
+  if (claimed) {
+    try {
+      await notifyFeed(scope, {
+        receiverId: withdrawal.customer_id,
+        template: 'withdrawal_paid',
+        data: { amount_myr: amount, reference: outcome.gatewayRef },
+        idempotencyKey: withdrawalFeedKey(
+          withdrawal.merchant_transaction_id,
+          'paid',
+        ),
+      });
+    } catch {
+      // Never fail a committed settle over a notification.
+    }
+  }
+
+  return { replayed: !claimed };
 }

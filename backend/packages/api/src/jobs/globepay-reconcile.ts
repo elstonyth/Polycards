@@ -3,6 +3,7 @@ import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { resolvePacks, type GatewayDeposits } from '../modules/packs/facets';
 import {
   GLOBEPAY_MAX_RM,
+  applyDepositOutcome,
   globepayEnabled,
 } from '../modules/packs/globepay-deposit';
 import {
@@ -11,10 +12,6 @@ import {
   rowGatewayConfigs,
 } from '../modules/packs/gateway';
 import { toOptionalMoney } from '../modules/packs/money';
-import { topupIdempotencyReference } from '../modules/packs/topup';
-import { notifyFeed } from '../modules/packs/notify-feed';
-import { sendTopupReceipt } from '../modules/packs/topup-receipt';
-import { topupFeedKey } from '../modules/packs/feed-events';
 import {
   GLOBEPAY_EXPIRED_RETRY_BATCH,
   GLOBEPAY_EXPIRED_RETRY_MS,
@@ -232,90 +229,48 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
       }
 
       if (action.kind === 'settle') {
-        const mutation = await packs.topUpCreditsWithLedger({
-          customerId: deposit.customer_id,
-          amount: action.amount,
-          reason: 'topup',
-          ledgerPaymentMethod: deposit.payment_method_code,
-          ledgerGatewayRef:
-            deposit.gateway_transaction_id ?? deposit.merchant_transaction_id,
-          reference:
-            deposit.gateway_transaction_id ?? deposit.merchant_transaction_id,
-          // SAME anchor as the callback route, so a callback that arrives while
-          // this sweep runs cannot produce a second credit.
-          idempotencyReference: topupIdempotencyReference(
-            deposit.customer_id,
-            deposit.merchant_transaction_id,
-          ),
-        });
-
-        // Same receipt the callback would have sent — after the credit
-        // commit, BEFORE the terminal row update, outside the !replayed
-        // guard: once the row leaves 'pending' this sweep never selects it
-        // again and a retried callback early-returns, so a crash between the
-        // update and a later send would lose the email forever. A crash after
-        // this send re-runs the branch next sweep (the credit replays, the
-        // notification module's unique idempotency_key dedupes). Non-throwing.
-        await sendTopupReceipt(container, {
-          customerId: deposit.customer_id,
+        // Credit -> receipt -> row claim -> feed lives in applyDepositOutcome
+        // (globepay-deposit.ts), one copy shared with the callback route —
+        // including the SAME idempotency anchor, so a callback arriving while
+        // this sweep runs cannot produce a second credit, and the same
+        // amount fences. This call site keeps only what is specific to the
+        // SWEEP: the settlement facts the requery carries (`detail` cannot be
+        // null on this branch — 'settle' is only produced from a successful
+        // requery — but the guards keep tsc honest rather than asserting),
+        // the counters, and the log lines.
+        const outcome = await applyDepositOutcome(container, deposit, {
+          state: 'settled',
           amount: action.amount,
           // `||`, not `??` — an empty-string gateway id must fall through, or
-          // the template fails closed AFTER the idempotency key is burned and
-          // the email is permanently unsent.
-          reference:
+          // the receipt template fails closed AFTER the idempotency key is
+          // burned and the email is permanently unsent.
+          gatewayRef:
             deposit.gateway_transaction_id || deposit.merchant_transaction_id,
-          merchantTransactionId: deposit.merchant_transaction_id,
-          paymentMethodCode: deposit.payment_method_code,
+          netAmount: toOptionalMoney(detail?.netAmount),
+          bankReferenceNo: detail?.bankReferenceNo || null,
+          uniqueReferenceNo: detail?.uniqueReferenceNo || null,
+          gatewayStatus: detail?.statusId ?? null,
+          settledAt: now,
         });
 
-        // Conditional on the status we READ, not a literal 'pending' — the
-        // same reasoning as the callback route's recovery flip
-        // (api/hooks/tgpay/deposit/route.ts:308): the second scan tier
-        // reaches here with an 'expired' row, and a hardcoded 'pending'
-        // selector would match nothing, leaving the credit committed while the
-        // row still said we had given up on it. Matching deposit.status keeps
-        // the concurrency guard intact — a row another worker moved since we
-        // read it still no-ops.
-        await packs.updateGlobePayDeposits({
-          selector: { id: deposit.id, status: deposit.status },
-          data: {
-            status: 'settled',
-            amount_settled: action.amount,
-            // Same settlement mirror the callback route writes — the requery
-            // carries the same facts. `detail` cannot be null on this branch
-            // ('settle' is only produced from a successful requery), but the
-            // guard keeps tsc honest rather than asserting.
-            net_amount: toOptionalMoney(detail?.netAmount),
-            bank_reference_no: detail?.bankReferenceNo || null,
-            unique_reference_no: detail?.uniqueReferenceNo || null,
-            gateway_status: detail?.statusId ?? null,
-            settled_at: now,
-          },
-        });
+        // The requery disagrees with what the row asked for. Quarantine,
+        // exactly like the over-ceiling branch above and like the callback
+        // route's 400: no credit, and NOT written off — the row keeps its
+        // status so an operator can settle it by hand. Unreachable while the
+        // hosted checkout fixes the sum at create-payment, which is why it is
+        // counted rather than merely logged.
+        if (!outcome.applied) {
+          quarantined += 1;
+          logger.error(
+            `[globepay-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount} but the row asked for RM ${Number(deposit.amount_requested)} (${outcome.reason}) — not credited, not written off; left ${deposit.status} for manual settlement`,
+          );
+          continue;
+        }
+
         settled += 1;
-
         logger.warn(
           `[globepay-reconcile] credited ${deposit.merchant_transaction_id} from a REQUERY, not a callback — the callback for this deposit was never received`,
         );
-
-        if (!mutation.replayed) {
-          try {
-            await notifyFeed(container, {
-              receiverId: deposit.customer_id,
-              template: 'topup_credited',
-              data: {
-                amount_myr: action.amount,
-                reference:
-                  deposit.gateway_transaction_id ??
-                  deposit.merchant_transaction_id,
-              },
-              idempotencyKey: topupFeedKey(deposit.merchant_transaction_id),
-            });
-          } catch {
-            // Never fail a committed credit over a notification.
-          }
-        }
-
         continue;
       }
 
@@ -334,11 +289,10 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
         const next = action.kind === 'fail' ? 'failed' : 'expired';
         // An already-expired row re-expiring is a no-op; skip it so the sweep
         // does not report the same row as newly expired every ten minutes.
+        // (The claim inside applyDepositOutcome would happily win a
+        // from-'expired'-to-'expired' flip and bump updated_at.)
         if (deposit.status === next) continue;
-        await packs.updateGlobePayDeposits({
-          selector: { id: deposit.id, status: deposit.status },
-          data: { status: next },
-        });
+        await applyDepositOutcome(container, deposit, { state: next });
         if (action.kind === 'fail') failed += 1;
         else expired += 1;
       }

@@ -1,5 +1,18 @@
 import { model } from '@medusajs/framework/utils';
 
+// The globepay_deposit.status domain — single source of truth for the model's
+// enum below and for the service's DepositStatus type
+// (modules/packs/service.ts), which the raw-SQL status claim needs because
+// raw SQL carries no model types. Mirrors WITHDRAWAL_STATUSES on the payout
+// model, for the same reason. What each value MEANS is documented on the
+// `status` field itself.
+export const DEPOSIT_STATUSES = [
+  'pending',
+  'settled',
+  'failed',
+  'expired',
+] as const;
+
 // GlobePayDeposit — the outstanding-deposit record for the GlobePay365 gateway.
 //
 // WHY this table has to exist (it is not bookkeeping-for-its-own-sake): the
@@ -64,9 +77,7 @@ export const GlobePayDeposit = model
     // sweep only scanned 'pending', so a bank transfer landing after the stale
     // window credited nobody and nothing ever looked again. A late callback or
     // the sweep's second scan tier can still settle an 'expired' row.
-    status: model
-      .enum(['pending', 'settled', 'failed', 'expired'])
-      .default('pending'),
+    status: model.enum([...DEPOSIT_STATUSES]).default('pending'),
     // Their raw numeric status from the last callback/requery, for support.
     gateway_status: model.number().nullable(),
     settled_at: model.dateTime().nullable(),

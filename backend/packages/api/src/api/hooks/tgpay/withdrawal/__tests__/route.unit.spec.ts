@@ -4,12 +4,21 @@ jest.mock('../../../../../modules/packs/notify-feed', () => ({
 jest.mock('../../../../../modules/packs/withdrawal-receipt', () => ({
   sendWithdrawalReceipt: jest.fn().mockResolvedValue(undefined),
 }));
+// Both halves of the payout outcome are deep modules shared with the sweep;
+// this route's job is to decide WHICH one and with what. Their own behaviour
+// is proved against a real database in
+// modules/packs/__tests__/withdrawal-outcome.integration.spec.ts and
+// withdrawal-forensics.integration.spec.ts.
 jest.mock('../../../../../modules/packs/globepay-withdrawal', () => ({
   refundGlobePayWithdrawal: jest.fn().mockResolvedValue({ replayed: false }),
+  applyWithdrawalOutcome: jest.fn().mockResolvedValue({ replayed: false }),
 }));
 
 import { POST } from '../route';
-import { refundGlobePayWithdrawal } from '../../../../../modules/packs/globepay-withdrawal';
+import {
+  applyWithdrawalOutcome,
+  refundGlobePayWithdrawal,
+} from '../../../../../modules/packs/globepay-withdrawal';
 import type {
   FakeFacet,
   GatewayWithdrawals,
@@ -20,6 +29,7 @@ beforeEach(() => {
   process.env.TGPAY_PUBLIC_KEY = 'pk-test';
   process.env.TGPAY_SECRET_KEY = 'sk-test';
   (refundGlobePayWithdrawal as jest.Mock).mockClear();
+  (applyWithdrawalOutcome as jest.Mock).mockClear();
 });
 
 const AUTH = { 'x-public-key': 'pk-test', 'x-secret-key': 'sk-test' };
@@ -101,15 +111,14 @@ describe('tgpay payout callback', () => {
       { gateway_transaction_id: 'tx-9', gateway: 'tgpay' },
       { take: 1 },
     );
-    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
+    expect(applyWithdrawalOutcome).toHaveBeenCalledWith(
+      h.req.scope,
+      pendingRow,
       expect.objectContaining({
-        selector: { id: 'gpw_1', status: 'pending' },
-        data: expect.objectContaining({
-          status: 'settled',
-          amount_settled: 100,
-          // fee = gross − net in the settlement report, so net = 100 − 1.
-          net_amount: 99,
-        }),
+        gatewayRef: 'tx-9',
+        amountSettled: 100,
+        // fee = gross − net in the settlement report, so net = 100 − 1.
+        netAmount: 99,
       }),
     );
     expect(refundGlobePayWithdrawal).not.toHaveBeenCalled();
@@ -126,23 +135,20 @@ describe('tgpay payout callback', () => {
       { merchant_transaction_id: 'PC-w1', gateway: 'tgpay' },
       { take: 1 },
     );
-    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          status: 'settled',
-          gateway_transaction_id: 'PC-w1',
-        }),
-      }),
+    expect(applyWithdrawalOutcome).toHaveBeenCalledWith(
+      h.req.scope,
+      expect.objectContaining({ id: 'gpw_1' }),
+      expect.objectContaining({ gatewayTransactionId: 'PC-w1' }),
     );
   });
 
   it('a missing fee leaves net unknown (null), never a zero fee', async () => {
     const h = harness(pendingRow);
     await run(h, { ...success, fee: undefined });
-    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ net_amount: null }),
-      }),
+    expect(applyWithdrawalOutcome).toHaveBeenCalledWith(
+      h.req.scope,
+      pendingRow,
+      expect.objectContaining({ netAmount: null }),
     );
   });
 
@@ -150,7 +156,7 @@ describe('tgpay payout callback', () => {
     const h = harness({ ...pendingRow, gateway: 'globepay' });
     const res = await run(h, success);
     expect(res.statusCode).toBe(200);
-    expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(applyWithdrawalOutcome).not.toHaveBeenCalled();
     expect(refundGlobePayWithdrawal).not.toHaveBeenCalled();
   });
 
@@ -165,21 +171,21 @@ describe('tgpay payout callback', () => {
       'pending',
       expect.stringMatching(/callback reject/),
     );
-    expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(applyWithdrawalOutcome).not.toHaveBeenCalled();
   });
 
   it('pending is acknowledged and changes nothing', async () => {
     const h = harness(pendingRow);
     const res = await run(h, { ...success, status: 'pending' });
     expect(res.statusCode).toBe(200);
-    expect(h.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(applyWithdrawalOutcome).not.toHaveBeenCalled();
     expect(refundGlobePayWithdrawal).not.toHaveBeenCalled();
   });
 
   it('a replay on a settled row is a no-op, an unknown id is acknowledged', async () => {
     const settled = harness({ ...pendingRow, status: 'settled' });
     expect((await run(settled, success)).statusCode).toBe(200);
-    expect(settled.packs.updateGlobePayWithdrawals).not.toHaveBeenCalled();
+    expect(applyWithdrawalOutcome).not.toHaveBeenCalled();
 
     const unknown = harness(null);
     expect((await run(unknown, success)).statusCode).toBe(200);

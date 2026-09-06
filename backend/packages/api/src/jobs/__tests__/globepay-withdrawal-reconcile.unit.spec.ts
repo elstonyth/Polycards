@@ -101,6 +101,9 @@ function harness(withdrawal: Record<string, unknown> = pendingRow) {
       ),
     ),
     updateGlobePayWithdrawals: jest.fn().mockResolvedValue(undefined),
+    // The settle flip is a conditional claim (applyWithdrawalOutcome), not a
+    // selector-update. `true` = this sweep moved the row.
+    claimGlobePayWithdrawalStatus: jest.fn().mockResolvedValue(true),
     // A debit row EXISTS, so the "never refund what was never debited" guard
     // cannot be what makes these tests pass — only the ambiguity check can.
     listCreditTransactions: jest.fn().mockResolvedValue([{ id: 'ct_debit' }]),
@@ -212,15 +215,18 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
 
     await globepayWithdrawalReconcileJob(h.container);
 
-    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
+    expect(h.packs.claimGlobePayWithdrawalStatus).toHaveBeenCalledWith(
       expect.objectContaining({
-        selector: { id: 'gpw_1', status: 'pending' },
-        data: expect.objectContaining({
-          status: 'settled',
-          amount_settled: 100,
-          net_amount: 98.5,
+        id: 'gpw_1',
+        from: ['pending'],
+        to: 'settled',
+        set: expect.objectContaining({
           bank_reference_no: 'BR-42',
           unique_reference_no: 'UR-43',
+        }),
+        money: expect.objectContaining({
+          amount_settled: 100,
+          net_amount: 98.5,
         }),
       }),
     );
@@ -237,14 +243,14 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
 
     await globepayWithdrawalReconcileJob(h.container);
 
-    expect(h.packs.updateGlobePayWithdrawals).toHaveBeenCalledWith(
+    expect(h.packs.claimGlobePayWithdrawalStatus).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          status: 'settled',
-          net_amount: null,
+        to: 'settled',
+        set: expect.objectContaining({
           bank_reference_no: null,
           unique_reference_no: null,
         }),
+        money: expect.objectContaining({ net_amount: null }),
       }),
     );
   });

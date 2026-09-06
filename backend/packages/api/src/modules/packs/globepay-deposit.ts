@@ -5,12 +5,20 @@ import {
   GATEWAYS,
   gatewayConfigFor,
   paymentGateway,
+  rowGateway,
   submitDeposit,
   GatewayError,
   type PaymentGateway,
 } from './gateway';
 import type { TgpayCustomer } from './tgpay-client';
-import { topUpAmountError } from './topup';
+import { topUpAmountError, topupIdempotencyReference } from './topup';
+import { sendTopupReceipt } from './topup-receipt';
+import { notifyFeed } from './notify-feed';
+import { topupFeedKey } from './feed-events';
+import type { DEPOSIT_STATUSES } from './models/globepay-deposit';
+
+/** The globepay_deposit.status domain, from the model. */
+type DepositStatus = (typeof DEPOSIT_STATUSES)[number];
 
 // The submit half of the GlobePay365 deposit loop: record intent, ask the
 // gateway for a cashier page, hand the customer the URL. NO credit is issued
@@ -355,4 +363,194 @@ export async function startGlobePayDeposit(
     referenceNo: result.referenceNo,
     qrCode: result.qrCode,
   };
+}
+
+// ---------------------------------------------------------------------------
+// The settle half. ONE copy, shared by the callback route and the sweep.
+
+/** The columns applyDepositOutcome reads. Deliberately narrower than the
+ *  model: widening it is how a new dependency gets noticed. */
+export type DepositOutcomeRow = {
+  id: string;
+  customer_id: string;
+  merchant_transaction_id: string;
+  gateway_transaction_id: string | null;
+  amount_requested: unknown;
+  payment_method_code: string;
+  /** The status the caller READ. Every write below is claimed FROM it. */
+  status: DepositStatus;
+  gateway?: string | null;
+};
+
+export type DepositOutcome =
+  | {
+      state: 'settled';
+      /** What the gateway says was paid — fenced against the row, then
+       *  credited verbatim. */
+      amount: number;
+      /** The reference the ledger row, the receipt and the feed row all
+       *  carry. Composed by the caller, because the two of them know
+       *  different things: the callback holds an id the row may not carry
+       *  yet, the sweep holds only the row. */
+      gatewayRef: string;
+      /** Their id, when this observation learned one. Written to the row; an
+       *  empty value is ignored rather than clearing what is already there. */
+      gatewayTransactionId?: string | null;
+      /** Each remaining field is written ONLY when the caller passes it —
+       *  `null` is a value ("unknown"), `undefined` means "leave the column
+       *  alone". The callback carries no fee and no bank references, and must
+       *  not blank the ones the audit sweep backfills. */
+      gatewayStatus?: number | null;
+      netAmount?: number | null;
+      bankReferenceNo?: string | null;
+      uniqueReferenceNo?: string | null;
+      settledAt: Date;
+    }
+  | {
+      /** Close the row without touching the ledger. 'failed' is terminal;
+       *  'expired' is not — see the model's `status` comment. */
+      state: 'failed' | 'expired';
+      gatewayTransactionId?: string | null;
+    };
+
+export type DepositOutcomeResult =
+  /** `replayed` is the LEDGER's answer on a settle (the shared idempotency
+   *  anchor is what decides whether money moved) and the ROW CLAIM's on a
+   *  close (nothing else could answer). Both mean "this outcome was already
+   *  applied", which is what the caller acts on. */
+  | { applied: true; replayed: boolean }
+  /** A money fence refused. NOTHING was written; the caller decides what to
+   *  answer the gateway and how loudly to log. */
+  | { applied: false; reason: 'amount-not-positive' | 'amount-mismatch' };
+
+/**
+ * Apply ONE observed outcome to ONE deposit row — the whole settle sequence,
+ * in the order the callback route and the reconcile sweep both need it:
+ *
+ *   fence the amount -> credit (idempotent) -> receipt -> claim the row ->
+ *   feed row (best-effort, and only when the credit was ours)
+ *
+ * Each caller used to carry its own copy, which is how the amount fence ended
+ * up on only one of them. It lives HERE now, so a deposit settled from a
+ * requery is fenced exactly like one settled from a callback — and since the
+ * sweep is production's only crediting path, that was the half that mattered.
+ *
+ * The receipt sits BEFORE the row claim and outside any replay guard — the
+ * same ordering, for the same reason, as refundGlobePayWithdrawal: once the
+ * row leaves its current status nothing re-runs this branch, so a crash
+ * between the claim and a later send would lose the email forever. A crash
+ * after the send re-runs the whole sequence next sweep (the credit replays on
+ * its anchor, the notification module's unique idempotency_key dedupes the
+ * email).
+ *
+ * The rest of the ordering is load-bearing too: the credit commits first
+ * because a settled row with no credit is invisible to every sweep, and the
+ * claim is the LAST write because it is what makes the row invisible to them.
+ */
+export async function applyDepositOutcome(
+  scope: { resolve: <T>(key: string) => T },
+  deposit: DepositOutcomeRow,
+  outcome: DepositOutcome,
+): Promise<DepositOutcomeResult> {
+  const packs = resolvePacks<GatewayDeposits>(scope);
+  const gatewayTransactionId = outcome.gatewayTransactionId || null;
+  const learnedId = gatewayTransactionId
+    ? { gateway_transaction_id: gatewayTransactionId }
+    : {};
+
+  if (outcome.state !== 'settled') {
+    const claimed = await packs.claimGlobePayDepositStatus({
+      id: deposit.id,
+      from: [deposit.status],
+      to: outcome.state,
+      set: learnedId,
+    });
+    return { applied: true, replayed: !claimed };
+  }
+
+  const { amount } = outcome;
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { applied: false, reason: 'amount-not-positive' };
+  }
+  // The hosted checkout fixes the sum at create-payment, so an observation can
+  // only disagree with the row if it is forged or the gateway is wrong — and
+  // either way it must not become withdrawable balance. Refuse and leave the
+  // row where it is. The gateway's own ceiling is the second fence, read off
+  // the gateway the ROW was created under (the same number as GLOBEPAY_MAX_RM
+  // today; the row's is the honest one to ask).
+  const gateway = rowGateway(deposit);
+  const ceiling = gateway
+    ? GATEWAYS[gateway].limits.depositMax
+    : GLOBEPAY_MAX_RM;
+  if (amount !== Number(deposit.amount_requested) || amount > ceiling) {
+    return { applied: false, reason: 'amount-mismatch' };
+  }
+
+  const mutation = await packs.topUpCreditsWithLedger({
+    customerId: deposit.customer_id,
+    amount,
+    reason: 'topup',
+    ledgerPaymentMethod: deposit.payment_method_code,
+    ledgerGatewayRef: outcome.gatewayRef,
+    reference: outcome.gatewayRef,
+    // The SAME anchor from both callers, so a callback and a sweep racing on
+    // one deposit produce exactly one credit — whichever gets there first.
+    idempotencyReference: topupIdempotencyReference(
+      deposit.customer_id,
+      deposit.merchant_transaction_id,
+    ),
+  });
+
+  await sendTopupReceipt(scope, {
+    customerId: deposit.customer_id,
+    amount,
+    reference: outcome.gatewayRef,
+    merchantTransactionId: deposit.merchant_transaction_id,
+    paymentMethodCode: deposit.payment_method_code,
+  });
+
+  // Claimed FROM the status the caller read, not from a literal 'pending':
+  // the callback's recovery branch and the sweep's second scan tier both
+  // arrive with a written-off row, and a hardcoded 'pending' would match
+  // nothing — leaving the credit committed while the row still said we had
+  // given up on it.
+  await packs.claimGlobePayDepositStatus({
+    id: deposit.id,
+    from: [deposit.status],
+    to: 'settled',
+    set: {
+      settled_at: outcome.settledAt,
+      ...learnedId,
+      ...(outcome.gatewayStatus !== undefined
+        ? { gateway_status: outcome.gatewayStatus }
+        : {}),
+      ...(outcome.bankReferenceNo !== undefined
+        ? { bank_reference_no: outcome.bankReferenceNo }
+        : {}),
+      ...(outcome.uniqueReferenceNo !== undefined
+        ? { unique_reference_no: outcome.uniqueReferenceNo }
+        : {}),
+    },
+    money: {
+      amount_settled: amount,
+      ...(outcome.netAmount !== undefined
+        ? { net_amount: outcome.netAmount }
+        : {}),
+    },
+  });
+
+  if (!mutation.replayed) {
+    try {
+      await notifyFeed(scope, {
+        receiverId: deposit.customer_id,
+        template: 'topup_credited',
+        data: { amount_myr: amount, reference: outcome.gatewayRef },
+        idempotencyKey: topupFeedKey(deposit.merchant_transaction_id),
+      });
+    } catch {
+      // Never fail a committed credit over a notification.
+    }
+  }
+
+  return { applied: true, replayed: mutation.replayed };
 }

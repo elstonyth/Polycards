@@ -8,12 +8,12 @@ import {
   tgpayConfigFromEnv,
   tgpayPayoutState,
 } from '../../../../modules/packs/tgpay-client';
-import { refundGlobePayWithdrawal } from '../../../../modules/packs/globepay-withdrawal';
+import {
+  applyWithdrawalOutcome,
+  refundGlobePayWithdrawal,
+} from '../../../../modules/packs/globepay-withdrawal';
 import { rowGateway } from '../../../../modules/packs/gateway';
 import { netOfFee, toOptionalMoney } from '../../../../modules/packs/money';
-import { notifyFeed } from '../../../../modules/packs/notify-feed';
-import { withdrawalFeedKey } from '../../../../modules/packs/feed-events';
-import { sendWithdrawalReceipt } from '../../../../modules/packs/withdrawal-receipt';
 
 // TGPay payout server-notify (docs "Payout callback"). Flat body, no wrapper,
 // and — unlike every other message — NO merchantRefNum: the row is found by
@@ -143,41 +143,19 @@ export async function POST(
     );
   }
 
-  await sendWithdrawalReceipt(req.scope, {
-    customerId: withdrawal.customer_id,
-    amount: Number(withdrawal.amount),
-    reference: gatewayTransactionId,
-    merchantTransactionId,
-    outcome: 'paid',
+  // Receipt -> claim -> feed, shared with the payout sweep. TGPay's callback
+  // carries no bank references, so those columns are left alone.
+  await applyWithdrawalOutcome(req.scope, withdrawal, {
+    gatewayRef: gatewayTransactionId,
+    gatewayTransactionId:
+      withdrawal.gateway_transaction_id ?? gatewayTransactionId,
+    amountSettled: toOptionalMoney(data.amount),
+    // The settlement report reads fee = gross − net, so net here is what the
+    // payout cost us less what the recipient got: amount − fee. NULL
+    // (unknown) when either is missing — never a zero fee by omission.
+    netAmount: netOfFee(data.amount, data.fee),
+    settledAt: new Date(),
   });
-  await packs.updateGlobePayWithdrawals({
-    selector: { id: withdrawal.id, status: 'pending' },
-    data: {
-      status: 'settled',
-      gateway_transaction_id:
-        withdrawal.gateway_transaction_id ?? gatewayTransactionId,
-      amount_settled: toOptionalMoney(data.amount),
-      // The settlement report reads fee = gross − net, so net here is what
-      // the payout cost us less what the recipient got: amount − fee. NULL
-      // (unknown) when either is missing — never a zero fee by omission.
-      net_amount: netOfFee(data.amount, data.fee),
-      settled_at: new Date(),
-    },
-  });
-
-  try {
-    await notifyFeed(req.scope, {
-      receiverId: withdrawal.customer_id,
-      template: 'withdrawal_paid',
-      data: {
-        amount_myr: Number(withdrawal.amount),
-        reference: gatewayTransactionId,
-      },
-      idempotencyKey: withdrawalFeedKey(merchantTransactionId, 'paid'),
-    });
-  } catch {
-    // Feed is best-effort; the row is already settled.
-  }
 
   res.status(200).send('success');
 }

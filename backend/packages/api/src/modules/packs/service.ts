@@ -63,7 +63,7 @@ import ChallengeStage from './models/challenge-stage';
 import ChallengeSchedule from './models/challenge-schedule';
 import ChallengeSettings from './models/challenge-settings';
 import TierSettings from './models/tier-settings';
-import GlobePayDeposit from './models/globepay-deposit';
+import GlobePayDeposit, { DEPOSIT_STATUSES } from './models/globepay-deposit';
 import GlobePayWithdrawal, {
   WITHDRAWAL_STATUSES,
 } from './models/globepay-withdrawal';
@@ -302,6 +302,24 @@ const PULL_TIER_SQL =
  *  WITHDRAWAL_STATUSES for the raw-SQL claim below (raw SQL carries no model
  *  types). */
 type WithdrawalStatus = (typeof WITHDRAWAL_STATUSES)[number];
+
+/** The globepay_deposit.status domain, derived from the model's
+ *  DEPOSIT_STATUSES for the raw-SQL claim below. */
+type DepositStatus = (typeof DEPOSIT_STATUSES)[number];
+
+/**
+ * The money mirror a settle claim writes alongside the status flip.
+ *
+ * These two are `bigNumber` columns, and a bigNumber is TWO columns: the
+ * numeric one and a paired `raw_*` jsonb the ORM maintains. A raw `UPDATE`
+ * cannot keep the pair in step, so the claim writes every PLAIN column and
+ * hands these to the ORM — on the SAME transaction, so the flip and its
+ * mirror commit or roll back together.
+ */
+type SettlementMirror = {
+  amount_settled?: number | null;
+  net_amount?: number | null;
+};
 
 /** One raw `ledger_entry` row as listLedgerEntriesForAdmin reads it. */
 export type LedgerEntryRow = {
@@ -3252,6 +3270,13 @@ class PacksModuleService extends MedusaService({
        *  left untouched and the claim answers false. */
       from: readonly WithdrawalStatus[];
       to: WithdrawalStatus;
+      /** Plain columns written BY THE CLAIM ITSELF, so the settlement facts
+       *  land in the same statement that decides the winner and a loser
+       *  writes none of them. */
+      set?: Record<string, unknown>;
+      /** The bigNumber pair — see SettlementMirror. Written only when the
+       *  claim was won. */
+      money?: SettlementMirror;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<boolean> {
@@ -3262,9 +3287,79 @@ class PacksModuleService extends MedusaService({
       // One bound placeholder per accepted status — the list is ours (never a
       // request value) and it stays bound rather than interpolated regardless.
       where: { status: input.from },
-      set: { status: input.to },
+      set: { ...(input.set ?? {}), status: input.to },
     });
+    if (rows.length === 1) {
+      await this.writeSettlementMirror(
+        'globepay_withdrawal',
+        input.id,
+        input.money,
+        sharedContext,
+      );
+    }
     return rows.length === 1;
+  }
+
+  /**
+   * ATOMIC STATUS CLAIM on one globepay_deposit row — the deposit sibling of
+   * claimGlobePayWithdrawalStatus, and every word of that method's warning
+   * applies here: `updateGlobePayDeposits({ selector: { id, status }, … })`
+   * type-checks, hands back an array, and reads like the same guard, but the
+   * generated service resolves the selector with a find-then-write that takes
+   * no row lock. On this table the loser of that race is a second top-up
+   * credited against one payment.
+   *
+   * `true` means THIS caller moved the row and owns what follows (the feed
+   * post); `false` means a callback and the reconcile sweep raced and the
+   * other one won.
+   */
+  @InjectTransactionManager()
+  async claimGlobePayDepositStatus(
+    input: {
+      id: string;
+      /** Statuses the row may be claimed FROM. Callers pass the status they
+       *  READ, not a literal 'pending': the callback route's recovery branch
+       *  and the sweep's second scan tier both settle an 'expired' row. */
+      from: readonly DepositStatus[];
+      to: DepositStatus;
+      set?: Record<string, unknown>;
+      money?: SettlementMirror;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const rows = await claimRows(em, {
+      table: 'globepay_deposit',
+      ids: [input.id],
+      where: { status: input.from },
+      set: { ...(input.set ?? {}), status: input.to },
+    });
+    if (rows.length === 1) {
+      await this.writeSettlementMirror(
+        'globepay_deposit',
+        input.id,
+        input.money,
+        sharedContext,
+      );
+    }
+    return rows.length === 1;
+  }
+
+  /** The ORM half of a settle claim — see SettlementMirror for why the two
+   *  bigNumber columns cannot ride the raw statement. Runs on the claim's own
+   *  transaction, and only after it was won, so a loser leaves no trace. */
+  private async writeSettlementMirror(
+    table: 'globepay_deposit' | 'globepay_withdrawal',
+    id: string,
+    money: SettlementMirror | undefined,
+    sharedContext: Context,
+  ): Promise<void> {
+    if (!money || Object.keys(money).length === 0) return;
+    if (table === 'globepay_deposit') {
+      await this.updateGlobePayDeposits([{ id, ...money }], sharedContext);
+      return;
+    }
+    await this.updateGlobePayWithdrawals([{ id, ...money }], sharedContext);
   }
 
   /**
