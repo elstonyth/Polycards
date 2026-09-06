@@ -13,11 +13,11 @@
  * main leaderboard). Nothing here is invented: pool, states, summary, and
  * standings all derive from ledger data.
  */
-import { sdk } from '@/lib/medusa';
+import { store } from '@/lib/store';
 import { logger } from '@/lib/logger';
 import { rm0, compact } from '@/lib/format';
 import { avatarForSeed } from '@/lib/profile-view';
-import { parseOne, ChallengeSchema } from '@/lib/data/schemas';
+import { ChallengeSchema } from '@/lib/data/schemas';
 import { formatReset, nextResetAt } from '@/lib/reset-countdown';
 import { cached } from '@/lib/ttl-cache';
 
@@ -139,11 +139,16 @@ const CHALLENGE_TTL_MS = 30_000;
  * that null is a real, cacheable state.
  */
 async function loadChallenge(): Promise<Challenge | null> {
-  const raw = await sdk.client.fetch<unknown>('/store/challenge');
-  const data = parseOne(ChallengeSchema, raw);
-  if (!data) {
-    throw new Error('/store/challenge body failed schema parse');
-  }
+  // Public route: no bearer, and no cache key on the wire (`cache: 'auto'`)
+  // — what the bare sdk.client.fetch sent. orThrow keeps the cached()
+  // contract: a schema-invalid 200 must reject so the memo evicts, where a
+  // genuinely OFF challenge (below) is a real, cacheable state.
+  const data = store.orThrow(
+    await store.get('/store/challenge', ChallengeSchema, {
+      auth: 'none',
+      cache: 'auto',
+    }),
+  );
   if (!data.active || data.stages.length === 0) return null;
 
   // ONE mapper for every prize thumbnail on the page (summary, per-stage

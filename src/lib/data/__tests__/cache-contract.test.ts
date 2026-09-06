@@ -135,20 +135,24 @@ describe('getChallenge cache contract', () => {
   };
 
   it('a schema-invalid body is NOT cached: returns null and the next call re-fetches', async () => {
+    const challenge = queued('GET /store/challenge');
     // Missing active/settings/stages/cards entirely fails ChallengeSchema.
-    fetchMock.mockResolvedValueOnce({});
+    challenge.push({ body: {} });
     expect(await getChallenge()).toBeNull();
 
-    fetchMock.mockResolvedValueOnce(off);
+    challenge.push({ body: off });
     await getChallenge();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(challenge.mem.requests).toHaveLength(2);
   });
 
   it('challenge genuinely off (active:false) IS cached: the next call does NOT re-fetch', async () => {
-    fetchMock.mockResolvedValueOnce(off);
+    const challenge = queued('GET /store/challenge');
+    challenge.push({ body: off });
     expect(await getChallenge()).toBeNull();
 
+    // A re-fetch here would drain the queue to its 502 fallback; assert on the
+    // recorded request count, which says it outright.
     await getChallenge();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(challenge.mem.requests).toHaveLength(1);
   });
 });

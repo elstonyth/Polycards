@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { storeShim, backend } from '@/lib/__tests__/store-shim';
 
-// challenge.ts imports @/lib/medusa (sdk) and @/lib/logger — mock both. The real
-// parseOne/ChallengeSchema, rm0, and avatarForSeed run, so schema validation +
+// challenge.ts reads through the `Store` port; an in-memory backend seeds it
+// (src/lib/__tests__/store-shim.ts) and @/lib/logger is mocked. The real
+// ChallengeSchema, rm0, and avatarForSeed run, so schema validation +
 // formatting are genuine.
-const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
-vi.mock('@/lib/medusa', () => ({ sdk: { client: { fetch: fetchMock } } }));
+vi.mock('@/lib/store', () => ({ store: storeShim }));
 vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
@@ -12,9 +13,13 @@ vi.mock('@/lib/logger', () => ({
 import { getChallenge } from '@/lib/data/challenge';
 import { clearTtlCache } from '@/lib/ttl-cache';
 
+/** Seed the one route this loader reads, and return the memory backend so a
+ *  test can read `requests`. Replaces the fetchMock.mockResolvedValueOnce
+ *  chain: each case seeds once and calls getChallenge once. */
+const seed = (body: unknown) => backend({ 'GET /store/challenge': { body } });
+
 describe('getChallenge', () => {
   beforeEach(() => {
-    fetchMock.mockReset();
     // getChallenge is now memoised per process for one 30s window, so without
     // this the FIRST test's fixture would be served to every later case.
     clearTtlCache();
@@ -100,14 +105,28 @@ describe('getChallenge', () => {
     // 2026-08-23T16:00Z. Catches an argument-order slip the label alone can't.
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-20T10:00:00Z'));
-    fetchMock.mockResolvedValueOnce(active);
+    seed(active);
     const c = await getChallenge();
     expect(c!.resetLabel).toBe('Resets Mondays 00:00 (MYT)');
     expect(new Date(c!.resetAt).toISOString()).toBe('2026-08-23T16:00:00.000Z');
   });
 
+  it('reads the public challenge route with no bearer and no cache key', async () => {
+    // An Authorization header would make this per-customer; an explicit cache
+    // mode would make a prerenderable caller dynamic. The bare
+    // sdk.client.fetch it replaces sent neither.
+    const mem = seed(active);
+    await getChallenge();
+    expect(mem.requests[0]).toEqual({
+      method: 'GET',
+      path: '/store/challenge',
+      headers: {},
+      cache: 'auto',
+    });
+  });
+
   it('maps an active challenge, formatting RM and resolving cards', async () => {
-    fetchMock.mockResolvedValueOnce(active);
+    seed(active);
     const c = await getChallenge();
     expect(c).not.toBeNull();
     expect(c!.resetLabel).toBe('Resets Mondays 00:00 (MYT)');
@@ -133,7 +152,7 @@ describe('getChallenge', () => {
   });
 
   it('lists every configured rank 1-10, sorted, with card and/or credits', async () => {
-    fetchMock.mockResolvedValueOnce({
+    seed({
       ...active,
       stages: [
         {
@@ -184,7 +203,7 @@ describe('getChallenge', () => {
 
   it('derives pool stats and stage states from the real pool', async () => {
     // pool 750: stage 1 (500) complete, stage 2 (1000) active, stage 3 locked.
-    fetchMock.mockResolvedValueOnce(active);
+    seed(active);
     const c = await getChallenge();
     expect(c!.pool).toEqual({
       pooled: 'RM 750',
@@ -203,7 +222,7 @@ describe('getChallenge', () => {
   });
 
   it('accumulates the Rewards Summary from unlocked stages only', async () => {
-    fetchMock.mockResolvedValueOnce(active);
+    seed(active);
     const c = await getChallenge();
     expect(c!.summary).toEqual({
       unlockedCount: 1,
@@ -222,7 +241,7 @@ describe('getChallenge', () => {
   it('excludes a rank-5 (sheet rank) card from the summary', async () => {
     // Sheet ranks (4+) go to the "Top 4-10" credits tile, not the podium card
     // row — matching the `creditsOf(…, 4)` boundary the credits total uses.
-    fetchMock.mockResolvedValueOnce({
+    seed({
       ...active,
       stages: [
         {
@@ -237,7 +256,7 @@ describe('getChallenge', () => {
   });
 
   it('includes a rank-2 (podium) card in the summary', async () => {
-    fetchMock.mockResolvedValueOnce({
+    seed({
       ...active,
       stages: [
         {
@@ -259,7 +278,7 @@ describe('getChallenge', () => {
   });
 
   it('marks every stage complete and sums all credits when cleared', async () => {
-    fetchMock.mockResolvedValueOnce({
+    seed({
       ...active,
       progress: { pooledMyr: 5000 },
     });
@@ -283,7 +302,7 @@ describe('getChallenge', () => {
 
   it('builds rankPrizes from unlocked stages only', async () => {
     // pool 750: only stage 1 (500) is unlocked.
-    fetchMock.mockResolvedValueOnce(active);
+    seed(active);
     const c = await getChallenge();
     expect(c!.rankPrizes).toEqual([
       {
@@ -305,7 +324,7 @@ describe('getChallenge', () => {
   it('accumulates rankPrizes across all unlocked stages', async () => {
     // Stage 2's rank-1 card swapped to a DISTINCT one (c2) so the order
     // assertion below actually exercises the highest-stage-first reverse.
-    fetchMock.mockResolvedValueOnce({
+    seed({
       ...active,
       progress: { pooledMyr: 5000 },
       stages: [
@@ -348,7 +367,7 @@ describe('getChallenge', () => {
   });
 
   it('returns empty rankPrizes when nothing is unlocked or progress is absent', async () => {
-    fetchMock.mockResolvedValueOnce({
+    seed({
       ...active,
       progress: { pooledMyr: 100 },
     });
@@ -358,12 +377,12 @@ describe('getChallenge', () => {
     // instead of re-fetching — passing either way and testing nothing new.
     clearTtlCache();
     const { progress: _p, ...rest } = active;
-    fetchMock.mockResolvedValueOnce(rest);
+    seed(rest);
     expect((await getChallenge())!.rankPrizes).toEqual([]);
   });
 
   it('maps the Weekly Pull Value top list (avatar fallback + override)', async () => {
-    fetchMock.mockResolvedValueOnce(active);
+    seed(active);
     const c = await getChallenge();
     expect(c!.top).toHaveLength(2);
     expect(c!.top[0]).toMatchObject({
@@ -380,7 +399,7 @@ describe('getChallenge', () => {
 
   it('returns null pool/summary (and null states) when the backend sends no progress', async () => {
     const { progress: _progress, top: _top, ...rest } = active;
-    fetchMock.mockResolvedValueOnce(rest);
+    seed(rest);
     const c = await getChallenge();
     expect(c).not.toBeNull();
     expect(c!.pool).toBeNull();
@@ -390,19 +409,19 @@ describe('getChallenge', () => {
   });
 
   it('returns null when the challenge is off (active:false)', async () => {
-    fetchMock.mockResolvedValueOnce({ ...active, active: false });
+    seed({ ...active, active: false });
     expect(await getChallenge()).toBeNull();
   });
 
   it('returns null when the backend is unreachable', async () => {
-    fetchMock.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    backend({ 'GET /store/challenge': { status: 502 } });
     expect(await getChallenge()).toBeNull();
   });
 
   it('preserves every rank 1-10 when a higher-rank card is unresolvable', async () => {
     // #1's card id is missing and it pays no credits → the ROW drops, and every
     // other rank must keep its own numeral instead of shifting up.
-    fetchMock.mockResolvedValueOnce({
+    seed({
       ...active,
       stages: [
         {
@@ -444,7 +463,7 @@ describe('getChallenge', () => {
   });
 
   it('keeps a rank whose card is unresolvable but which still pays credits', async () => {
-    fetchMock.mockResolvedValueOnce({
+    seed({
       ...active,
       stages: [
         {
@@ -464,7 +483,7 @@ describe('getChallenge', () => {
     // Stage 1 features c1 and `dup` (distinct ids, identical image). Both are
     // real prizes, so the summary shows TWO cards — an image-keyed dedupe would
     // wrongly collapse them to one.
-    fetchMock.mockResolvedValueOnce({
+    seed({
       ...active,
       progress: { pooledMyr: 5000 },
       stages: [
@@ -501,7 +520,7 @@ describe('getChallenge', () => {
 
   it('drops a malformed stage row and keeps the survivors', async () => {
     // Corrupt the middle stage — a null `thresholdMyr` fails `finite`.
-    fetchMock.mockResolvedValueOnce({
+    seed({
       ...active,
       stages: [
         active.stages[0],
@@ -520,7 +539,7 @@ describe('getChallenge', () => {
   });
 
   it('drops a malformed top-standings row and keeps the survivors', async () => {
-    fetchMock.mockResolvedValueOnce({
+    seed({
       ...active,
       top: [active.top[0], { ...active.top[1], volumeMyr: null }],
     });
@@ -531,7 +550,7 @@ describe('getChallenge', () => {
   });
 
   it('drops a malformed card entry without blanking the challenge', async () => {
-    fetchMock.mockResolvedValueOnce({
+    seed({
       ...active,
       cards: { ...active.cards, bad: { name: 5, image: null } },
     });
@@ -552,7 +571,7 @@ describe('getChallenge', () => {
   });
 
   it('drops a malformed RANK ROW without dropping the stage', async () => {
-    fetchMock.mockResolvedValueOnce({
+    seed({
       ...active,
       stages: [
         {
@@ -573,7 +592,7 @@ describe('getChallenge', () => {
 
   it('renders a stage with no rankRewards field (older backend)', async () => {
     const { rankRewards: _drop, ...stage1 } = active.stages[0]!;
-    fetchMock.mockResolvedValueOnce({
+    seed({
       ...active,
       stages: [stage1, ...active.stages.slice(1)],
     });
@@ -584,7 +603,7 @@ describe('getChallenge', () => {
   });
 
   it('degrades a malformed progress section to absent (stages still render)', async () => {
-    fetchMock.mockResolvedValueOnce({
+    seed({
       ...active,
       progress: { pooledMyr: 'not-a-number' },
     });
