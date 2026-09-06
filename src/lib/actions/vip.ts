@@ -10,15 +10,17 @@
  *     reward: { voucher_amount, frame_unlock } } | null }
  *   (`box_tier` left the wire with #490; the schema tolerates it as optional)
  *
+ * The call goes through the `Store` port (src/lib/store.ts), which owns the
+ * cookie read, the bearer, the schema check and the failure log; what stays
+ * here is the logged-out answer and the copy (`vipFailure`, over VIP_RULES).
+ *
  * `next.reward` is on the wire but is neither validated nor mapped — nothing
  * renders it, and declaring it let a malformed reward blank the LV card (#523).
  * It stays documented here so the wire shape above is still the truth.
  */
-import { authedFetch } from '@/lib/authed-fetch';
-import { logger } from '@/lib/logger';
-import { getAuthToken } from '@/lib/data/customer';
-import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
-import { parseOne, VipSchema } from '@/lib/data/schemas';
+import { store, type Failure } from '@/lib/store';
+import { friendlyError, type ErrorRule } from '@/lib/errors';
+import { VipSchema } from '@/lib/data/schemas';
 // mapVipLevels is a sync helper, so it lives in ./vip-map.ts rather than here
 // — a 'use server' file may only export async functions as values (same
 // reason pack-batch-map.ts / vault-map.ts exist). Re-export the type only.
@@ -63,50 +65,48 @@ const VIP_RULES: ErrorRule[] = [
   ],
 ];
 const VIP_FALLBACK = 'Something went wrong. Please try again.';
+const LOGIN_TO_VIEW_VIP = 'Please log in to view your VIP status.';
+
+/** A port `Failure` in this action's vocabulary: no cookie at all (the call
+ *  never left — `status` is undefined) and a 2xx that failed VipSchema each
+ *  keep their own copy; anything the backend actually said goes through
+ *  VIP_RULES, with `needsAuth` when it was a 401. */
+function vipFailure(f: Failure): VipResult {
+  if (f.kind === 'invalid_shape') {
+    return {
+      ok: false,
+      error: 'Got an unexpected response. Please try again.',
+    };
+  }
+  if (f.kind === 'unauthenticated' && f.status === undefined) {
+    return { ok: false, error: LOGIN_TO_VIEW_VIP, needsAuth: true };
+  }
+  return {
+    ok: false,
+    error: friendlyError(f.text, VIP_RULES, VIP_FALLBACK),
+    needsAuth: f.kind === 'unauthenticated',
+  };
+}
 
 export async function getVip(): Promise<VipResult> {
-  const token = await getAuthToken();
-  if (!token) {
-    return {
-      ok: false,
-      error: 'Please log in to view your VIP status.',
-      needsAuth: true,
-    };
-  }
+  const r = await store.get('/store/vip', VipSchema);
+  if (!r.ok) return vipFailure(r);
+  const v = r.data;
 
-  try {
-    const raw = await authedFetch(token, '/store/vip');
-
-    const v = parseOne(VipSchema, raw);
-    if (!v) {
-      return {
-        ok: false,
-        error: 'Got an unexpected response. Please try again.',
-      };
-    }
-
-    return {
-      ok: true,
-      vip: {
-        level: v.level,
-        highestLevelEver: v.highest_level_ever,
-        spend: v.spend,
-        next: v.next
-          ? {
-              level: v.next.level,
-              threshold: v.next.threshold,
-              remaining: v.next.remaining,
-            }
-          : null,
-        levels: mapVipLevels(v.levels),
-      },
-    };
-  } catch (error) {
-    logger.error('[vip] load failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, VIP_RULES, VIP_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  return {
+    ok: true,
+    vip: {
+      level: v.level,
+      highestLevelEver: v.highest_level_ever,
+      spend: v.spend,
+      next: v.next
+        ? {
+            level: v.next.level,
+            threshold: v.next.threshold,
+            remaining: v.next.remaining,
+          }
+        : null,
+      levels: mapVipLevels(v.levels),
+    },
+  };
 }
