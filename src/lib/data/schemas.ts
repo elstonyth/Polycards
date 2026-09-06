@@ -729,6 +729,17 @@ export const NotificationsEnvelopeSchema = z.looseObject({
   has_more: z.boolean().optional(),
 });
 
+/** GET /store/notifications as the feed reads it. The envelope is SOFT, like
+ *  CreditsPageSchema's totals: a malformed `unread_count` parses to null and
+ *  the action falls back to counting the unread rows it did get, rather than
+ *  blanking the feed. Rows drop one at a time (`parseList`'s semantics). */
+export const NotificationsPageSchema = z
+  .looseObject({ notifications: listOf(NotificationSchema) })
+  .transform((page) => ({
+    envelope: parseOne(NotificationsEnvelopeSchema, page),
+    rows: page.notifications,
+  }));
+
 /** POST /store/notifications/:id/read — mark-read response. */
 export const MarkReadSchema = z.looseObject({
   id: z.string(),
