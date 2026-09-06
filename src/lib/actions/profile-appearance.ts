@@ -19,7 +19,14 @@ import { MEDUSA_BACKEND_URL } from '@/lib/medusa';
 import { store, type Failure } from '@/lib/store';
 import { AUTH_COOKIE } from '@/lib/store-port';
 import { logger } from '@/lib/logger';
-import { friendlyError, type ErrorRule } from '@/lib/errors';
+import {
+  friendlyError,
+  friendlyFailure,
+  COPY,
+  RATE_LIMITED,
+  UNAUTHORIZED,
+  type ErrorRule,
+} from '@/lib/errors';
 import { UncheckedSchema } from '@/lib/data/schemas';
 import { FRAME_LEVELS } from '@/lib/frame-levels';
 
@@ -36,13 +43,16 @@ const APPEARANCE_RULES: ErrorRule[] = [
   ],
   [/unlocks at level/i, 'That frame is still locked — keep leveling!'],
   [/no frame image is configured/i, 'That frame isn’t available yet.'],
-  [
-    /too many|rate.?limit|429/i,
-    'Too many requests — wait a moment and try again.',
-  ],
-  [/unauthorized|not authenticated|401/i, 'Please log in again.'],
+  // Both transport rules stay, and stay HERE rather than moving to the shared
+  // tier: the probes are the shared ones (lib/errors.ts) but the sentences are
+  // not ("wait a moment", not "give it a moment"; "log in again", not "log in
+  // first"). They also have to stay in a RULES table rather than become a
+  // `kind` branch, because the multipart avatar upload below never goes
+  // through the `Store` port — it has no `Failure`, only a raw message.
+  [RATE_LIMITED, 'Too many requests — wait a moment and try again.'],
+  [UNAUTHORIZED, 'Please log in again.'],
 ];
-const FALLBACK = 'Something went wrong. Please try again.';
+const FALLBACK = COPY.generic;
 const LOGIN_FIRST = 'Please log in first.';
 
 export type AppearanceResult = { ok: true } | { ok: false; error: string };
@@ -115,5 +125,5 @@ function frameError(f: Failure): string {
   if (f.kind === 'unauthenticated' && f.status === undefined) {
     return LOGIN_FIRST;
   }
-  return friendlyError(f.text, APPEARANCE_RULES, FALLBACK);
+  return friendlyFailure(f, APPEARANCE_RULES, FALLBACK);
 }

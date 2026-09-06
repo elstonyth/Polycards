@@ -27,7 +27,12 @@ import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
 import { formatValue } from '@/lib/packs-format';
 import type { Rarity } from '@/lib/packs-data';
-import { friendlyError, type ErrorRule } from '@/lib/errors';
+import {
+  friendlyFailure,
+  RATE_LIMITED,
+  UNAUTHORIZED,
+  type ErrorRule,
+} from '@/lib/errors';
 import { parseOne, UncheckedSchema, WonCardSchema } from '@/lib/data/schemas';
 import { mapBatchRoll, clampCount, toBuybackOffer } from './pack-batch-map';
 import type { RawBatchRollItem, BatchRoll } from './pack-batch-map';
@@ -106,13 +111,18 @@ interface BackendWonCard {
   [key: string]: unknown;
 }
 
+const LOGIN_TO_OPEN = 'Please log in to open a pack.';
+
 // Patterns local to the open-pack action; never surface raw errors.
+// Both transport rules stay: the probes are the shared ones (lib/errors.ts)
+// but the SENTENCES are this surface's own — "opening packs too fast" names
+// what the customer was doing, which the shared copy cannot.
 const PACKS_RULES: ErrorRule[] = [
   [
-    /too many|rate.?limit|429/i,
+    RATE_LIMITED,
     "You're opening packs too fast — give it a moment and try again.",
   ],
-  [/unauthorized|not authenticated|401/i, 'Please log in to open a pack.'],
+  [UNAUTHORIZED, LOGIN_TO_OPEN],
   [/not enough credits/i, 'Not enough credits to open this pack.'],
   // A pack whose prize pool is empty/zero-weight (mid-setup in admin). Must
   // precede the generic not-found rule: the backend throws it as NOT_FOUND.
@@ -123,7 +133,6 @@ const PACKS_RULES: ErrorRule[] = [
   [/not available|not found|404/i, "This pack isn't available right now."],
 ];
 const PACKS_FALLBACK = 'Could not open the pack. Please try again.';
-const LOGIN_TO_OPEN = 'Please log in to open a pack.';
 
 /**
  * A port `Failure` in the open actions' vocabulary.
@@ -147,7 +156,7 @@ function openFailure(f: Failure): {
   }
   return {
     ok: false,
-    error: friendlyError(f.text, PACKS_RULES, PACKS_FALLBACK),
+    error: friendlyFailure(f, PACKS_RULES, PACKS_FALLBACK),
     needsAuth: f.kind === 'unauthenticated',
     needsTopUp: /not enough credits/i.test(f.text),
   };

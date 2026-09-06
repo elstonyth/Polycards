@@ -19,7 +19,12 @@
  * It stays documented here so the wire shape above is still the truth.
  */
 import { store, type Failure } from '@/lib/store';
-import { friendlyError, type ErrorRule } from '@/lib/errors';
+import {
+  friendlyFailure,
+  COPY,
+  UNAUTHORIZED,
+  type ErrorRule,
+} from '@/lib/errors';
 import { VipSchema } from '@/lib/data/schemas';
 // mapVipLevels is a sync helper, so it lives in ./vip-map.ts rather than here
 // — a 'use server' file may only export async functions as values (same
@@ -54,18 +59,12 @@ export type Vip = {
 export type VipResult =
   { ok: true; vip: Vip } | { ok: false; error: string; needsAuth?: boolean };
 
-const VIP_RULES: ErrorRule[] = [
-  [
-    /too many|rate.?limit|429/i,
-    'Too many requests — give it a moment and try again.',
-  ],
-  [
-    /unauthorized|not authenticated|401/i,
-    'Please log in to view your VIP status.',
-  ],
-];
-const VIP_FALLBACK = 'Something went wrong. Please try again.';
 const LOGIN_TO_VIEW_VIP = 'Please log in to view your VIP status.';
+// Only the 401 rule is this action's own: a rate limit gets the shared
+// transport sentence from friendlyFailure (lib/errors.ts), which is what this
+// table used to spell out for itself.
+const VIP_RULES: ErrorRule[] = [[UNAUTHORIZED, LOGIN_TO_VIEW_VIP]];
+const VIP_FALLBACK = COPY.generic;
 
 /** A port `Failure` in this action's vocabulary: no cookie at all (the call
  *  never left — `status` is undefined) and a 2xx that failed VipSchema each
@@ -83,7 +82,7 @@ function vipFailure(f: Failure): VipResult {
   }
   return {
     ok: false,
-    error: friendlyError(f.text, VIP_RULES, VIP_FALLBACK),
+    error: friendlyFailure(f, VIP_RULES, VIP_FALLBACK),
     needsAuth: f.kind === 'unauthenticated',
   };
 }

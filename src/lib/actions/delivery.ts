@@ -33,8 +33,19 @@ import {
   type DeliveryOrderStatus,
   type WithdrawAddressInput,
 } from '@/lib/data/schemas';
-import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
-import { DELIVERY_RULES, DELIVERY_FALLBACK } from '@/lib/delivery-errors';
+import {
+  friendlyError,
+  friendlyFailure,
+  isAuthError,
+  TRANSPORT_RULES,
+  UNAUTHORIZED,
+  type ErrorRule,
+} from '@/lib/errors';
+import {
+  DELIVERY_RULES,
+  DELIVERY_FALLBACK,
+  DELIVERY_LOGIN,
+} from '@/lib/delivery-errors';
 import { normalizePhone } from '@/lib/profile-validation';
 
 export type DeliveryOrderItemView = {
@@ -144,6 +155,13 @@ interface BackendDeliveryOrder {
   }[];
 }
 
+// The address book goes through `sdk.store.customer.*` — built-in Medusa
+// endpoints (exception 3 in lib/store.ts's header), so those three actions
+// catch a THROWN error and have no port `Failure` to hand `friendlyFailure`.
+// They append the shared transport tier here instead, which is exactly what
+// friendlyFailure does for every other delivery call.
+const ADDRESS_RULES: ErrorRule[] = [...DELIVERY_RULES, ...TRANSPORT_RULES];
+
 const LOGIN_FIRST = 'Please log in first.';
 const LOGIN_TO_VIEW_ORDERS = 'Please log in to view your orders.';
 
@@ -163,7 +181,7 @@ function deliveryFailure(
   }
   return {
     ok: false,
-    error: friendlyError(f.text, rules, DELIVERY_FALLBACK),
+    error: friendlyFailure(f, rules, DELIVERY_FALLBACK),
     needsAuth: f.kind === 'unauthenticated',
   };
 }
@@ -267,15 +285,10 @@ export type CancelDeliveryResult =
 // Cancel-specific error vocabulary — the generic DELIVERY_RULES map 404/409 to
 // request-delivery copy ("card or address not found") that would mislead here.
 // Order matters: "already canceled" must win before the broader shipped rule.
+// No rate-limit rule, for the same reason DELIVERY_RULES has none: the copy
+// WAS the shared sentence, so friendlyFailure answers a 429 now.
 const CANCEL_RULES: ErrorRule[] = [
-  [
-    /too many|rate.?limit|429/i,
-    'Too many requests — give it a moment and try again.',
-  ],
-  [
-    /unauthorized|not authenticated|401/i,
-    'Please log in to manage deliveries.',
-  ],
+  [UNAUTHORIZED, DELIVERY_LOGIN],
   [/already canceled/i, 'This delivery is already canceled.'],
   // Backend NOT_ALLOWED once the order is out of the customer window. It fires
   // from `ready_to_ship` on — not only after the parcel physically ships — so
@@ -440,7 +453,7 @@ export async function addAddress(
     logger.error('[delivery] add address failed:', error);
     return {
       ok: false,
-      error: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
+      error: friendlyError(error, ADDRESS_RULES, DELIVERY_FALLBACK),
       needsAuth: isAuthError(error),
     };
   }
@@ -477,7 +490,7 @@ export async function updateAddress(
     logger.error(`[delivery] update address '${addressId}' failed:`, error);
     return {
       ok: false,
-      error: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
+      error: friendlyError(error, ADDRESS_RULES, DELIVERY_FALLBACK),
       needsAuth: isAuthError(error),
     };
   }
@@ -503,7 +516,7 @@ export async function deleteAddress(
     logger.error(`[delivery] delete address '${addressId}' failed:`, error);
     return {
       ok: false,
-      error: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
+      error: friendlyError(error, ADDRESS_RULES, DELIVERY_FALLBACK),
       needsAuth: isAuthError(error),
     };
   }
@@ -585,7 +598,7 @@ export async function shipVaultCards(
           reason:
             r.kind === 'invalid_shape'
               ? 'This reward card could not be shipped right now.'
-              : friendlyError(r.text, DELIVERY_RULES, DELIVERY_FALLBACK),
+              : friendlyFailure(r, DELIVERY_RULES, DELIVERY_FALLBACK),
         });
         continue;
       }

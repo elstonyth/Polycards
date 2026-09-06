@@ -15,14 +15,13 @@
  * amount was malformed while the real cause (the gateway refusing the submit)
  * never reached the UI.
  */
-import type { ErrorRule } from '@/lib/errors';
+import { COPY, UNAUTHORIZED, type ErrorRule } from '@/lib/errors';
 
+// No rate-limit rule: this table's copy WAS the shared sentence, so the
+// transport tier in lib/errors.ts answers a 429 now (friendlyFailure). The 401
+// rule stays because the sentence is this surface's own, not the shared one.
 export const VAULT_RULES: ErrorRule[] = [
-  [
-    /too many|rate.?limit|429/i,
-    'Too many requests — give it a moment and try again.',
-  ],
-  [/unauthorized|not authenticated|401/i, 'Please log in to view your vault.'],
+  [UNAUTHORIZED, 'Please log in to view your vault.'],
   // requirePhoneVerified (backend api/utils/phone-verification-guard.ts) —
   // above every broad rule below, per the ORDER note in the file header. Names
   // the screen that fixes it: the gate clears the moment Settings completes the
@@ -91,4 +90,4 @@ export const VAULT_RULES: ErrorRule[] = [
   [/not found|404/i, 'This card is no longer in your vault.'],
 ];
 
-export const VAULT_FALLBACK = 'Something went wrong. Please try again.';
+export const VAULT_FALLBACK = COPY.generic;

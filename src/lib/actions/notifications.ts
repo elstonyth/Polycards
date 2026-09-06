@@ -24,7 +24,7 @@
  */
 import { store, type Failure } from '@/lib/store';
 import { sanePage } from '@/lib/page-param';
-import { friendlyError, type ErrorRule } from '@/lib/errors';
+import { friendlyFailure, COPY, type ErrorRule } from '@/lib/errors';
 import {
   NotificationsEnvelopeSchema,
   NotificationsPageSchema,
@@ -62,16 +62,14 @@ export type MarkAllReadResult =
   | { ok: true; marked: number; readAt: string }
   | { ok: false; error: string; needsAuth?: boolean };
 
+// Domain rule only. Both transport sentences this table used to carry were
+// the shared ones, so friendlyFailure (lib/errors.ts) answers a 429 and a 401
+// now — after this rule, exactly where they sat before.
 const NOTIF_RULES: ErrorRule[] = [
-  [
-    /too many|rate.?limit|429/i,
-    'Too many requests — give it a moment and try again.',
-  ],
   [/not found|404/i, 'Notification not found.'],
-  [/unauthorized|not authenticated|401/i, 'Please log in first.'],
 ];
-const NOTIF_FALLBACK = 'Something went wrong. Please try again.';
-const LOGIN_FIRST = 'Please log in first.';
+const NOTIF_FALLBACK = COPY.generic;
+const LOGIN_FIRST = COPY.loginRequired;
 const LOGIN_TO_VIEW = 'Please log in to view your notifications.';
 const UNEXPECTED_RESPONSE = 'Got an unexpected response. Please try again.';
 
@@ -92,7 +90,7 @@ function notifFailure(
   }
   return {
     ok: false,
-    error: friendlyError(f.text, NOTIF_RULES, NOTIF_FALLBACK),
+    error: friendlyFailure(f, NOTIF_RULES, NOTIF_FALLBACK),
     needsAuth: f.kind === 'unauthenticated',
   };
 }

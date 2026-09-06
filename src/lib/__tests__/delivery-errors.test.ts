@@ -39,11 +39,12 @@ describe('DELIVERY_RULES backend-message contract', () => {
     ).toBe('One or more cards are already in a pending delivery request.');
   });
 
-  it('maps transport-level errors', () => {
+  // No rate-limit case here any more: that copy WAS the shared sentence, so
+  // the rule left this table for the transport tier in lib/errors.ts and is
+  // pinned once, by friendly-failure.test.ts. The 401 stays — this surface
+  // words an expired session its own way, so the rule is still DELIVERY_RULES'.
+  it('maps an expired session to the delivery login copy', () => {
     expect(map('Unauthorized')).toBe('Please log in to manage deliveries.');
-    expect(map('rate limit exceeded (429)')).toBe(
-      'Too many requests — give it a moment and try again.',
-    );
     expect(map('Shipping address not found.')).toBe(
       'That card or address was not found.',
     );

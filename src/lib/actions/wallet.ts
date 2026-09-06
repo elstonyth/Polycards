@@ -10,7 +10,12 @@
  * so only the inner object is validated (not the transactions).
  */
 import { store, type Failure } from '@/lib/store';
-import { friendlyError, type ErrorRule } from '@/lib/errors';
+import {
+  friendlyFailure,
+  COPY,
+  UNAUTHORIZED,
+  type ErrorRule,
+} from '@/lib/errors';
 import { WalletEnvelopeSchema } from '@/lib/data/schemas';
 
 export type Wallet = {
@@ -27,15 +32,12 @@ export type WalletResult =
   | { ok: true; wallet: Wallet }
   | { ok: false; error: string; needsAuth?: boolean };
 
-const WALLET_RULES: ErrorRule[] = [
-  [
-    /too many|rate.?limit|429/i,
-    'Too many requests — give it a moment and try again.',
-  ],
-  [/unauthorized|not authenticated|401/i, 'Please log in to view your wallet.'],
-];
-const WALLET_FALLBACK = 'Something went wrong. Please try again.';
 const LOGIN_REQUIRED = 'Please log in to view your wallet.';
+// Only the 401 rule is this action's own: a rate limit gets the shared
+// transport sentence from friendlyFailure (lib/errors.ts), which is what this
+// table used to spell out for itself.
+const WALLET_RULES: ErrorRule[] = [[UNAUTHORIZED, LOGIN_REQUIRED]];
+const WALLET_FALLBACK = COPY.generic;
 
 /** A port `Failure` in this action's vocabulary: no cookie at all (the call
  *  never left — `status` is undefined) and a 2xx with the wrong shape each
@@ -53,7 +55,7 @@ function walletFailure(f: Failure): WalletResult {
   }
   return {
     ok: false,
-    error: friendlyError(f.text, WALLET_RULES, WALLET_FALLBACK),
+    error: friendlyFailure(f, WALLET_RULES, WALLET_FALLBACK),
     needsAuth: f.kind === 'unauthenticated',
   };
 }

@@ -21,7 +21,7 @@ import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
 import { sanePage } from '@/lib/page-param';
 import { elapsedLabel } from '@/lib/transactions';
-import { friendlyError } from '@/lib/errors';
+import { friendlyFailure } from '@/lib/errors';
 import { VAULT_RULES, VAULT_FALLBACK } from '@/lib/vault-errors';
 import {
   DEFAULT_DEPOSIT_METHOD,
@@ -90,7 +90,7 @@ function vaultFailure(
   }
   return {
     ok: false,
-    error: friendlyError(f.text, VAULT_RULES, VAULT_FALLBACK),
+    error: friendlyFailure(f, VAULT_RULES, VAULT_FALLBACK),
     needsAuth: f.kind === 'unauthenticated',
   };
 }
