@@ -18,8 +18,19 @@
 import { COPY, UNAUTHORIZED, type ErrorRule } from '@/lib/errors';
 
 // No rate-limit rule: this table's copy WAS the shared sentence, so the
-// transport tier in lib/errors.ts answers a 429 now (friendlyFailure). The 401
-// rule stays because the sentence is this surface's own, not the shared one.
+// transport tier in lib/errors.ts answers a 429 now (friendlyFailure) — but
+// only LAST: friendlyFailure runs every rule below first, so the transport
+// tier now sits behind every one of them, including the numeric one at the
+// tail (/not found|404/i). The 401 rule stays because the sentence is this
+// surface's own, not the shared one.
+//
+// Latent hazard, not live today: a rate-limited response reads
+// "<label> Try again in Ns." (backend rate-limit.ts), and if N ever reached
+// 404 it would hit that rule before the transport tier saw it (this table has
+// no /400/ or /409/ rule, unlike delivery-errors.ts). Every vault rate limit
+// defaults to a <=60s window (rate-limit.ts) — an env override could widen
+// it — so N never grows past two digits today; re-check this comment if a
+// window ever widens past ~400s.
 export const VAULT_RULES: ErrorRule[] = [
   [UNAUTHORIZED, 'Please log in to view your vault.'],
   // requirePhoneVerified (backend api/utils/phone-verification-guard.ts) —

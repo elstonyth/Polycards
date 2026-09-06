@@ -64,7 +64,12 @@ export type MarkAllReadResult =
 
 // Domain rule only. Both transport sentences this table used to carry were
 // the shared ones, so friendlyFailure (lib/errors.ts) answers a 429 and a 401
-// now — after this rule, exactly where they sat before.
+// now — but NOT both "where they sat before". The 401 rule sat after this one
+// (index 2 of 3) and still resolves after it, unchanged. The 429 rule sat
+// BEFORE this one (index 0) and now resolves after it, as part of the shared
+// transport tier — a real reorder. Safe today because no 429 text this
+// surface emits ("Too many mark-read requests." / "Too many mark-all-read
+// requests.") matches /not found|404/i.
 const NOTIF_RULES: ErrorRule[] = [
   [/not found|404/i, 'Notification not found.'],
 ];

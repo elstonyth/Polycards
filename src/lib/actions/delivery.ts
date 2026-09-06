@@ -286,7 +286,12 @@ export type CancelDeliveryResult =
 // request-delivery copy ("card or address not found") that would mislead here.
 // Order matters: "already canceled" must win before the broader shipped rule.
 // No rate-limit rule, for the same reason DELIVERY_RULES has none: the copy
-// WAS the shared sentence, so friendlyFailure answers a 429 now.
+// WAS the shared sentence, so friendlyFailure answers a 429 now — but only
+// LAST, behind every rule below, including /not found|404/i at the tail (same
+// latent hazard as DELIVERY_RULES/VAULT_RULES: a rate-limited response reads
+// "<label> Try again in Ns.", and an N containing "404" would hit that rule
+// first — unreachable today because this surface's rate limit defaults to a
+// <=60s window, see delivery-errors.ts).
 const CANCEL_RULES: ErrorRule[] = [
   [UNAUTHORIZED, DELIVERY_LOGIN],
   [/already canceled/i, 'This delivery is already canceled.'],
