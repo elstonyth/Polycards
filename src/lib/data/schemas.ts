@@ -79,6 +79,27 @@ function listOf<T>(item: z.ZodType<T>) {
   return droppableArray(item).catch([]);
 }
 
+/**
+ * NO envelope validation — every 2xx body passes, whatever it is.
+ *
+ * The `Store` port takes a schema per call, and two kinds of call must not have
+ * one:
+ *
+ * - the response is IGNORED, a 2xx IS the answer (the account-delete route, the
+ *   avatar-frame POST, the close-instant ping);
+ * - the response must not be REJECTED at the envelope because the customer has
+ *   already been CHARGED (`openPack`/`openBatch`/the free-rip spend). A drifted
+ *   field would classify as `invalid_shape`, and that action's copy for a
+ *   generic failure says "try again" — the one sentence a committed open must
+ *   never show. Those read the body through their own
+ *   `parseOne(WonCardSchema, …)` instead, where a bad card gets its own "the
+ *   card is in your Vault" answer.
+ *
+ * Callers that read fields off the body cast at the seam, the way
+ * `vault.data.items as unknown as BackendVaultItem[]` does in actions/vault.ts.
+ */
+export const UncheckedSchema = z.unknown();
+
 // --- data/packs.ts ----------------------------------------------------------
 
 /** GET /store/packs row — getter checks `category` + finite `price` only. */
