@@ -1,26 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
-import { memoryStore, type MemoryRoutes } from '@/lib/store-memory';
-import type { Store } from '@/lib/store';
+import { storeShim, backend } from '@/lib/__tests__/store-shim';
 
 // The action imports the port's HTTP adapter; point that import at an
-// in-memory backend per test. Nothing beneath the port is mocked.
-const port = vi.hoisted(() => ({ current: undefined as unknown as Store }));
-vi.mock('@/lib/store', () => {
-  const shim: Store = {
-    get: (path, schema, o) => port.current.get(path, schema, o),
-    post: (path, schema, body, o) => port.current.post(path, schema, body, o),
-    del: (path, schema, body, o) => port.current.del(path, schema, body, o),
-    orThrow: (r) => port.current.orThrow(r),
-  };
-  return { store: shim };
-});
+// in-memory backend per test (src/lib/__tests__/store-shim.ts). Nothing
+// beneath the port (SDK, cookies, logger) is mocked — the real schema parsing
+// and copy tables run.
+vi.mock('@/lib/store', () => ({ store: storeShim }));
 
 import { getWallet } from '../wallet';
-
-function backend(routes: MemoryRoutes, opts?: { token?: string | null }) {
-  port.current = memoryStore(routes, opts);
-  return port.current as ReturnType<typeof memoryStore>;
-}
 
 const WALLET = {
   balance: 120,

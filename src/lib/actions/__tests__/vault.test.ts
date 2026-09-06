@@ -1,27 +1,18 @@
 import { describe, it, expect, vi } from 'vitest';
-import { memoryStore, type MemoryRoutes } from '@/lib/store-memory';
-import type { Store } from '@/lib/store';
+import { storeShim, backend } from '@/lib/__tests__/store-shim';
 
 // The actions import the port's HTTP adapter; point that import at an
-// in-memory backend per test. Nothing beneath the port (SDK, cookies, logger)
-// is mocked — the real schema parsing and copy tables run.
-const port = vi.hoisted(() => ({ current: undefined as unknown as Store }));
-vi.mock('@/lib/store', () => {
-  const shim: Store = {
-    get: (path, schema, o) => port.current.get(path, schema, o),
-    post: (path, schema, body, o) => port.current.post(path, schema, body, o),
-    del: (path, schema, body, o) => port.current.del(path, schema, body, o),
-    orThrow: (r) => port.current.orThrow(r),
-  };
-  return { store: shim };
-});
+// in-memory backend per test (src/lib/__tests__/store-shim.ts). Nothing
+// beneath the port (SDK, cookies, logger) is mocked — the real schema parsing
+// and copy tables run.
+vi.mock('@/lib/store', () => ({ store: storeShim }));
 
-import { getVault, sellBackPull, startWithdrawal } from '../vault';
-
-function backend(routes: MemoryRoutes, opts?: { token?: string | null }) {
-  port.current = memoryStore(routes, opts);
-  return port.current as ReturnType<typeof memoryStore>;
-}
+import {
+  getVault,
+  sellBackPull,
+  startWithdrawal,
+  topUpCredits,
+} from '../vault';
 
 const WITHDRAW_OK = {
   body: {
@@ -71,6 +62,54 @@ describe('startWithdrawal — Idempotency-Key', () => {
       balance: 950,
       reference: 'PC-W1',
       status: 'pending',
+    });
+  });
+});
+
+describe('topUpCredits — Idempotency-Key', () => {
+  // Mandatory since the 2026-07-07 audit: the key is minted once per top-up
+  // ATTEMPT by the caller (TopUpSheet) and replayed across retries of that
+  // attempt, so a credited-but-response-lost retry dedupes on the backend
+  // instead of double-crediting.
+  it('posts the amount with the caller-minted key as the Idempotency-Key header', async () => {
+    const mem = backend({
+      'POST /store/credits/topup': { body: { amount: 25, balance: 125 } },
+    });
+    expect(await topUpCredits(25, 'topup-attempt-abc123')).toEqual({
+      ok: true,
+      amount: 25,
+      balance: 125,
+      replayed: false,
+    });
+    expect(mem.requests[0]).toMatchObject({
+      method: 'POST',
+      path: '/store/credits/topup',
+      headers: { 'Idempotency-Key': 'topup-attempt-abc123' },
+      body: { amount: 25 },
+    });
+  });
+
+  it('still mints a fallback key when the caller passes none, rather than sending no header at all', async () => {
+    const mem = backend({
+      'POST /store/credits/topup': { body: { amount: 25, balance: 125 } },
+    });
+    await topUpCredits(25);
+    const key = mem.requests[0]?.headers['Idempotency-Key'];
+    expect(typeof key).toBe('string');
+    expect(key!.length).toBeGreaterThan(0);
+  });
+
+  it('reports a backend replay so the sheet does not claim a second charge', async () => {
+    backend({
+      'POST /store/credits/topup': {
+        body: { amount: 25, balance: 125, replayed: true },
+      },
+    });
+    expect(await topUpCredits(25, 'k')).toEqual({
+      ok: true,
+      amount: 25,
+      balance: 125,
+      replayed: true,
     });
   });
 });
