@@ -14,18 +14,23 @@ describe('bank registry', () => {
     for (const id of ids) expect(id).toMatch(/^[A-Z0-9]{2,20}$/);
   });
 
-  it('no gateway code or legacy alias is claimed by two banks', () => {
-    const seen = new Map<string, string>();
-    for (const b of MY_BANKS) {
-      for (const [gw, c] of Object.entries(b.codes)) {
-        const key = `${gw}:${c.code}`;
-        expect(seen.get(key)).toBeUndefined();
-        seen.set(key, b.id);
-      }
-      for (const a of b.legacyAliases) {
-        const key = `legacy:${a}`;
-        expect(seen.get(key)).toBeUndefined();
-        seen.set(key, b.id);
+  it('no alias resolves to two banks — ids, gateway codes and legacy aliases share ONE lookup namespace', () => {
+    // findBank() keys canonical ids, every gateway code and every legacy
+    // alias in a single case-insensitive map, so a collision across those
+    // categories would silently make one bank resolve as another. The same
+    // bank may reuse a key across categories (a SWIFT id that is also its
+    // TGPay code); only a different owner is a fault.
+    const owner = new Map<string, string>();
+    for (const b of [...MY_BANKS, TGPAY_SANDBOX_BANK]) {
+      const keys = [
+        b.id,
+        ...Object.values(b.codes).map((c) => c.code),
+        ...b.legacyAliases,
+      ].map((k) => k.toUpperCase());
+      for (const key of keys) {
+        const prior = owner.get(key);
+        expect(prior === undefined || prior === b.id).toBe(true);
+        owner.set(key, b.id);
       }
     }
   });
