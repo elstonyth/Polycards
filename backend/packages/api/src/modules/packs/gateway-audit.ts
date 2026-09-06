@@ -1,4 +1,4 @@
-import type { SettlementState } from './globepay';
+import type { SettlementState } from './gateway-types';
 
 // Gateway audit (plan 130): the gateway is the source of truth for money in
 // and out, so rows we consider FINAL are re-read against it on a schedule and

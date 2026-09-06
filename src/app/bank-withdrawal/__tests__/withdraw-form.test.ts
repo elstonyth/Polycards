@@ -18,7 +18,7 @@ const getPaymentLimits = vi.fn();
 vi.mock('@/lib/actions/vault', () => ({
   startWithdrawal: (...args: unknown[]) => startWithdrawal(...args),
   fetchSavedBankAccounts: () => fetchSavedBankAccounts(),
-  // The band is the active gateway's; the tests below pin GlobePay's.
+  // The band is the active gateway's; the tests below pin RM 50 – 50,000.
   getPaymentLimits: () => getPaymentLimits(),
 }));
 
@@ -85,7 +85,7 @@ async function render(accounts: unknown[] = [READY_ACCOUNT]) {
 beforeEach(() => {
   vi.clearAllMocks();
   getPaymentLimits.mockResolvedValue({
-    gateway: 'globepay',
+    gateway: 'tgpay',
     deposit: { minRm: 30, maxRm: 10000 },
     withdrawal: { minRm: 50, maxRm: 50000 },
   });

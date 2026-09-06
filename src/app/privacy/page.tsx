@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 };
 
 // v1 policy written from what the product actually does (auth cookies,
-// consent-gated Meta Pixel, GlobePay payments, Resend transactional email,
+// consent-gated Meta Pixel, TGPay payments, Resend transactional email,
 // Twilio Verify SMS, the public Telegram pull broadcast, DigitalOcean
 // hosting). Operator should review wording before any formal legal reliance;
 // keep this page in sync when data practices change.

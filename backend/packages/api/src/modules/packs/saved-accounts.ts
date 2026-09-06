@@ -178,9 +178,9 @@ export function savedBankAccountViews(
 }
 
 /**
- * Can `gateway` pay to this bank? Unknown codes count as supported on GlobePay
- * only — they are its own pre-registry codes, passed through as-is. The
- * sandbox dummy bank is supported only while the sandbox is configured.
+ * Can `gateway` pay to this bank? A code the registry does not know is
+ * unsupported everywhere (nothing could pay to it). The sandbox dummy bank
+ * is supported only while the sandbox is configured.
  */
 export function bankSupportedBy(
   bankCode: string,
@@ -188,8 +188,7 @@ export function bankSupportedBy(
   env: { TGPAY_API_BASE?: string } = process.env,
 ): boolean {
   if (sandboxOnlyBank(bankCode, env)) return false;
-  if (gatewayBankCode(bankCode, gateway)) return true;
-  return gateway === 'globepay' && !findBank(bankCode);
+  return Boolean(gatewayBankCode(bankCode, gateway));
 }
 
 /** "about 3 hours" / "about 20 minutes" — a wait, not a wall-clock time, so the

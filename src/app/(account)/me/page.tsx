@@ -36,7 +36,7 @@ export const metadata: Metadata = {
 // Quick-access grid (Show's Me pattern). VIP, Daily Box, and Withdraw tiles
 // were dropped 2026-07-15; Vouchers went with the 2026-07-29 reward-surface
 // suspension (routes 404 while the reward economy is paused). Bank arrived
-// 2026-08-05 with real GlobePay payouts: saved accounts the withdraw form
+// 2026-08-05 with real gateway payouts: saved accounts the withdraw form
 // prefills, managed at /bank.
 const QUICK_ACCESS: { label: string; href: string; icon: LucideIcon }[] = [
   { label: 'Referral', href: '/referral', icon: Users },

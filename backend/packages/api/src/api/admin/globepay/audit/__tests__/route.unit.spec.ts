@@ -15,7 +15,6 @@ const ORIGINAL = { ...process.env };
 beforeEach(() => {
   delete process.env.PAYMENT_GATEWAY;
   process.env.GLOBEPAY_ENABLED = 'true';
-  process.env.GLOBEPAY_MERCHANT_CODE = 'M1';
   process.env.TGPAY_SECRET_KEY = 'sk-test';
   setActiveGateway(null);
   jest.clearAllMocks();
@@ -133,6 +132,7 @@ describe('GET /admin/globepay/audit', () => {
     expect(body.wallet).toBeNull();
     expect(body.wallet_error).toMatch(/403/);
     expect(body.findings).toHaveLength(1);
-    expect(body.history).toEqual([]);
+    // The retired gateway's settled history is still listed.
+    expect(body.history.map((h) => h.gateway)).toEqual(['globepay']);
   });
 });

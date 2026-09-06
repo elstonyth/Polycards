@@ -1,8 +1,12 @@
 # TGPay payment gateway — setup notes
 
-Status: **sandbox integration built 2026-09-05 (plan 130)**, behind the
-`PAYMENT_GATEWAY=tgpay` switch. Production stays on GlobePay365 until the
-switch is flipped there.
+Status: **LIVE in production since 2026-09-06** (`PAYMENT_GATEWAY=tgpay` on
+the backend, deployment c765231a; the GlobePay365 integration was removed
+the same day — `globepay365-setup.md` is the retired record). Production
+keys proven from inside DigitalOcean (`check-tgpay`: keys accepted, MYR
+wallets present). Still pending on TGPay's side at cutover: funding the
+payout wallet (0.00), the settlement bank details, and the 188.114.96.0 /
+188.114.97.0 range question.
 
 Source: the sandbox admin's own docs — <https://sandbox.tgpay365.com/docs/api>
 and `/docs/sandbox-api` (login required). Their doc template leaves the base

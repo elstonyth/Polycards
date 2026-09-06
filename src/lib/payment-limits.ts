@@ -10,12 +10,10 @@ export type PaymentLimits = {
 };
 
 /**
- * Used until the backend answers (and if it never does). The INTERSECTION of
- * the gateways' bands — highest floor, lowest ceiling (GlobePay RM 30–10,000 /
- * RM 50–50,000; TGPay RM 50–10,000 / RM 50–30,000) — so the forms never offer
- * an amount some active gateway would refuse. A fetch failure therefore costs
- * a GlobePay customer RM 30–49 top-ups and RM 30,001–50,000 payouts until the
- * next open, never a refused submit.
+ * Used until the backend answers (and if it never does): TGPay's band
+ * (RM 50–10,000 deposits, RM 50–30,000 payouts). Keep this the INTERSECTION
+ * of every configured gateway's band — highest floor, lowest ceiling — so the
+ * forms never offer an amount an active gateway would refuse.
  */
 export const DEFAULT_PAYMENT_LIMITS: PaymentLimits = {
   gateway: 'unknown',

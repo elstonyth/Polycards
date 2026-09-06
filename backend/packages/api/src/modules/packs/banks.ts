@@ -11,12 +11,14 @@ import type { PaymentGateway } from './gateway';
 //
 // Canonical ids are the bank's SWIFT/BIC where TGPay publishes one, else a
 // stable uppercase slug (the withdrawal validator only admits [A-Z0-9]{2,20}).
-// Legacy rows and metadata written before this file carry GlobePay's codes;
-// `findBank` accepts any gateway's code as an alias, so they keep resolving.
+// Rows and metadata written before this file carry the retired GlobePay365
+// gateway's codes (MYMB2U for Maybank, …); they are kept as LEGACY ALIASES
+// so `findBank` still resolves every saved account written under it, and a
+// customer never re-enters a bank because the gateway changed.
 //
 // Sources: TGPay "Malaysia bank SWIFT codes (payout)" (sandbox docs,
-// 2026-09-05); GlobePay365 GetSupportedBanks for merchant Testpolycard
-// (31 MYR banks, fetched 2026-09-05).
+// 2026-09-05); the GlobePay365 GetSupportedBanks list as fetched 2026-09-05
+// (aliases only).
 
 export type GatewayBankCode = { code: string; name: string };
 
@@ -27,20 +29,20 @@ export type Bank = {
   name: string;
   /** Per-gateway code + the exact name that gateway pairs with it. */
   codes: Partial<Record<PaymentGateway, GatewayBankCode>>;
+  /** Codes of retired gateways that older rows may still carry. */
+  legacyAliases: readonly string[];
 };
 
 const bank = (
   id: string,
   name: string,
-  globepay: GatewayBankCode | null,
+  legacy: GatewayBankCode | null,
   tgpay: GatewayBankCode | null,
 ): Bank => ({
   id,
   name,
-  codes: {
-    ...(globepay ? { globepay } : {}),
-    ...(tgpay ? { tgpay } : {}),
-  },
+  codes: tgpay ? { tgpay } : {},
+  legacyAliases: legacy ? [legacy.code] : [],
 });
 
 export const MY_BANKS: readonly Bank[] = [
@@ -64,7 +66,9 @@ export const MY_BANKS: readonly Bank[] = [
   bank('RHBBMYKL', 'RHB Bank', { code: 'MYRHBB', name: 'RHB Bank Berhad' }, { code: 'RHBBMYKL', name: 'RHB Bank Berhad' }),
   bank('SCBLMYKX', 'Standard Chartered', { code: 'MYSTCB', name: 'Standard Chartered Bank' }, { code: 'SCBLMYKX', name: 'Standard Chartered Bank (Malaysia) Berhad' }),
   bank('UOVBMYKL', 'UOB', { code: 'MYUOBB', name: 'United Overseas Bank' }, { code: 'UOVBMYKL', name: 'United Overseas Bank (Malaysia) Berhad' }),
-  // GlobePay-only today (e-wallets, digital and foreign banks).
+  // No TGPay payout code today (e-wallets, digital and foreign banks): kept so
+  // a saved account under one still resolves and reads as "not available with
+  // the current payout provider" instead of vanishing.
   bank('AEONMY', 'Aeon Bank', { code: 'ACDB', name: 'Aeon Bank' }, null),
   bank('MBSBMY', 'MBSB Bank', { code: 'AFBQ', name: 'MBSB Bank' }, null),
   bank('BIGPAYMY', 'BigPay', { code: 'BIGB', name: 'BigPay' }, null),
@@ -108,6 +112,7 @@ const byAlias = new Map<string, Bank>();
 for (const b of [...MY_BANKS, TGPAY_SANDBOX_BANK]) {
   byAlias.set(b.id.toUpperCase(), b);
   for (const c of Object.values(b.codes)) byAlias.set(c.code.toUpperCase(), b);
+  for (const a of b.legacyAliases) byAlias.set(a.toUpperCase(), b);
 }
 
 /** Resolve a canonical id OR any gateway's code to the bank. Null if unknown. */

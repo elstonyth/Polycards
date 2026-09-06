@@ -1,8 +1,5 @@
-import * as globepay from './globepay-client';
 import * as tgpay from './tgpay-client';
-import type { SettlementState } from './globepay';
-import type { GlobePayConfig } from './globepay-client';
-import type { TgpayConfig, TgpayCustomer } from './tgpay-client';
+import type { TgpayConfig } from './tgpay-client';
 import { PACKS_MODULE } from './index';
 import {
   banksFor,
@@ -11,13 +8,41 @@ import {
   TGPAY_SANDBOX_BANK,
 } from './banks';
 import { netOfFee } from './money';
+import type {
+  DepositDetail,
+  MerchantBalance,
+  SubmitDepositInput,
+  SubmitDepositResult,
+  SubmitWithdrawalInput,
+  SubmitWithdrawalResult,
+  SupportedBank,
+  WithdrawalDetail,
+} from './gateway-types';
 
-// The gateway seam. Every caller that used to import the HTTP client from
-// globepay-client imports it from here instead; the functions keep GlobePay's
-// signatures and dispatch on the ACTIVE gateway. Which one is active is an
-// admin setting (site_settings.payment_gateway, see resolveActiveGateway)
-// with PAYMENT_GATEWAY as the boot/fallback value; unset means GlobePay, so a
-// deploy that never heard of the switch behaves exactly as before.
+export { GatewayError } from './gateway-types';
+export type {
+  DepositDetail,
+  MerchantBalance,
+  SettlementState,
+  SubmitDepositInput,
+  SubmitDepositResult,
+  SubmitWithdrawalInput,
+  SubmitWithdrawalResult,
+  SupportedBank,
+  WithdrawalDetail,
+} from './gateway-types';
+
+// The gateway seam. The money orchestration, the reconcile jobs and the
+// admin/store routes call the functions below, which dispatch to the adapter
+// for a config's `kind`. Which gateway is ACTIVE is an admin setting
+// (site_settings.payment_gateway, see resolveActiveGateway) with
+// PAYMENT_GATEWAY as the boot/fallback value.
+//
+// Naming note: the tables (globepay_deposit / globepay_withdrawal), the
+// orchestration files (globepay-deposit.ts / globepay-withdrawal.ts), the
+// /admin/globepay/* routes and the GLOBEPAY_ENABLED switches predate the
+// seam and kept their names when the GlobePay365 integration itself was
+// removed (2026-09-06). They are gateway-neutral; only the names are old.
 //
 // The orchestration (globepay-deposit.ts, globepay-withdrawal.ts), the
 // reconcile jobs and the admin/store routes are gateway-agnostic through this
@@ -25,7 +50,7 @@ import { netOfFee } from './money';
 // way, so they live at src/api/hooks/<gateway>/. Adding a gateway = a client
 // file, a hooks folder, an entry in GATEWAYS and an adapter below.
 
-export type PaymentGateway = 'globepay' | 'tgpay';
+export type PaymentGateway = 'tgpay';
 
 export type GatewayDefinition = {
   id: PaymentGateway;
@@ -55,26 +80,6 @@ export type GatewayDefinition = {
 };
 
 export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
-  globepay: {
-    id: 'globepay',
-    label: 'GlobePay365',
-    configured: (env) => Boolean(env.GLOBEPAY_MERCHANT_CODE),
-    configFromEnv: (env) => globepay.globepayConfigFromEnv(env),
-    needsCustomerContact: false,
-    hooks: {
-      deposit: '/hooks/globepay/deposit',
-      withdrawal: '/hooks/globepay/withdrawal',
-      payoutVerify: '/hooks/globepay/payout-verify',
-    },
-    // Production merchant band confirmed by the provider 2026-07-29 (deposits)
-    // and the WD channel's documented range (withdrawals).
-    limits: {
-      depositMin: 30,
-      depositMax: 10000,
-      withdrawalMin: 50,
-      withdrawalMax: 50000,
-    },
-  },
   tgpay: {
     id: 'tgpay',
     label: 'TGPay',
@@ -99,6 +104,13 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
 
 export const GATEWAY_IDS = Object.keys(GATEWAYS) as PaymentGateway[];
 
+/**
+ * Gateways that no longer exist in this codebase but whose rows still do.
+ * History-only: the audit panel keeps reporting their settled totals, and
+ * rowGateway() returns null for their rows so no sweep ever calls them.
+ */
+export const RETIRED_GATEWAYS: readonly string[] = ['globepay'];
+
 export function isPaymentGateway(value: unknown): value is PaymentGateway {
   return (
     typeof value === 'string' &&
@@ -107,15 +119,14 @@ export function isPaymentGateway(value: unknown): value is PaymentGateway {
 }
 
 /**
- * The gateway a deposit/withdrawal row belongs to. A row with no value (the
- * column's default, a pre-migration read, an old test fixture) is GlobePay —
- * the only gateway that ever wrote rows before the switch existed. An
- * unregistered value is null: the caller must refuse rather than guess.
+ * The gateway a deposit/withdrawal row belongs to, or null when it names a
+ * gateway this deploy does not know — a retired one (every 'globepay' row
+ * from before 2026-09-06) or a bad value. The caller must skip or refuse
+ * rather than guess: those rows are final history, not live money.
  */
 export function rowGateway(row: {
   gateway?: string | null;
 }): PaymentGateway | null {
-  if (row.gateway == null || row.gateway === '') return 'globepay';
   return isPaymentGateway(row.gateway) ? row.gateway : null;
 }
 
@@ -134,14 +145,12 @@ export const ACTIVE_GATEWAY_TTL_MS = 30_000;
 let activeSetting: PaymentGateway | null = null;
 let activeReadAt = 0;
 
-/** The active gateway: admin setting when known, else PAYMENT_GATEWAY, else GlobePay. */
+/** The active gateway: admin setting when known, else PAYMENT_GATEWAY, else TGPay. */
 export function paymentGateway(
   env: { PAYMENT_GATEWAY?: string } = process.env,
 ): PaymentGateway {
   if (activeSetting) return activeSetting;
-  return isPaymentGateway(env.PAYMENT_GATEWAY)
-    ? env.PAYMENT_GATEWAY
-    : 'globepay';
+  return isPaymentGateway(env.PAYMENT_GATEWAY) ? env.PAYMENT_GATEWAY : 'tgpay';
 }
 
 /** Set the cached active gateway (admin switch, boot, tests). null = forget. */
@@ -175,7 +184,7 @@ export async function resolveActiveGateway(
   return paymentGateway();
 }
 
-export type GatewayConfig = GlobePayConfig | TgpayConfig;
+export type GatewayConfig = TgpayConfig;
 
 /** Config for a SPECIFIC gateway, from env. Throws when it is not configured. */
 export function gatewayConfigFor(
@@ -218,11 +227,10 @@ export function gatewayConfigFromEnv(
 }
 
 /**
- * Where a gateway must send its callbacks, and where the customer lands.
+ * Where a gateway must send its callbacks, and where the customer lands:
  * PAYMENT_CALLBACK_BASE (our public backend origin) + the gateway's hook
- * paths; without it, the explicit GLOBEPAY_*_URL values apply unchanged, so
- * a production deploy that predates the switch keeps its exact URLs.
- * Missing values come back as '' — callers fail closed on that, as before.
+ * paths. Missing values come back as '' — callers fail closed on that, so a
+ * deploy without the base cannot start a payment nobody could settle.
  */
 export function gatewayUrls(
   id: PaymentGateway = paymentGateway(),
@@ -236,34 +244,21 @@ export function gatewayUrls(
   hasPayoutVerify: boolean;
 } {
   const def = GATEWAYS[id];
-  const base = env.PAYMENT_CALLBACK_BASE?.replace(/\/+$/, '');
-  // An explicit URL is honoured only when it points at THIS gateway's hook.
-  // Production predates the switch and names the GlobePay hooks explicitly;
-  // handing those to TGPay would send every callback to a route that rejects
-  // it. Better to fail closed ('' → "temporarily unavailable") than misroute.
-  const hook = (path: string | undefined, explicit: string | undefined) => {
-    if (path && base) return `${base}${path}`;
-    if (path && explicit && explicit.replace(/\/+$/, '').endsWith(path)) {
-      return explicit;
-    }
-    return '';
-  };
+  // https only: the gateway posts its key headers to these URLs, and a
+  // plain-http base would put those reusable credentials on the wire in the
+  // clear. Anything else counts as unset, so the money routes fail closed.
+  const raw = env.PAYMENT_CALLBACK_BASE?.trim().replace(/\/+$/, '') ?? '';
+  const base = /^https:\/\/[^/\s]+$/i.test(raw) ? raw : '';
+  const hook = (path: string | undefined) =>
+    path && base ? `${base}${path}` : '';
   return {
-    notifyUrl: hook(def.hooks.deposit, env.GLOBEPAY_NOTIFY_URL),
-    returnUrl: env.GLOBEPAY_RETURN_URL ?? '',
-    withdrawNotifyUrl: hook(
-      def.hooks.withdrawal,
-      env.GLOBEPAY_WITHDRAW_NOTIFY_URL,
-    ),
-    payoutVerifyUrl: def.hooks.payoutVerify
-      ? hook(def.hooks.payoutVerify, env.GLOBEPAY_PAYOUT_VERIFY_URL)
-      : '',
+    notifyUrl: hook(def.hooks.deposit),
+    // PAYMENT_RETURN_URL; the pre-removal name is read until the spec moves.
+    returnUrl: env.PAYMENT_RETURN_URL ?? env.GLOBEPAY_RETURN_URL ?? '',
+    withdrawNotifyUrl: hook(def.hooks.withdrawal),
+    payoutVerifyUrl: hook(def.hooks.payoutVerify),
     hasPayoutVerify: Boolean(def.hooks.payoutVerify),
   };
-}
-
-function isTgpay(config: GatewayConfig): config is TgpayConfig {
-  return 'kind' in config && config.kind === 'tgpay';
 }
 
 /**
@@ -295,39 +290,10 @@ function absoluteLink(link: string, config: TgpayConfig): string {
 
 // ---------------------------------------------------------------------------
 // Adapters. One object per gateway with the six operations the money paths
-// need, all in GlobePay's shapes. The exported functions below only pick the
-// adapter for the config's `kind` — adding a gateway is a registry entry
-// PLUS an adapter here, nothing in the orchestration, sweeps or routes.
-
-export type SubmitDepositInput = globepay.SubmitDepositInput & {
-  /** Required by TGPay's create-payment; ignored by GlobePay. */
-  customer?: TgpayCustomer;
-};
-export type SubmitDepositResult = globepay.SubmitDepositResult;
-
-export type DepositDetail = Omit<globepay.DepositDetail, 'statusId'> & {
-  /** GlobePay's numeric code; null for TGPay, whose statuses are strings. */
-  statusId: number | null;
-  state: SettlementState;
-};
-
-export type SubmitWithdrawalInput = globepay.SubmitWithdrawalInput & {
-  /** Required by TGPay's payout; ignored by GlobePay. */
-  email?: string;
-};
-export type SubmitWithdrawalResult = globepay.SubmitWithdrawalResult;
-
-export type WithdrawalDetail = Omit<globepay.WithdrawalDetail, 'statusId'> & {
-  statusId: number | null;
-  state: SettlementState;
-};
-
-export type SupportedBank = globepay.SupportedBank;
-
-export type MerchantBalance = globepay.MerchantBalance & {
-  /** Human-readable caveats (e.g. a wallet the gateway has no row for). */
-  notes?: string[];
-};
+// need, in the neutral shapes of gateway-types.ts. The exported functions
+// below only pick the adapter for the config's `kind` — adding a gateway is
+// a registry entry PLUS an adapter here, nothing in the orchestration,
+// sweeps or routes.
 
 type GatewayAdapter<C extends GatewayConfig> = {
   submitDeposit: (
@@ -350,59 +316,9 @@ type GatewayAdapter<C extends GatewayConfig> = {
   checkBalance: (config: C) => Promise<MerchantBalance>;
 };
 
-const globepayAdapter: GatewayAdapter<GlobePayConfig> = {
-  submitDeposit: globepay.submitDeposit,
-  getDepositDetail: globepay.getDepositDetail,
-  // Saved accounts and rows carry the canonical bank id; GlobePay wants its
-  // own code. A code the registry does not know passes through untouched —
-  // that is exactly what every pre-registry row and metadata entry carries,
-  // and GlobePay is the gateway that issued it. A bank the registry KNOWS
-  // but GlobePay cannot pay to (Citibank, KFH, the TGPay sandbox bank) is a
-  // definite refusal: passing its canonical id through would be a misroute.
-  // async so a refusal is a rejection, like every other adapter error.
-  submitWithdrawal: async (input, config) => {
-    const known = findBank(input.destinationBankCode);
-    const own = gatewayBankCode(input.destinationBankCode, 'globepay');
-    if (known && !own) {
-      throw new globepay.GlobePayError(
-        `GlobePay365: cannot pay to bank ${input.destinationBankCode} — not in its supported list`,
-        ['GLOBEPAY_UNKNOWN_BANK'],
-        400,
-        true,
-      );
-    }
-    return globepay.submitWithdrawal(
-      { ...input, destinationBankCode: own?.code ?? input.destinationBankCode },
-      config,
-    );
-  },
-  getWithdrawalDetail: globepay.getWithdrawalDetail,
-  // Still the LIVE GetSupportedBanks, as before the registry — a bank
-  // GlobePay adds or drops must show up without a deploy — with each entry
-  // translated to its canonical id so the picker hands out the same ids
-  // under every gateway. A code the registry does not know passes through
-  // (GlobePay can pay to it; bankSupportedBy treats it as GlobePay's own).
-  // If the live call fails the registry snapshot stands in, so a gateway
-  // hiccup never blanks the picker.
-  getSupportedBanks: async (config) => {
-    try {
-      const live = await globepay.getSupportedBanks(config);
-      return live.map((b) => {
-        const known = findBank(b.bankCode);
-        return known
-          ? { bankCode: known.id, bankName: known.name }
-          : { bankCode: b.bankCode, bankName: b.bankName };
-      });
-    } catch {
-      return banksFor('globepay');
-    }
-  },
-  checkBalance: globepay.checkBalance,
-};
-
 /**
- * Storefront method codes (BQR / OB, plus the wider GlobePay MYR set) mapped
- * onto TGPay's two hosted-checkout rails. DN has no hosted equivalent
+ * Storefront method codes (BQR / OB, the pre-TGPay rail names the sheet still
+ * sends) mapped onto TGPay's two hosted-checkout rails. DN has no hosted equivalent
  * (DuitNow QR is custom-checkout only) and is refused as a definite error.
  */
 const TGPAY_METHOD: Record<string, 'FPX' | 'EWALLET' | undefined> = {
@@ -554,15 +470,13 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
   },
 };
 
-/**
- * Pick the adapter for a config. GlobePay configs carry no `kind`. The
- * adapters are typed against their own config; the union-typed call through
- * here is sound because `kind` is exactly what selected them.
- */
+const ADAPTERS: {
+  [K in GatewayConfig['kind']]: GatewayAdapter<GatewayConfig>;
+} = { tgpay: tgpayAdapter };
+
+/** Pick the adapter for a config by its `kind`. */
 function adapterFor(config: GatewayConfig): GatewayAdapter<GatewayConfig> {
-  return (isTgpay(config)
-    ? tgpayAdapter
-    : globepayAdapter) as unknown as GatewayAdapter<GatewayConfig>;
+  return ADAPTERS[config.kind];
 }
 
 export function submitDeposit(
@@ -603,5 +517,4 @@ export function checkBalance(config: GatewayConfig): Promise<MerchantBalance> {
   return adapterFor(config).checkBalance(config);
 }
 
-export { GlobePayError } from './globepay-client';
 export { TgpayError, TGPAY_NOT_FOUND } from './tgpay-client';

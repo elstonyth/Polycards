@@ -118,7 +118,7 @@ services:
       # with ARG NEXT_PUBLIC_PAYMENTS_PROVIDER in the root Dockerfile.
       - key: NEXT_PUBLIC_PAYMENTS_PROVIDER
         scope: RUN_AND_BUILD_TIME
-        value: globepay
+        value: tgpay
       # DEPOSIT_METHODS_ENABLED — deliberately NOT set here. Add it only to
       # retract a deposit channel:
       #
@@ -133,7 +133,7 @@ services:
       # top-ups ENTIRELY, use GLOBEPAY_ENABLED on the backend instead.
       #
       # This is the per-channel lever now — the storefront names a method on
-      # every deposit request, so the backend's GLOBEPAY_DEPOSIT_METHOD is a
+      # every deposit request, so the backend's default rail is a
       # fallback customer traffic never reaches. It matters because OB (online
       # banking) has never been proven live: GetSupportedBanks answered 200 for
       # it all through the 2026-08-06 outage while every OB deposit was refused.

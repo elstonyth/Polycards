@@ -72,8 +72,11 @@ export const GlobePayDeposit = model
     settled_at: model.dateTime().nullable(),
     // Which gateway this row was created under. The sweeps and the admin
     // approve route talk to THIS gateway, not the active one, so switching
-    // gateways never strands money already in flight on the old one.
-    gateway: model.text().default('globepay'),
+    // gateways never strands money already in flight on the old one. The
+    // orchestration always sets it; the column default ('globepay', from the
+    // 2026-09-05 migration) only ever applied to rows that predate it, and a
+    // row that somehow lands with a retired gateway is skipped by every sweep.
+    gateway: model.text().default('tgpay'),
     // Gateway audit (plan 130): when the audit sweep last requeried the
     // gateway for this row, and what it disagreed about. NULL note = the
     // gateway agrees with the row. The audit is a second, independent check

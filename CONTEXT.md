@@ -140,8 +140,9 @@ Buyback (which sells to the house).
 _Avoid_: sell (ambiguous between this and Buyback — say which)
 
 **Withdrawal**:
-Converting site credit out to real money through the GlobePay365 payout
-channel — table `globepay_withdrawal`, route `POST /store/credits/withdraw`,
+Converting site credit out to real money through the active payment
+gateway's payout channel (TGPay since 2026-09-06; the table keeps its
+original name) — table `globepay_withdrawal`, route `POST /store/credits/withdraw`,
 admin queue `/withdrawals`. The ledger reason string stays `cashout`
 (pre-dates the withdrawal build; `credit_transaction` is append-only, so an
 existing reason string is never renamed once rows carry it) — say
@@ -184,7 +185,7 @@ surface — see `disabled-guard.ts` — do not conflate the two)
 
 **Expired Deposit**:
 A top-up whose gateway status never resolved within `GLOBEPAY_STALE_AFTER_MS`
-(1h, vs GlobePay365's own 10-minute cashier timeout). Non-terminal: the slow
+(1h, well past a hosted checkout's own timeout). Non-terminal: the slow
 reconciliation sweep keeps re-querying an expired deposit for up to 7 days
 rather than writing it off, because "we stopped chasing" is not "the gateway
 said no" and a late-landing bank transfer must still be recoverable.

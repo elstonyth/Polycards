@@ -79,7 +79,7 @@ export async function sendTopupReceipt(
       container
         .resolve('logger')
         .error(
-          `[globepay] receipt email failed for ${input.merchantTransactionId} (credit is unaffected): ${(error as Error).message}`,
+          `[payments] receipt email failed for ${input.merchantTransactionId} (credit is unaffected): ${(error as Error).message}`,
         );
     } catch {
       // Logger unavailable in a bare test container — swallowing is the point.

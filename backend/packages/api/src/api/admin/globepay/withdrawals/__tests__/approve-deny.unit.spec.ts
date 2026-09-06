@@ -2,22 +2,9 @@ import { MedusaError } from '@medusajs/framework/utils';
 
 // The gateway's HTTP seam is the only thing stubbed — every decision under
 // test is the routes' own. Same seam and same reason as the sweep spec.
-jest.mock('../../../../../modules/packs/globepay-client', () => {
-  const actual = jest.requireActual(
-    '../../../../../modules/packs/globepay-client',
-  );
-  return {
-    ...actual,
-    globepayConfigFromEnv: jest.fn(() => ({
-      baseUrl: 'https://mapi.example.test',
-      merchantCode: 'Testpolycard',
-      aesKey: 'test-aes-key',
-      privateKey: 'priv',
-      publicKey: 'pub',
-      currencyCode: 'MYR',
-    })),
-    submitWithdrawal: jest.fn(),
-  };
+jest.mock('../../../../../modules/packs/gateway', () => {
+  const actual = jest.requireActual('../../../../../modules/packs/gateway');
+  return { ...actual, submitWithdrawal: jest.fn() };
 });
 // The refund helper's steps 2 and 4. Mocked for the same reason the sweep
 // spec mocks them: unmocked, sendWithdrawalReceipt's real body fails silently
@@ -30,9 +17,9 @@ jest.mock('../../../../../modules/packs/withdrawal-receipt', () => ({
 }));
 
 import {
-  GlobePayError,
+  GatewayError,
   submitWithdrawal,
-} from '../../../../../modules/packs/globepay-client';
+} from '../../../../../modules/packs/gateway';
 import { notifyFeed } from '../../../../../modules/packs/notify-feed';
 import { sendWithdrawalReceipt } from '../../../../../modules/packs/withdrawal-receipt';
 import {
@@ -63,7 +50,8 @@ const heldRow = () => ({
   gateway_transaction_id: null as string | null,
   customer_id: 'cus_1',
   amount: '1500.00',
-  bank_code: 'MBB',
+  bank_code: 'MBBEMYKL',
+  gateway: 'tgpay',
   account_number: ACCOUNT_NUMBER,
   account_holder_name: 'AHMAD BIN ALI',
   status: 'held',
@@ -131,7 +119,19 @@ function harness(row = heldRow(), debitExists = true, frozen = false) {
       .mockResolvedValue({ id: 'ct_refund', replayed: false }),
   };
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
-  const scope = { resolve: (k: string) => (k === 'logger' ? logger : packs) };
+  // TGPay's payout needs the recipient email, read from the customer module.
+  const customers = {
+    retrieveCustomer: jest.fn(async () => ({
+      email: 'cus1@x.test',
+      first_name: 'Ahmad',
+      last_name: 'Ali',
+      phone: '0123456789',
+    })),
+  };
+  const scope = {
+    resolve: (k: string) =>
+      k === 'logger' ? logger : k === 'customer' ? customers : packs,
+  };
   const req = {
     scope,
     params: { id: row.id },
@@ -174,11 +174,10 @@ beforeEach(() => {
   receipt.mockClear();
   process.env.GLOBEPAY_ENABLED = 'true';
   process.env.GLOBEPAY_WITHDRAWALS_ENABLED = 'true';
-  process.env.GLOBEPAY_MERCHANT_CODE = 'Testpolycard';
-  process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL =
-    'https://us/hooks/globepay/withdrawal';
-  process.env.GLOBEPAY_PAYOUT_VERIFY_URL =
-    'https://us/hooks/globepay/payout-verify';
+  process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
+  process.env.TGPAY_PUBLIC_KEY = 'pk-test';
+  process.env.TGPAY_SECRET_KEY = 'sk-test';
+  process.env.PAYMENT_CALLBACK_BASE = 'https://us';
 });
 
 describe('POST /admin/globepay/withdrawals/:id/approve', () => {
@@ -195,7 +194,7 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
       // bigNumber columns arrive as strings; submitWithdrawal calls
       // .toFixed(2) on this, which would throw on the raw value.
       amount: 1500,
-      destinationBankCode: 'MBB',
+      destinationBankCode: 'MBBEMYKL',
       destinationAccountNumber: ACCOUNT_NUMBER,
       destinationAccountHolderName: 'AHMAD BIN ALI',
     });
@@ -259,7 +258,7 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
   it('a DEFINITE refusal refunds on the shared anchor and closes the row failed', async () => {
     const h = harness();
     submitMock.mockRejectedValue(
-      new GlobePayError('Insufficient payout float', ['PMT10013'], 400, true),
+      new GatewayError('Insufficient payout float', ['PMT10013'], 400, true),
     );
     const { res } = mkRes();
 
@@ -276,7 +275,7 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
       idempotencyReference: withdrawalRefundReference('cus_1', 'PW-HELD-1'),
       ledger: {
         outcome: 'refunded',
-        bankCode: 'MBB',
+        bankCode: 'MBBEMYKL',
         accountNumber: ACCOUNT_NUMBER,
         gatewayRef: 'PW-HELD-1',
       },
@@ -414,7 +413,7 @@ describe('POST /admin/globepay/withdrawals/:id/approve', () => {
   });
 
   it('a missing NotifyUrl refuses before the claim — a payout that could never refund', async () => {
-    delete process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL;
+    delete process.env.PAYMENT_CALLBACK_BASE;
     const h = harness();
     const { res } = mkRes();
     await expect(APPROVE(h.req, res)).rejects.toMatchObject({

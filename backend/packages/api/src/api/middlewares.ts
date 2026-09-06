@@ -133,9 +133,8 @@ const accountDeleteRateLimit = createAccountDeleteRateLimit();
 // budget and one Redis connection (a compromised admin token is throttled
 // across all mutation routes together).
 const adminActionRateLimit = createAdminActionRateLimit();
-// One instance for all three GlobePay365 callback routes: they are one
-// gateway's traffic against one abuse ceiling, so one budget and one Redis
-// connection (see createGatewayHookRateLimit for the sizing rationale).
+// One instance for every gateway callback route: one abuse ceiling, one
+// budget, one Redis connection (see createGatewayHookRateLimit for sizing).
 const gatewayHookRateLimit = createGatewayHookRateLimit();
 // TGPay's source allowlist (src/api/utils/payer-ip.ts) — after the limiter.
 const tgpayCallbackAllowlist = createTgpayCallbackAllowlist();
@@ -327,53 +326,19 @@ export default defineMiddlewares({
       middlewares: [authIdentifierRateLimit, authRateLimit],
     },
     {
-      // GlobePay365 callbacks (deposit / withdrawal / payout-verify). These
-      // routes are deliberately UNAUTHENTICATED — a webhook carries no token
-      // and its authentication is the RSA signature over the decrypted
-      // payload — so this limiter is the ONLY thing bounding an anonymous
-      // caller on an endpoint that must decrypt before it can verify (§1.16).
-      // It is a ceiling, never a substitute for the signature check.
+      // Gateway server-notify callbacks (src/api/hooks/tgpay/*). These routes
+      // are deliberately UNAUTHENTICATED — a webhook carries no token; their
+      // authentication is the gateway's own (key headers, checked inside the
+      // handler) plus the source-IP allowlist below. What stops an anonymous
+      // POST flood from tying the router up is this rate limiter, keyed on
+      // the callback's source address.
       //
-      // Matcher shape verified empirically against the INSTALLED packages, not
-      // assumed. NOTE there are now TWO regex engines in play, not one:
-      //   1. express 4.22.2's bundled path-to-regexp 0.1.13
-      //      (node_modules/express/node_modules/path-to-regexp) — what
-      //      app.post(matcher, …) compiles the registration with; the analysis
-      //      below is about this one.
-      //   2. path-to-regexp 8.4.2, added by @medusajs/framework in 2.19 and
-      //      used by its OWN matcher lookups in
-      //      dist/http/routes-finder.js:56, which first rewrites '/*' to
-      //      '{*splat}' at :50 for 0.1.x backwards compatibility.
-      // Keep both in mind before changing any matcher string here: a shape that
-      // is fine under one can be rewritten or parsed differently by the other.
-      //
-      // This entry carries a `method`, so define-middlewares.js:17
-      // gives it `methods: ['POST']` and router.js:189 takes the
-      // `app.post(matcher, …)` branch — the ROUTE form, compiled with
-      // `end: true` as /^\/hooks\/globepay\/(.*)\/?$/i (the `app.use` branch's
-      // `end: false` form does NOT apply here). Booting a real express app with
-      // that registration, all three hook paths match, as do their
-      // trailing-slash and mixed-case variants (strict:false, caseSensitive:
-      // false — and the routes themselves match those too, so coverage is not
-      // dodgeable); '/hooks/globepay', '/hooks', '/hooksfoo/bar',
-      // '/hooks/globepayfoo/deposit' and '/store/credits/deposit' do not.
-      //
-      // It also runs BEFORE those routes' own handlers, which is what makes it
-      // more than decoration: router.js:107-110 sorts ONE list
-      // (`[].concat(middlewares).concat(routes)`) and registers in that order,
-      // and under the shared /hooks/globepay branch this entry's last segment
-      // '*' lands in the sorter's `wildcard` bucket while each route's
-      // 'deposit'/'withdrawal'/'payout-verify' lands in `static` — wildcard
-      // precedes static in the default orderBy. Replayed through the real
-      // RoutesSorter with the routes listed both after AND before this entry:
-      // the middleware sorts first either way.
-      matcher: '/hooks/globepay/*',
-      method: 'POST',
-      middlewares: [gatewayHookRateLimit],
-    },
-    {
-      // TGPay's payment/payout server-notify callbacks — same anonymous-POST
-      // exposure, same limiter (src/api/hooks/tgpay/*).
+      // Matcher note (verified against a booted express app): with a `method`
+      // this entry takes the ROUTE form, compiled as /^\/hooks\/tgpay\/(.*)\/?$/i,
+      // so every hook path matches (trailing-slash and mixed-case variants
+      // too) while '/hooks/tgpay', '/hooks' and '/hooks/tgpayfoo/deposit' do
+      // not; and it sorts BEFORE the routes' own handlers because a wildcard
+      // last segment precedes a static one in Medusa's RoutesSorter.
       matcher: '/hooks/tgpay/*',
       method: 'POST',
       middlewares: [gatewayHookRateLimit, tgpayCallbackAllowlist],
@@ -852,14 +817,14 @@ export default defineMiddlewares({
       ],
     },
     {
-      // Real GlobePay365 deposit (POST /store/credits/deposit). Same tier as
-      // the mock top-up above: authenticated write, own limiter. Each call
-      // creates a deposit at the gateway, so an unlimited caller could flood
-      // their back office even without ever paying.
+      // Real gateway deposit (POST /store/credits/deposit). Same tier as the
+      // mock top-up above: authenticated write, own limiter. Each call creates
+      // a payment at the gateway, so an unlimited caller could flood their
+      // back office even without ever paying.
       //
-      // NOTE: the gateway's own callback is POST /hooks/globepay/deposit, which
+      // NOTE: the gateway's own callback is POST /hooks/tgpay/deposit, which
       // is deliberately OUTSIDE /store/* — a webhook carries no customer token,
-      // so it must not hit authenticate(). Its auth is the RSA signature.
+      // so it must not hit authenticate(). Its auth is the gateway's key pair.
       matcher: '/store/credits/deposit',
       method: 'POST',
       middlewares: [
@@ -884,11 +849,10 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
-      // Real GlobePay365 payout (POST /store/credits/withdraw). Money OUT, so
-      // it shares the top-up write tier: authenticated, own limiter. The
-      // gateway's callback (POST /hooks/globepay/withdrawal) and Payout
-      // Verification (POST /hooks/globepay/payout-verify) are deliberately
-      // OUTSIDE /store/* — webhook auth is the RSA signature.
+      // Real gateway payout (POST /store/credits/withdraw). Money OUT, so it
+      // shares the top-up write tier: authenticated, own limiter. The
+      // gateway's callback (POST /hooks/tgpay/withdrawal) is deliberately
+      // OUTSIDE /store/* — webhook auth is the gateway's key pair.
       matcher: '/store/credits/withdraw',
       method: 'POST',
       middlewares: [

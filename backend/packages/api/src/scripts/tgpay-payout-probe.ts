@@ -1,3 +1,4 @@
+import { gatewayUrls } from '../modules/packs/gateway';
 import { ExecArgs } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import {
@@ -25,9 +26,9 @@ export default async function tgpayPayoutProbe({ container }: ExecArgs) {
     logger.error('[tgpay-probe] refusing: TGPAY_API_BASE is not a sandbox host');
     return;
   }
-  const notifyUrl = process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL;
+  const notifyUrl = gatewayUrls('tgpay').withdrawNotifyUrl;
   if (!notifyUrl) {
-    logger.error('[tgpay-probe] GLOBEPAY_WITHDRAW_NOTIFY_URL unset');
+    logger.error('[tgpay-probe] PAYMENT_CALLBACK_BASE unset — no notify URL');
     return;
   }
   const merchantRefNum = `PROBE-${Date.now()}`;

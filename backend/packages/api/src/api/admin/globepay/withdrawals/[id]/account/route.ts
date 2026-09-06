@@ -48,7 +48,7 @@ export async function GET(
   req.scope
     .resolve('logger')
     .info(
-      `[globepay] admin ${req.auth_context.actor_id} revealed the destination account of withdrawal ${row.id}`,
+      `[payments] admin ${req.auth_context.actor_id} revealed the destination account of withdrawal ${row.id}`,
     );
 
   // Same CWE-524 rule as the list route, for the one response that still

@@ -11,7 +11,8 @@ import {
   unknownWithdrawalAction,
 } from '../globepay-reconcile';
 import { GLOBEPAY_MAX_RM } from '../globepay-deposit';
-import { GlobePayError } from '../globepay-client';
+import { GatewayError } from '../gateway-types';
+import { TGPAY_NOT_FOUND } from '../tgpay-client';
 
 const now = new Date('2026-07-21T12:00:00Z');
 const minutesAgo = (m: number) => new Date(now.getTime() - m * 60 * 1000);
@@ -198,15 +199,14 @@ describe('unknownDepositAction', () => {
 });
 
 // A 400 is not evidence of anything on its own: a rotated key, a wrong
-// merchant code and an IP de-whitelisting all produce one, and staging's real
-// not-found came back as a plain-text 400 WITHOUT the documented PMT10016
-// (docs/payments/globepay365-setup.md:124). Until the provider supplies the
-// taxonomy, only an explicit code may authorise an action.
+// merchant id and an IP de-whitelisting all produce one. Only the explicit
+// not-found code (minted by the client on the gateway's own "transaction
+// not found" answer) may authorise an action.
 describe('classifyRequeryError', () => {
   it('acts only on the explicit not-found code', () => {
     expect(
       classifyRequeryError(
-        new GlobePayError('nope', ['PMT10016'], 400, true),
+        new GatewayError('nope', [TGPAY_NOT_FOUND], 404, true),
       ),
     ).toEqual({ kind: 'not-found' });
   });
@@ -214,14 +214,14 @@ describe('classifyRequeryError', () => {
   it('honours the not-found code at any HTTP status', () => {
     expect(
       classifyRequeryError(
-        new GlobePayError('nope', ['PMT10016'], 200, true),
+        new GatewayError('nope', [TGPAY_NOT_FOUND], 200, true),
       ),
     ).toEqual({ kind: 'not-found' });
   });
 
   it('treats a 400 with no not-found code as ambiguous, never not-found', () => {
     const refusal = classifyRequeryError(
-      new GlobePayError('Invalid merchant', ['PMT10006'], 400, true),
+      new GatewayError('Invalid merchant', ['SOME_OTHER_CODE'], 400, true),
     );
     expect(refusal).toEqual({ kind: 'ambiguous' });
     expect(refusal.kind).not.toBe('not-found');
@@ -230,7 +230,7 @@ describe('classifyRequeryError', () => {
   it('treats a bare 400 with NO codes as ambiguous — this is the real staging shape', () => {
     expect(
       classifyRequeryError(
-        new GlobePayError('non-JSON response (HTTP 400): Not found', [], 400),
+        new GatewayError('non-JSON response (HTTP 400): Not found', [], 400),
       ),
     ).toEqual({ kind: 'ambiguous' });
   });
@@ -244,7 +244,7 @@ describe('classifyRequeryError', () => {
 
   it('rethrows a non-400 refusal — a 500 is their outage, not our answer', () => {
     expect(
-      classifyRequeryError(new GlobePayError('boom', [], 500)),
+      classifyRequeryError(new GatewayError('boom', [], 500)),
     ).toEqual({ kind: 'rethrow' });
   });
 });
@@ -307,9 +307,9 @@ describe('ambiguousRefusalAction', () => {
 // output, because that is the only value the jobs branch on.
 describe('an ambiguous 400 can never reach a money-moving action', () => {
   const ambiguous400s = [
-    new GlobePayError('non-JSON response (HTTP 400): Not found', [], 400),
-    new GlobePayError('Invalid merchant', ['PMT10006'], 400, true),
-    new GlobePayError('unknown error', [], 400, true),
+    new GatewayError('non-JSON response (HTTP 400): Not found', [], 400),
+    new GatewayError('Invalid merchant', ['PMT10006'], 400, true),
+    new GatewayError('unknown error', [], 400, true),
   ];
   const ancient = new Date(now.getTime() - GLOBEPAY_STALE_AFTER_MS * 1000);
 

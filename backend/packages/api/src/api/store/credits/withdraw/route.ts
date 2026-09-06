@@ -18,7 +18,7 @@ import {
 //
 // AUTH + RATE LIMIT: registered in src/api/middlewares.ts. The customer id
 // comes ONLY from the verified token. The gateway's own callback is
-// POST /hooks/globepay/withdrawal, outside /store/*, authenticated by the RSA
+// POST /hooks/tgpay/withdrawal, outside /store/*, authenticated by the RSA
 // signature.
 //
 // The body names an `account_id` and NOTHING about the bank. Bank code, account

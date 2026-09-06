@@ -97,7 +97,7 @@ export async function POST(
   // The audit line says what the claim did — not what the refund below will
   // do, which the debit-existence check may yet rule out.
   logger.info(
-    `[globepay] admin ${adminId} DENIED withdrawal ${row.id} (${row.merchant_transaction_id}) — RM ${Number(row.amount)} closed`,
+    `[payments] admin ${adminId} DENIED withdrawal ${row.id} (${row.merchant_transaction_id}) — RM ${Number(row.amount)} closed`,
   );
 
   // 2) Only now, the money — and only if the locked read above found a debit
@@ -108,7 +108,7 @@ export async function POST(
   // row is already closed by the claim, so there is nothing further to do.
   if (!debited) {
     logger.warn(
-      `[globepay] closed ${row.merchant_transaction_id} without a refund — no debit ever landed for it`,
+      `[payments] closed ${row.merchant_transaction_id} without a refund — no debit ever landed for it`,
     );
     res.setHeader('Cache-Control', 'no-store');
     res.json({ id: row.id, status: 'failed', refunded: false });

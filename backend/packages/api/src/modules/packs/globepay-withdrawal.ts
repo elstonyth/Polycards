@@ -11,7 +11,7 @@ import {
   gatewayConfigFor,
   paymentGateway,
   submitWithdrawal,
-  GlobePayError,
+  GatewayError,
   type PaymentGateway,
 } from './gateway';
 import { newMerchantTransactionId } from './globepay-deposit';
@@ -90,7 +90,6 @@ export function globepayWithdrawalsEnabled(
   env: {
     GLOBEPAY_ENABLED?: string;
     GLOBEPAY_WITHDRAWALS_ENABLED?: string;
-    GLOBEPAY_MERCHANT_CODE?: string;
     PAYMENT_GATEWAY?: string;
     TGPAY_SECRET_KEY?: string;
   } = process.env,
@@ -595,7 +594,7 @@ export async function startGlobePayWithdrawal(
       config,
     );
   } catch (error) {
-    if (error instanceof GlobePayError && error.definite) {
+    if (error instanceof GatewayError && error.definite) {
       // The gateway PARSEABLY refused, so no payout exists on their side.
       // Refund the debit (idempotent) and close the row.
       await packs.withdrawCreditsWithLedger({
@@ -677,7 +676,7 @@ export async function startGlobePayWithdrawal(
         scope
           .resolve<{ warn: (message: string) => void }>('logger')
           .warn(
-            `[globepay] withdrawal refused: codes=${error.codes.join(',') || 'none'} ` +
+            `[payments] withdrawal refused: codes=${error.codes.join(',') || 'none'} ` +
               `httpStatus=${error.httpStatus} definite=${error.definite} ` +
               `bankCode=${bankCode} amount=${amount} ref=${merchantTransactionId} ` +
               `msg=${error.message}`,
@@ -717,7 +716,7 @@ export async function startGlobePayWithdrawal(
       scope
         .resolve<{ error: (msg: string) => void }>('logger')
         .error(
-          `[globepay] withdrawal ${merchantTransactionId} submit outcome AMBIGUOUS (${(error as Error).message}) — left pending for the sweep`,
+          `[payments] withdrawal ${merchantTransactionId} submit outcome AMBIGUOUS (${(error as Error).message}) — left pending for the sweep`,
         );
     } catch {
       // Swallowed deliberately: the logger is the thing that failed. The row
@@ -736,7 +735,7 @@ export async function startGlobePayWithdrawal(
   }
 
   // Scoped to 'pending', matching the identical stamp in the callback route
-  // (api/hooks/globepay/withdrawal/route.ts) and the admin approve route's
+  // (api/hooks/tgpay/withdrawal/route.ts) and the admin approve route's
   // own terminal write for this same field: if the sweep resolved this row
   // while the submit above was still in flight (refunded and closed it
   // 'failed'), an unscoped write would land a gateway id onto a refunded row
@@ -763,7 +762,7 @@ export async function startGlobePayWithdrawal(
  * refund's idempotency anchor, so those two paths share ONE copy of this
  * four-step money ordering instead of a second verbatim one that a bug fix
  * could land in without the other ever finding out. A THIRD near-copy still
- * lives in api/hooks/globepay/withdrawal/route.ts (the payout callback) and
+ * lives in api/hooks/tgpay/withdrawal/route.ts (the payout callback) and
  * has not been folded in — the next change to this ordering still needs two
  * edits, not one.
  *

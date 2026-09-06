@@ -24,10 +24,11 @@ export default async function seedHeldWithdrawal({
       merchant_transaction_id: `PC-helddemo${stamp}`,
       customer_id: 'cus_01KY4H64BASH0EYSN3HX0ZHT6D',
       amount: 1500,
-      bank_code: 'MYMB2U',
+      bank_code: 'MBBEMYKL',
       account_number: '157023456789',
       account_holder_name: 'AHMAD BIN ALI',
       status: 'held' as const,
+      gateway: 'tgpay',
     },
   ]);
   const row = Array.isArray(rows) ? rows[0] : rows;

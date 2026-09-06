@@ -8,7 +8,6 @@ const ORIGINAL = { ...process.env };
 
 beforeEach(() => {
   delete process.env.PAYMENT_GATEWAY;
-  delete process.env.GLOBEPAY_MERCHANT_CODE;
   process.env.TGPAY_SECRET_KEY = 'sk-test';
   process.env.PAYMENT_CALLBACK_BASE = 'https://api.example';
   setActiveGateway(null);
@@ -57,7 +56,6 @@ describe('GET /admin/payments/gateway', () => {
     expect(body.active).toBe('tgpay');
     expect(body.setting).toBe('tgpay');
     expect(body.gateways).toEqual([
-      { id: 'globepay', label: 'GlobePay365', configured: false },
       { id: 'tgpay', label: 'TGPay', configured: true },
     ]);
     expect(h.res.headers['Cache-Control']).toBe('no-store');
@@ -93,36 +91,31 @@ describe('POST /admin/payments/gateway', () => {
     delete process.env.GLOBEPAY_NOTIFY_URL;
   });
 
-  it('requires the payout-verify URL too, for a gateway that has that step, when withdrawals are on', async () => {
+  it('refuses a gateway with no callback URL in this environment', async () => {
     delete process.env.PAYMENT_CALLBACK_BASE;
-    process.env.GLOBEPAY_MERCHANT_CODE = 'Testpolycard';
-    process.env.GLOBEPAY_WITHDRAWALS_ENABLED = 'true';
-    process.env.GLOBEPAY_NOTIFY_URL = 'https://old/hooks/globepay/deposit';
-    process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL =
-      'https://old/hooks/globepay/withdrawal';
-    delete process.env.GLOBEPAY_PAYOUT_VERIFY_URL;
     const h = harness(null);
-    h.req.body = { gateway: 'globepay', reason: 'x' };
+    h.req.body = { gateway: 'tgpay', reason: 'x' };
     await expect(POST(h.req as never, h.res as never)).rejects.toThrow(
       /callback URL/,
     );
     expect(h.packs.editPaymentGateway).not.toHaveBeenCalled();
-    delete process.env.GLOBEPAY_WITHDRAWALS_ENABLED;
-    delete process.env.GLOBEPAY_NOTIFY_URL;
-    delete process.env.GLOBEPAY_WITHDRAW_NOTIFY_URL;
   });
 
-  it('refuses an unknown gateway, an unconfigured one, and a missing reason — without writing', async () => {
-    for (const body of [
-      { gateway: 'stripe', reason: 'x' },
-      { gateway: 'globepay', reason: 'x' },
-      { gateway: 'tgpay' },
-    ]) {
+  it('refuses an unknown or retired gateway, an unconfigured one, and a missing reason — without writing', async () => {
+    const configured = process.env.TGPAY_SECRET_KEY;
+    for (const [body, env] of [
+      [{ gateway: 'stripe', reason: 'x' }, {}],
+      [{ gateway: 'globepay', reason: 'x' }, {}],
+      [{ gateway: 'tgpay', reason: 'x' }, { TGPAY_SECRET_KEY: undefined }],
+      [{ gateway: 'tgpay' }, {}],
+    ] as const) {
+      if ('TGPAY_SECRET_KEY' in env) delete process.env.TGPAY_SECRET_KEY;
       const h = harness(null);
       h.req.body = body;
       await expect(POST(h.req as never, h.res as never)).rejects.toThrow();
       expect(h.packs.editPaymentGateway).not.toHaveBeenCalled();
+      process.env.TGPAY_SECRET_KEY = configured;
     }
-    expect(paymentGateway({})).toBe('globepay');
+    expect(paymentGateway({})).toBe('tgpay');
   });
 });

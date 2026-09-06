@@ -193,7 +193,7 @@ export type StartDepositResult =
 /**
  * The ACTIVE gateway's money bands, read from the backend per call — an
  * admin can switch gateways at runtime, and TGPay's floor (RM 50) is not
- * GlobePay's (RM 30). Public route, publishable key only. Any failure yields
+ * another gateway's may not be. Public route, publishable key only. Any failure yields
  * the defaults so the sheet still opens.
  */
 export async function getPaymentLimits(): Promise<PaymentLimits> {
@@ -235,7 +235,7 @@ export async function getDepositMethods(): Promise<DepositMethodCode[]> {
 }
 
 /**
- * Start a REAL top-up through the GlobePay365 gateway.
+ * Start a REAL top-up through the active payment gateway.
  *
  * Unlike `topUpCredits` this credits nothing and returns no balance: it hands
  * back the gateway's cashier URL, the customer pays there, and credit only
@@ -494,7 +494,7 @@ export type StartWithdrawalResult =
   | { ok: false; error: string; needsAuth?: boolean };
 
 /**
- * Start a REAL payout through the GlobePay365 gateway. The balance is debited
+ * Start a REAL payout through the active payment gateway. The balance is debited
  * immediately (the returned `balance` reflects it); the bank transfer then
  * completes asynchronously, and a failed payout refunds the debit — so the
  * money is never both spendable and in flight.

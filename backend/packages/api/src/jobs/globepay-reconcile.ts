@@ -272,7 +272,7 @@ export default async function globepayReconcileJob(container: MedusaContainer) {
 
         // Conditional on the status we READ, not a literal 'pending' — the
         // same reasoning as the callback route's recovery flip
-        // (api/hooks/globepay/deposit/route.ts:308): the second scan tier
+        // (api/hooks/tgpay/deposit/route.ts:308): the second scan tier
         // reaches here with an 'expired' row, and a hardcoded 'pending'
         // selector would match nothing, leaving the credit committed while the
         // row still said we had given up on it. Matching deposit.status keeps

@@ -981,7 +981,7 @@ export function createAdminActionRateLimit(): MiddlewareHandler {
 }
 
 /**
- * The gateway-hook limiter (POST /hooks/globepay/{deposit,withdrawal,
+ * The gateway-hook limiter (POST /hooks/tgpay/{deposit,withdrawal
  * payout-verify}). Those routes are unauthenticated BY DESIGN — a webhook
  * carries no token and its authentication is the RSA signature — so before
  * this existed an anonymous caller had no budget at all on an endpoint that

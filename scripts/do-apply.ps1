@@ -38,10 +38,6 @@ if ($App -eq 'backend') {
     $kv = $line -split '=', 2
     $secrets[$kv[0].Trim()] = $kv[1].Trim()
   }
-  # GLOBEPAY_* added 2026-07-29 with the real gateway. Both key values are the
-  # bare base64 body on ONE line (no PEM armor) — the module re-wraps them, and
-  # a multi-line value would break the literal substitution below.
-  #
   # TWILIO_* added 2026-08-04 with the phone-verification cutover. Every name
   # here is required unconditionally — the list and the spec placeholders move
   # together, and both only after deploy/.env.deploy carries the real values,
@@ -54,7 +50,7 @@ if ($App -eq 'backend') {
   #
   # TGPAY_PUBLIC_KEY / TGPAY_SECRET_KEY added 2026-09-06 for the TGPay cutover
   # (plan 130); values from the production back office, 2FA-gated.
-  foreach ($k in 'DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'COOKIE_SECRET', 'ADMIN_PASSWORD', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'GOOGLE_CLIENT_SECRET', 'RESEND_API_KEY', 'PRICECHARTING_API_TOKEN', 'GLOBEPAY_AES_KEY', 'GLOBEPAY_PUBLIC_KEY', 'GLOBEPAY_MERCHANT_PRIVATE_KEY', 'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_VERIFY_SERVICE_SID', 'TELEGRAM_BOT_TOKEN', 'TGPAY_PUBLIC_KEY', 'TGPAY_SECRET_KEY') {
+  foreach ($k in 'DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'COOKIE_SECRET', 'ADMIN_PASSWORD', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'GOOGLE_CLIENT_SECRET', 'RESEND_API_KEY', 'PRICECHARTING_API_TOKEN', 'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_VERIFY_SERVICE_SID', 'TELEGRAM_BOT_TOKEN', 'TGPAY_PUBLIC_KEY', 'TGPAY_SECRET_KEY') {
     if (-not $secrets.ContainsKey($k) -or [string]::IsNullOrWhiteSpace($secrets[$k])) {
       throw "deploy/.env.deploy is missing a value for $k"
     }
