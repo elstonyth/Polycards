@@ -867,6 +867,24 @@ export const DeliveryOrderSchema = z.looseObject({
     .optional(),
 });
 
+/** GET /store/delivery-orders — the page. `items` keeps `parseList`'s
+ *  semantics: a row whose status this build does not know DROPS rather than
+ *  blanking the customer's whole order history. */
+export const DeliveryOrdersPageSchema = z.looseObject({
+  items: listOf(DeliveryOrderSchema),
+});
+
+/** POST /store/delivery-orders/:id/cancel — the order as it now stands.
+ *
+ *  Soft all the way down, and that is the point: a 2xx MEANS the cancel
+ *  happened, so a drifted body must never false-fail it. A malformed `order`
+ *  reads as null (the action then reports the status the backend just
+ *  transitioned to), and so does a body that is not an object at all. */
+export const CancelDeliverySchema = z
+  .looseObject({ order: DeliveryOrderSchema.nullable().catch(null) })
+  .catch({ order: null })
+  .transform((body) => body.order);
+
 /** Single source of truth for the delivery status union (see the note above). */
 export type DeliveryOrderStatus = z.infer<typeof DeliveryOrderSchema>['status'];
 

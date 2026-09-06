@@ -9,16 +9,25 @@
  *   GET  /store/delivery-orders            — the caller's orders
  *   POST /store/delivery-orders/:id/address — edit address pre-ship
  *   POST /store/delivery-orders/:id/cancel  — cancel pre-ship (cards → vault)
+ *   POST /store/rewards/withdraw            — ship ONE reward pull (capped/day)
+ *
+ * Those five go through the `Store` port (src/lib/store.ts), which owns the
+ * cookie read, the bearer, the schema check and the failure log. The ADDRESS
+ * BOOK does not: `sdk.store.customer.createAddress/updateAddress/deleteAddress`
+ * are built-in Medusa endpoints with their own typed responses, they take
+ * headers positionally, and re-expressing them as raw paths here would trade
+ * `HttpTypes.StoreCustomerResponse` for a hand-written schema for nothing. They
+ * keep `getAuthToken`, which is why this file still imports it.
  */
 import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
-import { authedFetch } from '@/lib/authed-fetch';
+import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
 import { getAuthToken, getCustomer } from '@/lib/data/customer';
 import {
-  parseList,
-  parseOne,
-  DeliveryOrderSchema,
+  CancelDeliverySchema,
+  DeliveryOrdersPageSchema,
+  UncheckedSchema,
   WithdrawAddressSchema,
   WithdrawPrizeSchema,
   type DeliveryOrderStatus,
@@ -135,60 +144,68 @@ interface BackendDeliveryOrder {
   }[];
 }
 
+const LOGIN_FIRST = 'Please log in first.';
+const LOGIN_TO_VIEW_ORDERS = 'Please log in to view your orders.';
+
+/**
+ * A port `Failure` in this file's vocabulary. No cookie at all (the call never
+ * left — `status` is undefined) keeps the action's own logged-out copy;
+ * anything the backend actually said goes through the caller's rules table,
+ * with `needsAuth` when it was a 401.
+ */
+function deliveryFailure(
+  f: Failure,
+  loggedOut: string,
+  rules: readonly ErrorRule[] = DELIVERY_RULES,
+): { ok: false; error: string; needsAuth?: boolean } {
+  if (f.kind === 'unauthenticated' && f.status === undefined) {
+    return { ok: false, error: loggedOut, needsAuth: true };
+  }
+  return {
+    ok: false,
+    error: friendlyError(f.text, rules, DELIVERY_FALLBACK),
+    needsAuth: f.kind === 'unauthenticated',
+  };
+}
+
 export async function getDeliveryOrders(): Promise<DeliveryOrdersResult> {
-  const token = await getAuthToken();
-  if (!token) {
-    return {
-      ok: false,
-      error: 'Please log in to view your orders.',
-      needsAuth: true,
-    };
-  }
-  try {
-    const res = await authedFetch(token, '/store/delivery-orders');
-    const raw = parseList(
-      DeliveryOrderSchema,
-      (res as { items?: unknown }).items,
-    ) as unknown as BackendDeliveryOrder[];
-    const orders: DeliveryOrderView[] = raw.map((o) => ({
-      id: o.id,
-      status: o.status,
-      trackingNumber: o.tracking_number,
-      createdAt: o.created_at,
-      shippingFee: o.shipping_fee ?? null,
-      insuranceFee: o.insurance_fee ?? null,
-      address: {
-        name: o.address?.name ?? '',
-        line1: o.address?.address_1 ?? '',
-        line2: o.address?.address_2 ?? null,
-        city: o.address?.city ?? '',
-        province: o.address?.province ?? null,
-        postalCode: o.address?.postal_code ?? '',
-        countryCode: o.address?.country_code ?? '',
-        phone: o.address?.phone ?? null,
-      },
-      proofImages: o.proof_images ?? [],
-      items: (o.items ?? []).map((it) => ({
-        pullId: it.pull_id,
-        card: it.card
-          ? {
-              handle: it.card.handle,
-              name: it.card.name,
-              image: it.card.image,
-              slabImage: it.card.slab_image ?? null,
-            }
-          : null,
-      })),
-    }));
-    return { ok: true, orders };
-  } catch (error) {
-    logger.error('[delivery] list failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  const r = await store.get('/store/delivery-orders', DeliveryOrdersPageSchema);
+  if (!r.ok) return deliveryFailure(r, LOGIN_TO_VIEW_ORDERS);
+  // The assertion widens the parse output to the fields the mapper also READS
+  // but DeliveryOrderSchema deliberately does not guard — they ride the
+  // `looseObject` typed `unknown` (same seam as getVault's items).
+  const raw = r.data.items as unknown as BackendDeliveryOrder[];
+  const orders: DeliveryOrderView[] = raw.map((o) => ({
+    id: o.id,
+    status: o.status,
+    trackingNumber: o.tracking_number,
+    createdAt: o.created_at,
+    shippingFee: o.shipping_fee ?? null,
+    insuranceFee: o.insurance_fee ?? null,
+    address: {
+      name: o.address?.name ?? '',
+      line1: o.address?.address_1 ?? '',
+      line2: o.address?.address_2 ?? null,
+      city: o.address?.city ?? '',
+      province: o.address?.province ?? null,
+      postalCode: o.address?.postal_code ?? '',
+      countryCode: o.address?.country_code ?? '',
+      phone: o.address?.phone ?? null,
+    },
+    proofImages: o.proof_images ?? [],
+    items: (o.items ?? []).map((it) => ({
+      pullId: it.pull_id,
+      card: it.card
+        ? {
+            handle: it.card.handle,
+            name: it.card.name,
+            image: it.card.image,
+            slabImage: it.card.slab_image ?? null,
+          }
+        : null,
+    })),
+  }));
+  return { ok: true, orders };
 }
 
 export async function requestDelivery(
@@ -201,31 +218,22 @@ export async function requestDelivery(
   if (typeof addressId !== 'string' || addressId.trim() === '') {
     return { ok: false, error: 'Choose a shipping address.' };
   }
-  const token = await getAuthToken();
-  if (!token)
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-
-  try {
-    const res = await authedFetch(token, '/store/delivery-orders', {
-      method: 'POST',
-      body: { pull_ids: pullIds, address_id: addressId },
-    });
-    const orderId = (res as { order_id?: string }).order_id;
-    if (!orderId) {
-      return {
-        ok: false,
-        error: 'Got an unexpected response. Please try again.',
-      };
-    }
-    return { ok: true, orderId };
-  } catch (error) {
-    logger.error('[delivery] request failed:', error);
+  // Unchecked at the envelope: the batch is charged and committed by the time
+  // this body arrives, so a missing `order_id` keeps its own copy below rather
+  // than becoming a generic "try again".
+  const r = await store.post('/store/delivery-orders', UncheckedSchema, {
+    pull_ids: pullIds,
+    address_id: addressId,
+  });
+  if (!r.ok) return deliveryFailure(r, LOGIN_FIRST);
+  const orderId = (r.data as { order_id?: string }).order_id;
+  if (!orderId) {
     return {
       ok: false,
-      error: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
-      needsAuth: isAuthError(error),
+      error: 'Got an unexpected response. Please try again.',
     };
   }
+  return { ok: true, orderId };
 }
 
 // Re-point a pre-ship delivery order at a different saved address. The backend
@@ -242,28 +250,14 @@ export async function editDeliveryAddress(
   if (typeof addressId !== 'string' || addressId.trim() === '') {
     return { ok: false, error: 'Choose a shipping address.' };
   }
-  const token = await getAuthToken();
-  if (!token)
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-
-  try {
-    await authedFetch(
-      token,
-      `/store/delivery-orders/${encodeURIComponent(orderId)}/address`,
-      {
-        method: 'POST',
-        body: { address_id: addressId },
-      },
-    );
-    return { ok: true };
-  } catch (error) {
-    logger.error('[delivery] edit address failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  // The response is not read — a 2xx IS the answer.
+  const r = await store.post(
+    `/store/delivery-orders/${encodeURIComponent(orderId)}/address`,
+    UncheckedSchema,
+    { address_id: addressId },
+  );
+  if (!r.ok) return deliveryFailure(r, LOGIN_FIRST);
+  return { ok: true };
 }
 
 export type CancelDeliveryResult =
@@ -303,33 +297,16 @@ export async function cancelDeliveryOrder(
   if (typeof orderId !== 'string' || orderId.trim() === '') {
     return { ok: false, error: 'Missing order.' };
   }
-  const token = await getAuthToken();
-  if (!token)
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-
-  try {
-    const res = await authedFetch(
-      token,
-      `/store/delivery-orders/${encodeURIComponent(orderId)}/cancel`,
-      {
-        method: 'POST',
-      },
-    );
-    const order = parseOne(
-      DeliveryOrderSchema,
-      (res as { order?: unknown }).order,
-    );
-    // A 2xx means the cancel happened — a drifted body must not false-fail it,
-    // so fall back to the status the backend just transitioned to.
-    return { ok: true, status: order?.status ?? 'canceled' };
-  } catch (error) {
-    logger.error(`[delivery] cancel failed for '${orderId}':`, error);
-    return {
-      ok: false,
-      error: friendlyError(error, CANCEL_RULES, DELIVERY_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  const r = await store.post(
+    `/store/delivery-orders/${encodeURIComponent(orderId)}/cancel`,
+    CancelDeliverySchema,
+    undefined,
+  );
+  if (!r.ok) return deliveryFailure(r, LOGIN_FIRST, CANCEL_RULES);
+  // A 2xx means the cancel happened — a drifted body must not false-fail it
+  // (CancelDeliverySchema is soft to the root), so fall back to the status the
+  // backend just transitioned to.
+  return { ok: true, status: r.data?.status ?? 'canceled' };
 }
 
 // Read the customer's address book (built-in Medusa field — no custom route).
@@ -587,40 +564,42 @@ export async function shipVaultCards(
       }
       return { ok: true, shippedIds, skipped };
     }
-    const token = await getAuthToken();
-    if (!token) {
-      return { ok: false, error: 'Please log in first.', needsAuth: true };
-    }
     for (const pullId of rewardPullIds) {
-      try {
-        const parsed = parseOne(
-          WithdrawPrizeSchema,
-          await authedFetch(token, '/store/rewards/withdraw', {
-            method: 'POST',
-            body: { pull_id: pullId, address: parsedAddress.data },
-          }),
-        );
-        if (parsed?.status === 'requested') {
-          shippedIds.push(pullId);
-        } else if (parsed?.status === 'capped') {
-          skipped.push({
-            pullId,
-            reason: "You've hit today's reward shipping limit — try tomorrow.",
-          });
-        } else {
-          skipped.push({
-            pullId,
-            reason: 'This reward card could not be shipped right now.',
-          });
+      const r = await store.post(
+        '/store/rewards/withdraw',
+        WithdrawPrizeSchema,
+        {
+          pull_id: pullId,
+          address: parsedAddress.data,
+        },
+      );
+      if (!r.ok) {
+        // No cookie at all: this is the whole selection's problem, not this
+        // card's, and it fires before anything is skipped — the same
+        // all-or-nothing answer the pre-loop auth guard used to give.
+        if (r.kind === 'unauthenticated' && r.status === undefined) {
+          return { ok: false, error: LOGIN_FIRST, needsAuth: true };
         }
-      } catch (error) {
-        logger.error(
-          `[delivery] reward withdraw failed for '${pullId}':`,
-          error,
-        );
         skipped.push({
           pullId,
-          reason: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
+          reason:
+            r.kind === 'invalid_shape'
+              ? 'This reward card could not be shipped right now.'
+              : friendlyError(r.text, DELIVERY_RULES, DELIVERY_FALLBACK),
+        });
+        continue;
+      }
+      if (r.data.status === 'requested') {
+        shippedIds.push(pullId);
+      } else if (r.data.status === 'capped') {
+        skipped.push({
+          pullId,
+          reason: "You've hit today's reward shipping limit — try tomorrow.",
+        });
+      } else {
+        skipped.push({
+          pullId,
+          reason: 'This reward card could not be shipped right now.',
         });
       }
     }
