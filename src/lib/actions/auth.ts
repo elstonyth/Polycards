@@ -16,9 +16,9 @@
  * What stays on the SDK, deliberately: `sdk.store.customer.create/retrieve` and
  * `sdk.auth.resetPassword/updateProvider` are built-in Medusa endpoints with
  * typed responses that take a Bearer positionally — not our custom-route
- * envelope. And `/auth/token/refresh` keeps `authedFetch`, because the bearer
- * it must send is the register token just handed back by Google, NOT the
- * session cookie the port reads.
+ * envelope. `/auth/token/refresh` DOES go through the port, on the `bearer`
+ * option: the token it must send is the register token Google just handed
+ * back, not the session cookie, and `bearer` is how the port says that.
  *
  * Medusa v2 emailpass flow (verified against the backend):
  *  signup: register → {token} → create customer (Bearer register-token) → login
@@ -27,7 +27,6 @@
 import { headers } from 'next/headers';
 import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
-import { authedFetch } from '@/lib/authed-fetch';
 import { store } from '@/lib/store';
 import { UncheckedSchema } from '@/lib/data/schemas';
 import { logger } from '@/lib/logger';
@@ -337,10 +336,10 @@ export async function signup(input: {
 
 /**
  * Google OAuth (customer social login). Two server actions mirror the emailpass
- * flow — token exchange stays server-side (httpOnly cookie, no browser CORS) via
- * the port (and `authedFetch` for the refresh, which carries an explicit Bearer
- * that is NOT the session cookie), so the shared SDK singleton never holds
- * per-request auth state.
+ * flow — token exchange stays server-side (httpOnly cookie, no browser CORS)
+ * via the port (the refresh on its `bearer` option, which carries an explicit
+ * Bearer that is NOT the session cookie), so the shared SDK singleton never
+ * holds per-request auth state.
  *
  * Flow (verified against @medusajs/auth-google 2.13.4):
  *  start:    POST /auth/customer/google { callback_url } → { location } → browser
@@ -491,11 +490,13 @@ export async function googleCallback(query: {
         { Authorization: `Bearer ${token}` },
       );
       // The post-register token still lacks actor_id — refresh for a real one.
-      const refreshed = await authedFetch<TokenResponse>(
-        token,
-        '/auth/token/refresh',
-        { method: 'POST' },
-      );
+      // `bearer`, not the cookie: this sends the register token Google just
+      // handed back, and no auth cookie exists yet this request.
+      const refreshed = store.orThrow(
+        await store.post('/auth/token/refresh', UncheckedSchema, undefined, {
+          bearer: token,
+        }),
+      ) as TokenResponse;
       sessionToken = refreshed.token;
     }
 

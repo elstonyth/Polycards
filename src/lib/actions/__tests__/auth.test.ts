@@ -9,9 +9,10 @@ import type { MemoryRoutes } from '@/lib/store-memory';
 // an in-memory backend per test (src/lib/__tests__/store-shim.ts).
 //
 // `@/lib/medusa` KEEPS its mock, and both live side by side on purpose: what
-// is still on the SDK is `sdk.store.customer.*`, `sdk.auth.*` — and
-// `mocks.clientFetch`, which now sees exactly ONE call, the /auth/token/refresh
-// that carries Google's register token rather than the session cookie.
+// is still on the SDK is `sdk.store.customer.*` and `sdk.auth.*`, which take
+// their Bearer positionally. `mocks.clientFetch` should now see NOTHING at all
+// — /auth/token/refresh moved onto the port's `bearer` option — so a call
+// landing on it is a regression, and two cases assert exactly that.
 //
 // The real data modules import 'server-only' (throws outside an RSC) and touch
 // next/headers — mock them wholesale so only the action logic under test runs.
@@ -426,8 +427,7 @@ describe('googleCallback — OAuth callback branches', () => {
     expect(r.ok).toBe(true);
     expect(mocks.setAuthToken).toHaveBeenCalledWith(token);
     expect(mocks.customerCreate).not.toHaveBeenCalled();
-    // Only the callback GET, and NO refresh — the refresh is the one call left
-    // on the SDK, so an unwanted one would show up on clientFetch.
+    // Only the callback GET, and NO refresh.
     expect(mem.requests).toHaveLength(1);
     expect(mocks.clientFetch).not.toHaveBeenCalled();
   });
@@ -444,8 +444,8 @@ describe('googleCallback — OAuth callback branches', () => {
     const refreshed = makeToken({ actor_id: 'cus_new' });
     backend({
       'GET /auth/customer/google/callback': { body: { token: first } },
+      'POST /auth/token/refresh': { body: { token: refreshed } },
     });
-    mocks.clientFetch.mockResolvedValueOnce({ token: refreshed }); // refresh
     mocks.customerCreate.mockResolvedValueOnce({ customer: { id: 'cus_new' } });
     mocks.customerRetrieve.mockResolvedValueOnce({
       customer: {
@@ -464,14 +464,16 @@ describe('googleCallback — OAuth callback branches', () => {
     const [body, , authHeader] = mocks.customerCreate.mock.calls[0]!;
     expect(body.email).toBe('mixed@example.com');
     expect(authHeader.Authorization).toBe(`Bearer ${first}`);
-    // Refresh happened against the first (register) token's Bearer.
-    expect(mocks.clientFetch).toHaveBeenCalledWith(
-      '/auth/token/refresh',
-      expect.objectContaining({
-        method: 'POST',
-        headers: { Authorization: `Bearer ${first}` },
-      }),
-    );
+    // Refresh happened against the first (register) token's Bearer — the
+    // port's `bearer` option, NOT the session cookie the shim would otherwise
+    // send (memoryStore's default 'test-token').
+    expect(mem.requests.find((r) => r.path === '/auth/token/refresh')).toEqual({
+      method: 'POST',
+      path: '/auth/token/refresh',
+      headers: { Authorization: `Bearer ${first}` },
+      cache: 'no-store',
+    });
+    expect(mocks.clientFetch).not.toHaveBeenCalled();
     // The session cookie gets the refreshed token, never the register one.
     expect(mocks.setAuthToken).toHaveBeenCalledWith(refreshed);
   });
@@ -574,8 +576,11 @@ describe('googleCallback — OAuth callback branches', () => {
     });
     backend({
       'GET /auth/customer/google/callback': { body: { token: first } },
+      'POST /auth/token/refresh': {
+        status: 502,
+        body: { message: 'refresh down' },
+      },
     });
-    mocks.clientFetch.mockRejectedValueOnce(new Error('refresh down'));
     mocks.customerCreate.mockResolvedValueOnce({ customer: { id: 'cus_new' } });
 
     const r = await googleCallback({ code: 'c', state: 's' });
