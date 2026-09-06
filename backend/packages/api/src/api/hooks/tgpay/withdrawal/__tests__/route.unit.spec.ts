@@ -10,6 +10,10 @@ jest.mock('../../../../../modules/packs/globepay-withdrawal', () => ({
 
 import { POST } from '../route';
 import { refundGlobePayWithdrawal } from '../../../../../modules/packs/globepay-withdrawal';
+import type {
+  FakeFacet,
+  GatewayWithdrawals,
+} from '../../../../../modules/packs/facets';
 
 beforeEach(() => {
   process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
@@ -48,7 +52,7 @@ function harness(row: Record<string, unknown> | null) {
   const packs = {
     listGlobePayWithdrawals: jest.fn().mockResolvedValue(row ? [row] : []),
     updateGlobePayWithdrawals: jest.fn().mockResolvedValue(undefined),
-  };
+  } satisfies FakeFacet<GatewayWithdrawals>;
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const req = {
     body: {},

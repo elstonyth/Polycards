@@ -10,6 +10,10 @@ jest.mock('../../../../../modules/packs/globepay-deposit', () => ({
 }));
 
 import { startGlobePayDeposit } from '../../../../../modules/packs/globepay-deposit';
+import type {
+  FakeFacet,
+  GatewayDeposits,
+} from '../../../../../modules/packs/facets';
 
 const startMock = startGlobePayDeposit as jest.Mock;
 
@@ -133,7 +137,12 @@ describe('GET /store/credits/deposit — in-flight deposits', () => {
   const getReq = (actorId = 'cus_1', over: Record<string, unknown> = {}) =>
     ({
       auth_context: { actor_id: actorId },
-      scope: { resolve: () => ({ listGlobePayDeposits: listMock }) },
+      scope: {
+        resolve: () =>
+          ({
+            listGlobePayDeposits: listMock,
+          }) satisfies FakeFacet<GatewayDeposits>,
+      },
       ...over,
     }) as never;
 

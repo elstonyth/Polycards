@@ -1,5 +1,9 @@
 import { GET, parseStatusFilter } from '../route';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../../../../modules/packs/globepay-reconcile';
+import type {
+  FakeFacet,
+  GatewayReports,
+} from '../../../../../modules/packs/facets';
 
 const mkRes = () => {
   const out: { body?: any; status?: number } = {};
@@ -43,7 +47,7 @@ function mkScope(rows: any[]) {
       const skip = opts?.skip ?? 0;
       return [rows.slice(skip, skip + (opts?.take ?? 50)), rows.length];
     },
-  };
+  } satisfies FakeFacet<GatewayReports>;
   return {
     calls,
     scope: {

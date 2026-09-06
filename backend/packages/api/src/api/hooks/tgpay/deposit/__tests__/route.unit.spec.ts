@@ -8,6 +8,10 @@ jest.mock('../../../../../modules/packs/topup-receipt', () => ({
 import { POST } from '../route';
 import { GLOBEPAY_MAX_RM } from '../../../../../modules/packs/globepay-deposit';
 import { topupIdempotencyReference } from '../../../../../modules/packs/topup';
+import type {
+  FakeFacet,
+  GatewayDeposits,
+} from '../../../../../modules/packs/facets';
 
 beforeEach(() => {
   process.env.TGPAY_API_BASE = 'https://sandbox-api.example.test/api/v2';
@@ -41,7 +45,7 @@ function harness(deposit: Record<string, unknown> | null) {
       replayed: false,
       reference: null,
     }),
-  };
+  } satisfies FakeFacet<GatewayDeposits>;
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const req = {
     body: {},

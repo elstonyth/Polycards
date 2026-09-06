@@ -27,6 +27,7 @@ import { sendWithdrawalReceipt } from '../../modules/packs/withdrawal-receipt';
 import globepayWithdrawalReconcileJob from '../globepay-withdrawal-reconcile';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../modules/packs/globepay-reconcile';
 import { withdrawalRefundReference } from '../../modules/packs/globepay-withdrawal';
+import type { FakeFacet, GatewayWithdrawals } from '../../modules/packs/facets';
 
 const requery = getWithdrawalDetail as jest.Mock;
 // Both are module-level mocks shared across every test in this file (Jest
@@ -100,7 +101,7 @@ function harness(withdrawal: Record<string, unknown> = pendingRow) {
     withdrawCreditsWithLedger: jest
       .fn()
       .mockResolvedValue({ id: 'ct_1', replayed: false }),
-  };
+  } satisfies FakeFacet<GatewayWithdrawals>;
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const container = {
     resolve: (k: string) => (k === 'logger' ? logger : packs),

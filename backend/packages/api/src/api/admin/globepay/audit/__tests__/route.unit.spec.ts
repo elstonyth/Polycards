@@ -9,6 +9,11 @@ import {
   gatewayConfigFor,
   setActiveGateway,
 } from '../../../../../modules/packs/gateway';
+import type {
+  FakeFacet,
+  GatewayReports,
+} from '../../../../../modules/packs/facets';
+import type PacksModuleService from '../../../../../modules/packs/service';
 
 const ORIGINAL = { ...process.env };
 
@@ -74,7 +79,11 @@ function harness(setting: string | null) {
       },
     ]),
     listGlobePayWithdrawals: jest.fn(async () => []),
-  };
+    // siteSettings is outside the route’s facet: resolveActiveGateway
+    // resolves the service itself, from the same scope this fake serves.
+  } satisfies FakeFacet<
+    GatewayReports & Pick<PacksModuleService, 'siteSettings'>
+  >;
   const req = { scope: { resolve: () => packs } };
   const res = {
     body: undefined as unknown,

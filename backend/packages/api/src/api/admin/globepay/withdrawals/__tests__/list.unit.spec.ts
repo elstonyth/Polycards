@@ -4,6 +4,10 @@ import { GET, maskAccountNumber, parseStatusFilter } from '../route';
 import { GET as REVEAL } from '../[id]/account/route';
 import { GLOBEPAY_STALE_AFTER_MS } from '../../../../../modules/packs/globepay-reconcile';
 import { WITHDRAWAL_STATUSES } from '../../../../../modules/packs/models/globepay-withdrawal';
+import type {
+  FakeFacet,
+  GatewayReports,
+} from '../../../../../modules/packs/facets';
 
 // Money-OUT mirror of ../deposits — same contract, inverted stakes: a stale
 // pending row here is a customer ALREADY debited with no payout and no refund.
@@ -112,7 +116,7 @@ function mkScope(
         .filter((id) => frozenIds.includes(id))
         .map((id) => ({ id: `cas_${id}`, customer_id: id, frozen: true }));
     },
-  };
+  } satisfies FakeFacet<GatewayReports>;
   return {
     calls,
     logger,
@@ -337,7 +341,7 @@ describe('GET /admin/globepay/withdrawals/:id/account', () => {
         calls.opts = opts;
         return rows;
       },
-    };
+    } satisfies FakeFacet<GatewayReports>;
     return {
       calls,
       logger,

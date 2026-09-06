@@ -28,6 +28,11 @@ import {
 } from '../../../../../modules/packs/globepay-withdrawal';
 import { POST as APPROVE } from '../[id]/approve/route';
 import { POST as DENY } from '../[id]/deny/route';
+import type {
+  FakeFacet,
+  GatewayWithdrawals,
+} from '../../../../../modules/packs/facets';
+import type PacksModuleService from '../../../../../modules/packs/service';
 
 const submitMock = submitWithdrawal as jest.Mock;
 const notifyFeedMock = notifyFeed as jest.Mock;
@@ -117,7 +122,13 @@ function harness(row = heldRow(), debitExists = true, frozen = false) {
     withdrawCreditsWithLedger: jest
       .fn()
       .mockResolvedValue({ id: 'ct_refund', replayed: false }),
-  };
+    // claimGlobePayWithdrawalStatus is outside the facet on purpose — it is
+    // stubbed only so the guard below can prove neither route still reaches
+    // for the bare, unlocked claim.
+  } satisfies FakeFacet<
+    GatewayWithdrawals &
+      Pick<PacksModuleService, 'claimGlobePayWithdrawalStatus'>
+  >;
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   // TGPay's payout needs the recipient email, read from the customer module.
   const customers = {
