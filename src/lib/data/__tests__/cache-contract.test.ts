@@ -8,14 +8,24 @@
  * Anyone adding a new `cached()` adopter should add a case here pinning
  * which failures throw (evict) vs which values are legitimately cacheable.
  *
- * sdk + logger are mocked; the real schema/parse path runs for each adopter,
- * mirroring packs-price.test.ts's mock wiring. avatar-frames.ts imports
- * 'server-only' (throws outside an RSC) at module load — stub it, mirroring
- * profiles.test.ts.
+ * The adopters that have moved to the `Store` port seed `memoryStore` through
+ * the shared shim; the rest still mock `sdk.client.fetch` directly. Either
+ * way the real schema/parse path runs. avatar-frames.ts imports 'server-only'
+ * (throws outside an RSC) at module load — stub it, mirroring profiles.test.ts.
+ *
+ * A port-backed adopter expresses "this call failed" as a NON-2xx rather than
+ * a rejected promise: the HTTP adapter catches the SDK's rejection and turns
+ * it into a `Failure`, so a 502 is the same event this contract cares about —
+ * a failure that must never be memoised. Response QUEUES stand in for
+ * `mockResolvedValueOnce` chains, and `memoryStore`'s recorded `requests` for
+ * the fetch call count.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { storeShim, backend } from '@/lib/__tests__/store-shim';
+import type { MemoryResponse } from '@/lib/store-memory';
 
 vi.mock('server-only', () => ({}));
+vi.mock('@/lib/store', () => ({ store: storeShim }));
 
 const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
 vi.mock('@/lib/medusa', () => ({ sdk: { client: { fetch: fetchMock } } }));
@@ -28,6 +38,17 @@ import { getAvatarFrames } from '@/lib/data/avatar-frames';
 import { getLeaderboard } from '@/lib/data/leaderboard';
 import { getChallenge } from '@/lib/data/challenge';
 import { clearTtlCache } from '@/lib/ttl-cache';
+
+/** One route answering a queued response per call — the port equivalent of a
+ *  `mockResolvedValueOnce` chain. An exhausted queue answers 502, so a test
+ *  that re-fetches when it should not fails on its own assertion. */
+const queued = (route: string) => {
+  const queue: MemoryResponse[] = [];
+  const mem = backend({
+    [route]: () => queue.shift() ?? { status: 502, body: {} },
+  });
+  return { push: (r: MemoryResponse) => queue.push(r), mem };
+};
 
 beforeEach(() => {
   fetchMock.mockReset();
@@ -70,13 +91,14 @@ describe('getPackCategories cache contract', () => {
 
 describe('getAvatarFrames cache contract', () => {
   it('a schema-invalid body is NOT cached: degrades to {} and the next call re-fetches', async () => {
+    const frames = queued('GET /store/avatar-frames');
     // frames is a required field — omitting it fails AvatarFramesSchema.
-    fetchMock.mockResolvedValueOnce({});
+    frames.push({ body: {} });
     expect(await getAvatarFrames()).toEqual({});
 
-    fetchMock.mockResolvedValueOnce({ frames: { '1': '/frame-1.webp' } });
+    frames.push({ body: { frames: { '1': '/frame-1.webp' } } });
     await getAvatarFrames();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(frames.mem.requests).toHaveLength(2);
   });
 });
 
