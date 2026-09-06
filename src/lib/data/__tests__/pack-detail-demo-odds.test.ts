@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // The guest demo spin draws on odds SET 3, which reaches the storefront as the
 // backend's `demo_odds`. Nothing on screen shows which odds the demo rolled —
