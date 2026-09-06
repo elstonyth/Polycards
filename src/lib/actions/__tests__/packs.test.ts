@@ -240,6 +240,29 @@ describe('openBatch', () => {
     });
   });
 
+  // The envelope is unchecked on purpose, so nothing upstream catches a body
+  // without `rolls` — iterating it would throw inside a 'use server' action and
+  // surface as an error page over a CHARGED batch.
+  it('a body with no rolls array answers, never throws, over a charged batch', async () => {
+    backend({
+      'POST /store/packs/:slug/open-batch': { body: { balance: 880 } },
+    });
+    expect(await openBatch('bronze', 2)).toEqual({
+      ok: false,
+      error:
+        "Your pack opened and the card is in your Vault, but we couldn't show it here.",
+    });
+    expect(mocks.logError).toHaveBeenCalledWith(
+      "[packs] open-batch returned no rolls array for 'bronze'",
+    );
+  });
+
+  // An explicit empty array is a legal (if odd) 2xx and has always answered ok.
+  it('leaves an explicitly empty rolls array alone', async () => {
+    backend({ 'POST /store/packs/:slug/open-batch': { body: { rolls: [] } } });
+    expect(await openBatch('bronze', 1)).toMatchObject({ ok: true, rolls: [] });
+  });
+
   it('logged out: asks for a login without calling the backend', async () => {
     const mem = backend({}, { token: null });
     expect(await openBatch('bronze', 3)).toEqual({

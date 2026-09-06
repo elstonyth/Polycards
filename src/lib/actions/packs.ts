@@ -261,6 +261,20 @@ export async function openBatch(
     total_charged?: unknown;
   };
 
+  // The envelope is unchecked (see the header), so `rolls` might not be an
+  // array at all. Iterating a missing one would throw INSIDE a 'use server'
+  // action — an error page over a charged batch, i.e. the exact outcome the
+  // unchecked envelope exists to avoid. An explicit `rolls: []` is left alone:
+  // that is a legal (if odd) 2xx and has always answered ok with no rolls.
+  if (!Array.isArray(rawRolls)) {
+    logger.error(`[packs] open-batch returned no rolls array for '${slug}'`);
+    return {
+      ok: false,
+      error:
+        "Your pack opened and the card is in your Vault, but we couldn't show it here.",
+    };
+  }
+
   // Validate and map every roll. The charge is committed and every pull is
   // already `vaulted` by the time this runs, so a roll that fails
   // WonCardSchema is DROPPED, not fatal: the customer sees the cards that did
