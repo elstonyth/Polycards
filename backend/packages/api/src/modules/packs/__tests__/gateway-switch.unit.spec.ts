@@ -138,6 +138,19 @@ describe('rowGatewayConfigs', () => {
     expect(configFor('stripe')).toBeNull();
   });
 
+  // The fake gateway is only useful if a spec that selects it takes the SAME
+  // orchestration branches production takes — the deposit/withdrawal band
+  // checks and the "needs the customer's email" refusal all read these off the
+  // ACTIVE gateway's definition. The numbers are hand-copied from tgpay, so
+  // pin them: a change to TGPay's band that skips the fake would silently move
+  // what the band-edge tests in globepay-deposit.unit.spec.ts assert.
+  it('the fake gateway mirrors the real one where the orchestration branches', () => {
+    expect(GATEWAYS.fake.limits).toEqual(GATEWAYS.tgpay.limits);
+    expect(GATEWAYS.fake.needsCustomerContact).toBe(
+      GATEWAYS.tgpay.needsCustomerContact,
+    );
+  });
+
   it('every registered gateway declares its hooks and a configured() probe', () => {
     for (const def of Object.values(GATEWAYS)) {
       // Every entry, the test-only fake included: gatewayUrls turns an empty

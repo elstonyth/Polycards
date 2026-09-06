@@ -62,8 +62,8 @@ export type FakeCalls = {
 /** Exactly what TGPay pays to — see the `fake` code in banks.ts. */
 const FAKE_BANKS: SupportedBank[] = banksFor('fake');
 
-/** The wallet a `'ok'` balance read reports. Fixed, so specs can assert it. */
-export const FAKE_BALANCE: MerchantBalance = {
+/** The wallet an `'ok'` balance read reports. Script it to assert on values. */
+const FAKE_BALANCE: MerchantBalance = {
   merchantCode: 'fake',
   currencyCode: 'MYR',
   currentBalance: 1_000_000,
