@@ -493,6 +493,14 @@ envs:
   # TGPAY_CALLBACK_IPS is the source allowlist TGPay asked for — their servers
   # as listed 2026-09-05. Outside the sandbox the TGPay hooks refuse every
   # callback while this is unset, so it ships alongside the code.
+  # PAYMENT_GATEWAY is the boot/fallback gateway, read while the admin
+  # setting (site_settings.payment_gateway) is NULL. Set to tgpay at the
+  # 2026-09-06 cutover: production deposits and payouts go through TGPay
+  # from this apply on; GlobePay stays only to settle its own historical rows
+  # until it is removed.
+  - key: PAYMENT_GATEWAY
+    scope: RUN_TIME
+    value: tgpay
   - key: TGPAY_API_BASE
     scope: RUN_TIME
     value: https://api.tgpay365.com/api/v2
