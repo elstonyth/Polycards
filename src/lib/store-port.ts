@@ -109,9 +109,13 @@ export type StoreRequest = {
 };
 
 /** An adapter's answer: the 2xx body, or a failure — with its status when a
- *  response came back at all. */
+ *  response came back at all. `cause` is the underlying error the adapter
+ *  caught (e.g. undici's `TypeError: fetch failed`, whose `.cause` names the
+ *  socket problem — `ECONNREFUSED`/`ENOTFOUND`/TLS); logged but never surfaced
+ *  in the public `Failure`. */
 export type Sent =
-  { ok: true; body: unknown } | { ok: false; status?: number; text: string };
+  | { ok: true; body: unknown }
+  | { ok: false; status?: number; text: string; cause?: unknown };
 
 export interface Transport {
   /** The customer bearer, or null when logged out. Not consulted for
@@ -169,7 +173,7 @@ export function createStore(transport: Transport, log: Log): Store {
         status: sent.status,
         text: sent.text,
       };
-      log(`[store] ${method} ${path}: ${kind}`, failure);
+      log(`[store] ${method} ${path}: ${kind}`, failure, sent.cause);
       return failure;
     }
 

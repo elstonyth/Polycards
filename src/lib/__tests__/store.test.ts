@@ -176,6 +176,27 @@ describe('store — classification (never throws)', () => {
     expect((r as Failure).status).toBeUndefined();
   });
 
+  // Regression: the caught error (and, for undici, its nested `.cause` — e.g.
+  // `ECONNREFUSED`/`ENOTFOUND`/TLS detail on a `TypeError: fetch failed`) must
+  // still reach the log line, not just the `{ kind, status, text }` triple —
+  // that's what prod triage of a "fetch failed" report needs.
+  it('logs the original error (not just kind/status/text) on a network failure', async () => {
+    const netError = new TypeError('fetch failed');
+    (netError as { cause?: unknown }).cause = { code: 'ECONNREFUSED' };
+    mocks.fetch.mockRejectedValueOnce(netError);
+    const r = await store.get('/store/vault', BalanceSchema);
+    expect(r).toEqual({ ok: false, kind: 'backend', text: 'fetch failed' }); // public Failure unchanged
+    expect(mocks.logError).toHaveBeenCalledTimes(1);
+    expect(mocks.logError.mock.calls[0]?.[2]).toBe(netError);
+    expect(
+      (
+        (mocks.logError.mock.calls[0]?.[2] as { cause?: unknown }).cause as {
+          code?: string;
+        }
+      ).code,
+    ).toBe('ECONNREFUSED');
+  });
+
   it('a non-Error rejection still resolves', async () => {
     mocks.fetch.mockRejectedValueOnce('boom');
     expect(await store.get('/store/vault', BalanceSchema)).toEqual({

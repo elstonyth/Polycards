@@ -44,11 +44,16 @@ async function send({ path, body, ...init }: StoreRequest): Promise<Sent> {
     return { ok: true, body: data };
   } catch (error) {
     // A non-2xx rejects with `FetchError` (status + the backend's message
-    // text); a network drop with a plain Error and no status.
+    // text); a network drop with a plain Error and no status. Either way,
+    // `cause` carries the original error through to the log line — a network
+    // drop is typically undici's `TypeError: fetch failed`, whose `.cause`
+    // names the actual socket problem (ECONNREFUSED/ENOTFOUND/TLS), which
+    // `error.message` alone loses.
     return {
       ok: false,
       status: httpStatus(error),
       text: error instanceof Error ? error.message : String(error),
+      cause: error,
     };
   }
 }
