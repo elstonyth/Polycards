@@ -917,6 +917,14 @@ export const CardDetailSchema = z.looseObject({
   priceHistory: z.array(CardPricePointSchema).catch([]),
 });
 
+/** GET /store/cards/:handle — the `{ card }` wrapper the route answers with.
+ *  The card itself is REQUIRED: a 200 without a parseable one is a
+ *  backend/contract fault, and data/cards.ts must say 'error' for it rather
+ *  than fabricate a 404. */
+export const CardDetailEnvelopeSchema = z.looseObject({
+  card: CardDetailSchema,
+});
+
 /** One settled weekly line as the store surfaces render it (both the
  *  Referral and VIP tabs of /task). Cents + basis points on the wire; the
  *  UI converts for display. */
