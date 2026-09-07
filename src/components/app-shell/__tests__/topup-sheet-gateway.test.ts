@@ -175,7 +175,7 @@ describe('TopUpSheet gateway branch', () => {
     expect(text).toContain('Balance once paid');
     expect(text).not.toContain('New balance');
     expect(text).toContain('payment provider');
-    expect(text).not.toContain('GlobePay');
+    expect(text).not.toContain('TGPay');
     expect(payButton().textContent).toBe('Pay RM 300.00');
     expect(text).not.toContain('add RM');
     // The mock sheet's "Demo" badge must not ride along on a flow that takes

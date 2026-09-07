@@ -12,19 +12,12 @@
  * The backend is PII-safe (display name + avatar seed only — never email/id),
  * so nothing sensitive crosses into the storefront.
  */
-import { sdk } from '@/lib/medusa';
+import { store } from '@/lib/store';
 import { logger } from '@/lib/logger';
 import { avatarForSeed } from '@/lib/profile-view';
 import { rm } from '@/lib/format';
-import {
-  parseList,
-  parseOne,
-  LeaderboardEntrySchema,
-  OwnWeeklySchema,
-} from '@/lib/data/schemas';
+import { LeaderboardPageSchema, OwnWeeklySchema } from '@/lib/data/schemas';
 import { cached } from '@/lib/ttl-cache';
-import { getAuthToken } from '@/lib/data/customer';
-import { authedFetch } from '@/lib/authed-fetch';
 
 export type LeaderboardPeriod = 'weekly' | 'alltime';
 
@@ -84,20 +77,23 @@ const BOARD_TTL_MS = 30_000;
 /** Parsed board rows for a period, memoised per process for one window. */
 function fetchBoard(period: LeaderboardPeriod): Promise<BackendEntry[]> {
   return cached(`leaderboard:${period}`, BOARD_TTL_MS, async () => {
-    const { entries } = await sdk.client.fetch<{ entries: BackendEntry[] }>(
-      `/store/leaderboard?period=${period}`,
+    // `period` rides the port's query option rather than the path, which is
+    // the same `?period=weekly` on the wire. Public route: no bearer, and no
+    // cache key (`cache: 'auto'`) — the bare sdk.client.fetch sent neither.
+    //
+    // orThrow, and LeaderboardPageSchema rejects a non-array `entries`: that
+    // is a malformed 200, and it must reject so the TTL memo evicts instead
+    // of caching a blanked board for the window. Empty-and-valid is a real,
+    // cacheable state (a quiet leaderboard), and a single bad ROW still drops
+    // on its own.
+    const { entries } = store.orThrow(
+      await store.get('/store/leaderboard', LeaderboardPageSchema, {
+        auth: 'none',
+        cache: 'auto',
+        query: { period },
+      }),
     );
-    // Non-array is a malformed 200 — throw so the TTL memo evicts instead of
-    // caching a blanked board for the window. Empty-and-valid is a real,
-    // cacheable state (a quiet leaderboard).
-    if (!Array.isArray(entries)) {
-      throw new Error('/store/leaderboard returned a non-array entries field');
-    }
-    if (entries.length === 0) return [];
-    return parseList(
-      LeaderboardEntrySchema,
-      entries,
-    ) as unknown as BackendEntry[];
+    return entries as unknown as BackendEntry[];
   });
 }
 
@@ -155,17 +151,10 @@ export interface OwnWeekly {
  * hop fails; the card then falls back to the copy it shows today.
  */
 export async function getOwnWeekly(): Promise<OwnWeekly | null> {
-  try {
-    const token = await getAuthToken();
-    if (!token) return null;
-    const parsed = parseOne(
-      OwnWeeklySchema,
-      await authedFetch(token, '/store/leaderboard/me'),
-    );
-    if (!parsed) return null;
-    return { volumeMyr: parsed.volume, pulls: parsed.pulls, seed: parsed.seed };
-  } catch (error) {
-    logger.error('[leaderboard] own weekly standing failed to load:', error);
-    return null;
-  }
+  // Every failure is the same answer here — logged out, a rejected token, a
+  // backend blip, a malformed 200 — so the port's Result collapses the old
+  // token guard, `parseOne` null check and `catch` into one branch.
+  const r = await store.get('/store/leaderboard/me', OwnWeeklySchema);
+  if (!r.ok) return null;
+  return { volumeMyr: r.data.volume, pulls: r.data.pulls, seed: r.data.seed };
 }

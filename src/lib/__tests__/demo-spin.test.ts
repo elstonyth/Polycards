@@ -17,13 +17,15 @@ const ODDS: { rarity: Rarity; chance: string }[] = [
   { rarity: 'Common', chance: '50%' },
 ];
 
-const card = (id: string, rarity: Rarity): PackCard => ({
-  id,
-  name: id,
-  image: `/x/${id}.webp`,
+const card = (handle: string, rarity: Rarity): PackCard => ({
+  handle,
+  name: handle,
+  image: `/x/${handle}.webp`,
   slabImage: null,
-  value: 'RM 10.00',
+  priceMyr: 10,
   rarity,
+  pokemonDex: null,
+  spriteImage: null,
 });
 
 describe('parseChance', () => {
@@ -73,23 +75,23 @@ describe('demoDraw', () => {
 
   it('picks a card of the sampled rarity', () => {
     // rarityRoll 0 → Legendary; cardRoll anywhere → the only legendary
-    expect(demoDraw(pool, ODDS, 0, 0.7)?.id).toBe('leg');
+    expect(demoDraw(pool, ODDS, 0, 0.7)?.handle).toBe('leg');
   });
 
   it('picks uniformly among cards of the sampled tier', () => {
     // rarityRoll 0.01 → Mythical; two epics — cardRoll selects within the tier
-    expect(demoDraw(pool, ODDS, 0.01, 0)?.id).toBe('epic-a');
-    expect(demoDraw(pool, ODDS, 0.01, 0.99)?.id).toBe('epic-b');
+    expect(demoDraw(pool, ODDS, 0.01, 0)?.handle).toBe('epic-a');
+    expect(demoDraw(pool, ODDS, 0.01, 0.99)?.handle).toBe('epic-b');
   });
 
   it('falls back toward more common tiers when the sampled tier is empty', () => {
     // rarityRoll 0.9 → Common, which the pool lacks → nearest lower tier present
-    expect(demoDraw(pool, ODDS, 0.9, 0)?.id).toBe('unc');
+    expect(demoDraw(pool, ODDS, 0.9, 0)?.handle).toBe('unc');
   });
 
   it('falls back toward rarer tiers when nothing more common exists', () => {
     const rareOnly = [card('only', 'Legendary')];
-    expect(demoDraw(rareOnly, ODDS, 0.9, 0)?.id).toBe('only');
+    expect(demoDraw(rareOnly, ODDS, 0.9, 0)?.handle).toBe('only');
   });
 
   it('returns null on an empty pool', () => {
@@ -101,7 +103,7 @@ describe('demoDraw', () => {
       { rarity: 'Common', chance: '100%' },
     ];
     const pool = [card('only', 'Legendary')];
-    expect(demoDraw(pool, offOdds, 0.5, 0.5)?.id).toBe('only');
+    expect(demoDraw(pool, offOdds, 0.5, 0.5)?.handle).toBe('only');
   });
 });
 

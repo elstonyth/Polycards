@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
 import { AmbientVideo } from '@/components/AmbientVideo';
 import { type Pack, type PackCard } from '@/lib/packs-data';
+import { rm } from '@/lib/format';
 
 /**
  * Board 01 — THE SHOP IS OPEN. A framed, always-looping scene of the Polycards
@@ -77,7 +78,8 @@ export default function HeroBoard({
               style={{ '--i': 3 } as CSSProperties}
               className="chase-land font-heading text-chase text-5xl leading-none lg:mt-3 lg:text-7xl"
             >
-              {chase.value}
+              {/* getPackChase only ever hands over a PRICED card. */}
+              {chase.priceMyr != null ? rm(chase.priceMyr) : '—'}
             </p>
             {/* No truncate: at 15px this line clipped inside max-w-xs on a
                 phone, and it wraps to two readable lines instead. */}

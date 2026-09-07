@@ -6,14 +6,15 @@ import { X } from 'lucide-react';
 import type { Rarity } from '@/lib/packs-data';
 import type { PoolValueRange } from '@/lib/packs-format';
 import { rarityRgb } from '@/lib/rarity';
+import { rm } from '@/lib/format';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 
 /** True when there is at least one row to render — a pack can publish odds with
  *  no per-tier percentages AND have nothing priced (a backend without
- *  `marketPriceMyr` prices every card as '—', so poolValueRange returns null),
- *  which would otherwise paint an empty bordered box. Callers gate on this so
- *  they can fall back to their own "not published yet" copy. */
+ *  `marketPriceMyr` leaves every card's priceMyr null, so poolValueRange
+ *  returns null), which would otherwise paint an empty bordered box. Callers
+ *  gate on this so they can fall back to their own "not published yet" copy. */
 export const hasPublishedOddsContent = (
   odds: { rarity: Rarity; chance: string }[] | null,
   range: PoolValueRange | null,
@@ -36,11 +37,11 @@ export function PublishedOddsList({
    *  Still the content gate (see hasPublishedOddsContent) even when the row
    *  itself renders the expected value instead. */
   range: PoolValueRange | null;
-  /** Expected value of one pull over the published tiers; when present it
+  /** Expected value of one pull over the published tiers (RM); when present it
    *  REPLACES the range in the top row. Null (no published tier has a priced
    *  card) falls back to the range, so a pack with a priced pool but no
    *  per-tier rows still has something in that row. */
-  expectedValue?: string | null;
+  expectedValue?: number | null;
   /** Per-tier value ranges. A tier absent here (nothing priced in that tier, or
    *  the caller did not supply them) simply renders without a range line. */
   tierRanges?: Partial<Record<Rarity, PoolValueRange>>;
@@ -60,10 +61,12 @@ export function PublishedOddsList({
         {range !== null && (
           <li className="flex items-center justify-between border-b border-white/5 bg-white/[0.03] px-4 py-3">
             <span className="text-[13px] font-semibold text-white">
-              {expectedValue ? 'Expected value' : 'Card value range'}
+              {expectedValue != null ? 'Expected value' : 'Card value range'}
             </span>
             <span className="text-[13px] font-semibold tabular-nums text-white">
-              {expectedValue ?? `${range.min} – ${range.max}`}
+              {expectedValue != null
+                ? rm(expectedValue)
+                : `${rm(range.min)} – ${rm(range.max)}`}
             </span>
           </li>
         )}
@@ -95,11 +98,13 @@ export function PublishedOddsList({
                       className="block text-[11px] tabular-nums text-white/45"
                       aria-label={
                         tr.min === tr.max
-                          ? `Card value ${tr.min}`
-                          : `Card value ${tr.min} to ${tr.max}`
+                          ? `Card value ${rm(tr.min)}`
+                          : `Card value ${rm(tr.min)} to ${rm(tr.max)}`
                       }
                     >
-                      {tr.min === tr.max ? tr.min : `${tr.min} – ${tr.max}`}
+                      {tr.min === tr.max
+                        ? rm(tr.min)
+                        : `${rm(tr.min)} – ${rm(tr.max)}`}
                     </span>
                   )}
                 </span>
@@ -136,7 +141,7 @@ export function OddsSheet({
   /** Published rows (rarest-first); null = this pack has no published odds. */
   odds: { rarity: Rarity; chance: string }[] | null;
   range: PoolValueRange | null;
-  expectedValue?: string | null;
+  expectedValue?: number | null;
   tierRanges?: Partial<Record<Rarity, PoolValueRange>>;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);

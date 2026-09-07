@@ -6,29 +6,20 @@
  */
 import 'server-only';
 import { cache } from 'react';
-import { sdk } from '@/lib/medusa';
-import { authedFetch } from '@/lib/authed-fetch';
-import { httpStatus } from '@/lib/errors';
-import { logger } from '@/lib/logger';
-import { getAuthToken } from '@/lib/data/customer';
+import { store } from '@/lib/store';
 import {
-  parseOne,
   ReferralCodeLookupSchema,
   ReferralSummarySchema,
   type ReferralCodeLookup,
   type ReferralSummary,
 } from '@/lib/data/schemas';
 
+/** The signed-in customer's own referral panel, or null — logged out, a
+ *  backend blip and a malformed 200 all render the same "unavailable" panel,
+ *  so they collapse into one branch. */
 export async function getReferralSummary(): Promise<ReferralSummary | null> {
-  const token = await getAuthToken();
-  if (!token) return null;
-  try {
-    const raw = await authedFetch(token, '/store/referral');
-    return parseOne(ReferralSummarySchema, raw);
-  } catch (error) {
-    logger.error('[referral] summary load failed:', error);
-    return null;
-  }
+  const r = await store.get('/store/referral', ReferralSummarySchema);
+  return r.ok ? r.data : null;
 }
 
 export type ReferralCodeLookupResult =
@@ -45,22 +36,20 @@ export type ReferralCodeLookupResult =
  */
 export const lookupReferralCode = cache(
   async (code: string): Promise<ReferralCodeLookupResult> => {
-    try {
-      const raw = await sdk.client.fetch<unknown>(
-        `/store/referral/codes/${encodeURIComponent(code)}`,
-      );
-      const parsed = parseOne(ReferralCodeLookupSchema, raw);
-      if (!parsed) {
-        logger.error(`[referral] code lookup schema mismatch for "${code}"`);
-        return { status: 'error' };
-      }
-      return { status: 'ok', ...parsed };
-    } catch (error) {
-      if (httpStatus(error) === 404) {
-        return { status: 'notfound' };
-      }
-      logger.error(`[referral] code lookup failed for "${code}":`, error);
-      return { status: 'error' };
-    }
+    // Public route: no bearer, and no cache key on the wire (`cache: 'auto'`)
+    // — what the bare sdk.client.fetch sent.
+    const r = await store.get(
+      `/store/referral/codes/${encodeURIComponent(code)}`,
+      ReferralCodeLookupSchema,
+      { auth: 'none', cache: 'auto' },
+    );
+    if (r.ok) return { status: 'ok', ...r.data };
+    // Only a real 404 is 'notfound' (a dead code, or a hidden referrer).
+    // A schema mismatch is OURS, so it stays 'error' — the caller carries on
+    // and the bind re-validates rather than telling the visitor their
+    // friend's code is dead. The port logged it, with the code in the path.
+    return r.kind === 'not_found'
+      ? { status: 'notfound' }
+      : { status: 'error' };
   },
 );

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getFreePackState, type FreePackState } from '@/lib/data/free-pack';
+import { getFreePackState } from '@/lib/data/free-pack';
 import { getAuthToken } from '@/lib/data/customer';
+import { cached } from '@/lib/ttl-cache';
 
 // Same-origin endpoint the site-wide floating badge (GlobalFreePackBadge)
 // re-reads on route/auth change (throttled client-side to 30s — see
@@ -22,20 +23,22 @@ import { getAuthToken } from '@/lib/data/customer';
 export const dynamic = 'force-dynamic';
 
 const GUEST_TTL_MS = 60_000;
-let guestCache: { expires: number; body: FreePackState } | null = null;
 
 export async function GET() {
   const token = await getAuthToken();
   if (token) {
     return NextResponse.json(await getFreePackState());
   }
-  if (guestCache && guestCache.expires > Date.now()) {
-    return NextResponse.json(guestCache.body);
-  }
+  // The shared TTL memo rather than a Map of this route's own — same window,
+  // same per-process scope, plus the stampede collapse and rejection eviction
+  // that come with it. getFreePackState never throws (any failure is
+  // `hidden`), so that eviction never fires here: a blip still caches `hidden`
+  // for up to 60s, exactly as the hand-rolled Map did.
+  //
   // getFreePackState() re-reads the cookie itself and finds none on this
   // branch, so the cached body is always guest-shaped (`signup` or `hidden`,
   // never `claim`) — the cache can never leak a per-customer answer.
-  const body = await getFreePackState();
-  guestCache = { expires: Date.now() + GUEST_TTL_MS, body };
-  return NextResponse.json(body);
+  return NextResponse.json(
+    await cached('free-pack:guest', GUEST_TTL_MS, getFreePackState),
+  );
 }

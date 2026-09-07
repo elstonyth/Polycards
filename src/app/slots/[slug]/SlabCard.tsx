@@ -60,12 +60,12 @@ export function SlabCard({
   spriteSrc?: string;
 }) {
   const top = isTopRarity(card.rarity);
-  const value =
-    card.marketPriceMyr != null ? rm(card.marketPriceMyr) : card.value;
+  // Unpriced (an older backend sent no MYR price) stamps '—', never RM 0.00.
+  const value = card.priceMyr != null ? rm(card.priceMyr) : '—';
   // Literally the predicate the FRONT branches on — SlabImage exports it, so
   // the back can never end up on the other side of that decision (why it is
   // not `pack.group === 'RAW'` is documented there).
-  const raw = !isGraded(card.slab_image);
+  const raw = !isGraded(card.slabImage);
 
   // The slab turns under the pointer and catches a highlight as it turns, so
   // the hold before the flip is something to handle rather than sit through.
@@ -207,10 +207,15 @@ export function SlabCard({
         >
           {raw ? (
             <SlabImage
-              src={RAW_CARD_BACK_SRC}
-              slabSrc={null}
-              rarity={card.rarity}
-              alt=""
+              // Not the card — the card's BACK, wearing the card's tier. The
+              // nameless view is deliberate: it also makes the alt empty,
+              // which is what this face wants (nothing is revealed yet).
+              card={{
+                name: '',
+                image: RAW_CARD_BACK_SRC,
+                slabImage: null,
+                rarity: card.rarity,
+              }}
               sizes="(max-width: 640px) 64vw, 300px"
               className="absolute inset-0"
               priority
@@ -291,10 +296,7 @@ export function SlabCard({
           style={{ filter: slabAmbient('reveal', rarityRgb) } as CSSProperties}
         >
           <SlabImage
-            src={card.image}
-            slabSrc={card.slab_image}
-            rarity={card.rarity}
-            alt={card.name}
+            card={card}
             sizes="(max-width: 640px) 64vw, 300px"
             className="absolute inset-0"
           />

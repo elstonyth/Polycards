@@ -107,10 +107,15 @@ function topRarityOf(cards: WonCard[]): Rarity {
 /** Cosmetic reel-winner mapping for a won/demo card (decides nothing): rarity
  *  color + the column's Pokémon sprite (custom image ⇢ dex gif ⇢ Poké Ball). */
 function winnerFor(card: WonCard): ColumnWinner {
-  const r = resolveCardPokemon(card);
+  // resolveCardPokemon takes the wire's snake_case; the view is camelCase.
+  const r = resolveCardPokemon({
+    name: card.name,
+    pokemon_dex: card.pokemonDex,
+    sprite_image: card.spriteImage,
+  });
   const custom =
-    card.sprite_image && card.sprite_image.trim() !== ''
-      ? card.sprite_image
+    card.spriteImage && card.spriteImage.trim() !== ''
+      ? card.spriteImage
       : null;
   return {
     dex: r.dex,
@@ -202,7 +207,7 @@ export default function SlotMachineClient({
   const modeUndecided = !customer && authLoading;
 
   // Real backend price, never re-parsed from the rounded display string.
-  const cost = pack.priceValue;
+  const cost = pack.priceMyr;
   // Reel count — prop is the initial value (already clamped from ?count=); the
   // player adds/removes reels in-machine. cost * reels is the batch price.
   const [reels, setReels] = useState(isFreePack || isFreeRip ? 1 : count);
@@ -636,13 +641,10 @@ export default function SlotMachineClient({
     if (held.mode !== 'demo') {
       const now = Date.now();
       const justPulled: RecentPull[] = held.cards.map((won, i) => ({
-        id: `${won.id}-${now}-${i}`,
-        handle: won.id,
-        name: won.name,
-        image: won.image,
-        slabImage: won.slab_image,
-        value: won.marketPriceMyr != null ? rm(won.marketPriceMyr) : won.value,
-        rarity: won.rarity,
+        // The won card IS the feed row's card (one view); the rest is the
+        // pull's own display fields.
+        ...won,
+        id: `${won.handle}-${now}-${i}`,
         who: 'You',
         packName: pack.name,
         packIcon: pack.image,
@@ -669,8 +671,7 @@ export default function SlotMachineClient({
     const bigPrefix = held.mode === 'demo' ? 'Demo — ' : big ? 'Big win! ' : '';
     const first = held.cards[0];
     if (held.cards.length === 1 && first) {
-      const firstValue =
-        first.marketPriceMyr != null ? rm(first.marketPriceMyr) : first.value;
+      const firstValue = first.priceMyr != null ? rm(first.priceMyr) : '—';
       setAnnounce(`${bigPrefix}Won ${first.name}, ${firstValue}`);
     } else {
       setAnnounce(`${bigPrefix}Won ${held.cards.length} cards`);

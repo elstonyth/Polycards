@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { getPullGaps, resolveFeedPackSlug } from '@/lib/data/packs';
-import { cached } from '@/lib/ttl-cache';
+import { cachedJson } from '@/lib/ttl-cache';
 import { isRarity } from '@/lib/packs-format';
 import { RARITY_ORDER } from '@/lib/rarity';
 
@@ -25,18 +25,17 @@ export async function GET(request: NextRequest) {
     // The loader THROWS on a null read (ttl-cache contract): getPullGaps
     // swallows backend failures into null, and memoising that null would
     // show every viewer "unavailable" for the whole window after one blip.
-    const body = await cached(
+    // `return await`, not `return`: a bare return would settle the promise
+    // outside this try and the catch below would never see the throw.
+    return await cachedJson(
       `pull-gaps:${pack}:${rarity}`,
       CACHE_TTL_MS,
       async () => {
         const gaps = await getPullGaps(rarity, pack || undefined);
         if (!gaps) throw new Error('pull gaps unavailable');
-        return JSON.stringify(gaps);
+        return gaps;
       },
     );
-    return new Response(body, {
-      headers: { 'content-type': 'application/json' },
-    });
   } catch {
     // Not cached — the next request retries. The chart shows its
     // unavailable state on a non-2xx.

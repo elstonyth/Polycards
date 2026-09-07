@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import type { PackDetail } from '@/lib/data/packs';
+import { PackPollResponseSchema, parseOne } from '@/lib/data/schemas';
+import { useLivePoll } from '@/lib/use-live-poll';
 
 const POLL_MS = 60_000;
 
@@ -17,50 +18,17 @@ export function usePackDetailPoll(
   slug: string,
   initial: PackDetail | null,
 ): PackDetail | null {
-  const [detail, setDetail] = useState(initial);
-
-  // Reset to the new seed only on a genuine pack switch — never on a
-  // same-slug seed re-render, which would stomp fresher polled data.
-  // "Adjust state when props change" pattern: setState during render of the
-  // same component, per React docs; avoids the effect-cascade lint error.
-  const [prevSlug, setPrevSlug] = useState(slug);
-  if (prevSlug !== slug) {
-    setPrevSlug(slug);
-    setDetail(initial);
-  }
-
-  useEffect(() => {
-    let active = true;
-    const tick = async () => {
-      if (document.visibilityState !== 'visible') return;
-      try {
-        const res = await fetch(
-          `/api/pack-detail/${encodeURIComponent(slug)}`,
-          {
-            cache: 'no-store',
-          },
-        );
-        if (!res.ok) return;
-        const body = (await res.json()) as { detail?: PackDetail };
-        if (active && body.detail) setDetail(body.detail);
-      } catch {
-        // keep the last good detail
-      }
-    };
-    void tick(); // correct the seed right away (effect re-runs per slug)
-    const id = setInterval(tick, POLL_MS);
-    // Refocusing a backgrounded tab refetches right away — interval ticks
-    // skipped while hidden would otherwise leave stale prices for ≤60s.
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void tick();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      active = false;
-      clearInterval(id);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, [slug]);
-
-  return detail;
+  const { data, pending } = useLivePoll<PackDetail | null>(
+    `/api/pack-detail/${encodeURIComponent(slug)}`,
+    initial,
+    {
+      intervalMs: POLL_MS,
+      resetKey: slug,
+      accept: (next) => parseOne(PackPollResponseSchema, next)?.detail ?? null,
+    },
+  );
+  // `pending` is exactly "this slug's data hasn't landed yet": show the new
+  // seed rather than the previous pack's detail. A same-slug seed re-render is
+  // not pending, so it can never stomp fresher polled data.
+  return pending ? initial : data;
 }

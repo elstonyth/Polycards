@@ -4,9 +4,9 @@
  * data getters; failures degrade to {} (avatars render frameless).
  */
 import 'server-only';
-import { sdk } from '@/lib/medusa';
+import { store } from '@/lib/store';
 import { logger } from '@/lib/logger';
-import { parseOne, AvatarFramesSchema } from '@/lib/data/schemas';
+import { AvatarFramesSchema } from '@/lib/data/schemas';
 import { cached } from '@/lib/ttl-cache';
 
 // A milestone-frame catalog changes when the operator adds a frame — never
@@ -22,21 +22,25 @@ const FRAMES_TTL_MS = 60_000;
  * empty map, which `cached` cannot tell from a real one — so one blip would
  * strip every avatar frame for the full 60s window instead of for the blip.
  * Rejecting lets `cached` evict, and the next request retries.
+ *
+ * `store.orThrow` is what keeps that true through the port: a schema reject is
+ * a malformed 200, not a legitimately empty catalog, and it must reach the
+ * `catch` below rather than cache {} for the window.
  */
 export async function getAvatarFrames(): Promise<Record<string, string>> {
   try {
-    return await cached('avatar-frames', FRAMES_TTL_MS, async () => {
-      const parsed = parseOne(
-        AvatarFramesSchema,
-        await sdk.client.fetch('/store/avatar-frames', { cache: 'no-store' }),
-      );
-      // A schema reject is a malformed 200, not a legitimately empty catalog
-      // — throw so the TTL memo evicts instead of caching {} for the window.
-      if (!parsed) {
-        throw new Error('/store/avatar-frames body failed schema parse');
-      }
-      return parsed.frames;
-    });
+    return await cached(
+      'avatar-frames',
+      FRAMES_TTL_MS,
+      async () =>
+        store.orThrow(
+          // Public route, and every caller of this one is already dynamic —
+          // it sent an explicit no-store before the port and still does.
+          await store.get('/store/avatar-frames', AvatarFramesSchema, {
+            auth: 'none',
+          }),
+        ).frames,
+    );
   } catch (error) {
     logger.error('[avatar-frames] catalog load failed:', error);
     return {};

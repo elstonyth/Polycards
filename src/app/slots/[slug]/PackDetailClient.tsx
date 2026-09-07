@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useDragScroll } from '@/lib/use-drag-scroll';
-import { rm, affordable } from '@/lib/format';
+import { rm, rm0, affordable } from '@/lib/format';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { openAuth } from '@/components/AuthButton';
 import Reveal from '@/components/Reveal';
@@ -161,7 +161,7 @@ function PackRail({
               {p.name.replace(' Pack', '')}
             </span>
             <span className="text-[11px] font-semibold tabular-nums text-white/55">
-              {p.price}
+              {rm0(p.priceMyr)}
             </span>
           </button>
         );
@@ -221,16 +221,9 @@ export default function PackDetailClient({
     active.id === pack.id ? detail : null,
   );
   const [openCard, setOpenCard] = useState<CardSeed | null>(null);
-  const toSeed = (c: PackCard): CardSeed => ({
-    handle: c.id,
-    name: c.name,
-    image: c.image,
-    slabImage: c.slabImage,
-    value: c.value,
-    rarity: c.rarity,
-    pokemonDex: c.pokemonDex,
-    spriteImage: c.spriteImage,
-  });
+  // A pool card already IS a card seed (one view) — the overlay reads the
+  // fields it needs and ignores the rest.
+  const toSeed = (c: PackCard): CardSeed => c;
   // Credit balance (A2: opens debit the pack price) — read from the app-shell
   // TopUpProvider (identity-tagged; null = logged out / loading), so this page,
   // the header chip, and the top-up sheet can never disagree.
@@ -249,7 +242,7 @@ export default function PackDetailClient({
   const freeClaimUnavailable = isFreePack && !freePackEligible;
 
   // Real backend price, never re-parsed from the rounded display string.
-  const priceNum = active.priceValue;
+  const priceNum = active.priceMyr;
   // Baked Polycards tiers animate their factory stage (still poster otherwise).
   const heroVideo = factoryVideo(active.displayImage);
 
@@ -767,21 +760,12 @@ export default function PackDetailClient({
           <PullHistory
             initial={recentPulls}
             packSlug={active.id}
-            // No pokemonDex/spriteImage here: RecentPull doesn't carry them
-            // and neither does /store/pulls/recent, so threading them is a
-            // backend change, not an omission. The badge falls to
+            // A feed row IS a card seed (one view). Its pokemonDex/spriteImage
+            // are null: /store/pulls/recent doesn't send them, so threading
+            // them is a backend change, not an omission. The badge falls to
             // name-derivation for a card opened from this feed — visible only
             // on a card whose admin-configured sprite differs from its name.
-            onSelect={(c) =>
-              setOpenCard({
-                handle: c.handle,
-                name: c.name,
-                image: c.image,
-                slabImage: c.slabImage,
-                value: c.value,
-                rarity: c.rarity,
-              })
-            }
+            onSelect={setOpenCard}
           />
         </Reveal>
       </div>

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { rarityRgb } from '@/lib/rarity';
+import { rm } from '@/lib/format';
 import type { RecentPull } from '@/lib/data/packs';
 
 /**
@@ -30,7 +31,7 @@ export default function PullsMarquee({ pulls }: { pulls: RecentPull[] }) {
             {pull.who} pulled
           </span>
           <span className="font-heading text-sm tabular-nums text-white">
-            {pull.value}
+            {pull.priceMyr != null ? rm(pull.priceMyr) : '—'}
           </span>
           <span className="text-[11px] text-neutral-400">{pull.agoLabel}</span>
         </span>

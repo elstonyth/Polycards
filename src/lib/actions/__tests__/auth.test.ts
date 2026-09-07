@@ -1,5 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+  storeShim,
+  backend as memoryBackend,
+} from '@/lib/__tests__/store-shim';
+import type { MemoryRoutes } from '@/lib/store-memory';
 
+// The three token exchanges go through the `Store` port; point that import at
+// an in-memory backend per test (src/lib/__tests__/store-shim.ts).
+//
+// `@/lib/medusa` KEEPS its mock, and both live side by side on purpose: what
+// is still on the SDK is `sdk.store.customer.*` and `sdk.auth.*`, which take
+// their Bearer positionally. `mocks.clientFetch` should now see NOTHING at all
+// — /auth/token/refresh moved onto the port's `bearer` option — so a call
+// landing on it is a regression, and two cases assert exactly that.
+//
 // The real data modules import 'server-only' (throws outside an RSC) and touch
 // next/headers — mock them wholesale so only the action logic under test runs.
 const mocks = vi.hoisted(() => ({
@@ -68,6 +82,7 @@ vi.mock('@/lib/logger', () => ({
   },
 }));
 vi.mock('next/headers', () => ({ headers: mocks.headers }));
+vi.mock('@/lib/store', () => ({ store: storeShim }));
 vi.mock('@/lib/medusa', () => ({
   sdk: {
     client: { fetch: mocks.clientFetch },
@@ -93,9 +108,30 @@ import { resolveCallbackOrigin } from '@/lib/allowed-hosts';
 import { NextRequest } from 'next/server';
 import { GET as googleCallbackGET } from '@/app/auth/google/callback/route';
 
+/** The two emailpass exchanges, answering the way the backend does. Registered
+ *  together because `signup` runs both: register, then `login`'s exchange. */
+const TOKENS: MemoryRoutes = {
+  'POST /auth/customer/emailpass/register': { body: { token: 'reg-tok' } },
+  'POST /auth/customer/emailpass': { body: { token: 'sess-tok' } },
+};
+
+/** One route refusing with `message` — how a backend refusal reaches
+ *  AUTH_RULES, which matches on that text. */
+const refuses = (route: string, message: string, status = 400) =>
+  backend({ [route]: { status, body: { message } } });
+
+/** An unregistered route THROWS, so the default backend is also the assertion
+ *  that a boundary check ran before anything left. */
+let mem = memoryBackend({});
+
+/** `memoryBackend`, remembering the instance so a test can read `requests`
+ *  without threading the return value through every call site. */
+const backend = (routes: MemoryRoutes) => (mem = memoryBackend(routes));
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.phoneVerificationRequired = false;
+  mem = backend({});
 });
 
 // #3 — a missing/undefined password must return a friendly error, never throw.
@@ -109,7 +145,7 @@ describe('signup — password presence (#3)', () => {
       password: undefined as unknown as string,
     });
     expect(r).toEqual({ ok: false, error: 'Please enter your password.' });
-    expect(mocks.clientFetch).not.toHaveBeenCalled();
+    expect(mem.requests).toEqual([]);
   });
 
   it('returns a friendly error for an empty password', async () => {
@@ -138,7 +174,7 @@ describe('signup — required phone', () => {
       ok: false,
       error: 'Please enter a valid phone number for the selected country.',
     });
-    expect(mocks.clientFetch).not.toHaveBeenCalled();
+    expect(mem.requests).toEqual([]);
   });
 
   it('rejects an invalid number', async () => {
@@ -148,13 +184,11 @@ describe('signup — required phone', () => {
       phone: '12345',
     });
     expect(r.ok).toBe(false);
-    expect(mocks.clientFetch).not.toHaveBeenCalled();
+    expect(mem.requests).toEqual([]);
   });
 
   it('creates the customer with the normalized +60 phone', async () => {
-    mocks.clientFetch
-      .mockResolvedValueOnce({ token: 'reg-tok' }) // register
-      .mockResolvedValueOnce({ token: 'sess-tok' }); // login exchange
+    backend(TOKENS);
     mocks.customerCreate.mockResolvedValueOnce({ customer: { id: 'c1' } });
     mocks.customerRetrieve.mockResolvedValueOnce({
       customer: {
@@ -197,14 +231,12 @@ describe('signup — phone verification enforcement (PHONE_VERIFICATION_REQUIRED
       ok: false,
       error: 'Please verify your phone number first.',
     });
-    expect(mocks.clientFetch).not.toHaveBeenCalled();
+    expect(mem.requests).toEqual([]);
     expect(mocks.customerCreate).not.toHaveBeenCalled();
   });
 
   it('flag on + proof token → forwards it as the x-phone-verification header', async () => {
-    mocks.clientFetch
-      .mockResolvedValueOnce({ token: 'reg-tok' }) // register
-      .mockResolvedValueOnce({ token: 'sess-tok' }); // login exchange
+    backend(TOKENS);
     mocks.customerCreate.mockResolvedValueOnce({ customer: { id: 'c1' } });
     mocks.customerRetrieve.mockResolvedValueOnce({
       customer: {
@@ -236,7 +268,7 @@ describe('signup — phone verification enforcement (PHONE_VERIFICATION_REQUIRED
   // the AUTH_RULES entry this collapses to "Could not create your account.
   // Please try again." and they retry the same number forever.
   it('names the duplicate phone instead of the generic signup failure', async () => {
-    mocks.clientFetch.mockResolvedValueOnce({ token: 'reg-tok' }); // register
+    backend(TOKENS);
     mocks.customerCreate.mockRejectedValueOnce(
       new Error('This phone number is already in use.'),
     );
@@ -271,7 +303,7 @@ describe('resetPassword — password presence (#3)', () => {
 // that behaviour so a future refactor can't reintroduce the surprise-logout.
 describe('login — handle lookup is non-fatal (#9)', () => {
   it('logs in with handle:null when the handle lookup returns null', async () => {
-    mocks.clientFetch.mockResolvedValueOnce({ token: 'tok' }); // exchangeToken
+    backend({ 'POST /auth/customer/emailpass': { body: { token: 'tok' } } });
     mocks.customerRetrieve.mockResolvedValueOnce({
       customer: {
         id: 'c1',
@@ -312,7 +344,7 @@ const DISABLED_MESSAGE =
 
 describe('login — disabled account message (§4.2)', () => {
   it('maps the backend disabled 401 to the clear message', async () => {
-    mocks.clientFetch.mockRejectedValueOnce(new Error(DISABLED_MESSAGE));
+    refuses('POST /auth/customer/emailpass', DISABLED_MESSAGE, 401);
 
     const r = await login({
       email: 'off@polycards.app',
@@ -324,7 +356,7 @@ describe('login — disabled account message (§4.2)', () => {
   });
 
   it('still falls back to the generic message for an unrelated failure', async () => {
-    mocks.clientFetch.mockRejectedValueOnce(new Error('socket hang up'));
+    refuses('POST /auth/customer/emailpass', 'socket hang up', 500);
 
     const r = await login({
       email: 'a@polycards.app',
@@ -339,8 +371,10 @@ describe('login — disabled account message (§4.2)', () => {
 
   // The rule must stay tight: a bare /disabled/i would hijack unrelated copy.
   it('does not hijack an unrelated error containing the word "disabled"', async () => {
-    mocks.clientFetch.mockRejectedValueOnce(
-      new Error('Google sign-in is disabled for this project.'),
+    refuses(
+      'POST /auth/customer/emailpass',
+      'Google sign-in is disabled for this project.',
+      500,
     );
 
     const r = await login({
@@ -372,12 +406,12 @@ describe('googleCallback — OAuth callback branches', () => {
   it('missing code/state → cancelled, never touches the backend', async () => {
     const r = await googleCallback({});
     expect(r).toEqual({ ok: false, reason: 'cancelled' });
-    expect(mocks.clientFetch).not.toHaveBeenCalled();
+    expect(mem.requests).toEqual([]);
   });
 
   it('returning user → ok:true, stores the ORIGINAL token, no create/refresh', async () => {
     const token = makeToken({ actor_id: 'cus_1' });
-    mocks.clientFetch.mockResolvedValueOnce({ token }); // callback GET
+    backend({ 'GET /auth/customer/google/callback': { body: { token } } });
     mocks.customerRetrieve.mockResolvedValueOnce({
       customer: {
         id: 'cus_1',
@@ -393,8 +427,9 @@ describe('googleCallback — OAuth callback branches', () => {
     expect(r.ok).toBe(true);
     expect(mocks.setAuthToken).toHaveBeenCalledWith(token);
     expect(mocks.customerCreate).not.toHaveBeenCalled();
-    // Only the callback GET — a refresh would be a second clientFetch call.
-    expect(mocks.clientFetch).toHaveBeenCalledTimes(1);
+    // Only the callback GET, and NO refresh.
+    expect(mem.requests).toHaveLength(1);
+    expect(mocks.clientFetch).not.toHaveBeenCalled();
   });
 
   it('first login → normalizes email, refreshes, stores the REFRESHED token', async () => {
@@ -407,9 +442,10 @@ describe('googleCallback — OAuth callback branches', () => {
       },
     });
     const refreshed = makeToken({ actor_id: 'cus_new' });
-    mocks.clientFetch
-      .mockResolvedValueOnce({ token: first }) // callback GET
-      .mockResolvedValueOnce({ token: refreshed }); // /auth/token/refresh
+    backend({
+      'GET /auth/customer/google/callback': { body: { token: first } },
+      'POST /auth/token/refresh': { body: { token: refreshed } },
+    });
     mocks.customerCreate.mockResolvedValueOnce({ customer: { id: 'cus_new' } });
     mocks.customerRetrieve.mockResolvedValueOnce({
       customer: {
@@ -428,14 +464,16 @@ describe('googleCallback — OAuth callback branches', () => {
     const [body, , authHeader] = mocks.customerCreate.mock.calls[0]!;
     expect(body.email).toBe('mixed@example.com');
     expect(authHeader.Authorization).toBe(`Bearer ${first}`);
-    // Refresh happened against the first (register) token's Bearer.
-    expect(mocks.clientFetch).toHaveBeenCalledWith(
-      '/auth/token/refresh',
-      expect.objectContaining({
-        method: 'POST',
-        headers: { Authorization: `Bearer ${first}` },
-      }),
-    );
+    // Refresh happened against the first (register) token's Bearer — the
+    // port's `bearer` option, NOT the session cookie the shim would otherwise
+    // send (memoryStore's default 'test-token').
+    expect(mem.requests.find((r) => r.path === '/auth/token/refresh')).toEqual({
+      method: 'POST',
+      path: '/auth/token/refresh',
+      headers: { Authorization: `Bearer ${first}` },
+      cache: 'no-store',
+    });
+    expect(mocks.clientFetch).not.toHaveBeenCalled();
     // The session cookie gets the refreshed token, never the register one.
     expect(mocks.setAuthToken).toHaveBeenCalledWith(refreshed);
   });
@@ -459,7 +497,11 @@ describe('googleCallback — OAuth callback branches', () => {
   ])(
     'missing email (%s) → keys-only log, no PII value leaked',
     async (_label, payload, expectedUserMetadataKeys) => {
-      mocks.clientFetch.mockResolvedValueOnce({ token: makeToken(payload) });
+      backend({
+        'GET /auth/customer/google/callback': {
+          body: { token: makeToken(payload) },
+        },
+      });
 
       const r = await googleCallback({ code: 'c', state: 's' });
 
@@ -482,7 +524,7 @@ describe('googleCallback — OAuth callback branches', () => {
   );
 
   it('callback fetch rejects → generic reason, NEITHER setAuthToken NOR clearAuthToken', async () => {
-    mocks.clientFetch.mockRejectedValueOnce(new Error('network down'));
+    refuses('GET /auth/customer/google/callback', 'network down', 500);
 
     const r = await googleCallback({ code: 'c', state: 's' });
 
@@ -492,8 +534,15 @@ describe('googleCallback — OAuth callback branches', () => {
   });
 
   it('first login colliding with an emailpass account → exists', async () => {
-    mocks.clientFetch.mockResolvedValueOnce({
-      token: makeToken({ actor_id: '', user_metadata: { email: 'x@y.com' } }),
+    backend({
+      'GET /auth/customer/google/callback': {
+        body: {
+          token: makeToken({
+            actor_id: '',
+            user_metadata: { email: 'x@y.com' },
+          }),
+        },
+      },
     });
     mocks.customerCreate.mockRejectedValueOnce(
       new Error('Customer with email x@y.com already exists'),
@@ -506,7 +555,7 @@ describe('googleCallback — OAuth callback branches', () => {
 
   it('retrieve fails after setAuthToken → clearAuthToken (no broken cookie left)', async () => {
     const token = makeToken({ actor_id: 'cus_1' });
-    mocks.clientFetch.mockResolvedValueOnce({ token });
+    backend({ 'GET /auth/customer/google/callback': { body: { token } } });
     mocks.customerRetrieve.mockRejectedValueOnce(new Error('retrieve boom'));
 
     const r = await googleCallback({ code: 'c', state: 's' });
@@ -525,9 +574,13 @@ describe('googleCallback — OAuth callback branches', () => {
       actor_id: '',
       user_metadata: { email: 'x@y.com' },
     });
-    mocks.clientFetch
-      .mockResolvedValueOnce({ token: first }) // callback GET
-      .mockRejectedValueOnce(new Error('refresh down')); // /auth/token/refresh
+    backend({
+      'GET /auth/customer/google/callback': { body: { token: first } },
+      'POST /auth/token/refresh': {
+        status: 502,
+        body: { message: 'refresh down' },
+      },
+    });
     mocks.customerCreate.mockResolvedValueOnce({ customer: { id: 'cus_new' } });
 
     const r = await googleCallback({ code: 'c', state: 's' });
@@ -552,7 +605,9 @@ describe('googleLoginStart — callback_url host guard', () => {
       '&response_type=code' +
       '&scope=email+profile+openid' +
       '&state=opaque-state-key';
-    mocks.clientFetch.mockResolvedValueOnce({ location: backendLocation });
+    backend({
+      'POST /auth/customer/google': { body: { location: backendLocation } },
+    });
 
     const r = await googleLoginStart();
 
@@ -562,9 +617,11 @@ describe('googleLoginStart — callback_url host guard', () => {
       ok: true,
       location: `${backendLocation}&prompt=select_account`,
     });
-    const [path, opts] = mocks.clientFetch.mock.calls[0]!;
-    expect(path).toBe('/auth/customer/google');
-    expect(opts.body.callback_url).toBe(
+    const sent = mem.requests[0]!;
+    expect(sent.path).toBe('/auth/customer/google');
+    // A pre-login route: no cookie is read, so no bearer rides along.
+    expect(sent.headers).toEqual({});
+    expect((sent.body as { callback_url: string }).callback_url).toBe(
       'https://polycards.gg/auth/google/callback',
     );
     // The provider's `state` is bound to THIS browser for the return leg —
@@ -575,25 +632,32 @@ describe('googleLoginStart — callback_url host guard', () => {
 
   it('x-forwarded-proto is clamped, never interpolated verbatim', async () => {
     setHeaders({ host: 'polycards.gg', 'x-forwarded-proto': 'javascript' });
-    mocks.clientFetch.mockResolvedValueOnce({
-      location: 'https://accounts.google.com/o/oauth2/v2/auth?state=s',
+    backend({
+      'POST /auth/customer/google': {
+        body: {
+          location: 'https://accounts.google.com/o/oauth2/v2/auth?state=s',
+        },
+      },
     });
 
     await googleLoginStart();
 
-    const [, opts] = mocks.clientFetch.mock.calls[0]!;
-    expect(opts.body.callback_url).toBe(
-      'http://polycards.gg/auth/google/callback',
-    );
+    expect(
+      (mem.requests[0]!.body as { callback_url: string }).callback_url,
+    ).toBe('http://polycards.gg/auth/google/callback');
   });
 
   it('location already carrying a prompt → overwritten, state preserved', async () => {
     setHeaders({ host: 'polycards.gg', 'x-forwarded-proto': 'https' });
     // Guards the `set` (not `append`) semantics: if the provider ever starts
     // emitting its own `prompt`, we must replace it rather than send two.
-    mocks.clientFetch.mockResolvedValueOnce({
-      location:
-        'https://accounts.google.com/o/oauth2/v2/auth?state=keep-me&prompt=none',
+    backend({
+      'POST /auth/customer/google': {
+        body: {
+          location:
+            'https://accounts.google.com/o/oauth2/v2/auth?state=keep-me&prompt=none',
+        },
+      },
     });
 
     const r = await googleLoginStart();
@@ -607,7 +671,9 @@ describe('googleLoginStart — callback_url host guard', () => {
 
   it('malformed location → generic start error, nothing half-built returned', async () => {
     setHeaders({ host: 'polycards.gg', 'x-forwarded-proto': 'https' });
-    mocks.clientFetch.mockResolvedValueOnce({ location: '/not-absolute' });
+    backend({
+      'POST /auth/customer/google': { body: { location: '/not-absolute' } },
+    });
 
     const r = await googleLoginStart();
 
@@ -626,12 +692,12 @@ describe('googleLoginStart — callback_url host guard', () => {
       ok: false,
       error: 'Could not determine site origin.',
     });
-    expect(mocks.clientFetch).not.toHaveBeenCalled();
+    expect(mem.requests).toEqual([]);
   });
 
   it('backend returns no location → unavailable', async () => {
     setHeaders({ host: 'polycards.gg', 'x-forwarded-proto': 'https' });
-    mocks.clientFetch.mockResolvedValueOnce({});
+    backend({ 'POST /auth/customer/google': { body: {} } });
 
     const r = await googleLoginStart();
 
@@ -677,7 +743,7 @@ describe("callback route origin guard — resolveCallbackOrigin + the route's fa
     expect(res.headers.get('location')).toBe(
       '/auth/google/failed?reason=origin',
     );
-    expect(mocks.clientFetch).not.toHaveBeenCalled();
+    expect(mem.requests).toEqual([]);
   });
 
   it('missing host → 302 with a relative Location, never the bind origin', async () => {
@@ -689,7 +755,7 @@ describe("callback route origin guard — resolveCallbackOrigin + the route's fa
     expect(res.headers.get('location')).toBe(
       '/auth/google/failed?reason=origin',
     );
-    expect(mocks.clientFetch).not.toHaveBeenCalled();
+    expect(mem.requests).toEqual([]);
   });
 
   // Allowlisted host from here on — these exercise what happens AFTER the
@@ -710,19 +776,20 @@ describe("callback route origin guard — resolveCallbackOrigin + the route's fa
     expect(res.headers.get('location')).toBe(
       'https://polycards.gg/auth/google/failed?reason=expired',
     );
-    expect(mocks.clientFetch).not.toHaveBeenCalled();
+    expect(mem.requests).toEqual([]);
   });
 
   it('bound state matches → exchange runs; a failure lands as a reason CODE', async () => {
     mocks.takeOauthState.mockResolvedValueOnce('s');
-    mocks.clientFetch.mockRejectedValueOnce(new Error('network down'));
+    refuses('GET /auth/customer/google/callback', 'network down', 500);
 
     const res = await googleCallbackGET(prodRequest());
 
-    expect(mocks.clientFetch).toHaveBeenCalledWith(
-      '/auth/customer/google/callback',
-      expect.objectContaining({ query: { code: 'c', state: 's' } }),
-    );
+    expect(mem.requests[0]).toMatchObject({
+      method: 'GET',
+      path: '/auth/customer/google/callback',
+      query: { code: 'c', state: 's' },
+    });
     expect(res.headers.get('location')).toBe(
       'https://polycards.gg/auth/google/failed?reason=failed',
     );
@@ -734,7 +801,7 @@ describe("callback route origin guard — resolveCallbackOrigin + the route's fa
     expect(res.headers.get('location')).toBe(
       'https://polycards.gg/auth/google/failed?reason=cancelled',
     );
-    expect(mocks.clientFetch).not.toHaveBeenCalled();
+    expect(mem.requests).toEqual([]);
   });
 
   it('x-forwarded-host: localhost:4000 → succeeds with the http local origin', () => {
@@ -821,7 +888,6 @@ describe('googleLoginStart — a typed referral code is parked for the callback'
     'https://accounts.google.com/o/oauth2/v2/auth?state=opaque-state-key';
 
   beforeEach(() => {
-    mocks.clientFetch.mockReset();
     mocks.setReferralCookie.mockClear();
     mocks.lookupReferralCode.mockReset();
     mocks.lookupReferralCode.mockResolvedValue({ status: 'notfound' });
@@ -836,7 +902,7 @@ describe('googleLoginStart — a typed referral code is parked for the callback'
       error: expect.stringMatching(/couldn't find/),
       field: 'referral',
     });
-    expect(mocks.clientFetch).not.toHaveBeenCalled();
+    expect(mem.requests).toEqual([]);
     expect(mocks.setReferralCookie).not.toHaveBeenCalled();
   });
 
@@ -847,7 +913,9 @@ describe('googleLoginStart — a typed referral code is parked for the callback'
       handle: 'kenji-2c7f',
       name: 'Kenji',
     });
-    mocks.clientFetch.mockResolvedValueOnce({ location: googleLocation });
+    backend({
+      'POST /auth/customer/google': { body: { location: googleLocation } },
+    });
 
     const r = await googleLoginStart({ referral_code: 'f42b-0700' });
 
@@ -856,7 +924,9 @@ describe('googleLoginStart — a typed referral code is parked for the callback'
   });
 
   it('no code → no cookie write', async () => {
-    mocks.clientFetch.mockResolvedValueOnce({ location: googleLocation });
+    backend({
+      'POST /auth/customer/google': { body: { location: googleLocation } },
+    });
 
     const r = await googleLoginStart();
 
@@ -867,9 +937,7 @@ describe('googleLoginStart — a typed referral code is parked for the callback'
 
 describe('signup — referral attribution precedence', () => {
   const happySignup = () => {
-    mocks.clientFetch
-      .mockResolvedValueOnce({ token: 'reg-tok' }) // register
-      .mockResolvedValueOnce({ token: 'sess-tok' }); // login exchange
+    backend(TOKENS);
     mocks.customerCreate.mockResolvedValueOnce({ customer: { id: 'c1' } });
     mocks.customerRetrieve.mockResolvedValueOnce({
       customer: {
@@ -916,7 +984,7 @@ describe('signup — referral attribution precedence', () => {
     mocks.lookupReferralCode.mockResolvedValue({ status: 'notfound' });
     const r = await signup({ ...form, referral_code: 'ZZZZZZZZ' });
     expect(r.ok).toBe(false);
-    expect(mocks.clientFetch).not.toHaveBeenCalled();
+    expect(mem.requests).toEqual([]);
     expect(mocks.bindReferral).not.toHaveBeenCalled();
   });
 });

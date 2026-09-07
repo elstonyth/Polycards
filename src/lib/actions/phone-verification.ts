@@ -4,23 +4,31 @@
  * Phone-OTP server actions. Thin proxies onto the backend's
  * /store/phone-verification/* routes — running server-side keeps the
  * publishable-key transport consistent with every other action, and lets
- * changePhone read the httpOnly auth cookie it converts to a Bearer header
- * (getAuthToken, below). The proof token itself round-trips through the
- * browser by design: checkPhoneOtp returns it and changePhone takes it back.
+ * changePhone send the httpOnly auth cookie as a Bearer. The proof token
+ * itself round-trips through the browser by design: checkPhoneOtp returns it
+ * and changePhone takes it back.
  *
- * It does NOT let the backend see the visitor: `sdk` (src/lib/medusa.ts) is
- * built from a base URL and a publishable key and forwards no client headers,
- * so every OTP request arrives from this server's single egress IP. The
+ * All four calls go through the `Store` port (src/lib/store.ts). Three carry
+ * `auth: 'none'` — they are the pre-login routes, and reading the cookie jar
+ * for them would be both pointless and a reason for the route to go dynamic.
+ * Only `changePhone` is authenticated. Every response reads through
+ * `UncheckedSchema`: these bodies were never validated, and giving the port a
+ * schema now would turn a drifted field into an `invalid_shape` failure whose
+ * copy ("Invalid or expired code.") would send the caller round a resend loop.
+ *
+ * It does NOT let the backend see the visitor: the port's transport
+ * (src/lib/medusa.ts's `sdk`) is built from a base URL and a publishable key
+ * and forwards no client headers, so every OTP request arrives from this
+ * server's single egress IP. The
  * backend's IP-keyed OTP limiters are therefore a whole-STOREFRONT circuit
  * breaker, and the PER-PHONE tier is the only real per-client / SMS-cost
  * budget — do not delete it as "redundant with the IP tier". Full topology:
  * the phone-OTP limiter module comment in
  * backend/packages/api/src/api/utils/rate-limit.ts.
  */
-import { sdk } from '@/lib/medusa';
-import { authedFetch } from '@/lib/authed-fetch';
+import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
-import { getAuthToken } from '@/lib/data/customer';
+import { UncheckedSchema } from '@/lib/data/schemas';
 import {
   isServedPhoneCountry,
   normalizePhone,
@@ -33,10 +41,15 @@ type Fail = { ok: false; error: string };
 const fail = (error: string): Fail => ({ ok: false, error });
 
 // 429s carry a useful retry message; keep it, genericize everything else.
-const messageOf = (error: unknown, fallback: string): string => {
-  const msg = error instanceof Error ? error.message : '';
-  return /try again in \d+s/i.test(msg) ? msg : fallback;
-};
+const messageOf = (text: string, fallback: string): string =>
+  /try again in \d+s/i.test(text) ? text : fallback;
+
+/** No cookie at all — the call never left (`status` is undefined), so there is
+ *  no backend text to read, and the answer is the login prompt rather than
+ *  anything `messageOf` would generalize. Only `changePhone` is authenticated;
+ *  the other three routes run with `auth: 'none'` and never see this. */
+const loggedOut = (f: Failure): boolean =>
+  f.kind === 'unauthenticated' && f.status === undefined;
 
 // The three post-OTP outcomes password-reset/route.ts is DESIGNED to
 // disclose to a proven phone-holder (Task 5 comment) — a raw FetchError's
@@ -125,16 +138,18 @@ export async function startPhoneOtp(input: {
   // backend refuses silently and the user just never gets a code.
   if (input.purpose !== 'password-reset' && !isServedPhoneCountry(phone))
     return fail(UNSERVED_PHONE_COUNTRY_ERROR);
-  try {
-    await sdk.client.fetch('/store/phone-verification/start', {
-      method: 'POST',
-      body: { phone, purpose: input.purpose },
-    });
-    return { ok: true };
-  } catch (error) {
-    logger.error('[phone-otp] start failed:', error);
-    return fail(messageOf(error, 'Could not send the code. Please try again.'));
+  const r = await store.post(
+    '/store/phone-verification/start',
+    UncheckedSchema,
+    { phone, purpose: input.purpose },
+    { auth: 'none' },
+  );
+  if (!r.ok) {
+    return fail(
+      messageOf(r.text, 'Could not send the code. Please try again.'),
+    );
   }
+  return { ok: true };
 }
 
 export async function checkPhoneOtp(input: {
@@ -147,27 +162,32 @@ export async function checkPhoneOtp(input: {
     return fail('Please enter a valid phone number for the selected country.');
   if (!/^\d{4,10}$/.test(input.code))
     return fail('Enter the code from the SMS.');
-  try {
-    const { token } = await sdk.client.fetch<{ token: string }>(
-      '/store/phone-verification/check',
-      {
-        method: 'POST',
-        body: { phone, purpose: input.purpose, code: input.code },
-      },
-    );
-    return { ok: true, token };
-  } catch (error) {
-    logger.error('[phone-otp] check failed:', error);
+  const r = await store.post(
+    '/store/phone-verification/check',
+    UncheckedSchema,
+    { phone, purpose: input.purpose, code: input.code },
+    { auth: 'none' },
+  );
+  if (!r.ok) {
     // The duplicate-phone refusal MUST survive the genericizer: the code they
     // typed was correct, and "Invalid or expired code." sends them round the
     // resend loop forever over a problem no code can fix.
     return fail(
       friendlyError(
-        error,
+        r.text,
         PHONE_CHECK_RULES,
-        messageOf(error, 'Invalid or expired code.'),
+        messageOf(r.text, 'Invalid or expired code.'),
       ),
     );
+  }
+  // JSON parsing accepts null and malformed nested objects; preserve the
+  // pre-port projection fallback without changing the Store contract.
+  try {
+    const { token } = r.data as { token: string };
+    return { ok: true, token };
+  } catch (error) {
+    logger.error('[phone-verification] response projection failed:', error);
+    return fail('Invalid or expired code.');
   }
 }
 
@@ -197,68 +217,70 @@ export async function changePhone(input: {
   const phone = normalizePhone(input.phone);
   if (!phone)
     return fail('Please enter a valid phone number for the selected country.');
-  // Authed route — same cookie→Bearer idiom as setAvatarFrame in
-  // src/lib/actions/profile-appearance.ts (a custom Mercur route, so this
-  // can't go through sdk.store.customer.update like updateCustomerProfile).
-  const authToken = await getAuthToken();
-  if (!authToken) return fail('Please log in first.');
-  try {
-    const { customer } = await authedFetch<{
-      customer: { phone: string };
-    }>(authToken, '/store/phone-verification/change', {
-      method: 'POST',
-      // Omitted rather than sent empty when absent: the backend distinguishes
-      // "no password supplied" from "wrong password" only by presence.
-      body: {
-        phone,
-        token: input.token,
-        ...(input.password ? { password: input.password } : {}),
-        ...(input.oldPhoneToken
-          ? { old_phone_token: input.oldPhoneToken }
-          : {}),
-      },
-    });
-    return { ok: true, phone: customer.phone };
-  } catch (error) {
-    logger.error('[phone-otp] change failed:', error);
+  // The one AUTHENTICATED route here — a custom Mercur route, so it cannot go
+  // through sdk.store.customer.update like updateCustomerProfile does.
+  const r = await store.post(
+    '/store/phone-verification/change',
+    UncheckedSchema,
+    // Omitted rather than sent empty when absent: the backend distinguishes
+    // "no password supplied" from "wrong password" only by presence.
+    {
+      phone,
+      token: input.token,
+      ...(input.password ? { password: input.password } : {}),
+      ...(input.oldPhoneToken ? { old_phone_token: input.oldPhoneToken } : {}),
+    },
+  );
+  if (!r.ok) {
+    if (loggedOut(r)) return fail('Please log in first.');
     // Re-auth refusals win; then the same 429 retry-hint passthrough as
     // startPhoneOtp/checkPhoneOtp — a rate-limited change should say how long
     // to wait, not invite an immediate retry; then the generic copy.
     const message = friendlyError(
-      error,
+      r.text,
       PHONE_CHANGE_RULES,
-      messageOf(error, 'Could not update your phone number. Please try again.'),
+      messageOf(
+        r.text,
+        'Could not update your phone number. Please try again.',
+      ),
     );
-    return NEEDS_OLD_PHONE_PROOF.test(
-      error instanceof Error ? error.message : String(error),
-    )
+    return NEEDS_OLD_PHONE_PROOF.test(r.text)
       ? { ok: false, error: message, needsOldPhoneProof: true }
       : fail(message);
+  }
+  // JSON parsing accepts null and malformed nested objects; preserve the
+  // pre-port projection fallback without changing the Store contract.
+  try {
+    const { customer } = r.data as { customer: { phone: string } };
+    return { ok: true, phone: customer.phone };
+  } catch (error) {
+    logger.error('[phone-verification] response projection failed:', error);
+    return fail('Could not update your phone number. Please try again.');
   }
 }
 
 export async function resetPasswordByPhone(input: {
   token: string;
 }): Promise<{ ok: true; token: string; maskedEmail: string } | Fail> {
-  try {
-    const data = await sdk.client.fetch<{ token: string; maskedEmail: string }>(
-      '/store/phone-verification/password-reset',
-      { method: 'POST', body: { token: input.token } },
-    );
-    return { ok: true, ...data };
-  } catch (error) {
-    logger.error('[phone-otp] reset exchange failed:', error);
+  const r = await store.post(
+    '/store/phone-verification/password-reset',
+    UncheckedSchema,
+    { token: input.token },
+    { auth: 'none' },
+  );
+  if (!r.ok) {
     // Designed-disclosure messages win; a 429's retry text is the next
     // fallback (messageOf), the generic copy is the last resort.
     return fail(
       friendlyError(
-        error,
+        r.text,
         PHONE_RESET_RULES,
         messageOf(
-          error,
+          r.text,
           'Could not verify this phone. Reset by email instead.',
         ),
       ),
     );
   }
+  return { ok: true, ...(r.data as { token: string; maskedEmail: string }) };
 }

@@ -9,33 +9,52 @@
  *   GET  /store/delivery-orders            — the caller's orders
  *   POST /store/delivery-orders/:id/address — edit address pre-ship
  *   POST /store/delivery-orders/:id/cancel  — cancel pre-ship (cards → vault)
+ *   POST /store/rewards/withdraw            — ship ONE reward pull (capped/day)
+ *
+ * Those five go through the `Store` port (src/lib/store.ts), which owns the
+ * cookie read, the bearer, the schema check and the failure log. The ADDRESS
+ * BOOK does not: `sdk.store.customer.createAddress/updateAddress/deleteAddress`
+ * are built-in Medusa endpoints with their own typed responses, they take
+ * headers positionally, and re-expressing them as raw paths here would trade
+ * `HttpTypes.StoreCustomerResponse` for a hand-written schema for nothing. They
+ * keep `getAuthToken`, which is why this file still imports it.
  */
 import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
-import { authedFetch } from '@/lib/authed-fetch';
+import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
 import { getAuthToken, getCustomer } from '@/lib/data/customer';
 import {
-  parseList,
-  parseOne,
-  DeliveryOrderSchema,
+  CancelDeliverySchema,
+  DeliveryOrdersPageSchema,
+  UncheckedSchema,
   WithdrawAddressSchema,
   WithdrawPrizeSchema,
   type DeliveryOrderStatus,
   type WithdrawAddressInput,
 } from '@/lib/data/schemas';
-import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
-import { DELIVERY_RULES, DELIVERY_FALLBACK } from '@/lib/delivery-errors';
+import {
+  friendlyError,
+  friendlyFailure,
+  isAuthError,
+  TRANSPORT_RULES,
+  UNAUTHORIZED,
+  type ErrorRule,
+} from '@/lib/errors';
+import {
+  DELIVERY_RULES,
+  DELIVERY_FALLBACK,
+  DELIVERY_LOGIN,
+} from '@/lib/delivery-errors';
 import { normalizePhone } from '@/lib/profile-validation';
+import { toCardView, type CardView } from '@/lib/card-view';
 
 export type DeliveryOrderItemView = {
   pullId: string;
-  card: {
-    handle: string;
-    name: string;
-    image: string;
-    slabImage: string | null;
-  } | null;
+  /** The shipped card, or null when the backend no longer resolves it. The
+   *  route sends handle/name/image/slab_image only; the other view fields
+   *  read as their null defaults. */
+  card: CardView | null;
 };
 export type DeliveryOrderView = {
   id: string;
@@ -135,60 +154,68 @@ interface BackendDeliveryOrder {
   }[];
 }
 
+// The address book goes through `sdk.store.customer.*` — built-in Medusa
+// endpoints (exception 3 in lib/store.ts's header), so those three actions
+// catch a THROWN error and have no port `Failure` to hand `friendlyFailure`.
+// They append the shared transport tier here instead, which is exactly what
+// friendlyFailure does for every other delivery call.
+const ADDRESS_RULES: ErrorRule[] = [...DELIVERY_RULES, ...TRANSPORT_RULES];
+
+const LOGIN_FIRST = 'Please log in first.';
+const LOGIN_TO_VIEW_ORDERS = 'Please log in to view your orders.';
+
+/**
+ * A port `Failure` in this file's vocabulary. No cookie at all (the call never
+ * left — `status` is undefined) keeps the action's own logged-out copy;
+ * anything the backend actually said goes through the caller's rules table,
+ * with `needsAuth` when it was a 401.
+ */
+function deliveryFailure(
+  f: Failure,
+  loggedOut: string,
+  rules: readonly ErrorRule[] = DELIVERY_RULES,
+): { ok: false; error: string; needsAuth?: boolean } {
+  if (f.kind === 'unauthenticated' && f.status === undefined) {
+    return { ok: false, error: loggedOut, needsAuth: true };
+  }
+  return {
+    ok: false,
+    error: friendlyFailure(f, rules, DELIVERY_FALLBACK),
+    needsAuth: f.kind === 'unauthenticated',
+  };
+}
+
 export async function getDeliveryOrders(): Promise<DeliveryOrdersResult> {
-  const token = await getAuthToken();
-  if (!token) {
-    return {
-      ok: false,
-      error: 'Please log in to view your orders.',
-      needsAuth: true,
-    };
-  }
-  try {
-    const res = await authedFetch(token, '/store/delivery-orders');
-    const raw = parseList(
-      DeliveryOrderSchema,
-      (res as { items?: unknown }).items,
-    ) as unknown as BackendDeliveryOrder[];
-    const orders: DeliveryOrderView[] = raw.map((o) => ({
-      id: o.id,
-      status: o.status,
-      trackingNumber: o.tracking_number,
-      createdAt: o.created_at,
-      shippingFee: o.shipping_fee ?? null,
-      insuranceFee: o.insurance_fee ?? null,
-      address: {
-        name: o.address?.name ?? '',
-        line1: o.address?.address_1 ?? '',
-        line2: o.address?.address_2 ?? null,
-        city: o.address?.city ?? '',
-        province: o.address?.province ?? null,
-        postalCode: o.address?.postal_code ?? '',
-        countryCode: o.address?.country_code ?? '',
-        phone: o.address?.phone ?? null,
-      },
-      proofImages: o.proof_images ?? [],
-      items: (o.items ?? []).map((it) => ({
-        pullId: it.pull_id,
-        card: it.card
-          ? {
-              handle: it.card.handle,
-              name: it.card.name,
-              image: it.card.image,
-              slabImage: it.card.slab_image ?? null,
-            }
-          : null,
-      })),
-    }));
-    return { ok: true, orders };
-  } catch (error) {
-    logger.error('[delivery] list failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  const r = await store.get('/store/delivery-orders', DeliveryOrdersPageSchema);
+  if (!r.ok) return deliveryFailure(r, LOGIN_TO_VIEW_ORDERS);
+  // The assertion widens the parse output to the fields the mapper also READS
+  // but DeliveryOrderSchema deliberately does not guard — they ride the
+  // `looseObject` typed `unknown` (same seam as getVault's items).
+  const raw = r.data.items as unknown as BackendDeliveryOrder[];
+  const orders: DeliveryOrderView[] = raw.map((o) => ({
+    id: o.id,
+    status: o.status,
+    trackingNumber: o.tracking_number,
+    createdAt: o.created_at,
+    shippingFee: o.shipping_fee ?? null,
+    insuranceFee: o.insurance_fee ?? null,
+    address: {
+      name: o.address?.name ?? '',
+      line1: o.address?.address_1 ?? '',
+      line2: o.address?.address_2 ?? null,
+      city: o.address?.city ?? '',
+      province: o.address?.province ?? null,
+      postalCode: o.address?.postal_code ?? '',
+      countryCode: o.address?.country_code ?? '',
+      phone: o.address?.phone ?? null,
+    },
+    proofImages: o.proof_images ?? [],
+    items: (o.items ?? []).map((it) => ({
+      pullId: it.pull_id,
+      card: it.card ? toCardView(it.card) : null,
+    })),
+  }));
+  return { ok: true, orders };
 }
 
 export async function requestDelivery(
@@ -201,16 +228,18 @@ export async function requestDelivery(
   if (typeof addressId !== 'string' || addressId.trim() === '') {
     return { ok: false, error: 'Choose a shipping address.' };
   }
-  const token = await getAuthToken();
-  if (!token)
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-
+  // Unchecked at the envelope: the batch is charged and committed by the time
+  // this body arrives, so a missing `order_id` keeps its own copy below rather
+  // than becoming a generic "try again".
+  const r = await store.post('/store/delivery-orders', UncheckedSchema, {
+    pull_ids: pullIds,
+    address_id: addressId,
+  });
+  if (!r.ok) return deliveryFailure(r, LOGIN_FIRST);
+  // JSON parsing accepts null and malformed nested objects; preserve the
+  // pre-port projection fallback without changing the Store contract.
   try {
-    const res = await authedFetch(token, '/store/delivery-orders', {
-      method: 'POST',
-      body: { pull_ids: pullIds, address_id: addressId },
-    });
-    const orderId = (res as { order_id?: string }).order_id;
+    const orderId = (r.data as { order_id?: string }).order_id;
     if (!orderId) {
       return {
         ok: false,
@@ -219,12 +248,8 @@ export async function requestDelivery(
     }
     return { ok: true, orderId };
   } catch (error) {
-    logger.error('[delivery] request failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
+    logger.error('[delivery] response projection failed:', error);
+    return { ok: false, error: DELIVERY_FALLBACK, needsAuth: false };
   }
 }
 
@@ -242,28 +267,14 @@ export async function editDeliveryAddress(
   if (typeof addressId !== 'string' || addressId.trim() === '') {
     return { ok: false, error: 'Choose a shipping address.' };
   }
-  const token = await getAuthToken();
-  if (!token)
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-
-  try {
-    await authedFetch(
-      token,
-      `/store/delivery-orders/${encodeURIComponent(orderId)}/address`,
-      {
-        method: 'POST',
-        body: { address_id: addressId },
-      },
-    );
-    return { ok: true };
-  } catch (error) {
-    logger.error('[delivery] edit address failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  // The response is not read — a 2xx IS the answer.
+  const r = await store.post(
+    `/store/delivery-orders/${encodeURIComponent(orderId)}/address`,
+    UncheckedSchema,
+    { address_id: addressId },
+  );
+  if (!r.ok) return deliveryFailure(r, LOGIN_FIRST);
+  return { ok: true };
 }
 
 export type CancelDeliveryResult =
@@ -273,15 +284,15 @@ export type CancelDeliveryResult =
 // Cancel-specific error vocabulary — the generic DELIVERY_RULES map 404/409 to
 // request-delivery copy ("card or address not found") that would mislead here.
 // Order matters: "already canceled" must win before the broader shipped rule.
+// No rate-limit rule, for the same reason DELIVERY_RULES has none: the copy
+// WAS the shared sentence, so friendlyFailure answers a 429 now — but only
+// LAST, behind every rule below, including /not found|404/i at the tail (same
+// latent hazard as DELIVERY_RULES/VAULT_RULES: a rate-limited response reads
+// "<label> Try again in Ns.", and an N containing "404" would hit that rule
+// first — unreachable today because this surface's rate limit defaults to a
+// <=60s window, see delivery-errors.ts).
 const CANCEL_RULES: ErrorRule[] = [
-  [
-    /too many|rate.?limit|429/i,
-    'Too many requests — give it a moment and try again.',
-  ],
-  [
-    /unauthorized|not authenticated|401/i,
-    'Please log in to manage deliveries.',
-  ],
+  [UNAUTHORIZED, DELIVERY_LOGIN],
   [/already canceled/i, 'This delivery is already canceled.'],
   // Backend NOT_ALLOWED once the order is out of the customer window. It fires
   // from `ready_to_ship` on — not only after the parcel physically ships — so
@@ -303,33 +314,16 @@ export async function cancelDeliveryOrder(
   if (typeof orderId !== 'string' || orderId.trim() === '') {
     return { ok: false, error: 'Missing order.' };
   }
-  const token = await getAuthToken();
-  if (!token)
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-
-  try {
-    const res = await authedFetch(
-      token,
-      `/store/delivery-orders/${encodeURIComponent(orderId)}/cancel`,
-      {
-        method: 'POST',
-      },
-    );
-    const order = parseOne(
-      DeliveryOrderSchema,
-      (res as { order?: unknown }).order,
-    );
-    // A 2xx means the cancel happened — a drifted body must not false-fail it,
-    // so fall back to the status the backend just transitioned to.
-    return { ok: true, status: order?.status ?? 'canceled' };
-  } catch (error) {
-    logger.error(`[delivery] cancel failed for '${orderId}':`, error);
-    return {
-      ok: false,
-      error: friendlyError(error, CANCEL_RULES, DELIVERY_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  const r = await store.post(
+    `/store/delivery-orders/${encodeURIComponent(orderId)}/cancel`,
+    CancelDeliverySchema,
+    undefined,
+  );
+  if (!r.ok) return deliveryFailure(r, LOGIN_FIRST, CANCEL_RULES);
+  // A 2xx means the cancel happened — a drifted body must not false-fail it
+  // (CancelDeliverySchema is soft to the root), so fall back to the status the
+  // backend just transitioned to.
+  return { ok: true, status: r.data?.status ?? 'canceled' };
 }
 
 // Read the customer's address book (built-in Medusa field — no custom route).
@@ -463,7 +457,7 @@ export async function addAddress(
     logger.error('[delivery] add address failed:', error);
     return {
       ok: false,
-      error: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
+      error: friendlyError(error, ADDRESS_RULES, DELIVERY_FALLBACK),
       needsAuth: isAuthError(error),
     };
   }
@@ -500,7 +494,7 @@ export async function updateAddress(
     logger.error(`[delivery] update address '${addressId}' failed:`, error);
     return {
       ok: false,
-      error: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
+      error: friendlyError(error, ADDRESS_RULES, DELIVERY_FALLBACK),
       needsAuth: isAuthError(error),
     };
   }
@@ -526,7 +520,7 @@ export async function deleteAddress(
     logger.error(`[delivery] delete address '${addressId}' failed:`, error);
     return {
       ok: false,
-      error: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
+      error: friendlyError(error, ADDRESS_RULES, DELIVERY_FALLBACK),
       needsAuth: isAuthError(error),
     };
   }
@@ -587,40 +581,42 @@ export async function shipVaultCards(
       }
       return { ok: true, shippedIds, skipped };
     }
-    const token = await getAuthToken();
-    if (!token) {
-      return { ok: false, error: 'Please log in first.', needsAuth: true };
-    }
     for (const pullId of rewardPullIds) {
-      try {
-        const parsed = parseOne(
-          WithdrawPrizeSchema,
-          await authedFetch(token, '/store/rewards/withdraw', {
-            method: 'POST',
-            body: { pull_id: pullId, address: parsedAddress.data },
-          }),
-        );
-        if (parsed?.status === 'requested') {
-          shippedIds.push(pullId);
-        } else if (parsed?.status === 'capped') {
-          skipped.push({
-            pullId,
-            reason: "You've hit today's reward shipping limit — try tomorrow.",
-          });
-        } else {
-          skipped.push({
-            pullId,
-            reason: 'This reward card could not be shipped right now.',
-          });
+      const r = await store.post(
+        '/store/rewards/withdraw',
+        WithdrawPrizeSchema,
+        {
+          pull_id: pullId,
+          address: parsedAddress.data,
+        },
+      );
+      if (!r.ok) {
+        // No cookie at all: this is the whole selection's problem, not this
+        // card's, and it fires before anything is skipped — the same
+        // all-or-nothing answer the pre-loop auth guard used to give.
+        if (r.kind === 'unauthenticated' && r.status === undefined) {
+          return { ok: false, error: LOGIN_FIRST, needsAuth: true };
         }
-      } catch (error) {
-        logger.error(
-          `[delivery] reward withdraw failed for '${pullId}':`,
-          error,
-        );
         skipped.push({
           pullId,
-          reason: friendlyError(error, DELIVERY_RULES, DELIVERY_FALLBACK),
+          reason:
+            r.kind === 'invalid_shape'
+              ? 'This reward card could not be shipped right now.'
+              : friendlyFailure(r, DELIVERY_RULES, DELIVERY_FALLBACK),
+        });
+        continue;
+      }
+      if (r.data.status === 'requested') {
+        shippedIds.push(pullId);
+      } else if (r.data.status === 'capped') {
+        skipped.push({
+          pullId,
+          reason: "You've hit today's reward shipping limit — try tomorrow.",
+        });
+      } else {
+        skipped.push({
+          pullId,
+          reason: 'This reward card could not be shipped right now.',
         });
       }
     }

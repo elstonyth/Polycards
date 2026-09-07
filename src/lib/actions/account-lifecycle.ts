@@ -15,11 +15,16 @@
  *
  * The link map lives in `./account-lifecycle-map` because this file is
  * `'use server'` and may only export async functions.
+ *
+ * The call goes through the `Store` port (src/lib/store.ts), which owns the
+ * cookie read, the bearer and the failure log. What stays here is the refusal
+ * VOCABULARY below — codes, not prose — and the rule that the cookie is only
+ * cleared after a confirmed success.
  */
 
-import { authedFetch } from '@/lib/authed-fetch';
-import { logger } from '@/lib/logger';
-import { clearAuthToken, getAuthToken } from '@/lib/data/customer';
+import { store } from '@/lib/store';
+import { clearAuthToken } from '@/lib/data/customer';
+import { UncheckedSchema } from '@/lib/data/schemas';
 import { GENERIC_ERROR } from './account-lifecycle-map';
 
 export type DeleteResult =
@@ -69,14 +74,15 @@ const DELETE_COPY: Record<string, string> = {
 };
 
 /**
- * Pull a known refusal code out of a failed request.
+ * Pull a known refusal code out of a failure's text.
  *
- * The whole map rests on the SDK preserving the backend's message, so: on a
+ * The whole map rests on the backend's message reaching here intact, so: on a
  * non-2xx `@medusajs/js-sdk` throws `FetchError extends Error` with
- * `super(jsonError.message ?? resp.statusText)` (client.js normalizeResponse).
- * `message` is the field Medusa's error handler serializes, and the delete
- * route constructs MedusaError with the bare code — so `error.message` arrives
- * as exactly `BALANCE_NOT_ZERO`, unprefixed.
+ * `super(jsonError.message ?? resp.statusText)` (client.js normalizeResponse),
+ * and the port carries that straight through as `Failure.text`. `message` is
+ * the field Medusa's error handler serializes, and the delete route constructs
+ * MedusaError with the bare code — so the text arrives as exactly
+ * `BALANCE_NOT_ZERO`, unprefixed.
  *
  * Substring rather than equality anyway, so a future status prefix wouldn't
  * silently break every refusal. No code is a substring of another, so the scan
@@ -85,11 +91,7 @@ const DELETE_COPY: Record<string, string> = {
  * map was written — yields null and the caller falls back to GENERIC rather
  * than a blank refusal.
  */
-const codeOf = (
-  error: unknown,
-  copy: Record<string, string>,
-): string | null => {
-  const text = error instanceof Error ? error.message : String(error);
+const codeOf = (text: string, copy: Record<string, string>): string | null => {
   for (const code of Object.keys(copy)) {
     if (text.includes(code)) return code;
   }
@@ -103,16 +105,19 @@ const codeOf = (
 export async function deleteAccount(
   password: string | null,
 ): Promise<DeleteResult> {
-  const token = await getAuthToken();
-  if (!token) return { ok: false, error: LOGGED_OUT, reason: null };
-  try {
-    await authedFetch(token, '/store/customers/me/delete', {
-      method: 'POST',
-      body: password === null ? {} : { password },
-    });
-  } catch (error) {
-    logger.error('[account] delete failed:', error);
-    const reason = codeOf(error, DELETE_COPY);
+  // The response body is not read — a 2xx IS the answer.
+  const r = await store.post(
+    '/store/customers/me/delete',
+    UncheckedSchema,
+    password === null ? {} : { password },
+  );
+  if (!r.ok) {
+    // No cookie at all: the call never left (`status` undefined), so there is
+    // no backend text to read a code out of.
+    if (r.kind === 'unauthenticated' && r.status === undefined) {
+      return { ok: false, error: LOGGED_OUT, reason: null };
+    }
+    const reason = codeOf(r.text, DELETE_COPY);
     // `?? GENERIC` is load-bearing twice: noUncheckedIndexedAccess types the
     // lookup as possibly-undefined, and it guarantees a future code can never
     // render an empty refusal.

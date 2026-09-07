@@ -15,7 +15,7 @@ import {
   RARITY_ORDER,
   TOP_RARITIES,
 } from '@/lib/rarity';
-import { pullTime } from '@/lib/format';
+import { pullTime, rm } from '@/lib/format';
 import type { Rarity } from '@/lib/packs-data';
 import type { RecentFeed, RecentPull } from '@/lib/data/packs';
 
@@ -61,9 +61,11 @@ function Row({
         boxShadow: `0 0 24px -10px rgba(${rgb}, 0.55)`,
       }
     : undefined;
+  // Unpriced (an older backend sent no MYR price) reads '—', never RM 0.00.
+  const value = pull.priceMyr != null ? rm(pull.priceMyr) : '—';
   // The label carries EVERYTHING sighted users see in the row — an aria-label
   // REPLACES the content for SR users.
-  const label = `${pull.who} pulled ${pull.name} — ${pull.rarity}, ${pull.value}, ${pull.agoLabel}`;
+  const label = `${pull.who} pulled ${pull.name} — ${pull.rarity}, ${value}, ${pull.agoLabel}`;
   // No ring-offset: both controls now sit INSIDE the neutral-900 row (which
   // goes neutral-800 on hover), where the old page-ground offset color drew a
   // dark band around the ring.
@@ -116,11 +118,15 @@ function Row({
         </span>
       </span>
       <SlabImage
-        src={pull.image}
-        slabSrc={pull.slabImage}
+        card={pull}
+        // Decorative: the row prints the card's name in the column beside it.
         alt=""
         sizes="40px"
         className="w-9 shrink-0"
+        // 36px slab: the full-size halo (~44px) would bleed over the row
+        // above/below and the value column beside it. Ladder: scale ~
+        // width/200 (see the /me showcase's 80px -> 0.4).
+        glowScale={0.18}
       />
       {/* Card name over the value — the value owns the right edge and never
           wraps; the card name is what truncates. The column is FIXED-width
@@ -137,7 +143,7 @@ function Row({
           {pull.name}
         </span>
         <span className="whitespace-nowrap font-heading text-[13px] leading-none text-white tabular-nums @xs:text-[15px] @sm:text-base">
-          {pull.value}
+          {value}
         </span>
       </span>
     </>

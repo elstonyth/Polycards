@@ -8,34 +8,34 @@
  * The backend derives the customer id from the bearer token alone — this action
  * never sends an id — so a pull can't be forged for another account. The route
  * is POST /store/packs/:slug/open (customer-authenticated).
+ *
+ * Every call goes through the `Store` port (src/lib/store.ts), which owns the
+ * cookie read, the bearer and the failure log — but NOT the envelope check.
+ * Responses use `UncheckedSchema`: card validation retains the special
+ * Vault copy below. Local projection catches retain the pre-port fallback
+ * for malformed JSON envelopes/rows; JSON parsing alone cannot reject those.
  */
-import { authedFetch } from '@/lib/authed-fetch';
+import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
-import { getAuthToken } from '@/lib/data/customer';
-import { formatValue } from '@/lib/packs-format';
-import type { Rarity } from '@/lib/packs-data';
-import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
-import { parseOne, WonCardSchema } from '@/lib/data/schemas';
+import type { PackCard } from '@/lib/packs-data';
+import {
+  friendlyFailure,
+  RATE_LIMITED,
+  UNAUTHORIZED,
+  type ErrorRule,
+} from '@/lib/errors';
+import { parseOne, UncheckedSchema, WonCardSchema } from '@/lib/data/schemas';
+import { toCardView } from '@/lib/card-view';
 import { mapBatchRoll, clampCount, toBuybackOffer } from './pack-batch-map';
 import type { RawBatchRollItem, BatchRoll } from './pack-batch-map';
 export type { BatchRoll, BuybackOffer } from './pack-batch-map';
 
-// The won card, shaped for the roulette reveal (same fields as a mock PackCard).
-export type WonCard = {
-  id: string;
-  name: string;
-  image: string;
-  slab_image: string | null;
-  value: string;
-  rarity: Rarity;
-  pokemon_dex: number | null;
-  sprite_image: string | null;
-  /** Live MYR display price (raw USD FMV x FX x per-card multiplier) — mirrors
-   *  the vault's marketPriceMyr so the reveal shows the same live number.
-   *  Null if an older/un-enriched backend omitted it — the reveal then falls
-   *  back to the legacy `value` field instead of rendering "RM 0.00". */
-  marketPriceMyr: number | null;
-};
+/** The won card, shaped for the reveal — the same view as a pool card, so a
+ *  demo draw and a real open hand the machine one shape. `priceMyr` is the
+ *  live MYR display price (raw USD FMV × FX × per-card multiplier), the same
+ *  number the vault shows; null if an older/un-enriched backend omitted it —
+ *  the reveal then renders '—', never "RM 0.00". */
+export type WonCard = PackCard;
 
 export type OpenPackResult =
   | {
@@ -83,23 +83,18 @@ export type OpenPackResult =
     }
   | { ok: false; error: string; needsAuth?: boolean; needsTopUp?: boolean };
 
-// Shape of the `card` returned by the open route (normalized server-side).
-// Declares ONLY the two fields read straight off the raw object — the rest come
-// from parseOne(WonCardSchema, card), which stays their single declaration
-// (same split as RawBatchRollItem; openPack and openBatch map identically).
-interface BackendWonCard {
-  image: string;
-  slab_image?: string | null;
-  [key: string]: unknown;
-}
+const LOGIN_TO_OPEN = 'Please log in to open a pack.';
 
 // Patterns local to the open-pack action; never surface raw errors.
+// Both transport rules stay: the probes are the shared ones (lib/errors.ts)
+// but the SENTENCES are this surface's own — "opening packs too fast" names
+// what the customer was doing, which the shared copy cannot.
 const PACKS_RULES: ErrorRule[] = [
   [
-    /too many|rate.?limit|429/i,
+    RATE_LIMITED,
     "You're opening packs too fast — give it a moment and try again.",
   ],
-  [/unauthorized|not authenticated|401/i, 'Please log in to open a pack.'],
+  [UNAUTHORIZED, LOGIN_TO_OPEN],
   [/not enough credits/i, 'Not enough credits to open this pack.'],
   // A pack whose prize pool is empty/zero-weight (mid-setup in admin). Must
   // precede the generic not-found rule: the backend throws it as NOT_FOUND.
@@ -111,39 +106,64 @@ const PACKS_RULES: ErrorRule[] = [
 ];
 const PACKS_FALLBACK = 'Could not open the pack. Please try again.';
 
+/**
+ * A port `Failure` in the open actions' vocabulary.
+ *
+ * No cookie at all (the call never left — `status` is undefined) keeps the
+ * logged-out shape these actions have always returned: the login copy and
+ * `needsAuth`, with no `needsTopUp` key at all. Anything the backend actually
+ * said goes through PACKS_RULES, with `needsAuth` from the port's
+ * classification and `needsTopUp` still a prose probe — no status
+ * distinguishes "broke" from any other 400 (see the note on friendlyError in
+ * lib/errors.ts).
+ */
+function openFailure(f: Failure): {
+  ok: false;
+  error: string;
+  needsAuth?: boolean;
+  needsTopUp?: boolean;
+} {
+  if (f.kind === 'unauthenticated' && f.status === undefined) {
+    return { ok: false, error: LOGIN_TO_OPEN, needsAuth: true };
+  }
+  return {
+    ok: false,
+    error: friendlyFailure(f, PACKS_RULES, PACKS_FALLBACK),
+    needsAuth: f.kind === 'unauthenticated',
+    needsTopUp: /not enough credits/i.test(f.text),
+  };
+}
+
 export async function openPack(slug: string): Promise<OpenPackResult> {
   // Validate at the boundary — a server action is a public endpoint.
   if (typeof slug !== 'string' || slug.trim() === '') {
     return { ok: false, error: 'Invalid pack.' };
   }
 
-  const token = await getAuthToken();
-  if (!token) {
-    return {
-      ok: false,
-      error: 'Please log in to open a pack.',
-      needsAuth: true,
-    };
-  }
+  const r = await store.post(
+    `/store/packs/${encodeURIComponent(slug)}/open`,
+    UncheckedSchema,
+    {},
+  );
+  if (!r.ok) return openFailure(r);
 
+  // JSON parsing accepts null and malformed nested objects; preserve the
+  // pre-port projection fallback without changing the Store contract.
   try {
-    const { pull, card, balance, price, buyback, free, locked } =
-      await authedFetch<{
-        pull?: { id?: unknown };
-        card: BackendWonCard;
-        balance?: unknown;
-        price?: unknown;
-        // Untyped on purpose: only ever handed to parseOne(OpenBuybackSchema).
-        buyback?: unknown;
-        free?: unknown;
-        locked?: unknown;
-      }>(token, `/store/packs/${encodeURIComponent(slug)}/open`, {
-        method: 'POST',
-        body: {},
-      });
+    const { pull, card, balance, price, buyback, free, locked } = r.data as {
+      pull?: { id?: unknown };
+      // Untyped on purpose: only ever handed to parseOne(WonCardSchema).
+      card?: unknown;
+      balance?: unknown;
+      price?: unknown;
+      // Untyped on purpose: only ever handed to parseOne(OpenBuybackSchema).
+      buyback?: unknown;
+      free?: unknown;
+      locked?: unknown;
+    };
 
-    // The fetch generic is a type assertion, not a runtime guard — validate the
-    // shape so a renamed field can't render "$NaN" / an undefined rarity ring.
+    // The envelope is unchecked (see the header) — validate the CARD so a
+    // renamed field can't render "$NaN" / an undefined rarity ring.
     const wonCard = parseOne(WonCardSchema, card);
     if (!wonCard) {
       // The open is committed and the pull vaulted by now — never say "try
@@ -157,22 +177,11 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
 
     return {
       ok: true,
-      card: {
-        id: wonCard.handle,
-        name: wonCard.name,
-        image: card.image,
-        slab_image: card.slab_image ?? null,
-        // Raw USD market_value must never render behind "RM" — an older
-        // backend without marketPriceMyr shows "—" instead of a fake price.
-        value:
-          wonCard.marketPriceMyr != null
-            ? formatValue(wonCard.marketPriceMyr)
-            : '—',
-        rarity: wonCard.rarity as Rarity,
-        pokemon_dex: wonCard.pokemon_dex ?? null,
-        sprite_image: wonCard.sprite_image ?? null,
-        marketPriceMyr: wonCard.marketPriceMyr ?? null,
-      },
+      // `image` / `slab_image` ride WonCardSchema's looseObject passthrough, so
+      // the one mapper reads them off the same validated object (same as the
+      // batch and free-rip opens). The tier is re-stated because the schema
+      // guarantees it and the reveal's card type requires it.
+      card: { ...toCardView(wonCard), rarity: wonCard.rarity },
       pullId: typeof pull?.id === 'string' ? pull.id : null,
       marketValue: wonCard.market_value,
       buyback: toBuybackOffer(buyback),
@@ -188,18 +197,12 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
       locked: typeof locked === 'boolean' ? locked : free === true,
     };
   } catch (error) {
-    logger.error(`[packs] open-pack failed for '${slug}':`, error);
-    const needsAuth = isAuthError(error);
-    // No status distinguishes "broke" from any other 400 — this one stays a
-    // prose probe on purpose (see the note on friendlyError in lib/errors.ts).
-    const needsTopUp = /not enough credits/i.test(
-      error instanceof Error ? error.message : String(error),
-    );
+    logger.error('[packs] response projection failed:', error);
     return {
       ok: false,
-      error: friendlyError(error, PACKS_RULES, PACKS_FALLBACK),
-      needsAuth,
-      needsTopUp,
+      error: PACKS_FALLBACK,
+      needsAuth: false,
+      needsTopUp: false,
     };
   }
 }
@@ -229,30 +232,46 @@ export async function openBatch(
   // Clamp count to int in [1, 3].
   const clampedCount = clampCount(count);
 
-  const token = await getAuthToken();
-  if (!token) {
-    return {
-      ok: false,
-      error: 'Please log in to open a pack.',
-      needsAuth: true,
-    };
-  }
+  const r = await store.post(
+    `/store/packs/${encodeURIComponent(slug)}/open-batch`,
+    UncheckedSchema,
+    { count: clampedCount },
+  );
+  if (!r.ok) return openFailure(r);
 
+  // JSON parsing accepts null and malformed nested objects; preserve the
+  // pre-port projection fallback without changing the Store contract.
   try {
     const {
       rolls: rawRolls,
       balance,
       price,
       total_charged,
-    } = await authedFetch<{
+    } = r.data as {
       rolls: RawBatchRollItem[];
       balance?: unknown;
       price?: unknown;
       total_charged?: unknown;
-    }>(token, `/store/packs/${encodeURIComponent(slug)}/open-batch`, {
-      method: 'POST',
-      body: { count: clampedCount },
-    });
+    };
+
+    // The envelope is unchecked (see the header), so `rolls` might not be an
+    // array at all. Pre-port this was a TypeError — `for (const rawRoll of
+    // rawRolls)` over `undefined` — caught by the action's own try/catch and
+    // answered with PACKS_FALLBACK; keep that answer with this guard
+    // rather than invoking card-mapping copy. A non-JSON 200 never reaches here — the
+    // adapter turns it into a Failure before `r.data` exists — but a JSON 200
+    // that simply omits `rolls` does, which is what the test below pins. An
+    // explicit `rolls: []` is left alone: that is a legal (if odd) 2xx and has
+    // always answered ok with no rolls.
+    if (!Array.isArray(rawRolls)) {
+      logger.error(`[packs] open-batch returned no rolls array for '${slug}'`);
+      return {
+        ok: false,
+        error: PACKS_FALLBACK,
+        needsAuth: false,
+        needsTopUp: false,
+      };
+    }
 
     // Validate and map every roll. The charge is committed and every pull is
     // already `vaulted` by the time this runs, so a roll that fails
@@ -287,18 +306,12 @@ export async function openBatch(
           : null,
     };
   } catch (error) {
-    logger.error(`[packs] open-batch failed for '${slug}':`, error);
-    const needsAuth = isAuthError(error);
-    // No status distinguishes "broke" from any other 400 — this one stays a
-    // prose probe on purpose (see the note on friendlyError in lib/errors.ts).
-    const needsTopUp = /not enough credits/i.test(
-      error instanceof Error ? error.message : String(error),
-    );
+    logger.error('[packs] response projection failed:', error);
     return {
       ok: false,
-      error: friendlyError(error, PACKS_RULES, PACKS_FALLBACK),
-      needsAuth,
-      needsTopUp,
+      error: PACKS_FALLBACK,
+      needsAuth: false,
+      needsTopUp: false,
     };
   }
 }
@@ -323,37 +336,26 @@ export async function closeInstantWindow(pullIds: string[]): Promise<void> {
     (x) => typeof x === 'string' && x.trim() !== '',
   );
   if (ids.length === 0) return;
-  const token = await getAuthToken();
-  if (!token) return;
-  try {
-    await authedFetch(token, '/store/pulls/close-instant', {
-      method: 'POST',
-      body: { pull_ids: ids },
-    });
-  } catch (error) {
-    logger.error('[packs] close-instant failed:', error);
-  }
+  // Fire-and-forget: the response is not read, and a failure (logged out, a
+  // closed window, a network drop) is already logged by the port.
+  await store.post('/store/pulls/close-instant', UncheckedSchema, {
+    pull_ids: ids,
+  });
 }
 
 export async function revealPull(pullId: string): Promise<RevealResult> {
   if (typeof pullId !== 'string' || pullId.trim() === '') return { ok: false };
-  const token = await getAuthToken();
-  if (!token) return { ok: false };
-  try {
-    const data = await authedFetch<{ instant_deadline_ms?: unknown }>(
-      token,
-      `/store/pulls/${encodeURIComponent(pullId)}/reveal`,
-      {
-        method: 'POST',
-        body: {},
-      },
-    );
-    const ms = data?.instant_deadline_ms;
-    return typeof ms === 'number' && Number.isFinite(ms)
-      ? { ok: true, instantDeadlineMs: ms }
-      : { ok: false };
-  } catch (error) {
-    logger.error(`[packs] reveal ping failed for '${pullId}':`, error);
-    return { ok: false };
-  }
+  const r = await store.post(
+    `/store/pulls/${encodeURIComponent(pullId)}/reveal`,
+    UncheckedSchema,
+    {},
+  );
+  // Best-effort: logged out, a failed ping, or a body without the deadline all
+  // fall back to the open response's deadline.
+  if (!r.ok) return { ok: false };
+  const ms = (r.data as { instant_deadline_ms?: unknown } | null | undefined)
+    ?.instant_deadline_ms;
+  return typeof ms === 'number' && Number.isFinite(ms)
+    ? { ok: true, instantDeadlineMs: ms }
+    : { ok: false };
 }
