@@ -70,7 +70,8 @@ Before arming withdrawals (`GATEWAY_WITHDRAWALS_ENABLED=true`):
 1. Set `GATEWAY_WD_APPROVAL_ABOVE_RM` to a deliberately chosen figure, not silently left
    at the RM 1,000 default. Also confirm `GATEWAY_WD_DAILY_MAX_RM` (rolling-24h
    per-customer cap, default RM 50,000) and `PAYOUT_DESTINATION_COOLDOWN_HOURS` (default
-   24) are the values intended — see `docs/payments/globepay365-setup.md`'s config table.
+   24) are the values intended — see the comments on these three vars in
+   `backend/packages/api/.env.template`.
 2. Confirm the admin `/withdrawals` queue's default view is `held`
    (`backend/apps/admin/src/routes/withdrawals/page.tsx` — `useState<GatewayWithdrawalView>('held')`)
    so a held row is the first thing an operator sees, not something they have to filter
