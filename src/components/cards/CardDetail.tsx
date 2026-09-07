@@ -61,9 +61,8 @@ export function CardDetail({
     entrance ? ({ '--i': i } as CSSProperties) : undefined;
 
   // Live price pulse — rules and rationale in src/lib/price-tick.ts. State is
-  // adjusted during render (the React "adjust state when props change" pattern
-  // useCardPrice already uses) rather than in an effect, which this repo's lint
-  // rejects.
+  // adjusted during render with React's "adjust state when props change"
+  // pattern; useCardPrice separately resets via useLivePoll's keyed seed.
   const price = detail?.priceMyr ?? null;
   const [tick, setTick] = useState(() => initialPriceTick(seed.handle, price));
   const next = nextPriceTick(tick, seed.handle, price);

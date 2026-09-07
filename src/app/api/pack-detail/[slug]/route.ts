@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { rm } from '@/lib/format';
+import type { PackCard } from '@/lib/packs-data';
 import { getPackDetail } from '@/lib/data/packs';
 
 // Same-origin endpoint the pack page polls (60s) to refresh EVERY grid price
@@ -14,5 +16,17 @@ export async function GET(
   if (!detail) {
     return NextResponse.json({ message: 'not found' }, { status: 404 });
   }
-  return NextResponse.json({ detail });
+  // Older open tabs select by id and render the two-decimal value string.
+  const withLegacyFields = (card: PackCard) => ({
+    ...card,
+    id: card.handle,
+    value: card.priceMyr === null ? '—' : rm(card.priceMyr),
+  });
+  return NextResponse.json({
+    detail: {
+      ...detail,
+      pool: detail.pool.map(withLegacyFields),
+      topHits: detail.topHits.map(withLegacyFields),
+    },
+  });
 }

@@ -2,6 +2,7 @@
 
 import type { RecentFeed } from '@/lib/data/packs';
 import type { Rarity } from '@/lib/packs-data';
+import { RecentPollResponseSchema, parseOne } from '@/lib/data/schemas';
 import { useLivePoll } from '@/lib/use-live-poll';
 
 // "Live" = polling of the same-origin proxy (a direct :9000 call is
@@ -23,10 +24,10 @@ function acceptFeed(
   _prev: RecentFeed,
   pending: boolean,
 ): RecentFeed | null {
-  const body = next as Partial<RecentFeed>;
-  if (!Array.isArray(body.pulls)) return null;
+  const body = parseOne(RecentPollResponseSchema, next);
+  if (!body) return null;
   if (body.pulls.length === 0 && !pending) return null;
-  return { pulls: body.pulls, drought: body.drought ?? {} };
+  return body;
 }
 
 /** Live pull-history feed: seeds from the server snapshot, then polls.

@@ -1,6 +1,7 @@
 'use client';
 
 import type { CardDetailData } from '@/lib/data/cards';
+import { CardPollResponseSchema, parseOne } from '@/lib/data/schemas';
 import { useLivePoll } from '@/lib/use-live-poll';
 
 // Prices move at most daily (nightly PriceCharting sync) plus FX/markup edits;
@@ -20,7 +21,7 @@ export function useCardPrice(
     {
       intervalMs: POLL_MS,
       resetKey: handle ?? '',
-      accept: (next) => (next as { card?: CardDetailData }).card ?? null,
+      accept: (next) => parseOne(CardPollResponseSchema, next)?.card ?? null,
     },
   );
   // `pending` is exactly "this handle's data hasn't landed yet" (a genuine

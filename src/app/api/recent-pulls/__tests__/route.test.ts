@@ -147,3 +147,157 @@ describe('GET /api/recent-pulls — catalog-bounded key gate (plan 117 step 2)',
     expect(packsCallsOf()).toHaveLength(1);
   });
 });
+
+// Deployment skew: these URLs are also polled by already-open, older tabs.
+describe('polling JSON compatibility aliases', () => {
+  const wire = {
+    handle: 'charizard',
+    name: 'Charizard',
+    image: '/card.png',
+    slab_image: '/slab.png',
+    rarity: 'Rare',
+    market_value: 7,
+    pokemon_dex: 6,
+    sprite_image: '/sprite.png',
+  };
+  it('card detail preserves every legacy field alongside the numeric CardView', async () => {
+    const { GET: cardGet } = await import('@/app/api/cards/[handle]/route');
+    const oldCard = {
+      ...wire,
+      marketPriceMyr: 1234.5,
+      set: 'Base',
+      grader: 'PSA',
+      grade: '10',
+      pcSyncedAt: null,
+      priceHistory: [{ date: '2026-09-01', valueMyr: 1200 }],
+    };
+    seed({ 'GET /store/cards/:handle': { body: { card: oldCard } } });
+    const response = await cardGet(
+      new Request('http://localhost/api/cards/charizard'),
+      { params: Promise.resolve({ handle: 'charizard' }) },
+    );
+    const { card } = await response.json();
+    expect(card).toEqual({
+      handle: 'charizard',
+      name: 'Charizard',
+      image: '/card.png',
+      slab_image: '/slab.png',
+      rarity: 'Rare',
+      pokemon_dex: 6,
+      sprite_image: '/sprite.png',
+      marketPriceMyr: 1234.5,
+      set: 'Base',
+      grader: 'PSA',
+      grade: '10',
+      pcSyncedAt: null,
+      priceHistory: [{ date: '2026-09-01', valueMyr: 1200 }],
+      priceMyr: 1234.5,
+      slabImage: '/slab.png',
+      pokemonDex: 6,
+      spriteImage: '/sprite.png',
+    });
+    // Old detail rendering must still be able to format the polled number.
+    expect(
+      card.marketPriceMyr.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+    ).toBe('1,234.50');
+  });
+  it('pack pool and top hits preserve selection ids and formatted prices in their existing orders', async () => {
+    const { GET: packGet } = await import('@/app/api/pack-detail/[slug]/route');
+    seed({
+      'GET /store/packs/:slug': {
+        body: {
+          odds: [
+            { ...wire, handle: 'unpriced', market_value: 20, top_hit_order: 1 },
+            {
+              ...wire,
+              handle: 'priced',
+              marketPriceMyr: 1234.5,
+              top_hit_order: 2,
+            },
+            { ...wire, handle: 'zero', marketPriceMyr: 0 },
+          ],
+          published_odds: { Rare: 100 },
+        },
+      },
+    });
+    const response = await packGet(
+      new Request('http://localhost/api/pack-detail/bronze-pack'),
+      { params: Promise.resolve({ slug: 'bronze-pack' }) },
+    );
+    const { detail } = await response.json();
+    expect(
+      detail.pool.map((row: Record<string, unknown>) => [
+        row.id,
+        row.handle,
+        row.value,
+        row.priceMyr,
+      ]),
+    ).toEqual([
+      ['priced', 'priced', 'RM 1,234.50', 1234.5],
+      ['unpriced', 'unpriced', '—', null],
+      ['zero', 'zero', 'RM 0.00', 0],
+    ]);
+    expect(
+      detail.topHits.map((row: Record<string, unknown>) => [row.id, row.value]),
+    ).toEqual([
+      ['unpriced', '—'],
+      ['priced', 'RM 1,234.50'],
+    ]);
+    expect(detail.pool[0]).toMatchObject({
+      name: 'Charizard',
+      image: '/card.png',
+      slabImage: '/slab.png',
+      rarity: 'Rare',
+      pokemonDex: 6,
+      spriteImage: '/sprite.png',
+    });
+  });
+  it('recent rows retain legacy prices and labels without replacing pull ids with card handles', async () => {
+    seed({
+      'GET /store/pulls/recent': {
+        body: {
+          pulls: [
+            {
+              ...wire,
+              id: 'pull-priced',
+              marketPriceMyr: 1234.5,
+              rolled_at: '2026-09-01T00:00:00Z',
+            },
+            { ...wire, id: 'pull-unpriced', rolled_at: '2026-09-01T00:00:00Z' },
+            {
+              ...wire,
+              id: 'pull-zero',
+              marketPriceMyr: 0,
+              rolled_at: '2026-09-01T00:00:00Z',
+            },
+          ],
+        },
+      },
+    });
+    const response = await GET(req());
+    const { pulls } = await response.json();
+    expect(
+      pulls.map((row: Record<string, unknown>) => [
+        row.id,
+        row.handle,
+        row.value,
+        row.priceMyr,
+      ]),
+    ).toEqual([
+      ['pull-priced', 'charizard', 'RM 1,234.50', 1234.5],
+      ['pull-unpriced', 'charizard', '—', null],
+      ['pull-zero', 'charizard', 'RM 0.00', 0],
+    ]);
+    expect(pulls[0]).toMatchObject({
+      name: 'Charizard',
+      image: '/card.png',
+      slabImage: '/slab.png',
+      packName: 'Mystery Pack',
+      who: 'Anonymous',
+      profileHandle: null,
+      avatar: null,
+      frame: null,
+      rolledAt: '2026-09-01T00:00:00Z',
+    });
+  });
+});

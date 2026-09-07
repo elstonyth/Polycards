@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { getRecentPulls, resolveFeedPackSlug } from '@/lib/data/packs';
 import { cachedJson } from '@/lib/ttl-cache';
+import { rm } from '@/lib/format';
 import { isRarity } from '@/lib/packs-format';
 
 // Same-origin endpoint the "Recent Pulls" feeds poll for live updates — a
@@ -54,7 +55,19 @@ export async function GET(request: NextRequest) {
   // garbage value collapses to the unfiltered feed instead of minting a key.
   const rarityRaw = request.nextUrl.searchParams.get('rarity') ?? '';
   const rarity = isRarity(rarityRaw) ? rarityRaw : undefined;
-  return cachedJson(`recent-pulls:${pack}:${rarity ?? ''}`, CACHE_TTL_MS, () =>
-    getRecentPulls(pack || undefined, rarity),
+  return cachedJson(
+    `recent-pulls:${pack}:${rarity ?? ''}`,
+    CACHE_TTL_MS,
+    async () => {
+      const feed = await getRecentPulls(pack || undefined, rarity);
+      return {
+        ...feed,
+        // Keep the legacy label for tabs that predate the numeric CardView.
+        pulls: feed.pulls.map((pull) => ({
+          ...pull,
+          value: pull.priceMyr === null ? '—' : rm(pull.priceMyr),
+        })),
+      };
+    },
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import type { PackDetail } from '@/lib/data/packs';
+import { PackPollResponseSchema, parseOne } from '@/lib/data/schemas';
 import { useLivePoll } from '@/lib/use-live-poll';
 
 const POLL_MS = 60_000;
@@ -23,7 +24,7 @@ export function usePackDetailPoll(
     {
       intervalMs: POLL_MS,
       resetKey: slug,
-      accept: (next) => (next as { detail?: PackDetail }).detail ?? null,
+      accept: (next) => parseOne(PackPollResponseSchema, next)?.detail ?? null,
     },
   );
   // `pending` is exactly "this slug's data hasn't landed yet": show the new

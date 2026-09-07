@@ -150,3 +150,44 @@ describe('useLiveRecentPulls', () => {
     h.unmount();
   });
 });
+
+it.each([
+  {
+    id: 'old',
+    handle: 'card-old',
+    name: 'Card old',
+    image: '/c.png',
+    slabImage: null,
+    value: 'RM 1.00',
+    rarity: 'Common',
+    packName: 'Bronze Pack',
+    packIcon: '/p.webp',
+    who: 'PW',
+    profileHandle: null,
+    avatar: null,
+    frame: null,
+    rolledAt: '2026-09-02T13:38:44.000Z',
+    agoLabel: 'just now',
+  },
+  { ...pull('bad'), priceMyr: 'RM 1.00' },
+  null,
+])(
+  'retains seed and last-good feed when rows are incompatible: %j',
+  async (row) => {
+    respond({ pulls: [row], drought: {} });
+    const h = renderHook(() => useLiveRecentPulls(seed), undefined);
+    await flush();
+    expect(h.current.pulls).toEqual(seed.pulls);
+    respond({ pulls: [pull('fresh')], drought: { Rare: 2 } });
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(h.current.pulls.map((p) => p.id)).toEqual(['fresh']);
+    respond({ pulls: [row], drought: {} });
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(h.current.pulls.map((p) => p.id)).toEqual(['fresh']);
+    h.unmount();
+  },
+);

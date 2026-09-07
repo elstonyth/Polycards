@@ -1117,3 +1117,58 @@ export const TaskHubSchema = z.looseObject({
   tasks: z.array(TaskEntrySchema),
 });
 export type TaskHub = z.infer<typeof TaskHubSchema>;
+
+// --- same-origin polling responses ------------------------------------------
+
+/** Browser JSON is version-sensitive even on the same origin: rolling deploys
+ * can answer with the older view shape. Reject incompatible data before it
+ * replaces the seed/last-good view; routes separately retain old-tab aliases.
+ * These schemas validate the current VIEW, not the backend Store envelope. */
+const pollCard = z.object({
+  handle: z.string(),
+  name: z.string(),
+  image: z.string(),
+  slabImage: z.string().nullable(),
+  rarity: rarity.nullable(),
+  priceMyr: finite.nullable(),
+  pokemonDex: finite.nullable(),
+  spriteImage: z.string().nullable(),
+});
+const pollTiers = z.partialRecord(rarity, finite);
+const pollOdds = z.object({ tiers: pollTiers }).nullable();
+export const CardPollResponseSchema = z.object({
+  card: pollCard.extend({
+    priceMyr: finite,
+    set: z.string(),
+    grader: z.string(),
+    grade: z.string(),
+    pcSyncedAt: z.string().nullable(),
+    priceHistory: z.array(z.object({ date: z.string(), valueMyr: finite })),
+  }),
+});
+const pollPackCard = pollCard.extend({ rarity });
+export const PackPollResponseSchema = z.object({
+  detail: z.object({
+    topHits: z.array(pollPackCard),
+    pool: z.array(pollPackCard),
+    publishedOdds: pollOdds,
+    demoOdds: pollOdds,
+  }),
+});
+export const RecentPollResponseSchema = z.object({
+  pulls: z.array(
+    pollCard.extend({
+      rarity,
+      id: z.string(),
+      packName: z.string(),
+      packIcon: z.string(),
+      who: z.string(),
+      profileHandle: z.string().nullable(),
+      avatar: z.string().nullable(),
+      frame: z.string().nullable(),
+      rolledAt: z.string(),
+      agoLabel: z.string(),
+    }),
+  ),
+  drought: pollTiers.nullish().transform((value) => value ?? {}),
+});

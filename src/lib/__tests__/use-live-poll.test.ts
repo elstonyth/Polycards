@@ -7,6 +7,8 @@ import {
   setVisibility,
   presetVisibility,
 } from './render-hook';
+import { useCardPrice } from '../use-card-price';
+import type { CardDetailData } from '../data/cards';
 import { useLivePoll } from '../use-live-poll';
 
 beforeEach(() => {
@@ -215,4 +217,100 @@ describe('useLivePoll', () => {
     expect(h.current.data).toBe('good');
     h.unmount();
   });
+});
+
+const cardSeed: CardDetailData = {
+  handle: 'a',
+  name: 'Card A',
+  image: '/a.png',
+  slabImage: null,
+  priceMyr: 2,
+  rarity: 'Rare',
+  pokemonDex: null,
+  spriteImage: null,
+  set: 'Base',
+  grade: '10',
+  grader: 'PSA',
+  pcSyncedAt: null,
+  priceHistory: [],
+};
+
+it.each([
+  {
+    handle: 'a',
+    name: 'Card A',
+    image: '/a.png',
+    slab_image: null,
+    marketPriceMyr: 5,
+    rarity: 'Rare',
+    pokemon_dex: null,
+    sprite_image: null,
+    set: 'Base',
+    grade: '10',
+    grader: 'PSA',
+    pcSyncedAt: null,
+    priceHistory: [],
+  },
+  { ...cardSeed, priceMyr: '5' },
+  { ...cardSeed, priceMyr: null },
+  { ...cardSeed, priceHistory: [null] },
+])(
+  'card-price retains seed and last-good data across incompatible server JSON: %j',
+  async (card) => {
+    const fresh = { ...cardSeed, priceMyr: 8 };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ card }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ card: fresh }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ card }) });
+    vi.stubGlobal('fetch', fetcher);
+    const h = renderHook(() => useCardPrice('a', cardSeed), undefined);
+    await flush();
+    expect(h.current).toEqual(cardSeed);
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(h.current).toEqual(fresh);
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(h.current).toEqual(fresh);
+    h.unmount();
+    vi.unstubAllGlobals();
+  },
+);
+
+it('card-price switches to the new seed immediately and ignores a late previous-handle response', async () => {
+  const pending: ((body: unknown) => void)[] = [];
+  const fetcher = vi.fn<(url: string) => Promise<unknown>>(
+    () =>
+      new Promise((resolve) => {
+        pending.push((body) => resolve({ ok: true, json: async () => body }));
+      }),
+  );
+  vi.stubGlobal('fetch', fetcher);
+  const props = { handle: 'a', initial: cardSeed };
+  const h = renderHook(
+    () => useCardPrice(props.handle, props.initial),
+    undefined,
+  );
+  expect(h.current).toEqual(cardSeed);
+  props.handle = 'b';
+  props.initial = { ...cardSeed, handle: 'b', priceMyr: 3 };
+  h.rerender();
+  expect(h.current).toEqual(props.initial);
+  await act(async () => {
+    pending[1]!({ card: { ...props.initial, priceMyr: 4 } });
+  });
+  expect(h.current?.priceMyr).toBe(4);
+  await act(async () => {
+    pending[0]!({ card: { ...cardSeed, priceMyr: 99 } });
+  });
+  expect(h.current).toEqual({ ...props.initial, priceMyr: 4 });
+  expect(fetcher.mock.calls.map((args) => args[0])).toEqual([
+    '/api/cards/a',
+    '/api/cards/b',
+  ]);
+  h.unmount();
+  vi.unstubAllGlobals();
 });

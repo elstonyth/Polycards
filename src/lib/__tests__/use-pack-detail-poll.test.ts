@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act } from 'react';
-import { renderHook } from './render-hook';
+import { renderHook, flush } from './render-hook';
 import { usePackDetailPoll } from '../use-pack-detail-poll';
 import type { PackDetail } from '@/lib/data/packs';
 
@@ -85,3 +85,76 @@ describe('usePackDetailPoll', () => {
     hook.unmount();
   });
 });
+
+it.each([
+  {
+    topHits: [],
+    pool: [
+      {
+        id: 'old-card',
+        value: 'RM 2.00',
+        name: 'Old Card',
+        image: '/old.png',
+        slabImage: null,
+        rarity: 'Rare',
+        pokemonDex: null,
+        spriteImage: null,
+      },
+    ],
+    publishedOdds: null,
+    demoOdds: null,
+  },
+  { topHits: [], pool: [null], publishedOdds: null, demoOdds: null },
+  { topHits: 'broken', pool: [], publishedOdds: null, demoOdds: null },
+])(
+  'retains seed and last-good detail when a poll is incompatible: %j',
+  async (incompatible) => {
+    const fresh: PackDetail = {
+      ...detailA,
+      pool: [
+        {
+          handle: 'fresh',
+          name: 'Fresh Card',
+          image: '/fresh.png',
+          slabImage: null,
+          rarity: 'Rare',
+          priceMyr: 2,
+          pokemonDex: null,
+          spriteImage: null,
+        },
+      ],
+      publishedOdds: { tiers: { Rare: 100 } },
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ detail: incompatible }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ detail: fresh }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ detail: incompatible }),
+      });
+    vi.stubGlobal('fetch', fetcher);
+    const hook = renderHook(
+      () => usePackDetailPoll('pack-a', detailA),
+      undefined,
+    );
+    await flush();
+    expect(hook.current).toEqual(detailA);
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(hook.current).toEqual(fresh);
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(hook.current).toEqual(fresh);
+    hook.unmount();
+    vi.unstubAllGlobals();
+  },
+);
