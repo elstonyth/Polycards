@@ -170,7 +170,7 @@ export async function checkPhoneOtp(input: {
   if (!phone)
     return fail('Please enter a valid phone number for the selected country.');
   if (!/^\d{4,10}$/.test(input.code))
-    return fail('Enter the code from the SMS.');
+    return fail('Enter the verification code.');
   const r = await store.post(
     '/store/phone-verification/check',
     UncheckedSchema,
