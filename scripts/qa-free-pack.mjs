@@ -47,6 +47,94 @@ const ok = (m) => console.log(`✓ ${m}`);
 const shot = (page, name) =>
   page.screenshot({ path: `docs/research/qa-free-pack-${name}.png` });
 
+// After consent, the badge mounts only once useConsent's client effect runs.
+// Wait for that hydrated catalog, not unrelated polling/images to become idle.
+// Visible filters also exclude React's temporary hidden streaming holders.
+const visitCatalogWithBadge = async (page) => {
+  const response = await page.goto(`${BASE}/slots`, {
+    waitUntil: 'domcontentloaded',
+  });
+  if (!response?.ok()) {
+    throw new Error(`catalog navigation returned ${response?.status()}`);
+  }
+  const catalog = page
+    .getByTestId('catalog-root')
+    .filter({ visible: true })
+    .first();
+  await catalog.waitFor({ state: 'visible', timeout: 20000 });
+  const badge = catalog
+    .getByTestId('free-pack-badge')
+    .filter({ visible: true })
+    .first();
+  await badge.waitFor({ state: 'visible', timeout: 20000 });
+  return badge;
+};
+
+const visitHomeAfterClaim = async (page, email) => {
+  // A missing badge is meaningful only after auth and the global badge's own
+  // status request finish. Listen before the full navigation resets its cache.
+  const readClientJson = async (path) => {
+    const request = await page.waitForEvent('requestfinished', {
+      predicate: (request) =>
+        request.url() === new URL(path, BASE).href &&
+        request.method() === 'GET' &&
+        request.resourceType() === 'fetch',
+      timeout: 20000,
+    });
+    const response = await request.response();
+    if (response?.status() !== 200) {
+      throw new Error(`${path} returned ${response?.status()}`);
+    }
+    return response.json();
+  };
+  const sessionReady = readClientJson('/api/me');
+  const badgeReady = readClientJson('/api/free-pack');
+  const [, session, badge] = await Promise.all([
+    page
+      .goto(`${BASE}/`, { waitUntil: 'domcontentloaded' })
+      .then((response) => {
+        if (!response?.ok()) {
+          throw new Error(`home navigation returned ${response?.status()}`);
+        }
+      }),
+    sessionReady,
+    badgeReady,
+  ]);
+  await page
+    .getByRole('heading', { name: 'RIP A PACK', exact: true })
+    .filter({ visible: true })
+    .first()
+    .waitFor({ state: 'visible', timeout: 20000 });
+  if (!session?.customer?.id || session.customer.email !== email) {
+    throw new Error('home customer session did not match the QA customer');
+  }
+  if (badge?.mode !== 'hidden') {
+    throw new Error('home free-pack status was not hidden after claim');
+  }
+
+  // The storefront deliberately also returns hidden on backend errors. Prove
+  // a healthy, authenticated ineligible answer with this same browser session.
+  const token = (await page.context().cookies(BASE)).find(
+    (cookie) => cookie.name === '_polycards_jwt',
+  )?.value;
+  if (!token) throw new Error('home customer session cookie missing');
+  const response = await page.context().request.get(`${API}/store/free-pack`, {
+    headers: { 'x-publishable-api-key': PK, Authorization: `Bearer ${token}` },
+    timeout: 20000,
+  });
+  if (response.status() !== 200) {
+    throw new Error(`post-claim eligibility returned ${response.status()}`);
+  }
+  const eligibility = await response.json();
+  if (
+    eligibility?.eligible !== false ||
+    eligibility.slug !== null ||
+    'promo' in eligibility
+  ) {
+    throw new Error('post-claim eligibility was not authenticated and spent');
+  }
+};
+
 const json = async (res) => {
   const text = await res.text();
   try {
@@ -328,12 +416,7 @@ try {
   await page.waitForTimeout(2500);
 
   // 1 ── the badge is on /slots for an eligible account.
-  // networkidle, not domcontentloaded: mid-stream React parks the incoming
-  // subtree in a hidden holder, so a testid can transiently resolve to TWO
-  // hidden nodes and trip strict mode.
-  await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
-  const badge = page.getByTestId('free-pack-badge').first();
-  await badge.waitFor({ state: 'visible', timeout: 20000 });
+  const badge = await visitCatalogWithBadge(page);
   ok('free-pack badge visible on /slots');
   await shot(page, 'badge');
 
@@ -358,8 +441,7 @@ try {
   if (memberHomeBadge) ok('member badge visible on / (global mount)');
   else fail('member badge missing on / — global mount broken');
   await shot(page, 'member-badge-home');
-  await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
-  await badge.waitFor({ state: 'visible', timeout: 20000 });
+  await visitCatalogWithBadge(page);
 
   // 1b ── BADGE vs CATALOG. The badge is `fixed` bottom-right at z-40, floating
   // OVER the catalog, so it gets TWO assertions — they fail on different bugs
@@ -387,9 +469,7 @@ try {
     [1440, 700, 'desktop'],
   ]) {
     await page.setViewportSize({ width: w, height: h });
-    await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
-    const floating = page.getByTestId('free-pack-badge').first();
-    await floating.waitFor({ state: 'visible', timeout: 20000 });
+    const floating = await visitCatalogWithBadge(page);
     // Catalog links only: every pack href carries ?count=, the badge's does not.
     const tiles = page.locator('a[href*="count="]');
     const hits = (a, b) =>
@@ -449,8 +529,7 @@ try {
         // viewport instead of comparing tiles against the stale 1440 width.
         w = fitted;
         await page.setViewportSize({ width: w, height: h });
-        await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
-        await floating.waitFor({ state: 'visible', timeout: 20000 });
+        await visitCatalogWithBadge(page);
       }
     }
 
@@ -463,6 +542,7 @@ try {
     const minPad = label === 'desktop' ? 176 : 224;
     const pad = await page
       .getByTestId('catalog-root')
+      .filter({ visible: true })
       .first()
       .evaluate((el) => parseFloat(getComputedStyle(el).paddingBottom));
     if (pad >= minPad) {
@@ -515,7 +595,7 @@ try {
     }
   }
   await page.setViewportSize({ width: 430, height: 932 });
-  await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
+  await visitCatalogWithBadge(page);
 
   // 2 ── the badge lands straight on the reels; the detail page (reached by
   // URL — the badge no longer routes through it) still renders free mode.
@@ -669,7 +749,7 @@ try {
   }
   // The global mount must agree: navigate off /slots and let /api/free-pack
   // re-answer for the spent claim.
-  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+  await visitHomeAfterClaim(page, email);
   await page.waitForTimeout(2000);
   if (await page.getByTestId('free-pack-badge').count()) {
     fail('global badge still visible on / after the claim was spent');

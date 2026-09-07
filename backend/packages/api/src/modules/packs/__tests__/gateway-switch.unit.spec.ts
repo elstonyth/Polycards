@@ -1,5 +1,6 @@
 import {
   ACTIVE_GATEWAY_TTL_MS,
+  GATEWAY_IDS,
   GATEWAYS,
   gatewayUrls,
   isPaymentGateway,
@@ -79,10 +80,11 @@ describe('resolveActiveGateway', () => {
 });
 
 describe('gatewayUrls', () => {
-  it('with PAYMENT_CALLBACK_BASE the gateway gets its own hook paths; the return URL reads either name', () => {
+  it('with PAYMENT_CALLBACK_BASE the gateway gets its own hook paths and PAYMENT_RETURN_URL', () => {
+    // The legacy spelling of the return URL is gateway-env.unit.spec.ts's.
     const env = {
       PAYMENT_CALLBACK_BASE: 'https://api.example/',
-      GLOBEPAY_RETURN_URL: 'https://shop/wallet',
+      PAYMENT_RETURN_URL: 'https://shop/wallet',
     } as NodeJS.ProcessEnv;
     expect(gatewayUrls('tgpay', env)).toEqual({
       notifyUrl: 'https://api.example/hooks/tgpay/deposit',
@@ -91,12 +93,6 @@ describe('gatewayUrls', () => {
       payoutVerifyUrl: '',
       hasPayoutVerify: false,
     });
-    expect(
-      gatewayUrls('tgpay', {
-        ...env,
-        PAYMENT_RETURN_URL: 'https://shop/transactions',
-      }).returnUrl,
-    ).toBe('https://shop/transactions');
   });
 
   it('a plain-http or malformed callback base counts as unset — the key headers never go over cleartext', () => {
@@ -114,9 +110,9 @@ describe('gatewayUrls', () => {
     }
   });
 
-  it('without PAYMENT_CALLBACK_BASE every hook URL is empty so callers fail closed — no legacy explicit URL is honoured', () => {
+  it('without PAYMENT_CALLBACK_BASE every hook URL is empty so callers fail closed — no explicit *_NOTIFY_URL is honoured', () => {
     const urls = gatewayUrls('tgpay', {
-      GLOBEPAY_NOTIFY_URL: 'https://old/hooks/globepay/deposit',
+      GATEWAY_NOTIFY_URL: 'https://old/hooks/x/deposit',
     } as NodeJS.ProcessEnv);
     expect(urls.notifyUrl).toBe('');
     expect(urls.withdrawNotifyUrl).toBe('');
@@ -133,15 +129,36 @@ describe('rowGatewayConfigs', () => {
     const configFor = rowGatewayConfigs(env);
     expect(configFor('tgpay')).toMatchObject({ kind: 'tgpay' });
     expect(configFor('tgpay')).toBe(configFor('tgpay'));
-    expect(configFor('globepay')).toBeNull(); // no GLOBEPAY_* in env
+    expect(configFor('globepay')).toBeNull(); // retired gateway
     expect(configFor('stripe')).toBeNull();
+  });
+
+  // The fake gateway is only useful if a spec that selects it takes the SAME
+  // orchestration branches production takes — the deposit/withdrawal band
+  // checks and the "needs the customer's email" refusal all read these off the
+  // ACTIVE gateway's definition. The numbers are hand-copied from tgpay, so
+  // pin them: a change to TGPay's band that skips the fake would silently move
+  // what the band-edge tests in gateway-deposit.unit.spec.ts assert.
+  it('the fake gateway mirrors the real one where the orchestration branches', () => {
+    expect(GATEWAYS.fake.limits).toEqual(GATEWAYS.tgpay.limits);
+    expect(GATEWAYS.fake.needsCustomerContact).toBe(
+      GATEWAYS.tgpay.needsCustomerContact,
+    );
   });
 
   it('every registered gateway declares its hooks and a configured() probe', () => {
     for (const def of Object.values(GATEWAYS)) {
+      // Every entry, the test-only fake included: gatewayUrls turns an empty
+      // hook path into '' and the money routes fail closed on that.
       expect(def.hooks.deposit).toMatch(/^\/hooks\//);
       expect(def.hooks.withdrawal).toMatch(/^\/hooks\//);
-      expect(def.configured({} as NodeJS.ProcessEnv)).toBe(false);
+    }
+    // Credentials are what make a REAL gateway selectable, so an empty
+    // environment must configure none of them. The fake gateway is excluded
+    // because it has no credentials at all — what gates it is NODE_ENV, and
+    // both sides of that are pinned in fake-gateway.unit.spec.ts.
+    for (const id of GATEWAY_IDS) {
+      expect(GATEWAYS[id].configured({} as NodeJS.ProcessEnv)).toBe(false);
     }
   });
 });

@@ -1,5 +1,6 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
+import type { IUserModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { seedOf } from '../../src/utils/profile-handle';
@@ -24,6 +25,7 @@ medusaIntegrationTestRunner({
   testSuite: ({ api, getContainer }) => {
     describe('/admin/challenge', () => {
       let adminToken: string;
+      let adminId: string;
       let cardId: string;
       const packs = () =>
         getContainer().resolve<PacksModuleService>(PACKS_MODULE);
@@ -39,6 +41,10 @@ medusaIntegrationTestRunner({
           ADMIN_EMAIL,
           PASSWORD,
         );
+        const [admin] = await container
+          .resolve<IUserModuleService>(Modules.USER)
+          .listUsers({ email: ADMIN_EMAIL });
+        adminId = admin.id;
         // Seed one card so the existence check has something to accept.
         const [card] = await packs().createCards([
           {
@@ -246,6 +252,101 @@ medusaIntegrationTestRunner({
           { take: 10 },
         );
         expect(audits).toHaveLength(1);
+      });
+
+      it('POST schedule: queues an edition and audits it in the same transaction', async () => {
+        const startsAt = new Date(Date.now() + 7 * DAY_MS).toISOString();
+        const res = await unwrapResponse(
+          api.post(
+            '/admin/challenge/schedule',
+            {
+              starts_at: startsAt,
+              label: 'Week 42',
+              stages: [
+                {
+                  stage_number: 1,
+                  threshold_myr: 100,
+                  rank_rewards: [{ rank: 1, card_id: cardId, credits: 0 }],
+                },
+              ],
+              reason: 'queue week 42',
+            },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(res.status).toBe(200);
+        expect(res.data.schedule).toMatchObject({
+          starts_at: startsAt,
+          label: 'Week 42',
+          applied_at: null,
+          due: false,
+        });
+        const scheduleId = res.data.schedule.id as string;
+        expect(
+          await packs().listChallengeSchedules({ id: scheduleId }, { take: 1 }),
+        ).toHaveLength(1);
+
+        // The row is written by createChallengeSchedule, inside the same
+        // transaction as the schedule itself — the route no longer writes it
+        // after the fact, where an audit failure left a queued edition with no
+        // record of who queued it.
+        const audits = await packs().listAdminActionAudits(
+          { entity_type: 'challenge_stages', entity_id: scheduleId },
+          { take: 10 },
+        );
+        expect(audits).toHaveLength(1);
+        expect(audits[0]).toMatchObject({
+          action: 'create',
+          before: null,
+          reason: 'queue week 42',
+        });
+        expect(audits[0].admin_id).toBe(adminId); // fixture user from the session
+        expect(audits[0].after).toEqual({
+          starts_at: startsAt,
+          label: 'Week 42',
+          stages: [
+            {
+              stage_number: 1,
+              threshold_myr: 100,
+              rank_rewards: [{ rank: 1, card_id: cardId, credits: 0 }],
+            },
+          ],
+        });
+      });
+
+      it('POST schedule: a past start is refused and queues nothing', async () => {
+        // The refusal happens before any write, so neither the schedule row
+        // nor an audit row may exist afterwards.
+        const before = (await packs().listChallengeSchedules({}, { take: 100 }))
+          .length;
+        const res = await unwrapResponse(
+          api.post(
+            '/admin/challenge/schedule',
+            {
+              starts_at: new Date(Date.now() - DAY_MS).toISOString(),
+              label: 'Yesterday',
+              stages: [
+                {
+                  stage_number: 1,
+                  threshold_myr: 100,
+                  rank_rewards: [{ rank: 1, card_id: cardId, credits: 0 }],
+                },
+              ],
+              reason: 'queue the past',
+            },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(res.status).toBe(400);
+        expect(
+          (await packs().listChallengeSchedules({}, { take: 100 })).length,
+        ).toBe(before);
+        expect(
+          await packs().listAdminActionAudits(
+            { entity_type: 'challenge_stages', reason: 'queue the past' },
+            { take: 10 },
+          ),
+        ).toHaveLength(0);
       });
 
       it('POST settings: retired payout-only patch → 400 (no valid fields)', async () => {

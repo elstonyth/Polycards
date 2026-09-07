@@ -1,7 +1,7 @@
 # Security Verification Checklist — the controls code cannot enforce
 
 **Status:** open. Every item in A–G is a question this repository **cannot answer**,
-because the answer lives in a third-party console (Twilio, GlobePay365) or in the
+because the answer lives in a third-party console (Twilio) or in the
 running production environment. Nothing there is answered by reading the code.
 
 **Written:** 2026-08-07, at commit `db2767f5`, out of the round-10 security audit.
@@ -37,7 +37,7 @@ design** — its answers are third-party console state and change without a comm
 Two standing rules:
 
 - **No credential values in this file.** Name `TWILIO_VERIFY_SERVICE_SID` and every
-  `GLOBEPAY_*` key as a variable, never its value. The same goes for service SIDs,
+  `GATEWAY_*` key as a variable, never its value. The same goes for service SIDs,
   merchant codes, and profile identifiers when you record an answer.
 - **Do not write an answer you inferred.** An open question is useful; a confidently
   wrong one is worse than none. If you did not read it in a console, leave it open.
@@ -68,15 +68,14 @@ which they must go and ask about again.
 | 2 | Malaysia (`+60`) **was** enabled in SMS geo permissions, observed during the 2026-08-07 outage triage. What **else** is enabled is unrecorded — that is the open half of item **B**. | `CONTEXT.md:188` | 2026-08-07 | in-repo (outage triage) |
 | 3 | Twilio failure logs carry the numeric error code beside the HTTP status, so a compliance block, a geo block and a Fraud Guard hit are distinguishable **without** a console session. | `CONTEXT.md:200` | — | in-repo |
 | 4 | Diagnosis order if OTP breaks again: compliance profile → account type/balance → destination geo permission. All three sit upstream of every feature flag. | `CONTEXT.md:194-198` | — | in-repo |
-| 5 | The RSA callback signature is the **only** gate on the deposit hook — source-IP allowlisting was deliberately rejected (DO's LB hides their address). Nothing backstops a signature that verifies, which is what makes item **C** load-bearing. | `docs/payments/globepay365-setup.md:310-317` | — | in-repo |
-| 6 | Key **direction** is settled: outbound requests are signed with our merchant private key, inbound callbacks verified with GlobePay's public key (`GLOBEPAY_PUBLIC_KEY`). Key **scoping** — one platform key or one per merchant — is not stated anywhere. | `docs/payments/globepay365-setup.md:26-28`, `:38` | — | in-repo |
-| 7 | Only the `Data` object is covered by the signature; `TransactionId`, `MerchantTransactionId` and `Version` sit outside it and are mutable on an otherwise-genuine body. | `docs/payments/globepay365-setup.md:180-190` | — | in-repo |
-| 8 | `PMT10016` is the **documented** not-found code, but staging returned a bare 400 "Not found" **without** it. Both sweeps therefore treat any 400 as not-found. Partial answer to item **D**; what an **auth** failure returns is unrecorded. | `backend/packages/api/src/jobs/globepay-reconcile.ts:69-74`, `docs/payments/globepay365-setup.md:203` | — | in-repo |
-| 9 | Known error codes: `PMT10005` amount out of range, `PMT10024` payment-method routing gap, `PMT10000` duplicate merchant transaction id. None of these is an authentication failure. | `docs/payments/globepay365-setup.md:222`, `:239-242`, `backend/packages/api/src/modules/packs/models/globepay-deposit.ts:19-21` | — | in-repo |
-| 10 | Live deposit band is RM 30 – RM 10,000; payout band RM 50 – RM 50,000. Confirmed by the provider 2026-07-29, but nobody has submitted either ceiling against the live account. | `docs/payments/globepay365-setup.md:391-417` | 2026-07-29 | in-repo (provider) |
+| 5 | The RSA callback signature is the **only** gate on the deposit hook — source-IP allowlisting was deliberately rejected (DO's LB hides their address). Nothing backstops a signature that verifies. | `docs/payments/globepay365-setup.md:310-317` (removed 2026-09-07; see git history) | — | in-repo |
+| 7 | Only the `Data` object is covered by the signature; `TransactionId`, `MerchantTransactionId` and `Version` sit outside it and are mutable on an otherwise-genuine body. | `docs/payments/globepay365-setup.md:180-190` (removed 2026-09-07; see git history) | — | in-repo |
+| 8 | `PMT10016` is the **documented** not-found code, but staging returned a bare 400 "Not found" **without** it. Both sweeps therefore treat any 400 as not-found. | `backend/packages/api/src/jobs/deposit-reconcile.ts:69-74`, `docs/payments/globepay365-setup.md:203` (removed 2026-09-07; see git history) | — | in-repo |
+| 9 | Known error codes: `PMT10005` amount out of range, `PMT10024` payment-method routing gap, `PMT10000` duplicate merchant transaction id. None of these is an authentication failure. | `docs/payments/globepay365-setup.md:222`, `:239-242` (removed 2026-09-07; see git history), `backend/packages/api/src/modules/packs/models/gateway-deposit.ts:19-21` | — | in-repo |
+| 10 | Live deposit band is RM 30 – RM 10,000; payout band RM 50 – RM 50,000. Confirmed by the provider 2026-07-29, but nobody has submitted either ceiling against the live account. | `docs/payments/globepay365-setup.md:391-417` (removed 2026-09-07; see git history) | 2026-07-29 | in-repo (provider) |
 | 11 | The prod spec sets `PHONE_VERIFICATION_REQUIRED` only; `PHONE_GATE_REQUIRED` is deliberately **unset** and therefore follows it. So item **E** is one resolved value plus a confirmation that the second is still absent. | `.do/backend.app.yaml:235`, `:243` | — | in-repo |
 | 12 | `CONTEXT.md:175` records the OTP as valid for **10 minutes**. Treat this as **unconfirmed**: the same sentence attributes the six-digit length to "Twilio's own default", so the TTL is most likely the documented default rather than a reading of our service. Item **A** still asks for it. | `CONTEXT.md:175` | — | in-repo |
-| 13 | Alerting on a deposit pending past its window is **not built**. The admin Deposits page shows it; someone has to look. Both of plan 084's loud log lines are still only log lines. | `docs/payments/globepay365-setup.md:388-389` | — | in-repo |
+| 13 | Alerting on a deposit pending past its window is **not built**. The admin Deposits page shows it; someone has to look. Both of plan 084's loud log lines are still only log lines. | `docs/payments/globepay365-setup.md:388-389` (removed 2026-09-07; see git history) | — | in-repo |
 
 ---
 
@@ -119,54 +118,6 @@ is also visible in our own failure logs without a console session.
 
 **Record.** The enabled country list, the Fraud Guard state, and the date. If the list
 is wider than the allowlist plan 086 ships, say so explicitly — the two are a pair.
-
-> **Answer:** _(open)_
-
----
-
-## C. GlobePay365 callback key scoping
-
-**Question.** Does GlobePay sign callbacks with a **platform-wide** key, or with a key
-scoped to **our** merchant account?
-
-**Why it matters.** It decides whether the `MerchantCode` check added by plan 083
-(TODO) is defence-in-depth or the only thing preventing a credit for money that landed
-in someone else's merchant account. If the key is platform-wide, a callback describing
-a payment into a different merchant would verify against our configured
-`GLOBEPAY_PUBLIC_KEY` — and the signature is our only gate (settled #5).
-
-**Where to look.** Ask the provider directly; it is not derivable from the protocol
-docs, and settled #6 records that the repo states the key's direction but never its
-scoping. Do not infer it from the fact that we uploaded a per-merchant public key for
-the **outbound** direction — the two directions are independent.
-
-**Record.** The answer, **who** at the provider gave it, and the date. A name matters
-here: this one is a verbal answer with no artifact behind it.
-
-> **Answer:** _(open)_
-
----
-
-## D. GlobePay365 error taxonomy
-
-**Question.** Does a requery for a transaction that genuinely does not exist return a
-**distinguishable** code (`PMT10016` or otherwise)? And what does an
-authentication / merchant-code failure return?
-
-**Why it matters.** Both reconcile sweeps decide "write this off" / "refund this" from
-a bare HTTP 400. Plan 084 (TODO) makes the ambiguous case conservative; a confirmed
-taxonomy would let it be **precise** instead, which is the difference between a sweep
-that waits and one that acts. Settled #8 records the contradiction driving this: the
-documented code is not the one staging returned.
-
-**Where to look.** Ask the provider for the refusal taxonomy. Failing that, the
-`CheckBalance` probe (`docs/payments/globepay365-setup.md:247-253`) exercises the whole
-auth chain read-only — a deliberately wrong merchant code against it would show what an
-auth failure looks like, **but that is a live-account probe and an operator decision,
-not something to run casually.**
-
-**Record.** The HTTP status **and** response body for both cases: genuine not-found,
-and auth/merchant-code failure. Note the date and which environment.
 
 > **Answer:** _(open)_
 
@@ -231,7 +182,7 @@ whether an override was needed. Date it.
 **Why it matters.** The sweep writes `status: 'failed'` for both "the gateway said no"
 and "too old to keep chasing", then scans `pending` only — so an expired-but-live
 deposit is never looked at again
-(`backend/packages/api/src/jobs/globepay-reconcile.ts:145-150`). Plan 084 (TODO) stops
+(`backend/packages/api/src/jobs/deposit-reconcile.ts:145-150`). Plan 084 (TODO) stops
 **new** rows entering this state; it deliberately does **not** backfill, because
 deciding which historical rows to re-open is an operator call. This query finds them.
 
@@ -245,7 +196,7 @@ decide to look.
 -- gateway never returned a final failure (7 = fail).
 select id, merchant_transaction_id, gateway_transaction_id, customer_id,
        amount_requested, gateway_status, created_at
-from globepay_deposit
+from gateway_deposit
 where status = 'failed'
   and amount_settled is null
   and gateway_transaction_id is not null
@@ -275,11 +226,12 @@ will ever refund them automatically?
 
 **Why it matters.** Plan 084 narrowed both sweeps so that only an explicit `PMT10016`
 authorises the unknown-transaction path
-(`backend/packages/api/src/modules/packs/globepay-reconcile.ts`,
+(`backend/packages/api/src/modules/packs/gateway-reconcile.ts`,
 `classifyRequeryError`). That was the right call — the alternative refunds every
 in-flight payout the moment a merchant credential breaks, while the banks still execute
-them. But item **D** records that the gateway's real not-found is a plain-text 400
-carrying **no** code (`docs/payments/globepay365-setup.md:124`), so on the live gateway
+them. But the gateway's real not-found is a plain-text 400
+carrying **no** code (`docs/payments/globepay365-setup.md:124`, removed 2026-09-07; see
+git history), so on the live gateway
 `PMT10016` may never arrive at all. That makes the unknown path effectively unreachable,
 and the two sides are no longer symmetric:
 
@@ -296,7 +248,7 @@ and the two sides are no longer symmetric:
   ever return the customer's money. Today those rows accumulate in the sweep's
   50-row oldest-first window (starving it exactly as the deposit zombies would have),
   emit a `logger.error` every ten minutes that nothing pages on, and appear on **no**
-  operator surface — `/admin/globepay/withdrawals` has no view for them.
+  operator surface — `/admin/payments/withdrawals` has no view for them.
 
 **Proposed shape (NOT built — this needs its own plan).** A `needs_review` withdrawal
 status, reached after a bounded age of nothing but ambiguous refusals, that is
@@ -305,7 +257,7 @@ queue, gives an operator a list to work, and leaves the refund decision to a hum
 can check the bank. Mirrors the deposit side's `expired` without ever implying the
 payout did not happen. Needs the status, a migration, an admin view and a badge.
 
-**Where to look.** Answer item **D** first — a confirmed not-found code would make the
+**Where to look.** A confirmed not-found code from the active gateway would make the
 unknown path reachable again and shrink this to a much smaller problem. Failing that,
 count the population in production:
 
@@ -314,7 +266,7 @@ count the population in production:
 -- pending, no gateway id (so SubmitWithdrawal never returned), and older than any
 -- plausible in-flight submit.
 select id, merchant_transaction_id, customer_id, amount, created_at
-from globepay_withdrawal
+from gateway_withdrawal
 where status = 'pending'
   and gateway_transaction_id is null
   and created_at < now() - interval '1 day'
@@ -382,10 +334,10 @@ tier (single digits per minute, low tens per hour) — a human changing their ph
 number enters their password once, maybe twice. Worth checking in the same plan
 whether any other route has quietly become a credential check since it was wired.
 
-**Where to look.** `backend/packages/api/src/api/middlewares.ts:340-345` (the change
-matcher), `:269` and `:274` (the auth matchers), `api/utils/rate-limit.ts:764-800`
-(`createAuthIdentifierRateLimit`) and `:686-692` (`createDeliveryWriteRateLimit`), and
-the gate itself in `api/store/phone-verification/change/route.ts`.
+**Where to look.** `backend/packages/api/src/api/middlewares.ts` (the change and
+auth matchers), the `auth-identifier` and `delivery-write` entries in
+`backend/packages/api/src/api/utils/rate-limit.ts`, and the gate itself in
+`backend/packages/api/src/api/store/phone-verification/change/route.ts`.
 
 **Record.** The decision — build it, or accept the 90× with the reason why (the
 bearer-token precondition is a legitimate argument for accepting it). If accepted, say
@@ -401,11 +353,9 @@ so in `middlewares.ts` at the matcher, so the next auditor does not re-raise it.
   question was checked and when — a deleted item reads as a question nobody asked.
 - **Dates are the point.** An undated answer to a console question is indistinguishable
   from a guess a year later.
-- Items **A**, **B** and **E** gate how the phone-OTP findings are scored; **C**, **D**,
-  **G** and **H** gate the GlobePay ones. If an audit round starts before these are
+- Items **A**, **B** and **E** gate how the phone-OTP findings are scored; **G** and
+  **H** gate the payment-gateway ones. If an audit round starts before these are
   answered, score those findings at their **worst** plausible reading, not their best.
-  **D** gates **H** in particular: a confirmed not-found code would shrink H
-  substantially, so answering D first may save building anything for it.
 - A reviewer of this file should check two things: that no item asserts an answer
   nobody verified, and that no credential value has been recorded into an
   "Answer:" line.

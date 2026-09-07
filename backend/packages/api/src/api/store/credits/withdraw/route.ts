@@ -3,7 +3,7 @@ import {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
-import { startGlobePayWithdrawal } from '../../../../modules/packs/globepay-withdrawal';
+import { startWithdrawal } from '../../../../modules/packs/gateway-withdrawal';
 import { payerIpOf } from '../../../utils/payer-ip';
 import { contactIfNeeded } from '../../../utils/customer-contact';
 import {
@@ -11,9 +11,9 @@ import {
   resolveActiveGateway,
 } from '../../../../modules/packs/gateway';
 
-// POST /store/credits/withdraw — start a real GlobePay365 payout (method WD).
+// POST /store/credits/withdraw — start a real gateway payout (method WD).
 // The ledger is debited HERE, before the gateway call; a refused or failed
-// payout refunds it (globepay-withdrawal.ts / the withdrawal hook / the
+// payout refunds it (gateway-withdrawal.ts / the withdrawal hook / the
 // sweep — all sharing one refund idempotency anchor).
 //
 // AUTH + RATE LIMIT: registered in src/api/middlewares.ts. The customer id
@@ -79,14 +79,13 @@ export async function POST(
   // client-settable header. See src/api/utils/payer-ip.ts for why the order
   // matters.
   const ipAddress = payerIpOf(req);
-  // Some gateways (TGPay) want the recipient email on the payout request;
-  // GlobePay does not, and this route's tests run with an empty scope, so
-  // look it up only when the active gateway asks for it.
+  // Looked up only when the active gateway asks for it (needsCustomerContact;
+  // TGPay does) — this route's tests run with an empty scope.
   const email = (
     await contactIfNeeded(req.scope, gateway, customerId, 'payout')
   )?.email;
 
-  const result = await startGlobePayWithdrawal(
+  const result = await startWithdrawal(
     req.scope,
     {
       customerId,

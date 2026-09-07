@@ -41,7 +41,7 @@ export function topUpAmountError(value: unknown): string | null {
 //
 // The 'unsafe-demo' value is GONE (2026-07-29). It existed only to run the
 // always-approving mock in production while there was no real gateway; the
-// GlobePay365 gateway is that gateway, so production has no legitimate reason
+// real gateway (TGPay) is that gateway, so production has no legitimate reason
 // to mint credit again — see assertMockTopupSafe below.
 export function mockTopupAllowed(
   env: { NODE_ENV?: string; ALLOW_MOCK_TOPUP?: string } = process.env,
@@ -63,13 +63,13 @@ export function mockTopupAllowed(
 //
 // It rejects any value, not just 'true', because the old 'unsafe-demo' escape
 // hatch is gone: it existed to run the mock in production while there was no
-// real gateway, and GlobePay365 is now that gateway. A value the guard did not
+// real gateway, and there is one now. A value the guard did not
 // recognise must fail loudly rather than boot a server whose top-up path is
 // silently disabled — an operator who set the variable meant something by it.
 //
 // DEPLOY ORDER: the production spec still carried ALLOW_MOCK_TOPUP=unsafe-demo
 // when this shipped. It has to come OFF in the same spec update that adds the
-// GLOBEPAY_* vars, or the first deploy after this change refuses to boot.
+// GATEWAY_* vars, or the first deploy after this change refuses to boot.
 export function assertMockTopupSafe(
   env: { NODE_ENV?: string; ALLOW_MOCK_TOPUP?: string } = process.env,
 ): void {
@@ -79,7 +79,7 @@ export function assertMockTopupSafe(
       `ALLOW_MOCK_TOPUP is set (${env.ALLOW_MOCK_TOPUP}) but is not permitted ` +
         'in production: the mock payment gateway always approves and mints ' +
         'free spendable credit. Remove the variable from the production spec ' +
-        'and use the real payment gateway (GLOBEPAY_ENABLED=true).',
+        'and use the real payment gateway (GATEWAY_ENABLED=true).',
     );
   }
 }
@@ -151,8 +151,7 @@ export type MockChargeInput = {
 };
 
 export type MockChargeResult =
-  | { ok: true; reference: string }
-  | { ok: false; declined_reason: string };
+  { ok: true; reference: string } | { ok: false; declined_reason: string };
 
 // Unique-enough for a demo gateway; the DB row id is the real identity.
 let chargeSeq = 0;

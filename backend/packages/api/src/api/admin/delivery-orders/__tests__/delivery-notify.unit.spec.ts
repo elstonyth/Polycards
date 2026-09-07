@@ -13,17 +13,18 @@ const { POST } = require('../[id]/route');
 
 type Notif = Record<string, unknown>;
 
-function harness(order: Record<string, unknown> | undefined) {
+function harness(
+  order: Record<string, unknown> | undefined,
+  body: Record<string, unknown> = { status: 'shipped' },
+) {
   const notifications: Notif[] = [];
-  const audits: Record<string, unknown>[] = [];
+  // The route no longer writes the audit row itself — it hands the service an
+  // `audit` argument and transitionDeliveryOrderStatus writes the row inside
+  // the transaction that moves the status. So there is nothing to capture on
+  // the packs service here; what this file pins is the ARGUMENT (see
+  // runMock.mock.calls below).
   const packsService = {
     listDeliveryOrders: async () => (order ? [order] : []),
-    // The single-order route audits a status change (mirrors bulk); capture
-    // the row so the notify specs can also pin "audited once" / "not audited".
-    createAdminActionAudits: async (rows: Record<string, unknown>[]) => {
-      audits.push(...rows);
-      return rows;
-    },
   };
   const scope = {
     resolve: (key: string) => {
@@ -41,16 +42,16 @@ function harness(order: Record<string, unknown> | undefined) {
   const json = jest.fn();
   return {
     notifications,
-    audits,
     // A body with none of status/tracking_number/proof_images fails
     // coerceDeliveryUpdateBody's "provide something" guard before this
-    // route's notification wiring is ever reached. `status: 'shipped'` is
-    // inert here (the workflow is mocked and ignores `input`) and, unlike a
-    // `tracking_number` key, doesn't disturb the input.tracking_number
-    // undefined check the route uses to decide "unchanged".
+    // route's notification wiring is ever reached. The default
+    // `status: 'shipped'` is inert here (the workflow is mocked and ignores
+    // `input`) and, unlike a `tracking_number` key, doesn't disturb the
+    // input.tracking_number undefined check the route uses to decide
+    // "unchanged".
     req: {
       params: { id: 'do_1' },
-      body: { status: 'shipped' },
+      body,
       scope,
       auth_context: { actor_id: 'admin_1' },
     } as never,
@@ -84,16 +85,20 @@ it('notifies the order owner when an admin ships it', async () => {
     data: { order_id: 'do_1', status: 'shipped', tracking_number: 'TRK1' },
     idempotency_key: 'delivery:do_1:shipped',
   });
-  // One audit row per status change, same shape as the bulk route.
-  expect(h.audits).toEqual([
-    expect.objectContaining({
-      admin_id: 'admin_1',
-      entity_type: 'delivery_order',
-      entity_id: 'do_1',
-      before: { status: 'processed' },
-      after: { status: 'shipped' },
-    }),
-  ]);
+  // One audit row per status change, same shape as the bulk route — asserted
+  // through the workflow ARGUMENT now, because the row itself is written by
+  // transitionDeliveryOrderStatus inside the status change's own transaction.
+  // `before`/`after` are no longer the route's to supply: the service takes
+  // `before` from its own under-lock read and `after` from the target status.
+  expect(runMock).toHaveBeenCalledTimes(1);
+  expect(runMock.mock.calls[0][0].input).toMatchObject({
+    order_id: 'do_1',
+    audit: {
+      adminId: 'admin_1',
+      action: 'edit',
+      reason: 'mark as shipped',
+    },
+  });
   expect(h.json).toHaveBeenCalledWith({
     order_id: 'do_1',
     status: 'shipped',
@@ -144,7 +149,9 @@ it('a notification failure never fails the committed status change', async () =>
     tracking_number: null,
   });
   // Replace the notification module with one that throws.
-  const scope = h.req as unknown as { scope: { resolve: (k: string) => unknown } };
+  const scope = h.req as unknown as {
+    scope: { resolve: (k: string) => unknown };
+  };
   const original = scope.scope.resolve;
   scope.scope.resolve = (key: string) =>
     key === Modules.NOTIFICATION
@@ -160,4 +167,27 @@ it('a notification failure never fails the committed status change', async () =>
     order_id: 'do_1',
     status: 'completed',
   });
+});
+
+it('passes NO audit argument for a tracking-only update', async () => {
+  runMock.mockResolvedValue({
+    result: { order_id: 'do_1', status: 'shipped' },
+  });
+  const h = harness(
+    {
+      id: 'do_1',
+      customer_id: 'cus_1',
+      status: 'shipped',
+      tracking_number: null,
+    },
+    { tracking_number: 'TRK9' },
+  );
+
+  await POST(h.req, h.res);
+
+  // Nothing changed status, so there is nothing to audit and no admin verb to
+  // name — `mark as undefined` must never reach the service. The service also
+  // guards on this (it is skipped entirely for a tracking-only update), but a
+  // caller handing it a nonsense reason is a bug worth catching here.
+  expect(runMock.mock.calls[0][0].input.audit).toBeUndefined();
 });

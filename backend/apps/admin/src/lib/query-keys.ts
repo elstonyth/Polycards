@@ -17,21 +17,21 @@ export const qk = {
   // switching filters never shows another view's rows. `sort` always renders
   // (default '' = the route's status-dependent default order) — same
   // always-rendered-segment rule as qk.pulls.
-  globepayDeposits: (page: number, status: string, sort?: string) =>
-    ['admin', 'globepay-deposits', status, page, sort ?? ''] as const,
-  globepayWithdrawals: (page: number, status: string, sort?: string) =>
-    ['admin', 'globepay-withdrawals', status, page, sort ?? ''] as const,
+  gatewayDeposits: (page: number, status: string, sort?: string) =>
+    ['admin', 'gateway-deposits', status, page, sort ?? ''] as const,
+  gatewayWithdrawals: (page: number, status: string, sort?: string) =>
+    ['admin', 'gateway-withdrawals', status, page, sort ?? ''] as const,
   // 2-segment prefix — invalidates EVERY view/page/sort of the withdrawals
   // list in one call. Needed because approve/deny (Task 6, plan 094) move a
   // row across views (out of 'held', into 'pending' or 'failed'), unlike a
   // plain read that only ever touches the one (page, status, sort) it fetched.
-  globepayWithdrawalsKey: ['admin', 'globepay-withdrawals'] as const,
+  gatewayWithdrawalsKey: ['admin', 'gateway-withdrawals'] as const,
   economy: ['admin', 'economy'] as const,
   // (granularity, periods) always render — same always-rendered-segment rule
   // as qk.pulls: week and month views cache independently.
   settlement: (granularity: string, periods: number) =>
-    ['admin', 'globepay-settlement', granularity, periods] as const,
-  globepayBalance: ['admin', 'globepay-balance'] as const,
+    ['admin', 'gateway-settlement', granularity, periods] as const,
+  gatewayBalance: ['admin', 'gateway-balance'] as const,
   gatewayAudit: ['admin', 'gateway-audit'] as const,
   paymentGateway: ['admin', 'payment-gateway'] as const,
   // Referral rebuild (spec 2026-08-24).

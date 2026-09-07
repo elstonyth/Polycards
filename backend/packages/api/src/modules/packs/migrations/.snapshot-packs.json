@@ -2456,47 +2456,47 @@
           "mappedType": "datetime"
         }
       },
-      "name": "globepay_deposit",
+      "name": "gateway_deposit",
       "schema": "public",
       "indexes": [
         {
-          "keyName": "IDX_globepay_deposit_merchant_transaction_id_unique",
+          "keyName": "IDX_gateway_deposit_merchant_transaction_id_unique",
           "columnNames": [],
           "composite": false,
           "constraint": false,
           "primary": false,
           "unique": false,
-          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"IDX_globepay_deposit_merchant_transaction_id_unique\" ON \"globepay_deposit\" (\"merchant_transaction_id\") WHERE deleted_at IS NULL"
+          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"IDX_gateway_deposit_merchant_transaction_id_unique\" ON \"gateway_deposit\" (\"merchant_transaction_id\") WHERE deleted_at IS NULL"
         },
         {
-          "keyName": "IDX_globepay_deposit_deleted_at",
+          "keyName": "IDX_gateway_deposit_deleted_at",
           "columnNames": [],
           "composite": false,
           "constraint": false,
           "primary": false,
           "unique": false,
-          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_globepay_deposit_deleted_at\" ON \"globepay_deposit\" (\"deleted_at\") WHERE deleted_at IS NULL"
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_gateway_deposit_deleted_at\" ON \"gateway_deposit\" (\"deleted_at\") WHERE deleted_at IS NULL"
         },
         {
-          "keyName": "IDX_globepay_deposit_merchant_transaction_id",
+          "keyName": "IDX_gateway_deposit_merchant_transaction_id",
           "columnNames": [],
           "composite": false,
           "constraint": false,
           "primary": false,
           "unique": false,
-          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_globepay_deposit_merchant_transaction_id\" ON \"globepay_deposit\" (\"merchant_transaction_id\") WHERE deleted_at IS NULL"
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_gateway_deposit_merchant_transaction_id\" ON \"gateway_deposit\" (\"merchant_transaction_id\") WHERE deleted_at IS NULL"
         },
         {
-          "keyName": "IDX_globepay_deposit_status_created_at",
+          "keyName": "IDX_gateway_deposit_status_created_at",
           "columnNames": [],
           "composite": false,
           "constraint": false,
           "primary": false,
           "unique": false,
-          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_globepay_deposit_status_created_at\" ON \"globepay_deposit\" (\"status\", \"created_at\") WHERE deleted_at IS NULL"
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_gateway_deposit_status_created_at\" ON \"gateway_deposit\" (\"status\", \"created_at\") WHERE deleted_at IS NULL"
         },
         {
-          "keyName": "globepay_deposit_pkey",
+          "keyName": "gateway_deposit_pkey",
           "columnNames": [
             "id"
           ],
@@ -2742,56 +2742,56 @@
           "mappedType": "datetime"
         }
       },
-      "name": "globepay_withdrawal",
+      "name": "gateway_withdrawal",
       "schema": "public",
       "indexes": [
         {
-          "keyName": "IDX_globepay_withdrawal_merchant_transaction_id_unique",
+          "keyName": "IDX_gateway_withdrawal_merchant_transaction_id_unique",
           "columnNames": [],
           "composite": false,
           "constraint": false,
           "primary": false,
           "unique": false,
-          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"IDX_globepay_withdrawal_merchant_transaction_id_unique\" ON \"globepay_withdrawal\" (\"merchant_transaction_id\") WHERE deleted_at IS NULL"
+          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"IDX_gateway_withdrawal_merchant_transaction_id_unique\" ON \"gateway_withdrawal\" (\"merchant_transaction_id\") WHERE deleted_at IS NULL"
         },
         {
-          "keyName": "IDX_globepay_withdrawal_deleted_at",
+          "keyName": "IDX_gateway_withdrawal_deleted_at",
           "columnNames": [],
           "composite": false,
           "constraint": false,
           "primary": false,
           "unique": false,
-          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_globepay_withdrawal_deleted_at\" ON \"globepay_withdrawal\" (\"deleted_at\") WHERE deleted_at IS NULL"
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_gateway_withdrawal_deleted_at\" ON \"gateway_withdrawal\" (\"deleted_at\") WHERE deleted_at IS NULL"
         },
         {
-          "keyName": "IDX_globepay_withdrawal_merchant_transaction_id",
+          "keyName": "IDX_gateway_withdrawal_merchant_transaction_id",
           "columnNames": [],
           "composite": false,
           "constraint": false,
           "primary": false,
           "unique": false,
-          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_globepay_withdrawal_merchant_transaction_id\" ON \"globepay_withdrawal\" (\"merchant_transaction_id\") WHERE deleted_at IS NULL"
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_gateway_withdrawal_merchant_transaction_id\" ON \"gateway_withdrawal\" (\"merchant_transaction_id\") WHERE deleted_at IS NULL"
         },
         {
-          "keyName": "IDX_globepay_withdrawal_status_created_at",
+          "keyName": "IDX_gateway_withdrawal_status_created_at",
           "columnNames": [],
           "composite": false,
           "constraint": false,
           "primary": false,
           "unique": false,
-          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_globepay_withdrawal_status_created_at\" ON \"globepay_withdrawal\" (\"status\", \"created_at\") WHERE deleted_at IS NULL"
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_gateway_withdrawal_status_created_at\" ON \"gateway_withdrawal\" (\"status\", \"created_at\") WHERE deleted_at IS NULL"
         },
         {
-          "keyName": "UQ_globepay_withdrawal_customer_idempotency_key",
+          "keyName": "UQ_gateway_withdrawal_customer_idempotency_key",
           "columnNames": [],
           "composite": false,
           "constraint": false,
           "primary": false,
           "unique": false,
-          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"UQ_globepay_withdrawal_customer_idempotency_key\" ON \"globepay_withdrawal\" (\"customer_id\", \"idempotency_key\") WHERE idempotency_key is not null and deleted_at is null and status <> 'failed'"
+          "expression": "CREATE UNIQUE INDEX IF NOT EXISTS \"UQ_gateway_withdrawal_customer_idempotency_key\" ON \"gateway_withdrawal\" (\"customer_id\", \"idempotency_key\") WHERE idempotency_key is not null and deleted_at is null and status <> 'failed'"
         },
         {
-          "keyName": "globepay_withdrawal_pkey",
+          "keyName": "gateway_withdrawal_pkey",
           "columnNames": [
             "id"
           ],

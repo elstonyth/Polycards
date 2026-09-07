@@ -744,7 +744,7 @@ export type PendingDeposit = {
 };
 
 /** How long before a pending deposit stops being "confirming" and becomes a
- *  support case. Mirrors the backend's GLOBEPAY_STALE_AFTER_MS, which is also
+ *  support case. Mirrors the backend's GATEWAY_STALE_AFTER_MS, which is also
  *  where it stops being served at all — so this only bites on a page left
  *  open, and stops that page claiming to confirm something indefinitely. */
 const DEPOSIT_OVERDUE_MS = 60 * 60 * 1000;

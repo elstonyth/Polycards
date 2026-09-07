@@ -10,6 +10,17 @@ export type UpdateDeliveryOrderInput = {
   status?: DeliveryStatus;
   tracking_number?: string | null;
   proof_images?: string[];
+  /**
+   * Admin actor + verb for the admin_action_audit row. Passed straight through
+   * to transitionDeliveryOrderStatus, which writes it inside the same
+   * transaction as the status change. Omitted by the customer cancel route —
+   * there is no admin to name.
+   */
+  audit?: {
+    adminId: string;
+    action: 'edit' | 'bulk_status';
+    reason: string;
+  };
 };
 
 export type UpdateDeliveryOrderResult = {
@@ -121,6 +132,7 @@ export const updateDeliveryOrderInvoke = async (
     trackingNumber: nextTracking ?? null,
     proofImages: input.proof_images,
     pullIds,
+    audit: input.audit,
   });
 
   const prevPullStatus: 'delivering' | null =

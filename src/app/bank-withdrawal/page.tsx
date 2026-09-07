@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 // Three honest states: signed-out visitors get the auth wall; signed-in
 // customers get the real payout form once withdrawals are switched on
 // (NEXT_PUBLIC_WITHDRAWALS_ENABLED, mirrored by the backend's own fail-closed
-// GLOBEPAY_WITHDRAWALS_ENABLED), and the "not open yet" notice until then.
+// GATEWAY_WITHDRAWALS_ENABLED), and the "not open yet" notice until then.
 export const dynamic = 'force-dynamic';
 
 const WITHDRAWALS_OPEN = process.env.NEXT_PUBLIC_WITHDRAWALS_ENABLED === 'true';

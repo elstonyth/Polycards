@@ -152,7 +152,7 @@ describe('assertMockTopupSafe', () => {
   });
 
   // 2026-07-29: production may not run the mock gateway at all now that
-  // GlobePay365 exists. ANY value refuses boot — including the retired
+  // a real gateway exists. ANY value refuses boot — including the retired
   // 'unsafe-demo' and values the guard has never seen, because an operator who
   // set the variable meant something by it and a silently-disabled top-up path
   // is worse than a loud refusal.

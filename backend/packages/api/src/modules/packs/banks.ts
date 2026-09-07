@@ -41,7 +41,10 @@ const bank = (
 ): Bank => ({
   id,
   name,
-  codes: tgpay ? { tgpay } : {},
+  // The test-only 'fake' gateway (fake-gateway.ts) pays to exactly what TGPay
+  // pays to, so a spec that selects it takes the SAME supported/unsupported
+  // branches as production instead of finding every saved account unpayable.
+  codes: tgpay ? { tgpay, fake: tgpay } : {},
   legacyAliases: legacy ? [legacy.code] : [],
 });
 

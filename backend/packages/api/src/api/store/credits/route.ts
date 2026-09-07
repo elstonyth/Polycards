@@ -1,10 +1,12 @@
 import {
   AuthenticatedMedusaRequest,
   MedusaResponse,
-} from "@medusajs/framework/http";
-import PacksModuleService from "../../../modules/packs/service";
-import { PACKS_MODULE } from "../../../modules/packs";
-import { parsePaginationParams } from "../../../utils/pagination";
+} from '@medusajs/framework/http';
+import {
+  resolvePacks,
+  type CustomerWallet,
+} from '../../../modules/packs/facets';
+import { parsePaginationParams } from '../../../utils/pagination';
 
 // GET /store/credits — the authenticated customer's site-credit balance
 // (paged Σ over the append-only ledger — exact at any size) plus a page of
@@ -16,9 +18,9 @@ const PAGE_SIZE = 20;
 
 export async function GET(
   req: AuthenticatedMedusaRequest,
-  res: MedusaResponse
+  res: MedusaResponse,
 ): Promise<void> {
-  const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
+  const packs = resolvePacks<CustomerWallet>(req.scope);
   const customerId = req.auth_context.actor_id;
   const { limit, offset } = parsePaginationParams(req.query, {
     defaultLimit: PAGE_SIZE,
@@ -36,7 +38,11 @@ export async function GET(
       { customer_id: customerId },
       // id tiebreaker: batch buybacks land sibling rows in the same instant,
       // and created_at alone gives no stable order across offset pages.
-      { order: { created_at: "DESC", id: "DESC" }, take: limit + 1, skip: offset }
+      {
+        order: { created_at: 'DESC', id: 'DESC' },
+        take: limit + 1,
+        skip: offset,
+      },
     ),
   ]);
   const hasMore = txnRows.length > limit;
@@ -53,27 +59,32 @@ export async function GET(
   // to the gateway record (the reference is the gateway's id, or our merchant
   // reference when the gateway never issued one).
   const isMoneyRow = (reason: string) =>
-    reason === "topup" || reason === "cashout";
+    reason === 'topup' || reason === 'cashout';
   const refs = transactions
     .filter((t) => isMoneyRow(t.reason) && t.reference)
     .map((t) => t.reference as string);
   const gatewayByRef = new Map<string, { method: string; status: string }>();
   if (refs.length > 0) {
     const byRef = {
-      $or: [{ gateway_transaction_id: refs }, { merchant_transaction_id: refs }],
+      $or: [
+        { gateway_transaction_id: refs },
+        { merchant_transaction_id: refs },
+      ],
     };
     const [deposits, withdrawals] = await Promise.all([
-      packs.listGlobePayDeposits(byRef, { take: refs.length * 2 }),
-      packs.listGlobePayWithdrawals(byRef, { take: refs.length * 2 }),
+      packs.listGatewayDeposits(byRef, { take: refs.length * 2 }),
+      packs.listGatewayWithdrawals(byRef, { take: refs.length * 2 }),
     ]);
     for (const d of deposits) {
       const fact = { method: d.payment_method_code, status: d.status };
-      if (d.gateway_transaction_id) gatewayByRef.set(d.gateway_transaction_id, fact);
+      if (d.gateway_transaction_id)
+        gatewayByRef.set(d.gateway_transaction_id, fact);
       gatewayByRef.set(d.merchant_transaction_id, fact);
     }
     for (const w of withdrawals) {
-      const fact = { method: "WD", status: w.status };
-      if (w.gateway_transaction_id) gatewayByRef.set(w.gateway_transaction_id, fact);
+      const fact = { method: 'WD', status: w.status };
+      if (w.gateway_transaction_id)
+        gatewayByRef.set(w.gateway_transaction_id, fact);
       gatewayByRef.set(w.merchant_transaction_id, fact);
     }
   }

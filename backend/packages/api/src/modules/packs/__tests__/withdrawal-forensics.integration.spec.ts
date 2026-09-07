@@ -2,7 +2,7 @@ import path from 'path';
 import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
 import { PACKS_MODULE } from '../index';
 import type PacksModuleService from '../service';
-import GlobePayWithdrawal from '../models/globepay-withdrawal';
+import GatewayWithdrawal from '../models/gateway-withdrawal';
 
 jest.setTimeout(300 * 1000);
 
@@ -12,8 +12,8 @@ jest.setTimeout(300 * 1000);
 // the generated service's find-then-write actually flushes.
 //
 // The production sequence these reproduce, in order:
-//   1. startGlobePayWithdrawal inserts the row and keeps the returned object
-//   2. GlobePay POSTs Payout Verification to a DIFFERENT request, which stamps
+//   1. startWithdrawal inserts the row and keeps the returned object
+//   2. the gateway's Payout Verification hits a DIFFERENT request, which stamps
 //      verify_outcome on that same row
 //   3. their SubmitWithdrawal response comes back a refusal, and the ORIGINAL
 //      request closes the row from the object it captured in step 1
@@ -28,10 +28,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
   resolve: path.resolve(__dirname, '../../..', 'modules/packs'),
   // The runner generates the schema from THIS list, never from the
   // migrations — a model missing here fails as `relation … does not exist`.
-  moduleModels: [GlobePayWithdrawal],
+  moduleModels: [GatewayWithdrawal],
   testSuite: ({ service }) => {
     const newRow = (merchantTransactionId: string) =>
-      service.createGlobePayWithdrawals([
+      service.createGatewayWithdrawals([
         {
           merchant_transaction_id: merchantTransactionId,
           customer_id: 'cus_forensics',
@@ -44,7 +44,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       ]);
 
     const reread = async (id: string) => {
-      const [row] = await service.listGlobePayWithdrawals({ id }, { take: 1 });
+      const [row] = await service.listGatewayWithdrawals({ id }, { take: 1 });
       return row;
     };
 
@@ -53,14 +53,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
         const [inserted] = await newRow('PC-forensics-1');
 
         // Step 2, from the verification request.
-        await service.updateGlobePayWithdrawals({
+        await service.updateGatewayWithdrawals({
           id: inserted.id,
           verify_outcome: '2026-08-12T00:00:00.000Z rejected: amount 403.2 !=',
         });
 
         // Step 3, from the object step 1 captured — deliberately the STALE
         // one, which is what the refusal branch actually holds.
-        await service.updateGlobePayWithdrawals({
+        await service.updateGatewayWithdrawals({
           id: inserted.id,
           status: 'failed',
           failure_reason: 'submit refused: codes=PMT10013 httpStatus=200',
@@ -75,14 +75,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
       it('keeps it through the selector-scoped close the sweep and deny use', async () => {
         const [inserted] = await newRow('PC-forensics-2');
-        await service.updateGlobePayWithdrawals({
+        await service.updateGatewayWithdrawals({
           id: inserted.id,
           verify_outcome: '2026-08-12T00:00:00.000Z success',
         });
 
-        // refundGlobePayWithdrawal's terminal update — a different write shape
+        // refundWithdrawal's terminal update — a different write shape
         // (selector + data), so it needs its own proof.
-        await service.updateGlobePayWithdrawals({
+        await service.updateGatewayWithdrawals({
           selector: { id: inserted.id, status: 'pending' },
           data: {
             status: 'failed',

@@ -1,7 +1,7 @@
 import { Modules } from '@medusajs/framework/utils';
 import { TOPUP_RECEIPT_TEMPLATE } from '../resend/templates';
 
-// The emailed receipt for a settled GlobePay365 top-up. Sits beside notifyFeed
+// The emailed receipt for a settled gateway top-up. Sits beside notifyFeed
 // (the in-app bell row): the feed tells them while they are on the site, this
 // reaches them when they are not, and it is the artefact they keep.
 //

@@ -1,7 +1,4 @@
-import {
-  ContainerRegistrationKeys,
-  Modules,
-} from '@medusajs/framework/utils';
+import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import type {
   IAuthModuleService,
   ICustomerModuleService,
@@ -28,8 +25,7 @@ type NotificationModuleWithDelete = INotificationModuleService & {
 };
 
 export type AccountDeletionResult =
-  | { ok: true }
-  | { ok: false; reason: string; detail: string };
+  { ok: true } | { ok: false; reason: string; detail: string };
 
 // The single definition of "delete an account" — moved here verbatim from
 // POST /store/customers/me/delete (store/customers/me/delete/route.ts) so an
@@ -86,7 +82,7 @@ export async function purgeAndDeleteAccount(
   //    "anonymous books" rationale does not reach either. Do NOT narrow this
   //    back to the email alone: that silently leaves the entire feed history,
   //    including the bank details the purge just scrubbed out of
-  //    globepay_withdrawal, behind.
+  //    gateway_withdrawal, behind.
   //
   //    Read the address and delete them BEFORE the scrub below overwrites it.
   //    If this step fails the address is still intact, so a re-run finds the

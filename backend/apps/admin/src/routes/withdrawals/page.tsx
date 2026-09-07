@@ -15,14 +15,14 @@ import {
 import { ArrowUpTray } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
-  useGlobePayWithdrawals,
-  useApproveGlobePayWithdrawal,
-  useDenyGlobePayWithdrawal,
+  useGatewayWithdrawals,
+  useApproveWithdrawal,
+  useDenyWithdrawal,
 } from '../../lib/queries';
-import { getGlobePayWithdrawalAccount } from '../../lib/admin-rest';
+import { getWithdrawalAccount } from '../../lib/admin-rest';
 import type {
-  GlobePayWithdrawal,
-  GlobePayWithdrawalView,
+  GatewayWithdrawal,
+  GatewayWithdrawalView,
 } from '../../lib/admin-rest';
 import { rm, timeAgo } from '../../lib/format';
 import { useTableSort } from '../../lib/use-table-sort';
@@ -41,7 +41,7 @@ export const config: RouteConfig = {
 // gateway". The backend's own default stays 'pending' (route.ts); this SPA
 // always sends `status` explicitly, so this ordering/default is what actually
 // decides what an operator sees first.
-const VIEWS: GlobePayWithdrawalView[] = [
+const VIEWS: GatewayWithdrawalView[] = [
   'held',
   'pending',
   'settled',
@@ -49,7 +49,7 @@ const VIEWS: GlobePayWithdrawalView[] = [
   'all',
 ];
 
-// EXACTLY the backend's SORTABLE allow-list (api/admin/globepay/withdrawals/
+// EXACTLY the backend's SORTABLE allow-list (api/admin/payments/withdrawals/
 // route.ts) — real columns only, and only the ones this table renders a header
 // for. Adding a key here without a header (or vice versa) drifts the two lists.
 type SortKey = 'created_at' | 'amount';
@@ -58,7 +58,7 @@ type SortKey = 'created_at' | 'amount';
 // the inverse reason: did we debit somebody whose payout never confirmed AND
 // never refunded? A stale pending row (past the sweep window, flagged
 // server-side) is that customer until proven otherwise.
-const statusBadge = (w: GlobePayWithdrawal, label: string) => {
+const statusBadge = (w: GatewayWithdrawal, label: string) => {
   // held: needs a human, not the gateway — orange reads as "awaiting action"
   // the same way a stale pending row does, without conflating the two (a
   // held row's `stale` is always false; the sweep never touches it).
@@ -77,17 +77,17 @@ const WithdrawalsPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const prompt = usePrompt();
-  const approveMutation = useApproveGlobePayWithdrawal();
-  const denyMutation = useDenyGlobePayWithdrawal();
+  const approveMutation = useApproveWithdrawal();
+  const denyMutation = useDenyWithdrawal();
   const [page, setPage] = useState(0);
-  const [view, setView] = useState<GlobePayWithdrawalView>('held');
+  const [view, setView] = useState<GatewayWithdrawalView>('held');
   // Starts NULL, not seeded — same contract as the Deposits page: the route's
   // status-dependent default order (pending AND held oldest-first — Task 6,
   // plan 094) holds until the operator explicitly picks a column.
   const { sort, sortHeader } = useTableSort<SortKey>(null, {
     onChange: () => setPage(0),
   });
-  const { data, isError } = useGlobePayWithdrawals(
+  const { data, isError } = useGatewayWithdrawals(
     page,
     view,
     sort ? `${sort.key}:${sort.dir}` : undefined,
@@ -109,7 +109,7 @@ const WithdrawalsPage = () => {
     if (revealing.has(id)) return;
     setRevealing((prev) => new Set(prev).add(id));
     try {
-      const { account_number } = await getGlobePayWithdrawalAccount(id);
+      const { account_number } = await getWithdrawalAccount(id);
       setRevealed((prev) => ({ ...prev, [id]: account_number }));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -153,7 +153,7 @@ const WithdrawalsPage = () => {
   // never `revealed[w.id]` even if the operator already revealed this row —
   // the brief asks for "the masked destination", and the confirm step is the
   // last gate before a real bank payout, not a second reveal surface.
-  const approveHeld = (w: GlobePayWithdrawal) =>
+  const approveHeld = (w: GatewayWithdrawal) =>
     withActing(w.id, async () => {
       const ok = await prompt({
         title: t('withdrawals.confirmApproveTitle'),
@@ -170,7 +170,7 @@ const WithdrawalsPage = () => {
       await approveMutation.mutateAsync(w.id);
     });
 
-  const denyHeld = (w: GlobePayWithdrawal) =>
+  const denyHeld = (w: GatewayWithdrawal) =>
     withActing(w.id, async () => {
       const ok = await prompt({
         title: t('withdrawals.confirmDenyTitle'),
@@ -190,7 +190,7 @@ const WithdrawalsPage = () => {
   // A view change restarts paging — page 3 of "pending" has nothing to do
   // with page 3 of "all".
   const changeView = (next: string) => {
-    setView(next as GlobePayWithdrawalView);
+    setView(next as GatewayWithdrawalView);
     setPage(0);
   };
 

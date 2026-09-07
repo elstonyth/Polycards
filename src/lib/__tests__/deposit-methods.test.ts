@@ -55,7 +55,7 @@ describe('enabledDepositMethods (runtime retract switch)', () => {
 
   it('falls back to everything rather than leaving no way to pay', () => {
     // A typo must not silently strand every customer. Killing top-ups outright
-    // is GLOBEPAY_ENABLED's job on the backend, not this switch's.
+    // is GATEWAY_ENABLED's job on the backend, not this switch's.
     expect(codes('')).toEqual(DEPOSIT_METHODS.map((m) => m.code));
     expect(codes('FPX')).toEqual(DEPOSIT_METHODS.map((m) => m.code));
   });

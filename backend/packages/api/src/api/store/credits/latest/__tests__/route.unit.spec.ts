@@ -3,6 +3,10 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { GET as latest } from '../route';
+import type {
+  FakeFacet,
+  CustomerWallet,
+} from '../../../../../modules/packs/facets';
 
 // The route's whole job is: read the caller's own newest ledger row. This spec
 // pins the three things that make it correct — the customer id comes from the
@@ -11,7 +15,10 @@ import { GET as latest } from '../route';
 // ledger answers null rather than omitting the key.
 const mkRes = () => {
   const out: { body?: unknown } = {};
-  return { res: { json: (b: unknown) => (out.body = b) } as unknown as MedusaResponse, out };
+  return {
+    res: { json: (b: unknown) => (out.body = b) } as unknown as MedusaResponse,
+    out,
+  };
 };
 
 const listCreditTransactions = jest.fn();
@@ -20,7 +27,10 @@ const mkReq = (customerId = 'cus_1') => ({
   auth_context: { actor_id: customerId },
   query: {},
   params: {},
-  scope: { resolve: () => ({ listCreditTransactions }) },
+  scope: {
+    resolve: () =>
+      ({ listCreditTransactions }) satisfies FakeFacet<CustomerWallet>,
+  },
 });
 
 beforeEach(() => {
@@ -42,7 +52,9 @@ describe('GET /store/credits/latest', () => {
 
   it('returns the newest row created_at when the ledger is not empty', async () => {
     const when = new Date('2026-08-05T10:00:00.000Z');
-    listCreditTransactions.mockResolvedValue([{ id: 'ct_1', created_at: when }]);
+    listCreditTransactions.mockResolvedValue([
+      { id: 'ct_1', created_at: when },
+    ]);
     const { res, out } = mkRes();
 
     await latest(mkReq() as unknown as AuthenticatedMedusaRequest, res);

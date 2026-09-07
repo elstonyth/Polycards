@@ -1,8 +1,8 @@
 // Gateway-neutral shapes shared by every payment-gateway client, the
-// adapters in gateway.ts, and the money orchestration. These were GlobePay's
-// wire shapes originally (the orchestration was built against them); the
-// GlobePay integration is gone but the shapes stay, so a new gateway is an
-// adapter that maps onto them, nothing in the orchestration or the sweeps.
+// adapters in gateway.ts, and the money orchestration. They are the shapes the
+// orchestration was built against (the first gateway's wire format, since
+// retired), so a new gateway is an adapter that maps onto them, nothing in
+// the orchestration or the sweeps.
 
 /** What a deposit or payout has come to, in our terms. */
 export type SettlementState = 'success' | 'failed' | 'pending';

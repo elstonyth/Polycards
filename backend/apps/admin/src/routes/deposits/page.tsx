@@ -11,10 +11,10 @@ import {
 } from '@medusajs/ui';
 import { CurrencyDollar } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
-import { useGlobePayDeposits } from '../../lib/queries';
+import { useGatewayDeposits } from '../../lib/queries';
 import type {
-  GlobePayDeposit,
-  GlobePayDepositView,
+  GatewayDeposit,
+  GatewayDepositView,
 } from '../../lib/admin-rest';
 import { rm, timeAgo } from '../../lib/format';
 import { useTableSort } from '../../lib/use-table-sort';
@@ -28,7 +28,7 @@ export const config: RouteConfig = {
   rank: 2,
 };
 
-const VIEWS: GlobePayDepositView[] = [
+const VIEWS: GatewayDepositView[] = [
   'pending',
   'settled',
   'failed',
@@ -36,7 +36,7 @@ const VIEWS: GlobePayDepositView[] = [
   'all',
 ];
 
-// EXACTLY the backend's SORTABLE allow-list (api/admin/globepay/deposits/
+// EXACTLY the backend's SORTABLE allow-list (api/admin/payments/deposits/
 // route.ts) — real columns only. Customer and status are computed/joined
 // server-side after the page is fetched, so those headers stay plain.
 //
@@ -47,7 +47,7 @@ type SortKey = 'created_at' | 'amount_requested' | 'amount_settled';
 // Pending is the default view because this page exists for ONE question: did
 // somebody pay and not get credit? A stale pending row (older than the sweep's
 // stale window, flagged server-side) is that case until proven otherwise.
-const statusBadge = (d: GlobePayDeposit, label: string) => {
+const statusBadge = (d: GatewayDeposit, label: string) => {
   if (d.status === 'settled')
     return <StatusBadge color="green">{label}</StatusBadge>;
   if (d.status === 'failed')
@@ -67,14 +67,14 @@ const DepositsPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [page, setPage] = useState(0);
-  const [view, setView] = useState<GlobePayDepositView>('pending');
+  const [view, setView] = useState<GatewayDepositView>('pending');
   // Starts NULL, not seeded: with no explicit sort the route orders pending
   // oldest-first (the work queue) and history views newest-first, and a seeded
   // default would silently flatten that. First header click opts in.
   const { sort, sortHeader } = useTableSort<SortKey>(null, {
     onChange: () => setPage(0),
   });
-  const { data, isError } = useGlobePayDeposits(
+  const { data, isError } = useGatewayDeposits(
     page,
     view,
     sort ? `${sort.key}:${sort.dir}` : undefined,
@@ -83,7 +83,7 @@ const DepositsPage = () => {
   // A view change restarts paging: page 3 of "pending" has nothing to do with
   // page 3 of "all", and keeping the offset lands the operator on an empty page.
   const changeView = (next: string) => {
-    setView(next as GlobePayDepositView);
+    setView(next as GatewayDepositView);
     setPage(0);
   };
 

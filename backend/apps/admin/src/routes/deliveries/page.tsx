@@ -20,7 +20,7 @@ import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useBulkUpdateDeliveryOrders,
   useDeliveryOrders,
-  useGlobePayDeposits,
+  useGatewayDeposits,
   usePulls,
   useUpdateDeliveryOrder,
   useUploadImage,
@@ -29,7 +29,7 @@ import type {
   AdminDeliveryItem,
   AdminDeliveryOrder,
   DeliveryStatus,
-  GlobePayDeposit,
+  GatewayDeposit,
 } from '../../lib/admin-rest';
 import {
   DELIVERY_STATUS_LABEL,
@@ -67,10 +67,10 @@ const TONE: Record<DeliveryStatus, 'orange' | 'blue' | 'green' | 'grey'> = {
   canceled: 'grey',
 };
 
-// Exhaustive over GlobePayDeposit['status'], so a new gateway status is a type
+// Exhaustive over GatewayDeposit['status'], so a new gateway status is a type
 // error here rather than a raw token in the badge.
 const DEPOSIT_TONE: Record<
-  GlobePayDeposit['status'],
+  GatewayDeposit['status'],
   'orange' | 'green' | 'red' | 'purple'
 > = {
   pending: 'orange',
@@ -81,7 +81,7 @@ const DEPOSIT_TONE: Record<
   // the page and must not read as either settled, refused, or still-in-flight.
   expired: 'purple',
 };
-const DEPOSIT_STATUS_LABEL: Record<GlobePayDeposit['status'], string> = {
+const DEPOSIT_STATUS_LABEL: Record<GatewayDeposit['status'], string> = {
   pending: 'Pending',
   settled: 'Settled',
   failed: 'Failed',
@@ -246,7 +246,7 @@ const PackPurchases = () => {
 const Topups = () => {
   const navigate = useNavigate();
   const [page, setPage] = useState(0);
-  const { data, isError } = useGlobePayDeposits(page, 'all');
+  const { data, isError } = useGatewayDeposits(page, 'all');
   const deposits = data?.deposits ?? null;
 
   return (

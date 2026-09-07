@@ -38,26 +38,26 @@ import {
   getDeliveryOrder,
   getEconomyReport,
   getSettlementReport,
-  getGlobePayBalance,
+  getGatewayBalance,
   getGatewayAudit,
   getPaymentGateway,
   savePaymentGateway,
   type SettlementGranularity,
   type SettlementReport,
-  type GlobePayBalance,
+  type GatewayBalance,
   type GatewayAudit,
   type PaymentGatewaySetting,
   getFxHistory,
   getFxRate,
   getPulls,
-  getGlobePayDeposits,
-  type GlobePayDepositView,
-  type GlobePayDepositsResponse,
-  getGlobePayWithdrawals,
-  type GlobePayWithdrawalView,
-  type GlobePayWithdrawalsResponse,
-  approveGlobePayWithdrawal,
-  denyGlobePayWithdrawal,
+  getGatewayDeposits,
+  type GatewayDepositView,
+  type GatewayDepositsResponse,
+  getGatewayWithdrawals,
+  type GatewayWithdrawalView,
+  type GatewayWithdrawalsResponse,
+  approveWithdrawal,
+  denyWithdrawal,
   getPixelPokemon,
   createPixelPokemon,
   type PixelPokemonPage,
@@ -233,10 +233,10 @@ export const useSettlementReport = (
 // Live merchant balance at the gateway. A real upstream call (20s worst case),
 // so it refetches on a slow interval rather than every focus — the number
 // moves with settlements, not with tab switches.
-export const useGlobePayBalance = (): UseQueryResult<GlobePayBalance> =>
+export const useGatewayBalance = (): UseQueryResult<GatewayBalance> =>
   useQuery({
-    queryKey: qk.globepayBalance,
-    queryFn: getGlobePayBalance,
+    queryKey: qk.gatewayBalance,
+    queryFn: getGatewayBalance,
     refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
@@ -259,7 +259,7 @@ export const useSavePaymentGateway = () => {
     onSuccess: () => {
       toast.success('Payment gateway switched');
       qc.invalidateQueries({ queryKey: qk.paymentGateway });
-      qc.invalidateQueries({ queryKey: qk.globepayBalance });
+      qc.invalidateQueries({ queryKey: qk.gatewayBalance });
       qc.invalidateQueries({ queryKey: qk.gatewayAudit });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
@@ -858,14 +858,14 @@ export const useSaveTierSettings = () => {
 
 // Gateway deposits. Polls once a minute: this is the money-in watch list, and a
 // stranded payment should surface without an operator remembering to reload.
-export const useGlobePayDeposits = (
+export const useGatewayDeposits = (
   page = 0,
-  status: GlobePayDepositView = 'pending',
+  status: GatewayDepositView = 'pending',
   sort?: string,
-): UseQueryResult<GlobePayDepositsResponse> =>
+): UseQueryResult<GatewayDepositsResponse> =>
   useQuery({
-    queryKey: qk.globepayDeposits(page, status, sort),
-    queryFn: () => getGlobePayDeposits(page, status, 50, sort),
+    queryKey: qk.gatewayDeposits(page, status, sort),
+    queryFn: () => getGatewayDeposits(page, status, 50, sort),
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
   });
@@ -873,18 +873,18 @@ export const useGlobePayDeposits = (
 // Gateway withdrawals — same one-minute poll as deposits: this is the
 // money-out watch list, and a debited-but-unpaid customer should surface
 // without an operator remembering to reload.
-export const useGlobePayWithdrawals = (
+export const useGatewayWithdrawals = (
   page = 0,
   // No default: the sole caller (routes/withdrawals/page.tsx) always passes
   // this explicitly, seeded from state initialized to 'held' (plan 094's
   // operator-facing default view). A `= 'pending'` default here was dead and
   // actively misleading — it contradicted that default without ever firing.
-  status: GlobePayWithdrawalView,
+  status: GatewayWithdrawalView,
   sort?: string,
-): UseQueryResult<GlobePayWithdrawalsResponse> =>
+): UseQueryResult<GatewayWithdrawalsResponse> =>
   useQuery({
-    queryKey: qk.globepayWithdrawals(page, status, sort),
-    queryFn: () => getGlobePayWithdrawals(page, status, 50, sort),
+    queryKey: qk.gatewayWithdrawals(page, status, sort),
+    queryFn: () => getGatewayWithdrawals(page, status, 50, sort),
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
   });
@@ -898,7 +898,7 @@ export const useGlobePayWithdrawals = (
 // - 'already-handled': the idempotent no-op (a double-click, or another
 //   admin's tab, already moved the row out of 'held'). Worded without
 //   asserting a specific resulting status — the route's `status` field can be
-//   stale here (see GlobePayWithdrawalApproveResult's comment) — the
+//   stale here (see WithdrawalApproveResult's comment) — the
 //   invalidate below is what shows the row's real current state.
 //
 // onSettled (not onSuccess) invalidates: a THROWN refusal can still have
@@ -907,10 +907,10 @@ export const useGlobePayWithdrawals = (
 // unconditional refresh is the only branch that is never wrong. The whole
 // withdrawals prefix, not just the current (page, status, sort): the row may
 // now belong to a different view than the one on screen.
-export const useApproveGlobePayWithdrawal = () => {
+export const useApproveWithdrawal = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => approveGlobePayWithdrawal(id),
+    mutationFn: (id: string) => approveWithdrawal(id),
     onSuccess: (data) => {
       switch (classifyApproveResult(data)) {
         case 'submitted':
@@ -934,7 +934,7 @@ export const useApproveGlobePayWithdrawal = () => {
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: qk.globepayWithdrawalsKey });
+      qc.invalidateQueries({ queryKey: qk.gatewayWithdrawalsKey });
     },
   });
 };
@@ -942,10 +942,10 @@ export const useApproveGlobePayWithdrawal = () => {
 // Claim a held (or already-'failed', for the crash-recovery re-run)
 // withdrawal, refund it, and close it. Same onSettled-invalidate reasoning as
 // approve above.
-export const useDenyGlobePayWithdrawal = () => {
+export const useDenyWithdrawal = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => denyGlobePayWithdrawal(id),
+    mutationFn: (id: string) => denyWithdrawal(id),
     onSuccess: (data) => {
       switch (classifyDenyResult(data)) {
         case 'refunded':
@@ -964,7 +964,7 @@ export const useDenyGlobePayWithdrawal = () => {
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: qk.globepayWithdrawalsKey });
+      qc.invalidateQueries({ queryKey: qk.gatewayWithdrawalsKey });
     },
   });
 };

@@ -18,7 +18,6 @@ const mkService = (): Svc => {
   return svc;
 };
 
-
 // rawLedgerBalanceCents RESOLVES the manager out of the context and calls
 // .execute() on it, so it needs a context whose manager IS the fake em — CTX's
 // probe object would only get as far as "em.execute is not a function". Two
@@ -70,8 +69,8 @@ describe('rawLedgerBalanceCents', () => {
 type PreflightSvc = PacksModuleService & {
   rawLedgerBalanceCents: jest.Mock;
   listCustomerAccountStates: jest.Mock;
-  listGlobePayWithdrawals: jest.Mock;
-  listGlobePayDeposits: jest.Mock;
+  listGatewayWithdrawals: jest.Mock;
+  listGatewayDeposits: jest.Mock;
   listPulls: jest.Mock;
   listDeliveryOrders: jest.Mock;
 };
@@ -81,8 +80,8 @@ const mkPreflight = (): PreflightSvc => {
   // isFrozen reads through this; [] = not frozen, the common case.
   svc.listCustomerAccountStates = jest.fn().mockResolvedValue([]);
   svc.rawLedgerBalanceCents = jest.fn().mockResolvedValue(0);
-  svc.listGlobePayWithdrawals = jest.fn().mockResolvedValue([]);
-  svc.listGlobePayDeposits = jest.fn().mockResolvedValue([]);
+  svc.listGatewayWithdrawals = jest.fn().mockResolvedValue([]);
+  svc.listGatewayDeposits = jest.fn().mockResolvedValue([]);
   svc.listPulls = jest.fn().mockResolvedValue([]);
   svc.listDeliveryOrders = jest.fn().mockResolvedValue([]);
   return svc;
@@ -108,7 +107,7 @@ describe('deleteAccountPreflight', () => {
   // active clawback hold sitting at raw balance exactly 0 cleared every other
   // guard here. The purge then HARD-deletes player_payout_details (bank name,
   // full account number, holder name) and blanks
-  // globepay_withdrawal.account_holder_name: exactly the records the freeze
+  // gateway_withdrawal.account_holder_name: exactly the records the freeze
   // exists to preserve. First, because it is the cheapest and the most
   // absolute.
   it('blocks a FROZEN account, before it even reads the balance', async () => {
@@ -142,10 +141,10 @@ describe('deleteAccountPreflight', () => {
 
   it('blocks a held withdrawal', async () => {
     const svc = mkPreflight();
-    svc.listGlobePayWithdrawals.mockResolvedValue([{ id: 'w1' }]);
+    svc.listGatewayWithdrawals.mockResolvedValue([{ id: 'w1' }]);
     const r = await svc.deleteAccountPreflight('cus_1', CTX);
     expect(r).toMatchObject({ ok: false, reason: 'WITHDRAWAL_PENDING' });
-    expect(svc.listGlobePayWithdrawals).toHaveBeenCalledWith(
+    expect(svc.listGatewayWithdrawals).toHaveBeenCalledWith(
       { customer_id: 'cus_1', status: ['pending', 'held'] },
       { take: 1 },
       CTX_ARG,
@@ -158,10 +157,10 @@ describe('deleteAccountPreflight', () => {
   // outcome-only assertion would catch.
   it('blocks an in-flight deposit, including an expired one', async () => {
     const svc = mkPreflight();
-    svc.listGlobePayDeposits.mockResolvedValue([{ id: 'd1' }]);
+    svc.listGatewayDeposits.mockResolvedValue([{ id: 'd1' }]);
     const r = await svc.deleteAccountPreflight('cus_1', CTX);
     expect(r).toMatchObject({ ok: false, reason: 'DEPOSIT_PENDING' });
-    expect(svc.listGlobePayDeposits).toHaveBeenCalledWith(
+    expect(svc.listGatewayDeposits).toHaveBeenCalledWith(
       { customer_id: 'cus_1', status: ['pending', 'expired'] },
       { take: 1 },
       CTX_ARG,
@@ -224,7 +223,9 @@ const mkPurge = () => {
   // The in-lock re-check is part of the method under test, so the fake has to
   // answer it — without this the purge refuses before it scrubs anything.
   svc.deleteAccountPreflight = jest.fn().mockResolvedValue({ ok: true });
-  svc.listCustomerAccountStates = jest.fn().mockResolvedValue([{ id: 'cas_1' }]);
+  svc.listCustomerAccountStates = jest
+    .fn()
+    .mockResolvedValue([{ id: 'cas_1' }]);
   svc.createCustomerAccountStates = jest.fn().mockResolvedValue([]);
   svc.updateCustomerAccountStates = jest.fn().mockResolvedValue([]);
   svc.listAdminActionAudits = jest.fn().mockResolvedValue([]);
@@ -269,7 +270,7 @@ describe('purgeAccountPacksData', () => {
     const f = mkPurge();
     await f.svc.purgeAccountPacksData('cus_1', f.ctx);
     const all = f.sql.join('\n');
-    expect(all).toContain('globepay_withdrawal');
+    expect(all).toContain('gateway_withdrawal');
     expect(all).toContain('right("account_number", 4)');
     // NOT NULL columns, so '' rather than null — a null here is a constraint
     // violation that fails the whole purge on the first real delete.
@@ -477,8 +478,8 @@ describe('settleChallengeWeek — deleted winners', () => {
     const gone = new Set(deleted);
     svc.deletedCustomerIds = jest
       .fn()
-      .mockImplementation(async (ids: string[]) =>
-        new Set(ids.filter((id) => gone.has(id))),
+      .mockImplementation(
+        async (ids: string[]) => new Set(ids.filter((id) => gone.has(id))),
       );
     svc.settleChallengeWinner = jest.fn().mockResolvedValue(null);
     svc.reserveSettledStock = jest.fn().mockResolvedValue(undefined);

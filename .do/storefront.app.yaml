@@ -104,9 +104,10 @@ services:
       - key: NEXT_PUBLIC_SITE_URL
         scope: RUN_AND_BUILD_TIME
         value: https://polycards.gg
-      # Which top-up sheet the storefront renders: 'globepay' redirects to the
-      # real cashier, anything else keeps the mock. Cut over 2026-08-04, once
-      # the backend spec carried GLOBEPAY_ENABLED=true + the three secrets and
+      # Which top-up sheet the storefront renders: 'mock' keeps the mock sheet,
+      # any other value (currently 'tgpay') redirects to the real cashier.
+      # Cut over 2026-08-04, once the backend spec carried
+      # GATEWAY_ENABLED=true + the three secrets and
       # ALLOW_MOCK_TOPUP was gone from production — at that point the mock sheet
       # posted to a route that refuses (topup-credits.ts), so leaving it was a
       # dead-end button, not a safe default.
@@ -130,7 +131,7 @@ services:
       # keeps a future third channel from needing a spec edit to reach anyone.
       # Same for a value naming nothing recognised: it degrades to all of them
       # and logs, because a typo must not leave customers unable to pay. To stop
-      # top-ups ENTIRELY, use GLOBEPAY_ENABLED on the backend instead.
+      # top-ups ENTIRELY, use GATEWAY_ENABLED on the backend instead.
       #
       # This is the per-channel lever now — the storefront names a method on
       # every deposit request, so the backend's default rail is a
@@ -193,7 +194,7 @@ services:
         value: 'true'
       # Withdrawal UI gate (/bank-withdrawal form + saved-accounts flow).
       # Armed 2026-08-05 together with the backend's
-      # GLOBEPAY_WITHDRAWALS_ENABLED — the backend flag is the real money gate
+      # GATEWAY_WITHDRAWALS_ENABLED — the backend flag is the real money gate
       # (fail closed), this one only decides whether the form renders instead
       # of the "not open yet" notice. Build-time inlined like every
       # NEXT_PUBLIC_* here: the root Dockerfile ARG default is what the bundle

@@ -6,6 +6,10 @@ import {
   savedBankAccountId,
   MAX_SAVED_BANK_ACCOUNTS,
 } from '../route';
+import type {
+  FakeFacet,
+  CustomerWallet,
+} from '../../../../../../modules/packs/facets';
 
 // Saved payout accounts live in customer.metadata.bank_accounts and are the
 // picker source for the withdraw form. Three properties matter enough to pin:
@@ -47,7 +51,8 @@ const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
 
 const scope = {
   resolve: jest.fn((key: string) => {
-    if (key === 'packs') return { mutateCustomerMetadata };
+    if (key === 'packs')
+      return { mutateCustomerMetadata } satisfies FakeFacet<CustomerWallet>;
     if (key === 'notification') return { createNotifications };
     if (key === 'logger') return logger;
     return { retrieveCustomer, updateCustomers };
@@ -223,7 +228,7 @@ describe('POST /store/credits/withdraw/accounts', () => {
 
   it("normalises a gateway's own bank code to the canonical bank and its neutral name", async () => {
     retrieveCustomer.mockResolvedValue({ metadata: { bank_accounts: [] } });
-    // GlobePay's code for Maybank, as an older storefront (or a legacy picker)
+    // the gateway's code for Maybank, as an older storefront (or a legacy picker)
     // would send it — the saved account must not depend on which gateway was
     // active when it was saved.
     await POST(

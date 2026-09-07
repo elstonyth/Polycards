@@ -88,6 +88,15 @@ import type PacksModuleService from '../modules/packs/service';
  * reads/updates customer_account_state through the same generated module
  * methods purgeAccountPacksData itself uses.
  *
+ * The audit row below is therefore also written from here rather than from a
+ * PacksModuleService method, and is the only audit write left outside the
+ * transaction of its change after the 2026-09-07 sweep. That is deliberate on
+ * both counts: THE change being audited is the CORE customer module's phone
+ * null, which no packs transaction can span; and folding just the
+ * verification-stamp clear plus the audit into one packs method would buy
+ * atomicity on the secondary write only, at the cost of the transactional
+ * method this script's plan forbids (see NOT ATOMIC below).
+ *
  * NOT ATOMIC: the three writes below — customer-module phone null,
  * packs-module verification-stamp clear, packs-module audit append — are
  * three separate calls across two modules, not one transaction. The module
@@ -322,7 +331,8 @@ export default async function releaseCustomerPhone({ container }: ExecArgs) {
   // characters or fewer would otherwise put the WHOLE number in the row
   // instead of a genuine fragment (report-duplicate-phones.ts calls out the
   // same short-value edge case).
-  const phoneLast4 = customer.phone.length > 4 ? customer.phone.slice(-4) : null;
+  const phoneLast4 =
+    customer.phone.length > 4 ? customer.phone.slice(-4) : null;
   await packs.createAdminActionAudits([
     {
       admin_id: 'release-customer-phone',

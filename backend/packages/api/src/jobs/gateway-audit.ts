@@ -2,14 +2,14 @@ import { MedusaContainer } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../modules/packs';
 import type PacksModuleService from '../modules/packs/service';
-import { globepayEnabled } from '../modules/packs/globepay-deposit';
+import { gatewayEnabled } from '../modules/packs/gateway-deposit';
 import {
   getDepositDetail,
   getWithdrawalDetail,
   resolveActiveGateway,
   rowGatewayConfigs,
 } from '../modules/packs/gateway';
-import { classifyRequeryError } from '../modules/packs/globepay-reconcile';
+import { classifyRequeryError } from '../modules/packs/gateway-reconcile';
 import {
   GATEWAY_AUDIT_BATCH,
   GATEWAY_AUDIT_REPEAT_MS,
@@ -34,7 +34,7 @@ import { toOptionalMoney } from '../modules/packs/money';
 export default async function gatewayAuditJob(container: MedusaContainer) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   await resolveActiveGateway(container);
-  if (!globepayEnabled()) return;
+  if (!gatewayEnabled()) return;
 
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const configFor = rowGatewayConfigs();
@@ -54,7 +54,7 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
   let findings = 0;
   let skipped = 0;
 
-  const deposits = await packs.listGlobePayDeposits(
+  const deposits = await packs.listGatewayDeposits(
     { status: ['settled', 'failed', 'expired'], ...due },
     options,
   );
@@ -65,7 +65,7 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     if (!config) {
       // Money we cannot check is a finding in itself. Stamping it also keeps
       // an orphaned gateway's rows from occupying the batch forever.
-      await packs.updateGlobePayDeposits({
+      await packs.updateGatewayDeposits({
         id: row.id,
         audited_at: now,
         audit_note: `gateway "${row.gateway}" is not configured here — not audited`,
@@ -96,7 +96,7 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
       { status: row.status, amount: toOptionalMoney(row.amount_settled) },
       answer,
     );
-    await packs.updateGlobePayDeposits({
+    await packs.updateGatewayDeposits({
       id: row.id,
       audited_at: now,
       audit_note: note,
@@ -115,7 +115,7 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     }
   }
 
-  const withdrawals = await packs.listGlobePayWithdrawals(
+  const withdrawals = await packs.listGatewayWithdrawals(
     { status: ['settled', 'failed'], ...due },
     options,
   );
@@ -123,7 +123,7 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     let answer: GatewayAnswer;
     const config = configFor(row.gateway);
     if (!config) {
-      await packs.updateGlobePayWithdrawals({
+      await packs.updateGatewayWithdrawals({
         id: row.id,
         audited_at: now,
         audit_note: `gateway "${row.gateway}" is not configured here — not audited`,
@@ -151,7 +151,7 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
       { status: row.status, amount: toOptionalMoney(row.amount) },
       answer,
     );
-    await packs.updateGlobePayWithdrawals({
+    await packs.updateGatewayWithdrawals({
       id: row.id,
       audited_at: now,
       audit_note: note,

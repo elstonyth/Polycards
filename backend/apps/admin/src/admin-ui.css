@@ -86,7 +86,7 @@
    permanently empty — and its label sits three rows above our own Withdrawals
    page, so operators looked for customer withdrawals there and concluded they
    were missing. Customer money-out is Orders → Withdrawals
-   (src/routes/withdrawals, GET /admin/globepay/withdrawals), which is a
+   (src/routes/withdrawals, GET /admin/payments/withdrawals), which is a
    different table and a different API.
 
    Why CSS and not the supported override: mercurDashboardPlugin's
