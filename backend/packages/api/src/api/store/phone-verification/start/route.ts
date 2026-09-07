@@ -4,6 +4,7 @@ import type { ICustomerModuleService } from '@medusajs/framework/types';
 import {
   E164_RE,
   isAllowedSmsDestination,
+  isPhoneOtpChannel,
   isPhoneOtpPurpose,
   sendPhoneOtp,
   unresolvableSmsCountries,
@@ -16,7 +17,10 @@ import {
 // per-number caps, and — for password-reset — no SMS at all unless exactly
 // one registered account carries the phone (a pumping run would otherwise
 // use the reset flow to text arbitrary numbers on our bill).
-type Body = { phone?: unknown; purpose?: unknown };
+// `channel` is optional and defaults to sms; 'call' is the voice fallback
+// (see PHONE_OTP_CHANNELS). Validated here so an unknown value never reaches
+// Twilio, whose 400 body would echo the number.
+type Body = { phone?: unknown; purpose?: unknown; channel?: unknown };
 
 // `phone` isn't declared on FilterableCustomerProps (only has_account is) —
 // same cast pattern as findCustomerByHandle (utils/customer-by-metadata.ts).
@@ -26,11 +30,14 @@ export async function POST(
   req: MedusaRequest<Body>,
   res: MedusaResponse,
 ): Promise<void> {
-  const { phone, purpose } = req.body ?? {};
+  const { phone, purpose, channel: rawChannel } = req.body ?? {};
   if (typeof phone !== 'string' || !E164_RE.test(phone))
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid phone number.');
   if (!isPhoneOtpPurpose(purpose))
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid purpose.');
+  const channel = rawChannel === undefined ? 'sms' : rawChannel;
+  if (!isPhoneOtpChannel(channel))
+    throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid channel.');
 
   const logger = req.scope.resolve('logger') as { warn: (msg: string) => void };
 
@@ -106,6 +113,6 @@ export async function POST(
 
   // purpose is validated above; it selects the Verify template so the SMS
   // names the flow the code is for.
-  await sendPhoneOtp(process.env, logger, phone, purpose);
+  await sendPhoneOtp(process.env, logger, phone, purpose, channel);
   res.json({ ok: true });
 }

@@ -98,7 +98,13 @@ rate-limit / settings panel.
 **Record.** The three values and the date checked. Name the service by variable, not
 by SID.
 
-> **Answer:** _(open)_
+> **Answer (2026-09-07, Twilio One Console → the service named by
+> `TWILIO_VERIFY_SERVICE_SID` → Settings):** code length **6**; code TTL **10 minutes**
+> (Twilio-fixed — every logged verification expires exactly 10 min after creation);
+> max check attempts is not exposed on the settings page and is Twilio's fixed
+> **5 per verification** (their documented Verify limit). Custom code off, default
+> template, "Do not share" warning off. Voice channel enabled the same day for the
+> `call` fallback (see CONTEXT.md, 2026-09-07); WhatsApp channel disabled.
 
 ---
 
@@ -120,7 +126,11 @@ is also visible in our own failure logs without a console session.
 **Record.** The enabled country list, the Fraud Guard state, and the date. If the list
 is wider than the allowlist plan 086 ships, say so explicitly — the two are a pair.
 
-> **Answer:** _(open)_
+> **Answer (2026-09-07):** SMS geo permissions enable **Malaysia (+60) only** (237
+> destinations listed, one checked). Fraud Guard is **on**; the Blocked Verifications
+> log shows 0 in 30 days. This matches the code-side allowlist
+> (`ALLOWED_SMS_COUNTRIES=MY`) exactly. Voice geo permissions are a SEPARATE list and
+> were empty until the `call` fallback needed Malaysia enabled there the same day.
 
 ---
 
