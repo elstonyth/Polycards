@@ -7,3 +7,7 @@ export const PHONE_VERIFICATION_REQUIRED =
   process.env.NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED === 'true';
 
 export type PhoneOtpPurpose = 'signup' | 'phone-change' | 'password-reset';
+
+/** Mirror of the backend's PHONE_OTP_CHANNELS. 'call' = Twilio reads the code
+ *  aloud — the fallback for numbers whose SMS is "Delivered" but never read. */
+export type PhoneOtpChannel = 'sms' | 'call';

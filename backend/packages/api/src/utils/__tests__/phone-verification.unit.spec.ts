@@ -1,6 +1,7 @@
 import {
   E164_RE,
   isAllowedSmsDestination,
+  isPhoneOtpChannel,
   isPhoneOtpPurpose,
   isPhoneVerificationRequired,
   isTwilioVerifyConfigured,
@@ -48,6 +49,21 @@ describe('predicates', () => {
 // state a deploy came up in. It must report the fail-open coupling honestly and
 // flag a value an operator clearly meant as "on" — without ever echoing a raw
 // env value into a deploy log.
+describe('channel guard', () => {
+  // 'call' is the fallback for destinations whose carrier reports the SMS
+  // delivered while the subscriber never sees it (Digi/016, 2026-09-07).
+  // Anything else — 'whatsapp' included — needs its own channel enabled on
+  // the Verify service first, so the guard refuses it rather than letting
+  // Twilio 400 with a message that echoes the number.
+  it('accepts sms and call only', () => {
+    expect(isPhoneOtpChannel('sms')).toBe(true);
+    expect(isPhoneOtpChannel('call')).toBe(true);
+    expect(isPhoneOtpChannel('whatsapp')).toBe(false);
+    expect(isPhoneOtpChannel('')).toBe(false);
+    expect(isPhoneOtpChannel(undefined)).toBe(false);
+  });
+});
+
 describe('resolved gate state (boot reporter)', () => {
   const TWILIO = {
     TWILIO_ACCOUNT_SID: 'AC1',
@@ -297,6 +313,25 @@ describe('twilio transport', () => {
       'Basic ' + Buffer.from('AC1:tok').toString('base64'),
     );
     expect(String(init?.body)).toContain('Channel=sms');
+  });
+
+  // Voice fallback: Channel is a plain pass-through to Verify, and TemplateSid
+  // is SMS-only (Twilio 60408 rejects it on a call) so it must not ride along
+  // even when that purpose has a template configured.
+  it('send posts Channel=call for the voice channel and drops TemplateSid', async () => {
+    const fetchMock = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ status: 'pending' }), { status: 201 }));
+    await sendPhoneOtp(
+      { ...env, TWILIO_VERIFY_TEMPLATE_SID_SIGNUP: 'HJ_signup' },
+      noopLogger,
+      PHONE,
+      'signup',
+      'call',
+    );
+    const body = String(fetchMock.mock.calls[0][1]?.body);
+    expect(body).toContain('Channel=call');
+    expect(body).not.toContain('TemplateSid');
   });
   it('check maps approved → true, anything else → false', async () => {
     jest

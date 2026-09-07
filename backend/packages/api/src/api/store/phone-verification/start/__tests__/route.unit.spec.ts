@@ -177,3 +177,44 @@ describe('POST /store/phone-verification/start — duplicate-phone diagnosabilit
     expect(line()).not.toContain(MY.slice(3));
   });
 });
+
+/**
+ * The voice fallback. Twilio's delivery receipt says "Delivered" for every
+ * Digi (016) destination while none of them ever verifies (2026-09-07), so
+ * the OTP needs a second transport the caller can ask for. The route only
+ * validates and forwards the choice — the transport owns the request shape.
+ */
+describe('POST /store/phone-verification/start — channel', () => {
+  const reqWith = (channel: unknown) =>
+    ({
+      body: { phone: MY, purpose: 'signup', channel },
+      scope: {
+        resolve: (key: string) =>
+          key === 'logger' ? { warn } : { listCustomers: jest.fn(async () => [{ id: 'cus_1' }]) },
+      },
+    }) as never;
+
+  // Assert on the channel argument ALONE: arg 0 is process.env, and a failing
+  // matcher over the whole call would print it.
+  const channelArg = () => sendPhoneOtp.mock.calls[0][4] as unknown;
+
+  it('forwards the voice channel to the transport', async () => {
+    const { res, out } = mkRes();
+    await startVerification(reqWith('call'), res);
+    expect(sendCount()).toBe(1);
+    expect(channelArg()).toBe('call');
+    expect(out.body).toEqual({ ok: true });
+  });
+
+  it('defaults to sms when the body names no channel', async () => {
+    await startVerification(mkReq(MY), mkRes().res);
+    expect(channelArg()).toBe('sms');
+  });
+
+  it('rejects an unknown channel before sending anything', async () => {
+    await expect(startVerification(reqWith('whatsapp'), mkRes().res)).rejects.toThrow(
+      /invalid channel/i,
+    );
+    expect(sendCount()).toBe(0);
+  });
+});

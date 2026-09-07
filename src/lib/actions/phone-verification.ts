@@ -34,7 +34,10 @@ import {
   normalizePhone,
   UNSERVED_PHONE_COUNTRY_ERROR,
 } from '@/lib/profile-validation';
-import type { PhoneOtpPurpose } from '@/lib/phone-verification';
+import type {
+  PhoneOtpChannel,
+  PhoneOtpPurpose,
+} from '@/lib/phone-verification';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
 
 type Fail = { ok: false; error: string };
@@ -126,6 +129,8 @@ const PHONE_CHANGE_RULES: ErrorRule[] = [
 export async function startPhoneOtp(input: {
   phone: string;
   purpose: PhoneOtpPurpose;
+  /** Omitted = backend default (sms). Sent only when the user asked for it. */
+  channel?: PhoneOtpChannel;
 }): Promise<{ ok: true } | Fail> {
   const phone = normalizePhone(input.phone);
   if (!phone)
@@ -141,7 +146,11 @@ export async function startPhoneOtp(input: {
   const r = await store.post(
     '/store/phone-verification/start',
     UncheckedSchema,
-    { phone, purpose: input.purpose },
+    {
+      phone,
+      purpose: input.purpose,
+      ...(input.channel ? { channel: input.channel } : {}),
+    },
     { auth: 'none' },
   );
   if (!r.ok) {
@@ -161,7 +170,7 @@ export async function checkPhoneOtp(input: {
   if (!phone)
     return fail('Please enter a valid phone number for the selected country.');
   if (!/^\d{4,10}$/.test(input.code))
-    return fail('Enter the code from the SMS.');
+    return fail('Enter the verification code.');
   const r = await store.post(
     '/store/phone-verification/check',
     UncheckedSchema,

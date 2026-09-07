@@ -215,6 +215,23 @@ export type PhoneOtpPurpose = (typeof PHONE_OTP_PURPOSES)[number];
 export const isPhoneOtpPurpose = (v: unknown): v is PhoneOtpPurpose =>
   typeof v === 'string' && (PHONE_OTP_PURPOSES as readonly string[]).includes(v);
 
+/**
+ * Transports Verify may deliver the code over. 'sms' is the default. 'call'
+ * (Twilio reads the code aloud) is the fallback for destinations whose carrier
+ * reports the SMS delivered while the subscriber never sees it — on 2026-09-07
+ * every Digi (016) number in 30 days of Verify logs had "Delivered" receipts
+ * and zero successful checks, while the other Malaysian carriers verified
+ * normally. Nothing in this stack can tell carriers apart, so the user picks.
+ *
+ * Every entry here must be ENABLED on the Verify service in the Twilio
+ * console first ("API calls for this channel will fail" otherwise) — which is
+ * why 'whatsapp' is absent: it needs a sender set up, not just a toggle.
+ */
+export const PHONE_OTP_CHANNELS = ['sms', 'call'] as const;
+export type PhoneOtpChannel = (typeof PHONE_OTP_CHANNELS)[number];
+export const isPhoneOtpChannel = (v: unknown): v is PhoneOtpChannel =>
+  typeof v === 'string' && (PHONE_OTP_CHANNELS as readonly string[]).includes(v);
+
 /** ponytail: 10m fixed TTL, no config knob — add one only if support tickets ask. */
 const PROOF_TTL_MS = 10 * 60_000;
 
@@ -373,10 +390,11 @@ export async function sendPhoneOtp(
   logger: Logger,
   phone: string,
   purpose: PhoneOtpPurpose,
+  channel: PhoneOtpChannel = 'sms',
 ): Promise<void> {
   if (isDevOrTest(env)) {
     logger.warn(
-      `[phone-otp] dev transport — ${purpose} code for ${phone} is ${devCode(env)}`,
+      `[phone-otp] dev transport — ${purpose} code for ${phone} via ${channel} is ${devCode(env)}`,
     );
     return;
   }
@@ -392,12 +410,12 @@ export async function sendPhoneOtp(
     res = await fetch(`${twilioBase(env)}/Verifications`, {
       method: 'POST',
       headers: twilioHeaders(env),
-      // TemplateSid is SMS-only (Twilio error 60408 rejects it on call/email);
-      // this transport is sms-only, so it is always safe to include here.
+      // TemplateSid is SMS-only (Twilio error 60408 rejects it on call/email),
+      // so it rides along only when the channel is sms.
       body: new URLSearchParams({
         To: phone,
-        Channel: 'sms',
-        ...(templateSid ? { TemplateSid: templateSid } : {}),
+        Channel: channel,
+        ...(channel === 'sms' && templateSid ? { TemplateSid: templateSid } : {}),
       }).toString(),
       signal: AbortSignal.timeout(TWILIO_TIMEOUT_MS),
     });

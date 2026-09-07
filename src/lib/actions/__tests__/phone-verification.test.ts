@@ -334,3 +334,27 @@ describe('resetPasswordByPhone migration seam', () => {
     });
   });
 });
+
+// Voice fallback for destinations whose SMS is "Delivered" but never read
+// (Digi/016, 2026-09-07). The action forwards the choice verbatim; absent, it
+// sends no field at all so the backend's default (sms) stays the single source.
+describe('startPhoneOtp — channel', () => {
+  const bodyOf = () => mem.requests[0]!.body;
+
+  it('passes the voice channel through to the backend', async () => {
+    await expect(
+      startPhoneOtp({ phone: MY, purpose: 'phone-change', channel: 'call' }),
+    ).resolves.toEqual({ ok: true });
+    expect(mem.requests).toHaveLength(1);
+    expect(bodyOf()).toEqual({
+      phone: MY,
+      purpose: 'phone-change',
+      channel: 'call',
+    });
+  });
+
+  it('sends no channel field when none is chosen', async () => {
+    await startPhoneOtp({ phone: MY, purpose: 'signup' });
+    expect(bodyOf()).toEqual({ phone: MY, purpose: 'signup' });
+  });
+});
