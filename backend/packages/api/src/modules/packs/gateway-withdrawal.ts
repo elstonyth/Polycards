@@ -8,11 +8,16 @@ import {
 import {
   GATEWAYS,
   gatewayConfigFor,
+  gatewayUrls,
   paymentGateway,
+  resolveActiveGateway,
+  rowGateway,
   submitWithdrawal,
   GatewayError,
+  type GatewayConfig,
   type PaymentGateway,
 } from './gateway';
+import { contactIfNeeded } from '../../api/utils/customer-contact';
 import { newMerchantTransactionId } from './gateway-deposit';
 import { gatewayEnv, gatewayEnvName } from './gateway-env';
 import { withdrawalGateError } from './withdrawable';
@@ -1027,4 +1032,501 @@ export async function applyWithdrawalOutcome(
   }
 
   return { replayed: !claimed };
+}
+
+// ---------------------------------------------------------------------------
+// The ADMIN half of the held queue (plan 094). Together these two are the only
+// way a 'held' row leaves that state; the reconcile sweep never selects one.
+// ---------------------------------------------------------------------------
+
+/** What the approve route answers with, verbatim. */
+export type HeldWithdrawalApproval = {
+  id: string;
+  /** The row's status as this caller last saw it — 'pending' once claimed,
+   *  and for a LOST claim the status the loser read, not a re-read. */
+  status: string;
+  /** Their W… id; null when the submit outcome was ambiguous or the claim
+   *  was lost. */
+  transaction_id: string | null;
+  /** False when someone else had already moved the row (a double-clicked
+   *  button, a racing deny) — a no-op, not an error. */
+  approved: boolean;
+};
+
+/** What the deny route answers with, verbatim. */
+export type HeldWithdrawalDenial = {
+  id: string;
+  status: string;
+  /** False for the never-debited edge case: a held row whose debit never
+   *  landed is closed WITHOUT minting a refund. */
+  refunded: boolean;
+};
+
+export type HeldWithdrawalInput = {
+  withdrawalId: string;
+  /** The admin actor id from the verified token. Logged, never trusted. */
+  adminId: string;
+};
+
+/**
+ * Release a HELD payout to the gateway.
+ *
+ * This resumes exactly where startWithdrawal stopped: that function writes the
+ * row, debits the ledger, and returns without calling the gateway when the
+ * amount is above the approval threshold. Step 3 happens here.
+ *
+ * WHY submitting the ROW's stored bank details is not the forbidden precheck
+ * copy: startWithdrawal's step-3 comment says money may move "only to the
+ * destination the LOCKED resolution returned, never to the precheck's copy" —
+ * and this honours that. The row's bank_code / account_number /
+ * account_holder_name were written from that same locked resolution inside
+ * withdrawForCashout at debit time (its step 2 resolves the destination under
+ * the `credit:` advisory lock and returns it to the caller), so the row IS the
+ * authoritative destination, not a second unlocked read. It is also the only
+ * one that can still be trusted now: re-resolving from the customer's saved
+ * accounts at approval time would let a destination edited AFTER the debit
+ * redirect a payout the customer already committed to.
+ *
+ * Every call is logged with the row id and the admin actor id, and NEVER the
+ * account number.
+ */
+export async function submitHeldWithdrawal(
+  scope: { resolve: <T>(key: string) => T },
+  input: HeldWithdrawalInput & {
+    /** The ADMIN's request IP, not the customer's — that one was never
+     *  stored, and per api/utils/payer-ip.ts the store route's value is
+     *  already the storefront's egress IP for every customer alike. The
+     *  field's job is to be un-forgeable, which this still is. */
+    payerIp: string;
+  },
+): Promise<HeldWithdrawalApproval> {
+  const packs = resolvePacks<GatewayWithdrawals>(scope);
+  const logger = scope.resolve<{
+    info: (message: string) => void;
+    warn: (message: string) => void;
+    error: (message: string) => void;
+  }>('logger');
+  const { adminId } = input;
+
+  // EVERY precondition runs BEFORE the claim. A claim TO 'pending' followed
+  // by a throw strands a row that was never submitted and hands it to the
+  // sweep for no reason — the exact state the held branch exists to avoid.
+  // (The undebited branch below also throws after claiming, but it claims to
+  // 'failed': a closed row, which the sweep never selects.)
+  if (!withdrawalsEnabled()) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'The payout channel is closed — a held withdrawal cannot be approved right now.',
+    );
+  }
+  const [row] = await packs.listGatewayWithdrawals(
+    { id: input.withdrawalId },
+    { take: 1 },
+  );
+  if (!row) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_FOUND,
+      `Withdrawal '${input.withdrawalId}' not found.`,
+    );
+  }
+
+  // A held row is paid out through the gateway it was CREATED under, which
+  // may no longer be the active one. Fail closed if that gateway has since
+  // been unconfigured: the row stays held for a human, nothing moves.
+  await resolveActiveGateway(scope);
+  const gatewayId = rowGateway(row);
+  let config: GatewayConfig | null;
+  try {
+    config = gatewayId ? gatewayConfigFor(gatewayId) : null;
+  } catch {
+    config = null;
+  }
+  const urls = gatewayId ? gatewayUrls(gatewayId) : null;
+  const notifyUrl = urls?.withdrawNotifyUrl ?? '';
+  const verifyUrl = urls?.payoutVerifyUrl ?? '';
+  if (
+    !config ||
+    !gatewayId ||
+    !notifyUrl ||
+    (urls?.hasPayoutVerify && !verifyUrl)
+  ) {
+    // Fail closed, same reasoning as the store route: without a reachable
+    // NotifyUrl a failed payout could never refund itself.
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'The payout channel is closed — a held withdrawal cannot be approved right now.',
+    );
+  }
+  const amount = Number(row.amount);
+
+  // TGPay needs the recipient email; looked up only on a gateway that asks
+  // for it (needsCustomerContact). Resolved BEFORE the claim below, like
+  // every other precondition: a customer-module failure here must not strand
+  // a row that was claimed to 'pending' and never submitted. A customer with
+  // no email is refused for the same reason the store route refuses one
+  // pre-debit.
+  const email = (
+    await contactIfNeeded(scope, gatewayId, row.customer_id, 'payout')
+  )?.email;
+  if (GATEWAYS[gatewayId].needsCustomerContact && !email) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'This customer has no email address on file, which the payout provider requires.',
+    );
+  }
+
+  // FREEZE, re-read at approval time. This is the ONE piece of the
+  // request-time gate that must be re-checked: the whole point of a held
+  // queue is that a human looks at a suspicious payout, and a freeze landing
+  // between the request and the click is exactly how "suspicious" gets
+  // recorded. The queue DOES surface the flag — the list route's `frozen`
+  // field drives a badge on the row and disables that row's Approve button —
+  // but by that same comment it is a PREVIEW read at poll time, not the gate:
+  // a freeze landing in the gap between two polls still shows
+  // `frozen: false` until the next refresh. This re-read is what actually
+  // enforces it.
+  //
+  // A BARE freeze read, deliberately: the rest of withdrawForCashout's gate
+  // must NOT be re-run here. The debit already landed, so re-checking the
+  // balance or the playthrough would judge a payout against a wallet the
+  // payout itself has already reduced, and the held row already counts
+  // against its own rolling-24h cap.
+  //
+  // Cause-agnostic (no `cause` filter), matching the request-time gate, which
+  // refuses on walletSummary.isFrozen for BOTH causes. Not
+  // packs.assertNotFrozen: that one is scoped to cause='manual' so a clawback
+  // auto-freeze cannot block the top-up/buyback that repays it — right for an
+  // inflow-repayable path, wrong here, where it would pay a real bank account
+  // out of an account already in clawback debt.
+  const [frozen] = await packs.listCustomerAccountStates(
+    { customer_id: row.customer_id, frozen: true },
+    { take: 1 },
+  );
+  if (frozen) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'This customer’s account is frozen. Unfreeze it before approving a payout, or deny the withdrawal.',
+    );
+  }
+
+  // THE DEBIT CHECK AND THE CLAIM, as ONE locked decision.
+  //
+  // Both halves matter. A held row is NOT always debited: startWithdrawal
+  // writes it 'held' at step 1 and debits at step 2, so there is a real
+  // committed window — not only a crash — where the row is visible as held
+  // with no debit yet, simply because step 2 has not returned. Submitting
+  // against a debit that never lands pays a real bank account out of a
+  // balance that was never reduced (a straight cash loss, and a definite
+  // gateway refusal would then mint credit on top in the refund branch
+  // below); closing a row whose debit is merely still in flight strands that
+  // debit with nothing left to refund it.
+  //
+  // packs.claimWithdrawalAgainstDebit settles both under the customer's
+  // `credit:` advisory lock — the same key withdrawForCashout debits under —
+  // so `debited: false` means no debit will ever land, and the row move
+  // commits with the reading that justified it. It replaced an elapsed-time
+  // gate that inferred the same thing from the row's age; see that method for
+  // why no clock can (in short: a debit blocked on the advisory lock is
+  // `active`, not idle, so no Postgres timeout bounds it).
+  //
+  // An undebited row is closed 'failed' by that same call — scoped to 'held',
+  // so an undebited row in another status (a 'pending' one is the sweep's to
+  // resolve) is refused without being touched.
+  const { debited, claimed } = await packs.claimWithdrawalAgainstDebit({
+    id: row.id,
+    customerId: row.customer_id,
+    debitReference: withdrawalIdempotencyReference(
+      row.customer_id,
+      row.merchant_transaction_id,
+    ),
+    from: ['held'],
+    to: 'pending',
+  });
+  if (!debited) {
+    // The log reports what the claim did rather than asserting a close that
+    // may not have landed.
+    logger.warn(
+      `[payments] admin ${adminId} approve on withdrawal ${row.id} ` +
+        `(${row.merchant_transaction_id}) REFUSED — no debit ever landed ` +
+        `for it; ${claimed ? 'row closed' : `row left as '${row.status}'`}`,
+    );
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'This withdrawal was never debited, so it cannot be paid out.',
+    );
+  }
+  // A false claim means someone else already moved the row (a double-clicked
+  // button, a racing deny): return without submitting. Idempotent, not an
+  // error — the operator's intent has already happened or has already been
+  // overruled, and a second payout is the one outcome that cannot be undone.
+  if (!claimed) {
+    logger.info(
+      `[payments] admin ${adminId} approve on withdrawal ${row.id} was a no-op — it was '${row.status}', not held`,
+    );
+    return {
+      id: row.id,
+      status: row.status,
+      transaction_id: row.gateway_transaction_id,
+      approved: false,
+    };
+  }
+  logger.info(
+    `[payments] admin ${adminId} APPROVED withdrawal ${row.id} (${row.merchant_transaction_id}) — RM ${amount} to bank ${row.bank_code}`,
+  );
+
+  let result;
+  try {
+    result = await submitWithdrawal(
+      {
+        email,
+        merchantTransactionId: row.merchant_transaction_id,
+        merchantClientId: row.customer_id,
+        // bigNumber column — it arrives as a string, and submitWithdrawal
+        // calls .toFixed(2) on it.
+        amount,
+        destinationBankCode: row.bank_code,
+        destinationAccountNumber: row.account_number,
+        destinationAccountHolderName: row.account_holder_name.trim(),
+        notifyUrl,
+        returnUrl: verifyUrl,
+        ipAddress: input.payerIp,
+      },
+      config,
+    );
+  } catch (error) {
+    // Both branches mirror startWithdrawal's post-#425 shape exactly.
+    // There is no third path: an outcome that is not a PARSED refusal is
+    // ambiguous, and ambiguity must never refund.
+    if (error instanceof GatewayError && error.definite) {
+      // The gateway parseably refused, so no payout exists on their side.
+      // Refund (idempotent, on the shared anchor) and close the row. The
+      // claim above left it 'pending', which is what the helper's terminal
+      // update must be scoped to — its default.
+      await refundWithdrawal(
+        scope,
+        row,
+        null,
+        'pending',
+        // Same fields as the log line below, kept on the row because the log
+        // itself does not survive the next deployment (plan 095). Built by the
+        // shared formatter so this string and the store path's cannot drift —
+        // and so the digit redaction, which is a control rather than
+        // formatting, applies to both.
+        formatGatewayFailureReason({
+          prefix: 'approve refused',
+          codes: error.codes,
+          httpStatus: error.httpStatus,
+          bankCode: row.bank_code,
+          message: error.message,
+          // The row IS the submitted destination here (see the comment above
+          // the submit call), so these are the exact values their message
+          // could be echoing.
+          accountNumber: row.account_number,
+          accountHolderName: row.account_holder_name,
+        }),
+      );
+      // Their reason, on record, AFTER the money moved — a definitively
+      // refused submit leaves nothing at the gateway to requery later, so
+      // this line is the only thing that can tell an empty merchant payout
+      // float (PMT10013) apart from genuinely bad bank details. Best-effort:
+      // without the catch a throw from the logger would replace the error
+      // below and the operator would see a crash instead of the reason.
+      // Never the account number or the holder name; `msg` is the gateway's
+      // own text, the one field we do not compose (same accepted residual
+      // risk as the store path).
+      try {
+        logger.warn(
+          `[payments] admin-approved withdrawal refused: codes=${error.codes.join(',') || 'none'} ` +
+            `httpStatus=${error.httpStatus} definite=${error.definite} ` +
+            `bankCode=${row.bank_code} amount=${amount} ref=${row.merchant_transaction_id} ` +
+            `msg=${error.message}`,
+        );
+      } catch {
+        // Swallowed deliberately: the logger is the thing that failed, so
+        // there is nothing left to report it with.
+      }
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'The gateway refused this payout. The debit has been refunded and the withdrawal closed.',
+      );
+    }
+    // AMBIGUOUS (timeout, reset, WAF page): the request may have been
+    // accepted with only the response lost, so the payout could still
+    // execute. Refunding would double-pay. The row stays 'pending' with NO
+    // gateway id — precisely the state the reconcile sweep resolves (requery
+    // success -> settle, failed -> refund, unknown-and-stale -> refund).
+    //
+    // WHAT MAKES THAT SAFE for a row that waited: the sweep's "too old for an
+    // in-flight submit" clock reads the row's updated_at, not its created_at,
+    // precisely so an approval restarts it (the claim above wrote it one hop
+    // ago). Left on created_at, a row approved days after the customer asked
+    // would be born stale — the next sweep tick would read a not-yet-
+    // propagated payout as "never existed" and refund a transfer the bank
+    // then executes. See unknownWithdrawalAction and the job's call site;
+    // that clock is an invariant this branch depends on, not an incidental
+    // column choice.
+    //
+    // RETURNS rather than throws, for the same reason the store path does: a
+    // 500 here reads as "nothing happened" and invites a retry. A retry is in
+    // fact harmless (the row is no longer 'held', so the claim refuses it),
+    // but the honest answer is "submitted, outcome unknown" and the response
+    // says exactly that with a null transaction_id.
+    try {
+      logger.error(
+        `[payments] admin ${adminId} approved withdrawal ${row.merchant_transaction_id} but the submit outcome is AMBIGUOUS (${(error as Error).message}) — left pending for the sweep`,
+      );
+    } catch {
+      // Swallowed deliberately: the row stays 'pending', so the sweep still
+      // resolves this payout whether or not anyone ever reads about it.
+    }
+    return {
+      id: row.id,
+      status: 'pending',
+      transaction_id: null,
+      approved: true,
+    };
+  }
+
+  // Their W… id, recorded as early as it can be — it does not exist until the
+  // call above returns, and this is the next statement. The gap still matters:
+  // until the id lands, unknownWithdrawalAction's hasGatewayTransactionId
+  // guard cannot protect this row, and only the submit clock does.
+  //
+  // Scoped to 'pending' like every other terminal write on this path. Without
+  // the scope, a sweep that resolved this row while the submit was in flight
+  // (refunded and closed it 'failed') would have a gateway id written back
+  // onto it afterwards — a refunded row wearing the id of a payout, which is
+  // the one shape that makes a later reader believe the money went out.
+  await packs.updateGatewayWithdrawals({
+    selector: { id: row.id, status: 'pending' },
+    data: { gateway_transaction_id: result.transactionId },
+  });
+
+  return {
+    id: row.id,
+    status: 'pending',
+    transaction_id: result.transactionId,
+    approved: true,
+  };
+}
+
+/**
+ * Refuse a HELD payout and hand the money back. The other exit from 'held';
+ * submitHeldWithdrawal is the one that pays.
+ *
+ * Deliberately NOT gated on withdrawalsEnabled(), unlike approve: approving
+ * needs the payout channel open because it calls the gateway, but denying only
+ * touches our own ledger. An operator must still be able to return a held
+ * customer's money with the channel switched off — that is exactly when a
+ * queue of held rows most needs clearing.
+ *
+ * Logged with the row id and the admin actor id, and NEVER the account number.
+ */
+export async function denyHeldWithdrawal(
+  scope: { resolve: <T>(key: string) => T },
+  input: HeldWithdrawalInput,
+): Promise<HeldWithdrawalDenial> {
+  const packs = resolvePacks<GatewayWithdrawals>(scope);
+  const logger = scope.resolve<{
+    info: (message: string) => void;
+    warn: (message: string) => void;
+  }>('logger');
+  const { adminId } = input;
+
+  const [row] = await packs.listGatewayWithdrawals(
+    { id: input.withdrawalId },
+    { take: 1 },
+  );
+  if (!row) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_FOUND,
+      `Withdrawal '${input.withdrawalId}' not found.`,
+    );
+  }
+
+  // 1) CLAIM FIRST — the opposite order from the reconcile sweep, which
+  // refunds and then closes the row. The inversion is deliberate:
+  //
+  //   - Refund-first LOSES THE APPROVE/DENY RACE. While deny is refunding,
+  //     approve claims 'held' -> 'pending' and submits; deny's conditional
+  //     flip then matches nothing, so the payout goes out AND the credit
+  //     comes back. Real money, unrecoverable.
+  //   - Claim-first's cost is the opposite window: a crash between the claim
+  //     and the refund leaves a 'failed' row whose debit was never returned,
+  //     and the sweep — which selects 'pending' only — will never retry it.
+  //   - That window is closed by making deny RE-RUNNABLE: the claim accepts
+  //     'failed' as well as 'held', and the refund is anchored on
+  //     withdrawalRefundReference, which guarantees exactly one credit
+  //     however many times it runs. An operator who sees a 'failed' row with
+  //     no refund clicks Deny again and it settles.
+  //
+  // The DEBIT CHECK RIDES THE SAME CALL, and must. Deny closes the row the
+  // moment it claims it, before anything has looked for a debit — so a
+  // separate, later read could see "no debit" for a debit that is merely
+  // still in flight (startWithdrawal writes the row 'held' at step 1 and
+  // debits at step 2) and answer `refunded: false` on money that then leaves
+  // the balance for good. packs.claimWithdrawalAgainstDebit does the read and
+  // the claim in one transaction holding the customer's `credit:` advisory
+  // lock, the same key withdrawForCashout debits under, so the two cannot
+  // interleave: either the debit is already committed and we see it, or our
+  // close commits first and withdrawForCashout's own re-read refuses to debit
+  // a closed row. This replaced an elapsed-time gate in front of the claim;
+  // see that method for why a clock could never establish this.
+  //
+  // A false answer means the row is in a state deny must not touch —
+  // 'pending' belongs to the gateway and the sweep, 'settled' is already
+  // paid. Refusing loudly is right here (unlike approve's silent no-op): the
+  // operator asked to give money back and it did not happen.
+  const { debited, claimed } = await packs.claimWithdrawalAgainstDebit({
+    id: row.id,
+    customerId: row.customer_id,
+    debitReference: withdrawalIdempotencyReference(
+      row.customer_id,
+      row.merchant_transaction_id,
+    ),
+    from: ['held', 'failed'],
+    to: 'failed',
+  });
+  if (!claimed) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      `Withdrawal '${row.id}' is '${row.status}' — only a held (or already-denied) withdrawal can be denied.`,
+    );
+  }
+  // The audit line says what the claim did — not what the refund below will
+  // do, which the debit-existence check may yet rule out.
+  logger.info(
+    `[payments] admin ${adminId} DENIED withdrawal ${row.id} (${row.merchant_transaction_id}) — RM ${Number(row.amount)} closed`,
+  );
+
+  // 2) Only now, the money — and only if the locked read above found a debit
+  // to give back. "Refunding" a row that never took the customer's money
+  // would mint credit out of nothing, and because that read was taken under
+  // the `credit:` lock together with the claim, `debited: false` here means
+  // no debit will ever land for this row, not merely that none has yet. The
+  // row is already closed by the claim, so there is nothing further to do.
+  if (!debited) {
+    logger.warn(
+      `[payments] closed ${row.merchant_transaction_id} without a refund — no debit ever landed for it`,
+    );
+    return { id: row.id, status: 'failed', refunded: false };
+  }
+
+  // 3) The shared four-step ordering (refund -> receipt -> close -> notify).
+  // fromStatus 'failed', because the claim above already moved the row there
+  // — the helper's default 'pending' selector would silently no-op.
+  // gateway_status is passed back unchanged rather than nulled: a row that
+  // reached 'failed' through the sweep carries the gateway's own status
+  // number, and a mistaken deny on one must not erase it.
+  await refundWithdrawal(
+    scope,
+    row,
+    row.gateway_status ?? null,
+    'failed',
+    // Names the admin, so a denied row is never mistaken later for one the
+    // gateway refused (plan 095).
+    `denied by admin ${adminId}`,
+  );
+
+  return { id: row.id, status: 'failed', refunded: true };
 }
