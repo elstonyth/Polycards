@@ -38,6 +38,8 @@ export type FakeConfig = { kind: 'fake' };
  *   amount), so filling one in would change what the subject sees;
  * - a function — run, for a spec that needs to observe ordering or throw
  *   conditionally.
+ * Default detail amounts are zero. Tests expecting settlement must script
+ * a positive detail amount (and any net amount the scenario needs).
  */
 export type FakeOutcome<R> =
   'ok' | Error | Partial<R> | (() => Partial<R> | Promise<Partial<R>>);

@@ -135,7 +135,7 @@ disabled on the storefront until a gateway that serves it is active.
 
 1. Backend `.env`: the TGPay block (see `.env.template`). Callbacks need a
    public URL — `cloudflared tunnel --url http://localhost:9000` prints one;
-   put it in the two NOTIFY vars. The 1-minute deposit sweep
+   put that public origin in `PAYMENT_CALLBACK_BASE`. The 1-minute deposit sweep
    (`jobs/deposit-reconcile.ts`, query by `merchantRefNum`) is the fallback
    when a callback cannot reach us.
 2. Storefront `.env.local`: `NEXT_PUBLIC_PAYMENTS_PROVIDER=tgpay`,
@@ -147,6 +147,26 @@ disabled on the storefront until a gateway that serves it is active.
    credits once.
 5. Withdraw to the dummy bank → `gateway_withdrawal` row gets their
    `transactionRefNum` → payout callback settles or refunds it.
+
+## Gateway table rename deployment
+
+`Migration20260907120000` directly renames `globepay_deposit` and
+`globepay_withdrawal` to `gateway_deposit` and `gateway_withdrawal`. This requires
+a coordinated, quiesced API and worker cutover: old binaries cannot query the
+renamed schema. An ordinary pre-deploy migration with old workers still running
+does not provide compatibility.
+
+1. Prepare matching new API, admin and worker artifacts.
+2. Quiesce affected requests and drain all old writers and jobs. Arrange callback
+   intake handling for the maintenance window operationally.
+3. Run the rename migration using the new artifact, then start the matching new
+   API and workers. Validate before reopening traffic and jobs.
+
+Rollback also requires coordination: quiesce the new API and workers, reverse
+this rename using the artifact containing its down migration, then start the old
+binaries against the restored old table names. Never restart old workers against
+the renamed schema or leave new writers running during the reverse migration.
+This is deployment guidance only; it does not execute a deployment.
 
 ## Verified 2026-09-05
 

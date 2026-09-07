@@ -220,6 +220,44 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(sent).toEqual([]);
       });
 
+      it("source 'callback': refuses an amount above the ceiling even when it matches the row", async () => {
+        const row = await seed('ceiling', 'pending', 10001);
+        const called: string[] = [];
+        // Medusa's method wrappers do not support spyOn/mockRestore. Record
+        // calls at the container seam while retaining the real service.
+        const recorded = new Proxy(service, {
+          get(target, prop) {
+            const value = target[prop as keyof PacksModuleService];
+            if (typeof value !== 'function' || typeof prop !== 'string') {
+              return value;
+            }
+            return (...args: unknown[]) => {
+              called.push(prop);
+              return (value as (...a: unknown[]) => unknown).apply(
+                target,
+                args,
+              );
+            };
+          },
+        });
+        const ceilingScope = {
+          resolve: <T>(key: string): T =>
+            key === PACKS_MODULE ? (recorded as T) : scope.resolve<T>(key),
+        };
+        await expect(
+          applyDepositOutcome(ceilingScope, row, settled({ amount: 10001 })),
+        ).resolves.toEqual({ applied: false, reason: 'amount-mismatch' });
+        expect(called).not.toContain('claimDepositStatus');
+        expect(
+          await service.listCreditTransactions(
+            { customer_id: row.customer_id },
+            { take: 10 },
+          ),
+        ).toHaveLength(0);
+        expect((await reread(row.id)).status).toBe('pending');
+        expect(sent).toEqual([]);
+      });
+
       it("source 'requery': credits the OBSERVED amount when it disagrees with the row", async () => {
         const row = await seed('3b');
 

@@ -8,10 +8,9 @@ import type PacksModuleService from './service';
 // caller used to resolve the whole surface. A facet names the methods ONE AREA
 // of the codebase actually uses, so a reader of a payment route sees the
 // handful of methods that route can touch instead of the module's entire
-// vocabulary, and so a
-// service-side rename or removal fails `check-types` HERE — `Pick` rejects a
-// key that is not a member — instead of silently drifting past a hand-built
-// test fake.
+// vocabulary. A service-side rename or removal fails `check-types` HERE —
+// `Pick` rejects a key that is not a member — instead of silently drifting
+// past a hand-built test fake.
 //
 // Facets are named for the AREA they serve, not for a caller: the deposit
 // loop, the withdrawal loop, and the read-only admin reports. Add a member
@@ -81,7 +80,9 @@ export type CustomerWallet = Pick<
  * the caller is handed the facet, so nothing outside the facet is reachable
  * from that variable.
  */
-export function resolvePacks<F>(scope: ContainerLike): F {
+export function resolvePacks<F extends Partial<PacksModuleService>>(
+  scope: ContainerLike,
+): F {
   return scope.resolve<PacksModuleService>(PACKS_MODULE) as unknown as F;
 }
 
@@ -96,5 +97,7 @@ export function resolvePacks<F>(scope: ContainerLike): F {
  * and this checks NAMES, not signatures. Use `satisfies`, never a type
  * annotation, or the literal's inferred `jest.Mock` types are erased and every
  * `.mock.calls` assertion in the spec breaks.
+ * Never spread into the fake literal: spread keys escape excess-property
+ * checks and can hide stale method names.
  */
 export type FakeFacet<F> = Partial<Record<keyof F, unknown>>;

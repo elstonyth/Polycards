@@ -10,10 +10,9 @@
  * that the driver hands `RETURNING` rows back as a real array, or that a
  * loser really blocks and then matches nothing.
  *
- * The two cases that are honestly NOT database questions — "an empty id list
- * issues no query" and "a bad identifier throws before any SQL runs" — use a
- * hand-made `{ execute: jest.fn() }`, because the claim is precisely that
- * `execute` was never reached.
+ * No-query cases — empty lists, unsafe identifiers and undefined predicates —
+ * use a hand-made `{ execute: jest.fn() }`, because the claim is precisely
+ * that `execute` was never reached.
  *
  * `customer_account_state` is the fixture table: it carries a nullable
  * timestamp pair (`free_pack_available_at` / `free_pack_claimed_at`) for the
@@ -208,6 +207,19 @@ moduleIntegrationTestRunner<PacksModuleService>({
           }),
         ).resolves.toEqual([]);
         expect(b.execute).not.toHaveBeenCalled();
+      });
+
+      it('rejects an undefined predicate before any SQL runs', async () => {
+        const f = fakeEm();
+        await expect(
+          claimRows(f.em, {
+            table: TABLE,
+            ids: ['cas_undefined'],
+            where: { cause: undefined },
+            set: { frozen: true },
+          }),
+        ).rejects.toThrow(/undefined.*cause/i);
+        expect(f.execute).not.toHaveBeenCalled();
       });
 
       it('throws on an unsafe identifier before any SQL runs', async () => {

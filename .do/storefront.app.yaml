@@ -106,8 +106,8 @@ services:
         value: https://polycards.gg
       # Which top-up sheet the storefront renders: 'mock' keeps the mock sheet,
       # any other value (currently 'tgpay') redirects to the real cashier.
-      # Cut over 2026-08-04, once
-      # the backend spec carried GATEWAY_ENABLED=true + the three secrets and
+      # Cut over 2026-08-04, once the backend spec carried
+      # GATEWAY_ENABLED=true + the three secrets and
       # ALLOW_MOCK_TOPUP was gone from production — at that point the mock sheet
       # posted to a route that refuses (topup-credits.ts), so leaving it was a
       # dead-end button, not a safe default.

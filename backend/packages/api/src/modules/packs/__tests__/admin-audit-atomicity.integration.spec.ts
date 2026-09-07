@@ -9,10 +9,10 @@
  * leaving exactly the bug this task removed: a rolled-back change with a
  * committed audit row claiming it happened.
  *
- * The service's `protected audit(row, sharedContext)` is the ONE place that
- * threading happens for all 25+ writers, so proving it on one caller proves the
- * seam. `createChallengeSchedule` is that caller because it needs the fewest
- * models to stand up.
+ * This proves `protected audit(row, sharedContext)` forwards the transaction
+ * for `createChallengeSchedule`, which needs the fewest models to stand up.
+ * Other callers' context forwarding was statically reviewed; this test does
+ * not establish their runtime transaction behavior.
  *
  * Method: run the operation against a FORKED manager with an open transaction
  * (the same idiom as withdrawal-claim.integration.spec.ts), roll it back, then

@@ -1,5 +1,6 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
+import type { IUserModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { seedOf } from '../../src/utils/profile-handle';
@@ -24,6 +25,7 @@ medusaIntegrationTestRunner({
   testSuite: ({ api, getContainer }) => {
     describe('/admin/challenge', () => {
       let adminToken: string;
+      let adminId: string;
       let cardId: string;
       const packs = () =>
         getContainer().resolve<PacksModuleService>(PACKS_MODULE);
@@ -39,6 +41,10 @@ medusaIntegrationTestRunner({
           ADMIN_EMAIL,
           PASSWORD,
         );
+        const [admin] = await container
+          .resolve<IUserModuleService>(Modules.USER)
+          .listUsers({ email: ADMIN_EMAIL });
+        adminId = admin.id;
         // Seed one card so the existence check has something to accept.
         const [card] = await packs().createCards([
           {
@@ -294,10 +300,17 @@ medusaIntegrationTestRunner({
           before: null,
           reason: 'queue week 42',
         });
-        expect(audits[0].admin_id).toBeTruthy(); // from the session, not the body
-        expect(audits[0].after).toMatchObject({
+        expect(audits[0].admin_id).toBe(adminId); // fixture user from the session
+        expect(audits[0].after).toEqual({
           starts_at: startsAt,
           label: 'Week 42',
+          stages: [
+            {
+              stage_number: 1,
+              threshold_myr: 100,
+              rank_rewards: [{ rank: 1, card_id: cardId, credits: 0 }],
+            },
+          ],
         });
       });
 

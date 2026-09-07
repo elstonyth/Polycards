@@ -141,8 +141,8 @@ _Avoid_: sell (ambiguous between this and Buyback — say which)
 
 **Withdrawal**:
 Converting site credit out to real money through the active payment
-gateway's payout channel (TGPay since 2026-09-06; the table keeps its
-original name) — table `gateway_withdrawal`, route `POST /store/credits/withdraw`,
+gateway's payout channel (TGPay since 2026-09-06) — table `gateway_withdrawal`
+(renamed by `Migration20260907120000`), route `POST /store/credits/withdraw`,
 admin queue `/withdrawals`. The ledger reason string stays `cashout`
 (pre-dates the withdrawal build; `credit_transaction` is append-only, so an
 existing reason string is never renamed once rows carry it) — say

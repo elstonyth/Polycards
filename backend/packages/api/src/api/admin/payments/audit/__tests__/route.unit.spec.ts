@@ -1,6 +1,5 @@
 import { GET } from '../route';
 import { setActiveGateway } from '../../../../../modules/packs/gateway';
-import { GatewayError } from '../../../../../modules/packs/gateway-types';
 import { fakeGateway } from '../../../../../modules/packs/fake-gateway';
 import type {
   FakeFacet,
@@ -137,7 +136,7 @@ describe('GET /admin/payments/audit', () => {
 
   it('a wallet read failure is reported beside the findings, never instead of them', async () => {
     fakeGateway.script({
-      checkBalance: new GatewayError('403 not allowed', [], 403),
+      checkBalance: new Error('403 not allowed'),
     });
     // No admin setting: the active gateway falls back to PAYMENT_GATEWAY.
     process.env.PAYMENT_GATEWAY = 'fake';

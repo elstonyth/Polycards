@@ -1,3 +1,5 @@
+process.env.NODE_ENV = 'test';
+
 const { MetadataStorage } = require('@medusajs/framework/mikro-orm/core');
 
 MetadataStorage.clear();

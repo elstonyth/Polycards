@@ -199,6 +199,6 @@ describe('the production guard', () => {
   it('is never offered to the operator, in any environment', () => {
     // The admin switch lists GATEWAY_IDS and refuses anything isPaymentGateway
     // rejects; the fake is in neither list a deploy can reach.
-    expect(GATEWAY_IDS).toEqual(['tgpay']);
+    expect(GATEWAY_IDS).not.toContain('fake');
   });
 });

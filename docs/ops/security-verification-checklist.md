@@ -334,10 +334,10 @@ tier (single digits per minute, low tens per hour) — a human changing their ph
 number enters their password once, maybe twice. Worth checking in the same plan
 whether any other route has quietly become a credential check since it was wired.
 
-**Where to look.** `backend/packages/api/src/api/middlewares.ts:340-345` (the change
-matcher), `:269` and `:274` (the auth matchers), `api/utils/rate-limit.ts:764-800`
-(`createAuthIdentifierRateLimit`) and `:686-692` (`createDeliveryWriteRateLimit`), and
-the gate itself in `api/store/phone-verification/change/route.ts`.
+**Where to look.** `backend/packages/api/src/api/middlewares.ts` (the change and
+auth matchers), the `auth-identifier` and `delivery-write` entries in
+`backend/packages/api/src/api/utils/rate-limit.ts`, and the gate itself in
+`backend/packages/api/src/api/store/phone-verification/change/route.ts`.
 
 **Record.** The decision — build it, or accept the 90× with the reason why (the
 bearer-token precondition is a legitimate argument for accepting it). If accepted, say

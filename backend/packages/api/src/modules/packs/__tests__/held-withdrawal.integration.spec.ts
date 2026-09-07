@@ -76,6 +76,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
      * itself keeps `this` = the real service and never reaches the proxy).
      */
     let called: string[] = [];
+    let withdrawalUpdates: unknown[][] = [];
 
     const logger = {
       info: (m: string) => logged.push(m),
@@ -91,6 +92,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
         }
         return (...args: unknown[]) => {
           called.push(prop);
+          if (prop === 'updateGatewayWithdrawals') {
+            withdrawalUpdates.push(args);
+          }
           return (value as (...a: unknown[]) => unknown).apply(target, args);
         };
       },
@@ -130,6 +134,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       sent = [];
       logged = [];
       called = [];
+      withdrawalUpdates = [];
       fakeGateway.reset();
       // The active gateway is CACHED, so resolveActiveGateway short-circuits
       // on its TTL branch and never needs a site_settings table here.
@@ -294,9 +299,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // transaction per call whenever the caller passes no
       // `transactionManager` of its own, which neither call here does. Two
       // calls sharing the same `scope`/service therefore still run on two
-      // independent transactions, and the module test runner's pool
-      // (`pool: { min: 2 }`, @medusajs/test-utils database.js) has room for
-      // both at once — so this is a real race, decided by the `credit:`
+      // independent transactions. The race is decided by the `credit:`
       // advisory lock inside claimWithdrawalAgainstDebit, not by test
       // ordering. Unlike the sequential test above, which caller wins is not
       // knowable ahead of time (and the loser's pre-claim row read may or may
@@ -701,14 +704,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
      * test here stays green, so it is asserted directly. The real method runs
      * underneath; only the forbidden two are watched.
      *
-     * This proxy records method NAMES only, not their arguments, so it
-     * cannot see whether a stray `status` field ever rides into an
-     * `updateGatewayWithdrawals` call (the deleted unit spec's fake-based
-     * assertion for that). The real-DB re-reads elsewhere in this file
-     * (`after.status`, `after.gateway_transaction_id` in every test above)
-     * supersede it: a status write smuggled outside the lock would show up
-     * there as a row moved to the wrong state, against real Postgres rather
-     * than a fake's recorded call.
+     * The proxy also records generated-update arguments: a redundant
+     * same-status write would escape final-row assertions. Successful approve
+     * must update only the provider reference after the locked claim; refund
+     * paths legitimately write a terminal status through the generated method.
      */
     describe('the debit decision never happens outside the lock', () => {
       it.each([
@@ -734,6 +733,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           // The seed helpers go through `service` directly, so `called`
           // holds the operation's own calls alone.
           called = [];
+          withdrawalUpdates = [];
 
           await run(row.id);
 
@@ -745,6 +745,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
           ).toHaveLength(1);
           expect(called).not.toContain('listCreditTransactions');
           expect(called).not.toContain('claimWithdrawalStatus');
+          if (_name === 'submitHeldWithdrawal') {
+            expect(withdrawalUpdates).toHaveLength(1);
+            const [update] = withdrawalUpdates[0] as [{ data: unknown }];
+            expect(update.data).not.toHaveProperty('status');
+          }
         },
       );
     });

@@ -111,6 +111,9 @@ export async function claimRows(
   params.push(...claim.ids);
 
   for (const [column, value] of whereEntries) {
+    if (value === undefined) {
+      throw new Error(`claimRows: undefined WHERE value for '${column}'`);
+    }
     if (value === null) {
       whereSql.push(`${column} IS NULL`);
       continue;
