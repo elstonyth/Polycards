@@ -18,19 +18,24 @@ export function PhoneOtpStep({
   purpose,
   onVerified,
   onBack,
+  channel = 'sms',
 }: {
   phone: string;
   purpose: PhoneOtpPurpose;
   onVerified: (token: string) => void | Promise<void>;
   onBack: () => void;
+  /** How the parent sent the FIRST code. Defaults to SMS; a parent that
+   *  offers "get a call" up front passes 'call' so the copy and the
+   *  Call-again/Resend labels start out right. */
+  channel?: PhoneOtpChannel;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(RESEND_COOLDOWN_S);
-  // How the LAST code went out. The parent always sends the first one by SMS;
-  // "Get a call instead" exists because some carriers report the SMS
-  // delivered while the subscriber never sees it (Digi/016, 2026-09-07).
-  const [via, setVia] = useState<PhoneOtpChannel>('sms');
+  // How the LAST code went out — seeded by the parent's first send. "Get a
+  // call instead" exists because some carriers report the SMS delivered while
+  // the subscriber never sees it (Digi/016, 2026-09-07).
+  const [via, setVia] = useState<PhoneOtpChannel>(channel);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Focus once on mount only — NOT on every cooldown tick (that would yank
@@ -73,7 +78,9 @@ export function PhoneOtpStep({
     setBusy(true);
     // Set the cooldown BEFORE the request resolves — a double-click while the
     // first request is in flight must not fire a second SMS (the start route
-    // is budgeted at 3/60s and each send costs real money). One cooldown for
+    // is budgeted at 3 per 10 min per phone and each send costs real money —
+    // see the phone-OTP limiter module comment in
+    // backend/packages/api/src/api/utils/rate-limit.ts). One cooldown for
     // both channels: a call and an SMS to the same number are the same budget.
     setCooldown(RESEND_COOLDOWN_S);
     try {
