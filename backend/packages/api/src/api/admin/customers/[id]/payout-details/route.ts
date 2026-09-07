@@ -1,4 +1,7 @@
-import type { AuthenticatedMedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import type {
+  AuthenticatedMedusaRequest,
+  MedusaResponse,
+} from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
@@ -46,6 +49,16 @@ export async function GET(
   //
   // Best-effort: an audit failure must not deny an operator data they are
   // entitled to, and the throttle (now covering GET) is the volume control.
+  //
+  // DELIBERATELY the one audit row still written from a route (2026-09-07
+  // sweep, which moved every other one into the transaction of the change it
+  // describes). This one audits a READ. A SELECT has no transaction to join
+  // and nothing that can roll back, so moving the write into the service would
+  // buy no atomicity — it would only force a choice between keeping this
+  // try/catch inside a service method (pure relocation) or dropping it, which
+  // would make an audit outage deny a legitimate read. The write twin below
+  // audits from inside setPayoutDetails, where there IS a change to commit
+  // with.
   if (row) {
     const digits = (row.bank_account_number ?? '').replace(/\D/g, '');
     try {
@@ -79,7 +92,8 @@ export async function POST(
   res: MedusaResponse,
 ): Promise<void> {
   const body = (req.body ?? {}) as Body;
-  const bankName = typeof body.bank_name === 'string' ? body.bank_name.trim() : '';
+  const bankName =
+    typeof body.bank_name === 'string' ? body.bank_name.trim() : '';
   if (bankName === '' || bankName.length > 100) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,

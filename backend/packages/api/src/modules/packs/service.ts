@@ -8,7 +8,11 @@ import {
   MedusaContext,
   Modules,
 } from '@medusajs/framework/utils';
-import type { Context, HttpTypes } from '@medusajs/framework/types';
+import type {
+  Context,
+  HttpTypes,
+  InferTypeOf,
+} from '@medusajs/framework/types';
 import { PCT_SCALE } from '@acme/odds-math';
 import type { OddsRarity, TierRangeMap } from '@acme/odds-math';
 import type { Rarity } from './rarity';
@@ -515,6 +519,20 @@ interface SettleSnapshot {
   >;
 }
 
+// One admin_action_audit row, as every writer supplies it: the model's own
+// columns minus the framework-managed ones. Derived from the model rather than
+// hand-listed so the entity_type/action enums cannot drift from the DB CHECK.
+export type AdminAuditRow = Pick<
+  InferTypeOf<typeof AdminActionAudit>,
+  | 'admin_id'
+  | 'entity_type'
+  | 'entity_id'
+  | 'action'
+  | 'before'
+  | 'after'
+  | 'reason'
+>;
+
 class PacksModuleService extends MedusaService({
   Pack,
   Card,
@@ -555,6 +573,19 @@ class PacksModuleService extends MedusaService({
   TaskClaim,
   DailyCheckin,
 }) {
+  // Every audit row in this service goes through here — one place that knows
+  // the shape, and one place a reviewer checks that the row rides the caller's
+  // transaction. `sharedContext` is NOT optional: an audit written outside the
+  // transaction of the change it describes can commit when the change rolls
+  // back (and vice versa), which is the whole point of writing it here rather
+  // than in the route.
+  protected async audit(
+    row: AdminAuditRow,
+    sharedContext: Context,
+  ): Promise<void> {
+    await this.createAdminActionAudits([row], sharedContext);
+  }
+
   // Apply a pack-membership diff (add rows + delete rows + renormalize
   // survivor weights) as ONE transaction. The set-pack-members workflow step
   // computes the diff; a failed step never runs its OWN compensation, so
@@ -689,18 +720,16 @@ class PacksModuleService extends MedusaService({
     } else {
       await this.createSiteSettings([{ id: 'global', ...data }], sharedContext);
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'site_settings',
-          entity_id: row?.id ?? 'singleton',
-          action: 'edit_payment_gateway',
-          before,
-          after: data,
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'site_settings',
+        entity_id: row?.id ?? 'singleton',
+        action: 'edit_payment_gateway',
+        before,
+        after: data,
+        reason: input.reason,
+      },
       sharedContext,
     );
     return data;
@@ -728,18 +757,16 @@ class PacksModuleService extends MedusaService({
       // a create race can never leave two rows.
       await this.createSiteSettings([{ id: 'global', ...data }], sharedContext);
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'site_settings',
-          entity_id: row?.id ?? 'singleton',
-          action: 'edit_site_settings',
-          before,
-          after: data,
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'site_settings',
+        entity_id: row?.id ?? 'singleton',
+        action: 'edit_site_settings',
+        before,
+        after: data,
+        reason: input.reason,
+      },
       sharedContext,
     );
     return data;
@@ -963,18 +990,16 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'referral_settings',
-          entity_id: 'global',
-          action: 'edit_referral_settings',
-          before,
-          after: next,
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'referral_settings',
+        entity_id: 'global',
+        action: 'edit_referral_settings',
+        before,
+        after: next,
+        reason: input.reason,
+      },
       sharedContext,
     );
   }
@@ -1030,18 +1055,16 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'customer',
-          entity_id: input.customerId,
-          action: 'set_partner_rate',
-          before: { partner_referral_bp: beforeBp },
-          after: { partner_referral_bp: input.rateBp },
-          reason: input.reason ?? 'partner rate change',
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: 'set_partner_rate',
+        before: { partner_referral_bp: beforeBp },
+        after: { partner_referral_bp: input.rateBp },
+        reason: input.reason ?? 'partner rate change',
+      },
       sharedContext,
     );
   }
@@ -1301,18 +1324,16 @@ class PacksModuleService extends MedusaService({
         'That run changed state while you were approving it — reload the page.',
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'weekly_settlement',
-          entity_id: run.id,
-          action: 'approve_settlement',
-          before: { status: 'draft' },
-          after: { status: 'approved' },
-          reason: `week ${new Date(run.week_start).toISOString().slice(0, 10)}`,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'weekly_settlement',
+        entity_id: run.id,
+        action: 'approve_settlement',
+        before: { status: 'draft' },
+        after: { status: 'approved' },
+        reason: `week ${new Date(run.week_start).toISOString().slice(0, 10)}`,
+      },
       sharedContext,
     );
   }
@@ -1403,18 +1424,16 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'customer',
-          entity_id: input.customerId,
-          action: 'edit',
-          before: { referrer_id: before },
-          after: { referrer_id: input.referrerId },
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: 'edit',
+        before: { referrer_id: before },
+        after: { referrer_id: input.referrerId },
+        reason: input.reason,
+      },
       sharedContext,
     );
   }
@@ -1467,18 +1486,16 @@ class PacksModuleService extends MedusaService({
       },
       sharedContext,
     );
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'weekly_settlement',
-          entity_id: run.id,
-          action: 'void_settlement',
-          before: { status: 'draft' },
-          after: { status: 'void' },
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'weekly_settlement',
+        entity_id: run.id,
+        action: 'void_settlement',
+        before: { status: 'draft' },
+        after: { status: 'void' },
+        reason: input.reason,
+      },
       sharedContext,
     );
   }
@@ -1538,23 +1555,21 @@ class PacksModuleService extends MedusaService({
       { settlementId: line.settlement_id, amountCents: line.amount_cents },
       sharedContext,
     );
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'weekly_settlement',
-          entity_id: line.settlement_id,
-          action: 'void_settlement_line',
-          before: { line_id: line.id, status: 'pending' },
-          after: {
-            line_id: line.id,
-            status: 'voided',
-            customer_id: line.customer_id,
-            amount_cents: line.amount_cents,
-          },
-          reason: input.reason,
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'weekly_settlement',
+        entity_id: line.settlement_id,
+        action: 'void_settlement_line',
+        before: { line_id: line.id, status: 'pending' },
+        after: {
+          line_id: line.id,
+          status: 'voided',
+          customer_id: line.customer_id,
+          amount_cents: line.amount_cents,
         },
-      ],
+        reason: input.reason,
+      },
       sharedContext,
     );
   }
@@ -1721,18 +1736,16 @@ class PacksModuleService extends MedusaService({
       );
     }
     if (paid > 0 || skipped > 0) {
-      await this.createAdminActionAudits(
-        [
-          {
-            admin_id: input.adminId ?? 'system:pay-referral-week',
-            entity_type: 'weekly_settlement',
-            entity_id: run.id,
-            action: 'pay_settlement',
-            before: { status: run.status },
-            after: { paid, skipped },
-            reason: `week ${weekStartIso}`,
-          },
-        ],
+      await this.audit(
+        {
+          admin_id: input.adminId ?? 'system:pay-referral-week',
+          entity_type: 'weekly_settlement',
+          entity_id: run.id,
+          action: 'pay_settlement',
+          before: { status: run.status },
+          after: { paid, skipped },
+          reason: `week ${weekStartIso}`,
+        },
         sharedContext,
       );
     }
@@ -2472,18 +2485,16 @@ class PacksModuleService extends MedusaService({
       const [row] = await this.createTaskDefinitions([data], sharedContext);
       id = row.id;
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'task_definition',
-          entity_id: id,
-          action: before ? 'edit' : 'create',
-          before,
-          after: data,
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'task_definition',
+        entity_id: id,
+        action: before ? 'edit' : 'create',
+        before,
+        after: data,
+        reason: input.reason,
+      },
       sharedContext,
     );
     return { id };
@@ -2526,18 +2537,16 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'site_settings',
-          entity_id: row?.id ?? 'global',
-          action: 'edit_avatar_frames',
-          before,
-          after: data,
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'site_settings',
+        entity_id: row?.id ?? 'global',
+        action: 'edit_avatar_frames',
+        before,
+        after: data,
+        reason: input.reason,
+      },
       sharedContext,
     );
     // Public shape: only configured levels, never the null placeholders.
@@ -4259,18 +4268,16 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'customer',
-          entity_id: input.customerId,
-          action: 'freeze',
-          before,
-          after: { frozen: true, cause: 'manual' },
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: 'freeze',
+        before,
+        after: { frozen: true, cause: 'manual' },
+        reason: input.reason,
+      },
       sharedContext,
     );
     return { frozen: true };
@@ -4319,18 +4326,16 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'customer',
-          entity_id: input.customerId,
-          action: input.disabled ? 'disable' : 'enable',
-          before: { disabled: existing?.disabled ?? false },
-          after: { disabled: input.disabled },
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: input.disabled ? 'disable' : 'enable',
+        before: { disabled: existing?.disabled ?? false },
+        after: { disabled: input.disabled },
+        reason: input.reason,
+      },
       sharedContext,
     );
     return { disabled: input.disabled };
@@ -4615,24 +4620,22 @@ class PacksModuleService extends MedusaService({
       const digits = (n ?? '').replace(/\D/g, '');
       return digits.length > 4 ? digits.slice(-4) : null;
     };
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'customer',
-          entity_id: input.customerId,
-          action: 'edit',
-          before: {
-            bank_name: existing?.bank_name ?? null,
-            account_last4: last4(existing?.bank_account_number),
-          },
-          after: {
-            bank_name: input.bankName,
-            account_last4: last4(input.bankAccountNumber),
-          },
-          reason: 'payout details updated',
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: 'edit',
+        before: {
+          bank_name: existing?.bank_name ?? null,
+          account_last4: last4(existing?.bank_account_number),
         },
-      ],
+        after: {
+          bank_name: input.bankName,
+          account_last4: last4(input.bankAccountNumber),
+        },
+        reason: 'payout details updated',
+      },
       sharedContext,
     );
     return data;
@@ -4998,21 +5001,19 @@ class PacksModuleService extends MedusaService({
       );
     }
 
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'fx',
-          entity_id: 'USD_MYR',
-          action: 'edit_fx_rate',
-          before,
-          after: {
-            manual_override: input.manualOverride,
-            manual_rate: input.manualRate,
-          },
-          reason: input.reason,
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'fx',
+        entity_id: 'USD_MYR',
+        action: 'edit_fx_rate',
+        before,
+        after: {
+          manual_override: input.manualOverride,
+          manual_rate: input.manualRate,
         },
-      ],
+        reason: input.reason,
+      },
       sharedContext,
     );
 
@@ -5055,18 +5056,16 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'customer',
-          entity_id: input.customerId,
-          action: 'unfreeze',
-          before: existing ? { frozen: existing.frozen } : null,
-          after: { frozen: false },
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: 'unfreeze',
+        before: existing ? { frozen: existing.frozen } : null,
+        after: { frozen: false },
+        reason: input.reason,
+      },
       sharedContext,
     );
     return { frozen: false };
@@ -5659,18 +5658,16 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     if (!existingAudit) {
-      await this.createAdminActionAudits(
-        [
-          {
-            admin_id: customerId,
-            entity_type: 'customer',
-            entity_id: customerId,
-            action: 'delete_account',
-            before: { deleted: false },
-            after: { deleted: true },
-            reason: 'Customer deleted their own account.',
-          },
-        ],
+      await this.audit(
+        {
+          admin_id: customerId,
+          entity_type: 'customer',
+          entity_id: customerId,
+          action: 'delete_account',
+          before: { deleted: false },
+          after: { deleted: true },
+          reason: 'Customer deleted their own account.',
+        },
         sharedContext,
       );
     }
@@ -6891,6 +6888,20 @@ class PacksModuleService extends MedusaService({
       proofImages?: string[];
       /** Every pull the order covers — flipped on completed/canceled. */
       pullIds: string[];
+      /**
+       * Present for an ADMIN-driven move (the Manage modal and the bulk bar);
+       * absent for the customer's own cancel, which has no admin actor. The
+       * row is written from inside this transaction so it can never outlive a
+       * rolled-back transition, nor be lost after a committed one.
+       * `action` is a two-value union on purpose: the model's enum has no
+       * 'status' verb (widening it is a migration), and a third caller should
+       * have to think rather than invent one.
+       */
+      audit?: {
+        adminId: string;
+        action: 'edit' | 'bulk_status';
+        reason: string;
+      };
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ status: DeliveryStatus }> {
@@ -7060,6 +7071,28 @@ class PacksModuleService extends MedusaService({
         );
       }
     }
+
+    // The audit row for an admin-driven move, LAST and inside this
+    // transaction. `before` is the UNDER-LOCK read, not whatever the caller
+    // saw before it got here — the two are the same value except in exactly
+    // the race this lock exists for, and there the locked read is the true
+    // prior status. Only ever reached on a real change: a same-status update
+    // never reaches this method (the workflow step short-circuits it), so no
+    // row can be written whose before and after are identical.
+    if (input.audit) {
+      await this.audit(
+        {
+          admin_id: input.audit.adminId,
+          entity_type: 'delivery_order',
+          entity_id: input.orderId,
+          action: input.audit.action,
+          before: { status: order.status },
+          after: { status: input.to },
+          reason: input.audit.reason,
+        },
+        sharedContext,
+      );
+    }
     return { status: input.to };
   }
 
@@ -7162,18 +7195,16 @@ class PacksModuleService extends MedusaService({
       },
       sharedContext,
     );
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'credit',
-          entity_id: id,
-          action: 'adjust_credit',
-          before: { balance: Number((balance - input.amount).toFixed(2)) },
-          after: { balance },
-          reason: input.note,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'credit',
+        entity_id: id,
+        action: 'adjust_credit',
+        before: { balance: Number((balance - input.amount).toFixed(2)) },
+        after: { balance },
+        reason: input.note,
+      },
       sharedContext,
     );
     await this.recordLedgerEntry(
@@ -7509,18 +7540,16 @@ class PacksModuleService extends MedusaService({
     const after: RewardsSettingsView = {
       withdrawals_per_day: data.withdrawals_per_day,
     };
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'rewards_settings',
-          entity_id: row?.id ?? 'singleton',
-          action: 'edit_rewards_settings',
-          before,
-          after,
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'rewards_settings',
+        entity_id: row?.id ?? 'singleton',
+        action: 'edit_rewards_settings',
+        before,
+        after,
+        reason: input.reason,
+      },
       sharedContext,
     );
     return after;
@@ -8144,20 +8173,18 @@ class PacksModuleService extends MedusaService({
     }
 
     const after = input.levels.map((l) => ({ ...l }));
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'vip_levels',
-          entity_id: 'singleton',
-          action: 'replace',
-          // before/after are `json` columns typed Record<string, unknown> |
-          // null, not arrays — wrap the ladder snapshot under a key.
-          before: { levels: before },
-          after: { levels: after },
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'vip_levels',
+        entity_id: 'singleton',
+        action: 'replace',
+        // before/after are `json` columns typed Record<string, unknown> |
+        // null, not arrays — wrap the ladder snapshot under a key.
+        before: { levels: before },
+        after: { levels: after },
+        reason: input.reason,
+      },
       sharedContext,
     );
     return after;
@@ -8246,21 +8273,19 @@ class PacksModuleService extends MedusaService({
     }
 
     const after = input.stages.map((s) => ({ ...s }));
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'challenge_stages',
-          entity_id: 'singleton',
-          action: 'replace',
-          // before/after are `json` columns typed Record<string, unknown> |
-          // null, not arrays — wrap the stage-list snapshot under a key (same
-          // discipline as saveVipLevels' { levels: ... } wrap).
-          before: { stages: before },
-          after: { stages: after },
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'challenge_stages',
+        entity_id: 'singleton',
+        action: 'replace',
+        // before/after are `json` columns typed Record<string, unknown> |
+        // null, not arrays — wrap the stage-list snapshot under a key (same
+        // discipline as saveVipLevels' { levels: ... } wrap).
+        before: { stages: before },
+        after: { stages: after },
+        reason: input.reason,
+      },
       sharedContext,
     );
     return after;
@@ -8402,6 +8427,60 @@ class PacksModuleService extends MedusaService({
   }
 
   /**
+   * Queue a new edition — the row and its audit row in ONE transaction, the
+   * create twin of editChallengeSchedule. No lock and no pre-read: an insert
+   * has nothing to conflict with, so the only thing this method adds over the
+   * generated create is that the audit cannot be lost after a committed row
+   * (nor survive a rolled-back one).
+   *
+   * 'create', not a new 'schedule' verb: the action enum is a DB CHECK, so
+   * widening it costs a migration to say nothing the entity_id + payload do
+   * not already say.
+   */
+  @InjectTransactionManager()
+  async createChallengeSchedule(
+    input: {
+      startsAt: Date;
+      label: string | null;
+      stages: ChallengeStageInput[];
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ id: string }> {
+    const [created] = await this.createChallengeSchedules(
+      [
+        {
+          starts_at: input.startsAt,
+          label: input.label,
+          // model.json() generates a Record<string, unknown> create input — a
+          // plain array has no string index signature, so it needs the same
+          // double-cast saveChallengeStages uses for rank_rewards.
+          stages: input.stages as unknown as Record<string, unknown>,
+        },
+      ],
+      sharedContext,
+    );
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'challenge_stages',
+        entity_id: created.id,
+        action: 'create',
+        before: null,
+        after: {
+          starts_at: input.startsAt.toISOString(),
+          label: input.label,
+          stages: input.stages,
+        },
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+    return { id: created.id };
+  }
+
+  /**
    * Edit a QUEUED edition in place — new start, name, prize ladder — with the
    * conflict check, the write, and its audit row in ONE transaction.
    *
@@ -8471,26 +8550,24 @@ class PacksModuleService extends MedusaService({
       },
       sharedContext,
     );
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'challenge_stages',
-          entity_id: input.id,
-          action: 'edit',
-          before: {
-            starts_at: new Date(row.starts_at).toISOString(),
-            label: row.label,
-            stages: row.stages,
-          },
-          after: {
-            starts_at: input.startsAt.toISOString(),
-            label: input.label,
-            stages: input.stages,
-          },
-          reason: input.reason,
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'challenge_stages',
+        entity_id: input.id,
+        action: 'edit',
+        before: {
+          starts_at: new Date(row.starts_at).toISOString(),
+          label: row.label,
+          stages: row.stages,
         },
-      ],
+        after: {
+          starts_at: input.startsAt.toISOString(),
+          label: input.label,
+          stages: input.stages,
+        },
+        reason: input.reason,
+      },
       sharedContext,
     );
   }
@@ -9497,21 +9574,19 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'challenge_settings',
-          entity_id: row?.id ?? 'global',
-          action: 'edit',
-          // The `before`/`after` audit json columns type as
-          // Record<string, unknown> | null, and ChallengeSettingsView (a named
-          // interface) doesn't structurally satisfy that directly.
-          before: before as unknown as Record<string, unknown>,
-          after: after as unknown as Record<string, unknown>,
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'challenge_settings',
+        entity_id: row?.id ?? 'global',
+        action: 'edit',
+        // The `before`/`after` audit json columns type as
+        // Record<string, unknown> | null, and ChallengeSettingsView (a named
+        // interface) doesn't structurally satisfy that directly.
+        before: before as unknown as Record<string, unknown>,
+        after: after as unknown as Record<string, unknown>,
+        reason: input.reason,
+      },
       sharedContext,
     );
     return after;
@@ -9556,18 +9631,16 @@ class PacksModuleService extends MedusaService({
     const after: TierSettingsView = {
       ranges: normalizeTierRanges(full),
     };
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'tier_settings',
-          entity_id: row?.id ?? 'global',
-          action: 'edit',
-          before: before as unknown as Record<string, unknown>,
-          after: after as unknown as Record<string, unknown>,
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'tier_settings',
+        entity_id: row?.id ?? 'global',
+        action: 'edit',
+        before: before as unknown as Record<string, unknown>,
+        after: after as unknown as Record<string, unknown>,
+        reason: input.reason,
+      },
       sharedContext,
     );
     return after;
@@ -9613,18 +9686,16 @@ class PacksModuleService extends MedusaService({
       );
     }
 
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: adminId,
-          entity_type: 'voucher_ladder',
-          entity_id: 'singleton',
-          action: 'edit_voucher_ladder',
-          before,
-          after,
-          reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: adminId,
+        entity_type: 'voucher_ladder',
+        entity_id: 'singleton',
+        action: 'edit_voucher_ladder',
+        before,
+        after,
+        reason,
+      },
       sharedContext,
     );
   }
@@ -9830,6 +9901,25 @@ class PacksModuleService extends MedusaService({
         qty: l.qty,
         ref_id: l.id,
       })),
+      sharedContext,
+    );
+
+    // The audit row rides this transaction with the invoice it describes.
+    // admin_id IS agent_user_id: the route derives that field from
+    // req.auth_context.actor_id and it is never client-supplied, so there is
+    // no second actor to pass in.
+    await this.audit(
+      {
+        admin_id: input.agent_user_id,
+        entity_type: 'purchase_invoice',
+        entity_id: invoice.id,
+        action: 'create',
+        before: null,
+        after: { display_no, lines: lines.length },
+        reason: input.reverses_invoice_id
+          ? `reversal of invoice ${input.reverses_invoice_id}`
+          : 'purchase invoice created',
+      },
       sharedContext,
     );
 

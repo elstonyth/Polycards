@@ -164,32 +164,25 @@ export async function POST(
 
   const stages = validateChallengeStages(req.body);
 
+  // The row and its audit ride ONE service transaction (createChallengeSchedule)
+  // — this handler only validates the payload and shapes the response, the
+  // same split POST /:id already uses.
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const [created] = await packs.createChallengeSchedules([
-    {
-      starts_at: startsAt,
-      label,
-      // model.json() generates a Record<string, unknown> create input — a plain
-      // array has no string index signature, so it needs the same double-cast
-      // saveChallengeStages uses for rank_rewards.
-      stages: stages as unknown as Record<string, unknown>,
-    },
-  ]);
-  await packs.createAdminActionAudits([
-    {
-      admin_id: adminId,
-      entity_type: 'challenge_stages',
-      entity_id: created.id,
-      // 'create', not a new 'schedule' verb: the action enum is a DB CHECK, so
-      // widening it costs a migration to say nothing the entity_id + payload
-      // do not already say.
-      action: 'create',
-      before: null,
-      after: { starts_at: startsAt.toISOString(), label, stages },
-      reason,
-    },
-  ]);
-  // Just created with a future start, so `due` is false by construction — but
-  // it goes through the same view() so the shape can never drift from GET's.
-  res.json({ schedule: view({ ...created, applied_at: null }, Date.now()) });
+  const { id } = await packs.createChallengeSchedule({
+    startsAt,
+    label,
+    stages,
+    adminId,
+    reason,
+  });
+  // The service threw if the insert did not land, so these ARE the row's
+  // values. Just created with a future start, so `due` is false by
+  // construction — but it goes through the same view() so the shape can never
+  // drift from GET's.
+  res.json({
+    schedule: view(
+      { id, starts_at: startsAt, label, applied_at: null, stages },
+      Date.now(),
+    ),
+  });
 }

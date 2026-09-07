@@ -53,7 +53,9 @@ medusaIntegrationTestRunner({
         headers: { authorization: `Bearer ${adminToken}` },
       });
       const create = (body: unknown) =>
-        unwrapResponse(api.post('/admin/purchase-invoices', body, adminHeaders()));
+        unwrapResponse(
+          api.post('/admin/purchase-invoices', body, adminHeaders()),
+        );
 
       const LINE = {
         card_handle: 'charizard-psa-10',
@@ -94,6 +96,10 @@ medusaIntegrationTestRunner({
         expect(movements).toHaveLength(1);
         expect(movements[0]).toMatchObject({ kind: 'purchase', qty: 10 });
 
+        // Written by createPurchaseInvoiceWithLines inside the invoice's own
+        // transaction (it used to be a separate write in the route, after the
+        // workflow had already committed). admin_id is the server-derived
+        // agent id, never anything from the body.
         const [audit] = await packs.listAdminActionAudits(
           {
             entity_type: 'purchase_invoice',
@@ -101,7 +107,16 @@ medusaIntegrationTestRunner({
           },
           { take: 1 },
         );
-        expect(audit).toMatchObject({ action: 'create' });
+        expect(audit).toMatchObject({
+          action: 'create',
+          before: null,
+          reason: 'purchase invoice created',
+          after: {
+            display_no: res.data.invoice.display_no,
+            lines: res.data.invoice.lines.length,
+          },
+        });
+        expect(audit.admin_id).toBeTruthy();
       });
 
       it('two invoices get sequential display_no values', async () => {
@@ -163,7 +178,9 @@ medusaIntegrationTestRunner({
       it('accepts a reversal whose product has since been deleted', async () => {
         const HANDLE = 'reversal-deleted-product';
         await makeProduct(HANDLE, 'Reversal Deleted Product');
-        const original = await createOriginal([{ ...LINE, card_handle: HANDLE }]);
+        const original = await createOriginal([
+          { ...LINE, card_handle: HANDLE },
+        ]);
         expect(original.status).toBe(201);
 
         const productModule = getContainer().resolve(Modules.PRODUCT);
@@ -375,7 +392,10 @@ medusaIntegrationTestRunner({
           // under a dropped sort param, and under an ignored direction), which
           // is the whole point of the reversed creation order above.
           const asc = await unwrapResponse(
-            api.get('/admin/purchase-invoices?sort=supplier:asc', adminHeaders()),
+            api.get(
+              '/admin/purchase-invoices?sort=supplier:asc',
+              adminHeaders(),
+            ),
           );
           expect(asc.data.invoices[0].id).toBe(acme.data.invoice.id); // A < Z
           const desc = await unwrapResponse(
@@ -469,7 +489,10 @@ medusaIntegrationTestRunner({
 
         it('GET /:id 404s on an unknown id', async () => {
           const res = await unwrapResponse(
-            api.get('/admin/purchase-invoices/pinv_nonexistent', adminHeaders()),
+            api.get(
+              '/admin/purchase-invoices/pinv_nonexistent',
+              adminHeaders(),
+            ),
           );
           expect(res.status).toBe(404);
           // Status alone is VACUOUS: an unrouted path 404s too, so this case

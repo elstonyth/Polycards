@@ -51,28 +51,27 @@ export async function POST(
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
   const [before] = await packs.listDeliveryOrders({ id }, { take: 1 });
 
-  const { result } = await updateDeliveryOrderWorkflow(req.scope).run({
-    input: { order_id: id, ...input },
-  });
-
   // Same audit row the bulk route writes, so a Manage-modal transition is as
-  // traceable as a bulk-bar one. Only on a status CHANGE — a tracking-only
-  // update returns the unchanged status and has nothing to record. 'edit' is
-  // the model's generic single-entity action (a new 'status' value would need
-  // an enum migration); the reason names the transition.
-  if (before && before.status !== result.status) {
-    await packs.createAdminActionAudits([
-      {
-        admin_id: req.auth_context.actor_id,
-        entity_type: 'delivery_order',
-        entity_id: id,
-        action: 'edit',
-        before: { status: before.status },
-        after: { status: result.status },
-        reason: `mark as ${result.status}`,
-      },
-    ]);
-  }
+  // traceable as a bulk-bar one — but written by the service, INSIDE the
+  // transaction that moves the status, not here afterwards. Only a real status
+  // change reaches that write: a tracking-only update never calls the
+  // transition seam at all. 'edit' is the model's generic single-entity action
+  // (a new 'status' value would need an enum migration); the reason names the
+  // transition, and `input.status` is what it will be (the service refuses
+  // rather than lands anything else).
+  const { result } = await updateDeliveryOrderWorkflow(req.scope).run({
+    input: {
+      order_id: id,
+      ...input,
+      audit: input.status
+        ? {
+            adminId: req.auth_context.actor_id,
+            action: 'edit' as const,
+            reason: `mark as ${input.status}`,
+          }
+        : undefined,
+    },
+  });
 
   await notifyDeliveryChange(req.scope, before, result, input.tracking_number);
 
