@@ -30,11 +30,11 @@ vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
 
-import { getPackCategories } from '@/lib/data/packs';
+import { getPackCategories, getPullGaps } from '@/lib/data/packs';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
 import { getLeaderboard } from '@/lib/data/leaderboard';
 import { getChallenge } from '@/lib/data/challenge';
-import { clearTtlCache } from '@/lib/ttl-cache';
+import { cachedJson, clearTtlCache } from '@/lib/ttl-cache';
 
 /** One route answering a queued response per call — the port equivalent of a
  *  `mockResolvedValueOnce` chain. An exhausted queue answers 502, so a test
@@ -153,5 +153,51 @@ describe('getChallenge cache contract', () => {
     // recorded request count, which says it outright.
     await getChallenge();
     expect(challenge.mem.requests).toHaveLength(1);
+  });
+});
+
+describe('cachedJson cache contract', () => {
+  // The JSON-proxy wrapper (both feed routes) inherits `cached`'s rule: it is
+  // the LOADER's throw that keeps a degradation out of the memo. /api/pull-gaps
+  // is the shape that depends on it — getPullGaps swallows a backend failure
+  // into null, so the route throws on that null rather than memoising
+  // "unavailable" for every viewer for the rest of the window.
+  const gapsBody = {
+    rarity: 'Immortal',
+    pct: 1.1,
+    expected: 91,
+    avg: 60.5,
+    last20: 86,
+    current: 27,
+    hits: [],
+  };
+  const proxy = () =>
+    cachedJson('gaps', 60_000, async () => {
+      const gaps = await getPullGaps('Immortal');
+      if (!gaps) throw new Error('pull gaps unavailable');
+      return gaps;
+    });
+
+  it('a null read throws out of the loader and is NOT cached: the next call re-fetches', async () => {
+    const gaps = queued('GET /store/pulls/gaps');
+    gaps.push({ body: { rarity: 'Immortal', hits: 'nope' } }); // fails the schema
+    await expect(proxy()).rejects.toThrow('pull gaps unavailable');
+
+    gaps.push({ body: gapsBody });
+    const ok = await proxy();
+    expect(ok.headers.get('content-type')).toBe('application/json');
+    expect((await ok.json()).current).toBe(27);
+    expect(gaps.mem.requests).toHaveLength(2);
+  });
+
+  it('a good body IS cached: the serialized body is reused and the next call does NOT re-fetch', async () => {
+    const gaps = queued('GET /store/pulls/gaps');
+    gaps.push({ body: gapsBody });
+    expect((await (await proxy()).json()).current).toBe(27);
+
+    // A second Response over the SAME memoised body — a re-fetch would drain
+    // the queue to its 502 fallback and throw.
+    expect((await (await proxy()).json()).current).toBe(27);
+    expect(gaps.mem.requests).toHaveLength(1);
   });
 });
