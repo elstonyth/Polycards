@@ -179,12 +179,19 @@ export type AccountInfo = { hasPassword: boolean };
  * request.
  */
 export const getAccountInfo = cache(async (): Promise<AccountInfo> => {
-  const r = await store.get(
-    '/store/customers/me/account',
-    AccountInfoSchema,
-    // Explicit, though it is the default — this one is per-customer and must
-    // never be cached or answered for a guest.
-    { auth: 'required' },
-  );
-  return r.ok ? r.data : { hasPassword: true };
+  // The port reports backend refusals as `{ ok: false }`, but the call itself
+  // can still reject (the cookie-jar token lookup runs before the request).
+  // The fallback documented above has to cover that too.
+  try {
+    const r = await store.get(
+      '/store/customers/me/account',
+      AccountInfoSchema,
+      // Explicit, though it is the default — this one is per-customer and must
+      // never be cached or answered for a guest.
+      { auth: 'required' },
+    );
+    return r.ok ? r.data : { hasPassword: true };
+  } catch {
+    return { hasPassword: true };
+  }
 });

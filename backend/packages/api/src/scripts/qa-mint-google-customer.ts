@@ -3,7 +3,7 @@ import { Modules } from '@medusajs/framework/utils';
 // Declared at the workspace root (backend/package.json), reached via hoisting —
 // the first direct import of it under packages/api/src.
 import jwt from 'jsonwebtoken';
-import { writeFileSync } from 'node:fs';
+import { chmodSync, writeFileSync } from 'node:fs';
 
 // Local QA tool — the customer-side twin of reset-customer-password.ts for the
 // cohort that has no password. Seeds a throwaway GOOGLE-ONLY customer
@@ -27,16 +27,19 @@ export default async function qaMintGoogleCustomer({ container }: ExecArgs) {
   const email = `qa-google-${Date.now()}@polycards.local`;
   const customers: any = container.resolve(Modules.CUSTOMER);
   const auth: any = container.resolve(Modules.AUTH);
-  const customer = await customers.createCustomers({
-    email,
-    has_account: true,
-  });
-  const identity = await auth.createAuthIdentities({
-    provider_identities: [
-      { provider: 'google', entity_id: `qa-sub-${Date.now()}` },
-    ],
-    app_metadata: { customer_id: customer.id },
-  });
+  // Array in, array out — the module services overload single vs array, and
+  // the array form leaves no doubt which one this is.
+  const [customer] = await customers.createCustomers([
+    { email, has_account: true },
+  ]);
+  const [identity] = await auth.createAuthIdentities([
+    {
+      provider_identities: [
+        { provider: 'google', entity_id: `qa-sub-${Date.now()}` },
+      ],
+      app_metadata: { customer_id: customer.id },
+    },
+  ]);
   // The claims `authenticate()` reads. Core's own session token also carries
   // auth_provider / user_metadata / app_metadata.roles; nothing in these flows
   // reads them.
@@ -52,7 +55,9 @@ export default async function qaMintGoogleCustomer({ container }: ExecArgs) {
     jwtSecret as string,
     { expiresIn: (jwtExpiresIn as any) ?? '1d' },
   );
-  writeFileSync(out, `${token}\n`);
+  // Owner-only: `mode` applies to a NEW file, chmod covers an existing one.
+  writeFileSync(out, `${token}\n`, { mode: 0o600 });
+  chmodSync(out, 0o600);
   console.log(
     `QA google-only customer ${customer.id} — token written to ${out}`,
   );

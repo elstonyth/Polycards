@@ -126,11 +126,18 @@ export function PhoneOnboardingModal() {
   async function onLogout() {
     if (busy) return;
     setBusy(true);
+    setError(null);
     try {
       await logout();
       setCustomer(null);
       router.push('/');
       router.refresh();
+    } catch {
+      // A server-action call can reject at the transport boundary (offline, a
+      // mid-deploy action-id mismatch). Silence here would leave someone in a
+      // gate with no working exit. The error slot lives on the entry step.
+      setStep('entry');
+      setError('Could not log you out. Please try again.');
     } finally {
       setBusy(false);
     }

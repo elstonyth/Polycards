@@ -235,4 +235,16 @@ describe('PhoneOnboardingModal (required gate)', () => {
     ).toMatch(/already saved.*reload/i);
     expect(mocks.refresh).not.toHaveBeenCalled();
   });
+
+  test('a failed logout is reported and the gate stays', async () => {
+    mocks.logout.mockRejectedValueOnce(new Error('offline'));
+    await mount();
+    await act(async () => button('Log out')!.click());
+    expect(dialog()).not.toBeNull();
+    expect(
+      container.querySelector('#phone-onboarding-error')?.textContent,
+    ).toMatch(/could not log you out/i);
+    expect(mocks.setCustomer).not.toHaveBeenCalled();
+    expect(mocks.push).not.toHaveBeenCalled();
+  });
 });
