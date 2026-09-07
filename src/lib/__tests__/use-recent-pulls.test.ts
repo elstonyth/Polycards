@@ -1,51 +1,16 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createElement, act, useLayoutEffect } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import { act } from 'react';
+import { renderHook, flush } from './render-hook';
 import { useLiveRecentPulls } from '../use-recent-pulls';
 import type { RecentFeed, RecentPull } from '@/lib/data/packs';
 
-// Same createRoot + act harness as use-pack-detail-poll.test.ts (no hook
-// testing library in the repo). The hook's rules under test are all
-// ACROSS-render behaviour — a changing tier prop, an empty response for the
-// scope already on screen, the pending flag — so a pure-logic extraction
-// could not observe them.
-function renderHook<P, T>(useHook: (props: P) => T, initial: P) {
-  const container = document.createElement('div');
-  document.body.appendChild(container);
-  const box: { current: T } = { current: undefined as unknown as T };
-  let root!: Root;
-  function Probe({ props }: { props: P }) {
-    const result = useHook(props);
-    useLayoutEffect(() => {
-      box.current = result;
-    });
-    return null;
-  }
-  act(() => {
-    root = createRoot(container);
-    root.render(createElement(Probe, { props: initial }));
-  });
-  return {
-    get current() {
-      return box.current;
-    },
-    rerender: (props: P) => {
-      act(() => {
-        root.render(createElement(Probe, { props }));
-      });
-    },
-    unmount: () => {
-      act(() => root.unmount());
-      container.remove();
-    },
-  };
-}
-
-Object.defineProperty(document, 'visibilityState', {
-  configurable: true,
-  get: () => 'visible',
-});
+// The rules under test are the ones useLiveRecentPulls owns on top of
+// useLivePoll: the URL it builds per scope, its `accept` (an empty payload for
+// the scope already on screen is a blip, for a NEW scope it is that scope's
+// honest empty state), and the pending/shownScope contract PullHistory keys
+// its list on. The interval, the visibility gate and the ordering guard belong
+// to useLivePoll and are covered in use-live-poll.test.ts.
 
 const pull = (
   id: string,
@@ -78,7 +43,6 @@ const seed: RecentFeed = {
 const fetchMock = vi.fn();
 const respond = (body: unknown, ok = true) =>
   fetchMock.mockResolvedValueOnce({ ok, json: async () => body });
-const flush = () => act(async () => {});
 
 beforeEach(() => {
   fetchMock.mockReset();
