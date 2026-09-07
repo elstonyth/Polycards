@@ -131,6 +131,8 @@ beforeEach(() => {
   process.env.GATEWAY_WITHDRAWALS_ENABLED = 'true';
   // The explicit TGPay preflight cases must reach destination validation
   // without depending on credentials from a developer's local environment.
+  process.env.TGPAY_API_BASE = 'https://gateway.invalid/api/v2';
+  process.env.TGPAY_PUBLIC_KEY = 'test-only-preflight-public-key';
   process.env.TGPAY_SECRET_KEY = 'test-only-preflight-key';
   // The fake gateway mirrors TGPay's band and needs no credentials.
   process.env.PAYMENT_GATEWAY = 'fake';
