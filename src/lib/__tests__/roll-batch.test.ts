@@ -169,6 +169,53 @@ describe('rollBatch — demo Spin', () => {
     expect(res.batch.locked).toBe(false);
     expect(res.batch.mode).toBe('demo');
   });
+
+  // The demo winner's reel cell is derived from the card NAME, never from its
+  // configured pixel-Pokémon: `winnerFor` reads these two fields, so dropping
+  // them is what picks the name-derived sprite. A paid roll keeps whatever the
+  // backend configured. Spreading the pool card through unchanged (which is
+  // what a "the pool card IS the reveal's card" simplification does) silently
+  // changed the demo reveal's sprite.
+  it('drops the pool card’s sprite fields, where a PAID roll keeps them', async () => {
+    const sprites = { pokemonDex: 25, spriteImage: '/sprites/pikachu.gif' };
+    const configured: PackCard = { ...card('a'), ...sprites };
+
+    const demo = await rollBatch(
+      req({ mode: 'demo', reels: 1, demoPool: [configured] }),
+      deps(),
+    );
+    const paid = await rollBatch(
+      req({ mode: 'paid' }),
+      deps({
+        openBatch: vi.fn(async () => ({
+          ok: true as const,
+          rolls: [
+            {
+              card: { ...won('a'), ...sprites },
+              pullId: 'pull_a',
+              marketValue: 1,
+              buyback: null,
+            },
+          ],
+          price: 10,
+          total: 10,
+          balance: 7,
+        })),
+      }),
+    );
+
+    expect(demo.ok && paid.ok).toBe(true);
+    if (!demo.ok || !paid.ok) return;
+    expect(demo.batch.cards[0]).toMatchObject({
+      pokemonDex: null,
+      spriteImage: null,
+      // Everything else about the pool card survives — the demo slab still
+      // stamps its pool price.
+      priceMyr: 10,
+      name: 'a',
+    });
+    expect(paid.batch.cards[0]).toMatchObject(sprites);
+  });
 });
 
 describe('a demo batch is bound to no account', () => {

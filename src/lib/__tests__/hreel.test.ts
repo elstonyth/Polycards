@@ -47,30 +47,65 @@ describe('buildDecoyPool', () => {
       {
         name: 'Charizard [1st Edition] #4',
         pokemonDex: 6,
+        spriteImage: null,
         rarity: 'Immortal' as const,
       },
       {
         name: 'Pikachu #227/S-P',
         pokemonDex: 25,
+        spriteImage: null,
         rarity: 'Legendary' as const,
       },
       {
         name: 'Charizard GX #SV49',
         pokemonDex: 6,
+        spriteImage: null,
         rarity: 'Mythical' as const,
       },
-      { name: 'Charizard #4', pokemonDex: 6, rarity: 'Rare' as const },
-      { name: 'Pikachu #160', pokemonDex: 25, rarity: 'Uncommon' as const },
-      { name: 'Pikachu ex #219', pokemonDex: 25, rarity: 'Common' as const },
+      {
+        name: 'Charizard #4',
+        pokemonDex: 6,
+        spriteImage: null,
+        rarity: 'Rare' as const,
+      },
+      {
+        name: 'Pikachu #160',
+        pokemonDex: 25,
+        spriteImage: null,
+        rarity: 'Uncommon' as const,
+      },
+      {
+        name: 'Pikachu ex #219',
+        pokemonDex: 25,
+        spriteImage: null,
+        rarity: 'Common' as const,
+      },
     ];
     const pool = buildDecoyPool(cards);
     expect(new Set(pool.map((c) => c.rarity)).size).toBe(6);
   });
   test('drops exact (dex, rarity) duplicates and dex-less cards', () => {
     const pool = buildDecoyPool([
-      { name: 'Pikachu #1', pokemonDex: 25, rarity: 'Common' as const },
-      { name: 'Pikachu #2', pokemonDex: 25, rarity: 'Common' as const }, // dupe
-      { name: 'Trainer Card', pokemonDex: null, rarity: 'Common' as const }, // no dex
+      {
+        name: 'Pikachu #1',
+        pokemonDex: 25,
+        spriteImage: null,
+        rarity: 'Common' as const,
+      },
+      // dupe
+      {
+        name: 'Pikachu #2',
+        pokemonDex: 25,
+        spriteImage: null,
+        rarity: 'Common' as const,
+      },
+      // no dex
+      {
+        name: 'Trainer Card',
+        pokemonDex: null,
+        spriteImage: null,
+        rarity: 'Common' as const,
+      },
     ]);
     expect(pool).toEqual([{ dex: 25, rarity: 'Common' }]);
   });

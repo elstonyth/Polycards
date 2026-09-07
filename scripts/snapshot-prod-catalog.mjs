@@ -108,11 +108,12 @@ function arrayField(text, key) {
   return parseArrayAt(text, text.indexOf('[', at));
 }
 
-/** "RM 10,786.99" -> 10786.99 */
-const parseMyr = (value) => {
-  const n = Number(String(value ?? '').replace(/[^0-9.]/g, ''));
-  return Number.isFinite(n) ? n : 0;
-};
+// FIELD CONTRACT with the storefront view (rename these and this script goes
+// silently wrong, not loud):
+//   card.handle / card.priceMyr  — `CardView` in src/lib/card-view.ts
+//   pack.priceMyr                — `Pack` in src/lib/packs-data.ts
+// Money crosses the view layer as a NUMBER (null = unpriced); it used to be a
+// pre-formatted "RM 1,000" string parsed back here.
 
 /** Prod card handles encode the grade, e.g. `rowlet-290-sm-p-psa-10-4683337`.
  *  That is the only public source for grader/grade, and both drive real
@@ -151,8 +152,9 @@ function samplePool(pool, cap) {
     byTier.get(tier).push(c);
   }
   // Within a tier take the most valuable — the cards Top Hits actually shows.
+  // An unpriced card (priceMyr null) sorts last, as its "RM —" always did.
   for (const list of byTier.values()) {
-    list.sort((a, b) => parseMyr(b.value) - parseMyr(a.value));
+    list.sort((a, b) => (b.priceMyr ?? 0) - (a.priceMyr ?? 0));
   }
   const tiers = RARITY_ORDER.filter((t) => byTier.has(t));
   const quota = new Map(tiers.map((t) => [t, 1])); // floor: never lose a tier
@@ -223,22 +225,23 @@ async function main() {
     );
 
     for (const c of sampled) {
-      if (!cards.has(c.id)) {
-        const { grader, grade } = gradeOf(c.id);
+      if (!cards.has(c.handle)) {
+        const { grader, grade } = gradeOf(c.handle);
         // A handle the grade regex misses becomes a RAW card locally (no PSA-10
         // guarantee badge, different composition group) — quiet enough to be
         // mistaken for prod truth, so count it.
         if (!grader) ungraded++;
-        cards.set(c.id, {
-          handle: c.id,
+        cards.set(c.handle, {
+          handle: c.handle,
           name: c.name,
           set: setOf(c.name),
           grader,
           grade,
           // Prod exposes the DISPLAYED price (usd × fx × multiplier). The seed
           // divides it back out with the same fx + multiplier it installs, so a
-          // local card renders the exact RM figure production shows.
-          display_myr: parseMyr(c.value),
+          // local card renders the exact RM figure production shows. An
+          // unpriced card seeds 0 — same as the old "RM —" parse.
+          display_myr: typeof c.priceMyr === 'number' ? c.priceMyr : 0,
           image: c.image ?? '',
           slab_image: c.slabImage ?? null,
           pokemon_dex: typeof c.pokemonDex === 'number' ? c.pokemonDex : null,
@@ -250,12 +253,12 @@ async function main() {
     packRows.push({
       slug: pack.id,
       title: pack.name,
-      price: pack.priceValue,
+      price: pack.priceMyr,
       buyback_percent: pack.buybackPercent ?? 90,
       image: pack.image,
       display_image: pack.displayImage ?? null,
       rank: packRows.length,
-      cards: sampled.map((c) => ({ handle: c.id, rarity: c.rarity })),
+      cards: sampled.map((c) => ({ handle: c.handle, rarity: c.rarity })),
     });
   }
 
