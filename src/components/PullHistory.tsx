@@ -123,6 +123,10 @@ function Row({
         alt=""
         sizes="40px"
         className="w-9 shrink-0"
+        // 36px slab: the full-size halo (~44px) would bleed over the row
+        // above/below and the value column beside it. Ladder: scale ~
+        // width/200 (see the /me showcase's 80px -> 0.4).
+        glowScale={0.18}
       />
       {/* Card name over the value — the value owns the right edge and never
           wraps; the card name is what truncates. The column is FIXED-width

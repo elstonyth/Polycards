@@ -189,14 +189,25 @@ export default function RequestDeliveryModal({
           address. The shipping fee is deducted from your credit balance.
         </p>
 
-        {/* Selected cards */}
-        <div className="mt-3 flex gap-2 overflow-x-auto">
+        {/* Selected cards. overflow-x-auto clips the halo on all four sides
+            (same CSS coupling as the PoolByRarity rail, src/app/slots/[slug]/PoolByRarity.tsx:97-114)
+            so the room has to live in this box's own padding: `px-3 py-3`
+            give the ~13px a 60px slab's glowScale=0.3 halo reaches. Dropping
+            the old `mt-3` and letting `py-3`'s top half stand in for it keeps
+            the gap under the paragraph above unchanged (margin 0 + padding
+            12 = the old margin-12 + padding-0); `-mb-3` then cancels py-3's
+            bottom half so the address picker below doesn't shift down either.
+            No `-mx` needed: with width:auto in normal block flow the box's
+            outer edges don't move when padding changes, only its content
+            area shrinks — exactly where the extra room is wanted. */}
+        <div className="-mb-3 flex gap-2 overflow-x-auto px-3 py-3">
           {items.map((i) => (
             <SlabImage
               key={i.pullId}
               card={i.card}
               sizes="60px"
               className="w-15 shrink-0"
+              glowScale={0.3}
             />
           ))}
         </div>

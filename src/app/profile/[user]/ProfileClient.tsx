@@ -191,6 +191,10 @@ export default function ProfileClient({
                 alt=""
                 sizes="32px"
                 className="w-8 shrink-0"
+                // Latent today (the backend sends no rarity on recent[]), but
+                // set the scale now so a framed thumbnail here doesn't clip
+                // against this list's `overflow-hidden` edge the day it does.
+                glowScale={0.18}
               />
               <p className="min-w-0 flex-1 truncate text-[13px] text-white/80">
                 <span className="text-white/50">{a.verb}</span>{' '}
