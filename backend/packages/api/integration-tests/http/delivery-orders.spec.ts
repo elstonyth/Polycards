@@ -347,7 +347,10 @@ medusaIntegrationTestRunner({
         // above was refused, and a refused transition leaves no trace.
         const audits = await packs.listAdminActionAudits(
           { entity_type: 'delivery_order', entity_id: orderId },
-          { take: 20, order: { created_at: 'ASC' } },
+          // `id` is the tiebreaker, not decoration (same rule as the
+          // purchase-invoices GET): four rows written within the same second
+          // can tie on created_at, and this asserts an ORDERED array.
+          { take: 20, order: { created_at: 'ASC', id: 'ASC' } },
         );
         expect(audits.map((a) => a.reason)).toEqual([
           'mark as processed',
