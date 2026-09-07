@@ -114,7 +114,7 @@ export function PoolByRarity({
           className="-mx-4 -my-12 flex cursor-grab gap-2 overflow-x-auto px-10 py-12 active:cursor-grabbing sm:gap-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {rail.map((c) => (
-            <div key={c.id} className="w-[38%] shrink-0 sm:w-40">
+            <div key={c.handle} className="w-[38%] shrink-0 sm:w-40">
               <CardTile
                 card={c}
                 sizes="(max-width: 640px) 38vw, 160px"
@@ -238,7 +238,7 @@ function PoolModal({
                 <div className="grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3">
                   {cards.map((c) => (
                     <CardTile
-                      key={c.id}
+                      key={c.handle}
                       card={c}
                       sizes="(max-width: 640px) 45vw, 200px"
                       onOpen={onOpen}

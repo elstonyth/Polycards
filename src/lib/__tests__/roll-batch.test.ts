@@ -16,25 +16,26 @@ import type { WonCard } from '@/lib/actions/packs';
 // offer, and — the invariant with no other unit expression — that a demo Spin
 // issues ZERO server calls.
 
-const card = (id: string): PackCard => ({
-  id,
-  name: id,
-  image: `/x/${id}.webp`,
+const card = (handle: string): PackCard => ({
+  handle,
+  name: handle,
+  image: `/x/${handle}.webp`,
   slabImage: null,
-  value: 'RM 10.00',
+  priceMyr: 10,
   rarity: 'Common',
+  pokemonDex: null,
+  spriteImage: null,
 });
 
-const won = (id: string, marketPriceMyr: number | null = 20): WonCard => ({
-  id,
-  name: id,
-  image: `/x/${id}.webp`,
-  slab_image: null,
-  value: 'RM 20.00',
+const won = (handle: string, priceMyr: number | null = 20): WonCard => ({
+  handle,
+  name: handle,
+  image: `/x/${handle}.webp`,
+  slabImage: null,
+  priceMyr,
   rarity: 'Rare',
-  pokemon_dex: null,
-  sprite_image: null,
-  marketPriceMyr,
+  pokemonDex: null,
+  spriteImage: null,
 });
 
 /** Spies for all three server routes, so "was anything called" is assertable. */
@@ -378,7 +379,7 @@ describe('rollBatch — paid open', () => {
     expect(openBatch).toHaveBeenCalledWith('bronze', 2);
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    expect(res.batch.cards.map((c) => c.id)).toEqual(['a', 'b']);
+    expect(res.batch.cards.map((c) => c.handle)).toEqual(['a', 'b']);
     // Quoted offer wins over the flat fallback; a pull-less roll gets none.
     expect(res.batch.offers[0]).toMatchObject({
       percent: 80,

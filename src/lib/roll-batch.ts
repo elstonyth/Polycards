@@ -197,18 +197,18 @@ function buildOffer(
 ): SellBackOffer | null {
   if (roll.pullId === null) return null;
   // MYR display price; marketValue is raw USD FMV and must NEVER render behind
-  // "RM" — when an older backend omits marketPriceMyr, fall back to 0 (the
-  // vault seam's policy, actions/vault.ts) and let SellConfirmModal show "—"
-  // for an unknown value. The offer's amount fallbacks derive from this SAME
-  // figure so a single offer can never mix currencies.
-  const displayFmv = roll.card.marketPriceMyr ?? 0;
+  // "RM". An unpriced card (older backend, priceMyr null) quotes on 0 so the
+  // flat-rate fallbacks below stay numbers, and SellConfirmModal shows "—" for
+  // a 0 fmv. The offer's amount fallbacks derive from this SAME figure so a
+  // single offer can never mix currencies.
+  const displayFmv = roll.card.priceMyr ?? 0;
   const flat = Math.round(displayFmv * FLAT_BUYBACK_PERCENT) / 100;
   return {
     pullId: roll.pullId,
     fmv: displayFmv,
     cardName: roll.card.name,
     image: roll.card.image,
-    slabImage: roll.card.slab_image,
+    slabImage: roll.card.slabImage,
     percent: roll.buyback?.percent ?? FLAT_BUYBACK_PERCENT,
     amount: roll.buyback?.amount ?? flat,
     vaultPercent: roll.buyback?.vaultPercent ?? FLAT_BUYBACK_PERCENT,
@@ -260,17 +260,9 @@ function demoSpin(req: RollRequest, deps: RollDeps): RollResult {
     );
     // Unreachable past `rollBlocker` — an empty pool is demoDraw's only miss.
     if (!drawn) return { ok: false, kind: 'rejected', error: EMPTY_DEMO_POOL };
-    rolls.push({
-      card: {
-        ...drawn,
-        slab_image: drawn.slabImage,
-        pokemon_dex: null,
-        sprite_image: null,
-        marketPriceMyr: null,
-      },
-      pullId: null,
-      buyback: null,
-    });
+    // A pool card IS the reveal's card shape; its pool price is what the demo
+    // slab stamps, and no offer is ever built for it (pullId null).
+    rolls.push({ card: drawn, pullId: null, buyback: null });
   }
   return { ok: true, batch: batchOf(req, rolls, spinAt, null, false) };
 }

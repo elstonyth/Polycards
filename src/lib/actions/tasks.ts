@@ -23,7 +23,7 @@ import {
   WonCardSchema,
   type TaskHub,
 } from '@/lib/data/schemas';
-import { formatValue } from '@/lib/packs-format';
+import { toCardView } from '@/lib/card-view';
 import { toBuybackOffer } from '@/lib/actions/pack-batch-map';
 import type { BuybackOffer, WonCard } from '@/lib/actions/packs';
 
@@ -178,7 +178,8 @@ export async function spinTaskReward(
     redeemed?: boolean;
     reason?: 'not_found' | 'already_redeemed' | 'not_a_pack_reward';
     pullId?: string;
-    card?: Record<string, unknown>;
+    // Untyped on purpose: only ever handed to parseOne(WonCardSchema).
+    card?: unknown;
     locked?: unknown;
     buyback?: unknown;
   };
@@ -189,7 +190,6 @@ export async function spinTaskReward(
     if (!won) {
       return { ok: false, error: 'Got an unexpected response. Try again.' };
     }
-    const src = (raw.card ?? {}) as Record<string, unknown>;
     return {
       ok: true,
       redeemed: true,
@@ -198,20 +198,9 @@ export async function spinTaskReward(
       locked: typeof raw.locked === 'boolean' ? raw.locked : true,
       // The same mapping the paid open uses — one offer shape for the reveal.
       buyback: toBuybackOffer(raw.buyback),
-      card: {
-        id: won.handle,
-        name: won.name,
-        image: typeof src.image === 'string' ? src.image : '',
-        slab_image: typeof src.slab_image === 'string' ? src.slab_image : null,
-        // Raw USD must never render behind "RM" — an older backend without
-        // marketPriceMyr shows "—" rather than a fake price.
-        value:
-          won.marketPriceMyr != null ? formatValue(won.marketPriceMyr) : '—',
-        rarity: won.rarity as WonCard['rarity'],
-        pokemon_dex: won.pokemon_dex ?? null,
-        sprite_image: won.sprite_image ?? null,
-        marketPriceMyr: won.marketPriceMyr ?? null,
-      },
+      // …and the same card mapper (image/slab_image ride the looseObject
+      // passthrough; the tier is re-stated because the schema guarantees it).
+      card: { ...toCardView(won), rarity: won.rarity },
     };
   }
   return {

@@ -47,15 +47,14 @@ import {
   DELIVERY_LOGIN,
 } from '@/lib/delivery-errors';
 import { normalizePhone } from '@/lib/profile-validation';
+import { toCardView, type CardView } from '@/lib/card-view';
 
 export type DeliveryOrderItemView = {
   pullId: string;
-  card: {
-    handle: string;
-    name: string;
-    image: string;
-    slabImage: string | null;
-  } | null;
+  /** The shipped card, or null when the backend no longer resolves it. The
+   *  route sends handle/name/image/slab_image only; the other view fields
+   *  read as their null defaults. */
+  card: CardView | null;
 };
 export type DeliveryOrderView = {
   id: string;
@@ -213,14 +212,7 @@ export async function getDeliveryOrders(): Promise<DeliveryOrdersResult> {
     proofImages: o.proof_images ?? [],
     items: (o.items ?? []).map((it) => ({
       pullId: it.pull_id,
-      card: it.card
-        ? {
-            handle: it.card.handle,
-            name: it.card.name,
-            image: it.card.image,
-            slabImage: it.card.slab_image ?? null,
-          }
-        : null,
+      card: it.card ? toCardView(it.card) : null,
     })),
   }));
   return { ok: true, orders };

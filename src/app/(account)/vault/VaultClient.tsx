@@ -29,7 +29,6 @@ import {
   CardDetailOverlay,
   type CardSeed,
 } from '@/components/cards/CardDetailOverlay';
-import { formatValue, isRarity } from '@/lib/packs-format';
 import { toggleSelectAll } from '@/lib/vault-selection';
 import { VaultActionBar } from '@/components/account/VaultActionBar';
 import { useConsent } from '@/lib/use-consent';
@@ -103,10 +102,11 @@ export default function VaultClient({
   const selectedItems = items.filter(
     (i) => selected.has(i.pullId) && !i.locked,
   );
-  // Money display must use the MYR price (marketPriceMyr) — card.marketValue
-  // is the raw USD FMV from PriceCharting and must never render behind "RM".
+  // Money sums read the MYR price (`priceMyr`; the raw USD FMV never reaches
+  // the view). An unpriced card (null — an older backend) counts as 0 here so
+  // the totals stay numbers; the confirm/action bar then show '—' for a 0 fmv.
   const selectedFmv = selectedItems.reduce(
-    (s, i) => s + (i.card.marketPriceMyr ?? 0),
+    (s, i) => s + (i.card.priceMyr ?? 0),
     0,
   );
   // The sell math runs over the backend's `sellable` subset of the selection,
@@ -115,7 +115,7 @@ export default function VaultClient({
   // card — reward cards sell too — but the backend stays the authority.)
   const sellableSelected = selectedItems.filter((i) => i.sellable);
   const sellableFmv = sellableSelected.reduce(
-    (s, i) => s + (i.card.marketPriceMyr ?? 0),
+    (s, i) => s + (i.card.priceMyr ?? 0),
     0,
   );
   const selectedBuyback = sellableSelected.reduce(
@@ -140,10 +140,7 @@ export default function VaultClient({
   // mispriced, there is just nothing to sell yet.)
   const quotesFirm = items.every((i) => !i.sellable || i.buyback.firm);
 
-  const vaultValue = items.reduce(
-    (sum, i) => sum + (i.card.marketPriceMyr ?? 0),
-    0,
-  );
+  const vaultValue = items.reduce((sum, i) => sum + (i.card.priceMyr ?? 0), 0);
 
   const raritiesPresent = useMemo(() => {
     const present = new Set(items.map((i) => i.card.rarity));
@@ -483,7 +480,9 @@ export default function VaultClient({
         <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-4">
           {shown.map((item) => {
             const isSelected = selected.has(item.pullId);
-            const glow = rarityRgb(item.card.rarity);
+            // null (an unknown/absent tier) reads as Common gray, exactly as
+            // an unknown tier string did before the mapper guarded it.
+            const glow = rarityRgb(item.card.rarity ?? '');
             // Locked = the backend refuses BOTH sell and ship — the free
             // welcome pull before the first PAID open, and only that. NOT
             // `source`: every reward card (task, achievement, challenge prize)
@@ -629,14 +628,11 @@ export default function VaultClient({
                     type="button"
                     onClick={() =>
                       setOpenCard({
-                        handle: item.card.handle,
-                        name: item.card.name,
-                        image: item.card.image,
-                        slabImage: item.card.slabImage,
-                        value: formatValue(item.card.marketPriceMyr),
-                        rarity: isRarity(item.card.rarity)
-                          ? item.card.rarity
-                          : null,
+                        ...item.card,
+                        // The vault has always stamped RM 0.00 on an unpriced
+                        // card (its mapper used to read `?? 0`); kept as-is so
+                        // the tile and the overlay it opens still agree.
+                        priceMyr: item.card.priceMyr ?? 0,
                         // The overlay shows the same frame the tile does.
                         frameVariant: item.challengePrize
                           ? ('prism' as const)
@@ -666,7 +662,9 @@ export default function VaultClient({
                     {item.card.rarity}
                   </span>
                   <span className="font-heading shrink-0 whitespace-nowrap text-[12px] tabular-nums text-white sm:text-[13px]">
-                    {rm(item.card.marketPriceMyr ?? 0)}
+                    {/* `?? 0`: the vault has always shown RM 0.00 for an
+                        unpriced card (see the overlay seed above). */}
+                    {rm(item.card.priceMyr ?? 0)}
                   </span>
                 </div>
                 {/* pack origin is secondary meta — desktop-only so 3-up phone

@@ -48,10 +48,27 @@ describe('getCardResult', () => {
     expect(mem.requests[0]?.path).toBe('/store/cards/a%2Fb');
   });
 
-  it('returns { status: "ok", card } for a valid response', async () => {
+  it('returns { status: "ok", card } for a valid response, as the card view', async () => {
     backend({ [CARD_ROUTE]: { body: { card: validCard } } });
     const res = await getCardResult('db-charizard');
-    expect(res).toEqual({ status: 'ok', card: validCard });
+    expect(res).toEqual({
+      status: 'ok',
+      card: {
+        handle: 'db-charizard',
+        name: 'Charizard',
+        image: '/x.webp',
+        slabImage: null,
+        rarity: 'Legendary',
+        priceMyr: 1234.5,
+        pokemonDex: null,
+        spriteImage: null,
+        set: 'Base Set',
+        grader: 'PSA',
+        grade: '10',
+        pcSyncedAt: null,
+        priceHistory: [],
+      },
+    });
   });
 
   it('returns { status: "notfound" } on a 404 (genuine miss → page 404s)', async () => {
@@ -87,7 +104,11 @@ describe('getCardResult', () => {
 describe('getCard (null-returning view kept for /api/cards)', () => {
   it('returns the card when found', async () => {
     backend({ [CARD_ROUTE]: { body: { card: validCard } } });
-    expect(await getCard('db-charizard')).toEqual(validCard);
+    expect(await getCard('db-charizard')).toMatchObject({
+      handle: 'db-charizard',
+      priceMyr: 1234.5,
+      set: 'Base Set',
+    });
   });
 
   it('returns null for both a 404 and an outage', async () => {

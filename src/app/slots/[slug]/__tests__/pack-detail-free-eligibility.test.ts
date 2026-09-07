@@ -68,8 +68,7 @@ const PackDetailClient = (await import('../PackDetailClient')).default;
 const FREE_PACK: ResolvedPack = {
   id: 'welcome-pack',
   name: 'Welcome Pack',
-  price: 'RM 0',
-  priceValue: 0,
+  priceMyr: 0,
   image: '/images/polycards/free-pack-badge.webp',
   categoryId: FREE_WELCOME_CATEGORY,
   categoryName: 'Free pack',

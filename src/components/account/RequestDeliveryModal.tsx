@@ -74,7 +74,7 @@ export default function RequestDeliveryModal({
   // artifact can't show an insurance line at exactly RM200 that the
   // authoritative charge never applies.
   const orderValue =
-    Math.round(items.reduce((s, i) => s + i.card.marketPriceMyr, 0) * 100) /
+    Math.round(items.reduce((s, i) => s + (i.card.priceMyr ?? 0), 0) * 100) /
     100;
   const fee = selectedAddress
     ? computeDeliveryFee(

@@ -25,8 +25,7 @@
  */
 import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
-import { formatValue } from '@/lib/packs-format';
-import type { Rarity } from '@/lib/packs-data';
+import type { PackCard } from '@/lib/packs-data';
 import {
   friendlyFailure,
   RATE_LIMITED,
@@ -34,26 +33,17 @@ import {
   type ErrorRule,
 } from '@/lib/errors';
 import { parseOne, UncheckedSchema, WonCardSchema } from '@/lib/data/schemas';
+import { toCardView } from '@/lib/card-view';
 import { mapBatchRoll, clampCount, toBuybackOffer } from './pack-batch-map';
 import type { RawBatchRollItem, BatchRoll } from './pack-batch-map';
 export type { BatchRoll, BuybackOffer } from './pack-batch-map';
 
-// The won card, shaped for the roulette reveal (same fields as a mock PackCard).
-export type WonCard = {
-  id: string;
-  name: string;
-  image: string;
-  slab_image: string | null;
-  value: string;
-  rarity: Rarity;
-  pokemon_dex: number | null;
-  sprite_image: string | null;
-  /** Live MYR display price (raw USD FMV x FX x per-card multiplier) — mirrors
-   *  the vault's marketPriceMyr so the reveal shows the same live number.
-   *  Null if an older/un-enriched backend omitted it — the reveal then falls
-   *  back to the legacy `value` field instead of rendering "RM 0.00". */
-  marketPriceMyr: number | null;
-};
+/** The won card, shaped for the reveal — the same view as a pool card, so a
+ *  demo draw and a real open hand the machine one shape. `priceMyr` is the
+ *  live MYR display price (raw USD FMV × FX × per-card multiplier), the same
+ *  number the vault shows; null if an older/un-enriched backend omitted it —
+ *  the reveal then renders '—', never "RM 0.00". */
+export type WonCard = PackCard;
 
 export type OpenPackResult =
   | {
@@ -100,16 +90,6 @@ export type OpenPackResult =
       locked: boolean;
     }
   | { ok: false; error: string; needsAuth?: boolean; needsTopUp?: boolean };
-
-// Shape of the `card` returned by the open route (normalized server-side).
-// Declares ONLY the two fields read straight off the raw object — the rest come
-// from parseOne(WonCardSchema, card), which stays their single declaration
-// (same split as RawBatchRollItem; openPack and openBatch map identically).
-interface BackendWonCard {
-  image: string;
-  slab_image?: string | null;
-  [key: string]: unknown;
-}
 
 const LOGIN_TO_OPEN = 'Please log in to open a pack.';
 
@@ -177,7 +157,8 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
 
   const { pull, card, balance, price, buyback, free, locked } = r.data as {
     pull?: { id?: unknown };
-    card: BackendWonCard;
+    // Untyped on purpose: only ever handed to parseOne(WonCardSchema).
+    card?: unknown;
     balance?: unknown;
     price?: unknown;
     // Untyped on purpose: only ever handed to parseOne(OpenBuybackSchema).
@@ -201,22 +182,11 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
 
   return {
     ok: true,
-    card: {
-      id: wonCard.handle,
-      name: wonCard.name,
-      image: card.image,
-      slab_image: card.slab_image ?? null,
-      // Raw USD market_value must never render behind "RM" — an older
-      // backend without marketPriceMyr shows "—" instead of a fake price.
-      value:
-        wonCard.marketPriceMyr != null
-          ? formatValue(wonCard.marketPriceMyr)
-          : '—',
-      rarity: wonCard.rarity as Rarity,
-      pokemon_dex: wonCard.pokemon_dex ?? null,
-      sprite_image: wonCard.sprite_image ?? null,
-      marketPriceMyr: wonCard.marketPriceMyr ?? null,
-    },
+    // `image` / `slab_image` ride WonCardSchema's looseObject passthrough, so
+    // the one mapper reads them off the same validated object (same as the
+    // batch and free-rip opens). The tier is re-stated because the schema
+    // guarantees it and the reveal's card type requires it.
+    card: { ...toCardView(wonCard), rarity: wonCard.rarity },
     pullId: typeof pull?.id === 'string' ? pull.id : null,
     marketValue: wonCard.market_value,
     buyback: toBuybackOffer(buyback),

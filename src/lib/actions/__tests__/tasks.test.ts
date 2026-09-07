@@ -112,11 +112,11 @@ describe('spinTaskReward', () => {
       locked: false,
       buyback: { percent: 60, amount: 36, firm: true },
       card: {
-        id: 'pikachu-base-58',
+        handle: 'pikachu-base-58',
         name: 'Pikachu',
         image: 'https://cdn/pikachu.png',
-        slab_image: 'https://cdn/pikachu-slab.png',
-        value: 'RM 60.00',
+        slabImage: 'https://cdn/pikachu-slab.png',
+        priceMyr: 60,
       },
     });
     // The one wire assertion for a spend: the claim id is in the path, and

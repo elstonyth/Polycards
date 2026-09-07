@@ -5,6 +5,7 @@
  * so the firm-default logic can be unit-tested without the Next.js
  * server-action constraint. Nothing here is server-only.
  */
+import { toCardView, type CardView } from '@/lib/card-view';
 
 export type VaultItem = {
   pullId: string;
@@ -26,15 +27,10 @@ export type VaultItem = {
    *  `!locked` (task/achievement rewards sell like any card), but the vault
    *  keys its Sell affordance off THIS so the backend stays the authority. */
   sellable: boolean;
-  card: {
-    handle: string;
-    name: string;
-    image: string;
-    slabImage: string | null;
-    rarity: string;
-    marketValue: number;
-    marketPriceMyr: number;
-  };
+  /** The pulled card. `priceMyr` is null when the backend sent no MYR price
+   *  (it used to map to 0 here) — the vault's money sums read `?? 0`, its
+   *  money DISPLAY decides for itself. */
+  card: CardView;
   buyback: {
     percent: number;
     amount: number;
@@ -61,11 +57,11 @@ export type VaultItem = {
  * `.catch()` (which defaults a MISSING key, not just an invalid one), so only
  * those three coalesces are unreachable in production. Every other `??` here is
  * LIVE and load-bearing: `challenge_prize` is not in `VaultItemSchema` at all,
- * `showcased` and `buyback.firm` are `.optional()` (no default), and
- * `card.slab_image` / `card.marketPriceMyr` are unguarded. Dropping
+ * and `showcased` and `buyback.firm` are `.optional()` (no default). Dropping
  * `challenge_prize ?? false` would put `undefined` behind a `boolean` for any
  * backend predating the field — every customer's vault silently loses the prism
- * frame on challenge prizes, with no type error to catch it.
+ * frame on challenge prizes, with no type error to catch it. The CARD's
+ * defaults (slab_image, marketPriceMyr, …) live in `toCardView` now.
  */
 export interface BackendVaultItem {
   pull_id: string;
@@ -81,6 +77,9 @@ export interface BackendVaultItem {
   source?: 'pack' | 'reward' | 'free';
   locked?: boolean;
   sellable?: boolean;
+  /** The wire card — read by `toCardView`, which defaults every field. Only
+   *  `name` is schema-guaranteed (a nameless row drops); the rest ride the
+   *  looseObject and are typed here as they arrive. */
   card: {
     handle: string;
     name: string;
@@ -105,15 +104,7 @@ export function mapVaultItem(i: BackendVaultItem): VaultItem {
     locked: i.locked ?? false,
     // Defaults true — a backend without the field behaves as it always did.
     sellable: (i.sellable ?? true) && !(i.locked ?? false),
-    card: {
-      handle: i.card.handle,
-      name: i.card.name,
-      image: i.card.image,
-      slabImage: i.card.slab_image ?? null,
-      rarity: i.card.rarity,
-      marketValue: i.card.market_value,
-      marketPriceMyr: i.card.marketPriceMyr ?? 0,
-    },
+    card: toCardView(i.card),
     buyback: {
       percent: i.buyback.percent,
       amount: i.buyback.amount,

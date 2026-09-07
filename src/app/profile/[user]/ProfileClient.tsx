@@ -137,12 +137,12 @@ export default function ProfileClient({
                 the same card (same handle) — ids alone would collide. */}
             {user.collection.map((c, i) => (
               <Reveal
-                key={`${c.id}-${i}`}
+                key={`${c.handle}-${i}`}
                 delay={Math.min(i, 8) * 45}
                 className="h-full"
               >
                 <Link
-                  href={`/card/${c.id}`}
+                  href={`/card/${c.handle}`}
                   className="group block h-full rounded-2xl border border-white/10 bg-neutral-800 transition-[transform,border-color] duration-300 hover:-translate-y-1 hover:border-white/20"
                 >
                   {/* No overflow-hidden: the tier halo reaches ~44px past the
@@ -163,7 +163,7 @@ export default function ProfileClient({
                       {c.grader} {c.grade}
                     </p>
                     <p className="text-sm font-bold text-white">
-                      {c.price != null ? rm(c.price) : '—'}
+                      {c.priceMyr != null ? rm(c.priceMyr) : '—'}
                     </p>
                   </div>
                 </Link>
@@ -198,14 +198,14 @@ export default function ProfileClient({
               <p className="min-w-0 flex-1 truncate text-[13px] text-white/80">
                 <span className="text-white/50">{a.verb}</span>{' '}
                 <Link
-                  href={`/card/${a.card.id}`}
+                  href={`/card/${a.card.handle}`}
                   className="font-medium text-white hover:underline"
                 >
                   {a.card.name}
                 </Link>
               </p>
               <span className="shrink-0 text-[12px] tabular-nums text-white/50">
-                {a.card.price != null ? rm(a.card.price) : '—'}
+                {a.card.priceMyr != null ? rm(a.card.priceMyr) : '—'}
               </span>
               <span className="hidden shrink-0 text-[11px] text-white/55 sm:inline">
                 {a.time}

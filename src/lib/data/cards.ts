@@ -6,29 +6,24 @@
  */
 import { store } from '@/lib/store';
 import { CardDetailEnvelopeSchema } from '@/lib/data/schemas';
-import type { Rarity } from '@/lib/packs-data';
+import { toCardView, type CardView } from '@/lib/card-view';
 
 export interface CardPricePoint {
   date: string;
   valueMyr: number;
 }
 
-export interface CardDetailData {
-  handle: string;
-  name: string;
+/** The card page's payload: the card view plus what only this route sends.
+ *  `priceMyr` narrows to a NUMBER — CardDetailSchema requires a finite
+ *  marketPriceMyr, so a detail is never unpriced. */
+export type CardDetailData = CardView & {
   set: string;
   grader: string;
   grade: string;
-  image: string;
-  slab_image: string | null;
-  /** Configured pixel-Pokémon; optional — an older backend omits both. */
-  pokemon_dex?: number | null;
-  sprite_image?: string | null;
-  marketPriceMyr: number;
-  rarity: Rarity | null;
+  priceMyr: number;
   pcSyncedAt: string | null;
   priceHistory: CardPricePoint[];
-}
+};
 
 /** Why a card lookup produced no card — a genuine miss (404) must 404, but a
  *  transient backend failure must NOT: a customer opening a bookmarked card
@@ -56,7 +51,19 @@ export async function getCardResult(handle: string): Promise<CardResult> {
       ? { status: 'notfound' }
       : { status: 'error' };
   }
-  return { status: 'ok', card: r.data.card as unknown as CardDetailData };
+  const card = r.data.card;
+  return {
+    status: 'ok',
+    card: {
+      ...toCardView(card),
+      set: card.set,
+      grader: card.grader,
+      grade: card.grade,
+      priceMyr: card.marketPriceMyr,
+      pcSyncedAt: card.pcSyncedAt,
+      priceHistory: card.priceHistory,
+    },
+  };
 }
 
 /** Null-returning view of {@link getCardResult}, kept for callers that only

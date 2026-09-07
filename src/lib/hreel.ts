@@ -55,10 +55,8 @@ export type HReelCell = { dex: number; rarity: Rarity };
  * Dex-less cards (trainer/energy with no resolvable Pokémon) are skipped.
  */
 export function buildDecoyPool(
-  cards: readonly Pick<
-    PackCard,
-    'name' | 'pokemonDex' | 'spriteImage' | 'rarity'
-  >[],
+  cards: readonly (Pick<PackCard, 'name' | 'rarity'> &
+    Partial<Pick<PackCard, 'pokemonDex' | 'spriteImage'>>)[],
 ): HReelCell[] {
   const seen = new Set<string>();
   const out: HReelCell[] = [];

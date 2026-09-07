@@ -8,22 +8,14 @@
  */
 import type { PublicProfile } from '@/lib/data/profiles';
 import { relativeTime } from '@/lib/format';
+import { toCardView, type CardView } from '@/lib/card-view';
 
-export interface ProfileViewCard {
-  id: string;
-  name: string;
-  image: string;
-  slabImage: string | null;
-  grader: string;
-  grade: string;
-  /** RM display price; null when the backend hasn't enriched marketPriceMyr —
-   *  the raw USD market_value must never render behind an "RM" prefix
-   *  (ProfileClient shows "—" for null). */
-  price: number | null;
-  /** Gacha tier — surrounds the slab with the tier frame. Optional: the mock
-   *  pool carries no rarity, and older backends omit it (frame is skipped). */
-  rarity?: string | null;
-}
+/** A profile card: the card view (its `priceMyr` is null when the backend
+ *  hasn't enriched marketPriceMyr — ProfileClient shows '—', never the raw USD
+ *  market_value behind an "RM" prefix; its `rarity` is null on an older
+ *  backend, so the slab renders frameless rather than in a guessed tier) plus
+ *  the grading line the showcase prints. */
+export type ProfileViewCard = CardView & { grader: string; grade: string };
 
 export interface ProfileViewActivity {
   verb: string;
@@ -70,18 +62,7 @@ export function toProfileView(
 ): ProfileViewUser {
   // Collection = showcased cards (opt-in). Activity = all recent pulls.
   const collectionCards: ProfileViewCard[] = (profile.collection ?? []).map(
-    (c) => ({
-      id: c.handle,
-      name: c.name,
-      image: c.image,
-      slabImage: c.slab_image ?? null,
-      grader: c.grader,
-      grade: c.grade,
-      // Live MYR display value only — c.market_value is raw USD and must
-      // never render behind "RM"; null renders "—" instead of a fake price.
-      price: c.marketPriceMyr ?? null,
-      rarity: c.rarity ?? null,
-    }),
+    (c) => ({ ...toCardView(c), grader: c.grader, grade: c.grade }),
   );
 
   // Guard `recent` by SHAPE (not just nullishness): the schema is intentionally
@@ -90,13 +71,9 @@ export function toProfileView(
   // Both .map()s read this SAME array so their indices stay aligned.
   const recent = Array.isArray(profile.recent) ? profile.recent : [];
   const activityCards: ProfileViewCard[] = recent.map((p) => ({
-    id: p.card.handle,
-    name: p.card.name,
-    image: p.card.image,
-    slabImage: p.card.slab_image ?? null,
+    ...toCardView(p.card),
     grader: p.card.grader,
     grade: p.card.grade,
-    price: p.card.marketPriceMyr ?? null,
   }));
 
   return {

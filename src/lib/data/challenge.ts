@@ -20,19 +20,17 @@ import { avatarForSeed } from '@/lib/profile-view';
 import { ChallengeSchema } from '@/lib/data/schemas';
 import { formatReset, nextResetAt } from '@/lib/reset-countdown';
 import { cached } from '@/lib/ttl-cache';
+import { toCardView, type CardView } from '@/lib/card-view';
 
-export interface ChallengeCard {
-  name: string;
-  image: string;
+/** A prize thumbnail: the card view's display fields (`slabImage` alone
+ *  decides the prism frame — raw card art has the wrong aspect for the band). */
+export type ChallengeCard = Pick<CardView, 'name' | 'image' | 'slabImage'> & {
   /** Public route key — drives the "View Details" link to /card/<handle>, the
    *  same affordance the pack pool tiles carry. Null on an older backend that
    *  doesn't send it; the thumbnail then renders unlinked rather than pointing
    *  at a route that 404s. */
   handle: string | null;
-  /** The graded-slab composite, when the card has one. Only a real slab gets
-   *  the prism frame — raw card art has the wrong aspect for the band. */
-  slabImage: string | null;
-}
+};
 /** One configured prize rank (1–10) of a stage. `rank` is carried EXPLICITLY —
  *  never a list index — so an unresolvable card id can never shift a lower rank
  *  under the wrong numeral. A rank may carry a card AND/OR credits; ranks with
@@ -155,17 +153,11 @@ async function loadChallenge(): Promise<Challenge | null> {
   // rank table, standings prize column), so a field added to the payload
   // reaches all three surfaces or none — they used to construct the shape
   // inline in three places.
-  const toCard = (c: {
-    name: string;
-    image: string;
-    handle?: string | null;
-    slab_image?: string | null;
-  }): ChallengeCard => ({
-    name: c.name,
-    image: c.image,
-    handle: c.handle ?? null,
-    slabImage: c.slab_image ?? null,
-  });
+  const toCard = (c: (typeof data.cards)[string]): ChallengeCard => {
+    const { name, image, slabImage, handle } = toCardView(c);
+    // toCardView reads a missing handle as '' — here that is "no link".
+    return { name, image, slabImage, handle: handle || null };
+  };
   // Flat resolver: drop ids the backend couldn't resolve (deleted card).
   // Used for the summary, where order/rank don't matter.
   const resolveCards = (ids: string[]): ChallengeCard[] =>

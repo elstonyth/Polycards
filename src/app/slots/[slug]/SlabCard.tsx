@@ -60,12 +60,12 @@ export function SlabCard({
   spriteSrc?: string;
 }) {
   const top = isTopRarity(card.rarity);
-  const value =
-    card.marketPriceMyr != null ? rm(card.marketPriceMyr) : card.value;
+  // Unpriced (an older backend sent no MYR price) stamps '—', never RM 0.00.
+  const value = card.priceMyr != null ? rm(card.priceMyr) : '—';
   // Literally the predicate the FRONT branches on — SlabImage exports it, so
   // the back can never end up on the other side of that decision (why it is
   // not `pack.group === 'RAW'` is documented there).
-  const raw = !isGraded(card.slab_image);
+  const raw = !isGraded(card.slabImage);
 
   // The slab turns under the pointer and catches a highlight as it turns, so
   // the hold before the flip is something to handle rather than sit through.
@@ -292,7 +292,7 @@ export function SlabCard({
         >
           <SlabImage
             src={card.image}
-            slabSrc={card.slab_image}
+            slabSrc={card.slabImage}
             rarity={card.rarity}
             alt={card.name}
             sizes="(max-width: 640px) 64vw, 300px"

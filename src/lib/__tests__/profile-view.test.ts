@@ -36,93 +36,51 @@ describe('toProfileView — tolerates a missing recent array', () => {
   });
 });
 
-// Money-contract resilience (audit 2026-07-07 #11): market_value is raw USD
-// and must never render behind an "RM" prefix — a collection/activity card
-// without marketPriceMyr must map to price: null (ProfileClient shows "—"),
-// not fall back to the raw USD number.
-describe('toProfileView — never falls back to raw USD market_value', () => {
-  it('maps price to null when a collection card has no marketPriceMyr', () => {
-    const profile = {
-      name: 'Ash',
-      seed: 1,
-      joined_at: '2026-01-01T00:00:00Z',
-      stats: { pulls: 0, volume: 0 },
-      collection: [
-        {
-          handle: 'x',
-          name: 'X',
-          grader: 'PSA',
-          grade: '10',
-          image: '/x.webp',
-          market_value: 39.99, // raw USD, no marketPriceMyr
-        },
-      ],
-      recent: [],
-    } as unknown as PublicProfile;
-
-    const view = toProfileView(profile);
-    expect(view.collection[0]?.price).toBeNull();
-  });
-
-  it('uses marketPriceMyr when present', () => {
-    const profile = {
-      name: 'Ash',
-      seed: 1,
-      joined_at: '2026-01-01T00:00:00Z',
-      stats: { pulls: 0, volume: 0 },
-      collection: [
-        {
-          handle: 'x',
-          name: 'X',
-          grader: 'PSA',
-          grade: '10',
-          image: '/x.webp',
-          market_value: 39.99,
-          marketPriceMyr: 9.99,
-        },
-      ],
-      recent: [],
-    } as unknown as PublicProfile;
-
-    const view = toProfileView(profile);
-    expect(view.collection[0]?.price).toBe(9.99);
-  });
-});
-
-// Tier-frame contract: rarity drives the slab's tier frame, and a wrong-tier
-// frame is worse than none — so an old backend that omits collection[].rarity
-// (or a new one that nulls it on an odds-row miss) must map to null, never a
-// guessed tier. SlabImage skips the frame for a falsy rarity.
-describe('toProfileView — collection rarity degrades to null', () => {
-  const base = {
-    name: 'Ash',
-    seed: 1,
-    joined_at: '2026-01-01T00:00:00Z',
-    stats: { pulls: 1, volume: 0 },
-    recent: [],
-  };
+// Both card lists go through the one card mapper (card-view.test.ts pins its
+// defaults — the raw USD market_value never becoming the RM price, an unknown
+// tier degrading to null). What is pinned HERE is only that the profile's own
+// fields ride alongside it on both lists.
+describe('toProfileView — cards map through toCardView', () => {
   const card = {
     handle: 'c1',
     name: 'Card',
     grader: 'PSA',
     grade: '10',
     image: '/x.webp',
-    market_value: 1,
+    market_value: 39.99, // raw USD — must never become priceMyr
   };
+  const profile = {
+    name: 'Ash',
+    seed: 1,
+    joined_at: '2026-01-01T00:00:00Z',
+    stats: { pulls: 1, volume: 0 },
+    collection: [{ ...card, marketPriceMyr: 9.99, rarity: 'Legendary' }],
+    recent: [{ pack_id: 'p', rarity: 'Rare', rolled_at: '2026-01-02', card }],
+  } as unknown as PublicProfile;
 
-  it('maps an omitted rarity (old backend) to null', () => {
-    const view = toProfileView({
-      ...base,
-      collection: [card],
-    } as unknown as PublicProfile);
-    expect(view.collection[0]?.rarity).toBeNull();
+  it('a showcased card keeps its grading line beside the mapped view', () => {
+    expect(toProfileView(profile).collection[0]).toEqual({
+      handle: 'c1',
+      name: 'Card',
+      image: '/x.webp',
+      slabImage: null,
+      rarity: 'Legendary',
+      priceMyr: 9.99,
+      pokemonDex: null,
+      spriteImage: null,
+      grader: 'PSA',
+      grade: '10',
+    });
   });
 
-  it('passes a present rarity through', () => {
-    const view = toProfileView({
-      ...base,
-      collection: [{ ...card, rarity: 'Legendary' }],
-    } as unknown as PublicProfile);
-    expect(view.collection[0]?.rarity).toBe('Legendary');
+  it('an activity card is the same mapping, unpriced and frameless here', () => {
+    const view = toProfileView(profile);
+    expect(view.activity?.[0]?.card).toMatchObject({
+      handle: 'c1',
+      priceMyr: null,
+      rarity: null,
+      grader: 'PSA',
+      grade: '10',
+    });
   });
 });

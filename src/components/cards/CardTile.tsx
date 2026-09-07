@@ -3,6 +3,7 @@
 import { SlabImage } from '@/components/SlabImage';
 import { PokemonBadge } from '@/components/cards/PokemonBadge';
 import { badgeSprite } from '@/lib/pokemon-badge-sprite';
+import { rm } from '@/lib/format';
 import type { PackCard } from '@/lib/packs-data';
 
 /**
@@ -69,7 +70,11 @@ export function CardTile({
       {/* Only the amount is nowrap — "est." may drop to its own line so a
           six-figure value never spills past a 38%-wide rail tile. */}
       <span className="text-[13px] font-bold tabular-nums text-white">
-        <span className="whitespace-nowrap">{card.value}</span>{' '}
+        {/* Unpriced (an older backend sent no MYR price) reads '—', never a
+            raw USD number or RM 0.00. */}
+        <span className="whitespace-nowrap">
+          {card.priceMyr != null ? rm(card.priceMyr) : '—'}
+        </span>{' '}
         <span className="text-[11px] font-normal text-white/50">est.</span>
       </span>
     </button>

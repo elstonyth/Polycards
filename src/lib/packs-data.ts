@@ -5,6 +5,7 @@
 // NOTE: there is no static pack list here any more. Every pack the storefront
 // renders comes from the backend via src/lib/data/packs.ts; the only local data
 // left is the category chrome (tab label, heading, icon) that wraps it.
+import type { CardView } from '@/lib/card-view';
 
 /** Site-wide flat buyback % — what every sell from the vault/inventory pays.
  *  Mirrors FLAT_PERCENT in backend/packages/api/src/modules/packs/buyback-rate.ts. */
@@ -26,13 +27,11 @@ export const FREE_PULL_LOCKED_MESSAGE =
 export type Pack = {
   id: string;
   name: string;
-  /** DISPLAY ONLY, e.g. "RM 1,000" — rounded for the eye. Never parse it back
-   *  into money: use `priceValue`. */
-  price: string;
   /** The pack's real price in RM, straight from the backend. Every cost/afford
-   *  calculation (bet meter, canAfford, shortfall) MUST use this — deriving the
-   *  number from the rounded display string would gate a RM 1.50 pack at 2. */
-  priceValue: number;
+   *  calculation (bet meter, canAfford, shortfall) reads this; the tiles render
+   *  it with `rm0()` — the rounded "RM 2" for a RM 1.50 pack is display only
+   *  and never exists as data, so nothing can parse it back and gate at 2. */
+  priceMyr: number;
   /** Pack shot — /public path (public/images/polycards/) or an uploaded URL. */
   image: string;
   /** Pack-page HERO scene (wide landscape "factory" render, may be animated).
@@ -159,13 +158,6 @@ export function packHref(id: string, qty: number): string {
   return `/slots/${encodeURIComponent(id)}?count=${qty}`;
 }
 
-/** Numeric price, e.g. "RM 1,000" -> 1000. SORTING/BUCKETING ONLY — the string
- *  it parses is the ROUNDED display, so it can disagree with what the customer
- *  is actually charged. Money math reads `Pack.priceValue`. */
-export function priceNumber(price: string): number {
-  return parseFloat(price.replace(/^RM\s*/, '').replace(/,/g, '')) || 0;
-}
-
 // Tiers that ship an animated factory hero loop
 // (public/images/polycards/{tier}-factory.{mp4,webm} + -poster.webp).
 const FACTORY_VIDEO_TIERS = new Set([
@@ -204,19 +196,11 @@ export function factoryVideo(
 
 export type Rarity =
   'Immortal' | 'Legendary' | 'Mythical' | 'Rare' | 'Uncommon' | 'Common';
-export type PackCard = {
-  id: string;
-  name: string;
-  image: string;
-  slabImage: string | null;
-  value: string;
-  rarity: Rarity;
-  /** The card's CONFIGURED pixel-Pokémon (mirror of its linked library entry),
-   *  from the store route. Lets the slot reel flicker the pack's actual
-   *  configured Pokémon. Optional: only the pool/top-hits carry it. */
-  pokemonDex?: number | null;
-  spriteImage?: string | null;
-};
+/** A card of a pack's prize pool (and, since the reveal shows the same shape,
+ *  a won card — `WonCard` in actions/packs.ts is this type). The pool row's
+ *  tier is REQUIRED: the odds schema drops a row without one, so unlike the
+ *  base `CardView` this never renders frameless. */
+export type PackCard = CardView & { rarity: Rarity };
 
 // Per-rarity pull odds — the statically-PUBLISHED display, decoupled by design
 // from the backend's secret per-card weights (admin-configurable in Step 4).

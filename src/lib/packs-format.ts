@@ -1,14 +1,14 @@
 /**
- * Shared gacha-rarity + value formatting helpers.
+ * Shared gacha-rarity helpers + the pool value maths.
  *
- * Single source for the rarity tier list, the runtime rarity guard, and the USD
- * card-value formatter — used by both the pack data getters (`src/lib/data/packs.ts`)
- * and the open-pack server action (`src/lib/actions/packs.ts`) so the two can't
- * drift. Pure + isomorphic (no server-only imports), safe to import anywhere.
+ * Single source for the rarity tier list, the runtime rarity guard, and the
+ * published-odds/pool-value derivations the pack page renders. Money in and
+ * money out are NUMBERS (`priceMyr`, null = unpriced); the components format
+ * with `rm()`. Pure + isomorphic (no server-only imports), safe to import
+ * anywhere.
  */
-import { priceNumber, type Rarity } from '@/lib/packs-data';
+import type { Rarity } from '@/lib/packs-data';
 import { RARITY_ORDER } from '@/lib/rarity';
-import { money } from './format';
 
 /** Rarity tiers, rarest-first (display + iteration order).
  *  Re-exported from `@/lib/rarity` (RARITY_ORDER is the canonical source). */
@@ -50,31 +50,25 @@ export const publishedOddsRows = (
     chance: `${po.tiers[r]}%`,
   }));
 
-/**
- * Card market value -> "RM 39.80" (MYR, always 2 decimals). Values are decimals,
- * never cents — formatted as-is.
- */
-export const formatValue = (mv: number): string => money(mv, { prefix: 'RM ' });
-
-/** Min–max of a pool's PRICED display values ('—' rows skipped); null when
+/** Min–max of a pool's PRICED values (null = unpriced rows skipped); null when
  *  nothing is priced. Display prices already carry FX × per-card markup —
  *  this is a pure read, no new pricing math.
  *
- *  Only values > 0 count. The unpriced sentinel '—' parses to 0, so a card
- *  genuinely worth RM 0.00 (or a negative, which is always bad data) is dropped
- *  alongside it — deliberate: "RM 0.00 – RM 9,869.90" reads as a broken range,
- *  and the two cases are indistinguishable after priceNumber(). */
-export type PoolValueRange = { min: string; max: string };
+ *  Only values > 0 count. A card genuinely worth RM 0.00 (or a negative, which
+ *  is always bad data) is dropped like an unpriced one — deliberate:
+ *  "RM 0.00 – RM 9,869.90" reads as a broken range. */
+export type PoolValueRange = { min: number; max: number };
+
+/** The one "does this card count" rule for the pool maths below. */
+const priced = (c: { priceMyr: number | null }): c is { priceMyr: number } =>
+  c.priceMyr !== null && c.priceMyr > 0;
 
 export function poolValueRange(
-  pool: readonly { value: string }[],
+  pool: readonly { priceMyr: number | null }[],
 ): PoolValueRange | null {
-  const values = pool.map((c) => priceNumber(c.value)).filter((v) => v > 0);
+  const values = pool.filter(priced).map((c) => c.priceMyr);
   if (values.length === 0) return null;
-  return {
-    min: formatValue(Math.min(...values)),
-    max: formatValue(Math.max(...values)),
-  };
+  return { min: Math.min(...values), max: Math.max(...values) };
 }
 
 /** Per-tier value ranges — the same derivation as `poolValueRange`, run over
@@ -87,9 +81,9 @@ export function poolValueRange(
  *  from the backend, where an unknown tier string must be skipped rather than
  *  crash the odds panel. */
 export function tierValueRanges(
-  pool: readonly { rarity: string; value: string }[],
+  pool: readonly { rarity: string; priceMyr: number | null }[],
 ): Partial<Record<Rarity, PoolValueRange>> {
-  const byTier = new Map<string, { value: string }[]>();
+  const byTier = new Map<string, { priceMyr: number | null }[]>();
   for (const card of pool) {
     if (!isRarity(card.rarity)) continue;
     const bucket = byTier.get(card.rarity);
@@ -118,16 +112,14 @@ export function tierValueRanges(
  * one price basis.
  */
 export function poolExpectedValue(
-  pool: readonly { rarity: string; value: string }[],
+  pool: readonly { rarity: string; priceMyr: number | null }[],
   tiers: Partial<Record<Rarity, number>>,
-): string | null {
+): number | null {
   const sums = new Map<Rarity, { sum: number; n: number }>();
   for (const card of pool) {
-    if (!isRarity(card.rarity)) continue;
-    const v = priceNumber(card.value);
-    if (v <= 0) continue;
+    if (!isRarity(card.rarity) || !priced(card)) continue;
     const t = sums.get(card.rarity) ?? { sum: 0, n: 0 };
-    t.sum += v;
+    t.sum += card.priceMyr;
     t.n += 1;
     sums.set(card.rarity, t);
   }
@@ -157,5 +149,5 @@ export function poolExpectedValue(
   ) {
     return null;
   }
-  return formatValue(Math.round(ev * 100) / 100);
+  return Math.round(ev * 100) / 100;
 }
