@@ -31,3 +31,9 @@ b7623b23350b471dfa7db8769af0d8128abfd613:docs/superpowers/plans/2026-08-15-publi
 # across squash re-authoring, this fingerprint waives the already-pushed
 # branch commit in history.
 a7cdf2332bc83510f88d95f57623032857a2c7bc:backend/packages/api/integration-tests/http/delivery-orders.spec.ts:generic-api-key:595
+
+# Unit-test Idempotency-Key assertion ('wd-attempt-abc123') recorded by the
+# in-memory Store — a synthetic withdrawal dedupe tag, not a credential.
+# The inline `// gitleaks:allow` preserves this exact assertion across squash
+# re-authoring; this fingerprint waives only its historical branch finding.
+e4cc42d0704d9024ca3a75fbd78c8f37f8528c65:src/lib/actions/__tests__/vault.test.ts:generic-api-key:53

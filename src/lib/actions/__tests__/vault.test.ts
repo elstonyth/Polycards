@@ -41,7 +41,7 @@ describe('startWithdrawal — Idempotency-Key', () => {
     expect(mem.requests[0]).toMatchObject({
       method: 'POST',
       path: '/store/credits/withdraw',
-      headers: { 'Idempotency-Key': 'wd-attempt-abc123' },
+      headers: { 'Idempotency-Key': 'wd-attempt-abc123' }, // gitleaks:allow — synthetic test dedupe tag, not a credential
       body: { amount: 50, account_id: 'acct_1' },
     });
   });
