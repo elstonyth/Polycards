@@ -44,7 +44,9 @@ export default async function HomePage() {
   const pulls = feed.pulls;
   const packs = categories.flatMap((c) => c.packs);
   const inStock = packs.filter((p) => p.inStock !== false);
-  const featured = [...inStock].sort((a, b) => b.priceMyr - a.priceMyr)[0];
+  const featured = [...inStock].sort(
+    (a, b) => Math.round(b.priceMyr) - Math.round(a.priceMyr),
+  )[0];
 
   // Chase lookups cover the first N tiles PLUS the featured pack, so the hero
   // never silently loses its chase when featured falls outside the first N.

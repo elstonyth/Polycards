@@ -19,8 +19,10 @@ export default function TierShelf({
   packs: Pack[];
   chaseByPack: Map<string, PackCard | null>;
 }) {
-  // Ladder order: price high→low.
-  const rows = [...packs].sort((a, b) => b.priceMyr - a.priceMyr);
+  // Display ladder: rounded price high→low; ties retain catalog order.
+  const rows = [...packs].sort(
+    (a, b) => Math.round(b.priceMyr) - Math.round(a.priceMyr),
+  );
 
   return (
     <section aria-labelledby="shelf-heading" className="px-fluid mt-4 w-full">

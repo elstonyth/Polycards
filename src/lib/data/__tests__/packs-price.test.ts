@@ -10,6 +10,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // in-memory backend seeds it and the real schema/parse path runs.
 import { storeShim, backend } from '@/lib/__tests__/store-shim';
 
+vi.mock('next/cache', () => ({
+  unstable_cache: <T extends (...args: never[]) => unknown>(fn: T) => fn,
+}));
 vi.mock('@/lib/store', () => ({ store: storeShim }));
 vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
@@ -176,4 +179,54 @@ describe('getPackBySlug — the unlisted (uncataloged) pack', () => {
       'GRADED',
     );
   });
+});
+
+// Inspect composition props, without replacing the ordering logic itself.
+vi.mock('@/lib/data/leaderboard', () => ({ getLeaderboard: async () => [] }));
+vi.mock('@/components/home/HeroBoard', () => ({ default: () => null }));
+vi.mock('@/components/home/PullsMarquee', () => ({ default: () => null }));
+vi.mock('@/components/RecentPullsSection', () => ({ default: () => null }));
+vi.mock('@/components/home/TheGame', () => ({ default: () => null }));
+vi.mock('@/components/home/FinalCta', () => ({ default: () => null }));
+
+it('rounded-price ties preserve catalog order for the shelf and featured hero, while money stays exact', async () => {
+  const { isValidElement, Children } = await import('react');
+  const { default: HomePage } = await import('@/app/page');
+  const { default: TierShelf } = await import('@/components/home/TierShelf');
+  backend({
+    [PACKS]: {
+      body: {
+        packs: [
+          row({ slug: 'first', price: 1.51, rank: 1 }),
+          row({ slug: 'second', price: 2.49, rank: 2 }),
+        ],
+      },
+    },
+    'GET /store/pulls/recent': { body: { pulls: [] } },
+    'GET /store/packs/:slug': { status: 404 },
+  });
+  const packs = (await getPackCategories()).flatMap((c) => c.packs);
+  const shelf = TierShelf({ packs, chaseByPack: new Map() });
+  type Props = {
+    children?: import('react').ReactNode;
+    pack?: import('@/lib/packs-data').Pack;
+  };
+  function selectedPacks(
+    node: import('react').ReactNode,
+  ): import('@/lib/packs-data').Pack[] {
+    return Children.toArray(node).flatMap((child) => {
+      if (!isValidElement<Props>(child)) return [];
+      return [
+        ...(child.props.pack ? [child.props.pack] : []),
+        ...selectedPacks(child.props.children),
+      ];
+    });
+  }
+  expect
+    .soft(selectedPacks(shelf).map((p) => p.id))
+    .toEqual(['first', 'second']);
+  expect
+    .soft(selectedPacks(await HomePage()).map((p) => p.id))
+    .toEqual(['first']);
+  expect(packs.map((p) => p.priceMyr)).toEqual([1.51, 2.49]);
 });
