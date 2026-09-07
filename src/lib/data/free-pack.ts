@@ -13,10 +13,9 @@
  * token or an unreachable backend both resolve to `hidden` and the page
  * renders exactly as it does today.
  */
-import { authedFetch } from '@/lib/authed-fetch';
-import { logger } from '@/lib/logger';
+import { store } from '@/lib/store';
 import { getAuthToken } from '@/lib/data/customer';
-import { parseOne, FreePackSchema } from '@/lib/data/schemas';
+import { FreePackSchema } from '@/lib/data/schemas';
 
 /** Badge state for /slots — the union the page passes to the catalog. */
 export type FreePackState =
@@ -64,15 +63,20 @@ export function canClaimFreePack(state: FreePackState, slug: string): boolean {
  * renders exactly as it does today.
  */
 export async function getFreePackState(): Promise<FreePackState> {
+  // The cookie is read HERE as well as inside the port, and not by oversight:
+  // the mapper needs to know WHICH answer it is reading. A guest reads only
+  // `promo` and a customer only `eligible`+`slug`, so a stray field can never
+  // resurrect a spent claim — and that split needs the login state, which a
+  // Result cannot carry.
+  //
+  // `auth: 'optional'`: this route answers a guest rather than 401ing, and the
+  // bearer rides along when there is one — exactly what `authedFetch(token,
+  // …)` with a possibly-undefined token did, header omitted and all.
   const token = await getAuthToken();
-  try {
-    const parsed = parseOne(
-      FreePackSchema,
-      await authedFetch(token, '/store/free-pack'),
-    );
-    return mapFreePackState(Boolean(token), parsed);
-  } catch (error) {
-    logger.error('[free-pack] state read failed:', error);
-    return HIDDEN;
-  }
+  const r = await store.get('/store/free-pack', FreePackSchema, {
+    auth: 'optional',
+  });
+  // Any failure — expired token, unreachable backend, malformed 200 — is
+  // `hidden`, and the page renders exactly as it does today.
+  return mapFreePackState(Boolean(token), r.ok ? r.data : null);
 }

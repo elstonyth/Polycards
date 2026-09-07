@@ -11,17 +11,28 @@
  * request-delivery.unit.spec.ts; storefront: delivery-errors.test.ts), so a
  * reword breaks a test instead of silently degrading to the fallback.
  */
-import type { ErrorRule } from '@/lib/errors';
+import { COPY, UNAUTHORIZED, type ErrorRule } from '@/lib/errors';
 
+/** This surface's own word for an expired session — shared with CANCEL_RULES
+ *  in actions/delivery.ts, which answers the same 401 the same way. */
+export const DELIVERY_LOGIN = 'Please log in to manage deliveries.';
+
+// No rate-limit rule: this table's copy WAS the shared sentence, so the
+// transport tier in lib/errors.ts answers a 429 now (friendlyFailure) — but
+// only LAST: friendlyFailure runs every rule below first, so the transport
+// tier now sits behind every one of them, including the three numeric ones at
+// the tail (/no longer available|not allowed|409/i, /not found|404/i,
+// /required|invalid|400/i). The 401 rule stays because the sentence is this
+// surface's own, not the shared one.
+//
+// Latent hazard, not live today: a rate-limited response reads
+// "<label> Try again in Ns." (backend rate-limit.ts), and if N ever reached
+// 400, 404, or 409 it would hit one of those three rules before the transport
+// tier saw it. Every delivery rate limit defaults to a <=60s window
+// (rate-limit.ts) — an env override could widen it — so N never grows past
+// two digits today; re-check this comment if a window ever widens past ~400s.
 export const DELIVERY_RULES: ErrorRule[] = [
-  [
-    /too many|rate.?limit|429/i,
-    'Too many requests — give it a moment and try again.',
-  ],
-  [
-    /unauthorized|not authenticated|401/i,
-    'Please log in to manage deliveries.',
-  ],
+  [UNAUTHORIZED, DELIVERY_LOGIN],
   // requirePhoneVerified (backend api/utils/phone-verification-guard.ts). MUST
   // stay above the broad /not allowed|409/ rule below, which would otherwise
   // flatten it into "cards are no longer available to deliver" — a wrong
@@ -62,4 +73,4 @@ export const DELIVERY_RULES: ErrorRule[] = [
   ],
 ];
 
-export const DELIVERY_FALLBACK = 'Something went wrong. Please try again.';
+export const DELIVERY_FALLBACK = COPY.generic;

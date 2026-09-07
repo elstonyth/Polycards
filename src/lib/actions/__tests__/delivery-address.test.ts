@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { storeShim } from '@/lib/__tests__/store-shim';
 
-// The real data modules import 'server-only' (throws outside an RSC) and touch
-// next/headers — mock them wholesale so only the action logic under test runs,
-// same harness shape as auth.test.ts.
+// The address-book actions still go through the SDK (built-in Medusa endpoints
+// with typed responses), so this file keeps its sdk/customer mocks. The port's
+// HTTP adapter imports 'server-only' and is pulled in by the file's OTHER
+// actions, so it is shimmed too — nothing here reaches it.
+vi.mock('@/lib/store', () => ({ store: storeShim }));
 const mocks = vi.hoisted(() => ({
   getAuthToken: vi.fn(),
   createAddress: vi.fn(),

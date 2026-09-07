@@ -7,6 +7,7 @@ import {
   MedusaError,
 } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
+import { gatewayEnv } from '../../../../modules/packs/gateway-env';
 import type PacksModuleService from '../../../../modules/packs/service';
 import {
   GATEWAYS,
@@ -36,7 +37,7 @@ function describe() {
     })),
     env_default: isPaymentGateway(env.PAYMENT_GATEWAY)
       ? env.PAYMENT_GATEWAY
-      : 'globepay',
+      : 'tgpay',
   };
 }
 
@@ -72,11 +73,10 @@ export async function POST(
   }
   // Credentials alone are not enough: the gateway must be able to call us
   // back, or every payment would sit unsettled until the sweep. Without
-  // PAYMENT_CALLBACK_BASE the explicit URLs only count when they name THIS
-  // gateway's hooks (gatewayUrls), so a production deploy still carrying the
-  // GlobePay URLs cannot be switched to TGPay by accident.
+  // PAYMENT_CALLBACK_BASE every notify URL is empty (gatewayUrls), so a
+  // deploy that never set it cannot switch gateways by accident.
   const urls = gatewayUrls(wanted);
-  const withdrawalsOn = process.env.GLOBEPAY_WITHDRAWALS_ENABLED === 'true';
+  const withdrawalsOn = gatewayEnv('GATEWAY_WITHDRAWALS_ENABLED') === 'true';
   if (
     !urls.notifyUrl ||
     (withdrawalsOn &&

@@ -75,6 +75,33 @@ export function cached<T>(
   return value;
 }
 
+/**
+ * `cached` for a same-origin JSON proxy: memoise the SERIALIZED body and hand
+ * back a fresh `Response` around it.
+ *
+ * The string, not the object, is what's held on purpose. At poll volume the
+ * remaining per-request cost once the backend hop is gone is re-stringifying
+ * the payload (~6.6 KB on the recent-pulls feed), and that is charged once per
+ * request per open tab. A `Response` cannot be reused instead — its body is a
+ * one-shot stream — so the body string is the largest reusable unit.
+ *
+ * `cached`'s contract carries over unchanged: a loader that THROWS is not
+ * memoised, so a route that must not cache a degraded answer throws inside
+ * `load` and catches around this call (see /api/pull-gaps).
+ */
+export async function cachedJson(
+  key: string,
+  ttlMs: number,
+  load: () => Promise<unknown>,
+): Promise<Response> {
+  const body = await cached(key, ttlMs, async () =>
+    JSON.stringify(await load()),
+  );
+  return new Response(body, {
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 /** Test seam: module state outlives a test's fixtures — one vitest process is
  *  one module instance, so a prior test's value would be served to the next.
  *  Mirrors clearRecentPullsCache() on the backend route. */

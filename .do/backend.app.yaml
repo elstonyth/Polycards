@@ -334,19 +334,19 @@ envs:
   - key: TELEGRAM_CHAT_ID
     scope: RUN_TIME
     value: "-1003945115527"
-  # ── Money switches. The GLOBEPAY_* names predate the gateway seam and are
-  # kept because every runbook and alert knows them; they are gateway-neutral
-  # master switches (the GlobePay365 integration itself was removed
+  # ── Money switches. GATEWAY_* names any active gateway's deposits/
+  # withdrawals; the legacy GLOBEPAY_* spellings are still read as a fallback
+  # (the GlobePay365 integration itself was removed
   # 2026-09-06 — its settled rows remain as history on the audit panel).
   # Fail closed: without ENABLED the deposit route refuses every top-up.
-  - key: GLOBEPAY_ENABLED
+  - key: GATEWAY_ENABLED
     scope: RUN_TIME
     value: "true"
   # Withdrawals ARMED 2026-08-05 (operator decision). The customer withdrawal
   # route and the admin held-approval both refuse while this is off.
   # NEXT_PUBLIC_WITHDRAWALS_ENABLED flips on the storefront in the same window
   # (Dockerfile ARG default + .do/storefront.app.yaml, both).
-  - key: GLOBEPAY_WITHDRAWALS_ENABLED
+  - key: GATEWAY_WITHDRAWALS_ENABLED
     scope: RUN_TIME
     value: "true"
   # Where the customer's browser lands after the gateway's checkout — the
@@ -418,16 +418,17 @@ envs:
 
 # Dedicated outbound IPs. DO assigns one per component (the service makes the
 # customer-facing calls, the worker runs the reconciliation sweeps) and
-# GlobePay365 runs an ACTIVE API whitelist keyed on those exact addresses, so
-# BOTH have to be on their list.
+# TGPay's production API is IP-allowlisted per tenant, keyed on those exact
+# addresses (from anywhere else every call is "403 Request IP is not allowed
+# for this tenant"), so BOTH have to be on their list.
 #
 # This block lives here because `doctl apps update` replaces the whole spec:
 # on 2026-07-30 a do-apply from a spec without it silently released the IPs
 # assigned the day before (deployment 2779c7a6, egress null — app stayed
-# ACTIVE and healthy, only outbound calls to them would have been rejected).
-# Never drop it. After any egress toggle, re-read the assigned addresses
-# (`doctl apps get <id> -o json` → dedicated_ips) and re-send them to
-# GlobePay365 if they changed — a reallocation is invisible from our side.
+# ACTIVE and healthy, only outbound calls to the gateway would have been
+# rejected). Never drop it. After any egress toggle, re-read the assigned
+# addresses (`doctl apps get <id> -o json` → dedicated_ips) and re-send them
+# to TGPay if they changed — a reallocation is invisible from our side.
 egress:
   type: DEDICATED_IP
 
@@ -505,7 +506,7 @@ workers:
     instance_size_slug: basic-s
     instance_count: 1
     run_command: corepack yarn start
-    # This component runs the scheduled jobs, including the GlobePay deposit
+    # This component runs the scheduled jobs, including the deposit
     # reconcile sweep. Callbacks are not delivered in production, so that sweep
     # is the ONLY writer that credits a paid deposit — if this worker is down,
     # customers pay at the bank and their balance never moves, silently, while

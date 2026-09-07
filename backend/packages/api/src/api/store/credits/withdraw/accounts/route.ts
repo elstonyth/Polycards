@@ -3,14 +3,13 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
-import {
-  findBank,
-  sandboxOnlyBank,
-} from '../../../../../modules/packs/banks';
+import { findBank, sandboxOnlyBank } from '../../../../../modules/packs/banks';
 import { resolveActiveGateway } from '../../../../../modules/packs/gateway';
-import { withdrawalDetailsError } from '../../../../../modules/packs/globepay-withdrawal';
-import { PACKS_MODULE } from '../../../../../modules/packs';
-import type PacksModuleService from '../../../../../modules/packs/service';
+import { withdrawalDetailsError } from '../../../../../modules/packs/gateway-withdrawal';
+import {
+  resolvePacks,
+  type CustomerWallet,
+} from '../../../../../modules/packs/facets';
 import {
   MAX_SAVED_BANK_ACCOUNTS,
   parseSavedBankAccounts,
@@ -117,7 +116,7 @@ async function mutateAccounts(
   customerId: string,
   mutate: (accounts: SavedBankAccount[]) => SavedBankAccount[] | null,
 ): Promise<SavedBankAccount[]> {
-  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const packs = resolvePacks<CustomerWallet>(req.scope);
   const metadata = await packs.mutateCustomerMetadata({
     customerId: requireCustomerId(customerId),
     mutate: (current) => {
@@ -143,7 +142,12 @@ export async function GET(
   res: MedusaResponse,
 ): Promise<void> {
   const accounts = await loadAccounts(req, req.auth_context.actor_id);
-  noStore(res).json({ accounts: savedBankAccountViews(accounts, await resolveActiveGateway(req.scope)) });
+  noStore(res).json({
+    accounts: savedBankAccountViews(
+      accounts,
+      await resolveActiveGateway(req.scope),
+    ),
+  });
 }
 
 export async function POST(
@@ -234,7 +238,12 @@ export async function POST(
       savedAt: account.savedAt as string,
     });
   }
-  noStore(res).json({ accounts: savedBankAccountViews(saved, await resolveActiveGateway(req.scope)) });
+  noStore(res).json({
+    accounts: savedBankAccountViews(
+      saved,
+      await resolveActiveGateway(req.scope),
+    ),
+  });
 }
 
 export async function DELETE(
@@ -274,5 +283,10 @@ export async function DELETE(
       removedAt: new Date().toISOString(),
     });
   }
-  noStore(res).json({ accounts: savedBankAccountViews(saved, await resolveActiveGateway(req.scope)) });
+  noStore(res).json({
+    accounts: savedBankAccountViews(
+      saved,
+      await resolveActiveGateway(req.scope),
+    ),
+  });
 }

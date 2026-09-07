@@ -3,9 +3,22 @@
 /**
  * Customer auth server actions (emailpass). Called from the client auth modal.
  * Running server-side keeps the JWT in an httpOnly cookie and avoids browser
- * CORS (the backend doesn't allow the :4000 origin). The token exchange uses
- * `sdk.client.fetch` (returns `{ token }`) so the shared SDK singleton never
- * holds per-request auth state; customer create/retrieve pass an explicit Bearer.
+ * CORS (the backend doesn't allow the :4000 origin).
+ *
+ * The token exchanges go through the `Store` port (src/lib/store.ts) with
+ * `auth: 'none'`: they are pre-login routes, the cookie does not exist yet, and
+ * the shared SDK singleton must never hold per-request auth state. They use
+ * `store.orThrow`, not the `Result` — each `try` below spans the exchange AND
+ * the `sdk.store.*` calls after it, and one `catch` decides the copy for all of
+ * them (`friendlyError` on the message, `httpStatus` on the status; the latter
+ * reads `StoreError.failure.status`, see src/lib/errors.ts).
+ *
+ * What stays on the SDK, deliberately: `sdk.store.customer.create/retrieve` and
+ * `sdk.auth.resetPassword/updateProvider` are built-in Medusa endpoints with
+ * typed responses that take a Bearer positionally — not our custom-route
+ * envelope. `/auth/token/refresh` DOES go through the port, on the `bearer`
+ * option: the token it must send is the register token Google just handed
+ * back, not the session cookie, and `bearer` is how the port says that.
  *
  * Medusa v2 emailpass flow (verified against the backend):
  *  signup: register → {token} → create customer (Bearer register-token) → login
@@ -14,7 +27,8 @@
 import { headers } from 'next/headers';
 import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
-import { authedFetch } from '@/lib/authed-fetch';
+import { store } from '@/lib/store';
+import { UncheckedSchema } from '@/lib/data/schemas';
 import { logger } from '@/lib/logger';
 import {
   setAuthToken,
@@ -133,11 +147,18 @@ async function exchangeToken(
   email: string,
   password: string,
 ): Promise<string> {
-  const { token } = await sdk.client.fetch<TokenResponse>(path, {
-    method: 'POST',
-    body: { email, password },
-  });
-  return token;
+  // Unchecked at the envelope, exactly as the pre-port fetch generic was: the
+  // caller's `catch` owns every failure here, and the copy it picks comes from
+  // AUTH_RULES over the backend's own message.
+  const data = store.orThrow(
+    await store.post(
+      path,
+      UncheckedSchema,
+      { email, password },
+      { auth: 'none' },
+    ),
+  );
+  return (data as TokenResponse).token;
 }
 
 export async function login(input: {
@@ -315,10 +336,10 @@ export async function signup(input: {
 
 /**
  * Google OAuth (customer social login). Two server actions mirror the emailpass
- * flow — token exchange stays server-side (httpOnly cookie, no browser CORS) via
- * `sdk.client.fetch` (and `authedFetch` for the refresh, which carries an
- * explicit Bearer), so the shared SDK singleton never holds per-request auth
- * state.
+ * flow — token exchange stays server-side (httpOnly cookie, no browser CORS)
+ * via the port (the refresh on its `bearer` option, which carries an explicit
+ * Bearer that is NOT the session cookie), so the shared SDK singleton never
+ * holds per-request auth state.
  *
  * Flow (verified against @medusajs/auth-google 2.13.4):
  *  start:    POST /auth/customer/google { callback_url } → { location } → browser
@@ -382,10 +403,14 @@ export async function googleLoginStart(input?: {
       return { ok: false, error: 'Could not determine site origin.' };
     const callback_url = `${origin}/auth/google/callback`;
 
-    const { location } = await sdk.client.fetch<{ location?: string }>(
-      '/auth/customer/google',
-      { method: 'POST', body: { callback_url } },
-    );
+    const { location } = store.orThrow(
+      await store.post(
+        '/auth/customer/google',
+        UncheckedSchema,
+        { callback_url },
+        { auth: 'none' },
+      ),
+    ) as { location?: string };
     if (!location)
       return { ok: false, error: 'Google sign-in is currently unavailable.' };
     // auth-google's getRedirect() sets redirect_uri/client_id/response_type/
@@ -421,10 +446,12 @@ export async function googleCallback(query: {
   if (!query.code || !query.state) return { ok: false, reason: 'cancelled' };
 
   try {
-    const { token } = await sdk.client.fetch<TokenResponse>(
-      '/auth/customer/google/callback',
-      { method: 'GET', query: { code: query.code, state: query.state } },
-    );
+    const { token } = store.orThrow(
+      await store.get('/auth/customer/google/callback', UncheckedSchema, {
+        auth: 'none',
+        query: { code: query.code, state: query.state },
+      }),
+    ) as TokenResponse;
 
     const payload = decodeJwtPayload(token);
     let sessionToken = token;
@@ -463,11 +490,13 @@ export async function googleCallback(query: {
         { Authorization: `Bearer ${token}` },
       );
       // The post-register token still lacks actor_id — refresh for a real one.
-      const refreshed = await authedFetch<TokenResponse>(
-        token,
-        '/auth/token/refresh',
-        { method: 'POST' },
-      );
+      // `bearer`, not the cookie: this sends the register token Google just
+      // handed back, and no auth cookie exists yet this request.
+      const refreshed = store.orThrow(
+        await store.post('/auth/token/refresh', UncheckedSchema, undefined, {
+          bearer: token,
+        }),
+      ) as TokenResponse;
       sessionToken = refreshed.token;
     }
 

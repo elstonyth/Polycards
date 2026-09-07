@@ -15,14 +15,24 @@
  * amount was malformed while the real cause (the gateway refusing the submit)
  * never reached the UI.
  */
-import type { ErrorRule } from '@/lib/errors';
+import { COPY, UNAUTHORIZED, type ErrorRule } from '@/lib/errors';
 
+// No rate-limit rule: this table's copy WAS the shared sentence, so the
+// transport tier in lib/errors.ts answers a 429 now (friendlyFailure) — but
+// only LAST: friendlyFailure runs every rule below first, so the transport
+// tier now sits behind every one of them, including the numeric one at the
+// tail (/not found|404/i). The 401 rule stays because the sentence is this
+// surface's own, not the shared one.
+//
+// Latent hazard, not live today: a rate-limited response reads
+// "<label> Try again in Ns." (backend rate-limit.ts), and if N ever reached
+// 404 it would hit that rule before the transport tier saw it (this table has
+// no /400/ or /409/ rule, unlike delivery-errors.ts). Every vault rate limit
+// defaults to a <=60s window (rate-limit.ts) — an env override could widen
+// it — so N never grows past two digits today; re-check this comment if a
+// window ever widens past ~400s.
 export const VAULT_RULES: ErrorRule[] = [
-  [
-    /too many|rate.?limit|429/i,
-    'Too many requests — give it a moment and try again.',
-  ],
-  [/unauthorized|not authenticated|401/i, 'Please log in to view your vault.'],
+  [UNAUTHORIZED, 'Please log in to view your vault.'],
   // requirePhoneVerified (backend api/utils/phone-verification-guard.ts) —
   // above every broad rule below, per the ORDER note in the file header. Names
   // the screen that fixes it: the gate clears the moment Settings completes the
@@ -58,7 +68,7 @@ export const VAULT_RULES: ErrorRule[] = [
   [/(top-ups|withdrawals) must be between/i, (text) => text],
   [/insufficient/i, 'Not enough balance for that.'],
   // The operator kill switch, thrown by the deposit orchestration when
-  // GLOBEPAY_ENABLED is off and by the deposit route when a callback URL is
+  // GATEWAY_ENABLED is off and by the deposit route when a callback URL is
   // missing. Without this rule the message matched NOTHING and fell through to
   // VAULT_FALLBACK ("Something went wrong. Please try again."), which made the
   // switch self-defeating: the one lever for "stop customers retrying a gateway
@@ -91,4 +101,4 @@ export const VAULT_RULES: ErrorRule[] = [
   [/not found|404/i, 'This card is no longer in your vault.'],
 ];
 
-export const VAULT_FALLBACK = 'Something went wrong. Please try again.';
+export const VAULT_FALLBACK = COPY.generic;

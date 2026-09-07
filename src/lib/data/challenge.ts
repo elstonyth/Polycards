@@ -13,26 +13,24 @@
  * main leaderboard). Nothing here is invented: pool, states, summary, and
  * standings all derive from ledger data.
  */
-import { sdk } from '@/lib/medusa';
+import { store } from '@/lib/store';
 import { logger } from '@/lib/logger';
 import { rm0, compact } from '@/lib/format';
 import { avatarForSeed } from '@/lib/profile-view';
-import { parseOne, ChallengeSchema } from '@/lib/data/schemas';
+import { ChallengeSchema } from '@/lib/data/schemas';
 import { formatReset, nextResetAt } from '@/lib/reset-countdown';
 import { cached } from '@/lib/ttl-cache';
+import { toCardView, type CardView } from '@/lib/card-view';
 
-export interface ChallengeCard {
-  name: string;
-  image: string;
+/** A prize thumbnail: the card view's display fields (`slabImage` alone
+ *  decides the prism frame — raw card art has the wrong aspect for the band). */
+export type ChallengeCard = Pick<CardView, 'name' | 'image' | 'slabImage'> & {
   /** Public route key — drives the "View Details" link to /card/<handle>, the
    *  same affordance the pack pool tiles carry. Null on an older backend that
    *  doesn't send it; the thumbnail then renders unlinked rather than pointing
    *  at a route that 404s. */
   handle: string | null;
-  /** The graded-slab composite, when the card has one. Only a real slab gets
-   *  the prism frame — raw card art has the wrong aspect for the band. */
-  slabImage: string | null;
-}
+};
 /** One configured prize rank (1–10) of a stage. `rank` is carried EXPLICITLY —
  *  never a list index — so an unresolvable card id can never shift a lower rank
  *  under the wrong numeral. A rank may carry a card AND/OR credits; ranks with
@@ -139,28 +137,27 @@ const CHALLENGE_TTL_MS = 30_000;
  * that null is a real, cacheable state.
  */
 async function loadChallenge(): Promise<Challenge | null> {
-  const raw = await sdk.client.fetch<unknown>('/store/challenge');
-  const data = parseOne(ChallengeSchema, raw);
-  if (!data) {
-    throw new Error('/store/challenge body failed schema parse');
-  }
+  // Public route: no bearer, and no cache key on the wire (`cache: 'auto'`)
+  // — what the bare sdk.client.fetch sent. orThrow keeps the cached()
+  // contract: a schema-invalid 200 must reject so the memo evicts, where a
+  // genuinely OFF challenge (below) is a real, cacheable state.
+  const data = store.orThrow(
+    await store.get('/store/challenge', ChallengeSchema, {
+      auth: 'none',
+      cache: 'auto',
+    }),
+  );
   if (!data.active || data.stages.length === 0) return null;
 
   // ONE mapper for every prize thumbnail on the page (summary, per-stage
   // rank table, standings prize column), so a field added to the payload
   // reaches all three surfaces or none — they used to construct the shape
   // inline in three places.
-  const toCard = (c: {
-    name: string;
-    image: string;
-    handle?: string | null;
-    slab_image?: string | null;
-  }): ChallengeCard => ({
-    name: c.name,
-    image: c.image,
-    handle: c.handle ?? null,
-    slabImage: c.slab_image ?? null,
-  });
+  const toCard = (c: (typeof data.cards)[string]): ChallengeCard => {
+    const { name, image, slabImage, handle } = toCardView(c);
+    // toCardView reads a missing handle as '' — here that is "no link".
+    return { name, image, slabImage, handle: handle || null };
+  };
   // Flat resolver: drop ids the backend couldn't resolve (deleted card).
   // Used for the summary, where order/rank don't matter.
   const resolveCards = (ids: string[]): ChallengeCard[] =>

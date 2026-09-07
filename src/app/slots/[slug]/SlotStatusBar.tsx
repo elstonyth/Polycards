@@ -2,6 +2,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import { rm } from '@/lib/format';
 import type { RecentPull } from '@/lib/data/packs';
 import { Meter } from './Meter';
 
@@ -77,7 +78,9 @@ export function SlotStatusBar({
                 className="flex shrink-0 items-center gap-1.5 text-[11px] text-white/60"
               >
                 <span className="font-medium text-white/75">{p.name}</span>
-                <span className="tabular-nums text-white/60">{p.value}</span>
+                <span className="tabular-nums text-white/60">
+                  {p.priceMyr != null ? rm(p.priceMyr) : '—'}
+                </span>
               </span>
             ))}
           </div>

@@ -339,6 +339,34 @@ medusaIntegrationTestRunner({
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         const [pull] = await packs.listPulls({ id: pullId }, { take: 1 });
         expect(pull.status).toBe('delivered');
+
+        // One audit row per COMMITTED status change, written by
+        // transitionDeliveryOrderStatus inside the transaction that moved the
+        // status (it used to be a separate write in the route, after the
+        // workflow). Four rows, not five: the shipped-without-tracking attempt
+        // above was refused, and a refused transition leaves no trace.
+        const audits = await packs.listAdminActionAudits(
+          { entity_type: 'delivery_order', entity_id: orderId },
+          // `id` is the tiebreaker, not decoration (same rule as the
+          // purchase-invoices GET): four rows written within the same second
+          // can tie on created_at, and this asserts an ORDERED array.
+          { take: 20, order: { created_at: 'ASC', id: 'ASC' } },
+        );
+        expect(audits.map((a) => a.reason)).toEqual([
+          'mark as processed',
+          'mark as ready_to_ship',
+          'mark as shipped',
+          'mark as completed',
+        ]);
+        expect(audits.every((a) => a.action === 'edit')).toBe(true);
+        // admin_id is server-derived from the session, never from the body.
+        expect(audits.every((a) => Boolean(a.admin_id))).toBe(true);
+        // before/after bracket each move, and `before` is the service's own
+        // under-lock read rather than anything the route sampled beforehand.
+        expect(audits[0].before).toEqual({ status: 'requested' });
+        expect(audits[0].after).toEqual({ status: 'processed' });
+        expect(audits[3].before).toEqual({ status: 'shipped' });
+        expect(audits[3].after).toEqual({ status: 'completed' });
       });
 
       it('cancel returns the pulls to the vault; address edit allowed pre-ship, blocked post-ship', async () => {
@@ -428,9 +456,9 @@ medusaIntegrationTestRunner({
         expect(scoped.data.orders.map((o: { id: string }) => o.id)).toEqual([
           orderE,
         ]);
-        expect(scoped.data.orders.map((o: { id: string }) => o.id)).not.toContain(
-          orderF,
-        );
+        expect(
+          scoped.data.orders.map((o: { id: string }) => o.id),
+        ).not.toContain(orderF);
         expect(scoped.data.total).toBe(1);
 
         const empty = await reqApi(
@@ -521,7 +549,11 @@ medusaIntegrationTestRunner({
         const orderId = created.data.order_id;
 
         // Fee stamped on the order and exposed to the customer list.
-        const list = await reqApi('get', '/store/delivery-orders', authed(token));
+        const list = await reqApi(
+          'get',
+          '/store/delivery-orders',
+          authed(token),
+        );
         expect(list.data.items[0]).toMatchObject({
           id: orderId,
           shipping_fee: 15,
@@ -604,7 +636,11 @@ medusaIntegrationTestRunner({
           { pull_ids: [pullId], address_id: addressId },
         );
         expect(created.status).toBe(201);
-        const list = await reqApi('get', '/store/delivery-orders', authed(token));
+        const list = await reqApi(
+          'get',
+          '/store/delivery-orders',
+          authed(token),
+        );
         expect(list.data.items[0]).toMatchObject({
           shipping_fee: 15,
           insurance_fee: 12,

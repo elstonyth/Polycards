@@ -84,6 +84,11 @@ export async function POST(
     );
   }
 
+  // The audit row is written by createPurchaseInvoiceWithLines, inside the same
+  // transaction as the invoice + lines + stock movements. Writing it here,
+  // after the workflow, left a committed invoice with no record of who booked
+  // it whenever the audit insert failed. admin_id there is agent_user_id —
+  // the same server-derived actor id passed in below.
   const { result } = await createPurchaseInvoiceWorkflow(req.scope).run({
     input: {
       date: body.date,
@@ -93,20 +98,6 @@ export async function POST(
       lines: body.lines,
     },
   });
-
-  await packs.createAdminActionAudits([
-    {
-      admin_id: req.auth_context.actor_id,
-      entity_type: 'purchase_invoice',
-      entity_id: result.id,
-      action: 'create',
-      before: null,
-      after: { display_no: result.display_no, lines: result.lines.length },
-      reason: body.reverses_invoice_id
-        ? `reversal of invoice ${body.reverses_invoice_id}`
-        : 'purchase invoice created',
-    },
-  ]);
 
   res.status(201).json({ invoice: result });
 }

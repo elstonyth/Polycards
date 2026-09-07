@@ -1,73 +1,87 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+  storeShim,
+  backend as memoryBackend,
+} from '@/lib/__tests__/store-shim';
+import type { MemoryRoutes } from '@/lib/store-memory';
 
 // Unit-test the cancelDeliveryOrder server action's mapping: boundary
 // validation, auth gating, the success-response parse, and the cancel-specific
 // error vocabulary (already-shipped → "contact support", mirroring the backend
 // copy from POST /store/delivery-orders/:id/cancel).
-const { fetchMock, getAuthTokenMock } = vi.hoisted(() => ({
-  fetchMock: vi.fn(),
-  getAuthTokenMock: vi.fn(),
-}));
-
-vi.mock('@/lib/medusa', () => ({ sdk: { client: { fetch: fetchMock } } }));
+//
+// Both actions go through the `Store` port; point that import at an in-memory
+// backend per test. `@/lib/data/customer` still needs a stub — the file's
+// address-book actions import it and it pulls in 'server-only'.
+vi.mock('@/lib/store', () => ({ store: storeShim }));
 vi.mock('@/lib/data/customer', () => ({
-  getAuthToken: getAuthTokenMock,
+  getAuthToken: vi.fn(),
   getCustomer: vi.fn(),
 }));
-vi.mock('@/lib/logger', () => ({
-  logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
-}));
+vi.mock('@/lib/medusa', () => ({ sdk: { store: { customer: {} } } }));
 
 import { cancelDeliveryOrder, getDeliveryOrders } from '@/lib/actions/delivery';
 
+const CANCEL = 'POST /store/delivery-orders/:id/cancel';
+const LIST = 'GET /store/delivery-orders';
+
+/** An unregistered route THROWS, so the default backend is also the assertion
+ *  that a boundary check ran before anything left. */
+let mem = memoryBackend({});
+const backend = (routes: MemoryRoutes, opts?: { token?: string | null }) =>
+  (mem = memoryBackend(routes, opts));
+/** One route refusing with `message` — the text the copy tables match on. */
+const refuses = (route: string, message: string, status = 400) =>
+  backend({ [route]: { status, body: { message } } });
+
 beforeEach(() => {
-  fetchMock.mockReset();
-  getAuthTokenMock.mockReset();
-  getAuthTokenMock.mockResolvedValue('tok');
+  backend({});
 });
 
 describe('cancelDeliveryOrder', () => {
   it('rejects a missing order id without hitting the backend', async () => {
     const res = await cancelDeliveryOrder('');
     expect(res).toEqual({ ok: false, error: 'Missing order.' });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mem.requests).toEqual([]);
   });
 
   it('asks for login when there is no auth token', async () => {
-    getAuthTokenMock.mockResolvedValue(null);
+    backend({}, { token: null });
     const res = await cancelDeliveryOrder('do_1');
     expect(res).toEqual({
       ok: false,
       error: 'Please log in first.',
       needsAuth: true,
     });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mem.requests).toEqual([]);
   });
 
   it('POSTs to the cancel route and returns the backend status', async () => {
-    fetchMock.mockResolvedValue({
-      order: {
-        id: 'do_1',
-        status: 'canceled',
-        created_at: '2026-07-11T00:00:00Z',
-        tracking_number: null,
-        items: [],
+    backend({
+      [CANCEL]: {
+        body: {
+          order: {
+            id: 'do_1',
+            status: 'canceled',
+            created_at: '2026-07-11T00:00:00Z',
+            tracking_number: null,
+            items: [],
+          },
+        },
       },
     });
     const res = await cancelDeliveryOrder('do_1');
     expect(res).toEqual({ ok: true, status: 'canceled' });
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/store/delivery-orders/do_1/cancel',
-      expect.objectContaining({
-        method: 'POST',
-        headers: { Authorization: 'Bearer tok' },
-      }),
-    );
+    expect(mem.requests[0]).toMatchObject({
+      method: 'POST',
+      path: '/store/delivery-orders/do_1/cancel',
+      headers: { Authorization: 'Bearer test-token' },
+    });
   });
 
   it('still succeeds when the 2xx body is not the expected shape', async () => {
     // A 2xx means the cancel happened — a drifted body must not false-fail it.
-    fetchMock.mockResolvedValue({ order: { unexpected: true } });
+    backend({ [CANCEL]: { body: { order: { unexpected: true } } } });
     const res = await cancelDeliveryOrder('do_1');
     expect(res).toEqual({ ok: true, status: 'canceled' });
   });
@@ -84,7 +98,7 @@ describe('cancelDeliveryOrder', () => {
   ])(
     'maps the post-window refusal (%s) to the contact-support copy',
     async (message) => {
-      fetchMock.mockRejectedValue(new Error(message));
+      refuses(CANCEL, message, 409);
       const res = await cancelDeliveryOrder('do_1');
       expect(res.ok).toBe(false);
       if (!res.ok) {
@@ -97,9 +111,7 @@ describe('cancelDeliveryOrder', () => {
   );
 
   it('maps an already-canceled order to its own copy', async () => {
-    fetchMock.mockRejectedValue(
-      new Error('This delivery is already canceled.'),
-    );
+    refuses(CANCEL, 'This delivery is already canceled.', 409);
     const res = await cancelDeliveryOrder('do_1');
     expect(res.ok).toBe(false);
     if (!res.ok) {
@@ -108,7 +120,7 @@ describe('cancelDeliveryOrder', () => {
   });
 
   it('maps 404 to a not-found message', async () => {
-    fetchMock.mockRejectedValue(new Error('Order not found.'));
+    refuses(CANCEL, 'Order not found.', 404);
     const res = await cancelDeliveryOrder('do_1');
     expect(res.ok).toBe(false);
     if (!res.ok) {
@@ -117,7 +129,7 @@ describe('cancelDeliveryOrder', () => {
   });
 
   it('maps 401 to a login prompt with needsAuth', async () => {
-    fetchMock.mockRejectedValue(new Error('Unauthorized'));
+    refuses(CANCEL, 'Unauthorized', 401);
     const res = await cancelDeliveryOrder('do_1');
     expect(res).toEqual({
       ok: false,
@@ -127,7 +139,7 @@ describe('cancelDeliveryOrder', () => {
   });
 
   it('falls back to generic copy for an unknown error', async () => {
-    fetchMock.mockRejectedValue(new Error('ECONNRESET'));
+    refuses(CANCEL, 'ECONNRESET', 500);
     const res = await cancelDeliveryOrder('do_1');
     expect(res.ok).toBe(false);
     if (!res.ok) {
@@ -153,13 +165,17 @@ describe('getDeliveryOrders during deploy skew', () => {
   });
 
   it('keeps rows carrying the old packing/delivered status names', async () => {
-    fetchMock.mockResolvedValue({
-      items: [
-        row('packing'),
-        row('processed'),
-        row('delivered'),
-        row('completed'),
-      ],
+    backend({
+      [LIST]: {
+        body: {
+          items: [
+            row('packing'),
+            row('processed'),
+            row('delivered'),
+            row('completed'),
+          ],
+        },
+      },
     });
     const res = await getDeliveryOrders();
     expect(res.ok).toBe(true);
@@ -174,7 +190,9 @@ describe('getDeliveryOrders during deploy skew', () => {
 
   it('still drops a row whose status is no known token at all', async () => {
     // The widening is old ∪ new, not "anything goes".
-    fetchMock.mockResolvedValue({ items: [row('teleported'), row('shipped')] });
+    backend({
+      [LIST]: { body: { items: [row('teleported'), row('shipped')] } },
+    });
     const res = await getDeliveryOrders();
     expect(res.ok).toBe(true);
     if (!res.ok) return;

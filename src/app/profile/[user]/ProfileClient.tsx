@@ -137,12 +137,12 @@ export default function ProfileClient({
                 the same card (same handle) — ids alone would collide. */}
             {user.collection.map((c, i) => (
               <Reveal
-                key={`${c.id}-${i}`}
+                key={`${c.handle}-${i}`}
                 delay={Math.min(i, 8) * 45}
                 className="h-full"
               >
                 <Link
-                  href={`/card/${c.id}`}
+                  href={`/card/${c.handle}`}
                   className="group block h-full rounded-2xl border border-white/10 bg-neutral-800 transition-[transform,border-color] duration-300 hover:-translate-y-1 hover:border-white/20"
                 >
                   {/* No overflow-hidden: the tier halo reaches ~44px past the
@@ -150,10 +150,7 @@ export default function ProfileClient({
                       (same treatment as the vault grid). */}
                   <div className="relative w-full rounded-t-2xl bg-[radial-gradient(120%_80%_at_50%_15%,#2e2e2e_0%,#1c1c1c_55%,#141414_100%)] p-3">
                     <SlabImage
-                      src={c.image}
-                      slabSrc={c.slabImage}
-                      rarity={c.rarity}
-                      alt={c.name}
+                      card={c}
                       sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 16vw"
                       className="w-full transition-transform duration-300 group-hover:scale-[1.04]"
                     />
@@ -163,7 +160,7 @@ export default function ProfileClient({
                       {c.grader} {c.grade}
                     </p>
                     <p className="text-sm font-bold text-white">
-                      {c.price != null ? rm(c.price) : '—'}
+                      {c.priceMyr != null ? rm(c.priceMyr) : '—'}
                     </p>
                   </div>
                 </Link>
@@ -189,23 +186,27 @@ export default function ProfileClient({
               className="flex items-center gap-3 border-b border-white/5 px-4 py-3 last:border-b-0"
             >
               <SlabImage
-                src={a.card.image}
-                slabSrc={a.card.slabImage}
+                card={a.card}
+                // Decorative: the row names the card in the link beside it.
                 alt=""
                 sizes="32px"
                 className="w-8 shrink-0"
+                // Latent today (the backend sends no rarity on recent[]), but
+                // set the scale now so a framed thumbnail here doesn't clip
+                // against this list's `overflow-hidden` edge the day it does.
+                glowScale={0.18}
               />
               <p className="min-w-0 flex-1 truncate text-[13px] text-white/80">
                 <span className="text-white/50">{a.verb}</span>{' '}
                 <Link
-                  href={`/card/${a.card.id}`}
+                  href={`/card/${a.card.handle}`}
                   className="font-medium text-white hover:underline"
                 >
                   {a.card.name}
                 </Link>
               </p>
               <span className="shrink-0 text-[12px] tabular-nums text-white/50">
-                {a.card.price != null ? rm(a.card.price) : '—'}
+                {a.card.priceMyr != null ? rm(a.card.priceMyr) : '—'}
               </span>
               <span className="hidden shrink-0 text-[11px] text-white/55 sm:inline">
                 {a.time}

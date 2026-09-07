@@ -2,50 +2,46 @@ import type {
   MedusaNextFunction,
   MedusaRequest,
   MedusaResponse,
-} from "@medusajs/framework/http";
+} from '@medusajs/framework/http';
 import {
   evaluateSlidingWindow,
   InMemorySlidingWindowStore,
   FailoverRateLimitStore,
   createRateLimitMiddleware,
-  createAdminActionRateLimit,
-  createStoreReadRateLimit,
-  createProfileAppearanceRateLimit,
-  createPhoneOtpStartPhoneRateLimit,
-  createPhoneOtpCheckPhoneRateLimit,
-  createAuthIdentifierRateLimit,
-  createAuthRateLimit,
+  RATE_LIMITS,
+  rateLimit,
   phoneBodyKeyOf,
   emailBodyKeyOf,
   AUTH_DEFAULTS,
   STORE_READ_DEFAULTS,
   PROFILE_APPEARANCE_DEFAULTS,
   positiveIntFromEnv,
+  type RateLimitSpec,
   type RateLimitRule,
   type RateLimitStore,
-} from "../rate-limit";
+} from '../rate-limit';
 
 const MINUTE = 60_000;
 const T0 = 1_700_000_000_000; // fixed epoch-ms base so tests are deterministic
 
-describe("evaluateSlidingWindow", () => {
+describe('evaluateSlidingWindow', () => {
   const rule = (limit: number, windowMs: number): RateLimitRule => ({
     limit,
     windowMs,
   });
 
-  it("allows when there is no history", () => {
+  it('allows when there is no history', () => {
     const d = evaluateSlidingWindow([], T0, [rule(3, MINUTE)]);
     expect(d.allowed).toBe(true);
     expect(d.retryAfterMs).toBe(0);
   });
 
-  it("allows while the window holds fewer events than the limit", () => {
+  it('allows while the window holds fewer events than the limit', () => {
     const d = evaluateSlidingWindow([T0 - 10, T0 - 5], T0, [rule(3, MINUTE)]);
     expect(d.allowed).toBe(true);
   });
 
-  it("denies once the window is full and reports when the oldest event expires", () => {
+  it('denies once the window is full and reports when the oldest event expires', () => {
     const ts = [T0 - 30_000, T0 - 20_000, T0 - 10_000];
     const d = evaluateSlidingWindow(ts, T0, [rule(3, MINUTE)]);
     expect(d.allowed).toBe(false);
@@ -53,14 +49,14 @@ describe("evaluateSlidingWindow", () => {
     expect(d.retryAfterMs).toBe(30_000);
   });
 
-  it("ignores events that have aged out of the window (strict boundary)", () => {
+  it('ignores events that have aged out of the window (strict boundary)', () => {
     // An event exactly windowMs old is OUT of the window.
     const ts = [T0 - MINUTE, T0 - MINUTE + 1, T0 - 10];
     const d = evaluateSlidingWindow(ts, T0, [rule(3, MINUTE)]);
     expect(d.allowed).toBe(true);
   });
 
-  it("denies when any one of several rules is violated", () => {
+  it('denies when any one of several rules is violated', () => {
     const burst = rule(2, 10_000);
     const sustained = rule(10, MINUTE);
     const ts = [T0 - 2_000, T0 - 1_000];
@@ -70,7 +66,7 @@ describe("evaluateSlidingWindow", () => {
     expect(d.retryAfterMs).toBe(8_000);
   });
 
-  it("reports the longest wait when multiple rules are violated", () => {
+  it('reports the longest wait when multiple rules are violated', () => {
     const burst = rule(1, 10_000);
     const sustained = rule(2, MINUTE);
     const ts = [T0 - 40_000, T0 - 1_000];
@@ -80,7 +76,7 @@ describe("evaluateSlidingWindow", () => {
     expect(d.retryAfterMs).toBe(20_000);
   });
 
-  it("handles an unsorted history", () => {
+  it('handles an unsorted history', () => {
     const ts = [T0 - 10_000, T0 - 30_000, T0 - 20_000];
     const d = evaluateSlidingWindow(ts, T0, [rule(3, MINUTE)]);
     expect(d.allowed).toBe(false);
@@ -88,72 +84,72 @@ describe("evaluateSlidingWindow", () => {
   });
 });
 
-describe("InMemorySlidingWindowStore", () => {
+describe('InMemorySlidingWindowStore', () => {
   const rules: RateLimitRule[] = [{ limit: 3, windowMs: MINUTE }];
 
-  it("allows up to the limit then denies", async () => {
+  it('allows up to the limit then denies', async () => {
     const store = new InMemorySlidingWindowStore();
     for (let i = 0; i < 3; i++) {
-      const d = await store.consume("k", rules, T0 + i);
+      const d = await store.consume('k', rules, T0 + i);
       expect(d.allowed).toBe(true);
     }
-    const denied = await store.consume("k", rules, T0 + 3);
+    const denied = await store.consume('k', rules, T0 + 3);
     expect(denied.allowed).toBe(false);
     expect(denied.retryAfterMs).toBeGreaterThan(0);
   });
 
-  it("does not record denied attempts (all-or-nothing consumption)", async () => {
+  it('does not record denied attempts (all-or-nothing consumption)', async () => {
     const store = new InMemorySlidingWindowStore();
-    await store.consume("k", rules, T0);
-    await store.consume("k", rules, T0 + 1);
-    await store.consume("k", rules, T0 + 2);
+    await store.consume('k', rules, T0);
+    await store.consume('k', rules, T0 + 1);
+    await store.consume('k', rules, T0 + 2);
     // Hammer denied attempts; they must not extend the lockout.
     for (let i = 0; i < 5; i++) {
-      const d = await store.consume("k", rules, T0 + 10 + i);
+      const d = await store.consume('k', rules, T0 + 10 + i);
       expect(d.allowed).toBe(false);
     }
     // Just after the first event ages out, a slot must be free again.
-    const d = await store.consume("k", rules, T0 + MINUTE + 1);
+    const d = await store.consume('k', rules, T0 + MINUTE + 1);
     expect(d.allowed).toBe(true);
   });
 
-  it("tracks keys independently", async () => {
+  it('tracks keys independently', async () => {
     const store = new InMemorySlidingWindowStore();
-    for (let i = 0; i < 3; i++) await store.consume("a", rules, T0 + i);
-    expect((await store.consume("a", rules, T0 + 5)).allowed).toBe(false);
-    expect((await store.consume("b", rules, T0 + 5)).allowed).toBe(true);
+    for (let i = 0; i < 3; i++) await store.consume('a', rules, T0 + i);
+    expect((await store.consume('a', rules, T0 + 5)).allowed).toBe(false);
+    expect((await store.consume('b', rules, T0 + 5)).allowed).toBe(true);
   });
 
-  it("evicts oldest keys beyond maxKeys instead of growing unbounded", async () => {
+  it('evicts oldest keys beyond maxKeys instead of growing unbounded', async () => {
     const store = new InMemorySlidingWindowStore({ maxKeys: 2 });
-    await store.consume("a", rules, T0);
-    await store.consume("b", rules, T0 + 1);
-    await store.consume("c", rules, T0 + 2); // evicts "a"
+    await store.consume('a', rules, T0);
+    await store.consume('b', rules, T0 + 1);
+    await store.consume('c', rules, T0 + 2); // evicts "a"
     // "a" was forgotten, so it gets a fresh window.
     for (let i = 0; i < 3; i++) {
-      expect((await store.consume("a", rules, T0 + 10 + i)).allowed).toBe(true);
+      expect((await store.consume('a', rules, T0 + 10 + i)).allowed).toBe(true);
     }
   });
 });
 
-describe("FailoverRateLimitStore", () => {
+describe('FailoverRateLimitStore', () => {
   const rules: RateLimitRule[] = [{ limit: 1, windowMs: MINUTE }];
   const allowed = { allowed: true, retryAfterMs: 0 };
 
-  it("uses the primary store when it works", async () => {
+  it('uses the primary store when it works', async () => {
     const primary: RateLimitStore = {
       consume: jest.fn().mockResolvedValue(allowed),
     };
     const fallback: RateLimitStore = { consume: jest.fn() };
     const store = new FailoverRateLimitStore(primary, fallback);
-    const d = await store.consume("k", rules, T0);
+    const d = await store.consume('k', rules, T0);
     expect(d.allowed).toBe(true);
     expect(primary.consume).toHaveBeenCalledTimes(1);
     expect(fallback.consume).not.toHaveBeenCalled();
   });
 
-  it("falls back and reports the error when the primary throws", async () => {
-    const boom = new Error("redis down");
+  it('falls back and reports the error when the primary throws', async () => {
+    const boom = new Error('redis down');
     const primary: RateLimitStore = {
       consume: jest.fn().mockRejectedValue(boom),
     };
@@ -162,14 +158,14 @@ describe("FailoverRateLimitStore", () => {
     };
     const onError = jest.fn();
     const store = new FailoverRateLimitStore(primary, fallback, onError);
-    const d = await store.consume("k", rules, T0);
+    const d = await store.consume('k', rules, T0);
     expect(d.allowed).toBe(true);
-    expect(fallback.consume).toHaveBeenCalledWith("k", rules, T0);
+    expect(fallback.consume).toHaveBeenCalledWith('k', rules, T0);
     expect(onError).toHaveBeenCalledWith(boom);
   });
 });
 
-describe("createRateLimitMiddleware", () => {
+describe('createRateLimitMiddleware', () => {
   const rules: RateLimitRule[] = [{ limit: 5, windowMs: MINUTE }];
 
   type FakeRes = {
@@ -179,7 +175,11 @@ describe("createRateLimitMiddleware", () => {
   };
 
   const makeRes = (): { res: MedusaResponse; out: FakeRes } => {
-    const out: FakeRes = { statusCode: undefined, headers: {}, body: undefined };
+    const out: FakeRes = {
+      statusCode: undefined,
+      headers: {},
+      body: undefined,
+    };
     const res = {
       status(code: number) {
         out.statusCode = code;
@@ -198,50 +198,58 @@ describe("createRateLimitMiddleware", () => {
   };
 
   const makeReq = (over: Record<string, unknown> = {}): MedusaRequest =>
-    ({ ip: "10.0.0.1", ...over }) as unknown as MedusaRequest;
+    ({ ip: '10.0.0.1', ...over }) as unknown as MedusaRequest;
 
   const authedReq = (actorId: string): MedusaRequest =>
     makeReq({
-      auth_context: { actor_id: actorId, actor_type: "customer" },
+      auth_context: { actor_id: actorId, actor_type: 'customer' },
     });
 
-  it("calls next() and writes nothing when allowed", async () => {
+  it('calls next() and writes nothing when allowed', async () => {
     const store: RateLimitStore = {
       consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
     };
-    const mw = createRateLimitMiddleware({ store, rules, prefix: "rl:t:" });
+    const mw = createRateLimitMiddleware({ store, rules, prefix: 'rl:t:' });
     const next = jest.fn() as unknown as MedusaNextFunction;
     const { res, out } = makeRes();
 
-    await mw(authedReq("cus_1"), res, next);
+    await mw(authedReq('cus_1'), res, next);
 
     expect(next).toHaveBeenCalledTimes(1);
     expect(out.statusCode).toBeUndefined();
   });
 
-  it("keys on auth_context.actor_id with the configured prefix", async () => {
+  it('keys on auth_context.actor_id with the configured prefix', async () => {
     const store: RateLimitStore = {
       consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
     };
-    const mw = createRateLimitMiddleware({ store, rules, prefix: "rl:t:" });
-    await mw(authedReq("cus_42"), makeRes().res, jest.fn() as unknown as MedusaNextFunction);
+    const mw = createRateLimitMiddleware({ store, rules, prefix: 'rl:t:' });
+    await mw(
+      authedReq('cus_42'),
+      makeRes().res,
+      jest.fn() as unknown as MedusaNextFunction,
+    );
     expect(store.consume).toHaveBeenCalledWith(
-      "rl:t:cus_42",
+      'rl:t:cus_42',
       rules,
-      expect.any(Number)
+      expect.any(Number),
     );
   });
 
-  it("falls back to the request IP when there is no auth context", async () => {
+  it('falls back to the request IP when there is no auth context', async () => {
     const store: RateLimitStore = {
       consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
     };
-    const mw = createRateLimitMiddleware({ store, rules, prefix: "rl:t:" });
-    await mw(makeReq(), makeRes().res, jest.fn() as unknown as MedusaNextFunction);
+    const mw = createRateLimitMiddleware({ store, rules, prefix: 'rl:t:' });
+    await mw(
+      makeReq(),
+      makeRes().res,
+      jest.fn() as unknown as MedusaNextFunction,
+    );
     expect(store.consume).toHaveBeenCalledWith(
-      "rl:t:ip:10.0.0.1",
+      'rl:t:ip:10.0.0.1',
       rules,
-      expect.any(Number)
+      expect.any(Number),
     );
   });
 
@@ -256,38 +264,38 @@ describe("createRateLimitMiddleware", () => {
     const mw = createRateLimitMiddleware({
       store,
       rules,
-      prefix: "rl:t:",
+      prefix: 'rl:t:',
       keyOf: phoneBodyKeyOf,
     });
     await mw(
-      makeReq({ body: { phone: "+60107667787" } }),
+      makeReq({ body: { phone: '+60107667787' } }),
       makeRes().res,
       jest.fn() as unknown as MedusaNextFunction,
     );
     expect(store.consume).toHaveBeenCalledWith(
-      "rl:t:phone:+60107667787",
+      'rl:t:phone:+60107667787',
       rules,
       expect.any(Number),
     );
   });
 
-  it("phoneBodyKeyOf falls back to actor_id/IP for a non-E.164 body phone", async () => {
+  it('phoneBodyKeyOf falls back to actor_id/IP for a non-E.164 body phone', async () => {
     const store: RateLimitStore = {
       consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
     };
     const mw = createRateLimitMiddleware({
       store,
       rules,
-      prefix: "rl:t:",
+      prefix: 'rl:t:',
       keyOf: phoneBodyKeyOf,
     });
     await mw(
-      makeReq({ body: { phone: "0107667787" } }), // missing +country
+      makeReq({ body: { phone: '0107667787' } }), // missing +country
       makeRes().res,
       jest.fn() as unknown as MedusaNextFunction,
     );
     expect(store.consume).toHaveBeenCalledWith(
-      "rl:t:ip:10.0.0.1",
+      'rl:t:ip:10.0.0.1',
       rules,
       expect.any(Number),
     );
@@ -303,16 +311,16 @@ describe("createRateLimitMiddleware", () => {
     const mw = createRateLimitMiddleware({
       store,
       rules,
-      prefix: "rl:t:",
+      prefix: 'rl:t:',
       keyOf: emailBodyKeyOf,
     });
     await mw(
-      makeReq({ body: { email: " A@X.com " } }),
+      makeReq({ body: { email: ' A@X.com ' } }),
       makeRes().res,
       jest.fn() as unknown as MedusaNextFunction,
     );
     expect(store.consume).toHaveBeenCalledWith(
-      "rl:t:email:a@x.com",
+      'rl:t:email:a@x.com',
       rules,
       expect.any(Number),
     );
@@ -321,23 +329,23 @@ describe("createRateLimitMiddleware", () => {
   // Plan case 4: WITHOUT skipWhenNoKey, a keyless body still gets a working
   // budget (the IP fallback). This is the default `keyOf` contract and the
   // behaviour the phone tiers rely on.
-  it("emailBodyKeyOf falls back to the IP bucket when the body has no email", async () => {
+  it('emailBodyKeyOf falls back to the IP bucket when the body has no email', async () => {
     const store: RateLimitStore = {
       consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
     };
     const mw = createRateLimitMiddleware({
       store,
       rules,
-      prefix: "rl:t:",
+      prefix: 'rl:t:',
       keyOf: emailBodyKeyOf,
     });
     await mw(
-      makeReq({ body: { token: "proof", password: "hunter2" } }),
+      makeReq({ body: { token: 'proof', password: 'hunter2' } }),
       makeRes().res,
       jest.fn() as unknown as MedusaNextFunction,
     );
     expect(store.consume).toHaveBeenCalledWith(
-      "rl:t:ip:10.0.0.1",
+      'rl:t:ip:10.0.0.1',
       rules,
       expect.any(Number),
     );
@@ -348,20 +356,20 @@ describe("createRateLimitMiddleware", () => {
   // falling back to `ip:` there would impose this tier's per-account numbers
   // as a SITEWIDE ceiling tighter than the circuit breaker it sits under. If
   // someone deletes the flag, this test is what fails.
-  it("skipWhenNoKey: steps aside (no budget consumed) when keyOf yields nothing", async () => {
+  it('skipWhenNoKey: steps aside (no budget consumed) when keyOf yields nothing', async () => {
     const store: RateLimitStore = {
       consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
     };
     const mw = createRateLimitMiddleware({
       store,
       rules,
-      prefix: "rl:t:",
+      prefix: 'rl:t:',
       keyOf: emailBodyKeyOf,
       skipWhenNoKey: true,
     });
     const next = jest.fn() as unknown as MedusaNextFunction;
     const { res, out } = makeRes();
-    await mw(makeReq({ body: { token: "reset-jwt" } }), res, next);
+    await mw(makeReq({ body: { token: 'reset-jwt' } }), res, next);
     expect(next).toHaveBeenCalledTimes(1);
     expect(store.consume).not.toHaveBeenCalled();
     expect(out.statusCode).toBeUndefined();
@@ -372,36 +380,36 @@ describe("createRateLimitMiddleware", () => {
   // matching: whichever field the route turns out to read, the real
   // identifier's bucket was charged, so a decoy in the other field buys
   // nothing. Charging only the first key would restore a steerable control.
-  it("charges EVERY key a multi-key keyOf returns", async () => {
+  it('charges EVERY key a multi-key keyOf returns', async () => {
     const store: RateLimitStore = {
       consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
     };
     const mw = createRateLimitMiddleware({
       store,
       rules,
-      prefix: "rl:t:",
-      keyOf: () => ["email:victim@x.com", "email:decoy@x.com"],
+      prefix: 'rl:t:',
+      keyOf: () => ['email:victim@x.com', 'email:decoy@x.com'],
     });
     const next = jest.fn() as unknown as MedusaNextFunction;
     await mw(makeReq(), makeRes().res, next);
     expect(store.consume).toHaveBeenCalledTimes(2);
     expect(store.consume).toHaveBeenCalledWith(
-      "rl:t:email:victim@x.com",
+      'rl:t:email:victim@x.com',
       rules,
       expect.any(Number),
     );
     expect(store.consume).toHaveBeenCalledWith(
-      "rl:t:email:decoy@x.com",
+      'rl:t:email:decoy@x.com',
       rules,
       expect.any(Number),
     );
     expect(next).toHaveBeenCalledTimes(1);
   });
 
-  it("denies on the first exhausted key and stops charging the rest", async () => {
+  it('denies on the first exhausted key and stops charging the rest', async () => {
     const store: RateLimitStore = {
       consume: jest.fn(async (key: string) =>
-        key.endsWith("victim@x.com")
+        key.endsWith('victim@x.com')
           ? { allowed: false, retryAfterMs: 5_000 }
           : { allowed: true, retryAfterMs: 0 },
       ),
@@ -409,8 +417,8 @@ describe("createRateLimitMiddleware", () => {
     const mw = createRateLimitMiddleware({
       store,
       rules,
-      prefix: "rl:t:",
-      keyOf: () => ["email:victim@x.com", "email:decoy@x.com"],
+      prefix: 'rl:t:',
+      keyOf: () => ['email:victim@x.com', 'email:decoy@x.com'],
     });
     const next = jest.fn() as unknown as MedusaNextFunction;
     const { res, out } = makeRes();
@@ -421,76 +429,84 @@ describe("createRateLimitMiddleware", () => {
     expect(store.consume).toHaveBeenCalledTimes(1);
   });
 
-  it("drops falsy entries from a multi-key keyOf", async () => {
+  it('drops falsy entries from a multi-key keyOf', async () => {
     const store: RateLimitStore = {
       consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
     };
     const mw = createRateLimitMiddleware({
       store,
       rules,
-      prefix: "rl:t:",
-      keyOf: () => ["", "email:a@x.com"],
+      prefix: 'rl:t:',
+      keyOf: () => ['', 'email:a@x.com'],
     });
-    await mw(makeReq(), makeRes().res, jest.fn() as unknown as MedusaNextFunction);
+    await mw(
+      makeReq(),
+      makeRes().res,
+      jest.fn() as unknown as MedusaNextFunction,
+    );
     expect(store.consume).toHaveBeenCalledTimes(1);
     expect(store.consume).toHaveBeenCalledWith(
-      "rl:t:email:a@x.com",
+      'rl:t:email:a@x.com',
       rules,
       expect.any(Number),
     );
   });
 
-  it("falls back to actor_id/IP when keyOf returns undefined", async () => {
+  it('falls back to actor_id/IP when keyOf returns undefined', async () => {
     const store: RateLimitStore = {
       consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
     };
     const mw = createRateLimitMiddleware({
       store,
       rules,
-      prefix: "rl:t:",
+      prefix: 'rl:t:',
       keyOf: () => undefined,
     });
     await mw(
-      authedReq("cus_1"),
+      authedReq('cus_1'),
       makeRes().res,
       jest.fn() as unknown as MedusaNextFunction,
     );
     expect(store.consume).toHaveBeenCalledWith(
-      "rl:t:cus_1",
+      'rl:t:cus_1',
       rules,
       expect.any(Number),
     );
   });
 
-  it("responds 429 with a ceiled Retry-After and does not call next() when denied", async () => {
+  it('responds 429 with a ceiled Retry-After and does not call next() when denied', async () => {
     const store: RateLimitStore = {
       consume: jest
         .fn()
         .mockResolvedValue({ allowed: false, retryAfterMs: 1_200 }),
     };
-    const mw = createRateLimitMiddleware({ store, rules, prefix: "rl:t:" });
+    const mw = createRateLimitMiddleware({ store, rules, prefix: 'rl:t:' });
     const next = jest.fn() as unknown as MedusaNextFunction;
     const { res, out } = makeRes();
 
-    await mw(authedReq("cus_1"), res, next);
+    await mw(authedReq('cus_1'), res, next);
 
     expect(next).not.toHaveBeenCalled();
     expect(out.statusCode).toBe(429);
-    expect(out.headers["retry-after"]).toBe("2"); // ceil(1200ms) = 2s
-    expect(out.body).toMatchObject({ type: "rate_limit_exceeded" });
+    expect(out.headers['retry-after']).toBe('2'); // ceil(1200ms) = 2s
+    expect(out.body).toMatchObject({ type: 'rate_limit_exceeded' });
   });
 
-  it("never sends Retry-After below 1 second", async () => {
+  it('never sends Retry-After below 1 second', async () => {
     const store: RateLimitStore = {
       consume: jest.fn().mockResolvedValue({ allowed: false, retryAfterMs: 1 }),
     };
-    const mw = createRateLimitMiddleware({ store, rules, prefix: "rl:t:" });
+    const mw = createRateLimitMiddleware({ store, rules, prefix: 'rl:t:' });
     const { res, out } = makeRes();
-    await mw(authedReq("cus_1"), res, jest.fn() as unknown as MedusaNextFunction);
-    expect(out.headers["retry-after"]).toBe("1");
+    await mw(
+      authedReq('cus_1'),
+      res,
+      jest.fn() as unknown as MedusaNextFunction,
+    );
+    expect(out.headers['retry-after']).toBe('1');
   });
 
-  it("resolves a per-request message function against the denied request (sim finding P3-10)", async () => {
+  it('resolves a per-request message function against the denied request (sim finding P3-10)', async () => {
     // One limiter instance is shared across route families for a shared
     // budget; the 429 label must still name the route being hit, not
     // "delivery" for a rewards claim.
@@ -502,15 +518,15 @@ describe("createRateLimitMiddleware", () => {
     const mw = createRateLimitMiddleware({
       store,
       rules,
-      prefix: "rl:t:",
+      prefix: 'rl:t:',
       message: (req) =>
-        req.path.startsWith("/store/rewards/")
-          ? "Too many reward requests."
-          : "Too many delivery requests.",
+        req.path.startsWith('/store/rewards/')
+          ? 'Too many reward requests.'
+          : 'Too many delivery requests.',
     });
     const { res, out } = makeRes();
     await mw(
-      makeReq({ path: "/store/rewards/claim/g_1" }),
+      makeReq({ path: '/store/rewards/claim/g_1' }),
       res,
       jest.fn() as unknown as MedusaNextFunction,
     );
@@ -519,7 +535,7 @@ describe("createRateLimitMiddleware", () => {
     );
   });
 
-  it("rejects non-positive or fractional-to-zero rules at creation (boot-time failure)", () => {
+  it('rejects non-positive or fractional-to-zero rules at creation (boot-time failure)', () => {
     const store: RateLimitStore = {
       consume: jest.fn().mockResolvedValue({ allowed: true, retryAfterMs: 0 }),
     };
@@ -530,13 +546,13 @@ describe("createRateLimitMiddleware", () => {
       [{ limit: 2.5, windowMs: 1000 }],
     ] as RateLimitRule[][]) {
       expect(() =>
-        createRateLimitMiddleware({ store, rules: bad, prefix: "rl:t:" })
+        createRateLimitMiddleware({ store, rules: bad, prefix: 'rl:t:' }),
       ).toThrow(/positive integers/);
     }
   });
 
-  it("fails open (next()) and reports the error if the store itself throws", async () => {
-    const boom = new Error("store exploded");
+  it('fails open (next()) and reports the error if the store itself throws', async () => {
+    const boom = new Error('store exploded');
     const store: RateLimitStore = {
       consume: jest.fn().mockRejectedValue(boom),
     };
@@ -544,13 +560,13 @@ describe("createRateLimitMiddleware", () => {
     const mw = createRateLimitMiddleware({
       store,
       rules,
-      prefix: "rl:t:",
+      prefix: 'rl:t:',
       onError,
     });
     const next = jest.fn() as unknown as MedusaNextFunction;
     const { res, out } = makeRes();
 
-    await mw(authedReq("cus_1"), res, next);
+    await mw(authedReq('cus_1'), res, next);
 
     expect(next).toHaveBeenCalledTimes(1);
     expect(out.statusCode).toBeUndefined();
@@ -558,7 +574,153 @@ describe("createRateLimitMiddleware", () => {
   });
 });
 
-describe("createAdminActionRateLimit", () => {
+describe('RATE_LIMITS', () => {
+  it("preserves every former factory's exact defaults and optional behavior", () => {
+    const configs = Object.entries(RATE_LIMITS).map(([name, rawSpec]) => {
+      const spec: RateLimitSpec = rawSpec;
+      const message =
+        typeof spec.message === 'function'
+          ? '<function>'
+          : (spec.message ?? '');
+      const keyOf =
+        spec.keyOf === emailBodyKeyOf
+          ? 'emailBodyKeyOf'
+          : spec.keyOf === phoneBodyKeyOf
+            ? 'phoneBodyKeyOf'
+            : spec.keyOf
+              ? '<function>'
+              : '';
+      return [
+        name,
+        spec.defaults.burstLimit,
+        spec.defaults.burstWindowMs,
+        spec.defaults.limit,
+        spec.defaults.windowMs,
+        message,
+        keyOf,
+        spec.skipWhenNoKey ?? '',
+      ].join('|');
+    });
+
+    expect(configs).toEqual([
+      'pack-open|5|10000|20|60000|||',
+      'pack-open-batch|5|10000|20|60000|||',
+      'vault-buyback|10|10000|30|60000|Too many buyback requests.||',
+      'pull-reveal|20|10000|60|60000|Too many requests.||',
+      'credit-topup|5|10000|15|60000|Too many top-up requests.||',
+      'delivery-write|10|10000|30|60000|<function>||',
+      'auth|50|10000|300|60000|Too many sign-in attempts.||',
+      'auth-identifier|5|60000|20|3600000|Too many sign-in attempts for this account.|emailBodyKeyOf|true',
+      'account-delete|3|60000|20|3600000|Too many delete attempts for this account.||',
+      'profile-read|60|10000|600|60000|Too many requests.||',
+      'store-read|120|10000|480|60000|Too many requests.||',
+      'profile-appearance|15|10000|60|60000|Too many appearance changes.||',
+      'notification-read|20|10000|100|60000|Too many mark-read requests.||',
+      'notification-read-all|5|10000|30|60000|Too many mark-all-read requests.||',
+      'admin-action|30|10000|200|60000|Too many admin requests. Try again shortly.||',
+      'gateway-hook|100|10000|600|60000|Too many callback requests.|<function>|',
+      'phone-otp-start-phone|3|600000|6|86400000|Too many code requests for this number.|phoneBodyKeyOf|',
+      'phone-otp-start|30|60000|300|3600000|Too many code requests.||',
+      'phone-otp-check-phone|10|600000|30|86400000|Too many verification attempts for this number.|phoneBodyKeyOf|',
+      'phone-otp-check|60|60000|600|3600000|Too many verification attempts.||',
+      'referral-bind|3|60000|10|3600000|Too many referral attempts.||',
+      'task-action|10|10000|60|60000|Too many task actions.||',
+    ]);
+  });
+
+  it('preserves the delivery-write request-specific messages', () => {
+    const message = RATE_LIMITS['delivery-write'].message;
+    expect(typeof message).toBe('function');
+    if (typeof message !== 'function') return;
+
+    const req = (path: string): MedusaRequest =>
+      ({ path }) as unknown as MedusaRequest;
+    expect(message(req('/store/rewards/claim'))).toBe(
+      'Too many reward requests.',
+    );
+    expect(message(req('/store/profile/avatar'))).toBe('Too many uploads.');
+    expect(message(req('/store/phone-verification/change'))).toBe(
+      'Too many verification requests.',
+    );
+    expect(message(req('/store/delivery-orders'))).toBe(
+      'Too many delivery requests.',
+    );
+  });
+
+  it('preserves the gateway callback source-IP key', () => {
+    const keyOf = RATE_LIMITS['gateway-hook'].keyOf;
+    expect(
+      keyOf?.({
+        ip: '10.0.0.1',
+        headers: { 'do-connecting-ip': '::ffff:203.0.113.8' },
+      } as unknown as MedusaRequest),
+    ).toBe('ip:203.0.113.8');
+    expect(keyOf?.({} as MedusaRequest)).toBe('ip:unknown');
+  });
+});
+
+describe('rateLimit', () => {
+  const invoke = async (
+    middleware: ReturnType<typeof rateLimit>,
+  ): Promise<{ passed: boolean; status: number | undefined }> => {
+    let statusCode: number | undefined;
+    const res = {
+      status(code: number) {
+        statusCode = code;
+        return res;
+      },
+      set() {
+        return res;
+      },
+      json() {
+        return res;
+      },
+    };
+    const next = jest.fn();
+    await middleware(
+      {
+        ip: '10.0.0.2',
+        auth_context: { actor_id: 'cus_table', actor_type: 'customer' },
+      } as unknown as MedusaRequest,
+      res as unknown as MedusaResponse,
+      next as unknown as MedusaNextFunction,
+    );
+    return { passed: next.mock.calls.length === 1, status: statusCode };
+  };
+
+  it('keeps repeated constructions independent while one reused handler shares its bucket', async () => {
+    const names = [
+      'REDIS_URL',
+      'TASK_ACTION_RATE_BURST_LIMIT',
+      'TASK_ACTION_RATE_BURST_WINDOW_MS',
+      'TASK_ACTION_RATE_LIMIT',
+      'TASK_ACTION_RATE_WINDOW_MS',
+    ] as const;
+    const saved = names.map((name) => [name, process.env[name]] as const);
+    for (const name of names) delete process.env[name];
+    process.env.TASK_ACTION_RATE_BURST_LIMIT = '1';
+    process.env.TASK_ACTION_RATE_BURST_WINDOW_MS = '60000';
+    process.env.TASK_ACTION_RATE_LIMIT = '10';
+    process.env.TASK_ACTION_RATE_WINDOW_MS = '60000';
+
+    try {
+      const first = rateLimit('task-action');
+      const second = rateLimit('task-action');
+
+      expect(first).not.toBe(second);
+      expect(await invoke(first)).toEqual({ passed: true, status: undefined });
+      expect(await invoke(first)).toEqual({ passed: false, status: 429 });
+      expect(await invoke(second)).toEqual({ passed: true, status: undefined });
+    } finally {
+      for (const [name, value] of saved) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+});
+
+describe("rateLimit('admin-action')", () => {
   type FakeRes = {
     statusCode: number | undefined;
     headers: Record<string, string>;
@@ -566,7 +728,11 @@ describe("createAdminActionRateLimit", () => {
   };
 
   const makeRes = (): { res: MedusaResponse; out: FakeRes } => {
-    const out: FakeRes = { statusCode: undefined, headers: {}, body: undefined };
+    const out: FakeRes = {
+      statusCode: undefined,
+      headers: {},
+      body: undefined,
+    };
     const res = {
       status(code: number) {
         out.statusCode = code;
@@ -585,14 +751,17 @@ describe("createAdminActionRateLimit", () => {
   };
 
   const authedAdminReq = (actorId: string): MedusaRequest =>
-    ({ ip: "10.0.0.2", auth_context: { actor_id: actorId, actor_type: "user" } }) as unknown as MedusaRequest;
+    ({
+      ip: '10.0.0.2',
+      auth_context: { actor_id: actorId, actor_type: 'user' },
+    }) as unknown as MedusaRequest;
 
-  it("returns a middleware function", () => {
-    const mw = createAdminActionRateLimit();
-    expect(typeof mw).toBe("function");
+  it('returns a middleware function', () => {
+    const mw = rateLimit('admin-action');
+    expect(typeof mw).toBe('function');
   });
 
-  it("keys on auth_context.actor_id with the rl:admin-action: prefix", async () => {
+  it('keys on auth_context.actor_id with the rl:admin-action: prefix', async () => {
     // Build a spy store and inject it via env (REDIS_URL unset → in-memory).
     // We test key derivation by inspecting what InMemorySlidingWindowStore
     // receives — wrap it.
@@ -603,24 +772,23 @@ describe("createAdminActionRateLimit", () => {
         return { allowed: true, retryAfterMs: 0 };
       }),
     };
-    // Use createRateLimitMiddleware directly to mirror the factory's behaviour
-    // (the factory delegates to createEnvRateLimit which uses createRateLimitMiddleware).
+    // Use createRateLimitMiddleware directly to mirror rateLimit's behaviour.
     // For the keying assertion we simply use createRateLimitMiddleware with the
-    // same prefix the factory uses so we confirm the naming contract.
+    // same prefix the table entry uses so we confirm the naming contract.
     const mw = createRateLimitMiddleware({
       store,
       rules: [{ limit: 60, windowMs: 60_000 }],
-      prefix: "rl:admin-action:",
+      prefix: 'rl:admin-action:',
     });
     await mw(
-      authedAdminReq("usr_99"),
+      authedAdminReq('usr_99'),
       makeRes().res,
       jest.fn() as unknown as MedusaNextFunction,
     );
-    expect(calls[0]).toBe("rl:admin-action:usr_99");
+    expect(calls[0]).toBe('rl:admin-action:usr_99');
   });
 
-  it("falls back to IP when no auth_context is present", async () => {
+  it('falls back to IP when no auth_context is present', async () => {
     const calls: string[] = [];
     const store: RateLimitStore = {
       consume: jest.fn(async (key: string) => {
@@ -631,67 +799,67 @@ describe("createAdminActionRateLimit", () => {
     const mw = createRateLimitMiddleware({
       store,
       rules: [{ limit: 60, windowMs: 60_000 }],
-      prefix: "rl:admin-action:",
+      prefix: 'rl:admin-action:',
     });
-    const noAuthReq = { ip: "192.168.1.1" } as unknown as MedusaRequest;
+    const noAuthReq = { ip: '192.168.1.1' } as unknown as MedusaRequest;
     await mw(
       noAuthReq,
       makeRes().res,
       jest.fn() as unknown as MedusaNextFunction,
     );
-    expect(calls[0]).toBe("rl:admin-action:ip:192.168.1.1");
+    expect(calls[0]).toBe('rl:admin-action:ip:192.168.1.1');
   });
 
-  it("has a generous default budget (at least 30/min per actor) so normal admin use is never throttled", () => {
-    // Smoke-check the factory resolves without throwing — the exact budget is
+  it('has a generous default budget (at least 30/min per actor) so normal admin use is never throttled', () => {
+    // Smoke-check the named limiter resolves without throwing — the exact budget is
     // an integration concern, but we assert it is callable and the rules are valid.
-    expect(() => createAdminActionRateLimit()).not.toThrow();
+    expect(() => rateLimit('admin-action')).not.toThrow();
   });
 });
 
-describe("phone-otp per-phone limiter factories (Finding 1)", () => {
+describe('phone-otp per-phone limiters (Finding 1)', () => {
   // Redis-backed key derivation is exercised end-to-end by the http spec
-  // (needs a real body-parsed request); this just smoke-checks the factories
+  // (needs a real body-parsed request); this just smoke-checks the named limiters
   // resolve without throwing, same as the STORE_READ/PROFILE_APPEARANCE
   // smoke tests above.
-  it("createPhoneOtpStartPhoneRateLimit resolves", () => {
-    expect(() => createPhoneOtpStartPhoneRateLimit()).not.toThrow();
+  it('phone-otp-start-phone resolves', () => {
+    expect(() => rateLimit('phone-otp-start-phone')).not.toThrow();
   });
-  it("createPhoneOtpCheckPhoneRateLimit resolves", () => {
-    expect(() => createPhoneOtpCheckPhoneRateLimit()).not.toThrow();
+  it('phone-otp-check-phone resolves', () => {
+    expect(() => rateLimit('phone-otp-check-phone')).not.toThrow();
   });
 });
 
-describe("emailBodyKeyOf (Plan 081)", () => {
-  const LOGIN = "/auth/customer/emailpass";
-  const RESET = "/auth/customer/emailpass/reset-password";
+describe('emailBodyKeyOf (Plan 081)', () => {
+  const LOGIN = '/auth/customer/emailpass';
+  const RESET = '/auth/customer/emailpass/reset-password';
 
   const req = (body: unknown, path = LOGIN): MedusaRequest =>
-    ({ ip: "10.0.0.1", path, body }) as unknown as MedusaRequest;
+    ({ ip: '10.0.0.1', path, body }) as unknown as MedusaRequest;
 
-  it("normalizes case and surrounding whitespace into one bucket", () => {
-    expect(emailBodyKeyOf(req({ email: " A@X.com " }))).toEqual([
-      "email:a@x.com",
+  it('normalizes case and surrounding whitespace into one bucket', () => {
+    expect(emailBodyKeyOf(req({ email: ' A@X.com ' }))).toEqual([
+      'email:a@x.com',
     ]);
-    expect(emailBodyKeyOf(req({ email: "a@x.com" }))).toEqual([
-      "email:a@x.com",
+    expect(emailBodyKeyOf(req({ email: 'a@x.com' }))).toEqual([
+      'email:a@x.com',
     ]);
   });
 
   // Core's reset-password route validates `identifier`, not `email`
   // (@medusajs/medusa/dist/api/auth/validators.js:6), and the storefront sends
   // the address in it — so this is the field the LIVE reset path uses.
-  it("reads `identifier` on the reset-password route", () => {
-    expect(emailBodyKeyOf(req({ identifier: "A@X.com" }, RESET))).toEqual([
-      "email:a@x.com",
+  it('reads `identifier` on the reset-password route', () => {
+    expect(emailBodyKeyOf(req({ identifier: 'A@X.com' }, RESET))).toEqual([
+      'email:a@x.com',
     ]);
   });
 
   // A real client sends exactly one of the two fields, so a real request is
   // always a single key and a single consume.
-  it("returns one key when the body carries one identifier", () => {
-    expect(emailBodyKeyOf(req({ email: "a@x.com" }, LOGIN))).toHaveLength(1);
-    expect(emailBodyKeyOf(req({ identifier: "a@x.com" }, RESET))).toHaveLength(
+  it('returns one key when the body carries one identifier', () => {
+    expect(emailBodyKeyOf(req({ email: 'a@x.com' }, LOGIN))).toHaveLength(1);
+    expect(emailBodyKeyOf(req({ identifier: 'a@x.com' }, RESET))).toHaveLength(
       1,
     );
   });
@@ -703,95 +871,95 @@ describe("emailBodyKeyOf (Plan 081)", () => {
   // bucket every request while the victim kept receiving reset mail. Charging
   // BOTH is what makes that impossible — the victim's key is always in the
   // list, whatever the path says.
-  it("charges BOTH identifiers, so a decoy cannot buy a fresh bucket", () => {
+  it('charges BOTH identifiers, so a decoy cannot buy a fresh bucket', () => {
     const keys = emailBodyKeyOf(
-      req({ email: "decoy@x.com", identifier: "victim@x.com" }, RESET),
+      req({ email: 'decoy@x.com', identifier: 'victim@x.com' }, RESET),
     );
-    expect(keys).toContain("email:victim@x.com");
-    expect(keys).toContain("email:decoy@x.com");
+    expect(keys).toContain('email:victim@x.com');
+    expect(keys).toContain('email:decoy@x.com');
     // The route's own field is charged first, purely so a 429 names it.
-    expect(keys?.[0]).toBe("email:victim@x.com");
+    expect(keys?.[0]).toBe('email:victim@x.com');
     expect(
       emailBodyKeyOf(
-        req({ email: "victim@x.com", identifier: "decoy@x.com" }, LOGIN),
+        req({ email: 'victim@x.com', identifier: 'decoy@x.com' }, LOGIN),
       )?.[0],
-    ).toBe("email:victim@x.com");
+    ).toBe('email:victim@x.com');
   });
 
   // Express 4 defaults here are strict:false / caseSensitive:false, so these
   // all reach the same reset handler. An exact `endsWith` test missed them and
   // fell through to `email` — the decoy field on that route.
-  it("treats trailing slashes and casing as insignificant, like express does", () => {
+  it('treats trailing slashes and casing as insignificant, like express does', () => {
     for (const path of [
-      "/auth/customer/emailpass/reset-password/",
-      "/auth/customer/emailpass/Reset-Password",
-      "/auth/customer/emailpass/RESET-PASSWORD/",
-      "/auth/customer/emailpass/reset-password//",
+      '/auth/customer/emailpass/reset-password/',
+      '/auth/customer/emailpass/Reset-Password',
+      '/auth/customer/emailpass/RESET-PASSWORD/',
+      '/auth/customer/emailpass/reset-password//',
     ]) {
       expect(
         emailBodyKeyOf(
-          req({ email: "decoy@x.com", identifier: "victim@x.com" }, path),
+          req({ email: 'decoy@x.com', identifier: 'victim@x.com' }, path),
         )?.[0],
-      ).toBe("email:victim@x.com");
+      ).toBe('email:victim@x.com');
     }
   });
 
   it("returns the other field's key when the route's own field is absent", () => {
     // Not a real client shape, but it must still cost the account a bucket
     // rather than costing nothing.
-    expect(emailBodyKeyOf(req({ identifier: "a@x.com" }, LOGIN))).toEqual([
-      "email:a@x.com",
+    expect(emailBodyKeyOf(req({ identifier: 'a@x.com' }, LOGIN))).toEqual([
+      'email:a@x.com',
     ]);
-    expect(emailBodyKeyOf(req({ email: "a@x.com" }, RESET))).toEqual([
-      "email:a@x.com",
+    expect(emailBodyKeyOf(req({ email: 'a@x.com' }, RESET))).toEqual([
+      'email:a@x.com',
     ]);
   });
 
-  it("de-duplicates when both fields carry the same address", () => {
+  it('de-duplicates when both fields carry the same address', () => {
     expect(
-      emailBodyKeyOf(req({ email: "a@x.com", identifier: " A@X.com " }, LOGIN)),
-    ).toEqual(["email:a@x.com"]);
+      emailBodyKeyOf(req({ email: 'a@x.com', identifier: ' A@X.com ' }, LOGIN)),
+    ).toEqual(['email:a@x.com']);
   });
 
   // Keyspace bound: a limiter key derived from unvalidated body input is a
   // Redis memory-growth vector, so anything that is not email-shaped and short
   // returns undefined (→ the caller's fallback), it never becomes a key.
-  it("returns undefined for a missing body", () => {
-    expect(emailBodyKeyOf({ ip: "10.0.0.1" } as unknown as MedusaRequest)).toBe(
+  it('returns undefined for a missing body', () => {
+    expect(emailBodyKeyOf({ ip: '10.0.0.1' } as unknown as MedusaRequest)).toBe(
       undefined,
     );
   });
 
-  it("returns undefined for a body with no email/identifier", () => {
-    expect(emailBodyKeyOf(req({ token: "t", password: "p" }))).toBe(undefined);
+  it('returns undefined for a body with no email/identifier', () => {
+    expect(emailBodyKeyOf(req({ token: 't', password: 'p' }))).toBe(undefined);
   });
 
-  it("returns undefined for a non-string email", () => {
-    expect(emailBodyKeyOf(req({ email: { toString: () => "a@x.com" } }))).toBe(
+  it('returns undefined for a non-string email', () => {
+    expect(emailBodyKeyOf(req({ email: { toString: () => 'a@x.com' } }))).toBe(
       undefined,
     );
     expect(emailBodyKeyOf(req({ email: 12345 }))).toBe(undefined);
   });
 
-  it("returns undefined for an email over 254 chars", () => {
-    const long = `${"a".repeat(250)}@x.com`; // 256 chars, email-shaped
+  it('returns undefined for an email over 254 chars', () => {
+    const long = `${'a'.repeat(250)}@x.com`; // 256 chars, email-shaped
     expect(long.length).toBeGreaterThan(254);
     expect(emailBodyKeyOf(req({ email: long }))).toBe(undefined);
   });
 
-  it("returns undefined for a string that is not email-shaped", () => {
-    for (const bad of ["", "   ", "not-an-email", "a@b", "a b@x.com"]) {
+  it('returns undefined for a string that is not email-shaped', () => {
+    for (const bad of ['', '   ', 'not-an-email', 'a@b', 'a b@x.com']) {
       expect(emailBodyKeyOf(req({ email: bad }))).toBe(undefined);
     }
   });
 });
 
-describe("the two auth rate-limit tiers (Plan 081)", () => {
-  const BURST_ENV = "AUTH_IDENTIFIER_RATE_BURST_LIMIT";
+describe('the two auth rate-limit tiers (Plan 081)', () => {
+  const BURST_ENV = 'AUTH_IDENTIFIER_RATE_BURST_LIMIT';
   let saved: Array<[string, string | undefined]> = [];
 
   beforeEach(() => {
-    // These factories read env AT CONSTRUCTION, so the environment has to be
+    // rateLimit reads env AT CONSTRUCTION, so the environment has to be
     // pinned before the create calls below. Two things must go:
     //  - REDIS_URL, so the limiter stays on its in-memory store (a unit test
     //    must not open a socket);
@@ -799,10 +967,12 @@ describe("the two auth rate-limit tiers (Plan 081)", () => {
     //    limiter for the http suite — leaving those in place would make the
     //    sitewide test below assert .env.test's numbers instead of
     //    AUTH_DEFAULTS, i.e. pass no matter what the defaults say.
-    saved = ["REDIS_URL", ...Object.keys(process.env).filter((k) => /^AUTH_.*RATE/.test(k))]
-      .map((k) => [k, process.env[k]] as [string, string | undefined]);
+    saved = [
+      'REDIS_URL',
+      ...Object.keys(process.env).filter((k) => /^AUTH_.*RATE/.test(k)),
+    ].map((k) => [k, process.env[k]] as [string, string | undefined]);
     for (const [k] of saved) delete process.env[k];
-    process.env[BURST_ENV] = "1";
+    process.env[BURST_ENV] = '1';
   });
 
   afterEach(() => {
@@ -813,7 +983,10 @@ describe("the two auth rate-limit tiers (Plan 081)", () => {
     }
   });
 
-  const makeRes = (): { res: MedusaResponse; statusOf: () => number | undefined } => {
+  const makeRes = (): {
+    res: MedusaResponse;
+    statusOf: () => number | undefined;
+  } => {
     let statusCode: number | undefined;
     const res = {
       status(code: number) {
@@ -844,33 +1017,33 @@ describe("the two auth rate-limit tiers (Plan 081)", () => {
       next: MedusaNextFunction,
     ) => Promise<void>,
     body: unknown,
-    path = "/auth/customer/emailpass",
+    path = '/auth/customer/emailpass',
   ): Promise<{ passed: boolean; status: number | undefined }> => {
     const next = jest.fn();
     const { res, statusOf } = makeRes();
     await mw(
-      { ip: "203.0.113.9", path, body } as unknown as MedusaRequest,
+      { ip: '203.0.113.9', path, body } as unknown as MedusaRequest,
       res,
       next as unknown as MedusaNextFunction,
     );
     return { passed: next.mock.calls.length === 1, status: statusOf() };
   };
 
-  it("gives different emails from the same IP different buckets", async () => {
-    const mw = createAuthIdentifierRateLimit();
+  it('gives different emails from the same IP different buckets', async () => {
+    const mw = rateLimit('auth-identifier');
 
     // Burst limit is 1, so the second attempt on the SAME email is denied...
-    expect((await post(mw, { email: "a@x.com", password: "p" })).passed).toBe(
+    expect((await post(mw, { email: 'a@x.com', password: 'p' })).passed).toBe(
       true,
     );
-    const second = await post(mw, { email: "a@x.com", password: "p" });
+    const second = await post(mw, { email: 'a@x.com', password: 'p' });
     expect(second.passed).toBe(false);
     expect(second.status).toBe(429);
 
     // ...while a different account is unaffected. This is the whole point of
     // the change: it fails if `keyOf: emailBodyKeyOf` is removed from the
-    // factory, because both requests would then key on the shared IP.
-    expect((await post(mw, { email: "b@x.com", password: "p" })).passed).toBe(
+    // table entry, because both requests would then key on the shared IP.
+    expect((await post(mw, { email: 'b@x.com', password: 'p' })).passed).toBe(
       true,
     );
     // ...and the reset path's `identifier` field shares a@x.com's bucket, so
@@ -879,38 +1052,38 @@ describe("the two auth rate-limit tiers (Plan 081)", () => {
       (
         await post(
           mw,
-          { identifier: "a@x.com" },
-          "/auth/customer/emailpass/reset-password",
+          { identifier: 'a@x.com' },
+          '/auth/customer/emailpass/reset-password',
         )
       ).passed,
     ).toBe(false);
   });
 
-  it("does not consume any budget for a body with no identifier (skipWhenNoKey)", async () => {
-    const mw = createAuthIdentifierRateLimit();
+  it('does not consume any budget for a body with no identifier (skipWhenNoKey)', async () => {
+    const mw = rateLimit('auth-identifier');
     // /auth/*/emailpass/update — token + password, no identifier. Repeated
     // well past the burst limit of 1; none of it may bind.
     for (let i = 0; i < 5; i++) {
-      expect((await post(mw, { password: "new-password" })).passed).toBe(true);
+      expect((await post(mw, { password: 'new-password' })).passed).toBe(true);
     }
   });
 
-  // The reset-bombing bypass, end to end through the real factory. Burst is 1,
+  // The reset-bombing bypass, end to end through the named limiter. Burst is 1,
   // so the victim's second reset request must 429 no matter what the attacker
   // puts in the field the route ignores, and no matter how they spell the path.
-  it("a decoy identifier cannot buy a fresh bucket on reset-password", async () => {
+  it('a decoy identifier cannot buy a fresh bucket on reset-password', async () => {
     for (const path of [
-      "/auth/customer/emailpass/reset-password",
-      "/auth/customer/emailpass/reset-password/",
-      "/auth/customer/emailpass/RESET-PASSWORD",
+      '/auth/customer/emailpass/reset-password',
+      '/auth/customer/emailpass/reset-password/',
+      '/auth/customer/emailpass/RESET-PASSWORD',
     ]) {
-      const mw = createAuthIdentifierRateLimit(); // fresh bucket per spelling
+      const mw = rateLimit('auth-identifier'); // fresh bucket per spelling
       expect(
-        (await post(mw, { identifier: "victim@x.com" }, path)).passed,
+        (await post(mw, { identifier: 'victim@x.com' }, path)).passed,
       ).toBe(true);
       const bombed = await post(
         mw,
-        { email: `decoy-${Math.random()}@x.com`, identifier: "victim@x.com" },
+        { email: `decoy-${Math.random()}@x.com`, identifier: 'victim@x.com' },
         path,
       );
       expect({ path, ...bombed }).toMatchObject({ passed: false, status: 429 });
@@ -922,67 +1095,68 @@ describe("the two auth rate-limit tiers (Plan 081)", () => {
   // The BURST is the binding rule: at the old 5/10s the real ceiling was 30
   // requests per minute for the entire site, which 429'd honest sign-ins and
   // was a trivial DoS lever. Guards a revert of that number specifically.
-  it("admits far more than 30 sign-ins a minute from the one storefront IP", async () => {
-    const mw = createAuthRateLimit(); // real defaults, no env override
+  it('admits far more than 30 sign-ins a minute from the one storefront IP', async () => {
+    const mw = rateLimit('auth'); // real defaults, no env override
     for (let i = 0; i < 40; i++) {
-      const r = await post(mw, { email: `user${i}@x.com`, password: "p" });
+      const r = await post(mw, { email: `user${i}@x.com`, password: 'p' });
       expect({ i, ...r }).toMatchObject({ passed: true });
     }
   });
 });
 
-describe("AUTH_DEFAULTS (Plan 081)", () => {
+describe('AUTH_DEFAULTS (Plan 081)', () => {
   // The IP tier is a SITEWIDE circuit breaker, not per-client fairness — every
   // visitor's credential request arrives from the storefront's one egress IP.
-  // createAuthIdentifierRateLimit is the tier that bounds one account, so this
+  // auth-identifier is the tier that bounds one account, so this
   // one only has to sit above legitimate whole-site traffic.
-  it("is sized as a sitewide budget, not a per-user one", () => {
+  it('is sized as a sitewide budget, not a per-user one', () => {
     expect(AUTH_DEFAULTS.limit).toBeGreaterThanOrEqual(300);
     expect(AUTH_DEFAULTS.windowMs).toBeLessThanOrEqual(60_000);
   });
 
   // The burst is the BINDING rule — a low one silently overrides the sustained
   // ceiling. Keep the two consistent, or the sitewide bucket comes back.
-  it("has a burst that does not shadow the sustained ceiling", () => {
-    const burstsPerWindow = AUTH_DEFAULTS.windowMs / AUTH_DEFAULTS.burstWindowMs;
+  it('has a burst that does not shadow the sustained ceiling', () => {
+    const burstsPerWindow =
+      AUTH_DEFAULTS.windowMs / AUTH_DEFAULTS.burstWindowMs;
     expect(AUTH_DEFAULTS.burstLimit * burstsPerWindow).toBeGreaterThanOrEqual(
       AUTH_DEFAULTS.limit,
     );
   });
 
-  it("factories resolve", () => {
-    expect(() => createAuthRateLimit()).not.toThrow();
-    expect(() => createAuthIdentifierRateLimit()).not.toThrow();
+  it('named limiters resolve', () => {
+    expect(() => rateLimit('auth')).not.toThrow();
+    expect(() => rateLimit('auth-identifier')).not.toThrow();
   });
 });
 
-describe("positiveIntFromEnv", () => {
-  const NAME = "RL_TEST_ENV_VALUE";
+describe('positiveIntFromEnv', () => {
+  const NAME = 'RL_TEST_ENV_VALUE';
   afterEach(() => {
     delete process.env[NAME];
   });
 
   const cases: Array<[string | undefined, number]> = [
     [undefined, 42], // unset → fallback
-    ["", 42], // empty → fallback
-    ["60", 60], // plain integer
-    ["60.9", 60], // floors fractional part
-    ["0.5", 42], // (0,1) floors to 0 → MUST fall back, not disable the rule
-    ["1e-3", 42], // scientific notation in (0,1)
-    ["0", 42],
-    ["-5", 42],
-    ["abc", 42],
-    ["1e20", 42], // beyond safe integer range
+    ['', 42], // empty → fallback
+    ['60', 60], // plain integer
+    ['60.9', 60], // floors fractional part
+    ['0.5', 42], // (0,1) floors to 0 → MUST fall back, not disable the rule
+    ['1e-3', 42], // scientific notation in (0,1)
+    ['0', 42],
+    ['-5', 42],
+    ['abc', 42],
+    ['1e20', 42], // beyond safe integer range
   ];
 
-  it.each(cases)("parses %p as %p (fallback 42)", (raw, expected) => {
+  it.each(cases)('parses %p as %p (fallback 42)', (raw, expected) => {
     if (raw === undefined) delete process.env[NAME];
     else process.env[NAME] = raw;
     expect(positiveIntFromEnv(NAME, 42)).toBe(expected);
   });
 });
 
-describe("STORE_READ_DEFAULTS", () => {
+describe('STORE_READ_DEFAULTS', () => {
   // One account-page RSC render fans out to ~6-8 store reads (credits, vip,
   // daily, profiles/me, avatar-frames, notifications). The budget must fit
   // an enthusiastic human with two tabs open — the 2026-07-07 incident
@@ -990,24 +1164,24 @@ describe("STORE_READ_DEFAULTS", () => {
   // sustained ceiling during rapid frame-swapping. ≥15 renders per burst
   // window and ≥60 renders per minute keeps real use out of 429 territory
   // while still stopping runaway scripts.
-  it("fits at least 15 page renders per burst window and 60 per minute", () => {
+  it('fits at least 15 page renders per burst window and 60 per minute', () => {
     expect(STORE_READ_DEFAULTS.burstLimit).toBeGreaterThanOrEqual(120);
     expect(STORE_READ_DEFAULTS.burstWindowMs).toBeLessThanOrEqual(10_000);
     expect(STORE_READ_DEFAULTS.limit).toBeGreaterThanOrEqual(480);
     expect(STORE_READ_DEFAULTS.windowMs).toBeLessThanOrEqual(60_000);
   });
 
-  it("is what createStoreReadRateLimit boots with (factory resolves)", () => {
-    expect(() => createStoreReadRateLimit()).not.toThrow();
+  it('is what the store-read limiter boots with', () => {
+    expect(() => rateLimit('store-read')).not.toThrow();
   });
 });
 
-describe("PROFILE_APPEARANCE_DEFAULTS", () => {
+describe('PROFILE_APPEARANCE_DEFAULTS', () => {
   // Frame equip/unequip is a cosmetic, idempotent metadata write — nothing
   // like a delivery order. Sharing the delivery-write budget (10/10s, 30/60s)
   // meant flipping through frames 429'd on the 11th swap (2026-07-07 round 3).
   // A collector must be able to cycle all 10 frames twice a minute.
-  it("allows cycling the whole 10-frame workbook twice per minute", () => {
+  it('allows cycling the whole 10-frame workbook twice per minute', () => {
     expect(PROFILE_APPEARANCE_DEFAULTS.burstLimit).toBeGreaterThanOrEqual(15);
     expect(PROFILE_APPEARANCE_DEFAULTS.burstWindowMs).toBeLessThanOrEqual(
       10_000,
@@ -1016,7 +1190,7 @@ describe("PROFILE_APPEARANCE_DEFAULTS", () => {
     expect(PROFILE_APPEARANCE_DEFAULTS.windowMs).toBeLessThanOrEqual(60_000);
   });
 
-  it("factory resolves", () => {
-    expect(() => createProfileAppearanceRateLimit()).not.toThrow();
+  it('named limiter resolves', () => {
+    expect(() => rateLimit('profile-appearance')).not.toThrow();
   });
 });

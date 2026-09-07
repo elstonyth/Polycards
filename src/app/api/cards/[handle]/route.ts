@@ -15,5 +15,14 @@ export async function GET(
   if (!card) {
     return NextResponse.json({ message: 'not found' }, { status: 404 });
   }
-  return NextResponse.json({ card });
+  // Older open tabs still read these fields at this unchanged URL.
+  return NextResponse.json({
+    card: {
+      ...card,
+      marketPriceMyr: card.priceMyr,
+      slab_image: card.slabImage,
+      pokemon_dex: card.pokemonDex,
+      sprite_image: card.spriteImage,
+    },
+  });
 }

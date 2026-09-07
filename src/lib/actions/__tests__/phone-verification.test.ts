@@ -1,35 +1,37 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { storeShim, backend } from '@/lib/__tests__/store-shim';
+import type { MemoryRoutes } from '@/lib/store-memory';
 
-// Same wholesale-mock shape as auth.test.ts: the real data modules import
-// 'server-only' and touch next/headers, so only the action logic runs here.
-const mocks = vi.hoisted(() => ({
-  clientFetch: vi.fn(),
-  logError: vi.fn(),
-  getAuthToken: vi.fn(),
-}));
+// The actions import the port's HTTP adapter; point that import at an
+// in-memory backend per test (src/lib/__tests__/store-shim.ts). Nothing
+// beneath the port (SDK, cookies, logger) is mocked.
+vi.mock('@/lib/store', () => ({ store: storeShim }));
 
-vi.mock('@/lib/medusa', () => ({
-  sdk: { client: { fetch: mocks.clientFetch } },
-}));
-vi.mock('@/lib/logger', () => ({
-  logger: {
-    error: mocks.logError,
-    warn: vi.fn(),
-    info: vi.fn(),
-    debug: vi.fn(),
-  },
-}));
-vi.mock('@/lib/data/customer', () => ({ getAuthToken: mocks.getAuthToken }));
-
-const { startPhoneOtp, checkPhoneOtp, changePhone } =
+const { startPhoneOtp, checkPhoneOtp, changePhone, resetPasswordByPhone } =
   await import('@/lib/actions/phone-verification');
 
 const MY = '+60107667787';
 const GB = '+442079460958';
 
+const START = 'POST /store/phone-verification/start';
+const CHECK = 'POST /store/phone-verification/check';
+const CHANGE = 'POST /store/phone-verification/change';
+
+/** The three routes answering 200 with a body each action can read. */
+const OK: MemoryRoutes = {
+  [START]: { body: {} },
+  [CHECK]: { body: { token: 'proof' } },
+  [CHANGE]: { body: { customer: { phone: MY } } },
+};
+
+/** One route refusing with `message` — how every backend refusal below
+ *  arrives, and what the copy tables match on. */
+const refuses = (route: string, message: string) =>
+  backend({ ...OK, [route]: { status: 400, body: { message } } });
+
+let mem = backend(OK);
 beforeEach(() => {
-  mocks.clientFetch.mockReset().mockResolvedValue({});
-  mocks.getAuthToken.mockReset().mockResolvedValue('tok_customer');
+  mem = backend(OK);
 });
 
 describe('startPhoneOtp — served-destination gate', () => {
@@ -39,7 +41,7 @@ describe('startPhoneOtp — served-destination gate', () => {
     ).resolves.toEqual({
       ok: true,
     });
-    expect(mocks.clientFetch).toHaveBeenCalledTimes(1);
+    expect(mem.requests).toHaveLength(1);
   });
 
   // The picker only offers MY, but typing a leading `+` overrides it — this is
@@ -54,7 +56,7 @@ describe('startPhoneOtp — served-destination gate', () => {
           'We can only send verification codes to Malaysian (+60) numbers right now.',
       });
       // Never reached the network: no wasted call, and no silent failure.
-      expect(mocks.clientFetch).not.toHaveBeenCalled();
+      expect(mem.requests).toEqual([]);
     },
   );
 
@@ -65,7 +67,7 @@ describe('startPhoneOtp — served-destination gate', () => {
     await expect(
       startPhoneOtp({ phone: GB, purpose: 'password-reset' }),
     ).resolves.toEqual({ ok: true });
-    expect(mocks.clientFetch).toHaveBeenCalledTimes(1);
+    expect(mem.requests).toHaveLength(1);
   });
 
   // The stored-number path SettingsForm's 'old-otp' step depends on: it feeds
@@ -77,7 +79,7 @@ describe('startPhoneOtp — served-destination gate', () => {
     await expect(
       startPhoneOtp({ phone: MY, purpose: 'phone-change' }),
     ).resolves.toEqual({ ok: true });
-    expect(mocks.clientFetch).toHaveBeenCalledTimes(1);
+    expect(mem.requests).toHaveLength(1);
   });
 
   it('still rejects an unparseable number first', async () => {
@@ -89,7 +91,7 @@ describe('startPhoneOtp — served-destination gate', () => {
       ok: false,
       error: 'Please enter a valid phone number for the selected country.',
     });
-    expect(mocks.clientFetch).not.toHaveBeenCalled();
+    expect(mem.requests).toEqual([]);
   });
 });
 
@@ -100,11 +102,7 @@ describe('startPhoneOtp — served-destination gate', () => {
 describe('changePhone — re-auth fields', () => {
   // `!` because the assertions that follow are exactly what proves a call
   // happened — an undefined here should read as "no request was made".
-  const bodyOf = () => mocks.clientFetch.mock.calls[0]![1].body;
-
-  beforeEach(() => {
-    mocks.clientFetch.mockResolvedValue({ customer: { phone: MY } });
-  });
+  const bodyOf = () => mem.requests[0]!.body;
 
   it('forwards the current password', async () => {
     await expect(
@@ -139,9 +137,7 @@ describe('changePhone — re-auth fields', () => {
   // The genericizer would otherwise turn this into "Could not update your phone
   // number. Please try again." in front of someone who mistyped their password.
   it('surfaces the backend re-auth refusals instead of the generic copy', async () => {
-    mocks.clientFetch.mockRejectedValue(
-      new Error('Enter your current password to change your phone number.'),
-    );
+    refuses(CHANGE, 'Enter your current password to change your phone number.');
     const result = await changePhone({
       phone: MY,
       token: 'proof',
@@ -153,9 +149,7 @@ describe('changePhone — re-auth fields', () => {
         'That password is incorrect. Enter your current password to change your phone number.',
     });
 
-    mocks.clientFetch.mockRejectedValue(
-      new Error('Verify your current phone number to change it.'),
-    );
+    refuses(CHANGE, 'Verify your current phone number to change it.');
     await expect(changePhone({ phone: MY, token: 'proof' })).resolves.toEqual({
       ok: false,
       error: 'Verify your current phone number before changing it.',
@@ -168,9 +162,7 @@ describe('changePhone — re-auth fields', () => {
   // Same genericizer problem, different cause: the OTP was fine, the number
   // just belongs to someone else. "Please try again." would loop them.
   it('surfaces the duplicate-number refusal', async () => {
-    mocks.clientFetch.mockRejectedValue(
-      new Error('This phone number is already in use.'),
-    );
+    refuses(CHANGE, 'This phone number is already in use.');
     await expect(changePhone({ phone: MY, token: 'proof' })).resolves.toEqual({
       ok: false,
       error: 'This phone number is already registered to another account.',
@@ -186,9 +178,7 @@ describe('changePhone — re-auth fields', () => {
 // attempts the change and reads the answer off the refusal.
 describe('changePhone — needsOldPhoneProof discriminator', () => {
   it('flags the old-phone refusal', async () => {
-    mocks.clientFetch.mockRejectedValue(
-      new Error('Verify your current phone number to change it.'),
-    );
+    refuses(CHANGE, 'Verify your current phone number to change it.');
     const result = await changePhone({ phone: MY, token: 'proof' });
     expect(result.ok).toBe(false);
     expect(result).toHaveProperty('needsOldPhoneProof', true);
@@ -204,14 +194,13 @@ describe('changePhone — needsOldPhoneProof discriminator', () => {
     ['a rate limit', 'Too many requests. Try again in 30s.'],
     ['an unrecognised failure', 'boom'],
   ])('leaves the flag off for %s', async (_case, message) => {
-    mocks.clientFetch.mockRejectedValue(new Error(message));
+    refuses(CHANGE, message);
     const result = await changePhone({ phone: MY, token: 'proof' });
     expect(result.ok).toBe(false);
     expect(result).not.toHaveProperty('needsOldPhoneProof');
   });
 
   it('leaves the flag off on success', async () => {
-    mocks.clientFetch.mockResolvedValue({ customer: { phone: MY } });
     const result = await changePhone({ phone: MY, token: 'proof' });
     expect(result).toEqual({ ok: true, phone: MY });
   });
@@ -223,9 +212,7 @@ describe('changePhone — needsOldPhoneProof discriminator', () => {
 // round the resend loop over a problem no code can fix.
 describe('checkPhoneOtp — duplicate-number refusal', () => {
   it('surfaces the refusal instead of the generic code copy', async () => {
-    mocks.clientFetch.mockRejectedValue(
-      new Error('This phone number is already in use.'),
-    );
+    refuses(CHECK, 'This phone number is already in use.');
     await expect(
       checkPhoneOtp({ phone: MY, purpose: 'signup', code: '123456' }),
     ).resolves.toEqual({
@@ -236,17 +223,115 @@ describe('checkPhoneOtp — duplicate-number refusal', () => {
   });
 
   it('still generalizes an unrecognised failure', async () => {
-    mocks.clientFetch.mockRejectedValue(new Error('boom'));
+    refuses(CHECK, 'boom');
     await expect(
       checkPhoneOtp({ phone: MY, purpose: 'signup', code: '123456' }),
     ).resolves.toEqual({ ok: false, error: 'Invalid or expired code.' });
   });
 
   it('returns the proof token on success', async () => {
-    mocks.clientFetch.mockResolvedValue({ token: 'proof' });
     await expect(
       checkPhoneOtp({ phone: MY, purpose: 'signup', code: '123456' }),
     ).resolves.toEqual({ ok: true, token: 'proof' });
+  });
+});
+
+// The three pre-login routes carry `auth: 'none'` — no cookie is read, so no
+// Authorization header rides along and the routes stay reachable for a visitor
+// who has no session yet. Only the change route is authenticated.
+describe('auth mode per route', () => {
+  it('sends no bearer on start/check and one on change', async () => {
+    await startPhoneOtp({ phone: MY, purpose: 'signup' });
+    await checkPhoneOtp({ phone: MY, purpose: 'signup', code: '123456' });
+    await changePhone({ phone: MY, token: 'proof' });
+    expect(mem.requests.map((r) => [r.path, r.headers])).toEqual([
+      ['/store/phone-verification/start', {}],
+      ['/store/phone-verification/check', {}],
+      [
+        '/store/phone-verification/change',
+        { Authorization: 'Bearer test-token' },
+      ],
+    ]);
+  });
+
+  it('still reaches the pre-login routes with no session at all', async () => {
+    const guest = backend(OK, { token: null });
+    await expect(
+      startPhoneOtp({ phone: MY, purpose: 'password-reset' }),
+    ).resolves.toEqual({ ok: true });
+    expect(guest.requests).toHaveLength(1);
+  });
+
+  it('changePhone asks for a login when there is no session', async () => {
+    const guest = backend(OK, { token: null });
+    await expect(changePhone({ phone: MY, token: 'proof' })).resolves.toEqual({
+      ok: false,
+      error: 'Please log in first.',
+    });
+    expect(guest.requests).toEqual([]);
+  });
+});
+
+describe('unchecked phone JSON projection parity', () => {
+  it('contains a null OTP check response', async () => {
+    backend({ [CHECK]: { body: null } });
+    await expect(
+      checkPhoneOtp({ phone: MY, purpose: 'signup', code: '123456' }),
+    ).resolves.toEqual({ ok: false, error: 'Invalid or expired code.' });
+  });
+  it('contains a null customer after phone change', async () => {
+    backend({ [CHANGE]: { body: { customer: null } } });
+    await expect(changePhone({ phone: MY, token: 'proof' })).resolves.toEqual({
+      ok: false,
+      error: 'Could not update your phone number. Please try again.',
+    });
+  });
+});
+
+describe('resetPasswordByPhone migration seam', () => {
+  const route = 'POST /store/phone-verification/password-reset';
+  it('posts the proof without cookie auth and returns the reset token and masked email', async () => {
+    const mem = backend(
+      {
+        [route]: {
+          body: { token: 'reset-token', maskedEmail: 'w***@example.com' },
+        },
+      },
+      { token: null },
+    );
+    await expect(
+      resetPasswordByPhone({ token: 'phone-proof' }),
+    ).resolves.toEqual({
+      ok: true,
+      token: 'reset-token',
+      maskedEmail: 'w***@example.com',
+    });
+    expect(mem.requests).toEqual([
+      {
+        method: 'POST',
+        path: '/store/phone-verification/password-reset',
+        body: { token: 'phone-proof' },
+        headers: {},
+        cache: 'no-store',
+      },
+    ]);
+  });
+  it('preserves the Google-only refusal rather than inviting a dead-end email reset', async () => {
+    backend(
+      {
+        [route]: {
+          status: 400,
+          body: { message: 'This account signs in with Google.' },
+        },
+      },
+      { token: null },
+    );
+    await expect(
+      resetPasswordByPhone({ token: 'phone-proof' }),
+    ).resolves.toEqual({
+      ok: false,
+      error: 'This account signs in with Google.',
+    });
   });
 });
 
@@ -254,24 +339,22 @@ describe('checkPhoneOtp — duplicate-number refusal', () => {
 // (Digi/016, 2026-09-07). The action forwards the choice verbatim; absent, it
 // sends no field at all so the backend's default (sms) stays the single source.
 describe('startPhoneOtp — channel', () => {
+  const bodyOf = () => mem.requests[0]!.body;
+
   it('passes the voice channel through to the backend', async () => {
     await expect(
       startPhoneOtp({ phone: MY, purpose: 'phone-change', channel: 'call' }),
     ).resolves.toEqual({ ok: true });
-    expect(mocks.clientFetch).toHaveBeenCalledWith(
-      '/store/phone-verification/start',
-      expect.objectContaining({
-        body: { phone: MY, purpose: 'phone-change', channel: 'call' },
-      }),
-    );
+    expect(mem.requests).toHaveLength(1);
+    expect(bodyOf()).toEqual({
+      phone: MY,
+      purpose: 'phone-change',
+      channel: 'call',
+    });
   });
 
   it('sends no channel field when none is chosen', async () => {
     await startPhoneOtp({ phone: MY, purpose: 'signup' });
-    const [, init] = mocks.clientFetch.mock.calls[0] as [
-      string,
-      { body: unknown },
-    ];
-    expect(init.body).toEqual({ phone: MY, purpose: 'signup' });
+    expect(bodyOf()).toEqual({ phone: MY, purpose: 'signup' });
   });
 });

@@ -1,58 +1,17 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createElement, act, useLayoutEffect } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import { act } from 'react';
+import { renderHook, flush } from './render-hook';
 import { usePackDetailPoll } from '../use-pack-detail-poll';
 import type { PackDetail } from '@/lib/data/packs';
 
-// No @testing-library/react (or any React-hook test harness) lives in this
-// repo yet -- use-sound.test.ts / consent.test.ts test hooks by extracting
-// pure logic, but this hook's whole bug is about behavior ACROSS renders
-// (a changing `slug` prop), which a pure-logic extraction can't observe.
-// Drive React directly via createRoot + act instead of adding a dependency;
-// react-dom + jsdom are already installed. The result is captured in a
-// layout effect (not during render) so it stays a side effect, not a render
-// impurity -- act() flushes layout effects synchronously, so it's readable
-// immediately after render/rerender.
-function renderHook<T>(useHook: () => T) {
-  const container = document.createElement('div');
-  document.body.appendChild(container);
-  const box: { current: T } = { current: undefined as unknown as T };
-  let root!: Root;
-  function Probe() {
-    const result = useHook();
-    useLayoutEffect(() => {
-      box.current = result;
-    });
-    return null;
-  }
-  act(() => {
-    root = createRoot(container);
-    root.render(createElement(Probe));
-  });
-  return {
-    get current() {
-      return box.current;
-    },
-    rerender: () => {
-      act(() => {
-        root.render(createElement(Probe));
-      });
-    },
-    unmount: () => {
-      act(() => root.unmount());
-      container.remove();
-    },
-  };
-}
-
-// jsdom's default document.visibilityState is "prerender", not "visible" --
-// the hook's tick() would silently no-op every test without this, since it
-// bails out early on a hidden/prerendering tab.
-Object.defineProperty(document, 'visibilityState', {
-  configurable: true,
-  get: () => 'visible',
-});
+// The rule under test is the one usePackDetailPoll owns on top of useLivePoll:
+// what it renders while a slug's own data has not landed yet (the new seed —
+// never the previous pack's detail under the new pack's name). The timer, the
+// visibility gate and the ordering guard live in use-live-poll.test.ts.
+// `renderHook`'s props argument is unused here on purpose: these cases mutate
+// a fixture the hook closes over, which is what a parent re-rendering with new
+// props looks like from inside.
 
 const detailA: PackDetail = {
   topHits: [],
@@ -77,14 +36,20 @@ describe('usePackDetailPoll', () => {
 
   it('renders the initial non-null seed', () => {
     const props = { slug: 'pack-a', initial: detailA as PackDetail | null };
-    const hook = renderHook(() => usePackDetailPoll(props.slug, props.initial));
+    const hook = renderHook(
+      () => usePackDetailPoll(props.slug, props.initial),
+      undefined,
+    );
     expect(hook.current).toBe(detailA);
     hook.unmount();
   });
 
   it('a sibling switch with initial=null yields null, never the old pack data', () => {
     const props = { slug: 'pack-a', initial: detailA as PackDetail | null };
-    const hook = renderHook(() => usePackDetailPoll(props.slug, props.initial));
+    const hook = renderHook(
+      () => usePackDetailPoll(props.slug, props.initial),
+      undefined,
+    );
     expect(hook.current).toBe(detailA);
 
     // Switch to a sibling pack -- PackDetailClient now passes null (it is
@@ -102,7 +67,10 @@ describe('usePackDetailPoll', () => {
       vi.fn(() => Promise.reject(new Error('network down'))),
     );
     const props = { slug: 'pack-a', initial: detailA as PackDetail | null };
-    const hook = renderHook(() => usePackDetailPoll(props.slug, props.initial));
+    const hook = renderHook(
+      () => usePackDetailPoll(props.slug, props.initial),
+      undefined,
+    );
 
     props.slug = 'pack-b';
     props.initial = null;
@@ -117,3 +85,76 @@ describe('usePackDetailPoll', () => {
     hook.unmount();
   });
 });
+
+it.each([
+  {
+    topHits: [],
+    pool: [
+      {
+        id: 'old-card',
+        value: 'RM 2.00',
+        name: 'Old Card',
+        image: '/old.png',
+        slabImage: null,
+        rarity: 'Rare',
+        pokemonDex: null,
+        spriteImage: null,
+      },
+    ],
+    publishedOdds: null,
+    demoOdds: null,
+  },
+  { topHits: [], pool: [null], publishedOdds: null, demoOdds: null },
+  { topHits: 'broken', pool: [], publishedOdds: null, demoOdds: null },
+])(
+  'retains seed and last-good detail when a poll is incompatible: %j',
+  async (incompatible) => {
+    const fresh: PackDetail = {
+      ...detailA,
+      pool: [
+        {
+          handle: 'fresh',
+          name: 'Fresh Card',
+          image: '/fresh.png',
+          slabImage: null,
+          rarity: 'Rare',
+          priceMyr: 2,
+          pokemonDex: null,
+          spriteImage: null,
+        },
+      ],
+      publishedOdds: { tiers: { Rare: 100 } },
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ detail: incompatible }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ detail: fresh }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ detail: incompatible }),
+      });
+    vi.stubGlobal('fetch', fetcher);
+    const hook = renderHook(
+      () => usePackDetailPoll('pack-a', detailA),
+      undefined,
+    );
+    await flush();
+    expect(hook.current).toEqual(detailA);
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(hook.current).toEqual(fresh);
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(hook.current).toEqual(fresh);
+    hook.unmount();
+    vi.unstubAllGlobals();
+  },
+);

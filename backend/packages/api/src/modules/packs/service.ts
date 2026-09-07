@@ -8,10 +8,21 @@ import {
   MedusaContext,
   Modules,
 } from '@medusajs/framework/utils';
-import type { Context, HttpTypes } from '@medusajs/framework/types';
+import type {
+  Context,
+  HttpTypes,
+  InferTypeOf,
+} from '@medusajs/framework/types';
 import { PCT_SCALE } from '@acme/odds-math';
 import type { OddsRarity, TierRangeMap } from '@acme/odds-math';
 import type { Rarity } from './rarity';
+import {
+  claimOne,
+  claimRows,
+  NOT_NULL,
+  NOW,
+  type LedgerSqlManager,
+} from './claim';
 import {
   validateDeliveryRequest,
   validateDeliveryStatusTransition,
@@ -56,10 +67,10 @@ import ChallengeStage from './models/challenge-stage';
 import ChallengeSchedule from './models/challenge-schedule';
 import ChallengeSettings from './models/challenge-settings';
 import TierSettings from './models/tier-settings';
-import GlobePayDeposit from './models/globepay-deposit';
-import GlobePayWithdrawal, {
+import GatewayDeposit, { DEPOSIT_STATUSES } from './models/gateway-deposit';
+import GatewayWithdrawal, {
   WITHDRAWAL_STATUSES,
-} from './models/globepay-withdrawal';
+} from './models/gateway-withdrawal';
 import ChallengePayout from './models/challenge-payout';
 import LedgerEntry from './models/ledger-entry';
 import LedgerSequence from './models/ledger-sequence';
@@ -71,7 +82,8 @@ import {
   type LedgerPayload,
   type LedgerType,
 } from './ledger';
-import type { GatewayPeriodRow, LedgerPeriodRow } from './globepay-settlement';
+import type { GatewayPeriodRow, LedgerPeriodRow } from './gateway-settlement';
+import { gatewayEnvName } from './gateway-env';
 import PurchaseInvoice from './models/purchase-invoice';
 import PurchaseInvoiceLine from './models/purchase-invoice-line';
 import StockMovement from './models/stock-movement';
@@ -171,7 +183,7 @@ const DEPOSITED_PT_FILTER =
   "reason = 'topup' AND amount > 0 AND external_funded_cents IS NOT NULL";
 
 // Default rolling-24h cashout ceiling, in RM. The per-transaction payout band
-// (RM 50 – RM 50,000, globepay-withdrawal.ts) bounds ONE payout; before this
+// (RM 50 – RM 50,000, gateway-withdrawal.ts) bounds ONE payout; before this
 // cap nothing summed prior withdrawals over any window, so a compromised
 // account's blast radius was "the whole balance, as fast as the rate limiter
 // allows" with no velocity signal to alert on.
@@ -179,7 +191,7 @@ const DEPOSITED_PT_FILTER =
 // The env override is read PER CALL inside withdrawForCashout (never latched at
 // module load) so a spec can drive both cap states through one booted app —
 // the convention plan 066 established.
-const GLOBEPAY_WD_DAILY_MAX_RM_DEFAULT = 50_000;
+const GATEWAY_WD_DAILY_MAX_RM_DEFAULT = 50_000;
 
 // Postgres unique-violation detector (SQLSTATE 23505) for the open-settlement
 // idempotency index. See settleOpen's catch for the exact semantics — a 23505
@@ -285,22 +297,34 @@ export type AuditRow = {
   admin_id: string;
 };
 
-/** The transactional MikroORM manager surface we use for the advisory lock +
- *  the Σ-ledger read. `?` placeholders are inlined by MikroORM's formatQuery. */
-type LedgerSqlManager = {
-  execute<T = unknown>(query: string, params?: unknown[]): Promise<T>;
-};
-
 /** Tier predicate for a `pull p` row: its (pack, card) odds row carries the
  *  given rarity (`?`). Rarity is PER-PACK, so the join is on both keys. */
 const PULL_TIER_SQL =
   'EXISTS (SELECT 1 FROM pack_odds o WHERE o.pack_id = p.pack_id ' +
   '  AND o.card_id = p.card_id AND o.deleted_at IS NULL AND o.rarity = ?)';
 
-/** The globepay_withdrawal.status domain, derived from the model's
+/** The gateway_withdrawal.status domain, derived from the model's
  *  WITHDRAWAL_STATUSES for the raw-SQL claim below (raw SQL carries no model
  *  types). */
 type WithdrawalStatus = (typeof WITHDRAWAL_STATUSES)[number];
+
+/** The gateway_deposit.status domain, derived from the model's
+ *  DEPOSIT_STATUSES for the raw-SQL claim below. */
+type DepositStatus = (typeof DEPOSIT_STATUSES)[number];
+
+/**
+ * The money mirror a settle claim writes alongside the status flip.
+ *
+ * These two are `bigNumber` columns, and a bigNumber is TWO columns: the
+ * numeric one and a paired `raw_*` jsonb the ORM maintains. A raw `UPDATE`
+ * cannot keep the pair in step, so the claim writes every PLAIN column and
+ * hands these to the ORM — on the SAME transaction, so the flip and its
+ * mirror commit or roll back together.
+ */
+type SettlementMirror = {
+  amount_settled?: number | null;
+  net_amount?: number | null;
+};
 
 /** One raw `ledger_entry` row as listLedgerEntriesForAdmin reads it. */
 export type LedgerEntryRow = {
@@ -495,6 +519,20 @@ interface SettleSnapshot {
   >;
 }
 
+// One admin_action_audit row, as every writer supplies it: the model's own
+// columns minus the framework-managed ones. Derived from the model rather than
+// hand-listed so the entity_type/action enums cannot drift from the DB CHECK.
+export type AdminAuditRow = Pick<
+  InferTypeOf<typeof AdminActionAudit>,
+  | 'admin_id'
+  | 'entity_type'
+  | 'entity_id'
+  | 'action'
+  | 'before'
+  | 'after'
+  | 'reason'
+>;
+
 class PacksModuleService extends MedusaService({
   Pack,
   Card,
@@ -519,8 +557,8 @@ class PacksModuleService extends MedusaService({
   ChallengeSchedule,
   ChallengeSettings,
   TierSettings,
-  GlobePayDeposit,
-  GlobePayWithdrawal,
+  GatewayDeposit,
+  GatewayWithdrawal,
   ChallengePayout,
   LedgerEntry,
   LedgerSequence,
@@ -535,6 +573,19 @@ class PacksModuleService extends MedusaService({
   TaskClaim,
   DailyCheckin,
 }) {
+  // Every audit row in this service goes through here — one place that knows
+  // the shape, and one place a reviewer checks that the row rides the caller's
+  // transaction. `sharedContext` is NOT optional: an audit written outside the
+  // transaction of the change it describes can commit when the change rolls
+  // back (and vice versa), which is the whole point of writing it here rather
+  // than in the route.
+  protected async audit(
+    row: AdminAuditRow,
+    sharedContext: Context,
+  ): Promise<void> {
+    await this.createAdminActionAudits([row], sharedContext);
+  }
+
   // Apply a pack-membership diff (add rows + delete rows + renormalize
   // survivor weights) as ONE transaction. The set-pack-members workflow step
   // computes the diff; a failed step never runs its OWN compensation, so
@@ -669,18 +720,16 @@ class PacksModuleService extends MedusaService({
     } else {
       await this.createSiteSettings([{ id: 'global', ...data }], sharedContext);
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'site_settings',
-          entity_id: row?.id ?? 'singleton',
-          action: 'edit_payment_gateway',
-          before,
-          after: data,
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'site_settings',
+        entity_id: row?.id ?? 'singleton',
+        action: 'edit_payment_gateway',
+        before,
+        after: data,
+        reason: input.reason,
+      },
       sharedContext,
     );
     return data;
@@ -708,18 +757,16 @@ class PacksModuleService extends MedusaService({
       // a create race can never leave two rows.
       await this.createSiteSettings([{ id: 'global', ...data }], sharedContext);
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'site_settings',
-          entity_id: row?.id ?? 'singleton',
-          action: 'edit_site_settings',
-          before,
-          after: data,
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'site_settings',
+        entity_id: row?.id ?? 'singleton',
+        action: 'edit_site_settings',
+        before,
+        after: data,
+        reason: input.reason,
+      },
       sharedContext,
     );
     return data;
@@ -943,18 +990,16 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'referral_settings',
-          entity_id: 'global',
-          action: 'edit_referral_settings',
-          before,
-          after: next,
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'referral_settings',
+        entity_id: 'global',
+        action: 'edit_referral_settings',
+        before,
+        after: next,
+        reason: input.reason,
+      },
       sharedContext,
     );
   }
@@ -1010,18 +1055,16 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'customer',
-          entity_id: input.customerId,
-          action: 'set_partner_rate',
-          before: { partner_referral_bp: beforeBp },
-          after: { partner_referral_bp: input.rateBp },
-          reason: input.reason ?? 'partner rate change',
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: 'set_partner_rate',
+        before: { partner_referral_bp: beforeBp },
+        after: { partner_referral_bp: input.rateBp },
+        reason: input.reason ?? 'partner rate change',
+      },
       sharedContext,
     );
   }
@@ -1259,38 +1302,38 @@ class PacksModuleService extends MedusaService({
         `Only a draft run can be approved (this one is '${run.status}').`,
       );
     }
-    // ONE conditional UPDATE, answered by RETURNING (the
-    // claimGlobePayWithdrawalStatus idiom): the generated selector-update is a
+    // ONE conditional claim (see claim.ts): the generated selector-update is a
     // find-then-write that reports nothing, so a void committing between the
     // read above and the write left the run 'void' and still wrote an
     // approve_settlement audit row (review 2026-09). No row = the race was
     // lost; refuse rather than audit an approval that never happened.
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    const approved = await em.execute<{ id: string }[]>(
-      'UPDATE weekly_settlement ' +
-        "SET status = 'approved', approved_by = ?, approved_at = now(), updated_at = now() " +
-        "WHERE id = ? AND status = 'draft' AND deleted_at IS NULL " +
-        'RETURNING id',
-      [input.adminId, run.id],
-    );
+    const approved = await claimRows(em, {
+      table: 'weekly_settlement',
+      ids: [run.id],
+      where: { status: 'draft' },
+      set: {
+        status: 'approved',
+        approved_by: input.adminId,
+        approved_at: NOW,
+      },
+    });
     if (approved.length !== 1) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         'That run changed state while you were approving it — reload the page.',
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'weekly_settlement',
-          entity_id: run.id,
-          action: 'approve_settlement',
-          before: { status: 'draft' },
-          after: { status: 'approved' },
-          reason: `week ${new Date(run.week_start).toISOString().slice(0, 10)}`,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'weekly_settlement',
+        entity_id: run.id,
+        action: 'approve_settlement',
+        before: { status: 'draft' },
+        after: { status: 'approved' },
+        reason: `week ${new Date(run.week_start).toISOString().slice(0, 10)}`,
+      },
       sharedContext,
     );
   }
@@ -1381,18 +1424,16 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'customer',
-          entity_id: input.customerId,
-          action: 'edit',
-          before: { referrer_id: before },
-          after: { referrer_id: input.referrerId },
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: 'edit',
+        before: { referrer_id: before },
+        after: { referrer_id: input.referrerId },
+        reason: input.reason,
+      },
       sharedContext,
     );
   }
@@ -1445,18 +1486,16 @@ class PacksModuleService extends MedusaService({
       },
       sharedContext,
     );
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'weekly_settlement',
-          entity_id: run.id,
-          action: 'void_settlement',
-          before: { status: 'draft' },
-          after: { status: 'void' },
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'weekly_settlement',
+        entity_id: run.id,
+        action: 'void_settlement',
+        before: { status: 'draft' },
+        after: { status: 'void' },
+        reason: input.reason,
+      },
       sharedContext,
     );
   }
@@ -1485,22 +1524,24 @@ class PacksModuleService extends MedusaService({
         `Only a pending line can be voided (this one is '${line.status}').`,
       );
     }
-    // ONE conditional UPDATE, answered by RETURNING — the same claim
-    // payWeeklySettlement makes before it moves money, and for the same
-    // reason claimGlobePayWithdrawalStatus exists: the generated selector-
-    // update is a find-then-write with no row lock, so a void racing the pay
-    // job could stamp 'voided' over a line whose credit was already written
-    // (bug review 2026-08-25; race confirmed 2026-09). Here the row lock
-    // makes pay's claim wait and then see 'voided'. No row = the race was
-    // lost — bail before the totals deduction so it can't double-subtract.
+    // ONE conditional claim (see claim.ts) — the same one payWeeklySettlement
+    // makes before it moves money: the generated selector-update is a
+    // find-then-write with no row lock, so a void racing the pay job could
+    // stamp 'voided' over a line whose credit was already written (bug review
+    // 2026-08-25; race confirmed 2026-09). Here the row lock makes pay's claim
+    // wait and then see 'voided'. No row = the race was lost — bail before the
+    // totals deduction so it can't double-subtract.
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    const voided = await em.execute<{ id: string }[]>(
-      'UPDATE weekly_settlement_line ' +
-        "SET status = 'voided', void_reason = ?, voided_by = ?, updated_at = now() " +
-        "WHERE id = ? AND status = 'pending' AND deleted_at IS NULL " +
-        'RETURNING id',
-      [input.reason, input.adminId, line.id],
-    );
+    const voided = await claimRows(em, {
+      table: 'weekly_settlement_line',
+      ids: [line.id],
+      where: { status: 'pending' },
+      set: {
+        status: 'voided',
+        void_reason: input.reason,
+        voided_by: input.adminId,
+      },
+    });
     if (voided.length !== 1) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
@@ -1514,23 +1555,21 @@ class PacksModuleService extends MedusaService({
       { settlementId: line.settlement_id, amountCents: line.amount_cents },
       sharedContext,
     );
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'weekly_settlement',
-          entity_id: line.settlement_id,
-          action: 'void_settlement_line',
-          before: { line_id: line.id, status: 'pending' },
-          after: {
-            line_id: line.id,
-            status: 'voided',
-            customer_id: line.customer_id,
-            amount_cents: line.amount_cents,
-          },
-          reason: input.reason,
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'weekly_settlement',
+        entity_id: line.settlement_id,
+        action: 'void_settlement_line',
+        before: { line_id: line.id, status: 'pending' },
+        after: {
+          line_id: line.id,
+          status: 'voided',
+          customer_id: line.customer_id,
+          amount_cents: line.amount_cents,
         },
-      ],
+        reason: input.reason,
+      },
       sharedContext,
     );
   }
@@ -1594,28 +1633,27 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
 
-    // Every line flip below is ONE conditional UPDATE answered by RETURNING
-    // (the claimGlobePayWithdrawalStatus idiom), never the generated
-    // selector-update: that one is a find-then-write with no row lock, so it
-    // could not stop an admin void from landing between this run's list and
-    // its money write — the credit was minted, then the "status guard" after
-    // it silently matched nothing, and the customer was paid on a line that
-    // read 'voided' (review 2026-09). The claim now comes FIRST and holds the
-    // row lock until this transaction commits; a concurrent void either
-    // committed already (no row here, no money) or waits and then sees 'paid'.
+    // Every line flip below is ONE conditional claim (see claim.ts), never the
+    // generated selector-update: that one is a find-then-write with no row
+    // lock, so it could not stop an admin void from landing between this run's
+    // list and its money write — the credit was minted, then the "status
+    // guard" after it silently matched nothing, and the customer was paid on a
+    // line that read 'voided' (review 2026-09). The claim comes FIRST and
+    // holds the row lock until this transaction commits; a concurrent void
+    // either committed already (no row here, no money) or waits and then sees
+    // 'paid'.
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     let paid = 0;
     let skipped = 0;
     const paidCustomerIds: string[] = [];
     for (const line of pending) {
       if (skip.has(line.customer_id)) {
-        const voided = await em.execute<{ id: string }[]>(
-          'UPDATE weekly_settlement_line ' +
-            "SET status = 'voided', void_reason = 'account_deleted', updated_at = now() " +
-            "WHERE id = ? AND status = 'pending' AND deleted_at IS NULL " +
-            'RETURNING id',
-          [line.id],
-        );
+        const voided = await claimRows(em, {
+          table: 'weekly_settlement_line',
+          ids: [line.id],
+          where: { status: 'pending' },
+          set: { status: 'voided', void_reason: 'account_deleted' },
+        });
         // An admin void got there first — and already took its deduction.
         if (voided.length !== 1) continue;
         await this.deductRunTotal(
@@ -1625,13 +1663,12 @@ class PacksModuleService extends MedusaService({
         skipped++;
         continue;
       }
-      const claimed = await em.execute<{ id: string }[]>(
-        'UPDATE weekly_settlement_line ' +
-          "SET status = 'paid', updated_at = now() " +
-          "WHERE id = ? AND status = 'pending' AND deleted_at IS NULL " +
-          'RETURNING id',
-        [line.id],
-      );
+      const claimed = await claimRows(em, {
+        table: 'weekly_settlement_line',
+        ids: [line.id],
+        where: { status: 'pending' },
+        set: { status: 'paid' },
+      });
       // Voided since the list above (or claimed by a concurrent pay) — no
       // money for this line from this run.
       if (claimed.length !== 1) continue;
@@ -1699,18 +1736,16 @@ class PacksModuleService extends MedusaService({
       );
     }
     if (paid > 0 || skipped > 0) {
-      await this.createAdminActionAudits(
-        [
-          {
-            admin_id: input.adminId ?? 'system:pay-referral-week',
-            entity_type: 'weekly_settlement',
-            entity_id: run.id,
-            action: 'pay_settlement',
-            before: { status: run.status },
-            after: { paid, skipped },
-            reason: `week ${weekStartIso}`,
-          },
-        ],
+      await this.audit(
+        {
+          admin_id: input.adminId ?? 'system:pay-referral-week',
+          entity_type: 'weekly_settlement',
+          entity_id: run.id,
+          action: 'pay_settlement',
+          before: { status: run.status },
+          after: { paid, skipped },
+          reason: `week ${weekStartIso}`,
+        },
         sharedContext,
       );
     }
@@ -2450,18 +2485,16 @@ class PacksModuleService extends MedusaService({
       const [row] = await this.createTaskDefinitions([data], sharedContext);
       id = row.id;
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'task_definition',
-          entity_id: id,
-          action: before ? 'edit' : 'create',
-          before,
-          after: data,
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'task_definition',
+        entity_id: id,
+        action: before ? 'edit' : 'create',
+        before,
+        after: data,
+        reason: input.reason,
+      },
       sharedContext,
     );
     return { id };
@@ -2504,18 +2537,16 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'site_settings',
-          entity_id: row?.id ?? 'global',
-          action: 'edit_avatar_frames',
-          before,
-          after: data,
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'site_settings',
+        entity_id: row?.id ?? 'global',
+        action: 'edit_avatar_frames',
+        before,
+        after: data,
+        reason: input.reason,
+      },
       sharedContext,
     );
     // Public shape: only configured levels, never the null placeholders.
@@ -2871,7 +2902,7 @@ class PacksModuleService extends MedusaService({
   // Wallet-tab join (Task 9) is a plain equality on credit_transaction.id.
   //
   // ledgerPaymentMethod/ledgerGatewayRef default to the mock gateway so the
-  // original caller is untouched; the GlobePay365 callback and its
+  // original caller is untouched; the gateway callback and its
   // reconciliation sweep pass the real method (BQR/OB) and their transaction
   // id. Those two share ONE idempotency anchor, so a callback racing the sweep
   // collapses to a single credit — and since refId is that credit's id, to a
@@ -2943,7 +2974,7 @@ class PacksModuleService extends MedusaService({
             outcome: input.ledger.outcome,
             bank_code: input.ledger.bankCode,
             // Last 4 only — the ledger is a customer- and operator-visible
-            // surface; the full number stays on globepay_withdrawal.
+            // surface; the full number stays on gateway_withdrawal.
             account_last4: input.ledger.accountNumber
               ? input.ledger.accountNumber.slice(-4)
               : null,
@@ -2960,7 +2991,7 @@ class PacksModuleService extends MedusaService({
   // gate and the debit, as a single serialized unit.
   //
   // Why the gate cannot merely PRECEDE the debit (it used to, in
-  // globepay-withdrawal.ts, with no lock held across the two): `floor: 0` in
+  // gateway-withdrawal.ts, with no lock held across the two): `floor: 0` in
   // mutateCreditAtomic guards the RAW balance. It knows nothing about `locked`
   // — walletSummary's withdrawable folds in the freeze flag and the playthrough
   // gate, and the floor cannot see either. So N concurrent
@@ -3036,7 +3067,7 @@ class PacksModuleService extends MedusaService({
     // 1a) THE ROW MUST STILL BE OPEN. Read under the lock, before anything
     //     else, and the debit half of the pact with
     //     claimWithdrawalAgainstDebit below — see that method for the full
-    //     argument. In short: globepay-withdrawal.ts commits the row at step 1
+    //     argument. In short: gateway-withdrawal.ts commits the row at step 1
     //     and debits here at step 2, so an admin approve/deny can land in
     //     between and close a row this call is about to debit. That admin
     //     close takes THIS key first and only closes a row it read as
@@ -3058,7 +3089,7 @@ class PacksModuleService extends MedusaService({
     //     'pending' is checked alongside 'held' because this guard is not
     //     held-specific: any closed row must not be debited.
     const [openRow] = await em.execute<{ status: string }[]>(
-      'SELECT status FROM globepay_withdrawal ' +
+      'SELECT status FROM gateway_withdrawal ' +
         'WHERE merchant_transaction_id = ? AND deleted_at IS NULL',
       [input.merchantTransactionId],
     );
@@ -3103,7 +3134,7 @@ class PacksModuleService extends MedusaService({
     //    wallet gate uses: a bad destination outranks a bad wallet. A frozen
     //    account naming an un-cooled destination hears about the destination,
     //    not the freeze. That is the quieter answer to someone holding a stolen
-    //    token, and it keeps this method and globepay-withdrawal.ts's precheck
+    //    token, and it keeps this method and gateway-withdrawal.ts's precheck
     //    in the same order. withdrawable.ts's own precedence rule (freeze
     //    outranks playthrough outranks the cap) is untouched — it orders the
     //    three WALLET refusals against each other, all of which sit below this.
@@ -3126,7 +3157,7 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     //    THIS is the authoritative gate — the decision that makes the payout
-    //    safe. globepay-withdrawal.ts calls the same helper unlocked before
+    //    safe. gateway-withdrawal.ts calls the same helper unlocked before
     //    writing its row, but only to avoid leaving debris on a refusal that is
     //    already certain; it decides nothing.
     const gateError = withdrawalGateError(wallet, input.amount);
@@ -3137,7 +3168,7 @@ class PacksModuleService extends MedusaService({
     //
     //    `pending` and `settled` both moved (or are still moving) money;
     //    `held` does too — the debit already posted (see
-    //    startGlobePayWithdrawal), the row is merely parked for admin approval
+    //    startWithdrawal), the row is merely parked for admin approval
     //    instead of being sent to the gateway, and the money stays out of the
     //    balance until a refund (admin deny) puts it back. So a held payout
     //    consumes the customer's daily blast radius exactly like a submitted
@@ -3149,7 +3180,7 @@ class PacksModuleService extends MedusaService({
     //    created_at) and (customer_id) partial indexes this scan uses.
     //
     //    The just-created row is EXCLUDED by merchant_transaction_id:
-    //    globepay-withdrawal.ts writes it with its final status (`pending` or
+    //    gateway-withdrawal.ts writes it with its final status (`pending` or
     //    `held`) BEFORE calling this method (the callback echoes only
     //    MerchantTransactionId, so that row is the only way back to the
     //    customer), so an unfiltered sum would count this very attempt
@@ -3169,12 +3200,12 @@ class PacksModuleService extends MedusaService({
     // ignored.
     const capCents =
       nonNegativeIntFromEnv(
-        'GLOBEPAY_WD_DAILY_MAX_RM',
-        GLOBEPAY_WD_DAILY_MAX_RM_DEFAULT,
+        gatewayEnvName('GATEWAY_WD_DAILY_MAX_RM'),
+        GATEWAY_WD_DAILY_MAX_RM_DEFAULT,
       ) * 100;
     const capRows = await em.execute<{ sum_cents: string | null }[]>(
       'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS sum_cents ' +
-        'FROM globepay_withdrawal ' +
+        'FROM gateway_withdrawal ' +
         'WHERE customer_id = ? AND deleted_at IS NULL ' +
         "AND status IN ('pending', 'settled', 'held') " +
         "AND created_at > now() - interval '24 hours' " +
@@ -3225,55 +3256,128 @@ class PacksModuleService extends MedusaService({
   }
 
   /**
-   * ATOMIC STATUS CLAIM on one globepay_withdrawal row — the mutex behind the
+   * ATOMIC STATUS CLAIM on one gateway_withdrawal row — the mutex behind the
    * admin approve/deny routes (plan 094).
    *
-   * ONE conditional UPDATE, and that is the whole point: Postgres re-evaluates
-   * the predicate against committed state AFTER the row lock is released, so
-   * of two concurrent claims exactly one matches a row and the other matches
-   * none. `RETURNING id` is that answer. `true` means THIS caller moved the
-   * row and owns whatever follows it (a gateway submit, a refund); `false`
-   * means someone else already did, and the caller must not act.
+   * ONE conditional claim (claim.ts carries the full argument): `true` means
+   * THIS caller moved the row and owns whatever follows it (a gateway submit,
+   * a refund); `false` means someone else already did, and the caller must not
+   * act.
    *
-   * Do NOT reimplement this with `updateGlobePayWithdrawals({ selector, data
+   * Do NOT reimplement this with `updateGatewayWithdrawals({ selector, data
    * })`. It type-checks and hands back an array, so `length === 0` reads like
    * the same guard, but the generated service resolves the selector with a
    * find-then-write and takes no row lock: two concurrent approves — a
    * double-clicked button is the realistic trigger — both read 'held', both
    * see one row, and both submit. That is a duplicate payout to a real bank
-   * account. Raw SQL for the same reason the rolling-24h cap above uses it:
-   * the module-service layer has no conditional-write primitive.
+   * account.
    */
   @InjectTransactionManager()
-  async claimGlobePayWithdrawalStatus(
+  async claimWithdrawalStatus(
     input: {
       id: string;
       /** Statuses the row may be claimed FROM. A row in any other status is
        *  left untouched and the claim answers false. */
       from: readonly WithdrawalStatus[];
       to: WithdrawalStatus;
+      /** Plain columns written BY THE CLAIM ITSELF, so the settlement facts
+       *  land in the same statement that decides the winner and a loser
+       *  writes none of them. */
+      set?: Record<string, unknown>;
+      /** The bigNumber pair — see SettlementMirror. Written only when the
+       *  claim was won. */
+      money?: SettlementMirror;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<boolean> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    // One placeholder per accepted status. The list is ours (never a request
-    // value) and it stays BOUND rather than interpolated regardless.
-    const accepted = input.from.map(() => '?').join(', ');
-    const rows = await em.execute<{ id: string }[]>(
-      'UPDATE globepay_withdrawal SET status = ?, updated_at = now() ' +
-        `WHERE id = ? AND status IN (${accepted}) AND deleted_at IS NULL ` +
-        'RETURNING id',
-      [input.to, input.id, ...input.from],
-    );
+    const rows = await claimRows(em, {
+      table: 'gateway_withdrawal',
+      ids: [input.id],
+      // One bound placeholder per accepted status — the list is ours (never a
+      // request value) and it stays bound rather than interpolated regardless.
+      where: { status: input.from },
+      set: { ...(input.set ?? {}), status: input.to },
+    });
+    if (rows.length === 1) {
+      await this.writeSettlementMirror(
+        'gateway_withdrawal',
+        input.id,
+        input.money,
+        sharedContext,
+      );
+    }
     return rows.length === 1;
   }
 
   /**
+   * ATOMIC STATUS CLAIM on one gateway_deposit row — the deposit sibling of
+   * claimWithdrawalStatus, and every word of that method's warning
+   * applies here: `updateGatewayDeposits({ selector: { id, status }, … })`
+   * type-checks, hands back an array, and reads like the same guard, but the
+   * generated service resolves the selector with a find-then-write that takes
+   * no row lock. On this table the loser of that race is a second top-up
+   * credited against one payment.
+   *
+   * `true` means THIS caller moved the row and owns what follows (the feed
+   * post); `false` means a callback and the reconcile sweep raced and the
+   * other one won.
+   */
+  @InjectTransactionManager()
+  async claimDepositStatus(
+    input: {
+      id: string;
+      /** Statuses the row may be claimed FROM. Callers pass the status they
+       *  READ, not a literal 'pending': the callback route's recovery branch
+       *  and the sweep's second scan tier both settle an 'expired' row. */
+      from: readonly DepositStatus[];
+      to: DepositStatus;
+      set?: Record<string, unknown>;
+      money?: SettlementMirror;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const rows = await claimRows(em, {
+      table: 'gateway_deposit',
+      ids: [input.id],
+      where: { status: input.from },
+      set: { ...(input.set ?? {}), status: input.to },
+    });
+    if (rows.length === 1) {
+      await this.writeSettlementMirror(
+        'gateway_deposit',
+        input.id,
+        input.money,
+        sharedContext,
+      );
+    }
+    return rows.length === 1;
+  }
+
+  /** The ORM half of a settle claim — see SettlementMirror for why the two
+   *  bigNumber columns cannot ride the raw statement. Runs on the claim's own
+   *  transaction, and only after it was won, so a loser leaves no trace. */
+  private async writeSettlementMirror(
+    table: 'gateway_deposit' | 'gateway_withdrawal',
+    id: string,
+    money: SettlementMirror | undefined,
+    sharedContext: Context,
+  ): Promise<void> {
+    if (!money || Object.keys(money).length === 0) return;
+    if (table === 'gateway_deposit') {
+      await this.updateGatewayDeposits([{ id, ...money }], sharedContext);
+      return;
+    }
+    await this.updateGatewayWithdrawals([{ id, ...money }], sharedContext);
+  }
+
+  /**
    * The admin approve/deny claim, SERIALIZED AGAINST THE DEBIT — the whole
-   * reason this exists on top of claimGlobePayWithdrawalStatus (plan 094
+   * reason this exists on top of claimWithdrawalStatus (plan 094
    * review fix, CodeRabbit).
    *
-   * THE WINDOW. startGlobePayWithdrawal commits the withdrawal row at step 1
+   * THE WINDOW. startWithdrawal commits the withdrawal row at step 1
    * and debits at step 2, so a committed 'held' row with no debit yet is a
    * normal, expected state — not only a crash. An admin acting inside that
    * window sees "no debit" and cannot tell it from "no debit EVER": close the
@@ -3282,7 +3386,7 @@ class PacksModuleService extends MedusaService({
    * never revisits a 'held' or 'failed' row.
    *
    * WHY NOT A TIMER. This used to be an elapsed-time gate
-   * (GLOBEPAY_WD_HELD_DEBIT_GRACE_MS): wait 60s and a still-running debit was
+   * (GATEWAY_WD_HELD_DEBIT_GRACE_MS): wait 60s and a still-running debit was
    * declared impossible, on the grounds that
    * idle_in_transaction_session_timeout would have killed it. That reasoning
    * was FALSE. That timeout only fires on a session idle BETWEEN statements;
@@ -3308,7 +3412,7 @@ class PacksModuleService extends MedusaService({
    * @returns `debited` — whether a debit exists for this payout, decided
    * under the lock, so a caller may act on `false` as "no debit will ever
    * land". `claimed` — whether THIS caller moved the row (see
-   * claimGlobePayWithdrawalStatus).
+   * claimWithdrawalStatus).
    */
   @InjectTransactionManager()
   async claimWithdrawalAgainstDebit(
@@ -3345,7 +3449,7 @@ class PacksModuleService extends MedusaService({
 
     // The try spans the WHOLE locked section, not just the advisory lock.
     // SET LOCAL applies to every statement left in this transaction, and the
-    // claim's `UPDATE … RETURNING id` takes a ROW lock that can time out too
+    // claim's conditional UPDATE takes a ROW lock that can time out too
     // — wrapping only the acquisition would let that one reach the operator
     // as a raw `canceling statement due to lock timeout`, which is exactly
     // what the translation below exists to prevent, one statement later.
@@ -3376,7 +3480,7 @@ class PacksModuleService extends MedusaService({
       // carries a transactionManager instead of opening a second transaction —
       // if it did open one, the claim would land outside the lock and the whole
       // pact above would silently lapse.
-      const claimed = await this.claimGlobePayWithdrawalStatus(
+      const claimed = await this.claimWithdrawalStatus(
         { id: input.id, from: input.from, to: debited ? input.to : 'failed' },
         sharedContext,
       );
@@ -4164,18 +4268,16 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'customer',
-          entity_id: input.customerId,
-          action: 'freeze',
-          before,
-          after: { frozen: true, cause: 'manual' },
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: 'freeze',
+        before,
+        after: { frozen: true, cause: 'manual' },
+        reason: input.reason,
+      },
       sharedContext,
     );
     return { frozen: true };
@@ -4224,18 +4326,16 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'customer',
-          entity_id: input.customerId,
-          action: input.disabled ? 'disable' : 'enable',
-          before: { disabled: existing?.disabled ?? false },
-          after: { disabled: input.disabled },
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: input.disabled ? 'disable' : 'enable',
+        before: { disabled: existing?.disabled ?? false },
+        after: { disabled: input.disabled },
+        reason: input.reason,
+      },
       sharedContext,
     );
     return { disabled: input.disabled };
@@ -4342,14 +4442,13 @@ class PacksModuleService extends MedusaService({
    * ATOMIC ONE-SHOT CLAIM of the free welcome pack — answers `true` to exactly
    * one caller, and `false` to every other.
    *
-   * ONE conditional UPDATE, for the same reason as
-   * claimGlobePayWithdrawalStatus: Postgres re-evaluates the predicate against
-   * committed state AFTER the row lock is released, so of two concurrent
-   * claims — a double-tapped "Open free pack" is the realistic trigger —
-   * exactly one matches a row. A read-then-write (list the state, check
-   * free_pack_claimed_at, then update) type-checks and reads like the same
-   * guard, but takes no row lock: both callers see NULL and both open a free
-   * pack. `true` means THIS caller owns the free open that follows.
+   * ONE conditional claim (see claim.ts), for the same reason as
+   * claimWithdrawalStatus: of two concurrent claims — a double-tapped
+   * "Open free pack" is the realistic trigger — exactly one matches a row. A
+   * read-then-write (list the state, check free_pack_claimed_at, then update)
+   * type-checks and reads like the same guard, but takes no row lock: both
+   * callers see NULL and both open a free pack. `true` means THIS caller owns
+   * the free open that follows.
    *
    * No row is lazily created here: an unstamped account has no
    * free_pack_available_at, so the WHERE matches nothing and the claim is
@@ -4361,15 +4460,16 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<boolean> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    const rows = await em.execute<{ id: string }[]>(
-      'UPDATE customer_account_state ' +
-        'SET free_pack_claimed_at = now(), updated_at = now() ' +
-        'WHERE customer_id = ? AND free_pack_available_at IS NOT NULL ' +
-        'AND free_pack_claimed_at IS NULL AND deleted_at IS NULL ' +
-        'RETURNING id',
-      [customerId],
-    );
-    return rows.length > 0;
+    return claimOne(em, {
+      table: 'customer_account_state',
+      ids: [customerId],
+      idColumn: 'customer_id',
+      where: {
+        free_pack_available_at: NOT_NULL,
+        free_pack_claimed_at: null,
+      },
+      set: { free_pack_claimed_at: NOW },
+    });
   }
 
   // Compensation for a free open that failed after the claim was won: hand the
@@ -4520,24 +4620,22 @@ class PacksModuleService extends MedusaService({
       const digits = (n ?? '').replace(/\D/g, '');
       return digits.length > 4 ? digits.slice(-4) : null;
     };
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'customer',
-          entity_id: input.customerId,
-          action: 'edit',
-          before: {
-            bank_name: existing?.bank_name ?? null,
-            account_last4: last4(existing?.bank_account_number),
-          },
-          after: {
-            bank_name: input.bankName,
-            account_last4: last4(input.bankAccountNumber),
-          },
-          reason: 'payout details updated',
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: 'edit',
+        before: {
+          bank_name: existing?.bank_name ?? null,
+          account_last4: last4(existing?.bank_account_number),
         },
-      ],
+        after: {
+          bank_name: input.bankName,
+          account_last4: last4(input.bankAccountNumber),
+        },
+        reason: 'payout details updated',
+      },
       sharedContext,
     );
     return data;
@@ -4545,7 +4643,7 @@ class PacksModuleService extends MedusaService({
 
   // One customer's saved payout destinations, unlocked.
   //
-  // Exists for ONE caller: globepay-withdrawal.ts's pre-row destination
+  // Exists for ONE caller: gateway-withdrawal.ts's pre-row destination
   // precheck, which has no transaction of its own. The decision that matters
   // does not come through here — withdrawForCashout calls loadSavedBankAccounts
   // directly on its own locked transaction manager, so this method cannot be
@@ -4599,7 +4697,7 @@ class PacksModuleService extends MedusaService({
       'SELECT customer_id, bank_code, account_number, ' +
         '  MIN(account_holder_name) AS account_holder_name, ' +
         '  MIN(created_at) AS first_settled_at ' +
-        'FROM globepay_withdrawal ' +
+        'FROM gateway_withdrawal ' +
         "WHERE status = 'settled' AND deleted_at IS NULL " +
         'GROUP BY customer_id, bank_code, account_number ' +
         'ORDER BY customer_id, first_settled_at',
@@ -4903,21 +5001,19 @@ class PacksModuleService extends MedusaService({
       );
     }
 
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'fx',
-          entity_id: 'USD_MYR',
-          action: 'edit_fx_rate',
-          before,
-          after: {
-            manual_override: input.manualOverride,
-            manual_rate: input.manualRate,
-          },
-          reason: input.reason,
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'fx',
+        entity_id: 'USD_MYR',
+        action: 'edit_fx_rate',
+        before,
+        after: {
+          manual_override: input.manualOverride,
+          manual_rate: input.manualRate,
         },
-      ],
+        reason: input.reason,
+      },
       sharedContext,
     );
 
@@ -4960,18 +5056,16 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'customer',
-          entity_id: input.customerId,
-          action: 'unfreeze',
-          before: existing ? { frozen: existing.frozen } : null,
-          after: { frozen: false },
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: 'unfreeze',
+        before: existing ? { frozen: existing.frozen } : null,
+        after: { frozen: false },
+        reason: input.reason,
+      },
       sharedContext,
     );
     return { frozen: false };
@@ -5286,7 +5380,7 @@ class PacksModuleService extends MedusaService({
     // FIRST, because it is the cheapest check and the most absolute: a freeze is
     // an active hold, and deletion would destroy the very evidence it preserves
     // (the purge HARD-deletes player_payout_details — bank name, full account
-    // number, holder name — and blanks globepay_withdrawal.account_holder_name).
+    // number, holder name — and blanks gateway_withdrawal.account_holder_name).
     //
     // None of the checks below catch it. `frozen` is ORTHOGONAL to `disabled`,
     // so no store-side guard rejects a frozen session, and rawLedgerBalanceCents
@@ -5317,7 +5411,7 @@ class PacksModuleService extends MedusaService({
       };
     }
 
-    const [withdrawal] = await this.listGlobePayWithdrawals(
+    const [withdrawal] = await this.listGatewayWithdrawals(
       { customer_id: customerId, status: ['pending', 'held'] },
       { take: 1 },
       sharedContext,
@@ -5339,7 +5433,7 @@ class PacksModuleService extends MedusaService({
     // failure it prevents is concrete — the transfer doesn't land, the row
     // expires, the customer deletes at balance 0, the transfer arrives, and
     // the sweep credits an ownerless account.
-    const [deposit] = await this.listGlobePayDeposits(
+    const [deposit] = await this.listGatewayDeposits(
       { customer_id: customerId, status: ['pending', 'expired'] },
       { take: 1 },
       sharedContext,
@@ -5445,7 +5539,7 @@ class PacksModuleService extends MedusaService({
   // partial failure recoverable.
   //
   // What is deliberately NOT touched: credit_transaction, ledger_entry,
-  // globepay_deposit, pull and vip_member_state. Those are the business books.
+  // gateway_deposit, pull and vip_member_state. Those are the business books.
   // They carry only a customer_id that no longer resolves to a person, so the
   // rows are already anonymous by construction.
   @InjectTransactionManager()
@@ -5474,7 +5568,7 @@ class PacksModuleService extends MedusaService({
     // number is kept for the same reason setPayoutDetails keeps it in its audit
     // row — a same-bank redirect is otherwise indistinguishable from a no-op.
     await em.execute(
-      `update "globepay_withdrawal"
+      `update "gateway_withdrawal"
           set "account_number" = right("account_number", 4),
               "account_holder_name" = ''
         where "customer_id" = ?`,
@@ -5564,18 +5658,16 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     if (!existingAudit) {
-      await this.createAdminActionAudits(
-        [
-          {
-            admin_id: customerId,
-            entity_type: 'customer',
-            entity_id: customerId,
-            action: 'delete_account',
-            before: { deleted: false },
-            after: { deleted: true },
-            reason: 'Customer deleted their own account.',
-          },
-        ],
+      await this.audit(
+        {
+          admin_id: customerId,
+          entity_type: 'customer',
+          entity_id: customerId,
+          action: 'delete_account',
+          before: { deleted: false },
+          after: { deleted: true },
+          reason: 'Customer deleted their own account.',
+        },
         sharedContext,
       );
     }
@@ -6113,9 +6205,9 @@ class PacksModuleService extends MedusaService({
     }));
   }
 
-  // Count-then-insert for a GlobePay deposit, serialized per customer.
+  // Count-then-insert for a gateway deposit, serialized per customer.
   //
-  // GLOBEPAY_MAX_RECENT_PENDING_PER_CUSTOMER used to be enforced by counting
+  // GATEWAY_MAX_RECENT_PENDING_PER_CUSTOMER used to be enforced by counting
   // pending rows and then inserting, on separate connections: N concurrent
   // submits could each read N−1, all pass, and all insert, so the cap was not
   // a cap (#429). The count and the insert now share ONE transaction behind a
@@ -6125,7 +6217,7 @@ class PacksModuleService extends MedusaService({
   // runs on a different connection and the lock is decoration.
   //
   // Returns null — not a throw — when the cap is reached. The customer-facing
-  // sentence belongs with the policy in globepay-deposit.ts; the lock has no
+  // sentence belongs with the policy in gateway-deposit.ts; the lock has no
   // opinion about wording. The gateway call deliberately stays OUTSIDE this
   // transaction: holding an advisory lock across a third-party HTTP timeout
   // would be worse than the race being fixed.
@@ -6138,7 +6230,7 @@ class PacksModuleService extends MedusaService({
   // commit and the cap race (#429) would silently reopen. Do not compose this
   // method into a context carrying a stricter isolation level.
   @InjectTransactionManager()
-  async createGlobePayDepositCapped(
+  async createDepositCapped(
     input: {
       data: {
         merchant_transaction_id: string;
@@ -6146,7 +6238,7 @@ class PacksModuleService extends MedusaService({
         amount_requested: number;
         payment_method_code: string;
         status: 'pending';
-        /** Which gateway the row is created under; column defaults to GlobePay. */
+        /** Which gateway the row is created under; the column default is TGPay. */
         gateway?: string;
       };
       maxRecentPending: number;
@@ -6156,9 +6248,9 @@ class PacksModuleService extends MedusaService({
   ): Promise<{ id: string } | null> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-      `globepay-deposit:${input.data.customer_id}`,
+      `gateway-deposit:${input.data.customer_id}`,
     ]);
-    const [, recentPending] = await this.listAndCountGlobePayDeposits(
+    const [, recentPending] = await this.listAndCountGatewayDeposits(
       {
         customer_id: input.data.customer_id,
         status: 'pending',
@@ -6168,18 +6260,15 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     if (recentPending >= input.maxRecentPending) return null;
-    const [row] = await this.createGlobePayDeposits(
-      [input.data],
-      sharedContext,
-    );
+    const [row] = await this.createGatewayDeposits([input.data], sharedContext);
     return { id: row.id };
   }
 
-  // The three grouped result sets behind /admin/globepay/settlement, one DB
+  // The three grouped result sets behind /admin/payments/settlement, one DB
   // round-trip each (audit 2026-08-17 B4/B5): settled gateway rows bucketed by
   // MYT calendar period, and the credit ledger's topup/cashout sums bucketed
   // the same way so the two records of the same money can be compared at all.
-  // The merge and the fee/delta arithmetic live in globepay-settlement.ts
+  // The merge and the fee/delta arithmetic live in gateway-settlement.ts
   // (pure, unit-tested) — this method only owns the SQL, mirroring the
   // ledgerReasonTotals / economy.ts split.
   //
@@ -6199,12 +6288,12 @@ class PacksModuleService extends MedusaService({
   // summed over whatever amount_settled rows exist, which SUM already skips
   // silently for NULL. Either way, the excluded rows get their own FILTER and
   // are counted out loud instead of being left to deflate the figure they
-  // were skipped from — see globepay-settlement.ts's header for the full
+  // were skipped from — see gateway-settlement.ts's header for the full
   // rule.
   /**
    * All-time gateway money totals from OUR rows, for the audit page to set
    * beside the gateway's live wallet balances (plan 130). Same NULL rule as
-   * globepaySettlementRows: a NULL net is counted, not zeroed.
+   * settlementRows: a NULL net is counted, not zeroed.
    */
   @InjectManager()
   async gatewayAuditTotals(
@@ -6245,7 +6334,7 @@ class PacksModuleService extends MedusaService({
               COALESCE(SUM(ROUND(amount_settled * 100)), 0)::bigint AS gross_cents,
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
               COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
-         FROM globepay_deposit
+         FROM gateway_deposit
         WHERE deleted_at IS NULL AND status = 'settled' AND gateway = ?`,
       [gateway],
     );
@@ -6254,7 +6343,7 @@ class PacksModuleService extends MedusaService({
               COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS gross_cents,
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
               COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
-         FROM globepay_withdrawal
+         FROM gateway_withdrawal
         WHERE deleted_at IS NULL AND status = 'settled' AND gateway = ?`,
       [gateway],
     );
@@ -6263,11 +6352,11 @@ class PacksModuleService extends MedusaService({
     const [audit] = await em.execute<
       { findings: string; last: string | null }[]
     >(
-      `SELECT (SELECT COUNT(*) FROM globepay_deposit WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND gateway = ?)
-            + (SELECT COUNT(*) FROM globepay_withdrawal WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND gateway = ?) AS findings,
+      `SELECT (SELECT COUNT(*) FROM gateway_deposit WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND gateway = ?)
+            + (SELECT COUNT(*) FROM gateway_withdrawal WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND gateway = ?) AS findings,
               GREATEST(
-                (SELECT MAX(audited_at) FROM globepay_deposit WHERE deleted_at IS NULL AND gateway = ?),
-                (SELECT MAX(audited_at) FROM globepay_withdrawal WHERE deleted_at IS NULL AND gateway = ?)
+                (SELECT MAX(audited_at) FROM gateway_deposit WHERE deleted_at IS NULL AND gateway = ?),
+                (SELECT MAX(audited_at) FROM gateway_withdrawal WHERE deleted_at IS NULL AND gateway = ?)
               ) AS last`,
       [gateway, gateway, gateway, gateway],
     );
@@ -6280,7 +6369,7 @@ class PacksModuleService extends MedusaService({
   }
 
   @InjectManager()
-  async globepaySettlementRows(
+  async settlementRows(
     granularity: 'week' | 'month',
     since: Date,
     @MedusaContext() sharedContext: Context = {},
@@ -6290,7 +6379,7 @@ class PacksModuleService extends MedusaService({
     ledger: LedgerPeriodRow[];
   }> {
     if (granularity !== 'week' && granularity !== 'month') {
-      throw new Error(`globepaySettlementRows: bad granularity ${granularity}`);
+      throw new Error(`settlementRows: bad granularity ${granularity}`);
     }
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
@@ -6319,7 +6408,7 @@ class PacksModuleService extends MedusaService({
     // GROSS can also be NULL on a settled deposit: a hand-settled row is
     // written by an operator outside every writer that sets amount_settled
     // (money-path-accuracy-audit-2026-08-17's "operational rule" paragraph).
-    // The quarantine branch in globepay-reconcile.ts — over-ceiling
+    // The quarantine branch in gateway-reconcile.ts — over-ceiling
     // callbacks/requeries — is the one flow that reaches manual settlement
     // today, and it leaves the row `settled` for a human with nothing written
     // back; there is no pre-emptive guard. SUM already skips those rows
@@ -6333,7 +6422,7 @@ class PacksModuleService extends MedusaService({
               COALESCE(SUM(ROUND(amount_settled * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS gross_with_net_cents,
               COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net,
               COUNT(*) FILTER (WHERE amount_settled IS NULL)::bigint AS missing_gross
-         FROM globepay_deposit
+         FROM gateway_deposit
         WHERE deleted_at IS NULL AND status = 'settled'
           AND settled_at IS NOT NULL AND settled_at >= ?::timestamptz
         GROUP BY 1`,
@@ -6358,7 +6447,7 @@ class PacksModuleService extends MedusaService({
               COALESCE(SUM(ROUND(COALESCE(amount_settled, amount) * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS gross_with_net_cents,
               COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net,
               0::bigint AS missing_gross  -- withdrawals gross on \`amount\`, never NULL
-         FROM globepay_withdrawal
+         FROM gateway_withdrawal
         WHERE deleted_at IS NULL AND status = 'settled'
           AND settled_at IS NOT NULL AND settled_at >= ?::timestamptz
         GROUP BY 1`,
@@ -6642,19 +6731,19 @@ class PacksModuleService extends MedusaService({
       );
     }
     if (pull.revealed_at == null) {
-      // First-write-wins under concurrent reveals — ONE conditional UPDATE.
-      // Not `updatePulls({ selector })`: the generated selector-update is a
-      // find-then-write with no WHERE on the write, so two racing calls would
-      // both "win" and Telegram (no dedupe) would post the same hit twice.
-      // Re-read to return whichever value persisted.
+      // First-write-wins under concurrent reveals — ONE conditional claim
+      // (see claim.ts). Not `updatePulls({ selector })`: the generated
+      // selector-update is a find-then-write with no WHERE on the write, so
+      // two racing calls would both "win" and Telegram (no dedupe) would post
+      // the same hit twice. Re-read to return whichever value persisted.
       const em = (sharedContext.transactionManager ??
         sharedContext.manager) as unknown as LedgerSqlManager;
-      const stamped = await em.execute<{ id: string }[]>(
-        'UPDATE pull SET revealed_at = ?, updated_at = NOW() ' +
-          'WHERE id = ? AND revealed_at IS NULL AND deleted_at IS NULL ' +
-          'RETURNING id',
-        [new Date(nowMs), pull.id],
-      );
+      const stamped = await claimOne(em, {
+        table: 'pull',
+        ids: [pull.id],
+        where: { revealed_at: null },
+        set: { revealed_at: new Date(nowMs) },
+      });
       const [fresh] = await this.listPulls(
         { id: pull.id },
         { take: 1 },
@@ -6665,12 +6754,12 @@ class PacksModuleService extends MedusaService({
           fresh.rolled_at,
           fresh.revealed_at,
         ),
-        // The rows the FILTERED update actually touched — empty for the loser
-        // of a race, because its WHERE no longer matched. That is the whole
-        // exactly-once guarantee behind the announcement: Telegram has no
-        // dedupe, so a second caller believing it revealed the pull would mean
-        // the same hit posted twice to a public channel.
-        first_reveal: stamped.length > 0,
+        // Whether the FILTERED update actually touched a row — false for the
+        // loser of a race, because its WHERE no longer matched. That is the
+        // whole exactly-once guarantee behind the announcement: Telegram has
+        // no dedupe, so a second caller believing it revealed the pull would
+        // mean the same hit posted twice to a public channel.
+        first_reveal: stamped,
       };
     }
     return {
@@ -6679,10 +6768,10 @@ class PacksModuleService extends MedusaService({
     };
   }
 
-  // Showcase toggle as ONE conditional UPDATE: stamps only while the pull is
-  // still vaulted and owned by the caller, so a sell/deliver landing between
-  // the route's check and this write loses (0 rows) instead of starring a
-  // sold pull. Same reason as revealPull — `updatePulls({ selector })` is a
+  // Showcase toggle as ONE conditional claim (see claim.ts): stamps only while
+  // the pull is still vaulted and owned by the caller, so a sell/deliver
+  // landing between the route's check and this write loses instead of starring
+  // a sold pull. Same reason as revealPull — `updatePulls({ selector })` is a
   // find-then-write and cannot give this guarantee.
   @InjectManager()
   async setShowcasedIfVaulted(
@@ -6693,13 +6782,12 @@ class PacksModuleService extends MedusaService({
   ): Promise<boolean> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const rows = await em.execute<{ id: string }[]>(
-      'UPDATE pull SET showcased = ?, updated_at = NOW() ' +
-        "WHERE id = ? AND customer_id = ? AND status = 'vaulted' " +
-        'AND deleted_at IS NULL RETURNING id',
-      [showcased, pullId, customerId],
-    );
-    return rows.length > 0;
+    return claimOne(em, {
+      table: 'pull',
+      ids: [pullId],
+      where: { customer_id: customerId, status: 'vaulted' },
+      set: { showcased },
+    });
   }
 
   // Close the instant-buyback window for the caller's OWN pulls — called when
@@ -6737,12 +6825,13 @@ class PacksModuleService extends MedusaService({
   }
 
   // Atomic, guarded pull-status transition — THE seam every vaulted→X flip must
-  // use (buyback, delivery request, deliver/cancel). One conditional UPDATE
-  // (`WHERE status = from`) inside a transaction: if ANY requested pull is not
-  // currently in `from`, the whole batch throws and rolls back — closing the
-  // read-then-unconditional-write race that let one pull be sold back AND
-  // shipped (2026-07-07 audit #1). `set` carries the buyback snapshot columns
-  // so the flip and its money stamp are one atomic statement.
+  // use (buyback, delivery request, deliver/cancel). One conditional claim
+  // (`WHERE status = from`, see claim.ts) inside a transaction: if ANY
+  // requested pull is not currently in `from`, the whole batch throws and
+  // rolls back — closing the read-then-unconditional-write race that let one
+  // pull be sold back AND shipped (2026-07-07 audit #1). `set` carries the
+  // buyback snapshot columns so the flip and its money stamp are one atomic
+  // statement.
   @InjectTransactionManager()
   async transitionPullStatus(
     input: {
@@ -6755,23 +6844,19 @@ class PacksModuleService extends MedusaService({
   ): Promise<void> {
     if (input.ids.length === 0) return;
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    const setCols = ['status = ?', 'updated_at = NOW()'];
-    const params: unknown[] = [input.to];
+    const set: Record<string, unknown> = { status: input.to };
     if (input.set?.buyback_amount !== undefined) {
-      setCols.splice(1, 0, 'buyback_amount = ?');
-      params.push(input.set.buyback_amount);
+      set.buyback_amount = input.set.buyback_amount;
     }
     if (input.set?.buyback_at !== undefined) {
-      setCols.splice(setCols.length - 1, 0, 'buyback_at = ?');
-      params.push(input.set.buyback_at);
+      set.buyback_at = input.set.buyback_at;
     }
-    const placeholders = input.ids.map(() => '?').join(', ');
-    const rows = await em.execute<{ id: string }[]>(
-      `UPDATE pull SET ${setCols.join(', ')} ` +
-        `WHERE id IN (${placeholders}) AND status = ? AND deleted_at IS NULL ` +
-        'RETURNING id',
-      [...params, ...input.ids, input.from],
-    );
+    const rows = await claimRows(em, {
+      table: 'pull',
+      ids: input.ids,
+      where: { status: input.from },
+      set,
+    });
     if (rows.length !== input.ids.length) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
@@ -6803,6 +6888,20 @@ class PacksModuleService extends MedusaService({
       proofImages?: string[];
       /** Every pull the order covers — flipped on completed/canceled. */
       pullIds: string[];
+      /**
+       * Present for an ADMIN-driven move (the Manage modal and the bulk bar);
+       * absent for the customer's own cancel, which has no admin actor. The
+       * row is written from inside this transaction so it can never outlive a
+       * rolled-back transition, nor be lost after a committed one.
+       * `action` is a two-value union on purpose: the model's enum has no
+       * 'status' verb (widening it is a migration), and a third caller should
+       * have to think rather than invent one.
+       */
+      audit?: {
+        adminId: string;
+        action: 'edit' | 'bulk_status';
+        reason: string;
+      };
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ status: DeliveryStatus }> {
@@ -6972,6 +7071,28 @@ class PacksModuleService extends MedusaService({
         );
       }
     }
+
+    // The audit row for an admin-driven move, LAST and inside this
+    // transaction. `before` is the UNDER-LOCK read, not whatever the caller
+    // saw before it got here — the two are the same value except in exactly
+    // the race this lock exists for, and there the locked read is the true
+    // prior status. Only ever reached on a real change: a same-status update
+    // never reaches this method (the workflow step short-circuits it), so no
+    // row can be written whose before and after are identical.
+    if (input.audit) {
+      await this.audit(
+        {
+          admin_id: input.audit.adminId,
+          entity_type: 'delivery_order',
+          entity_id: input.orderId,
+          action: input.audit.action,
+          before: { status: order.status },
+          after: { status: input.to },
+          reason: input.audit.reason,
+        },
+        sharedContext,
+      );
+    }
     return { status: input.to };
   }
 
@@ -7074,18 +7195,16 @@ class PacksModuleService extends MedusaService({
       },
       sharedContext,
     );
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'credit',
-          entity_id: id,
-          action: 'adjust_credit',
-          before: { balance: Number((balance - input.amount).toFixed(2)) },
-          after: { balance },
-          reason: input.note,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'credit',
+        entity_id: id,
+        action: 'adjust_credit',
+        before: { balance: Number((balance - input.amount).toFixed(2)) },
+        after: { balance },
+        reason: input.note,
+      },
       sharedContext,
     );
     await this.recordLedgerEntry(
@@ -7421,18 +7540,16 @@ class PacksModuleService extends MedusaService({
     const after: RewardsSettingsView = {
       withdrawals_per_day: data.withdrawals_per_day,
     };
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'rewards_settings',
-          entity_id: row?.id ?? 'singleton',
-          action: 'edit_rewards_settings',
-          before,
-          after,
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'rewards_settings',
+        entity_id: row?.id ?? 'singleton',
+        action: 'edit_rewards_settings',
+        before,
+        after,
+        reason: input.reason,
+      },
       sharedContext,
     );
     return after;
@@ -8056,20 +8173,18 @@ class PacksModuleService extends MedusaService({
     }
 
     const after = input.levels.map((l) => ({ ...l }));
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'vip_levels',
-          entity_id: 'singleton',
-          action: 'replace',
-          // before/after are `json` columns typed Record<string, unknown> |
-          // null, not arrays — wrap the ladder snapshot under a key.
-          before: { levels: before },
-          after: { levels: after },
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'vip_levels',
+        entity_id: 'singleton',
+        action: 'replace',
+        // before/after are `json` columns typed Record<string, unknown> |
+        // null, not arrays — wrap the ladder snapshot under a key.
+        before: { levels: before },
+        after: { levels: after },
+        reason: input.reason,
+      },
       sharedContext,
     );
     return after;
@@ -8158,21 +8273,19 @@ class PacksModuleService extends MedusaService({
     }
 
     const after = input.stages.map((s) => ({ ...s }));
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'challenge_stages',
-          entity_id: 'singleton',
-          action: 'replace',
-          // before/after are `json` columns typed Record<string, unknown> |
-          // null, not arrays — wrap the stage-list snapshot under a key (same
-          // discipline as saveVipLevels' { levels: ... } wrap).
-          before: { stages: before },
-          after: { stages: after },
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'challenge_stages',
+        entity_id: 'singleton',
+        action: 'replace',
+        // before/after are `json` columns typed Record<string, unknown> |
+        // null, not arrays — wrap the stage-list snapshot under a key (same
+        // discipline as saveVipLevels' { levels: ... } wrap).
+        before: { stages: before },
+        after: { stages: after },
+        reason: input.reason,
+      },
       sharedContext,
     );
     return after;
@@ -8314,6 +8427,60 @@ class PacksModuleService extends MedusaService({
   }
 
   /**
+   * Queue a new edition — the row and its audit row in ONE transaction, the
+   * create twin of editChallengeSchedule. No lock and no pre-read: an insert
+   * has nothing to conflict with, so the only thing this method adds over the
+   * generated create is that the audit cannot be lost after a committed row
+   * (nor survive a rolled-back one).
+   *
+   * 'create', not a new 'schedule' verb: the action enum is a DB CHECK, so
+   * widening it costs a migration to say nothing the entity_id + payload do
+   * not already say.
+   */
+  @InjectTransactionManager()
+  async createChallengeSchedule(
+    input: {
+      startsAt: Date;
+      label: string | null;
+      stages: ChallengeStageInput[];
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ id: string }> {
+    const [created] = await this.createChallengeSchedules(
+      [
+        {
+          starts_at: input.startsAt,
+          label: input.label,
+          // model.json() generates a Record<string, unknown> create input — a
+          // plain array has no string index signature, so it needs the same
+          // double-cast saveChallengeStages uses for rank_rewards.
+          stages: input.stages as unknown as Record<string, unknown>,
+        },
+      ],
+      sharedContext,
+    );
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'challenge_stages',
+        entity_id: created.id,
+        action: 'create',
+        before: null,
+        after: {
+          starts_at: input.startsAt.toISOString(),
+          label: input.label,
+          stages: input.stages,
+        },
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+    return { id: created.id };
+  }
+
+  /**
    * Edit a QUEUED edition in place — new start, name, prize ladder — with the
    * conflict check, the write, and its audit row in ONE transaction.
    *
@@ -8383,26 +8550,24 @@ class PacksModuleService extends MedusaService({
       },
       sharedContext,
     );
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'challenge_stages',
-          entity_id: input.id,
-          action: 'edit',
-          before: {
-            starts_at: new Date(row.starts_at).toISOString(),
-            label: row.label,
-            stages: row.stages,
-          },
-          after: {
-            starts_at: input.startsAt.toISOString(),
-            label: input.label,
-            stages: input.stages,
-          },
-          reason: input.reason,
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'challenge_stages',
+        entity_id: input.id,
+        action: 'edit',
+        before: {
+          starts_at: new Date(row.starts_at).toISOString(),
+          label: row.label,
+          stages: row.stages,
         },
-      ],
+        after: {
+          starts_at: input.startsAt.toISOString(),
+          label: input.label,
+          stages: input.stages,
+        },
+        reason: input.reason,
+      },
       sharedContext,
     );
   }
@@ -9409,21 +9574,19 @@ class PacksModuleService extends MedusaService({
         sharedContext,
       );
     }
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'challenge_settings',
-          entity_id: row?.id ?? 'global',
-          action: 'edit',
-          // The `before`/`after` audit json columns type as
-          // Record<string, unknown> | null, and ChallengeSettingsView (a named
-          // interface) doesn't structurally satisfy that directly.
-          before: before as unknown as Record<string, unknown>,
-          after: after as unknown as Record<string, unknown>,
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'challenge_settings',
+        entity_id: row?.id ?? 'global',
+        action: 'edit',
+        // The `before`/`after` audit json columns type as
+        // Record<string, unknown> | null, and ChallengeSettingsView (a named
+        // interface) doesn't structurally satisfy that directly.
+        before: before as unknown as Record<string, unknown>,
+        after: after as unknown as Record<string, unknown>,
+        reason: input.reason,
+      },
       sharedContext,
     );
     return after;
@@ -9468,18 +9631,16 @@ class PacksModuleService extends MedusaService({
     const after: TierSettingsView = {
       ranges: normalizeTierRanges(full),
     };
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: input.adminId,
-          entity_type: 'tier_settings',
-          entity_id: row?.id ?? 'global',
-          action: 'edit',
-          before: before as unknown as Record<string, unknown>,
-          after: after as unknown as Record<string, unknown>,
-          reason: input.reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'tier_settings',
+        entity_id: row?.id ?? 'global',
+        action: 'edit',
+        before: before as unknown as Record<string, unknown>,
+        after: after as unknown as Record<string, unknown>,
+        reason: input.reason,
+      },
       sharedContext,
     );
     return after;
@@ -9525,18 +9686,16 @@ class PacksModuleService extends MedusaService({
       );
     }
 
-    await this.createAdminActionAudits(
-      [
-        {
-          admin_id: adminId,
-          entity_type: 'voucher_ladder',
-          entity_id: 'singleton',
-          action: 'edit_voucher_ladder',
-          before,
-          after,
-          reason,
-        },
-      ],
+    await this.audit(
+      {
+        admin_id: adminId,
+        entity_type: 'voucher_ladder',
+        entity_id: 'singleton',
+        action: 'edit_voucher_ladder',
+        before,
+        after,
+        reason,
+      },
       sharedContext,
     );
   }
@@ -9742,6 +9901,25 @@ class PacksModuleService extends MedusaService({
         qty: l.qty,
         ref_id: l.id,
       })),
+      sharedContext,
+    );
+
+    // The audit row rides this transaction with the invoice it describes.
+    // admin_id IS agent_user_id: the route derives that field from
+    // req.auth_context.actor_id and it is never client-supplied, so there is
+    // no second actor to pass in.
+    await this.audit(
+      {
+        admin_id: input.agent_user_id,
+        entity_type: 'purchase_invoice',
+        entity_id: invoice.id,
+        action: 'create',
+        before: null,
+        after: { display_no, lines: lines.length },
+        reason: input.reverses_invoice_id
+          ? `reversal of invoice ${input.reverses_invoice_id}`
+          : 'purchase invoice created',
+      },
       sharedContext,
     );
 

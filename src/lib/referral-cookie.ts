@@ -5,9 +5,9 @@
  */
 import 'server-only';
 import { cookies } from 'next/headers';
-import { authedFetch } from '@/lib/authed-fetch';
+import { store } from '@/lib/store';
+import { UncheckedSchema } from '@/lib/data/schemas';
 import { logger } from '@/lib/logger';
-import { getAuthToken } from '@/lib/data/customer';
 import { normalizeReferralCode } from '@/lib/referral-code';
 
 export const REFERRAL_COOKIE = '_polycards_ref';
@@ -49,11 +49,13 @@ export async function bindReferral(code: string | null = null): Promise<void> {
   try {
     const referrerCode = code ?? (await readReferralCookie());
     if (!referrerCode) return;
-    const token = await getAuthToken();
-    if (!token) return;
-    await authedFetch(token, '/store/referral/bind', {
-      method: 'POST',
-      body: { referrer_code: referrerCode },
+    // The bind's answer is ignored — a 2xx IS the answer — so no schema. The
+    // port's default auth: 'required' is the old `if (!token) return`: no
+    // cookie means no request leaves at all, and a failure it DID make is
+    // logged once by the port. The catch below stays for the cookie reads,
+    // which can still throw: a referral hiccup must never fail a signup.
+    await store.post('/store/referral/bind', UncheckedSchema, {
+      referrer_code: referrerCode,
     });
   } catch (error) {
     logger.error('[referral] bind after signup failed:', error);

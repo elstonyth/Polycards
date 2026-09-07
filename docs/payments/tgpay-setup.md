@@ -2,7 +2,7 @@
 
 Status: **LIVE in production since 2026-09-06** (`PAYMENT_GATEWAY=tgpay` on
 the backend, deployment c765231a; the GlobePay365 integration was removed
-the same day — `globepay365-setup.md` is the retired record). Production
+the same day — see git history for the retired record). Production
 keys proven from inside DigitalOcean (`check-tgpay`: keys accepted, MYR
 wallets present). Still pending on TGPay's side at cutover: funding the
 payout wallet (0.00), the settlement bank details, and the 188.114.96.0 /
@@ -51,9 +51,9 @@ found by the `transactionRefNum` stored at create time. Both are at-least-once.
 ## What the code does
 
 - `modules/packs/tgpay-client.ts` — HTTP client, error class (`TgpayError`
-  extends `GlobePayError`, `definite` = parseable 4xx), status mapping, the
+  extends `GatewayError`, `definite` = parseable 4xx), status mapping, the
   SWIFT bank table, callback header check (constant-time).
-- `modules/packs/gateway.ts` — the switch. GlobePay-shaped functions, so the
+- `modules/packs/gateway.ts` — the switch. gateway-neutral functions, so the
   deposit/withdrawal orchestration, reconcile sweeps and admin routes did not
   change. Storefront method codes map `OB`/`FPX` → hosted FPX, `BQR` → hosted
   E-wallet; `DN` is refused (DuitNow QR needs custom checkout).
@@ -61,11 +61,11 @@ found by the `transactionRefNum` stored at create time. Both are at-least-once.
 - `scripts/check-tgpay.ts` — balance preflight; `scripts/tgpay-payout-probe.ts`
   — sandbox-only RM 50 payout to the dummy bank, outside our ledger;
   `scripts/run-gateway-audit.ts` — run the audit sweep once.
-- `jobs/gateway-audit.ts` + `GET /admin/globepay/audit` — the gateway-as-
+- `jobs/gateway-audit.ts` + `GET /admin/payments/audit` — the gateway-as-
   source-of-truth check (plan 130 §additions); findings on the admin
   Settlement page.
 
-Rows still live in `globepay_deposit` / `globepay_withdrawal`; `gateway_status`
+Rows still live in `gateway_deposit` / `gateway_withdrawal`; `gateway_status`
 is `null` for TGPay rows (their statuses are strings, the column is numeric).
 
 ## Sandbox facts (read from the admin 2026-09-05)
@@ -119,9 +119,8 @@ is `null` for TGPay rows (their statuses are strings, the column is numeric).
 An admin setting, not an env var: Settlement page → **Payment gateway**
 (`GET/POST /admin/payments/gateway`, audited). `PAYMENT_GATEWAY` is only the
 boot/fallback value. Set `PAYMENT_CALLBACK_BASE` (the backend's public origin)
-so the notify URLs derive from each gateway's hook paths; without it an
-explicit `GLOBEPAY_*_URL` is honoured only when it already names that
-gateway's hook, and the switch refuses a gateway with no callback URL. Every
+so the notify URLs derive from each gateway's hook paths; without it every
+notify URL is empty and the switch refuses a gateway with no callback URL. Every
 deposit/withdrawal row records its gateway, and the sweeps use the row's.
 
 ## Bank accounts survive a switch
@@ -136,18 +135,38 @@ disabled on the storefront until a gateway that serves it is active.
 
 1. Backend `.env`: the TGPay block (see `.env.template`). Callbacks need a
    public URL — `cloudflared tunnel --url http://localhost:9000` prints one;
-   put it in the two NOTIFY vars. The 1-minute deposit sweep
-   (`jobs/globepay-reconcile.ts`, query by `merchantRefNum`) is the fallback
+   put that public origin in `PAYMENT_CALLBACK_BASE`. The 1-minute deposit sweep
+   (`jobs/deposit-reconcile.ts`, query by `merchantRefNum`) is the fallback
    when a callback cannot reach us.
 2. Storefront `.env.local`: `NEXT_PUBLIC_PAYMENTS_PROVIDER=tgpay`,
    `NEXT_PUBLIC_WITHDRAWALS_ENABLED=true`.
 3. `./node_modules/.bin/medusa exec src/scripts/check-tgpay.ts` from
    `backend/packages/api` — proves keys + base URL.
 4. Top up from the storefront wallet → hosted checkout → sandbox simulator →
-   back to `/wallet`; confirm the `globepay_deposit` row settles and the ledger
+   back to `/wallet`; confirm the `gateway_deposit` row settles and the ledger
    credits once.
-5. Withdraw to the dummy bank → `globepay_withdrawal` row gets their
+5. Withdraw to the dummy bank → `gateway_withdrawal` row gets their
    `transactionRefNum` → payout callback settles or refunds it.
+
+## Gateway table rename deployment
+
+`Migration20260907120000` directly renames `globepay_deposit` and
+`globepay_withdrawal` to `gateway_deposit` and `gateway_withdrawal`. This requires
+a coordinated, quiesced API and worker cutover: old binaries cannot query the
+renamed schema. An ordinary pre-deploy migration with old workers still running
+does not provide compatibility.
+
+1. Prepare matching new API, admin and worker artifacts.
+2. Quiesce affected requests and drain all old writers and jobs. Arrange callback
+   intake handling for the maintenance window operationally.
+3. Run the rename migration using the new artifact, then start the matching new
+   API and workers. Validate before reopening traffic and jobs.
+
+Rollback also requires coordination: quiesce the new API and workers, reverse
+this rename using the artifact containing its down migration, then start the old
+binaries against the restored old table names. Never restart old workers against
+the renamed schema or leave new writers running during the reverse migration.
+This is deployment guidance only; it does not execute a deployment.
 
 ## Verified 2026-09-05
 

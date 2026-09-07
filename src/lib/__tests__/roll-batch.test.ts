@@ -16,25 +16,26 @@ import type { WonCard } from '@/lib/actions/packs';
 // offer, and — the invariant with no other unit expression — that a demo Spin
 // issues ZERO server calls.
 
-const card = (id: string): PackCard => ({
-  id,
-  name: id,
-  image: `/x/${id}.webp`,
+const card = (handle: string): PackCard => ({
+  handle,
+  name: handle,
+  image: `/x/${handle}.webp`,
   slabImage: null,
-  value: 'RM 10.00',
+  priceMyr: 10,
   rarity: 'Common',
+  pokemonDex: null,
+  spriteImage: null,
 });
 
-const won = (id: string, marketPriceMyr: number | null = 20): WonCard => ({
-  id,
-  name: id,
-  image: `/x/${id}.webp`,
-  slab_image: null,
-  value: 'RM 20.00',
+const won = (handle: string, priceMyr: number | null = 20): WonCard => ({
+  handle,
+  name: handle,
+  image: `/x/${handle}.webp`,
+  slabImage: null,
+  priceMyr,
   rarity: 'Rare',
-  pokemon_dex: null,
-  sprite_image: null,
-  marketPriceMyr,
+  pokemonDex: null,
+  spriteImage: null,
 });
 
 /** Spies for all three server routes, so "was anything called" is assertable. */
@@ -167,6 +168,53 @@ describe('rollBatch — demo Spin', () => {
     expect(res.batch.balance).toBeNull();
     expect(res.batch.locked).toBe(false);
     expect(res.batch.mode).toBe('demo');
+  });
+
+  // The demo winner's reel cell is derived from the card NAME, never from its
+  // configured pixel-Pokémon: `winnerFor` reads these two fields, so dropping
+  // them is what picks the name-derived sprite. A paid roll keeps whatever the
+  // backend configured. Spreading the pool card through unchanged (which is
+  // what a "the pool card IS the reveal's card" simplification does) silently
+  // changed the demo reveal's sprite.
+  it('drops the pool card’s sprite fields, where a PAID roll keeps them', async () => {
+    const sprites = { pokemonDex: 25, spriteImage: '/sprites/pikachu.gif' };
+    const configured: PackCard = { ...card('a'), ...sprites };
+
+    const demo = await rollBatch(
+      req({ mode: 'demo', reels: 1, demoPool: [configured] }),
+      deps(),
+    );
+    const paid = await rollBatch(
+      req({ mode: 'paid' }),
+      deps({
+        openBatch: vi.fn(async () => ({
+          ok: true as const,
+          rolls: [
+            {
+              card: { ...won('a'), ...sprites },
+              pullId: 'pull_a',
+              marketValue: 1,
+              buyback: null,
+            },
+          ],
+          price: 10,
+          total: 10,
+          balance: 7,
+        })),
+      }),
+    );
+
+    expect(demo.ok && paid.ok).toBe(true);
+    if (!demo.ok || !paid.ok) return;
+    expect(demo.batch.cards[0]).toMatchObject({
+      pokemonDex: null,
+      spriteImage: null,
+      // Everything else about the pool card survives — the demo slab still
+      // stamps its pool price.
+      priceMyr: 10,
+      name: 'a',
+    });
+    expect(paid.batch.cards[0]).toMatchObject(sprites);
   });
 });
 
@@ -378,7 +426,7 @@ describe('rollBatch — paid open', () => {
     expect(openBatch).toHaveBeenCalledWith('bronze', 2);
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    expect(res.batch.cards.map((c) => c.id)).toEqual(['a', 'b']);
+    expect(res.batch.cards.map((c) => c.handle)).toEqual(['a', 'b']);
     // Quoted offer wins over the flat fallback; a pull-less roll gets none.
     expect(res.batch.offers[0]).toMatchObject({
       percent: 80,

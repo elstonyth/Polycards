@@ -81,14 +81,14 @@ describe('POST /admin/payments/gateway', () => {
 
   it('refuses a gateway whose callbacks could not reach us', async () => {
     delete process.env.PAYMENT_CALLBACK_BASE;
-    process.env.GLOBEPAY_NOTIFY_URL = 'https://old/hooks/globepay/deposit';
+    process.env.GATEWAY_NOTIFY_URL = 'https://old/hooks/x/deposit';
     const h = harness(null);
     h.req.body = { gateway: 'tgpay', reason: 'x' };
     await expect(POST(h.req as never, h.res as never)).rejects.toThrow(
       /callback URL/,
     );
     expect(h.packs.editPaymentGateway).not.toHaveBeenCalled();
-    delete process.env.GLOBEPAY_NOTIFY_URL;
+    delete process.env.GATEWAY_NOTIFY_URL;
   });
 
   it('refuses a gateway with no callback URL in this environment', async () => {

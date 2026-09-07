@@ -4,7 +4,7 @@ import { PACKS_MODULE } from '../modules/packs';
 import type PacksModuleService from '../modules/packs/service';
 import { deleteApexPost, postApexPull } from '../modules/packs/telegram';
 
-// Telegram apex-board pre-flight — the same gap check-globepay.ts closes for
+// Telegram apex-board pre-flight — the same gap tgpay-payout-probe.ts closes for
 // payments. It exercises the ENTIRE integration end to end (odds lookup →
 // rarity gate → source gate → disabled gate → card/pack/customer/FX joins →
 // caption → live Telegram API call) without waiting for someone to actually

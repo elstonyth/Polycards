@@ -24,6 +24,7 @@ import { levelProgressPct } from '@/lib/actions/vip-map';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
 import { rm, rm0 } from '@/lib/format';
 import { SlabImage } from '@/components/SlabImage';
+import { toCardView } from '@/lib/card-view';
 import { LogoutButton, TopUpButton } from './MeActions';
 import { MeHeader } from './MeAppearance';
 import { EquippedFrameProvider } from './equipped-frame';
@@ -246,13 +247,13 @@ export default async function MePage() {
                     className="w-20 shrink-0 transition-opacity hover:opacity-90"
                   >
                     <SlabImage
-                      src={card.image}
-                      slabSrc={card.slab_image}
-                      rarity={card.rarity}
+                      // The showcase strip is the one surface that renders the
+                      // profile WIRE row rather than the mapped view — the
+                      // shared mapper is what turns it into a card view here.
+                      card={toCardView(card)}
                       // Thumbnail-sized slab: the full-size halo is wider than
                       // the slab itself here and would bleed into neighbours.
                       glowScale={0.4}
-                      alt={card.name}
                       sizes="80px"
                       className="w-20"
                     />

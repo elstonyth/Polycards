@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { getRecentPulls, resolveFeedPackSlug } from '@/lib/data/packs';
-import { cached } from '@/lib/ttl-cache';
+import { cachedJson } from '@/lib/ttl-cache';
+import { rm } from '@/lib/format';
 import { isRarity } from '@/lib/packs-format';
 
 // Same-origin endpoint the "Recent Pulls" feeds poll for live updates — a
@@ -13,9 +14,8 @@ export const dynamic = 'force-dynamic';
 // Mirrors the backend route's own 5s window (store/pulls/recent). That one caps
 // the DB work; this one caps what the STOREFRONT pays — the backend hop plus the
 // zod parse and row mapping in getRecentPulls — which is otherwise charged once
-// per poll tick per open tab. The serialized body, not the array, is what gets
-// held: at poll volume, re-stringifying ~6.6 KB per request is the remaining
-// per-request cost once the fetch is gone.
+// per poll tick per open tab. `cachedJson` holds the serialized body rather
+// than the array; the reason it is the string is in ttl-cache.ts.
 //
 // A new pull surfaces up to 5s later than before, on top of the backend's own
 // 5s window. Invisible on a feed whose rows are labelled in whole minutes.
@@ -55,12 +55,19 @@ export async function GET(request: NextRequest) {
   // garbage value collapses to the unfiltered feed instead of minting a key.
   const rarityRaw = request.nextUrl.searchParams.get('rarity') ?? '';
   const rarity = isRarity(rarityRaw) ? rarityRaw : undefined;
-  const body = await cached(
+  return cachedJson(
     `recent-pulls:${pack}:${rarity ?? ''}`,
     CACHE_TTL_MS,
-    async () => JSON.stringify(await getRecentPulls(pack || undefined, rarity)),
+    async () => {
+      const feed = await getRecentPulls(pack || undefined, rarity);
+      return {
+        ...feed,
+        // Keep the legacy label for tabs that predate the numeric CardView.
+        pulls: feed.pulls.map((pull) => ({
+          ...pull,
+          value: pull.priceMyr === null ? '—' : rm(pull.priceMyr),
+        })),
+      };
+    },
   );
-  return new Response(body, {
-    headers: { 'content-type': 'application/json' },
-  });
 }

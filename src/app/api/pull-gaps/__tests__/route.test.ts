@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
-// sdk + logger are mocked; the real getPackCategories/getPullGaps parse path
-// runs, so the key gate and the schema boundary are exercised for real.
-const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
-vi.mock('@/lib/medusa', () => ({ sdk: { client: { fetch: fetchMock } } }));
+// The loaders read through the `Store` port; an in-memory backend seeds them
+// so the real getPackCategories/getPullGaps parse path runs and both the key
+// gate and the schema boundary are exercised. rarity/pack_id now ride the
+// port's `query` option instead of a hand-built querystring — same URL on the
+// wire, so the assertions read `request.query`.
+import { storeShim, backend } from '@/lib/__tests__/store-shim';
+import type { MemoryRoutes } from '@/lib/store-memory';
+
+vi.mock('@/lib/store', () => ({ store: storeShim }));
 vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
@@ -37,19 +42,21 @@ const gapsBody = {
 
 const req = (query = '') =>
   new NextRequest(`http://localhost/api/pull-gaps${query}`);
+const seed = (over: MemoryRoutes = {}) =>
+  backend({
+    'GET /store/packs': { body: { packs: [packRow] } },
+    'GET /store/packs/:slug': { status: 404, body: { message: 'not found' } },
+    'GET /store/pulls/gaps': { body: gapsBody },
+    ...over,
+  });
+
+let mem: ReturnType<typeof seed>;
 const gapsCallsOf = () =>
-  fetchMock.mock.calls.filter(([path]) =>
-    String(path).startsWith('/store/pulls/gaps'),
-  );
+  mem.requests.filter((r) => r.path === '/store/pulls/gaps');
 
 beforeEach(() => {
-  fetchMock.mockReset();
   clearTtlCache();
-  fetchMock.mockImplementation(async (path: string) => {
-    if (path.startsWith('/store/packs')) return { packs: [packRow] };
-    if (path.startsWith('/store/pulls/gaps')) return gapsBody;
-    throw new Error(`unexpected fetch path in test: ${path}`);
-  });
+  mem = seed();
 });
 
 describe('GET /api/pull-gaps', () => {
@@ -58,9 +65,13 @@ describe('GET /api/pull-gaps', () => {
     await GET(req('?pack_id=not-a-pack&rarity=Shiny'));
     await GET(req());
 
-    expect(gapsCallsOf().map(([p]) => p)).toEqual([
-      '/store/pulls/gaps?rarity=Legendary&pack_id=bronze-pack',
-      '/store/pulls/gaps?rarity=Immortal',
+    // rarity first, then pack_id — the order the hand-built querystring had.
+    expect(gapsCallsOf().map((r) => Object.entries(r.query!))).toEqual([
+      [
+        ['rarity', 'Legendary'],
+        ['pack_id', 'bronze-pack'],
+      ],
+      [['rarity', 'Immortal']],
     ]);
   });
 
@@ -87,9 +98,8 @@ describe('GET /api/pull-gaps', () => {
   });
 
   it('a malformed body is a 503 null that is NOT memoised (the next request retries)', async () => {
-    fetchMock.mockImplementation(async (path: string) => {
-      if (path.startsWith('/store/packs')) return { packs: [packRow] };
-      return { rarity: 'Immortal', hits: 'nope' };
+    mem = seed({
+      'GET /store/pulls/gaps': { body: { rarity: 'Immortal', hits: 'nope' } },
     });
     const bad = await GET(req());
     expect(bad.status).toBe(503);
@@ -97,10 +107,7 @@ describe('GET /api/pull-gaps', () => {
 
     // The backend recovers inside the same 5s window — a memoised null would
     // have kept every viewer on "unavailable" until it expired.
-    fetchMock.mockImplementation(async (path: string) => {
-      if (path.startsWith('/store/packs')) return { packs: [packRow] };
-      return gapsBody;
-    });
+    mem = seed();
     const good = await GET(req());
     expect(good.status).toBe(200);
     expect((await good.json()).current).toBe(27);

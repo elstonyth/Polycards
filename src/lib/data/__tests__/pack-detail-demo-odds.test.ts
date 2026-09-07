@@ -1,12 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // The guest demo spin draws on odds SET 3, which reaches the storefront as the
 // backend's `demo_odds`. Nothing on screen shows which odds the demo rolled —
 // a broken mapping just silently degrades to the published display odds — so
-// the wiring is pinned here. sdk + logger are mocked; the real parse path runs.
-const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
+// the wiring is pinned here. The detail read goes through the `Store` port;
+// the real parse path runs over an in-memory backend.
+import { storeShim, backend } from '@/lib/__tests__/store-shim';
 
-vi.mock('@/lib/medusa', () => ({ sdk: { client: { fetch: fetchMock } } }));
+vi.mock('@/lib/store', () => ({ store: storeShim }));
 vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
@@ -23,13 +24,11 @@ const ODDS_ROW = {
 };
 
 const detail = async (over: Record<string, unknown>) => {
-  fetchMock.mockResolvedValueOnce({ odds: [ODDS_ROW], ...over });
+  backend({
+    'GET /store/packs/:slug': { body: { odds: [ODDS_ROW], ...over } },
+  });
   return getPackDetail('bronze-pack');
 };
-
-beforeEach(() => {
-  fetchMock.mockReset();
-});
 
 describe('pack detail: demo odds', () => {
   it('maps demo_odds tiers onto demoOdds', async () => {

@@ -1,28 +1,29 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { storeShim, backend } from '@/lib/__tests__/store-shim';
 
 // Mock server-only to avoid Next.js server component guard in tests
 vi.mock('server-only', () => ({}));
 
-// Mock dependencies for the module under test
-vi.mock('@/lib/medusa', () => ({
-  sdk: {
-    client: {
-      fetch: vi.fn(),
-    },
-  },
-}));
+// The badge read goes through the `Store` port; getAuthToken stays mocked
+// because getFreePackState reads the cookie for a NON-fetch reason — which of
+// the two answers (guest `promo` vs customer `eligible`) it is looking at.
+vi.mock('@/lib/store', () => ({ store: storeShim }));
 
-vi.mock('@/lib/logger', () => ({
-  logger: {
-    error: vi.fn(),
-  },
+const mocks = vi.hoisted(() => ({
+  getAuthToken: vi.fn(async (): Promise<string | undefined> => undefined),
 }));
+vi.mock('@/lib/data/customer', () => ({ getAuthToken: mocks.getAuthToken }));
 
-vi.mock('@/lib/data/customer', () => ({
-  getAuthToken: vi.fn(),
-}));
+import {
+  canClaimFreePack,
+  mapFreePackState,
+  getFreePackState,
+} from '../free-pack';
 
-import { canClaimFreePack, mapFreePackState } from '../free-pack';
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.getAuthToken.mockResolvedValue(undefined);
+});
 
 describe('mapFreePackState — (token, response) → badge state', () => {
   it('guest + promo:true → signup', () => {
@@ -99,5 +100,48 @@ describe('canClaimFreePack — (badge state, slug) → may this visitor claim it
     // `hidden` is both, and the storefront cannot tell them apart: withhold
     // rather than advertise an offer the backend would refuse.
     expect(canClaimFreePack({ mode: 'hidden' }, 'welcome-pack')).toBe(false);
+  });
+});
+
+// The badge's whole entry point. What matters on the wire is that the bearer
+// rides along when there is one and is OMITTED (never `Bearer undefined`)
+// when there is not — this route answers a guest rather than 401ing.
+describe('getFreePackState — the wire and the two branches', () => {
+  const FREE_PACK = 'GET /store/free-pack';
+
+  it('a logged-in customer sends the bearer and reads eligible+slug', async () => {
+    mocks.getAuthToken.mockResolvedValue('jwt');
+    const mem = backend(
+      { [FREE_PACK]: { body: { eligible: true, slug: 'welcome-pack' } } },
+      { token: 'jwt' },
+    );
+    expect(await getFreePackState()).toEqual({
+      mode: 'claim',
+      slug: 'welcome-pack',
+    });
+    expect(mem.requests[0]).toEqual({
+      method: 'GET',
+      path: '/store/free-pack',
+      headers: { Authorization: 'Bearer jwt' },
+      cache: 'no-store',
+    });
+  });
+
+  it('a guest still calls, with NO Authorization header, and reads promo', async () => {
+    const mem = backend(
+      { [FREE_PACK]: { body: { eligible: false, slug: null, promo: true } } },
+      { token: null },
+    );
+    expect(await getFreePackState()).toEqual({ mode: 'signup' });
+    expect(mem.requests[0]?.headers).toEqual({});
+    expect(JSON.stringify(mem.requests[0])).not.toContain('undefined');
+  });
+
+  it('is hidden on a backend failure and on a malformed 200', async () => {
+    mocks.getAuthToken.mockResolvedValue('jwt');
+    backend({ [FREE_PACK]: { status: 500, body: {} } });
+    expect(await getFreePackState()).toEqual({ mode: 'hidden' });
+    backend({ [FREE_PACK]: { body: { eligible: 'yes' } } });
+    expect(await getFreePackState()).toEqual({ mode: 'hidden' });
   });
 });

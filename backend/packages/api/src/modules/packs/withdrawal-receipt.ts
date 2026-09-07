@@ -2,7 +2,7 @@ import { Modules } from '@medusajs/framework/utils';
 import { WITHDRAWAL_RECEIPT_TEMPLATE } from '../resend/templates';
 import { receiptSiteUrl } from './topup-receipt';
 
-// The emailed receipt for a resolved GlobePay365 payout — topup-receipt.ts's
+// The emailed receipt for a resolved gateway payout — topup-receipt.ts's
 // mirror. Two outcomes reach the customer: 'paid' (the bank transfer settled)
 // and 'refunded' (the transfer could not be completed and the debit came
 // back — cause-agnostic deliberately: a denied HELD withdrawal, plan 094,

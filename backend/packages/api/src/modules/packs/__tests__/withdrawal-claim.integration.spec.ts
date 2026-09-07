@@ -1,7 +1,7 @@
 /**
- * claimGlobePayWithdrawalStatus against a REAL Postgres — integration:modules
+ * claimWithdrawalStatus against a REAL Postgres — integration:modules
  *
- * WHY this exists on top of the unit spec (globepay-withdrawal.unit.spec.ts,
+ * WHY this exists on top of the unit spec (gateway-withdrawal.unit.spec.ts,
  * which pins the statement's shape against a fake `em`): the claim's whole
  * value is its return value, and that comes from what the MikroORM driver
  * hands back for an `UPDATE … RETURNING id`. A fake `em` returns whatever the
@@ -20,9 +20,9 @@ import path from 'path';
 import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
 import { PACKS_MODULE } from '../index';
 import type PacksModuleService from '../service';
-import GlobePayWithdrawal from '../models/globepay-withdrawal';
+import GatewayWithdrawal from '../models/gateway-withdrawal';
 import CreditTransaction from '../models/credit-transaction';
-import { withdrawalIdempotencyReference } from '../globepay-withdrawal';
+import { withdrawalIdempotencyReference } from '../gateway-withdrawal';
 
 jest.setTimeout(300 * 1000);
 
@@ -33,14 +33,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
   // A modules-type spec builds its schema from THIS array, never from the
   // migrations, so omitting it is an unfixable `relation "credit_transaction"
   // does not exist`.
-  moduleModels: [GlobePayWithdrawal, CreditTransaction],
+  moduleModels: [GatewayWithdrawal, CreditTransaction],
   testSuite: ({ service, MikroOrmWrapper }) => {
     const seed = async (
       suffix: string,
       status: 'pending' | 'settled' | 'failed' | 'held',
       customerId = 'cus_claim',
     ) => {
-      const [row] = await service.createGlobePayWithdrawals([
+      const [row] = await service.createGatewayWithdrawals([
         {
           merchant_transaction_id: `PW-CLAIM-${suffix}`,
           customer_id: customerId,
@@ -54,14 +54,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
       return row;
     };
     const statusOf = async (id: string) =>
-      (await service.listGlobePayWithdrawals({ id }, { take: 1 }))[0]?.status;
+      (await service.listGatewayWithdrawals({ id }, { take: 1 }))[0]?.status;
 
-    describe('claimGlobePayWithdrawalStatus', () => {
+    describe('claimWithdrawalStatus', () => {
       it('the FIRST claim wins and a repeat loses — the double-approve guard', async () => {
         const row = await seed('1', 'held');
 
         await expect(
-          service.claimGlobePayWithdrawalStatus({
+          service.claimWithdrawalStatus({
             id: row.id,
             from: ['held'],
             to: 'pending',
@@ -73,7 +73,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // This is what a double-clicked Approve hits, and it is the only
         // thing between it and a duplicate payout.
         await expect(
-          service.claimGlobePayWithdrawalStatus({
+          service.claimWithdrawalStatus({
             id: row.id,
             from: ['held'],
             to: 'pending',
@@ -85,7 +85,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       it('leaves a settled row untouched — deny cannot reach one', async () => {
         const row = await seed('2', 'settled');
         await expect(
-          service.claimGlobePayWithdrawalStatus({
+          service.claimWithdrawalStatus({
             id: row.id,
             from: ['held', 'failed'],
             to: 'failed',
@@ -97,7 +97,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       it("deny's claim is re-runnable: held -> failed, then failed -> failed", async () => {
         const row = await seed('3', 'held');
         const claim = () =>
-          service.claimGlobePayWithdrawalStatus({
+          service.claimWithdrawalStatus({
             id: row.id,
             from: ['held', 'failed'],
             to: 'failed',
@@ -111,9 +111,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
       it('never claims a soft-deleted row', async () => {
         const row = await seed('4', 'held');
-        await service.softDeleteGlobePayWithdrawals([row.id]);
+        await service.softDeleteGatewayWithdrawals([row.id]);
         await expect(
-          service.claimGlobePayWithdrawalStatus({
+          service.claimWithdrawalStatus({
             id: row.id,
             from: ['held'],
             to: 'pending',
@@ -122,7 +122,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
 
       // The sweep reads its staleness clock off `updated_at` from exactly this
-      // list call (jobs/globepay-withdrawal-reconcile.ts, plan 094). If the
+      // list call (jobs/withdrawal-reconcile.ts, plan 094). If the
       // field were not selected onto the entity, `new Date(undefined)` is an
       // Invalid Date, every age comparison is false, and a debit that never
       // reached the bank waits pending forever — with tsc and every mocked
@@ -136,7 +136,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // `before === after` (the claim's SQL never touching the column at all)
       // still satisfies `>=`, so the previous version of this assertion passed
       // whether or not `updated_at = now()` was even present in
-      // claimGlobePayWithdrawalStatus's raw SQL (service.ts) — see plan 094's
+      // claimWithdrawalStatus's raw SQL (service.ts) — see plan 094's
       // ledger. Comparing against created_at instead was considered and
       // rejected: JS `Date` truncates to milliseconds, so two statements a
       // fraction of a millisecond apart make that flaky too. This is the only
@@ -158,22 +158,22 @@ moduleIntegrationTestRunner<PacksModuleService>({
         const backdated = await MikroOrmWrapper.getManager().execute<
           { id: string }[]
         >(
-          "UPDATE globepay_withdrawal SET updated_at = now() - interval '2 hours' WHERE id = ? RETURNING id",
+          "UPDATE gateway_withdrawal SET updated_at = now() - interval '2 hours' WHERE id = ? RETURNING id",
           [row.id],
         );
         expect(backdated).toHaveLength(1);
-        const [before] = await service.listGlobePayWithdrawals(
+        const [before] = await service.listGatewayWithdrawals(
           { id: row.id },
           { take: 1 },
         );
         expect(before.updated_at).toBeInstanceOf(Date);
 
-        await service.claimGlobePayWithdrawalStatus({
+        await service.claimWithdrawalStatus({
           id: row.id,
           from: ['held'],
           to: 'pending',
         });
-        const [after] = await service.listGlobePayWithdrawals(
+        const [after] = await service.listGatewayWithdrawals(
           { id: row.id },
           { take: 1 },
         );
@@ -185,7 +185,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
       it('a row that does not exist is a lost claim, not a crash', async () => {
         await expect(
-          service.claimGlobePayWithdrawalStatus({
+          service.claimWithdrawalStatus({
             id: 'gpw_does_not_exist',
             from: ['held'],
             to: 'pending',
@@ -200,7 +200,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
      *
      * THE BUG IT PINS. The admin approve/deny routes used to read the debit
      * unlocked and then close the row, deciding "no debit will ever land"
-     * from the row's AGE (a 60s grace, GLOBEPAY_WD_HELD_DEBIT_GRACE_MS). The
+     * from the row's AGE (a 60s grace, GATEWAY_WD_HELD_DEBIT_GRACE_MS). The
      * justification was that idle_in_transaction_session_timeout would have
      * killed any transaction still running past it. It does not: that
      * timeout fires only on a session idle BETWEEN statements, and a debit
@@ -229,7 +229,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         const rows = await MikroOrmWrapper.getManager().execute<
           { id: string }[]
         >(
-          "UPDATE globepay_withdrawal SET created_at = now() - interval '2 hours' WHERE id = ? RETURNING id",
+          "UPDATE gateway_withdrawal SET created_at = now() - interval '2 hours' WHERE id = ? RETURNING id",
           [id],
         );
         // Asserted for the same reason the updated_at test above asserts its
@@ -316,7 +316,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
       // The mirror, and the reason the destructive close must stay
       // available: a row whose debit really never landed (a crash between
-      // startGlobePayWithdrawal's step 1 and step 2) is still closable by an
+      // startWithdrawal's step 1 and step 2) is still closable by an
       // operator, with no refund.
       it('closes a genuinely orphaned held row as failed', async () => {
         const row = await seed('LOCK-2', 'held', CUSTOMER);
@@ -347,13 +347,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // needs the `customer` table, wallet state and saved accounts —
         // none of which exist in a modules-type spec — so the step-1a
         // BRANCH is pinned by the fake-`em` tests in
-        // globepay-withdrawal.unit.spec.ts instead. The SQL is duplicated
+        // gateway-withdrawal.unit.spec.ts instead. The SQL is duplicated
         // here rather than exported: those unit tests already assert the
         // shipped text contains each clause below, so drift fails there.
         const [seen] = await MikroOrmWrapper.getManager().execute<
           { status: string }[]
         >(
-          'SELECT status FROM globepay_withdrawal ' +
+          'SELECT status FROM gateway_withdrawal ' +
             'WHERE merchant_transaction_id = ? AND deleted_at IS NULL',
           [row.merchant_transaction_id],
         );

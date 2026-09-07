@@ -6,9 +6,9 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 (globalThis as Record<string, unknown>).__BACKEND_URL__ = 'http://backend.test';
 
 const {
-  approveGlobePayWithdrawal,
-  denyGlobePayWithdrawal,
-  getGlobePayWithdrawalAccount,
+  approveWithdrawal,
+  denyWithdrawal,
+  getWithdrawalAccount,
   getPurchaseInvoice,
   httpStatus,
 } = await import('./admin-rest');
@@ -84,10 +84,10 @@ describe('the withdrawal account reveal fetches one row', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const out = await getGlobePayWithdrawalAccount('gpw_1');
+    const out = await getWithdrawalAccount('gpw_1');
     expect(out.account_number).toBe('1234567890');
     expect(String(fetchMock.mock.calls[0][0])).toBe(
-      'http://backend.test/admin/globepay/withdrawals/gpw_1/account',
+      'http://backend.test/admin/payments/withdrawals/gpw_1/account',
     );
   });
 
@@ -101,7 +101,7 @@ describe('the withdrawal account reveal fetches one row', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    await getGlobePayWithdrawalAccount('gpw_1/../..?limit=100');
+    await getWithdrawalAccount('gpw_1/../..?limit=100');
     const url = String(fetchMock.mock.calls[0][0]);
     expect(url).toContain('gpw_1%2F..%2F..%3Flimit%3D100');
     expect(url.endsWith('/account')).toBe(true);
@@ -109,7 +109,7 @@ describe('the withdrawal account reveal fetches one row', () => {
 
   test('a 404 surfaces its status, so the row-not-found case is distinguishable', async () => {
     respondWith(404, { message: "Withdrawal 'gpw_x' not found." });
-    const err = await getGlobePayWithdrawalAccount('gpw_x').catch(
+    const err = await getWithdrawalAccount('gpw_x').catch(
       (e: unknown) => e,
     );
     expect(httpStatus(err)).toBe(404);
@@ -136,7 +136,7 @@ describe('the held-withdrawal approve/deny calls', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const out = await approveGlobePayWithdrawal('gpw_1');
+    const out = await approveWithdrawal('gpw_1');
     expect(out).toEqual({
       id: 'gpw_1',
       status: 'pending',
@@ -145,7 +145,7 @@ describe('the held-withdrawal approve/deny calls', () => {
     });
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toBe(
-      'http://backend.test/admin/globepay/withdrawals/gpw_1/approve',
+      'http://backend.test/admin/payments/withdrawals/gpw_1/approve',
     );
     expect((init as RequestInit).method).toBe('POST');
   });
@@ -160,11 +160,11 @@ describe('the held-withdrawal approve/deny calls', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const out = await denyGlobePayWithdrawal('gpw_1');
+    const out = await denyWithdrawal('gpw_1');
     expect(out).toEqual({ id: 'gpw_1', status: 'failed', refunded: true });
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toBe(
-      'http://backend.test/admin/globepay/withdrawals/gpw_1/deny',
+      'http://backend.test/admin/payments/withdrawals/gpw_1/deny',
     );
     expect((init as RequestInit).method).toBe('POST');
   });
@@ -177,7 +177,7 @@ describe('the held-withdrawal approve/deny calls', () => {
       message:
         'This customer’s account is frozen. Unfreeze it before approving a payout, or deny the withdrawal.',
     });
-    const err = await approveGlobePayWithdrawal('gpw_1').catch(
+    const err = await approveWithdrawal('gpw_1').catch(
       (e: unknown) => e,
     );
     expect((err as Error).message).toMatch(/account is frozen/);

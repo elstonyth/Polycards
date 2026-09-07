@@ -13,6 +13,7 @@ vi.mock('@/lib/medusa', () => ({ sdk: { client: { fetch: fetchMock } } }));
 
 import { authedFetch } from '@/lib/authed-fetch';
 import { httpStatus, isAuthError } from '@/lib/errors';
+import { StoreError } from '@/lib/store-port';
 
 beforeEach(() => {
   fetchMock.mockReset();
@@ -88,6 +89,25 @@ describe('httpStatus / isAuthError', () => {
   it('is undefined when the failure never carried a status', () => {
     expect(httpStatus(new Error('socket hang up'))).toBeUndefined();
     expect(httpStatus('not even an error')).toBeUndefined();
+  });
+
+  // `store.orThrow` throws StoreError, not FetchError. actions/auth.ts is the
+  // first caller to rely on that: signup's "username taken" branch keys off a
+  // 409/422 from a call the port made, and without this it would silently read
+  // undefined and collapse into the generic "Could not create your account".
+  it('reads the status off a StoreError too', () => {
+    const store409 = new StoreError({
+      ok: false,
+      kind: 'backend',
+      status: 409,
+      text: 'Conflict',
+    });
+    expect(httpStatus(store409)).toBe(409);
+    expect(
+      httpStatus(
+        new StoreError({ ok: false, kind: 'backend', text: 'fetch failed' }),
+      ),
+    ).toBeUndefined();
   });
 
   // The point of the refactor: a 401 whose prose says nothing about auth used

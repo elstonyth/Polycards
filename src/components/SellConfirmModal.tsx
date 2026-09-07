@@ -99,9 +99,16 @@ export default function SellConfirmModal({
         <div className="flex items-center gap-3">
           {!bulk && (
             <SlabImage
-              src={image}
-              slabSrc={slabImage}
-              alt={cardName}
+              // The offer carries flat display fields, not a card view, so the
+              // tier is genuinely absent here and this slab stays unframed —
+              // as it always has. Threading the real tier means widening
+              // SellBackOffer (roll-batch.ts), which is a money path.
+              card={{
+                name: cardName,
+                image,
+                slabImage: slabImage ?? null,
+                rarity: null,
+              }}
               sizes="48px"
               className="w-12 shrink-0"
             />

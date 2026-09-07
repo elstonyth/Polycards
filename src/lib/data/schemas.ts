@@ -8,13 +8,25 @@
  *
  * IMPORTANT — behaviour-preserving: each schema validates EXACTLY the fields its
  * getter checked before (no stricter), using `looseObject` so unchecked-but-read
- * fields pass through untouched. `parseList` DROPS invalid items (mirroring the
- * old `.filter()` — one bad row never throws the whole list); `parseOne` returns
- * null on failure (mirroring the single-object validate-or-null getters). zod's
- * default `.parse()` would THROW — these helpers deliberately do not.
+ * fields pass through untouched.
+ *
+ * A call that goes through the `Store` port hands it ONE schema for the whole
+ * response, so the drop-bad-rows semantics live INSIDE the schema: `listOf`
+ * (a bad row drops, a non-array reads as empty) or `droppableArray` (a bad row
+ * drops, a non-array FAILS — which is what a `cached()` loader needs, so a
+ * malformed 200 evicts instead of memoising a blank).
+ *
+ * The standalone `parseList` / `parseOne` remain for the two things that are
+ * not a transport call: nested validation inside an already-parsed body (a won
+ * card, a buyback offer), and `src/lib/actions/daily.ts`, which is SUSPENDED
+ * and not to be rewritten. `parseList` DROPS invalid items (mirroring the old
+ * `.filter()` — one bad row never throws the whole list); `parseOne` returns
+ * null on failure. zod's default `.parse()` would THROW — these helpers
+ * deliberately do not.
  */
 import { z } from 'zod';
 import { isRarity } from '@/lib/packs-format';
+import type { Rarity } from '@/lib/packs-data';
 
 // Zod 4's JIT compiles schemas with `new Function(...)`; our CSP `script-src`
 // has no 'unsafe-eval' (see src/lib/security/csp.ts), so that probe fires a CSP
@@ -22,10 +34,53 @@ import { isRarity } from '@/lib/packs-format';
 // Set here because this module is the app's sole `zod` importer.
 z.config({ jitless: true });
 
+/** The schema type the `Store` port (src/lib/store-port.ts) takes — re-exported
+ *  so no other module needs to import zod. */
+export type { ZodType } from 'zod';
+
 /** Matches the getters' `Number.isFinite(x)` checks exactly (rejects NaN/±∞). */
 const finite = z.number().refine((n) => Number.isFinite(n));
-/** A string that is one of the known gacha rarities (the old `isRarity` guard). */
-const rarity = z.string().refine(isRarity);
+/** A string that is one of the known gacha rarities (the old `isRarity` guard),
+ *  typed as the tier it proves so no caller has to cast the parse output. */
+const rarity = z.custom<Rarity>((v) => typeof v === 'string' && isRarity(v));
+
+// --- card-view.ts -----------------------------------------------------------
+
+/**
+ * The card object as EVERY card-bearing route sends it — the odds row, the
+ * recent pull, the open/batch/free-rip `card`, the vault row's `card`, the
+ * profile collection, the delivery item, the challenge prize, the card detail.
+ * `toCardView` (src/lib/card-view.ts) parses through this and is the one place
+ * the wire card becomes a `CardView`.
+ *
+ * Every field `.catch()`es to its view default on purpose: this schema decides
+ * what a field READS AS, never whether the row survives. Which fields must be
+ * present for a row to render at all stays each route's own call
+ * (`WonCardSchema`, `OddsEntrySchema`, `VaultItemSchema.card`, …) — they are no
+ * stricter or looser than before, and a card that passed them cannot fail here.
+ * `z.object`, not `looseObject`: the mapper reads only these keys, and the
+ * index signature a loose object carries would keep hand-typed rows
+ * (`BackendVaultItem`, `PublicProfileCard`) from typing as input.
+ *
+ * The money invariant lives here: `marketPriceMyr` (live MYR display price,
+ * FMV × FX × margin) is null when the backend did not price the card — never 0,
+ * which is a real price. Raw USD `market_value` is deliberately not read.
+ */
+export const CardWireSchema = z.object({
+  handle: z.string().catch(''),
+  name: z.string().catch(''),
+  image: z.string().catch(''),
+  slab_image: z.string().nullable().catch(null),
+  rarity: rarity.nullable().catch(null),
+  marketPriceMyr: finite.nullable().catch(null),
+  pokemon_dex: z.number().int().positive().nullable().catch(null),
+  sprite_image: z.string().nullable().catch(null),
+});
+export type CardWire = z.infer<typeof CardWireSchema>;
+/** What `toCardView` accepts: any object — each key is optional and untyped
+ *  because the schema above defaults every one. (`z.input` would not do: in
+ *  zod 4 a `.catch()` field's input type is its output type, i.e. required.) */
+export type CardWireInput = Partial<Record<keyof CardWire, unknown>>;
 
 /** Drop invalid items — mirrors `(Array.isArray(x)?x:[]).filter(predicate)`. */
 export function parseList<T>(schema: z.ZodType<T>, raw: unknown): T[] {
@@ -68,6 +123,34 @@ function droppableRecord<T>(item: z.ZodType<T>) {
     );
 }
 
+/** `parseList` as a schema, for a `Store` port call that validates the whole
+ *  response in one place: a malformed item DROPS (one bad row never blanks the
+ *  survivors) and a non-array reads as empty. */
+function listOf<T>(item: z.ZodType<T>) {
+  return droppableArray(item).catch([]);
+}
+
+/**
+ * NO envelope validation — every 2xx body passes, whatever it is.
+ *
+ * The `Store` port takes a schema per call, and two kinds of call must not have
+ * one:
+ *
+ * - the response is IGNORED, a 2xx IS the answer (the account-delete route, the
+ *   avatar-frame POST, the close-instant ping);
+ * - the response must not be REJECTED at the envelope because the customer has
+ *   already been CHARGED (`openPack`/`openBatch`/the free-rip spend). A drifted
+ *   field would classify as `invalid_shape`, and that action's copy for a
+ *   generic failure says "try again" — the one sentence a committed open must
+ *   never show. Those read the body through their own
+ *   `parseOne(WonCardSchema, …)` instead, where a bad card gets its own "the
+ *   card is in your Vault" answer.
+ *
+ * Callers that read fields off the body cast at the seam, the way
+ * `vault.data.items as unknown as BackendVaultItem[]` does in actions/vault.ts.
+ */
+export const UncheckedSchema = z.unknown();
+
 // --- data/packs.ts ----------------------------------------------------------
 
 /** GET /store/packs row — getter checks `category` + finite `price` only. */
@@ -83,6 +166,19 @@ export const PackRowSchema = z.looseObject({
    *  Malformed/absent degrades to false: never overclaim the guarantee. */
   psa10: z.boolean().catch(false).optional(),
 });
+
+/** GET /store/packs — the catalog list. `droppableArray`, not `listOf`: a bad
+ *  ROW drops on its own, but a non-array `packs` must FAIL the parse. That is
+ *  a malformed 200 (deploy skew, a proxy error page, a schema rename), and
+ *  this loader lives inside `cached()` — reading it as empty would memoise an
+ *  all-empty catalog for the window instead of evicting. */
+export const PacksPageSchema = z.looseObject({
+  packs: droppableArray(PackRowSchema),
+});
+
+/** GET /store/packs/:slug as data/packs.ts#getUncatalogedPack reads it — the
+ *  same runtime guard the list path applies, on the single row. */
+export const UncatalogedPackSchema = z.looseObject({ pack: PackRowSchema });
 
 /** GET /store/packs/:slug odds row — handle + known rarity + finite value.
  *  marketPriceMyr (live MYR display price: FMV × FX × margin, computed by the
@@ -102,6 +198,20 @@ export const OddsEntrySchema = z.looseObject({
   sprite_image: z.string().nullable().catch(null).optional(),
 });
 
+/** GET /store/packs/:slug as data/packs.ts#getPackDetail reads it.
+ *
+ *  `published_odds` / `demo_odds` stay UNVALIDATED here on purpose: they are
+ *  jsonb passthrough, and parsePublishedOdds sanitizes them field by field
+ *  (dropping unknown tiers and out-of-range percentages) rather than
+ *  rejecting the whole response over one bad number. `odds` is a
+ *  droppableArray for the same reason as the catalog: a bad row drops, a
+ *  non-array response does not read as "this pack has no pool". */
+export const PackDetailPageSchema = z.looseObject({
+  odds: droppableArray(OddsEntrySchema),
+  published_odds: z.unknown().optional(),
+  demo_odds: z.unknown().optional(),
+});
+
 /** GET /store/pulls/recent row — handle + name + known rarity + finite value.
  *  marketPriceMyr optional, same contract as the odds row above. */
 export const RecentPullSchema = z.looseObject({
@@ -119,6 +229,15 @@ export const RecentPullSchema = z.looseObject({
   profile_handle: z.string().nullable().optional(),
   avatar_url: z.string().nullable().optional(),
   frame_url: z.string().nullable().optional(),
+});
+
+/** GET /store/pulls/recent — the feed. `drought` stays unvalidated here: the
+ *  getter walks it entry by entry against the known tiers, so one bad counter
+ *  costs its own counter, not the feed. Rows drop one at a time; a non-array
+ *  `pulls` fails, which is the getter's empty-feed answer. */
+export const RecentPullsPageSchema = z.looseObject({
+  pulls: droppableArray(RecentPullSchema),
+  drought: z.unknown().optional(),
 });
 
 /** GET /store/pulls/gaps — the stats chart: a known tier, a finite current
@@ -156,6 +275,19 @@ export const LeaderboardEntrySchema = z.looseObject({
   pulls: finite,
   avatar_url: z.string().nullable().optional(),
   equipped_frame_level: finite.nullable().optional(),
+});
+
+/** GET /store/leaderboard — the board as data/leaderboard.ts reads it.
+ *
+ *  `droppableArray`, NOT `listOf`: one malformed row still drops on its own,
+ *  but a non-array `entries` must FAIL the parse rather than read as empty.
+ *  That is a malformed 200, and this loader lives inside `cached()` — coercing
+ *  it to [] would memoise a blank board for the whole window instead of
+ *  evicting. Same reason for PacksPageSchema, PackDetailPageSchema and
+ *  RecentPullsPageSchema below; the pre-port code spelled it
+ *  `if (!Array.isArray(x)) throw` in front of `parseList`. */
+export const LeaderboardPageSchema = z.looseObject({
+  entries: droppableArray(LeaderboardEntrySchema),
 });
 
 /** GET /store/leaderboard/me — the caller's OWN weekly pulled value, pull
@@ -266,6 +398,13 @@ export const AvatarFramesSchema = z.looseObject({
 /** GET /store/profiles/me — `{ handle }`. */
 export const ProfileHandleSchema = z.looseObject({ handle: z.string() });
 
+/** GET /store/customers/me/account — the Settings page's Danger zone facts.
+ *  `hasPassword` is REQUIRED here on purpose: data/customer.ts answers `true`
+ *  for anything it cannot read, and a body missing the field would otherwise
+ *  read as `false` — dropping the password box from an account that HAS one,
+ *  whose every delete then fails PASSWORD_REQUIRED with no way to comply. */
+export const AccountInfoSchema = z.looseObject({ hasPassword: z.boolean() });
+
 // --- actions/vault.ts -------------------------------------------------------
 
 /** GET /store/vault item — pull_id + card.name + finite buyback.amount/percent.
@@ -301,6 +440,12 @@ export const VaultItemSchema = z.looseObject({
   }),
 });
 
+/** GET /store/vault — the page. `items` keeps `parseList`'s semantics (see
+ *  VaultItemSchema: a failing row drops, never the customer's whole vault). */
+export const VaultPageSchema = z.looseObject({
+  items: listOf(VaultItemSchema),
+});
+
 // --- data/free-pack.ts ------------------------------------------------------
 
 /** GET /store/free-pack — the one-time welcome-pack claim badge's whole answer.
@@ -331,8 +476,9 @@ export const LatestEventSchema = z.looseObject({
 });
 
 /** GET /store/credits — lifetime totals (balance is also validated by BalanceSchema).
- *  `has_more` (pagination) is optional so an older backend still parses. */
-export const CreditsSchema = z.looseObject({
+ *  `has_more` (pagination) is optional so an older backend still parses.
+ *  Applied SOFTLY by CreditsPageSchema below, never on its own. */
+const CreditsSchema = z.looseObject({
   balance: finite,
   topup_total: finite,
   spend_total: finite,
@@ -391,6 +537,17 @@ export const CreditTransactionSchema = z.looseObject({
     .optional(),
 });
 
+/** GET /store/credits as the Transactions page reads it. The totals are SOFT:
+ *  a malformed block parses to null and the page shows zeros while still
+ *  listing what it can (`totals?.balance ?? 0` in actions/vault.ts); rows drop
+ *  one at a time, as every ledger list here does. */
+export const CreditsPageSchema = z
+  .looseObject({ transactions: listOf(CreditTransactionSchema) })
+  .transform((page) => ({
+    totals: parseOne(CreditsSchema, page),
+    rows: page.transactions,
+  }));
+
 /** POST /store/credits/topup response — finite amount + balance. `replayed`
  *  is true when the backend deduped an already-processed Idempotency-Key
  *  (nothing new was charged — sim P2-4); optional so an older backend that
@@ -412,6 +569,11 @@ export const PendingDepositSchema = z.looseObject({
   amount: finite,
   payment_method_code: z.string().optional(),
   created_at: z.string(),
+});
+
+/** GET /store/credits/deposit — the list of those. */
+export const PendingDepositsSchema = z.looseObject({
+  deposits: listOf(PendingDepositSchema),
 });
 
 /** POST /store/credits/deposit response — the real payment gateway. Unlike the
@@ -501,6 +663,29 @@ export const BuybackResultSchema = z.looseObject({
   percent: finite.optional(),
 });
 
+/** POST /store/vault/buyback-batch response. The backend is ours, but a
+ *  server action still validates its input at the boundary — and the client
+ *  uses `results` to decide what to REMOVE from the vault, so this must never
+ *  fail the whole batch over one odd figure: every count is soft (absent or
+ *  NaN reads as absent; actions/vault.ts falls back to 0, or to the sold
+ *  count for `sold`), a per-pull row drops only when `ok` is not a boolean,
+ *  and a malformed `pull_id`/`error` reads as absent rather than dropping the
+ *  row that carries the other one. */
+const softCount = finite.optional().catch(undefined);
+export const BuybackBatchSchema = z.looseObject({
+  sold: softCount,
+  failed: softCount,
+  credited: softCount,
+  balance: softCount,
+  results: listOf(
+    z.looseObject({
+      pull_id: z.string().optional().catch(undefined),
+      ok: z.boolean(),
+      error: z.string().optional().catch(undefined),
+    }),
+  ),
+});
+
 // --- actions/packs.ts -------------------------------------------------------
 
 /** Open-route `card` — handle + name + known rarity + finite market_value.
@@ -533,8 +718,8 @@ export const OpenBuybackSchema = z.looseObject({
 
 /** GET /store/credits — nested `wallet` block used by getWallet().
  *  The backend returns `{ wallet: { balance, available, is_frozen },
- *  transactions: [...] }`. getWallet() extracts
- *  `(raw as { wallet? }).wallet` and parses it with this schema. */
+ *  transactions: [...] }`; WalletEnvelopeSchema below reads the block out of
+ *  that envelope and validates it with this schema. */
 export const WalletSchema = z.looseObject({
   balance: finite,
   available: finite,
@@ -553,6 +738,9 @@ export const WalletSchema = z.looseObject({
     })
     .optional(),
 });
+
+/** GET /store/credits as getWallet() reads it — only the `wallet` block. */
+export const WalletEnvelopeSchema = z.looseObject({ wallet: WalletSchema });
 
 // --- actions/vip.ts ---------------------------------------------------------
 
@@ -647,6 +835,17 @@ export const NotificationsEnvelopeSchema = z.looseObject({
   unread_count: finite,
   has_more: z.boolean().optional(),
 });
+
+/** GET /store/notifications as the feed reads it. The envelope is SOFT, like
+ *  CreditsPageSchema's totals: a malformed `unread_count` parses to null and
+ *  the action falls back to counting the unread rows it did get, rather than
+ *  blanking the feed. Rows drop one at a time (`parseList`'s semantics). */
+export const NotificationsPageSchema = z
+  .looseObject({ notifications: listOf(NotificationSchema) })
+  .transform((page) => ({
+    envelope: parseOne(NotificationsEnvelopeSchema, page),
+    rows: page.notifications,
+  }));
 
 /** POST /store/notifications/:id/read — mark-read response. */
 export const MarkReadSchema = z.looseObject({
@@ -775,6 +974,24 @@ export const DeliveryOrderSchema = z.looseObject({
     .optional(),
 });
 
+/** GET /store/delivery-orders — the page. `items` keeps `parseList`'s
+ *  semantics: a row whose status this build does not know DROPS rather than
+ *  blanking the customer's whole order history. */
+export const DeliveryOrdersPageSchema = z.looseObject({
+  items: listOf(DeliveryOrderSchema),
+});
+
+/** POST /store/delivery-orders/:id/cancel — the order as it now stands.
+ *
+ *  Soft all the way down, and that is the point: a 2xx MEANS the cancel
+ *  happened, so a drifted body must never false-fail it. A malformed `order`
+ *  reads as null (the action then reports the status the backend just
+ *  transitioned to), and so does a body that is not an object at all. */
+export const CancelDeliverySchema = z
+  .looseObject({ order: DeliveryOrderSchema.nullable().catch(null) })
+  .catch({ order: null })
+  .transform((body) => body.order);
+
 /** Single source of truth for the delivery status union (see the note above). */
 export type DeliveryOrderStatus = z.infer<typeof DeliveryOrderSchema>['status'];
 
@@ -805,6 +1022,14 @@ export const CardDetailSchema = z.looseObject({
   rarity: rarity.nullable().catch(null),
   pcSyncedAt: z.string().nullable().catch(null),
   priceHistory: z.array(CardPricePointSchema).catch([]),
+});
+
+/** GET /store/cards/:handle — the `{ card }` wrapper the route answers with.
+ *  The card itself is REQUIRED: a 200 without a parseable one is a
+ *  backend/contract fault, and data/cards.ts must say 'error' for it rather
+ *  than fabricate a 404. */
+export const CardDetailEnvelopeSchema = z.looseObject({
+  card: CardDetailSchema,
 });
 
 /** One settled weekly line as the store surfaces render it (both the
@@ -892,3 +1117,58 @@ export const TaskHubSchema = z.looseObject({
   tasks: z.array(TaskEntrySchema),
 });
 export type TaskHub = z.infer<typeof TaskHubSchema>;
+
+// --- same-origin polling responses ------------------------------------------
+
+/** Browser JSON is version-sensitive even on the same origin: rolling deploys
+ * can answer with the older view shape. Reject incompatible data before it
+ * replaces the seed/last-good view; routes separately retain old-tab aliases.
+ * These schemas validate the current VIEW, not the backend Store envelope. */
+const pollCard = z.object({
+  handle: z.string(),
+  name: z.string(),
+  image: z.string(),
+  slabImage: z.string().nullable(),
+  rarity: rarity.nullable(),
+  priceMyr: finite.nullable(),
+  pokemonDex: finite.nullable(),
+  spriteImage: z.string().nullable(),
+});
+const pollTiers = z.partialRecord(rarity, finite);
+const pollOdds = z.object({ tiers: pollTiers }).nullable();
+export const CardPollResponseSchema = z.object({
+  card: pollCard.extend({
+    priceMyr: finite,
+    set: z.string(),
+    grader: z.string(),
+    grade: z.string(),
+    pcSyncedAt: z.string().nullable(),
+    priceHistory: z.array(z.object({ date: z.string(), valueMyr: finite })),
+  }),
+});
+const pollPackCard = pollCard.extend({ rarity });
+export const PackPollResponseSchema = z.object({
+  detail: z.object({
+    topHits: z.array(pollPackCard),
+    pool: z.array(pollPackCard),
+    publishedOdds: pollOdds,
+    demoOdds: pollOdds,
+  }),
+});
+export const RecentPollResponseSchema = z.object({
+  pulls: z.array(
+    pollCard.extend({
+      rarity,
+      id: z.string(),
+      packName: z.string(),
+      packIcon: z.string(),
+      who: z.string(),
+      profileHandle: z.string().nullable(),
+      avatar: z.string().nullable(),
+      frame: z.string().nullable(),
+      rolledAt: z.string(),
+      agoLabel: z.string(),
+    }),
+  ),
+  drought: pollTiers.nullish().transform((value) => value ?? {}),
+});

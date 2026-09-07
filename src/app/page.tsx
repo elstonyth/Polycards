@@ -4,7 +4,7 @@ import {
   getRecentPulls,
 } from '@/lib/data/packs';
 import { getLeaderboard } from '@/lib/data/leaderboard';
-import { priceNumber, type PackCard } from '@/lib/packs-data';
+import type { PackCard } from '@/lib/packs-data';
 import HeroBoard from '@/components/home/HeroBoard';
 import PullsMarquee from '@/components/home/PullsMarquee';
 import TierShelf from '@/components/home/TierShelf';
@@ -45,7 +45,7 @@ export default async function HomePage() {
   const packs = categories.flatMap((c) => c.packs);
   const inStock = packs.filter((p) => p.inStock !== false);
   const featured = [...inStock].sort(
-    (a, b) => priceNumber(b.price) - priceNumber(a.price),
+    (a, b) => Math.round(b.priceMyr) - Math.round(a.priceMyr),
   )[0];
 
   // Chase lookups cover the first N tiles PLUS the featured pack, so the hero

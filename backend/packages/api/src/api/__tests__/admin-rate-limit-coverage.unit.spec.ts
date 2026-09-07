@@ -4,13 +4,14 @@
  * plans 004, 015, 044) — this test makes the next omission fail loudly
  * instead of waiting for an audit.
  *
- * Pure text scan, zero runtime imports: it reads middlewares.ts and every
- * src/api/admin/**\/route.ts as text with regexes. No Medusa framework, no
- * app boot, no DB.
+ * Mostly a text scan: it reads the public RATE_LIMITS table, then scans
+ * middlewares.ts and every src/api/admin/**\/route.ts with regexes. No Medusa
+ * framework boot and no DB.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { RATE_LIMITS } from '../utils/rate-limit';
 
 const API_ROOT = path.resolve(__dirname, '..');
 const MIDDLEWARES_PATH = path.join(API_ROOT, 'middlewares.ts');
@@ -121,13 +122,19 @@ function parseMethodField(raw: string): string[] {
  */
 function extractAdminActionRateLimitEntries(): LimiterEntry[] {
   const src = fs.readFileSync(MIDDLEWARES_PATH, 'utf8');
+  const limiterName: keyof typeof RATE_LIMITS = 'admin-action';
+  const bindingMatch = src.match(
+    new RegExp(`const\\s+(\\w+)\\s*=\\s*rateLimit\\('${limiterName}'\\);`),
+  );
+  const bindingName = bindingMatch?.[1];
+  if (!bindingName) return [];
   const entryRe =
     /{\s*(?:\/\/[^\n]*\n\s*)*matcher:\s*'([^']+)',\s*method:\s*(\[[^\]]*\]|'[^']*'),\s*middlewares:\s*\[([^\]]*)\],?\s*}/g;
   const entries: LimiterEntry[] = [];
   let match: RegExpExecArray | null;
   while ((match = entryRe.exec(src))) {
     const [, matcher, methodRaw, middlewaresRaw] = match;
-    if (middlewaresRaw.includes('adminActionRateLimit')) {
+    if (middlewaresRaw.includes(bindingName)) {
       entries.push({ matcher, methods: parseMethodField(methodRaw) });
     }
   }
@@ -194,7 +201,7 @@ const EXEMPT: { path: string; method: string; reason: string }[] = [
     path: '/admin/cards/*',
     method: 'POST',
     reason:
-      'Card catalog update — PR #305\'s bulk retier fires this per-row from a ' +
+      "Card catalog update — PR #305's bulk retier fires this per-row from a " +
       'client-side loop; the shared burst budget would 429 mid-batch.',
   },
   {
@@ -257,6 +264,7 @@ describe('admin mutation routes are rate-limited (plan 061 coverage guard)', () 
   });
 
   it('extraction is not vacuous (finds real entries, not just /store noise)', () => {
+    expect(RATE_LIMITS['admin-action']).toBeDefined();
     // Guards against a regex change silently matching nothing (green-for-the-
     // wrong-reason, as happened with the axe/oklch a11y gate).
     expect(limiterEntries.length).toBeGreaterThan(20);

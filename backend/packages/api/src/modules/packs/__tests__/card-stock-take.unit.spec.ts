@@ -12,7 +12,7 @@ import { takeCardStock, CardStockTakeError } from '../card-stock';
  * adjustInventory chain through a fake container, so that revert fails here.
  *
  * The container fake resolves BY KEY, same shape as
- * globepay-deposit.unit.spec.ts's harness() — cardInventoryLevels resolves
+ * gateway-deposit.unit.spec.ts's harness() — cardInventoryLevels resolves
  * ContainerRegistrationKeys.QUERY and calls query.graph(), and takeCardStock
  * itself resolves Modules.INVENTORY for adjustInventory. The row shape fed
  * through query.graph() is the nested product/variant/inventory_item/
@@ -103,11 +103,7 @@ describe('takeCardStock', () => {
     // The full 5 lands on the only level, not a clamp to the 2 available —
     // the negative counter IS the "units owed" signal (see card-stock.ts).
     expect(h.inventory.adjustInventory).toHaveBeenCalledTimes(1);
-    expect(h.inventory.adjustInventory).toHaveBeenCalledWith(
-      'A',
-      'loc1',
-      -5,
-    );
+    expect(h.inventory.adjustInventory).toHaveBeenCalledWith('A', 'loc1', -5);
   });
 
   it('reports what was actually applied when a mid-plan adjust throws', async () => {

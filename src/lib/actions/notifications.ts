@@ -16,17 +16,18 @@
  *
  * `getUnreadCount()` returns 0 when the user is logged out (used in nav badge)
  * so it never throws and never requires auth.
+ *
+ * Every call goes through the `Store` port (src/lib/store.ts), which owns the
+ * cookie read, the bearer, the schema check and the failure log. What stays
+ * here is each action's logged-out answer and its copy (`notifFailure`, over
+ * NOTIF_RULES).
  */
-import { authedFetch } from '@/lib/authed-fetch';
-import { logger } from '@/lib/logger';
+import { store, type Failure } from '@/lib/store';
 import { sanePage } from '@/lib/page-param';
-import { getAuthToken } from '@/lib/data/customer';
-import { friendlyError, isAuthError, type ErrorRule } from '@/lib/errors';
+import { friendlyFailure, COPY, type ErrorRule } from '@/lib/errors';
 import {
-  parseOne,
-  parseList,
-  NotificationSchema,
   NotificationsEnvelopeSchema,
+  NotificationsPageSchema,
   MarkReadSchema,
   MarkAllReadSchema,
 } from '@/lib/data/schemas';
@@ -61,15 +62,43 @@ export type MarkAllReadResult =
   | { ok: true; marked: number; readAt: string }
   | { ok: false; error: string; needsAuth?: boolean };
 
+// Domain rule only. Both transport sentences this table used to carry were
+// the shared ones, so friendlyFailure (lib/errors.ts) answers a 429 and a 401
+// now — but NOT both "where they sat before". The 401 rule sat after this one
+// (index 2 of 3) and still resolves after it, unchanged. The 429 rule sat
+// BEFORE this one (index 0) and now resolves after it, as part of the shared
+// transport tier — a real reorder. Safe today because no 429 text this
+// surface emits ("Too many mark-read requests." / "Too many mark-all-read
+// requests.") matches /not found|404/i.
 const NOTIF_RULES: ErrorRule[] = [
-  [
-    /too many|rate.?limit|429/i,
-    'Too many requests — give it a moment and try again.',
-  ],
   [/not found|404/i, 'Notification not found.'],
-  [/unauthorized|not authenticated|401/i, 'Please log in first.'],
 ];
-const NOTIF_FALLBACK = 'Something went wrong. Please try again.';
+const NOTIF_FALLBACK = COPY.generic;
+const LOGIN_FIRST = COPY.loginRequired;
+const LOGIN_TO_VIEW = 'Please log in to view your notifications.';
+const UNEXPECTED_RESPONSE = 'Got an unexpected response. Please try again.';
+
+/** A port `Failure` in this file's vocabulary: no cookie at all (the call
+ *  never left — `status` is undefined) gives the action's own logged-out copy;
+ *  a 2xx that failed its schema gives the "unexpected response" copy; anything
+ *  the backend actually said goes through NOTIF_RULES, with `needsAuth` when
+ *  it was a 401. */
+function notifFailure(
+  f: Failure,
+  loggedOut: string,
+): { ok: false; error: string; needsAuth?: boolean } {
+  if (f.kind === 'invalid_shape') {
+    return { ok: false, error: UNEXPECTED_RESPONSE };
+  }
+  if (f.kind === 'unauthenticated' && f.status === undefined) {
+    return { ok: false, error: loggedOut, needsAuth: true };
+  }
+  return {
+    ok: false,
+    error: friendlyFailure(f, NOTIF_RULES, NOTIF_FALLBACK),
+    needsAuth: f.kind === 'unauthenticated',
+  };
+}
 
 /** Coerce a backend read_at (string | Date | null) to string | null. */
 function coerceReadAt(value: string | Date | null | undefined): string | null {
@@ -84,48 +113,26 @@ export async function getNotifications(
   // Validate at the boundary — server actions are public endpoints.
   const safePage = sanePage(page);
 
-  const token = await getAuthToken();
-  if (!token) {
-    return {
-      ok: false,
-      error: 'Please log in to view your notifications.',
-      needsAuth: true,
-    };
-  }
+  const r = await store.get('/store/notifications', NotificationsPageSchema, {
+    query: { limit: PAGE_SIZE, offset: (safePage - 1) * PAGE_SIZE },
+  });
+  if (!r.ok) return notifFailure(r, LOGIN_TO_VIEW);
+  const { envelope, rows } = r.data;
 
-  try {
-    const raw = await authedFetch(token, '/store/notifications', {
-      query: { limit: PAGE_SIZE, offset: (safePage - 1) * PAGE_SIZE },
-    });
-
-    const envelope = parseOne(NotificationsEnvelopeSchema, raw);
-    const rows = parseList(
-      NotificationSchema,
-      (raw as { notifications?: unknown }).notifications,
-    );
-
-    return {
-      ok: true,
-      notifications: rows.map((n) => ({
-        id: n.id,
-        template: n.template,
-        data: (n.data as Record<string, unknown> | null | undefined) ?? null,
-        createdAt: n.created_at,
-        readAt: coerceReadAt(n.read_at),
-      })),
-      unreadCount:
-        envelope?.unread_count ?? rows.filter((n) => !n.read_at).length,
-      page: safePage,
-      hasMore: envelope?.has_more ?? false,
-    };
-  } catch (error) {
-    logger.error('[notifications] load failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, NOTIF_RULES, NOTIF_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  return {
+    ok: true,
+    notifications: rows.map((n) => ({
+      id: n.id,
+      template: n.template,
+      data: (n.data as Record<string, unknown> | null | undefined) ?? null,
+      createdAt: n.created_at,
+      readAt: coerceReadAt(n.read_at),
+    })),
+    unreadCount:
+      envelope?.unread_count ?? rows.filter((n) => !n.read_at).length,
+    page: safePage,
+    hasMore: envelope?.has_more ?? false,
+  };
 }
 
 export async function markRead(id: string): Promise<MarkReadResult> {
@@ -134,42 +141,18 @@ export async function markRead(id: string): Promise<MarkReadResult> {
     return { ok: false, error: 'Invalid notification id.' };
   }
 
-  const token = await getAuthToken();
-  if (!token) {
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-  }
+  const r = await store.post(
+    `/store/notifications/${encodeURIComponent(id)}/read`,
+    MarkReadSchema,
+    {},
+  );
+  if (!r.ok) return notifFailure(r, LOGIN_FIRST);
 
-  try {
-    const raw = await authedFetch(
-      token,
-      `/store/notifications/${encodeURIComponent(id)}/read`,
-      {
-        method: 'POST',
-        body: {},
-      },
-    );
-
-    const parsed = parseOne(MarkReadSchema, raw);
-    if (!parsed) {
-      return {
-        ok: false,
-        error: 'Got an unexpected response. Please try again.',
-      };
-    }
-
-    return {
-      ok: true,
-      id: parsed.id,
-      readAt: coerceReadAt(parsed.read_at) ?? new Date().toISOString(),
-    };
-  } catch (error) {
-    logger.error(`[notifications] markRead failed for '${id}':`, error);
-    return {
-      ok: false,
-      error: friendlyError(error, NOTIF_RULES, NOTIF_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  return {
+    ok: true,
+    id: r.data.id,
+    readAt: coerceReadAt(r.data.read_at) ?? new Date().toISOString(),
+  };
 }
 
 /**
@@ -177,21 +160,16 @@ export async function markRead(id: string): Promise<MarkReadResult> {
  * call unconditionally in nav badges without an auth gate.
  */
 export async function getUnreadCount(): Promise<number> {
-  const token = await getAuthToken();
-  if (!token) return 0;
-
-  try {
-    const raw = await authedFetch(token, '/store/notifications', {
-      // unread_count is a TRUE total (not page-scoped), so the badge only
-      // needs the envelope — fetch the smallest legal page.
-      query: { limit: 1 },
-    });
-    const envelope = parseOne(NotificationsEnvelopeSchema, raw);
-    return envelope?.unread_count ?? 0;
-  } catch (error) {
-    logger.error('[notifications] unread count failed:', error);
-    return 0;
-  }
+  const r = await store.get(
+    '/store/notifications',
+    NotificationsEnvelopeSchema,
+    // unread_count is a TRUE total (not page-scoped), so the badge only needs
+    // the envelope — fetch the smallest legal page.
+    { query: { limit: 1 } },
+  );
+  // Logged out, a failed read, or an envelope that did not parse: no badge
+  // rather than a wrong one — exactly what the three old branches did.
+  return r.ok ? r.data.unread_count : 0;
 }
 
 /**
@@ -201,36 +179,16 @@ export async function getUnreadCount(): Promise<number> {
  * client-side would 429 — this is the only viable way to zero the badge.
  */
 export async function markAllRead(): Promise<MarkAllReadResult> {
-  const token = await getAuthToken();
-  if (!token) {
-    return { ok: false, error: 'Please log in first.', needsAuth: true };
-  }
+  const r = await store.post(
+    '/store/notifications/read-all',
+    MarkAllReadSchema,
+    {},
+  );
+  if (!r.ok) return notifFailure(r, LOGIN_FIRST);
 
-  try {
-    const raw = await authedFetch(token, '/store/notifications/read-all', {
-      method: 'POST',
-      body: {},
-    });
-
-    const parsed = parseOne(MarkAllReadSchema, raw);
-    if (!parsed) {
-      return {
-        ok: false,
-        error: 'Got an unexpected response. Please try again.',
-      };
-    }
-
-    return {
-      ok: true,
-      marked: parsed.marked,
-      readAt: coerceReadAt(parsed.read_at) ?? new Date().toISOString(),
-    };
-  } catch (error) {
-    logger.error('[notifications] markAllRead failed:', error);
-    return {
-      ok: false,
-      error: friendlyError(error, NOTIF_RULES, NOTIF_FALLBACK),
-      needsAuth: isAuthError(error),
-    };
-  }
+  return {
+    ok: true,
+    marked: r.data.marked,
+    readAt: coerceReadAt(r.data.read_at) ?? new Date().toISOString(),
+  };
 }

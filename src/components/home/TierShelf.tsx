@@ -2,12 +2,8 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { ArrowRight } from 'lucide-react';
 import Reveal from '@/components/Reveal';
-import {
-  packHref,
-  priceNumber,
-  type Pack,
-  type PackCard,
-} from '@/lib/packs-data';
+import { packHref, type Pack, type PackCard } from '@/lib/packs-data';
+import { rm, rm0 } from '@/lib/format';
 
 /**
  * Board 02 — RIP A PACK: one full-width row per pack, most expensive first, so
@@ -23,9 +19,9 @@ export default function TierShelf({
   packs: Pack[];
   chaseByPack: Map<string, PackCard | null>;
 }) {
-  // Ladder order: price high→low (unparseable prices sink to the bottom).
+  // Display ladder: rounded price high→low; ties retain catalog order.
   const rows = [...packs].sort(
-    (a, b) => priceNumber(b.price) - priceNumber(a.price),
+    (a, b) => Math.round(b.priceMyr) - Math.round(a.priceMyr),
   );
 
   return (
@@ -121,7 +117,10 @@ function LadderRow({
           chase && (
             <p className="mt-0.5 truncate text-[11px] uppercase tracking-wide text-neutral-400">
               Top chase{' '}
-              <span className="text-chase font-semibold">{chase.value}</span>
+              <span className="text-chase font-semibold">
+                {/* getPackChase only ever hands over a PRICED card. */}
+                {chase.priceMyr != null ? rm(chase.priceMyr) : '—'}
+              </span>
             </p>
           )
         )}
@@ -137,7 +136,7 @@ function LadderRow({
             lead ? 'text-xl lg:text-3xl' : 'text-lg lg:text-2xl'
           } ${soldOut ? 'opacity-50' : ''}`}
         >
-          {pack.price}
+          {rm0(pack.priceMyr)}
         </span>
         {!soldOut && (
           <span className="flex items-center gap-1 text-[11px] font-semibold text-neutral-400">

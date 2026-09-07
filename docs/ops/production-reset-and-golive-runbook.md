@@ -59,20 +59,21 @@ needed before launch.
 
 ### 1.2c Payout approval threshold — must be SET deliberately, not left at default
 
-A live GlobePay365 payout channel means real bank transfers can leave the merchant
-account. `GLOBEPAY_WD_APPROVAL_ABOVE_RM` (default RM 1,000, unset) holds any withdrawal
+A live payout channel means real bank transfers can leave the merchant
+account. `GATEWAY_WD_APPROVAL_ABOVE_RM` (default RM 1,000, unset) holds any withdrawal
 above that figure in the admin `/withdrawals` queue for a human to approve or deny —
 without a named operator watching that queue, a held withdrawal just sits, indefinitely,
 looking to the customer like nothing happened.
 
-Before arming withdrawals (`GLOBEPAY_WITHDRAWALS_ENABLED=true`):
+Before arming withdrawals (`GATEWAY_WITHDRAWALS_ENABLED=true`):
 
-1. Set `GLOBEPAY_WD_APPROVAL_ABOVE_RM` to a deliberately chosen figure, not silently left
-   at the RM 1,000 default. Also confirm `GLOBEPAY_WD_DAILY_MAX_RM` (rolling-24h
+1. Set `GATEWAY_WD_APPROVAL_ABOVE_RM` to a deliberately chosen figure, not silently left
+   at the RM 1,000 default. Also confirm `GATEWAY_WD_DAILY_MAX_RM` (rolling-24h
    per-customer cap, default RM 50,000) and `PAYOUT_DESTINATION_COOLDOWN_HOURS` (default
-   24) are the values intended — see `docs/payments/globepay365-setup.md`'s config table.
+   24) are the values intended — see the comments on these three vars in
+   `backend/packages/api/.env.template`.
 2. Confirm the admin `/withdrawals` queue's default view is `held`
-   (`backend/apps/admin/src/routes/withdrawals/page.tsx` — `useState<GlobePayWithdrawalView>('held')`)
+   (`backend/apps/admin/src/routes/withdrawals/page.tsx` — `useState<GatewayWithdrawalView>('held')`)
    so a held row is the first thing an operator sees, not something they have to filter
    into view.
 3. **Name who watches the queue** and how often. Nothing in this codebase alerts on a

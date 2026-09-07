@@ -25,7 +25,7 @@ describe('parseSortParam', () => {
     expect(parseSortParam('secret_column:asc', SORTABLE, 'created_at')).toEqual(
       { key: 'created_at', dir: 'DESC' },
     );
-    // The globepay lists pass their status-dependent default direction in, so
+    // The deposit/withdrawal lists pass their status-dependent default direction in, so
     // a bad key cannot knock the pending work queue out of oldest-first.
     expect(
       parseSortParam('secret_column:desc', SORTABLE, 'created_at', 'ASC'),

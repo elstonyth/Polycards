@@ -49,25 +49,26 @@ export async function POST(
       continue;
     }
     try {
-      const { result } = await updateDeliveryOrderWorkflow(req.scope).run({
-        input: { order_id: id, status },
-      });
       // Spec acceptance: one audit row per changed order. admin_id is
-      // server-derived; reason names the bulk tool.
-      await packs.createAdminActionAudits([
-        {
-          admin_id: req.auth_context.actor_id,
-          entity_type: 'delivery_order',
-          entity_id: id,
-          action: 'bulk_status',
-          before: { status: before.status },
-          after: { status: result.status },
-          reason: `bulk mark as ${status}`,
+      // server-derived; reason names the bulk tool. The row is written by the
+      // service inside the transaction that moves the status, so an
+      // audit-write failure rolls the transition back with it instead of
+      // leaving a changed order with no record of who changed it.
+      const { result } = await updateDeliveryOrderWorkflow(req.scope).run({
+        input: {
+          order_id: id,
+          status,
+          audit: {
+            adminId: req.auth_context.actor_id,
+            action: 'bulk_status' as const,
+            reason: `bulk mark as ${status}`,
+          },
         },
-      ]);
-      // Pushed AFTER the audit so `updated` and `skipped` stay disjoint: an
-      // audit-write failure lands in the catch below, and an id reported as
-      // skipped must never also be reported as updated.
+      });
+      // Pushed only once the workflow (transition AND audit) committed, so
+      // `updated` and `skipped` stay disjoint: a failure of either lands in the
+      // catch below, and an id reported as skipped must never also be reported
+      // as updated.
       updated.push(id);
       await notifyDeliveryChange(req.scope, before, result, undefined);
     } catch (err) {

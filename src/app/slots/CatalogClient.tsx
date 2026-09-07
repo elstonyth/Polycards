@@ -10,6 +10,7 @@ import {
   RectangleVertical,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { rm0 } from '@/lib/format';
 import { pillVariants } from '@/components/ui/pill';
 import Reveal from '@/components/Reveal';
 import QtyStepper from '@/components/QtyStepper';
@@ -99,7 +100,7 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
           {pack.name}
         </p>
         <p className="font-heading mt-0.5 whitespace-nowrap text-[15px] tabular-nums text-white sm:text-base">
-          {pack.price}
+          {rm0(pack.priceMyr)}
         </p>
       </div>
 
@@ -204,7 +205,7 @@ function PackRow({
         </span>
       ) : (
         <span className="flex shrink-0 items-center gap-1 rounded-full bg-white px-4 py-2 text-[13px] font-semibold text-neutral-950">
-          {pack.price}
+          {rm0(pack.priceMyr)}
           <ChevronRight className="h-3.5 w-3.5" aria-hidden />
         </span>
       )}

@@ -7,9 +7,8 @@
  *
  * Nothing in here is server-only — no SDK, no auth, no secrets.
  */
-import { formatValue } from '@/lib/packs-format';
 import { parseOne, WonCardSchema, OpenBuybackSchema } from '@/lib/data/schemas';
-import type { Rarity } from '@/lib/packs-data';
+import { toCardView } from '@/lib/card-view';
 import type { WonCard } from './packs';
 
 /** Inline buyback offer shape — shared between openPack and openBatch. */
@@ -54,19 +53,13 @@ export type BatchRoll = {
 /**
  * Raw shape of a single element inside the backend `rolls` array.
  *
- * Declares ONLY what is read straight off the raw object — `pull.id`, and the
- * two card fields `WonCardSchema` omits. Everything else the mapper needs comes
- * out of `parseOne(WonCardSchema, …)`, so `WonCardSchema` stays the single
- * declaration of those fields instead of being re-typed here; the index
- * signature carries them (unread and untyped) to the parse call.
+ * Declares ONLY what is read straight off the raw object — `pull.id`. The card
+ * is untyped on purpose: it goes to `parseOne(WonCardSchema, …)`, whose
+ * looseObject passthrough carries every display field to `toCardView`.
  */
 export interface RawBatchRollItem {
   pull?: { id?: unknown };
-  card: {
-    image: string;
-    slab_image?: string | null;
-    [key: string]: unknown;
-  };
+  card?: unknown;
   buyback?: unknown;
 }
 
@@ -86,31 +79,17 @@ export const clampCount = (n: number): number =>
  * committed by the time a caller sees this, so `openBatch` DROPS the bad roll
  * and keeps the rest — it refuses the batch only when nothing mapped.
  *
- * `image`/`slab_image` are intentionally read from the raw object
- * (`rawRoll.card`), NOT from the validated `wonCard`, because `WonCardSchema`
- * omits both fields (consistent with how `openPack` maps its card).
+ * `image`/`slab_image` are not declared by `WonCardSchema`; they ride its
+ * looseObject passthrough to `toCardView`, the one card mapper (the single
+ * open and the free rip map identically). The tier is re-stated because the
+ * schema guarantees it and the reveal's card type requires it.
  */
 export function mapBatchRoll(rawRoll: RawBatchRollItem): BatchRoll | null {
   const wonCard = parseOne(WonCardSchema, rawRoll.card);
   if (!wonCard) return null;
 
   return {
-    card: {
-      id: wonCard.handle,
-      name: wonCard.name,
-      image: rawRoll.card.image, // ← RAW, not from parsed wonCard
-      slab_image: rawRoll.card.slab_image ?? null, // ← RAW, same reason
-      // Raw USD market_value must never render behind "RM" — an older
-      // backend without marketPriceMyr shows "—" instead of a fake price.
-      value:
-        wonCard.marketPriceMyr != null
-          ? formatValue(wonCard.marketPriceMyr)
-          : '—',
-      rarity: wonCard.rarity as Rarity,
-      pokemon_dex: wonCard.pokemon_dex ?? null,
-      sprite_image: wonCard.sprite_image ?? null,
-      marketPriceMyr: wonCard.marketPriceMyr ?? null,
-    },
+    card: { ...toCardView(wonCard), rarity: wonCard.rarity },
     pullId: typeof rawRoll.pull?.id === 'string' ? rawRoll.pull.id : null,
     marketValue: wonCard.market_value,
     buyback: toBuybackOffer(rawRoll.buyback),

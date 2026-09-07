@@ -6,17 +6,17 @@
 // withdrawal-outcome.test.ts). The type-only import keeps this file free of
 // __BACKEND_URL__ (same trick format.ts uses for DeliveryStatus).
 import type {
-  GlobePayWithdrawalApproveResult,
-  GlobePayWithdrawalDenyResult,
+  WithdrawalApproveResult,
+  WithdrawalDenyResult,
 } from './admin-rest';
 
 export type ApproveOutcome = 'submitted' | 'ambiguous' | 'already-handled';
 
 // `approved` alone decides this — NOT `status`, which the route can leave
 // stale on the no-op branch (read once, before the claim it then fails to
-// make; see approve/route.ts and GlobePayWithdrawalApproveResult's comment).
+// make; see approve/route.ts and WithdrawalApproveResult's comment).
 export function classifyApproveResult(
-  data: GlobePayWithdrawalApproveResult,
+  data: WithdrawalApproveResult,
 ): ApproveOutcome {
   if (!data.approved) return 'already-handled';
   return data.transaction_id ? 'submitted' : 'ambiguous';
@@ -25,7 +25,7 @@ export function classifyApproveResult(
 export type DenyOutcome = 'refunded' | 'closed-no-refund';
 
 export function classifyDenyResult(
-  data: GlobePayWithdrawalDenyResult,
+  data: WithdrawalDenyResult,
 ): DenyOutcome {
   return data.refunded ? 'refunded' : 'closed-no-refund';
 }

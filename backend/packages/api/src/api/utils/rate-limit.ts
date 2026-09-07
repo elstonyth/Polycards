@@ -8,9 +8,9 @@ import Redis from 'ioredis';
 import { E164_RE } from '../../utils/phone-verification';
 import { callbackSourceIp } from './payer-ip';
 
-// Sliding-window rate limiting for the pack-open endpoint (and reusable for
-// any future endpoint — the factory at the bottom is the only pack-specific
-// part). There is no rate-limit facility anywhere in the Medusa/Mercur
+// Shared sliding-window rate limiting for every configured endpoint. The
+// RATE_LIMITS table at the bottom owns endpoint-specific policy. There is no
+// rate-limit facility anywhere in the Medusa/Mercur
 // dependency tree (verified 2026-06-10), so this is hand-rolled on the same
 // ioredis the Medusa redis modules use.
 //
@@ -300,7 +300,7 @@ export function createRateLimitMiddleware(
   // Misconfigured rules must fail at boot, loudly — limit 0 would 429 every
   // request and windowMs 0 would never deny one (see evaluateSlidingWindow's
   // strict window bound). Env parsing guarantees this for the pack-open
-  // limiter; this guards direct reuse of the factory.
+  // limiter; this guards direct callers too.
   for (const r of rules) {
     if (
       !Number.isSafeInteger(r.limit) ||
@@ -620,142 +620,13 @@ function createEnvRateLimit(opts: {
   });
 }
 
-/**
- * The pack-open limiter: burst + sustained sliding windows per customer,
- * Redis-backed (REDIS_URL) with in-memory failover. Limits are env-tunable:
- * PACK_OPEN_RATE_BURST_LIMIT / PACK_OPEN_RATE_BURST_WINDOW_MS (default 5/10s)
- * PACK_OPEN_RATE_LIMIT / PACK_OPEN_RATE_WINDOW_MS (default 20/60s)
- */
-export function createPackOpenRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({ name: 'pack-open', defaults: DEFAULTS });
+export interface RateLimitSpec {
+  defaults: EnvLimiterDefaults;
+  message?: RateLimitMessage;
+  keyOf?: (req: MedusaRequest) => string | string[] | undefined;
+  skipWhenNoKey?: boolean;
 }
 
-/**
- * The pack-open-batch limiter: burst + sustained sliding windows per customer,
- * Redis-backed (REDIS_URL) with in-memory failover. One batch request = up to
- * MAX_COUNT opens, so it gets its own independent budget rather than consuming
- * from the single-open limiter. Env-tunable:
- * PACK_OPEN_BATCH_RATE_BURST_LIMIT / PACK_OPEN_BATCH_RATE_BURST_WINDOW_MS (default 5/10s)
- * PACK_OPEN_BATCH_RATE_LIMIT / PACK_OPEN_BATCH_RATE_WINDOW_MS (default 20/60s)
- */
-export function createPackOpenBatchRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({ name: 'pack-open-batch', defaults: DEFAULTS });
-}
-
-/**
- * The vault-buyback limiter — same construction as pack-open, scoped per
- * customer. A buyback can happen at most once per pull (DB-enforced), so this
- * only throttles hammering. Env-tunable:
- * VAULT_BUYBACK_RATE_BURST_LIMIT / VAULT_BUYBACK_RATE_BURST_WINDOW_MS (10/10s)
- * VAULT_BUYBACK_RATE_LIMIT / VAULT_BUYBACK_RATE_WINDOW_MS (30/60s)
- */
-export function createVaultBuybackRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'vault-buyback',
-    message: 'Too many buyback requests.',
-    defaults: {
-      burstLimit: 10,
-      burstWindowMs: 10_000,
-      limit: 30,
-      windowMs: 60_000,
-    },
-  });
-}
-
-/**
- * The pull-reveal limiter — scoped per customer. The reveal ping fires once per
- * pull and is DB-idempotent, so this only throttles hammering. Env-tunable:
- * PULL_REVEAL_RATE_BURST_LIMIT / PULL_REVEAL_RATE_BURST_WINDOW_MS (20/10s)
- * PULL_REVEAL_RATE_LIMIT / PULL_REVEAL_RATE_WINDOW_MS (60/60s)
- */
-export function createPullRevealRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'pull-reveal',
-    message: 'Too many requests.',
-    defaults: {
-      burstLimit: 20,
-      burstWindowMs: 10_000,
-      limit: 60,
-      windowMs: 60_000,
-    },
-  });
-}
-
-/**
- * The credit-topup limiter — same construction as vault-buyback, scoped per
- * customer. Top-ups are gateway-backed writes (mock today), so the budget is
- * tighter than the read limiter but roomy for honest retries. Env-tunable:
- * CREDIT_TOPUP_RATE_BURST_LIMIT / CREDIT_TOPUP_RATE_BURST_WINDOW_MS (5/10s)
- * CREDIT_TOPUP_RATE_LIMIT / CREDIT_TOPUP_RATE_WINDOW_MS (15/60s)
- */
-export function createCreditTopupRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'credit-topup',
-    message: 'Too many top-up requests.',
-    defaults: {
-      burstLimit: 5,
-      burstWindowMs: 10_000,
-      limit: 15,
-      windowMs: 60_000,
-    },
-  });
-}
-
-/**
- * The delivery-write limiter (POST /store/delivery-orders + POST
- * /store/delivery-orders/:id/address) — scoped per customer. These are
- * state-changing writes (audit 2026-06-23: previously governed by the generous
- * store-READ budget); give them a tighter write-tier budget consistent with
- * topup/buyback. Still authed + ownership-checked, so this is anti-hammering
- * hardening. Env-tunable:
- * DELIVERY_WRITE_RATE_BURST_LIMIT / DELIVERY_WRITE_RATE_BURST_WINDOW_MS (10/10s)
- * DELIVERY_WRITE_RATE_LIMIT / DELIVERY_WRITE_RATE_WINDOW_MS (30/60s)
- */
-export function createDeliveryWriteRateLimit(
-  message: RateLimitMessage = 'Too many delivery requests.',
-): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'delivery-write',
-    message,
-    defaults: {
-      burstLimit: 10,
-      burstWindowMs: 10_000,
-      limit: 30,
-      windowMs: 60_000,
-    },
-  });
-}
-
-/**
- * The auth-endpoint limiter, SITEWIDE (login / register / password reset /
- * reset-completion). These routes are PUBLIC — there is no auth_context yet —
- * so the middleware keys on the request IP (its designed fallback), and the
- * storefront issues every credential request from a SERVER ACTION
- * (src/lib/actions/auth.ts is 'use server'; src/lib/medusa.ts forwards no
- * client headers), so in production that IP is the one Next.js egress IP for
- * every visitor. This tier is therefore a whole-site CIRCUIT BREAKER, not
- * per-client fairness — same stance as createProfileReadRateLimit and the
- * phone-OTP IP tiers. `createAuthIdentifierRateLimit` below is the tier that
- * bounds attempts against ONE account; it runs first (middlewares.ts).
- *
- * Its own defaults object, NOT the shared `DEFAULTS`: that one is also read by
- * createPackOpenRateLimit / createPackOpenBatchRateLimit, and widening it in
- * place would silently widen two unrelated gameplay limiters.
- *
- * The two rules are deliberately CONSISTENT (50 per 10s = 300 per minute).
- * Do not "tighten" the burst on its own: the burst is the binding rule, so a
- * low one silently overrides the sustained ceiling and re-creates the sitewide
- * bucket this tier was widened to remove — at 5/10s the real ceiling was
- * 30/min sitewide, a trivial DoS lever that 429'd honest sign-ins. Sized below
- * the repo's other by-topology-sitewide limiters (createProfileReadRateLimit
- * 60/10s + 600/60s, STORE_READ_DEFAULTS 120/10s + 480/60s) because auth volume
- * is far lower, and still orders of magnitude under a credential-stuffing run
- * — which createAuthIdentifierRateLimit bounds PER ACCOUNT anyway. That tier,
- * not this one, is what protects a single account.
- * Env-tunable:
- * AUTH_RATE_BURST_LIMIT / AUTH_RATE_BURST_WINDOW_MS (default 50/10s)
- * AUTH_RATE_LIMIT / AUTH_RATE_WINDOW_MS (default 300/60s)
- */
 export const AUTH_DEFAULTS: EnvLimiterDefaults = {
   burstLimit: 50,
   burstWindowMs: 10_000,
@@ -763,42 +634,177 @@ export const AUTH_DEFAULTS: EnvLimiterDefaults = {
   windowMs: 60_000,
 };
 
-export function createAuthRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'auth',
+export const STORE_READ_DEFAULTS: EnvLimiterDefaults = {
+  burstLimit: 120,
+  burstWindowMs: 10_000,
+  limit: 480,
+  windowMs: 60_000,
+};
+
+export const PROFILE_APPEARANCE_DEFAULTS: EnvLimiterDefaults = {
+  burstLimit: 15,
+  burstWindowMs: 10_000,
+  limit: 60,
+  windowMs: 60_000,
+};
+
+export const RATE_LIMITS = {
+  /**
+   * The pack-open limiter: burst + sustained sliding windows per customer,
+   * Redis-backed (REDIS_URL) with in-memory failover. Limits are env-tunable:
+   * PACK_OPEN_RATE_BURST_LIMIT / PACK_OPEN_RATE_BURST_WINDOW_MS (default 5/10s)
+   * PACK_OPEN_RATE_LIMIT / PACK_OPEN_RATE_WINDOW_MS (default 20/60s)
+   */
+  'pack-open': { defaults: DEFAULTS },
+
+  /**
+   * The pack-open-batch limiter: burst + sustained sliding windows per customer,
+   * Redis-backed (REDIS_URL) with in-memory failover. One batch request = up to
+   * MAX_COUNT opens, so it gets its own independent budget rather than consuming
+   * from the single-open limiter. Env-tunable:
+   * PACK_OPEN_BATCH_RATE_BURST_LIMIT / PACK_OPEN_BATCH_RATE_BURST_WINDOW_MS (default 5/10s)
+   * PACK_OPEN_BATCH_RATE_LIMIT / PACK_OPEN_BATCH_RATE_WINDOW_MS (default 20/60s)
+   */
+  'pack-open-batch': { defaults: DEFAULTS },
+
+  /**
+   * The vault-buyback limiter — same construction as pack-open, scoped per
+   * customer. A buyback can happen at most once per pull (DB-enforced), so this
+   * only throttles hammering. Env-tunable:
+   * VAULT_BUYBACK_RATE_BURST_LIMIT / VAULT_BUYBACK_RATE_BURST_WINDOW_MS (10/10s)
+   * VAULT_BUYBACK_RATE_LIMIT / VAULT_BUYBACK_RATE_WINDOW_MS (30/60s)
+   */
+  'vault-buyback': {
+    message: 'Too many buyback requests.',
+    defaults: {
+      burstLimit: 10,
+      burstWindowMs: 10_000,
+      limit: 30,
+      windowMs: 60_000,
+    },
+  },
+
+  /**
+   * The pull-reveal limiter — scoped per customer. The reveal ping fires once per
+   * pull and is DB-idempotent, so this only throttles hammering. Env-tunable:
+   * PULL_REVEAL_RATE_BURST_LIMIT / PULL_REVEAL_RATE_BURST_WINDOW_MS (20/10s)
+   * PULL_REVEAL_RATE_LIMIT / PULL_REVEAL_RATE_WINDOW_MS (60/60s)
+   */
+  'pull-reveal': {
+    message: 'Too many requests.',
+    defaults: {
+      burstLimit: 20,
+      burstWindowMs: 10_000,
+      limit: 60,
+      windowMs: 60_000,
+    },
+  },
+
+  /**
+   * The credit-topup limiter — same construction as vault-buyback, scoped per
+   * customer. Top-ups are gateway-backed writes (mock today), so the budget is
+   * tighter than the read limiter but roomy for honest retries. Env-tunable:
+   * CREDIT_TOPUP_RATE_BURST_LIMIT / CREDIT_TOPUP_RATE_BURST_WINDOW_MS (5/10s)
+   * CREDIT_TOPUP_RATE_LIMIT / CREDIT_TOPUP_RATE_WINDOW_MS (15/60s)
+   */
+  'credit-topup': {
+    message: 'Too many top-up requests.',
+    defaults: {
+      burstLimit: 5,
+      burstWindowMs: 10_000,
+      limit: 15,
+      windowMs: 60_000,
+    },
+  },
+
+  /**
+   * The delivery-write limiter (POST /store/delivery-orders + POST
+   * /store/delivery-orders/:id/address) — scoped per customer. These are
+   * state-changing writes (audit 2026-06-23: previously governed by the generous
+   * store-READ budget); give them a tighter write-tier budget consistent with
+   * topup/buyback. Still authed + ownership-checked, so this is anti-hammering
+   * hardening. Env-tunable:
+   * DELIVERY_WRITE_RATE_BURST_LIMIT / DELIVERY_WRITE_RATE_BURST_WINDOW_MS (10/10s)
+   * DELIVERY_WRITE_RATE_LIMIT / DELIVERY_WRITE_RATE_WINDOW_MS (30/60s)
+   */
+  'delivery-write': {
+    message: (req) => {
+      if (req.path.startsWith('/store/rewards/'))
+        return 'Too many reward requests.';
+      if (req.path.startsWith('/store/profile/')) return 'Too many uploads.';
+      if (req.path.startsWith('/store/phone-verification/'))
+        return 'Too many verification requests.';
+      return 'Too many delivery requests.';
+    },
+    defaults: {
+      burstLimit: 10,
+      burstWindowMs: 10_000,
+      limit: 30,
+      windowMs: 60_000,
+    },
+  },
+
+  /**
+   * The auth-endpoint limiter, SITEWIDE (login / register / password reset /
+   * reset-completion). These routes are PUBLIC — there is no auth_context yet —
+   * so the middleware keys on the request IP (its designed fallback), and the
+   * storefront issues every credential request from a SERVER ACTION
+   * (src/lib/actions/auth.ts is 'use server'; src/lib/medusa.ts forwards no
+   * client headers), so in production that IP is the one Next.js egress IP for
+   * every visitor. This tier is therefore a whole-site CIRCUIT BREAKER, not
+   * per-client fairness — same stance as the `profile-read` and phone-OTP IP
+   * tiers. `auth-identifier` below is the tier that
+   * bounds attempts against ONE account; it runs first (middlewares.ts).
+   *
+   * Its own defaults object, NOT the shared `DEFAULTS`: that one is also read by
+   * `pack-open` / `pack-open-batch`, and widening it in
+   * place would silently widen two unrelated gameplay limiters.
+   *
+   * The two rules are deliberately CONSISTENT (50 per 10s = 300 per minute).
+   * Do not "tighten" the burst on its own: the burst is the binding rule, so a
+   * low one silently overrides the sustained ceiling and re-creates the sitewide
+   * bucket this tier was widened to remove — at 5/10s the real ceiling was
+   * 30/min sitewide, a trivial DoS lever that 429'd honest sign-ins. Sized below
+   * the repo's other by-topology-sitewide limiters (`profile-read`
+   * 60/10s + 600/60s, STORE_READ_DEFAULTS 120/10s + 480/60s) because auth volume
+   * is far lower, and still orders of magnitude under a credential-stuffing run
+   * — which `auth-identifier` bounds PER ACCOUNT anyway. That tier,
+   * not this one, is what protects a single account.
+   * Env-tunable:
+   * AUTH_RATE_BURST_LIMIT / AUTH_RATE_BURST_WINDOW_MS (default 50/10s)
+   * AUTH_RATE_LIMIT / AUTH_RATE_WINDOW_MS (default 300/60s)
+   */
+  auth: {
     message: 'Too many sign-in attempts.',
     defaults: AUTH_DEFAULTS,
-  });
-}
+  },
 
-/**
- * The auth-endpoint limiter, PER-IDENTIFIER (login / register / password
- * reset). Keys on the email in the request body (`emailBodyKeyOf`) so it
- * survives the single-egress-IP topology described above — the email sibling
- * of createPhoneOtpStartPhoneRateLimit, and the reason this plan exists: an
- * IP-only auth limiter is one sitewide bucket, so one user's retries can 429
- * every other user's sign-in, and anyone who knows that can hold the bucket
- * empty. Runs BEFORE the IP tier (middlewares.ts) so a hammered account 429s
- * before spending the sitewide budget.
- *
- * `skipWhenNoKey` because the '/auth/*' wildcard matcher also covers the
- * emailpass `update` route, which carries no identifier: without it that route
- * would fall back to `ip:` and inherit these per-account numbers as a SITEWIDE
- * ceiling far tighter than the circuit breaker above. It still consumes the
- * sitewide tier on the same matcher, so nothing is unlimited.
- *
- * Budget: a human who has forgotten their password tries a handful of times in
- * a minute and a couple of dozen in an hour; a credential-stuffing run against
- * one account does far more. Deliberately roomier than a legitimate user needs
- * and far below hammering rates. Note login and password-reset share this one
- * per-email budget, so ~5 login typos inside a minute also defer the immediate
- * "forgot password" click by up to that minute. Env-tunable:
- * AUTH_IDENTIFIER_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 5/60s)
- * AUTH_IDENTIFIER_RATE_LIMIT / _WINDOW_MS (default 20/1h)
- */
-export function createAuthIdentifierRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'auth-identifier',
+  /**
+   * The auth-endpoint limiter, PER-IDENTIFIER (login / register / password
+   * reset). Keys on the email in the request body (`emailBodyKeyOf`) so it
+   * survives the single-egress-IP topology described above — the email sibling
+   * of `phone-otp-start-phone`, and the reason this plan exists: an
+   * IP-only auth limiter is one sitewide bucket, so one user's retries can 429
+   * every other user's sign-in, and anyone who knows that can hold the bucket
+   * empty. Runs BEFORE the IP tier (middlewares.ts) so a hammered account 429s
+   * before spending the sitewide budget.
+   *
+   * `skipWhenNoKey` because the '/auth/*' wildcard matcher also covers the
+   * emailpass `update` route, which carries no identifier: without it that route
+   * would fall back to `ip:` and inherit these per-account numbers as a SITEWIDE
+   * ceiling far tighter than the circuit breaker above. It still consumes the
+   * sitewide tier on the same matcher, so nothing is unlimited.
+   *
+   * Budget: a human who has forgotten their password tries a handful of times in
+   * a minute and a couple of dozen in an hour; a credential-stuffing run against
+   * one account does far more. Deliberately roomier than a legitimate user needs
+   * and far below hammering rates. Note login and password-reset share this one
+   * per-email budget, so ~5 login typos inside a minute also defer the immediate
+   * "forgot password" click by up to that minute. Env-tunable:
+   * AUTH_IDENTIFIER_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 5/60s)
+   * AUTH_IDENTIFIER_RATE_LIMIT / _WINDOW_MS (default 20/1h)
+   */
+  'auth-identifier': {
     message: 'Too many sign-in attempts for this account.',
     keyOf: emailBodyKeyOf,
     skipWhenNoKey: true,
@@ -808,24 +814,21 @@ export function createAuthIdentifierRateLimit(): MiddlewareHandler {
       limit: 20,
       windowMs: 3_600_000,
     },
-  });
-}
+  },
 
-/**
- * The account-delete limiter. The route takes a password, so an unthrottled
- * one is a password oracle — but the generic `createAuthRateLimit` is the
- * WRONG throttle for it: with no `keyOf` it keys on `auth_context.actor_id`
- * (already populated by authenticate()), giving a per-customer 50/10s + 300/60s
- * budget. That is looser than the write tier it would stack with, so stacking
- * adds nothing, and ~90× looser than the login path that guards the same
- * secret. These numbers mirror createAuthIdentifierRateLimit instead, because
- * that is the tier bounding password guesses per account. Env-tunable:
- * ACCOUNT_DELETE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 3/60s)
- * ACCOUNT_DELETE_RATE_LIMIT / _WINDOW_MS (default 20/1h)
- */
-export function createAccountDeleteRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'account-delete',
+  /**
+   * The account-delete limiter. The route takes a password, so an unthrottled
+   * one is a password oracle — but the generic `auth` limiter is the
+   * WRONG throttle for it: with no `keyOf` it keys on `auth_context.actor_id`
+   * (already populated by authenticate()), giving a per-customer 50/10s + 300/60s
+   * budget. That is looser than the write tier it would stack with, so stacking
+   * adds nothing, and ~90× looser than the login path that guards the same
+   * secret. These numbers mirror `auth-identifier` instead, because
+   * that is the tier bounding password guesses per account. Env-tunable:
+   * ACCOUNT_DELETE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 3/60s)
+   * ACCOUNT_DELETE_RATE_LIMIT / _WINDOW_MS (default 20/1h)
+   */
+  'account-delete': {
     message: 'Too many delete attempts for this account.',
     defaults: {
       burstLimit: 3,
@@ -833,23 +836,20 @@ export function createAccountDeleteRateLimit(): MiddlewareHandler {
       limit: 20,
       windowMs: 3_600_000,
     },
-  });
-}
+  },
 
-/**
- * The public-profile read limiter (GET /store/profiles/:handle). The route is
- * PUBLIC — no auth_context — so the middleware keys on the request IP (its
- * designed fallback). NOTE: the storefront fetches profiles SERVER-side, so
- * every visitor's page view arrives from the one Next.js origin IP — the
- * budget below is therefore a whole-storefront budget, not per-visitor, and
- * is sized well above any human browsing rate while still stopping scripted
- * hammering/enumeration. Env-tunable:
- * PROFILE_READ_RATE_BURST_LIMIT / PROFILE_READ_RATE_BURST_WINDOW_MS (60/10s)
- * PROFILE_READ_RATE_LIMIT / PROFILE_READ_RATE_WINDOW_MS (600/60s)
- */
-export function createProfileReadRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'profile-read',
+  /**
+   * The public-profile read limiter (GET /store/profiles/:handle). The route is
+   * PUBLIC — no auth_context — so the middleware keys on the request IP (its
+   * designed fallback). NOTE: the storefront fetches profiles SERVER-side, so
+   * every visitor's page view arrives from the one Next.js origin IP — the
+   * budget below is therefore a whole-storefront budget, not per-visitor, and
+   * is sized well above any human browsing rate while still stopping scripted
+   * hammering/enumeration. Env-tunable:
+   * PROFILE_READ_RATE_BURST_LIMIT / PROFILE_READ_RATE_BURST_WINDOW_MS (60/10s)
+   * PROFILE_READ_RATE_LIMIT / PROFILE_READ_RATE_WINDOW_MS (600/60s)
+   */
+  'profile-read': {
     message: 'Too many requests.',
     defaults: {
       burstLimit: 60,
@@ -857,73 +857,50 @@ export function createProfileReadRateLimit(): MiddlewareHandler {
       limit: 600,
       windowMs: 60_000,
     },
-  });
-}
+  },
 
-/**
- * The store-read limiter for the customer's own vault/credits GETs — cheap
- * reads, so the budget is generous; it only stops a runaway client or script
- * from hammering. One instance is shared by all read matchers (a combined
- * budget), and one account-page RSC render fans out to ~6-8 of these reads
- * at once. Sized for an enthusiastic human with two tabs open: the 2026-07-07
- * incident tripped twice — first the 30/10s burst (equip→refetch fan-out),
- * then a 240/60s sustained ceiling during rapid frame-swapping. ≥15 renders
- * per burst window, ≥60 renders/min; still stops runaway scripts by an order
- * of magnitude. Env-tunable:
- * STORE_READ_RATE_BURST_LIMIT / STORE_READ_RATE_BURST_WINDOW_MS (default 120/10s)
- * STORE_READ_RATE_LIMIT / STORE_READ_RATE_WINDOW_MS (default 480/60s)
- */
-export const STORE_READ_DEFAULTS: EnvLimiterDefaults = {
-  burstLimit: 120,
-  burstWindowMs: 10_000,
-  limit: 480,
-  windowMs: 60_000,
-};
-
-export function createStoreReadRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'store-read',
+  /**
+   * The store-read limiter for the customer's own vault/credits GETs — cheap
+   * reads, so the budget is generous; it only stops a runaway client or script
+   * from hammering. One instance is shared by all read matchers (a combined
+   * budget), and one account-page RSC render fans out to ~6-8 of these reads
+   * at once. Sized for an enthusiastic human with two tabs open: the 2026-07-07
+   * incident tripped twice — first the 30/10s burst (equip→refetch fan-out),
+   * then a 240/60s sustained ceiling during rapid frame-swapping. ≥15 renders
+   * per burst window, ≥60 renders/min; still stops runaway scripts by an order
+   * of magnitude. Env-tunable:
+   * STORE_READ_RATE_BURST_LIMIT / STORE_READ_RATE_BURST_WINDOW_MS (default 120/10s)
+   * STORE_READ_RATE_LIMIT / STORE_READ_RATE_WINDOW_MS (default 480/60s)
+   */
+  'store-read': {
     message: 'Too many requests.',
     defaults: STORE_READ_DEFAULTS,
-  });
-}
+  },
 
-/**
- * The profile-appearance limiter (POST /store/profile/frame). Frame equip/
- * unequip is a cosmetic, idempotent metadata write — a collector comparing
- * frames flips through them fast, so it must NOT share the tight delivery-
- * write budget (10/10s tripped on the 11th swap, 2026-07-07). Sized to cycle
- * the whole 10-frame workbook twice a minute with margin; still caps a
- * runaway script at ~1 write/s sustained. Env-tunable:
- * PROFILE_APPEARANCE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 15/10s)
- * PROFILE_APPEARANCE_RATE_LIMIT / _WINDOW_MS (default 60/60s)
- */
-export const PROFILE_APPEARANCE_DEFAULTS: EnvLimiterDefaults = {
-  burstLimit: 15,
-  burstWindowMs: 10_000,
-  limit: 60,
-  windowMs: 60_000,
-};
-
-export function createProfileAppearanceRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'profile-appearance',
+  /**
+   * The profile-appearance limiter (POST /store/profile/frame). Frame equip/
+   * unequip is a cosmetic, idempotent metadata write — a collector comparing
+   * frames flips through them fast, so it must NOT share the tight delivery-
+   * write budget (10/10s tripped on the 11th swap, 2026-07-07). Sized to cycle
+   * the whole 10-frame workbook twice a minute with margin; still caps a
+   * runaway script at ~1 write/s sustained. Env-tunable:
+   * PROFILE_APPEARANCE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 15/10s)
+   * PROFILE_APPEARANCE_RATE_LIMIT / _WINDOW_MS (default 60/60s)
+   */
+  'profile-appearance': {
     message: 'Too many appearance changes.',
     defaults: PROFILE_APPEARANCE_DEFAULTS,
-  });
-}
+  },
 
-/**
- * The notification-read limiter (POST /store/notifications/:id/read). This is
- * a lightweight idempotent write (upsert of a read-state row), so the budget
- * is more generous than credit mutations but tighter than the read limiter.
- * Env-tunable:
- * NOTIFICATION_READ_RATE_BURST_LIMIT / NOTIFICATION_READ_RATE_BURST_WINDOW_MS (default 20/10s)
- * NOTIFICATION_READ_RATE_LIMIT / NOTIFICATION_READ_RATE_WINDOW_MS (default 100/60s)
- */
-export function createNotificationReadRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'notification-read',
+  /**
+   * The notification-read limiter (POST /store/notifications/:id/read). This is
+   * a lightweight idempotent write (upsert of a read-state row), so the budget
+   * is more generous than credit mutations but tighter than the read limiter.
+   * Env-tunable:
+   * NOTIFICATION_READ_RATE_BURST_LIMIT / NOTIFICATION_READ_RATE_BURST_WINDOW_MS (default 20/10s)
+   * NOTIFICATION_READ_RATE_LIMIT / NOTIFICATION_READ_RATE_WINDOW_MS (default 100/60s)
+   */
+  'notification-read': {
     message: 'Too many mark-read requests.',
     defaults: {
       burstLimit: 20,
@@ -931,21 +908,18 @@ export function createNotificationReadRateLimit(): MiddlewareHandler {
       limit: 100,
       windowMs: 60_000,
     },
-  });
-}
+  },
 
-/**
- * The bulk mark-read limiter (POST /store/notifications/read-all). One call
- * clears the whole feed page, so a human needs this only a handful of times a
- * minute — far tighter than the per-id limiter it replaces for bulk work, and
- * deliberately its own tier so a runaway read-all loop cannot eat the per-id
- * budget a normal feed interaction depends on. Env-tunable:
- * NOTIFICATION_READ_ALL_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 5/10s)
- * NOTIFICATION_READ_ALL_RATE_LIMIT / _WINDOW_MS (default 30/60s)
- */
-export function createNotificationReadAllRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'notification-read-all',
+  /**
+   * The bulk mark-read limiter (POST /store/notifications/read-all). One call
+   * clears the whole feed page, so a human needs this only a handful of times a
+   * minute — far tighter than the per-id limiter it replaces for bulk work, and
+   * deliberately its own tier so a runaway read-all loop cannot eat the per-id
+   * budget a normal feed interaction depends on. Env-tunable:
+   * NOTIFICATION_READ_ALL_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 5/10s)
+   * NOTIFICATION_READ_ALL_RATE_LIMIT / _WINDOW_MS (default 30/60s)
+   */
+  'notification-read-all': {
     message: 'Too many mark-all-read requests.',
     defaults: {
       burstLimit: 5,
@@ -953,23 +927,20 @@ export function createNotificationReadAllRateLimit(): MiddlewareHandler {
       limit: 30,
       windowMs: 60_000,
     },
-  });
-}
+  },
 
-/**
- * Rate-limiter for admin money-mutation routes (freeze/unfreeze,
- * rewards-settings, credit-adjust). Admins are
- * trusted operators, so the budget is deliberately generous — this is
- * anti-token-drain hardening, not a tight per-action throttle. One instance
- * is shared by all matched matchers so they share one budget and one Redis
- * connection. Keys on auth_context.actor_id (populated by the framework admin
- * auth); falls back to the request IP if no actor is present. Env-tunable:
- * ADMIN_ACTION_RATE_BURST_LIMIT / ADMIN_ACTION_RATE_BURST_WINDOW_MS (default 30/10s)
- * ADMIN_ACTION_RATE_LIMIT / ADMIN_ACTION_RATE_WINDOW_MS (default 200/60s)
- */
-export function createAdminActionRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'admin-action',
+  /**
+   * Rate-limiter for admin money-mutation routes (freeze/unfreeze,
+   * rewards-settings, credit-adjust). Admins are
+   * trusted operators, so the budget is deliberately generous — this is
+   * anti-token-drain hardening, not a tight per-action throttle. One instance
+   * is shared by all matched matchers so they share one budget and one Redis
+   * connection. Keys on auth_context.actor_id (populated by the framework admin
+   * auth); falls back to the request IP if no actor is present. Env-tunable:
+   * ADMIN_ACTION_RATE_BURST_LIMIT / ADMIN_ACTION_RATE_BURST_WINDOW_MS (default 30/10s)
+   * ADMIN_ACTION_RATE_LIMIT / ADMIN_ACTION_RATE_WINDOW_MS (default 200/60s)
+   */
+  'admin-action': {
     message: 'Too many admin requests. Try again shortly.',
     defaults: {
       burstLimit: 30,
@@ -977,58 +948,55 @@ export function createAdminActionRateLimit(): MiddlewareHandler {
       limit: 200,
       windowMs: 60_000,
     },
-  });
-}
+  },
 
-/**
- * The gateway-hook limiter (POST /hooks/tgpay/{deposit,withdrawal
- * payout-verify}). Those routes are unauthenticated BY DESIGN — a webhook
- * carries no token and its authentication is the RSA signature — so before
- * this existed an anonymous caller had no budget at all on an endpoint that
- * does blocking cryptography: §1.16 forces `openCallback` to decrypt before it
- * can verify, so a forged body still cost a real AES decrypt (and, until plan
- * 089 memoized it, a 1000-round PBKDF2) on the single event loop.
- *
- * THIS IS AN ABUSE CEILING, NOT AUTHENTICATION and not fairness between
- * callers. The gateway is the only legitimate caller and should never come
- * near these numbers. The signature is, and stays, the real gate — see the
- * maintenance note in plan 089: "the hooks are rate-limited now" is never a
- * reason to relax signature verification.
- *
- * Keyed on IP (the middleware's default) — a webhook has no auth_context and
- * no useful body key: every field is inside the encrypted `Data` blob.
- * Medusa's express loader sets `trust proxy` 1 unconditionally (see
- * utils/payer-ip.ts), so `req.ip` comes from the proxy chain and a caller
- * cannot rotate its own key by spoofing X-Forwarded-For. If the deployed chain
- * is deeper than one hop the key collapses to one upstream address for all
- * callers — which does not weaken a ceiling on a surface that has exactly one
- * legitimate caller.
- *
- * Sized generously, because a 429 to a genuine callback costs something:
- * - deposit / withdrawal callbacks: recoverable. The gateway retries (per the
- *   integration guide, not observed here), and — independently of whether it
- *   does — the two reconcile jobs (src/jobs/globepay-*reconcile.ts, cron every
- *   10 min) requery the gateway for anything still pending, so the settlement
- *   lands late rather than never.
- * - payout-verify: fails CLOSED. Anything but a literal "success" makes the
- *   gateway refuse that payout, so a 429 blocks a legitimate withdrawal from
- *   paying out (no money moves wrongly, but a customer waits).
- * That asymmetry is why the ceiling sits orders of magnitude above real
- * callback volume: if one ever trips it, raise the env var, don't remove it.
- *
- * The two rules are deliberately CONSISTENT (100 per 10s = 600 per minute =
- * the sustained rule). The burst is always the binding rule, so a tighter one
- * silently overrides the sustained ceiling and makes the documented number a
- * lie — the scar recorded on AUTH_DEFAULTS above. Plan 089 suggested 60/10s;
- * that would have made the real ceiling 360/min, so the burst was raised to
- * match rather than shipping an inconsistent pair.
- * Env-tunable:
- * GATEWAY_HOOK_RATE_BURST_LIMIT / GATEWAY_HOOK_RATE_BURST_WINDOW_MS (100/10s)
- * GATEWAY_HOOK_RATE_LIMIT / GATEWAY_HOOK_RATE_WINDOW_MS (600/60s)
- */
-export function createGatewayHookRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'gateway-hook',
+  /**
+   * The gateway-hook limiter (POST /hooks/tgpay/{deposit,withdrawal
+   * payout-verify}). Those routes are unauthenticated BY DESIGN — a webhook
+   * carries no token and its authentication is the RSA signature — so before
+   * this existed an anonymous caller had no budget at all on an endpoint that
+   * does blocking cryptography: §1.16 forces `openCallback` to decrypt before it
+   * can verify, so a forged body still cost a real AES decrypt (and, until plan
+   * 089 memoized it, a 1000-round PBKDF2) on the single event loop.
+   *
+   * THIS IS AN ABUSE CEILING, NOT AUTHENTICATION and not fairness between
+   * callers. The gateway is the only legitimate caller and should never come
+   * near these numbers. The signature is, and stays, the real gate — see the
+   * maintenance note in plan 089: "the hooks are rate-limited now" is never a
+   * reason to relax signature verification.
+   *
+   * Keyed on IP (the middleware's default) — a webhook has no auth_context and
+   * no useful body key: every field is inside the encrypted `Data` blob.
+   * Medusa's express loader sets `trust proxy` 1 unconditionally (see
+   * utils/payer-ip.ts), so `req.ip` comes from the proxy chain and a caller
+   * cannot rotate its own key by spoofing X-Forwarded-For. If the deployed chain
+   * is deeper than one hop the key collapses to one upstream address for all
+   * callers — which does not weaken a ceiling on a surface that has exactly one
+   * legitimate caller.
+   *
+   * Sized generously, because a 429 to a genuine callback costs something:
+   * - deposit / withdrawal callbacks: recoverable. The gateway retries (per the
+   *   integration guide, not observed here), and — independently of whether it
+   *   does — the two reconcile jobs (src/jobs/{deposit,withdrawal}-reconcile.ts, cron every
+   *   10 min) requery the gateway for anything still pending, so the settlement
+   *   lands late rather than never.
+   * - payout-verify: fails CLOSED. Anything but a literal "success" makes the
+   *   gateway refuse that payout, so a 429 blocks a legitimate withdrawal from
+   *   paying out (no money moves wrongly, but a customer waits).
+   * That asymmetry is why the ceiling sits orders of magnitude above real
+   * callback volume: if one ever trips it, raise the env var, don't remove it.
+   *
+   * The two rules are deliberately CONSISTENT (100 per 10s = 600 per minute =
+   * the sustained rule). The burst is always the binding rule, so a tighter one
+   * silently overrides the sustained ceiling and makes the documented number a
+   * lie — the scar recorded on AUTH_DEFAULTS above. Plan 089 suggested 60/10s;
+   * that would have made the real ceiling 360/min, so the burst was raised to
+   * match rather than shipping an inconsistent pair.
+   * Env-tunable:
+   * GATEWAY_HOOK_RATE_BURST_LIMIT / GATEWAY_HOOK_RATE_BURST_WINDOW_MS (100/10s)
+   * GATEWAY_HOOK_RATE_LIMIT / GATEWAY_HOOK_RATE_WINDOW_MS (600/60s)
+   */
+  'gateway-hook': {
     message: 'Too many callback requests.',
     // Keyed on the CALLER's address, not req.ip: on App Platform req.ip is
     // DigitalOcean's ingress, so every gateway callback would otherwise share
@@ -1040,42 +1008,39 @@ export function createGatewayHookRateLimit(): MiddlewareHandler {
       limit: 600,
       windowMs: 60_000,
     },
-  });
-}
+  },
 
-// Phone-OTP limiters are keyed in TWO independent dimensions, both applied
-// (see middlewares.ts): a per-phone tier (below) and this IP tier. Why both —
-// the storefront's phone-verification server actions proxy every OTP request
-// through the Next.js server (src/lib/actions/phone-verification.ts), so in
-// production the backend sees exactly ONE egress IP for every visitor. An
-// IP-only limiter is therefore a SITEWIDE bucket, not per-client fairness:
-// one user's retries can 429 every other user's signup/change/reset OTPs,
-// and it's trivially DoS-able by anyone who knows that. The per-phone tier
-// (createPhoneOtpStartPhoneRateLimit / createPhoneOtpCheckPhoneRateLimit)
-// keys on the phone number in the request body instead, so it survives the
-// shared-IP topology and is the real per-client / SMS-cost cap. This IP tier
-// is kept as a second, deliberately generous circuit breaker against
-// whole-site SMS-spend abuse — sized above legitimate sitewide traffic, with
-// Twilio's own Fraud Guard + geo-lock as the upstream defense. Both factories
-// below build their own env-driven limiter (own Redis connection) rather than
-// sharing one instance — they are genuinely distinct budgets (per-phone vs.
-// sitewide), so collapsing them into one shared limiter would silently merge
-// the two buckets back into the single-bucket bug this split fixes.
+  // Phone-OTP limiters are keyed in TWO independent dimensions, both applied
+  // (see middlewares.ts): a per-phone tier (below) and this IP tier. Why both —
+  // the storefront's phone-verification server actions proxy every OTP request
+  // through the Next.js server (src/lib/actions/phone-verification.ts), so in
+  // production the backend sees exactly ONE egress IP for every visitor. An
+  // IP-only limiter is therefore a SITEWIDE bucket, not per-client fairness:
+  // one user's retries can 429 every other user's signup/change/reset OTPs,
+  // and it's trivially DoS-able by anyone who knows that. The per-phone tier
+  // (`phone-otp-start-phone` / `phone-otp-check-phone`)
+  // keys on the phone number in the request body instead, so it survives the
+  // shared-IP topology and is the real per-client / SMS-cost cap. This IP tier
+  // is kept as a second, deliberately generous circuit breaker against
+  // whole-site SMS-spend abuse — sized above legitimate sitewide traffic, with
+  // Twilio's own Fraud Guard + geo-lock as the upstream defense. Both entries
+  // below build their own env-driven limiter (own Redis connection) rather than
+  // sharing one instance — they are genuinely distinct budgets (per-phone vs.
+  // sitewide), so collapsing them into one shared limiter would silently merge
+  // the two buckets back into the single-bucket bug this split fixes.
 
-/**
- * The phone-OTP send limiter, PER-PHONE (POST /store/phone-verification/start).
- * PUBLIC route — keys on the `phone` field in the request body (falls back to
- * IP if the body has no string phone; the route itself 400s that shape
- * anyway). This is the primary fairness/SMS-cost cap: each allowed request
- * can cost real money (one SMS), layered under Twilio Verify's own
- * per-number caps. Runs BEFORE the IP tier below (middlewares.ts) so a
- * hammered number 429s before spending the sitewide budget. Env-tunable:
- * PHONE_OTP_START_PHONE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 3/10min)
- * PHONE_OTP_START_PHONE_RATE_LIMIT / _WINDOW_MS (default 6/24h)
- */
-export function createPhoneOtpStartPhoneRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'phone-otp-start-phone',
+  /**
+   * The phone-OTP send limiter, PER-PHONE (POST /store/phone-verification/start).
+   * PUBLIC route — keys on the `phone` field in the request body (falls back to
+   * IP if the body has no string phone; the route itself 400s that shape
+   * anyway). This is the primary fairness/SMS-cost cap: each allowed request
+   * can cost real money (one SMS), layered under Twilio Verify's own
+   * per-number caps. Runs BEFORE the IP tier below (middlewares.ts) so a
+   * hammered number 429s before spending the sitewide budget. Env-tunable:
+   * PHONE_OTP_START_PHONE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 3/10min)
+   * PHONE_OTP_START_PHONE_RATE_LIMIT / _WINDOW_MS (default 6/24h)
+   */
+  'phone-otp-start-phone': {
     message: 'Too many code requests for this number.',
     keyOf: phoneBodyKeyOf,
     defaults: {
@@ -1084,22 +1049,19 @@ export function createPhoneOtpStartPhoneRateLimit(): MiddlewareHandler {
       limit: 6,
       windowMs: 86_400_000,
     },
-  });
-}
+  },
 
-/**
- * The phone-OTP send limiter, SITEWIDE (POST /store/phone-verification/start).
- * PUBLIC route — keys on the request IP (its designed fallback), which in
- * production is the storefront's one egress IP (see the module comment
- * above) — so this is a whole-storefront SMS-spend circuit breaker, NOT
- * per-client fairness (createPhoneOtpStartPhoneRateLimit is that tier).
- * Env-tunable:
- * PHONE_OTP_START_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 30/60s)
- * PHONE_OTP_START_RATE_LIMIT / _WINDOW_MS (default 300/1h)
- */
-export function createPhoneOtpStartRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'phone-otp-start',
+  /**
+   * The phone-OTP send limiter, SITEWIDE (POST /store/phone-verification/start).
+   * PUBLIC route — keys on the request IP (its designed fallback), which in
+   * production is the storefront's one egress IP (see the module comment
+   * above) — so this is a whole-storefront SMS-spend circuit breaker, NOT
+   * per-client fairness (`phone-otp-start-phone` is that tier).
+   * Env-tunable:
+   * PHONE_OTP_START_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 30/60s)
+   * PHONE_OTP_START_RATE_LIMIT / _WINDOW_MS (default 300/1h)
+   */
+  'phone-otp-start': {
     message: 'Too many code requests.',
     defaults: {
       burstLimit: 30,
@@ -1107,20 +1069,17 @@ export function createPhoneOtpStartRateLimit(): MiddlewareHandler {
       limit: 300,
       windowMs: 3_600_000,
     },
-  });
-}
+  },
 
-/**
- * The phone-OTP check limiter, PER-PHONE (POST /store/phone-verification/check).
- * PUBLIC — same keyOf as the start-phone limiter above. Bounds code guessing
- * against one specific number; Twilio additionally caps 5 checks per
- * verification. Runs BEFORE the IP tier below (middlewares.ts). Env-tunable:
- * PHONE_OTP_CHECK_PHONE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 10/10min)
- * PHONE_OTP_CHECK_PHONE_RATE_LIMIT / _WINDOW_MS (default 30/24h)
- */
-export function createPhoneOtpCheckPhoneRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'phone-otp-check-phone',
+  /**
+   * The phone-OTP check limiter, PER-PHONE (POST /store/phone-verification/check).
+   * PUBLIC — same keyOf as the start-phone limiter above. Bounds code guessing
+   * against one specific number; Twilio additionally caps 5 checks per
+   * verification. Runs BEFORE the IP tier below (middlewares.ts). Env-tunable:
+   * PHONE_OTP_CHECK_PHONE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 10/10min)
+   * PHONE_OTP_CHECK_PHONE_RATE_LIMIT / _WINDOW_MS (default 30/24h)
+   */
+  'phone-otp-check-phone': {
     message: 'Too many verification attempts for this number.',
     keyOf: phoneBodyKeyOf,
     defaults: {
@@ -1129,20 +1088,17 @@ export function createPhoneOtpCheckPhoneRateLimit(): MiddlewareHandler {
       limit: 30,
       windowMs: 86_400_000,
     },
-  });
-}
+  },
 
-/**
- * The phone-OTP check limiter, SITEWIDE (POST /store/phone-verification/check).
- * PUBLIC — keys on IP, which in production is the storefront's one egress IP
- * (see the module comment above): a sitewide circuit breaker, not per-client
- * fairness (createPhoneOtpCheckPhoneRateLimit is that tier). Env-tunable:
- * PHONE_OTP_CHECK_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 60/60s)
- * PHONE_OTP_CHECK_RATE_LIMIT / _WINDOW_MS (default 600/1h)
- */
-export function createPhoneOtpCheckRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'phone-otp-check',
+  /**
+   * The phone-OTP check limiter, SITEWIDE (POST /store/phone-verification/check).
+   * PUBLIC — keys on IP, which in production is the storefront's one egress IP
+   * (see the module comment above): a sitewide circuit breaker, not per-client
+   * fairness (`phone-otp-check-phone` is that tier). Env-tunable:
+   * PHONE_OTP_CHECK_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 60/60s)
+   * PHONE_OTP_CHECK_RATE_LIMIT / _WINDOW_MS (default 600/1h)
+   */
+  'phone-otp-check': {
     message: 'Too many verification attempts.',
     defaults: {
       burstLimit: 60,
@@ -1150,20 +1106,17 @@ export function createPhoneOtpCheckRateLimit(): MiddlewareHandler {
       limit: 600,
       windowMs: 3_600_000,
     },
-  });
-}
+  },
 
-/**
- * The referral-bind limiter (POST /store/referral/bind). One legitimate call
- * per account lifetime (attribution is permanent), fired blind by the
- * storefront right after signup — so the budget is tiny and per-customer.
- * Env-tunable:
- * REFERRAL_BIND_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 3/60s)
- * REFERRAL_BIND_RATE_LIMIT / _WINDOW_MS (default 10/1h)
- */
-export function createReferralBindRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'referral-bind',
+  /**
+   * The referral-bind limiter (POST /store/referral/bind). One legitimate call
+   * per account lifetime (attribution is permanent), fired blind by the
+   * storefront right after signup — so the budget is tiny and per-customer.
+   * Env-tunable:
+   * REFERRAL_BIND_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 3/60s)
+   * REFERRAL_BIND_RATE_LIMIT / _WINDOW_MS (default 10/1h)
+   */
+  'referral-bind': {
     message: 'Too many referral attempts.',
     defaults: {
       burstLimit: 3,
@@ -1171,20 +1124,17 @@ export function createReferralBindRateLimit(): MiddlewareHandler {
       limit: 10,
       windowMs: 3_600_000,
     },
-  });
-}
+  },
 
-/**
- * The task-action limiter (POST /store/tasks/checkin and
- * /store/tasks/:id/claim). Both are idempotent single-tap writes — one
- * legitimate check-in per day, one claim per task per period — so the budget
- * mirrors notification-read's shape but tighter. Env-tunable:
- * TASK_ACTION_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 10/10s)
- * TASK_ACTION_RATE_LIMIT / _WINDOW_MS (default 60/60s)
- */
-export function createTaskActionRateLimit(): MiddlewareHandler {
-  return createEnvRateLimit({
-    name: 'task-action',
+  /**
+   * The task-action limiter (POST /store/tasks/checkin and
+   * /store/tasks/:id/claim). Both are idempotent single-tap writes — one
+   * legitimate check-in per day, one claim per task per period — so the budget
+   * mirrors notification-read's shape but tighter. Env-tunable:
+   * TASK_ACTION_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 10/10s)
+   * TASK_ACTION_RATE_LIMIT / _WINDOW_MS (default 60/60s)
+   */
+  'task-action': {
     message: 'Too many task actions.',
     defaults: {
       burstLimit: 10,
@@ -1192,5 +1142,14 @@ export function createTaskActionRateLimit(): MiddlewareHandler {
       limit: 60,
       windowMs: 60_000,
     },
-  });
+  },
+} as const satisfies Record<string, RateLimitSpec>;
+
+/**
+ * Constructs one limiter from the named spec. Calls deliberately return
+ * independent handlers: middlewares.ts hoists the names whose routes share a
+ * fallback bucket and calls this separately where the existing factories did.
+ */
+export function rateLimit(name: keyof typeof RATE_LIMITS): MiddlewareHandler {
+  return createEnvRateLimit({ name, ...RATE_LIMITS[name] });
 }

@@ -7,18 +7,16 @@ import { useModalA11y } from '@/lib/use-modal-a11y';
 import { usePrefersReducedMotion } from '@/lib/use-reveal';
 import { useCardPrice } from '@/lib/use-card-price';
 import { CardDetail } from '@/components/cards/CardDetail';
-import type { Rarity } from '@/lib/packs-data';
+import type { CardView } from '@/lib/card-view';
 
 /** The minimum a grid knows about a card — enough to open the overlay
  *  INSTANTLY; the endpoint hydrates the rest (set/grade/history) via
- *  useCardPrice. `value` is the already-formatted "RM 4,850" string. */
-export interface CardSeed {
-  handle: string;
-  name: string;
-  image: string;
-  slabImage: string | null;
-  value: string;
-  rarity: Rarity | null;
+ *  useCardPrice. It is the card view's display fields (`priceMyr` null =
+ *  unpriced, rendered '—'), so any card view opens the overlay as it is. */
+export type CardSeed = Pick<
+  CardView,
+  'handle' | 'name' | 'image' | 'slabImage' | 'rarity' | 'priceMyr'
+> & {
   /** Cosmetic frame that OVERRIDES the tier frame. A weekly-challenge prize
    *  wears the challenge's prism frame wherever it is shown — the stage grid,
    *  this overlay, the card page opened from it, and the winner's vault — so it
@@ -30,7 +28,7 @@ export interface CardSeed {
    *  (vault, a direct /card/<handle> visit) fall back to name-derivation. */
   pokemonDex?: number | null;
   spriteImage?: string | null;
-}
+};
 
 /**
  * Full-screen card detail overlay. Open = seed

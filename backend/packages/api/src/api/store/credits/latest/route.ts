@@ -2,8 +2,10 @@ import {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import PacksModuleService from '../../../../modules/packs/service';
-import { PACKS_MODULE } from '../../../../modules/packs';
+import {
+  resolvePacks,
+  type CustomerWallet,
+} from '../../../../modules/packs/facets';
 
 // GET /store/credits/latest — the newest balance movement for the caller.
 //
@@ -27,7 +29,7 @@ export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
+  const packs = resolvePacks<CustomerWallet>(req.scope);
 
   const [newest] = await packs.listCreditTransactions(
     { customer_id: req.auth_context.actor_id },

@@ -8,30 +8,7 @@ import {
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import multer from 'multer';
-import {
-  createAccountDeleteRateLimit,
-  createAdminActionRateLimit,
-  createAuthIdentifierRateLimit,
-  createAuthRateLimit,
-  createCreditTopupRateLimit,
-  createDeliveryWriteRateLimit,
-  createGatewayHookRateLimit,
-  createNotificationReadAllRateLimit,
-  createNotificationReadRateLimit,
-  createPackOpenBatchRateLimit,
-  createPackOpenRateLimit,
-  createPhoneOtpCheckPhoneRateLimit,
-  createPhoneOtpCheckRateLimit,
-  createPhoneOtpStartPhoneRateLimit,
-  createPhoneOtpStartRateLimit,
-  createProfileAppearanceRateLimit,
-  createReferralBindRateLimit,
-  createTaskActionRateLimit,
-  createProfileReadRateLimit,
-  createPullRevealRateLimit,
-  createStoreReadRateLimit,
-  createVaultBuybackRateLimit,
-} from './utils/rate-limit';
+import { rateLimit } from './utils/rate-limit';
 import { createResetTokenSingleUseGuard } from './utils/reset-token-guard';
 import {
   rejectCustomerMetadata,
@@ -83,7 +60,7 @@ import { refuseCrossOriginAdminWrite } from './utils/admin-origin-guard';
 // In production that IS one shared bucket, not per-visitor: the badge is
 // site-wide (every route, not just /slots — #442), and every guest read is
 // proxied server-side through the storefront's ONE Next.js egress IP (the
-// same single-egress-IP topology createAuthRateLimit / createProfileReadRateLimit
+// same single-egress-IP topology the auth / profile-read limiters
 // already document — see rate-limit.ts ~750-760), so this is a
 // whole-storefront CIRCUIT BREAKER on the badge's guest read
 // (STORE_READ_DEFAULTS: 120/10s burst, 480/60s sustained sitewide), the same
@@ -99,43 +76,36 @@ import { refuseCrossOriginAdminWrite } from './utils/admin-origin-guard';
 
 // One instance shared by the vault + credits matchers: the two reads travel
 // together in the UI, so they share one budget (and one Redis connection).
-const storeReadRateLimit = createStoreReadRateLimit();
-const authRateLimit = createAuthRateLimit();
+const storeReadRateLimit = rateLimit('store-read');
+const authRateLimit = rateLimit('auth');
 // The per-identifier (per-email) credential tier. ONE instance shared by every
 // credential matcher below: they are one budget per account across login,
 // register and reset, and one instance also means one Redis connection fronting
 // the single `rl:auth-identifier:` keyspace (two instances would share the
 // Redis budget but NOT the in-memory failover budget — split-brain when Redis
 // blips).
-const authIdentifierRateLimit = createAuthIdentifierRateLimit();
+const authIdentifierRateLimit = rateLimit('auth-identifier');
 // Shared by ALL write-tier matchers below (delivery-order writes, rewards
 // claim/withdraw, daily draw, avatar upload, verified phone change): one
 // budget + one Redis connection, distinct from the read budget. The 429
 // label resolves per request so a rewards claim is never told "Too many
 // delivery requests." (sim finding P3-10).
-const deliveryWriteRateLimit = createDeliveryWriteRateLimit((req) => {
-  if (req.path.startsWith('/store/rewards/'))
-    return 'Too many reward requests.';
-  if (req.path.startsWith('/store/profile/')) return 'Too many uploads.';
-  if (req.path.startsWith('/store/phone-verification/'))
-    return 'Too many verification requests.';
-  return 'Too many delivery requests.';
-});
+const deliveryWriteRateLimit = rateLimit('delivery-write');
 // Frame equip/unequip — cosmetic metadata write with its own generous budget
 // (sharing the delivery-write tier 429'd a collector's 11th frame swap).
-const profileAppearanceRateLimit = createProfileAppearanceRateLimit();
-const referralBindRateLimit = createReferralBindRateLimit();
-const taskActionRateLimit = createTaskActionRateLimit();
+const profileAppearanceRateLimit = rateLimit('profile-appearance');
+const referralBindRateLimit = rateLimit('referral-bind');
+const taskActionRateLimit = rateLimit('task-action');
 // Permanent account deletion — its own tier because the route takes a password
-// and the write tier is no throttle for one (see createAccountDeleteRateLimit).
-const accountDeleteRateLimit = createAccountDeleteRateLimit();
+// and the write tier is no throttle for one (see the account-delete spec).
+const accountDeleteRateLimit = rateLimit('account-delete');
 // One instance shared by all admin money-mutation matchers: they share one
 // budget and one Redis connection (a compromised admin token is throttled
 // across all mutation routes together).
-const adminActionRateLimit = createAdminActionRateLimit();
+const adminActionRateLimit = rateLimit('admin-action');
 // One instance for every gateway callback route: one abuse ceiling, one
-// budget, one Redis connection (see createGatewayHookRateLimit for sizing).
-const gatewayHookRateLimit = createGatewayHookRateLimit();
+// budget, one Redis connection (see the gateway-hook spec for sizing).
+const gatewayHookRateLimit = rateLimit('gateway-hook');
 // TGPay's source allowlist (src/api/utils/payer-ip.ts) — after the limiter.
 const tgpayCallbackAllowlist = createTgpayCallbackAllowlist();
 
@@ -353,8 +323,8 @@ export default defineMiddlewares({
       matcher: '/store/phone-verification/start',
       method: 'POST',
       middlewares: [
-        createPhoneOtpStartPhoneRateLimit(),
-        createPhoneOtpStartRateLimit(),
+        rateLimit('phone-otp-start-phone'),
+        rateLimit('phone-otp-start'),
       ],
     },
     {
@@ -363,8 +333,8 @@ export default defineMiddlewares({
       matcher: '/store/phone-verification/check',
       method: 'POST',
       middlewares: [
-        createPhoneOtpCheckPhoneRateLimit(),
-        createPhoneOtpCheckRateLimit(),
+        rateLimit('phone-otp-check-phone'),
+        rateLimit('phone-otp-check'),
       ],
     },
     {
@@ -396,7 +366,7 @@ export default defineMiddlewares({
       // verification inside a rate limiter is not worth it, because this route
       // already has a genuine per-identifier bound one hop upstream: a caller
       // cannot obtain the proof without spending
-      // createPhoneOtpCheckPhoneRateLimit's per-number budget (30/24h) on
+      // phone-otp-check-phone's per-number budget (30/24h) on
       // /store/phone-verification/check. authRateLimit (IP) is the sitewide
       // circuit breaker on top of that.
       matcher: '/store/phone-verification/password-reset',
@@ -545,7 +515,7 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [
         authenticate('customer', ['bearer']),
-        createPackOpenRateLimit(),
+        rateLimit('pack-open'),
       ],
     },
     {
@@ -553,7 +523,7 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [
         authenticate('customer', ['bearer']),
-        createPackOpenBatchRateLimit(),
+        rateLimit('pack-open-batch'),
       ],
     },
     {
@@ -591,7 +561,7 @@ export default defineMiddlewares({
       matcher: '/store/vault/*/buyback',
       middlewares: [
         authenticate('customer', ['bearer']),
-        createVaultBuybackRateLimit(),
+        rateLimit('vault-buyback'),
       ],
     },
     {
@@ -604,7 +574,7 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [
         authenticate('customer', ['bearer']),
-        createVaultBuybackRateLimit(),
+        rateLimit('vault-buyback'),
       ],
     },
     {
@@ -662,7 +632,7 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [
         authenticate('customer', ['bearer']),
-        createPullRevealRateLimit(),
+        rateLimit('pull-reveal'),
       ],
     },
     {
@@ -677,7 +647,7 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [
         authenticate('customer', ['bearer']),
-        createPullRevealRateLimit(),
+        rateLimit('pull-reveal'),
       ],
     },
     {
@@ -721,7 +691,7 @@ export default defineMiddlewares({
       // profile read.
       matcher: '/store/referral/codes/*',
       method: 'GET',
-      middlewares: [createProfileReadRateLimit()],
+      middlewares: [rateLimit('profile-read')],
     },
     {
       // Spend a task's free-rip entitlement (POST /store/tasks/claims/:id/spin).
@@ -771,7 +741,7 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [
         authenticate('customer', ['bearer']),
-        createNotificationReadAllRateLimit(),
+        rateLimit('notification-read-all'),
       ],
     },
     {
@@ -783,7 +753,7 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [
         authenticate('customer', ['bearer']),
-        createNotificationReadRateLimit(),
+        rateLimit('notification-read'),
       ],
     },
     {
@@ -802,7 +772,7 @@ export default defineMiddlewares({
       // can't express an exclusion.
       matcher: '/store/profiles/*',
       method: 'GET',
-      middlewares: [createProfileReadRateLimit()],
+      middlewares: [rateLimit('profile-read')],
     },
     {
       // Credit top-up through the (mock) payment gateway
@@ -812,7 +782,7 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [
         authenticate('customer', ['bearer']),
-        createCreditTopupRateLimit(),
+        rateLimit('credit-topup'),
         requirePhoneVerified,
       ],
     },
@@ -829,7 +799,7 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [
         authenticate('customer', ['bearer']),
-        createCreditTopupRateLimit(),
+        rateLimit('credit-topup'),
         requirePhoneVerified,
       ],
     },
@@ -857,7 +827,7 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [
         authenticate('customer', ['bearer']),
-        createCreditTopupRateLimit(),
+        rateLimit('credit-topup'),
         // Same phone gate as topup/deposit/delivery (2026-08-05): money OUT
         // was the one money path without it, which made an unverified account
         // able to cash out what it could never have topped up. Flag-gated by
@@ -1203,7 +1173,7 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
-      // Per-row bank-account reveal (GET /admin/globepay/withdrawals/:id/account).
+      // Per-row bank-account reveal (GET /admin/payments/withdrawals/:id/account).
       // The ONE deliberate READ on this limiter — every other matcher sharing
       // adminActionRateLimit is a POST or a DELETE (checked across the whole
       // array, not just the neighbours), so do not read this as a mutation.
@@ -1214,7 +1184,7 @@ export default defineMiddlewares({
       // route that still serves one in full: throttled, it stays a per-dispute
       // lookup; unthrottled, a compromised admin token walks the table and
       // re-derives exactly the bulk view the masking removed.
-      matcher: '/admin/globepay/withdrawals/*/account',
+      matcher: '/admin/payments/withdrawals/*/account',
       method: 'GET',
       middlewares: [adminActionRateLimit],
     },
@@ -1224,7 +1194,7 @@ export default defineMiddlewares({
       // transfer. The row's own atomic status claim is what stops a
       // double-click paying twice — this budget is the outer bound on how
       // fast a compromised admin token could work the queue at all.
-      matcher: '/admin/globepay/withdrawals/*/approve',
+      matcher: '/admin/payments/withdrawals/*/approve',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },
@@ -1233,7 +1203,7 @@ export default defineMiddlewares({
       // approve twin. It mints no credit beyond the one refund the row's
       // shared idempotency anchor allows, but it is still a ledger write
       // driven by an admin token.
-      matcher: '/admin/globepay/withdrawals/*/deny',
+      matcher: '/admin/payments/withdrawals/*/deny',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

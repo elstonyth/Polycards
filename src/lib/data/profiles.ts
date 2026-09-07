@@ -12,16 +12,8 @@
  */
 import 'server-only';
 import { cache } from 'react';
-import { sdk } from '@/lib/medusa';
-import { authedFetch } from '@/lib/authed-fetch';
-import { logger } from '@/lib/logger';
-import { httpStatus } from '@/lib/errors';
-import { getAuthToken } from '@/lib/data/customer';
-import {
-  parseOne,
-  PublicProfileSchema,
-  ProfileHandleSchema,
-} from '@/lib/data/schemas';
+import { store } from '@/lib/store';
+import { PublicProfileSchema, ProfileHandleSchema } from '@/lib/data/schemas';
 
 export type ProfileRarity =
   'Immortal' | 'Legendary' | 'Mythical' | 'Rare' | 'Uncommon' | 'Common';
@@ -97,54 +89,47 @@ export type ProfileResult =
  */
 export const getPublicProfile = cache(
   async (handle: string): Promise<ProfileResult> => {
-    try {
-      const profile = await sdk.client.fetch<PublicProfile>(
-        `/store/profiles/${encodeURIComponent(handle)}`,
-      );
-      const valid = parseOne(PublicProfileSchema, profile);
-      if (!valid) {
-        logger.error(`[profiles] schema validation failed for "${handle}"`);
-        return { status: 'error' };
-      }
-      return { status: 'ok', profile: valid as unknown as PublicProfile };
-    } catch (error) {
-      // 404 = nobody holds this display name (typo, or a retired URL).
-      if (httpStatus(error) === 404) {
-        return { status: 'notfound' };
-      }
-      // 410 = a real name the backend is deliberately hiding (disabled
-      // account). Not an error, and never a 404 — the name is still taken.
-      if (httpStatus(error) === 410) {
-        return { status: 'unavailable' };
-      }
-      logger.error(`[profiles] failed to load profile "${handle}":`, error);
-      return { status: 'error' };
-    }
+    // Public route: no bearer, and no cache key on the wire (`cache: 'auto'`)
+    // — what the bare sdk.client.fetch sent.
+    const r = await store.get(
+      `/store/profiles/${encodeURIComponent(handle)}`,
+      PublicProfileSchema,
+      { auth: 'none', cache: 'auto' },
+    );
+    if (r.ok)
+      return { status: 'ok', profile: r.data as unknown as PublicProfile };
+    // 404 = nobody holds this display name (typo, or a retired URL).
+    if (r.kind === 'not_found') return { status: 'notfound' };
+    // 410 = a real name the backend is deliberately hiding (disabled
+    // account). Not an error, and never a 404 — the name is still taken.
+    if (r.status === 410) return { status: 'unavailable' };
+    // Everything else — 5xx, a network drop, a 200 that fails the schema — is
+    // a profile we could not load, never "does not exist". The port logged it,
+    // with the handle in the path it names.
+    return { status: 'error' };
   },
 );
 
-/** The handle for an explicit token (used right after login, pre-cookie-read). */
+/** The handle for an EXPLICIT token — the login and Google-callback paths call
+ *  this in the same request that sets the cookie, so the jar the port would
+ *  read is still the pre-login one. `bearer` is the port's way to say that. */
 export async function fetchProfileHandle(
   token: string,
 ): Promise<string | null> {
-  try {
-    const parsed = parseOne(
-      ProfileHandleSchema,
-      await authedFetch(token, '/store/profiles/me'),
-    );
-    return parsed ? parsed.handle : null;
-  } catch (error) {
-    logger.error('[profiles] failed to load own profile handle:', error);
-    return null;
-  }
+  const r = await store.get('/store/profiles/me', ProfileHandleSchema, {
+    bearer: token,
+  });
+  return r.ok ? r.data.handle : null;
 }
 
 /**
  * The logged-in customer's own profile handle (lazily assigned by the backend
  * on first call), or null when logged out or the backend is unreachable.
+ *
+ * The cookie read is the port's (`auth: 'required'`), which also keeps the old
+ * "logged out ⇒ no request at all" guarantee.
  */
 export async function getOwnProfileHandle(): Promise<string | null> {
-  const token = await getAuthToken();
-  if (!token) return null;
-  return fetchProfileHandle(token);
+  const r = await store.get('/store/profiles/me', ProfileHandleSchema);
+  return r.ok ? r.data.handle : null;
 }

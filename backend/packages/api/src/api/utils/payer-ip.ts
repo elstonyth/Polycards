@@ -1,11 +1,11 @@
 import { tgpayCallbackIpVerdict } from '../../modules/packs/tgpay-client';
-// The IP a money route reports to GlobePay365 in its `IPAddress` field.
+// The IP a money route reports to the gateway as the payer IP.
 //
 // THEIR requirement is the paying customer's IP, not ours. req.ip FIRST:
 // Medusa's express-loader sets `trust proxy` 1 unconditionally, so req.ip is
 // derived from the proxy chain and a client cannot set it. The raw
 // X-Forwarded-For first hop is client-controlled — reading it first let a
-// caller choose the IP we report to GlobePay365, so it is only a fallback for
+// caller choose the IP we report to the gateway, so it is only a fallback for
 // a deployment where req.ip is somehow empty.
 //
 // This lives here because the deposit and withdrawal routes landed in the same

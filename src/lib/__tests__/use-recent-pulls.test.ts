@@ -1,51 +1,16 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createElement, act, useLayoutEffect } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import { act } from 'react';
+import { renderHook, flush } from './render-hook';
 import { useLiveRecentPulls } from '../use-recent-pulls';
 import type { RecentFeed, RecentPull } from '@/lib/data/packs';
 
-// Same createRoot + act harness as use-pack-detail-poll.test.ts (no hook
-// testing library in the repo). The hook's rules under test are all
-// ACROSS-render behaviour — a changing tier prop, an empty response for the
-// scope already on screen, the pending flag — so a pure-logic extraction
-// could not observe them.
-function renderHook<P, T>(useHook: (props: P) => T, initial: P) {
-  const container = document.createElement('div');
-  document.body.appendChild(container);
-  const box: { current: T } = { current: undefined as unknown as T };
-  let root!: Root;
-  function Probe({ props }: { props: P }) {
-    const result = useHook(props);
-    useLayoutEffect(() => {
-      box.current = result;
-    });
-    return null;
-  }
-  act(() => {
-    root = createRoot(container);
-    root.render(createElement(Probe, { props: initial }));
-  });
-  return {
-    get current() {
-      return box.current;
-    },
-    rerender: (props: P) => {
-      act(() => {
-        root.render(createElement(Probe, { props }));
-      });
-    },
-    unmount: () => {
-      act(() => root.unmount());
-      container.remove();
-    },
-  };
-}
-
-Object.defineProperty(document, 'visibilityState', {
-  configurable: true,
-  get: () => 'visible',
-});
+// The rules under test are the ones useLiveRecentPulls owns on top of
+// useLivePoll: the URL it builds per scope, its `accept` (an empty payload for
+// the scope already on screen is a blip, for a NEW scope it is that scope's
+// honest empty state), and the pending/shownScope contract PullHistory keys
+// its list on. The interval, the visibility gate and the ordering guard belong
+// to useLivePoll and are covered in use-live-poll.test.ts.
 
 const pull = (
   id: string,
@@ -57,8 +22,10 @@ const pull = (
   image: '/c.png',
   slabImage: null,
   profileHandle: null,
-  value: 'RM 1.00',
+  priceMyr: 1,
   rarity,
+  pokemonDex: null,
+  spriteImage: null,
   packName: 'Bronze Pack',
   packIcon: '/p.webp',
   who: 'PW',
@@ -76,7 +43,6 @@ const seed: RecentFeed = {
 const fetchMock = vi.fn();
 const respond = (body: unknown, ok = true) =>
   fetchMock.mockResolvedValueOnce({ ok, json: async () => body });
-const flush = () => act(async () => {});
 
 beforeEach(() => {
   fetchMock.mockReset();
@@ -184,3 +150,44 @@ describe('useLiveRecentPulls', () => {
     h.unmount();
   });
 });
+
+it.each([
+  {
+    id: 'old',
+    handle: 'card-old',
+    name: 'Card old',
+    image: '/c.png',
+    slabImage: null,
+    value: 'RM 1.00',
+    rarity: 'Common',
+    packName: 'Bronze Pack',
+    packIcon: '/p.webp',
+    who: 'PW',
+    profileHandle: null,
+    avatar: null,
+    frame: null,
+    rolledAt: '2026-09-02T13:38:44.000Z',
+    agoLabel: 'just now',
+  },
+  { ...pull('bad'), priceMyr: 'RM 1.00' },
+  null,
+])(
+  'retains seed and last-good feed when rows are incompatible: %j',
+  async (row) => {
+    respond({ pulls: [row], drought: {} });
+    const h = renderHook(() => useLiveRecentPulls(seed), undefined);
+    await flush();
+    expect(h.current.pulls).toEqual(seed.pulls);
+    respond({ pulls: [pull('fresh')], drought: { Rare: 2 } });
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(h.current.pulls.map((p) => p.id)).toEqual(['fresh']);
+    respond({ pulls: [row], drought: {} });
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(h.current.pulls.map((p) => p.id)).toEqual(['fresh']);
+    h.unmount();
+  },
+);

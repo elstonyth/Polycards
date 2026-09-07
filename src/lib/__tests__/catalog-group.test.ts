@@ -13,8 +13,7 @@ import {
 const pack = (over: Partial<Pack>): Pack => ({
   id: 'p',
   name: 'P',
-  price: 'RM 10',
-  priceValue: 10,
+  priceMyr: 10,
   image: '/x.webp',
   ...over,
 });

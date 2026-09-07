@@ -12,7 +12,7 @@ import { TGPAY_SANDBOX_BANK } from '../modules/packs/banks';
 
 /**
  * SANDBOX-ONLY payout probe: submits one RM 50 payout to TGPay's dummy bank
- * outside our ledger (no globepay_withdrawal row — the callback will log
+ * outside our ledger (no gateway_withdrawal row — the callback will log
  * "UNKNOWN payout" and change nothing). Proves the wire format, the payout
  * wallet funding, and the callback delivery. Refuses to run against any
  * non-sandbox base URL.
@@ -23,7 +23,9 @@ export default async function tgpayPayoutProbe({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const config = tgpayConfigFromEnv();
   if (!tgpayIsSandbox(config)) {
-    logger.error('[tgpay-probe] refusing: TGPAY_API_BASE is not a sandbox host');
+    logger.error(
+      '[tgpay-probe] refusing: TGPAY_API_BASE is not a sandbox host',
+    );
     return;
   }
   const notifyUrl = gatewayUrls('tgpay').withdrawNotifyUrl;

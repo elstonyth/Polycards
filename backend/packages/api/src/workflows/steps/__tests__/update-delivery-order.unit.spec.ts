@@ -55,6 +55,26 @@ describe('updateDeliveryOrderInvoke', () => {
     expect(res.output).toEqual({ order_id: 'do_1', status: 'canceled' });
   });
 
+  it('forwards the admin audit argument to the transition seam verbatim', async () => {
+    // The route no longer writes the audit row; it rides this argument into
+    // transitionDeliveryOrderStatus, which writes it inside the transaction
+    // that moves the status. If this step dropped the field the change would
+    // still land — silently unaudited — so the pass-through is asserted here.
+    const packs = makePacks();
+    const audit = {
+      adminId: 'admin_1',
+      action: 'bulk_status' as const,
+      reason: 'bulk mark as canceled',
+    };
+    await updateDeliveryOrderInvoke(
+      { order_id: 'do_1', status: 'canceled', audit },
+      { container: containerFor(packs) },
+    );
+    expect(packs.transitionDeliveryOrderStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ audit }),
+    );
+  });
+
   it('marks compensation to revert covered pulls to delivering on a completed transition', async () => {
     // Guards the line-127 rename (input.status === 'delivered' -> 'completed'):
     // without it, a failed completed transition's compensation would silently

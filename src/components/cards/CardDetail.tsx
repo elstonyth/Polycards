@@ -47,7 +47,13 @@ export function CardDetail({
   // no band and no halo at all, so there is nothing for gray to match.
   const rgb =
     rarity || frameVariant ? slabGlowRgb(rarity, frameVariant) : rarityRgbValue;
-  const priceLabel = detail ? rm(detail.marketPriceMyr) : seed.value;
+  // The endpoint always prices a card; a grid seed may not (an older backend
+  // omitted the MYR price) — then '—' until the detail lands, never RM 0.00.
+  const priceLabel = detail
+    ? rm(detail.priceMyr)
+    : seed.priceMyr != null
+      ? rm(seed.priceMyr)
+      : '—';
 
   // Entrance slot helpers — see globals.css "Shared first-paint entrance".
   const rise = entrance ? 'rise-in' : '';
@@ -55,10 +61,9 @@ export function CardDetail({
     entrance ? ({ '--i': i } as CSSProperties) : undefined;
 
   // Live price pulse — rules and rationale in src/lib/price-tick.ts. State is
-  // adjusted during render (the React "adjust state when props change" pattern
-  // useCardPrice already uses) rather than in an effect, which this repo's lint
-  // rejects.
-  const price = detail?.marketPriceMyr ?? null;
+  // adjusted during render with React's "adjust state when props change"
+  // pattern; useCardPrice separately resets via useLivePoll's keyed seed.
+  const price = detail?.priceMyr ?? null;
   const [tick, setTick] = useState(() => initialPriceTick(seed.handle, price));
   const next = nextPriceTick(tick, seed.handle, price);
   if (next !== tick) setTick(next);
@@ -91,11 +96,15 @@ export function CardDetail({
       >
         <div style={{ filter: slabAmbient('hero', rgb) }}>
           <SlabImage
-            src={seed.image}
-            slabSrc={detail?.slab_image ?? seed.slabImage}
-            rarity={rarity}
+            // Seed art + whichever slab has landed, under the resolved tier
+            // (context rarity wins — see `rarity` above).
+            card={{
+              name: seed.name,
+              image: seed.image,
+              slabImage: detail?.slabImage ?? seed.slabImage,
+              rarity,
+            }}
             frameVariant={frameVariant}
-            alt={seed.name}
             sizes="(max-width: 768px) 62vw, 420px"
             priority
             className="w-full"
@@ -113,12 +122,12 @@ export function CardDetail({
         <PokemonBadge
           card={{
             name: seed.name,
-            pokemonDex: seed.pokemonDex ?? detail?.pokemon_dex,
-            spriteImage: seed.spriteImage ?? detail?.sprite_image,
+            pokemonDex: seed.pokemonDex ?? detail?.pokemonDex,
+            spriteImage: seed.spriteImage ?? detail?.spriteImage,
           }}
           rarity={rarity}
           frameVariant={frameVariant}
-          slabSrc={detail?.slab_image ?? seed.slabImage}
+          slabSrc={detail?.slabImage ?? seed.slabImage}
           className="w-[20%]"
         />
       </div>
@@ -219,7 +228,7 @@ export function CardDetail({
           <p style={at(4)} className={cn(rise, 'text-[13px] text-white/70')}>
             Instant buyback if pulled:{' '}
             <span className="font-bold text-buyback-fg">
-              {rm((detail.marketPriceMyr * buybackPercent) / 100)}
+              {rm((detail.priceMyr * buybackPercent) / 100)}
             </span>{' '}
             ({buybackPercent}%)
           </p>

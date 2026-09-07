@@ -13,7 +13,12 @@
 import type { HttpTypes } from '@medusajs/types';
 import { logger } from '@/lib/logger';
 import { updateCustomerProfile } from '@/lib/data/customer';
-import { friendlyError, httpStatus, type ErrorRule } from '@/lib/errors';
+import {
+  friendlyError,
+  httpStatus,
+  UNAUTHORIZED,
+  type ErrorRule,
+} from '@/lib/errors';
 import {
   NAME_MAX,
   normalizePhone,
@@ -49,10 +54,12 @@ const clean = (v: string | undefined): string | null | undefined => {
 };
 
 const PROFILE_RULES: ErrorRule[] = [
-  [
-    /not authenticated|unauthorized|401/i,
-    'Your session has expired. Please log in again.',
-  ],
+  // The shared probe (lib/errors.ts), this surface's own sentence. Stays a
+  // RULES entry rather than a `kind` branch: this action catches a thrown
+  // error rather than reading a port `Failure`, and the no-cookie case
+  // (data/customer.ts throws a bare `Error('Not authenticated.')`, no status)
+  // is only reachable through the text probe.
+  [UNAUTHORIZED, 'Your session has expired. Please log in again.'],
   // The backend's username guard answers a taken name with this sentence.
   [/display name is already taken|username is taken/i, USERNAME_TAKEN],
   // …and the SAME outcome arrives as a raw Postgres error when two renames

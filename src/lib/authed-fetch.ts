@@ -1,4 +1,19 @@
 /**
+ * SUPERSEDED — the `Store` port (src/lib/store.ts) owns this envelope now, plus
+ * the cookie read, the schema check and the failure log. **Do not adopt this
+ * from new code**, and do not widen it: `store.get/post/del` is the interface,
+ * and the port's `bearer` option covers the one thing this had that the port
+ * lacked (a token that is not the session cookie).
+ *
+ * It survives for ONE caller: `src/lib/actions/daily.ts`, a kept orphan of the
+ * suspended reward surfaces (see ADR 0004 / the SUSPENDED banner on that file).
+ * Rewriting a suspended file would turn its eventual revert into a rewrite,
+ * which is exactly the bargain that banner exists to protect — so this file,
+ * its test and `getAuthToken` all stay until that surface is un-suspended or
+ * retired, and whichever happens, `daily.ts` decides this file's fate.
+ *
+ * Everything below describes the pre-port world.
+ *
  * The one place the storefront builds an AUTHENTICATED `sdk.client.fetch` to
  * the Medusa backend. Scoped deliberately to that surface: `sdk.store.*` /
  * `sdk.auth.*` take headers positionally and still pass their own bearer.
