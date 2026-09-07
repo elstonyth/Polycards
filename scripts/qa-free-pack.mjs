@@ -70,6 +70,71 @@ const visitCatalogWithBadge = async (page) => {
   return badge;
 };
 
+const visitHomeAfterClaim = async (page, email) => {
+  // A missing badge is meaningful only after auth and the global badge's own
+  // status request finish. Listen before the full navigation resets its cache.
+  const readClientJson = async (path) => {
+    const request = await page.waitForEvent('requestfinished', {
+      predicate: (request) =>
+        request.url() === new URL(path, BASE).href &&
+        request.method() === 'GET' &&
+        request.resourceType() === 'fetch',
+      timeout: 20000,
+    });
+    const response = await request.response();
+    if (response?.status() !== 200) {
+      throw new Error(`${path} returned ${response?.status()}`);
+    }
+    return response.json();
+  };
+  const sessionReady = readClientJson('/api/me');
+  const badgeReady = readClientJson('/api/free-pack');
+  const [, session, badge] = await Promise.all([
+    page
+      .goto(`${BASE}/`, { waitUntil: 'domcontentloaded' })
+      .then((response) => {
+        if (!response?.ok()) {
+          throw new Error(`home navigation returned ${response?.status()}`);
+        }
+      }),
+    sessionReady,
+    badgeReady,
+  ]);
+  await page
+    .getByRole('heading', { name: 'RIP A PACK', exact: true })
+    .filter({ visible: true })
+    .first()
+    .waitFor({ state: 'visible', timeout: 20000 });
+  if (!session?.customer?.id || session.customer.email !== email) {
+    throw new Error('home customer session did not match the QA customer');
+  }
+  if (badge?.mode !== 'hidden') {
+    throw new Error('home free-pack status was not hidden after claim');
+  }
+
+  // The storefront deliberately also returns hidden on backend errors. Prove
+  // a healthy, authenticated ineligible answer with this same browser session.
+  const token = (await page.context().cookies(BASE)).find(
+    (cookie) => cookie.name === '_polycards_jwt',
+  )?.value;
+  if (!token) throw new Error('home customer session cookie missing');
+  const response = await page.context().request.get(`${API}/store/free-pack`, {
+    headers: { 'x-publishable-api-key': PK, Authorization: `Bearer ${token}` },
+    timeout: 20000,
+  });
+  if (response.status() !== 200) {
+    throw new Error(`post-claim eligibility returned ${response.status()}`);
+  }
+  const eligibility = await response.json();
+  if (
+    eligibility?.eligible !== false ||
+    eligibility.slug !== null ||
+    'promo' in eligibility
+  ) {
+    throw new Error('post-claim eligibility was not authenticated and spent');
+  }
+};
+
 const json = async (res) => {
   const text = await res.text();
   try {
@@ -684,7 +749,7 @@ try {
   }
   // The global mount must agree: navigate off /slots and let /api/free-pack
   // re-answer for the spent claim.
-  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+  await visitHomeAfterClaim(page, email);
   await page.waitForTimeout(2000);
   if (await page.getByTestId('free-pack-badge').count()) {
     fail('global badge still visible on / after the claim was spent');
