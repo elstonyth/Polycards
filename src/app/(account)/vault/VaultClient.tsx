@@ -494,13 +494,10 @@ export default function VaultClient({
               // showing the bare baked slab with only a faint drop-shadow, so the
               // tier frame never appeared here).
               <SlabImage
-                src={item.card.image}
-                slabSrc={item.card.slabImage}
-                rarity={item.card.rarity}
+                card={item.card}
                 // Won in the weekly challenge → keeps the challenge's prism
                 // frame here, the same one it wore on the stage grid.
                 frameVariant={item.challengePrize ? 'prism' : undefined}
-                alt={item.card.name}
                 sizes="(max-width: 1024px) 33vw, 25vw"
                 className="w-full"
               />

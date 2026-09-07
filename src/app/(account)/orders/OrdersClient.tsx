@@ -101,8 +101,8 @@ function DeliveryItems({ items }: { items: DeliveryOrderView['items'] }) {
     <span className="flex items-center gap-2">
       {first?.card?.image && (
         <SlabImage
-          src={first.card.image}
-          slabSrc={first.card.slabImage}
+          card={first.card}
+          // Decorative: the card's name is the very next thing on this line.
           alt=""
           sizes="24px"
           className="w-6 shrink-0"
@@ -569,8 +569,8 @@ function OrderDetailModal({
             >
               {it.card?.image && (
                 <SlabImage
-                  src={it.card.image}
-                  slabSrc={it.card.slabImage}
+                  card={it.card}
+                  // Decorative: the row spells the card's name out beside it.
                   alt=""
                   sizes="32px"
                   className="w-8 shrink-0"

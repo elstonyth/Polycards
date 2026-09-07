@@ -97,11 +97,15 @@ export function CardDetail({
       >
         <div style={{ filter: slabAmbient('hero', rgb) }}>
           <SlabImage
-            src={seed.image}
-            slabSrc={detail?.slabImage ?? seed.slabImage}
-            rarity={rarity}
+            // Seed art + whichever slab has landed, under the resolved tier
+            // (context rarity wins — see `rarity` above).
+            card={{
+              name: seed.name,
+              image: seed.image,
+              slabImage: detail?.slabImage ?? seed.slabImage,
+              rarity,
+            }}
             frameVariant={frameVariant}
-            alt={seed.name}
             sizes="(max-width: 768px) 62vw, 420px"
             priority
             className="w-full"

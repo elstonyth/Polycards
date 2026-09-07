@@ -57,8 +57,10 @@ export function PrizeCard({
   const alt = card.handle ? '' : card.name;
   const art = card.slabImage ? (
     <SlabImage
-      src={card.image}
-      slabSrc={card.slabImage}
+      // A prize row carries no tier (see the header) — the prism variant is
+      // what frames it, so the card view states the absence rather than
+      // leaving the frame to a prop someone could forget.
+      card={{ ...card, rarity: null }}
       alt={alt}
       frameVariant="prism"
       glowScale={glowScale}

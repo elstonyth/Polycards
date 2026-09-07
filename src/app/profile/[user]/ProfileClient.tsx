@@ -150,10 +150,7 @@ export default function ProfileClient({
                       (same treatment as the vault grid). */}
                   <div className="relative w-full rounded-t-2xl bg-[radial-gradient(120%_80%_at_50%_15%,#2e2e2e_0%,#1c1c1c_55%,#141414_100%)] p-3">
                     <SlabImage
-                      src={c.image}
-                      slabSrc={c.slabImage}
-                      rarity={c.rarity}
-                      alt={c.name}
+                      card={c}
                       sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 16vw"
                       className="w-full transition-transform duration-300 group-hover:scale-[1.04]"
                     />
@@ -189,8 +186,8 @@ export default function ProfileClient({
               className="flex items-center gap-3 border-b border-white/5 px-4 py-3 last:border-b-0"
             >
               <SlabImage
-                src={a.card.image}
-                slabSrc={a.card.slabImage}
+                card={a.card}
+                // Decorative: the row names the card in the link beside it.
                 alt=""
                 sizes="32px"
                 className="w-8 shrink-0"

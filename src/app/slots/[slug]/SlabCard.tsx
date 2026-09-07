@@ -207,10 +207,15 @@ export function SlabCard({
         >
           {raw ? (
             <SlabImage
-              src={RAW_CARD_BACK_SRC}
-              slabSrc={null}
-              rarity={card.rarity}
-              alt=""
+              // Not the card — the card's BACK, wearing the card's tier. The
+              // nameless view is deliberate: it also makes the alt empty,
+              // which is what this face wants (nothing is revealed yet).
+              card={{
+                name: '',
+                image: RAW_CARD_BACK_SRC,
+                slabImage: null,
+                rarity: card.rarity,
+              }}
               sizes="(max-width: 640px) 64vw, 300px"
               className="absolute inset-0"
               priority
@@ -291,10 +296,7 @@ export function SlabCard({
           style={{ filter: slabAmbient('reveal', rarityRgb) } as CSSProperties}
         >
           <SlabImage
-            src={card.image}
-            slabSrc={card.slabImage}
-            rarity={card.rarity}
-            alt={card.name}
+            card={card}
             sizes="(max-width: 640px) 64vw, 300px"
             className="absolute inset-0"
           />

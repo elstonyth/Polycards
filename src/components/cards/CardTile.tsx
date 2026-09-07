@@ -40,9 +40,8 @@ export function CardTile({
           doubled frame around the slab (operator, 2026-07-17). */}
       <span className="relative block w-full">
         <SlabImage
-          src={card.image}
-          slabSrc={card.slabImage}
-          rarity={card.rarity}
+          card={card}
+          // Decorative: the button's own aria-label names the card.
           alt=""
           sizes={sizes}
           className="w-full transition-opacity duration-200 group-hover:opacity-60 group-focus-visible:opacity-60"

@@ -194,9 +194,7 @@ export default function RequestDeliveryModal({
           {items.map((i) => (
             <SlabImage
               key={i.pullId}
-              src={i.card.image}
-              slabSrc={i.card.slabImage}
-              alt={i.card.name}
+              card={i.card}
               sizes="60px"
               className="w-15 shrink-0"
             />

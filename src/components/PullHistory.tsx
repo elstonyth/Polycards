@@ -118,8 +118,8 @@ function Row({
         </span>
       </span>
       <SlabImage
-        src={pull.image}
-        slabSrc={pull.slabImage}
+        card={pull}
+        // Decorative: the row prints the card's name in the column beside it.
         alt=""
         sizes="40px"
         className="w-9 shrink-0"

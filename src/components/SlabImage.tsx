@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import { rarityRgb } from '@/lib/rarity';
+import type { CardView } from '@/lib/card-view';
 
 /**
  * Aspect ratio of the baked slab composite (= the frame asset it's baked
@@ -276,34 +277,39 @@ export const slabAmbient = (preset: SlabAmbient, rgb: string): string =>
  * size slabbed or not, and call sites never branch on aspect. The corner
  * rounding matches what the old runtime clip applied (4.8% / 3.4%).
  *
- * Pass `rarity` (the admin-set gacha tier) to add the tier-colored glass
- * frame + halo (rarity.ts colors: Immortal orange, Legendary pink, …).
- * Graded gets the slab band (public/images/slab-frames); raw gets the
- * card-hugging glass border (public/images/raw-frames).
+ * The art AND the tier come from ONE prop, the card view. The tier-colored
+ * glass frame + halo (rarity.ts colors: Immortal orange, Legendary pink, …)
+ * therefore ride along with the card instead of being a separate `rarity`
+ * prop a call site could forget — which is what silently un-framed the slab
+ * on every surface that mapped a card by hand (the known bug class this
+ * signature closes). Graded gets the slab band (public/images/slab-frames);
+ * raw gets the card-hugging glass border (public/images/raw-frames).
  */
 export function SlabImage({
-  src,
-  slabSrc,
+  card,
   alt,
   sizes,
   className,
   priority = false,
-  rarity,
   frameVariant,
   glowScale = 1,
 }: {
-  src: string;
-  slabSrc?: string | null;
-  alt: string;
+  /** The card being shown — its art, its name, and its tier. */
+  card: Pick<CardView, 'name' | 'image' | 'slabImage' | 'rarity'>;
+  /** Alt text override. Defaults to the card's name; pass `''` where the name
+   *  is already on screen beside the slab (or on the wrapping link/button's
+   *  aria-label), so a screen reader doesn't hear it twice. */
+  alt?: string;
   sizes?: string;
   className?: string;
   priority?: boolean;
-  rarity?: string | null;
   /** Cosmetic frame that overrides the rarity tier (band art + halo colour). */
   frameVariant?: FrameVariant;
   /** Halo size multiplier — drop below 1 on thumbnail-sized slabs. */
   glowScale?: number;
 }) {
+  const { image: src, slabImage: slabSrc, rarity } = card;
+  const label = alt ?? card.name;
   // A variant frames the slab on its own — no `rarity` needed at the call site.
   const framed = frameVariant ?? rarity;
   const bandSrc = frameVariant
@@ -347,7 +353,7 @@ export function SlabImage({
             <span className="absolute" style={{ inset: `${FRAME_BAND}%` }}>
               <Image
                 src={slabSrc}
-                alt={alt}
+                alt={label}
                 fill
                 sizes={sizes}
                 priority={priority}
@@ -358,7 +364,7 @@ export function SlabImage({
         ) : (
           <Image
             src={slabSrc}
-            alt={alt}
+            alt={label}
             fill
             sizes={sizes}
             priority={priority}
@@ -398,7 +404,7 @@ export function SlabImage({
           >
             <Image
               src={src}
-              alt={alt}
+              alt={label}
               fill
               sizes={sizes}
               priority={priority}
@@ -414,7 +420,7 @@ export function SlabImage({
         >
           <Image
             src={src}
-            alt={alt}
+            alt={label}
             fill
             sizes={sizes}
             priority={priority}
