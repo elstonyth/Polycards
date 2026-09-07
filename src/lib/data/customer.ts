@@ -163,16 +163,22 @@ export async function updateCustomerProfile(
 export type AccountInfo = { hasPassword: boolean };
 
 /**
- * Account facts the Settings page needs before rendering the Danger zone.
+ * Account facts the Settings page needs before rendering the Danger zone, and
+ * the account layout needs for the required-phone gate (shouldGatePhone).
  *
  * `hasPassword` is false for a Google-only signup, which removes the password
  * field from the delete confirmation. Defaults to `true` on any failure — the
  * safer shape, since it asks for MORE proof rather than less. Getting it wrong
  * the other way would drop the password field for an account that does have
  * one, and every delete would then fail PASSWORD_REQUIRED with no way to
- * comply.
+ * comply. For the phone gate the same default means NO gate on a failed read
+ * (fail-open); that is deliberate — the backend money/goods gates are the
+ * enforcement, and a gate raised on a password account can never be completed.
+ *
+ * Request-scoped cache: the layout and /settings both read it on a gated
+ * request.
  */
-export async function getAccountInfo(): Promise<AccountInfo> {
+export const getAccountInfo = cache(async (): Promise<AccountInfo> => {
   const r = await store.get(
     '/store/customers/me/account',
     AccountInfoSchema,
@@ -181,4 +187,4 @@ export async function getAccountInfo(): Promise<AccountInfo> {
     { auth: 'required' },
   );
   return r.ok ? r.data : { hasPassword: true };
-}
+});

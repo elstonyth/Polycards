@@ -18,3 +18,21 @@
  */
 export const isPhoneGateError = (message: string): boolean =>
   /verify your phone/i.test(message);
+
+/**
+ * The account layout's required-phone gate (PhoneOnboardingModal). True for
+ * a password-less account with no phone while enforcement is on — the one
+ * cohort the change route lets add a first phone on the new-number proof
+ * alone. `hasPassword` is a thunk so the account read is paid only by
+ * phoneless accounts; a failed read reports `true` (see getAccountInfo) and
+ * therefore fails OPEN here — the backend money/goods gates are the
+ * enforcement, the modal is UX.
+ */
+export async function shouldGatePhone(input: {
+  flag: boolean;
+  phone: string | null | undefined;
+  hasPassword: () => Promise<boolean>;
+}): Promise<boolean> {
+  if (!input.flag || input.phone) return false;
+  return !(await input.hasPassword());
+}
