@@ -287,6 +287,56 @@ moduleIntegrationTestRunner<PacksModuleService>({
         });
       });
 
+      // The genuinely concurrent twin of the test above. `Promise.all` fires
+      // both calls in the same tick rather than awaiting them in turn — this
+      // is not decorative: `submitHeldWithdrawal` never takes a JS-level
+      // lock, and `@InjectTransactionManager` (service.ts) opens a FRESH
+      // transaction per call whenever the caller passes no
+      // `transactionManager` of its own, which neither call here does. Two
+      // calls sharing the same `scope`/service therefore still run on two
+      // independent transactions, and the module test runner's pool
+      // (`pool: { min: 2 }`, @medusajs/test-utils database.js) has room for
+      // both at once — so this is a real race, decided by the `credit:`
+      // advisory lock inside claimWithdrawalAgainstDebit, not by test
+      // ordering. Unlike the sequential test above, which caller wins is not
+      // knowable ahead of time (and the loser's pre-claim row read may or may
+      // not have seen the winner's gateway id yet) — only the outcome is, so
+      // this asserts the outcome and the re-read row rather than either
+      // promise's `transaction_id`.
+      it('a double approve raced CONCURRENTLY still submits exactly ONCE', async () => {
+        const row = await seed();
+        await debit(row);
+
+        const [a, b] = await Promise.all([
+          submitHeldWithdrawal(scope, {
+            withdrawalId: row.id,
+            adminId: ADMIN,
+            payerIp: PAYER_IP,
+          }),
+          submitHeldWithdrawal(scope, {
+            withdrawalId: row.id,
+            adminId: ADMIN,
+            payerIp: PAYER_IP,
+          }),
+        ]);
+
+        expect(fakeGateway.calls.withdrawals).toHaveLength(1);
+
+        const approved = [a, b].filter((r) => r.approved);
+        const refused = [a, b].filter((r) => !r.approved);
+        expect(approved).toHaveLength(1);
+        expect(refused).toHaveLength(1);
+
+        const after = await reread(row.id);
+        expect(after.status).toBe('pending');
+        // Exactly one gateway id landed on the row, and it is the winner's.
+        expect(after.gateway_transaction_id).not.toBeNull();
+        expect(after.gateway_transaction_id).toBe(approved[0].transaction_id);
+
+        // No refund, no phantom credit: the original debit and nothing else.
+        expect(await creditRows(row.customer_id)).toHaveLength(1);
+      });
+
       it('a DEFINITE refusal refunds on the shared anchor and closes the row failed', async () => {
         const row = await seed();
         await debit(row);
@@ -650,6 +700,15 @@ moduleIntegrationTestRunner<PacksModuleService>({
      * Reintroducing either unlocked call reopens the window while every other
      * test here stays green, so it is asserted directly. The real method runs
      * underneath; only the forbidden two are watched.
+     *
+     * This proxy records method NAMES only, not their arguments, so it
+     * cannot see whether a stray `status` field ever rides into an
+     * `updateGatewayWithdrawals` call (the deleted unit spec's fake-based
+     * assertion for that). The real-DB re-reads elsewhere in this file
+     * (`after.status`, `after.gateway_transaction_id` in every test above)
+     * supersede it: a status write smuggled outside the lock would show up
+     * there as a row moved to the wrong state, against real Postgres rather
+     * than a fake's recorded call.
      */
     describe('the debit decision never happens outside the lock', () => {
       it.each([
@@ -678,7 +737,12 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
           await run(row.id);
 
-          expect(called).toContain('claimWithdrawalAgainstDebit');
+          // Exactly once, not merely "at least once": a caller that claimed
+          // twice (e.g. a retry loop swallowing the first lost claim) would
+          // still pass a bare `toContain`.
+          expect(
+            called.filter((c) => c === 'claimWithdrawalAgainstDebit'),
+          ).toHaveLength(1);
           expect(called).not.toContain('listCreditTransactions');
           expect(called).not.toContain('claimWithdrawalStatus');
         },
