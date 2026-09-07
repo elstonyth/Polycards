@@ -337,3 +337,27 @@ describe('revealPull / closeInstantWindow', () => {
     expect(mem.requests).toEqual([]);
   });
 });
+
+describe('unchecked JSON projection parity', () => {
+  it('contains a null single-open envelope with the original fallback fields', async () => {
+    backend({ 'POST /store/packs/:slug/open': { body: null } });
+    await expect(openPack('bronze')).resolves.toEqual({
+      ok: false,
+      error: 'Could not open the pack. Please try again.',
+      needsAuth: false,
+      needsTopUp: false,
+    });
+  });
+  it.each([null, { rolls: [null] }])(
+    'contains malformed batch projection %j',
+    async (body) => {
+      backend({ 'POST /store/packs/:slug/open-batch': { body } });
+      await expect(openBatch('bronze', 1)).resolves.toEqual({
+        ok: false,
+        error: 'Could not open the pack. Please try again.',
+        needsAuth: false,
+        needsTopUp: false,
+      });
+    },
+  );
+});

@@ -11,17 +11,9 @@
  *
  * Every call goes through the `Store` port (src/lib/store.ts), which owns the
  * cookie read, the bearer and the failure log — but NOT the envelope check.
- * These responses read through `UncheckedSchema` on purpose: by the time one
- * arrives the customer has been CHARGED, and a drifted field classified as
- * `invalid_shape` would land on PACKS_FALLBACK — "Could not open the pack.
- * Please try again." over a committed open, i.e. an invitation to pay twice.
- * The CARD is still validated (`parseOne(WonCardSchema, …)`), and that failure
- * has its own copy: the card is in the Vault, we just could not show it.
- * One exception, inherited from the pre-port behaviour on purpose: `openBatch`
- * answers PACKS_FALLBACK when `rolls` isn't an array at all (see the guard
- * below) — that IS what the pre-port TypeError, caught by the old try/catch,
- * used to answer, so keeping it is behaviour-preserving, not a regression of
- * the rule above.
+ * Responses use `UncheckedSchema`: card validation retains the special
+ * Vault copy below. Local projection catches retain the pre-port fallback
+ * for malformed JSON envelopes/rows; JSON parsing alone cannot reject those.
  */
 import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
@@ -155,50 +147,64 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
   );
   if (!r.ok) return openFailure(r);
 
-  const { pull, card, balance, price, buyback, free, locked } = r.data as {
-    pull?: { id?: unknown };
-    // Untyped on purpose: only ever handed to parseOne(WonCardSchema).
-    card?: unknown;
-    balance?: unknown;
-    price?: unknown;
-    // Untyped on purpose: only ever handed to parseOne(OpenBuybackSchema).
-    buyback?: unknown;
-    free?: unknown;
-    locked?: unknown;
-  };
+  // JSON parsing accepts null and malformed nested objects; preserve the
+  // pre-port projection fallback without changing the Store contract.
+  try {
+    const { pull, card, balance, price, buyback, free, locked } = r.data as {
+      pull?: { id?: unknown };
+      // Untyped on purpose: only ever handed to parseOne(WonCardSchema).
+      card?: unknown;
+      balance?: unknown;
+      price?: unknown;
+      // Untyped on purpose: only ever handed to parseOne(OpenBuybackSchema).
+      buyback?: unknown;
+      free?: unknown;
+      locked?: unknown;
+    };
 
-  // The envelope is unchecked (see the header) — validate the CARD so a
-  // renamed field can't render "$NaN" / an undefined rarity ring.
-  const wonCard = parseOne(WonCardSchema, card);
-  if (!wonCard) {
-    // The open is committed and the pull vaulted by now — never say "try
-    // again" over a charged open (a retry would charge twice).
+    // The envelope is unchecked (see the header) — validate the CARD so a
+    // renamed field can't render "$NaN" / an undefined rarity ring.
+    const wonCard = parseOne(WonCardSchema, card);
+    if (!wonCard) {
+      // The open is committed and the pull vaulted by now — never say "try
+      // again" over a charged open (a retry would charge twice).
+      return {
+        ok: false,
+        error:
+          "Your pack opened and the card is in your Vault, but we couldn't show it here.",
+      };
+    }
+
+    return {
+      ok: true,
+      // `image` / `slab_image` ride WonCardSchema's looseObject passthrough, so
+      // the one mapper reads them off the same validated object (same as the
+      // batch and free-rip opens). The tier is re-stated because the schema
+      // guarantees it and the reveal's card type requires it.
+      card: { ...toCardView(wonCard), rarity: wonCard.rarity },
+      pullId: typeof pull?.id === 'string' ? pull.id : null,
+      marketValue: wonCard.market_value,
+      buyback: toBuybackOffer(buyback),
+      balance:
+        typeof balance === 'number' && Number.isFinite(balance)
+          ? balance
+          : null,
+      price: typeof price === 'number' && Number.isFinite(price) ? price : null,
+      // Only a literal true claims a free open (an older backend omits it).
+      free: free === true,
+      // A backend that predates `locked` still sends `free` — fall back to it
+      // so a free pull reads as locked rather than offering a sell that 400s.
+      locked: typeof locked === 'boolean' ? locked : free === true,
+    };
+  } catch (error) {
+    logger.error('[packs] response projection failed:', error);
     return {
       ok: false,
-      error:
-        "Your pack opened and the card is in your Vault, but we couldn't show it here.",
+      error: PACKS_FALLBACK,
+      needsAuth: false,
+      needsTopUp: false,
     };
   }
-
-  return {
-    ok: true,
-    // `image` / `slab_image` ride WonCardSchema's looseObject passthrough, so
-    // the one mapper reads them off the same validated object (same as the
-    // batch and free-rip opens). The tier is re-stated because the schema
-    // guarantees it and the reveal's card type requires it.
-    card: { ...toCardView(wonCard), rarity: wonCard.rarity },
-    pullId: typeof pull?.id === 'string' ? pull.id : null,
-    marketValue: wonCard.market_value,
-    buyback: toBuybackOffer(buyback),
-    balance:
-      typeof balance === 'number' && Number.isFinite(balance) ? balance : null,
-    price: typeof price === 'number' && Number.isFinite(price) ? price : null,
-    // Only a literal true claims a free open (an older backend omits it).
-    free: free === true,
-    // A backend that predates `locked` still sends `free` — fall back to it
-    // so a free pull reads as locked rather than offering a sell that 400s.
-    locked: typeof locked === 'boolean' ? locked : free === true,
-  };
 }
 
 export type OpenBatchResult =
@@ -233,29 +239,74 @@ export async function openBatch(
   );
   if (!r.ok) return openFailure(r);
 
-  const {
-    rolls: rawRolls,
-    balance,
-    price,
-    total_charged,
-  } = r.data as {
-    rolls: RawBatchRollItem[];
-    balance?: unknown;
-    price?: unknown;
-    total_charged?: unknown;
-  };
+  // JSON parsing accepts null and malformed nested objects; preserve the
+  // pre-port projection fallback without changing the Store contract.
+  try {
+    const {
+      rolls: rawRolls,
+      balance,
+      price,
+      total_charged,
+    } = r.data as {
+      rolls: RawBatchRollItem[];
+      balance?: unknown;
+      price?: unknown;
+      total_charged?: unknown;
+    };
 
-  // The envelope is unchecked (see the header), so `rolls` might not be an
-  // array at all. Pre-port this was a TypeError — `for (const rawRoll of
-  // rawRolls)` over `undefined` — caught by the action's own try/catch and
-  // answered with PACKS_FALLBACK; the port has no try/catch, so guard
-  // explicitly and keep that answer. A non-JSON 200 never reaches here — the
-  // adapter turns it into a Failure before `r.data` exists — but a JSON 200
-  // that simply omits `rolls` does, which is what the test below pins. An
-  // explicit `rolls: []` is left alone: that is a legal (if odd) 2xx and has
-  // always answered ok with no rolls.
-  if (!Array.isArray(rawRolls)) {
-    logger.error(`[packs] open-batch returned no rolls array for '${slug}'`);
+    // The envelope is unchecked (see the header), so `rolls` might not be an
+    // array at all. Pre-port this was a TypeError — `for (const rawRoll of
+    // rawRolls)` over `undefined` — caught by the action's own try/catch and
+    // answered with PACKS_FALLBACK; keep that answer with this guard
+    // rather than invoking card-mapping copy. A non-JSON 200 never reaches here — the
+    // adapter turns it into a Failure before `r.data` exists — but a JSON 200
+    // that simply omits `rolls` does, which is what the test below pins. An
+    // explicit `rolls: []` is left alone: that is a legal (if odd) 2xx and has
+    // always answered ok with no rolls.
+    if (!Array.isArray(rawRolls)) {
+      logger.error(`[packs] open-batch returned no rolls array for '${slug}'`);
+      return {
+        ok: false,
+        error: PACKS_FALLBACK,
+        needsAuth: false,
+        needsTopUp: false,
+      };
+    }
+
+    // Validate and map every roll. The charge is committed and every pull is
+    // already `vaulted` by the time this runs, so a roll that fails
+    // WonCardSchema is DROPPED, not fatal: the customer sees the cards that did
+    // map. Only when none map is the batch refused — and the copy then says
+    // where the card went, never "try again" (a retry would charge twice).
+    const rolls: BatchRoll[] = [];
+    for (const rawRoll of rawRolls) {
+      const mapped = mapBatchRoll(rawRoll);
+      if (mapped) rolls.push(mapped);
+      else logger.error(`[packs] open-batch roll failed to map for '${slug}'`);
+    }
+    if (rolls.length === 0 && rawRolls.length > 0) {
+      return {
+        ok: false,
+        error:
+          "Your pack opened and the card is in your Vault, but we couldn't show it here.",
+      };
+    }
+
+    return {
+      ok: true,
+      rolls,
+      balance:
+        typeof balance === 'number' && Number.isFinite(balance)
+          ? balance
+          : null,
+      price: typeof price === 'number' && Number.isFinite(price) ? price : null,
+      total:
+        typeof total_charged === 'number' && Number.isFinite(total_charged)
+          ? total_charged
+          : null,
+    };
+  } catch (error) {
+    logger.error('[packs] response projection failed:', error);
     return {
       ok: false,
       error: PACKS_FALLBACK,
@@ -263,37 +314,6 @@ export async function openBatch(
       needsTopUp: false,
     };
   }
-
-  // Validate and map every roll. The charge is committed and every pull is
-  // already `vaulted` by the time this runs, so a roll that fails
-  // WonCardSchema is DROPPED, not fatal: the customer sees the cards that did
-  // map. Only when none map is the batch refused — and the copy then says
-  // where the card went, never "try again" (a retry would charge twice).
-  const rolls: BatchRoll[] = [];
-  for (const rawRoll of rawRolls) {
-    const mapped = mapBatchRoll(rawRoll);
-    if (mapped) rolls.push(mapped);
-    else logger.error(`[packs] open-batch roll failed to map for '${slug}'`);
-  }
-  if (rolls.length === 0 && rawRolls.length > 0) {
-    return {
-      ok: false,
-      error:
-        "Your pack opened and the card is in your Vault, but we couldn't show it here.",
-    };
-  }
-
-  return {
-    ok: true,
-    rolls,
-    balance:
-      typeof balance === 'number' && Number.isFinite(balance) ? balance : null,
-    price: typeof price === 'number' && Number.isFinite(price) ? price : null,
-    total:
-      typeof total_charged === 'number' && Number.isFinite(total_charged)
-        ? total_charged
-        : null,
-  };
 }
 
 export type RevealResult =

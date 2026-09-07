@@ -7,15 +7,12 @@
  * check-in, per-period claim), so every non-throwing outcome returns a
  * result object for the tab to render, never an exception.
  *
- * Every call goes through the `Store` port (src/lib/store.ts), which owns the
- * cookie read, the bearer, the schema check and the failure log. The two POST
- * bodies are read with `UncheckedSchema` and this file's own types — the port
- * must not reject them at the envelope, because by the time a response comes
- * back the check-in is recorded, the claim is stamped, or the free rip is
- * SPENT, and "try again" over a spent entitlement is the one wrong answer.
- * A bad card inside a spin is caught below by `parseOne(WonCardSchema, …)`.
+ * Every call goes through the Store port for transport/auth failures.
+ * Unchecked response projections keep the pre-port fallback locally, while
+ * a bad spin card retains its existing parseOne(WonCardSchema, ...) result.
  */
 import { store, type Failure } from '@/lib/store';
+import { logger } from '@/lib/logger';
 import {
   parseOne,
   TaskHubSchema,
@@ -56,8 +53,15 @@ export async function checkInToday(): Promise<CheckInResult> {
     undefined,
   );
   if (!r.ok) return { ok: false, error: checkInError(r) };
-  const raw = r.data as { checked?: unknown };
-  return { ok: true, checked: Boolean(raw.checked) };
+  // JSON parsing accepts null and malformed nested objects; preserve the
+  // pre-port projection fallback without changing the Store contract.
+  try {
+    const raw = r.data as { checked?: unknown };
+    return { ok: true, checked: Boolean(raw.checked) };
+  } catch (error) {
+    logger.error('[tasks] response projection failed:', error);
+    return { ok: false, error: 'Could not check in. Please try again.' };
+  }
 }
 
 /** Why a claim did not pay. `window_closed` is its own case on purpose: a
@@ -85,7 +89,7 @@ export type ClaimResult =
 
 /** The claim response, as this action asserts it — the same assertion the
  *  pre-port fetch generic carried. `UncheckedSchema` means the port does not
- *  check it: a stamped claim must not read as "try again". */
+ *  check it; the local projection catch preserves the pre-port fallback. */
 type RawClaim =
   | {
       claimed: true;
@@ -106,17 +110,24 @@ export async function claimTaskReward(taskId: string): Promise<ClaimResult> {
       error: loggedOut(r) ?? 'Could not claim. Please try again.',
     };
   }
-  const raw = r.data as RawClaim;
-  if (raw.claimed) {
-    const spin =
-      raw.reward.type === 'pack' &&
-      typeof raw.claimId === 'string' &&
-      typeof raw.reward.pack_id === 'string'
-        ? { claimId: raw.claimId, packId: raw.reward.pack_id }
-        : null;
-    return { ok: true, claimed: true, rewardType: raw.reward.type, spin };
+  // JSON parsing accepts null and malformed nested objects; preserve the
+  // pre-port projection fallback without changing the Store contract.
+  try {
+    const raw = r.data as RawClaim;
+    if (raw.claimed) {
+      const spin =
+        raw.reward.type === 'pack' &&
+        typeof raw.claimId === 'string' &&
+        typeof raw.reward.pack_id === 'string'
+          ? { claimId: raw.claimId, packId: raw.reward.pack_id }
+          : null;
+      return { ok: true, claimed: true, rewardType: raw.reward.type, spin };
+    }
+    return { ok: true, claimed: false, reason: raw.reason };
+  } catch (error) {
+    logger.error('[tasks] response projection failed:', error);
+    return { ok: false, error: 'Could not claim. Please try again.' };
   }
-  return { ok: true, claimed: false, reason: raw.reason };
 }
 
 /** What the slot gets back from spending a free rip. Mirrors the paid open's
@@ -174,38 +185,45 @@ export async function spinTaskReward(
       error: loggedOut(r) ?? 'Could not spin your free rip. Try again.',
     };
   }
-  const raw = r.data as {
-    redeemed?: boolean;
-    reason?: 'not_found' | 'already_redeemed' | 'not_a_pack_reward';
-    pullId?: string;
-    // Untyped on purpose: only ever handed to parseOne(WonCardSchema).
-    card?: unknown;
-    locked?: unknown;
-    buyback?: unknown;
-  };
-  if (raw.redeemed && typeof raw.pullId === 'string') {
-    // The envelope is unchecked (see the header) — validate the CARD so a
-    // renamed field can't render "$NaN" or an undefined rarity.
-    const won = parseOne(WonCardSchema, raw.card);
-    if (!won) {
-      return { ok: false, error: 'Got an unexpected response. Try again.' };
+  // JSON parsing accepts null and malformed nested objects; preserve the
+  // pre-port projection fallback without changing the Store contract.
+  try {
+    const raw = r.data as {
+      redeemed?: boolean;
+      reason?: 'not_found' | 'already_redeemed' | 'not_a_pack_reward';
+      pullId?: string;
+      // Untyped on purpose: only ever handed to parseOne(WonCardSchema).
+      card?: unknown;
+      locked?: unknown;
+      buyback?: unknown;
+    };
+    if (raw.redeemed && typeof raw.pullId === 'string') {
+      // The envelope is unchecked (see the header) — validate the CARD so a
+      // renamed field can't render "$NaN" or an undefined rarity.
+      const won = parseOne(WonCardSchema, raw.card);
+      if (!won) {
+        return { ok: false, error: 'Got an unexpected response. Try again.' };
+      }
+      return {
+        ok: true,
+        redeemed: true,
+        pullId: raw.pullId,
+        marketValue: won.market_value,
+        locked: typeof raw.locked === 'boolean' ? raw.locked : true,
+        // The same mapping the paid open uses — one offer shape for the reveal.
+        buyback: toBuybackOffer(raw.buyback),
+        // …and the same card mapper (image/slab_image ride the looseObject
+        // passthrough; the tier is re-stated because the schema guarantees it).
+        card: { ...toCardView(won), rarity: won.rarity },
+      };
     }
     return {
       ok: true,
-      redeemed: true,
-      pullId: raw.pullId,
-      marketValue: won.market_value,
-      locked: typeof raw.locked === 'boolean' ? raw.locked : true,
-      // The same mapping the paid open uses — one offer shape for the reveal.
-      buyback: toBuybackOffer(raw.buyback),
-      // …and the same card mapper (image/slab_image ride the looseObject
-      // passthrough; the tier is re-stated because the schema guarantees it).
-      card: { ...toCardView(won), rarity: won.rarity },
+      redeemed: false,
+      reason: raw.reason ?? 'not_found',
     };
+  } catch (error) {
+    logger.error('[tasks] response projection failed:', error);
+    return { ok: false, error: 'Could not spin your free rip. Try again.' };
   }
-  return {
-    ok: true,
-    redeemed: false,
-    reason: raw.reason ?? 'not_found',
-  };
 }

@@ -7,7 +7,7 @@ import type { MemoryRoutes } from '@/lib/store-memory';
 // beneath the port (SDK, cookies, logger) is mocked.
 vi.mock('@/lib/store', () => ({ store: storeShim }));
 
-const { startPhoneOtp, checkPhoneOtp, changePhone } =
+const { startPhoneOtp, checkPhoneOtp, changePhone, resetPasswordByPhone } =
   await import('@/lib/actions/phone-verification');
 
 const MY = '+60107667787';
@@ -269,5 +269,68 @@ describe('auth mode per route', () => {
       error: 'Please log in first.',
     });
     expect(guest.requests).toEqual([]);
+  });
+});
+
+describe('unchecked phone JSON projection parity', () => {
+  it('contains a null OTP check response', async () => {
+    backend({ [CHECK]: { body: null } });
+    await expect(
+      checkPhoneOtp({ phone: MY, purpose: 'signup', code: '123456' }),
+    ).resolves.toEqual({ ok: false, error: 'Invalid or expired code.' });
+  });
+  it('contains a null customer after phone change', async () => {
+    backend({ [CHANGE]: { body: { customer: null } } });
+    await expect(changePhone({ phone: MY, token: 'proof' })).resolves.toEqual({
+      ok: false,
+      error: 'Could not update your phone number. Please try again.',
+    });
+  });
+});
+
+describe('resetPasswordByPhone migration seam', () => {
+  const route = 'POST /store/phone-verification/password-reset';
+  it('posts the proof without cookie auth and returns the reset token and masked email', async () => {
+    const mem = backend(
+      {
+        [route]: {
+          body: { token: 'reset-token', maskedEmail: 'w***@example.com' },
+        },
+      },
+      { token: null },
+    );
+    await expect(
+      resetPasswordByPhone({ token: 'phone-proof' }),
+    ).resolves.toEqual({
+      ok: true,
+      token: 'reset-token',
+      maskedEmail: 'w***@example.com',
+    });
+    expect(mem.requests).toEqual([
+      {
+        method: 'POST',
+        path: '/store/phone-verification/password-reset',
+        body: { token: 'phone-proof' },
+        headers: {},
+        cache: 'no-store',
+      },
+    ]);
+  });
+  it('preserves the Google-only refusal rather than inviting a dead-end email reset', async () => {
+    backend(
+      {
+        [route]: {
+          status: 400,
+          body: { message: 'This account signs in with Google.' },
+        },
+      },
+      { token: null },
+    );
+    await expect(
+      resetPasswordByPhone({ token: 'phone-proof' }),
+    ).resolves.toEqual({
+      ok: false,
+      error: 'This account signs in with Google.',
+    });
   });
 });

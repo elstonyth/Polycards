@@ -236,14 +236,21 @@ export async function requestDelivery(
     address_id: addressId,
   });
   if (!r.ok) return deliveryFailure(r, LOGIN_FIRST);
-  const orderId = (r.data as { order_id?: string }).order_id;
-  if (!orderId) {
-    return {
-      ok: false,
-      error: 'Got an unexpected response. Please try again.',
-    };
+  // JSON parsing accepts null and malformed nested objects; preserve the
+  // pre-port projection fallback without changing the Store contract.
+  try {
+    const orderId = (r.data as { order_id?: string }).order_id;
+    if (!orderId) {
+      return {
+        ok: false,
+        error: 'Got an unexpected response. Please try again.',
+      };
+    }
+    return { ok: true, orderId };
+  } catch (error) {
+    logger.error('[delivery] response projection failed:', error);
+    return { ok: false, error: DELIVERY_FALLBACK, needsAuth: false };
   }
-  return { ok: true, orderId };
 }
 
 // Re-point a pre-ship delivery order at a different saved address. The backend

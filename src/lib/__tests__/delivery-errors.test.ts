@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { friendlyError } from '@/lib/errors';
+import { friendlyError, friendlyFailure } from '@/lib/errors';
 import { DELIVERY_RULES, DELIVERY_FALLBACK } from '@/lib/delivery-errors';
 import { isPhoneGateError } from '@/lib/phone-gate';
 
@@ -68,4 +68,19 @@ describe('DELIVERY_RULES backend-message contract', () => {
   it('falls back on unknown text without leaking it', () => {
     expect(map('ECONNRESET raw socket detail')).toBe(DELIVERY_FALLBACK);
   });
+});
+
+it('composed delivery failure gives the domain verdict precedence over transport text', () => {
+  expect(
+    friendlyFailure(
+      {
+        ok: false,
+        kind: 'rate_limited',
+        status: 429,
+        text: 'Too many requests: one or more cards have already been delivered.',
+      },
+      DELIVERY_RULES,
+      DELIVERY_FALLBACK,
+    ),
+  ).toBe('One or more cards have already been delivered.');
 });

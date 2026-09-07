@@ -181,3 +181,29 @@ describe('spinTaskReward', () => {
     expect(r.ok && r.redeemed && r.buyback).toBeNull();
   });
 });
+
+describe('unchecked task JSON projection parity', () => {
+  it('contains a null check-in response', async () => {
+    backend({ 'POST /store/tasks/checkin': { body: null } });
+    await expect(checkInToday()).resolves.toEqual({
+      ok: false,
+      error: 'Could not check in. Please try again.',
+    });
+  });
+  it('contains a claimed reward with a null reward object', async () => {
+    backend({
+      'POST /store/tasks/:id/claim': { body: { claimed: true, reward: null } },
+    });
+    await expect(claimTaskReward('task_1')).resolves.toEqual({
+      ok: false,
+      error: 'Could not claim. Please try again.',
+    });
+  });
+  it('contains a null free-rip response', async () => {
+    backend({ 'POST /store/tasks/claims/:id/spin': { body: null } });
+    await expect(spinTaskReward('clm_1')).resolves.toEqual({
+      ok: false,
+      error: 'Could not spin your free rip. Try again.',
+    });
+  });
+});

@@ -193,3 +193,14 @@ describe('deleteAddress', () => {
     expect(res.ok).toBe(false);
   });
 });
+
+it('maps an SDK rate-limit rejection through the appended transport tier', async () => {
+  updateMock.mockRejectedValueOnce(
+    new Error('Too many requests. Try again in 30s.'),
+  );
+  expect(await updateAddress('addr_1', FULL)).toEqual({
+    ok: false,
+    error: 'Too many requests — give it a moment and try again.',
+    needsAuth: false,
+  });
+});

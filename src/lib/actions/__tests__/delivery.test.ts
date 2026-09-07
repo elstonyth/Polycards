@@ -341,3 +341,12 @@ describe('shipVaultCards', () => {
     expect(mem.requests).toEqual([]);
   });
 });
+
+it('contains a null delivery response with the original fallback fields', async () => {
+  backend({ 'POST /store/delivery-orders': { body: null } });
+  await expect(requestDelivery(['pull_1'], 'addr_1')).resolves.toEqual({
+    ok: false,
+    error: 'Something went wrong. Please try again.',
+    needsAuth: false,
+  });
+});

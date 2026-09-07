@@ -27,6 +27,7 @@
  * backend/packages/api/src/api/utils/rate-limit.ts.
  */
 import { store, type Failure } from '@/lib/store';
+import { logger } from '@/lib/logger';
 import { UncheckedSchema } from '@/lib/data/schemas';
 import {
   isServedPhoneCountry,
@@ -179,8 +180,15 @@ export async function checkPhoneOtp(input: {
       ),
     );
   }
-  const { token } = r.data as { token: string };
-  return { ok: true, token };
+  // JSON parsing accepts null and malformed nested objects; preserve the
+  // pre-port projection fallback without changing the Store contract.
+  try {
+    const { token } = r.data as { token: string };
+    return { ok: true, token };
+  } catch (error) {
+    logger.error('[phone-verification] response projection failed:', error);
+    return fail('Invalid or expired code.');
+  }
 }
 
 // The backend refuses to MOVE a phone on a session alone — a stolen session
@@ -240,8 +248,15 @@ export async function changePhone(input: {
       ? { ok: false, error: message, needsOldPhoneProof: true }
       : fail(message);
   }
-  const { customer } = r.data as { customer: { phone: string } };
-  return { ok: true, phone: customer.phone };
+  // JSON parsing accepts null and malformed nested objects; preserve the
+  // pre-port projection fallback without changing the Store contract.
+  try {
+    const { customer } = r.data as { customer: { phone: string } };
+    return { ok: true, phone: customer.phone };
+  } catch (error) {
+    logger.error('[phone-verification] response projection failed:', error);
+    return fail('Could not update your phone number. Please try again.');
+  }
 }
 
 export async function resetPasswordByPhone(input: {
