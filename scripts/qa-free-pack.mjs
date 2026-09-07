@@ -47,6 +47,29 @@ const ok = (m) => console.log(`✓ ${m}`);
 const shot = (page, name) =>
   page.screenshot({ path: `docs/research/qa-free-pack-${name}.png` });
 
+// After consent, the badge mounts only once useConsent's client effect runs.
+// Wait for that hydrated catalog, not unrelated polling/images to become idle.
+// Visible filters also exclude React's temporary hidden streaming holders.
+const visitCatalogWithBadge = async (page) => {
+  const response = await page.goto(`${BASE}/slots`, {
+    waitUntil: 'domcontentloaded',
+  });
+  if (!response?.ok()) {
+    throw new Error(`catalog navigation returned ${response?.status()}`);
+  }
+  const catalog = page
+    .getByTestId('catalog-root')
+    .filter({ visible: true })
+    .first();
+  await catalog.waitFor({ state: 'visible', timeout: 20000 });
+  const badge = catalog
+    .getByTestId('free-pack-badge')
+    .filter({ visible: true })
+    .first();
+  await badge.waitFor({ state: 'visible', timeout: 20000 });
+  return badge;
+};
+
 const json = async (res) => {
   const text = await res.text();
   try {
@@ -328,12 +351,7 @@ try {
   await page.waitForTimeout(2500);
 
   // 1 ── the badge is on /slots for an eligible account.
-  // networkidle, not domcontentloaded: mid-stream React parks the incoming
-  // subtree in a hidden holder, so a testid can transiently resolve to TWO
-  // hidden nodes and trip strict mode.
-  await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
-  const badge = page.getByTestId('free-pack-badge').first();
-  await badge.waitFor({ state: 'visible', timeout: 20000 });
+  const badge = await visitCatalogWithBadge(page);
   ok('free-pack badge visible on /slots');
   await shot(page, 'badge');
 
@@ -358,8 +376,7 @@ try {
   if (memberHomeBadge) ok('member badge visible on / (global mount)');
   else fail('member badge missing on / — global mount broken');
   await shot(page, 'member-badge-home');
-  await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
-  await badge.waitFor({ state: 'visible', timeout: 20000 });
+  await visitCatalogWithBadge(page);
 
   // 1b ── BADGE vs CATALOG. The badge is `fixed` bottom-right at z-40, floating
   // OVER the catalog, so it gets TWO assertions — they fail on different bugs
@@ -387,9 +404,7 @@ try {
     [1440, 700, 'desktop'],
   ]) {
     await page.setViewportSize({ width: w, height: h });
-    await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
-    const floating = page.getByTestId('free-pack-badge').first();
-    await floating.waitFor({ state: 'visible', timeout: 20000 });
+    const floating = await visitCatalogWithBadge(page);
     // Catalog links only: every pack href carries ?count=, the badge's does not.
     const tiles = page.locator('a[href*="count="]');
     const hits = (a, b) =>
@@ -449,8 +464,7 @@ try {
         // viewport instead of comparing tiles against the stale 1440 width.
         w = fitted;
         await page.setViewportSize({ width: w, height: h });
-        await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
-        await floating.waitFor({ state: 'visible', timeout: 20000 });
+        await visitCatalogWithBadge(page);
       }
     }
 
@@ -463,6 +477,7 @@ try {
     const minPad = label === 'desktop' ? 176 : 224;
     const pad = await page
       .getByTestId('catalog-root')
+      .filter({ visible: true })
       .first()
       .evaluate((el) => parseFloat(getComputedStyle(el).paddingBottom));
     if (pad >= minPad) {
@@ -515,7 +530,7 @@ try {
     }
   }
   await page.setViewportSize({ width: 430, height: 932 });
-  await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
+  await visitCatalogWithBadge(page);
 
   // 2 ── the badge lands straight on the reels; the detail page (reached by
   // URL — the badge no longer routes through it) still renders free mode.
