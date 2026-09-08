@@ -44,7 +44,7 @@ __metadata:
     "@medusajs/framework": "npm:2.19.0"
     "@medusajs/medusa": "npm:2.19.0"
     "@medusajs/test-utils": "npm:2.19.0"
-    "@mercurjs/cli": "npm:2.3.1"
+    "@mercurjs/cli": "npm:2.3.3"
     "@mercurjs/core": "npm:2.3.1"
     "@mercurjs/types": "npm:2.3.1"
     "@swc/core": "npm:^1.16.0"
@@ -4434,14 +4434,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@mercurjs/cli@npm:2.3.1":
-  version: 2.3.1
-  resolution: "@mercurjs/cli@npm:2.3.1"
+"@mercurjs/cli@npm:2.3.3":
+  version: 2.3.3
+  resolution: "@mercurjs/cli@npm:2.3.3"
   dependencies:
     "@antfu/ni": "npm:^30.3.0"
     "@medusajs/admin-bundler": "npm:2.18.0"
     "@medusajs/framework": "npm:2.18.0"
-    "@mercurjs/dashboard-sdk": "npm:2.3.1"
+    "@mercurjs/dashboard-sdk": "npm:2.3.3"
     "@vitejs/plugin-react": "npm:^6.0.3"
     commander: "npm:^15.0.0"
     cosmiconfig: "npm:^9.0.0"
@@ -4461,7 +4461,7 @@ __metadata:
     zod: "npm:4.4.3"
   bin:
     mercurjs: dist/index.js
-  checksum: 10c0/9c6db0642a3f718812b0cf5eb5e8b5db74c5abed98ede2c22698ba3c4016cc187eed35f269ced08fd761efed8f9a720d3aa698661090f9ff8d33919c5d19693d
+  checksum: 10c0/1c8f91280a22307ae1c0d7f5e120ad77bd92191bcc9dd01071d9d325d6bcfccbcdd4a87c4e9cb11b20962c65e4c0b74f141e3436cfdb71b6219c6d24b96a04f0
   languageName: node
   linkType: hard
 
@@ -4506,6 +4506,18 @@ __metadata:
     "@babel/types": "npm:8.0.4"
     esbuild-register: "npm:^3.6.0"
   checksum: 10c0/b5778cbcffb9202d7749614943d446297e841a701d020fc92c38e068abb1e10c8dab37c0978adaf1617063c04952d070e2864b1a158eb901a980c4e8df025787
+  languageName: node
+  linkType: hard
+
+"@mercurjs/dashboard-sdk@npm:2.3.3":
+  version: 2.3.3
+  resolution: "@mercurjs/dashboard-sdk@npm:2.3.3"
+  dependencies:
+    "@babel/parser": "npm:8.0.4"
+    "@babel/traverse": "npm:7.25.6"
+    "@babel/types": "npm:8.0.4"
+    esbuild-register: "npm:^3.6.0"
+  checksum: 10c0/93264debb1b3ddbe5c514140eeceb19c97a9d63e61d0eb3f722e77aceb8c24e6bc4ace631dfb73cc649f8fdfbc9fdb98b313ddfdf4cea4d918ccc61bdc33cf38
   languageName: node
   linkType: hard
 
