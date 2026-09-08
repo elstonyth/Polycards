@@ -114,8 +114,9 @@ export default async function WalletPage() {
           </>
         ) : (
           <p className="mt-4 text-sm text-white/70">
-            No deposits to play through — your balance is withdrawable as soon
-            as payouts open.
+            No deposits to play through. Withdrawals require a saved bank
+            account and must fit your withdrawable balance and the limits on the
+            withdrawal page.
           </p>
         )}
       </Panel>
