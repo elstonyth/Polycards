@@ -71,6 +71,24 @@ describe('signup referral prefill', () => {
     expect(referralInput().value).toBe('ZFVZ8QLG');
   });
 
+  it('prefills an already mounted pristine input when the cookie read resolves later', async () => {
+    let resolve: (code: string) => void = () => {};
+    getReferralPrefill.mockReturnValue(
+      new Promise<string>((done) => {
+        resolve = done;
+      }),
+    );
+    await open();
+    const mountedInput = referralInput();
+    expect(mountedInput.isConnected).toBe(true);
+    expect(mountedInput.value).toBe('');
+
+    await act(async () => resolve('ZFVZ8QLG'));
+
+    expect(referralInput()).toBe(mountedInput);
+    expect(mountedInput.value).toBe('ZFVZ8QLG');
+  });
+
   it('retains the invitation when the dialog is closed and reopened', async () => {
     await open('ZFVZ8QLG');
     act(() =>
