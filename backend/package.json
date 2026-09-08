@@ -15,7 +15,7 @@
     "@medusajs/ui": "4.2.1",
     "@mercurjs/client": "2.3.1",
     "@mercurjs/dashboard-sdk": "2.3.1",
-    "@mercurjs/dashboard-shared": "2.3.1",
+    "@mercurjs/dashboard-shared": "2.3.3",
     "@tanstack/react-query": "5.102.8",
     "jsonwebtoken": "9.0.3",
     "lodash": "^4.18.1",
