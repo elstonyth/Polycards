@@ -239,7 +239,7 @@ export function StageCarousel({
             }`}
             onClick={() => setIndex(i)}
             className={cn(
-              'flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold transition-colors',
+              'flex min-h-11 min-w-11 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold transition-colors',
               i === index
                 ? 'bg-chase text-neutral-950'
                 : s.state === 'complete'

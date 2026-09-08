@@ -185,18 +185,21 @@ describe('TopUpSheet gateway branch', () => {
 
   it('rejects an amount under the gateway floor without calling it', async () => {
     typeAmount('20');
-    await click(payButton());
-    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
-      'Top-ups must be between RM 30 and RM 10,000.',
+    const invalidButton = buttons().find(
+      (button) => button.textContent === 'Enter a valid amount',
     );
+    if (!invalidButton) throw new Error('Invalid amount button not found');
+    expect(invalidButton.disabled).toBe(true);
+    const guidance = container.querySelector('#topup-amount-guidance');
+    expect(guidance?.textContent).toContain('RM 30.00');
+    expect(guidance?.textContent).toContain('RM 10,000.00');
+    await click(invalidButton);
     expect(startDeposit).not.toHaveBeenCalled();
     expect(leaveFor).not.toHaveBeenCalled();
   });
 
-  // Above the ceiling there is no Pay button to press: the gateway's max now
-  // coincides with the site-wide RM 10,000 top-up cap, which disables the
-  // control outright. Pinned because it means the band error above can only
-  // ever fire for the floor.
+  // Both bounds disable checkout before any gateway request. The active
+  // gateway's maximum is also capped by the site-wide RM 10,000 limit.
   it('offers no Pay button above the RM 10,000 ceiling', async () => {
     typeAmount('10001');
     expect(buttons().some((b) => /^Pay RM/.test(b.textContent ?? ''))).toBe(

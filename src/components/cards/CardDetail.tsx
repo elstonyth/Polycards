@@ -9,6 +9,7 @@ import { rarityRgb } from '@/lib/rarity';
 import { rm, relativeTime } from '@/lib/format';
 import type { CardDetailData } from '@/lib/data/cards';
 import type { CardSeed } from '@/components/cards/CardDetailOverlay';
+import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 
 /**
  * The card-detail content, rendered by BOTH the overlay (instant, seeded from
@@ -230,7 +231,9 @@ export function CardDetail({
             <span className="font-bold text-buyback-fg">
               {rm((detail.priceMyr * buybackPercent) / 100)}
             </span>{' '}
-            ({buybackPercent}%)
+            ({buybackPercent}%) during the reveal countdown. After leaving the
+            reveal or when its timer expires: {BUYBACK_RATE_LABEL} of card value
+            in your vault.
           </p>
         )}
 

@@ -37,8 +37,9 @@ export default function SiteFooter() {
       className="border-t border-white/10 px-fluid pb-28 pt-6 lg:pb-8"
     >
       <p className="text-[12px] text-white/55">
-        © {new Date().getFullYear()} Polycards — rip packs, pull graded cards,
-        sell back at {BUYBACK_RATE_LABEL}.
+        © {new Date().getFullYear()} Polycards — rip packs, pull graded cards.
+        Vault buyback at {BUYBACK_RATE_LABEL}. Instant rates apply during the
+        reveal countdown.
       </p>
     </footer>
   );

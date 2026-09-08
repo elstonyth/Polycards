@@ -213,9 +213,9 @@ export function PokemonToken({
             // to the poké-ball rather than showing a broken-image icon.
             if (imageSrc)
               return s === POKEBALL_FALLBACK ? s : POKEBALL_FALLBACK;
-            // Dex sprite chain: showdown gif → static png → poké-ball.
-            if (s === spriteGif(dex)) return spritePng(dex);
+            // Check static first: some dex entries have no animated sprite.
             if (s === spritePng(dex)) return POKEBALL_FALLBACK;
+            if (s === spriteGif(dex)) return spritePng(dex);
             return s; // already the poké-ball (a data URI that can't fail)
           });
         }}

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { rm0 } from '@/lib/format';
+import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 import { pillVariants } from '@/components/ui/pill';
 import Reveal from '@/components/Reveal';
 import QtyStepper from '@/components/QtyStepper';
@@ -55,7 +56,7 @@ function PackCard({ pack, icon }: { pack: Pack; icon: string }) {
       ) : (
         pack.boost && (
           <span className="absolute left-3 top-3 z-[2] rounded-md bg-buyback px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide text-white shadow-sm sm:text-[10px]">
-            +{buyback}% Buyback Boost
+            {buyback}% Instant Buyback
           </span>
         )
       )}
@@ -189,11 +190,11 @@ function PackRow({
           </span>
         ) : pack.boost ? (
           <span className="mt-1 inline-block rounded bg-buyback px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide text-white">
-            +{buyback}% Buyback Boost
+            {buyback}% Instant Buyback
           </span>
         ) : (
           <span className="mt-1 block text-[11px] text-white/60">
-            {categoryName} · {buyback}% buyback
+            {categoryName} · {buyback}% instant buyback
           </span>
         )}
       </div>
@@ -309,6 +310,12 @@ export default function CatalogClient({
       )}
     >
       {freePack && <FreePackBadge state={freePack} />}
+
+      <p className="mb-4 text-[12px] leading-relaxed text-neutral-400">
+        Instant buyback rates apply during the reveal countdown. Leaving the
+        reveal or letting its timer expire changes buyback to{' '}
+        {BUYBACK_RATE_LABEL} of card value in your vault.
+      </p>
 
       {/* Sticky filter bar — category chip rail */}
       <div className="glass-chrome sticky top-2 z-20 mb-6 rounded-2xl border border-white/10 p-2">

@@ -109,7 +109,7 @@ export default function ProfileClient({
             aria-pressed={tab === t}
             onClick={() => setTab(t)}
             className={cn(
-              'rounded-lg px-5 py-2 text-center text-sm font-medium transition-colors',
+              'min-h-11 min-w-11 rounded-lg px-5 py-2 text-center text-sm font-medium transition-colors',
               tab === t
                 ? 'bg-white/10 text-white'
                 : 'text-white/50 hover:text-white/80',

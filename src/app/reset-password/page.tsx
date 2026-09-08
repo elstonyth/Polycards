@@ -15,9 +15,9 @@ export default function ResetPasswordPage() {
     // Suspense boundary around the client component.
     <Suspense
       fallback={
-        <main className="px-fluid flex min-h-[70vh] items-center justify-center py-16">
+        <div className="px-fluid flex min-h-[70vh] items-center justify-center py-16">
           <p className="text-sm text-white/50">Loading…</p>
-        </main>
+        </div>
       }
     >
       <ResetPasswordClient />

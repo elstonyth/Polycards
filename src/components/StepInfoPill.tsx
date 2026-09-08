@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { ArrowRight, HelpCircle, Globe, DollarSign, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useModalA11y } from '@/lib/use-modal-a11y';
-import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
+import { BUYBACK_EXPLANATION } from '@/lib/buyback-copy';
 
 type Variant = 'packs' | 'buyback' | 'ships';
 
@@ -88,7 +88,7 @@ export default function StepInfoPill({
           type="button"
           onClick={() => setOpen(true)}
           aria-label="How instant buyback works"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/70 transition-colors duration-200 hover:bg-white/20 hover:text-white"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/70 transition-colors duration-200 hover:bg-white/20 hover:text-white"
         >
           <HelpCircle className="h-4 w-4" aria-hidden />
         </button>
@@ -117,7 +117,7 @@ export default function StepInfoPill({
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="Close"
-                className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+                className="absolute right-4 top-4 flex h-11 w-11 items-center justify-center rounded-full text-white/50 transition-colors hover:bg-white/10 hover:text-white"
               >
                 <X className="h-4 w-4" aria-hidden />
               </button>
@@ -126,12 +126,10 @@ export default function StepInfoPill({
                 id="buyback-title"
                 className="font-heading text-xl font-bold text-white sm:text-2xl"
               >
-                {BUYBACK_RATE_LABEL} Instant Buyback
+                How buyback works
               </h3>
-              <p className="mt-3 text-[13px] leading-relaxed text-white/60 sm:text-sm">
-                Every card you pull has a guaranteed buyback price set at{' '}
-                {BUYBACK_RATE_LABEL} of its Alt Fair Market Value. Pull a card
-                you don&apos;t want? Sell it back instantly with one tap.
+              <p className="mt-3 text-[13px] leading-relaxed text-neutral-400 sm:text-sm">
+                {BUYBACK_EXPLANATION}
               </p>
 
               {/* three mini steps */}
@@ -164,12 +162,16 @@ export default function StepInfoPill({
 
               {/* FMV box */}
               <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                <p className="mb-3 text-[12px] text-neutral-400">
+                  Vault example — after leaving the reveal or after the
+                  countdown expires.
+                </p>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-white/60">Card FMV</span>
                   <span className="font-semibold text-white">RM 100.00</span>
                 </div>
                 <div className="mt-2 flex items-center justify-between text-sm">
-                  <span className="text-white/60">Instant buyback</span>
+                  <span className="text-neutral-400">Vault buyback</span>
                   <span className="font-semibold text-buyback-fg">
                     RM 90.00
                   </span>

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import {
   ArrowLeft,
@@ -76,17 +76,17 @@ const FREE_PACK_UNAVAILABLE_MESSAGE =
 function PackRail({
   packs,
   activeId,
-  onPick,
+  qty,
 }: {
   packs: Pack[];
   activeId: string;
-  onPick: (p: Pack) => void;
+  qty: number;
 }) {
   // Mouse drag-to-scroll: touch swipes natively, but a mouse has no gesture
   // for a horizontal rail (a vertical wheel does nothing here), so the extra
   // packs were unreachable on desktop without a trackpad.
   const drag = useDragScroll<HTMLDivElement>();
-  const arrived = useRef<HTMLButtonElement>(null);
+  const arrived = useRef<HTMLAnchorElement>(null);
 
   // Centre the pack we arrived on. With only three tiles visible, a deep link
   // to a 6th-place pack would otherwise render a selector that appears not to
@@ -123,12 +123,12 @@ function PackRail({
       {packs.map((p) => {
         const selected = p.id === activeId;
         return (
-          <button
+          <Link
             key={p.id}
             ref={selected ? arrived : undefined}
-            type="button"
-            aria-pressed={selected}
-            onClick={() => onPick(p)}
+            href={`/slots/${p.id}?count=${qty}`}
+            scroll={false}
+            aria-current={selected ? 'page' : undefined}
             className={cn(
               'flex shrink-0 flex-col items-center gap-0.5 rounded-xl border px-1 py-2 text-center transition-colors',
               // With more packs than fit, tiles are narrowed so a 4th one
@@ -163,7 +163,7 @@ function PackRail({
             <span className="text-[11px] font-semibold tabular-nums text-white/55">
               {rm0(p.priceMyr)}
             </span>
-          </button>
+          </Link>
         );
       })}
     </div>
@@ -203,23 +203,25 @@ export default function PackDetailClient({
   const { customer } = useAuth();
   const { balance, openTopUp } = useTopUp();
   const router = useRouter();
-  const [active, setActive] = useState<Pack>(pack);
-  const [qty, setQty] = useState(initialQty);
+  // Route data owns selection so the address bar, shared links and browser
+  // history always describe the pack being shown.
+  const active = pack;
+  // Back can restore a cached server snapshot with an older initialQty, so
+  // the live URL owns quantity as well as pack selection.
+  const searchParams = useSearchParams();
+  const count = Number(searchParams.get('count') ?? initialQty);
+  const maxQty = 3; // The reel (openBatch) caps a single open at 3 packs.
+  const qty = Number.isInteger(count)
+    ? Math.min(maxQty, Math.max(1, count))
+    : 1;
   // `openError` surfaces a friendly failure inline (`needsTopUp` adds the
   // top-up entry for credit shortfalls). Real opens happen on the reel, so
   // there is no in-place async open state here.
   const [openError, setOpenError] = useState<string | null>(null);
   const [needsTopUp, setNeedsTopUp] = useState(false);
-  // One request refreshes every grid price (60s, visibility-gated). `detail`
-  // is the URL pack's (`pack`) server snapshot -- only pass it as the seed
-  // when the selected sibling IS the URL pack; otherwise seed null so a
-  // sibling switch never renders pack A's pool/Top Hits/odds under pack B's
-  // name (the gated-empty sections below render instead until the poll's
-  // immediate tick lands).
-  const liveDetail = usePackDetailPoll(
-    active.id,
-    active.id === pack.id ? detail : null,
-  );
+  // One request refreshes every grid price (60s, visibility-gated), seeded
+  // with this route's server snapshot.
+  const liveDetail = usePackDetailPoll(active.id, detail);
   const [openCard, setOpenCard] = useState<CardSeed | null>(null);
   // A pool card already IS a card seed (one view) — the overlay reads the
   // fields it needs and ignores the rest.
@@ -252,9 +254,14 @@ export default function PackDetailClient({
   // published `ODDS` — they never reflect the admin-tuned win rates (see
   // packs.ts / route.ts).
 
-  // The reel (openBatch) caps a single open at 3 packs.
-  const maxQty = 3;
-  const setQ = (n: number) => setQty(Math.min(maxQty, Math.max(1, n)));
+  const setQ = (n: number) => {
+    const count = Math.min(maxQty, Math.max(1, n));
+    // Replace this history entry so reload, sharing and Back from another
+    // pack preserve the chosen quantity without adding an entry per tap.
+    const url = new URL(window.location.href);
+    url.searchParams.set('count', String(count));
+    window.history.replaceState(null, '', url);
+  };
 
   // The admin-PUBLISHED odds — the ONLY rates players see. Null (unset) hides
   // the whole Pull Odds panel.
@@ -335,11 +342,6 @@ export default function PackDetailClient({
     router.push(`/slots/${active.id}/spin?count=${qty}`);
   }
 
-  function reset() {
-    setOpenError(null);
-    setNeedsTopUp(false);
-  }
-
   return (
     // pb clears the mobile sticky buy bar (fixed above the tab bar).
     <div className="mx-auto w-full px-fluid pb-28 pt-4 lg:pb-4">
@@ -368,7 +370,7 @@ export default function PackDetailClient({
           <div className="relative aspect-[36/25] overflow-hidden rounded-2xl border border-white/10 bg-neutral-900">
             {active.boost && (
               <span className="absolute left-4 top-4 z-20 rounded-md bg-buyback px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
-                +{active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% Buyback Boost
+                {active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% Instant Buyback
               </span>
             )}
             {heroVideo ? (
@@ -409,7 +411,7 @@ export default function PackDetailClient({
           <div className="relative flex items-center justify-center rounded-2xl border border-white/10 bg-neutral-900 py-6 sm:py-10">
             {active.boost && (
               <span className="absolute left-4 top-4 z-20 rounded-md bg-buyback px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
-                +{active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% Buyback Boost
+                {active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% Instant Buyback
               </span>
             )}
             <Image
@@ -456,11 +458,20 @@ export default function PackDetailClient({
                 </span>
               ) : (
                 <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-buyback/90 px-2.5 py-1 text-[11px] font-bold text-white">
-                  {active.buybackPercent ?? 90}% Buyback
+                  {active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% instant
+                  buyback
                   <Info className="h-3 w-3 opacity-80" aria-hidden />
                 </span>
               )}
             </div>
+
+            {!isFreePack && (
+              <p className="px-5 pt-4 text-[12px] leading-relaxed text-neutral-400">
+                The pack rate applies during the reveal countdown. Leaving the
+                reveal or letting the timer expire changes buyback to{' '}
+                {FLAT_BUYBACK_PERCENT}% of card value in your vault.
+              </p>
+            )}
 
             <div className="flex flex-col gap-4 px-5 py-4">
               {/* Free demo spin — guests only (hidden once logged in; a real
@@ -544,10 +555,7 @@ export default function PackDetailClient({
                         <PackRail
                           packs={g.packs}
                           activeId={active.id}
-                          onPick={(p) => {
-                            setActive(p);
-                            reset();
-                          }}
+                          qty={qty}
                         />
                       </div>
                     ))}
@@ -751,12 +759,8 @@ export default function PackDetailClient({
             </h2>
           </div>
           {/* THIS pack's history — seeded from the server snapshot, then
-              polled so anyone's pull shows up here without a reload. Keyed on
-              the active sibling: the sibling row switches packs in place, no
-              navigation. Deliberately NOT blanked on that switch (unlike
-              usePackDetailPoll above): the previous pack's rows show for the
-              one in-flight poll (dimmed as pending), whereas blanking would
-              flash "No pulls yet" on a pack that demonstrably has pulls. */}
+              polled so anyone's pull shows up here without a reload. Sibling
+              links load the selected pack's route and its own history seed. */}
           <PullHistory
             initial={recentPulls}
             packSlug={active.id}
@@ -797,7 +801,7 @@ export default function PackDetailClient({
                 ? 'Not available on this account'
                 : isFreePack
                   ? 'Your welcome pack'
-                  : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% buyback`}
+                  : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% during reveal`}
             </p>
           </div>
           <div

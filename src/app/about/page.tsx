@@ -39,7 +39,7 @@ const STEPS = [
   {
     num: '04',
     title: 'SHIP OR SELL',
-    body: `Redeem anytime with worldwide shipping, or sell back at ${BUYBACK_RATE_LABEL}.`,
+    body: `Request worldwide shipping, or sell from your vault at ${BUYBACK_RATE_LABEL}. The pack's instant rate applies during the reveal countdown.`,
   },
 ] as const;
 
@@ -54,8 +54,8 @@ const FEATURES = [
     stat: BUYBACK_RATE_LABEL,
     // Money-in signal (DESIGN.md Signal Rule) — the one colored stat.
     statClass: 'text-buyback-fg',
-    label: 'Buyback rate',
-    body: `${BUYBACK_RATE_LABEL} buyback guarantee on every card. Sell instantly without waiting for buyers.`,
+    label: 'Vault buyback rate',
+    body: `Eligible vault cards sell at ${BUYBACK_RATE_LABEL} of card value. Pack-specific instant rates apply during the reveal countdown only.`,
   },
   {
     stat: '24/7',
@@ -318,7 +318,7 @@ export default function AboutPage() {
             <ArrowRight className="h-4 w-4" aria-hidden />
           </Link>
           <p className="mt-4 text-[13px] text-neutral-400">
-            Real graded slabs · {BUYBACK_RATE_LABEL} buyback ·{' '}
+            Real graded slabs · {BUYBACK_RATE_LABEL} vault buyback ·{' '}
             {/* Persistent underline, not hover:underline — this link sits in a
                 run of text and only 1.74:1 separates it from the neutral-400
                 around it, so colour alone can't distinguish it

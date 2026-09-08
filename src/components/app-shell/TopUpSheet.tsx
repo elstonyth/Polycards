@@ -47,7 +47,7 @@ const GATEWAY_MAX_RM = DEFAULT_PAYMENT_LIMITS.deposit.maxRm;
 
 // The mock's 10/25 rungs are below the gateway's floor, so offering them would
 // guarantee a rejection on the real path. The gateway rungs span the production
-// band (RM 30 – 10,000) rather than hugging its floor — 5,000 is a real ticket
+// band rather than hugging its floor — 5,000 is a real ticket
 // size now that the ceiling is 10,000, and it was impossible under the test
 // account's RM 1,000 cap.
 const PRESETS = USE_GATEWAY ? [300, 600, 1200, 5000] : [10, 25, 50, 100];
@@ -99,13 +99,6 @@ export default function TopUpSheet({
   // only after a confirmed success so "top up more" starts a fresh attempt.
   const attemptKey = useRef<string | null>(null);
 
-  const amount = Number.parseFloat(amountText);
-  const amountValid =
-    Number.isFinite(amount) &&
-    amount > 0 &&
-    amount <= 10_000 &&
-    Math.abs(amount * 100 - Math.round(amount * 100)) < 1e-6;
-
   // Focus-in, Tab trap, Escape, scroll lock + focus restore on close.
   useModalA11y(panelRef, open, onClose);
 
@@ -133,6 +126,15 @@ export default function TopUpSheet({
     min: GATEWAY_MIN_RM,
     max: GATEWAY_MAX_RM,
   });
+  const minAmount = USE_GATEWAY ? Math.max(0.01, limits.min) : 0.01;
+  const maxAmount = USE_GATEWAY ? Math.min(10_000, limits.max) : 10_000;
+  const amount = Number(amountText.trim());
+  const amountValid =
+    /^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(amountText.trim()) &&
+    Number.isFinite(amount) &&
+    amount >= minAmount &&
+    amount <= maxAmount;
+
   useEffect(() => {
     if (!open || !USE_GATEWAY) return;
     let cancelled = false;
@@ -172,12 +174,6 @@ export default function TopUpSheet({
     setSubmitting(true);
     try {
       if (USE_GATEWAY) {
-        if (amount < limits.min || amount > limits.max) {
-          setError(
-            `Top-ups must be between ${rm0(limits.min)} and ${rm0(limits.max)}.`,
-          );
-          return;
-        }
         const res = await startDeposit(amount, method);
         if (!res.ok) {
           setError(res.error);
@@ -319,10 +315,24 @@ export default function TopUpSheet({
                 value={amountText}
                 onChange={(e) => setAmountText(e.target.value)}
                 aria-label="Top-up amount in RM"
+                aria-describedby="topup-amount-guidance"
+                aria-invalid={amountText.trim().length > 0 && !amountValid}
                 className="font-heading w-full bg-transparent text-2xl text-white outline-none placeholder:text-neutral-600"
                 placeholder="0.00"
               />
             </label>
+            <p
+              id="topup-amount-guidance"
+              className={cn(
+                'mt-2 text-[12px] leading-relaxed',
+                amountText.trim().length > 0 && !amountValid
+                  ? 'text-red-300'
+                  : 'text-neutral-400',
+              )}
+            >
+              Enter {rm(minAmount)}–{rm(maxAmount)}, with up to 2 decimal
+              places.
+            </p>
 
             {/* Channel picker. Gateway only: the mock has no channels, and
                 without this the customer always landed on whichever one
@@ -440,7 +450,7 @@ export default function TopUpSheet({
                     ? // Nothing is added here — the button leaves the site.
                       `Pay ${rm(amount)}`
                     : `Proceed — add ${rm(amount)}`
-                  : 'Enter an amount'}
+                  : 'Enter a valid amount'}
             </Pill>
 
             <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">

@@ -17,7 +17,7 @@ import MetaPixel from '@/components/MetaPixel';
 import { SITE_URL } from '@/lib/site';
 import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 
-const SITE_DESCRIPTION = `Rip packs. Pull graded cards. Hold, redeem, or sell back at ${BUYBACK_RATE_LABEL} value.`;
+const SITE_DESCRIPTION = `Rip packs. Pull graded cards. Hold, redeem, or sell from your vault at ${BUYBACK_RATE_LABEL} of card value.`;
 
 const geistSans = Geist({
   variable: '--font-geist-sans',

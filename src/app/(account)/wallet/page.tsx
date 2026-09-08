@@ -187,9 +187,10 @@ export default async function WalletPage() {
         </div>
 
         <p className="mt-4 text-[13px] text-white/50">
-          Frozen accounts are held until review. Bank payouts go live with the
-          payment gateway — until then your balance stays spendable on packs and
-          sell-back credit lands instantly.
+          Frozen accounts are held until review. Top-ups are credited after the
+          payment provider confirms payment. Bank withdrawals require an
+          unlocked balance and a saved bank account; processing status appears
+          on the withdrawal page. Buyback credit is available immediately.
         </p>
       </Panel>
     </>

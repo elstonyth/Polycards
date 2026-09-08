@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { getReferralPrefill } from '@/lib/actions/auth';
 import AuthForm from './AuthForm';
 
 type AuthMode = 'login' | 'signup';
@@ -21,7 +22,7 @@ type AuthMode = 'login' | 'signup';
 export default function AuthModal() {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<AuthMode>('login');
-  // Carried by the /r/<code> landing (openAuth options) into the signup form.
+  // The landing supplies this immediately; later opens recover its cookie.
   const [referralCode, setReferralCode] = useState<string | undefined>();
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -32,7 +33,9 @@ export default function AuthModal() {
   useLiquidGlass(panelRef, open, GLASS_SUBTLE);
 
   useEffect(() => {
+    let request = 0;
     const onOpen = (e: Event) => {
+      const currentRequest = ++request;
       const detail = (
         e as CustomEvent<{ mode?: AuthMode; referralCode?: string }>
       ).detail;
@@ -41,9 +44,21 @@ export default function AuthModal() {
       setMode(detail?.mode ?? 'login');
       setReferralCode(detail?.referralCode);
       setOpen(true);
+      if (!detail?.referralCode) {
+        void getReferralPrefill()
+          .then((code) => {
+            if (currentRequest === request) setReferralCode(code ?? undefined);
+          })
+          // Signup stays usable during a failed read; attribution still has
+          // its server-side cookie fallback when the form is submitted.
+          .catch(() => {});
+      }
     };
     window.addEventListener('polycards:auth', onOpen);
-    return () => window.removeEventListener('polycards:auth', onOpen);
+    return () => {
+      request++;
+      window.removeEventListener('polycards:auth', onOpen);
+    };
   }, []);
 
   // Open automatically when redirected here with ?auth=login|signup (e.g. the

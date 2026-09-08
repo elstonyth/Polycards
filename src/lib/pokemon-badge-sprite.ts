@@ -47,5 +47,8 @@ export function badgeSprite(card: BadgeCard, still = false): BadgeSprite {
       : still
         ? [spritePng(dex)]
         : [spriteGif(dex), spritePng(dex)];
-  return { name, chain: custom ? [custom, ...dexChain] : dexChain };
+  return {
+    name,
+    chain: [...new Set(custom ? [custom, ...dexChain] : dexChain)],
+  };
 }

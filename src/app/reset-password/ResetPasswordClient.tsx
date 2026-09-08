@@ -76,7 +76,7 @@ export default function ResetPasswordClient() {
   }
 
   return (
-    <main className="px-fluid flex min-h-[70vh] items-center justify-center py-16">
+    <div className="px-fluid flex min-h-[70vh] items-center justify-center py-16">
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-neutral-950 p-7 sm:p-8">
         {!token ? (
           <>
@@ -177,6 +177,6 @@ export default function ResetPasswordClient() {
           </>
         )}
       </div>
-    </main>
+    </div>
   );
 }

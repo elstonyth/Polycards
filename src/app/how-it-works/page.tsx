@@ -14,11 +14,11 @@ import FaqAccordion, { type FaqItem } from '@/components/FaqAccordion';
 import Reveal from '@/components/Reveal';
 import HowItWorksSteps from '@/components/HowItWorksSteps';
 import HeroVideo from '@/components/HeroVideo';
-import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
+import { BUYBACK_EXPLANATION, BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 
 export const metadata: Metadata = {
   title: 'How It Works',
-  description: `Open packs of real graded cards, own them instantly, and ship to your door or sell back at ${BUYBACK_RATE_LABEL} of market value.`,
+  description: `Open packs of real graded cards, own them instantly, and ship to your door or sell from your vault at ${BUYBACK_RATE_LABEL} of card value.`,
 };
 
 type VaultCard = { icon: LucideIcon; title: string; body: string };
@@ -109,11 +109,11 @@ const FAQS: FaqItem[] = [
   },
   {
     q: "What if I don't like my pull?",
-    a: `You can sell any card back instantly for ${BUYBACK_RATE_LABEL} of its market value. The credit lands on your balance immediately, ready for the next rip.`,
+    a: BUYBACK_EXPLANATION,
   },
   {
     q: 'How are pulls determined? Is it fair?',
-    a: 'Every pull uses commit-reveal. Before you spin, the server commits to a hashed seed it cannot change afterwards; your outcome is derived from that seed plus your own session seed, so no one, including us, can steer the result once the pack is open. The odds for each pack are shown up front. Per-pull proofs, the seeds and selection details you would need to reproduce a result yourself, are not available yet; that is being finalized on the fairness page.',
+    a: 'Cards are selected on the server using a cryptographically secure random draw and the applicable pack odds. Review the odds before opening. Independent per-pull verification is not available yet: we do not currently publish the proof data needed to reproduce an individual result yourself. See the fairness page for the current availability notice.',
   },
   {
     q: 'Where are my cards stored?',
@@ -121,7 +121,7 @@ const FAQS: FaqItem[] = [
   },
   {
     q: 'Can I sell my cards?',
-    a: `Absolutely. Every card comes with an instant sell-back at ${BUYBACK_RATE_LABEL} of its market value, a guaranteed payout with funds available immediately.`,
+    a: `Eligible cards in your vault sell back for ${BUYBACK_RATE_LABEL} of card value. The pack's displayed instant rate is available during the reveal countdown only. Buyback pays site credit immediately; bank withdrawal has separate eligibility requirements.`,
   },
 ];
 
@@ -175,7 +175,8 @@ export default function HowItWorksPage() {
               className="mt-4 max-w-lg text-sm leading-relaxed text-white/65 sm:text-base 2xl:text-lg"
             >
               Open packs of real graded cards, own them instantly, and ship to
-              your door or sell back at {BUYBACK_RATE_LABEL} of market value.
+              your door or sell from your vault at {BUYBACK_RATE_LABEL} of card
+              value.
             </Reveal>
             <Reveal delay={270} className="mt-6 flex flex-wrap gap-3">
               <Link

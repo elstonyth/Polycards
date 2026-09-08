@@ -41,7 +41,7 @@ export default function AppHeader() {
         <div className="flex min-w-0 items-center gap-5">
           <Link
             href="/"
-            className="flex shrink-0 items-center"
+            className="flex min-h-11 shrink-0 items-center"
             aria-label="Polycards home"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
