@@ -77,7 +77,7 @@ export function MeHeader({
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="font-heading flex max-w-full items-center gap-1.5 truncate text-2xl text-white transition-colors hover:text-white/80"
+              className="font-heading flex min-h-11 max-w-full items-center gap-1.5 truncate text-2xl text-white transition-colors hover:text-white/80"
             >
               <span className="truncate">{displayName}</span>
               <Pencil
@@ -96,7 +96,7 @@ export function MeHeader({
             <button
               type="button"
               onClick={() => void copyHandle()}
-              className="mt-1.5 inline-flex max-w-full items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[12px] font-semibold text-neutral-300 transition-colors hover:text-white"
+              className="mt-1.5 inline-flex min-h-11 max-w-full items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[12px] font-semibold text-neutral-300 transition-colors hover:text-white"
             >
               <span className="truncate">@{handle}</span>
               {copied ? (

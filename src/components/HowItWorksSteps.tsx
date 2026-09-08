@@ -31,7 +31,7 @@ const STEPS: Step[] = [
   {
     num: '1',
     title: 'Open a pack',
-    body: 'Choose from a range of Pokémon packs. Every pack contains a random graded card, with live odds and commit-reveal pulls: the server commits to a hashed seed before you spin.',
+    body: 'Choose from a range of Pokémon packs and review the odds before opening. Your card is selected randomly. Independent per-pull verification is not available yet.',
     pill: 'View all packs',
     pillSub: 'Browse every category and rip',
     pillVariant: 'packs',
@@ -66,8 +66,8 @@ const STEPS: Step[] = [
     num: '2',
     title: 'Reveal your card',
     body: 'Tap to reveal what you pulled. Every card is real, vaulted by PSA, Fanatics, and Alt, and fully insured from the moment you own it.',
-    pill: `${BUYBACK_RATE_LABEL} instant cash back`,
-    pillSub: "Don't like your pull? Sell it back instantly",
+    pill: 'Instant buyback during reveal',
+    pillSub: `Pack rate during the countdown · ${BUYBACK_RATE_LABEL} in your vault`,
     pillVariant: 'buyback',
     media: (
       // eslint-disable-next-line @next/next/no-img-element
@@ -80,8 +80,8 @@ const STEPS: Step[] = [
   },
   {
     num: '3',
-    title: `Keep, ship, or sell back for ${BUYBACK_RATE_LABEL}`,
-    body: `Hold your card in the vault, sell it back instantly for ${BUYBACK_RATE_LABEL} of market value, or redeem and we'll ship the physical slab to your door.`,
+    title: 'Keep, ship, or sell back',
+    body: `Keep your card in the vault, sell it for ${BUYBACK_RATE_LABEL} of card value, or request delivery. The pack's instant buyback rate ends when you leave the reveal or its countdown expires.`,
     pill: 'Ships worldwide',
     pillSub: 'Fully tracked and insured to your door',
     pillVariant: 'ships',

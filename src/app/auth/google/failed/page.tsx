@@ -41,7 +41,7 @@ export default async function GoogleFailedPage({
   const { reason = '' } = await searchParams;
 
   return (
-    <main className="px-fluid flex min-h-[70vh] flex-col items-center justify-center gap-4 py-16 text-center">
+    <div className="px-fluid flex min-h-[70vh] flex-col items-center justify-center gap-4 py-16 text-center">
       <h1 className="font-heading text-2xl font-bold tracking-tight text-white sm:text-3xl">
         Sign-in didn&apos;t complete
       </h1>
@@ -54,6 +54,6 @@ export default async function GoogleFailedPage({
       >
         Back to Polycards
       </Link>
-    </main>
+    </div>
   );
 }

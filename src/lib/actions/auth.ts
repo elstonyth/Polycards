@@ -37,7 +37,11 @@ import {
 } from '@/lib/data/customer';
 import { fetchProfileHandle } from '@/lib/data/profiles';
 import { friendlyError, httpStatus, type ErrorRule } from '@/lib/errors';
-import { bindReferral, setReferralCookie } from '@/lib/referral-cookie';
+import {
+  bindReferral,
+  readReferralCookie,
+  setReferralCookie,
+} from '@/lib/referral-cookie';
 import { normalizeReferralCode } from '@/lib/referral-code';
 import { lookupReferralCode } from '@/lib/data/referral';
 import {
@@ -50,6 +54,12 @@ import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
+
+/** Display the same stored invitation that signup uses after a reload. The
+ * cookie remains httpOnly; this read neither changes nor binds attribution. */
+export async function getReferralPrefill(): Promise<string | null> {
+  return readReferralCookie();
+}
 
 export type AuthCustomer = {
   id: string;

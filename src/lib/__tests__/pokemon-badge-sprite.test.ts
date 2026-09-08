@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { badgeSprite } from '@/lib/pokemon-badge-sprite';
 
 describe('badgeSprite', () => {
+  it.each([994, 995])('uses an existing static sprite for dex %i', (dex) => {
+    const { chain } = badgeSprite({ name: 'Card', pokemonDex: dex });
+    expect(chain).toEqual([
+      `https://cdn.jsdelivr.net/gh/PokeAPI/sprites@master/sprites/pokemon/${dex}.png`,
+    ]);
+  });
+
   it('uses the CONFIGURED dex, not the name', () => {
     // The camelCase→snake_case mapping into resolveCardPokemon is the trap:
     // pass the wrong key and this silently falls to name derivation, the code

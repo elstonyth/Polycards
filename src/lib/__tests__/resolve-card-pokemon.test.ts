@@ -3,6 +3,17 @@ import { resolveCardPokemon } from '@/lib/resolve-card-pokemon';
 import { POKEDEX_NAMES } from '@/lib/mock/pokedex-names';
 
 describe('resolveCardPokemon', () => {
+  it.each([994, 995])(
+    'avoids an unavailable Showdown animation for dex %i',
+    (dex) => {
+      expect(
+        resolveCardPokemon({ name: 'Card', pokemon_dex: dex }).sprite,
+      ).toBe(
+        `https://cdn.jsdelivr.net/gh/PokeAPI/sprites@master/sprites/pokemon/${dex}.png`,
+      );
+    },
+  );
+
   it('explicit pokemon_dex wins over name-derivation', () => {
     const r = resolveCardPokemon({ name: 'Pikachu Card', pokemon_dex: 150 });
     expect(r.dex).toBe(150);

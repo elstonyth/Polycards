@@ -26,7 +26,7 @@ export default function FinalCta() {
           <ArrowRight className="h-4 w-4" aria-hidden />
         </Link>
         <p className="mt-4 text-[13px] text-neutral-400">
-          Real graded slabs · {BUYBACK_RATE_LABEL} buyback
+          Real graded slabs · {BUYBACK_RATE_LABEL} vault buyback
         </p>
       </div>
     </Reveal>

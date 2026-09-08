@@ -40,19 +40,19 @@ const QUICK_ANSWERS = [
     title: 'BUYBACK',
     copy: (
       <>
-        Every card sells back instantly at{' '}
+        Vault buyback pays{' '}
         <span className="text-buyback-fg font-semibold">
           {BUYBACK_RATE_LABEL}
         </span>
-        . No buyer needed.
+        . The pack&apos;s instant rate applies during the reveal countdown.
       </>
     ),
     href: '/how-it-works#faq',
   },
   {
     num: '03',
-    title: 'FAIR PULLS',
-    copy: 'Every rip is provably fair. Check the math yourself.',
+    title: 'PULL ODDS & VERIFICATION',
+    copy: 'Review pack odds before opening. Independent per-pull verification is not available yet.',
     href: '/fairness',
   },
 ] as const;
