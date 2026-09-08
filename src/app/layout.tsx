@@ -11,6 +11,7 @@ import { TopUpProvider } from '@/components/app-shell/TopUpProvider';
 import { VaultDotProvider } from '@/components/app-shell/VaultDotProvider';
 import { AuthProvider } from '@/components/auth/AuthProvider';
 import { GlobalFreePackBadge } from '@/components/FreePackBadge';
+import { TelegramBanner } from '@/components/app-shell/TelegramBanner';
 import SkipLink from '@/components/SkipLink';
 import CookieConsent from '@/components/CookieConsent';
 import MetaPixel from '@/components/MetaPixel';
@@ -110,6 +111,7 @@ export default async function RootLayout({
                 {/* Site-wide free-pack badge; /slots renders its own copy from
                     server state, so the global one skips that route. */}
                 <GlobalFreePackBadge />
+                <TelegramBanner />
                 <CookieConsent />
               </VaultDotProvider>
             </TopUpProvider>
