@@ -46,7 +46,7 @@ __metadata:
     "@medusajs/test-utils": "npm:2.19.0"
     "@mercurjs/cli": "npm:2.3.1"
     "@mercurjs/core": "npm:2.3.1"
-    "@mercurjs/types": "npm:2.3.1"
+    "@mercurjs/types": "npm:2.3.3"
     "@swc/core": "npm:^1.16.0"
     "@swc/jest": "npm:^0.2.36"
     "@types/jest": "npm:^30.0.0"
@@ -4555,12 +4555,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@mercurjs/types@npm:2.3.1":
-  version: 2.3.1
-  resolution: "@mercurjs/types@npm:2.3.1"
+"@mercurjs/types@npm:2.3.3":
+  version: 2.3.3
+  resolution: "@mercurjs/types@npm:2.3.3"
   dependencies:
     "@medusajs/types": "npm:2.18.0"
-  checksum: 10c0/ed5321c757f40255a39266dd00811b267b552692ab05409308ae2859be7ceb5272d2e5155a01ff2eb94a2ba5f247af3ccfbebecd0071acbf0928c2ca0fcfb5f1
+  checksum: 10c0/3b6449026ad11436c794562eb6ee86a6a57d1c67fce53a99d57e3256661e6ae54b0bc998c19e562410c114f7e4cebb3ce3ec91dba9c8e2bb465ba1f52f1337d4
   languageName: node
   linkType: hard
 
