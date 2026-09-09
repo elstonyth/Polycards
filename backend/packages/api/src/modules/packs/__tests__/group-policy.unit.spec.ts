@@ -5,7 +5,11 @@ import {
   isPartnerGroup,
   resolveGroupPolicyForCustomer,
 } from '../group-policy';
-import { DEFAULT_PLAYER_GROUP_NAME, resolvePlayerGroup } from '../odds-sets';
+import {
+  DEFAULT_PLAYER_GROUP_NAME,
+  effectivePlayerGroup,
+  resolvePlayerGroup,
+} from '../odds-sets';
 
 // Group metadata is admin-written, untyped JSON. Every reader below must be
 // defensive the way coerceOddsSet is: a value that is not exactly what the
@@ -40,21 +44,41 @@ describe('groupPolicyOf', () => {
     }
   });
 
-  it('honours the toggles only when exactly true', () => {
+  it('honours the toggles only when exactly true, on a partner group', () => {
     const on = groupPolicyOf({
       name: 'pro',
-      metadata: { withdrawals_blocked: true, verification_exempt: true },
+      metadata: {
+        partner_rate_bp: 400,
+        withdrawals_blocked: true,
+        verification_exempt: true,
+      },
     });
     expect(on.withdrawals_blocked).toBe(true);
     expect(on.verification_exempt).toBe(true);
     for (const v of ['true', 1, 'yes', {}, null]) {
       const p = groupPolicyOf({
         name: 'pro',
-        metadata: { withdrawals_blocked: v, verification_exempt: v },
+        metadata: {
+          partner_rate_bp: 400,
+          withdrawals_blocked: v,
+          verification_exempt: v,
+        },
       });
       expect(p.withdrawals_blocked).toBe(false);
       expect(p.verification_exempt).toBe(false);
     }
+  });
+
+  // Partner off = one switch on the read side too: a stray toggle on an
+  // ordinary group (written any way but editGroupPolicy) must not block or
+  // exempt its members.
+  it('ignores the toggles on a group with no partner rate', () => {
+    expect(
+      groupPolicyOf({
+        name: 'pro',
+        metadata: { withdrawals_blocked: true, verification_exempt: true },
+      }),
+    ).toEqual(EMPTY_GROUP_POLICY);
   });
 
   // Same rule as effectiveOddsSet on the admin: DEFAULT's members and
@@ -141,12 +165,45 @@ describe('resolvePlayerGroup / resolveGroupPolicyForCustomer', () => {
 
   it('keeps oldest-wins among two real groups', async () => {
     const c = containerWith([
-      { id: 'cg_a', name: 'a', metadata: { withdrawals_blocked: true } },
+      {
+        id: 'cg_a',
+        name: 'a',
+        metadata: { partner_rate_bp: 300, withdrawals_blocked: true },
+      },
       { id: 'cg_b', name: 'b', metadata: { partner_rate_bp: 500 } },
     ]);
     const r = await resolveGroupPolicyForCustomer(c, 'cus_1');
     expect(r?.group.id).toBe('cg_a');
     expect(r?.policy.withdrawals_blocked).toBe(true);
-    expect(r?.policy.partner_rate_bp).toBeNull();
+    expect(r?.policy.partner_rate_bp).toBe(300);
+  });
+});
+
+// The pure rule the resolver and the admin Players list share: sorted by
+// created_at, id breaks ties, DEFAULT skipped whatever position it holds.
+describe('effectivePlayerGroup', () => {
+  it('orders by created_at regardless of input order, then by id', () => {
+    const groups = [
+      { id: 'cg_b', name: 'b', created_at: '2026-02-01T00:00:00Z' },
+      { id: 'cg_a', name: 'a', created_at: '2026-01-01T00:00:00Z' },
+      { id: 'cg_0', name: 'zero', created_at: '2026-01-01T00:00:00Z' },
+    ];
+    expect(effectivePlayerGroup(groups)?.id).toBe('cg_0');
+  });
+
+  it('skips DEFAULT and is null with no real group', () => {
+    const dflt = {
+      id: 'cg_d',
+      name: DEFAULT_PLAYER_GROUP_NAME,
+      created_at: '2025-01-01T00:00:00Z',
+    };
+    expect(
+      effectivePlayerGroup([
+        dflt,
+        { id: 'cg_p', name: 'pro', created_at: '2026-01-01T00:00:00Z' },
+      ])?.id,
+    ).toBe('cg_p');
+    expect(effectivePlayerGroup([dflt])).toBeNull();
+    expect(effectivePlayerGroup([])).toBeNull();
   });
 });

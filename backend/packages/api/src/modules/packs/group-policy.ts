@@ -1,6 +1,9 @@
 import type { MedusaContainer } from '@medusajs/framework/types';
-import { MedusaError } from '@medusajs/framework/utils';
-import { isDefaultPlayerGroup, resolvePlayerGroup } from './odds-sets';
+import {
+  isDefaultPlayerGroup,
+  resolvePlayerGroup,
+  type PlayerGroupLike,
+} from './odds-sets';
 
 /**
  * Group policy — the "partner group" half of a player group (spec
@@ -37,11 +40,6 @@ export const EMPTY_GROUP_POLICY: GroupPolicy = Object.freeze({
   verification_exempt: false,
 });
 
-type GroupLike = {
-  name?: string | null;
-  metadata?: Record<string, unknown> | null;
-};
-
 /** A stored rate is a non-negative integer, as number or numeric string.
  *  Bounds against referral_settings are the WRITE path's job
  *  (editGroupPolicy); a read never invents a rate from a bad value. */
@@ -56,17 +54,23 @@ const coerceRateBp = (v: unknown): number | null => {
  * behave identically (resolvePlayerGroup skips it, so this only matters for
  * readers handed the row directly, e.g. an admin list).
  */
-export const groupPolicyOf = (g: GroupLike): GroupPolicy => {
+export const groupPolicyOf = (g: PlayerGroupLike): GroupPolicy => {
   if (isDefaultPlayerGroup(g)) return EMPTY_GROUP_POLICY;
   const m = g.metadata ?? {};
+  const rate = coerceRateBp(m[PARTNER_RATE_KEY]);
+  // Partner off = one switch, on the READ side too: the toggles only mean
+  // anything on a partner group. editGroupPolicy clears them with the rate,
+  // but a row written any other way (a stray key on the native metadata
+  // route) must not block or exempt an ordinary group's members.
+  if (rate === null) return EMPTY_GROUP_POLICY;
   return {
-    partner_rate_bp: coerceRateBp(m[PARTNER_RATE_KEY]),
+    partner_rate_bp: rate,
     withdrawals_blocked: m[WITHDRAWALS_BLOCKED_KEY] === true,
     verification_exempt: m[VERIFICATION_EXEMPT_KEY] === true,
   };
 };
 
-export const isPartnerGroup = (g: GroupLike): boolean =>
+export const isPartnerGroup = (g: PlayerGroupLike): boolean =>
   groupPolicyOf(g).partner_rate_bp !== null;
 
 export type ResolvedGroupPolicy = {
@@ -91,26 +95,10 @@ export async function resolveGroupPolicyForCustomer(
   };
 }
 
-/** The message the admin shows next to the locked per-customer control and
- *  the one the route refuses with — one string, so the UI never promises a
- *  path the server then refuses differently. */
+/** Conflict rule (spec 2026-09-09): while a customer is in a partner group
+ *  the group's rate is what they earn, so a per-customer rate would be stored
+ *  but never paid. PacksModuleService.setPartnerRate refuses with this
+ *  message; the admin card shows the same words next to its locked control,
+ *  so the UI never promises a path the server then refuses differently. */
 export const partnerGroupLockMessage = (groupName: string): string =>
   `This player is in partner group "${groupName}", whose rate applies to them. Move them out of the group to set a per-customer rate.`;
-
-/**
- * Conflict rule (spec 2026-09-09): while a customer is in a partner group the
- * group's rate is what they earn, so a per-customer rate would be stored but
- * never paid. Refuse the write instead of accepting a lie.
- */
-export async function assertNotInPartnerGroup(
-  container: MedusaContainer,
-  customerId: string,
-): Promise<void> {
-  const resolved = await resolveGroupPolicyForCustomer(container, customerId);
-  if (resolved && resolved.policy.partner_rate_bp !== null) {
-    throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      partnerGroupLockMessage(resolved.group.name),
-    );
-  }
-}

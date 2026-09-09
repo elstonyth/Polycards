@@ -16,9 +16,10 @@ Today a "special" (partner) account is a per-customer flag: `customer_account_st
 | "All verifications" | Phone OTP is the only customer verification in this codebase: `requirePhoneVerified` on top-up, deposit, delivery-order create, withdraw; plus the storefront account-tree phone modal. Nothing else. |
 | Withdraw block scope | Bank withdrawals (`POST /store/credits/withdraw`) only. Spending, buyback credit, pack opens, pending withdrawals created before the block: unaffected. |
 | Precedence | **Group wins.** A customer in a partner group uses the group's rate. Their own `partner_referral_bp` stays stored, inert, and resurfaces when they leave the group. |
-| Conflict rule | While a customer is in a partner group, the per-customer rate cannot be set: the admin card is disabled AND `setPartnerRate` refuses with 400. The operator moves the player out of the group first, then sets a per-customer rate. |
+| Conflict rule | While a customer is in a partner group, a per-customer rate cannot be SET: the admin card is locked AND `PacksModuleService.setPartnerRate` refuses a non-null rate with 400. CLEARING (null) stays allowed so an inert rate can be removed. The operator moves the player out of the group first, then sets a per-customer rate. |
+| Only one writer for the policy keys | The native `POST /admin/customer-groups[/:id]` merges arbitrary metadata with no bounds and no audit (the prebuilt Metadata editor reaches it too), so `rejectGroupPolicyMetadata` refuses any body whose `metadata` carries a policy key. `odds_set` still passes. |
 | DEFAULT group | Locked: cannot be a partner group, same reason its odds set is locked (ungrouped players must roll and behave exactly like DEFAULT members). |
-| Rename bug | Mercur's Edit Customer Group form (`useExtendableForm`) always posts `additional_data: {}`; core Medusa 2.19's strict `AdminUpdateCustomerGroup` has no such field, so every rename 400s. Fix: a repo middleware strips `additional_data` from `POST /admin/customer-groups` and `POST /admin/customer-groups/:id` bodies. Project middlewares register before core route middlewares (framework `ApiLoader`: project api dir is scanned first and the sorter keeps insertion order), so the strip runs before the validator. |
+| Rename bug | Mercur's Edit Customer Group form (`useExtendableForm`) always posts `additional_data: {}`; core Medusa 2.19's strict `AdminUpdateCustomerGroup` has no such field, so every rename 400s. Fix: a repo middleware strips `additional_data` from the native create/update bodies. Ordering trap: core's api dir is scanned BEFORE the project's and the sorter keeps insertion order within a bucket, so a same-matcher entry would run AFTER core's validator. The strip is registered on `'/admin/customer-groups*'` (regex bucket, which sorts ahead of core's static and params entries) — verified by the integration spec. |
 
 ## Data model
 
@@ -32,7 +33,7 @@ customer_group.metadata = {
 }
 ```
 
-Reading is defensive (untyped JSON): anything that is not a finite integer is `null`; anything that is not `true` is `false`.
+Reading is defensive (untyped JSON): anything that is not a non-negative integer is `null`; anything that is not `true` is `false`; and the two toggles are only honoured when `partner_rate_bp` is non-null — "partner off" is one switch on the read side as well as the write side.
 
 Audit: `admin_action_audit` gains `entity_type: 'customer_group'` and `action: 'edit_group_policy'`. One migration widens both CHECKs (same drop/re-add recipe as `Migration20260906090000`).
 
@@ -46,15 +47,16 @@ Audit: `admin_action_audit` gains `entity_type: 'customer_group'` and `action: '
   - `resolveGroupPolicyForCustomer(container, customerId)` — `{ group: {id,name}, policy } | null`.
 - `PacksModuleService`
   - `editGroupPolicy({ groupId, policy, adminId, reason })` — validates bounds when `partner_rate_bp` is non-null, refuses DEFAULT, forces both toggles false when not partner, merges metadata through the customer module, writes the audit row.
-  - `setPartnerRate` — refuses (INVALID_DATA) when `resolveGroupPolicyForCustomer` says the customer is in a partner group.
-  - `effectivePartnerBp` used by: close-week job (batched: list partner groups, then their member ids), `referralStorefrontSummary`, the admin referral card route.
+  - `partnerGroupOfCustomers(ids)` — raw SQL over `customer_group_customer` + `customer_group` (the module container cannot resolve the Customer module): which customers are in a partner group, and which one.
+  - `setPartnerRate` — refuses a non-null rate (INVALID_DATA, `partnerGroupLockMessage`) when `partnerGroupOfCustomers` says the customer is in a partner group; null (clear) passes.
+  - `partnerBpForCustomers(ids)` — group rate first, manual flag second; used by the close-week job, `referralStorefrontSummary`, and the account route.
 - Routes
   - `POST /admin/customer-groups/:id/policy` body `{ partner_rate_bp: number|null, withdrawals_blocked: boolean, verification_exempt: boolean, reason: string }` → `{ customer_group }`. Registered with `adminActionRateLimit`.
   - `GET /admin/players` rows gain `partner: 'group' | 'manual' | null`.
   - `GET /admin/customers/:id/referral` gains `partner_group: { id, name, rate_bp } | null`.
   - `GET /store/customers/me/account` gains `policy: { partner: boolean, withdrawals_blocked: boolean, verification_exempt: boolean }`.
 - Middleware
-  - `stripAdditionalData` on `POST /admin/customer-groups` and `POST /admin/customer-groups/*`.
+  - `stripAdditionalData` + `rejectGroupPolicyMetadata` on `POST /admin/customer-groups*`.
   - `blockGroupWithdrawals` on `POST /store/credits/withdraw` (after rate limit, before `requirePhoneVerified`): NOT_ALLOWED "Withdrawals are not available on this account."
   - `requirePhoneVerified`: an unverified customer passes when their group policy has `verification_exempt`. Fail-closed on read errors, as today.
 

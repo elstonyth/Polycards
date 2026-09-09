@@ -297,7 +297,7 @@ const PlayersPage = () => {
                             title={
                               p.partner === 'group'
                                 ? t('players.partnerViaGroup', {
-                                    group: p.groups[0] ?? defaultGroupName,
+                                    group: p.partner_group ?? '',
                                   })
                                 : t('players.partnerManual')
                             }

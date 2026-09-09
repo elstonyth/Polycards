@@ -120,18 +120,19 @@ const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
   const saving = saveOdds.isPending || savePolicy.isPending;
 
   const save = () => {
-    if (oddsDirty) {
-      saveOdds.mutate(
-        { id: group.id, set: value },
-        // Drop the override so the row re-reads the (now authoritative)
-        // refetched server value.
-        { onSuccess: () => setPicked(undefined) },
-      );
-    }
-    if (policyDirty) {
-      // Audited on the server; the prompt is the reason's only input.
-      const reason = window.prompt(t('oddsSets.reasonPrompt'))?.trim();
-      if (!reason) return;
+    // Reason FIRST: the policy write is audited and the prompt is its only
+    // input, so a cancelled prompt must abort the whole save — firing the odds
+    // write before asking would leave the row half-saved with Save still lit.
+    const reason = policyDirty
+      ? window.prompt(t('oddsSets.reasonPrompt'))?.trim()
+      : undefined;
+    if (policyDirty && !reason) return;
+    // SEQUENCED, never concurrent: both writes land on the same metadata
+    // column through Medusa's read-merge-write, so two in flight can overwrite
+    // each other's keys with the stale copy each one read. Odds first (the
+    // native route), policy after it settles.
+    const writePolicy = () => {
+      if (!policyDirty || !reason) return;
       savePolicy.mutate(
         {
           id: group.id,
@@ -144,6 +145,21 @@ const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
         },
         { onSuccess: () => setDraft(undefined) },
       );
+    };
+    if (oddsDirty) {
+      saveOdds.mutate(
+        { id: group.id, set: value },
+        // Drop the override so the row re-reads the (now authoritative)
+        // refetched server value, then write the policy on top of it.
+        {
+          onSuccess: () => {
+            setPicked(undefined);
+            writePolicy();
+          },
+        },
+      );
+    } else {
+      writePolicy();
     }
   };
 

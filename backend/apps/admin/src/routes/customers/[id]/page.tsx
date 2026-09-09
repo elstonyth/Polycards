@@ -91,13 +91,7 @@ const deliveryTone = (
 type ModalKind = 'freeze' | 'unfreeze' | 'credits';
 
 type TabKey =
-  | 'profile'
-  | 'lvl'
-  | 'wallet'
-  | 'vault'
-  | 'orders'
-  | 'pulls'
-  | 'history';
+  'profile' | 'lvl' | 'wallet' | 'vault' | 'orders' | 'pulls' | 'history';
 
 // ── Tab bodies ──────────────────────────────────────────────────────────────
 // One component per tab, following routes/deliveries/page.tsx: an inactive
@@ -452,6 +446,22 @@ const ReferralCardBody = ({
                 <Badge size="small" color="purple">
                   {lockedByGroup.rate_bp / 100}% · {lockedByGroup.name}
                 </Badge>
+                {/* Clearing stays allowed while the group applies (the
+                    server refuses only a NEW rate), so an inert per-customer
+                    rate can be removed without a move out and back. */}
+                {data.partner_referral_bp !== null && (
+                  <Button
+                    size="small"
+                    variant="transparent"
+                    disabled={setRate.isPending}
+                    onClick={() => {
+                      setRatePct('');
+                      apply(null);
+                    }}
+                  >
+                    Clear
+                  </Button>
+                )}
               </div>
               <Text size="xsmall" className="text-ui-fg-muted">
                 {t('players.partnerLockedByGroup', {

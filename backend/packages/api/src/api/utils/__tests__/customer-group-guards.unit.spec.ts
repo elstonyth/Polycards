@@ -1,9 +1,38 @@
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import {
   blockGroupWithdrawals,
+  GROUP_POLICY_METADATA_MESSAGE,
+  rejectGroupPolicyMetadata,
   stripAdditionalData,
   WITHDRAWALS_BLOCKED_MESSAGE,
 } from '../customer-group-guards';
+
+describe('rejectGroupPolicyMetadata', () => {
+  const run = (body: unknown) =>
+    new Promise<unknown>((resolve) => {
+      rejectGroupPolicyMetadata({ body } as never, {} as never, resolve);
+    });
+
+  // The native metadata write has no bounds and no audit — every policy key
+  // must be turned away, whatever the value.
+  it.each([
+    ['partner_rate_bp', 10000],
+    ['withdrawals_blocked', true],
+    ['verification_exempt', false],
+  ])('refuses metadata carrying %s', async (key, value) => {
+    const err = (await run({ metadata: { odds_set: 2, [key]: value } })) as MedusaError;
+    expect(err).toBeInstanceOf(MedusaError);
+    expect(err.type).toBe(MedusaError.Types.INVALID_DATA);
+    expect(err.message).toBe(GROUP_POLICY_METADATA_MESSAGE);
+  });
+
+  it('passes the odds-set write and a rename', async () => {
+    expect(await run({ metadata: { odds_set: 2 } })).toBeUndefined();
+    expect(await run({ name: 'whales' })).toBeUndefined();
+    expect(await run({ name: 'whales', metadata: null })).toBeUndefined();
+    expect(await run(undefined)).toBeUndefined();
+  });
+});
 
 describe('stripAdditionalData', () => {
   const run = (body: unknown) => {

@@ -5,7 +5,18 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
-import { resolveGroupPolicyForCustomer } from '../../modules/packs/group-policy';
+import {
+  PARTNER_RATE_KEY,
+  resolveGroupPolicyForCustomer,
+  VERIFICATION_EXEMPT_KEY,
+  WITHDRAWALS_BLOCKED_KEY,
+} from '../../modules/packs/group-policy';
+
+const GROUP_POLICY_KEYS = [
+  PARTNER_RATE_KEY,
+  WITHDRAWALS_BLOCKED_KEY,
+  VERIFICATION_EXEMPT_KEY,
+] as const;
 
 /**
  * POST /admin/customer-groups and POST /admin/customer-groups/:id — drop
@@ -36,6 +47,42 @@ export function stripAdditionalData(
   const body = req.body as Record<string, unknown> | null | undefined;
   if (body && typeof body === 'object' && 'additional_data' in body) {
     delete body.additional_data;
+  }
+  next();
+}
+
+export const GROUP_POLICY_METADATA_MESSAGE =
+  'partner_rate_bp, withdrawals_blocked and verification_exempt are set through POST /admin/customer-groups/:id/policy, which checks the rate against the partner bounds and records the change.';
+
+/**
+ * Same matcher as stripAdditionalData: refuse a body whose `metadata` carries
+ * any partner-policy key. The native create/update routes merge arbitrary
+ * metadata with no bounds check and no audit row (the prebuilt dashboard's
+ * Metadata editor reaches them too), so without this a
+ * `metadata: { partner_rate_bp: 10000 }` would pay a group at 100% with
+ * nothing in the audit trail. The repo's /policy route is the only writer;
+ * `odds_set` and the DEFAULT marker still pass. Same shape as
+ * rejectAdminBankAccountsMetadata (customer-metadata-guard.ts).
+ */
+export function rejectGroupPolicyMetadata(
+  req: MedusaRequest,
+  _res: MedusaResponse,
+  next: MedusaNextFunction,
+): void {
+  const body = req.body as Record<string, unknown> | null | undefined;
+  const metadata = body?.metadata as Record<string, unknown> | null | undefined;
+  if (
+    metadata &&
+    typeof metadata === 'object' &&
+    GROUP_POLICY_KEYS.some((key) => key in metadata)
+  ) {
+    next(
+      new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        GROUP_POLICY_METADATA_MESSAGE,
+      ),
+    );
+    return;
   }
   next();
 }

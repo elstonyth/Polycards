@@ -27,6 +27,7 @@ import {
 import { validateDeliverableAddress } from './utils/address-guard';
 import {
   blockGroupWithdrawals,
+  rejectGroupPolicyMetadata,
   stripAdditionalData,
 } from './utils/customer-group-guards';
 import {
@@ -1060,7 +1061,10 @@ export default defineMiddlewares({
       // where removing the key is harmless.
       matcher: '/admin/customer-groups*',
       method: 'POST',
-      middlewares: [stripAdditionalData],
+      // rejectGroupPolicyMetadata keeps the partner-policy keys off the
+      // native metadata write path — POST /admin/customer-groups/:id/policy is
+      // their only writer (bounds + audit).
+      middlewares: [stripAdditionalData, rejectGroupPolicyMetadata],
     },
     {
       matcher: '/admin/rewards-settings',

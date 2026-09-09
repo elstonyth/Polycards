@@ -39,9 +39,9 @@ export async function shouldGatePhone(input: {
   flag: boolean;
   phone: string | null | undefined;
   hasPassword: () => Promise<boolean>;
-  exempt?: () => Promise<boolean>;
+  exempt: () => Promise<boolean>;
 }): Promise<boolean> {
   if (!input.flag || input.phone) return false;
-  if (input.exempt && (await input.exempt())) return false;
+  if (await input.exempt()) return false;
   return !(await input.hasPassword());
 }

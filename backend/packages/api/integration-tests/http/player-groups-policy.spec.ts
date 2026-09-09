@@ -206,6 +206,33 @@ medusaIntegrationTestRunner({
         );
       });
 
+      // The native metadata write has no bounds and no audit, so the policy
+      // keys are refused there — /policy is their only writer. odds_set, the
+      // one key this app writes natively, still passes.
+      it('refuses partner-policy keys on the native metadata routes', async () => {
+        const smuggled = await unwrapResponse(
+          api.post(
+            `/admin/customer-groups/${groupId}`,
+            { metadata: { partner_rate_bp: 10_000 } },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(smuggled.status).toBe(400);
+        expect(smuggled.data.message).toMatch(/customer-groups\/:id\/policy/);
+        const stored = await customerModule().retrieveCustomerGroup(groupId);
+        expect(stored.metadata?.partner_rate_bp).toBeUndefined();
+
+        const odds = await unwrapResponse(
+          api.post(
+            `/admin/customer-groups/${groupId}`,
+            { metadata: { odds_set: 3 } },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(odds.status).toBe(200);
+        expect(odds.data.customer_group.metadata.odds_set).toBe(3);
+      });
+
       it('refuses a manual partner rate while the player is in a partner group, and reports the source', async () => {
         expect(
           (
@@ -225,6 +252,16 @@ medusaIntegrationTestRunner({
         );
         expect(refused.status).toBe(400);
         expect(refused.data.message).toMatch(/partner group "Policy Partners"/);
+        // Clearing is not setting: a null rate passes even inside the group,
+        // so an inert manual rate can always be removed.
+        const cleared = await unwrapResponse(
+          api.post(
+            `/admin/customers/${memberId}/partner-rate`,
+            { rate_bp: null, reason: 'clear inert rate' },
+            { headers: adminHeaders() },
+          ),
+        );
+        expect(cleared.status).toBe(200);
 
         const card = await unwrapResponse(
           api.get(`/admin/customers/${memberId}/referral`, {

@@ -101,7 +101,7 @@ import {
   type ReferralWeek,
 } from './referral';
 import { asPixelPokemonCrud } from './pixel-pokemon-service';
-import { groupPolicyOf } from './group-policy';
+import { groupPolicyOf, partnerGroupLockMessage } from './group-policy';
 import { isDefaultPlayerGroup } from './odds-sets';
 import {
   taskIsLive,
@@ -800,10 +800,7 @@ class PacksModuleService extends MedusaService({
     | {
         bound: false;
         reason:
-          | 'self'
-          | 'already_bound'
-          | 'not_a_new_account'
-          | 'referrer_disabled';
+          'self' | 'already_bound' | 'not_a_new_account' | 'referrer_disabled';
       }
   > {
     if (input.customerId === input.referrerId) {
@@ -1028,6 +1025,32 @@ class PacksModuleService extends MedusaService({
   ): Promise<Map<string, number | null>> {
     const out = new Map<string, number | null>();
     if (ids.length === 0) return out;
+    const groups = await this.partnerGroupOfCustomers(ids, sharedContext);
+    const states = await this.listCustomerAccountStates(
+      { customer_id: ids },
+      { take: ids.length },
+      sharedContext,
+    );
+    const stateBp = new Map(
+      states.map((r) => [r.customer_id, r.partner_referral_bp ?? null]),
+    );
+    for (const id of ids) {
+      out.set(id, groups.get(id)?.rate_bp ?? stateBp.get(id) ?? null);
+    }
+    return out;
+  }
+
+  // Which customers are in a PARTNER group, and which one: one row per
+  // customer whose effective player group (oldest non-DEFAULT membership,
+  // same rule as resolvePlayerGroup) carries a partner rate. Customers in no
+  // group, in DEFAULT, or in an ordinary group are absent from the map.
+  @InjectManager()
+  async partnerGroupOfCustomers(
+    ids: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, { name: string; rate_bp: number }>> {
+    const out = new Map<string, { name: string; rate_bp: number }>();
+    if (ids.length === 0) return out;
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const ph = ids.map(() => '?').join(',');
@@ -1045,22 +1068,12 @@ class PacksModuleService extends MedusaService({
         'ORDER BY cg.created_at ASC, cg.id ASC',
       ids,
     );
-    const groupBp = new Map<string, number | null>();
+    const seen = new Set<string>();
     for (const m of memberships) {
-      if (groupBp.has(m.customer_id) || isDefaultPlayerGroup(m)) continue;
-      groupBp.set(m.customer_id, groupPolicyOf(m).partner_rate_bp);
-    }
-    const states = await this.listCustomerAccountStates(
-      { customer_id: ids },
-      { take: ids.length },
-      sharedContext,
-    );
-    const stateBp = new Map(
-      states.map((r) => [r.customer_id, r.partner_referral_bp ?? null]),
-    );
-    for (const id of ids) {
-      const fromGroup = groupBp.get(id) ?? null;
-      out.set(id, fromGroup ?? stateBp.get(id) ?? null);
+      if (seen.has(m.customer_id) || isDefaultPlayerGroup(m)) continue;
+      seen.add(m.customer_id); // the effective group, partner or not
+      const rate = groupPolicyOf(m).partner_rate_bp;
+      if (rate !== null) out.set(m.customer_id, { name: m.name, rate_bp: rate });
     }
     return out;
   }
@@ -1068,10 +1081,11 @@ class PacksModuleService extends MedusaService({
   // Partner flag: a manual commission rate that REPLACES the tier table for
   // this customer. null clears it. Bounds come from referral_settings.
   //
-  // A customer inside a PARTNER GROUP is refused at the route
-  // (assertNotInPartnerGroup, group-policy.ts): the group's rate applies to
-  // them, so a manual rate would be stored but never paid — the operator moves
-  // them out of the group first.
+  // A customer inside a PARTNER GROUP is refused (spec 2026-09-09): the
+  // group's rate applies to them, so a manual rate would be stored but never
+  // paid — the operator moves them out of the group first. CLEARING (null)
+  // stays allowed, so an inert rate left behind can be removed. Enforced here,
+  // not only at the route, so no future caller can write a rate that lies.
   @InjectTransactionManager()
   async setPartnerRate(
     input: {
@@ -1083,6 +1097,15 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
     if (input.rateBp != null) {
+      const partnerGroup = (
+        await this.partnerGroupOfCustomers([input.customerId], sharedContext)
+      ).get(input.customerId);
+      if (partnerGroup) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          partnerGroupLockMessage(partnerGroup.name),
+        );
+      }
       const { partner_min_bp, partner_max_bp } =
         await this.getReferralSettings(sharedContext);
       if (
@@ -2249,10 +2272,7 @@ class PacksModuleService extends MedusaService({
     | {
         claimed: false;
         reason:
-          | 'not_found'
-          | 'not_completed'
-          | 'already_claimed'
-          | 'window_closed';
+          'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
       }
   > {
     // Deliberately NOT filtered on active: retiring a task must never strand
@@ -8902,8 +8922,7 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      | SettleSnapshot
-      | undefined;
+      SettleSnapshot | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME
@@ -9318,8 +9337,7 @@ class PacksModuleService extends MedusaService({
   private async reserveSettledStock(
     winner: SettledWinner,
     decrementStock:
-      | ((handle: string, qty: number) => Promise<boolean>)
-      | undefined,
+      ((handle: string, qty: number) => Promise<boolean>) | undefined,
     weekStartIso: string,
   ): Promise<void> {
     if (!decrementStock) return;

@@ -136,6 +136,7 @@ import {
   type ReferralTierWire,
 } from './admin-rest';
 import type { SetEntry } from '@acme/odds-math';
+import type { GroupPolicy } from './player-groups';
 import { qk } from './query-keys';
 import {
   classifyApproveResult,
@@ -625,7 +626,10 @@ export const useBulkUpdateDeliveryOrders = () => {
   });
 };
 
-export type { VoucherLadderDTO, VoucherRangeDTO } from './admin-rest';
+export type {
+  VoucherLadderDTO,
+  VoucherRangeDTO,
+} from './admin-rest';
 
 export const useVoucherLadder = (): UseQueryResult<VoucherLadderDTO> =>
   useQuery({ queryKey: qk.voucherLadder, queryFn: getVoucherLadder });
@@ -1093,11 +1097,8 @@ export const useSetGroupOddsSet = () => {
 export const useSetGroupPolicy = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: {
-      id: string;
-      policy: Parameters<typeof setGroupPolicy>[1];
-      reason: string;
-    }) => setGroupPolicy(vars.id, vars.policy, vars.reason),
+    mutationFn: (vars: { id: string; policy: GroupPolicy; reason: string }) =>
+      setGroupPolicy(vars.id, vars.policy, vars.reason),
     onSuccess: () => {
       toast.success('Group policy saved');
       return qc.invalidateQueries({ queryKey: qk.customerGroups });

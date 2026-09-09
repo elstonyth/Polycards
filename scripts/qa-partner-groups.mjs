@@ -79,7 +79,7 @@ const A = { token: adminTok };
 
 const name = `qa-partner-${stamp}`;
 const email = `${name}@polycards.local`;
-const password = 'PwQa2026!';
+const password = 'PwQa2026!'; // gitleaks:allow — throwaway seed account
 const reg = await api('/auth/customer/emailpass/register', {
   method: 'POST',
   body: { email, password },
@@ -203,6 +203,16 @@ await page.goto(`${ADMIN}/customers/${customerId}`, {
 await page.getByText('Partner rate').waitFor({ timeout: 60000 });
 await page.waitForTimeout(1500);
 await shot('3-customer-detail', { fullPage: true });
+// 3b. The locked Referral card. Element screenshot: the page scrolls inside a
+// container, so a viewport shot after scrollIntoView still shows the header.
+// Heading → its px-6 wrapper → the Container card.
+await page
+  .getByRole('heading', { name: 'Referral' })
+  .locator('xpath=ancestor::div[2]')
+  .screenshot({
+    path: path.join(OUT, 'qa-partner-3b-referral-card-locked.png'),
+  });
+console.log('shot', path.join(OUT, 'qa-partner-3b-referral-card-locked.png'));
 
 // 4. The prebuilt Edit Customer Group rename — the bug the strip fixes.
 await page.goto(`${ADMIN}/customer-groups/${group.id}/edit`, {

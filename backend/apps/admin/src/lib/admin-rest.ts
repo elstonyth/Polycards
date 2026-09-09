@@ -4,6 +4,7 @@
 // /admin/* routes). __BACKEND_URL__ is injected by the dashboard Vite plugin.
 
 import type { PullsResponse } from './packs-api';
+import type { GroupPolicy } from './player-groups';
 
 declare const __BACKEND_URL__: string;
 
@@ -1074,11 +1075,7 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 // reconciliation sweep's window, i.e. a payment that may have landed at the
 // gateway without ever being credited here.
 export type GatewayDepositView =
-  | 'pending'
-  | 'settled'
-  | 'failed'
-  | 'expired'
-  | 'all';
+  'pending' | 'settled' | 'failed' | 'expired' | 'all';
 
 export interface GatewayDeposit {
   id: string;
@@ -1130,7 +1127,9 @@ export function getGatewayDeposits(
   // route's default order is status-dependent (pending = oldest-first work
   // queue) and an always-sent sort would silently flatten that.
   if (sort) params.set('sort', sort);
-  return getJson<GatewayDepositsResponse>(`/admin/payments/deposits?${params}`);
+  return getJson<GatewayDepositsResponse>(
+    `/admin/payments/deposits?${params}`,
+  );
 }
 
 // Gateway withdrawals (GET /admin/payments/withdrawals) — the money-OUT
@@ -1146,11 +1145,7 @@ export function getGatewayDeposits(
 // always sends `status` explicitly (see getGatewayWithdrawals below), so the
 // page's default view is what actually decides what an operator sees first.
 export type GatewayWithdrawalView =
-  | 'held'
-  | 'pending'
-  | 'settled'
-  | 'failed'
-  | 'all';
+  'held' | 'pending' | 'settled' | 'failed' | 'all';
 
 export interface GatewayWithdrawal {
   id: string;
@@ -1313,6 +1308,9 @@ export interface PlayerRow {
    *  partner group (its rate pays them), 'manual' for the per-customer flag,
    *  null for an ordinary account. */
   partner: 'group' | 'manual' | null;
+  /** The partner group's name when `partner === 'group'` — the EFFECTIVE
+   *  group, which `groups[0]` need not be. */
+  partner_group: string | null;
 }
 
 export interface PlayersPage {
@@ -1451,11 +1449,7 @@ export const createCustomerGroupAdmin = (name: string, set: 1 | 2 | 3) =>
  *  the group back into an ordinary group and clears both toggles. */
 export const setGroupPolicy = (
   id: string,
-  policy: {
-    partner_rate_bp: number | null;
-    withdrawals_blocked: boolean;
-    verification_exempt: boolean;
-  },
+  policy: GroupPolicy,
   reason: string,
 ) =>
   postJson<{ customer_group: AdminCustomerGroup }>(
