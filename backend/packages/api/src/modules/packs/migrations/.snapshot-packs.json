@@ -1,5 +1,7 @@
 {
-  "namespaces": ["public"],
+  "namespaces": [
+    "public"
+  ],
   "name": "public",
   "tables": [
     {
@@ -204,7 +206,9 @@
         },
         {
           "keyName": "admin_action_audit_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -493,7 +497,9 @@
         },
         {
           "keyName": "card_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -598,7 +604,9 @@
         },
         {
           "keyName": "card_price_history_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -655,7 +663,10 @@
           "autoincrement": false,
           "primary": false,
           "nullable": false,
-          "enumItems": ["credits", "card"],
+          "enumItems": [
+            "credits",
+            "card"
+          ],
           "mappedType": "enum"
         },
         "card_id": {
@@ -704,7 +715,10 @@
           "primary": false,
           "nullable": false,
           "default": "'granted'",
-          "enumItems": ["granted", "skipped_no_stock"],
+          "enumItems": [
+            "granted",
+            "skipped_no_stock"
+          ],
           "mappedType": "enum"
         },
         "snapshot": {
@@ -791,7 +805,9 @@
         },
         {
           "keyName": "challenge_payout_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -907,7 +923,9 @@
         },
         {
           "keyName": "challenge_schedule_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -1045,7 +1063,9 @@
         },
         {
           "keyName": "challenge_settings_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -1168,7 +1188,9 @@
         },
         {
           "keyName": "challenge_stage_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -1339,7 +1361,9 @@
         },
         {
           "keyName": "credit_transaction_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -1387,7 +1411,10 @@
           "autoincrement": false,
           "primary": false,
           "nullable": true,
-          "enumItems": ["auto", "manual"],
+          "enumItems": [
+            "auto",
+            "manual"
+          ],
           "mappedType": "enum"
         },
         "frozen_reason": {
@@ -1435,7 +1462,10 @@
           "autoincrement": false,
           "primary": false,
           "nullable": true,
-          "enumItems": ["repaid", "admin"],
+          "enumItems": [
+            "repaid",
+            "admin"
+          ],
           "mappedType": "enum"
         },
         "disabled": {
@@ -1589,7 +1619,9 @@
         },
         {
           "keyName": "customer_account_state_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -1685,7 +1717,9 @@
         },
         {
           "keyName": "daily_checkin_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -1955,7 +1989,9 @@
         },
         {
           "keyName": "delivery_order_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -2069,7 +2105,9 @@
         },
         {
           "keyName": "delivery_order_item_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -2221,7 +2259,9 @@
         },
         {
           "keyName": "fx_rate_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -2332,7 +2372,12 @@
           "primary": false,
           "nullable": false,
           "default": "'pending'",
-          "enumItems": ["pending", "settled", "failed", "expired"],
+          "enumItems": [
+            "pending",
+            "settled",
+            "failed",
+            "expired"
+          ],
           "mappedType": "enum"
         },
         "gateway_status": {
@@ -2455,7 +2500,9 @@
         },
         {
           "keyName": "gateway_deposit_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -2584,7 +2631,12 @@
           "primary": false,
           "nullable": false,
           "default": "'pending'",
-          "enumItems": ["pending", "settled", "failed", "held"],
+          "enumItems": [
+            "pending",
+            "settled",
+            "failed",
+            "held"
+          ],
           "mappedType": "enum"
         },
         "gateway_status": {
@@ -2743,7 +2795,9 @@
         },
         {
           "keyName": "gateway_withdrawal_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -2781,7 +2835,16 @@
           "autoincrement": false,
           "primary": false,
           "nullable": false,
-          "enumItems": ["TP", "SP", "SE", "OD", "AD", "WP", "WD", "RF"],
+          "enumItems": [
+            "TP",
+            "SP",
+            "SE",
+            "OD",
+            "AD",
+            "WP",
+            "WD",
+            "RF"
+          ],
           "mappedType": "enum"
         },
         "customer_id": {
@@ -2949,7 +3012,9 @@
         },
         {
           "keyName": "ledger_entry_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -3045,7 +3110,9 @@
         },
         {
           "keyName": "ledger_sequence_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -3160,7 +3227,9 @@
         },
         {
           "keyName": "notification_read_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -3294,7 +3363,10 @@
           "primary": false,
           "nullable": false,
           "default": "'active'",
-          "enumItems": ["active", "draft"],
+          "enumItems": [
+            "active",
+            "draft"
+          ],
           "mappedType": "enum"
         },
         "published_odds": {
@@ -3400,7 +3472,9 @@
         },
         {
           "keyName": "pack_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -3510,7 +3584,11 @@
           "autoincrement": false,
           "primary": false,
           "nullable": true,
-          "enumItems": ["product", "credit", "nothing"],
+          "enumItems": [
+            "product",
+            "credit",
+            "nothing"
+          ],
           "mappedType": "enum"
         },
         "product_handle": {
@@ -3614,7 +3692,9 @@
         },
         {
           "keyName": "pack_odds_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -3757,7 +3837,9 @@
         },
         {
           "keyName": "pixel_pokemon_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -3871,7 +3953,9 @@
         },
         {
           "keyName": "player_payout_details_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -3977,7 +4061,12 @@
           "primary": false,
           "nullable": false,
           "default": "'vaulted'",
-          "enumItems": ["vaulted", "bought_back", "delivering", "delivered"],
+          "enumItems": [
+            "vaulted",
+            "bought_back",
+            "delivering",
+            "delivered"
+          ],
           "mappedType": "enum"
         },
         "recorded_value_usd": {
@@ -4026,7 +4115,11 @@
           "primary": false,
           "nullable": false,
           "default": "'pack'",
-          "enumItems": ["pack", "reward", "free"],
+          "enumItems": [
+            "pack",
+            "reward",
+            "free"
+          ],
           "mappedType": "enum"
         },
         "open_id": {
@@ -4121,7 +4214,9 @@
         },
         {
           "keyName": "pull_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -4254,7 +4349,9 @@
         },
         {
           "keyName": "purchase_invoice_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -4431,7 +4528,9 @@
         },
         {
           "keyName": "purchase_invoice_line_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -4536,7 +4635,9 @@
         },
         {
           "keyName": "referral_attribution_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -4634,7 +4735,9 @@
         },
         {
           "keyName": "referral_settings_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -4713,7 +4816,9 @@
         },
         {
           "keyName": "rewards_settings_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -4800,7 +4905,9 @@
         },
         {
           "keyName": "site_settings_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -4923,7 +5030,9 @@
         },
         {
           "keyName": "stock_movement_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -5056,7 +5165,9 @@
         },
         {
           "keyName": "task_claim_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -5085,7 +5196,10 @@
           "autoincrement": false,
           "primary": false,
           "nullable": false,
-          "enumItems": ["weekly", "achievement"],
+          "enumItems": [
+            "weekly",
+            "achievement"
+          ],
           "mappedType": "enum"
         },
         "title": {
@@ -5202,7 +5316,9 @@
         },
         {
           "keyName": "task_definition_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -5280,7 +5396,9 @@
         },
         {
           "keyName": "tier_settings_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -5431,7 +5549,9 @@
         },
         {
           "keyName": "vip_level_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -5558,7 +5678,9 @@
         },
         {
           "keyName": "vip_member_state_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -5605,7 +5727,12 @@
           "autoincrement": false,
           "primary": false,
           "nullable": false,
-          "enumItems": ["voucher", "frame", "box", "prize"],
+          "enumItems": [
+            "voucher",
+            "frame",
+            "box",
+            "prize"
+          ],
           "mappedType": "enum"
         },
         "payload": {
@@ -5625,7 +5752,11 @@
           "primary": false,
           "nullable": false,
           "default": "'granted'",
-          "enumItems": ["granted", "fulfilled", "revoked"],
+          "enumItems": [
+            "granted",
+            "fulfilled",
+            "revoked"
+          ],
           "mappedType": "enum"
         },
         "source_open_id": {
@@ -5645,7 +5776,10 @@
           "primary": false,
           "nullable": false,
           "default": "'ladder'",
-          "enumItems": ["ladder", "box"],
+          "enumItems": [
+            "ladder",
+            "box"
+          ],
           "mappedType": "enum"
         },
         "created_at": {
@@ -5713,7 +5847,9 @@
         },
         {
           "keyName": "vip_reward_grant_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -5753,7 +5889,12 @@
           "primary": false,
           "nullable": false,
           "default": "'draft'",
-          "enumItems": ["draft", "approved", "paid", "void"],
+          "enumItems": [
+            "draft",
+            "approved",
+            "paid",
+            "void"
+          ],
           "mappedType": "enum"
         },
         "approved_by": {
@@ -5851,7 +5992,9 @@
         },
         {
           "keyName": "weekly_settlement_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
@@ -5926,7 +6069,11 @@
           "primary": false,
           "nullable": false,
           "default": "'pending'",
-          "enumItems": ["pending", "voided", "paid"],
+          "enumItems": [
+            "pending",
+            "voided",
+            "paid"
+          ],
           "mappedType": "enum"
         },
         "void_reason": {
@@ -6030,7 +6177,9 @@
         },
         {
           "keyName": "weekly_settlement_line_pkey",
-          "columnNames": ["id"],
+          "columnNames": [
+            "id"
+          ],
           "composite": false,
           "constraint": true,
           "primary": true,
