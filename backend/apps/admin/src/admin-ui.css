@@ -14,6 +14,23 @@
  * or forked components, so this survives a @medusajs/ui upgrade.
  */
 
+/* --- Our own utility layer ---------------------------------------------- */
+/*
+ * Since @mercurjs/admin 2.3.1 (#496) the package's `index.css` is PRECOMPILED
+ * Tailwind: it carries only the utilities the dashboard itself uses, and no
+ * `@tailwind` directive for the consuming app to expand. Nothing else in this
+ * app emitted one, so every class our routes use that the dashboard happens
+ * not to (w-72, p-10, max-w-[760px], grid-cols-[auto_1fr], …) silently
+ * rendered as nothing — in vite dev AND in the production bundle.
+ *
+ * These two directives put tailwind.config.cjs's content scan back to work.
+ * Utilities and components only: the dashboard CSS already ships a compiled
+ * preflight, and a second `@tailwind base` after it would re-order element
+ * resets against the dashboard's own element rules.
+ */
+@tailwind components;
+@tailwind utilities;
+
 /* --- Hit targets -------------------------------------------------------- */
 /*
  * Medusa buttons are padding-sized, not height-sized: `size="small"` is
