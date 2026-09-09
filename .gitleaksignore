@@ -3,3 +3,6 @@
 # password generator draws from, not a key. The current tree carries an
 # inline gitleaks:allow; this entry covers the commit that predates it.
 40c9a52e03d98ebab8eae127af8aa9c655ed978f:backend/packages/api/src/utils/partner-accounts.ts:generic-api-key:44
+# Same constant in the first commit's client-side generator (file rewritten
+# since; the alphabet now lives only in partner-accounts.ts).
+445abd670e71053578eca33754ef13645adb7966:backend/apps/admin/src/lib/create-player.ts:generic-api-key:13
