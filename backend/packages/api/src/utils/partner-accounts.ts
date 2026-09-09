@@ -42,7 +42,7 @@ const EMAIL_ALPHABET = 'abcdefghijkmnpqrstuvwxyz23456789';
 // Same set plus uppercase, no symbols — 16 chars is ~90 bits, and a
 // symbol-free password survives being pasted into a chat app or a cell.
 const PASSWORD_ALPHABET =
-  'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'; // gitleaks:allow
 
 const pick = (alphabet: string, n: number): string =>
   Array.from({ length: n }, () => alphabet[randomInt(alphabet.length)]).join(
