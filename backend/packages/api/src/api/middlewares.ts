@@ -1038,6 +1038,12 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Mint a login-able player from the dashboard (POST /admin/players).
+      matcher: '/admin/players',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Partner policy on a player group (POST /admin/customer-groups/:id/policy).
       matcher: '/admin/customer-groups/*/policy',
       method: 'POST',

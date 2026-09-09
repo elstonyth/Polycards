@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
   Badge,
+  Button,
   Container,
   Heading,
   Input,
@@ -15,6 +16,7 @@ import {
   Textarea,
 } from '@medusajs/ui';
 import { Users } from '@medusajs/icons';
+import CreatePlayerModal from './CreatePlayerModal';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useCustomerGroupsAdmin,
@@ -58,6 +60,7 @@ const PlayersPage = () => {
   const [q, setQ] = useState('');
   const [target, setTarget] = useState<Target | null>(null);
   const [reason, setReason] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
   // Only to name the default group for players with no stored membership. The
   // constant is the fallback for the window before the list resolves (and for a
   // shop that has no default row yet).
@@ -128,17 +131,22 @@ const PlayersPage = () => {
               {t('players.subtitle')}
             </Text>
           </div>
-          <Input
-            type="search"
-            className="w-72"
-            placeholder={t('players.searchPlaceholder')}
-            aria-label={t('players.searchPlaceholder')}
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(0);
-            }}
-          />
+          <div className="flex items-center gap-x-2">
+            <Input
+              type="search"
+              className="w-72"
+              placeholder={t('players.searchPlaceholder')}
+              aria-label={t('players.searchPlaceholder')}
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(0);
+              }}
+            />
+            <Button size="small" onClick={() => setCreateOpen(true)}>
+              {t('players.create')}
+            </Button>
+          </div>
         </div>
 
         {isError ? (
@@ -381,6 +389,11 @@ const PlayersPage = () => {
           </Prompt.Footer>
         </Prompt.Content>
       </Prompt>
+
+      <CreatePlayerModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+      />
     </div>
   );
 };

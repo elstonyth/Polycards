@@ -975,6 +975,7 @@ export const useDenyWithdrawal = () => {
 // Own import block (not merged into the one at the top) so this whole section
 // stays append-only while a parallel epic edits the same file.
 import {
+  createPlayer,
   disablePlayer,
   enablePlayer,
   getCustomerDetail,
@@ -987,7 +988,27 @@ import {
   type PlayersPage,
 } from './admin-rest';
 
-export type { PlayerRow, PlayersPage, PayoutDetails } from './admin-rest';
+export type {
+  CreatedPlayer,
+  PlayerRow,
+  PlayersPage,
+  PayoutDetails,
+} from './admin-rest';
+
+// No success toast: the modal that calls this shows the credentials, which is
+// the real confirmation. The new row lands on page 0 of the list (newest
+// first) and shifts its group's member count.
+export const useCreatePlayer = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: createPlayer,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.playersKey });
+      qc.invalidateQueries({ queryKey: qk.customerGroupCounts });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
 
 // Paged + searchable, but NOT id-scoped, so plain keepPreviousData is right
 // here (no stale-row-click hazard — the whole page swaps together).

@@ -1332,6 +1332,24 @@ export const listPlayers = (
     `/admin/players?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
   );
 
+/** What POST /admin/players hands back: enough to open the profile and name
+ *  the group the player landed in. The password is never echoed. */
+export interface CreatedPlayer {
+  id: string;
+  email: string;
+  group: { id: string; name: string };
+}
+
+// Mint a login-able player: emailpass identity + customer + ONE group
+// membership, server-side. `group_id` null = DEFAULT (same contract as
+// setCustomerGroup). The route lowercases the email and refuses one already
+// held by an account (422).
+export const createPlayer = (body: {
+  email: string;
+  password: string;
+  group_id: string | null;
+}) => postJson<{ player: CreatedPlayer }>('/admin/players', body);
+
 // Login block / unblock. `reason` is mandatory (1–500 chars) and audited; the
 // admin actor is taken from the session server-side, never sent from here.
 export const disablePlayer = (id: string, reason: string) =>
