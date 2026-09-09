@@ -286,6 +286,25 @@ const PlayersPage = () => {
                             ? t('players.disabled')
                             : t('players.active')}
                         </StatusBadge>
+                        {/* Partner account (spec 2026-09-09) — visible from
+                            the list, not only inside the profile: "is this
+                            player on a special rate?" is asked from here. The
+                            title names the source, because a group partner
+                            cannot be changed on the profile's Referral card. */}
+                        {p.partner && (
+                          <StatusBadge
+                            color="purple"
+                            title={
+                              p.partner === 'group'
+                                ? t('players.partnerViaGroup', {
+                                    group: p.groups[0] ?? defaultGroupName,
+                                  })
+                                : t('players.partnerManual')
+                            }
+                          >
+                            {t('players.partner')}
+                          </StatusBadge>
+                        )}
                       </div>
                     </Table.Cell>
                   </Table.Row>

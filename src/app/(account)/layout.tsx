@@ -35,10 +35,12 @@ export default async function AccountLayout({
   // enforcement — which is also why a failed account read (reported as
   // hasPassword: true) fails OPEN here instead of raising a gate a password
   // account could never complete.
+  // Both thunks read the same request-cached getAccountInfo — one round trip.
   const gatePhone = await shouldGatePhone({
     flag: PHONE_VERIFICATION_REQUIRED,
     phone: customer.phone,
     hasPassword: async () => (await getAccountInfo()).hasPassword,
+    exempt: async () => (await getAccountInfo()).policy.verificationExempt,
   });
 
   return (

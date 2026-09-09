@@ -20,10 +20,22 @@ import { getAccountInfo } from '@/lib/data/customer';
 
 const ACCOUNT = 'GET /store/customers/me/account';
 
+// The pre-feature policy: nothing exempt, nothing blocked. Every fallback
+// answers this — a failed read must never lift the phone gate or hide the
+// withdrawal form (both are UX; the backend gates enforce).
+const NO_POLICY = {
+  partner: false,
+  withdrawalsBlocked: false,
+  verificationExempt: false,
+};
+
 describe('getAccountInfo', () => {
   it('reads the route with the customer bearer and passes the answer through', async () => {
     const mem = backend({ [ACCOUNT]: { body: { hasPassword: false } } });
-    expect(await getAccountInfo()).toEqual({ hasPassword: false });
+    expect(await getAccountInfo()).toEqual({
+      hasPassword: false,
+      policy: NO_POLICY,
+    });
     expect(mem.requests[0]).toEqual({
       method: 'GET',
       path: '/store/customers/me/account',
@@ -32,24 +44,58 @@ describe('getAccountInfo', () => {
     });
   });
 
+  // Partner groups (spec 2026-09-09): the policy block rides on the same
+  // read, snake_case on the wire, camelCase for the pages.
+  it('passes the partner-group policy through', async () => {
+    backend({
+      [ACCOUNT]: {
+        body: {
+          hasPassword: true,
+          policy: {
+            partner: true,
+            withdrawals_blocked: true,
+            verification_exempt: true,
+          },
+        },
+      },
+    });
+    expect(await getAccountInfo()).toEqual({
+      hasPassword: true,
+      policy: {
+        partner: true,
+        withdrawalsBlocked: true,
+        verificationExempt: true,
+      },
+    });
+  });
+
   it('defaults to hasPassword: true when logged out, without leaving the storefront', async () => {
     const mem = backend(
       { [ACCOUNT]: { body: { hasPassword: false } } },
       { token: null },
     );
-    expect(await getAccountInfo()).toEqual({ hasPassword: true });
+    expect(await getAccountInfo()).toEqual({
+      hasPassword: true,
+      policy: NO_POLICY,
+    });
     expect(mem.requests).toHaveLength(0);
   });
 
   it('defaults to hasPassword: true on a backend failure', async () => {
     backend({ [ACCOUNT]: { status: 500, body: {} } });
-    expect(await getAccountInfo()).toEqual({ hasPassword: true });
+    expect(await getAccountInfo()).toEqual({
+      hasPassword: true,
+      policy: NO_POLICY,
+    });
   });
 
   it('defaults to hasPassword: true for a body that omits the field', async () => {
     // Pre-port the fetch generic was a type assertion, so this answered
     // `{ hasPassword: undefined }` — falsy, i.e. the DANGEROUS direction.
     backend({ [ACCOUNT]: { body: {} } });
-    expect(await getAccountInfo()).toEqual({ hasPassword: true });
+    expect(await getAccountInfo()).toEqual({
+      hasPassword: true,
+      policy: NO_POLICY,
+    });
   });
 });

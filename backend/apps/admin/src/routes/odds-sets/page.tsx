@@ -8,6 +8,7 @@ import {
   Input,
   Label,
   Select,
+  Switch,
   Table,
   Text,
 } from '@medusajs/ui';
@@ -17,19 +18,22 @@ import {
   useCreateCustomerGroup,
   useCustomerGroupsAdmin,
   useGroupPlayerCount,
+  useReferralSettings,
   useSetGroupOddsSet,
+  useSetGroupPolicy,
   type AdminCustomerGroup,
 } from '../../lib/queries';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import {
   DEFAULT_PLAYER_GROUP_NAME,
   effectiveOddsSet,
+  groupPolicyOf,
   isDefaultPlayerGroup,
   oddsSetOf as coerce,
 } from '../../lib/player-groups';
 
 export const config: RouteConfig = {
-  label: 'Odds Sets',
+  label: 'Player Groups',
   icon: Users,
   nested: '/customers',
   rank: 3,
@@ -47,25 +51,101 @@ const PlayerCount = ({ groupId }: { groupId: string }) => {
   return <span className="tabular-nums">{data}</span>;
 };
 
-/** One group row: its odds set (locked for the default group) and its member
- *  count. */
+/** The partner-policy half of a row, as the operator edits it. `ratePct` is a
+ *  string so a half-typed "3." survives a render. */
+type PolicyDraft = {
+  partner: boolean;
+  ratePct: string;
+  withdrawalsBlocked: boolean;
+  verificationExempt: boolean;
+};
+
+const draftOf = (group: AdminCustomerGroup): PolicyDraft => {
+  const p = groupPolicyOf(group);
+  return {
+    partner: p.partner_rate_bp !== null,
+    ratePct: p.partner_rate_bp === null ? '' : String(p.partner_rate_bp / 100),
+    withdrawalsBlocked: p.withdrawals_blocked,
+    verificationExempt: p.verification_exempt,
+  };
+};
+
+const sameDraft = (a: PolicyDraft, b: PolicyDraft): boolean =>
+  a.partner === b.partner &&
+  a.ratePct.trim() === b.ratePct.trim() &&
+  a.withdrawalsBlocked === b.withdrawalsBlocked &&
+  a.verificationExempt === b.verificationExempt;
+
+/** One group row: its odds set and its partner policy (both locked for the
+ *  default group) and its member count. */
 const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
   const { t } = useTranslation();
-  const save = useSetGroupOddsSet();
-  // Unsaved pick ONLY. Seeding from the server value would go stale after the
-  // post-save invalidation refetch; `undefined` falls back to it every render.
+  const saveOdds = useSetGroupOddsSet();
+  const savePolicy = useSetGroupPolicy();
+  const { data: settings } = useReferralSettings();
+  // Unsaved edits ONLY. Seeding from the server value would go stale after
+  // the post-save invalidation refetch; `undefined` falls back to it every
+  // render.
   const [picked, setPicked] = useState<OddsSet | undefined>();
+  const [draft, setDraft] = useState<PolicyDraft | undefined>();
 
-  // The default group's odds set is LOCKED, not merely hidden: its members and
-  // customers with no group at all must roll identically, and the draw path
-  // pins it to set 1 regardless of what this row stores. An editable control
-  // here would let the operator raise "DEFAULT" to set 3 and believe they had
-  // moved the whole ungrouped population onto it — they would not have, and
-  // nothing on screen would say so.
+  // The default group's odds set AND policy are LOCKED, not merely hidden: its
+  // members and customers with no group at all must behave identically, and
+  // both the draw path and the policy resolver pin that row regardless of
+  // what it stores. An editable control here would let the operator raise
+  // "DEFAULT" to a partner group and believe they had moved the whole
+  // ungrouped population onto it — they would not have, and nothing on
+  // screen would say so.
   const locked = isDefaultPlayerGroup(group);
-  const saved = effectiveOddsSet(group);
-  const value = locked ? saved : (picked ?? saved);
-  const dirty = !locked && value !== saved;
+  const savedSet = effectiveOddsSet(group);
+  const value = locked ? savedSet : (picked ?? savedSet);
+  const oddsDirty = !locked && value !== savedSet;
+
+  const saved = draftOf(group);
+  const policy = locked ? saved : (draft ?? saved);
+  const policyDirty = !locked && !sameDraft(policy, saved);
+  const edit = (patch: Partial<PolicyDraft>) =>
+    setDraft({ ...policy, ...patch });
+
+  const boundsHint = settings
+    ? `${settings.partner_min_bp / 100}–${settings.partner_max_bp / 100}%`
+    : '';
+  const rateBp = policy.partner
+    ? Math.round(Number(policy.ratePct) * 100)
+    : null;
+  const rateInvalid =
+    policy.partner &&
+    (policy.ratePct.trim() === '' || !Number.isFinite(rateBp));
+
+  const saving = saveOdds.isPending || savePolicy.isPending;
+
+  const save = () => {
+    if (oddsDirty) {
+      saveOdds.mutate(
+        { id: group.id, set: value },
+        // Drop the override so the row re-reads the (now authoritative)
+        // refetched server value.
+        { onSuccess: () => setPicked(undefined) },
+      );
+    }
+    if (policyDirty) {
+      // Audited on the server; the prompt is the reason's only input.
+      const reason = window.prompt(t('oddsSets.reasonPrompt'))?.trim();
+      if (!reason) return;
+      savePolicy.mutate(
+        {
+          id: group.id,
+          policy: {
+            partner_rate_bp: rateBp,
+            withdrawals_blocked: policy.partner && policy.withdrawalsBlocked,
+            verification_exempt: policy.partner && policy.verificationExempt,
+          },
+          reason,
+        },
+        { onSuccess: () => setDraft(undefined) },
+      );
+    }
+  };
 
   return (
     <Table.Row>
@@ -88,6 +168,83 @@ const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
           </Select.Content>
         </Select>
       </Table.Cell>
+      {/* Partner policy (spec 2026-09-09). The switch is the one control:
+          off clears the rate and both toggles on save, so a group is never
+          half-partner. */}
+      <Table.Cell>
+        <Switch
+          checked={policy.partner}
+          disabled={locked || saving}
+          onCheckedChange={(on) => edit({ partner: on })}
+          aria-label={`${t('oddsSets.partner')} — ${group.name}`}
+        />
+      </Table.Cell>
+      <Table.Cell>
+        {policy.partner ? (
+          <div className="flex items-center gap-1">
+            <Input
+              type="number"
+              className="w-20"
+              value={policy.ratePct}
+              placeholder={boundsHint}
+              disabled={locked || saving}
+              onChange={(e) => edit({ ratePct: e.target.value })}
+              aria-label={`${t('oddsSets.partnerRate')} — ${group.name}`}
+            />
+            <Text size="small" className="text-ui-fg-muted">
+              %
+            </Text>
+          </div>
+        ) : (
+          <span className="text-ui-fg-muted">—</span>
+        )}
+      </Table.Cell>
+      <Table.Cell>
+        {policy.partner ? (
+          <Select
+            value={policy.withdrawalsBlocked ? 'blocked' : 'allowed'}
+            disabled={locked || saving}
+            onValueChange={(v) => edit({ withdrawalsBlocked: v === 'blocked' })}
+          >
+            <Select.Trigger className="w-28">
+              <Select.Value />
+            </Select.Trigger>
+            <Select.Content>
+              <Select.Item value="allowed">
+                {t('oddsSets.withdrawalsAllowed')}
+              </Select.Item>
+              <Select.Item value="blocked">
+                {t('oddsSets.withdrawalsBlocked')}
+              </Select.Item>
+            </Select.Content>
+          </Select>
+        ) : (
+          <span className="text-ui-fg-muted">—</span>
+        )}
+      </Table.Cell>
+      <Table.Cell>
+        {policy.partner ? (
+          <Select
+            value={policy.verificationExempt ? 'off' : 'required'}
+            disabled={locked || saving}
+            onValueChange={(v) => edit({ verificationExempt: v === 'off' })}
+          >
+            <Select.Trigger className="w-28">
+              <Select.Value />
+            </Select.Trigger>
+            <Select.Content>
+              <Select.Item value="required">
+                {t('oddsSets.verificationRequired')}
+              </Select.Item>
+              <Select.Item value="off">
+                {t('oddsSets.verificationOff')}
+              </Select.Item>
+            </Select.Content>
+          </Select>
+        ) : (
+          <span className="text-ui-fg-muted">—</span>
+        )}
+      </Table.Cell>
       <Table.Cell className="text-right">
         <PlayerCount groupId={group.id} />
       </Table.Cell>
@@ -100,15 +257,8 @@ const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
           <Button
             size="small"
             variant="secondary"
-            disabled={!dirty || save.isPending}
-            onClick={() =>
-              save.mutate(
-                { id: group.id, set: value },
-                // Drop the override so the row re-reads the (now authoritative)
-                // refetched server value.
-                { onSuccess: () => setPicked(undefined) },
-              )
-            }
+            disabled={(!oddsDirty && !policyDirty) || rateInvalid || saving}
+            onClick={save}
           >
             {t('oddsSets.save')}
           </Button>
@@ -121,8 +271,9 @@ const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
 /**
  * Player groups ARE Medusa customer groups — the SAME rows the prebuilt
  * /customer-groups screen lists and populates, so there is no separate "player
- * groups" page. This one owns the two things that screen has no field for: a
- * group's odds set, and creating a group with its odds set already chosen. A
+ * groups" page. This one owns the things that screen has no field for: a
+ * group's odds set, its partner policy (rate, withdrawals, phone
+ * verification), and creating a group with its odds set already chosen. A
  * PLAYER's group is changed from their own profile (routes/customers/[id]).
  */
 const OddsSetsPage = () => {
@@ -252,6 +403,12 @@ const OddsSetsPage = () => {
               <Table.Row>
                 <Table.HeaderCell>{t('oddsSets.group')}</Table.HeaderCell>
                 <Table.HeaderCell>{t('oddsSets.oddsSet')}</Table.HeaderCell>
+                <Table.HeaderCell>{t('oddsSets.partner')}</Table.HeaderCell>
+                <Table.HeaderCell>{t('oddsSets.partnerRate')}</Table.HeaderCell>
+                <Table.HeaderCell>{t('oddsSets.withdrawals')}</Table.HeaderCell>
+                <Table.HeaderCell>
+                  {t('oddsSets.verification')}
+                </Table.HeaderCell>
                 <Table.HeaderCell className="text-right">
                   {t('oddsSets.players')}
                 </Table.HeaderCell>
@@ -266,6 +423,11 @@ const OddsSetsPage = () => {
               ))}
             </Table.Body>
           </Table>
+          <div className="border-t px-6 py-3">
+            <Text size="xsmall" className="text-ui-fg-muted">
+              {t('oddsSets.policyHint')}
+            </Text>
+          </div>
         </div>
       )}
     </Container>

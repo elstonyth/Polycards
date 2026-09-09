@@ -186,7 +186,10 @@ medusaIntegrationTestRunner({
             { headers: adminHeaders() },
           ),
         );
-        expect(renamed.status).toBe(200);
+        expect({
+          status: renamed.status,
+          message: renamed.data?.message,
+        }).toEqual({ status: 200, message: undefined });
         expect(renamed.data.customer_group.name).toBe(
           'Policy Partners Renamed',
         );

@@ -1074,7 +1074,11 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 // reconciliation sweep's window, i.e. a payment that may have landed at the
 // gateway without ever being credited here.
 export type GatewayDepositView =
-  'pending' | 'settled' | 'failed' | 'expired' | 'all';
+  | 'pending'
+  | 'settled'
+  | 'failed'
+  | 'expired'
+  | 'all';
 
 export interface GatewayDeposit {
   id: string;
@@ -1126,9 +1130,7 @@ export function getGatewayDeposits(
   // route's default order is status-dependent (pending = oldest-first work
   // queue) and an always-sent sort would silently flatten that.
   if (sort) params.set('sort', sort);
-  return getJson<GatewayDepositsResponse>(
-    `/admin/payments/deposits?${params}`,
-  );
+  return getJson<GatewayDepositsResponse>(`/admin/payments/deposits?${params}`);
 }
 
 // Gateway withdrawals (GET /admin/payments/withdrawals) — the money-OUT
@@ -1144,7 +1146,11 @@ export function getGatewayDeposits(
 // always sends `status` explicitly (see getGatewayWithdrawals below), so the
 // page's default view is what actually decides what an operator sees first.
 export type GatewayWithdrawalView =
-  'held' | 'pending' | 'settled' | 'failed' | 'all';
+  | 'held'
+  | 'pending'
+  | 'settled'
+  | 'failed'
+  | 'all';
 
 export interface GatewayWithdrawal {
   id: string;
@@ -1303,6 +1309,10 @@ export interface PlayerRow {
    *  above: an unverified account can log in and browse, it just cannot top up
    *  or request delivery while the phone gate is on. */
   phone_verified: boolean;
+  /** Partner account (spec 2026-09-09): 'group' when their player group is a
+   *  partner group (its rate pays them), 'manual' for the per-customer flag,
+   *  null for an ordinary account. */
+  partner: 'group' | 'manual' | null;
 }
 
 export interface PlayersPage {
@@ -1435,6 +1445,23 @@ export const createCustomerGroupAdmin = (name: string, set: 1 | 2 | 3) =>
     name,
     metadata: { odds_set: set },
   });
+
+/** Partner policy on a group (spec 2026-09-09) — repo-side route: bounds,
+ *  the DEFAULT refusal and the audit row live on the server. A null rate turns
+ *  the group back into an ordinary group and clears both toggles. */
+export const setGroupPolicy = (
+  id: string,
+  policy: {
+    partner_rate_bp: number | null;
+    withdrawals_blocked: boolean;
+    verification_exempt: boolean;
+  },
+  reason: string,
+) =>
+  postJson<{ customer_group: AdminCustomerGroup }>(
+    `/admin/customer-groups/${encodeURIComponent(id)}/policy`,
+    { ...policy, reason },
+  );
 
 /** How many players are in one group. Only `count` is used — limit=1 keeps the
  *  payload one row wide on a group with 50k members (limit=0 is not a
@@ -1838,6 +1865,9 @@ export async function voidReferralLine(
 export interface CustomerReferralCard {
   referred_by: string | null;
   partner_referral_bp: number | null;
+  /** Non-null when the player's group is a partner group: its rate is what
+   *  pays them and the manual control below is locked (spec 2026-09-09). */
+  partner_group: { id: string; name: string; rate_bp: number } | null;
   downline: { customer_id: string; since: string }[];
   lines: {
     id: string;

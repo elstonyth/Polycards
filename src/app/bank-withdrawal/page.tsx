@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { AlertCircle, Landmark } from 'lucide-react';
 import AuthButton from '@/components/AuthButton';
-import { getCustomer } from '@/lib/data/customer';
+import { getAccountInfo, getCustomer } from '@/lib/data/customer';
 import { getWallet } from '@/lib/actions/wallet';
 import WithdrawForm from './WithdrawForm';
 
@@ -23,9 +23,16 @@ export default async function BankWithdrawalPage() {
   // withdrawable, not raw balance: the freeze/playthrough gate lives
   // server-side, and the form must not promise money the server
   // will refuse.
-  const walletResult = customer ? await getWallet() : null;
+  const [walletResult, account] = customer
+    ? await Promise.all([getWallet(), getAccountInfo()])
+    : [null, null];
   const withdrawable =
     walletResult && walletResult.ok ? walletResult.wallet.withdrawable : null;
+  // Partner groups (spec 2026-09-09): a member of a group that blocks
+  // withdrawals gets the notice instead of a form the backend
+  // (blockGroupWithdrawals) would refuse on submit. UX only — the refusal
+  // stays the enforcement, so a stale `false` here costs one error banner.
+  const blocked = account?.policy.withdrawalsBlocked === true;
 
   return (
     <div className="w-full px-fluid py-10">
@@ -37,7 +44,21 @@ export default async function BankWithdrawalPage() {
       </p>
 
       {customer ? (
-        WITHDRAWALS_OPEN ? (
+        blocked ? (
+          <div
+            className="mt-6 flex items-start gap-2.5 rounded-xl border border-white/10 bg-neutral-900 px-4 py-3.5 text-sm text-white/80"
+            role="status"
+          >
+            <Landmark
+              className="mt-0.5 h-4 w-4 shrink-0 text-white/60"
+              aria-hidden
+            />
+            <span>
+              Withdrawals are not available on this account. Your credit balance
+              stays spendable on packs.
+            </span>
+          </div>
+        ) : WITHDRAWALS_OPEN ? (
           <WithdrawForm withdrawable={withdrawable} />
         ) : (
           <>

@@ -39,4 +39,40 @@ describe('shouldGatePhone', () => {
       }),
     ).toBe(true);
   });
+
+  // Partner groups (spec 2026-09-09): the group's verification_exempt is the
+  // one thing that lifts the gate for the gated cohort — the backend money
+  // paths already pass them, so the modal would demand a phone for nothing.
+  test('verification-exempt account: never gated', async () => {
+    expect(
+      await shouldGatePhone({
+        flag: true,
+        phone: null,
+        hasPassword: read(false),
+        exempt: read(true),
+      }),
+    ).toBe(false);
+  });
+
+  test('exempt read is paid only by the phoneless cohort', async () => {
+    const exempt = read(true);
+    await shouldGatePhone({
+      flag: true,
+      phone: '+60123456789',
+      hasPassword: read(false),
+      exempt,
+    });
+    expect(exempt).not.toHaveBeenCalled();
+  });
+
+  test('a false exemption changes nothing', async () => {
+    expect(
+      await shouldGatePhone({
+        flag: true,
+        phone: null,
+        hasPassword: read(false),
+        exempt: read(false),
+      }),
+    ).toBe(true);
+  });
 });

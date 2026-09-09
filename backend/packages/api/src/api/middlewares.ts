@@ -1047,12 +1047,18 @@ export default defineMiddlewares({
       // posts `additional_data`, which core's strict validator refuses — see
       // stripAdditionalData. No rate limiter here: these are core routes, not
       // repo mutation routes (the coverage guard scans src/api/admin only).
-      matcher: '/admin/customer-groups',
-      method: 'POST',
-      middlewares: [stripAdditionalData],
-    },
-    {
-      matcher: '/admin/customer-groups/*',
+      //
+      // Matcher note (verified against the booted app in
+      // player-groups-policy.spec.ts): core's api dir is scanned BEFORE this
+      // project's (medusa/dist/loaders/api.js), so within one sorter bucket
+      // core's validateAndTransformBody registers first and a plain
+      // '/admin/customer-groups' entry here would run AFTER it. The trailing
+      // `*` puts this entry in the REGEX bucket, which the RoutesSorter orders
+      // ahead of both core entries (static create, params update) — the same
+      // trick the '/hooks/tgpay/*' entry documents. It also covers
+      // /admin/customer-groups/:id/customers and the /policy route above,
+      // where removing the key is harmless.
+      matcher: '/admin/customer-groups*',
       method: 'POST',
       middlewares: [stripAdditionalData],
     },

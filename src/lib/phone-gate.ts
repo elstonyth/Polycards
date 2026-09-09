@@ -27,12 +27,21 @@ export const isPhoneGateError = (message: string): boolean =>
  * phoneless accounts; a failed read reports `true` (see getAccountInfo) and
  * therefore fails OPEN here — the backend money/goods gates are the
  * enforcement, the modal is UX.
+ *
+ * `exempt` (partner groups, spec 2026-09-09): a member of a group whose
+ * policy turns phone verification off is never gated — the backend passes
+ * them through requirePhoneVerified, so a modal here would demand a phone the
+ * money paths no longer need. Also a thunk, and read only for the phoneless
+ * cohort; a failed read reports `false` (see getAccountInfo), which keeps the
+ * legacy gate exactly where it was.
  */
 export async function shouldGatePhone(input: {
   flag: boolean;
   phone: string | null | undefined;
   hasPassword: () => Promise<boolean>;
+  exempt?: () => Promise<boolean>;
 }): Promise<boolean> {
   if (!input.flag || input.phone) return false;
+  if (input.exempt && (await input.exempt())) return false;
   return !(await input.hasPassword());
 }

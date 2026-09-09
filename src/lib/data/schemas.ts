@@ -403,7 +403,20 @@ export const ProfileHandleSchema = z.looseObject({ handle: z.string() });
  *  for anything it cannot read, and a body missing the field would otherwise
  *  read as `false` — dropping the password box from an account that HAS one,
  *  whose every delete then fails PASSWORD_REQUIRED with no way to comply. */
-export const AccountInfoSchema = z.looseObject({ hasPassword: z.boolean() });
+/** GET /store/customers/me/account. `policy` is the partner-group block
+ *  (spec 2026-09-09) — optional so a deploy-skew backend without it still
+ *  parses; the consumer defaults every flag to false (no exemption, no
+ *  block), which is the pre-feature behaviour. */
+export const AccountInfoSchema = z.looseObject({
+  hasPassword: z.boolean(),
+  policy: z
+    .looseObject({
+      partner: z.boolean(),
+      withdrawals_blocked: z.boolean(),
+      verification_exempt: z.boolean(),
+    })
+    .optional(),
+});
 
 // --- actions/vault.ts -------------------------------------------------------
 

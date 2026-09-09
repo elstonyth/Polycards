@@ -20,10 +20,10 @@ import { resolveGroupPolicyForCustomer } from '../../modules/packs/group-policy'
  * backend consumes the field (the route has no additionalDataValidator), so
  * stripping it loses nothing.
  *
- * Ordering: the framework's ApiLoader scans the project api dir BEFORE core's
- * and its sorter keeps insertion order within a bucket, so a project
- * middleware on the same matcher runs ahead of core's validateAndTransformBody
- * (verified in @medusajs/framework dist/http/router.js + routes-sorter.js).
+ * Ordering: core's api dir is scanned BEFORE the project's, and the sorter
+ * keeps insertion order within a bucket — so this must be registered on a
+ * matcher that sorts into an EARLIER bucket than core's entries. See the
+ * '/admin/customer-groups*' entry in middlewares.ts for the exact trick.
  *
  * Removes the key only — everything else in the body reaches the validator
  * untouched, so an actually-invalid rename still fails the way it should.
