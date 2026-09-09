@@ -4,6 +4,8 @@ import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { resolveFxRate } from '../../../modules/packs/pricing';
+import { isPartnerGroup } from '../../../modules/packs/group-policy';
+import { effectivePlayerGroup } from '../../../modules/packs/odds-sets';
 import {
   parsePaginationParams,
   parseSortParam,
@@ -84,6 +86,17 @@ export async function GET(
       const s = agg.state.get(c.id);
       const name =
         [c.first_name, c.last_name].filter(Boolean).join(' ') || null;
+      // Partner source (spec 2026-09-09): 'group' when the effective player
+      // group — the same choice resolvePlayerGroup makes — is a partner group,
+      // else 'manual' for the per-customer flag. Group first because the
+      // group's rate is the one that pays them.
+      const effective = effectivePlayerGroup(c.groups ?? []);
+      const partner =
+        effective && isPartnerGroup(effective)
+          ? 'group'
+          : s?.partnerBp != null
+            ? 'manual'
+            : null;
       return {
         id: c.id,
         email: c.email,
@@ -103,6 +116,10 @@ export async function GET(
         // No state row at all = never verified, which is the default for every
         // account that predates the gate.
         phone_verified: s?.phoneVerified ?? false,
+        partner,
+        // Named so the list can say WHICH group — groups[0] is whichever
+        // membership Medusa returned first, not the effective one.
+        partner_group: partner === 'group' ? (effective?.name ?? null) : null,
       };
     }),
   });

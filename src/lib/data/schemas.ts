@@ -398,12 +398,25 @@ export const AvatarFramesSchema = z.looseObject({
 /** GET /store/profiles/me — `{ handle }`. */
 export const ProfileHandleSchema = z.looseObject({ handle: z.string() });
 
-/** GET /store/customers/me/account — the Settings page's Danger zone facts.
+/** GET /store/customers/me/account — the Settings page's Danger zone facts
+ *  plus the account-tree policy.
  *  `hasPassword` is REQUIRED here on purpose: data/customer.ts answers `true`
  *  for anything it cannot read, and a body missing the field would otherwise
  *  read as `false` — dropping the password box from an account that HAS one,
- *  whose every delete then fails PASSWORD_REQUIRED with no way to comply. */
-export const AccountInfoSchema = z.looseObject({ hasPassword: z.boolean() });
+ *  whose every delete then fails PASSWORD_REQUIRED with no way to comply.
+ *  `policy` is the partner-group block (spec 2026-09-09) — OPTIONAL so a
+ *  deploy-skew backend without it still parses; the consumer defaults every
+ *  flag to false (no exemption, no block), which is the pre-feature behaviour. */
+export const AccountInfoSchema = z.looseObject({
+  hasPassword: z.boolean(),
+  policy: z
+    .looseObject({
+      partner: z.boolean(),
+      withdrawals_blocked: z.boolean(),
+      verification_exempt: z.boolean(),
+    })
+    .optional(),
+});
 
 // --- actions/vault.ts -------------------------------------------------------
 

@@ -42,3 +42,57 @@ export const effectiveOddsSet = (g: {
   metadata?: Record<string, unknown> | null;
 }): 1 | 2 | 3 =>
   isDefaultPlayerGroup(g) ? 1 : oddsSetOf(g.metadata?.odds_set);
+
+// ── Partner policy (spec 2026-09-09) ─────────────────────────────────────────
+// Mirrors packs/group-policy.ts. Same COPIED-not-imported rule as above; the
+// contract test reads the backend source for the three key names.
+
+/** Mirrors PARTNER_RATE_KEY in packs/group-policy.ts. */
+export const PARTNER_RATE_KEY = 'partner_rate_bp';
+/** Mirrors WITHDRAWALS_BLOCKED_KEY in packs/group-policy.ts. */
+export const WITHDRAWALS_BLOCKED_KEY = 'withdrawals_blocked';
+/** Mirrors VERIFICATION_EXEMPT_KEY in packs/group-policy.ts. */
+export const VERIFICATION_EXEMPT_KEY = 'verification_exempt';
+
+export type GroupPolicy = {
+  partner_rate_bp: number | null;
+  withdrawals_blocked: boolean;
+  verification_exempt: boolean;
+};
+
+export const EMPTY_GROUP_POLICY: GroupPolicy = {
+  partner_rate_bp: null,
+  withdrawals_blocked: false,
+  verification_exempt: false,
+};
+
+const rateBpOf = (v: unknown): number | null => {
+  const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+  return typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : null;
+};
+
+/** Mirrors groupPolicyOf in packs/group-policy.ts — the DEFAULT group is
+ *  pinned to the empty policy whatever its row stores, for the same reason
+ *  effectiveOddsSet pins it to set 1. */
+export const groupPolicyOf = (g: {
+  name?: string | null;
+  metadata?: Record<string, unknown> | null;
+}): GroupPolicy => {
+  if (isDefaultPlayerGroup(g)) return EMPTY_GROUP_POLICY;
+  const m = g.metadata ?? {};
+  // Partner off = one switch, same as the backend reader: the toggles only
+  // mean anything on a partner group, so a stray toggle without a rate is
+  // never seeded into the Player Groups draft.
+  const rate = rateBpOf(m[PARTNER_RATE_KEY]);
+  if (rate === null) return EMPTY_GROUP_POLICY;
+  return {
+    partner_rate_bp: rate,
+    withdrawals_blocked: m[WITHDRAWALS_BLOCKED_KEY] === true,
+    verification_exempt: m[VERIFICATION_EXEMPT_KEY] === true,
+  };
+};
+
+export const isPartnerGroup = (g: {
+  name?: string | null;
+  metadata?: Record<string, unknown> | null;
+}): boolean => groupPolicyOf(g).partner_rate_bp !== null;

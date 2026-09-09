@@ -21,6 +21,8 @@ export async function POST(
       'rate_bp must be a number or null.',
     );
   }
+  // Group config beats the manual flag (spec 2026-09-09): setPartnerRate
+  // refuses a non-null rate for a member of a partner group.
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   await packs.setPartnerRate({
     customerId: req.params.id,

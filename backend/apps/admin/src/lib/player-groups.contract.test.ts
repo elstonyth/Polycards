@@ -5,8 +5,13 @@ import {
   DEFAULT_PLAYER_GROUP_FLAG,
   DEFAULT_PLAYER_GROUP_NAME,
   effectiveOddsSet,
+  groupPolicyOf,
   isDefaultPlayerGroup,
+  isPartnerGroup,
   oddsSetOf,
+  PARTNER_RATE_KEY,
+  VERIFICATION_EXEMPT_KEY,
+  WITHDRAWALS_BLOCKED_KEY,
 } from './player-groups';
 
 // This app builds standalone, so packs/odds-sets.ts cannot be imported here —
@@ -19,6 +24,82 @@ const BACKEND_ODDS_SETS = join(
   __dirname,
   '../../../../packages/api/src/modules/packs/odds-sets.ts',
 );
+const BACKEND_GROUP_POLICY = join(
+  __dirname,
+  '../../../../packages/api/src/modules/packs/group-policy.ts',
+);
+
+describe('partner-policy key names match the backend', () => {
+  const src = readFileSync(BACKEND_GROUP_POLICY, 'utf8');
+
+  it('reads the backend source (guards the path itself)', () => {
+    expect(src).toContain('resolveGroupPolicyForCustomer');
+  });
+
+  it.each([
+    ['PARTNER_RATE_KEY', PARTNER_RATE_KEY],
+    ['WITHDRAWALS_BLOCKED_KEY', WITHDRAWALS_BLOCKED_KEY],
+    ['VERIFICATION_EXEMPT_KEY', VERIFICATION_EXEMPT_KEY],
+  ])('mirrors %s', (name, local) => {
+    const m = new RegExp(`${name}\\s*=\\s*'([^']+)'`).exec(src);
+    expect(m?.[1]).toBe(local);
+  });
+});
+
+describe('groupPolicyOf / isPartnerGroup', () => {
+  it('reads a real group and pins DEFAULT to the empty policy', () => {
+    expect(
+      groupPolicyOf({
+        name: 'partners',
+        metadata: {
+          partner_rate_bp: '400',
+          withdrawals_blocked: true,
+          verification_exempt: 'yes',
+        },
+      }),
+    ).toEqual({
+      partner_rate_bp: 400,
+      withdrawals_blocked: true,
+      verification_exempt: false,
+    });
+    expect(
+      groupPolicyOf({
+        name: 'DEFAULT',
+        metadata: { partner_rate_bp: 400, withdrawals_blocked: true },
+      }),
+    ).toEqual({
+      partner_rate_bp: null,
+      withdrawals_blocked: false,
+      verification_exempt: false,
+    });
+  });
+
+  // Mirrors the backend: a stray toggle on a group with no rate is inert, so
+  // flipping the Partner switch on never seeds a block the operator did not
+  // pick.
+  it('ignores the toggles on a group with no partner rate', () => {
+    expect(
+      groupPolicyOf({
+        name: 'pro',
+        metadata: { withdrawals_blocked: true, verification_exempt: true },
+      }),
+    ).toEqual({
+      partner_rate_bp: null,
+      withdrawals_blocked: false,
+      verification_exempt: false,
+    });
+  });
+
+  it('is a partner group only with a usable rate', () => {
+    expect(
+      isPartnerGroup({ name: 'p', metadata: { partner_rate_bp: 300 } }),
+    ).toBe(true);
+    expect(
+      isPartnerGroup({ name: 'p', metadata: { partner_rate_bp: 4.5 } }),
+    ).toBe(false);
+    expect(isPartnerGroup({ name: 'p', metadata: null })).toBe(false);
+  });
+});
 
 describe('player-group constants match the backend', () => {
   const src = readFileSync(BACKEND_ODDS_SETS, 'utf8');

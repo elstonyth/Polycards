@@ -26,6 +26,11 @@ import {
 } from './utils/phone-verification-guard';
 import { validateDeliverableAddress } from './utils/address-guard';
 import {
+  blockGroupWithdrawals,
+  rejectGroupPolicyMetadata,
+  stripAdditionalData,
+} from './utils/customer-group-guards';
+import {
   blockDisabledCustomerSession,
   blockDisabledEmailpassLogin,
 } from './utils/disabled-guard';
@@ -828,6 +833,10 @@ export default defineMiddlewares({
       middlewares: [
         authenticate('customer', ['bearer']),
         rateLimit('credit-topup'),
+        // Partner groups (spec 2026-09-09): a member of a group whose policy
+        // blocks withdrawals is refused here, before any phone check — the
+        // block is a property of the account, not of what it has proven.
+        blockGroupWithdrawals,
         // Same phone gate as topup/deposit/delivery (2026-08-05): money OUT
         // was the one money path without it, which made an unverified account
         // able to cash out what it could never have topped up. Flag-gated by
@@ -1027,6 +1036,35 @@ export default defineMiddlewares({
       matcher: '/admin/customers/*/group',
       method: 'POST',
       middlewares: [adminActionRateLimit],
+    },
+    {
+      // Partner policy on a player group (POST /admin/customer-groups/:id/policy).
+      matcher: '/admin/customer-groups/*/policy',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Native create/update customer-group routes: the prebuilt Edit form
+      // posts `additional_data`, which core's strict validator refuses — see
+      // stripAdditionalData. No rate limiter here: these are core routes, not
+      // repo mutation routes (the coverage guard scans src/api/admin only).
+      //
+      // Matcher note (verified against the booted app in
+      // player-groups-policy.spec.ts): core's api dir is scanned BEFORE this
+      // project's (medusa/dist/loaders/api.js), so within one sorter bucket
+      // core's validateAndTransformBody registers first and a plain
+      // '/admin/customer-groups' entry here would run AFTER it. The trailing
+      // `*` puts this entry in the REGEX bucket, which the RoutesSorter orders
+      // ahead of both core entries (static create, params update) — the same
+      // trick the '/hooks/tgpay/*' entry documents. It also covers
+      // /admin/customer-groups/:id/customers and the /policy route above,
+      // where removing the key is harmless.
+      matcher: '/admin/customer-groups*',
+      method: 'POST',
+      // rejectGroupPolicyMetadata keeps the partner-policy keys off the
+      // native metadata write path — POST /admin/customer-groups/:id/policy is
+      // their only writer (bounds + audit).
+      middlewares: [stripAdditionalData, rejectGroupPolicyMetadata],
     },
     {
       matcher: '/admin/rewards-settings',

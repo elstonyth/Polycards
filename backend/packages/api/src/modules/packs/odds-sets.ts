@@ -1,5 +1,6 @@
 import { Modules } from '@medusajs/framework/utils';
 import type {
+  CustomerGroupDTO,
   ICustomerModuleService,
   MedusaContainer,
 } from '@medusajs/framework/types';
@@ -26,13 +27,42 @@ export const DEFAULT_PLAYER_GROUP_NAME = 'DEFAULT';
  *  the pre-existing production row on first read. */
 export const DEFAULT_PLAYER_GROUP_FLAG = 'is_default';
 
-/** Is this the default (ungrouped-equivalent) player group? */
-export const isDefaultPlayerGroup = (g: {
+/** The two fields every player-group rule reads — a CustomerGroupDTO, a raw
+ *  `customer_group` row, or an admin list entry all satisfy it. */
+export type PlayerGroupLike = {
   name?: string | null;
   metadata?: Record<string, unknown> | null;
-}): boolean =>
+};
+
+/** Is this the default (ungrouped-equivalent) player group? */
+export const isDefaultPlayerGroup = (g: PlayerGroupLike): boolean =>
   g.metadata?.[DEFAULT_PLAYER_GROUP_FLAG] === true ||
   g.name === DEFAULT_PLAYER_GROUP_NAME;
+
+/**
+ * THE rule for "which of a customer's groups is their player group": the
+ * oldest non-DEFAULT membership (created_at ASC, id as the tiebreak), or null.
+ * One function so the odds set, the group policy and the admin Players list
+ * can never disagree about which group a player is in. Pure — callers hand it
+ * whatever membership list they already hold.
+ */
+export function effectivePlayerGroup<
+  T extends PlayerGroupLike & {
+    id?: string;
+    created_at?: Date | string | null;
+  },
+>(groups: readonly T[]): T | null {
+  const at = (g: T) => new Date(g.created_at ?? 0).getTime();
+  return (
+    [...groups]
+      .sort(
+        (a, b) =>
+          at(a) - at(b) ||
+          String(a.id ?? '').localeCompare(String(b.id ?? '')),
+      )
+      .find((g) => !isDefaultPlayerGroup(g)) ?? null
+  );
+}
 
 /** One card's draw weight under a given odds set.
  *
@@ -153,12 +183,26 @@ export async function resolveOddsSetForCustomer(
   container: MedusaContainer,
   customerId?: string,
 ): Promise<OddsSet> {
-  if (!customerId) return 1;
+  const group = await resolvePlayerGroup(container, customerId);
+  return group ? coerceOddsSet(group.metadata?.odds_set) : 1;
+}
+
+/**
+ * A customer's EFFECTIVE player group: the oldest non-DEFAULT membership, or
+ * null for no real group (and for an anonymous caller). This is the one
+ * definition of "which group is this player in" — the odds set above and the
+ * group policy (group-policy.ts) both read it, so the group whose odds a
+ * player rolls is always the group whose policy applies to them.
+ */
+export async function resolvePlayerGroup(
+  container: MedusaContainer,
+  customerId?: string,
+): Promise<CustomerGroupDTO | null> {
+  if (!customerId) return null;
   const customers = container.resolve<ICustomerModuleService>(Modules.CUSTOMER);
   const groups = await customers.listCustomerGroups(
     { customers: customerId },
     { order: { created_at: 'ASC' } },
   );
-  const group = groups.find((g) => !isDefaultPlayerGroup(g));
-  return group ? coerceOddsSet(group.metadata?.odds_set) : 1;
+  return effectivePlayerGroup(groups);
 }

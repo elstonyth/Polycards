@@ -160,7 +160,25 @@ export async function updateCustomerProfile(
   return customer;
 }
 
-export type AccountInfo = { hasPassword: boolean };
+export type AccountPolicy = {
+  partner: boolean;
+  withdrawalsBlocked: boolean;
+  verificationExempt: boolean;
+};
+export type AccountInfo = { hasPassword: boolean; policy: AccountPolicy };
+
+/** The pre-feature shape: nothing exempt, nothing blocked. Also the answer on
+ *  any failed read — both flags are UX only (the backend gates enforce), and
+ *  "no exemption" is the side that asks for MORE proof, not less. */
+const NO_POLICY: AccountPolicy = {
+  partner: false,
+  withdrawalsBlocked: false,
+  verificationExempt: false,
+};
+const ACCOUNT_INFO_FALLBACK: AccountInfo = {
+  hasPassword: true,
+  policy: NO_POLICY,
+};
 
 /**
  * Account facts the Settings page needs before rendering the Danger zone, and
@@ -190,8 +208,19 @@ export const getAccountInfo = cache(async (): Promise<AccountInfo> => {
       // never be cached or answered for a guest.
       { auth: 'required' },
     );
-    return r.ok ? r.data : { hasPassword: true };
+    if (!r.ok) return ACCOUNT_INFO_FALLBACK;
+    const p = r.data.policy;
+    return {
+      hasPassword: r.data.hasPassword,
+      policy: p
+        ? {
+            partner: p.partner,
+            withdrawalsBlocked: p.withdrawals_blocked,
+            verificationExempt: p.verification_exempt,
+          }
+        : NO_POLICY,
+    };
   } catch {
-    return { hasPassword: true };
+    return ACCOUNT_INFO_FALLBACK;
   }
 });

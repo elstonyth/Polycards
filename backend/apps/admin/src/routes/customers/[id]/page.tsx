@@ -360,6 +360,7 @@ const ReferralCardBody = ({
   customerId: string;
   data: CustomerReferralCard;
 }) => {
+  const { t } = useTranslation();
   const { data: settings } = useReferralSettings();
   const setRate = useSetPartnerRate();
   const setReferrer = useSetCustomerReferrer();
@@ -390,6 +391,11 @@ const ReferralCardBody = ({
   const boundsHint = settings
     ? `${settings.partner_min_bp / 100}–${settings.partner_max_bp / 100}%`
     : '';
+  // Conflict rule (spec 2026-09-09): while the player is in a partner group
+  // the group's rate pays them, and the server refuses a manual rate. Lock the
+  // control here with the same message, rather than let the operator type a
+  // value the Set button then rejects.
+  const lockedByGroup = data.partner_group;
 
   return (
     <div className="border-t px-6 py-4">
@@ -434,44 +440,81 @@ const ReferralCardBody = ({
         <dd>{data.downline.length}</dd>
         <dt className="text-ui-fg-subtle">Partner rate</dt>
         <dd>
-          <div className="flex items-center gap-2">
-            <Input
-              type="number"
-              value={ratePct}
-              onChange={(e) => setRatePct(e.target.value)}
-              placeholder={boundsHint}
-              className="w-24"
-            />
-            <Text size="small" className="text-ui-fg-muted">
-              %
-            </Text>
-            <Button
-              size="small"
-              variant="secondary"
-              disabled={setRate.isPending || ratePct.trim() === ''}
-              onClick={() => apply(Math.round(Number(ratePct) * 100))}
-            >
-              Set
-            </Button>
-            {data.partner_referral_bp !== null && (
-              <Button
-                size="small"
-                variant="transparent"
-                disabled={setRate.isPending}
-                onClick={() => {
-                  setRatePct('');
-                  apply(null);
-                }}
-              >
-                Clear
-              </Button>
-            )}
-          </div>
-          {boundsHint && (
-            <Text size="xsmall" className="text-ui-fg-muted">
-              Allowed range {boundsHint} — replaces the tier table for this
-              customer.
-            </Text>
+          {lockedByGroup ? (
+            <>
+              <div className="flex items-center gap-2">
+                <Badge size="small" color="purple">
+                  {lockedByGroup.rate_bp / 100}% · {lockedByGroup.name}
+                </Badge>
+                {/* Clearing stays allowed while the group applies (the
+                    server refuses only a NEW rate), so an inert per-customer
+                    rate can be removed without a move out and back. */}
+                {data.partner_referral_bp !== null && (
+                  <Button
+                    size="small"
+                    variant="transparent"
+                    disabled={setRate.isPending}
+                    onClick={() => {
+                      setRatePct('');
+                      apply(null);
+                    }}
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
+              <Text size="xsmall" className="text-ui-fg-muted">
+                {t('players.partnerLockedByGroup', {
+                  group: lockedByGroup.name,
+                })}
+                {data.partner_referral_bp !== null &&
+                  ` ${t('players.partnerManualShadowed', {
+                    rate: data.partner_referral_bp / 100,
+                  })}`}
+              </Text>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  value={ratePct}
+                  onChange={(e) => setRatePct(e.target.value)}
+                  placeholder={boundsHint}
+                  className="w-24"
+                />
+                <Text size="small" className="text-ui-fg-muted">
+                  %
+                </Text>
+                <Button
+                  size="small"
+                  variant="secondary"
+                  disabled={setRate.isPending || ratePct.trim() === ''}
+                  onClick={() => apply(Math.round(Number(ratePct) * 100))}
+                >
+                  Set
+                </Button>
+                {data.partner_referral_bp !== null && (
+                  <Button
+                    size="small"
+                    variant="transparent"
+                    disabled={setRate.isPending}
+                    onClick={() => {
+                      setRatePct('');
+                      apply(null);
+                    }}
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
+              {boundsHint && (
+                <Text size="xsmall" className="text-ui-fg-muted">
+                  Allowed range {boundsHint} — replaces the tier table for this
+                  customer.
+                </Text>
+              )}
+            </>
           )}
         </dd>
       </dl>
@@ -483,9 +526,7 @@ const ReferralCardBody = ({
           <ul className="mt-1 flex flex-col gap-1 text-sm">
             {data.lines.slice(0, 8).map((l) => (
               <li key={l.id} className="flex items-center gap-2">
-                <Badge size="2xsmall">
-                  Commission
-                </Badge>
+                <Badge size="2xsmall">Commission</Badge>
                 <span className="tabular-nums">{rm(l.amount_cents / 100)}</span>
                 <span className="text-ui-fg-muted text-xs">{l.status}</span>
               </li>
@@ -1337,6 +1378,9 @@ const Customer360Page = () => {
   // frozen (funds) and disabled (login) are orthogonal — badge them separately
   // off the same account_state, or a disabled player reads as a normal one.
   const isDisabled = auditQ.data?.account_state?.disabled ?? false;
+  // Partner badge in the header (spec 2026-09-09). Shares the ReferralCard's
+  // query key, so the card's own fetch answers this for free.
+  const referralQ = useCustomerReferral(id ?? '');
 
   // ── Modal state ─────────────────────────────────────────────────────────────
   const [modal, setModal] = useState<ModalKind | null>(null);
@@ -1449,6 +1493,22 @@ const Customer360Page = () => {
                   {t('players.disabled')}
                 </Badge>
               )}
+              {/* Partner account (spec 2026-09-09) — from the referral card's
+                  query, which the Profile tab also reads; the header shows it
+                  whatever tab is open. Names the group when the group is the
+                  source, since that is where it has to be changed. */}
+              {referralQ.data?.partner_group ? (
+                <Badge size="small" color="purple">
+                  {t('players.partnerViaGroup', {
+                    group: referralQ.data.partner_group.name,
+                  })}
+                </Badge>
+              ) : referralQ.data?.partner_referral_bp !== null &&
+                referralQ.data?.partner_referral_bp !== undefined ? (
+                <Badge size="small" color="purple">
+                  {t('players.partner')}
+                </Badge>
+              ) : null}
             </div>
             {view?.customer.created_at && (
               <Text className="text-ui-fg-subtle mt-1" size="small">

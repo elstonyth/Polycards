@@ -33,6 +33,9 @@ export const AdminActionAudit = model
       'referral_settings',
       'weekly_settlement',
       'task_definition',
+      // Partner groups (spec 2026-09-09): group-policy edits audit against the
+      // customer group row they change.
+      'customer_group',
     ]),
     entity_id: model.text(),
     action: model.enum([
@@ -73,6 +76,8 @@ export const AdminActionAudit = model
       'void_settlement_line',
       'void_settlement',
       'pay_settlement',
+      // Partner groups (spec 2026-09-09) — see Migration20260909090000.
+      'edit_group_policy',
     ]),
     before: model.json().nullable(),
     after: model.json().nullable(),

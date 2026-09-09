@@ -50,7 +50,8 @@
             "tier_settings",
             "referral_settings",
             "weekly_settlement",
-            "task_definition"
+            "task_definition",
+            "customer_group"
           ],
           "mappedType": "enum"
         },
@@ -98,7 +99,9 @@
             "approve_settlement",
             "void_settlement_line",
             "void_settlement",
-            "pay_settlement"
+            "pay_settlement",
+            "edit_payment_gateway",
+            "edit_group_policy"
           ],
           "mappedType": "enum"
         },

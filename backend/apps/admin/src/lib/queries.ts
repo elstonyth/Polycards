@@ -109,6 +109,7 @@ import {
   // ── Epic 3 (Odds) ──
   listCustomerGroupsAdmin,
   setGroupOddsSet,
+  setGroupPolicy,
   createCustomerGroupAdmin,
   countCustomersInGroup,
   setCustomerGroup,
@@ -135,6 +136,7 @@ import {
   type ReferralTierWire,
 } from './admin-rest';
 import type { SetEntry } from '@acme/odds-math';
+import type { GroupPolicy } from './player-groups';
 import { qk } from './query-keys';
 import {
   classifyApproveResult,
@@ -1084,6 +1086,21 @@ export const useSetGroupOddsSet = () => {
       // Returned so the mutation stays pending until the refetch lands — the
       // Odds Sets page drops its local override in ITS onSuccess, and doing so
       // against a stale cache would flash the previous set.
+      return qc.invalidateQueries({ queryKey: qk.customerGroups });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+// Partner policy on one group (spec 2026-09-09). Same invalidate-and-wait
+// shape as useSetGroupOddsSet so the row re-reads the server's answer.
+export const useSetGroupPolicy = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; policy: GroupPolicy; reason: string }) =>
+      setGroupPolicy(vars.id, vars.policy, vars.reason),
+    onSuccess: () => {
+      toast.success('Group policy saved');
       return qc.invalidateQueries({ queryKey: qk.customerGroups });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
