@@ -113,9 +113,17 @@ const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
   const rateBp = policy.partner
     ? Math.round(Number(policy.ratePct) * 100)
     : null;
+  // Bounds checked HERE as well as on the server: save() sequences the odds
+  // write before the policy write, so a rate the server would refuse must
+  // never get that far — it would leave the odds saved and the policy not.
   const rateInvalid =
     policy.partner &&
-    (policy.ratePct.trim() === '' || !Number.isFinite(rateBp));
+    (policy.ratePct.trim() === '' ||
+      rateBp === null ||
+      !Number.isFinite(rateBp) ||
+      (settings !== undefined &&
+        (rateBp < settings.partner_min_bp ||
+          rateBp > settings.partner_max_bp)));
 
   const saving = saveOdds.isPending || savePolicy.isPending;
 
@@ -203,6 +211,10 @@ const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
               className="w-20"
               value={policy.ratePct}
               placeholder={boundsHint}
+              step="0.01"
+              min={settings ? settings.partner_min_bp / 100 : undefined}
+              max={settings ? settings.partner_max_bp / 100 : undefined}
+              aria-invalid={rateInvalid || undefined}
               disabled={locked || saving}
               onChange={(e) => edit({ ratePct: e.target.value })}
               aria-label={`${t('oddsSets.partnerRate')} — ${group.name}`}

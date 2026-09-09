@@ -299,6 +299,16 @@ describe('requirePhoneVerified', () => {
       )) as Error;
       expect(err.message).toMatch(/verify your phone/i);
     });
+    // A stray toggle on an ordinary group (no partner rate) is inert —
+    // groupPolicyOf returns the empty policy — so the gate stays closed.
+    it('ignores an exemption on a group without a partner rate', async () => {
+      const err = (await run(
+        gateReq('cus_1', false, [
+          { name: 'pro', metadata: { verification_exempt: true } },
+        ]),
+      )) as Error;
+      expect(err.message).toMatch(/verify your phone/i);
+    });
     it('ignores an exemption stored on the DEFAULT group', async () => {
       const err = (await run(
         gateReq('cus_1', false, [

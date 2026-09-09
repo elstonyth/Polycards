@@ -1,5 +1,6 @@
 import path from 'path';
 import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
+import { CORE_CUSTOMER_MODELS } from './core-customer-models';
 import { PACKS_MODULE } from '../index';
 import type PacksModuleService from '../service';
 import ReferralAttribution from '../models/referral-attribution';
@@ -17,6 +18,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
   moduleName: PACKS_MODULE,
   resolve: path.resolve(__dirname, '../../..', 'modules/packs'),
   moduleModels: [
+    ...CORE_CUSTOMER_MODELS,
     ReferralAttribution,
     ReferralSettings,
     WeeklySettlement,

@@ -296,9 +296,11 @@ const PlayersPage = () => {
                             color="purple"
                             title={
                               p.partner === 'group'
-                                ? t('players.partnerViaGroup', {
-                                    group: p.partner_group ?? '',
-                                  })
+                                ? p.partner_group
+                                  ? t('players.partnerViaGroup', {
+                                      group: p.partner_group,
+                                    })
+                                  : t('players.partner')
                                 : t('players.partnerManual')
                             }
                           >

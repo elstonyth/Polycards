@@ -80,8 +80,13 @@ export const groupPolicyOf = (g: {
 }): GroupPolicy => {
   if (isDefaultPlayerGroup(g)) return EMPTY_GROUP_POLICY;
   const m = g.metadata ?? {};
+  // Partner off = one switch, same as the backend reader: the toggles only
+  // mean anything on a partner group, so a stray toggle without a rate is
+  // never seeded into the Player Groups draft.
+  const rate = rateBpOf(m[PARTNER_RATE_KEY]);
+  if (rate === null) return EMPTY_GROUP_POLICY;
   return {
-    partner_rate_bp: rateBpOf(m[PARTNER_RATE_KEY]),
+    partner_rate_bp: rate,
     withdrawals_blocked: m[WITHDRAWALS_BLOCKED_KEY] === true,
     verification_exempt: m[VERIFICATION_EXEMPT_KEY] === true,
   };

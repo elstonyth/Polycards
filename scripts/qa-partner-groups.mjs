@@ -124,6 +124,17 @@ const policy = await api(`/admin/customer-groups/${group.id}/policy`, {
 });
 console.log('policy metadata', JSON.stringify(policy.customer_group.metadata));
 
+// A refusal body is JSON from Medusa, but never assume it — an empty or
+// HTML body (proxy, crash page) must not throw inside the catch and end the
+// run before the remaining checks.
+const refusalMessage = (e) => {
+  try {
+    return JSON.parse(e.body).message;
+  } catch {
+    return e.body;
+  }
+};
+
 // The conflict rule, from the API: manual rate refused while in the group.
 try {
   await api(`/admin/customers/${customerId}/partner-rate`, {
@@ -133,7 +144,7 @@ try {
   });
   console.log('partner-rate: UNEXPECTEDLY ACCEPTED');
 } catch (e) {
-  console.log('partner-rate refused:', e.status, JSON.parse(e.body).message);
+  console.log('partner-rate refused:', e.status, refusalMessage(e));
 }
 // The withdraw block, from the API.
 try {
@@ -144,7 +155,7 @@ try {
   });
   console.log('withdraw: UNEXPECTEDLY ACCEPTED');
 } catch (e) {
-  console.log('withdraw refused:', e.status, JSON.parse(e.body).message);
+  console.log('withdraw refused:', e.status, refusalMessage(e));
 }
 const account = await api('/store/customers/me/account', { token: custTok });
 console.log('account policy', JSON.stringify(account.policy));

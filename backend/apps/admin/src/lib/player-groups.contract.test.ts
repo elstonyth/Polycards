@@ -74,6 +74,22 @@ describe('groupPolicyOf / isPartnerGroup', () => {
     });
   });
 
+  // Mirrors the backend: a stray toggle on a group with no rate is inert, so
+  // flipping the Partner switch on never seeds a block the operator did not
+  // pick.
+  it('ignores the toggles on a group with no partner rate', () => {
+    expect(
+      groupPolicyOf({
+        name: 'pro',
+        metadata: { withdrawals_blocked: true, verification_exempt: true },
+      }),
+    ).toEqual({
+      partner_rate_bp: null,
+      withdrawals_blocked: false,
+      verification_exempt: false,
+    });
+  });
+
   it('is a partner group only with a usable rate', () => {
     expect(
       isPartnerGroup({ name: 'p', metadata: { partner_rate_bp: 300 } }),
