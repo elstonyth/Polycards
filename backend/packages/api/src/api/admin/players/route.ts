@@ -1,4 +1,8 @@
-import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import type {
+  AuthenticatedMedusaRequest,
+  MedusaRequest,
+  MedusaResponse,
+} from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
@@ -6,6 +10,12 @@ import type PacksModuleService from '../../../modules/packs/service';
 import { resolveFxRate } from '../../../modules/packs/pricing';
 import { isPartnerGroup } from '../../../modules/packs/group-policy';
 import { effectivePlayerGroup } from '../../../modules/packs/odds-sets';
+import {
+  mintPartnerAccount,
+  type PartnerAccountRow,
+} from '../../../utils/partner-accounts';
+import { isValidUsername } from '../../../utils/profile-handle';
+import { CHARSET_MESSAGE } from '../../utils/username-guard';
 import {
   parsePaginationParams,
   parseSortParam,
@@ -123,4 +133,105 @@ export async function GET(
       };
     }),
   });
+}
+
+type CreateBody = {
+  count?: unknown;
+  display_name?: unknown;
+  group_id?: unknown;
+};
+
+const MAX_BATCH = 50;
+
+/**
+ * POST /admin/players — the partner account generator.
+ *
+ * Body `{ count?, display_name?, group_id? }`: mints `count` (1–50, default
+ * 1) login-able accounts with generated emails and passwords, files each into
+ * `group_id` (null/omitted = DEFAULT, same contract as
+ * POST /admin/customers/:id/group) and answers with every credential — the
+ * same rows GET /admin/players/export serves later. `display_name` is
+ * optional: blank = auto ("Collector####"); typed = validated and must be
+ * free, then account #1 gets it exactly and the rest of the batch get
+ * numbered variants (claimUsername's rule).
+ *
+ * Sequential, no batch rollback: accounts minted before a failure stay (they
+ * are valid logins, visible in the list and the export); the operator sees
+ * the error and generates the remainder. utils/partner-accounts.ts owns the
+ * per-account unwind.
+ */
+export async function POST(
+  req: AuthenticatedMedusaRequest<CreateBody>,
+  res: MedusaResponse,
+): Promise<void> {
+  const body = req.body ?? {};
+  const count = body.count === undefined ? 1 : body.count;
+  if (
+    typeof count !== 'number' ||
+    !Number.isInteger(count) ||
+    count < 1 ||
+    count > MAX_BATCH
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `count must be an integer between 1 and ${MAX_BATCH}.`,
+    );
+  }
+  const rawName = body.display_name;
+  if (
+    rawName !== undefined &&
+    rawName !== null &&
+    typeof rawName !== 'string'
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'display_name must be a string or null.',
+    );
+  }
+  const displayName =
+    typeof rawName === 'string' && rawName.trim() !== ''
+      ? rawName.trim()
+      : null;
+  if (displayName !== null && !isValidUsername(displayName)) {
+    throw new MedusaError(MedusaError.Types.INVALID_DATA, CHARSET_MESSAGE);
+  }
+  const rawGroup = body.group_id;
+  if (
+    rawGroup !== undefined &&
+    rawGroup !== null &&
+    typeof rawGroup !== 'string'
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'group_id must be a string or null.',
+    );
+  }
+  const groupId =
+    typeof rawGroup === 'string' && rawGroup.trim() !== ''
+      ? rawGroup.trim()
+      : null;
+
+  // 404 on a bad group and 422 on a taken name BEFORE any write — after the
+  // first account exists, either would leave a half-minted batch behind.
+  const customers = req.scope.resolve<ICustomerModuleService>(Modules.CUSTOMER);
+  if (groupId) {
+    await customers.retrieveCustomerGroup(groupId, { select: ['id'] });
+  }
+  if (displayName !== null) {
+    const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+    if (await packs.findCustomerIdByUsername(displayName)) {
+      // DUPLICATE_ERROR, not CONFLICT: Medusa's error handler replaces
+      // CONFLICT's message with idempotency-key advice (username-guard.ts).
+      throw new MedusaError(
+        MedusaError.Types.DUPLICATE_ERROR,
+        'That display name is already taken.',
+      );
+    }
+  }
+
+  const players: PartnerAccountRow[] = [];
+  for (let i = 0; i < count; i++) {
+    players.push(await mintPartnerAccount(req.scope, { displayName, groupId }));
+  }
+  res.status(201).json({ players });
 }

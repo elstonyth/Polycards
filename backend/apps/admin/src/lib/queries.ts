@@ -975,8 +975,10 @@ export const useDenyWithdrawal = () => {
 // Own import block (not merged into the one at the top) so this whole section
 // stays append-only while a parallel epic edits the same file.
 import {
+  createPlayers,
   disablePlayer,
   enablePlayer,
+  exportPartnerAccountsXlsx,
   getCustomerDetail,
   getPayoutDetails,
   getSpendReport,
@@ -987,7 +989,35 @@ import {
   type PlayersPage,
 } from './admin-rest';
 
-export type { PlayerRow, PlayersPage, PayoutDetails } from './admin-rest';
+export type {
+  CreatedPlayer,
+  PlayerRow,
+  PlayersPage,
+  PayoutDetails,
+} from './admin-rest';
+
+// No success toast: the modal that calls this shows the credentials, which is
+// the real confirmation. New rows land on page 0 of the list (newest first)
+// and shift their group's member count.
+export const useCreatePlayers = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: createPlayers,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.playersKey });
+      qc.invalidateQueries({ queryKey: qk.customerGroupCounts });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+// The .xlsx of generated partner logins; `ids` narrows it to one batch. A
+// mutation only for its pending flag and error toast — nothing is cached.
+export const useExportPartnerAccounts = () =>
+  useMutation({
+    mutationFn: (ids?: string[]) => exportPartnerAccountsXlsx(ids),
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
 
 // Paged + searchable, but NOT id-scoped, so plain keepPreviousData is right
 // here (no stale-row-click hazard — the whole page swaps together).

@@ -1038,6 +1038,20 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Partner account generator (POST /admin/players): mints up to 50
+      // logins per call.
+      matcher: '/admin/players',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Serves the generated partner PASSWORDS (GET /admin/players/export) —
+      // the payout-details GET precedent: a sensitive read gets the limiter.
+      matcher: '/admin/players/export',
+      method: 'GET',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Partner policy on a player group (POST /admin/customer-groups/:id/policy).
       matcher: '/admin/customer-groups/*/policy',
       method: 'POST',

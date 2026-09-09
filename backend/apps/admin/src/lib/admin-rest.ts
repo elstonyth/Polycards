@@ -1332,6 +1332,48 @@ export const listPlayers = (
     `/admin/players?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
   );
 
+/** One generated partner account — what POST /admin/players answers and what
+ *  GET /admin/players/export lists. `password` is the plaintext the operator
+ *  hands out. */
+export interface CreatedPlayer {
+  id: string;
+  email: string;
+  password: string;
+  name: string | null;
+  group: string | null;
+  created_at: string;
+}
+
+// Partner account generator: `count` (1–50) logins with server-generated
+// email + password, filed into `group_id` (null = DEFAULT, same contract as
+// setCustomerGroup). `display_name` null = auto; typed = exact for the first
+// account, numbered variants for the rest (422 when taken).
+export const createPlayers = (body: {
+  count: number;
+  display_name: string | null;
+  group_id: string | null;
+}) => postJson<{ players: CreatedPlayer[] }>('/admin/players', body);
+
+// Every generated partner login (or one batch by ids) as a .xlsx download.
+// Same blob-URL dance as exportInventoryXlsx, for the reasons noted there.
+export async function exportPartnerAccountsXlsx(ids?: string[]): Promise<void> {
+  const qs = ids?.length ? `?ids=${encodeURIComponent(ids.join(','))}` : '';
+  const res = await fetch(`${__BACKEND_URL__}/admin/players/export${qs}`, {
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    throw await httpError(res);
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `partner-accounts-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 // Login block / unblock. `reason` is mandatory (1–500 chars) and audited; the
 // admin actor is taken from the session server-side, never sent from here.
 export const disablePlayer = (id: string, reason: string) =>
