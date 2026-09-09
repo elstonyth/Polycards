@@ -4,6 +4,9 @@ import type {
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { IAuthModuleService } from '@medusajs/framework/types';
+import { PACKS_MODULE } from '../../../../../modules/packs';
+import type PacksModuleService from '../../../../../modules/packs/service';
+import { resolveGroupPolicyForCustomer } from '../../../../../modules/packs/group-policy';
 
 // GET /store/customers/me/account — what the storefront needs to know about an
 // account before it renders anything that depends on the account's state.
@@ -25,14 +28,33 @@ export async function GET(
     throw new MedusaError(MedusaError.Types.UNAUTHORIZED, 'Unauthorized');
   }
   const auth = req.scope.resolve<IAuthModuleService>(Modules.AUTH);
-  const identities = await auth.listAuthIdentities(
-    { app_metadata: { customer_id: customerId } },
-    { relations: ['provider_identities'] },
-  );
+  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const [identities, groupPolicy, partnerBp] = await Promise.all([
+    auth.listAuthIdentities(
+      { app_metadata: { customer_id: customerId } },
+      { relations: ['provider_identities'] },
+    ),
+    resolveGroupPolicyForCustomer(req.scope, customerId),
+    packs
+      .partnerBpForCustomers([customerId])
+      .then((m) => m.get(customerId) ?? null),
+  ]);
   const hasPassword = identities.some((identity) =>
     (identity.provider_identities ?? []).some(
       (provider) => provider.provider === 'emailpass',
     ),
   );
-  res.json({ hasPassword });
+  // Partner groups (spec 2026-09-09): what the account tree needs to skip the
+  // phone modal and to replace the withdrawal form with a notice. Both are UX
+  // — the backend gates (requirePhoneVerified, blockGroupWithdrawals) are the
+  // enforcement, so a stale answer here can never move money.
+  const policy = groupPolicy?.policy;
+  res.json({
+    hasPassword,
+    policy: {
+      partner: partnerBp !== null,
+      withdrawals_blocked: policy?.withdrawals_blocked === true,
+      verification_exempt: policy?.verification_exempt === true,
+    },
+  });
 }

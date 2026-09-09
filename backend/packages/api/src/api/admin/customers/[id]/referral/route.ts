@@ -7,6 +7,7 @@ import type PacksModuleService from '../../../../../modules/packs/service';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/types';
 import { reqReason } from '../../../rewards-settings/validate';
+import { resolveGroupPolicyForCustomer } from '../../../../../modules/packs/group-policy';
 
 // GET /admin/customers/:id/referral — the Customer-360 referral card: who
 // referred them, their direct downline, their partner rate, and their
@@ -18,22 +19,36 @@ export async function GET(
   const customerId = req.params.id;
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
 
-  const [[referredBy], downline, [state], lines] = await Promise.all([
-    packs.listReferralAttributions({ customer_id: customerId }, { take: 1 }),
-    packs.listReferralAttributions(
-      { referrer_id: customerId },
-      { order: { created_at: 'DESC' }, take: 1000 },
-    ),
-    packs.listCustomerAccountStates({ customer_id: customerId }, { take: 1 }),
-    packs.listWeeklySettlementLines(
-      { customer_id: customerId },
-      { order: { created_at: 'DESC' }, take: 50 },
-    ),
-  ]);
+  const [[referredBy], downline, [state], lines, groupPolicy] =
+    await Promise.all([
+      packs.listReferralAttributions({ customer_id: customerId }, { take: 1 }),
+      packs.listReferralAttributions(
+        { referrer_id: customerId },
+        { order: { created_at: 'DESC' }, take: 1000 },
+      ),
+      packs.listCustomerAccountStates({ customer_id: customerId }, { take: 1 }),
+      packs.listWeeklySettlementLines(
+        { customer_id: customerId },
+        { order: { created_at: 'DESC' }, take: 50 },
+      ),
+      resolveGroupPolicyForCustomer(req.scope, customerId),
+    ]);
+
+  // Partner groups (spec 2026-09-09): when the player's group is a partner
+  // group its rate is what pays them, and the card locks the manual control.
+  const partnerGroup =
+    groupPolicy && groupPolicy.policy.partner_rate_bp !== null
+      ? {
+          id: groupPolicy.group.id,
+          name: groupPolicy.group.name,
+          rate_bp: groupPolicy.policy.partner_rate_bp,
+        }
+      : null;
 
   res.json({
     referred_by: referredBy?.referrer_id ?? null,
     partner_referral_bp: state?.partner_referral_bp ?? null,
+    partner_group: partnerGroup,
     downline: downline.map((d) => ({
       customer_id: d.customer_id,
       since: d.created_at,

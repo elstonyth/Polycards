@@ -8,6 +8,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { assertPhoneUnclaimed } from './phone-claim';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
+import { resolveGroupPolicyForCustomer } from '../../modules/packs/group-policy';
 import {
   isPhoneGateRequired,
   isPhoneVerificationRequired,
@@ -128,6 +129,12 @@ export const requirePhoneVerified = async (
   try {
     const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
     if (await packs.isPhoneVerified(customerId)) return next();
+    // Partner groups (spec 2026-09-09): a member of a group whose policy has
+    // `verification_exempt` passes every requirePhoneVerified site without a
+    // verified phone. Checked AFTER the verified read, so the common case
+    // (verified player) never pays for the group lookup.
+    const policy = await resolveGroupPolicyForCustomer(req.scope, customerId);
+    if (policy?.policy.verification_exempt) return next();
   } catch (e) {
     // Fail CLOSED. A read failure here must not become a free pass on a money
     // path; the caller retries, and the storefront copy already tells them

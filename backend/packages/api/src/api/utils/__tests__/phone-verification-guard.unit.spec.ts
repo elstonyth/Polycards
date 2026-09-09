@@ -205,17 +205,27 @@ describe('requirePhoneVerified', () => {
 
   // actorId '' models a register-token bearer (see the guard); `verified`
   // throwing models a DB read failure, which must NOT become a free pass.
+  // `groups` is the player's group list (oldest first) as the customer module
+  // would return it — the verification_exempt branch reads it through
+  // resolveGroupPolicyForCustomer. Empty = no group.
   const gateReq = (
     actorId: string | undefined,
     verified: boolean | (() => never),
+    groups: { name: string; metadata?: Record<string, unknown> }[] = [],
   ) =>
     ({
       auth_context: actorId === undefined ? undefined : { actor_id: actorId },
       scope: {
-        resolve: () => ({
-          isPhoneVerified: async () =>
-            typeof verified === 'function' ? verified() : verified,
-        }),
+        resolve: (key: string) =>
+          key === Modules.CUSTOMER
+            ? {
+                listCustomerGroups: async () =>
+                  groups.map((g, i) => ({ id: `cg_${i}`, ...g })),
+              }
+            : {
+                isPhoneVerified: async () =>
+                  typeof verified === 'function' ? verified() : verified,
+              },
       },
     }) as never;
 
@@ -265,6 +275,40 @@ describe('requirePhoneVerified', () => {
         throw new Error('db down');
       };
       expect(await run(gateReq('cus_1', boom))).toBeInstanceOf(Error);
+    });
+
+    // Partner groups (spec 2026-09-09): the group's verification_exempt is
+    // the one thing besides a verified phone that opens this gate.
+    it('passes an unverified member of a verification-exempt group', async () => {
+      expect(
+        await run(
+          gateReq('cus_1', false, [
+            {
+              name: 'partners',
+              metadata: { partner_rate_bp: 400, verification_exempt: true },
+            },
+          ]),
+        ),
+      ).toBeUndefined();
+    });
+    it('still refuses an unverified member of a group without the exemption', async () => {
+      const err = (await run(
+        gateReq('cus_1', false, [
+          { name: 'pro', metadata: { partner_rate_bp: 400 } },
+        ]),
+      )) as Error;
+      expect(err.message).toMatch(/verify your phone/i);
+    });
+    it('ignores an exemption stored on the DEFAULT group', async () => {
+      const err = (await run(
+        gateReq('cus_1', false, [
+          {
+            name: 'DEFAULT',
+            metadata: { is_default: true, verification_exempt: true },
+          },
+        ]),
+      )) as Error;
+      expect(err.message).toMatch(/verify your phone/i);
     });
 
     // The point of the separate switch: kill the money gate WITHOUT reopening

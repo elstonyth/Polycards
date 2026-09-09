@@ -26,6 +26,10 @@ import {
 } from './utils/phone-verification-guard';
 import { validateDeliverableAddress } from './utils/address-guard';
 import {
+  blockGroupWithdrawals,
+  stripAdditionalData,
+} from './utils/customer-group-guards';
+import {
   blockDisabledCustomerSession,
   blockDisabledEmailpassLogin,
 } from './utils/disabled-guard';
@@ -828,6 +832,10 @@ export default defineMiddlewares({
       middlewares: [
         authenticate('customer', ['bearer']),
         rateLimit('credit-topup'),
+        // Partner groups (spec 2026-09-09): a member of a group whose policy
+        // blocks withdrawals is refused here, before any phone check — the
+        // block is a property of the account, not of what it has proven.
+        blockGroupWithdrawals,
         // Same phone gate as topup/deposit/delivery (2026-08-05): money OUT
         // was the one money path without it, which made an unverified account
         // able to cash out what it could never have topped up. Flag-gated by
@@ -1027,6 +1035,26 @@ export default defineMiddlewares({
       matcher: '/admin/customers/*/group',
       method: 'POST',
       middlewares: [adminActionRateLimit],
+    },
+    {
+      // Partner policy on a player group (POST /admin/customer-groups/:id/policy).
+      matcher: '/admin/customer-groups/*/policy',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Native create/update customer-group routes: the prebuilt Edit form
+      // posts `additional_data`, which core's strict validator refuses — see
+      // stripAdditionalData. No rate limiter here: these are core routes, not
+      // repo mutation routes (the coverage guard scans src/api/admin only).
+      matcher: '/admin/customer-groups',
+      method: 'POST',
+      middlewares: [stripAdditionalData],
+    },
+    {
+      matcher: '/admin/customer-groups/*',
+      method: 'POST',
+      middlewares: [stripAdditionalData],
     },
     {
       matcher: '/admin/rewards-settings',

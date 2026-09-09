@@ -5,6 +5,7 @@ import type {
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
+import { assertNotInPartnerGroup } from '../../../../../modules/packs/group-policy';
 import { reqReason } from '../../../rewards-settings/validate';
 
 // POST /admin/customers/:id/partner-rate { rate_bp, reason } — flag (or, with
@@ -21,6 +22,9 @@ export async function POST(
       'rate_bp must be a number or null.',
     );
   }
+  // Group config beats the manual flag (spec 2026-09-09): a member of a
+  // partner group is refused here, with the message the admin card also shows.
+  await assertNotInPartnerGroup(req.scope, req.params.id);
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   await packs.setPartnerRate({
     customerId: req.params.id,

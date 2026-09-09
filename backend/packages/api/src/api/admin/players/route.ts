@@ -4,6 +4,8 @@ import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { resolveFxRate } from '../../../modules/packs/pricing';
+import { isPartnerGroup } from '../../../modules/packs/group-policy';
+import { isDefaultPlayerGroup } from '../../../modules/packs/odds-sets';
 import {
   parsePaginationParams,
   parseSortParam,
@@ -16,6 +18,32 @@ import {
 // would need a different query shape entirely, not an option change. `name` is
 // the JS join of first_name + last_name, expressed as the two columns in order.
 const SORTABLE = new Set(['created_at', 'email', 'name']);
+
+/**
+ * Why a player is a partner (spec 2026-09-09): 'group' when their effective
+ * player group (oldest non-DEFAULT membership — the same choice
+ * resolvePlayerGroup makes) is a partner group, else 'manual' for the
+ * per-customer flag, else null. Group first because the group's rate is the
+ * one that pays them.
+ */
+export function partnerSourceOf(
+  groups: {
+    name: string;
+    metadata?: Record<string, unknown> | null;
+    created_at?: Date | string;
+  }[],
+  manualBp: number | null,
+): 'group' | 'manual' | null {
+  const effective = [...groups]
+    .sort(
+      (a, b) =>
+        new Date(a.created_at ?? 0).getTime() -
+        new Date(b.created_at ?? 0).getTime(),
+    )
+    .find((g) => !isDefaultPlayerGroup(g));
+  if (effective && isPartnerGroup(effective)) return 'group';
+  return manualBp !== null ? 'manual' : null;
+}
 
 // GET /admin/players — the All Players list (POLYCARD-BACK §4.2). Page of
 // Medusa customers + batched per-player aggregates (playersOverview): one
@@ -103,6 +131,7 @@ export async function GET(
         // No state row at all = never verified, which is the default for every
         // account that predates the gate.
         phone_verified: s?.phoneVerified ?? false,
+        partner: partnerSourceOf(c.groups ?? [], s?.partnerBp ?? null),
       };
     }),
   });

@@ -1,5 +1,6 @@
 import { Modules } from '@medusajs/framework/utils';
 import type {
+  CustomerGroupDTO,
   ICustomerModuleService,
   MedusaContainer,
 } from '@medusajs/framework/types';
@@ -153,12 +154,26 @@ export async function resolveOddsSetForCustomer(
   container: MedusaContainer,
   customerId?: string,
 ): Promise<OddsSet> {
-  if (!customerId) return 1;
+  const group = await resolvePlayerGroup(container, customerId);
+  return group ? coerceOddsSet(group.metadata?.odds_set) : 1;
+}
+
+/**
+ * A customer's EFFECTIVE player group: the oldest non-DEFAULT membership, or
+ * null for no real group (and for an anonymous caller). This is the one
+ * definition of "which group is this player in" — the odds set above and the
+ * group policy (group-policy.ts) both read it, so the group whose odds a
+ * player rolls is always the group whose policy applies to them.
+ */
+export async function resolvePlayerGroup(
+  container: MedusaContainer,
+  customerId?: string,
+): Promise<CustomerGroupDTO | null> {
+  if (!customerId) return null;
   const customers = container.resolve<ICustomerModuleService>(Modules.CUSTOMER);
   const groups = await customers.listCustomerGroups(
     { customers: customerId },
     { order: { created_at: 'ASC' } },
   );
-  const group = groups.find((g) => !isDefaultPlayerGroup(g));
-  return group ? coerceOddsSet(group.metadata?.odds_set) : 1;
+  return groups.find((g) => !isDefaultPlayerGroup(g)) ?? null;
 }

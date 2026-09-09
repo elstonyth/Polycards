@@ -101,6 +101,8 @@ import {
   type ReferralWeek,
 } from './referral';
 import { asPixelPokemonCrud } from './pixel-pokemon-service';
+import { groupPolicyOf } from './group-policy';
+import { isDefaultPlayerGroup } from './odds-sets';
 import {
   taskIsLive,
   taskProgress,
@@ -798,7 +800,10 @@ class PacksModuleService extends MedusaService({
     | {
         bound: false;
         reason:
-          'self' | 'already_bound' | 'not_a_new_account' | 'referrer_disabled';
+          | 'self'
+          | 'already_bound'
+          | 'not_a_new_account'
+          | 'referrer_disabled';
       }
   > {
     if (input.customerId === input.referrerId) {
@@ -1004,8 +1009,69 @@ class PacksModuleService extends MedusaService({
     );
   }
 
+  // The partner rate each customer is actually paid at (spec 2026-09-09):
+  // their PARTNER GROUP's `partner_rate_bp` when they are in one — group
+  // config beats the manual flag — else customer_account_state.partner_referral_bp,
+  // else null (tier table). A real group that is NOT a partner group leaves the
+  // manual flag in force.
+  //
+  // Raw SQL on the core customer-group tables, the same way the referral-code
+  // readers below read `customer`: the module container cannot resolve the
+  // Customer module, and this has to run inside the close-week transaction.
+  // Oldest non-DEFAULT membership wins, exactly like resolvePlayerGroup
+  // (odds-sets.ts), so the group whose odds a player rolls is the group whose
+  // rate they earn.
+  @InjectManager()
+  async partnerBpForCustomers(
+    ids: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, number | null>> {
+    const out = new Map<string, number | null>();
+    if (ids.length === 0) return out;
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const ph = ids.map(() => '?').join(',');
+    const memberships = await em.execute<
+      {
+        customer_id: string;
+        name: string;
+        metadata: Record<string, unknown> | null;
+      }[]
+    >(
+      'SELECT cgc.customer_id, cg.name, cg.metadata ' +
+        'FROM customer_group_customer cgc ' +
+        'JOIN customer_group cg ON cg.id = cgc.customer_group_id AND cg.deleted_at IS NULL ' +
+        `WHERE cgc.customer_id IN (${ph}) AND cgc.deleted_at IS NULL ` +
+        'ORDER BY cg.created_at ASC, cg.id ASC',
+      ids,
+    );
+    const groupBp = new Map<string, number | null>();
+    for (const m of memberships) {
+      if (groupBp.has(m.customer_id) || isDefaultPlayerGroup(m)) continue;
+      groupBp.set(m.customer_id, groupPolicyOf(m).partner_rate_bp);
+    }
+    const states = await this.listCustomerAccountStates(
+      { customer_id: ids },
+      { take: ids.length },
+      sharedContext,
+    );
+    const stateBp = new Map(
+      states.map((r) => [r.customer_id, r.partner_referral_bp ?? null]),
+    );
+    for (const id of ids) {
+      const fromGroup = groupBp.get(id) ?? null;
+      out.set(id, fromGroup ?? stateBp.get(id) ?? null);
+    }
+    return out;
+  }
+
   // Partner flag: a manual commission rate that REPLACES the tier table for
   // this customer. null clears it. Bounds come from referral_settings.
+  //
+  // A customer inside a PARTNER GROUP is refused at the route
+  // (assertNotInPartnerGroup, group-policy.ts): the group's rate applies to
+  // them, so a manual rate would be stored but never paid — the operator moves
+  // them out of the group first.
   @InjectTransactionManager()
   async setPartnerRate(
     input: {
@@ -1175,15 +1241,10 @@ class PacksModuleService extends MedusaService({
       );
     }
     const referrerIds = [...downlineByReferrer.keys()];
-    const partnerRows = referrerIds.length
-      ? await this.listCustomerAccountStates(
-          { customer_id: referrerIds },
-          { take: referrerIds.length },
-          sharedContext,
-        )
-      : [];
-    const partnerBpByCustomer = new Map(
-      partnerRows.map((r) => [r.customer_id, r.partner_referral_bp ?? null]),
+    // Group rate first, manual rate second — see partnerBpForCustomers.
+    const partnerBpByCustomer = await this.partnerBpForCustomers(
+      referrerIds,
+      sharedContext,
     );
 
     type NewLine = {
@@ -1808,12 +1869,10 @@ class PacksModuleService extends MedusaService({
     const downlineCount = Number(agg?.downline_count ?? 0);
     const turnoverCents = Number(agg?.turnover_cents ?? 0);
 
-    const [state] = await this.listCustomerAccountStates(
-      { customer_id: input.customerId },
-      { take: 1 },
-      sharedContext,
-    );
-    const partnerBp = state?.partner_referral_bp ?? null;
+    const partnerBp =
+      (await this.partnerBpForCustomers([input.customerId], sharedContext)).get(
+        input.customerId,
+      ) ?? null;
     const settings = await this.getReferralSettings(sharedContext);
     const rateBp = resolveRateBp(turnoverCents, settings.tiers, partnerBp);
 
@@ -2190,7 +2249,10 @@ class PacksModuleService extends MedusaService({
     | {
         claimed: false;
         reason:
-          'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
+          | 'not_found'
+          | 'not_completed'
+          | 'already_claimed'
+          | 'window_closed';
       }
   > {
     // Deliberately NOT filtered on active: retiring a task must never strand
@@ -6591,7 +6653,14 @@ class PacksModuleService extends MedusaService({
     // question the Players list has to be able to answer.
     const state = new Map<
       string,
-      { frozen: boolean; disabled: boolean; phoneVerified: boolean }
+      {
+        frozen: boolean;
+        disabled: boolean;
+        phoneVerified: boolean;
+        // The MANUAL partner flag only; the group-sourced one is resolved by
+        // the route from the memberships it already loads.
+        partnerBp: number | null;
+      }
     >();
     if (ids.length === 0) return { wallet, vault, pullCount, vipLevel, state };
 
@@ -6639,9 +6708,10 @@ class PacksModuleService extends MedusaService({
         frozen: boolean;
         disabled: boolean;
         phone_verified_at: string | null;
+        partner_referral_bp: number | null;
       }[]
     >(
-      `SELECT customer_id, frozen, disabled, phone_verified_at FROM customer_account_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
+      `SELECT customer_id, frozen, disabled, phone_verified_at, partner_referral_bp FROM customer_account_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
       ids,
     );
 
@@ -6660,6 +6730,8 @@ class PacksModuleService extends MedusaService({
         frozen: Boolean(r.frozen),
         disabled: Boolean(r.disabled),
         phoneVerified: r.phone_verified_at !== null,
+        partnerBp:
+          r.partner_referral_bp === null ? null : Number(r.partner_referral_bp),
       });
     return { wallet, vault, pullCount, vipLevel, state };
   }
@@ -8830,7 +8902,8 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      SettleSnapshot | undefined;
+      | SettleSnapshot
+      | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME
@@ -9245,7 +9318,8 @@ class PacksModuleService extends MedusaService({
   private async reserveSettledStock(
     winner: SettledWinner,
     decrementStock:
-      ((handle: string, qty: number) => Promise<boolean>) | undefined,
+      | ((handle: string, qty: number) => Promise<boolean>)
+      | undefined,
     weekStartIso: string,
   ): Promise<void> {
     if (!decrementStock) return;
