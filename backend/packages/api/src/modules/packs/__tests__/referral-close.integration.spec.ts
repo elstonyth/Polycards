@@ -1,6 +1,6 @@
 import path from 'path';
 import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
-import { CORE_CUSTOMER_MODELS } from './core-customer-models';
+import { CORE_CUSTOMER_MODELS } from '../test-support/core-customer-models';
 import { PACKS_MODULE } from '../index';
 import type PacksModuleService from '../service';
 import ReferralAttribution from '../models/referral-attribution';

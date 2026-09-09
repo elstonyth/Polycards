@@ -6,7 +6,9 @@ import {
 } from '@medusajs/customer/dist/models';
 
 /**
- * The core Customer module's DML models, for `moduleIntegrationTestRunner`
+ * Test support (NOT under __tests__: the integration:modules tier globs every
+ * file there as a suite). The core Customer module's DML models, for
+ * `moduleIntegrationTestRunner`
  * specs whose code path reads the customer-group tables with raw SQL
  * (PacksModuleService.partnerGroupOfCustomers — partner groups, spec
  * 2026-09-09). The module runner only creates the tables of the models it is
