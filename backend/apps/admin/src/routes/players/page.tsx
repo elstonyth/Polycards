@@ -20,6 +20,7 @@ import CreatePlayerModal from './CreatePlayerModal';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useCustomerGroupsAdmin,
+  useExportPartnerAccounts,
   usePlayers,
   useSetPlayerDisabled,
 } from '../../lib/queries';
@@ -61,6 +62,7 @@ const PlayersPage = () => {
   const [target, setTarget] = useState<Target | null>(null);
   const [reason, setReason] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const exporter = useExportPartnerAccounts();
   // Only to name the default group for players with no stored membership. The
   // constant is the fallback for the window before the list resolves (and for a
   // shop that has no default row yet).
@@ -143,6 +145,16 @@ const PlayersPage = () => {
                 setPage(0);
               }}
             />
+            {/* The .xlsx of every generated partner login — the same rows the
+                generator shows once, so a closed modal loses nothing. */}
+            <Button
+              size="small"
+              variant="secondary"
+              isLoading={exporter.isPending}
+              onClick={() => exporter.mutate(undefined)}
+            >
+              {t('players.export')}
+            </Button>
             <Button size="small" onClick={() => setCreateOpen(true)}>
               {t('players.create')}
             </Button>

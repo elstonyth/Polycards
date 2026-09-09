@@ -4,16 +4,18 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
-import type {
-  IAuthModuleService,
-  ICustomerModuleService,
-} from '@medusajs/framework/types';
+import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { resolveFxRate } from '../../../modules/packs/pricing';
 import { isPartnerGroup } from '../../../modules/packs/group-policy';
 import { effectivePlayerGroup } from '../../../modules/packs/odds-sets';
-import { setPlayerGroup } from '../../../modules/packs/player-groups';
+import {
+  mintPartnerAccount,
+  type PartnerAccountRow,
+} from '../../../utils/partner-accounts';
+import { isValidUsername } from '../../../utils/profile-handle';
+import { CHARSET_MESSAGE } from '../../utils/username-guard';
 import {
   parsePaginationParams,
   parseSortParam,
@@ -133,56 +135,65 @@ export async function GET(
   });
 }
 
-type CreateBody = { email?: unknown; password?: unknown; group_id?: unknown };
+type CreateBody = {
+  count?: unknown;
+  display_name?: unknown;
+  group_id?: unknown;
+};
 
-// Same permissive shape as rate-limit.ts's EMAIL_RE: the emailpass provider is
-// the real gate, this only turns garbage into a 400 before anything is written.
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_BATCH = 50;
 
 /**
- * POST /admin/players — mint a login-able player from the dashboard.
+ * POST /admin/players — the partner account generator.
  *
- * Body `{ email, password, group_id? }`; `group_id` null/omitted means the
- * DEFAULT group (same contract as POST /admin/customers/:id/group).
+ * Body `{ count?, display_name?, group_id? }`: mints `count` (1–50, default
+ * 1) login-able accounts with generated emails and passwords, files each into
+ * `group_id` (null/omitted = DEFAULT, same contract as
+ * POST /admin/customers/:id/group) and answers with every credential — the
+ * same rows GET /admin/players/export serves later. `display_name` is
+ * optional: blank = auto ("Collector####"); typed = validated and must be
+ * free, then account #1 gets it exactly and the rest of the batch get
+ * numbered variants (claimUsername's rule).
  *
- * Storefront sign-up is two core routes (emailpass register, then POST
- * /store/customers with the registration token), which the admin cannot
- * replay. This does the same three writes server-side: emailpass identity →
- * customer row (has_account) → identity linked to the customer
- * (app_metadata.customer_id, the claim the session token carries). The seed's
- * test-customer block and scripts/reset-customer-password.ts are the same
- * dance.
- *
- * Module services directly, NOT createCustomerAccountWorkflow: the workflow
- * emits customer.created, whose subscriber files the player into DEFAULT
- * asynchronously — racing the explicit group write below and leaving them in
- * two groups. No event also means no free-welcome-pack stamp, which is right
- * for an operator-minted account.
- *
- * Order matters for the unwind. The identity is registered FIRST because it is
- * the write the provider refuses on a duplicate (entity_id = email); if the
- * customer half then fails, both halves are removed so a retry with the same
- * email is not refused by the piece that landed.
+ * Sequential, no batch rollback: accounts minted before a failure stay (they
+ * are valid logins, visible in the list and the export); the operator sees
+ * the error and generates the remainder. utils/partner-accounts.ts owns the
+ * per-account unwind.
  */
 export async function POST(
   req: AuthenticatedMedusaRequest<CreateBody>,
   res: MedusaResponse,
 ): Promise<void> {
   const body = req.body ?? {};
-  const email =
-    typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
-  if (!email || email.length > 254 || !EMAIL_RE.test(email)) {
+  const count = body.count === undefined ? 1 : body.count;
+  if (
+    typeof count !== 'number' ||
+    !Number.isInteger(count) ||
+    count < 1 ||
+    count > MAX_BATCH
+  ) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      'A valid email is required.',
+      `count must be an integer between 1 and ${MAX_BATCH}.`,
     );
   }
-  const password = typeof body.password === 'string' ? body.password : '';
-  if (password.length < 8 || password.length > 128) {
+  const rawName = body.display_name;
+  if (
+    rawName !== undefined &&
+    rawName !== null &&
+    typeof rawName !== 'string'
+  ) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      'Password must be 8–128 characters.',
+      'display_name must be a string or null.',
     );
+  }
+  const displayName =
+    typeof rawName === 'string' && rawName.trim() !== ''
+      ? rawName.trim()
+      : null;
+  if (displayName !== null && !isValidUsername(displayName)) {
+    throw new MedusaError(MedusaError.Types.INVALID_DATA, CHARSET_MESSAGE);
   }
   const rawGroup = body.group_id;
   if (
@@ -200,66 +211,27 @@ export async function POST(
       ? rawGroup.trim()
       : null;
 
+  // 404 on a bad group and 422 on a taken name BEFORE any write — after the
+  // first account exists, either would leave a half-minted batch behind.
   const customers = req.scope.resolve<ICustomerModuleService>(Modules.CUSTOMER);
-  const auth = req.scope.resolve<IAuthModuleService>(Modules.AUTH);
-
-  // 404 on a bad group BEFORE any write — once the customer exists, a missing
-  // group would strand them in no group at all.
   if (groupId) {
     await customers.retrieveCustomerGroup(groupId, { select: ['id'] });
   }
-
-  // `email` is unique among has_account rows. A Google-only player with this
-  // email has no emailpass identity, so register() alone would not catch it and
-  // the customer insert would fail AFTER the identity was minted.
-  const [taken] = await customers.listCustomers(
-    { email, has_account: true },
-    { select: ['id'], take: 1 },
-  );
-  if (taken) {
-    throw new MedusaError(
-      MedusaError.Types.DUPLICATE_ERROR,
-      `A player with email ${email} already exists.`,
-    );
+  if (displayName !== null) {
+    const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+    if (await packs.findCustomerIdByUsername(displayName)) {
+      // DUPLICATE_ERROR, not CONFLICT: Medusa's error handler replaces
+      // CONFLICT's message with idempotency-key advice (username-guard.ts).
+      throw new MedusaError(
+        MedusaError.Types.DUPLICATE_ERROR,
+        'That display name is already taken.',
+      );
+    }
   }
 
-  const { authIdentity, error } = await auth.register('emailpass', {
-    body: { email, password },
-  });
-  if (error || !authIdentity) {
-    throw new MedusaError(
-      MedusaError.Types.DUPLICATE_ERROR,
-      typeof error === 'string'
-        ? error
-        : `A login for ${email} already exists.`,
-    );
+  const players: PartnerAccountRow[] = [];
+  for (let i = 0; i < count; i++) {
+    players.push(await mintPartnerAccount(req.scope, { displayName, groupId }));
   }
-
-  let customerId: string | undefined;
-  try {
-    const [customer] = await customers.createCustomers([
-      { email, has_account: true },
-    ]);
-    customerId = customer.id;
-    await auth.updateAuthIdentities({
-      id: authIdentity.id,
-      app_metadata: { customer_id: customer.id },
-    });
-  } catch (e) {
-    // Best-effort unwind; the ORIGINAL error is what surfaces.
-    await Promise.allSettled([
-      auth.deleteAuthIdentities([authIdentity.id]),
-      customerId ? customers.deleteCustomers([customerId]) : undefined,
-    ]);
-    throw e;
-  }
-
-  const group = await setPlayerGroup(req.scope, customerId, groupId);
-  res.status(201).json({
-    player: {
-      id: customerId,
-      email,
-      group: { id: group.id, name: group.name },
-    },
-  });
+  res.status(201).json({ players });
 }

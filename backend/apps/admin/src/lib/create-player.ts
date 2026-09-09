@@ -1,29 +1,10 @@
 import { isDefaultPlayerGroup, isPartnerGroup } from './player-groups';
 
-// What the Create Player modal pre-fills. Generated in the browser so the
-// operator sees (and can copy) the credentials before anything is written;
-// POST /admin/players validates whatever is finally submitted.
+// Partner account generator rules the modal needs. Credentials are generated
+// SERVER-SIDE (POST /admin/players) — nothing here mints anything.
 
-const EMAIL_DOMAIN = 'polycards.gg';
-// Lowercase + digits minus the look-alikes (0/o, 1/l): these get read out
-// loud and typed by hand. 32 symbols, so a byte modulo it is unbiased.
-const EMAIL_ALPHABET = 'abcdefghijkmnpqrstuvwxyz23456789';
-// ponytail: same alphabet plus uppercase, no symbols — 16 chars is ~90 bits,
-// and a symbol-free password survives being pasted into a chat app.
-const PASSWORD_ALPHABET =
-  'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-
-const pick = (alphabet: string, n: number): string => {
-  const bytes = crypto.getRandomValues(new Uint8Array(n));
-  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('');
-};
-
-/** `partner-xxxxxx@polycards.gg` — the prefix says what the account is for in
- *  the Players list; the operator can overtype it. */
-export const generatePlayerEmail = (prefix = 'partner'): string =>
-  `${prefix}-${pick(EMAIL_ALPHABET, 6)}@${EMAIL_DOMAIN}`;
-
-export const generatePlayerPassword = (): string => pick(PASSWORD_ALPHABET, 16);
+/** Mirrors MAX_BATCH in api/admin/players/route.ts. */
+export const MAX_BATCH = 50;
 
 type GroupLike = {
   id: string;
@@ -31,9 +12,22 @@ type GroupLike = {
   metadata?: Record<string, unknown> | null;
 };
 
-/** The group the modal preselects: the first partner group (that is what
+/** The group the generator preselects: the first partner group (that is what
  *  operator-minted accounts are for), else DEFAULT, else nothing. */
 export const defaultGroupForNewPlayer = (
   groups: readonly GroupLike[],
 ): string =>
   (groups.find(isPartnerGroup) ?? groups.find(isDefaultPlayerGroup))?.id ?? '';
+
+/** Batch size as typed: an integer in 1..MAX_BATCH, else null. */
+export const parseBatchCount = (raw: string): number | null => {
+  const n = Number(raw.trim());
+  return Number.isInteger(n) && n >= 1 && n <= MAX_BATCH ? n : null;
+};
+
+/** Tab-separated `name  email  password` lines — what "Copy all" puts on the
+ *  clipboard, pasteable straight into a sheet. */
+export const credentialLines = (
+  rows: readonly { name: string | null; email: string; password: string }[],
+): string =>
+  rows.map((r) => `${r.name ?? ''}\t${r.email}\t${r.password}`).join('\n');

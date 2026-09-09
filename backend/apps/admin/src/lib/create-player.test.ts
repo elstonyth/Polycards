@@ -1,30 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
+  credentialLines,
   defaultGroupForNewPlayer,
-  generatePlayerEmail,
-  generatePlayerPassword,
+  parseBatchCount,
 } from './create-player';
-
-describe('generatePlayerEmail', () => {
-  it('is partner-<6 unambiguous chars>@polycards.gg and varies', () => {
-    const a = generatePlayerEmail();
-    expect(a).toMatch(
-      /^partner-[abcdefghijkmnpqrstuvwxyz23456789]{6}@polycards\.gg$/,
-    );
-    expect(generatePlayerEmail()).not.toBe(a);
-    expect(generatePlayerEmail('vip')).toMatch(/^vip-/);
-  });
-});
-
-describe('generatePlayerPassword', () => {
-  it('is 16 chars from the symbol-free alphabet and varies', () => {
-    const p = generatePlayerPassword();
-    expect(p).toMatch(
-      /^[ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789]{16}$/,
-    );
-    expect(generatePlayerPassword()).not.toBe(p);
-  });
-});
 
 describe('defaultGroupForNewPlayer', () => {
   const def = { id: 'g_def', name: 'DEFAULT', metadata: { is_default: true } };
@@ -43,5 +22,26 @@ describe('defaultGroupForNewPlayer', () => {
     expect(defaultGroupForNewPlayer([pro, def])).toBe('g_def');
     expect(defaultGroupForNewPlayer([pro])).toBe('');
     expect(defaultGroupForNewPlayer([])).toBe('');
+  });
+});
+
+describe('parseBatchCount', () => {
+  it('accepts integers in 1..50 and nothing else', () => {
+    expect(parseBatchCount('1')).toBe(1);
+    expect(parseBatchCount(' 50 ')).toBe(50);
+    for (const bad of ['0', '51', '1.5', '', 'x', '-3']) {
+      expect(parseBatchCount(bad)).toBeNull();
+    }
+  });
+});
+
+describe('credentialLines', () => {
+  it('is one tab-separated line per account, blank name allowed', () => {
+    expect(
+      credentialLines([
+        { name: 'Ada', email: 'a@x.gg', password: 'pw1' },
+        { name: null, email: 'b@x.gg', password: 'pw2' },
+      ]),
+    ).toBe('Ada\ta@x.gg\tpw1\n\tb@x.gg\tpw2');
   });
 });

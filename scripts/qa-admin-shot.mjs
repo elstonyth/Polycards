@@ -1,5 +1,5 @@
-// Screenshot the admin "Create player" flow WITHOUT a password: the session
-// comes from a token minted by backend/packages/api/src/scripts/
+// Screenshot the admin partner-account generator WITHOUT a password: the
+// session comes from a token minted by backend/packages/api/src/scripts/
 // qa-mint-admin-session.ts (QA_JWT_FILE), turned into the dashboard's cookie
 // session via POST /auth/session. Requires backend :9000 + admin :7000 up.
 //
@@ -30,20 +30,21 @@ if (!session.ok()) throw new Error(`POST /auth/session → ${session.status()}`)
 
 const page = await ctx.newPage();
 const shot = (name) =>
-  page.screenshot({ path: `${OUT}/create-player-${name}.png` });
+  page.screenshot({ path: `${OUT}/partner-accounts-${name}.png` });
 
 await page.goto(`${ADMIN}/dashboard/players`, {
   waitUntil: 'domcontentloaded',
 });
-const openBtn = page.getByRole('button', { name: 'Create player' });
+const openBtn = page.getByRole('button', { name: 'Generate partner accounts' });
 await openBtn.waitFor({ timeout: 60000 });
 await page.waitForTimeout(1500);
 await shot('1-players');
 
 await openBtn.click();
 const dialog = page.getByRole('dialog');
-await dialog.getByLabel('Email').waitFor({ timeout: 15000 });
-await page.waitForTimeout(800);
+await dialog.getByLabel('How many').waitFor({ timeout: 15000 });
+await dialog.getByLabel('How many').fill('3');
+await page.waitForTimeout(500);
 await shot('2-modal');
 
 // Group dropdown open, so the partner default + the alternatives are visible.
@@ -53,16 +54,24 @@ await shot('3-group-select');
 await page.keyboard.press('Escape');
 await page.waitForTimeout(300);
 
-const email = await dialog.getByLabel('Email').inputValue();
-await dialog.getByRole('button', { name: 'Create player' }).click();
-await dialog.getByText('Player created').waitFor({ timeout: 30000 });
+await dialog.getByRole('button', { name: 'Generate', exact: true }).click();
+await dialog.getByText('accounts generated').waitFor({ timeout: 60000 });
 await page.waitForTimeout(800);
-await shot('4-created');
+await shot('4-generated');
+const firstEmail = await dialog.locator('tbody td').nth(1).innerText();
 
 await dialog.getByRole('button', { name: 'Done' }).click();
-await page.getByText(email).first().waitFor({ timeout: 15000 });
+await page.getByText(firstEmail).first().waitFor({ timeout: 15000 });
 await page.waitForTimeout(800);
 await shot('5-players-after');
 
-console.log(`created ${email}; screenshots in ${OUT}`);
+// The Players-page export: prove the .xlsx actually downloads.
+const [download] = await Promise.all([
+  page.waitForEvent('download', { timeout: 30000 }),
+  page.getByRole('button', { name: 'Export partner logins' }).click(),
+]);
+const xlsx = `${OUT}/${download.suggestedFilename()}`;
+await download.saveAs(xlsx);
+
+console.log(`generated 3 (first ${firstEmail}); export saved to ${xlsx}`);
 await browser.close();

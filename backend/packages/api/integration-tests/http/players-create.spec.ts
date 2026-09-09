@@ -5,18 +5,21 @@ import { mintSuperAdmin, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
-// POST /admin/players — the dashboard's "Create player". What only a booted app
-// can prove: the minted credentials pass core's own login route, the session
-// resolves to the created customer (identity linked, not orphaned), and the
-// player holds exactly the chosen group — the customer.created subscriber
-// must NOT have raced a DEFAULT membership in beside it.
+// POST /admin/players + GET /admin/players/export — the partner account
+// generator. What only a booted app can prove: the generated credentials pass
+// core's own login route, the session resolves to the created customer
+// (identity linked, not orphaned), each account holds exactly the chosen
+// group (the customer.created subscriber must NOT have raced a DEFAULT
+// membership in beside it), display names obey the username invariant, and
+// the export serves a real workbook of what was minted.
 
 const PASSWORD = 'players-create-admin-password-1'; // gitleaks:allow
 const ADMIN_EMAIL = 'players-create-admin@test.dev';
-// Mixed case on purpose: the route lowercases before every write.
-const PLAYER_EMAIL = 'Partner-Abc123@test.dev';
-const PLAYER_PASSWORD = 'players-create-player-password-1'; // gitleaks:allow
 const GROUP_NAME = 'Players Create Partners';
+const EMAIL_RE =
+  /^partner-[abcdefghijkmnpqrstuvwxyz23456789]{6}@polycards\.gg$/;
+const XLSX_MIME =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 const jwtActor = (token: string): string =>
   JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString()).actor_id;
@@ -24,7 +27,7 @@ const jwtActor = (token: string): string =>
 medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ api, getContainer }) => {
-    describe('POST /admin/players', () => {
+    describe('partner account generator', () => {
       let adminToken: string;
       let groupId: string;
 
@@ -33,9 +36,18 @@ medusaIntegrationTestRunner({
       });
       const customers = (): ICustomerModuleService =>
         getContainer().resolve<ICustomerModuleService>(Modules.CUSTOMER);
-      const create = (body: Record<string, unknown>) =>
+      const generate = (body: Record<string, unknown>) =>
         unwrapResponse(
           api.post('/admin/players', body, { headers: adminHeaders() }),
+        );
+      // arraybuffer is load-bearing (inventory-export.spec): without it axios
+      // decodes the zip as text and the PK check passes on garbage.
+      const exportXlsx = (qs = '') =>
+        unwrapResponse(
+          api.get(`/admin/players/export${qs}`, {
+            headers: adminHeaders(),
+            responseType: 'arraybuffer',
+          }),
         );
 
       beforeEach(async () => {
@@ -52,94 +64,101 @@ medusaIntegrationTestRunner({
         groupId = group.id;
       });
 
-      it('mints a player who can log in, in exactly the chosen group', async () => {
-        const res = await create({
-          email: PLAYER_EMAIL,
-          password: PLAYER_PASSWORD,
-          group_id: groupId,
-        });
+      it('mints a batch that can log in, each in exactly the chosen group', async () => {
+        const res = await generate({ count: 2, group_id: groupId });
         expect(res.status).toBe(201);
-        const { player } = res.data;
-        expect(player.email).toBe(PLAYER_EMAIL.toLowerCase());
-        expect(player.group).toEqual({ id: groupId, name: GROUP_NAME });
+        const { players } = res.data;
+        expect(players).toHaveLength(2);
+        expect(new Set(players.map((p: any) => p.email)).size).toBe(2);
+        for (const p of players) {
+          expect(p.email).toMatch(EMAIL_RE);
+          expect(p.password).toHaveLength(16);
+          expect(p.name).toMatch(/^Collector\d{4}$/);
+          expect(p.group).toBe(GROUP_NAME);
+        }
 
         // The credentials pass core's login route — the whole point — and the
         // token names THIS customer, so the identity is linked, not orphaned.
+        const [first] = players;
         const login = await unwrapResponse(
           api.post('/auth/customer/emailpass', {
-            email: player.email,
-            password: PLAYER_PASSWORD,
+            email: first.email,
+            password: first.password,
           }),
         );
         expect(login.status).toBe(200);
-        expect(jwtActor(login.data.token)).toBe(player.id);
+        expect(jwtActor(login.data.token)).toBe(first.id);
 
         // One membership, the chosen one: no DEFAULT beside it.
         const groups = await customers().listCustomerGroups({
-          customers: player.id,
+          customers: first.id,
         });
         expect(groups.map((g) => g.id)).toEqual([groupId]);
 
-        // And the Players list shows the row with the group named.
+        // The Players list shows the row with the group and partner badge.
         const list = await unwrapResponse(
-          api.get('/admin/players?q=partner-abc123', {
+          api.get(`/admin/players?q=${encodeURIComponent(first.email)}`, {
             headers: adminHeaders(),
           }),
         );
-        expect(list.status).toBe(200);
         expect(list.data.players).toHaveLength(1);
         expect(list.data.players[0]).toMatchObject({
-          id: player.id,
-          email: player.email,
+          id: first.id,
+          name: first.name,
           groups: [GROUP_NAME],
           partner: 'group',
         });
       });
 
-      it('lands in DEFAULT without group_id and refuses a reused email', async () => {
-        const first = await create({
-          email: 'second-player@test.dev',
-          password: PLAYER_PASSWORD,
-        });
-        expect(first.status).toBe(201);
-        expect(first.data.player.group.name).toBe('DEFAULT');
+      it('gives a typed name to the first account, numbered variants to the rest, and refuses a taken one', async () => {
+        const res = await generate({ count: 2, display_name: 'AdaPartner' });
+        expect(res.status).toBe(201);
+        const names = res.data.players.map((p: any) => p.name);
+        expect(names[0]).toBe('AdaPartner');
+        expect(names[1]).toMatch(/^AdaPartner\d{4}$/);
+        // DEFAULT when no group is given.
+        expect(res.data.players[0].group).toBe('DEFAULT');
 
-        // Case-insensitive: the same mailbox, differently typed.
-        const dup = await create({
-          email: 'SECOND-player@test.dev',
-          password: PLAYER_PASSWORD,
-        });
+        // Case-insensitive, the username invariant.
+        const dup = await generate({ display_name: 'adapartner' });
         expect(dup.status).toBe(422);
-        expect(
-          await customers().listCustomers({ email: 'second-player@test.dev' }),
-        ).toHaveLength(1);
+        const bad = await generate({ display_name: 'has space' });
+        expect(bad.status).toBe(400);
       });
 
-      it('400s a bad body and 404s an unknown group, writing nothing', async () => {
-        expect(
-          (await create({ email: 'nope', password: PLAYER_PASSWORD })).status,
-        ).toBe(400);
-        expect(
-          (await create({ email: 'short@test.dev', password: 'short' })).status,
-        ).toBe(400);
-        expect(
-          (
-            await create({
-              email: 'nogroup@test.dev',
-              password: PLAYER_PASSWORD,
-              group_id: 'cgrp_missing',
-            })
-          ).status,
-        ).toBe(404);
-        expect(
-          await customers().listCustomers({ email: 'nogroup@test.dev' }),
-        ).toHaveLength(0);
-        // No identity either: a later create with this email must succeed.
-        const later = await create({
-          email: 'nogroup@test.dev',
-          password: PLAYER_PASSWORD,
-        });
-        expect(later.status).toBe(201);
+      it('400s a bad count and 404s an unknown group, minting nothing', async () => {
+        const before = (await customers().listCustomers({ has_account: true }))
+          .length;
+        expect((await generate({ count: 0 })).status).toBe(400);
+        expect((await generate({ count: 51 })).status).toBe(400);
+        expect((await generate({ group_id: 'cgrp_missing' })).status).toBe(404);
+        const after = (await customers().listCustomers({ has_account: true }))
+          .length;
+        expect(after).toBe(before);
+      });
+
+      it('exports the generated accounts as a real .xlsx, all or one batch', async () => {
+        const a = await generate({ count: 2, group_id: groupId });
+        const b = await generate({ count: 1 });
+        const ids = a.data.players.map((p: any) => p.id);
+
+        const all = await exportXlsx();
+        expect(all.status).toBe(200);
+        expect(all.headers['content-type']).toBe(XLSX_MIME);
+        expect(all.headers['content-disposition']).toMatch(
+          /^attachment; filename="partner-accounts-\d{4}-\d{2}-\d{2}\.xlsx"$/,
+        );
+        const body = Buffer.from(all.data);
+        expect(body.subarray(0, 2).toString('latin1')).toBe('PK');
+        // 3 rows of credentials is well past an empty workbook.
+        expect(body.length).toBeGreaterThan(2000);
+
+        const batch = await exportXlsx(`?ids=${ids.join(',')}`);
+        expect(batch.status).toBe(200);
+        expect(Buffer.from(batch.data).length).toBeLessThan(body.length);
+
+        expect((await exportXlsx('?ids=')).status).toBe(400);
+        void b;
       });
     });
   },

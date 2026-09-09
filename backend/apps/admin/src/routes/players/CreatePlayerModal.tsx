@@ -1,60 +1,62 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
 import {
   Button,
-  Copy,
   FocusModal,
   Heading,
   Input,
   Label,
   Select,
+  Table,
   Text,
+  toast,
 } from '@medusajs/ui';
-import { useCreatePlayer, useCustomerGroupsAdmin } from '../../lib/queries';
 import {
+  useCreatePlayers,
+  useCustomerGroupsAdmin,
+  useExportPartnerAccounts,
+  type CreatedPlayer,
+} from '../../lib/queries';
+import {
+  credentialLines,
   defaultGroupForNewPlayer,
-  generatePlayerEmail,
-  generatePlayerPassword,
+  MAX_BATCH,
+  parseBatchCount,
 } from '../../lib/create-player';
 import { effectiveOddsSet, isPartnerGroup } from '../../lib/player-groups';
 
-// Mint a storefront login from the dashboard (POST /admin/players): a
-// generated email + password the operator hands to a partner, and ONE player
-// group, preselected to the partner group. Every value is editable before
-// saving; the route validates what is submitted.
+// Partner account generator (POST /admin/players). The operator types
+// nothing that has to be right: how many, an optional display name, and the
+// group (preselected to the partner group). Emails and passwords are minted
+// server-side and come back once here — and stay exportable from the Players
+// page's "Export partner logins", so closing this without copying loses
+// nothing.
 type Props = {
   open: boolean;
   onClose: () => void;
 };
 
-// What the operator hands over. Held AFTER the create so the modal can show
-// it once: only the hash is stored, so closing this view without copying
-// means a password reset.
-type Created = { id: string; email: string; password: string; group: string };
-
 const CreatePlayerModal = ({ open, onClose }: Props) => {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const { data: groupList, isError: groupsError } = useCustomerGroupsAdmin();
-  const create = useCreatePlayer();
+  const generate = useCreatePlayers();
+  const exporter = useExportPartnerAccounts();
 
-  const [email, setEmail] = useState(generatePlayerEmail);
-  const [password, setPassword] = useState(generatePlayerPassword);
+  const [count, setCount] = useState('1');
+  const [name, setName] = useState('');
   // Unsaved pick only — undefined falls through to the computed default, so
   // the Select lands on the partner group the moment the list resolves.
   const [picked, setPicked] = useState<string | undefined>();
-  const [created, setCreated] = useState<Created | null>(null);
+  const [created, setCreated] = useState<CreatedPlayer[] | null>(null);
 
   const fresh = () => {
-    setEmail(generatePlayerEmail());
-    setPassword(generatePlayerPassword());
+    setCount('1');
+    setName('');
     setPicked(undefined);
     setCreated(null);
   };
 
-  // Fresh credentials on every open, during render (RegisterCardModal's
-  // pattern) — a reused email would be refused on the second create.
+  // Reset on the open transition, during render (RegisterCardModal's pattern).
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
@@ -63,31 +65,28 @@ const CreatePlayerModal = ({ open, onClose }: Props) => {
 
   const groups = groupList?.customer_groups ?? [];
   const groupId = picked ?? defaultGroupForNewPlayer(groups);
-  const canSave =
-    email.trim() !== '' && password.length >= 8 && !create.isPending;
+  const batch = parseBatchCount(count);
+  const canSave = batch !== null && !generate.isPending;
 
   const save = async () => {
+    if (batch === null) return;
     try {
-      const res = await create.mutateAsync({
-        email: email.trim(),
-        password,
+      const res = await generate.mutateAsync({
+        count: batch,
+        display_name: name.trim() || null,
         group_id: groupId || null,
       });
-      setCreated({
-        id: res.player.id,
-        email: res.player.email,
-        password,
-        group: res.player.group.name,
-      });
+      setCreated(res.players);
     } catch {
-      // useCreatePlayer's onError already toasted; the form stays as typed so
-      // the operator can fix the email and retry.
+      // useCreatePlayers' onError already toasted; the form stays as typed so
+      // the operator can fix the name and retry.
     }
   };
 
-  const openPlayer = (id: string) => {
-    onClose();
-    navigate(`/customers/${id}`);
+  const copyAll = async () => {
+    if (!created) return;
+    await navigator.clipboard.writeText(credentialLines(created));
+    toast.success(t('players.copied', { count: created.length }));
   };
 
   return (
@@ -112,7 +111,7 @@ const CreatePlayerModal = ({ open, onClose }: Props) => {
                 <Button
                   size="small"
                   onClick={save}
-                  isLoading={create.isPending}
+                  isLoading={generate.isPending}
                   disabled={!canSave}
                 >
                   {t('players.createSave')}
@@ -122,12 +121,14 @@ const CreatePlayerModal = ({ open, onClose }: Props) => {
           </div>
         </FocusModal.Header>
         <FocusModal.Body className="flex flex-col items-center overflow-auto p-10">
-          <div className="flex w-full max-w-[560px] flex-col gap-y-6">
+          <div className="flex w-full max-w-[760px] flex-col gap-y-6">
             {created ? (
               <>
                 <div>
                   <FocusModal.Title asChild>
-                    <Heading level="h2">{t('players.createdTitle')}</Heading>
+                    <Heading level="h2">
+                      {t('players.createdTitle', { count: created.length })}
+                    </Heading>
                   </FocusModal.Title>
                   <FocusModal.Description asChild>
                     <Text className="text-ui-fg-subtle mt-1" size="small">
@@ -135,47 +136,46 @@ const CreatePlayerModal = ({ open, onClose }: Props) => {
                     </Text>
                   </FocusModal.Description>
                 </div>
-                <dl className="grid grid-cols-[auto_1fr] items-center gap-x-6 gap-y-3">
-                  <dt>
-                    <Text size="small" weight="plus">
-                      {t('players.createEmail')}
-                    </Text>
-                  </dt>
-                  <dd className="flex items-center gap-x-2 font-mono text-sm">
-                    <span className="break-all">{created.email}</span>
-                    <Copy content={created.email} />
-                  </dd>
-                  <dt>
-                    <Text size="small" weight="plus">
-                      {t('players.createPassword')}
-                    </Text>
-                  </dt>
-                  <dd className="flex items-center gap-x-2 font-mono text-sm">
-                    <span className="break-all">{created.password}</span>
-                    <Copy content={created.password} />
-                  </dd>
-                  <dt>
-                    <Text size="small" weight="plus">
-                      {t('players.createGroup')}
-                    </Text>
-                  </dt>
-                  <dd>
-                    <Text size="small">{created.group}</Text>
-                  </dd>
-                </dl>
+                <div className="overflow-x-auto rounded-lg border">
+                  <Table>
+                    <Table.Header>
+                      <Table.Row>
+                        <Table.HeaderCell>
+                          {t('players.createdName')}
+                        </Table.HeaderCell>
+                        <Table.HeaderCell>
+                          {t('players.createdEmail')}
+                        </Table.HeaderCell>
+                        <Table.HeaderCell>
+                          {t('players.createdPassword')}
+                        </Table.HeaderCell>
+                      </Table.Row>
+                    </Table.Header>
+                    <Table.Body>
+                      {created.map((p) => (
+                        <Table.Row key={p.id}>
+                          <Table.Cell>{p.name ?? '—'}</Table.Cell>
+                          <Table.Cell className="font-mono text-sm">
+                            {p.email}
+                          </Table.Cell>
+                          <Table.Cell className="font-mono text-sm">
+                            {p.password}
+                          </Table.Cell>
+                        </Table.Row>
+                      ))}
+                    </Table.Body>
+                  </Table>
+                </div>
                 <div className="flex flex-wrap gap-x-2 gap-y-2">
-                  <Copy
-                    content={`${created.email}\n${created.password}`}
-                    asChild
-                  >
-                    <Button size="small">{t('players.copyBoth')}</Button>
-                  </Copy>
                   <Button
                     size="small"
-                    variant="secondary"
-                    onClick={() => openPlayer(created.id)}
+                    isLoading={exporter.isPending}
+                    onClick={() => exporter.mutate(created.map((p) => p.id))}
                   >
-                    {t('players.createdOpen')}
+                    {t('players.downloadXlsx')}
+                  </Button>
+                  <Button size="small" variant="secondary" onClick={copyAll}>
+                    {t('players.copyAll')}
                   </Button>
                   <Button size="small" variant="secondary" onClick={fresh}>
                     {t('players.createdAnother')}
@@ -199,50 +199,42 @@ const CreatePlayerModal = ({ open, onClose }: Props) => {
                   <Label
                     size="small"
                     weight="plus"
-                    htmlFor="create-player-email"
+                    htmlFor="create-player-count"
                   >
-                    {t('players.createEmail')}
+                    {t('players.createCount')}
                   </Label>
                   <Input
-                    id="create-player-email"
-                    type="email"
-                    autoComplete="off"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    id="create-player-count"
+                    type="number"
+                    min={1}
+                    max={MAX_BATCH}
+                    step={1}
+                    className="w-32"
+                    value={count}
+                    onChange={(e) => setCount(e.target.value)}
                   />
+                  <Text size="xsmall" className="text-ui-fg-subtle">
+                    {t('players.createCountHint', { max: MAX_BATCH })}
+                  </Text>
                 </div>
 
                 <div className="flex flex-col gap-y-2">
                   <Label
                     size="small"
                     weight="plus"
-                    htmlFor="create-player-password"
+                    htmlFor="create-player-name"
                   >
-                    {t('players.createPassword')}
+                    {t('players.createName')}
                   </Label>
-                  <div className="flex gap-x-2">
-                    {/* type="text", not "password": the operator has to read
-                        it out to the partner, and nothing is hidden from them
-                        anyway — they just generated it. */}
-                    <Input
-                      id="create-player-password"
-                      type="text"
-                      autoComplete="off"
-                      className="font-mono"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                    />
-                    <Button
-                      size="small"
-                      variant="secondary"
-                      type="button"
-                      onClick={() => setPassword(generatePlayerPassword())}
-                    >
-                      {t('players.createRegenerate')}
-                    </Button>
-                  </div>
+                  <Input
+                    id="create-player-name"
+                    autoComplete="off"
+                    maxLength={30}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
                   <Text size="xsmall" className="text-ui-fg-subtle">
-                    {t('players.createPasswordHint')}
+                    {t('players.createNameHint')}
                   </Text>
                 </div>
 

@@ -1038,9 +1038,17 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
-      // Mint a login-able player from the dashboard (POST /admin/players).
+      // Partner account generator (POST /admin/players): mints up to 50
+      // logins per call.
       matcher: '/admin/players',
       method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Serves the generated partner PASSWORDS (GET /admin/players/export) —
+      // the payout-details GET precedent: a sensitive read gets the limiter.
+      matcher: '/admin/players/export',
+      method: 'GET',
       middlewares: [adminActionRateLimit],
     },
     {
