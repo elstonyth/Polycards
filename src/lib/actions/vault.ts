@@ -195,6 +195,9 @@ export async function getPaymentLimits(): Promise<PaymentLimits> {
       minRm: r.data.withdrawal.min_rm,
       maxRm: r.data.withdrawal.max_rm,
     },
+    // Absent (older backend) reads as open — see the schema's comment.
+    depositsEnabled: r.data.deposits_enabled ?? true,
+    withdrawalsEnabled: r.data.withdrawals_enabled ?? true,
   };
 }
 
