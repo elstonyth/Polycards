@@ -20,8 +20,13 @@ concurrency:
 jobs:
   # Most PRs here are storefront work — don't make them pay the ~10-min backend
   # toll for code they didn't touch. Backend jobs run only when backend/** (or
-  # this workflow) changes; a skipped job counts as PASSING for branch
-  # protection, so required checks stay satisfied.
+  # this workflow) changes. They are NOT individually required checks: a
+  # required check that skips would block every storefront-only PR forever,
+  # and integration-http's contexts are per-shard ("integration-http (N)").
+  # Instead the always-run `backend-gate` job (bottom of this file) aggregates
+  # their results — success or skipped passes, failure or cancelled fails —
+  # and THAT single context is the required check (round 15, 2026-09-10; the
+  # round-14 belief that the jobs were already required was wrong).
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -578,6 +583,32 @@ jobs:
           name: modules-integration-log
           path: backend/packages/api/modules-tests.log
           retention-days: 7
+
+  # Aggregates the four path-filtered backend jobs into ONE always-reporting
+  # context so branch protection can require it. `if: always()` is what makes
+  # it report on storefront-only PRs, where every needed job is `skipped`.
+  # Pass = every result is success or skipped. Fail = any failure or
+  # cancelled (a cancelled shard is how a cold-install timeout presents, and
+  # that must stay visible, not vanish into a green gate). Matrix width and
+  # the path filter can change freely; this name does not.
+  backend-gate:
+    needs:
+      [backend-quality, backend-unit, integration-http, integration-modules]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate backend job results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS"
+          bad=$(echo "$RESULTS" | grep -Eo '"result": *"(failure|cancelled)"' | wc -l)
+          if [ "$bad" -ne 0 ]; then
+            echo "::error::$bad backend job(s) failed or were cancelled"
+            exit 1
+          fi
+          echo "backend gate: all backend jobs succeeded or were skipped"
 
   # Secret scan — forward-looking insurance for a payments-adjacent codebase.
   # Historical false positives can be waived via a .gitleaksignore fingerprint.
