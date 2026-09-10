@@ -1241,13 +1241,13 @@ export async function submitHeldWithdrawal(
     ),
     from: ['held'],
     to: 'pending',
-    // The DECISION, not the outcome (plan 132). `after.status` is 'pending'
-    // even though the submit below may still be refused and refunded, and
-    // even though an UNDEBITED row is closed 'failed' by this same call — the
-    // row records what the operator asked for. What actually happened is on
-    // the withdrawal row itself (`status`, `failure_reason`). Status, amount
-    // and bank code only: the account number and holder name never enter an
-    // audit payload, for the same reason they never enter a log line.
+    // The DECISION, not the outcome (plan 132). `after.status` is the status
+    // the claim landed on ('pending', or 'failed' for a never-debited row —
+    // claimWithdrawalAgainstDebit overwrites it); the submit below may still
+    // be refused and refunded, and that outcome is on the withdrawal row
+    // (`status`, `failure_reason`). Status, amount and bank code only: the
+    // account number and holder name never enter an audit payload, for the
+    // same reason they never enter a log line.
     audit: {
       admin_id: adminId,
       action: 'approve_withdrawal',

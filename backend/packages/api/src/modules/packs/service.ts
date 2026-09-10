@@ -3500,6 +3500,8 @@ class PacksModuleService extends MedusaService({
    * what makes it honest: a CHECK violation or any other insert failure
    * aborts the same transaction the claim is in, so "status flipped with no
    * record" and "record written with no flip" are both impossible.
+   * `after.status` is overwritten with the status the claim actually landed
+   * on, so an audit row can never contradict the withdrawal row it describes.
    *
    * @returns `debited` — whether a debit exists for this payout, decided
    * under the lock, so a caller may act on `false` as "no debit will ever
@@ -3576,17 +3578,22 @@ class PacksModuleService extends MedusaService({
       // carries a transactionManager instead of opening a second transaction —
       // if it did open one, the claim would land outside the lock and the whole
       // pact above would silently lapse.
+      const landed = debited ? input.to : 'failed';
       const claimed = await this.claimWithdrawalStatus(
-        { id: input.id, from: input.from, to: debited ? input.to : 'failed' },
+        { id: input.id, from: input.from, to: landed },
         sharedContext,
       );
       // Only the caller that actually MOVED the row records a decision: a
       // loser (double-clicked Approve, a racing Deny) changed nothing, and an
       // audit row for it would read as a second decision that never happened.
+      // `after.status` is stamped from `landed`, not from what the caller
+      // asked for: an approve of an UNDEBITED row closes it 'failed', and an
+      // audit row claiming 'pending' would contradict the row it describes.
       if (claimed && input.audit) {
         await this.audit(
           {
             ...input.audit,
+            after: { ...(input.audit.after ?? {}), status: landed },
             entity_type: 'gateway_withdrawal',
             entity_id: input.id,
           },

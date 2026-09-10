@@ -484,6 +484,15 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect((await reread(row.id)).status).toBe('failed');
         // "Refunding" a row that never took the money would mint credit.
         expect(await creditRows(row.customer_id)).toHaveLength(0);
+
+        // The approve WAS a decision and is recorded as one — but its
+        // `after.status` is the status the claim landed on, not the 'pending'
+        // the caller asked for. An audit row saying 'pending' here would
+        // contradict the withdrawal row two assertions above.
+        const audits = await auditRows(row.id);
+        expect(audits).toHaveLength(1);
+        expect(audits[0].action).toBe('approve_withdrawal');
+        expect((audits[0].after as { status?: string }).status).toBe('failed');
       });
 
       it('404s an unknown id without touching anything', async () => {
