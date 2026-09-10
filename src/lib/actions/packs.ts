@@ -105,6 +105,11 @@ const PACKS_RULES: ErrorRule[] = [
   [/not available|not found|404/i, "This pack isn't available right now."],
 ];
 const PACKS_FALLBACK = 'Could not open the pack. Please try again.';
+// Every failure AFTER a 2xx: the open is committed and the pull vaulted, so
+// "try again" would invite a second charge (schemas.ts, the unchecked-envelope
+// rule). Says where the card went instead.
+const CHARGED_BUT_UNSHOWABLE =
+  "Your pack opened and the card is in your Vault, but we couldn't show it here.";
 
 /**
  * A port `Failure` in the open actions' vocabulary.
@@ -170,8 +175,7 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
       // again" over a charged open (a retry would charge twice).
       return {
         ok: false,
-        error:
-          "Your pack opened and the card is in your Vault, but we couldn't show it here.",
+        error: CHARGED_BUT_UNSHOWABLE,
       };
     }
 
@@ -198,9 +202,11 @@ export async function openPack(slug: string): Promise<OpenPackResult> {
     };
   } catch (error) {
     logger.error('[packs] response projection failed:', error);
+    // A 2xx got here — the open is committed and the pull vaulted, so this
+    // must not say "try again" either.
     return {
       ok: false,
-      error: PACKS_FALLBACK,
+      error: CHARGED_BUT_UNSHOWABLE,
       needsAuth: false,
       needsTopUp: false,
     };
@@ -257,17 +263,19 @@ export async function openBatch(
     // The envelope is unchecked (see the header), so `rolls` might not be an
     // array at all. Pre-port this was a TypeError — `for (const rawRoll of
     // rawRolls)` over `undefined` — caught by the action's own try/catch and
-    // answered with PACKS_FALLBACK; keep that answer with this guard
-    // rather than invoking card-mapping copy. A non-JSON 200 never reaches here — the
-    // adapter turns it into a Failure before `r.data` exists — but a JSON 200
-    // that simply omits `rolls` does, which is what the test below pins. An
-    // explicit `rolls: []` is left alone: that is a legal (if odd) 2xx and has
-    // always answered ok with no rolls.
+    // answered with the pre-port SHAPE (both flags false); this guard keeps
+    // that shape, but not the pre-port sentence — a 2xx got here, so the
+    // charge is committed and "try again" would invite a second one. A
+    // non-JSON 200 never reaches here — the adapter turns it into a Failure
+    // before `r.data` exists — but a JSON 200 that simply omits `rolls` does,
+    // which is what the test below pins. An explicit `rolls: []` is left
+    // alone: that is a legal (if odd) 2xx and has always answered ok with no
+    // rolls.
     if (!Array.isArray(rawRolls)) {
       logger.error(`[packs] open-batch returned no rolls array for '${slug}'`);
       return {
         ok: false,
-        error: PACKS_FALLBACK,
+        error: CHARGED_BUT_UNSHOWABLE,
         needsAuth: false,
         needsTopUp: false,
       };
@@ -287,8 +295,7 @@ export async function openBatch(
     if (rolls.length === 0 && rawRolls.length > 0) {
       return {
         ok: false,
-        error:
-          "Your pack opened and the card is in your Vault, but we couldn't show it here.",
+        error: CHARGED_BUT_UNSHOWABLE,
       };
     }
 
@@ -307,9 +314,11 @@ export async function openBatch(
     };
   } catch (error) {
     logger.error('[packs] response projection failed:', error);
+    // A 2xx got here — the open is committed and every mapped pull is
+    // vaulted, so this must not say "try again" either.
     return {
       ok: false,
-      error: PACKS_FALLBACK,
+      error: CHARGED_BUT_UNSHOWABLE,
       needsAuth: false,
       needsTopUp: false,
     };
