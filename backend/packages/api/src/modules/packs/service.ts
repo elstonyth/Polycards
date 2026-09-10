@@ -3491,6 +3491,16 @@ class PacksModuleService extends MedusaService({
    * critical sections are mutually exclusive and each reads what the other
    * wrote: whichever commits first wins, and the loser observes it.
    *
+   * THE AUDIT ROW RIDES THIS TRANSACTION (plan 132). An admin exit from
+   * 'held' moves real money — approve submits a bank transfer, deny appends a
+   * refund to the append-only ledger — and until this existed the only record
+   * of who and why was a log line, which outlives nothing (DigitalOcean run
+   * logs cover the CURRENT deployment only; see the 2026-08-11 note in
+   * gateway-withdrawal.ts). Writing the row HERE rather than in the caller is
+   * what makes it honest: a CHECK violation or any other insert failure
+   * aborts the same transaction the claim is in, so "status flipped with no
+   * record" and "record written with no flip" are both impossible.
+   *
    * @returns `debited` — whether a debit exists for this payout, decided
    * under the lock, so a caller may act on `false` as "no debit will ever
    * land". `claimed` — whether THIS caller moved the row (see
@@ -3509,6 +3519,10 @@ class PacksModuleService extends MedusaService({
        *  closed 'failed' instead: there is no other honest destination for a
        *  payout that never took the customer's money. */
       to: WithdrawalStatus;
+      /** The admin decision to record, written only when THIS caller claimed
+       *  the row. `entity_type` / `entity_id` are supplied here so every
+       *  writer files against the same withdrawal row. */
+      audit?: Omit<AdminAuditRow, 'entity_type' | 'entity_id'>;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ debited: boolean; claimed: boolean }> {
@@ -3566,6 +3580,19 @@ class PacksModuleService extends MedusaService({
         { id: input.id, from: input.from, to: debited ? input.to : 'failed' },
         sharedContext,
       );
+      // Only the caller that actually MOVED the row records a decision: a
+      // loser (double-clicked Approve, a racing Deny) changed nothing, and an
+      // audit row for it would read as a second decision that never happened.
+      if (claimed && input.audit) {
+        await this.audit(
+          {
+            ...input.audit,
+            entity_type: 'gateway_withdrawal',
+            entity_id: input.id,
+          },
+          sharedContext,
+        );
+      }
       return { debited, claimed };
     } catch (error) {
       // ONLY 55P03 (lock_not_available) is translated. Anything else — a
