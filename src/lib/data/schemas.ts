@@ -1185,3 +1185,26 @@ export const RecentPollResponseSchema = z.object({
   ),
   drought: pollTiers.nullish().transform((value) => value ?? {}),
 });
+
+/** GET /api/pull-gaps — the stats chart's VIEW shape (getPullGaps's return),
+ *  not the backend Store envelope PullGapsSchema validates. A 200 carrying
+ *  the older view (no `hits`) must land as the chart's unavailable state,
+ *  never as a render-time throw through the panel's error boundary. */
+export const PullGapsPollResponseSchema = z.object({
+  rarity,
+  pct: finite.nullable(),
+  expected: finite.nullable(),
+  avg: finite.nullable(),
+  last20: finite.nullable(),
+  current: count,
+  hits: z.array(
+    z.object({
+      id: z.string(),
+      gap: count,
+      rolledAt: z.string(),
+      who: z.string(),
+      avatar: z.string().nullable(),
+      frame: z.string().nullable(),
+    }),
+  ),
+});
