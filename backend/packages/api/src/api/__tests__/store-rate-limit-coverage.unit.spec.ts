@@ -126,11 +126,20 @@ const GET_EXEMPT: { path: string; reason: string }[] = [
 // They are deliberately NOT on GET_EXEMPT (writing "cached" would be false)
 // and NOT given a limiter (out of scope here — a store-read budget on a
 // catalog/pricing route needs its own sizing pass, the same reasoning the
-// plan gives for not touching the cached ones). The coverage test below is
-// wrapped in `it.failing` specifically for these three, so the suite stays
-// green AND the gap stays visible: the moment any of the three gets a real
-// limiter or cache, `it.failing` itself starts failing (an "unexpectedly
-// passed" report), forcing whoever fixed it to notice and move the route.
+// plan gives for not touching the cached ones).
+//
+// This list is a RECORDED FINDING, not an exemption. The GET-coverage test
+// below pins it as an EXACT SET, which keeps the guard loud in BOTH
+// directions:
+//   - a NEW unlimited, uncached GET route fails the test BY NAME (it shows up
+//     in the received set) — the `/store/pulls/gaps` regression this whole
+//     probe exists to catch;
+//   - giving one of these three a real limiter (or a cache plus a GET_EXEMPT
+//     entry) ALSO fails the test, until the route is deleted from this list —
+//     so a fix cannot land without updating the finding.
+// The test is a plain `it`, never an expected-to-fail wrapper: such a wrapper
+// reports a body that fails for a BRAND-NEW reason as a pass, which is exactly
+// the silent regression being guarded against.
 const KNOWN_UNPROTECTED_GETS = [
   '/store/cards/*',
   '/store/pricing/fx',
@@ -229,54 +238,49 @@ describe('store routes are rate-limited (plan 136 coverage guard)', () => {
     expect(failures).toEqual([]);
   });
 
-  // Wrapped in `it.failing`: the underlying check is expected to fail TODAY,
-  // naming exactly KNOWN_UNPROTECTED_GETS. it.failing PASSES when its body
-  // throws and FAILS when it doesn't — so this test is currently green
-  // because the finding is real, and the day someone gives cards/*,
-  // pricing/fx or avatar-frames a real limiter (or cache + GET_EXEMPT entry)
-  // this flips to an "unexpectedly passed" failure that forces a deliberate
-  // fix to this file instead of a silent pass. See KNOWN_UNPROTECTED_GETS
-  // above for the read-the-route evidence.
-  it.failing(
-    'every store route.ts GET export is rate-limited or on GET_EXEMPT with a reason (finding: cards/*, pricing/fx, avatar-frames are neither — see KNOWN_UNPROTECTED_GETS)',
-    () => {
-      const routeFiles = collectRouteFiles(STORE_ROOT);
-      const failures: string[] = [];
-      let scannedGetCount = 0;
+  // A plain `it` that pins the finding as an exact set — see
+  // KNOWN_UNPROTECTED_GETS above for the read-the-route evidence behind the
+  // three names, and for why the exact-set shape is loud in both directions.
+  // The two failure modes are kept in SEPARATE arrays on purpose: `stale`
+  // (covered AND exempt) must always be empty, while `failures` (neither
+  // covered nor exempt) must equal the recorded finding — collapsing them
+  // would let a stale GET_EXEMPT entry masquerade as one of the three.
+  it('every store route.ts GET export is rate-limited, on GET_EXEMPT, or one of the KNOWN_UNPROTECTED_GETS findings — exact set', () => {
+    const routeFiles = collectRouteFiles(STORE_ROOT);
+    const failures: string[] = [];
+    const stale: string[] = [];
+    let scannedGetCount = 0;
 
-      for (const relPath of routeFiles) {
-        const text = fs.readFileSync(path.join(API_ROOT, relPath), 'utf8');
-        if (!getMethodsOf(text)) continue;
-        scannedGetCount++;
+    for (const relPath of routeFiles) {
+      const text = fs.readFileSync(path.join(API_ROOT, relPath), 'utf8');
+      if (!getMethodsOf(text)) continue;
+      scannedGetCount++;
 
-        const url = routeFileToUrl(relPath);
-        const covered = isRouteLimited(url, 'GET');
-        const exempt = GET_EXEMPT.some((e) => e.path === url);
+      const url = routeFileToUrl(relPath);
+      const covered = isRouteLimited(url, 'GET');
+      const exempt = GET_EXEMPT.some((e) => e.path === url);
 
-        if (!covered && !exempt) {
-          failures.push(
-            `GET ${url} (src/api/${relPath}) exports GET but is not ` +
-              `rate-limited and not on GET_EXEMPT`,
-          );
-        }
-        if (covered && exempt) {
-          failures.push(
-            `GET ${url} is both covered by a limiter matcher AND listed in ` +
-              `GET_EXEMPT — remove the stale entry`,
-          );
-        }
+      // The bare URL, not a decorated sentence: this array is compared to
+      // KNOWN_UNPROTECTED_GETS as a set, and the array diff names the
+      // offending route on its own.
+      if (!covered && !exempt) {
+        failures.push(url);
       }
+      if (covered && exempt) {
+        stale.push(
+          `GET ${url} is both covered by a limiter matcher AND listed in ` +
+            `GET_EXEMPT — remove the stale entry`,
+        );
+      }
+    }
 
-      expect(scannedGetCount).toBeGreaterThan(20);
-      // Expected to fail today: `failures` should be exactly the three
-      // KNOWN_UNPROTECTED_GETS entries, not empty. Asserting toEqual([]) — the
-      // same assertion the passing version of this test would use — is what
-      // makes it.failing's flip-when-fixed property work; a looser assertion
-      // here (e.g. asserting the 3-item list) would stop failing the moment
-      // the list is merely reordered, not actually fixed.
-      expect(failures).toEqual([]);
-    },
-  );
+    // Same green-for-the-wrong-reason guard as the mutation test: without this
+    // floor, a helper regression that matched no route files would make both
+    // assertions below vacuous.
+    expect(scannedGetCount).toBeGreaterThan(20);
+    expect(stale).toEqual([]);
+    expect([...failures].sort()).toEqual([...KNOWN_UNPROTECTED_GETS].sort());
+  });
 });
 
 describe('rate-limit-coverage-helpers regression tests (regex shapes that silently under-reported before plan 136)', () => {
