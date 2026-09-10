@@ -304,7 +304,7 @@ jobs:
   # jest shards natively at the file level (--shard=N/M). In CI each shard gets
   # its OWN job + postgres, so wall-clock = per-shard overhead + slowest shard's
   # tests, and adding shards divides the ~20 test-minutes across more runners.
-  # 84 suites over 8 shards ≈ 10-11/shard. The per-shard overhead floor is now
+  # 105 suites over 8 shards ≈ 13-14/shard (as of 2026-09-10). The per-shard overhead floor is now
   # ~1m25s (container init + node setup + the node_modules-cached ~50s install),
   # so wall ≈ 1m25s + 20min/N; past ~8 shards the fixed floor dominates and more
   # shards stop paying off. postgres data is on tmpfs (below) so the per-suite
