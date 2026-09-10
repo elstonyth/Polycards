@@ -57,6 +57,12 @@ medusaIntegrationTestRunner({
 
       afterAll(() => {
         redis?.disconnect();
+        // The runner never restores env, so the next suite in the shard would
+        // otherwise boot its app on THIS budget. Dropping the two keys puts it
+        // back on whatever the test env sets (or, failing that, the same
+        // production defaults) — never on something tighter.
+        delete process.env.STORE_READ_RATE_BURST_LIMIT;
+        delete process.env.STORE_READ_RATE_BURST_WINDOW_MS;
       });
 
       beforeEach(async () => {
