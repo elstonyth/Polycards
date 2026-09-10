@@ -101,6 +101,12 @@ the cent.
 
 ### Attribution flow
 
+> **Superseded in part by [ADR 0008](../../adr/0008-referral-code-is-a-random-short-code.md) (2026-09-03).**
+> The referral identity is a random 8-character code in
+> `customer.metadata.referral_code`, shared as `/r/<code>`, not the profile
+> handle at `/invite/<handle>`. The cookie, the signup bind, the self-referral
+> and already-attributed refusals below are unchanged.
+
 - `/invite/[handle]` (storefront route): validates the handle exists, sets a 30-day cookie,
   redirects to `/`. The signup server action reads the cookie and calls a backend endpoint that
   inserts `referral_attribution` (rejecting self-referral and already-attributed customers).
