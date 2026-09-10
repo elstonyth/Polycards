@@ -12,8 +12,11 @@
  * Every call goes through the `Store` port (src/lib/store.ts), which owns the
  * cookie read, the bearer and the failure log — but NOT the envelope check.
  * Responses use `UncheckedSchema`: card validation retains the special
- * Vault copy below. Local projection catches retain the pre-port fallback
- * for malformed JSON envelopes/rows; JSON parsing alone cannot reject those.
+ * Vault copy below. Local projection catches retain the pre-port SHAPE
+ * (needsAuth/needsTopUp both false) for malformed JSON envelopes/rows — JSON
+ * parsing alone cannot reject those — but NOT the pre-port sentence: every one
+ * of these catches runs after a 2xx, so the charge is committed and the copy
+ * says where the card went (CHARGED_BUT_UNSHOWABLE), never "try again".
  */
 import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
