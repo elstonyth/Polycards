@@ -48,14 +48,29 @@ export function toOptionalMoney(value: unknown): number | null {
 }
 
 /**
- * What a payout cost us less what the recipient got, for the settlement
- * report's fee = gross − net rule. NULL (unknown) when either side is
- * missing — never a zero fee by omission. 2-dp inputs, 2-dp result.
+ * What we RECEIVED from a deposit: amount less the gateway's fee, for the
+ * settlement report's fee = |gross − net| rule. NULL (unknown) when either
+ * side is missing — never a zero fee by omission. 2-dp inputs, 2-dp result.
  */
 export function netOfFee(amount: unknown, fee: unknown): number | null {
   const a = toOptionalMoney(amount);
   const f = toOptionalMoney(fee);
   return a === null || f === null ? null : Number((a - f).toFixed(2));
+}
+
+/**
+ * What a payout COST our payout wallet: the recipient's amount plus the
+ * gateway's fee (TGPay charges payout fees on top — a RM 50 payout with a
+ * RM 1 fee drains 51; docs/payments/tgpay-setup.md "Verified 2026-09-05").
+ * This is the payout direction's `net_amount`, so that the settlement fee is
+ * |gross − net| in BOTH directions: deposits net = amount − fee (what we
+ * received), payouts net = amount + fee (what we paid). NULL (unknown) when
+ * either side is missing — never a zero fee by omission.
+ */
+export function payoutCost(amount: unknown, fee: unknown): number | null {
+  const a = toOptionalMoney(amount);
+  const f = toOptionalMoney(fee);
+  return a === null || f === null ? null : Number((a + f).toFixed(2));
 }
 
 /** Whole-percent of a sen amount, staying in sen, half-up. */

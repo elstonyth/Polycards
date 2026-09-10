@@ -89,6 +89,85 @@ describe('mergeSettlementPeriods', () => {
     expect(p.deposits.missingGross).toBe(1);
   });
 
+  // THE DIRECTION RULE (plan 133). `net_amount` is the money that moved
+  // through our gateway wallet, which sits on opposite sides of gross per
+  // direction: a deposit's net is what we RECEIVED (≤ gross), a payout's is
+  // what we PAID (≥ gross, because TGPay charges the payout fee on top). A
+  // single `gross − net` would report the payout fee as NEGATIVE.
+  it('a payout’s fee is net − gross: the wallet paid MORE than the recipient got', () => {
+    const [p] = mergeSettlementPeriods(
+      [],
+      [
+        gw({
+          count: 1,
+          grossCents: 5_000, // RM 50.00 instructed and debited
+          netCents: 5_100, // RM 51.00 actually left the payout wallet
+          grossWithNetCents: 5_000,
+        }),
+      ],
+      [],
+    );
+    expect(p.withdrawals.gross).toBe(50);
+    expect(p.withdrawals.net).toBe(51);
+    expect(p.withdrawals.fee).toBe(1);
+  });
+
+  it('a deposit’s fee stays gross − net: we received LESS than the customer paid', () => {
+    const [p] = mergeSettlementPeriods(
+      [
+        gw({
+          count: 1,
+          grossCents: 5_000,
+          netCents: 4_900,
+          grossWithNetCents: 5_000,
+        }),
+      ],
+      [],
+      [],
+    );
+    expect(p.deposits.fee).toBe(1);
+  });
+
+  it('the known-net subset rule holds on the payout side too', () => {
+    // Two settled payouts: RM 50 whose wallet cost is known (51), RM 100
+    // settled before the mirror with no net on file.
+    const [p] = mergeSettlementPeriods(
+      [],
+      [
+        gw({
+          count: 2,
+          grossCents: 15_000,
+          netCents: 5_100,
+          grossWithNetCents: 5_000, // only the known-net row's gross
+          missingNet: 1,
+        }),
+      ],
+      [],
+    );
+    // Fee = 51 − 50 over the known row, NOT 51 − 150.
+    expect(p.withdrawals.fee).toBe(1);
+    expect(p.withdrawals.missingNet).toBe(1);
+  });
+
+  // The premise the whole plan rests on: the ledger comparison keys on GROSS,
+  // which is the figure the customer's balance moved by. Net now carries the
+  // gateway's cut and must never enter this subtraction.
+  it('the withdrawals delta still keys on gross, not on the new net', () => {
+    const [p] = mergeSettlementPeriods(
+      [],
+      [
+        gw({
+          count: 1,
+          grossCents: 5_000,
+          netCents: 5_100,
+          grossWithNetCents: 5_000,
+        }),
+      ],
+      [lg({ cashoutCents: 5_000 })],
+    );
+    expect(p.delta.withdrawals).toBe(0);
+  });
+
   it('a fully-known bucket reports missingGross 0 — not a hard-coded non-zero default', () => {
     const [p] = mergeSettlementPeriods(
       [gw({ count: 1, grossCents: 5_000, missingGross: 0 })],

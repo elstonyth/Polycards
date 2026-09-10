@@ -139,14 +139,17 @@ medusaIntegrationTestRunner({
           },
         ]);
 
-        // A settled payout with net on file, same month.
+        // A settled payout with net on file, same month. Net 82 on a gross of
+        // 80: a payout's net is what the WALLET PAID (plan 133) — TGPay
+        // charges the RM 2 payout fee on top, so the fee is still 2 and the
+        // gross (what the customer was debited) is still 80.
         await packs().createGatewayWithdrawals([
           {
             merchant_transaction_id: 'PC-settle-wd-1',
             customer_id: CUSTOMER_ID,
             amount: 80,
             amount_settled: 80,
-            net_amount: 78,
+            net_amount: 82,
             bank_code: 'MBB',
             account_number: '1234567890',
             account_holder_name: 'SETTLEMENT SPEC',
@@ -191,6 +194,8 @@ medusaIntegrationTestRunner({
         });
         expect(current!.withdrawals.count).toBe(1);
         expect(current!.withdrawals.gross).toBe(80);
+        // fee = net − gross on the payout side, and POSITIVE: a single
+        // gross − net would report this as −2.
         expect(current!.withdrawals.fee).toBe(2);
         // Ledger agrees with the gateway this month: both deltas exactly 0.
         expect(current!.ledger.topupCredited).toBe(150);
@@ -254,6 +259,59 @@ medusaIntegrationTestRunner({
       it('falls back to month/12 on garbage params instead of erroring', async () => {
         const data = await report('?granularity=quarterly&periods=-3');
         expect(data.granularity).toBe('month');
+      });
+
+      // Plan 133. The audit panel is the one screen built to hold OUR totals
+      // against the gateway's wallet, and its deposit gross silently skipped
+      // hand-settled rows — the very failure the settlement report's NULL
+      // rule already counts. Integration, not unit: the counter is a SQL
+      // FILTER, and only a real database can say it counts the right rows.
+      it('the audit totals count a hand-settled deposit out of gross — missing_gross', async () => {
+        const auditTotals = async () => {
+          const res = await unwrapResponse(
+            api.get('/admin/payments/audit', {
+              headers: { authorization: `Bearer ${adminToken}` },
+            }),
+          );
+          expect(res.status).toBe(200);
+          return res.data as {
+            gateway: string;
+            totals: {
+              deposits: {
+                gross: number;
+                missing_net: number;
+                missing_gross: number;
+              };
+              withdrawals: { missing_gross: number };
+            };
+          };
+        };
+
+        // Read once for the ACTIVE gateway id — the totals filter on it, so a
+        // row seeded under any other gateway would not be counted at all and
+        // this test would pass for the wrong reason.
+        const before = await auditTotals();
+        await packs().createGatewayDeposits([
+          {
+            merchant_transaction_id: 'PC-audit-missgross-1',
+            customer_id: CUSTOMER_ID,
+            amount_requested: 777,
+            payment_method_code: 'BQR',
+            status: 'settled',
+            settled_at: MID_MONTH,
+            gateway: before.gateway,
+          },
+        ]);
+
+        const after = await auditTotals();
+        expect(after.totals.deposits.missing_gross).toBe(
+          before.totals.deposits.missing_gross + 1,
+        );
+        // Counted, never zeroed into the sum: gross does not move by 777.
+        expect(after.totals.deposits.gross).toBe(before.totals.deposits.gross);
+        // Structurally zero on the payout side — a payout's gross is
+        // `amount`, which is NOT NULL.
+        expect(after.totals.withdrawals.missing_gross).toBe(0);
       });
 
       // The week convention, against the real database: settlementSince says
