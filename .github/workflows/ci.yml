@@ -603,7 +603,9 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
         run: |
           echo "$RESULTS"
-          bad=$(echo "$RESULTS" | grep -Eo '"result": *"(failure|cancelled)"' | wc -l)
+          # grep exits 1 on zero matches — the all-green path — so it must
+          # never abort this step, pipefail or not.
+          bad=$(echo "$RESULTS" | { grep -Eo '"result": *"(failure|cancelled)"' || true; } | wc -l)
           if [ "$bad" -ne 0 ]; then
             echo "::error::$bad backend job(s) failed or were cancelled"
             exit 1
