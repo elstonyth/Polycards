@@ -2,8 +2,9 @@
  * Store-side twin of admin-rate-limit-coverage.unit.spec.ts (plan 136,
  * follow-up #6 from the 2026-09-02 review). The admin probe cannot see a
  * dropped store limiter — #547/#538/#557 added three new public store
- * routes, one of which (`/store/pulls/gaps`) shipped with no limiter. This
- * walks every `src/api/store/**\/route.ts`, and asserts:
+ * routes, one of which (`/store/pulls/gaps`) shipped with no limiter until
+ * plan 134 added one. This walks every `src/api/store/**\/route.ts`, and
+ * asserts:
  *
  *  - every MUTATION export (POST/PUT/PATCH/DELETE) is matched by a limiter
  *    entry in middlewares.ts or sits on an explicit, exact-set MUTATION_EXEMPT
@@ -76,11 +77,6 @@ const MUTATION_EXEMPT: { path: string; method: string; reason: string }[] = [];
 // cache goes on the report, not the list"), so they are NOT here; see
 // KNOWN_UNPROTECTED_GETS below and the completion report.
 const GET_EXEMPT: { path: string; reason: string }[] = [
-  {
-    path: '/store/pulls/gaps',
-    reason:
-      'plan 134 adds storeReadRateLimit to this matcher; remove this entry when it lands. Cached per-process 5s (CACHE_TTL_MS, pulls/gaps/route.ts) in the meantime.',
-  },
   {
     path: '/store/pulls/recent',
     reason:
@@ -186,7 +182,6 @@ describe('store routes are rate-limited (plan 136 coverage guard)', () => {
         '/store/leaderboard',
         '/store/packs',
         '/store/packs/*',
-        '/store/pulls/gaps',
         '/store/pulls/recent',
       ].sort(),
     );
