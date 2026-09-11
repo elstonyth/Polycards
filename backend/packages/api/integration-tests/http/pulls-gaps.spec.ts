@@ -1,12 +1,35 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
+import type Redis from 'ioredis';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { clearPullGapsCache } from '../../src/api/store/pulls/gaps/route';
 import { clearRecentPullsCache } from '../../src/api/store/pulls/recent/route';
-import { unwrapResponse } from './utils';
+import { STORE_READ_DEFAULTS } from '../../src/api/utils/rate-limit';
+import {
+  connectTestRedisOrFail,
+  TEST_REDIS_URL,
+  unwrapResponse,
+} from './utils';
 
 jest.setTimeout(240 * 1000);
+
+// The route is public, so the limiter keys on the request IP — every call in
+// this harness shares one. These restore the PRODUCTION store-read numbers
+// over the effectively-unlimited ones in .env.test (which exist so the other
+// suites' reads never trip it). Deliberately the shipped values, not tighter
+// ones: the runner never restores env, so this leaks into later suites in the
+// shard (see auth-rate-limit.spec.ts) and a leak of production behaviour is
+// the only harmless kind. The burst rule is what's under test; the sustained
+// one is left as .env.test has it.
+const RATE_ENV = {
+  STORE_READ_RATE_BURST_LIMIT: String(STORE_READ_DEFAULTS.burstLimit),
+  STORE_READ_RATE_BURST_WINDOW_MS: String(STORE_READ_DEFAULTS.burstWindowMs),
+  // The app's limiter must write to the SAME redis beforeEach clears below, or
+  // it silently fails over to its in-memory store and a previous suite's
+  // store-read events stay on the budget. See auth-rate-limit.spec.ts.
+  REDIS_URL: TEST_REDIS_URL,
+};
 
 // GET /store/pulls/gaps — the stats chart behind the pull-history panel. The
 // gap arithmetic is a window function over the scope's whole ledger, so it is
@@ -20,13 +43,35 @@ const IMMORTAL = 'gaps-immortal';
 
 medusaIntegrationTestRunner({
   inApp: true,
+  env: RATE_ENV,
   testSuite: ({ api, getContainer }) => {
     describe('store pull gaps — hit history for the stats chart', () => {
       let storeHeaders: Record<string, string>;
+      let redis: Redis;
+
+      beforeAll(async () => {
+        redis = await connectTestRedisOrFail(
+          'the gaps suite must observe the real rl:store-read:* budget',
+        );
+      });
+
+      afterAll(() => {
+        redis?.disconnect();
+        // The runner never restores env, so the next suite in the shard would
+        // otherwise boot its app on THIS budget. Dropping the two keys puts it
+        // back on whatever the test env sets (or, failing that, the same
+        // production defaults) — never on something tighter.
+        delete process.env.STORE_READ_RATE_BURST_LIMIT;
+        delete process.env.STORE_READ_RATE_BURST_WINDOW_MS;
+      });
 
       beforeEach(async () => {
         const container = getContainer();
         clearPullGapsCache();
+        // Events another suite (or the previous case) left inside the burst
+        // window would shift this one's budget.
+        const spent = await redis.keys('rl:store-read:*');
+        if (spent.length) await redis.del(...spent);
 
         const apiKeyModule = container.resolve(Modules.API_KEY);
         const key = await apiKeyModule.createApiKeys({
@@ -238,6 +283,68 @@ medusaIntegrationTestRunner({
             frame_url: null,
           });
         }
+      });
+
+      // The scalars ride the hit rows now (one scan), so a tier with NO hits
+      // is the one path that still needs the scalar-only statement. Its
+      // drought must stay the scope's whole pull count — CONTEXT.md §Drought,
+      // "a tier never hit counts every pull on record".
+      it('a tier that has never hit falls back to the scalar-only scan', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const seeded = await packs.listPulls(
+          { pack_id: PACK, source: 'pack' },
+          { take: 1000 },
+        );
+        // Guards the assertion below from passing on an empty ledger.
+        expect(seeded.length).toBeGreaterThan(0);
+
+        const r = await unwrapResponse(
+          api.get(`/store/pulls/gaps?pack_id=${PACK}&rarity=Mythical`, {
+            headers: storeHeaders,
+          }),
+        );
+        expect(r.status).toBe(200);
+        expect(r.data.hits).toEqual([]);
+        expect(r.data.current).toBe(seeded.length);
+        expect(r.data.avg).toBeNull();
+        expect(r.data.last20).toBeNull();
+      });
+
+      // Last in the file: it spends the whole burst budget, and the sliding
+      // window drains on wall-clock time.
+      it('429s past the store read burst budget', async () => {
+        // One warm request populates the route's 5s cache, so the burst below
+        // is a limiter test and not 120 concurrent ledger scans.
+        const warm = await unwrapResponse(
+          api.get(`/store/pulls/gaps?pack_id=${PACK}&rarity=Immortal`, {
+            headers: storeHeaders,
+          }),
+        );
+        expect(warm.status).toBe(200);
+
+        // In parallel, not sequentially: 121 round trips one after another can
+        // outlast the burst window on a loaded box and never trip.
+        const rest = await Promise.all(
+          Array.from({ length: STORE_READ_DEFAULTS.burstLimit }, () =>
+            unwrapResponse(
+              api.get(`/store/pulls/gaps?pack_id=${PACK}&rarity=Immortal`, {
+                headers: storeHeaders,
+              }),
+            ),
+          ),
+        );
+
+        // burstLimit + 1 events against a burstLimit budget: the overflow is
+        // denied, and nothing above the budget was ever served.
+        const denied = rest.filter((res) => res.status === 429);
+        expect(denied.length).toBeGreaterThanOrEqual(1);
+        expect(
+          rest.filter((res) => res.status === 200).length,
+        ).toBeLessThanOrEqual(STORE_READ_DEFAULTS.burstLimit);
+        expect(denied[0].data).toMatchObject({ type: 'rate_limit_exceeded' });
+        expect(Number(denied[0].headers['retry-after'])).toBeGreaterThanOrEqual(
+          1,
+        );
       });
     });
   },

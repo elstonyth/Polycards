@@ -60,7 +60,7 @@ export async function GET(
 
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
 
-  // Gate the slug BEFORE the two full-ledger scans below — same reason as the
+  // Gate the slug BEFORE the full-ledger scan below — same reason as the
   // recent route: caller-supplied, public key, so garbage slugs must cost one
   // indexed pack lookup, not a window-function pass over every pull.
   const pack = packId

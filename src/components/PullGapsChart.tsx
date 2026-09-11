@@ -9,6 +9,7 @@ import { gapScale, gapPercent } from '@/lib/pull-gaps';
 import { pullTime } from '@/lib/format';
 import type { Rarity } from '@/lib/packs-data';
 import type { PullGaps } from '@/lib/data/packs';
+import { parseOne, PullGapsPollResponseSchema } from '@/lib/data/schemas';
 
 /**
  * The pull-history STATS tab (showgo's histogram sheet): for one chase tier,
@@ -55,9 +56,14 @@ export function PullGapsChart({
     const q = new URLSearchParams({ rarity: tier });
     if (packSlug) q.set('pack_id', packSlug);
     fetch(`/api/pull-gaps?${q.toString()}`, { cache: 'no-store' })
-      .then((r) => (r.ok ? (r.json() as Promise<PullGaps | null>) : null))
-      .then((body) => {
+      .then((r) => (r.ok ? r.json() : null))
+      .then((raw: unknown) => {
         if (!active) return;
+        // A rolling deploy can answer 200 with the older view shape; a body
+        // with no `hits` used to throw inside render (the panel's error
+        // boundary, not this component's unavailable branch).
+        const body =
+          raw == null ? null : parseOne(PullGapsPollResponseSchema, raw);
         if (body) {
           setData(body);
           setLoadedScope(scope);

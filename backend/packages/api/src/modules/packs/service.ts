@@ -6057,8 +6057,10 @@ class PacksModuleService extends MedusaService({
   // header prints: the observed mean gap over ALL hits, the mean over the
   // last 20, and the current drought (pulls since the newest hit — the same
   // number pullDrought reports, derived here from the sequence instead).
-  // Two full scans of the scope's ledger per call — bounded by the route's
-  // 5s cache and by the chart only being fetched while its tab is open.
+  // One scan of the scope's ledger per call (two only when the tier has never
+  // hit — see the fallback below), bounded further by the route's 5s cache and
+  // its store-read rate limit. The scan itself is UNBOUNDED: a never-hit tier's
+  // drought is "every pull on record" (CONTEXT.md §Drought).
   @InjectManager()
   async pullGaps(
     opts: { packId: string | null; rarity: Rarity; limit: number },
@@ -6095,8 +6097,21 @@ class PacksModuleService extends MedusaService({
       '         (n - COALESCE(LAG(n) OVER (ORDER BY n), 0))::int AS gap ' +
       '    FROM seq WHERE hit ' +
       ') ';
-    const [scalars] = await em.execute<
+    // The four header scalars ride the hit rows (every row carries the same
+    // values), so the CTE runs ONCE: `seq` is referenced more than once, so
+    // Postgres materialises it and the scalar subqueries read the materialised
+    // rows instead of re-scanning the ledger.
+    const scalarSql =
+      '(SELECT COUNT(*) FROM seq)::int AS total, ' +
+      '       (SELECT MAX(n) FROM hits)::int AS last_n, ' +
+      '       (SELECT AVG(gap) FROM hits)::float AS avg_gap, ' +
+      '       (SELECT AVG(gap) FROM (SELECT gap FROM hits ORDER BY n DESC LIMIT 20) t)::float AS last20_gap';
+    const rows = await em.execute<
       {
+        id: string;
+        customer_id: string | null;
+        rolled_at: string | Date;
+        gap: number | string;
         total: number | string;
         last_n: number | string | null;
         avg_gap: number | string | null;
@@ -6104,31 +6119,39 @@ class PacksModuleService extends MedusaService({
       }[]
     >(
       ctes +
-        'SELECT (SELECT COUNT(*) FROM seq)::int AS total, ' +
-        '       (SELECT MAX(n) FROM hits)::int AS last_n, ' +
-        '       (SELECT AVG(gap) FROM hits)::float AS avg_gap, ' +
-        '       (SELECT AVG(gap) FROM (SELECT gap FROM hits ORDER BY n DESC LIMIT 20) t)::float AS last20_gap',
-      scopeParams,
-    );
-    const hits = await em.execute<
-      {
-        id: string;
-        customer_id: string | null;
-        rolled_at: string | Date;
-        gap: number | string;
-      }[]
-    >(
-      ctes +
-        'SELECT id, customer_id, rolled_at, gap FROM hits ORDER BY n DESC LIMIT ?',
+        'SELECT h.id, h.customer_id, h.rolled_at, h.gap, ' +
+        scalarSql +
+        '  FROM hits h ORDER BY h.n DESC LIMIT ?',
       [...scopeParams, opts.limit],
     );
+    // A tier that has NEVER hit returns no rows, so the scalars have nowhere
+    // to ride: fall back to the scalar-only statement (the second scan runs
+    // for that case alone — `current` must still be the scope's whole pull
+    // count, per CONTEXT.md's Drought entry).
+    const [scalars] =
+      rows.length > 0
+        ? rows
+        : await em.execute<
+            {
+              total: number | string;
+              last_n: number | string | null;
+              avg_gap: number | string | null;
+              last20_gap: number | string | null;
+            }[]
+          >(ctes + 'SELECT ' + scalarSql, scopeParams);
     const num = (v: number | string | null | undefined): number | null =>
       v == null ? null : Number(v);
     return {
       current: Number(scalars?.total ?? 0) - Number(scalars?.last_n ?? 0),
       avg: num(scalars?.avg_gap),
       last20: num(scalars?.last20_gap),
-      hits: hits.map((h) => ({ ...h, gap: Number(h.gap) })),
+      // Explicit, not a spread: the rows also carry the scalar columns.
+      hits: rows.map((h) => ({
+        id: h.id,
+        customer_id: h.customer_id,
+        rolled_at: h.rolled_at,
+        gap: Number(h.gap),
+      })),
     };
   }
 
