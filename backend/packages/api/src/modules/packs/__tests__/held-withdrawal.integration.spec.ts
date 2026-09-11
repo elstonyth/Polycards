@@ -33,6 +33,7 @@ import CreditTransaction from '../models/credit-transaction';
 import CustomerAccountState from '../models/customer-account-state';
 import LedgerEntry from '../models/ledger-entry';
 import LedgerSequence from '../models/ledger-sequence';
+import AdminActionAudit from '../models/admin-action-audit';
 import {
   denyHeldWithdrawal,
   submitHeldWithdrawal,
@@ -55,6 +56,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
   // refund `refundWithdrawal` writes; the two ledger tables are what
   // withdrawCreditsWithLedger appends to (omit one and the refund branch dies
   // on `relation … does not exist`); CustomerAccountState is the freeze read.
+  // AdminActionAudit is the accountability row both exits now write inside
+  // the claim's transaction (plan 132) — and this is the right layer for it
+  // because MikroORM builds the entity_type/action CHECKs from the model's
+  // own enums, so a value the model does not carry fails here exactly as it
+  // would in production.
   // A modules-type spec builds its schema from THIS array, never from the
   // migrations.
   moduleModels: [
@@ -63,6 +69,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     CustomerAccountState,
     LedgerEntry,
     LedgerSequence,
+    AdminActionAudit,
   ],
   testSuite: ({ service, MikroOrmWrapper }) => {
     let sent: { channel: string; key: string }[] = [];
@@ -214,6 +221,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
     const creditRows = async (customerId: string) =>
       service.listCreditTransactions({ customer_id: customerId }, { take: 10 });
 
+    /** Every admin_action_audit row filed against ONE withdrawal (plan 132). */
+    const auditRows = async (withdrawalId: string) =>
+      service.listAdminActionAudits(
+        { entity_type: 'gateway_withdrawal', entity_id: withdrawalId },
+        { take: 10 },
+      );
+
     describe('submitHeldWithdrawal', () => {
       it('submits the row’s OWN stored destination, stamps the gateway id and moves no money', async () => {
         const row = await seed();
@@ -257,6 +271,25 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // return or otherwise touch a single credit row.
         expect(await creditRows(row.customer_id)).toHaveLength(1);
         expect(sent).toEqual([]);
+
+        // The durable record of WHO approved this and why (plan 132) — the
+        // log line above it is gone with the next deployment.
+        const audits = await auditRows(row.id);
+        expect(audits).toHaveLength(1);
+        expect(audits[0]).toMatchObject({
+          admin_id: ADMIN,
+          entity_type: 'gateway_withdrawal',
+          entity_id: row.id,
+          action: 'approve_withdrawal',
+          before: { status: 'held' },
+          after: { status: 'pending', amount: 1500, bank_code: 'MBBEMYKL' },
+        });
+        expect(audits[0].reason).toContain(row.merchant_transaction_id);
+        // Boolean, not .not.toContain(): a failing toContain would print the
+        // account number into a public CI log.
+        expect(JSON.stringify(audits[0].after).includes(ACCOUNT_NUMBER)).toBe(
+          false,
+        );
       });
 
       // THE money test. A double-clicked Approve is the realistic trigger and
@@ -290,6 +323,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
           transaction_id: first.transaction_id,
           approved: false,
         });
+        // And exactly ONE audit row: the loser never claimed, so it took no
+        // decision to record (plan 132).
+        expect(await auditRows(row.id)).toHaveLength(1);
       });
 
       // The genuinely concurrent twin of the test above. `Promise.all` fires
@@ -448,6 +484,15 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect((await reread(row.id)).status).toBe('failed');
         // "Refunding" a row that never took the money would mint credit.
         expect(await creditRows(row.customer_id)).toHaveLength(0);
+
+        // The approve WAS a decision and is recorded as one — but its
+        // `after.status` is the status the claim landed on, not the 'pending'
+        // the caller asked for. An audit row saying 'pending' here would
+        // contradict the withdrawal row two assertions above.
+        const audits = await auditRows(row.id);
+        expect(audits).toHaveLength(1);
+        expect(audits[0].action).toBe('approve_withdrawal');
+        expect((audits[0].after as { status?: string }).status).toBe('failed');
       });
 
       it('404s an unknown id without touching anything', async () => {
@@ -574,6 +619,22 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(lines).toContain(row.id);
         expect(lines).toContain('DENIED');
         expect(lines.includes(ACCOUNT_NUMBER)).toBe(false);
+
+        // …and the durable half of "audits the admin" (plan 132): one row,
+        // written in the claim's own transaction.
+        const audits = await auditRows(row.id);
+        expect(audits).toHaveLength(1);
+        expect(audits[0]).toMatchObject({
+          admin_id: ADMIN,
+          entity_type: 'gateway_withdrawal',
+          entity_id: row.id,
+          action: 'deny_withdrawal',
+          before: { status: 'held' },
+          after: { status: 'failed', amount: 1500 },
+        });
+        expect(JSON.stringify(audits[0].after).includes(ACCOUNT_NUMBER)).toBe(
+          false,
+        );
       });
 
       // The recovery path claim-first ordering exists to make safe: a crash
@@ -581,7 +642,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // never came back, and the sweep (pending-only) never revisits it. An
       // operator clicking Deny again must settle it — and a second click on a
       // settled one must credit exactly once, on the shared anchor.
-      it('is re-runnable on its OWN failed row and credits exactly once', async () => {
+      it('is re-runnable on its OWN failed row, credits exactly once, and audits the re-run as a NEW decision', async () => {
         const row = await seed();
         await debit(row);
 
@@ -601,6 +662,63 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(sent.filter((s) => s.channel === 'customer_feed')).toHaveLength(
           1,
         );
+        // TWO audit rows, deliberately (plan 132). The re-run re-claims
+        // 'failed' -> 'failed', so `claimed` is true and the operator took a
+        // second decision — the money is idempotent, the accountability is
+        // not. Both name the same row.
+        const audits = await auditRows(row.id);
+        expect(audits).toHaveLength(2);
+        expect(audits.map((a) => a.action)).toEqual([
+          'deny_withdrawal',
+          'deny_withdrawal',
+        ]);
+      });
+
+      // THE transactional property (plan 132). The audit row is written
+      // inside claimWithdrawalAgainstDebit's transaction precisely so the two
+      // cannot diverge, and the realistic way that insert fails is the
+      // entity_type/action CHECK — the constraint two previous migrations
+      // exist to keep in step with the model.
+      //
+      // Driven through the claim DIRECTLY rather than through
+      // denyHeldWithdrawal with a stubbed createAdminActionAudits: a
+      // MedusaService is a Proxy, so neither an own property on the handle
+      // nor one on its prototype reaches the lookup `audit()` performs (the
+      // prototype write is swallowed by the Proxy's `set` trap and surfaces
+      // as a bogus column in the next UPDATE). Feeding an action the enum
+      // does not carry exercises the same rollback the real path would take,
+      // against the real constraint.
+      it('an audit insert failure rolls the claim back — no flip without a record', async () => {
+        const row = await seed();
+        await debit(row);
+
+        await expect(
+          service.claimWithdrawalAgainstDebit({
+            id: row.id,
+            customerId: row.customer_id,
+            debitReference: withdrawalIdempotencyReference(
+              row.customer_id,
+              row.merchant_transaction_id,
+            ),
+            from: ['held'],
+            to: 'pending',
+            audit: {
+              admin_id: ADMIN,
+              // Not a member of the model's `action` enum, so the generated
+              // CHECK refuses the insert.
+              action: 'not_a_real_action' as 'deny_withdrawal',
+              before: { status: 'held' },
+              after: { status: 'pending' },
+              reason: 'an action the CHECK refuses',
+            },
+          }),
+        ).rejects.toThrow();
+
+        // The row never moved, no audit row landed, and nothing was refunded
+        // for a decision that left no trace.
+        expect((await reread(row.id)).status).toBe('held');
+        expect(await auditRows(row.id)).toHaveLength(0);
+        expect(await creditRows(row.customer_id)).toHaveLength(1);
       });
 
       // Deny accepts 'failed' so that recovery works, which also lets an

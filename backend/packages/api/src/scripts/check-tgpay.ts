@@ -25,8 +25,13 @@ export default async function checkTgpay({ container }: ExecArgs) {
     return;
   }
 
+  // LENGTH, never characters. Production TGPay keys are 8–10 characters
+  // (docs/payments/tgpay-setup.md), so the 8-char "prefix" this used to log
+  // was most of the key — in a DigitalOcean run log, every time the setup doc
+  // told the operator to run this. The length still distinguishes a sandbox
+  // key from a production one, which is all the preflight needs.
   logger.info(
-    `[tgpay-preflight] calling balance endpoints against ${config.baseUrl} as ${config.publicKey.slice(0, 8)}…`,
+    `[tgpay-preflight] calling balance endpoints against ${config.baseUrl} (public key: ${config.publicKey.length} chars)`,
   );
   try {
     const b = await balances(config);

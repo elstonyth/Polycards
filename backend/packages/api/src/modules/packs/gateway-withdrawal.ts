@@ -1239,6 +1239,20 @@ export async function submitHeldWithdrawal(
     ),
     from: ['held'],
     to: 'pending',
+    // The DECISION, not the outcome (plan 132). `after.status` is the status
+    // the claim landed on ('pending', or 'failed' for a never-debited row —
+    // claimWithdrawalAgainstDebit overwrites it); the submit below may still
+    // be refused and refunded, and that outcome is on the withdrawal row
+    // (`status`, `failure_reason`). Status, amount and bank code only: the
+    // account number and holder name never enter an audit payload, for the
+    // same reason they never enter a log line.
+    audit: {
+      admin_id: adminId,
+      action: 'approve_withdrawal',
+      before: { status: row.status },
+      after: { status: 'pending', amount, bank_code: row.bank_code },
+      reason: `approved held withdrawal ${row.merchant_transaction_id} (RM ${amount})`,
+    },
   });
   if (!debited) {
     // The log reports what the claim did rather than asserting a close that
@@ -1484,6 +1498,17 @@ export async function denyHeldWithdrawal(
     ),
     from: ['held', 'failed'],
     to: 'failed',
+    // The DECISION, in the claim's own transaction (plan 132). A re-run deny
+    // on an already-'failed' row re-claims it and therefore writes a SECOND
+    // row — that is right: it is a second decision the operator took. Status
+    // and amount only; never the account number or holder name.
+    audit: {
+      admin_id: adminId,
+      action: 'deny_withdrawal',
+      before: { status: row.status },
+      after: { status: 'failed', amount: Number(row.amount) },
+      reason: `denied held withdrawal ${row.merchant_transaction_id} (RM ${Number(row.amount)})`,
+    },
   });
   if (!claimed) {
     throw new MedusaError(
