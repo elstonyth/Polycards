@@ -124,6 +124,7 @@ type SideTotals = {
   grossCents: number;
   netCents: number;
   missingNet: number;
+  missingGross: number;
 };
 function moneyTotals(t: { deposits: SideTotals; withdrawals: SideTotals }) {
   const side = (s: SideTotals) => ({
@@ -131,6 +132,10 @@ function moneyTotals(t: { deposits: SideTotals; withdrawals: SideTotals }) {
     gross: s.grossCents / 100,
     net: s.netCents / 100,
     missing_net: s.missingNet,
+    // Same NULL rule the settlement report already publishes: a settled
+    // deposit with no amount_settled (settled by hand) contributes 0 to the
+    // sum, so `gross` is a FLOOR whenever this is non-zero.
+    missing_gross: s.missingGross,
   });
   return { deposits: side(t.deposits), withdrawals: side(t.withdrawals) };
 }

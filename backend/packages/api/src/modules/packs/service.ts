@@ -6421,12 +6421,14 @@ class PacksModuleService extends MedusaService({
       grossCents: number;
       netCents: number;
       missingNet: number;
+      missingGross: number;
     };
     withdrawals: {
       count: number;
       grossCents: number;
       netCents: number;
       missingNet: number;
+      missingGross: number;
     };
     findings: number;
     lastAuditedAt: string | null;
@@ -6438,18 +6440,21 @@ class PacksModuleService extends MedusaService({
       gross_cents: string;
       net_cents: string;
       missing_net: string;
+      missing_gross: string;
     };
     const toTotals = (r: Raw) => ({
       count: Number(r.n),
       grossCents: Number(r.gross_cents),
       netCents: Number(r.net_cents),
       missingNet: Number(r.missing_net),
+      missingGross: Number(r.missing_gross),
     });
     const [dep] = await em.execute<Raw[]>(
       `SELECT COUNT(*)::bigint AS n,
               COALESCE(SUM(ROUND(amount_settled * 100)), 0)::bigint AS gross_cents,
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
-              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
+              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net,
+              COUNT(*) FILTER (WHERE amount_settled IS NULL)::bigint AS missing_gross
          FROM gateway_deposit
         WHERE deleted_at IS NULL AND status = 'settled' AND gateway = ?`,
       [gateway],
@@ -6458,7 +6463,11 @@ class PacksModuleService extends MedusaService({
       `SELECT COUNT(*)::bigint AS n,
               COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS gross_cents,
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
-              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
+              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net,
+              -- Constant 0, not a FILTER: a payout's gross is \`amount\`, which
+              -- is NOT NULL, so there is no such thing as a payout row with an
+              -- unknown gross. The column exists to keep both sides one shape.
+              0::bigint AS missing_gross
          FROM gateway_withdrawal
         WHERE deleted_at IS NULL AND status = 'settled' AND gateway = ?`,
       [gateway],

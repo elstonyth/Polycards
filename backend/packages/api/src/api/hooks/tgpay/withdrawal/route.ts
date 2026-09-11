@@ -13,7 +13,7 @@ import {
   refundWithdrawal,
 } from '../../../../modules/packs/gateway-withdrawal';
 import { rowGateway } from '../../../../modules/packs/gateway';
-import { netOfFee, toOptionalMoney } from '../../../../modules/packs/money';
+import { payoutCost, toOptionalMoney } from '../../../../modules/packs/money';
 
 // TGPay payout server-notify (docs "Payout callback"). Flat body, no wrapper,
 // and — unlike every other message — NO merchantRefNum: the row is found by
@@ -150,10 +150,10 @@ export async function POST(
     gatewayTransactionId:
       withdrawal.gateway_transaction_id ?? gatewayTransactionId,
     amountSettled: toOptionalMoney(data.amount),
-    // The settlement report reads fee = gross − net, so net here is what the
-    // payout cost us less what the recipient got: amount − fee. NULL
-    // (unknown) when either is missing — never a zero fee by omission.
-    netAmount: netOfFee(data.amount, data.fee),
+    // net_amount on a payout is what the wallet PAID — amount + fee (TGPay
+    // charges on top). NULL when the callback omits the fee — never a zero
+    // fee by omission.
+    netAmount: payoutCost(data.amount, data.fee),
     settledAt: new Date(),
   });
 

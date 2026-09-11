@@ -68,6 +68,20 @@ found by the `transactionRefNum` stored at create time. Both are at-least-once.
 Rows still live in `gateway_deposit` / `gateway_withdrawal`; `gateway_status`
 is `null` for TGPay rows (their statuses are strings, the column is numeric).
 
+`net_amount` means the money that moved through **our gateway wallet**, which
+puts it on opposite sides of the gross per direction (plan 133). On a payout
+row it is the wallet **cost** — `amount + fee`, their `amountIncludeFee` —
+because TGPay charges the payout fee on top (the RM 50 / fee RM 1 /
+`amountIncludeFee` 51 proof under "Verified 2026-09-05" below). On a deposit
+row it stays what we **received**, `amountAfterFee`. Either way the settlement
+fee is `|gross − net|`, and `gross` (the amount the customer's balance moved
+by) remains the anchor every ledger comparison keys on. The hourly audit sweep
+(`jobs/gateway-audit.ts`) backfills a missing payout net from the query and
+repairs one that disagrees with the gateway — the handful of rows written
+between 2026-09-06 and this change under the old `amount − fee` convention.
+Retired `globepay` rows are left exactly as that gateway wrote them and are
+never repaired.
+
 ## Sandbox facts (read from the admin 2026-09-05)
 
 - Tenant `polycards`, currency MYR. Rates: DuitNow 1.5 %, FPX 1.2 % (min RM 1),
