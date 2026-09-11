@@ -196,7 +196,11 @@ medusaIntegrationTestRunner({
           { take: 1 },
         );
         expect(after.status).toBe('settled');
-        expect(Number(after.net_amount)).toBe(49);
+        // A payout's net is what the payout WALLET PAID (plan 133): TGPay
+        // charges the RM 1 fee on top of the RM 50 the recipient gets, so 51
+        // left the wallet. The customer's balance still moved by 50 — that is
+        // `amount`, and no assertion here changes.
+        expect(Number(after.net_amount)).toBe(51);
         expect(after.settled_at).toBeTruthy();
         expect(await balance()).toBe(balanceAfterDebit);
       });

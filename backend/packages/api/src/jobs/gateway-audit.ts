@@ -24,8 +24,11 @@ import { toOptionalMoney } from '../modules/packs/money';
  * Gateway audit sweep (plan 130). Re-reads FINAL deposit and withdrawal rows
  * against the gateway — the source of truth for money in and out — and
  * records the verdict on the row. Never moves money; the reconcile sweeps own
- * that. Also backfills `net_amount` where the gateway reports a net we never
- * received (TGPay's callback carries no fee; its query does).
+ * that. BOTH loops also backfill `net_amount` from the query when the row has
+ * none (TGPay's callback carries no fee; its query does), and the withdrawal
+ * loop additionally REPAIRS a TGPay payout net that disagrees with the
+ * gateway — the population written before plan 133, under the old
+ * amount − fee convention.
  *
  * An ambiguous gateway error (timeout, 5xx, unattributable 400) leaves the
  * row un-stamped so the next run retries it; only a definite answer (a
@@ -121,6 +124,7 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
   );
   for (const row of withdrawals) {
     let answer: GatewayAnswer;
+    let netAmount: number | null = null;
     const config = configFor(row.gateway);
     if (!config) {
       await packs.updateGatewayWithdrawals({
@@ -134,6 +138,9 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     try {
       const d = await getWithdrawalDetail(row.merchant_transaction_id, config);
       answer = { kind: 'detail', state: d.state, amount: Number(d.amount) };
+      netAmount = Number.isFinite(Number(d.netAmount))
+        ? Number(d.netAmount)
+        : null;
     } catch (error) {
       const refusal = classifyRequeryError(error);
       if (refusal.kind !== 'not-found') {
@@ -151,11 +158,33 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
       { status: row.status, amount: toOptionalMoney(row.amount) },
       answer,
     );
+    // Repair (plan 133): rows settled before 2026-09-10 stored net as
+    // amount − fee. The gateway's figure is authoritative; overwrite when
+    // it disagrees. Deposits never had the inverted convention — do not
+    // mirror this there. Scoped to TGPay because the retired gateway's rows
+    // were written by a different provider under its own convention and this
+    // sweep has no standing to restate them.
+    const repairing =
+      row.gateway === 'tgpay' &&
+      netAmount !== null &&
+      row.status === 'settled' &&
+      toOptionalMoney(row.net_amount) !== netAmount;
     await packs.updateGatewayWithdrawals({
       id: row.id,
       audited_at: now,
       audit_note: note,
+      ...(row.net_amount == null &&
+      netAmount !== null &&
+      row.status === 'settled'
+        ? { net_amount: netAmount }
+        : {}),
+      ...(repairing ? { net_amount: netAmount } : {}),
     });
+    if (repairing && row.net_amount != null) {
+      logger.info(
+        `[gateway-audit] withdrawal ${row.merchant_transaction_id}: net_amount ${toOptionalMoney(row.net_amount)} -> ${netAmount} (a payout's net is what the wallet PAID, plan 133)`,
+      );
+    }
     checked += 1;
     if (note) {
       findings += 1;

@@ -36,6 +36,8 @@ export const AdminActionAudit = model
       // Partner groups (spec 2026-09-09): group-policy edits audit against the
       // customer group row they change.
       'customer_group',
+      // Held-withdrawal approve/deny (plan 132).
+      'gateway_withdrawal',
     ]),
     entity_id: model.text(),
     action: model.enum([
@@ -78,6 +80,9 @@ export const AdminActionAudit = model
       'pay_settlement',
       // Partner groups (spec 2026-09-09) — see Migration20260909090000.
       'edit_group_policy',
+      // Held-withdrawal approve/deny (plan 132).
+      'approve_withdrawal',
+      'deny_withdrawal',
     ]),
     before: model.json().nullable(),
     after: model.json().nullable(),

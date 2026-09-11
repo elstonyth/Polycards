@@ -70,8 +70,10 @@ export const GatewayWithdrawal = model
     // approve route (-> 'pending') or the admin deny route (-> 'failed',
     // refunded).
     status: model.enum([...WITHDRAWAL_STATUSES]).default('pending'),
-    // Their raw numeric status from the last callback/requery (4 = success,
-    // 5 = fail, else processing), for support.
+    // Their raw numeric status from the last callback/requery, for gateways
+    // that have one (GlobePay: 4 = success, 5 = fail, else processing). NULL
+    // for every gateway whose statuses are strings — TGPay — so support reads
+    // `failure_reason` / `audit_note` instead.
     gateway_status: model.number().nullable(),
     settled_at: model.dateTime().nullable(),
     // Client-supplied retry token, scoped to the customer. NULL for callers

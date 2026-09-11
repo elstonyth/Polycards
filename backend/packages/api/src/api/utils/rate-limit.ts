@@ -951,40 +951,36 @@ export const RATE_LIMITS = {
   },
 
   /**
-   * The gateway-hook limiter (POST /hooks/tgpay/{deposit,withdrawal
-   * payout-verify}). Those routes are unauthenticated BY DESIGN — a webhook
-   * carries no token and its authentication is the RSA signature — so before
-   * this existed an anonymous caller had no budget at all on an endpoint that
-   * does blocking cryptography: §1.16 forces `openCallback` to decrypt before it
-   * can verify, so a forged body still cost a real AES decrypt (and, until plan
-   * 089 memoized it, a 1000-round PBKDF2) on the single event loop.
+   * The gateway-hook limiter (POST /hooks/tgpay/{deposit,withdrawal}). Those
+   * routes are unauthenticated BY DESIGN — a webhook carries no token; their
+   * authentication is the gateway's own key headers, checked inside the
+   * handler (tgpayCallbackAuthorized), plus the source-IP allowlist on the
+   * same matcher (tgpayCallbackAllowlist, middlewares.ts). Before this
+   * existed an anonymous caller had no budget at all on that surface.
    *
    * THIS IS AN ABUSE CEILING, NOT AUTHENTICATION and not fairness between
    * callers. The gateway is the only legitimate caller and should never come
-   * near these numbers. The signature is, and stays, the real gate — see the
-   * maintenance note in plan 089: "the hooks are rate-limited now" is never a
-   * reason to relax signature verification.
+   * near these numbers. The key-header check and the callback allowlist are,
+   * and stay, the real gates — see the maintenance note in plan 089: "the
+   * hooks are rate-limited now" is never a reason to relax either.
    *
-   * Keyed on IP (the middleware's default) — a webhook has no auth_context and
-   * no useful body key: every field is inside the encrypted `Data` blob.
-   * Medusa's express loader sets `trust proxy` 1 unconditionally (see
-   * utils/payer-ip.ts), so `req.ip` comes from the proxy chain and a caller
-   * cannot rotate its own key by spoofing X-Forwarded-For. If the deployed chain
-   * is deeper than one hop the key collapses to one upstream address for all
-   * callers — which does not weaken a ceiling on a surface that has exactly one
+   * Keyed on callbackSourceIp (do-connecting-ip), the same address the
+   * allowlist judges. Medusa's express loader sets `trust proxy` 1
+   * unconditionally (see utils/payer-ip.ts), so a caller cannot rotate its
+   * own key by spoofing X-Forwarded-For. If the deployed chain is deeper
+   * than one hop the key collapses to one upstream address for all callers —
+   * which does not weaken a ceiling on a surface that has exactly one
    * legitimate caller.
    *
    * Sized generously, because a 429 to a genuine callback costs something:
-   * - deposit / withdrawal callbacks: recoverable. The gateway retries (per the
-   *   integration guide, not observed here), and — independently of whether it
-   *   does — the two reconcile jobs (src/jobs/{deposit,withdrawal}-reconcile.ts, cron every
-   *   10 min) requery the gateway for anything still pending, so the settlement
-   *   lands late rather than never.
-   * - payout-verify: fails CLOSED. Anything but a literal "success" makes the
-   *   gateway refuse that payout, so a 429 blocks a legitimate withdrawal from
-   *   paying out (no money moves wrongly, but a customer waits).
-   * That asymmetry is why the ceiling sits orders of magnitude above real
-   * callback volume: if one ever trips it, raise the env var, don't remove it.
+   * deposit / withdrawal callbacks are recoverable. The gateway retries (per
+   * the integration guide, not observed here), and — independently of
+   * whether it does — the two reconcile jobs
+   * (src/jobs/{deposit,withdrawal}-reconcile.ts, cron every 10 min) requery
+   * the gateway for anything still pending, so the settlement lands late
+   * rather than never. That asymmetry is why the ceiling sits orders of
+   * magnitude above real callback volume: if one ever trips it, raise the
+   * env var, don't remove it.
    *
    * The two rules are deliberately CONSISTENT (100 per 10s = 600 per minute =
    * the sustained rule). The burst is always the binding rule, so a tighter one

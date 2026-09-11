@@ -49,17 +49,15 @@ import { sendWithdrawalReceipt } from './withdrawal-receipt';
 // rows, plan 094 follow-up, never requeries, refunds, or writes one).
 
 /**
- * Per-transaction payout band, confirmed by the provider 2026-07-29 (Sean):
- * MYR Payout is RM 50 – RM 50,000, a DIFFERENT band from deposits (RM 30 –
- * 10,000) — the floor is higher and the ceiling is five times larger. They also
- * noted that anything above RM 10,000 is settled as several bank slips on their
- * side; that is their internal batching, invisible to us, and it does not change
- * what we submit or what a callback reports.
- *
- * Their own rejection names no numbers, so we say them.
+ * Payout bands are per gateway — `GATEWAYS[id].limits.withdrawalMin/Max`
+ * (`gateway.ts`), enforced in `startWithdrawal`. `GATEWAY_WD_MIN_RM` stays
+ * exported only because `gateway-withdrawal.unit.spec.ts` still imports it
+ * as a fixture value; it happens to equal the live TGPay floor (RM 50) but
+ * is NOT itself read by any request-time validation — the registry is.
+ * `GATEWAY_WD_MAX_RM` (formerly RM 50,000, the GlobePay-era ceiling; the
+ * live TGPay ceiling is RM 30,000) had no remaining reader and was removed.
  */
 export const GATEWAY_WD_MIN_RM = 50;
-export const GATEWAY_WD_MAX_RM = 50000;
 
 /**
  * Above this RM figure a withdrawal is HELD for admin approval instead of
@@ -1241,6 +1239,20 @@ export async function submitHeldWithdrawal(
     ),
     from: ['held'],
     to: 'pending',
+    // The DECISION, not the outcome (plan 132). `after.status` is the status
+    // the claim landed on ('pending', or 'failed' for a never-debited row —
+    // claimWithdrawalAgainstDebit overwrites it); the submit below may still
+    // be refused and refunded, and that outcome is on the withdrawal row
+    // (`status`, `failure_reason`). Status, amount and bank code only: the
+    // account number and holder name never enter an audit payload, for the
+    // same reason they never enter a log line.
+    audit: {
+      admin_id: adminId,
+      action: 'approve_withdrawal',
+      before: { status: row.status },
+      after: { status: 'pending', amount, bank_code: row.bank_code },
+      reason: `approved held withdrawal ${row.merchant_transaction_id} (RM ${amount})`,
+    },
   });
   if (!debited) {
     // The log reports what the claim did rather than asserting a close that
@@ -1486,6 +1498,17 @@ export async function denyHeldWithdrawal(
     ),
     from: ['held', 'failed'],
     to: 'failed',
+    // The DECISION, in the claim's own transaction (plan 132). A re-run deny
+    // on an already-'failed' row re-claims it and therefore writes a SECOND
+    // row — that is right: it is a second decision the operator took. Status
+    // and amount only; never the account number or holder name.
+    audit: {
+      admin_id: adminId,
+      action: 'deny_withdrawal',
+      before: { status: row.status },
+      after: { status: 'failed', amount: Number(row.amount) },
+      reason: `denied held withdrawal ${row.merchant_transaction_id} (RM ${Number(row.amount)})`,
+    },
   });
   if (!claimed) {
     throw new MedusaError(

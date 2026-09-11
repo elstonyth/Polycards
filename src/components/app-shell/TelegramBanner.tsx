@@ -77,8 +77,6 @@ export function TelegramBanner() {
           alt="Join our Telegram community — Join now"
           width={864}
           height={393}
-          loading="eager"
-          unoptimized
           sizes="(max-width: 400px) 160px, (max-width: 600px) 40vw, 240px"
           className="block h-auto w-full [mask-image:url('/images/polycards/telegram-ticket-mask.svg')] [mask-size:100%_100%]"
         />

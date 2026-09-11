@@ -242,15 +242,18 @@ describe('openBatch', () => {
   // The envelope is unchecked on purpose, so nothing upstream catches a body
   // without `rolls` — iterating it would throw inside a 'use server' action.
   // Pre-port that was a TypeError caught by the action's own try/catch,
-  // answered with the generic PACKS_FALLBACK copy (needsAuth/needsTopUp both
-  // false) — the guard exists to keep that exact answer without throwing.
+  // answered with the generic PACKS_FALLBACK SHAPE (needsAuth/needsTopUp both
+  // false) — the guard exists to keep that shape without throwing. The
+  // sentence is not pre-port: a 2xx got here, so this is a charged batch and
+  // must say where the card went, never "try again".
   it('a body with no rolls array answers, never throws, over a charged batch', async () => {
     backend({
       'POST /store/packs/:slug/open-batch': { body: { balance: 880 } },
     });
     expect(await openBatch('bronze', 2)).toEqual({
       ok: false,
-      error: 'Could not open the pack. Please try again.',
+      error:
+        "Your pack opened and the card is in your Vault, but we couldn't show it here.",
       needsAuth: false,
       needsTopUp: false,
     });
@@ -338,12 +341,16 @@ describe('revealPull / closeInstantWindow', () => {
   });
 });
 
+// Parity with the pre-port SHAPE (needsAuth/needsTopUp both false), not the
+// pre-port sentence — every one of these bodies is a 2xx, so the charge is
+// committed and the sentence must say where the card went, never "try again".
 describe('unchecked JSON projection parity', () => {
   it('contains a null single-open envelope with the original fallback fields', async () => {
     backend({ 'POST /store/packs/:slug/open': { body: null } });
     await expect(openPack('bronze')).resolves.toEqual({
       ok: false,
-      error: 'Could not open the pack. Please try again.',
+      error:
+        "Your pack opened and the card is in your Vault, but we couldn't show it here.",
       needsAuth: false,
       needsTopUp: false,
     });
@@ -354,10 +361,38 @@ describe('unchecked JSON projection parity', () => {
       backend({ 'POST /store/packs/:slug/open-batch': { body } });
       await expect(openBatch('bronze', 1)).resolves.toEqual({
         ok: false,
-        error: 'Could not open the pack. Please try again.',
+        error:
+          "Your pack opened and the card is in your Vault, but we couldn't show it here.",
         needsAuth: false,
         needsTopUp: false,
       });
     },
   );
+});
+
+describe('every post-2xx failure path says where the card went — none says try again', () => {
+  it('openPack: a null envelope', async () => {
+    backend({ 'POST /store/packs/:slug/open': { body: null } });
+    const r = await openPack('bronze');
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).not.toMatch(/try again/i);
+  });
+
+  it('openBatch: a body with no rolls array', async () => {
+    backend({
+      'POST /store/packs/:slug/open-batch': { body: { balance: 880 } },
+    });
+    const r = await openBatch('bronze', 1);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).not.toMatch(/try again/i);
+  });
+
+  it('openBatch: a rolls array of unmappable rows', async () => {
+    backend({
+      'POST /store/packs/:slug/open-batch': { body: { rolls: [null] } },
+    });
+    const r = await openBatch('bronze', 1);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).not.toMatch(/try again/i);
+  });
 });

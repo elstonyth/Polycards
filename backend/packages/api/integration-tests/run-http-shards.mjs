@@ -19,7 +19,7 @@
 // in-memory under TEST_TYPE (medusa-config), not those suites' probes.
 import { spawnSync } from 'node:child_process';
 
-// 8 shards ≈ 11 suites/process at the current 88 suites — matches CI's
+// 8 shards ≈ 13 suites/process at the current 105 suites (as of 2026-09-10) — matches CI's
 // integration-http matrix (ci.yml passes --shard=N/8 explicitly; keep the two
 // in sync). Even at ~11 suites a shard's cumulative heap can clear node's
 // default old-space, so CI's heap bump is mirrored into NODE_OPTIONS below.

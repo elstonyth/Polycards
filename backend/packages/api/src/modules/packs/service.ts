@@ -3491,6 +3491,18 @@ class PacksModuleService extends MedusaService({
    * critical sections are mutually exclusive and each reads what the other
    * wrote: whichever commits first wins, and the loser observes it.
    *
+   * THE AUDIT ROW RIDES THIS TRANSACTION (plan 132). An admin exit from
+   * 'held' moves real money — approve submits a bank transfer, deny appends a
+   * refund to the append-only ledger — and until this existed the only record
+   * of who and why was a log line, which outlives nothing (DigitalOcean run
+   * logs cover the CURRENT deployment only; see the 2026-08-11 note in
+   * gateway-withdrawal.ts). Writing the row HERE rather than in the caller is
+   * what makes it honest: a CHECK violation or any other insert failure
+   * aborts the same transaction the claim is in, so "status flipped with no
+   * record" and "record written with no flip" are both impossible.
+   * `after.status` is overwritten with the status the claim actually landed
+   * on, so an audit row can never contradict the withdrawal row it describes.
+   *
    * @returns `debited` — whether a debit exists for this payout, decided
    * under the lock, so a caller may act on `false` as "no debit will ever
    * land". `claimed` — whether THIS caller moved the row (see
@@ -3509,6 +3521,10 @@ class PacksModuleService extends MedusaService({
        *  closed 'failed' instead: there is no other honest destination for a
        *  payout that never took the customer's money. */
       to: WithdrawalStatus;
+      /** The admin decision to record, written only when THIS caller claimed
+       *  the row. `entity_type` / `entity_id` are supplied here so every
+       *  writer files against the same withdrawal row. */
+      audit?: Omit<AdminAuditRow, 'entity_type' | 'entity_id'>;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ debited: boolean; claimed: boolean }> {
@@ -3562,10 +3578,28 @@ class PacksModuleService extends MedusaService({
       // carries a transactionManager instead of opening a second transaction —
       // if it did open one, the claim would land outside the lock and the whole
       // pact above would silently lapse.
+      const landed = debited ? input.to : 'failed';
       const claimed = await this.claimWithdrawalStatus(
-        { id: input.id, from: input.from, to: debited ? input.to : 'failed' },
+        { id: input.id, from: input.from, to: landed },
         sharedContext,
       );
+      // Only the caller that actually MOVED the row records a decision: a
+      // loser (double-clicked Approve, a racing Deny) changed nothing, and an
+      // audit row for it would read as a second decision that never happened.
+      // `after.status` is stamped from `landed`, not from what the caller
+      // asked for: an approve of an UNDEBITED row closes it 'failed', and an
+      // audit row claiming 'pending' would contradict the row it describes.
+      if (claimed && input.audit) {
+        await this.audit(
+          {
+            ...input.audit,
+            after: { ...(input.audit.after ?? {}), status: landed },
+            entity_type: 'gateway_withdrawal',
+            entity_id: input.id,
+          },
+          sharedContext,
+        );
+      }
       return { debited, claimed };
     } catch (error) {
       // ONLY 55P03 (lock_not_available) is translated. Anything else — a
@@ -6410,12 +6444,14 @@ class PacksModuleService extends MedusaService({
       grossCents: number;
       netCents: number;
       missingNet: number;
+      missingGross: number;
     };
     withdrawals: {
       count: number;
       grossCents: number;
       netCents: number;
       missingNet: number;
+      missingGross: number;
     };
     findings: number;
     lastAuditedAt: string | null;
@@ -6427,18 +6463,21 @@ class PacksModuleService extends MedusaService({
       gross_cents: string;
       net_cents: string;
       missing_net: string;
+      missing_gross: string;
     };
     const toTotals = (r: Raw) => ({
       count: Number(r.n),
       grossCents: Number(r.gross_cents),
       netCents: Number(r.net_cents),
       missingNet: Number(r.missing_net),
+      missingGross: Number(r.missing_gross),
     });
     const [dep] = await em.execute<Raw[]>(
       `SELECT COUNT(*)::bigint AS n,
               COALESCE(SUM(ROUND(amount_settled * 100)), 0)::bigint AS gross_cents,
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
-              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
+              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net,
+              COUNT(*) FILTER (WHERE amount_settled IS NULL)::bigint AS missing_gross
          FROM gateway_deposit
         WHERE deleted_at IS NULL AND status = 'settled' AND gateway = ?`,
       [gateway],
@@ -6447,7 +6486,11 @@ class PacksModuleService extends MedusaService({
       `SELECT COUNT(*)::bigint AS n,
               COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS gross_cents,
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
-              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
+              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net,
+              -- Constant 0, not a FILTER: a payout's gross is \`amount\`, which
+              -- is NOT NULL, so there is no such thing as a payout row with an
+              -- unknown gross. The column exists to keep both sides one shape.
+              0::bigint AS missing_gross
          FROM gateway_withdrawal
         WHERE deleted_at IS NULL AND status = 'settled' AND gateway = ?`,
       [gateway],

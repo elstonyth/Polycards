@@ -51,7 +51,8 @@
             "referral_settings",
             "weekly_settlement",
             "task_definition",
-            "customer_group"
+            "customer_group",
+            "gateway_withdrawal"
           ],
           "mappedType": "enum"
         },
@@ -101,7 +102,9 @@
             "void_settlement",
             "pay_settlement",
             "edit_payment_gateway",
-            "edit_group_policy"
+            "edit_group_policy",
+            "approve_withdrawal",
+            "deny_withdrawal"
           ],
           "mappedType": "enum"
         },

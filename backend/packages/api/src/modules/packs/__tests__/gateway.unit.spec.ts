@@ -5,6 +5,7 @@ jest.mock('../tgpay-client', () => {
     createPayment: jest.fn(),
     createPayout: jest.fn(),
     queryPayment: jest.fn(),
+    queryPayout: jest.fn(),
   };
 });
 
@@ -14,6 +15,7 @@ import {
   gatewayConfigFromEnv,
   getDepositDetail,
   getSupportedBanks,
+  getWithdrawalDetail,
   paymentGateway,
   submitDeposit,
   submitWithdrawal,
@@ -191,6 +193,53 @@ describe('TGPay payouts', () => {
       bankCode: 'MBBEMYKL',
       bankName: 'Maybank / Malayan Banking Berhad',
     });
+  });
+
+  // Plan 133: a payout's net_amount is what the WALLET PAID, not what the
+  // recipient got. TGPay charges the fee on top — their own
+  // `amountIncludeFee` is the figure their wallet page shows, and it is the
+  // same number as amount + fee whenever both parts are present.
+  it('takes the gateway’s own amountIncludeFee as the payout’s net', async () => {
+    (tgpay.queryPayout as jest.Mock).mockResolvedValue({
+      status: 'success',
+      order: {
+        payoutRefNum: 'W1',
+        merchantRefNum: 'PC-w1',
+        amount: 50,
+        fee: 1,
+        amountIncludeFee: 51,
+      },
+    });
+    const d = await getWithdrawalDetail('PC-w1', tgpayConfig);
+    expect(d.amount).toBe(50);
+    expect(d.netAmount).toBe(51);
+    expect(d.statusId).toBeNull();
+    expect(d.transactionId).toBe('W1');
+  });
+
+  it('falls back to amount + fee when they omit amountIncludeFee', async () => {
+    (tgpay.queryPayout as jest.Mock).mockResolvedValue({
+      status: 'success',
+      order: {
+        payoutRefNum: 'W2',
+        merchantRefNum: 'PC-w2',
+        amount: 50,
+        fee: 1,
+      },
+    });
+    expect((await getWithdrawalDetail('PC-w2', tgpayConfig)).netAmount).toBe(
+      51,
+    );
+  });
+
+  it('leaves the net UNKNOWN (NaN → NULL on the row) with neither figure', async () => {
+    (tgpay.queryPayout as jest.Mock).mockResolvedValue({
+      status: 'success',
+      order: { payoutRefNum: 'W3', merchantRefNum: 'PC-w3', amount: 50 },
+    });
+    expect(
+      Number.isNaN((await getWithdrawalDetail('PC-w3', tgpayConfig)).netAmount),
+    ).toBe(true);
   });
 });
 

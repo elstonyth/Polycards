@@ -35,16 +35,31 @@ afterAll(() => {
   setActiveGateway(null);
 });
 
-const zero = { count: 0, grossCents: 0, netCents: 0, missingNet: 0 };
+const zero = {
+  count: 0,
+  grossCents: 0,
+  netCents: 0,
+  missingNet: 0,
+  missingGross: 0,
+};
 function totals(gateway: string) {
   if (gateway === 'globepay') {
     return {
-      deposits: { count: 2, grossCents: 10000, netCents: 9800, missingNet: 0 },
+      deposits: {
+        count: 2,
+        grossCents: 10000,
+        netCents: 9800,
+        missingNet: 0,
+        // One hand-settled row with no amount_settled — gross is a FLOOR
+        // (plan 133).
+        missingGross: 1,
+      },
       withdrawals: {
         count: 1,
         grossCents: 5000,
         netCents: 4950,
         missingNet: 0,
+        missingGross: 0,
       },
       findings: 1,
       lastAuditedAt: '2026-09-06T00:00:00.000Z',
@@ -101,7 +116,10 @@ type Body = {
   wallet: { current: number; available: number } | null;
   wallet_error: string | null;
   totals: { deposits: { count: number; gross: number; net: number } };
-  history: { gateway: string; deposits: { count: number; gross: number } }[];
+  history: {
+    gateway: string;
+    deposits: { count: number; gross: number; missing_gross: number };
+  }[];
   findings: { kind: string; gateway: string; amount: number | null }[];
 };
 
@@ -122,7 +140,14 @@ describe('GET /admin/payments/audit', () => {
     expect(body.history).toEqual([
       expect.objectContaining({
         gateway: 'globepay',
-        deposits: expect.objectContaining({ count: 2, gross: 100, net: 98 }),
+        // missing_gross rides through with the rest — the panel needs it to
+        // say "gross is a floor" on a retired gateway too (plan 133).
+        deposits: expect.objectContaining({
+          count: 2,
+          gross: 100,
+          net: 98,
+          missing_gross: 1,
+        }),
       }),
     ]);
     expect(body.findings[0]).toEqual(
