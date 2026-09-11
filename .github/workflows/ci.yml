@@ -591,9 +591,20 @@ jobs:
   # cancelled (a cancelled shard is how a cold-install timeout presents, and
   # that must stay visible, not vanish into a green gate). Matrix width and
   # the path filter can change freely; this name does not.
+  #
+  # `changes` is in `needs` on purpose: if the path filter itself fails or is
+  # cancelled, the four backend jobs are skipped for the WRONG reason, and a
+  # gate that only looked at them would read that as all-green. Its result
+  # rides the same JSON, so a failed filter fails the gate.
   backend-gate:
     needs:
-      [backend-quality, backend-unit, integration-http, integration-modules]
+      [
+        changes,
+        backend-quality,
+        backend-unit,
+        integration-http,
+        integration-modules,
+      ]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
