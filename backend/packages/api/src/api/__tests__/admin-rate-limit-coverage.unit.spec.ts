@@ -12,106 +12,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { RATE_LIMITS } from '../utils/rate-limit';
-
-const API_ROOT = path.resolve(__dirname, '..');
-const MIDDLEWARES_PATH = path.join(API_ROOT, 'middlewares.ts');
-
-/** Recursively collect every route.ts file under dir, relative to API_ROOT. */
-function collectRouteFiles(dir: string): string[] {
-  const results: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...collectRouteFiles(full));
-    } else if (entry.isFile() && entry.name === 'route.ts') {
-      results.push(path.relative(API_ROOT, full).replace(/\\/g, '/'));
-    }
-  }
-  return results;
-}
-
-/**
- * `src/api/admin/packs/[slug]/odds/route.ts` -> `/admin/packs/*\/odds`.
- * Mirrors the matcher convention documented in middlewares.ts and plan 061:
- * a `[bracket]` path segment becomes a `*`.
- */
-function routeFileToUrl(relPath: string): string {
-  const withoutFile = relPath.replace(/\/route\.ts$/, '');
-  const segments = withoutFile
-    .split('/')
-    .map((seg) => (/^\[.+\]$/.test(seg) ? '*' : seg));
-  return `/${segments.join('/')}`;
-}
-
-// Matches two export shapes a route.ts handler can use for a mutation
-// method, so the scan can't be dodged by switching styles:
-//   export async function POST(...)   (the original, still group 1)
-//   export function POST(...)         (no async — group 1)
-//   export const POST = ...           (arrow/const handler — group 2)
-// `export { x as METHOD, y as METHOD2 }` re-exports are handled SEPARATELY
-// below (RE_EXPORT_BLOCK_RE + RE_EXPORT_SPECIFIER_RE), not folded into this
-// alternation: a single regex match can only capture one group per match, so
-// a block aliasing more than one method at once (e.g.
-// `export { create as POST, remove as DELETE }`) would silently lose every
-// specifier after the first if it stayed a third alternative here.
-const MUTATION_METHOD_RE =
-  /export\s+(?:async\s+)?function\s+(POST|PUT|PATCH|DELETE)\b|export\s+const\s+(POST|PUT|PATCH|DELETE)\s*=/g;
-
-// Every `export { ... }` block, so its contents can be scanned on their own
-// for however many `as METHOD` specifiers it contains.
-const RE_EXPORT_BLOCK_RE = /export\s*\{([^}]*)\}/g;
-const RE_EXPORT_SPECIFIER_RE = /\bas\s+(POST|PUT|PATCH|DELETE)\b/g;
-
-function mutationMethodsOf(fileText: string): string[] {
-  const methods = new Set<string>();
-
-  let match: RegExpExecArray | null;
-  MUTATION_METHOD_RE.lastIndex = 0;
-  while ((match = MUTATION_METHOD_RE.exec(fileText))) {
-    const method = match[1] || match[2];
-    if (method) methods.add(method);
-  }
-
-  let blockMatch: RegExpExecArray | null;
-  RE_EXPORT_BLOCK_RE.lastIndex = 0;
-  while ((blockMatch = RE_EXPORT_BLOCK_RE.exec(fileText))) {
-    let specMatch: RegExpExecArray | null;
-    RE_EXPORT_SPECIFIER_RE.lastIndex = 0;
-    while ((specMatch = RE_EXPORT_SPECIFIER_RE.exec(blockMatch[1]))) {
-      methods.add(specMatch[1]);
-    }
-  }
-
-  return [...methods];
-}
-
-/**
- * Convert a middlewares.ts matcher string into the same RegExp Express /
- * path-to-regexp 0.1.x (Medusa's runtime dependency, confirmed installed at
- * packages/api/node_modules/path-to-regexp@0.1.13) would build for it: `*`
- * spans `/` (becomes `.*`), everything else is a literal, anchored ^...$.
- * Verified against the real path-to-regexp output for this repo's matchers
- * during plan 061 (e.g. `/admin/packs/*` DOES match `/admin/packs/reorder`
- * and `/admin/packs/bronze/odds` — see the EXEMPT entries below).
- */
-function matcherToRegExp(matcher: string): RegExp {
-  const escaped = matcher.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = escaped.split('*').join('.*');
-  return new RegExp(`^${pattern}$`);
-}
-
-interface LimiterEntry {
-  matcher: string;
-  methods: string[];
-}
-
-function parseMethodField(raw: string): string[] {
-  return raw
-    .replace(/^\[|\]$/g, '')
-    .split(',')
-    .map((s) => s.trim().replace(/^'|'$/g, ''))
-    .filter(Boolean);
-}
+import {
+  API_ROOT,
+  MIDDLEWARES_PATH,
+  collectRouteFiles,
+  routeFileToUrl,
+  mutationMethodsOf,
+  matcherToRegExp,
+  extractLimiterEntries,
+  type LimiterEntry,
+} from './rate-limit-coverage-helpers';
 
 /**
  * Extract every `{ matcher: '...', method: ..., middlewares: [...] }` entry
@@ -128,17 +38,9 @@ function extractAdminActionRateLimitEntries(): LimiterEntry[] {
   );
   const bindingName = bindingMatch?.[1];
   if (!bindingName) return [];
-  const entryRe =
-    /{\s*(?:\/\/[^\n]*\n\s*)*matcher:\s*'([^']+)',\s*method:\s*(\[[^\]]*\]|'[^']*'),\s*middlewares:\s*\[([^\]]*)\],?\s*}/g;
-  const entries: LimiterEntry[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = entryRe.exec(src))) {
-    const [, matcher, methodRaw, middlewaresRaw] = match;
-    if (middlewaresRaw.includes(bindingName)) {
-      entries.push({ matcher, methods: parseMethodField(methodRaw) });
-    }
-  }
-  return entries;
+  return extractLimiterEntries(src).filter((e) =>
+    e.middlewares.includes(bindingName),
+  );
 }
 
 // Routes that export a mutation method but are deliberately NOT matched by
