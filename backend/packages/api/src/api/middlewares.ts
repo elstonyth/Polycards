@@ -502,6 +502,19 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
+      // A Google sign-in whose email already has an account: attach the
+      // identity instead of refusing (see the route). `allowUnregistered`
+      // because the caller holds a REGISTER token — auth_identity_id, no actor
+      // — exactly like POST /store/customers. authRateLimit is the sign-in tier
+      // the rest of that exchange already shares.
+      matcher: '/store/customers/link-google',
+      method: 'POST',
+      middlewares: [
+        authenticate('customer', ['bearer'], { allowUnregistered: true }),
+        authRateLimit,
+      ],
+    },
+    {
       // Free welcome pack eligibility (GET /store/free-pack) — the ONLY public
       // surface the free pack has (the catalog excludes its category). The
       // per-customer answer still requires the verified bearer; an

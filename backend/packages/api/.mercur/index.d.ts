@@ -575,6 +575,7 @@ export type Routes = {
                 account: typeof import("../../src/api/store/customers/me/account/route");
                 delete: typeof import("../../src/api/store/customers/me/delete/route");
             };
+            linkGoogle: typeof import("../../src/api/store/customers/link-google/route");
         };
         locales: typeof import("@medusajs/medusa/api/store/locales/route");
         orders: typeof import("@medusajs/medusa/api/store/orders/route") & {
