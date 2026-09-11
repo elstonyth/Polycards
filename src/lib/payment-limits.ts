@@ -7,16 +7,21 @@ export type PaymentLimits = {
   gateway: string;
   deposit: { minRm: number; maxRm: number };
   withdrawal: { minRm: number; maxRm: number };
+  depositsEnabled: boolean;
+  withdrawalsEnabled: boolean;
 };
 
 /**
  * Used until the backend answers (and if it never does): TGPay's band
  * (RM 50–10,000 deposits, RM 50–30,000 payouts). Keep this the INTERSECTION
  * of every configured gateway's band — highest floor, lowest ceiling — so the
- * forms never offer an amount an active gateway would refuse.
+ * forms never offer an amount an active gateway would refuse. Both channels
+ * default OPEN: the until-it-answers value must never close a channel.
  */
 export const DEFAULT_PAYMENT_LIMITS: PaymentLimits = {
   gateway: 'unknown',
   deposit: { minRm: 50, maxRm: 10000 },
   withdrawal: { minRm: 50, maxRm: 30000 },
+  depositsEnabled: true,
+  withdrawalsEnabled: true,
 };

@@ -10,19 +10,21 @@ import {
   startWithdrawal,
   type SavedBankAccount,
 } from '@/lib/actions/vault';
-import { DEFAULT_PAYMENT_LIMITS } from '@/lib/payment-limits';
+import {
+  DEFAULT_PAYMENT_LIMITS,
+  type PaymentLimits,
+} from '@/lib/payment-limits';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { cn } from '@/lib/utils';
 
-// The payout band belongs to whichever gateway the admin has active (TGPay
-// caps at RM 30,000; another gateway may differ), so it is read from the backend
-// when the form mounts; these are only the until-it-answers defaults. NOT the
-// same band as deposits — the payout floor is higher. The gateway's own
-// rejection names no numbers, so the form does.
-const WD_MIN_RM = DEFAULT_PAYMENT_LIMITS.withdrawal.minRm;
-const WD_MAX_RM = DEFAULT_PAYMENT_LIMITS.withdrawal.maxRm;
+// The payout band (and whether withdrawals are even open) belongs to
+// whichever gateway the admin has active (TGPay caps at RM 30,000; another
+// gateway may differ), so it is read from the backend when the form mounts;
+// DEFAULT_PAYMENT_LIMITS is only the until-it-answers value. NOT the same
+// band as deposits — the payout floor is higher. The gateway's own rejection
+// names no numbers, so the form does.
 
 /** Can this destination receive money right now? The server's `usableFrom` is
  *  the only input — the cooling-off duration is never duplicated here, so
@@ -88,13 +90,15 @@ export default function WithdrawForm({
   // next withdrawal starts a fresh attempt. Mirrors TopUpSheet's attemptKey.
   const attemptKey = useRef<string | null>(null);
 
-  const [band, setBand] = useState({ min: WD_MIN_RM, max: WD_MAX_RM });
+  const [limits, setLimits] = useState<PaymentLimits>(DEFAULT_PAYMENT_LIMITS);
+  // The channel itself, not the band — the admin can close withdrawals
+  // outright while a gateway stays configured (getPaymentLimits, plan 135).
+  const withdrawalsClosed = !limits.withdrawalsEnabled;
   useEffect(() => {
     let cancelled = false;
     getPaymentLimits()
       .then((l) => {
-        if (!cancelled)
-          setBand({ min: l.withdrawal.minRm, max: l.withdrawal.maxRm });
+        if (!cancelled) setLimits(l);
       })
       .catch(() => {});
     fetchSavedBankAccounts().then((res) => {
@@ -135,11 +139,11 @@ export default function WithdrawForm({
   const formValid = amountValid && selected !== undefined;
 
   async function submit() {
-    if (submitting || !formValid) return;
+    if (submitting || !formValid || withdrawalsClosed) return;
     setError(null);
-    if (amount < band.min || amount > band.max) {
+    if (amount < limits.withdrawal.minRm || amount > limits.withdrawal.maxRm) {
       setError(
-        `Withdrawals must be between ${rm0(band.min)} and ${rm0(band.max)}.`,
+        `Withdrawals must be between ${rm0(limits.withdrawal.minRm)} and ${rm0(limits.withdrawal.maxRm)}.`,
       );
       return;
     }
@@ -292,12 +296,24 @@ export default function WithdrawForm({
             inputMode="decimal"
             value={amountText}
             onChange={(e) => setAmountText(e.target.value)}
+            disabled={withdrawalsClosed}
             aria-label="Withdrawal amount in RM"
+            aria-describedby={
+              withdrawalsClosed ? 'withdraw-amount-guidance' : undefined
+            }
             placeholder="0.00"
-            className="h-11 w-full bg-transparent text-sm text-white outline-none placeholder:text-neutral-600"
+            className="h-11 w-full bg-transparent text-sm text-white outline-none placeholder:text-neutral-600 disabled:opacity-50"
           />
         </span>
       </label>
+      {withdrawalsClosed && (
+        <p
+          id="withdraw-amount-guidance"
+          className="mt-2 text-[12px] leading-relaxed text-neutral-400"
+        >
+          Withdrawals are paused right now.
+        </p>
+      )}
 
       {/* The remedy sits INSIDE role="alert" so problem and way out are one
           announcement. No onNavigate here — this is a page, not a modal. */}
@@ -313,7 +329,7 @@ export default function WithdrawForm({
 
       <Pill
         onClick={submit}
-        disabled={submitting || !formValid}
+        disabled={submitting || !formValid || withdrawalsClosed}
         size="lg"
         className="mt-4 w-full"
       >
