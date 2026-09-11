@@ -1,4 +1,11 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { callbackSourceIp, createTgpayCallbackAllowlist } from '../payer-ip';
+import { GATEWAYS, GATEWAY_IDS } from '../../../modules/packs/gateway';
+import {
+  extractLimiterEntries,
+  matcherToRegExp,
+} from '../../__tests__/rate-limit-coverage-helpers';
 
 const ORIGINAL = {
   TGPAY_CALLBACK_IPS: process.env.TGPAY_CALLBACK_IPS,
@@ -44,9 +51,14 @@ describe('callbackSourceIp — allowlist input', () => {
       }),
     ).toBe('54.251.58.7');
     expect(
-      callbackSourceIp({ ip: '::ffff:1.32.102.19', socket: { remoteAddress: '10.0.0.1' } }),
+      callbackSourceIp({
+        ip: '::ffff:1.32.102.19',
+        socket: { remoteAddress: '10.0.0.1' },
+      }),
     ).toBe('1.32.102.19');
-    expect(callbackSourceIp({ socket: { remoteAddress: '10.0.0.9' } })).toBe('10.0.0.9');
+    expect(callbackSourceIp({ socket: { remoteAddress: '10.0.0.9' } })).toBe(
+      '10.0.0.9',
+    );
     expect(callbackSourceIp({})).toBe('');
   });
 });
@@ -67,7 +79,10 @@ describe('TGPay callback allowlist middleware', () => {
     });
     expect(viaIngress.next).toHaveBeenCalled();
     // A spoofed forwarded header changes nothing: it is never read.
-    const bad = run({ ip: '9.9.9.9', headers: { 'x-forwarded-for': '1.32.102.19' } });
+    const bad = run({
+      ip: '9.9.9.9',
+      headers: { 'x-forwarded-for': '1.32.102.19' },
+    });
     expect(bad.next).not.toHaveBeenCalled();
     expect(bad.res.statusCode).toBe(403);
     expect(bad.res.body).toBe('rejected');
@@ -87,5 +102,53 @@ describe('TGPay callback allowlist middleware', () => {
     process.env.TGPAY_API_BASE = 'https://sandbox-api.example/api/v2';
     const sandbox = run({ ip: '9.9.9.9' });
     expect(sandbox.next).toHaveBeenCalled();
+  });
+});
+
+describe('wiring — every gateway hook path carries the limiter AND the allowlist', () => {
+  // The allowlist above is tested in isolation — it never reads middlewares.ts.
+  // Rename a hook path, reorder the array, or drop the entry in a refactor and
+  // production reverts to header-only callback authentication with a green
+  // suite unless something reads the actual wiring. This does.
+  it('middlewares.ts has an entry matching each GATEWAYS[id].hooks path with both middlewares', () => {
+    const src = fs.readFileSync(
+      path.resolve(__dirname, '../../middlewares.ts'),
+      'utf8',
+    );
+    const entries = extractLimiterEntries(src).map((e) => ({
+      ...e,
+      re: matcherToRegExp(e.matcher),
+    }));
+    for (const id of GATEWAY_IDS) {
+      for (const hookPath of Object.values(GATEWAYS[id].hooks)) {
+        const hit = entries.find(
+          (e) => e.methods.includes('POST') && e.re.test(hookPath),
+        );
+        // Jest's expect() takes exactly one argument — no message param —
+        // so the "which path" context comes from the thrown message instead.
+        if (!hit) throw new Error(`${hookPath} has no POST middleware entry`);
+        expect(hit.middlewares).toMatch(/\bgatewayHookRateLimit\b/);
+        expect(hit.middlewares).toMatch(/\btgpayCallbackAllowlist\b/);
+      }
+    }
+  });
+
+  it('the bare /hooks/tgpay prefix (no trailing segment) does not match the hook matcher', () => {
+    // The matcher note at middlewares.ts:311-317 (verified against a booted
+    // express app) records that '/hooks/tgpay/*' compiles to
+    // /^\/hooks\/tgpay\/(.*)\/?$/i — it must NOT match the bare prefix.
+    const src = fs.readFileSync(
+      path.resolve(__dirname, '../../middlewares.ts'),
+      'utf8',
+    );
+    const entries = extractLimiterEntries(src).map((e) => ({
+      ...e,
+      re: matcherToRegExp(e.matcher),
+    }));
+    expect(
+      entries.some(
+        (e) => e.methods.includes('POST') && e.re.test('/hooks/tgpay'),
+      ),
+    ).toBe(false);
   });
 });
