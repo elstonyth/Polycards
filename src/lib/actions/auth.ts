@@ -449,6 +449,15 @@ export async function googleLoginStart(input?: {
   }
 }
 
+/** Core's `validateCustomerAccountCreation` refusal for an email whose
+ *  customer row already `has_account` — the one create failure the Google
+ *  path recovers from by linking. Its guest-row sibling ("already exists")
+ *  is not: there is no account to attach to. */
+const isExistingAccountRefusal = (error: unknown): boolean =>
+  /already has an account/i.test(
+    error instanceof Error ? error.message : String(error),
+  );
+
 export async function googleCallback(query: {
   code?: string;
   state?: string;
@@ -465,6 +474,7 @@ export async function googleCallback(query: {
 
     const payload = decodeJwtPayload(token);
     let sessionToken = token;
+    let linked = false;
     // Empty actor_id ⇒ first Google login: no customer record yet, create one.
     if (!payload.actor_id) {
       // Normalize like login()/signup() so a mixed-case Google email can't
@@ -491,14 +501,33 @@ export async function googleCallback(query: {
       // ("Collector4809") on its first profile read, and the user picks a real
       // username in settings. `last_name` is not public and not the URL, so it
       // rides along unchanged.
-      await sdk.store.customer.create(
-        {
-          email,
-          last_name: payload.user_metadata?.family_name,
-        },
-        {},
-        { Authorization: `Bearer ${token}` },
-      );
+      try {
+        await sdk.store.customer.create(
+          {
+            email,
+            last_name: payload.user_metadata?.family_name,
+          },
+          {},
+          { Authorization: `Bearer ${token}` },
+        );
+      } catch (error) {
+        // Core refuses to register an email that already has an account and
+        // has no linking of its own. Google verified this email, so attach the
+        // identity to that account (backend store/customers/link-google)
+        // instead of sending the customer off to find a password they may
+        // never use — a Google sign-in never asks for one. Any other create
+        // failure still fails the sign-in, and so does a refused link (below).
+        if (!isExistingAccountRefusal(error)) throw error;
+        store.orThrow(
+          await store.post(
+            '/store/customers/link-google',
+            UncheckedSchema,
+            undefined,
+            { bearer: token },
+          ),
+        );
+        linked = true;
+      }
       // The post-register token still lacks actor_id — refresh for a real one.
       // `bearer`, not the cookie: this sends the register token Google just
       // handed back, and no auth cookie exists yet this request.
@@ -517,10 +546,13 @@ export async function googleCallback(query: {
         { Authorization: `Bearer ${sessionToken}` },
       );
       const handle = await fetchProfileHandle(sessionToken);
-      if (!payload.actor_id) {
+      if (!payload.actor_id && !linked) {
         // First Google login IS a signup — consume the invite cookie exactly
         // like the emailpass path, or every Google recruit's link is dropped
         // (review 2026-08-25, spec finding 2). Swallows failures internally.
+        // A LINKED login is not one: the account predates this visit, and
+        // binding it would let anyone refer an existing account by re-signing
+        // in with Google.
         await bindReferral();
       }
       return { ok: true, customer: toAuthCustomer(customer, handle) };

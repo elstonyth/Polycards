@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { googleCallback, type GoogleFailReason } from '@/lib/actions/auth';
 import { takeOauthState } from '@/lib/data/customer';
 import { resolveCallbackOrigin } from '@/lib/allowed-hosts';
+import { logger } from '@/lib/logger';
 
 /**
  * Google OAuth return URL (an Authorised redirect URI on the OAuth client).
@@ -38,7 +39,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // the browser resolve it against the origin IT requested, so skip
   // NextResponse.redirect's URL construction entirely and write the header
   // by hand.
+  // Every refusal this route makes ON ITS OWN is logged: none of these reach
+  // the backend, so without it a run of "Sign-in session expired" reports is
+  // invisible (prod 2026-09-10: four Google starts in two minutes, no
+  // callback ever logged anywhere). Shape only — never the state or code.
+  const refused = (
+    reason: GoogleFailReason,
+    detail: Record<string, unknown>,
+  ): void =>
+    logger.warn('[auth] google callback refused', { reason, ...detail });
+
   if (!origin) {
+    refused('origin', { host });
     return new NextResponse(null, {
       status: 302,
       headers: { Location: '/auth/google/failed?reason=origin' },
@@ -50,7 +62,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       new URL(`/auth/google/failed?reason=${reason}`, origin),
     );
 
-  if (searchParams.get('error')) {
+  const error = searchParams.get('error');
+  if (error) {
+    refused('cancelled', { error });
     return failed('cancelled');
   }
 
@@ -60,7 +74,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // own half-finished callback URL to a victim and have the victim's browser
   // logged into the attacker's account. Single-use: the read clears it.
   const state = searchParams.get('state');
-  if (!state || (await takeOauthState()) !== state) {
+  const bound = await takeOauthState();
+  if (!state || bound !== state) {
+    refused('expired', {
+      hasState: Boolean(state),
+      hasCookie: bound !== undefined,
+    });
     return failed('expired');
   }
 

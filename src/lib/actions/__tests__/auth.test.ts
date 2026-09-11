@@ -28,6 +28,9 @@ const mocks = vi.hoisted(() => ({
   // Referenceable handle for logger.error so the keys-only assertion (case 4)
   // can inspect the logged args; googleLoginStart also needs next/headers.
   logError: vi.fn(),
+  // The callback route logs its own refusals (origin/cancelled/expired) so a
+  // run of them is diagnosable; one route case asserts the shape.
+  logWarn: vi.fn(),
   headers: vi.fn(),
   // PHONE_VERIFICATION_REQUIRED is a module-level const read at import time —
   // mock it as a live getter so individual tests can flip it (a plain
@@ -76,7 +79,7 @@ vi.mock('@/lib/data/profiles', () => ({
 vi.mock('@/lib/logger', () => ({
   logger: {
     error: mocks.logError,
-    warn: vi.fn(),
+    warn: mocks.logWarn,
     info: vi.fn(),
     debug: vi.fn(),
   },
@@ -553,6 +556,76 @@ describe('googleCallback — OAuth callback branches', () => {
     expect(r).toEqual({ ok: false, reason: 'exists' });
   });
 
+  // Core's actual refusal for a registered email (prod 2026-09-10). A Google
+  // sign-in never asks for a password: the identity is attached to that
+  // account with the register token, then refreshed like a fresh signup.
+  it('first login on an email that already has an account → links, refreshes, ok — and no referral bind', async () => {
+    const first = makeToken({
+      actor_id: '',
+      user_metadata: { email: 'x@y.com' },
+    });
+    const refreshed = makeToken({ actor_id: 'cus_old' });
+    backend({
+      'GET /auth/customer/google/callback': { body: { token: first } },
+      'POST /store/customers/link-google': { body: { customer_id: 'cus_old' } },
+      'POST /auth/token/refresh': { body: { token: refreshed } },
+    });
+    mocks.customerCreate.mockRejectedValueOnce(
+      new Error('Customer with this email already has an account'),
+    );
+    mocks.customerRetrieve.mockResolvedValueOnce({
+      customer: {
+        id: 'cus_old',
+        email: 'x@y.com',
+        first_name: null,
+        last_name: null,
+      },
+    });
+    mocks.fetchProfileHandle.mockResolvedValueOnce('h');
+
+    const r = await googleCallback({ code: 'c', state: 's' });
+
+    expect(r.ok).toBe(true);
+    expect(mem.requests.map((q) => q.path)).toEqual([
+      '/auth/customer/google/callback',
+      '/store/customers/link-google',
+      '/auth/token/refresh',
+    ]);
+    // Both ride the REGISTER token's bearer — no cookie exists yet.
+    expect(mem.requests[1]).toMatchObject({
+      method: 'POST',
+      headers: { Authorization: `Bearer ${first}` },
+    });
+    expect(mocks.setAuthToken).toHaveBeenCalledWith(refreshed);
+    // The account predates this visit, so it is not a signup to attribute.
+    expect(mocks.bindReferral).not.toHaveBeenCalled();
+  });
+
+  it('link refused → failed, nothing stored', async () => {
+    backend({
+      'GET /auth/customer/google/callback': {
+        body: {
+          token: makeToken({
+            actor_id: '',
+            user_metadata: { email: 'x@y.com' },
+          }),
+        },
+      },
+      'POST /store/customers/link-google': {
+        status: 404,
+        body: { message: 'No account uses this email.' },
+      },
+    });
+    mocks.customerCreate.mockRejectedValueOnce(
+      new Error('Customer with this email already has an account'),
+    );
+
+    const r = await googleCallback({ code: 'c', state: 's' });
+
+    expect(r).toEqual({ ok: false, reason: 'failed' });
+    expect(mocks.setAuthToken).not.toHaveBeenCalled();
+  });
+
   it('retrieve fails after setAuthToken → clearAuthToken (no broken cookie left)', async () => {
     const token = makeToken({ actor_id: 'cus_1' });
     backend({ 'GET /auth/customer/google/callback': { body: { token } } });
@@ -777,6 +850,15 @@ describe("callback route origin guard — resolveCallbackOrigin + the route's fa
       'https://polycards.gg/auth/google/failed?reason=expired',
     );
     expect(mem.requests).toEqual([]);
+    // Logged, shape only: the refusal never reaches the backend, so this is
+    // the only trace of it. The state value itself must not be logged.
+    expect(mocks.logWarn).toHaveBeenCalledWith(
+      '[auth] google callback refused',
+      { reason: 'expired', hasState: true, hasCookie: true },
+    );
+    expect(JSON.stringify(mocks.logWarn.mock.calls)).not.toContain(
+      'someone-elses-state',
+    );
   });
 
   it('bound state matches → exchange runs; a failure lands as a reason CODE', async () => {
