@@ -236,14 +236,16 @@ export function resolveWithdrawalDestination(args: {
     );
   }
 
-  // The id is not a label, it is sha256(bankCode, accountNumber). That
-  // derivation is the ONLY reason an id cannot be repointed at a different bank
-  // account — it is what lets the withdraw route accept an `account_id` and no
-  // bank fields at all. Today it holds because every writer computes it (the
-  // save route, the backfill script); recomputing it HERE makes it hold by
-  // enforcement instead of by convention, at the single read the money path
-  // depends on. Any future writer that forgets savedBankAccountId, or anything
-  // that reaches customer metadata directly, is refused rather than paid.
+  // The id is not a label, it is sha256(bankCode, accountNumber). This
+  // re-derivation is a real check for a CANONICAL-coded entry — account.id
+  // there is whatever was actually stored, verified against a freshly derived
+  // value. For a LEGACY-coded entry it is not: parseSavedBankAccounts (lines
+  // 93-99) already recomputed account.id as savedBankAccountId(bankCode,
+  // accountNumber) at read time, so this comparison is against a value it
+  // just derived and cannot fail for that entry. The legacy path is covered
+  // instead by every writer computing the id correctly (the save route, the
+  // backfill script) and by client-supplied metadata being refused
+  // (middlewares.ts customer-write guards) — convention, not this enforcement.
   //
   // Same message as the unknown-id branch on purpose: a caller learns "not a
   // valid destination", never "tampering detected".
