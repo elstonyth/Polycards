@@ -117,8 +117,11 @@ describe('tgpay payout callback', () => {
       expect.objectContaining({
         gatewayRef: 'tx-9',
         amountSettled: 100,
-        // fee = gross − net in the settlement report, so net = 100 − 1.
-        netAmount: 99,
+        // A payout's net is what the WALLET PAID (plan 133): TGPay charges
+        // the fee on top, so a RM 100 payout with a RM 1 fee drains 101. The
+        // settlement fee is |gross − net| = 1 either way; the difference is
+        // that 101 is the figure the gateway's payout wallet actually moved.
+        netAmount: 101,
       }),
     );
     expect(refundWithdrawal).not.toHaveBeenCalled();

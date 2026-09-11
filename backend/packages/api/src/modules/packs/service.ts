@@ -3491,6 +3491,18 @@ class PacksModuleService extends MedusaService({
    * critical sections are mutually exclusive and each reads what the other
    * wrote: whichever commits first wins, and the loser observes it.
    *
+   * THE AUDIT ROW RIDES THIS TRANSACTION (plan 132). An admin exit from
+   * 'held' moves real money — approve submits a bank transfer, deny appends a
+   * refund to the append-only ledger — and until this existed the only record
+   * of who and why was a log line, which outlives nothing (DigitalOcean run
+   * logs cover the CURRENT deployment only; see the 2026-08-11 note in
+   * gateway-withdrawal.ts). Writing the row HERE rather than in the caller is
+   * what makes it honest: a CHECK violation or any other insert failure
+   * aborts the same transaction the claim is in, so "status flipped with no
+   * record" and "record written with no flip" are both impossible.
+   * `after.status` is overwritten with the status the claim actually landed
+   * on, so an audit row can never contradict the withdrawal row it describes.
+   *
    * @returns `debited` — whether a debit exists for this payout, decided
    * under the lock, so a caller may act on `false` as "no debit will ever
    * land". `claimed` — whether THIS caller moved the row (see
@@ -3509,6 +3521,10 @@ class PacksModuleService extends MedusaService({
        *  closed 'failed' instead: there is no other honest destination for a
        *  payout that never took the customer's money. */
       to: WithdrawalStatus;
+      /** The admin decision to record, written only when THIS caller claimed
+       *  the row. `entity_type` / `entity_id` are supplied here so every
+       *  writer files against the same withdrawal row. */
+      audit?: Omit<AdminAuditRow, 'entity_type' | 'entity_id'>;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ debited: boolean; claimed: boolean }> {
@@ -3562,10 +3578,28 @@ class PacksModuleService extends MedusaService({
       // carries a transactionManager instead of opening a second transaction —
       // if it did open one, the claim would land outside the lock and the whole
       // pact above would silently lapse.
+      const landed = debited ? input.to : 'failed';
       const claimed = await this.claimWithdrawalStatus(
-        { id: input.id, from: input.from, to: debited ? input.to : 'failed' },
+        { id: input.id, from: input.from, to: landed },
         sharedContext,
       );
+      // Only the caller that actually MOVED the row records a decision: a
+      // loser (double-clicked Approve, a racing Deny) changed nothing, and an
+      // audit row for it would read as a second decision that never happened.
+      // `after.status` is stamped from `landed`, not from what the caller
+      // asked for: an approve of an UNDEBITED row closes it 'failed', and an
+      // audit row claiming 'pending' would contradict the row it describes.
+      if (claimed && input.audit) {
+        await this.audit(
+          {
+            ...input.audit,
+            after: { ...(input.audit.after ?? {}), status: landed },
+            entity_type: 'gateway_withdrawal',
+            entity_id: input.id,
+          },
+          sharedContext,
+        );
+      }
       return { debited, claimed };
     } catch (error) {
       // ONLY 55P03 (lock_not_available) is translated. Anything else — a
@@ -6023,8 +6057,10 @@ class PacksModuleService extends MedusaService({
   // header prints: the observed mean gap over ALL hits, the mean over the
   // last 20, and the current drought (pulls since the newest hit — the same
   // number pullDrought reports, derived here from the sequence instead).
-  // Two full scans of the scope's ledger per call — bounded by the route's
-  // 5s cache and by the chart only being fetched while its tab is open.
+  // One scan of the scope's ledger per call (two only when the tier has never
+  // hit — see the fallback below), bounded further by the route's 5s cache and
+  // its store-read rate limit. The scan itself is UNBOUNDED: a never-hit tier's
+  // drought is "every pull on record" (CONTEXT.md §Drought).
   @InjectManager()
   async pullGaps(
     opts: { packId: string | null; rarity: Rarity; limit: number },
@@ -6061,8 +6097,21 @@ class PacksModuleService extends MedusaService({
       '         (n - COALESCE(LAG(n) OVER (ORDER BY n), 0))::int AS gap ' +
       '    FROM seq WHERE hit ' +
       ') ';
-    const [scalars] = await em.execute<
+    // The four header scalars ride the hit rows (every row carries the same
+    // values), so the CTE runs ONCE: `seq` is referenced more than once, so
+    // Postgres materialises it and the scalar subqueries read the materialised
+    // rows instead of re-scanning the ledger.
+    const scalarSql =
+      '(SELECT COUNT(*) FROM seq)::int AS total, ' +
+      '       (SELECT MAX(n) FROM hits)::int AS last_n, ' +
+      '       (SELECT AVG(gap) FROM hits)::float AS avg_gap, ' +
+      '       (SELECT AVG(gap) FROM (SELECT gap FROM hits ORDER BY n DESC LIMIT 20) t)::float AS last20_gap';
+    const rows = await em.execute<
       {
+        id: string;
+        customer_id: string | null;
+        rolled_at: string | Date;
+        gap: number | string;
         total: number | string;
         last_n: number | string | null;
         avg_gap: number | string | null;
@@ -6070,31 +6119,39 @@ class PacksModuleService extends MedusaService({
       }[]
     >(
       ctes +
-        'SELECT (SELECT COUNT(*) FROM seq)::int AS total, ' +
-        '       (SELECT MAX(n) FROM hits)::int AS last_n, ' +
-        '       (SELECT AVG(gap) FROM hits)::float AS avg_gap, ' +
-        '       (SELECT AVG(gap) FROM (SELECT gap FROM hits ORDER BY n DESC LIMIT 20) t)::float AS last20_gap',
-      scopeParams,
-    );
-    const hits = await em.execute<
-      {
-        id: string;
-        customer_id: string | null;
-        rolled_at: string | Date;
-        gap: number | string;
-      }[]
-    >(
-      ctes +
-        'SELECT id, customer_id, rolled_at, gap FROM hits ORDER BY n DESC LIMIT ?',
+        'SELECT h.id, h.customer_id, h.rolled_at, h.gap, ' +
+        scalarSql +
+        '  FROM hits h ORDER BY h.n DESC LIMIT ?',
       [...scopeParams, opts.limit],
     );
+    // A tier that has NEVER hit returns no rows, so the scalars have nowhere
+    // to ride: fall back to the scalar-only statement (the second scan runs
+    // for that case alone — `current` must still be the scope's whole pull
+    // count, per CONTEXT.md's Drought entry).
+    const [scalars] =
+      rows.length > 0
+        ? rows
+        : await em.execute<
+            {
+              total: number | string;
+              last_n: number | string | null;
+              avg_gap: number | string | null;
+              last20_gap: number | string | null;
+            }[]
+          >(ctes + 'SELECT ' + scalarSql, scopeParams);
     const num = (v: number | string | null | undefined): number | null =>
       v == null ? null : Number(v);
     return {
       current: Number(scalars?.total ?? 0) - Number(scalars?.last_n ?? 0),
       avg: num(scalars?.avg_gap),
       last20: num(scalars?.last20_gap),
-      hits: hits.map((h) => ({ ...h, gap: Number(h.gap) })),
+      // Explicit, not a spread: the rows also carry the scalar columns.
+      hits: rows.map((h) => ({
+        id: h.id,
+        customer_id: h.customer_id,
+        rolled_at: h.rolled_at,
+        gap: Number(h.gap),
+      })),
     };
   }
 
@@ -6387,12 +6444,14 @@ class PacksModuleService extends MedusaService({
       grossCents: number;
       netCents: number;
       missingNet: number;
+      missingGross: number;
     };
     withdrawals: {
       count: number;
       grossCents: number;
       netCents: number;
       missingNet: number;
+      missingGross: number;
     };
     findings: number;
     lastAuditedAt: string | null;
@@ -6404,18 +6463,21 @@ class PacksModuleService extends MedusaService({
       gross_cents: string;
       net_cents: string;
       missing_net: string;
+      missing_gross: string;
     };
     const toTotals = (r: Raw) => ({
       count: Number(r.n),
       grossCents: Number(r.gross_cents),
       netCents: Number(r.net_cents),
       missingNet: Number(r.missing_net),
+      missingGross: Number(r.missing_gross),
     });
     const [dep] = await em.execute<Raw[]>(
       `SELECT COUNT(*)::bigint AS n,
               COALESCE(SUM(ROUND(amount_settled * 100)), 0)::bigint AS gross_cents,
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
-              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
+              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net,
+              COUNT(*) FILTER (WHERE amount_settled IS NULL)::bigint AS missing_gross
          FROM gateway_deposit
         WHERE deleted_at IS NULL AND status = 'settled' AND gateway = ?`,
       [gateway],
@@ -6424,7 +6486,11 @@ class PacksModuleService extends MedusaService({
       `SELECT COUNT(*)::bigint AS n,
               COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS gross_cents,
               COALESCE(SUM(ROUND(net_amount * 100)) FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS net_cents,
-              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net
+              COUNT(*) FILTER (WHERE net_amount IS NULL)::bigint AS missing_net,
+              -- Constant 0, not a FILTER: a payout's gross is \`amount\`, which
+              -- is NOT NULL, so there is no such thing as a payout row with an
+              -- unknown gross. The column exists to keep both sides one shape.
+              0::bigint AS missing_gross
          FROM gateway_withdrawal
         WHERE deleted_at IS NULL AND status = 'settled' AND gateway = ?`,
       [gateway],

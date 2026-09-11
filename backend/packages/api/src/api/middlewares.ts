@@ -876,6 +876,17 @@ export default defineMiddlewares({
       middlewares: [storeReadRateLimit],
     },
     {
+      // The pull-history stats chart (GET /store/pulls/gaps). Public and
+      // publishable-key scoped like /store/pulls/recent, but a cache miss
+      // costs a window-function pass over the scope's whole pack ledger —
+      // the most expensive public read there is — so it takes the store read
+      // budget rather than trusting the client to fetch only while its tab
+      // is open (plan 134).
+      matcher: '/store/pulls/gaps',
+      method: 'GET',
+      middlewares: [storeReadRateLimit],
+    },
+    {
       // Saved payout accounts (GET /store/credits/withdraw/accounts) — the
       // withdraw form's picker source. Per-customer metadata read, so it
       // shares the store read budget.

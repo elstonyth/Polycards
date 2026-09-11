@@ -129,6 +129,23 @@ const SettlementPage = () => {
     0,
   );
 
+  /** One audit-tile money figure, rendered as a FLOOR ("≥ x" with the same
+   *  tooltip hint the settlement table's fee column uses) when `missing`
+   *  rows were excluded from the sum behind it. */
+  const money = (
+    value: number | null | undefined,
+    missing = 0,
+    hint: 'feeFloorHint' | 'grossFloorHint' = 'feeFloorHint',
+  ) => {
+    if (value === undefined || value === null) return '—';
+    if (missing <= 0) return rm(value);
+    return (
+      <Tooltip content={t(`settlement.${hint}`, { count: missing })}>
+        <span>≥ {rm(value)}</span>
+      </Tooltip>
+    );
+  };
+
   return (
     <div className="flex flex-col gap-y-3">
       {/* Active payment gateway (plan 130 §runtime switch). Sits above the
@@ -479,14 +496,37 @@ const SettlementPage = () => {
             <div className="grid grid-cols-2 gap-px border-t bg-ui-border-base md:grid-cols-4">
               {(
                 [
-                  ['auditWalletPayin', audit.data.wallet?.current],
-                  ['auditWalletPayout', audit.data.wallet?.available],
+                  ['auditWalletPayin', money(audit.data.wallet?.current)],
+                  ['auditWalletPayout', money(audit.data.wallet?.available)],
                   [
                     'auditOurDeposits',
-                    audit.data.totals.deposits.net,
-                    audit.data.totals.deposits.gross,
+                    // Net first, then gross — and each is a FLOOR when its own
+                    // counter is non-zero: a settled deposit with no net on
+                    // file is excluded from Σnet, one settled by hand with no
+                    // amount_settled is excluded from Σgross.
+                    money(
+                      audit.data.totals.deposits.net,
+                      audit.data.totals.deposits.missing_net,
+                      'feeFloorHint',
+                    ),
+                    money(
+                      audit.data.totals.deposits.gross,
+                      audit.data.totals.deposits.missing_gross,
+                      'grossFloorHint',
+                    ),
                   ],
-                  ['auditOurWithdrawals', audit.data.totals.withdrawals.gross],
+                  [
+                    'auditOurWithdrawals',
+                    // Gross (what customers were debited) beside net (what the
+                    // payout wallet actually paid, fee included) — the number
+                    // to hold against the gateway's payout wallet.
+                    money(audit.data.totals.withdrawals.gross),
+                    money(
+                      audit.data.totals.withdrawals.net,
+                      audit.data.totals.withdrawals.missing_net,
+                      'feeFloorHint',
+                    ),
+                  ],
                 ] as const
               ).map(([key, value, secondary]) => (
                 <div key={key} className="bg-ui-bg-subtle px-6 py-3">
@@ -494,12 +534,9 @@ const SettlementPage = () => {
                     {t(`settlement.${key}`)}
                   </Text>
                   <Heading level="h3" className="mt-0.5 tabular-nums">
-                    {value === undefined || value === null ? '—' : rm(value)}
+                    {value}
                     {secondary !== undefined ? (
-                      <span className="text-ui-fg-muted">
-                        {' '}
-                        / {rm(secondary)}
-                      </span>
+                      <span className="text-ui-fg-muted"> / {secondary}</span>
                     ) : null}
                   </Heading>
                 </div>

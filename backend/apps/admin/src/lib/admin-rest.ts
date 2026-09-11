@@ -440,9 +440,15 @@ export type HistoricalGatewayId = PaymentGatewayId | (string & {});
 export interface GatewayAuditTotals {
   count: number;
   gross: number;
-  /** Σ net over rows whose net is known — a FLOOR when missing_net > 0. */
+  /** Σ net over rows whose net is known — a FLOOR when missing_net > 0. For a
+   *  deposit that is what we RECEIVED (amount − fee); for a payout it is what
+   *  the wallet PAID (amount + fee — TGPay charges payout fees on top). */
   net: number;
   missing_net: number;
+  /** Settled deposits whose amount_settled is NULL (settled by hand) —
+   *  `gross` is a FLOOR when > 0. Always 0 on the payout side: a payout's
+   *  gross is `amount`, which is NOT NULL. */
+  missing_gross: number;
 }
 
 export interface GatewayAuditFinding {
