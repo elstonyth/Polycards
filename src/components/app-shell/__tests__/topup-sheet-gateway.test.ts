@@ -22,17 +22,22 @@ const topUpCredits = vi.fn();
 // The sheet asks the server which channels are on offer every time it opens
 // (DEPOSIT_METHODS_ENABLED is RUN_TIME and several routes are prerendered).
 const getDepositMethods = vi.fn();
+// The sheet reads the active gateway's band AND its open/closed channel
+// flags per open; the tests keep the RM 30 – 10,000 band their amounts were
+// written for, with both channels open (the common case) as the default —
+// individual tests override this to exercise the closed-channel copy.
+const getPaymentLimits = vi.fn().mockResolvedValue({
+  gateway: 'tgpay',
+  deposit: { minRm: 30, maxRm: 10000 },
+  withdrawal: { minRm: 50, maxRm: 50000 },
+  depositsEnabled: true,
+  withdrawalsEnabled: true,
+});
 vi.mock('@/lib/actions/vault', () => ({
   startDeposit: (...args: unknown[]) => startDeposit(...args),
   topUpCredits: (...args: unknown[]) => topUpCredits(...args),
   getDepositMethods: () => getDepositMethods(),
-  // The sheet reads the active gateway's band per open; the tests keep the
-  // RM 30 – 10,000 band their amounts were written for.
-  getPaymentLimits: async () => ({
-    gateway: 'tgpay',
-    deposit: { minRm: 30, maxRm: 10000 },
-    withdrawal: { minRm: 50, maxRm: 50000 },
-  }),
+  getPaymentLimits: (...args: unknown[]) => getPaymentLimits(...args),
 }));
 // jsdom's window.location is unforgeable, so navigation is observed through
 // the leaveFor seam instead of a location spy.
@@ -86,6 +91,16 @@ async function mount(codes: string[] = ['BQR', 'OB']) {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  // clearAllMocks resets call history, not the resolved value below — pin it
+  // fresh every test so a test that overrides it (the closed-channel case)
+  // can't leak into whichever test happens to run next.
+  getPaymentLimits.mockResolvedValue({
+    gateway: 'tgpay',
+    deposit: { minRm: 30, maxRm: 10000 },
+    withdrawal: { minRm: 50, maxRm: 50000 },
+    depositsEnabled: true,
+    withdrawalsEnabled: true,
+  });
   await mount();
 });
 
@@ -198,12 +213,29 @@ describe('TopUpSheet gateway branch', () => {
     expect(leaveFor).not.toHaveBeenCalled();
   });
 
-  // Both bounds disable checkout before any gateway request. The active
-  // gateway's maximum is also capped by the site-wide RM 10,000 limit.
-  it('offers no Pay button above the RM 10,000 ceiling', async () => {
-    typeAmount('10001');
+  // Both bounds disable checkout before any gateway request. The ceiling is
+  // whichever gateway the admin has active, not a hard-coded RM 10,000 — a
+  // gateway configured with a higher cap (here RM 12,000) must be honoured.
+  it("offers no Pay button above the gateway's ceiling", async () => {
+    act(() => root.unmount());
+    container.remove();
+    getPaymentLimits.mockResolvedValue({
+      gateway: 'tgpay',
+      deposit: { minRm: 30, maxRm: 12000 },
+      withdrawal: { minRm: 50, maxRm: 50000 },
+      depositsEnabled: true,
+      withdrawalsEnabled: true,
+    });
+    await mount();
+
+    typeAmount('12000.01');
     expect(buttons().some((b) => /^Pay RM/.test(b.textContent ?? ''))).toBe(
       false,
+    );
+
+    typeAmount('12000');
+    expect(buttons().some((b) => /^Pay RM/.test(b.textContent ?? ''))).toBe(
+      true,
     );
     expect(startDeposit).not.toHaveBeenCalled();
   });
@@ -269,5 +301,31 @@ describe('TopUpSheet gateway branch', () => {
       'Please log in first.',
     );
     expect(leaveFor).not.toHaveBeenCalled();
+  });
+
+  it('disables the amount field and Pay button when deposits are paused, with a guidance line', async () => {
+    act(() => root.unmount());
+    container.remove();
+    getPaymentLimits.mockResolvedValue({
+      gateway: 'tgpay',
+      deposit: { minRm: 30, maxRm: 10000 },
+      withdrawal: { minRm: 50, maxRm: 50000 },
+      depositsEnabled: false,
+      withdrawalsEnabled: true,
+    });
+    await mount();
+
+    expect(
+      container.querySelector<HTMLInputElement>(
+        'input[aria-label="Top-up amount in RM"]',
+      )?.disabled,
+    ).toBe(true);
+    expect(buttons().some((b) => /^Pay RM/.test(b.textContent ?? ''))).toBe(
+      false,
+    );
+    expect(container.textContent).toContain(
+      'Top-ups are paused right now. Your balance and cards are unaffected.',
+    );
+    expect(startDeposit).not.toHaveBeenCalled();
   });
 });

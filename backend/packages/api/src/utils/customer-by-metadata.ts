@@ -1,6 +1,6 @@
-import type { ICustomerModuleService, CustomerDTO } from "@medusajs/types";
+import type { ICustomerModuleService, CustomerDTO } from '@medusajs/types';
 
-type CustomerFilters = Parameters<ICustomerModuleService["listCustomers"]>[0];
+type CustomerFilters = Parameters<ICustomerModuleService['listCustomers']>[0];
 
 /**
  * Resolves a customer by one metadata key. `metadata` is a JSONB column;
@@ -27,12 +27,13 @@ async function findCustomerByMetadata(
 // is how `ash_red` could have resolved someone else's profile.
 
 /**
- * By referral code (metadata.referral_code — written by ensureReferralCode,
- * utils/referral-code.ts). Exercised by referral.spec.ts.
+ * By referral code (metadata.referral_code — written by
+ * PacksModuleService.assignReferralCode (modules/packs/service.ts)).
+ * Exercised by referral.spec.ts.
  */
 export async function findCustomerByReferralCode(
   customers: ICustomerModuleService,
   code: string,
 ): Promise<CustomerDTO | null> {
-  return findCustomerByMetadata(customers, "referral_code", code);
+  return findCustomerByMetadata(customers, 'referral_code', code);
 }

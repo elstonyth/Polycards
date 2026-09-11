@@ -25,7 +25,11 @@ operator:
 - Each customer gets a **random 8-character code** (32-symbol alphabet with no
   0/O/1/I look-alikes, 40 bits), stored in `customer.metadata.referral_code`
   beside the handle and assigned lazily on the first `/referral` visit
-  (`utils/referral-code.ts`, `ensureReferralCode`). No new table: the code is
+  (allocated by `PacksModuleService.assignReferralCode`,
+  `backend/packages/api/src/modules/packs/service.ts`, under a global
+  `referral_code:alloc` advisory lock with the uniqueness probe and the write
+  in one transaction — which is what keeps the unindexed pre-check below
+  safe). No new table: the code is
   looked up the same way the handle is.
 - The share link is **`/r/<code>`**; `/referral` shows the QR of that link, the
   link, the code, and a Share button.

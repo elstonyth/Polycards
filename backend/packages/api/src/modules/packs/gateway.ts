@@ -9,7 +9,7 @@ import {
   gatewayBankCode,
   TGPAY_SANDBOX_BANK,
 } from './banks';
-import { netOfFee } from './money';
+import { payoutCost, toOptionalMoney } from './money';
 import type {
   DepositDetail,
   MerchantBalance,
@@ -491,9 +491,15 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
       statusId: null,
       status: q.status,
       amount,
-      // Same rule as the payout callback (money.ts netOfFee); NaN when
-      // unknown, which toOptionalMoney turns into NULL on the row.
-      netAmount: netOfFee(q.order?.amount, q.order?.fee) ?? NaN,
+      // Same rule as the payout callback (money.ts payoutCost): a payout's
+      // net is what the wallet PAID. `amountIncludeFee` is what their wallet
+      // page shows; the sum is the same number when both parts are present
+      // (verified on the sandbox: 50 + 1 = 51). NaN when unknown, which
+      // toOptionalMoney turns into NULL on the row.
+      netAmount:
+        toOptionalMoney(q.order?.amountIncludeFee) ??
+        payoutCost(q.order?.amount, q.order?.fee) ??
+        NaN,
       paymentMethodCode: 'WD',
       bankReferenceNo: null,
       uniqueReferenceNo: null,

@@ -23,6 +23,20 @@
 // period with missingGross > 0 has a gross that is a floor too, for the same
 // reason. Both counters exist so the reader sees the floor, not just the
 // number.
+//
+// THE DIRECTION RULE (plan 133). `net_amount` means the same thing in both
+// directions — the money that moved through OUR gateway wallet — which puts
+// it on opposite sides of `gross`:
+//   - a DEPOSIT's net is what we RECEIVED: amount − fee, so net ≤ gross;
+//   - a PAYOUT's net is what we PAID: amount + fee, so net ≥ gross. TGPay
+//     charges the payout fee on top (docs/payments/tgpay-setup.md, verified
+//     2026-09-05: a RM 50 payout with a RM 1 fee drained the wallet by 51).
+// So the fee is |gross − net| per direction, still over the known-net subset
+// only. `gross` stays the LEDGER ANCHOR in both directions — it is the figure
+// the customer's balance moved by (a deposit's credited amount, a payout's
+// debited amount), which is what `delta` below compares against the credit
+// ledger. Never key a ledger comparison on net: net includes the gateway's
+// cut, which never touches a customer balance.
 
 /** One period-bucket of settled gateway rows, as grouped by the service SQL. */
 export type GatewayPeriodRow = {
@@ -107,14 +121,21 @@ const EMPTY_DIRECTION: SettlementDirection = {
   missingGross: 0,
 };
 
-function toDirection(row: GatewayPeriodRow | undefined): SettlementDirection {
+function toDirection(
+  row: GatewayPeriodRow | undefined,
+  direction: 'deposit' | 'withdrawal',
+): SettlementDirection {
   if (!row) return EMPTY_DIRECTION;
   return {
     count: row.count,
     gross: row.grossCents / 100,
     net: row.netCents / 100,
-    // Fee over the known-net subset ONLY — see the NULL rule above.
-    fee: (row.grossWithNetCents - row.netCents) / 100,
+    // Fee over the known-net subset ONLY — see the NULL rule above — and
+    // signed per direction, see the DIRECTION RULE.
+    fee:
+      direction === 'deposit'
+        ? (row.grossWithNetCents - row.netCents) / 100
+        : (row.netCents - row.grossWithNetCents) / 100,
     missingNet: row.missingNet,
     missingGross: row.missingGross,
   };
@@ -143,8 +164,8 @@ export function mergeSettlementPeriods(
   ].sort((a, b) => (a < b ? 1 : -1));
 
   return periods.map((period) => {
-    const d = toDirection(depositsBy.get(period));
-    const w = toDirection(withdrawalsBy.get(period));
+    const d = toDirection(depositsBy.get(period), 'deposit');
+    const w = toDirection(withdrawalsBy.get(period), 'withdrawal');
     const l = ledgerBy.get(period);
     const topupCredited = (l?.topupCents ?? 0) / 100;
     const cashoutNet = (l?.cashoutCents ?? 0) / 100;

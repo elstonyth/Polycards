@@ -24,8 +24,12 @@ export async function GET(
   }
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  // Both metadata writers go through the per-customer advisory lock, so
-  // running them side by side cannot lose a key.
+  // Two writers, two columns, two disjoint global locks: the handle workflow
+  // writes first_name under `username:alloc` (backstopped by
+  // IDX_customer_first_name_lower_unique); assignReferralCode writes metadata
+  // under `referral_code:alloc` + `metadata:<id>`. Each transaction locks at
+  // most one customer row, so running them side by side cannot lose either
+  // write or deadlock.
   const [{ result }, code, summary] = await Promise.all([
     ensureProfileHandleWorkflow(req.scope).run({
       input: { customer_id: customerId },

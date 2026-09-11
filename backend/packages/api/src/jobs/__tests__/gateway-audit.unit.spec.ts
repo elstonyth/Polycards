@@ -123,3 +123,96 @@ describe('gateway audit job', () => {
     expect(h.packs.listGatewayDeposits).not.toHaveBeenCalled();
   });
 });
+
+// Plan 133. The withdrawal loop's docblock claimed a net backfill it never
+// did, and the payout rows written before this change stored net as
+// amount − fee — the inverted convention. Both are this loop's to settle.
+describe('gateway audit job — payout net_amount', () => {
+  const settledPayout = (over: Record<string, unknown> = {}) => ({
+    id: 'gpw_n',
+    gateway: 'fake',
+    merchant_transaction_id: 'PC-wn',
+    status: 'settled',
+    amount: '100.00',
+    net_amount: null,
+    created_at: new Date(),
+    ...over,
+  });
+  const lastWithdrawalUpdate = (h: ReturnType<typeof harness>) =>
+    (h.packs.updateGatewayWithdrawals.mock.calls as unknown[][]).at(-1)?.[0] as
+      Record<string, unknown> | undefined;
+
+  it('backfills a NULL payout net from the gateway’s answer', async () => {
+    fakeGateway.script({
+      getWithdrawalDetail: { state: 'success', amount: 100, netAmount: 101 },
+    });
+    const h = harness([], [settledPayout()]);
+    await gatewayAuditJob(h.container as never);
+    expect(lastWithdrawalUpdate(h)).toMatchObject({
+      id: 'gpw_n',
+      net_amount: 101,
+    });
+  });
+
+  it('does NOT restate a disagreeing net on a gateway that is not TGPay', async () => {
+    fakeGateway.script({
+      getWithdrawalDetail: { state: 'success', amount: 100, netAmount: 101 },
+    });
+    const h = harness([], [settledPayout({ net_amount: '99.00' })]);
+    await gatewayAuditJob(h.container as never);
+    // The repair is TGPay's alone: another provider's rows were written under
+    // its own convention and this sweep has no standing to rewrite them.
+    expect(lastWithdrawalUpdate(h)).not.toHaveProperty('net_amount');
+    // No repair line — the only info this run logs is the run summary.
+    expect(h.logger.info).not.toHaveBeenCalledWith(
+      expect.stringContaining('PC-wn'),
+    );
+  });
+
+  it('repairs a TGPay payout whose stored net disagrees, and says so', async () => {
+    // A real tgpay config for THIS row, so the job takes the tgpay adapter
+    // rather than the fake — the repair is scoped to that gateway id and a
+    // fake row can never reach it. Only the HTTP is replaced.
+    process.env.TGPAY_API_BASE = 'https://sandbox-api.tgpay365.test/api/v2';
+    process.env.TGPAY_PUBLIC_KEY = 'pk';
+    process.env.TGPAY_SECRET_KEY = 'sk';
+    const realFetch = global.fetch;
+    global.fetch = jest.fn(async () => ({
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          status: 1,
+          data: {
+            status: 'success',
+            order: {
+              payoutRefNum: 'W1',
+              merchantRefNum: 'PC-wn',
+              amount: 100,
+              fee: 1,
+              amountIncludeFee: 101,
+            },
+          },
+        }),
+    })) as unknown as typeof fetch;
+    try {
+      const h = harness(
+        [],
+        [settledPayout({ gateway: 'tgpay', net_amount: '99.00' })],
+      );
+      await gatewayAuditJob(h.container as never);
+      // 99 was amount − fee. 101 is what the payout wallet actually paid.
+      expect(lastWithdrawalUpdate(h)).toMatchObject({ net_amount: 101 });
+      expect(h.logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('PC-wn'),
+      );
+      expect(h.logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('99 -> 101'),
+      );
+    } finally {
+      global.fetch = realFetch;
+      delete process.env.TGPAY_API_BASE;
+      delete process.env.TGPAY_PUBLIC_KEY;
+      delete process.env.TGPAY_SECRET_KEY;
+    }
+  });
+});

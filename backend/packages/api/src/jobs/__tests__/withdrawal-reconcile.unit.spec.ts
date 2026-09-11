@@ -196,6 +196,53 @@ describe('withdrawal sweep — an unattributable 400 never refunds', () => {
     expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
   });
 
+  // Plan 132. TGPay's statuses are WORDS and its statusId is always null
+  // (gateway.ts, tgpay adapter), so a reason keyed on statusId filed every
+  // payout the gateway explicitly REFUSED under the same string as one that
+  // aged out with no record at all — the two states plan 095 added
+  // failure_reason to keep apart.
+  it("names the gateway's own word on a refusal, not a missing statusId", async () => {
+    const h = harness();
+    fakeGateway.script({
+      getWithdrawalDetail: {
+        state: 'failed',
+        status: 'reject',
+        statusId: null,
+      },
+    });
+
+    await withdrawalReconcileJob(h.container);
+
+    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
+      selector: { id: pendingRow.id, status: 'pending' },
+      data: {
+        status: 'failed',
+        gateway_status: null,
+        failure_reason: 'sweep: requery said reject',
+      },
+    });
+  });
+
+  // A gateway that DOES carry a number keeps it, appended to the word — the
+  // number is still the thing their support desk searches on.
+  it('keeps a numeric statusId alongside the word when the gateway has one', async () => {
+    const h = harness();
+    fakeGateway.script({
+      getWithdrawalDetail: { state: 'failed', status: 'FAIL', statusId: 5 },
+    });
+
+    await withdrawalReconcileJob(h.container);
+
+    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
+      selector: { id: pendingRow.id, status: 'pending' },
+      data: {
+        status: 'failed',
+        gateway_status: 5,
+        failure_reason: 'sweep: requery said FAIL (statusId 5)',
+      },
+    });
+  });
+
   // The settlement mirror on the SWEEP path (audit 2026-08-17 B1/B2/C2).
   // The sweep was production's only settle path for a month (callbacks dead
   // until 2026-08-13), so "requery-settled rows carry net/refs" is exactly

@@ -88,6 +88,8 @@ beforeEach(() => {
     gateway: 'tgpay',
     deposit: { minRm: 30, maxRm: 10000 },
     withdrawal: { minRm: 50, maxRm: 50000 },
+    depositsEnabled: true,
+    withdrawalsEnabled: true,
   });
 });
 
@@ -203,6 +205,29 @@ describe('WithdrawForm', () => {
     expect(submitButton().disabled).toBe(false);
   });
 
+  it('disables the amount field and submit when withdrawals are paused, with a guidance line', async () => {
+    getPaymentLimits.mockResolvedValue({
+      gateway: 'tgpay',
+      deposit: { minRm: 30, maxRm: 10000 },
+      withdrawal: { minRm: 50, maxRm: 50000 },
+      depositsEnabled: true,
+      withdrawalsEnabled: false,
+    });
+    await render();
+    fillValidForm();
+    expect(
+      container.querySelector<HTMLInputElement>(
+        'input[aria-label="Withdrawal amount in RM"]',
+      )?.disabled,
+    ).toBe(true);
+    expect(submitButton().disabled).toBe(true);
+    expect(container.textContent).toContain(
+      'Withdrawals are paused right now.',
+    );
+    await submit();
+    expect(startWithdrawal).not.toHaveBeenCalled();
+  });
+
   it.each(['49', '50001'])(
     'rejects RM %s in the form without touching the backend',
     async (amount) => {
@@ -221,6 +246,8 @@ describe('WithdrawForm', () => {
       gateway: 'tgpay',
       deposit: { minRm: 50, maxRm: 10000 },
       withdrawal: { minRm: 50, maxRm: 30000 },
+      depositsEnabled: true,
+      withdrawalsEnabled: true,
     });
     await render();
     fillValidForm('40000');
