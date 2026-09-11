@@ -17,10 +17,10 @@
     "test": "jest"
   },
   "devDependencies": {
-    "@swc/core": "^1.16.0",
+    "@swc/core": "^1.16.2",
     "@swc/jest": "^0.2.36",
     "@types/jest": "^30.0.0",
-    "jest": "^30.5.0",
+    "jest": "^30.5.1",
     "typescript": "5.9.3"
   }
 }
