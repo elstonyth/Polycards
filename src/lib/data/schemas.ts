@@ -527,6 +527,10 @@ export const PaymentConfigSchema = z.looseObject({
   gateway: z.string(),
   deposit: z.looseObject({ min_rm: finite, max_rm: finite }),
   withdrawal: z.looseObject({ min_rm: finite, max_rm: finite }),
+  // Absent on a backend older than #557's /store/payments/config; absent
+  // reads as open so an older backend keeps today's behaviour.
+  deposits_enabled: z.boolean().optional(),
+  withdrawals_enabled: z.boolean().optional(),
 });
 
 /** GET /store/credits transaction row. `amount` is signed (credit +, spend −).

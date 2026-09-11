@@ -20,8 +20,13 @@ concurrency:
 jobs:
   # Most PRs here are storefront work — don't make them pay the ~10-min backend
   # toll for code they didn't touch. Backend jobs run only when backend/** (or
-  # this workflow) changes; a skipped job counts as PASSING for branch
-  # protection, so required checks stay satisfied.
+  # this workflow) changes. They are NOT individually required checks: a
+  # required check that skips would block every storefront-only PR forever,
+  # and integration-http's contexts are per-shard ("integration-http (N)").
+  # Instead the always-run `backend-gate` job (bottom of this file) aggregates
+  # their results — success or skipped passes, failure or cancelled fails —
+  # and THAT single context is the required check (round 15, 2026-09-10; the
+  # round-14 belief that the jobs were already required was wrong).
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -304,7 +309,7 @@ jobs:
   # jest shards natively at the file level (--shard=N/M). In CI each shard gets
   # its OWN job + postgres, so wall-clock = per-shard overhead + slowest shard's
   # tests, and adding shards divides the ~20 test-minutes across more runners.
-  # 84 suites over 8 shards ≈ 10-11/shard. The per-shard overhead floor is now
+  # 105 suites over 8 shards ≈ 13-14/shard (as of 2026-09-10). The per-shard overhead floor is now
   # ~1m25s (container init + node setup + the node_modules-cached ~50s install),
   # so wall ≈ 1m25s + 20min/N; past ~8 shards the fixed floor dominates and more
   # shards stop paying off. postgres data is on tmpfs (below) so the per-suite
@@ -578,6 +583,45 @@ jobs:
           name: modules-integration-log
           path: backend/packages/api/modules-tests.log
           retention-days: 7
+
+  # Aggregates the four path-filtered backend jobs into ONE always-reporting
+  # context so branch protection can require it. `if: always()` is what makes
+  # it report on storefront-only PRs, where every needed job is `skipped`.
+  # Pass = every result is success or skipped. Fail = any failure or
+  # cancelled (a cancelled shard is how a cold-install timeout presents, and
+  # that must stay visible, not vanish into a green gate). Matrix width and
+  # the path filter can change freely; this name does not.
+  #
+  # `changes` is in `needs` on purpose: if the path filter itself fails or is
+  # cancelled, the four backend jobs are skipped for the WRONG reason, and a
+  # gate that only looked at them would read that as all-green. Its result
+  # rides the same JSON, so a failed filter fails the gate.
+  backend-gate:
+    needs:
+      [
+        changes,
+        backend-quality,
+        backend-unit,
+        integration-http,
+        integration-modules,
+      ]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate backend job results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS"
+          # grep exits 1 on zero matches — the all-green path — so it must
+          # never abort this step, pipefail or not.
+          bad=$(echo "$RESULTS" | { grep -Eo '"result": *"(failure|cancelled)"' || true; } | wc -l)
+          if [ "$bad" -ne 0 ]; then
+            echo "::error::$bad backend job(s) failed or were cancelled"
+            exit 1
+          fi
+          echo "backend gate: all backend jobs succeeded or were skipped"
 
   # Secret scan — forward-looking insurance for a payments-adjacent codebase.
   # Historical false positives can be waived via a .gitleaksignore fingerprint.

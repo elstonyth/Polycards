@@ -262,12 +262,17 @@ export default async function withdrawalReconcileJob(
         gatewayStatus,
         'pending',
         // What the SWEEP knew when it closed this row (plan 095): the
-        // gateway's own status number, or its absence when the payout went
-        // stale with no record to requery. Without it a swept-closed row and
-        // a submit-refused one look identical afterwards.
-        gatewayStatus === null
-          ? 'sweep: stale with no gateway record'
-          : `sweep: requery statusId ${gatewayStatus}`,
+        // gateway's own status WORD (TGPay) or NUMBER (a gateway that has
+        // one), or its absence when the payout went stale with no record to
+        // requery. Without it a swept-closed row and a submit-refused one
+        // look identical afterwards. Keyed on `detail`, not on statusId:
+        // TGPay's statuses are strings and its statusId is always null
+        // (gateway.ts, tgpay adapter), so a numeric key read every explicit
+        // `reject` as "no record at all".
+        detail
+          ? `sweep: requery said ${detail.status || detail.state}` +
+              (gatewayStatus !== null ? ` (statusId ${gatewayStatus})` : '')
+          : 'sweep: stale with no gateway record',
       );
       refunded += 1;
     } catch (error) {
