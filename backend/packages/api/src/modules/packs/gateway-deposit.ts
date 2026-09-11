@@ -23,8 +23,8 @@ type DepositStatus = (typeof DEPOSIT_STATUSES)[number];
 
 // The submit half of the gateway deposit loop: record intent, ask the
 // gateway for a cashier page, hand the customer the URL. NO credit is issued
-// here — that happens only when a verified callback reports status 6
-// (src/api/hooks/tgpay/deposit/route.ts).
+// here — that happens only when a verified callback reports the gateway's
+// success status (TGPay: `APPROVED`) — src/api/hooks/tgpay/deposit/route.ts.
 
 /**
  * Fallback MYR deposit method when neither the request nor the environment
@@ -67,17 +67,16 @@ export const GATEWAY_MAX_RECENT_PENDING_PER_CUSTOMER = 5;
 export const GATEWAY_PENDING_WINDOW_MS = 20 * 60 * 1000;
 
 /**
- * Per-transaction limits for the PRODUCTION merchant account, confirmed by the
- * provider 2026-07-29 (Sean): Online Banking bank-to-bank and QR e-wallet both
- * RM 30 – RM 10,000. The old RM 30–1,000 ceiling was the TEST account's, probed
- * live on 2026-07-22 (1000 accepted, 1001 → PMT10005) — re-probe on production
- * before treating 10,000 as verified rather than stated.
+ * The site-wide deposit ceiling (== TOPUP_MAX_RM, topup.ts) — not a
+ * per-gateway figure. Per-gateway bands live on `GATEWAYS[id].limits`
+ * (gateway.ts); TGPay's deposit band is 50–10,000, so this constant is
+ * currently the binding (lower) ceiling of the two. Doubles as the sweep's
+ * quarantine ceiling (gateway-reconcile.ts): a requeried amount above this
+ * is left for manual settlement rather than auto-credited.
  *
  * Enforced HERE as well as in the storefront so an amount that cannot possibly
- * succeed never costs a network round-trip or leaves a failed row behind. Their
- * own rejection is a bare "Invalid Transaction Amount" with no bounds in it.
+ * succeed never costs a network round-trip or leaves a failed row behind.
  */
-export const GATEWAY_MIN_RM = 30;
 export const GATEWAY_MAX_RM = 10000;
 
 /**

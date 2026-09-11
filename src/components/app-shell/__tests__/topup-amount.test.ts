@@ -43,6 +43,8 @@ beforeEach(() => {
     gateway: 'tgpay',
     deposit: { minRm: 50, maxRm: 10000 },
     withdrawal: { minRm: 50, maxRm: 30000 },
+    depositsEnabled: true,
+    withdrawalsEnabled: true,
   });
   startDeposit.mockResolvedValue({
     ok: false,
@@ -132,6 +134,8 @@ describe('top-up amount validation before gateway checkout', () => {
       gateway: 'alternate',
       deposit: { minRm: 100, maxRm: 1000 },
       withdrawal: { minRm: 50, maxRm: 30000 },
+      depositsEnabled: true,
+      withdrawalsEnabled: true,
     });
     await mount();
     await enterAmount('50');
