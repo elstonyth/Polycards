@@ -31,6 +31,7 @@ RUN corepack enable
 # Copy only manifests first so `yarn install` is cached until a dependency
 # actually changes. Every workspace package.json must be present before install.
 COPY package.json yarn.lock .yarnrc.yml turbo.json ./
+COPY .yarn/patches/ ./.yarn/patches/
 COPY packages/api/package.json ./packages/api/
 COPY packages/odds-math/package.json ./packages/odds-math/
 COPY packages/pokemon/package.json ./packages/pokemon/

@@ -4546,6 +4546,26 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@mercurjs/core@patch:@mercurjs/core@npm%3A2.3.3#~/.yarn/patches/@mercurjs-core-npm-2.3.3-2ff3229629.patch":
+  version: 2.3.3
+  resolution: "@mercurjs/core@patch:@mercurjs/core@npm%3A2.3.3#~/.yarn/patches/@mercurjs-core-npm-2.3.3-2ff3229629.patch::version=2.3.3&hash=b484e9"
+  dependencies:
+    "@orama/orama": "npm:^3.1.18"
+    pkg-dir: "npm:4"
+    resolve-cwd: "npm:^3.0.0"
+    zod: "npm:4.4.3"
+  peerDependencies:
+    "@medusajs/admin-sdk": ">=2.18.0"
+    "@medusajs/cli": ">=2.18.0"
+    "@medusajs/framework": ">=2.18.0"
+    "@medusajs/icons": ">=2.18.0"
+    "@medusajs/medusa": ">=2.18.0"
+    "@medusajs/test-utils": ">=2.18.0"
+    express: ^4.21.0
+  checksum: 10c0/c05fc1ba771fe6bb81394920df8c8b1f7a82646500aec62ed7bfdbe1c201778fbbf26f6b422ab07c3b2fd09c566a6b2a7c6d93ccd49799f8533fab39d4702997
+  languageName: node
+  linkType: hard
+
 "@mercurjs/dashboard-sdk@npm:2.3.3":
   version: 2.3.3
   resolution: "@mercurjs/dashboard-sdk@npm:2.3.3"

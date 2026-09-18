@@ -29,6 +29,7 @@
     "zod": "4.6.2"
   },
   "resolutions": {
+    "@mercurjs/core@npm:2.3.3": "patch:@mercurjs/core@npm%3A2.3.3#~/.yarn/patches/@mercurjs-core-npm-2.3.3-2ff3229629.patch",
     "csv-parse@^5.6.0": "7.0.2",
     "qs": "6.16.0",
     "@opentelemetry/core": "^2.10.0",

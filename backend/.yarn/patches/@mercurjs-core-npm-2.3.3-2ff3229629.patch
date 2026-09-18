@@ -1,0 +1,150 @@
+diff --git a/.medusa/server/src/api/store/carts/[id]/line-items/validators.d.ts b/.medusa/server/src/api/store/carts/[id]/line-items/validators.d.ts
+index 404904f107cb6ef581606be6fb0623119bd81d84..e8aa6b936615ea0a5b08c2019c378fff094df53d 100644
+--- a/.medusa/server/src/api/store/carts/[id]/line-items/validators.d.ts
++++ b/.medusa/server/src/api/store/carts/[id]/line-items/validators.d.ts
+@@ -2,23 +2,17 @@ import { z } from "zod";
+ export declare const StoreAddCartLineItem: z.ZodObject<{
+     offer_id: z.ZodString;
+     quantity: z.ZodNumber;
+-    unit_price: z.ZodOptional<z.ZodNumber>;
+-    compare_at_unit_price: z.ZodOptional<z.ZodNumber>;
+     metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+     additional_data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+ }, "strict", z.ZodTypeAny, {
+     offer_id: string;
+     quantity: number;
+     metadata?: Record<string, unknown> | undefined;
+-    unit_price?: number | undefined;
+-    compare_at_unit_price?: number | undefined;
+     additional_data?: Record<string, unknown> | undefined;
+ }, {
+     offer_id: string;
+     quantity: number;
+     metadata?: Record<string, unknown> | undefined;
+-    unit_price?: number | undefined;
+-    compare_at_unit_price?: number | undefined;
+     additional_data?: Record<string, unknown> | undefined;
+ }>;
+ export type StoreAddCartLineItemType = z.infer<typeof StoreAddCartLineItem>;
+diff --git a/.medusa/server/src/api/store/carts/[id]/line-items/validators.js b/.medusa/server/src/api/store/carts/[id]/line-items/validators.js
+index a68cc50106435a3b46406bab32c3e9d255f7c4b4..50726bafeeb3796c6127156c7da245c1b862b3e7 100644
+--- a/.medusa/server/src/api/store/carts/[id]/line-items/validators.js
++++ b/.medusa/server/src/api/store/carts/[id]/line-items/validators.js
+@@ -6,8 +6,6 @@ exports.StoreAddCartLineItem = zod_1.z
+     .object({
+     offer_id: zod_1.z.string().min(1, "offer_id is required"),
+     quantity: zod_1.z.number().int().positive(),
+-    unit_price: zod_1.z.number().optional(),
+-    compare_at_unit_price: zod_1.z.number().optional(),
+     metadata: zod_1.z.record(zod_1.z.unknown()).optional(),
+     additional_data: zod_1.z.record(zod_1.z.unknown()).optional(),
+ })
+diff --git a/.medusa/server/src/api/vendor/customer-groups/[id]/customers/route.js b/.medusa/server/src/api/vendor/customer-groups/[id]/customers/route.js
+index 6fc5256f2913ee71db09d041ac2dc826457fce7b..6a7a3bec960e5d1e4d85220d0dfd9044e5141cce 100644
+--- a/.medusa/server/src/api/vendor/customer-groups/[id]/customers/route.js
++++ b/.medusa/server/src/api/vendor/customer-groups/[id]/customers/route.js
+@@ -2,16 +2,17 @@
+ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.POST = void 0;
+ const core_flows_1 = require("@medusajs/core-flows");
++const helpers_2 = require("../../../customers/helpers");
+ const helpers_1 = require("../../helpers");
+ const POST = async (req, res) => {
+     const { id } = req.params;
+-    await (0, helpers_1.validateSellerCustomerGroup)(req.scope, req.seller_context.seller_id, id);
++    const sellerId = req.seller_context.seller_id;
++    await (0, helpers_1.validateSellerCustomerGroup)(req.scope, sellerId, id);
++    const add = req.validatedBody.add ?? [];
++    const remove = req.validatedBody.remove ?? [];
++    await (0, helpers_2.validateSellerCustomer)(req.scope, sellerId, [...add, ...remove]);
+     await (0, core_flows_1.linkCustomersToCustomerGroupWorkflow)(req.scope).run({
+-        input: {
+-            id,
+-            add: req.validatedBody.add ?? [],
+-            remove: req.validatedBody.remove ?? [],
+-        },
++        input: { id, add, remove },
+     });
+     const customer_group = await (0, helpers_1.refetchCustomerGroup)(id, req.scope, req.queryConfig.fields);
+     res.json({ customer_group });
+diff --git a/.medusa/server/src/api/vendor/customers/helpers.d.ts b/.medusa/server/src/api/vendor/customers/helpers.d.ts
+index 8a5bf2bdbc5fccc20ba9a3aa1aa4bf6db11cd2e5..c0a8c53b90f6cc14a50fa11cc07c3588d1152fb7 100644
+--- a/.medusa/server/src/api/vendor/customers/helpers.d.ts
++++ b/.medusa/server/src/api/vendor/customers/helpers.d.ts
+@@ -1,2 +1,2 @@
+ import { MedusaContainer } from "@medusajs/framework";
+-export declare const validateSellerCustomer: (scope: MedusaContainer, sellerId: string, customerId: string) => Promise<void>;
++export declare const validateSellerCustomer: (scope: MedusaContainer, sellerId: string, customerId: string | string[]) => Promise<void>;
+diff --git a/.medusa/server/src/api/vendor/customers/helpers.js b/.medusa/server/src/api/vendor/customers/helpers.js
+index 1d1b646f3ffd82f4e8f3891d9e038a2a92dd4982..cc459085ba10040b9af2f09b4adf9d5eb6167c10 100644
+--- a/.medusa/server/src/api/vendor/customers/helpers.js
++++ b/.medusa/server/src/api/vendor/customers/helpers.js
+@@ -3,17 +3,23 @@ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.validateSellerCustomer = void 0;
+ const utils_1 = require("@medusajs/framework/utils");
+ const validateSellerCustomer = async (scope, sellerId, customerId) => {
++    const ids = Array.isArray(customerId) ? customerId : [customerId];
++    if (ids.length === 0) {
++        return;
++    }
+     const query = scope.resolve(utils_1.ContainerRegistrationKeys.QUERY);
+-    const { data: [sellerCustomer], } = await query.graph({
++    const { data: sellerCustomers } = await query.graph({
+         entity: "seller_customer",
+         filters: {
+             seller_id: sellerId,
+-            customer_id: customerId,
++            customer_id: ids,
+         },
+-        fields: ["seller_id", "customer_id"],
++        fields: ["customer_id"],
+     });
+-    if (!sellerCustomer) {
+-        throw new utils_1.MedusaError(utils_1.MedusaError.Types.NOT_FOUND, `Customer with id: ${customerId} was not found`);
++    const ownedIds = new Set(sellerCustomers.map((row) => row.customer_id));
++    const missingId = ids.find((id) => !ownedIds.has(id));
++    if (missingId) {
++        throw new utils_1.MedusaError(utils_1.MedusaError.Types.NOT_FOUND, `Customer with id: ${missingId} was not found`);
+     }
+ };
+ exports.validateSellerCustomer = validateSellerCustomer;
+diff --git a/.medusa/server/src/api/vendor/products/middlewares.js b/.medusa/server/src/api/vendor/products/middlewares.js
+index f450c0c76732b6209e2249caa8d49fe19ac22591..f1aaf4941fa99b9677f8ce4f19264f6e7dea1699 100644
+--- a/.medusa/server/src/api/vendor/products/middlewares.js
++++ b/.medusa/server/src/api/vendor/products/middlewares.js
+@@ -32,6 +32,18 @@ const applySellerProductLinkFilter = async (req, _res, next) => {
+     ];
+     return next();
+ };
++const ensureVariantBelongsToProduct = async (req, _res, next) => {
++    const query = req.scope.resolve(utils_3.ContainerRegistrationKeys.QUERY);
++    const { data: [variant], } = await query.graph({
++        entity: "variant",
++        fields: ["id"],
++        filters: { id: req.params.variant_id, product_id: req.params.id },
++    });
++    if (!variant) {
++        throw new utils_3.MedusaError(utils_3.MedusaError.Types.NOT_FOUND, `Variant with id ${req.params.variant_id} was not found`);
++    }
++    return next();
++};
+ exports.vendorProductsMiddlewares = [
+     {
+         method: ["GET"],
+@@ -155,6 +167,7 @@ exports.vendorProductsMiddlewares = [
+         method: ["POST"],
+         matcher: "/vendor/products/:id/variants/:variant_id",
+         middlewares: [
++            ensureVariantBelongsToProduct,
+             (0, framework_1.validateAndTransformBody)(validators_1.VendorUpdateProductVariant),
+             (0, framework_1.validateAndTransformQuery)(validators_1.VendorGetProductParams, query_config_1.vendorProductQueryConfig.retrieve),
+         ],
+@@ -168,7 +181,7 @@ exports.vendorProductsMiddlewares = [
+     {
+         method: ["DELETE"],
+         matcher: "/vendor/products/:id/variants/:variant_id",
+-        middlewares: [],
++        middlewares: [ensureVariantBelongsToProduct],
+         policies: [
+             {
+                 resource: policy_resources_1.PolicyResource.product_variant,
