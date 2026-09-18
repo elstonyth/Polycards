@@ -14,9 +14,10 @@
     "@medusajs/icons": "2.19.0",
     "@medusajs/ui": "4.2.1",
     "@mercurjs/client": "2.3.3",
-    "@mercurjs/dashboard-sdk": "2.3.1",
+    "@mercurjs/dashboard-sdk": "2.3.3",
     "@mercurjs/dashboard-shared": "2.3.3",
     "@tanstack/react-query": "5.102.8",
+    "i18next": "26.3.5",
     "jsonwebtoken": "9.0.3",
     "lodash": "^4.18.1",
     "react": "^18.3.1",
@@ -28,6 +29,8 @@
     "zod": "4.6.2"
   },
   "resolutions": {
+    "csv-parse@^5.6.0": "7.0.2",
+    "qs": "6.16.0",
     "@opentelemetry/core": "^2.10.0",
     "@opentelemetry/exporter-prometheus": "^0.217.0",
     "@opentelemetry/propagator-jaeger": "^2.9.0",
@@ -50,6 +53,7 @@
     "@eslint/js": "^10.0.1",
     "@types/jsonwebtoken": "^9.0.9",
     "@types/lodash": "^4.17.25",
+    "@types/node": "24.13.4",
     "@types/react": "^18.3.2",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.2.1",
