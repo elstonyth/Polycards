@@ -4,15 +4,18 @@
 // Usage: node scripts/qa-home-redesign.mjs   (expects the standalone server)
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
+import assert from 'node:assert/strict';
 
 const BASE = process.env.PW_BASE ?? 'http://localhost:4000';
 const OUT = 'docs/research';
 mkdirSync(OUT, { recursive: true });
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({ channel: process.env.PW_CHANNEL });
 try {
   for (const [name, viewport, reducedMotion] of [
+    ['home-drop-small', { width: 320, height: 740 }, 'reduce'],
     ['home-drop-phone', { width: 390, height: 844 }, 'no-preference'],
+    ['home-drop-tablet', { width: 768, height: 1024 }, 'reduce'],
     ['home-drop-desktop', { width: 1440, height: 900 }, 'no-preference'],
     ['home-drop-phone-reduced', { width: 390, height: 844 }, 'reduce'],
   ]) {
@@ -23,6 +26,77 @@ try {
     // Dismiss the cookie banner so it doesn't overlay the boards.
     const accept = page.getByRole('button', { name: 'Accept' });
     if (await accept.isVisible().catch(() => false)) await accept.click();
+
+    const hero = page.locator('section[aria-labelledby="hero-heading"]');
+    if (process.env.PW_EXPECT_HITS) {
+      assert.equal(
+        await hero.locator('[data-hero-hit]').count(),
+        Number(process.env.PW_EXPECT_HITS),
+      );
+    }
+    assert.equal(await page.locator('main h1').count(), 1);
+    assert.match(
+      await hero.innerText(),
+      /Open packs\.[\s\S]*Pull real cards\./,
+    );
+    assert.doesNotMatch(
+      await hero.locator('h1').innerText(),
+      /Pok[eé]mon|One Piece/i,
+    );
+    assert.equal(
+      await hero
+        .getByRole('link', { name: 'Open a pack', exact: true })
+        .getAttribute('href'),
+      '/slots',
+    );
+    assert.equal(
+      await hero
+        .getByRole('link', { name: 'How it works' })
+        .getAttribute('href'),
+      '/how-it-works',
+    );
+    await hero
+      .locator('img')
+      .evaluateAll((images) =>
+        Promise.all(images.map((image) => image.decode())),
+      );
+    assert.ok(
+      await page
+        .locator('main img')
+        .evaluateAll((images) =>
+          images.every(
+            (image) => !decodeURIComponent(image.src).includes('/home/hero/'),
+          ),
+        ),
+    );
+    assert.ok(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      `${name}: horizontal overflow`,
+    );
+    if (reducedMotion === 'reduce') {
+      assert.equal(
+        await hero.evaluate(
+          (element) =>
+            element
+              .getAnimations({ subtree: true })
+              .filter(
+                (animation) =>
+                  animation.effect?.getTiming().iterations === Infinity,
+              ).length,
+        ),
+        0,
+      );
+    }
+
+    const openPack = hero.getByRole('link', {
+      name: 'Open a pack',
+      exact: true,
+    });
+    // Trial performs Playwright's hit-target check without leaving the page.
+    await openPack.click({ trial: true });
+    await page.evaluate(() => window.scrollTo(0, 0));
 
     await page.screenshot({ path: `${OUT}/${name}-top.png` });
 

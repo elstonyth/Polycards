@@ -145,7 +145,7 @@ export default function StepInfoPill({
                 <MiniStep label="Pull a card">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src="/home/hero/slabs/pokemon1.webp"
+                    src="/images/app/polycards-slab-back.webp"
                     alt=""
                     className="h-12 w-auto object-contain"
                   />

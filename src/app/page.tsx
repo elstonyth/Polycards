@@ -1,6 +1,6 @@
 import {
   getPackCategories,
-  getPackChase,
+  getPackHighlights,
   getRecentPulls,
 } from '@/lib/data/packs';
 import { getLeaderboard } from '@/lib/data/leaderboard';
@@ -27,11 +27,11 @@ import FinalCta from '@/components/home/FinalCta';
 //
 // Do NOT add `export const fetchCache` here. It would make unstable_cache skip
 // its read and silently put all N pack-detail payloads back on every render of
-// getPackChase below, with nothing failing.
+// getPackHighlights below, with nothing failing.
 export const revalidate = 15;
 
 /** How many shelf tiles get a per-pack top-chase lookup (a cache read each —
- *  see getPackChase; one backend request each only on a cold miss). */
+ *  see getPackHighlights; one backend request each only on a cold miss). */
 const CHASE_LOOKUPS = 16;
 
 export default async function HomePage() {
@@ -44,37 +44,45 @@ export default async function HomePage() {
   const pulls = feed.pulls;
   const packs = categories.flatMap((c) => c.packs);
   const inStock = packs.filter((p) => p.inStock !== false);
-  const featured = [...inStock].sort(
-    (a, b) => Math.round(b.priceMyr) - Math.round(a.priceMyr),
-  )[0];
-
-  // Chase lookups cover the first N tiles PLUS the featured pack, so the hero
-  // never silently loses its chase when featured falls outside the first N.
-  // ponytail: pools are per-pack (listPackOdds is pack_id-scoped), so these N
-  // lookups are genuinely distinct. The render cost DID show up (2026-08-17:
-  // ~700 KB of pool JSON per home view, TTFB 1.0–3.5 s), so the short-TTL cache
-  // this comment anticipated now lives in getPackChase.
+  // Cover every available pack for the hero; keep the existing shelf limit
+  // for sold-out rows. Both surfaces share the cached, compact projection.
   const lookupPacks = [
-    ...new Set([
-      ...(featured ? [featured] : []),
-      ...packs.slice(0, CHASE_LOOKUPS),
-    ]),
+    ...new Set([...inStock, ...packs.slice(0, CHASE_LOOKUPS)]),
   ];
-  const chases = await Promise.all(lookupPacks.map((p) => getPackChase(p.id)));
-  const chaseByPack = new Map<string, PackCard | null>(
-    lookupPacks.map((p, i) => [p.id, chases[i] ?? null]),
+  const highlights = await Promise.all(
+    lookupPacks.map((pack) => getPackHighlights(pack.id)),
   );
-
-  const featuredChase = featured
-    ? (chaseByPack.get(featured.id) ?? null)
-    : null;
+  const highlightsByPack = new Map(
+    lookupPacks.map((pack, index) => [pack.id, highlights[index]]),
+  );
+  const chaseByPack = new Map<string, PackCard | null>(
+    lookupPacks.map((pack, index) => [
+      pack.id,
+      highlights[index]?.chase ?? null,
+    ]),
+  );
+  const seen = new Set<string>();
+  const topHits = inStock
+    .flatMap((pack) =>
+      (highlightsByPack.get(pack.id)?.slabs ?? []).map((card) => ({
+        card,
+        pack,
+      })),
+    )
+    .sort((a, b) => (b.card.priceMyr ?? 0) - (a.card.priceMyr ?? 0))
+    .filter(({ card }) => {
+      if (seen.has(card.handle)) return false;
+      seen.add(card.handle);
+      return true;
+    })
+    .slice(0, 3);
 
   return (
     // Full-bleed by design (CLAUDE.md): boards carry their own px-fluid
     // gutters; the marquee is the one true edge-to-edge band.
     <div className="w-full">
-      {/* 01 — the spotlight slab. No packs → the shelf empty state leads. */}
-      {featured && <HeroBoard pack={featured} chase={featuredChase} />}
+      {/* Brand introduction remains visible with an empty or offline catalog. */}
+      <HeroBoard hits={topHits} />
 
       {/* seam — live pulls marquee (absent when no pulls) */}
       <PullsMarquee pulls={pulls} />

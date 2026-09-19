@@ -22,11 +22,11 @@ export default function FinalCta() {
             'mt-8',
           )}
         >
-          RIP A PACK
+          Open a pack
           <ArrowRight className="h-4 w-4" aria-hidden />
         </Link>
         <p className="mt-4 text-[13px] text-neutral-400">
-          Real graded slabs · {BUYBACK_RATE_LABEL} vault buyback
+          Real collectible cards · {BUYBACK_RATE_LABEL} vault buyback
         </p>
       </div>
     </Reveal>
