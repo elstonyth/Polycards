@@ -1,6 +1,7 @@
 'use client';
 
 import { type ReactNode } from 'react';
+import { Truck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   useInView,
@@ -31,7 +32,7 @@ const STEPS: Step[] = [
   {
     num: '1',
     title: 'Open a pack',
-    body: 'Choose from a range of Pokémon packs and review the odds before opening. Your card is selected randomly. Independent per-pull verification is not available yet.',
+    body: 'Choose a Polycards pack and review the cards and odds before opening. Your card is selected randomly. Independent per-pull verification is not available yet.',
     pill: 'View all packs',
     pillSub: 'Browse every category and rip',
     pillVariant: 'packs',
@@ -72,8 +73,8 @@ const STEPS: Step[] = [
     media: (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src="/home/hero/ripped-slab.webp"
-        alt="Graded card revealed from a ripped pack"
+        src="/images/app/polycards-slab-back.webp"
+        alt="Polycards collectible in a protective slab"
         className="relative h-[88%] w-auto object-contain drop-shadow-[0_16px_40px_rgba(0,0,0,0.45)] transition-transform duration-500 ease-out group-hover:scale-[1.04]"
       />
     ),
@@ -86,12 +87,15 @@ const STEPS: Step[] = [
     pillSub: 'Fully tracked and insured to your door',
     pillVariant: 'ships',
     media: (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src="/home/hero/trade-sell-ship.webp"
-        alt="Sell back or ship your cards worldwide"
-        className="relative h-[88%] w-auto object-contain drop-shadow-[0_16px_40px_rgba(0,0,0,0.3)] transition-transform duration-500 ease-out group-hover:scale-[1.04]"
-      />
+      <div className="relative flex h-[88%] items-center justify-center gap-4">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/images/app/polycards-slab-back.webp"
+          alt="Your Polycards collectible"
+          className="h-full w-auto -rotate-6 object-contain"
+        />
+        <Truck className="h-12 w-12 text-neutral-400" aria-hidden />
+      </div>
     ),
   },
 ];

@@ -189,9 +189,8 @@ vi.mock('@/components/RecentPullsSection', () => ({ default: () => null }));
 vi.mock('@/components/home/TheGame', () => ({ default: () => null }));
 vi.mock('@/components/home/FinalCta', () => ({ default: () => null }));
 
-it('rounded-price ties preserve catalog order for the shelf and featured hero, while money stays exact', async () => {
+it('rounded-price ties preserve catalog order for the shelf, while money stays exact', async () => {
   const { isValidElement, Children } = await import('react');
-  const { default: HomePage } = await import('@/app/page');
   const { default: TierShelf } = await import('@/components/home/TierShelf');
   backend({
     [PACKS]: {
@@ -225,8 +224,67 @@ it('rounded-price ties preserve catalog order for the shelf and featured hero, w
   expect
     .soft(selectedPacks(shelf).map((p) => p.id))
     .toEqual(['first', 'second']);
-  expect
-    .soft(selectedPacks(await HomePage()).map((p) => p.id))
-    .toEqual(['first']);
   expect(packs.map((p) => p.priceMyr)).toEqual([1.51, 2.49]);
+});
+
+it('features the three distinct highest-value slabs from available packs, not the most expensive pack', async () => {
+  const { Children, isValidElement } = await import('react');
+  const { default: HomePage } = await import('@/app/page');
+  const card = (
+    handle: string,
+    price: number,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    handle,
+    name: handle,
+    rarity: 'Immortal',
+    market_value: price,
+    marketPriceMyr: price,
+    image: '/card.webp',
+    slab_image: '/slab.webp',
+    ...extra,
+  });
+  backend({
+    [PACKS]: {
+      body: {
+        packs: [
+          row({ slug: 'first', price: 500 }),
+          row({ slug: 'second', price: 5 }),
+          row({ slug: 'sold', price: 1000, in_stock: false }),
+        ],
+      },
+    },
+    'GET /store/pulls/recent': { body: { pulls: [] } },
+    'GET /store/packs/first': {
+      body: {
+        odds: [card('shared', 90), card('third', 80), card('lower', 10)],
+      },
+    },
+    'GET /store/packs/second': {
+      body: {
+        odds: [
+          card('raw', 1000, { slab_image: null }),
+          card('unpriced', 2000, { marketPriceMyr: undefined }),
+          card('shared', 90),
+          card('highest', 100),
+          card('fourth', 70),
+        ],
+      },
+    },
+    'GET /store/packs/sold': { body: { odds: [card('unavailable', 9999)] } },
+  });
+  const hero = Children.toArray((await HomePage()).props.children)[0];
+  if (
+    !isValidElement<{
+      hits: { card: { handle: string }; pack: { id: string } }[];
+    }>(hero)
+  ) {
+    throw new Error('Expected homepage hero');
+  }
+  expect(hero.props.hits.map(({ card }) => card.handle)).toEqual([
+    'highest',
+    'shared',
+    'third',
+  ]);
+  expect(hero.props.hits[0]?.pack.id).toBe('second');
 });

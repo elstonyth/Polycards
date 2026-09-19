@@ -147,28 +147,6 @@
   }
 }
 
-/* Home board 01 — the shop window lighting up. Deliberately NO opacity: the
-   clip's poster is this page's LCP image, and starting it transparent would
-   push LCP out by the length of the animation to buy an effect the brightness
-   ramp already delivers. The panel is painted from frame one and lights up in
-   place, which is what "the shop is open" is supposed to read as. */
-@keyframes windowIn {
-  from {
-    transform: scale(0.965);
-    filter: brightness(0.55);
-  }
-  to {
-    transform: scale(1);
-    filter: brightness(1);
-  }
-}
-@layer utilities {
-  .window-in {
-    animation: windowIn 900ms var(--ease-out-expo) backwards;
-    animation-delay: calc(var(--i, 0) * 70ms);
-  }
-}
-
 /* The money beat. The top chase is the one thing on this fold worth shouting,
    so it lands last and carries a single decaying bloom in its own Chase Gold —
    "Glow Is Earned" (DESIGN.md §4): the hue is inherited from the value itself,

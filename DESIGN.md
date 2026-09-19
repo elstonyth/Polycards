@@ -235,6 +235,17 @@ The home page is a six-board editorial scroll story (spec:
   (`rarityRgb`), idle float (`slabFloat`, ±8px/6s) plus a subtle scroll-linked
   tilt. Reduced motion: perfectly still, fully lit. The glow hue is always
   inherited from the thing glowing (Glow Is Earned).
+- **Pack-opening introduction (2026-09-20)** — collection-neutral headline:
+  "Open packs. Pull real cards." The three highest-value distinct slab cards
+  across available packs form the hero fan, with the top hit centered. Values
+  and slab art come from live inventory; branded card backs fill unavailable
+  slots. Never substitute legacy clone artwork or mock inventory. Display type
+  scales from 44px on phones to 104px on wide screens.
+  Phone order: introduction, actions, artwork, three-step explainer. Desktop:
+  copy and actions left, artwork right. Primary action goes to `/slots`; the
+  quieter explainer link goes to `/how-it-works`. Real prices only, and chase
+  captions explicitly say pulls vary. Keep the introduction visible without
+  stock; the shelf owns the inventory empty state.
 - **Tier ladder** — one full-width row per pack, ordered by price high→low
   (`TierShelf.tsx`): neutral art pedestal (white/4%), pack name, top-chase
   line (value in Chase Gold), price in Nekst right-aligned, quiet `Rip it →`

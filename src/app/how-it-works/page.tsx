@@ -146,7 +146,7 @@ export default function HowItWorksPage() {
         {/* decorative blurred blob (static, not animated-in) */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/home/hero/ripped-packs/pokemon.webp"
+          src="/images/polycards/gold-pack.webp"
           alt=""
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-70 blur-[40px] saturate-[1.7] will-change-transform animate-[heroBlob_18s_ease-in-out_infinite] motion-reduce:animate-none motion-reduce:will-change-auto"

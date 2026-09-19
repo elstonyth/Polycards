@@ -1,134 +1,199 @@
-import type { CSSProperties } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
-import { ArrowRight } from 'lucide-react';
+import {
+  ArrowRight,
+  ArrowUpRight,
+  Layers2,
+  PackageOpen,
+  Truck,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
-import { AmbientVideo } from '@/components/AmbientVideo';
+import { SlabImage } from '@/components/SlabImage';
 import { type Pack, type PackCard } from '@/lib/packs-data';
+import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 import { rm } from '@/lib/format';
 
-/**
- * Board 01 — THE SHOP IS OPEN. A framed, always-looping scene of the Polycards
- * shop at night (customers browsing, the cashier at the counter). Phone:
- * stacked near-full-viewport; desktop: type left, shop right. The top chase
- * still headlines the type block when the pool has one.
- * CTA → /slots (the routing rule: home never deep-links a product).
- *
- * Load choreography (globals.css "Shared first-paint entrance"): kicker → the
- * shop window lighting up → the chase value landing with its one-shot gold
- * bloom → subline → CTA, every step ending together just under a second. It is
- * pure CSS so this stays a server component and so nothing depends on an
- * observer firing above the fold; --i is the 70ms stagger step.
- */
+/** Brand artwork stays visible even when the live catalog is unavailable. */
 export default function HeroBoard({
-  pack,
-  chase,
+  hits,
 }: {
-  pack: Pack;
-  chase: PackCard | null;
+  hits: { card: PackCard; pack: Pack }[];
 }) {
+  const lead = hits[0];
   return (
-    // Phone: kicker → slab → value/name → CTA, all inside the first viewport
-    // (media height is capped so the pill stays in thumb reach). Desktop: the
-    // kicker + type block form the left column, the slab the right.
     <section
       aria-labelledby="hero-heading"
-      // Phone height subtracts header (64) + fixed TabBar (64) so the CTA
-      // clears the bar even on short phones; desktop has no TabBar.
-      // Desktop: text + shop sit as a CENTERED cluster (both columns
-      // content-sized, `justify-center` soaks up wide-screen slack) so the
-      // shop never drifts to the far-right edge with a dead gap in the middle
-      // — the old `1fr auto` did exactly that. Columns shrink (minmax floor 0)
-      // before they overflow narrower desktops.
-      className="px-fluid flex min-h-[calc(100svh-128px)] w-full flex-col items-center justify-center gap-5 py-8 text-center lg:grid lg:min-h-[calc(100svh-64px)] lg:grid-cols-[minmax(0,34rem)_minmax(0,46rem)] lg:content-center lg:items-center lg:justify-center lg:gap-x-16 lg:py-16 lg:text-left"
+      className="px-fluid relative grid w-full gap-x-8 pt-6 pb-6 lg:min-h-[680px] lg:grid-cols-[1fr_1.05fr] lg:content-center lg:pt-14 lg:pb-10 xl:gap-x-16"
     >
-      <p
-        id="hero-heading"
-        className="rise-in text-[11px] font-semibold uppercase tracking-[0.3em] text-neutral-400 lg:col-start-1 lg:row-start-1 lg:self-end"
-      >
-        The shop is open
-      </p>
+      <div className="relative z-10 text-center lg:col-start-1 lg:row-start-1 lg:self-end lg:pl-[3vw] lg:text-left">
+        <p className="rise-in mb-4 flex items-center justify-center gap-2 text-[11px] font-semibold tracking-[0.18em] text-neutral-400 uppercase lg:justify-start">
+          <Layers2 className="h-4 w-4" aria-hidden />
+          The collector’s next great find
+        </p>
+        <h1
+          id="hero-heading"
+          className="rise-in font-heading text-[clamp(2.75rem,6.1vw,6.5rem)] leading-[0.98] tracking-[-0.04em] text-white [--i:1]"
+        >
+          Open packs.
+          <br />
+          Pull real cards.
+        </h1>
+        <p className="rise-in mx-auto mt-5 max-w-md text-sm leading-relaxed text-neutral-400 [--i:2] lg:mx-0 lg:text-base">
+          Open online. Reveal a real collectible. Keep it, sell it back, or ship
+          it home.
+        </p>
+      </div>
 
-      {/* The glowing shop at night — an ambient looping scene (customers walk
-          in, the cashier serves) framed in a grounded panel: the clip carries
-          its own dark background, so a rounded bordered box reads as an intended
-          window into the shop rather than a floating cutout. */}
-      <div className="w-full max-w-[min(92vw,30rem)] lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:w-full lg:max-w-none">
+      <figure className="relative row-start-3 mx-auto mt-7 aspect-[1.15] w-full max-w-[600px] lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:my-0 lg:aspect-[1.05]">
         <div
-          style={{ '--i': 1 } as CSSProperties}
-          className="window-in relative aspect-video overflow-hidden rounded-2xl border border-white/10 bg-neutral-950 shadow-[0_24px_80px_-24px_rgba(0,0,0,0.85)]"
-        >
-          <AmbientVideo
-            mp4="/images/polycards/shop-night.mp4"
-            webm="/images/polycards/shop-night.webm"
-            poster="/images/polycards/shop-night-poster.webp"
-            className="absolute inset-0 h-full w-full"
-          />
+          aria-hidden
+          className="pointer-events-none absolute inset-0 rounded-full bg-radial from-white/[0.05] via-transparent to-transparent"
+        />
+        {[
+          'top-[5%] left-[30%] z-10 w-[41%] -rotate-[3deg]',
+          'top-[15%] left-[3%] w-[36%] -rotate-[14deg]',
+          'top-[15%] right-[3%] w-[36%] rotate-[14deg]',
+        ].map((position, index) => {
+          const hit = hits[index];
+          return (
+            <div
+              key={index}
+              className={cn('absolute', position)}
+              data-hero-hit={hit ? index + 1 : undefined}
+            >
+              <div
+                className={
+                  index === 0
+                    ? 'motion-safe:animate-[slabFloat_6s_ease-in-out_infinite]'
+                    : undefined
+                }
+              >
+                {hit ? (
+                  <SlabImage
+                    card={hit.card}
+                    sizes="(min-width: 1024px) 246px, 40vw"
+                    priority={index === 0}
+                    glowScale={0.4}
+                  />
+                ) : (
+                  <Image
+                    src="/images/app/polycards-slab-back.webp"
+                    alt={
+                      index === 0
+                        ? 'Polycards collectible card in a protective slab'
+                        : ''
+                    }
+                    width={900}
+                    height={1519}
+                    sizes="(min-width: 1024px) 246px, 40vw"
+                    className="h-auto w-full"
+                    preload={index === 0}
+                  />
+                )}
+              </div>
+            </div>
+          );
+        })}
+        <figcaption className="absolute inset-x-[8%] bottom-0 z-20 rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 lg:inset-x-[12%] lg:px-5 lg:py-4">
+          {lead ? (
+            <>
+              <div className="flex flex-col items-start justify-between gap-1 sm:flex-row sm:items-center sm:gap-3">
+                <span className="text-[10px] font-semibold tracking-[0.14em] text-neutral-400 uppercase">
+                  Top {hits.length} chase {hits.length === 1 ? 'card' : 'cards'}
+                </span>
+                <span className="font-heading text-chase text-lg lg:text-2xl">
+                  {lead.card.priceMyr != null ? rm(lead.card.priceMyr) : '—'}
+                </span>
+              </div>
+              <p className="mt-1 text-sm font-semibold text-white">
+                {lead.card.name}
+              </p>
+              <p className="mt-1 text-xs text-neutral-400">
+                Discover it in {lead.pack.name} · Pulls vary
+              </p>
+            </>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-white">
+                  Your next reveal starts here.
+                </p>
+                <p className="mt-1 text-xs text-neutral-400">
+                  Open online. Collect for real.
+                </p>
+              </div>
+              <PackageOpen
+                className="hidden h-6 w-6 shrink-0 text-neutral-400 sm:block"
+                aria-hidden
+              />
+            </div>
+          )}
+        </figcaption>
+      </figure>
+
+      <div className="rise-in relative z-10 row-start-2 mt-5 flex flex-col items-center [--i:3] lg:col-start-1 lg:row-start-2 lg:mt-7 lg:items-start lg:self-start lg:pl-[3vw]">
+        <div className="flex w-full flex-wrap items-center justify-center gap-2 lg:justify-start lg:gap-5">
+          <Link
+            href="/slots"
+            className={cn(
+              pillVariants({ variant: 'primary', size: 'lg' }),
+              'group min-w-36 px-5 sm:min-w-44 sm:px-6',
+            )}
+          >
+            Open a pack
+            <ArrowRight
+              className="h-4 w-4 transition-transform group-hover:translate-x-1 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
+              aria-hidden
+            />
+          </Link>
+          <Link
+            href="/how-it-works"
+            className={cn(
+              pillVariants({ variant: 'secondary', size: 'lg' }),
+              'bg-transparent px-2 text-neutral-300 hover:bg-white/5 sm:px-4',
+            )}
+          >
+            How it works <ArrowUpRight className="h-4 w-4" aria-hidden />
+          </Link>
         </div>
+        <p className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[11px] text-neutral-400 lg:justify-start lg:text-xs">
+          <span className="flex items-center gap-1.5">
+            <Truck className="h-3.5 w-3.5" aria-hidden />
+            Physical delivery
+          </span>
+          <span className="h-3 border-l border-white/15" aria-hidden />
+          <span>{BUYBACK_RATE_LABEL} vault buyback</span>
+        </p>
       </div>
 
-      {/* Type block — the top chase still gets the headline when one exists. */}
-      <div className="flex flex-col items-center lg:col-start-1 lg:row-start-2 lg:items-start lg:self-start">
-        {chase ? (
-          <>
-            {/* The bloom rides the value only when there IS a chase — the
-                fallback headline is copy, not a prize, so it gets the plain
-                rise (Chase Gold is reserved for prize moments). */}
-            <p
-              style={{ '--i': 3 } as CSSProperties}
-              className="chase-land font-heading text-chase text-5xl leading-none lg:mt-3 lg:text-7xl"
-            >
-              {/* getPackChase only ever hands over a PRICED card. */}
-              {chase.priceMyr != null ? rm(chase.priceMyr) : '—'}
-            </p>
-            {/* No truncate: at 15px this line clipped inside max-w-xs on a
-                phone, and it wraps to two readable lines instead. */}
-            <p
-              style={{ '--i': 4 } as CSSProperties}
-              className="rise-in mt-3 max-w-xs text-[15px] text-neutral-300 lg:mt-4 lg:max-w-md lg:text-base"
-            >
-              Top chase: {chase.name} · {pack.name}
-            </p>
-          </>
-        ) : (
-          <>
-            <p
-              style={{ '--i': 3 } as CSSProperties}
-              className="rise-in font-heading text-5xl leading-none text-white lg:mt-3 lg:text-7xl"
-            >
-              Rip real graded cards
-            </p>
-            {/* text-sm/neutral-400 under a 72px headline was a hierarchy cliff,
-                and neutral-400 sits exactly ON the DESIGN.md contrast floor. */}
-            <p
-              style={{ '--i': 4 } as CSSProperties}
-              className="rise-in mt-3 max-w-xs text-[15px] text-neutral-300 lg:mt-4 lg:max-w-md lg:text-base"
-            >
-              Every pack holds a real, professionally graded slab.
-            </p>
-          </>
-        )}
-        {/* The entrance sits directly on the pill. Tailwind 4 compiles
-            `active:scale-[0.98]` to the independent `scale` property, not to
-            `transform`, so the two compose and the press state survives the
-            entrance untouched. */}
-        <Link
-          href="/slots"
-          style={{ '--i': 5 } as CSSProperties}
-          className={cn(
-            pillVariants({ variant: 'primary', size: 'lg' }),
-            'rise-in group mt-6',
-          )}
-        >
-          RIP A PACK
-          {/* The arrow leans toward the destination on hover — the one hover
-              affordance on this fold. motion-reduce keeps it still. */}
-          <ArrowRight
-            className="h-4 w-4 transition-transform duration-200 ease-out group-hover:translate-x-0.5 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
-            aria-hidden
-          />
-        </Link>
-      </div>
+      <ol
+        aria-label="How pack opening works"
+        className="mt-9 grid grid-cols-3 gap-3 border-t border-white/10 pt-5 lg:col-span-2 lg:mt-10 lg:gap-8 lg:pt-6"
+      >
+        {[
+          ['01', 'Choose your pack', 'Explore the cards and odds.'],
+          ['02', 'Make the reveal', 'Discover your real collectible.'],
+          ['03', 'Make it yours', 'Keep, sell back, or ship it.'],
+        ].map(([number, title, description]) => (
+          <li
+            key={number}
+            className="flex flex-col gap-1.5 lg:flex-row lg:items-center lg:gap-4"
+          >
+            <span className="font-heading text-xs text-neutral-400 lg:text-xl">
+              {number}
+            </span>
+            <div>
+              <p className="text-xs font-semibold text-white lg:text-sm">
+                {title}
+              </p>
+              <p className="mt-1 hidden text-xs text-neutral-400 sm:block">
+                {description}
+              </p>
+            </div>
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }

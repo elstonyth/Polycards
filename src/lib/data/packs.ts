@@ -42,7 +42,7 @@ import {
 // bearer, and `cache: 'auto'` — no cache key on the wire, which is what the
 // bare sdk.client.fetch calls sent. An explicit `no-store` would make a
 // statically prerenderable route dynamic, and src/app/page.tsx renders this
-// catalog, this feed and (via getPackChase) this detail under `revalidate = 15`.
+// catalog, this feed and (via getPackHighlights) this detail under `revalidate = 15`.
 const PUBLIC = { auth: 'none', cache: 'auto' } as const;
 
 // Shape of a pack row from GET /store/packs (backend Pack model).
@@ -339,58 +339,22 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
 }
 
 /**
- * A pack's top chase card — the single field the home shelf needs off a pack.
- *
- * Cached because the home page is `force-dynamic` and the only source for this
- * one card is the whole prize pool: `/store/packs/bronze-pack` alone is ~288 KB
- * and the five live packs total ~700 KB, all of it fetched, zod-parsed and then
- * discarded on EVERY home render, on a 1-vCPU box. Measured 2026-08-17 against
- * a production build: a cold render issues five /store/packs/<slug> requests,
- * the next three inside the TTL issue none.
- *
- * Cached HERE rather than around getPackDetail: the derived card is a few
- * hundred bytes where the detail is hundreds of KB, so the entry stays cheap to
- * hold, and `/slots/[slug]` — which genuinely renders the whole pool and its
- * odds — keeps reading through uncached.
- *
- * 60 s because pools change on a catalog edit, not per request; no `tags`
- * because nothing in the storefront calls `revalidateTag` today, and an
- * invalidation hook nobody fires is worse than none.
- *
- * NOTE the failure path this buys: getPackDetail returns null on a backend
- * error, and a cache stores whatever it is given, so a blip during a COLD miss
- * pins "no chase" on that pack for the full TTL where it used to self-heal on
- * the next request. Only a cold miss — once an entry exists, expiry serves the
- * stale value and revalidates behind the request, and a failed revalidate keeps
- * the stale value rather than overwriting it with null.
- *
- * Not fixed by throwing on null to keep failures out of the cache, and NOT
- * because a throw would break the render (it would not — the callback is
- * awaited before the write, so a rejection is never cached, and a wrapper's
- * catch absorbs it). Because getPackDetail returns null for TWO things: a
- * backend error, and a pool that is legitimately empty or all-invalid (see its
- * early returns). Throwing would make every empty-pool pack refetch its whole
- * payload on every home render, forever — reinstating exactly the cost this
- * exists to remove.
- *
- * Read the degradation as the hero, not a footnote: a null chase on the
- * FEATURED pack drops HeroBoard to its no-prize headline ("Rip real graded
- * cards"), losing the Chase Gold value and its bloom, for up to a TTL. Still
- * graceful, still the cheaper failure than a dead render.
- *
- * `unstable_cache` rather than `use cache`: the latter needs
- * `cacheComponents: true`, a whole-app rendering-semantics opt-in, for one hot
- * path. Migrate together, not here.
+ * Small homepage projection: shelf chase plus the three highest-value slabs.
+ * One pool read per pack per 60s, shared by hero and shelf. Cache the projection
+ * rather than the large pool. An unavailable/empty pool stays empty for the TTL.
  */
-export const getPackChase = unstable_cache(
-  async (slug: string): Promise<PackCard | null> => {
+export const getPackHighlights = unstable_cache(
+  async (
+    slug: string,
+  ): Promise<{ chase: PackCard | null; slabs: PackCard[] }> => {
     const detail = await getPackDetail(slug);
-    // pool is value-sorted desc, so the first PRICED entry is the pack's
-    // highest-value card (null = an older backend omitted marketPriceMyr;
-    // falling through it keeps a fake headline off the shelf).
-    return detail?.pool.find((c) => c.priceMyr !== null) ?? null;
+    const priced = detail?.pool.filter((card) => card.priceMyr !== null) ?? [];
+    return {
+      chase: priced[0] ?? null,
+      slabs: priced.filter((card) => card.slabImage && card.handle).slice(0, 3),
+    };
   },
-  ['pack-chase'],
+  ['pack-highlights'],
   { revalidate: 60 },
 );
 
