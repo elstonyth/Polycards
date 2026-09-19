@@ -1,18 +1,10 @@
-import Image from 'next/image';
 import Link from 'next/link';
-import {
-  ArrowRight,
-  ArrowUpRight,
-  Layers2,
-  PackageOpen,
-  Truck,
-} from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Layers2, Truck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
-import { SlabImage } from '@/components/SlabImage';
+import { HeroSlabs } from './HeroSlabs';
 import { type Pack, type PackCard } from '@/lib/packs-data';
 import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
-import { rm } from '@/lib/format';
 
 /** Brand artwork stays visible even when the live catalog is unavailable. */
 export default function HeroBoard({
@@ -20,7 +12,6 @@ export default function HeroBoard({
 }: {
   hits: { card: PackCard; pack: Pack }[];
 }) {
-  const lead = hits[0];
   return (
     <section
       aria-labelledby="hero-heading"
@@ -45,92 +36,7 @@ export default function HeroBoard({
         </p>
       </div>
 
-      <figure className="relative row-start-3 mx-auto mt-7 aspect-[1.15] w-full max-w-[600px] lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:my-0 lg:aspect-[1.05]">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 rounded-full bg-radial from-white/[0.05] via-transparent to-transparent"
-        />
-        {[
-          'top-[5%] left-[30%] z-10 w-[41%] -rotate-[3deg]',
-          'top-[15%] left-[3%] w-[36%] -rotate-[14deg]',
-          'top-[15%] right-[3%] w-[36%] rotate-[14deg]',
-        ].map((position, index) => {
-          const hit = hits[index];
-          return (
-            <div
-              key={index}
-              className={cn('absolute', position)}
-              data-hero-hit={hit ? index + 1 : undefined}
-            >
-              <div
-                className={
-                  index === 0
-                    ? 'motion-safe:animate-[slabFloat_6s_ease-in-out_infinite]'
-                    : undefined
-                }
-              >
-                {hit ? (
-                  <SlabImage
-                    card={hit.card}
-                    sizes="(min-width: 1024px) 246px, 40vw"
-                    priority={index === 0}
-                    glowScale={0.4}
-                  />
-                ) : (
-                  <Image
-                    src="/images/app/polycards-slab-back.webp"
-                    alt={
-                      index === 0
-                        ? 'Polycards collectible card in a protective slab'
-                        : ''
-                    }
-                    width={900}
-                    height={1519}
-                    sizes="(min-width: 1024px) 246px, 40vw"
-                    className="h-auto w-full"
-                    preload={index === 0}
-                  />
-                )}
-              </div>
-            </div>
-          );
-        })}
-        <figcaption className="absolute inset-x-[8%] bottom-0 z-20 rounded-xl border border-white/10 bg-neutral-900 px-4 py-3 lg:inset-x-[12%] lg:px-5 lg:py-4">
-          {lead ? (
-            <>
-              <div className="flex flex-col items-start justify-between gap-1 sm:flex-row sm:items-center sm:gap-3">
-                <span className="text-[10px] font-semibold tracking-[0.14em] text-neutral-400 uppercase">
-                  Top {hits.length} chase {hits.length === 1 ? 'card' : 'cards'}
-                </span>
-                <span className="font-heading text-chase text-lg lg:text-2xl">
-                  {lead.card.priceMyr != null ? rm(lead.card.priceMyr) : '—'}
-                </span>
-              </div>
-              <p className="mt-1 text-sm font-semibold text-white">
-                {lead.card.name}
-              </p>
-              <p className="mt-1 text-xs text-neutral-400">
-                Discover it in {lead.pack.name} · Pulls vary
-              </p>
-            </>
-          ) : (
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-white">
-                  Your next reveal starts here.
-                </p>
-                <p className="mt-1 text-xs text-neutral-400">
-                  Open online. Collect for real.
-                </p>
-              </div>
-              <PackageOpen
-                className="hidden h-6 w-6 shrink-0 text-neutral-400 sm:block"
-                aria-hidden
-              />
-            </div>
-          )}
-        </figcaption>
-      </figure>
+      <HeroSlabs hits={hits} />
 
       <div className="rise-in relative z-10 row-start-2 mt-5 flex flex-col items-center [--i:3] lg:col-start-1 lg:row-start-2 lg:mt-7 lg:items-start lg:self-start lg:pl-[3vw]">
         <div className="flex w-full flex-wrap items-center justify-center gap-2 lg:justify-start lg:gap-5">

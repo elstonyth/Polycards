@@ -3,6 +3,7 @@
 // reduced-motion pass and the routing-rule audit (every product tap → /slots).
 // Usage: node scripts/qa-home-redesign.mjs   (expects the standalone server)
 import { chromium } from 'playwright';
+import { expect } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import assert from 'node:assert/strict';
 
@@ -119,6 +120,77 @@ try {
     await page.waitForTimeout(300);
 
     await page.screenshot({ path: `${OUT}/${name}-full.png`, fullPage: true });
+
+    const slabs = hero.locator('[data-hero-hit]');
+    if ((await slabs.count()) > 1) {
+      const selected = () =>
+        hero.locator('[data-hero-hit][aria-pressed="true"]');
+      const selection = () => selected().getAttribute('data-hero-hit');
+      const next = hero.getByRole('button', { name: 'Next card', exact: true });
+      const caption = hero.locator('[data-hit-name]');
+
+      if (name === 'home-drop-desktop') {
+        // Verify a complete automatic cycle, including wrapping to the first hit.
+        const first = await selection();
+        for (let turn = 0; turn < 3; turn++) {
+          const before = await selection();
+          await expect.poll(selection, { timeout: 5500 }).not.toBe(before);
+          await expect(caption).toHaveText(
+            (await selected().getAttribute('aria-label')).replace(/^Show /, ''),
+          );
+          assert.equal(await selected().getAttribute('data-position'), '0');
+        }
+        assert.equal(await selection(), first);
+
+        await hero.getByRole('button', { name: 'Pause card rotation' }).click();
+        await page.mouse.move(0, 0);
+        const stopped = await selection();
+        await page.waitForTimeout(4500);
+        assert.equal(await selection(), stopped);
+        await hero
+          .getByRole('button', { name: 'Resume card rotation' })
+          .click();
+        // Explicit resume wins even while the pointer remains over the control.
+        await expect.poll(selection, { timeout: 5500 }).not.toBe(stopped);
+
+        await page.mouse.move(0, 0);
+        await hero.locator('figure').hover();
+        const hovered = await selection();
+        await page.waitForTimeout(4500);
+        assert.equal(await selection(), hovered);
+        await page.mouse.move(0, 0);
+        await next.focus();
+        await page.waitForTimeout(4500);
+        assert.equal(await selection(), hovered);
+      }
+
+      if (name === 'home-drop-phone-reduced') {
+        const still = await selection();
+        await page.waitForTimeout(4500);
+        assert.equal(await selection(), still);
+        await expect(
+          hero.getByRole('button', { name: /card rotation/ }),
+        ).toBeHidden();
+      }
+
+      const before = Number(await selection());
+      await next.click();
+      assert.equal(
+        Number(await selection()),
+        (before % (await slabs.count())) + 1,
+      );
+      await expect(caption).toHaveText(
+        (await selected().getAttribute('aria-label')).replace(/^Show /, ''),
+      );
+      await page.waitForTimeout(reducedMotion === 'reduce' ? 0 : 750);
+      assert.ok(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      );
+      await page.screenshot({ path: `${OUT}/${name}-rotated.png` });
+      console.log(`[${name}] card rotation and caption OK`);
+    }
 
     // Routing-rule audit: every anchor inside the six boards that shows a
     // product must point at exactly "/slots".

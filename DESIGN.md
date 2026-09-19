@@ -237,7 +237,11 @@ The home page is a six-board editorial scroll story (spec:
   inherited from the thing glowing (Glow Is Earned).
 - **Pack-opening introduction (2026-09-20)** — collection-neutral headline:
   "Open packs. Pull real cards." The three highest-value distinct slab cards
-  across available packs form the hero fan, with the top hit centered. Values
+  across available packs form the hero fan, initially with the top hit centered.
+  Every four seconds, the next slab takes the center and its caption updates.
+  Hover pauses rotation; selecting a slab, keyboard focus, or the pause control
+  stops it until resumed. Reduced motion keeps manual selection instant and
+  disables automatic rotation. Values
   and slab art come from live inventory; branded card backs fill unavailable
   slots. Never substitute legacy clone artwork or mock inventory. Display type
   scales from 44px on phones to 104px on wide screens.
