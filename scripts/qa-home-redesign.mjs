@@ -150,9 +150,10 @@ try {
         await hero
           .getByRole('button', { name: 'Resume card rotation' })
           .click();
-        await page.mouse.move(0, 0);
+        // Explicit resume wins even while the pointer remains over the control.
         await expect.poll(selection, { timeout: 5500 }).not.toBe(stopped);
 
+        await page.mouse.move(0, 0);
         await hero.locator('figure').hover();
         const hovered = await selection();
         await page.waitForTimeout(4500);

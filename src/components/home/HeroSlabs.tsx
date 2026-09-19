@@ -147,7 +147,10 @@ export function HeroSlabs({
                     pillVariants({ variant: 'ghost' }),
                     'w-11 px-0 motion-reduce:hidden',
                   )}
-                  onClick={() => setPaused((value) => !value)}
+                  onClick={() => {
+                    if (paused) setHovered(false);
+                    setPaused((value) => !value);
+                  }}
                 >
                   {paused ? (
                     <Play className="h-4 w-4" aria-hidden />
