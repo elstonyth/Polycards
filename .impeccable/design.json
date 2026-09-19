@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-19T19:39:15.875Z",
+  "generatedAt": "2026-09-19T20:18:08.412Z",
   "title": "Design System: Polycards",
   "extensions": {
     "colorMeta": {
@@ -253,7 +253,7 @@
       "White pill CTAs on dark — one primary per zone",
       "Nekst Black for headings, ranks, and RM values; Geist for everything else",
       "Phone-first: bottom tab bar, ≥44px targets, sticky action cards",
-      "The three highest-value distinct slab cards across available packs form the hero fan, with the top hit centered."
+      "The three highest-value distinct slab cards across available packs form the hero fan, initially with the top hit centered. Every four seconds, the next slab takes the center and its caption updates."
     ],
     "rules": [
       {

@@ -12,7 +12,7 @@ it('keeps Polycards card backs without inventing hits when the catalog is unavai
   );
   expect(html).toContain('href="/slots"');
   expect(html).not.toMatch(
-    /data-hero-hit|\bRM\s|gold-pack.webp|diamond-pack.webp|\/home\/hero\//i,
+    /data-hero-hit|\bRM\s|gold-pack.webp|diamond-pack.webp|\/home\/hero\/|Next card|card rotation/i,
   );
 });
 
@@ -36,5 +36,9 @@ it('renders all three supplied slabs with the highest-value hit in front', () =>
   expect(html).toContain('1,234.56');
   expect(html).toContain('Gold Pack');
   expect(html).toContain('Pulls vary');
+  expect(html).toContain('Next card');
+  expect(html).toContain('Pause card rotation');
+  expect(html.match(/aria-pressed="true"/g)).toHaveLength(1);
+  expect(html).toContain('aria-live="off"');
   expect(html).not.toContain('polycards-slab-back.webp');
 });
