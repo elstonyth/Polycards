@@ -80,12 +80,6 @@ const VAULT_ROWS = [
   },
 ] as const;
 
-const VAULT_LOGOS = [
-  { src: '/images/psa.png', alt: 'PSA' },
-  { src: '/images/fanatics.png', alt: 'Fanatics' },
-  { src: '/images/altwhite.png', alt: 'Alt' },
-];
-
 /** Board lockup (DESIGN.md §5) — ALL-CAPS Nekst head, optional quiet link. */
 const BoardHead = ({
   id,
@@ -286,17 +280,6 @@ export default function AboutPage() {
             </Reveal>
           ))}
         </div>
-        <Reveal className="mt-6 flex flex-wrap items-center justify-center gap-8 opacity-70">
-          {VAULT_LOGOS.map((l) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={l.alt}
-              src={l.src}
-              alt={l.alt}
-              className="h-7 w-auto object-contain"
-            />
-          ))}
-        </Reveal>
       </section>
 
       {/* 06 — closer (FinalCta idiom) */}
