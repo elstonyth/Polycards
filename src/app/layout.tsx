@@ -10,6 +10,7 @@ import { CreditDotProvider } from '@/components/app-shell/CreditDotProvider';
 import { TopUpProvider } from '@/components/app-shell/TopUpProvider';
 import { VaultDotProvider } from '@/components/app-shell/VaultDotProvider';
 import { AuthProvider } from '@/components/auth/AuthProvider';
+import { SoundProvider } from '@/lib/use-sound';
 import { GlobalFreePackBadge } from '@/components/FreePackBadge';
 import { TelegramBanner } from '@/components/app-shell/TelegramBanner';
 import SkipLink from '@/components/SkipLink';
@@ -92,31 +93,33 @@ export default async function RootLayout({
             no-JS visitor can never consent — an unconditional pixel there
             would contradict the consent gate in MetaPixel.tsx. */}
         <MetaPixel />
-        <AuthProvider>
-          <CreditDotProvider>
-            <TopUpProvider>
-              <VaultDotProvider>
-                <SkipLink />
-                <AppHeader />
-                <main id="main" className="flex-1 pb-12 lg:pb-8">
-                  {/* Referral-link landing. Client-only by design — reads the
+        <SoundProvider>
+          <AuthProvider>
+            <CreditDotProvider>
+              <TopUpProvider>
+                <VaultDotProvider>
+                  <SkipLink />
+                  <AppHeader />
+                  <main id="main" className="flex-1 pb-12 lg:pb-8">
+                    {/* Referral-link landing. Client-only by design — reads the
                       ?invite param from window.location so the ISR-cached home
                       page stays visitor-agnostic. */}
-                  <InviteWelcome />
-                  {children}
-                </main>
-                {/* Footer carries the TabBar clearance (pb-28) on phones. */}
-                <SiteFooter />
-                <TabBar />
-                {/* Site-wide free-pack badge; /slots renders its own copy from
+                    <InviteWelcome />
+                    {children}
+                  </main>
+                  {/* Footer carries the TabBar clearance (pb-28) on phones. */}
+                  <SiteFooter />
+                  <TabBar />
+                  {/* Site-wide free-pack badge; /slots renders its own copy from
                     server state, so the global one skips that route. */}
-                <GlobalFreePackBadge />
-                <TelegramBanner />
-                <CookieConsent />
-              </VaultDotProvider>
-            </TopUpProvider>
-          </CreditDotProvider>
-        </AuthProvider>
+                  <GlobalFreePackBadge />
+                  <TelegramBanner />
+                  <CookieConsent />
+                </VaultDotProvider>
+              </TopUpProvider>
+            </CreditDotProvider>
+          </AuthProvider>
+        </SoundProvider>
       </body>
     </html>
   );

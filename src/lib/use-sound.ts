@@ -1,29 +1,46 @@
 'use client';
 
-// SFX + haptics for the slot. Gesture-unlocked (first sound follows the SPIN
-// click, so no autoplay-policy violation). Mute persists in localStorage,
-// default UNMUTED (PRD §3.9). Degrades silently if an asset is missing, so the
-// slice ships before final audio is sourced.
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { playSfx, sharedAudioContext, type SfxName } from '@/lib/slot-sfx';
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import {
+  playSfx,
+  setSfxMuted,
+  sharedAudioContext,
+  type SfxName,
+} from '@/lib/slot-sfx';
+import { RARITY_ORDER, rarityWinVolume } from '@/lib/rarity';
+import type { Rarity } from '@/lib/packs-data';
 
 const MUTED_KEY = 'polycards.slot.muted';
-
+const MUSIC_VOLUME = 0.25;
+const EFFECTS_VOLUME = 0.22;
 const FILES = {
   tap: '/sounds/slot-tap.mp3',
   start: '/sounds/slot-start.mp3',
   stop: '/sounds/slot-stop.mp3',
-  win: '/sounds/slot-win.mp3',
-  bigwin: '/sounds/slot-bigwin.mp3',
   riser: '/sounds/slot-riser.mp3',
   count: '/sounds/slot-count.mp3',
-  ambient: '/sounds/slot-ambient.mp3',
+  reelTick: '/sounds/reel-tick.wav',
+  ambient: '/sounds/adventure-loop.wav',
+  Common: '/sounds/reveal-common.mp3',
+  Uncommon: '/sounds/reveal-uncommon.mp3',
+  Rare: '/sounds/reveal-rare.mp3',
+  Mythical: '/sounds/reveal-mythical.mp3',
+  Legendary: '/sounds/reveal-legendary.mp3',
+  Immortal: '/sounds/reveal-immortal.mp3',
 } as const;
 
 export type SoundName = keyof typeof FILES;
 export type { SfxName } from '@/lib/slot-sfx';
 
-/** Pure: maps a raw localStorage value to muted state. Default unmuted. */
 export function parseMuted(raw: string | null): boolean {
   return raw === '1';
 }
@@ -40,194 +57,231 @@ export function writeMuted(muted: boolean): void {
   try {
     localStorage.setItem(MUTED_KEY, muted ? '1' : '0');
   } catch {
-    /* private mode / storage disabled — non-fatal */
+    // The in-memory preference remains authoritative when storage is blocked.
   }
 }
 
-/** A looping bed: the decoded audio, its live source, and its reused gain. */
-type Bed = {
-  buffer: AudioBuffer | null;
-  source: AudioBufferSourceNode | null;
-  gain: GainNode | null;
-};
-
-/**
- * Stop and unwire a bed's current source. Disconnecting matters as much as
- * stopping: a stopped-but-connected node stays wired to the graph.
- */
-function stopBedSource(bed: Bed | undefined): void {
-  if (!bed?.source) return;
-  try {
-    bed.source.stop();
-  } catch {
-    /* already stopped */
-  }
-  bed.source.disconnect();
-  bed.source = null;
+/** A batch flips together: celebrate its best rarity, once. */
+export function revealSound(rarities: readonly string[]): Rarity {
+  return RARITY_ORDER.find((rarity) => rarities.includes(rarity)) ?? 'Common';
 }
 
-export function useSound() {
-  // SSR-safe: server + client first render both start unmuted, so there's no
-  // hydration mismatch on the mute icon; the stored value is applied in an
-  // effect after mount (mirrors usePrefersReducedMotion). A lazy useState
-  // initialiser would read localStorage during render and diverge from the
-  // server snapshot.
+function useSoundPlayer() {
   const [muted, setMuted] = useState(false);
-  const pool = useRef<Partial<Record<SoundName, HTMLAudioElement>>>({});
-  // Looping beds run through WebAudio, not the <audio> element: an MP3 carries
-  // encoder padding at both ends, and HTMLAudioElement.loop plays that padding
-  // as a short silence every lap — clearly audible as a "reset" on a sustained
-  // bass bed. A decoded AudioBuffer loops sample-accurately instead.
-  const beds = useRef<Partial<Record<SoundName, Bed>>>({});
+  const mutedRef = useRef(true);
+  const mounted = useRef(false);
+  const generation = useRef(0);
+  const buffers = useRef(new Map<SoundName, Promise<AudioBuffer>>());
+  const sources = useRef(new Set<AudioBufferSourceNode>());
+  const music = useRef<{
+    source: AudioBufferSourceNode;
+    gain: GainNode;
+  } | null>(null);
+  const celebrations = useRef(0);
 
-  // Hydrate mute state + preload the audio pool on the client only.
-  useEffect(() => {
-    setMuted(readMuted());
-    for (const [name, src] of Object.entries(FILES)) {
-      const audio = new Audio(src);
-      audio.preload = 'auto';
-      pool.current[name as SoundName] = audio;
+  const load = useCallback((name: SoundName, ac: AudioContext) => {
+    let pending = buffers.current.get(name);
+    if (!pending) {
+      pending = fetch(FILES[name])
+        .then((response) => {
+          if (!response.ok) throw new Error('Sound unavailable');
+          return response.arrayBuffer();
+        })
+        .then((data) => ac.decodeAudioData(data))
+        .catch((error: unknown) => {
+          buffers.current.delete(name);
+          throw error;
+        });
+      buffers.current.set(name, pending);
     }
-    const pool_ = pool.current;
-    const beds_ = beds.current;
-    return () => {
-      // One-shots (bigwin fanfare etc.) must not bleed past the machine's
-      // unmount — nor must the looping bed, which has no end of its own.
-      for (const audio of Object.values(pool_)) audio?.pause();
-      for (const bed of Object.values(beds_)) {
-        stopBedSource(bed);
-        // The context outlives this hook, so the bed's gain has to be unwired
-        // here or it stays attached to the destination for the session.
-        bed?.gain?.disconnect();
-        if (bed) bed.gain = null;
-      }
-    };
+    return pending;
   }, []);
+
+  const duckMusic = useCallback(() => {
+    const bed = music.current;
+    if (!bed) return;
+    bed.gain.gain.setTargetAtTime(
+      MUSIC_VOLUME * (celebrations.current > 0 ? 0.35 : 1),
+      bed.gain.context.currentTime,
+      0.15,
+    );
+  }, []);
+
+  const silence = useCallback(() => {
+    // Invalidate sounds still fetching/decoding, as well as those already playing.
+    generation.current++;
+    for (const source of sources.current) source.stop();
+    sources.current.clear();
+    celebrations.current = 0;
+    if (music.current) {
+      music.current.source.stop();
+      music.current.source.disconnect();
+      music.current.gain.disconnect();
+      music.current = null;
+    }
+  }, []);
+
+  const startMusic = useCallback(() => {
+    if (!mounted.current || mutedRef.current || document.hidden) return;
+    const ac = sharedAudioContext(); // Resume synchronously inside the gesture.
+    if (!ac || music.current) return;
+    const ticket = generation.current;
+    void load('ambient', ac)
+      .then((buffer) => {
+        if (
+          !mounted.current ||
+          mutedRef.current ||
+          document.hidden ||
+          ticket !== generation.current ||
+          music.current
+        )
+          return;
+        const source = ac.createBufferSource();
+        const gain = ac.createGain();
+        gain.gain.value = MUSIC_VOLUME * (celebrations.current > 0 ? 0.35 : 1);
+        source.buffer = buffer;
+        source.loop = true;
+        source.connect(gain).connect(ac.destination);
+        music.current = { source, gain };
+        source.start();
+      })
+      .catch(() => {}); // Retry on the next gesture if autoplay or loading failed.
+  }, [load]);
 
   const play = useCallback(
     (name: SoundName, volume = 1, rate = 1) => {
-      // Gate on the in-memory state (authoritative) — readMuted() falls back to
-      // false when storage is blocked, which would let muted sounds still play.
-      if (muted) return;
-      const audio = pool.current[name];
-      if (!audio) return;
-      try {
-        audio.loop = false; // an element last used by loop() must not re-loop
-        audio.volume = Math.min(1, Math.max(0, volume));
-        // rate ≠ 1 shifts pitch (classic rising reel-stop): pitch correction off.
-        audio.preservesPitch = rate === 1;
-        audio.playbackRate = rate;
-        audio.currentTime = 0;
-        void audio.play().catch(() => {});
-      } catch {
-        /* no-op */
-      }
-    },
-    [muted],
-  );
-
-  // Looping playback (ambient bed). Stop via halt(). Resolves to whether
-  // playback actually started, so callers latching "already playing" state
-  // (ambientOn) can reset on failure and retry on a later gesture instead of
-  // going permanently silent.
-  const loop = useCallback(
-    async (name: SoundName, volume = 1): Promise<boolean> => {
-      if (muted) return false;
-
-      // Preferred path: decode once, then loop the buffer. Gapless.
+      if (!mounted.current || mutedRef.current || document.hidden) return;
       const ac = sharedAudioContext();
-      if (ac) {
-        try {
-          const bed = (beds.current[name] ??= {
-            buffer: null,
-            source: null,
-            gain: null,
-          });
-          bed.buffer ??= await fetch(FILES[name])
-            .then((r) => r.arrayBuffer())
-            .then((b) => ac.decodeAudioData(b));
-          // One gain per bed, reused: a fresh node per call would leave the
-          // old one wired to the destination with nothing feeding it.
-          if (!bed.gain) {
-            bed.gain = ac.createGain();
-            bed.gain.connect(ac.destination);
-          }
-          bed.gain.gain.value = Math.min(1, Math.max(0, volume));
-          stopBedSource(bed);
+      if (!ac) return;
+      const ticket = generation.current;
+      void load(name, ac)
+        .then((buffer) => {
+          if (
+            !mounted.current ||
+            mutedRef.current ||
+            document.hidden ||
+            ticket !== generation.current
+          )
+            return;
           const source = ac.createBufferSource();
-          source.buffer = bed.buffer;
-          source.loop = true;
-          source.connect(bed.gain);
+          const gain = ac.createGain();
+          const celebration = (RARITY_ORDER as readonly string[]).includes(
+            name,
+          );
+          gain.gain.value = EFFECTS_VOLUME * Math.min(1, Math.max(0, volume));
+          source.buffer = buffer;
+          source.playbackRate.value = rate;
+          source.connect(gain).connect(ac.destination);
+          sources.current.add(source);
+          if (celebration) {
+            celebrations.current++;
+            duckMusic();
+          }
+          source.onended = () => {
+            const wasActive = sources.current.delete(source);
+            source.disconnect();
+            gain.disconnect();
+            if (celebration && wasActive) {
+              celebrations.current--;
+              duckMusic();
+            }
+          };
+          // A new source per trigger: a later reveal never restarts an unfinished cue.
           source.start();
-          bed.source = source;
-          return true;
-        } catch {
-          // Decode or autoplay refused — fall through to the element.
-        }
-      }
-
-      const audio = pool.current[name];
-      if (!audio) return false;
-      try {
-        audio.loop = true;
-        audio.volume = Math.min(1, Math.max(0, volume));
-        audio.playbackRate = 1;
-        audio.currentTime = 0;
-        await audio.play();
-        return true;
-      } catch {
-        return false;
-      }
+        })
+        .catch(() => {});
     },
-    [muted],
+    [load, duckMusic],
   );
 
-  // Halt a playing sound (the 6s spin bed outlives short spins). Not muted-
-  // gated: halting must always work, even if mute was toggled mid-spin.
-  const halt = useCallback((name: SoundName) => {
-    // The gain stays connected — it's reused by the next loop() and carries no
-    // signal while the source is gone.
-    stopBedSource(beds.current[name]);
-    const audio = pool.current[name];
-    if (!audio) return;
-    try {
-      audio.pause();
-      audio.loop = false;
-      audio.currentTime = 0;
-    } catch {
-      /* no-op */
-    }
-  }, []);
-
-  const vibrate = useCallback(
-    (pattern: number | number[]) => {
-      if (muted) return;
-      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-        try {
-          navigator.vibrate(pattern);
-        } catch {
-          /* no-op */
-        }
-      }
+  const playReveal = useCallback(
+    (rarities: readonly string[]) => {
+      const rarity = revealSound(rarities);
+      play(rarity, rarityWinVolume(rarity));
     },
-    [muted],
+    [play],
+  );
+
+  const applyMuted = useCallback(
+    (next: boolean) => {
+      mutedRef.current = next;
+      setMuted(next);
+      setSfxMuted(next || document.hidden);
+      if (next) silence();
+      else startMusic();
+    },
+    [silence, startMusic],
   );
 
   const toggleMuted = useCallback(() => {
-    setMuted((m) => {
-      const next = !m;
-      writeMuted(next);
-      return next;
-    });
+    const next = !mutedRef.current;
+    writeMuted(next);
+    applyMuted(next);
+  }, [applyMuted]);
+
+  useEffect(() => {
+    mounted.current = true;
+    // Browser-only preference must hydrate after SSR, before any sound starts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    applyMuted(readMuted());
+    const visibility = () => {
+      setSfxMuted(mutedRef.current || document.hidden);
+      if (document.hidden) silence();
+      else startMusic();
+    };
+    const storage = (event: StorageEvent) => {
+      if (event.key === MUTED_KEY || event.key === null)
+        applyMuted(readMuted());
+    };
+    document.addEventListener('pointerup', startMusic);
+    document.addEventListener('keydown', startMusic);
+    document.addEventListener('visibilitychange', visibility);
+    window.addEventListener('storage', storage);
+    const ac = sharedAudioContext();
+    if (ac) void load('reelTick', ac).catch(() => {});
+    return () => {
+      mounted.current = false;
+      silence();
+      setSfxMuted(true);
+      document.removeEventListener('pointerup', startMusic);
+      document.removeEventListener('keydown', startMusic);
+      document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('storage', storage);
+    };
+  }, [applyMuted, load, silence, startMusic]);
+
+  const vibrate = useCallback((pattern: number | number[]) => {
+    if (mutedRef.current || !('vibrate' in navigator)) return;
+    try {
+      navigator.vibrate(pattern);
+    } catch {
+      /* Optional on mobile browsers. */
+    }
   }, []);
 
   const sfx = useCallback(
     (name: SfxName) => {
-      if (muted) return;
-      playSfx(name);
+      if (mutedRef.current || document.hidden) return;
+      if (name === 'reelTick') play('reelTick', 0.6);
+      else playSfx(name);
     },
-    [muted],
+    [play],
   );
 
-  return { muted, toggleMuted, play, loop, halt, vibrate, sfx };
+  return { muted, toggleMuted, play, playReveal, vibrate, sfx };
+}
+
+const SoundContext = createContext<ReturnType<typeof useSoundPlayer> | null>(
+  null,
+);
+
+export function SoundProvider({ children }: { children: ReactNode }) {
+  const sound = useSoundPlayer();
+  return createElement(SoundContext.Provider, { value: sound }, children);
+}
+
+export function useSound() {
+  const sound = useContext(SoundContext);
+  if (!sound) throw new Error('useSound requires SoundProvider');
+  return sound;
 }
