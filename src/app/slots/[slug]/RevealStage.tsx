@@ -13,7 +13,7 @@ import type { SellBackOffer, SellBackFn, RevealFn } from './useSellWindow';
 import SellConfirmModal from '@/components/SellConfirmModal';
 import { rm } from '@/lib/format';
 import { FREE_PULL_LOCKED_MESSAGE } from '@/lib/packs-data';
-import { rarityRgb, isTopRarity, rarityWinVolume } from '@/lib/rarity';
+import { rarityRgb, isTopRarity } from '@/lib/rarity';
 import type { SoundName } from '@/lib/use-sound';
 import type { SfxName } from '@/lib/slot-sfx';
 import { useSellWindow } from './useSellWindow';
@@ -45,6 +45,7 @@ export function RevealStage({
   onSellFailed,
   sfx,
   vibrate,
+  playReveal,
   play,
 }: {
   phase: RevealPhase;
@@ -84,6 +85,7 @@ export function RevealStage({
   onSellFailed?: (message: string) => void;
   sfx: (name: SfxName) => void;
   vibrate: (p: number | number[]) => void;
+  playReveal: (rarities: readonly string[]) => void;
   play: (name: SoundName, volume?: number) => void;
 }) {
   const [flipped, setFlipped] = useState(false);
@@ -220,10 +222,7 @@ export function RevealStage({
   function flipAll() {
     if (flipped) return;
     setFlipped(true);
-    // Louder the higher the best pull: tier-scaled volume on top of the
-    // asset ladder (bigwin is mastered hotter than win).
-    const bestVolume = Math.max(...cards.map((c) => rarityWinVolume(c.rarity)));
-    play(anyTop ? 'bigwin' : 'win', bestVolume);
+    playReveal(cards.map((card) => card.rarity));
     vibrate(anyTop ? [40, 40, 80] : 30);
   }
 

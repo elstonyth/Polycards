@@ -170,10 +170,7 @@ export default function SlotMachineClient({
   // aside entirely for a demo — see handleSettled.)
   const customerIdRef = useRef<string | null>(customer?.id ?? null);
   customerIdRef.current = customer?.id ?? null;
-  const { muted, toggleMuted, play, loop, halt, vibrate, sfx } = useSound();
-  // Ambient bed starts on the first real spin gesture (autoplay-safe) and
-  // persists across spins; mute kills it and the next spin restarts it.
-  const ambientOn = useRef(false);
+  const { muted, toggleMuted, play, playReveal, vibrate, sfx } = useSound();
 
   // The one-time free welcome pack. It is opened SINGLY through the single-open
   // route — the backend rejects a batch on this category outright — so the reel
@@ -765,21 +762,11 @@ export default function SlotMachineClient({
   // per-cell reelTick below (one click per Pokémon crossing — tracks the real
   // reel speed, which a fixed-tempo loop file cannot; the slot-spin.mp3 loop was
   // tried and replaced 2026-08-04). Reduced motion has no reel travel — same
-  // guard as the clacks below. The ambient bed piggybacks on the same moment:
-  // first spin is a safe gesture-unlocked point to start it, and it persists
-  // across spins until muted.
+  // guard as the clacks below. Background music belongs to the app shell.
   useEffect(() => {
     if (phase !== 'spinning' || reduced) return;
-    if (!ambientOn.current && !muted) {
-      // Latch optimistically (a re-fire mustn't double-start), un-latch on
-      // failure so the NEXT spin retries instead of staying silent forever.
-      ambientOn.current = true;
-      void loop('ambient').then((ok) => {
-        if (!ok) ambientOn.current = false;
-      });
-    }
     play('start');
-  }, [phase, spin?.nonce, reduced, muted, play, loop]);
+  }, [phase, spin?.nonce, reduced, play]);
 
   // Per-cell tick: EVERY reel calls this as one of its Pokémon centers on the
   // winning line, so multi-reel spins sound multi-reel. The ~18ms floor only
@@ -793,14 +780,6 @@ export default function SlotMachineClient({
     lastTickAt.current = now;
     sfx('reelTick');
   }, [sfx]);
-
-  // Mute must silence the already-running ambient loop, not just future plays.
-  useEffect(() => {
-    if (muted) {
-      halt('ambient');
-      ambientOn.current = false;
-    }
-  }, [muted, halt]);
 
   // Reel-stop clacks: the stack owns its per-column settle internally, so fire a
   // mechanical clack at each column's stop time from here (cleared on teardown).
@@ -1080,6 +1059,7 @@ export default function SlotMachineClient({
                   onSellFailed={handleSellFailed}
                   sfx={sfx}
                   vibrate={vibrate}
+                  playReveal={playReveal}
                   play={play}
                 />
               </div>
