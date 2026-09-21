@@ -6,6 +6,7 @@
 // renders comes from the backend via src/lib/data/packs.ts; the only local data
 // left is the category chrome (tab label, heading, icon) that wraps it.
 import type { CardView } from '@/lib/card-view';
+import { mediaHost } from '@/lib/security/csp';
 
 /** Site-wide flat buyback % — what every sell from the vault/inventory pays.
  *  Mirrors FLAT_PERCENT in backend/packages/api/src/modules/packs/buyback-rate.ts. */
@@ -172,15 +173,19 @@ const FACTORY_VIDEO_TIERS = new Set([
 ]);
 
 /** Animated factory-hero sources for a pack, or null when its display image is
- *  not one of the baked Polycards factory scenes (arbitrary uploaded heroes
- *  keep rendering as a still). Poster is the clip's own first frame. */
+ *  not a registered factory scene. Admin uploads of `{tier}-factory.webp`
+ *  retain their baked loop; arbitrary heroes stay still. Poster is frame one. */
 export function factoryVideo(
   displayImage: string | undefined,
 ): { mp4: string; webm: string; poster: string } | null {
   if (!displayImage) return null;
-  const tier = /^\/images\/polycards\/([a-z]+)-factory\.webp$/.exec(
-    displayImage,
-  )?.[1];
+  const uploadPrefix = `https://${mediaHost()}/`;
+  const uploadedFile = displayImage.startsWith(uploadPrefix)
+    ? displayImage.slice(uploadPrefix.length)
+    : '';
+  const tier =
+    /^\/images\/polycards\/([a-z]+)-factory\.webp$/.exec(displayImage)?.[1] ??
+    /^([a-z]+)-factory-[0-9A-Z]{26}\.webp$/.exec(uploadedFile)?.[1];
   if (!tier || !FACTORY_VIDEO_TIERS.has(tier)) return null;
   const base = `/images/polycards/${tier}-factory`;
   return {

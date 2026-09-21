@@ -1,7 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { factoryVideo } from '../packs-data';
 
 describe('factoryVideo', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   it('resolves mp4/webm/poster for each baked tier', () => {
     for (const tier of [
       'bronze',
@@ -18,6 +20,36 @@ describe('factoryVideo', () => {
         poster: `/images/polycards/${tier}-factory-poster.webp`,
       });
     }
+  });
+
+  it('keeps a registered factory animated after uploading its still through admin', () => {
+    vi.stubEnv('NEXT_PUBLIC_MEDIA_HOST', undefined);
+    expect(
+      factoryVideo(
+        'https://polycards-media.sgp1.cdn.digitaloceanspaces.com/celebration-factory-01M32GC8049JJBNVKEP3VMYNC4.webp',
+      ),
+    ).toEqual(factoryVideo('/images/polycards/celebration-factory.webp'));
+    for (const url of [
+      'https://cdn.example.com/celebration-factory-01M32GC8049JJBNVKEP3VMYNC4.webp',
+      'https://polycards-media.sgp1.cdn.digitaloceanspaces.com/custom-factory-01M32GC8049JJBNVKEP3VMYNC4.webp',
+      'https://polycards-media.sgp1.cdn.digitaloceanspaces.com/custom-hero.webp',
+    ]) {
+      expect(factoryVideo(url)).toBeNull();
+    }
+  });
+
+  it('uses the configured media host for uploaded factory scenes', () => {
+    vi.stubEnv('NEXT_PUBLIC_MEDIA_HOST', 'media.example.com');
+    expect(
+      factoryVideo(
+        'https://media.example.com/celebration-factory-01M32GC8049JJBNVKEP3VMYNC4.webp',
+      ),
+    ).toEqual(factoryVideo('/images/polycards/celebration-factory.webp'));
+    expect(
+      factoryVideo(
+        'https://media.example.com.attacker.test/celebration-factory-01M32GC8049JJBNVKEP3VMYNC4.webp',
+      ),
+    ).toBeNull();
   });
 
   it('returns null for undefined / a pack shot / an arbitrary uploaded hero', () => {
