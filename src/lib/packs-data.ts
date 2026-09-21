@@ -166,8 +166,9 @@ const FACTORY_VIDEO_TIERS = new Set([
   'gold',
   'platinum',
   'diamond',
-  // Set packs (not a price tier) — same diorama, Ascended Heroes dressing.
+  // Set packs (not a price tier) — themed factory dioramas.
   'ascended',
+  'celebration',
 ]);
 
 /** Animated factory-hero sources for a pack, or null when its display image is
