@@ -25,11 +25,17 @@ export default function TierShelf({
   );
 
   return (
-    <section aria-labelledby="shelf-heading" className="px-fluid mt-4 w-full">
+    <section
+      aria-labelledby="shelf-heading"
+      className="px-fluid mt-10 w-full lg:mt-14"
+    >
       <div className="flex items-baseline justify-between">
-        <h1 id="shelf-heading" className="font-heading text-3xl text-white">
-          RIP A PACK
-        </h1>
+        <h2
+          id="shelf-heading"
+          className="font-heading text-2xl tracking-tight text-white lg:text-4xl"
+        >
+          Find your next pull.
+        </h2>
         <Link
           href="/slots"
           className="flex min-h-11 items-center gap-1 text-[13px] font-semibold text-neutral-400 transition-colors hover:text-white"
@@ -38,6 +44,9 @@ export default function TierShelf({
           <ArrowRight className="h-3.5 w-3.5" aria-hidden />
         </Link>
       </div>
+      <p className="mt-1 text-sm text-neutral-400">
+        Pick a pack. See the cards and odds. Make it a moment.
+      </p>
 
       {rows.length === 0 ? (
         <p className="mt-4 rounded-2xl border border-white/10 bg-neutral-900 px-4 py-10 text-center text-[13px] text-neutral-400">
@@ -118,7 +127,7 @@ function LadderRow({
             <p className="mt-0.5 truncate text-[11px] uppercase tracking-wide text-neutral-400">
               Top chase{' '}
               <span className="text-chase font-semibold">
-                {/* getPackChase only ever hands over a PRICED card. */}
+                {/* getPackHighlights only ever hands over a PRICED card. */}
                 {chase.priceMyr != null ? rm(chase.priceMyr) : '—'}
               </span>
             </p>

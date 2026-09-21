@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LogIn, Plus } from 'lucide-react';
+import { LogIn, Plus, Volume2, VolumeX } from 'lucide-react';
+import { useSound } from '@/lib/use-sound';
 import { cn } from '@/lib/utils';
 import { rm } from '@/lib/format';
 import { useCountedValue } from '@/lib/use-counted-value';
@@ -25,6 +26,7 @@ const LOGO_SRC = '/branding/polycards-logo.png';
 export default function AppHeader() {
   const pathname = usePathname();
   const { customer, isLoading } = useAuth();
+  const { muted, toggleMuted } = useSound();
   const { balance, openTopUp } = useTopUp();
   const { show: vaultDot } = useVaultDot();
   // A pack open or a sell-back moves this number; counting to the new figure
@@ -117,6 +119,20 @@ export default function AppHeader() {
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
+          <Pill
+            variant="ghost"
+            className="w-11 px-0"
+            aria-label={muted ? 'Unmute sound' : 'Mute sound'}
+            aria-pressed={muted}
+            title={muted ? 'Unmute sound' : 'Mute sound'}
+            onClick={toggleMuted}
+          >
+            {muted ? (
+              <VolumeX className="h-4 w-4" aria-hidden />
+            ) : (
+              <Volume2 className="h-4 w-4" aria-hidden />
+            )}
+          </Pill>
           {customer ? (
             <>
               <NotificationBell />

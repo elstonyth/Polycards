@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-20T00:10:00+08:00",
+  "generatedAt": "2026-09-19T20:18:08.412Z",
   "title": "Design System: Polycards",
   "extensions": {
     "colorMeta": {
@@ -252,7 +252,8 @@
       "The card is the hero: chrome is monochrome; only cards, tiers, rarity, and money carry color",
       "White pill CTAs on dark — one primary per zone",
       "Nekst Black for headings, ranks, and RM values; Geist for everything else",
-      "Phone-first: bottom tab bar, ≥44px targets, sticky action cards"
+      "Phone-first: bottom tab bar, ≥44px targets, sticky action cards",
+      "The three highest-value distinct slab cards across available packs form the hero fan, initially with the top hit centered. Every four seconds, the next slab takes the center and its caption updates."
     ],
     "rules": [
       {

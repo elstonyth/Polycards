@@ -18,6 +18,13 @@ export type SfxName =
   | 'tensionRise';
 
 let ctx: AudioContext | null = null;
+let effectsGain: GainNode | null = null;
+let effectsMuted = false;
+
+export function setSfxMuted(muted: boolean): void {
+  effectsMuted = muted;
+  if (effectsGain) effectsGain.gain.value = muted ? 0 : 0.22;
+}
 /**
  * The one AudioContext for the whole slot screen — the cue synth here and the
  * ambient bed in use-sound both run through it. Browsers cap live contexts, and
@@ -31,7 +38,7 @@ function audio(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   try {
     ctx ??= new AudioContext();
-    if (ctx.state === 'suspended') void ctx.resume();
+    if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
     return ctx;
   } catch {
     return null;
@@ -43,8 +50,14 @@ function blip(
   durMs: number,
   opts: { type?: OscillatorType; gain?: number; slideTo?: number } = {},
 ): void {
+  if (effectsMuted) return;
   const ac = audio();
   if (!ac) return;
+  if (!effectsGain) {
+    effectsGain = ac.createGain();
+    effectsGain.gain.value = 0.22;
+    effectsGain.connect(ac.destination);
+  }
   const t0 = ac.currentTime;
   const osc = ac.createOscillator();
   const g = ac.createGain();
@@ -55,7 +68,11 @@ function blip(
   }
   g.gain.setValueAtTime(opts.gain ?? 0.08, t0);
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + durMs / 1000);
-  osc.connect(g).connect(ac.destination);
+  osc.connect(g).connect(effectsGain);
+  osc.onended = () => {
+    osc.disconnect();
+    g.disconnect();
+  };
   osc.start(t0);
   osc.stop(t0 + durMs / 1000 + 0.02);
 }

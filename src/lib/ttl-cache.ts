@@ -22,7 +22,7 @@
 //   backend route Map        30s (packs list/detail, leaderboard; pulls 5s)
 //   this storefront memo     30s (catalog, board) / 60s (avatar frames)
 //   home route cache         15s (src/app/page.tsx revalidate)
-//   getPackChase             60s (unstable_cache, no tags)
+//   getPackHighlights        60s (unstable_cache, no tags)
 // ⇒ an admin pack edit can take ~60s to reach /slots, ~75s to reach /,
 //   ~105s to reach a home chase card. Admin busts clear ONLY the writing
 //   backend instance's Maps; the other instance rolls over on TTL.

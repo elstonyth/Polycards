@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import Image from 'next/image';
 import {
   Vault,
   ShieldCheck,
@@ -42,43 +41,6 @@ const VAULT_CARDS: VaultCard[] = [
     icon: Truck,
     title: 'Ship Anytime',
     body: 'Redeem your cards with worldwide tracked delivery',
-  },
-];
-
-const VAULT_LOGOS = [
-  { src: '/images/psa.png', alt: 'PSA' },
-  { src: '/images/fanatics.png', alt: 'Fanatics' },
-  { src: '/images/altwhite.png', alt: 'Alt' },
-];
-
-type Testimonial = {
-  name: string;
-  handle: string;
-  text: string;
-  pfp: string;
-  media: string;
-};
-const TESTIMONIALS: Testimonial[] = [
-  {
-    name: 'Mikerow',
-    handle: '@Mikerow01',
-    text: 'LFG my claim from @pokenic came it look how nice those slabs are. Thank you again one love',
-    pfp: '/social/pfp/Mikerow01-400x400.jpg',
-    media: '/social/tweets/1940199479699022263_media-1.webp',
-  },
-  {
-    name: 'Lynch',
-    handle: '@_LYNCHY__',
-    text: 'Digital to physical in just under 2 weeks super cool! Thanks @pokenic for creating unique way to trade!',
-    pfp: '/social/pfp/_LYNCHY__-400x400.jpg',
-    media: '/social/tweets/1937209444800004323_media-1.webp',
-  },
-  {
-    name: 'James Pleiades Hawkins',
-    handle: '@PleiadesHawkin',
-    text: 'Mail day here in the gallery. @pokenic made it REAL!!',
-    pfp: '/social/pfp/PleiadesHawkin-400x400.jpg',
-    media: '/social/tweets/1959021922383274245_media-1.webp',
   },
 ];
 
@@ -146,7 +108,7 @@ export default function HowItWorksPage() {
         {/* decorative blurred blob (static, not animated-in) */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/home/hero/ripped-packs/pokemon.webp"
+          src="/images/polycards/gold-pack.webp"
           alt=""
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-70 blur-[40px] saturate-[1.7] will-change-transform animate-[heroBlob_18s_ease-in-out_infinite] motion-reduce:animate-none motion-reduce:will-change-auto"
@@ -260,7 +222,7 @@ export default function HowItWorksPage() {
           />
         </Reveal>
         {/* One grouped guarantee panel (hairline-divided cells), deliberately
-            NOT the discrete feature-card grid section 6 uses — the two benefit
+            NOT the discrete feature-card grid section 5 uses — the two benefit
             sections must not read as the same component twice. A gap-px grid
             over a hairline-tinted container paints the dividers without the
             divide-x/-y-on-grid stray-border gotcha; the panel reveals as one
@@ -286,69 +248,9 @@ export default function HowItWorksPage() {
             })}
           </div>
         </Reveal>
-        <Reveal className="mt-8 flex flex-wrap items-center justify-center gap-8 opacity-70">
-          {VAULT_LOGOS.map((l) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={l.alt}
-              src={l.src}
-              alt={l.alt}
-              className="h-7 w-auto object-contain"
-            />
-          ))}
-        </Reveal>
       </section>
 
-      {/* 5. TESTIMONIALS */}
-      <section className="mb-16">
-        <Reveal>
-          <SectionHeading
-            title="What Collectors Are Saying"
-            sub="Real feedback from the Polycards community."
-          />
-        </Reveal>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {TESTIMONIALS.map((t, i) => (
-            <Reveal key={t.handle} delay={i * 110} className="h-full">
-              <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] transition-colors duration-300 hover:border-white/20">
-                <div className="relative h-44 w-full">
-                  <Image
-                    src={t.media}
-                    alt={`Photo shared by ${t.name}`}
-                    fill
-                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                    className="object-cover"
-                  />
-                </div>
-                <div className="flex flex-1 flex-col gap-3 p-5">
-                  <p className="flex-1 text-[13px] leading-relaxed text-white/75">
-                    {t.text}
-                  </p>
-                  <div className="flex items-center gap-3">
-                    <Image
-                      src={t.pfp}
-                      alt={t.name}
-                      width={32}
-                      height={32}
-                      className="h-8 w-8 rounded-full object-cover"
-                    />
-                    <div className="leading-tight">
-                      <div className="text-[13px] font-semibold text-white">
-                        {t.name}
-                      </div>
-                      <div className="text-[11px] text-white/50">
-                        {t.handle}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-      </section>
-
-      {/* 6. WHAT YOU CAN DO */}
+      {/* 5. WHAT YOU CAN DO */}
       <section className="mb-16">
         <Reveal>
           <SectionHeading
@@ -385,7 +287,7 @@ export default function HowItWorksPage() {
         </div>
       </section>
 
-      {/* 7. FAQ. #faq is linked from /contact */}
+      {/* 6. FAQ. #faq is linked from /contact */}
       <section id="faq" className="mb-16 scroll-mt-24">
         <Reveal>
           <SectionHeading
@@ -398,7 +300,7 @@ export default function HowItWorksPage() {
         </Reveal>
       </section>
 
-      {/* 8. CTA */}
+      {/* 7. CTA */}
       <Reveal
         as="section"
         className="mb-8 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-b from-white/[0.06] to-transparent px-6 py-14 text-center sm:py-16"
