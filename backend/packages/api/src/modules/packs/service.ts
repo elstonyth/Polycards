@@ -1,4 +1,4 @@
-import { randomInt, randomUUID } from 'node:crypto';
+import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
   MedusaService,
@@ -7266,9 +7266,46 @@ class PacksModuleService extends MedusaService({
       amount: number;
       note: string;
       adminId: string;
+      idempotencyKey?: string;
     },
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ id: string; amount: number; balance: number }> {
+  ): Promise<{ id: string; amount: number; balance: number; replayed?: boolean }> {
+    // Serialize retries BEFORE the mint-window and customer locks. Replays
+    // must still succeed after a grant exhausts today's mint allowance.
+    const requestReference = input.idempotencyKey
+      ? `adjust-idem:${createHash('sha256')
+          .update(JSON.stringify([input.adminId, input.customerId, input.idempotencyKey]))
+          .digest('hex')}`
+      : undefined;
+    if (requestReference) {
+      const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+      await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+        requestReference,
+      ]);
+      const [existing] = await this.listCreditTransactions(
+        { customer_id: input.customerId, source_transaction_id: requestReference },
+        { take: 1 },
+        sharedContext,
+      );
+      if (existing) {
+        if (
+          Math.round(Number(existing.amount) * 100) !== Math.round(input.amount * 100) ||
+          existing.reference !== input.note
+        ) {
+          throw new MedusaError(
+            MedusaError.Types.INVALID_DATA,
+            'This request ID was already used for a different adjustment.',
+          );
+        }
+        const { balance } = await this.creditSummary(input.customerId, sharedContext);
+        return {
+          id: existing.id,
+          amount: Number(existing.amount),
+          balance,
+          replayed: true,
+        };
+      }
+    }
     // Rolling-24h GLOBAL mint ceiling (ADJUST_DAILY_MINT_MAX_RM), enforced HERE
     // — inside this transaction, under a global lock — because an unlocked
     // pre-check outside it was only enforcement-at-margin: 50 parallel
@@ -7350,6 +7387,7 @@ class PacksModuleService extends MedusaService({
         reason: 'adjustment',
         reference: input.note,
         floor: 0,
+        sourceTransactionId: requestReference,
       },
       sharedContext,
     );

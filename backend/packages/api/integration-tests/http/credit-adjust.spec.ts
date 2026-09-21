@@ -161,6 +161,32 @@ medusaIntegrationTestRunner({
         expect(await ledgerRows()).toHaveLength(2); // grant + partial only
       });
 
+      it("retries concurrent bulk requests without duplicating credits or audit entries", async () => {
+        const { id } = await registerCustomer("adjust-retry@test.dev");
+        const body = { amount: 12.5, note: "Group grant", idempotency_key: "bulk-1" };
+        const responses = await Promise.all([
+          adjust(id, body, adminHeaders()),
+          adjust(id, body, adminHeaders()),
+          adjust(id, body, adminHeaders()),
+        ]);
+        for (const response of responses) {
+          expect(response.status).toBe(200);
+          expect(response.data).toMatchObject({ amount: 12.5, balance: 12.5 });
+        }
+        process.env.ADJUST_DAILY_MINT_MAX_RM = "0";
+        expect((await adjust(id, body, adminHeaders())).status).toBe(200);
+        const [row] = await ledgerRows();
+        expect(await ledgerRows()).toHaveLength(1);
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        expect(await packs.listAdminActionAudits({ entity_id: row.id, action: "adjust_credit" }))
+          .toHaveLength(1);
+        expect(await packs.listLedgerEntries({ ref_id: row.id, type: "AD" })).toHaveLength(1);
+        const conflict = await adjust(id, { ...body, amount: 20 }, adminHeaders());
+        expect(conflict.status).toBe(400);
+        expect(conflict.data.message).toMatch(/different adjustment/);
+        expect(await ledgerRows()).toHaveLength(1);
+      });
+
       it("rejects invalid amounts and missing notes with 400 and writes nothing", async () => {
         const { id } = await registerCustomer("adjust-customer-d@test.dev");
 
@@ -171,6 +197,9 @@ medusaIntegrationTestRunner({
           { amount: "5", note: "string" },
           { amount: 5 }, // missing note
           { amount: 5, note: "   " }, // blank note
+          { amount: 5, note: "grant", idempotency_key: "" },
+          { amount: 5, note: "grant", idempotency_key: 42 },
+          { amount: 5, note: "grant", idempotency_key: "x".repeat(201) },
         ]) {
           const res = await adjust(id, body, adminHeaders());
           expect(res.status).toBe(400);
