@@ -20,6 +20,21 @@ describe('factoryVideo', () => {
     }
   });
 
+  it('keeps a registered factory animated after uploading its still through admin', () => {
+    expect(
+      factoryVideo(
+        'https://polycards-media.sgp1.cdn.digitaloceanspaces.com/celebration-factory-01M32GC8049JJBNVKEP3VMYNC4.webp',
+      ),
+    ).toEqual(factoryVideo('/images/polycards/celebration-factory.webp'));
+    for (const url of [
+      'https://cdn.example.com/celebration-factory-01M32GC8049JJBNVKEP3VMYNC4.webp',
+      'https://polycards-media.sgp1.cdn.digitaloceanspaces.com/custom-factory-01M32GC8049JJBNVKEP3VMYNC4.webp',
+      'https://polycards-media.sgp1.cdn.digitaloceanspaces.com/custom-hero.webp',
+    ]) {
+      expect(factoryVideo(url)).toBeNull();
+    }
+  });
+
   it('returns null for undefined / a pack shot / an arbitrary uploaded hero', () => {
     expect(factoryVideo(undefined)).toBeNull();
     // a pack shot, not a factory scene

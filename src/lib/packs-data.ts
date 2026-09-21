@@ -172,15 +172,17 @@ const FACTORY_VIDEO_TIERS = new Set([
 ]);
 
 /** Animated factory-hero sources for a pack, or null when its display image is
- *  not one of the baked Polycards factory scenes (arbitrary uploaded heroes
- *  keep rendering as a still). Poster is the clip's own first frame. */
+ *  not a registered factory scene. Admin uploads of `{tier}-factory.webp`
+ *  retain their baked loop; arbitrary heroes stay still. Poster is frame one. */
 export function factoryVideo(
   displayImage: string | undefined,
 ): { mp4: string; webm: string; poster: string } | null {
   if (!displayImage) return null;
-  const tier = /^\/images\/polycards\/([a-z]+)-factory\.webp$/.exec(
-    displayImage,
-  )?.[1];
+  const tier =
+    /^\/images\/polycards\/([a-z]+)-factory\.webp$/.exec(displayImage)?.[1] ??
+    /^https:\/\/polycards-media\.sgp1\.cdn\.digitaloceanspaces\.com\/([a-z]+)-factory-[0-9A-Z]{26}\.webp$/.exec(
+      displayImage,
+    )?.[1];
   if (!tier || !FACTORY_VIDEO_TIERS.has(tier)) return null;
   const base = `/images/polycards/${tier}-factory`;
   return {
