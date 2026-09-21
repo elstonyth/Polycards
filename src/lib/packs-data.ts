@@ -6,6 +6,7 @@
 // renders comes from the backend via src/lib/data/packs.ts; the only local data
 // left is the category chrome (tab label, heading, icon) that wraps it.
 import type { CardView } from '@/lib/card-view';
+import { mediaHost } from '@/lib/security/csp';
 
 /** Site-wide flat buyback % — what every sell from the vault/inventory pays.
  *  Mirrors FLAT_PERCENT in backend/packages/api/src/modules/packs/buyback-rate.ts. */
@@ -178,11 +179,13 @@ export function factoryVideo(
   displayImage: string | undefined,
 ): { mp4: string; webm: string; poster: string } | null {
   if (!displayImage) return null;
+  const uploadPrefix = `https://${mediaHost()}/`;
+  const uploadedFile = displayImage.startsWith(uploadPrefix)
+    ? displayImage.slice(uploadPrefix.length)
+    : '';
   const tier =
     /^\/images\/polycards\/([a-z]+)-factory\.webp$/.exec(displayImage)?.[1] ??
-    /^https:\/\/polycards-media\.sgp1\.cdn\.digitaloceanspaces\.com\/([a-z]+)-factory-[0-9A-Z]{26}\.webp$/.exec(
-      displayImage,
-    )?.[1];
+    /^([a-z]+)-factory-[0-9A-Z]{26}\.webp$/.exec(uploadedFile)?.[1];
   if (!tier || !FACTORY_VIDEO_TIERS.has(tier)) return null;
   const base = `/images/polycards/${tier}-factory`;
   return {
