@@ -81,6 +81,56 @@ const grant = (amount: number) => ({
 });
 
 describe('PacksModuleService.adminAdjustCredit — mint-window lock', () => {
+  it('replays a committed request even after the mint limit is exhausted', async () => {
+    const f = fakeService(1_000_000_00);
+    const list = jest.fn(async () => [{ id: 'ctx_existing', amount: 5, reference: 'test' }]);
+    Object.assign(f.svc, {
+      listCreditTransactions: list,
+      creditSummary: jest.fn(async () => ({ balance: 12 })),
+    });
+    const result = await f.svc.adminAdjustCredit({ ...grant(5), idempotencyKey: 'batch:cus_1' }, f.ctx);
+    expect(result).toMatchObject({ id: 'ctx_existing', amount: 5, balance: 12, replayed: true });
+    expect(list).toHaveBeenCalledWith(expect.objectContaining({ customer_id: 'cus_1' }), { take: 1 }, f.ctx);
+    expect(f.ops).toEqual(['lock']);
+    expect(f.writes.mutateCreditAtomic).not.toHaveBeenCalled();
+    expect(f.writes.createAdminActionAudits).not.toHaveBeenCalled();
+    expect(f.writes.recordLedgerEntry).not.toHaveBeenCalled();
+  });
+
+  it('refuses changing the amount or note of a committed request', async () => {
+    const f = fakeService();
+    Object.assign(f.svc, {
+      listCreditTransactions: jest.fn(async () => [{ id: 'ctx_existing', amount: 5, reference: 'test' }]),
+    });
+    for (const input of [{ ...grant(6) }, { ...grant(5), note: 'different' }]) {
+      await expect(f.svc.adminAdjustCredit({ ...input, idempotencyKey: 'batch:cus_1' }, f.ctx))
+        .rejects.toThrow(/different adjustment/);
+    }
+    expect(f.writes.mutateCreditAtomic).not.toHaveBeenCalled();
+  });
+
+  it('compares replay amounts in cents, matching the accepted money precision', async () => {
+    const f = fakeService();
+    Object.assign(f.svc, {
+      listCreditTransactions: jest.fn(async () => [{ id: 'ctx_existing', amount: 0.3, reference: 'test' }]),
+      creditSummary: jest.fn(async () => ({ balance: 0.3 })),
+    });
+    const result = await f.svc.adminAdjustCredit({ ...grant(0.1 + 0.2), idempotencyKey: 'batch:cus_1' }, f.ctx);
+    expect(result).toMatchObject({ amount: 0.3, balance: 0.3, replayed: true });
+    expect(f.writes.mutateCreditAtomic).not.toHaveBeenCalled();
+  });
+
+  it('stores a scoped request reference alongside a new audited credit', async () => {
+    const f = fakeService();
+    Object.assign(f.svc, { listCreditTransactions: jest.fn(async () => []) });
+    await f.svc.adminAdjustCredit({ ...grant(5), idempotencyKey: 'batch:cus_1' }, f.ctx);
+    expect(f.writes.mutateCreditAtomic).toHaveBeenCalledWith(expect.objectContaining({
+      sourceTransactionId: expect.stringMatching(/^adjust-idem:[a-f0-9]{64}$/),
+    }), f.ctx);
+    expect(f.writes.createAdminActionAudits).toHaveBeenCalledTimes(1);
+    expect(f.writes.recordLedgerEntry).toHaveBeenCalledTimes(1);
+  });
+
   it('takes the GLOBAL mint lock BEFORE summing the window, then writes', async () => {
     const f = fakeService(0);
     await f.svc.adminAdjustCredit(grant(5), f.ctx);

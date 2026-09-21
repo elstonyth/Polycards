@@ -14,6 +14,7 @@ export type AdjustCreditsInput = {
   note: unknown;
   /** Server-derived actor id from req.auth_context.actor_id — never from body. */
   admin_id: string;
+  idempotency_key?: unknown;
 };
 
 export type AdjustCreditsResult = {
@@ -42,6 +43,16 @@ export const adjustCreditsStep = createStep(
     }
     const amount = input.amount as number;
     const note = (input.note as string).trim();
+    if (
+      input.idempotency_key !== undefined &&
+      (typeof input.idempotency_key !== 'string' ||
+        !input.idempotency_key.trim() || input.idempotency_key.length > 200)
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Request ID must be a non-empty string of at most 200 characters.',
+      );
+    }
 
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
 
@@ -57,15 +68,16 @@ export const adjustCreditsStep = createStep(
     // written together in the same transaction inside adminAdjustCredit, so
     // both commit or neither does. The advisory-lock serialisation from
     // mutateCreditAtomic is preserved (adminAdjustCredit calls it internally).
-    const { id, balance } = await packs.adminAdjustCredit({
+    const { id, balance, replayed } = await packs.adminAdjustCredit({
       customerId: input.customer_id,
       amount,
       note,
       adminId: input.admin_id,
+      idempotencyKey: (input.idempotency_key as string | undefined)?.trim(),
     });
 
     const result: AdjustCreditsResult = { amount, balance };
-    return new StepResponse(result, { creditTransactionId: id });
+    return new StepResponse(result, replayed ? undefined : { creditTransactionId: id });
   },
   async (data: { creditTransactionId: string } | undefined, { container }) => {
     if (!data) return;

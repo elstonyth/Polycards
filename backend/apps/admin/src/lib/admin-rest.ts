@@ -206,6 +206,26 @@ export async function searchCustomers(q: string): Promise<SupportCustomer[]> {
   return data.customers;
 }
 
+export interface GroupCreditCustomer {
+  id: string;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+}
+
+export const listGroupCreditCustomersPage = (groupId: string, offset: number) => {
+  const params = new URLSearchParams({
+    groups: groupId,
+    limit: '100',
+    offset: String(offset),
+    fields: 'id,email,first_name,last_name',
+    order: 'id',
+  });
+  return getJson<{ customers: GroupCreditCustomer[]; count: number }>(
+    `/admin/customers?${params}`,
+  );
+};
+
 export async function getCustomerGacha(id: string): Promise<CustomerGacha> {
   return getJson<CustomerGacha>(
     `/admin/customers/${encodeURIComponent(id)}/gacha`,
@@ -309,6 +329,7 @@ export async function adjustCustomerCredits(
   id: string,
   amount: number,
   note: string,
+  idempotencyKey?: string,
 ): Promise<{ amount: number; balance: number }> {
   const res = await fetch(
     `${__BACKEND_URL__}/admin/customers/${encodeURIComponent(id)}/credits`,
@@ -316,7 +337,7 @@ export async function adjustCustomerCredits(
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount, note }),
+      body: JSON.stringify({ amount, note, idempotency_key: idempotencyKey }),
     },
   );
   if (!res.ok) {

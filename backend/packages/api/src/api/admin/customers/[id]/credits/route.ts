@@ -6,7 +6,7 @@ import { Modules } from "@medusajs/framework/utils";
 import type { ICustomerModuleService } from "@medusajs/framework/types";
 import { adjustCreditsWorkflow } from "../../../../../workflows/adjust-credits";
 
-type Body = { amount?: unknown; note?: unknown };
+type Body = { amount?: unknown; note?: unknown; idempotency_key?: unknown };
 
 // POST /admin/customers/:id/credits — operator credit adjustment (grant /
 // refund / clawback). One signed ledger row, RM 0 balance floor; amount/note
@@ -37,6 +37,7 @@ export async function POST(
       amount: body.amount,
       note: body.note,
       admin_id: adminId,
+      idempotency_key: body.idempotency_key,
     },
   });
 
