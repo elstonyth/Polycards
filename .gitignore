@@ -152,3 +152,7 @@ public/images/claw/polycards-factory-test.png
 # public/videos/pack-opening-demo.mp4 stayed only because it was tracked before
 # this rule landed, so the gap was invisible until a new sibling was added.
 /videos/
+
+# local agent/marketing work products (image-gen previews, video masters, QA
+# captures). Assets that ship are copied into public/ and committed there.
+/output/

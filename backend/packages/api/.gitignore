@@ -29,3 +29,7 @@ build
 .medusa
 # runtime uploads served at /static (restore via scripts/restore-backend-static.mjs)
 /static
+
+# Mercur CLI codegen writes routes.d.ts next to the tracked index.d.ts; only
+# index.d.ts is consumed (via .mercur/_generated/index.ts), so keep this one out.
+/.mercur/routes.d.ts
