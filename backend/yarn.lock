@@ -47,7 +47,7 @@ __metadata:
     "@medusajs/medusa": "npm:2.19.0"
     "@medusajs/test-utils": "npm:2.19.0"
     "@mercurjs/cli": "npm:2.3.3"
-    "@mercurjs/core": "npm:2.3.3"
+    "@mercurjs/core": "npm:2.3.5"
     "@mercurjs/types": "npm:2.3.3"
     "@swc/core": "npm:^1.16.2"
     "@swc/jest": "npm:^0.2.36"
@@ -4526,43 +4526,23 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@mercurjs/core@npm:2.3.3":
-  version: 2.3.3
-  resolution: "@mercurjs/core@npm:2.3.3"
+"@mercurjs/core@npm:2.3.5":
+  version: 2.3.5
+  resolution: "@mercurjs/core@npm:2.3.5"
   dependencies:
     "@orama/orama": "npm:^3.1.18"
     pkg-dir: "npm:4"
     resolve-cwd: "npm:^3.0.0"
     zod: "npm:4.4.3"
   peerDependencies:
-    "@medusajs/admin-sdk": ">=2.18.0"
-    "@medusajs/cli": ">=2.18.0"
-    "@medusajs/framework": ">=2.18.0"
-    "@medusajs/icons": ">=2.18.0"
-    "@medusajs/medusa": ">=2.18.0"
-    "@medusajs/test-utils": ">=2.18.0"
+    "@medusajs/admin-sdk": ">=2.20.1"
+    "@medusajs/cli": ">=2.20.1"
+    "@medusajs/framework": ">=2.20.1"
+    "@medusajs/icons": ">=2.20.1"
+    "@medusajs/medusa": ">=2.20.1"
+    "@medusajs/test-utils": ">=2.20.1"
     express: ^4.21.0
-  checksum: 10c0/2c446061d8779991cf6d9582b5defb1850960eb863ec2db6b51e27bca4023620178b3c7c6fe17deb9274e820a0ef36d64d2d907ff9e0156ca15bee21db91378e
-  languageName: node
-  linkType: hard
-
-"@mercurjs/core@patch:@mercurjs/core@npm%3A2.3.3#~/.yarn/patches/@mercurjs-core-npm-2.3.3-2ff3229629.patch":
-  version: 2.3.3
-  resolution: "@mercurjs/core@patch:@mercurjs/core@npm%3A2.3.3#~/.yarn/patches/@mercurjs-core-npm-2.3.3-2ff3229629.patch::version=2.3.3&hash=b484e9"
-  dependencies:
-    "@orama/orama": "npm:^3.1.18"
-    pkg-dir: "npm:4"
-    resolve-cwd: "npm:^3.0.0"
-    zod: "npm:4.4.3"
-  peerDependencies:
-    "@medusajs/admin-sdk": ">=2.18.0"
-    "@medusajs/cli": ">=2.18.0"
-    "@medusajs/framework": ">=2.18.0"
-    "@medusajs/icons": ">=2.18.0"
-    "@medusajs/medusa": ">=2.18.0"
-    "@medusajs/test-utils": ">=2.18.0"
-    express: ^4.21.0
-  checksum: 10c0/c05fc1ba771fe6bb81394920df8c8b1f7a82646500aec62ed7bfdbe1c201778fbbf26f6b422ab07c3b2fd09c566a6b2a7c6d93ccd49799f8533fab39d4702997
+  checksum: 10c0/80d0de49e1d21f56ac7f1fc84b6607cd4b9cdafc7ace66a374a15189cf327921b2827d56b6d4fbe0a9a7884187f652137f4a810bc53c59431933ccf0cea29dfe
   languageName: node
   linkType: hard
 
