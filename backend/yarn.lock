@@ -15,7 +15,7 @@ __metadata:
     "@medusajs/icons": "npm:2.19.0"
     "@medusajs/ui": "npm:4.2.1"
     "@medusajs/ui-preset": "npm:2.19.0"
-    "@mercurjs/admin": "npm:2.3.3"
+    "@mercurjs/admin": "npm:2.3.5"
     "@tanstack/react-query": "npm:5.102.8"
     "@types/node": "npm:^24.13.4"
     autoprefixer: "npm:^10.5.6"
@@ -3230,6 +3230,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@medusajs/admin-shared@npm:2.20.1":
+  version: 2.20.1
+  resolution: "@medusajs/admin-shared@npm:2.20.1"
+  checksum: 10c0/e3eef9c2686cb3f1edbfa70a81a9af06600c3104d8e7e8574e4f2101bd80b3afa99da6957b2d5722dee5f985e2fa1b4f581e8f6291e4b99661cae1231b3b4927
+  languageName: node
+  linkType: hard
+
 "@medusajs/admin-vite-plugin@npm:2.18.0":
   version: 2.18.0
   resolution: "@medusajs/admin-vite-plugin@npm:2.18.0"
@@ -3529,6 +3536,54 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@medusajs/dashboard@npm:2.20.1":
+  version: 2.20.1
+  resolution: "@medusajs/dashboard@npm:2.20.1"
+  dependencies:
+    "@ariakit/react": "npm:^0.4.15"
+    "@babel/runtime": "npm:^7.26.10"
+    "@dnd-kit/core": "npm:^6.1.0"
+    "@dnd-kit/sortable": "npm:^8.0.0"
+    "@dnd-kit/utilities": "npm:^3.2.2"
+    "@hookform/error-message": "npm:^2.0.1"
+    "@hookform/resolvers": "npm:5.5.7"
+    "@medusajs/admin-shared": "npm:2.20.1"
+    "@medusajs/icons": "npm:2.20.1"
+    "@medusajs/js-sdk": "npm:2.20.1"
+    "@medusajs/ui": "npm:4.2.3"
+    "@radix-ui/react-dialog": "npm:1.1.4"
+    "@radix-ui/react-dismissable-layer": "npm:1.1.4"
+    "@tanstack/react-query": "npm:5.64.2"
+    "@tanstack/react-table": "npm:8.20.5"
+    "@tanstack/react-virtual": "npm:^3.8.3"
+    "@uiw/react-json-view": "npm:^2.0.0-alpha.17"
+    bignumber.js: "npm:^9.1.2"
+    cmdk: "npm:^0.2.0"
+    copy-to-clipboard: "npm:^3.3.3"
+    date-fns: "npm:^3.6.0"
+    i18next: "npm:23.7.11"
+    i18next-browser-languagedetector: "npm:7.2.0"
+    lodash.debounce: "npm:^4.0.8"
+    lodash.isequal: "npm:^4.5.0"
+    match-sorter: "npm:^6.3.4"
+    motion: "npm:^11.15.0"
+    qrcode: "npm:^1.5.4"
+    qs: "npm:^6.15.2"
+    radix-ui: "npm:1.1.2"
+    react: "npm:^18.3.1"
+    react-country-flag: "npm:^3.1.0"
+    react-currency-input-field: "npm:^3.6.11"
+    react-dom: "npm:^18.3.1"
+    react-helmet-async: "npm:^2.0.5"
+    react-hook-form: "npm:7.83.0"
+    react-i18next: "npm:13.5.0"
+    react-jwt: "npm:^1.2.0"
+    react-router-dom: "npm:7.18.2"
+    zod: "npm:4.2.0"
+  checksum: 10c0/c013d00a16b05ce73b966b2aeae9bb3b720f2791099ecf662e662b17da8f1f5dc6203bd7ebbc09dca74d8a3c6ea2ffbfeb294a5deab4c95e4304134a6c095c33
+  languageName: node
+  linkType: hard
+
 "@medusajs/deps@npm:2.18.0":
   version: 2.18.0
   resolution: "@medusajs/deps@npm:2.18.0"
@@ -3788,6 +3843,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@medusajs/icons@npm:2.20.1":
+  version: 2.20.1
+  resolution: "@medusajs/icons@npm:2.20.1"
+  peerDependencies:
+    react: ^18.3.1 || ^19.0.0
+  checksum: 10c0/ce2e12092dadf715de1ee31f730966ef5000ddfe756baacf2e7225648be40b249a7f4a31cc40d7407545667dbfcb8ea2215462cde2bd0899178881aeb8188edb
+  languageName: node
+  linkType: hard
+
 "@medusajs/index@npm:2.19.0":
   version: 2.19.0
   resolution: "@medusajs/index@npm:2.19.0"
@@ -3813,6 +3877,16 @@ __metadata:
     fetch-event-stream: "npm:^0.1.5"
     qs: "npm:^6.15.2"
   checksum: 10c0/572ed7e0c1b74eb9baa9a99dc1b96c8a4dd0e355418ba8465edde23487bd049d711d43031a565d49a14c4ca8c6b5cfaed316814f0ffd0ede954cd72648b41c01
+  languageName: node
+  linkType: hard
+
+"@medusajs/js-sdk@npm:2.20.1":
+  version: 2.20.1
+  resolution: "@medusajs/js-sdk@npm:2.20.1"
+  dependencies:
+    fetch-event-stream: "npm:^0.1.5"
+    qs: "npm:^6.15.2"
+  checksum: 10c0/e4e1ee824cac66c7dd4a20d9c74c0c950f8f76719ee41818c27e8949f13a54259a223e7e8f6d3b34e43933ce8c7d3beda9cb6b60b877c01e3390384e0da9e0f5
   languageName: node
   linkType: hard
 
@@ -4323,6 +4397,36 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@medusajs/ui@npm:4.2.3":
+  version: 4.2.3
+  resolution: "@medusajs/ui@npm:4.2.3"
+  dependencies:
+    "@dnd-kit/core": "npm:^6.1.0"
+    "@dnd-kit/sortable": "npm:^8.0.0"
+    "@dnd-kit/utilities": "npm:^3.2.2"
+    "@medusajs/icons": "npm:2.20.1"
+    "@radix-ui/react-dialog": "npm:1.1.4"
+    "@radix-ui/react-dismissable-layer": "npm:1.1.4"
+    "@tanstack/react-table": "npm:8.20.5"
+    clsx: "npm:^1.2.1"
+    copy-to-clipboard: "npm:^3.3.3"
+    cva: "npm:1.0.0-beta.1"
+    lodash.isequal: "npm:^4.5.0"
+    prism-react-renderer: "npm:^2.0.6"
+    prismjs: "npm:^1.30.0"
+    radix-ui: "npm:1.1.2"
+    react-aria: "npm:^3.33.1"
+    react-currency-input-field: "npm:^3.6.11"
+    react-stately: "npm:^3.31.1"
+    sonner: "npm:^1.5.0"
+    tailwind-merge: "npm:^2.2.1"
+  peerDependencies:
+    react: ^18.3.1
+    react-dom: ^18.3.1
+  checksum: 10c0/7b878c0150082d05102604d1101ada8fb5450fab1dd2ea119482cb198e479c0114058e4575901b44b3055e6c005c64c58cc3055f016bbe813957a623c93add7a
+  languageName: node
+  linkType: hard
+
 "@medusajs/user@npm:2.19.0":
   version: 2.19.0
   resolution: "@medusajs/user@npm:2.19.0"
@@ -4433,9 +4537,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@mercurjs/admin@npm:2.3.3":
-  version: 2.3.3
-  resolution: "@mercurjs/admin@npm:2.3.3"
+"@mercurjs/admin@npm:2.3.5":
+  version: 2.3.5
+  resolution: "@mercurjs/admin@npm:2.3.5"
   dependencies:
     "@ariakit/react": "npm:^0.4.15"
     "@babel/runtime": "npm:^8.0.0"
@@ -4444,12 +4548,12 @@ __metadata:
     "@dnd-kit/utilities": "npm:^3.2.2"
     "@hookform/error-message": "npm:^2.0.1"
     "@hookform/resolvers": "npm:5.4.0"
-    "@medusajs/admin-shared": "npm:2.18.0"
-    "@medusajs/dashboard": "npm:2.18.0"
-    "@medusajs/icons": "npm:2.18.0"
-    "@medusajs/ui": "npm:4.1.19"
-    "@mercurjs/client": "npm:2.3.3"
-    "@mercurjs/dashboard-shared": "npm:2.3.3"
+    "@medusajs/admin-shared": "npm:2.20.1"
+    "@medusajs/dashboard": "npm:2.20.1"
+    "@medusajs/icons": "npm:2.20.1"
+    "@medusajs/ui": "npm:4.2.3"
+    "@mercurjs/client": "npm:2.3.5"
+    "@mercurjs/dashboard-shared": "npm:2.3.5"
     "@radix-ui/react-dialog": "npm:1.1.19"
     "@radix-ui/react-dismissable-layer": "npm:1.1.4"
     "@tanstack/react-query": "npm:5.64.2"
@@ -4479,7 +4583,7 @@ __metadata:
     react: ^18.0.0
     react-dom: ^18.0.0
     react-router-dom: ^7.18.1
-  checksum: 10c0/18ae7bcb0f7a769f3fdf4e6a6e84c81d240e4ca067230d1884e861adeb345a8748d2b3ef3323f71f7a72f6e0fc54e64167947bd8d3f5d87b90c34c22fdd76867
+  checksum: 10c0/a6d93a9237f2a8bc83e9f747d28c9b0b0f1238867748a4ea834148b507760f4de82820a59991f00eff5fff5e445d7334ade57e0e774700ffb9f1f215aba0e81a
   languageName: node
   linkType: hard
 
@@ -4523,6 +4627,18 @@ __metadata:
   peerDependencies:
     typescript: ">=4.8.0"
   checksum: 10c0/54b3b3a332b09363e38abc8daa8948df013c2b45268a3b76635b340cf725012a09f562b662bcf008382c3c3cad89374332d3316be353ba5fead59976788de480
+  languageName: node
+  linkType: hard
+
+"@mercurjs/client@npm:2.3.5":
+  version: 2.3.5
+  resolution: "@mercurjs/client@npm:2.3.5"
+  dependencies:
+    "@tanstack/react-query": "npm:^5.64.2"
+    qs: "npm:^6.12.1"
+  peerDependencies:
+    typescript: ">=4.8.0"
+  checksum: 10c0/097888aa9f7e28148a9d8f434d39fe285fb9a1cdbea0c1d4395ac60736dbac12b4a363882b18d27f521345e8936536111f45ffb0e7dd573a139ee9c27139067c
   languageName: node
   linkType: hard
 
@@ -4624,6 +4740,55 @@ __metadata:
     react-dom: ^18.0.0
     react-router-dom: ^7.18.1
   checksum: 10c0/857c3a5d180d2914e361964f2839bb730fd30cce8f216ef5a56c2276414499c083afc36bfb9557dd6b09703e09eebc2bf43caf1c98278142b7122368e60c425f
+  languageName: node
+  linkType: hard
+
+"@mercurjs/dashboard-shared@npm:2.3.5":
+  version: 2.3.5
+  resolution: "@mercurjs/dashboard-shared@npm:2.3.5"
+  dependencies:
+    "@ariakit/react": "npm:^0.4.15"
+    "@babel/runtime": "npm:^8.0.0"
+    "@dnd-kit/core": "npm:^6.1.0"
+    "@dnd-kit/sortable": "npm:^8.0.0"
+    "@dnd-kit/utilities": "npm:^3.2.2"
+    "@hookform/error-message": "npm:^2.0.1"
+    "@hookform/resolvers": "npm:5.4.0"
+    "@medusajs/admin-shared": "npm:2.20.1"
+    "@medusajs/dashboard": "npm:2.20.1"
+    "@medusajs/icons": "npm:2.20.1"
+    "@medusajs/ui": "npm:4.2.3"
+    "@mercurjs/client": "npm:2.3.5"
+    "@radix-ui/react-dialog": "npm:1.1.19"
+    "@radix-ui/react-dismissable-layer": "npm:1.1.4"
+    "@tanstack/react-query": "npm:5.64.2"
+    "@tanstack/react-table": "npm:8.21.3"
+    "@tanstack/react-virtual": "npm:^3.8.3"
+    "@uiw/react-json-view": "npm:^2.0.0-alpha.17"
+    cmdk: "npm:^1.1.1"
+    copy-to-clipboard: "npm:^4.0.2"
+    date-fns: "npm:^3.6.0"
+    i18next: "npm:26.3.5"
+    i18next-browser-languagedetector: "npm:7.2.0"
+    i18next-http-backend: "npm:3.0.5"
+    lodash.debounce: "npm:^4.0.8"
+    lodash.isequal: "npm:^4.5.0"
+    match-sorter: "npm:^8.3.0"
+    motion: "npm:^11.15.0"
+    qs: "npm:^6.12.1"
+    radix-ui: "npm:1.1.2"
+    react-country-flag: "npm:^3.1.0"
+    react-currency-input-field: "npm:^4.0.6"
+    react-helmet-async: "npm:^3.0.0"
+    react-hook-form: "npm:7.49.1"
+    react-i18next: "npm:17.0.8"
+    react-jwt: "npm:^2.1.1"
+    zod: "npm:4.4.3"
+  peerDependencies:
+    react: ^18.0.0
+    react-dom: ^18.0.0
+    react-router-dom: ^7.18.1
+  checksum: 10c0/0371e854f20cafa14b1c11eb4c76475037285b508026de16a36593c2c80e704bbda80eb872193f354af5ba62bcd50bef16cd52865cd6a499200784acd7d17f67
   languageName: node
   linkType: hard
 
