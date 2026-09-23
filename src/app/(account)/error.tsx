@@ -2,10 +2,12 @@
 
 import * as Sentry from '@sentry/nextjs';
 import { useEffect } from 'react';
+import { reloadForVersionSkew } from '@/lib/version-skew';
 
 // Segment boundary for the whole account cluster (11 pages). Without it, a
 // failed server action inside any of them bubbles to the root error.tsx and
-// takes the page shell with it.
+// takes the page shell with it. A tab stranded on a previous deploy (deleted
+// chunk, unknown action) reloads instead — "Try again" can't cure that.
 export default function AccountError({
   error,
   reset,
@@ -15,6 +17,7 @@ export default function AccountError({
 }) {
   useEffect(() => {
     Sentry.captureException(error);
+    reloadForVersionSkew(error);
   }, [error]);
 
   return (

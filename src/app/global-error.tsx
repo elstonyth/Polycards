@@ -2,6 +2,7 @@
 
 import * as Sentry from '@sentry/nextjs';
 import { useEffect } from 'react';
+import { reloadForVersionSkew } from '@/lib/version-skew';
 
 export default function GlobalError({
   error,
@@ -12,6 +13,8 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     Sentry.captureException(error);
+    // A tab stranded on a previous deploy reloads (see lib/version-skew).
+    reloadForVersionSkew(error);
   }, [error]);
 
   return (
