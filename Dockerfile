@@ -106,6 +106,19 @@ ENV NEXT_PUBLIC_PAYMENTS_PROVIDER=$NEXT_PUBLIC_PAYMENTS_PROVIDER
 ENV NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=$NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED
 ENV NEXT_PUBLIC_WITHDRAWALS_ENABLED=$NEXT_PUBLIC_WITHDRAWALS_ENABLED
 ENV CSP_ENFORCE=$CSP_ENFORCE
+# Salt for every Server Action ID (`next build --webpack` hashes each action ID
+# with the actions encryption key). Unset, each build generates a random key,
+# so EVERY deploy renames every action and any tab still running the previous
+# build fails all of them with "Failed to find Server Action" — how login broke
+# on prod 2026-09-23 with auth.ts untouched. A fixed key keeps IDs stable across
+# deploys. SECRET, so unlike the ARGs above it has NO default (public repo):
+# App Platform passes it as a build-arg from the BUILD_TIME secret in
+# .do/storefront.app.yaml. ARG only, no ENV — the RUN steps below see it, and
+# the runtime reads the key Next embeds in the build output.
+ARG NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+# Length only, never the value. 0 in a DO build log = the secret did not arrive
+# and this deploy rotates every action ID again.
+RUN echo "server-actions key length: ${#NEXT_SERVER_ACTIONS_ENCRYPTION_KEY}"
 
 # Next.js collects completely anonymous telemetry data about general usage.
 # Learn more here: https://nextjs.org/telemetry

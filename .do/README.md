@@ -20,8 +20,11 @@ as fallbacks — the custom domains are the real origins.
 
 ## Secrets
 
-`storefront.app.yaml` has **no secrets** (the backend URL + publishable key are
-`NEXT_PUBLIC_*`, public by design) — it is committed verbatim.
+`storefront.app.yaml` has **one secret**, `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`
+(build-time only — it keeps Server Action IDs stable across deploys; see the
+comment on it in the spec). It is redacted to a `__SECRET__…__` placeholder and
+injected exactly like the backend's. Everything else in that spec (backend URL,
+publishable key, other `NEXT_PUBLIC_*`) is public by design.
 
 `backend.app.yaml` has 4 secret env values (`DATABASE_URL`, `REDIS_URL`,
 `JWT_SECRET`, `COOKIE_SECRET`) redacted to `__SECRET__<KEY>__` placeholders. The real
@@ -30,14 +33,18 @@ by `scripts/do-apply.ps1`. Never put a real secret in `.do/`.
 
 If `deploy/.env.deploy` is lost, recreate it from the DO managed-DB connection
 strings (Postgres + Valkey) plus the generated `JWT_SECRET` / `COOKIE_SECRET`
-(rotate them if unknown).
+(rotate them if unknown). `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` can simply be
+regenerated (32 random bytes, base64:
+`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`) —
+a new value renames every Server Action once, so open tabs from before that
+deploy must reload.
 
 ## Apply
 
 ```pwsh
 pwsh scripts/do-apply.ps1 backend -Validate     # validate only, no live change
 pwsh scripts/do-apply.ps1 backend               # validate + REDEPLOY prod
-pwsh scripts/do-apply.ps1 storefront            # storefront has no secrets
+pwsh scripts/do-apply.ps1 storefront            # validate + REDEPLOY prod (1 secret)
 ```
 
 The script injects secrets, writes a resolved spec to gitignored

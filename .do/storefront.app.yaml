@@ -1,8 +1,10 @@
 # DigitalOcean App Platform spec — polycards-storefront (Next.js 16).
 #
-# COMMITTED IaC (single source of truth). No secrets here: the backend URL and
-# the publishable key are NEXT_PUBLIC_* (public by design) and are baked at
-# BUILD time, so the backend must already be live before a build.
+# COMMITTED IaC (single source of truth). One secret, redacted to a
+# placeholder that scripts/do-apply.ps1 fills from gitignored
+# deploy/.env.deploy (NEXT_SERVER_ACTIONS_ENCRYPTION_KEY, below). The backend
+# URL and the publishable key are NEXT_PUBLIC_* (public by design) and are
+# baked at BUILD time, so the backend must already be live before a build.
 #
 #   Validate (no live change):  pwsh scripts/do-apply.ps1 storefront -Validate
 #   Apply (redeploys prod):     pwsh scripts/do-apply.ps1 storefront
@@ -178,6 +180,20 @@ services:
       - key: NEXT_TELEMETRY_DISABLED
         scope: RUN_AND_BUILD_TIME
         value: '1'
+      # Salt for every Server Action ID — keeps them stable across deploys.
+      # Without it each build picks a random key, every deploy renames every
+      # action, and tabs still on the previous build fail all of them ("Failed
+      # to find Server Action": login on 2026-09-23). Moves together with the
+      # no-default `ARG NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` in ./Dockerfile.
+      # BUILD_TIME only: it reaches the build as a --build-arg and Next embeds
+      # it in the build output, so the running container never needs it —
+      # which also means a spec apply alone changes nothing until the next
+      # push-triggered build (DO skips the build on "app spec updated").
+      # 32 random bytes, base64. Rotating it renames every action once.
+      - key: NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+        scope: BUILD_TIME
+        type: SECRET
+        value: __SECRET__NEXT_SERVER_ACTIONS_ENCRYPTION_KEY__
       # Phone-OTP UI gate. Build-time inlined, so flipping this needs a REBUILD,
       # not a restart — and it must not go true until the backend is already
       # serving /store/phone-verification/* with the Twilio secrets set, or the
