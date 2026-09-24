@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { badgeSprite } from '@/lib/pokemon-badge-sprite';
+import { STATIC_ONLY_DEX } from '@/lib/mock/pokedex';
 
 describe('badgeSprite', () => {
-  it.each([994, 995])('uses an existing static sprite for dex %i', (dex) => {
-    const { chain } = badgeSprite({ name: 'Card', pokemonDex: dex });
-    expect(chain).toEqual([
-      `https://cdn.jsdelivr.net/gh/PokeAPI/sprites@master/sprites/pokemon/${dex}.png`,
-    ]);
-  });
+  it.each([...STATIC_ONLY_DEX])(
+    'uses an existing static sprite for dex %i',
+    (dex) => {
+      const { chain } = badgeSprite({ name: 'Card', pokemonDex: dex });
+      expect(chain).toEqual([
+        `https://cdn.jsdelivr.net/gh/PokeAPI/sprites@master/sprites/pokemon/${dex}.png`,
+      ]);
+    },
+  );
 
   it('uses the CONFIGURED dex, not the name', () => {
     // The camelCase→snake_case mapping into resolveCardPokemon is the trap:

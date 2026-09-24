@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { resolveCardPokemon } from '@/lib/resolve-card-pokemon';
 import { POKEDEX_NAMES } from '@/lib/mock/pokedex-names';
+import { STATIC_ONLY_DEX } from '@/lib/mock/pokedex';
 
 describe('resolveCardPokemon', () => {
-  it.each([994, 995])(
+  it.each([...STATIC_ONLY_DEX])(
     'avoids an unavailable Showdown animation for dex %i',
     (dex) => {
       expect(
