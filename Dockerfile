@@ -117,8 +117,11 @@ ENV CSP_ENFORCE=$CSP_ENFORCE
 # the runtime reads the key Next embeds in the build output.
 ARG NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
 # Length only, never the value. 0 in a DO build log = the secret did not arrive
-# and this deploy rotates every action ID again.
-RUN echo "server-actions key length: ${#NEXT_SERVER_ACTIONS_ENCRYPTION_KEY}"
+# and this deploy rotates every action ID again. Printed by node so the line
+# holds no `$`: DO's Kaniko resolves RUN text for its layer-cache key and
+# rejects shell-only syntax like ${#VAR} ("missing ':' in substitution" —
+# failed the 2026-09-24 deploy before any step ran).
+RUN node -e "console.log('server-actions key length:', (process.env.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY || '').length)"
 
 # Next.js collects completely anonymous telemetry data about general usage.
 # Learn more here: https://nextjs.org/telemetry
