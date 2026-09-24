@@ -2,6 +2,7 @@
 
 import * as Sentry from '@sentry/nextjs';
 import { useEffect } from 'react';
+import { reloadForVersionSkew } from '@/lib/version-skew';
 
 export default function Error({
   error,
@@ -12,9 +13,11 @@ export default function Error({
 }) {
   // Report client-side render errors caught by this segment boundary — the
   // common case. (global-error.tsx covers root-layout failures; the
-  // instrumentation onRequestError hook covers server-side errors.)
+  // instrumentation onRequestError hook covers server-side errors.) A tab
+  // stranded on a previous deploy reloads instead: reset() can't cure it.
   useEffect(() => {
     Sentry.captureException(error);
+    reloadForVersionSkew(error);
   }, [error]);
 
   return (

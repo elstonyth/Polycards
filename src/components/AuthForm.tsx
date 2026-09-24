@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, unstable_isUnrecognizedActionError } from 'next/navigation';
 import { Mail, Lock, Ticket, User as UserIcon, Loader2 } from 'lucide-react';
 import {
   login,
@@ -44,6 +44,18 @@ type Note = {
   text: string;
   field?: 'password' | 'phone' | 'referral' | 'username';
 };
+
+// Copy for a server action call that threw instead of returning an error. A
+// tab still running a previous deploy's bundle gets UnrecognizedActionError
+// from every call, and retrying can never fix that — only a reload fetches the
+// current action IDs — so it gets its own copy rather than "try again".
+function failureNote(err: unknown): Note {
+  return {
+    text: unstable_isUnrecognizedActionError(err)
+      ? 'Polycards was just updated. Refresh the page and try again.'
+      : 'Something went wrong. Please try again.',
+  };
+}
 
 // The signup form's values as they travel through the OTP detour: held for
 // the deferred signup() call and re-seeded into the remounted form.
@@ -131,8 +143,8 @@ export default function AuthForm({
         return;
       }
       setNote({ text: result.error });
-    } catch {
-      setNote({ text: 'Something went wrong. Please try again.' });
+    } catch (err) {
+      setNote(failureNote(err));
     } finally {
       setBusy(false);
     }
@@ -164,8 +176,8 @@ export default function AuthForm({
       }
       setForgotPhone(phone);
       setForgot('phone-otp');
-    } catch {
-      setNote({ text: 'Something went wrong. Please try again.' });
+    } catch (err) {
+      setNote(failureNote(err));
     } finally {
       setBusy(false);
     }
@@ -205,8 +217,8 @@ export default function AuthForm({
       try {
         const result = await login({ email, password });
         finishAuth(result);
-      } catch {
-        setNote({ text: 'Something went wrong. Please try again.' });
+      } catch (err) {
+        setNote(failureNote(err));
       } finally {
         setBusy(false);
       }
@@ -250,8 +262,8 @@ export default function AuthForm({
           setNote({ text: check.error, field: 'referral' });
           return;
         }
-      } catch {
-        setNote({ text: 'Something went wrong. Please try again.' });
+      } catch (err) {
+        setNote(failureNote(err));
         return;
       } finally {
         setBusy(false);
@@ -313,8 +325,8 @@ export default function AuthForm({
           referral_code,
           proofToken: null,
         });
-      } catch {
-        setNote({ text: 'Something went wrong. Please try again.' });
+      } catch (err) {
+        setNote(failureNote(err));
       } finally {
         setBusy(false);
       }
@@ -331,8 +343,8 @@ export default function AuthForm({
         referral_code,
       });
       finishAuth(result);
-    } catch {
-      setNote({ text: 'Something went wrong. Please try again.' });
+    } catch (err) {
+      setNote(failureNote(err));
     } finally {
       setBusy(false);
     }
@@ -366,9 +378,9 @@ export default function AuthForm({
       }
       setBusy(false);
       setNote({ text: result.error, field: result.field });
-    } catch {
+    } catch (err) {
       setBusy(false);
-      setNote({ text: 'Something went wrong. Please try again.' });
+      setNote(failureNote(err));
     }
   }
 

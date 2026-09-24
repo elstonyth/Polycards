@@ -1,9 +1,9 @@
 #!/usr/bin/env pwsh
 # Apply a committed .do/<app>.app.yaml spec to its DigitalOcean App Platform app.
 #
-# Backend secrets are redacted in the committed spec (.do/backend.app.yaml) and
-# injected here from gitignored deploy/.env.deploy at apply time, so no secret
-# is ever committed. The committed .do/*.yaml is the single source of truth —
+# Secrets are redacted in the committed specs (.do/*.app.yaml) and injected
+# here from gitignored deploy/.env.deploy at apply time, so no secret is ever
+# committed. The committed .do/*.yaml is the single source of truth —
 # edit it, then run this; never edit the app in the DO UI (that causes drift).
 #
 #   pwsh scripts/do-apply.ps1 backend -Validate     # validate only, NO live change
@@ -27,21 +27,12 @@ $tmpl = Join-Path $root ".do/$App.app.yaml"
 if (-not (Test-Path $tmpl)) { throw "Missing committed spec: $tmpl" }
 $spec = Get-Content $tmpl -Raw
 
-if ($App -eq 'backend') {
-  $envFile = Join-Path $root 'deploy/.env.deploy'
-  if (-not (Test-Path $envFile)) {
-    throw "Missing $envFile (gitignored secrets). Recreate from the DO managed-DB connection strings + generated JWT/COOKIE secrets."
-  }
-  $secrets = @{}
-  foreach ($line in Get-Content $envFile) {
-    if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
-    $kv = $line -split '=', 2
-    $secrets[$kv[0].Trim()] = $kv[1].Trim()
-  }
-  # TWILIO_* added 2026-08-04 with the phone-verification cutover. Every name
-  # here is required unconditionally — the list and the spec placeholders move
-  # together, and both only after deploy/.env.deploy carries the real values,
-  # or the throw below blocks EVERY backend apply rather than one feature.
+# Every name here is required unconditionally — each list and its spec's
+# placeholders move together, and both only after deploy/.env.deploy carries
+# the real values, or the throw below blocks EVERY apply of that app rather
+# than one feature.
+$secretKeys = @{
+  # TWILIO_* added 2026-08-04 with the phone-verification cutover.
   #
   # TELEGRAM_BOT_TOKEN added 2026-08-21 with the apex-pull board. The live app
   # already carries the value (applied straight through `doctl apps update` on
@@ -50,15 +41,29 @@ if ($App -eq 'backend') {
   #
   # TGPAY_PUBLIC_KEY / TGPAY_SECRET_KEY added 2026-09-06 for the TGPay cutover
   # (plan 130); values from the production back office, 2FA-gated.
-  foreach ($k in 'DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'COOKIE_SECRET', 'ADMIN_PASSWORD', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'GOOGLE_CLIENT_SECRET', 'RESEND_API_KEY', 'PRICECHARTING_API_TOKEN', 'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_VERIFY_SERVICE_SID', 'TELEGRAM_BOT_TOKEN', 'TGPAY_PUBLIC_KEY', 'TGPAY_SECRET_KEY') {
-    if (-not $secrets.ContainsKey($k) -or [string]::IsNullOrWhiteSpace($secrets[$k])) {
-      throw "deploy/.env.deploy is missing a value for $k"
-    }
-    $token = "__SECRET__${k}__"
-    if (-not $spec.Contains($token)) { throw "Spec has no placeholder $token" }
-    # Literal replace (both args literal) — safe for $ / regex-special chars in secrets.
-    $spec = $spec.Replace($token, $secrets[$k])
+  backend    = 'DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'COOKIE_SECRET', 'ADMIN_PASSWORD', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'GOOGLE_CLIENT_SECRET', 'RESEND_API_KEY', 'PRICECHARTING_API_TOKEN', 'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_VERIFY_SERVICE_SID', 'TELEGRAM_BOT_TOKEN', 'TGPAY_PUBLIC_KEY', 'TGPAY_SECRET_KEY'
+  # Added 2026-09-23: stable Server Action IDs across deploys (see the spec).
+  storefront = @('NEXT_SERVER_ACTIONS_ENCRYPTION_KEY')
+}
+
+$envFile = Join-Path $root 'deploy/.env.deploy'
+if (-not (Test-Path $envFile)) {
+  throw "Missing $envFile (gitignored secrets). Recreate from the DO managed-DB connection strings + generated JWT/COOKIE secrets."
+}
+$secrets = @{}
+foreach ($line in Get-Content $envFile) {
+  if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
+  $kv = $line -split '=', 2
+  $secrets[$kv[0].Trim()] = $kv[1].Trim()
+}
+foreach ($k in $secretKeys[$App]) {
+  if (-not $secrets.ContainsKey($k) -or [string]::IsNullOrWhiteSpace($secrets[$k])) {
+    throw "deploy/.env.deploy is missing a value for $k"
   }
+  $token = "__SECRET__${k}__"
+  if (-not $spec.Contains($token)) { throw "Spec has no placeholder $token" }
+  # Literal replace (both args literal) — safe for $ / regex-special chars in secrets.
+  $spec = $spec.Replace($token, $secrets[$k])
 }
 
 if ($spec -match '__SECRET__') {
