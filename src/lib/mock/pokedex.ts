@@ -11,7 +11,7 @@ export const spritePng = (dex: number) => `${SPRITE_BASE}/${dex}.png`;
 // Ogerpon (#1017 404'd on the prod bronze reel 2026-09-24). The list is the
 // full measured set: every dex 1-1025 was HEAD-checked on jsDelivr that day.
 // Avoid requesting known 404s, including speculative reel image preloads.
-const STATIC_ONLY_DEX = new Set([
+export const STATIC_ONLY_DEX: ReadonlySet<number> = new Set([
   990, 991, 992, 993, 994, 995, 1006, 1008, 1010, 1017, 1022, 1023, 1024, 1025,
 ]);
 export const spriteGif = (dex: number) =>

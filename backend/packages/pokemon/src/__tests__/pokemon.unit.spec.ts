@@ -4,6 +4,7 @@ import {
   POKEDEX_NAMES,
   spriteGif,
   spritePng,
+  STATIC_ONLY_DEX,
 } from '../index';
 
 describe('@acme/pokemon', () => {
@@ -41,6 +42,17 @@ describe('@acme/pokemon', () => {
       expect(spritePng(6)).toBe(
         'https://cdn.jsdelivr.net/gh/PokeAPI/sprites@master/sprites/pokemon/6.png',
       );
+    });
+    // Same set as the storefront copy (src/lib/mock/pokedex.ts): the admin
+    // picker renders these with no error fallback, so a 404 GIF stays broken.
+    it.each([...STATIC_ONLY_DEX])(
+      'spriteGif serves the static png for GIF-less dex %i',
+      (dex) => {
+        expect(spriteGif(dex)).toBe(spritePng(dex));
+      },
+    );
+    it('keeps the storefront set: the dex that 404d on the prod reel', () => {
+      expect(STATIC_ONLY_DEX.has(1017)).toBe(true);
     });
   });
 
