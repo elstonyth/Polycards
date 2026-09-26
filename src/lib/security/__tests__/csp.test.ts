@@ -63,6 +63,10 @@ describe('buildCsp', () => {
     expect(csp).toMatch(/connect-src[^;]*https:\/\/connect\.facebook\.net/);
     expect(csp).toMatch(/connect-src[^;]*https:\/\/www\.facebook\.com/);
     expect(csp).toMatch(/img-src[^;]*https:\/\/www\.facebook\.com/);
+    // fbevents.js sends events as a form POST into a hidden iframe; the
+    // enforced policy blocked both and no event reached Meta (2026-09-27).
+    expect(csp).toMatch(/form-action 'self' https:\/\/www\.facebook\.com/);
+    expect(csp).toMatch(/frame-src https:\/\/www\.facebook\.com/);
   });
 
   it('allows the jsDelivr sprite CDN in img-src', () => {

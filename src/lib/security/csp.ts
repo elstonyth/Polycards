@@ -65,10 +65,15 @@ export function buildCsp(): string {
   const sentry = 'https://*.sentry.io https://*.ingest.sentry.io';
 
   // Meta Pixel (components/MetaPixel.tsx): fbevents.js loads from
-  // connect.facebook.net, events fire to facebook.com (script beacons +
-  // the <noscript> tracking image).
+  // connect.facebook.net. Events go to www.facebook.com/tr/ as a form POST
+  // into a hidden iframe (needs form-action + frame-src, not just img-src),
+  // plus the <noscript> tracking image.
   const fbScript = 'https://connect.facebook.net';
   const fbTrack = 'https://www.facebook.com';
+  // If the pixel is ever attached to a Conversions API Gateway in Events
+  // Manager, its per-pixel config (connect.facebook.net/signals/config/<id>,
+  // "openbridge") names a host fbevents.js fetch()es every event to — that
+  // host then belongs in connect-src too.
 
   const connect = ["'self'", backend, media, sentry, fbScript, fbTrack]
     .filter(Boolean)
@@ -105,10 +110,10 @@ export function buildCsp(): string {
     `img-src ${img}`,
     `font-src 'self'`,
     `connect-src ${connect}`,
-    `frame-src 'none'`,
+    `frame-src ${fbTrack}`,
     `object-src 'none'`,
     `base-uri 'self'`,
-    `form-action 'self'`,
+    `form-action 'self' ${fbTrack}`,
     `frame-ancestors 'none'`,
   ];
   // `upgrade-insecure-requests` does nothing in a report-only policy and the
