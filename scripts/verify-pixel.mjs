@@ -88,7 +88,10 @@ console.log(
 console.log(pageView ? 'ok: PageView fired' : 'FAIL: no PageView /tr beacon');
 
 // A pack page must report ViewContent for THAT pack.
-const packLink = page.locator('a[href^="/slots/"]').first();
+// Not a /spin link (e.g. the free-pack badge): the reel page has no ViewContent.
+const packLink = page
+  .locator('a[href^="/slots/"]:not([href*="/spin"])')
+  .first();
 const href = await packLink.getAttribute('href').catch(() => null);
 const slug = href?.split('/')[2]?.split('?')[0];
 if (slug) {

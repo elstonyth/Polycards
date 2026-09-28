@@ -132,7 +132,8 @@ export function TopUpProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         // Ads measurement rides the same read: each top-up that settled
         // reaches the Meta Pixel once, whenever this browser next sees it.
-        reportDeposits(forId, activity.settled);
+        // Null = no answer this time, which must not count as "none".
+        if (activity.settled) reportDeposits(forId, activity.settled);
         const refs = activity.pending.map((deposit) => deposit.reference);
         const settled = outstanding.filter((ref) => !refs.includes(ref));
         outstanding = refs;

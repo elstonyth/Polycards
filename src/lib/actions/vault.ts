@@ -612,13 +612,18 @@ export async function getPendingDeposits(): Promise<PendingDeposit[]> {
  * plus the ones that settled recently, which the Meta Pixel reports as
  * Purchase / FirstDeposit (reportDeposits in lib/pixel.ts). Same never-an-error
  * contract as getPendingDeposits.
+ *
+ * `settled` is null — never [] — when there is no answer (a failed read, or a
+ * backend that predates the field): the reporter would record an empty list
+ * as this browser's baseline, and the next real read would replay a week of
+ * deposits as new.
  */
 export async function getDepositActivity(): Promise<{
   pending: PendingDeposit[];
-  settled: SettledDeposit[];
+  settled: SettledDeposit[] | null;
 }> {
   const r = await store.get('/store/credits/deposit', PendingDepositsSchema);
-  if (!r.ok) return { pending: [], settled: [] };
+  if (!r.ok) return { pending: [], settled: null };
   // One instant for the whole list, so two rows started a second apart do not
   // read as if measured by different clocks.
   const now = Date.now();
@@ -633,11 +638,12 @@ export async function getDepositActivity(): Promise<{
         overdue: now - startedAt > DEPOSIT_OVERDUE_MS,
       };
     }),
-    settled: (r.data.settled ?? []).map((deposit) => ({
-      reference: deposit.merchant_transaction_id,
-      amount: deposit.amount,
-      first: deposit.first === true,
-    })),
+    settled:
+      r.data.settled?.map((deposit) => ({
+        reference: deposit.merchant_transaction_id,
+        amount: deposit.amount,
+        first: deposit.first === true,
+      })) ?? null,
   };
 }
 

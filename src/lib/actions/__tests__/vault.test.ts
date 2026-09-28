@@ -8,6 +8,7 @@ import { storeShim, backend } from '@/lib/__tests__/store-shim';
 vi.mock('@/lib/store', () => ({ store: storeShim }));
 
 import {
+  getDepositActivity,
   getVault,
   sellBackPull,
   startWithdrawal,
@@ -111,6 +112,54 @@ describe('topUpCredits — Idempotency-Key', () => {
       balance: 125,
       replayed: true,
     });
+  });
+});
+
+describe('getDepositActivity — settled deposits for the Meta Pixel', () => {
+  it('maps recently settled deposits, keeping the first-ever flag', async () => {
+    backend({
+      'GET /store/credits/deposit': {
+        body: {
+          deposits: [],
+          settled: [
+            { merchant_transaction_id: 'PC-2', amount: 100, first: false },
+            { merchant_transaction_id: 'PC-1', amount: 50, first: true },
+          ],
+        },
+      },
+    });
+    expect((await getDepositActivity()).settled).toEqual([
+      { reference: 'PC-2', amount: 100, first: false },
+      { reference: 'PC-1', amount: 50, first: true },
+    ]);
+  });
+
+  // No answer is not "nothing settled": [] would become the reporter's
+  // baseline, and the next real read would replay every deposit as new —
+  // exactly what happens while the storefront deploys ahead of the backend.
+  it('reports null, not [], when the backend sends no settled list', async () => {
+    backend({
+      'GET /store/credits/deposit': {
+        body: {
+          deposits: [
+            {
+              merchant_transaction_id: 'PC-P',
+              amount: 50,
+              payment_method_code: 'FPX',
+              created_at: new Date().toISOString(),
+            },
+          ],
+        },
+      },
+    });
+    const activity = await getDepositActivity();
+    expect(activity.settled).toBeNull();
+    expect(activity.pending).toHaveLength(1);
+  });
+
+  it('reports null when the read fails', async () => {
+    backend({ 'GET /store/credits/deposit': { status: 500 } });
+    expect(await getDepositActivity()).toEqual({ pending: [], settled: null });
   });
 });
 

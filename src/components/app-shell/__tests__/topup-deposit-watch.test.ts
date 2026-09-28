@@ -23,7 +23,8 @@ import { createRoot, type Root } from 'react-dom/client';
 // reporter gets.
 const getPendingDeposits = vi.fn();
 const getCreditBalance = vi.fn();
-let settled: { reference: string; amount: number; first: boolean }[] = [];
+let settled: { reference: string; amount: number; first: boolean }[] | null =
+  [];
 vi.mock('@/lib/actions/vault', () => ({
   getDepositActivity: async () => ({
     pending: await getPendingDeposits(),
@@ -177,6 +178,19 @@ describe('TopUpProvider — gateway deposit watch', () => {
 
     await mount();
     expect(reportDeposits).toHaveBeenCalledWith('cus_1', settled);
+  });
+
+  // No answer (a failed read, or a backend that predates the field) is not
+  // "nothing settled": handing the reporter [] would record an empty baseline,
+  // and the next real read would replay a week of deposits as new Purchases.
+  it('skips the pixel reporter when the read carried no settled list', async () => {
+    settled = null;
+    getPendingDeposits.mockResolvedValue([]);
+    getCreditBalance.mockResolvedValue(100);
+
+    await mount();
+    expect(getPendingDeposits).toHaveBeenCalledTimes(1);
+    expect(reportDeposits).not.toHaveBeenCalled();
   });
 
   // Two consecutive payments: the second must be watched exactly like the
