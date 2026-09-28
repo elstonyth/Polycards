@@ -4,6 +4,8 @@ import { PACKS_MODULE } from './index';
 import type PacksModuleService from './service';
 import { RARITY_ORDER, rarityRank, type Rarity } from './rarity';
 import { toMoney } from './money';
+import { buybackAmount, FLAT_PERCENT } from './buyback-rate';
+import { renderPullCard } from './pull-card';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   displayMarketPrice,
@@ -208,8 +210,18 @@ export type ApexCaptionInput = {
 };
 
 /** The posted message. Pure — every lookup happens in postApexPull, so the
- *  wording is unit-testable and safe to re-tune without touching the DB path. */
-export function buildApexCaption(input: ApexCaptionInput): string {
+ *  wording is unit-testable and safe to re-tune without touching the DB path.
+ *
+ *  `details: false` is the caption that rides WITH the designed pull card
+ *  (pull-card.ts): the picture already carries the card, grade, set, value and
+ *  pack, so the text keeps only what a picture cannot — the headline, the
+ *  linked name and the link out (operator's call, 2026-09-28). Every fallback
+ *  picture (the bare slab, or none at all) takes the full caption instead, or
+ *  a degraded post would name nothing but the tier. */
+export function buildApexCaption(
+  input: ApexCaptionInput,
+  { details = true }: { details?: boolean } = {},
+): string {
   const emoji = rarityEmoji(input.rarity);
   const tier = input.rarity.toUpperCase();
   // stripAutolinks BEFORE escapeHtml: it matches on the raw text, and an
@@ -236,13 +248,19 @@ export function buildApexCaption(input: ApexCaptionInput): string {
     `${emoji} <b>${tier} PULL</b> ${emoji}`,
     '',
     `🎉 Congratulations <b>${name}</b>!`,
-    '',
-    `💎 <b>${cardName}</b>${input.grade.trim() ? ` · ${grade}` : ''}`,
   ];
-  if (input.set.trim()) lines.push(`🃏 ${set}`);
+  if (details) {
+    lines.push(
+      '',
+      `💎 <b>${cardName}</b>${input.grade.trim() ? ` · ${grade}` : ''}`,
+    );
+    if (input.set.trim()) lines.push(`🃏 ${set}`);
+    lines.push(
+      `🎰 Pulled from <b>${packTitle}</b>`,
+      `💰 Market value <b>RM ${price}</b>`,
+    );
+  }
   lines.push(
-    `🎰 Pulled from <b>${packTitle}</b>`,
-    `💰 Market value <b>RM ${price}</b>`,
     '',
     `🔗 <a href="${escapeHtml(input.siteUrl)}">Open your own pack at polycards.gg</a>`,
   );
@@ -408,27 +426,40 @@ const attempt = async (p: Promise<TelegramResult>): Promise<TelegramResult> =>
 
 /** Which route actually carried the post.
  *
- *  'bytes' is the only healthy one. 'url' means Telegram fetched the art itself
+ *  'card' is the only healthy one: the designed pull card (pull-card.ts).
+ *  'bytes' is the bare slab we flattened onto black — the card failed to render
+ *  or upload, and the post went out as the pre-2026-09-28 board looked: a right
+ *  backdrop, but not the design. 'url' means Telegram fetched the art itself
  *  and flattened its transparency onto WHITE — the post has a picture, in the
  *  wrong backdrop, which is precisely the state #471 was written to end and
- *  precisely the state production was found in on 2026-08-24. It is a degraded
- *  success, so it must be distinguishable from both a healthy post and a
- *  text-only one; treating it as "fine, it has a photo" is how it went
- *  unnoticed. */
-export type ApexPhotoPath = 'bytes' | 'url' | 'text';
+ *  precisely the state production was found in on 2026-08-24. The last three
+ *  are degraded successes, so each must be distinguishable from a healthy post
+ *  and from each other; treating "fine, it has a photo" as healthy is how the
+ *  URL fallback went unnoticed for months. */
+export type ApexPhotoPath = 'card' | 'bytes' | 'url' | 'text';
+
+/** The rendered pull card and the short caption that rides with it. `photo`
+ *  null (with `error`) when the render failed — sendApexPost then goes straight
+ *  to the bare-slab chain with the full caption. */
+export type ApexCardPhoto = {
+  photo: Buffer | null;
+  caption: string;
+  error?: string;
+};
 
 /** A send, plus how it got there and what failed on the way. `photoError` is
- *  set on EVERY post that wanted the byte path and did not get it — INCLUDING
- *  the ones that still went out with a picture via the URL fallback. That is
- *  the case this exists for: `ok` is true, a picture is visible, and without
- *  this the composite can be dead for months with nothing to show for it. */
+ *  set on EVERY post that wanted a better path than the one it got — INCLUDING
+ *  the ones that still went out with a picture via a fallback. That is the case
+ *  this exists for: `ok` is true, a picture is visible, and without this the
+ *  card (or the composite) can be dead for months with nothing to show for it. */
 export type ApexSendResult = TelegramResult & {
   photoError?: string;
   photoPath: ApexPhotoPath;
 };
 
-/** Post as a photo when we have an image, else as text. Two photo paths, tried
- *  in order and BOTH tried on failure: the preferred one uploads bytes we
+/** Post as a photo when we have an image, else as text. The designed pull card
+ *  goes first (with its short caption); after it, two bare-slab photo paths,
+ *  tried in order and BOTH tried on failure: the preferred one uploads bytes we
  *  flattened onto black ourselves; if the composite or its upload fails for any
  *  reason — including a thrown network/timeout error, not just a non-ok
  *  response — we hand Telegram the URL as before, so a broken byte path costs
@@ -437,14 +468,26 @@ export type ApexSendResult = TelegramResult & {
  *  when it returned no bytes at all.) The text fallback then genuinely covers a
  *  failed photo entirely, thrown or not: locally the card image is a localhost
  *  URL Telegram cannot reach, and a silent drop would make the board look
- *  broken in dev. */
+ *  broken in dev. Every step after the card uses the FULL caption: none of
+ *  those pictures carries the card's details. */
 export async function sendApexPost(
   token: string,
   chatId: string,
   caption: string,
   photoUrl: string | null,
+  card: ApexCardPhoto | null = null,
 ): Promise<ApexSendResult> {
   const failures: string[] = [];
+  if (card) {
+    if (card.error) failures.push(card.error);
+    if (card.photo) {
+      const upload = await attempt(
+        uploadApexPhoto(token, chatId, card.caption, card.photo),
+      );
+      if (upload.ok) return { ...upload, photoPath: 'card' };
+      failures.push(`card upload: ${upload.description ?? 'unknown error'}`);
+    }
+  }
   if (photoUrl) {
     const composite = await blackBackedPhoto(photoUrl);
     if (composite.error) failures.push(composite.error);
@@ -452,7 +495,10 @@ export async function sendApexPost(
       const upload = await attempt(
         uploadApexPhoto(token, chatId, caption, composite.photo),
       );
-      if (upload.ok) return { ...upload, photoPath: 'bytes' };
+      // Carries `failures` for the same reason as the URL return below: when
+      // the card is broken, THIS is the normal production path.
+      if (upload.ok)
+        return { ...upload, ...photoErrorOf(failures), photoPath: 'bytes' };
       failures.push(`byte upload: ${upload.description ?? 'unknown error'}`);
     }
     const urlPhoto = await attempt(
@@ -499,18 +545,21 @@ const photoErrorOf = (failures: string[]): { photoError?: string } =>
   failures.length ? { photoError: failures.join('; ') } : {};
 
 export type ApexPostResult = {
+  /** The caption that went out with the picture that carried the post — the
+   *  short one on the 'card' path, the full one on every fallback. */
   caption: string;
   /** Telegram's id for the post, so a caller can delete it again. Null when the
    *  send failed. */
   messageId: number | null;
-  /** Why the byte path did not carry this post, when there was art to send.
-   *  Undefined = the composite went out (or there was no art at all). Set even
-   *  when a picture DID appear via the URL fallback. */
+  /** Why the pull card did not carry this post, when there was art to send.
+   *  Undefined = the card went out (or there was no art at all). Set even when
+   *  a picture DID appear via a fallback. */
   photoError?: string;
   /** Which route carried it. Surfaced, not just logged, so the smoke pre-flight
-   *  can fail on anything but 'bytes': a URL-fallback post and a text-only post
-   *  are both `ok` posts, and reporting those as success is how the board ran
-   *  on the fallback from #471 to 2026-08-24 without anyone noticing. */
+   *  can fail on anything but 'card': a bare-slab, URL-fallback or text-only
+   *  post is still an `ok` post, and reporting those as success is how the
+   *  board ran on the fallback from #471 to 2026-08-24 without anyone
+   *  noticing. */
   photoPath: ApexPhotoPath;
 };
 
@@ -619,7 +668,7 @@ export async function postApexPull(
       Number(card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
     );
 
-    const caption = buildApexCaption({
+    const captionInput: ApexCaptionInput = {
       who,
       profileUrl,
       rarity,
@@ -629,11 +678,57 @@ export async function postApexPull(
       packTitle: pack?.title ?? event.pack_id,
       priceMyr,
       siteUrl,
-    });
+    };
+    const caption = buildApexCaption(captionInput);
 
-    // The baked slab is the hero image; raw cards fall back to the bare photo.
+    // The designed pull card is the picture. Rendered ONCE, here, so the 429
+    // retry below re-sends the same bytes instead of fetching the art again.
+    // Buyback is quoted at the flat vault rate — the one any viewer can get
+    // (operator's call, 2026-09-28); the pack's instant rate expires 30s
+    // after the reveal, long before most people see the post.
+    const rendered = await renderPullCard(
+      {
+        rarity,
+        cardName: card.name,
+        grader: card.grader ?? '',
+        grade: card.grade ?? '',
+        set: card.set ?? '',
+        priceMyr,
+        buybackMyr: buybackAmount(priceMyr, FLAT_PERCENT),
+        buybackPercent: FLAT_PERCENT,
+        // Same sanitising as the caption: a URL in a picture is still an ad
+        // even though nobody can click it.
+        who: stripAutolinks(who) || 'Anonymous',
+        revealedAt: new Date(pull.revealed_at ?? Date.now()),
+        siteHost: siteUrl.replace(/^[a-z][a-z0-9+.-]*:\/\//i, ''),
+      },
+      {
+        slab: card.slab_image ?? null,
+        card: card.image ?? null,
+        pack: pack?.image ?? null,
+      },
+    );
+    if (rendered.warning) {
+      logWarn(
+        container,
+        `[telegram] pull card for pull ${event.pull_id} rendered without part of its art: ${rendered.warning}`,
+      );
+    }
+    const cardPhoto: ApexCardPhoto = {
+      photo: rendered.photo,
+      caption: buildApexCaption(captionInput, { details: false }),
+      ...(rendered.error ? { error: rendered.error } : {}),
+    };
+
+    // Fallback picture: the baked slab; raw cards fall back to the bare photo.
     const photoUrl = card.slab_image ?? card.image ?? null;
-    let result = await sendApexPost(token, chatId, caption, photoUrl);
+    let result = await sendApexPost(
+      token,
+      chatId,
+      caption,
+      photoUrl,
+      cardPhoto,
+    );
     // Accumulated, not read off the final result: the 429 branch below
     // REASSIGNS `result`, and a rate-limit is exactly when the photo reason is
     // worth keeping. Deduped — the same cause twice is one line.
@@ -653,7 +748,7 @@ export async function postApexPull(
         `[telegram] apex post rate-limited for pull ${event.pull_id} — retrying once after ${waitSec}s`,
       );
       await new Promise((r) => setTimeout(r, waitSec * 1000));
-      result = await sendApexPost(token, chatId, caption, photoUrl);
+      result = await sendApexPost(token, chatId, caption, photoUrl, cardPhoto);
       if (result.photoError) photoErrors.add(result.photoError);
     }
     if (!result.ok) {
@@ -671,22 +766,24 @@ export async function postApexPull(
       // then delivered the picture perfectly well, and reporting that as
       // "posted WITHOUT its picture" is a lie the reader can check against the
       // channel — which is how a real warn gets written off as noise.
-      // 'url' is the trap in the other direction: the post DOES carry a
-      // picture, just Telegram's white-flattened one instead of our composite,
-      // so it must not read as a clean success either.
+      // 'bytes' and 'url' are the trap in the other direction: the post DOES
+      // carry a picture, just not the designed card (and for 'url', Telegram's
+      // white-flattened slab), so neither may read as a clean success.
       const what =
-        result.photoPath === 'bytes'
-          ? 'delivered its picture on the retry, after an earlier attempt failed'
-          : result.photoPath === 'url'
-            ? 'fell back to the URL picture (Telegram white-flattens it; the black composite is broken)'
-            : 'posted WITHOUT its picture';
+        result.photoPath === 'card'
+          ? 'delivered its pull card on the retry, after an earlier attempt failed'
+          : result.photoPath === 'bytes'
+            ? 'fell back to the bare slab picture (the pull card is broken)'
+            : result.photoPath === 'url'
+              ? 'fell back to the URL picture (Telegram white-flattens it; the pull card and the black composite are both broken)'
+              : 'posted WITHOUT its picture';
       logWarn(
         container,
         `[telegram] apex post for pull ${event.pull_id} ${what} (${photoUrl}): ${[...photoErrors].join('; ')}`,
       );
     }
     return {
-      caption,
+      caption: result.photoPath === 'card' ? cardPhoto.caption : caption,
       messageId: result.result?.message_id ?? null,
       ...(photoErrors.size ? { photoError: [...photoErrors].join('; ') } : {}),
       photoPath: result.photoPath,

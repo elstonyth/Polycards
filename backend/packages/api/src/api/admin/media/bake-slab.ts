@@ -12,7 +12,7 @@ import type PacksModuleService from '../../../modules/packs/service';
 import { IMAGE_RULES } from './validate';
 import { DEFAULT_SLAB_FRAME_B64 } from './slab-frame-default';
 import { renderLabelSvg, type SlabLabelFields } from './label';
-import { ensureLabelFont } from './label-font';
+import { ensureBundledFonts } from './label-font';
 import {
   fetchBytes,
   isAllowedImageUrl,
@@ -261,7 +261,7 @@ export async function composeSlab(
     { input: frame, left: 0, top: 0 },
   ];
   if (label) {
-    ensureLabelFont(); // must precede the first text render in this process
+    ensureBundledFonts(); // must precede the first text render in this process
     layers.push({ input: renderLabelSvg(label, fw, fh), left: 0, top: 0 });
   }
   return sharp({
