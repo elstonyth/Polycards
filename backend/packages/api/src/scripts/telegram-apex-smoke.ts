@@ -141,9 +141,16 @@ export default async function telegramApexSmoke({ container }: ExecArgs) {
     // while this pre-flight kept reporting success. The photo path is the part
     // of this integration no unit test can prove, so it is the part the
     // pre-flight has to check, and it must never read as a pass.
-    if (posted.photoPath === 'bytes') {
+    if (posted.photoPath === 'card') {
       logger.info(
-        '[telegram-smoke] picture uploaded as our own composite — the photo path is healthy.',
+        '[telegram-smoke] picture uploaded as the designed pull card — the photo path is healthy.',
+      );
+    } else if (posted.photoPath === 'bytes') {
+      degraded = `photo path fell back to the bare slab picture: ${posted.photoError ?? 'no reason recorded'}`;
+      // Same trap one step up: a correct-looking picture on a black backdrop,
+      // but the pull card itself failed to render or upload.
+      logger.error(
+        `[telegram-smoke] DEGRADED — the picture is the bare slab composite, not the pull card: ${posted.photoError ?? 'no reason recorded'}`,
       );
     } else if (posted.photoPath === 'url') {
       degraded = `photo path fell back to the URL picture: ${posted.photoError ?? 'no reason recorded'}`;

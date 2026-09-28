@@ -1,4 +1,6 @@
 import sharp from 'sharp';
+import { buybackAmount, FLAT_PERCENT } from '../buyback-rate';
+import { renderPullCard } from '../pull-card';
 import {
   blackBackedPhoto,
   buildApexCaption,
@@ -10,19 +12,31 @@ import {
   type ApexCaptionInput,
 } from '../telegram';
 
-const caption = (over: Partial<ApexCaptionInput> = {}): string =>
-  buildApexCaption({
-    who: 'Headshot001',
-    profileUrl: 'https://polycards.gg/profile/headshot-001',
-    rarity: 'Legendary',
-    cardName: 'Meowth',
-    grade: 'PSA 10',
-    set: 'ME02: Phantasmal Flames',
-    packTitle: 'Starter Pack',
-    priceMyr: 701.32,
-    siteUrl: 'https://polycards.gg',
-    ...over,
-  });
+// The designed card is rendered by pull-card.ts (its own spec). Stubbed here so
+// each test states which picture exists: by default the render FAILS, which
+// keeps the bare-slab fallback chain below testable exactly as before.
+jest.mock('../pull-card', () => ({ renderPullCard: jest.fn() }));
+const renderMock = renderPullCard as jest.MockedFunction<typeof renderPullCard>;
+
+const caption = (
+  over: Partial<ApexCaptionInput> = {},
+  opts?: { details?: boolean },
+): string =>
+  buildApexCaption(
+    {
+      who: 'Headshot001',
+      profileUrl: 'https://polycards.gg/profile/headshot-001',
+      rarity: 'Legendary',
+      cardName: 'Meowth',
+      grade: 'PSA 10',
+      set: 'ME02: Phantasmal Flames',
+      packTitle: 'Starter Pack',
+      priceMyr: 701.32,
+      siteUrl: 'https://polycards.gg',
+      ...over,
+    },
+    opts,
+  );
 
 describe('buildApexCaption', () => {
   it('names the tier, the puller, the card, the pack and the RM value', () => {
@@ -33,6 +47,26 @@ describe('buildApexCaption', () => {
     expect(text).toContain('PSA 10');
     expect(text).toContain('Starter Pack');
     expect(text).toContain('RM 701.32');
+  });
+
+  // The pull card already shows card, grade, set, pack and value; beside it
+  // the caption keeps only what a picture cannot carry — the links.
+  it('keeps only the headline, the linked name and the link out beside the pull card', () => {
+    const short = caption({}, { details: false });
+    expect(short).toContain('LEGENDARY PULL');
+    expect(short).toContain(
+      '<a href="https://polycards.gg/profile/headshot-001">Headshot001</a>',
+    );
+    expect(short).toContain('Open your own pack at polycards.gg');
+    for (const detail of [
+      'Meowth',
+      'PSA 10',
+      'Phantasmal',
+      'Starter Pack',
+      'RM 701.32',
+    ]) {
+      expect(short).not.toContain(detail);
+    }
   });
 
   it('always renders the price at 2dp', () => {
@@ -320,6 +354,11 @@ describe('postApexPull', () => {
     delete process.env.TELEGRAM_MIN_RARITY;
     warned = [];
     resetTelegramWarnings();
+    renderMock.mockReset();
+    renderMock.mockResolvedValue({
+      photo: null,
+      error: 'pull card: stubbed off',
+    });
   });
 
   afterEach(() => {
@@ -651,7 +690,197 @@ describe('postApexPull', () => {
       // The reason is still kept — the first attempt's failure is real history.
       expect(result?.photoError).toContain('HTTP 500');
       const warn = warned.find((w) => w.includes('apex post for pull'));
-      expect(warn).toContain('delivered its picture on the retry');
+      // The card is stubbed off, so the retry landed the BARE slab — which is
+      // what the warn must say, not that the picture is missing.
+      expect(warn).toContain('fell back to the bare slab picture');
+      expect(warn).not.toContain('WITHOUT its picture');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  // --- the designed pull card (pull-card.ts) --------------------------------
+
+  const cardJpeg = () =>
+    sharp({
+      create: { width: 4, height: 4, channels: 3, background: '#0a0a0a' },
+    })
+      .jpeg()
+      .toBuffer();
+
+  /** fetch that accepts every multipart upload and records what it carried. */
+  const acceptUploads = (uploaded: Buffer[], messageId = 5) =>
+    (async (url: string, init?: { body?: unknown }) => {
+      const form = init?.body as FormData;
+      uploaded.push(Buffer.from(await (form.get('photo') as Blob).arrayBuffer()));
+      sent.push({ url: String(url), body: { caption: form.get('caption') } });
+      return {
+        json: async () => ({ ok: true, result: { message_id: messageId } }),
+      };
+    }) as unknown as typeof fetch;
+
+  it('posts the designed pull card first, with the short caption', async () => {
+    const jpeg = await cardJpeg();
+    renderMock.mockResolvedValue({ photo: jpeg });
+    const uploaded: Buffer[] = [];
+    global.fetch = acceptUploads(uploaded);
+
+    const result = await postApexPull(fakeContainer({}), EVENT);
+
+    expect(sent).toHaveLength(1);
+    const [call] = sent as { url: string; body: { caption: string } }[];
+    expect(call.url).toContain('/sendPhoto');
+    expect(uploaded[0].equals(jpeg)).toBe(true);
+    expect(call.body.caption).toContain('LEGENDARY PULL');
+    expect(call.body.caption).toContain(
+      '<a href="https://polycards.gg/profile/Elston">Elston</a>',
+    );
+    expect(call.body.caption).toContain('Open your own pack');
+    expect(call.body.caption).not.toContain('Meowth');
+    expect(call.body.caption).not.toContain('Market value');
+    expect(result).toMatchObject({
+      photoPath: 'card',
+      messageId: 5,
+      caption: call.body.caption,
+    });
+    expect(result?.photoError).toBeUndefined();
+    expect(warned).toHaveLength(0);
+  });
+
+  // A card that disagreed with the site would be a credibility bug on a public
+  // channel — the renderer gets the storefront's own price, the flat buyback on
+  // it, the public name and the reveal time.
+  it('renders the card from the numbers the site shows', async () => {
+    renderMock.mockResolvedValue({ photo: await cardJpeg() });
+    global.fetch = acceptUploads([]);
+    const revealedAt = new Date('2026-09-28T07:26:00Z');
+
+    await postApexPull(
+      fakeContainer({ pulls: [{ source: 'pack', revealed_at: revealedAt }] }),
+      EVENT,
+    );
+
+    const [input, urls] = renderMock.mock.calls[0];
+    expect(input).toMatchObject({
+      rarity: 'Legendary',
+      cardName: 'Meowth',
+      grader: 'PSA',
+      grade: '10',
+      set: 'ME02',
+      buybackPercent: FLAT_PERCENT,
+      who: 'Elston',
+      siteHost: 'polycards.gg',
+    });
+    expect(input.priceMyr).toBeGreaterThan(0);
+    expect(input.buybackMyr).toBe(buybackAmount(input.priceMyr, FLAT_PERCENT));
+    expect(input.revealedAt.toISOString()).toBe(revealedAt.toISOString());
+    expect(urls).toEqual({
+      slab: null,
+      card: 'https://cdn.example/m.png',
+      pack: null,
+    });
+  });
+
+  // A refused card must cost the design, never the post — and the fallback
+  // picture carries none of the card's details, so it takes the FULL caption.
+  it('falls back to the bare slab, with the full caption, when the card upload is rejected', async () => {
+    renderMock.mockResolvedValue({ photo: await cardJpeg() });
+    const art = await sharp({
+      create: {
+        width: 8,
+        height: 8,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
+    })
+      .png()
+      .toBuffer();
+    let uploads = 0;
+    global.fetch = (async (url: string, init?: { body?: unknown }) => {
+      const u = String(url);
+      if (u.startsWith('https://cdn.example/'))
+        return new Response(new Uint8Array(art));
+      uploads++;
+      if (uploads === 1) {
+        return {
+          json: async () => ({ ok: false, description: 'IMAGE_PROCESS_FAILED' }),
+        };
+      }
+      const form = init?.body as FormData;
+      sent.push({ url: u, body: { caption: form.get('caption') } });
+      return { json: async () => ({ ok: true, result: { message_id: 6 } }) };
+    }) as unknown as typeof fetch;
+
+    const result = await postApexPull(fakeContainer({}), EVENT);
+
+    expect(result?.photoPath).toBe('bytes');
+    expect(result?.photoError).toContain('card upload: IMAGE_PROCESS_FAILED');
+    const [call] = sent as { body: { caption: string } }[];
+    expect(call.body.caption).toContain('Market value');
+    expect(result?.caption).toBe(call.body.caption);
+    const warn = warned.find((w) => w.includes('apex post for pull'));
+    expect(warn).toContain('fell back to the bare slab picture');
+  });
+
+  it('reports why the card could not render', async () => {
+    renderMock.mockResolvedValue({
+      photo: null,
+      error: 'pull card: slab art: HTTP 404',
+    });
+
+    const result = await postApexPull(fakeContainer({}), EVENT);
+
+    expect(result?.photoPath).not.toBe('card');
+    expect(result?.photoError).toContain('pull card: slab art: HTTP 404');
+  });
+
+  // Art the card rendered WITHOUT (the pack tile) is a quiet degradation — the
+  // post still goes out as the card, but the reason must reach the logs.
+  it('logs the art a card rendered without, and still posts the card', async () => {
+    renderMock.mockResolvedValue({
+      photo: await cardJpeg(),
+      warning: 'pack art: HTTP 404',
+    });
+    global.fetch = acceptUploads([]);
+
+    const result = await postApexPull(fakeContainer({}), EVENT);
+
+    expect(result?.photoPath).toBe('card');
+    const warn = warned.find((w) => w.includes('rendered without'));
+    expect(warn).toContain('pack art: HTTP 404');
+  });
+
+  it('says the card landed on the 429 retry, not that it went missing', async () => {
+    jest.useFakeTimers();
+    try {
+      renderMock.mockResolvedValue({ photo: await cardJpeg() });
+      let uploads = 0;
+      global.fetch = (async (url: string, init?: { body?: unknown }) => {
+        const u = String(url);
+        if (u.startsWith('https://cdn.example/'))
+          return new Response('nope', { status: 500 });
+        if (init?.body instanceof FormData && ++uploads > 1) {
+          sent.push({ url: u, body: { caption: init.body.get('caption') } });
+          return {
+            json: async () => ({ ok: true, result: { message_id: 93 } }),
+          };
+        }
+        return {
+          json: async () => ({
+            ok: false,
+            error_code: 429,
+            parameters: { retry_after: 1 },
+          }),
+        };
+      }) as unknown as typeof fetch;
+
+      const pending = postApexPull(fakeContainer({}), EVENT);
+      await jest.advanceTimersByTimeAsync(1000);
+      const result = await pending;
+
+      expect(result).toMatchObject({ photoPath: 'card', messageId: 93 });
+      const warn = warned.find((w) => w.includes('apex post for pull'));
+      expect(warn).toContain('delivered its pull card on the retry');
       expect(warn).not.toContain('WITHOUT its picture');
     } finally {
       jest.useRealTimers();
