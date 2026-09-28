@@ -2,9 +2,10 @@
 
 import Script from 'next/script';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CONSENT_EVENT, getConsent, type ConsentState } from '@/lib/consent';
 import { PIXEL_ENABLED, pixelSnippet, syncConsent } from '@/lib/pixel';
+import { reloadPage } from '@/lib/navigation';
 
 const META_PIXEL_ID = '1829134618519800';
 
@@ -31,6 +32,20 @@ const TOKENIZED_ROUTES = ['/reset-password'];
 export default function MetaPixel() {
   const pathname = usePathname();
   const [consent, setConsent] = useState<ConsentState | null>(null);
+  // Whether THIS page loaded the pixel — not whether some window.fbq exists:
+  // anything else defining fbq for a visitor who said no would otherwise
+  // reload the page forever.
+  const loadedHere = useRef(false);
+  const showPixel =
+    PIXEL_ENABLED &&
+    // Checked before consent: a visitor who lands directly on a tokenized
+    // route must get no pixel for that page, even if they'd already consented.
+    !TOKENIZED_ROUTES.includes(pathname) &&
+    consent === 'accepted';
+
+  useEffect(() => {
+    if (showPixel) loadedHere.current = true;
+  }, [showPixel]);
 
   useEffect(() => {
     const sync = () => setConsent(getConsent());
@@ -52,14 +67,10 @@ export default function MetaPixel() {
     // fbevents.js cannot be unloaded: a "no" that arrives after it loaded in
     // this page (another tab's banner, a stale one here) needs a fresh page,
     // or its own history tracking keeps reporting navigations.
-    if (consent === 'rejected' && window.fbq) window.location.reload();
+    if (consent === 'rejected' && loadedHere.current) reloadPage();
   }, [consent]);
 
-  if (!PIXEL_ENABLED) return null;
-  // Checked before consent: a visitor who lands directly on a tokenized route
-  // must get no pixel for that page, even if they'd already consented.
-  if (TOKENIZED_ROUTES.includes(pathname)) return null;
-  if (consent !== 'accepted') return null;
+  if (!showPixel) return null;
 
   return (
     <Script id="meta-pixel" strategy="afterInteractive">

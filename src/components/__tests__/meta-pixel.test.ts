@@ -26,6 +26,9 @@ vi.mock('@/lib/pixel', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/pixel')>()),
   PIXEL_ENABLED: true,
 }));
+// jsdom can't navigate; a reload is observed through the navigation seam.
+const reloadPage = vi.fn();
+vi.mock('@/lib/navigation', () => ({ reloadPage: () => reloadPage() }));
 
 let container: HTMLDivElement;
 let root: Root;
@@ -39,6 +42,7 @@ beforeAll(() => {
 beforeEach(() => {
   localStorage.clear();
   pathname = '/';
+  reloadPage.mockClear();
   delete window.polycardsPixelQueue;
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -85,6 +89,30 @@ describe('MetaPixel', () => {
     pathname = '/reset-password';
     await mount();
     expect(loaded()).toBeNull();
+  });
+
+  // fbevents.js can't be unloaded, so a "no" after this page loaded it needs
+  // a fresh page.
+  it('reloads once when a "no" follows a pixel this page loaded', async () => {
+    localStorage.setItem(CONSENT_KEY, 'accepted');
+    await mount();
+    expect(loaded()).not.toBeNull();
+
+    localStorage.setItem(CONSENT_KEY, 'rejected');
+    await act(async () => {
+      window.dispatchEvent(new Event(CONSENT_EVENT));
+    });
+    expect(reloadPage).toHaveBeenCalledTimes(1);
+  });
+
+  // Something else (an extension, another tag) defining fbq must never turn
+  // a visitor's "no" into a reload loop.
+  it('never reloads a page that did not load the pixel itself', async () => {
+    window.fbq = Object.assign(() => {}, { callMethod: () => {} });
+    localStorage.setItem(CONSENT_KEY, 'rejected');
+    await mount();
+    expect(reloadPage).not.toHaveBeenCalled();
+    delete window.fbq;
   });
 
   it('drops held events when the answer is no', async () => {
