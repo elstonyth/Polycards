@@ -34,6 +34,7 @@ import {
   setAuthToken,
   clearAuthToken,
   setOauthState,
+  markSignup,
 } from '@/lib/data/customer';
 import { fetchProfileHandle } from '@/lib/data/profiles';
 import { friendlyError, httpStatus, type ErrorRule } from '@/lib/errors';
@@ -309,6 +310,9 @@ export async function signup(input: {
           : {}),
       },
     );
+    // The account exists from here, whatever the auto-login below does — a
+    // failed login still leaves a sign-up for the pixel to count.
+    await markSignup('email');
     // The register token isn't a session token — log in to get the real one.
     const result = await login({ email, password: input.password });
     if (result.ok) {
@@ -528,6 +532,9 @@ export async function googleCallback(query: {
         );
         linked = true;
       }
+      // A created account is a sign-up from here, whatever the refresh and
+      // retrieve below do; a LINKED one predates this visit and is not.
+      if (!linked) await markSignup('google');
       // The post-register token still lacks actor_id — refresh for a real one.
       // `bearer`, not the cookie: this sends the register token Google just
       // handed back, and no auth cookie exists yet this request.

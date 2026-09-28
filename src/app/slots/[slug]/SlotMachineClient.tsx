@@ -24,6 +24,7 @@ import { useVaultDot } from '@/components/app-shell/VaultDotProvider';
 import { useSound } from '@/lib/use-sound';
 import { rm, affordable } from '@/lib/format';
 import { logger } from '@/lib/logger';
+import { trackPixel } from '@/lib/pixel';
 import { cn } from '@/lib/utils';
 import {
   type ResolvedPack,
@@ -540,6 +541,19 @@ export default function SlotMachineClient({
     }
 
     const batch = res.batch;
+
+    // Ads funnel (lib/pixel.ts): a pack opened WITH BALANCE — auxiliary
+    // analysis, never a Purchase (the money came in as a top-up already). Free
+    // claims and the guest demo spend nothing, so they are not opens here.
+    if (batch.mode === 'paid') {
+      trackPixel('OpenPack', {
+        content_ids: [pack.id],
+        content_name: pack.name,
+        num_items: batch.cards.length,
+        value: Math.round(cost * batch.cards.length * 100) / 100,
+        currency: 'MYR',
+      });
+    }
 
     // Paint the debit now, not at settle: the open already charged (the saga
     // commits the charge before recording pulls), so the bet is spent before a

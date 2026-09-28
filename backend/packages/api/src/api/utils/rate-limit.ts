@@ -1139,6 +1139,23 @@ export const RATE_LIMITS = {
       windowMs: 60_000,
     },
   },
+
+  /**
+   * The Meta Pixel ack (POST /store/credits/deposit/unreported): the
+   * storefront marks the deposits it just reported. One call per page load at
+   * most in practice, so a small idempotent-write budget. Env-tunable:
+   * DEPOSIT_PIXEL_ACK_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 5/10s)
+   * DEPOSIT_PIXEL_ACK_RATE_LIMIT / _WINDOW_MS (default 30/60s)
+   */
+  'deposit-pixel-ack': {
+    message: 'Too many requests.',
+    defaults: {
+      burstLimit: 5,
+      burstWindowMs: 10_000,
+      limit: 30,
+      windowMs: 60_000,
+    },
+  },
 } as const satisfies Record<string, RateLimitSpec>;
 
 /**

@@ -9,8 +9,14 @@ import {
   type ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
-import { getCreditBalance, getPendingDeposits } from '@/lib/actions/vault';
+import {
+  ackReportedDeposits,
+  getCreditBalance,
+  getUnreportedDeposits,
+  readPendingDeposits,
+} from '@/lib/actions/vault';
 import { rm } from '@/lib/format';
+import { mayReportDeposits, reportDeposits } from '@/lib/pixel';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { SuccessToast } from '@/components/ui/SuccessToast';
@@ -20,6 +26,9 @@ import TopUpSheet from './TopUpSheet';
  *  credits in about a second, so this is the resolution of "the balance just
  *  updates by itself" — not a race with anything. */
 const DEPOSIT_POLL_MS = 10_000;
+
+/** Consecutive failed reads before the watch gives up until the next mount. */
+const MAX_FAILED_READS = 3;
 
 type TopUpContextValue = {
   /** RM credit balance; null while loading or logged out. */
@@ -124,16 +133,55 @@ export function TopUpProvider({ children }: { children: ReactNode }) {
     // or restart the poll (cancelling it) on every balance change.
     let outstanding: string[] = [];
     let balanceWhileWaiting: number | null = null;
+    let failedReads = 0;
+    let answered = false;
+
+    // Ads measurement (lib/pixel.ts): settled top-ups no browser has reported
+    // yet go to the Meta Pixel, then get acked on the backend. Asked once per
+    // mount (anything that settled while the customer was away) and again
+    // whenever a payment leaves the pending list below.
+    const reportSettled = async () => {
+      if (!mayReportDeposits()) return;
+      try {
+        const unreported = await getUnreportedDeposits();
+        if (cancelled || !unreported) return;
+        reportDeposits(unreported, (references) => {
+          void ackReportedDeposits(references).catch(() => {});
+        });
+      } catch {
+        // Measurement only: the next read offers the same deposits again.
+      }
+    };
+
+    // No answer is not "nothing pending": keep watching what was outstanding
+    // — or, if the very first read failed, find out — for a few tries; an
+    // expired session would otherwise poll forever.
+    const retryLater = () => {
+      failedReads += 1;
+      if (
+        (!answered || outstanding.length > 0) &&
+        failedReads < MAX_FAILED_READS
+      ) {
+        timer = setTimeout(tick, DEPOSIT_POLL_MS);
+      }
+    };
 
     const tick = async () => {
       try {
-        const pending = await getPendingDeposits();
+        const pending = await readPendingDeposits();
         if (cancelled) return;
+        if (pending === null) {
+          retryLater();
+          return;
+        }
+        failedReads = 0;
+        answered = true;
         const refs = pending.map((deposit) => deposit.reference);
-        const settled = outstanding.filter((ref) => !refs.includes(ref));
+        const left = outstanding.filter((ref) => !refs.includes(ref));
         outstanding = refs;
 
-        if (settled.length > 0) {
+        if (left.length > 0) {
+          void reportSettled();
           // A deposit leaving the pending list is not proof of credit — it may
           // have failed or been written off — so the toast is driven by the
           // BALANCE actually moving, never by the disappearance itself.
@@ -166,12 +214,14 @@ export function TopUpProvider({ children }: { children: ReactNode }) {
         // fresh mount (the cashier redirect leaves and re-enters the app).
         if (refs.length > 0) timer = setTimeout(tick, DEPOSIT_POLL_MS);
       } catch {
-        // A failed poll is not worth retrying in a loop — the ledger is still
-        // the source of truth and the next navigation re-reads it.
+        // A thrown read (transport, a deploy mid-session) is the same "no
+        // answer": bounded retry, and the ledger stays the source of truth.
+        if (!cancelled) retryLater();
       }
     };
 
     void tick();
+    void reportSettled();
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);

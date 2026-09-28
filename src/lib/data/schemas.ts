@@ -593,6 +593,18 @@ export const PendingDepositsSchema = z.looseObject({
   deposits: listOf(PendingDepositSchema),
 });
 
+/** GET /store/credits/deposit/unreported — settled top-ups no browser has
+ *  reported to the Meta Pixel yet (lib/pixel.ts reportDeposits). */
+export const UnreportedDepositsSchema = z.looseObject({
+  deposits: listOf(
+    z.looseObject({
+      merchant_transaction_id: z.string(),
+      amount: finite,
+      first: z.boolean().optional(),
+    }),
+  ),
+});
+
 /** POST /store/credits/deposit response — the real payment gateway. Unlike the
  *  mock top-up this credits NOTHING yet: it returns the gateway's cashier URL,
  *  and credit only lands when their signed callback settles the deposit. `url`
