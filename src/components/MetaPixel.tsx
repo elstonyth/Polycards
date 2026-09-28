@@ -4,6 +4,7 @@ import Script from 'next/script';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { CONSENT_EVENT, getConsent } from '@/lib/consent';
+import { reportSignup } from '@/lib/pixel';
 
 const META_PIXEL_ID = '1829134618519800';
 
@@ -37,6 +38,12 @@ export default function MetaPixel() {
     return () => window.removeEventListener(CONSENT_EVENT, sync);
   }, []);
 
+  // A sign-up that happened before the visitor accepted, or that landed here
+  // through the Google redirect, is reported the moment the pixel may send.
+  useEffect(() => {
+    if (consented) reportSignup();
+  }, [consented]);
+
   // Checked before consent: a visitor who lands directly on a tokenized route
   // must get no pixel for that page, even if they'd already consented.
   if (TOKENIZED_ROUTES.includes(pathname)) return null;
@@ -53,7 +60,9 @@ t.src=v;s=b.getElementsByTagName(e)[0];
 s.parentNode.insertBefore(t,s)}(window, document,'script',
 'https://connect.facebook.net/en_US/fbevents.js');
 fbq('init', '${META_PIXEL_ID}');
-fbq('track', 'PageView');`}
+fbq('track', 'PageView');
+(window.polycardsPixelQueue||[]).forEach(function(a){fbq.apply(null,a)});
+window.polycardsPixelQueue=[];`}
     </Script>
   );
 }

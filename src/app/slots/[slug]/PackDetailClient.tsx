@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useDragScroll } from '@/lib/use-drag-scroll';
 import { rm, rm0, affordable } from '@/lib/format';
+import { trackPixel } from '@/lib/pixel';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { openAuth } from '@/components/AuthButton';
 import Reveal from '@/components/Reveal';
@@ -206,6 +207,17 @@ export default function PackDetailClient({
   // Route data owns selection so the address bar, shared links and browser
   // history always describe the pack being shown.
   const active = pack;
+  // Ads funnel (lib/pixel.ts): a pack page view. Keyed on the pack, not the
+  // mount — switching to a sibling pack can reuse this component.
+  useEffect(() => {
+    trackPixel('ViewContent', {
+      content_ids: [active.id],
+      content_name: active.name,
+      content_type: 'product',
+      value: active.priceMyr,
+      currency: 'MYR',
+    });
+  }, [active.id, active.name, active.priceMyr]);
   // Back can restore a cached server snapshot with an older initialQty, so
   // the live URL owns quantity as well as pack selection.
   const searchParams = useSearchParams();

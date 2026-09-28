@@ -34,6 +34,7 @@ import {
   setAuthToken,
   clearAuthToken,
   setOauthState,
+  markSignup,
 } from '@/lib/data/customer';
 import { fetchProfileHandle } from '@/lib/data/profiles';
 import { friendlyError, httpStatus, type ErrorRule } from '@/lib/errors';
@@ -316,6 +317,7 @@ export async function signup(input: {
       // /r/<code> cookie. Swallows every failure internally — a referral
       // hiccup must never fail a signup.
       await bindReferral(referral.code);
+      await markSignup('email');
     }
     return result;
   } catch (error) {
@@ -554,6 +556,7 @@ export async function googleCallback(query: {
         // binding it would let anyone refer an existing account by re-signing
         // in with Google.
         await bindReferral();
+        await markSignup('google');
       }
       return { ok: true, customer: toAuthCustomer(customer, handle) };
     } catch (error) {

@@ -54,6 +54,7 @@ import {
 export type { VaultItem } from './vault-map';
 
 import type { VaultItem } from './vault-map';
+import type { SettledDeposit } from '@/lib/pixel';
 
 export type VaultResult =
   | { ok: true; items: VaultItem[]; balance: number }
@@ -603,21 +604,41 @@ const DEPOSIT_OVERDUE_MS = 60 * 60 * 1000;
  * the (account) layout has already gated the page by the time this runs.
  */
 export async function getPendingDeposits(): Promise<PendingDeposit[]> {
+  return (await getDepositActivity()).pending;
+}
+
+/**
+ * The deposit watch's one read (TopUpProvider): the pending top-ups above,
+ * plus the ones that settled recently, which the Meta Pixel reports as
+ * Purchase / FirstDeposit (reportDeposits in lib/pixel.ts). Same never-an-error
+ * contract as getPendingDeposits.
+ */
+export async function getDepositActivity(): Promise<{
+  pending: PendingDeposit[];
+  settled: SettledDeposit[];
+}> {
   const r = await store.get('/store/credits/deposit', PendingDepositsSchema);
-  if (!r.ok) return [];
+  if (!r.ok) return { pending: [], settled: [] };
   // One instant for the whole list, so two rows started a second apart do not
   // read as if measured by different clocks.
   const now = Date.now();
-  return r.data.deposits.map((deposit) => {
-    const startedAt = new Date(deposit.created_at).getTime();
-    return {
+  return {
+    pending: r.data.deposits.map((deposit) => {
+      const startedAt = new Date(deposit.created_at).getTime();
+      return {
+        reference: deposit.merchant_transaction_id,
+        amount: deposit.amount,
+        method: deposit.payment_method_code ?? null,
+        startedLabel: elapsedLabel(startedAt, now),
+        overdue: now - startedAt > DEPOSIT_OVERDUE_MS,
+      };
+    }),
+    settled: (r.data.settled ?? []).map((deposit) => ({
       reference: deposit.merchant_transaction_id,
       amount: deposit.amount,
-      method: deposit.payment_method_code ?? null,
-      startedLabel: elapsedLabel(startedAt, now),
-      overdue: now - startedAt > DEPOSIT_OVERDUE_MS,
-    };
-  });
+      first: deposit.first === true,
+    })),
+  };
 }
 
 export type ToggleShowcaseResult =

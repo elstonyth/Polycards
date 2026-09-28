@@ -9,8 +9,9 @@ import {
   type ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
-import { getCreditBalance, getPendingDeposits } from '@/lib/actions/vault';
+import { getCreditBalance, getDepositActivity } from '@/lib/actions/vault';
 import { rm } from '@/lib/format';
+import { reportDeposits } from '@/lib/pixel';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { SuccessToast } from '@/components/ui/SuccessToast';
@@ -127,9 +128,12 @@ export function TopUpProvider({ children }: { children: ReactNode }) {
 
     const tick = async () => {
       try {
-        const pending = await getPendingDeposits();
+        const activity = await getDepositActivity();
         if (cancelled) return;
-        const refs = pending.map((deposit) => deposit.reference);
+        // Ads measurement rides the same read: each top-up that settled
+        // reaches the Meta Pixel once, whenever this browser next sees it.
+        reportDeposits(forId, activity.settled);
+        const refs = activity.pending.map((deposit) => deposit.reference);
         const settled = outstanding.filter((ref) => !refs.includes(ref));
         outstanding = refs;
 

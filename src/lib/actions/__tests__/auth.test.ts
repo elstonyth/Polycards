@@ -38,6 +38,8 @@ const mocks = vi.hoisted(() => ({
   phoneVerificationRequired: false,
   setReferralCookie: vi.fn(async () => {}),
   bindReferral: vi.fn(async (_code?: string | null) => {}),
+  // The Meta Pixel's CompleteRegistration marker — a real signup only.
+  markSignup: vi.fn(async (_method: 'email' | 'google') => {}),
   lookupReferralCode: vi.fn(
     async (
       _code: string,
@@ -55,6 +57,7 @@ vi.mock('@/lib/data/customer', () => ({
   clearAuthToken: mocks.clearAuthToken,
   setOauthState: mocks.setOauthState,
   takeOauthState: mocks.takeOauthState,
+  markSignup: mocks.markSignup,
   getAuthToken: vi.fn(),
 }));
 vi.mock('@/lib/phone-verification', () => ({
@@ -433,6 +436,8 @@ describe('googleCallback — OAuth callback branches', () => {
     // Only the callback GET, and NO refresh.
     expect(mem.requests).toHaveLength(1);
     expect(mocks.clientFetch).not.toHaveBeenCalled();
+    // A sign-in, not a sign-up: nothing for the pixel to count.
+    expect(mocks.markSignup).not.toHaveBeenCalled();
   });
 
   it('first login → normalizes email, refreshes, stores the REFRESHED token', async () => {
@@ -479,6 +484,8 @@ describe('googleCallback — OAuth callback branches', () => {
     expect(mocks.clientFetch).not.toHaveBeenCalled();
     // The session cookie gets the refreshed token, never the register one.
     expect(mocks.setAuthToken).toHaveBeenCalledWith(refreshed);
+    // A first Google login IS a signup — the pixel counts it.
+    expect(mocks.markSignup).toHaveBeenCalledWith('google');
   });
 
   // Decoy PII rides in the payload (top-level `email`, and a `user_metadata`
@@ -597,8 +604,10 @@ describe('googleCallback — OAuth callback branches', () => {
       headers: { Authorization: `Bearer ${first}` },
     });
     expect(mocks.setAuthToken).toHaveBeenCalledWith(refreshed);
-    // The account predates this visit, so it is not a signup to attribute.
+    // The account predates this visit, so it is not a signup to attribute —
+    // nor one to report to the pixel.
     expect(mocks.bindReferral).not.toHaveBeenCalled();
+    expect(mocks.markSignup).not.toHaveBeenCalled();
   });
 
   it('link refused → failed, nothing stored', async () => {
@@ -1060,6 +1069,8 @@ describe('signup — referral attribution precedence', () => {
     const r = await signup(form);
     expect(r.ok).toBe(true);
     expect(mocks.bindReferral).toHaveBeenCalledWith(null);
+    // The account exists: leave the pixel's CompleteRegistration marker.
+    expect(mocks.markSignup).toHaveBeenCalledWith('email');
   });
 
   it('an unknown typed code fails BEFORE any account is created', async () => {
@@ -1068,5 +1079,6 @@ describe('signup — referral attribution precedence', () => {
     expect(r.ok).toBe(false);
     expect(mem.requests).toEqual([]);
     expect(mocks.bindReferral).not.toHaveBeenCalled();
+    expect(mocks.markSignup).not.toHaveBeenCalled();
   });
 });

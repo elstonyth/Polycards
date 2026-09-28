@@ -18,6 +18,10 @@ export const metadata: Metadata = {
 // (modules/packs/telegram.ts) has an ADMINISTRATIVE disable only, no customer
 // opt-out — the copy says what is true rather than promising a control that
 // does not exist. Adding one is a product decision, not a copy edit.
+//
+// Updated 2026-09-28: the consented pixel now reports pack views, pack opens,
+// sign-ups and completed top-ups with their amount (src/lib/pixel.ts), not
+// just page views — the Cookies section says so.
 
 const SECTIONS: { title: string; body: string }[] = [
   {
@@ -26,7 +30,7 @@ const SECTIONS: { title: string; body: string }[] = [
   },
   {
     title: 'Cookies',
-    body: 'We use cookies to keep you signed in and to remember choices like your referral invite. Analytics cookies (Meta Pixel) are set only if you accept them in the cookie banner — rejecting them keeps the site fully functional.',
+    body: 'We use cookies to keep you signed in and to remember choices like your referral invite. Analytics cookies (Meta Pixel) are set only if you accept them in the cookie banner — rejecting them keeps the site fully functional. If you accept, the pixel tells Meta which pages and packs you view, when you open a pack, when you create an account, and when a top-up completes and for how much, so we can see which of our ads work. It never receives your password or payment details.',
   },
   {
     title: 'Payments',

@@ -24,6 +24,7 @@ import { useVaultDot } from '@/components/app-shell/VaultDotProvider';
 import { useSound } from '@/lib/use-sound';
 import { rm, affordable } from '@/lib/format';
 import { logger } from '@/lib/logger';
+import { trackPixel } from '@/lib/pixel';
 import { cn } from '@/lib/utils';
 import {
   type ResolvedPack,
@@ -540,6 +541,15 @@ export default function SlotMachineClient({
     }
 
     const batch = res.batch;
+
+    // Ads funnel (lib/pixel.ts): a roll landed. One event for every route —
+    // the guest demo is the pre-signup taste — and `mode` tells them apart.
+    trackPixel('OpenPack', {
+      content_ids: [pack.id],
+      content_name: pack.name,
+      num_items: batch.cards.length,
+      mode: batch.mode,
+    });
 
     // Paint the debit now, not at settle: the open already charged (the saga
     // commits the charge before recording pulls), so the bet is spent before a

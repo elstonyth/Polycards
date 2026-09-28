@@ -12,6 +12,7 @@ import {
   type AuthResult,
 } from '@/lib/actions/auth';
 import { leaveFor } from '@/lib/navigation';
+import { reportSignup } from '@/lib/pixel';
 import { useAuth } from './auth/AuthProvider';
 import {
   NAME_MAX,
@@ -187,6 +188,9 @@ export default function AuthForm({
   // so update context directly (no refetch flash) on success.
   function finishAuth(result: AuthResult) {
     if (result.ok) {
+      // In signup mode every result comes from signup(), which left the
+      // CompleteRegistration marker — report it now if consent allows.
+      if (isSignup) reportSignup();
       setCustomer(result.customer);
       onSuccess?.();
       router.refresh();

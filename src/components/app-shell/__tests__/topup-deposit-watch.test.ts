@@ -18,11 +18,23 @@ import { createRoot, type Root } from 'react-dom/client';
 // polling when nothing is outstanding, and it never polls for a logged-out
 // visitor.
 
+// The watcher's one read is getDepositActivity; `getPendingDeposits` stands
+// for its pending half, `settled` for the recently settled half the Meta Pixel
+// reporter gets.
 const getPendingDeposits = vi.fn();
 const getCreditBalance = vi.fn();
+let settled: { reference: string; amount: number; first: boolean }[] = [];
 vi.mock('@/lib/actions/vault', () => ({
-  getPendingDeposits: () => getPendingDeposits(),
+  getDepositActivity: async () => ({
+    pending: await getPendingDeposits(),
+    settled,
+  }),
   getCreditBalance: () => getCreditBalance(),
+}));
+
+const reportDeposits = vi.fn();
+vi.mock('@/lib/pixel', () => ({
+  reportDeposits: (...args: unknown[]) => reportDeposits(...args),
 }));
 
 const refresh = vi.fn();
@@ -64,6 +76,7 @@ beforeAll(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   customer = { id: 'cus_1' };
+  settled = [];
   vi.useFakeTimers({ shouldAdvanceTime: true });
 });
 
@@ -152,6 +165,18 @@ describe('TopUpProvider — gateway deposit watch', () => {
     await mount();
     await nextPoll();
     expect(getPendingDeposits).not.toHaveBeenCalled();
+    expect(reportDeposits).not.toHaveBeenCalled();
+  });
+
+  // Ads measurement rides the same read: whatever settled recently goes to
+  // the pixel reporter (which decides what is new), tagged with the account.
+  it('hands recently settled deposits to the pixel reporter', async () => {
+    settled = [{ reference: 'PC-9', amount: 50, first: true }];
+    getPendingDeposits.mockResolvedValue([]);
+    getCreditBalance.mockResolvedValue(100);
+
+    await mount();
+    expect(reportDeposits).toHaveBeenCalledWith('cus_1', settled);
   });
 
   // Two consecutive payments: the second must be watched exactly like the
