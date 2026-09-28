@@ -2,45 +2,52 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CONSENT_KEY } from '../consent';
 import {
+  pixelSnippet,
   reportDeposits,
   reportSignup,
   SIGNUP_MARKER,
+  syncConsent,
   trackPixel,
 } from '../pixel';
 
 // What the ads team reads in Events Manager comes only from these calls, so
-// what is pinned here is the contract they rely on: nothing without consent,
-// nothing lost to the snippet's late load, and each sign-up / deposit reported
-// exactly once.
+// what is pinned here is the contract they rely on: the banner answer decides
+// (sent / held / dropped), held work runs once fbevents.js has loaded, and a
+// sign-up or deposit is only marked done once its event can really go out.
 
-const fbq = vi.fn();
-const accept = () => localStorage.setItem(CONSENT_KEY, 'accepted');
-const pixelCalls = () => fbq.mock.calls.map((call) => call.slice(0, 2));
+/** fbq as it is once fbevents.js has loaded (it adds `callMethod`). */
+const fbq = Object.assign(vi.fn(), { callMethod: vi.fn() });
+const consent = (state: 'accepted' | 'rejected') =>
+  localStorage.setItem(CONSENT_KEY, state);
+const setMarker = (value: string) =>
+  (document.cookie = `${SIGNUP_MARKER}=${value}; path=/`);
+/** What the snippet does once fbevents.js has loaded. */
+const loadPixel = () => {
+  window.fbq = fbq;
+  (window.polycardsPixelQueue ?? []).forEach((run) => run());
+  window.polycardsPixelQueue = [];
+};
 
 beforeEach(() => {
   localStorage.clear();
   document.cookie = `${SIGNUP_MARKER}=; path=/; max-age=0`;
-  fbq.mockClear();
-  window.fbq = fbq;
+  fbq.mockReset();
+  delete window.fbq;
   delete window.polycardsPixelQueue;
 });
 
 afterEach(() => {
   delete window.fbq;
+  delete window.polycardsPixelQueue;
 });
 
 describe('trackPixel', () => {
-  it('drops the event without consent', () => {
-    expect(trackPixel('ViewContent', { content_ids: ['p1'] })).toBe(false);
-    localStorage.setItem(CONSENT_KEY, 'rejected');
-    expect(trackPixel('ViewContent', { content_ids: ['p1'] })).toBe(false);
-    expect(fbq).not.toHaveBeenCalled();
-  });
-
   it('sends standard events with track, ours with trackCustom, eventID last', () => {
-    accept();
+    consent('accepted');
+    window.fbq = fbq;
     trackPixel('Purchase', { value: 50, currency: 'MYR' }, 'PC-1');
-    trackPixel('OpenPack', { mode: 'paid' });
+    trackPixel('InitiateCheckout', { value: 300, currency: 'MYR' });
+    trackPixel('OpenPack', { value: 12, currency: 'MYR' });
     expect(fbq.mock.calls).toEqual([
       [
         'track',
@@ -48,40 +55,98 @@ describe('trackPixel', () => {
         { value: 50, currency: 'MYR' },
         { eventID: 'PC-1' },
       ],
-      ['trackCustom', 'OpenPack', { mode: 'paid' }],
+      ['track', 'InitiateCheckout', { value: 300, currency: 'MYR' }],
+      ['trackCustom', 'OpenPack', { value: 12, currency: 'MYR' }],
     ]);
   });
 
-  // A page's first effects run before the afterInteractive snippet defines
-  // fbq; MetaPixel's snippet replays this queue right after its init.
-  it('queues until the snippet has defined fbq', () => {
-    accept();
-    delete window.fbq;
-    expect(trackPixel('ViewContent', { content_ids: ['p1'] })).toBe(true);
-    expect(window.polycardsPixelQueue).toEqual([
-      ['track', 'ViewContent', { content_ids: ['p1'] }],
-    ]);
+  // The ad landing page: ViewContent fires in the first render, before the
+  // visitor has answered the banner. Accepting on that page must still count it.
+  it('holds an event until the visitor accepts and the pixel loads', () => {
+    trackPixel('ViewContent', { content_ids: ['p1'] });
+    expect(fbq).not.toHaveBeenCalled();
+    consent('accepted');
+    loadPixel();
+    expect(fbq).toHaveBeenCalledWith('track', 'ViewContent', {
+      content_ids: ['p1'],
+    });
+  });
+
+  // An ad blocker lets the snippet define the stub but never loads
+  // fbevents.js: nothing leaves, so nothing may count as sent.
+  it('treats the stub alone as not loaded', () => {
+    consent('accepted');
+    window.fbq = vi.fn() as unknown as typeof window.fbq;
+    trackPixel('ViewContent', { content_ids: ['p1'] });
+    expect(window.fbq).not.toHaveBeenCalled();
+    expect(window.polycardsPixelQueue).toHaveLength(1);
+  });
+
+  it('drops the event for a visitor who rejected', () => {
+    consent('rejected');
+    trackPixel('ViewContent', { content_ids: ['p1'] });
+    loadPixel();
+    expect(fbq).not.toHaveBeenCalled();
+  });
+
+  // fbq is third-party code; a throw in it must not break a paid roll.
+  it('never lets a throwing fbq reach the caller', () => {
+    consent('accepted');
+    window.fbq = Object.assign(
+      () => {
+        throw new Error('fbevents blew up');
+      },
+      { callMethod: vi.fn() },
+    );
+    expect(() => trackPixel('OpenPack', { value: 12 })).not.toThrow();
+  });
+});
+
+describe('syncConsent', () => {
+  // "Rejected: nothing is sent or kept" — including what was held before the
+  // answer, which a later "yes" in the same page must not send.
+  it('drops held events and the sign-up marker on a reject', () => {
+    trackPixel('ViewContent', { content_ids: ['p1'] });
+    setMarker('email');
+    consent('rejected');
+    syncConsent();
+    expect(window.polycardsPixelQueue).toEqual([]);
+    expect(document.cookie).not.toContain(SIGNUP_MARKER);
+
+    consent('accepted');
+    loadPixel();
+    expect(fbq).not.toHaveBeenCalled();
+  });
+
+  it('reports a waiting sign-up otherwise', () => {
+    setMarker('google');
+    consent('accepted');
+    syncConsent();
+    loadPixel();
+    expect(fbq).toHaveBeenCalledWith('track', 'CompleteRegistration', {
+      content_name: 'google',
+    });
   });
 });
 
 describe('reportSignup', () => {
   it('does nothing when no account was just created', () => {
-    accept();
+    consent('accepted');
+    window.fbq = fbq;
     reportSignup();
     expect(fbq).not.toHaveBeenCalled();
   });
 
-  // The visitor signed up before answering the cookie banner: the marker must
-  // outlive this call so MetaPixel can report it once they accept.
-  it('keeps the marker until consent, then reports it once', () => {
-    document.cookie = `${SIGNUP_MARKER}=google; path=/`;
+  // The marker is cleared only when the event can go out: a page that never
+  // loads the pixel (another tab's Accept, /reset-password, a blocker) keeps it.
+  it('keeps the marker until the event is sent, then reports it once', () => {
+    setMarker('google');
     reportSignup();
-    expect(fbq).not.toHaveBeenCalled();
+    reportSignup();
     expect(document.cookie).toContain(`${SIGNUP_MARKER}=google`);
 
-    accept();
-    reportSignup();
-    reportSignup();
+    consent('accepted');
+    loadPixel();
     expect(fbq.mock.calls).toEqual([
       ['track', 'CompleteRegistration', { content_name: 'google' }],
     ]);
@@ -89,8 +154,9 @@ describe('reportSignup', () => {
   });
 
   it('ignores a marker holding anything but a known method', () => {
-    accept();
-    document.cookie = `${SIGNUP_MARKER}=<script>; path=/`;
+    consent('accepted');
+    window.fbq = fbq;
+    setMarker('<script>');
     reportSignup();
     expect(fbq).not.toHaveBeenCalled();
   });
@@ -103,60 +169,100 @@ describe('reportDeposits', () => {
     first,
   });
 
-  // Deposits that settled before this browser watched the account predate
-  // tracking here — reporting them would replay history on the day this
-  // ships, after cleared storage, and in every private window.
-  it('records what already settled on the first run, without reporting it', () => {
-    accept();
-    reportDeposits('cus_1', [deposit('PC-old', true)]);
-    reportDeposits('cus_1', [deposit('PC-old', true)]);
-    expect(fbq).not.toHaveBeenCalled();
-  });
-
-  it('reports a newly settled deposit once, with FirstDeposit for the first ever', () => {
-    accept();
-    reportDeposits('cus_1', []);
-    reportDeposits('cus_1', [deposit('PC-1', true)]);
-    reportDeposits('cus_1', [deposit('PC-2'), deposit('PC-1', true)]);
+  it('sends Purchase (+FirstDeposit for the first ever), then acks them', () => {
+    consent('accepted');
+    window.fbq = fbq;
+    const ack = vi.fn();
+    reportDeposits([deposit('PC-A1', true), deposit('PC-A2')], ack);
 
     expect(fbq.mock.calls).toEqual([
       [
         'track',
         'Purchase',
         { value: 100, currency: 'MYR' },
-        { eventID: 'PC-1' },
+        { eventID: 'PC-A1' },
       ],
       [
         'trackCustom',
         'FirstDeposit',
         { value: 100, currency: 'MYR' },
-        { eventID: 'PC-1' },
+        { eventID: 'PC-A1' },
       ],
       [
         'track',
         'Purchase',
         { value: 100, currency: 'MYR' },
-        { eventID: 'PC-2' },
+        { eventID: 'PC-A2' },
       ],
     ]);
+    expect(ack).toHaveBeenCalledWith(['PC-A1', 'PC-A2']);
   });
 
-  it('holds a deposit that settled before consent and reports it after', () => {
-    reportDeposits('cus_1', []);
-    reportDeposits('cus_1', [deposit('PC-1')]);
-    expect(fbq).not.toHaveBeenCalled();
-
-    accept();
-    reportDeposits('cus_1', [deposit('PC-1')]);
-    expect(pixelCalls()).toEqual([['track', 'Purchase']]);
+  // Two reads (mount, then a payment leaving the pending list) can offer the
+  // same deposit before the first ack lands. Sent once; acked again, since
+  // the ack is idempotent and the first one may have failed.
+  it('sends a deposit once per page, and re-acks it when offered again', () => {
+    consent('accepted');
+    window.fbq = fbq;
+    const ack = vi.fn();
+    reportDeposits([deposit('PC-B1')], ack);
+    reportDeposits([deposit('PC-B1')], ack);
+    expect(fbq).toHaveBeenCalledTimes(1);
+    expect(ack.mock.calls).toEqual([[['PC-B1']], [['PC-B1']]]);
   });
 
-  // Another account on the same browser has its own history: its old
-  // deposits must baseline, not fire because this browser watched someone else.
-  it('keeps each account on the browser separate', () => {
-    accept();
-    reportDeposits('cus_1', []);
-    reportDeposits('cus_2', [deposit('PC-9')]);
+  // Unacked means the backend offers it again on a later read, so nothing is
+  // lost when the pixel never loads.
+  it('neither sends nor acks until fbevents.js has loaded', () => {
+    consent('accepted');
+    window.fbq = vi.fn() as unknown as typeof window.fbq;
+    const ack = vi.fn();
+    reportDeposits([deposit('PC-C1')], ack);
+    expect(ack).not.toHaveBeenCalled();
+
+    loadPixel();
+    expect(fbq).toHaveBeenCalledTimes(1);
+    expect(ack).toHaveBeenCalledWith(['PC-C1']);
+  });
+
+  it('neither sends nor acks for a visitor who rejected', () => {
+    consent('rejected');
+    const ack = vi.fn();
+    reportDeposits([deposit('PC-D1')], ack);
+    loadPixel();
     expect(fbq).not.toHaveBeenCalled();
+    expect(ack).not.toHaveBeenCalled();
+  });
+});
+
+// MetaPixel renders this string; the queue it drains is the one above. Run it
+// for real so a rename on either side fails here instead of silently dropping
+// every held landing-page event.
+describe('pixelSnippet', () => {
+  it('inits and sends PageView at once, and runs held work when fbevents.js loads', () => {
+    document.head.appendChild(document.createElement('script'));
+    consent('accepted');
+    trackPixel('ViewContent', { content_ids: ['p1'] });
+
+    new Function(pixelSnippet('123'))();
+
+    const stub = window.fbq as unknown as { queue: ArrayLike<unknown>[] };
+    const calls = () => stub.queue.map((call) => Array.from(call).slice(0, 2));
+    expect(calls()).toEqual([
+      ['init', '123'],
+      ['track', 'PageView'],
+    ]);
+    expect(window.polycardsPixelQueue).toHaveLength(1);
+
+    const loader = document.querySelector<HTMLScriptElement>(
+      'script[src*="fbevents.js"]',
+    );
+    loader?.onload?.(new Event('load'));
+    expect(calls()).toEqual([
+      ['init', '123'],
+      ['track', 'PageView'],
+      ['track', 'ViewContent'],
+    ]);
+    expect(window.polycardsPixelQueue).toEqual([]);
   });
 });

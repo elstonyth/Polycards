@@ -8,8 +8,11 @@ import { storeShim, backend } from '@/lib/__tests__/store-shim';
 vi.mock('@/lib/store', () => ({ store: storeShim }));
 
 import {
-  getDepositActivity,
+  ackReportedDeposits,
+  getPendingDeposits,
+  getUnreportedDeposits,
   getVault,
+  readPendingDeposits,
   sellBackPull,
   startWithdrawal,
   topUpCredits,
@@ -115,51 +118,62 @@ describe('topUpCredits — Idempotency-Key', () => {
   });
 });
 
-describe('getDepositActivity — settled deposits for the Meta Pixel', () => {
-  it('maps recently settled deposits, keeping the first-ever flag', async () => {
+describe('pending deposits — a failed read is not "nothing pending"', () => {
+  it('the deposit watch gets null when the read fails', async () => {
+    backend({ 'GET /store/credits/deposit': { status: 429 } });
+    expect(await readPendingDeposits()).toBeNull();
+  });
+
+  it('the Transactions page still gets its plain empty list', async () => {
+    backend({ 'GET /store/credits/deposit': { status: 500 } });
+    expect(await getPendingDeposits()).toEqual([]);
+  });
+});
+
+describe('unreported deposits — the Meta Pixel source and its ack', () => {
+  it('maps the settled deposits, keeping the first-ever flag', async () => {
     backend({
-      'GET /store/credits/deposit': {
+      'GET /store/credits/deposit/unreported': {
         body: {
-          deposits: [],
-          settled: [
-            { merchant_transaction_id: 'PC-2', amount: 100, first: false },
+          deposits: [
             { merchant_transaction_id: 'PC-1', amount: 50, first: true },
+            { merchant_transaction_id: 'PC-2', amount: 100 },
           ],
         },
       },
     });
-    expect((await getDepositActivity()).settled).toEqual([
-      { reference: 'PC-2', amount: 100, first: false },
+    expect(await getUnreportedDeposits()).toEqual([
       { reference: 'PC-1', amount: 50, first: true },
+      { reference: 'PC-2', amount: 100, first: false },
     ]);
   });
 
-  // No answer is not "nothing settled": [] would become the reporter's
-  // baseline, and the next real read would replay every deposit as new —
-  // exactly what happens while the storefront deploys ahead of the backend.
-  it('reports null, not [], when the backend sends no settled list', async () => {
-    backend({
-      'GET /store/credits/deposit': {
-        body: {
-          deposits: [
-            {
-              merchant_transaction_id: 'PC-P',
-              amount: 50,
-              payment_method_code: 'FPX',
-              created_at: new Date().toISOString(),
-            },
-          ],
-        },
-      },
-    });
-    const activity = await getDepositActivity();
-    expect(activity.settled).toBeNull();
-    expect(activity.pending).toHaveLength(1);
+  it('is null when the read fails, so nothing is treated as reported', async () => {
+    backend({ 'GET /store/credits/deposit/unreported': { status: 404 } });
+    expect(await getUnreportedDeposits()).toBeNull();
   });
 
-  it('reports null when the read fails', async () => {
-    backend({ 'GET /store/credits/deposit': { status: 500 } });
-    expect(await getDepositActivity()).toEqual({ pending: [], settled: null });
+  it('acks the references it was given', async () => {
+    const mem = backend({
+      'POST /store/credits/deposit/unreported': { body: { acknowledged: 2 } },
+    });
+    await ackReportedDeposits(['PC-1', 'PC-2']);
+    expect(mem.requests[0]).toMatchObject({
+      method: 'POST',
+      path: '/store/credits/deposit/unreported',
+      body: { references: ['PC-1', 'PC-2'] },
+    });
+  });
+
+  // A server action is a public endpoint: junk never reaches the backend.
+  it.each([
+    ['empty', []],
+    ['too many', Array.from({ length: 11 }, (_, i) => `PC-${i}`)],
+    ['a non-string', ['PC-1', 7 as unknown as string]],
+  ])('sends nothing for %s', async (_label, references) => {
+    const mem = backend({});
+    await ackReportedDeposits(references);
+    expect(mem.requests).toEqual([]);
   });
 });
 

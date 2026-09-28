@@ -97,23 +97,6 @@ export async function POST(
  */
 const PENDING_LIMIT = 5;
 
-/**
- * How far back a SETTLED deposit is still handed to the storefront for its
- * Meta Pixel (Purchase / FirstDeposit, src/lib/pixel.ts). Meta's default
- * click-attribution window: a report later than that could not be credited to
- * an ad anyway.
- */
-const SETTLED_REPORT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-
-/**
- * How many of those settled deposits to hand over, newest first. The browser
- * reads this on every visit and while a payment is outstanding, so a deposit
- * is only missed if this many newer ones settle before it is ever read. Must
- * stay well under the storefront's remembered-reference cap (reportDeposits
- * in src/lib/pixel.ts), or a forgotten reference could be reported twice.
- */
-const SETTLED_LIMIT = 10;
-
 // GET /store/credits/deposit — the caller's OWN in-flight top-ups.
 //
 // Why this exists: the ledger is the only thing /transactions could read, and a
@@ -144,31 +127,14 @@ export async function GET(
   const customerId = req.auth_context.actor_id;
   const packs = resolvePacks<GatewayDeposits>(req.scope);
 
-  const [deposits, settled, [firstSettled]] = await Promise.all([
-    packs.listGatewayDeposits(
-      {
-        customer_id: customerId,
-        status: 'pending',
-        created_at: { $gte: new Date(Date.now() - GATEWAY_STALE_AFTER_MS) },
-      },
-      { take: PENDING_LIMIT, order: { created_at: 'DESC' } },
-    ),
-    // Ads measurement: a deposit settles on the sweep, not in the customer's
-    // browser, so this list is how the storefront's Meta Pixel learns of it.
-    packs.listGatewayDeposits(
-      {
-        customer_id: customerId,
-        status: 'settled',
-        settled_at: { $gte: new Date(Date.now() - SETTLED_REPORT_WINDOW_MS) },
-      },
-      { take: SETTLED_LIMIT, order: { settled_at: 'DESC' } },
-    ),
-    // The customer's first settled deposit ever, for the FirstDeposit flag.
-    packs.listGatewayDeposits(
-      { customer_id: customerId, status: 'settled' },
-      { take: 1, order: { settled_at: 'ASC' } },
-    ),
-  ]);
+  const deposits = await packs.listGatewayDeposits(
+    {
+      customer_id: customerId,
+      status: 'pending',
+      created_at: { $gte: new Date(Date.now() - GATEWAY_STALE_AFTER_MS) },
+    },
+    { take: PENDING_LIMIT, order: { created_at: 'DESC' } },
+  );
 
   // Hand-picked fields, not the row: it also carries the gateway id and our
   // internal status vocabulary, and the amount reported is the one we REQUESTED
@@ -179,14 +145,6 @@ export async function GET(
       amount: deposit.amount_requested,
       payment_method_code: deposit.payment_method_code,
       created_at: deposit.created_at,
-    })),
-    // The credited figure once settled; the requested one only if no settled
-    // figure is on file. Number(): the storefront parses a strict number and
-    // would silently drop the row otherwise (GET /store/credits does the same).
-    settled: settled.map((deposit) => ({
-      merchant_transaction_id: deposit.merchant_transaction_id,
-      amount: Number(deposit.amount_settled ?? deposit.amount_requested),
-      first: deposit.id === firstSettled?.id,
     })),
   });
 }

@@ -1073,6 +1073,20 @@ describe('signup — referral attribution precedence', () => {
     expect(mocks.markSignup).toHaveBeenCalledWith('email');
   });
 
+  // The account exists once create returns: a failed auto-login (the shared
+  // per-email rate limit, say) must not cost the ads their CompleteRegistration.
+  it('leaves the sign-up marker even when the auto-login after create fails', async () => {
+    backend({
+      'POST /auth/customer/emailpass/register': { body: { token: 'reg-tok' } },
+      'POST /auth/customer/emailpass': { status: 429 },
+    });
+    mocks.customerCreate.mockResolvedValueOnce({ customer: { id: 'c1' } });
+    const r = await signup(form);
+    expect(r.ok).toBe(false);
+    expect(mocks.markSignup).toHaveBeenCalledWith('email');
+    expect(mocks.bindReferral).not.toHaveBeenCalled();
+  });
+
   it('an unknown typed code fails BEFORE any account is created', async () => {
     mocks.lookupReferralCode.mockResolvedValue({ status: 'notfound' });
     const r = await signup({ ...form, referral_code: 'ZZZZZZZZ' });

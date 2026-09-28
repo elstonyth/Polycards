@@ -40,6 +40,8 @@ import {
   BuybackBatchSchema,
   DepositStartSchema,
   PendingDepositsSchema,
+  UnreportedDepositsSchema,
+  UncheckedSchema,
   WithdrawStartSchema,
   WithdrawBanksSchema,
   SavedBankAccountsSchema,
@@ -604,47 +606,68 @@ const DEPOSIT_OVERDUE_MS = 60 * 60 * 1000;
  * the (account) layout has already gated the page by the time this runs.
  */
 export async function getPendingDeposits(): Promise<PendingDeposit[]> {
-  return (await getDepositActivity()).pending;
+  return (await readPendingDeposits()) ?? [];
 }
 
 /**
- * The deposit watch's one read (TopUpProvider): the pending top-ups above,
- * plus the ones that settled recently, which the Meta Pixel reports as
- * Purchase / FirstDeposit (reportDeposits in lib/pixel.ts). Same never-an-error
- * contract as getPendingDeposits.
- *
- * `settled` is null — never [] — when there is no answer (a failed read, or a
- * backend that predates the field): the reporter would record an empty list
- * as this browser's baseline, and the next real read would replay a week of
- * deposits as new.
+ * The same read for TopUpProvider's deposit watch, which must tell "nothing
+ * pending" apart from "no answer" (null): a failed poll is not a payment that
+ * cleared.
  */
-export async function getDepositActivity(): Promise<{
-  pending: PendingDeposit[];
-  settled: SettledDeposit[] | null;
-}> {
+export async function readPendingDeposits(): Promise<PendingDeposit[] | null> {
   const r = await store.get('/store/credits/deposit', PendingDepositsSchema);
-  if (!r.ok) return { pending: [], settled: null };
+  if (!r.ok) return null;
   // One instant for the whole list, so two rows started a second apart do not
   // read as if measured by different clocks.
   const now = Date.now();
-  return {
-    pending: r.data.deposits.map((deposit) => {
-      const startedAt = new Date(deposit.created_at).getTime();
-      return {
-        reference: deposit.merchant_transaction_id,
-        amount: deposit.amount,
-        method: deposit.payment_method_code ?? null,
-        startedLabel: elapsedLabel(startedAt, now),
-        overdue: now - startedAt > DEPOSIT_OVERDUE_MS,
-      };
-    }),
-    settled:
-      r.data.settled?.map((deposit) => ({
-        reference: deposit.merchant_transaction_id,
-        amount: deposit.amount,
-        first: deposit.first === true,
-      })) ?? null,
-  };
+  return r.data.deposits.map((deposit) => {
+    const startedAt = new Date(deposit.created_at).getTime();
+    return {
+      reference: deposit.merchant_transaction_id,
+      amount: deposit.amount,
+      method: deposit.payment_method_code ?? null,
+      startedLabel: elapsedLabel(startedAt, now),
+      overdue: now - startedAt > DEPOSIT_OVERDUE_MS,
+    };
+  });
+}
+
+/**
+ * Settled top-ups no browser has reported to the Meta Pixel yet — what
+ * reportDeposits (lib/pixel.ts) sends as Purchase / FirstDeposit. Null when
+ * there is no answer; the watch simply tries again on its next read.
+ */
+export async function getUnreportedDeposits(): Promise<
+  SettledDeposit[] | null
+> {
+  const r = await store.get(
+    '/store/credits/deposit/unreported',
+    UnreportedDepositsSchema,
+  );
+  if (!r.ok) return null;
+  return r.data.deposits.map((deposit) => ({
+    reference: deposit.merchant_transaction_id,
+    amount: deposit.amount,
+    first: deposit.first === true,
+  }));
+}
+
+/** Mark deposits reported once the pixel has sent them, so no other browser
+ *  of the customer's sends them again. Fire-and-forget: a lost ack only means
+ *  one more report on a later read. */
+export async function ackReportedDeposits(references: string[]): Promise<void> {
+  // Validate at the boundary — a server action is a public endpoint.
+  if (
+    !Array.isArray(references) ||
+    references.length === 0 ||
+    references.length > 10 ||
+    !references.every((ref) => typeof ref === 'string' && ref.length > 0)
+  ) {
+    return;
+  }
+  await store.post('/store/credits/deposit/unreported', UncheckedSchema, {
+    references,
+  });
 }
 
 export type ToggleShowcaseResult =

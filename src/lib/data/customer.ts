@@ -20,6 +20,7 @@ import { httpStatus } from '@/lib/errors';
 // module only sets and clears it.
 import { AUTH_COOKIE } from '@/lib/store-port';
 import { SIGNUP_MARKER } from '@/lib/pixel';
+import { CONSENT_KEY } from '@/lib/consent';
 
 // Matches the backend's `jwtExpiresIn` default ("1d", medusa-config.ts sets
 // none) — a longer cookie only outlives its JWT and reads as "logged in" while
@@ -46,10 +47,13 @@ export async function setAuthToken(token: string): Promise<void> {
  * Pixel reports as CompleteRegistration (reportSignup in lib/pixel.ts reads and
  * clears it). Deliberately NOT httpOnly: page script is its only reader, and it
  * holds nothing but the method. A week covers a visitor who answers the cookie
- * banner late; nothing reaches Meta unless they accept.
+ * banner late; nothing reaches Meta unless they accept — and a visitor who
+ * already rejected gets no marker at all (the banner mirrors its answer into
+ * the CONSENT_KEY cookie for exactly this kind of server-side check).
  */
 export async function markSignup(method: 'email' | 'google'): Promise<void> {
   const store = await cookies();
+  if (store.get(CONSENT_KEY)?.value === 'rejected') return;
   store.set(SIGNUP_MARKER, method, {
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',

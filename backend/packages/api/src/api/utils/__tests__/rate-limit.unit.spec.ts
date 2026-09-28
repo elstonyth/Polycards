@@ -625,6 +625,7 @@ describe('RATE_LIMITS', () => {
       'phone-otp-check|60|60000|600|3600000|Too many verification attempts.||',
       'referral-bind|3|60000|10|3600000|Too many referral attempts.||',
       'task-action|10|10000|60|60000|Too many task actions.||',
+      'deposit-pixel-ack|5|10000|30|60000|Too many requests.||',
     ]);
   });
 

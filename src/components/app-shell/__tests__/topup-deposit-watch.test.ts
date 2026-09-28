@@ -12,29 +12,28 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 // The provider watches the customer's own in-flight gateway deposits so the
-// balance updates BY ITSELF when the payment clears — the header chip, the
-// money dot and every server-rendered money surface, from one poll. What is
-// pinned here: it only claims credit when the balance actually moved, it stops
-// polling when nothing is outstanding, and it never polls for a logged-out
-// visitor.
+// balance updates BY ITSELF when the payment clears — the header chip and
+// every server-rendered money surface, from one poll. What is pinned here: it
+// only claims credit when the balance actually moved, it stops polling when
+// nothing is outstanding, a failed read is not a cleared payment, it never
+// polls for a logged-out visitor — and settled deposits reach the Meta Pixel
+// reporter on mount and whenever a payment leaves the pending list.
 
-// The watcher's one read is getDepositActivity; `getPendingDeposits` stands
-// for its pending half, `settled` for the recently settled half the Meta Pixel
-// reporter gets.
-const getPendingDeposits = vi.fn();
+const readPendingDeposits = vi.fn();
 const getCreditBalance = vi.fn();
-let settled: { reference: string; amount: number; first: boolean }[] | null =
-  [];
+const getUnreportedDeposits = vi.fn();
+const ackReportedDeposits = vi.fn(async (_references: string[]) => {});
 vi.mock('@/lib/actions/vault', () => ({
-  getDepositActivity: async () => ({
-    pending: await getPendingDeposits(),
-    settled,
-  }),
+  readPendingDeposits: () => readPendingDeposits(),
   getCreditBalance: () => getCreditBalance(),
+  getUnreportedDeposits: () => getUnreportedDeposits(),
+  ackReportedDeposits: (references: string[]) =>
+    ackReportedDeposits(references),
 }));
 
 const reportDeposits = vi.fn();
 vi.mock('@/lib/pixel', () => ({
+  mayReportDeposits: () => true,
   reportDeposits: (...args: unknown[]) => reportDeposits(...args),
 }));
 
@@ -77,7 +76,7 @@ beforeAll(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   customer = { id: 'cus_1' };
-  settled = [];
+  getUnreportedDeposits.mockResolvedValue([]);
   vi.useFakeTimers({ shouldAdvanceTime: true });
 });
 
@@ -111,7 +110,7 @@ async function nextPoll() {
 
 describe('TopUpProvider — gateway deposit watch', () => {
   it('credits the balance and says so when the payment clears', async () => {
-    getPendingDeposits
+    readPendingDeposits
       .mockResolvedValueOnce([deposit('PC-1')]) // outstanding
       .mockResolvedValueOnce([]); // settled at the gateway
     getCreditBalance
@@ -133,7 +132,7 @@ describe('TopUpProvider — gateway deposit watch', () => {
   // A deposit can leave the pending list by FAILING. Announcing credit then
   // would be a lie the customer acts on.
   it('stays silent when a deposit vanishes without the balance moving', async () => {
-    getPendingDeposits
+    readPendingDeposits
       .mockResolvedValueOnce([deposit('PC-1')])
       .mockResolvedValueOnce([]);
     getCreditBalance.mockResolvedValue(100);
@@ -148,14 +147,14 @@ describe('TopUpProvider — gateway deposit watch', () => {
   // The common case: nobody is mid-payment. One request per session, then it
   // must go quiet rather than poll the read budget forever.
   it('stops after one look when nothing is outstanding', async () => {
-    getPendingDeposits.mockResolvedValue([]);
+    readPendingDeposits.mockResolvedValue([]);
     getCreditBalance.mockResolvedValue(100);
 
     await mount();
-    expect(getPendingDeposits).toHaveBeenCalledTimes(1);
+    expect(readPendingDeposits).toHaveBeenCalledTimes(1);
     await nextPoll();
     await nextPoll();
-    expect(getPendingDeposits).toHaveBeenCalledTimes(1);
+    expect(readPendingDeposits).toHaveBeenCalledTimes(1);
     // Only the provider's own login-time balance read — the watcher took no
     // baseline, because there is nothing to compare it against later.
     expect(getCreditBalance).toHaveBeenCalledTimes(1);
@@ -165,38 +164,92 @@ describe('TopUpProvider — gateway deposit watch', () => {
     customer = null;
     await mount();
     await nextPoll();
-    expect(getPendingDeposits).not.toHaveBeenCalled();
-    expect(reportDeposits).not.toHaveBeenCalled();
+    expect(readPendingDeposits).not.toHaveBeenCalled();
+    expect(getUnreportedDeposits).not.toHaveBeenCalled();
   });
 
-  // Ads measurement rides the same read: whatever settled recently goes to
-  // the pixel reporter (which decides what is new), tagged with the account.
-  it('hands recently settled deposits to the pixel reporter', async () => {
-    settled = [{ reference: 'PC-9', amount: 50, first: true }];
-    getPendingDeposits.mockResolvedValue([]);
+  // A failed read is not a cleared payment: the watch keeps going and still
+  // credits the deposit when it lands.
+  it('keeps watching through a failed read', async () => {
+    readPendingDeposits
+      .mockResolvedValueOnce([deposit('PC-1')])
+      .mockResolvedValueOnce(null) // a 429 / 5xx / dropped connection
+      .mockResolvedValueOnce([]);
+    getCreditBalance
+      .mockResolvedValueOnce(100) // login-time fetch
+      .mockResolvedValueOnce(100) // baseline
+      .mockResolvedValue(600); // once it lands
+
+    await mount();
+    await nextPoll();
+    expect(container.textContent).not.toContain('added to your balance');
+    await nextPoll();
+    expect(container.textContent).toContain('RM 500.00 added to your balance');
+  });
+
+  // A cashier return whose very first read fails must still find out what is
+  // pending, rather than leave the watch off for the whole visit.
+  it('retries a failed first read', async () => {
+    readPendingDeposits
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce([deposit('PC-1')])
+      .mockResolvedValueOnce([]);
+    getCreditBalance
+      .mockResolvedValueOnce(100) // login-time fetch
+      .mockResolvedValueOnce(100) // baseline
+      .mockResolvedValue(600); // once it lands
+
+    await mount();
+    await nextPoll();
+    await nextPoll();
+    expect(container.textContent).toContain('RM 500.00 added to your balance');
+  });
+
+  // ...but not forever: an expired session answers nothing, every time.
+  it('gives up after a few failed reads in a row', async () => {
+    readPendingDeposits
+      .mockResolvedValueOnce([deposit('PC-1')])
+      .mockResolvedValue(null);
     getCreditBalance.mockResolvedValue(100);
 
     await mount();
-    expect(reportDeposits).toHaveBeenCalledWith('cus_1', settled);
+    for (let i = 0; i < 6; i++) await nextPoll();
+    // The first read, then three failures, then silence.
+    expect(readPendingDeposits).toHaveBeenCalledTimes(4);
   });
 
-  // No answer (a failed read, or a backend that predates the field) is not
-  // "nothing settled": handing the reporter [] would record an empty baseline,
-  // and the next real read would replay a week of deposits as new Purchases.
-  it('skips the pixel reporter when the read carried no settled list', async () => {
-    settled = null;
-    getPendingDeposits.mockResolvedValue([]);
+  // Ads measurement: what settled while the customer was away goes to the
+  // pixel reporter on mount, and is acked through the backend once sent.
+  it('hands settled, unreported deposits to the pixel reporter on mount', async () => {
+    const settled = [{ reference: 'PC-9', amount: 50, first: true }];
+    getUnreportedDeposits.mockResolvedValue(settled);
+    readPendingDeposits.mockResolvedValue([]);
     getCreditBalance.mockResolvedValue(100);
 
     await mount();
-    expect(getPendingDeposits).toHaveBeenCalledTimes(1);
-    expect(reportDeposits).not.toHaveBeenCalled();
+
+    expect(reportDeposits).toHaveBeenCalledWith(settled, expect.any(Function));
+    const ack = reportDeposits.mock.calls[0]?.[1] as (refs: string[]) => void;
+    ack(['PC-9']);
+    expect(ackReportedDeposits).toHaveBeenCalledWith(['PC-9']);
+  });
+
+  it('asks again for unreported deposits when a payment leaves the pending list', async () => {
+    readPendingDeposits
+      .mockResolvedValueOnce([deposit('PC-1')])
+      .mockResolvedValueOnce([]);
+    getCreditBalance.mockResolvedValue(100);
+
+    await mount();
+    expect(getUnreportedDeposits).toHaveBeenCalledTimes(1);
+    await nextPoll();
+    expect(getUnreportedDeposits).toHaveBeenCalledTimes(2);
   });
 
   // Two consecutive payments: the second must be watched exactly like the
   // first, not swallowed because the watcher already fired once.
   it('keeps watching while a deposit is still outstanding', async () => {
-    getPendingDeposits
+    readPendingDeposits
       .mockResolvedValueOnce([deposit('PC-1')])
       .mockResolvedValueOnce([deposit('PC-1')])
       .mockResolvedValueOnce([]);

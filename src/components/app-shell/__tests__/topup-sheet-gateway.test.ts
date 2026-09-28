@@ -52,6 +52,11 @@ vi.mock('@/lib/use-liquid-glass', () => ({
   useLiquidGlass: () => {},
   GLASS_SUBTLE: {},
 }));
+// The ads funnel's InitiateCheckout (lib/pixel.ts).
+const trackPixel = vi.fn();
+vi.mock('@/lib/pixel', () => ({
+  trackPixel: (...args: unknown[]) => trackPixel(...args),
+}));
 
 type SheetProps = ComponentProps<typeof import('../TopUpSheet').default>;
 
@@ -253,6 +258,17 @@ describe('TopUpSheet gateway branch', () => {
     );
     // No success state — nothing has been credited yet.
     expect(container.textContent).not.toContain('ADDED');
+  });
+
+  // Ads funnel: pressing Pay starts a top-up, whatever the gateway answers —
+  // sent before the checkout call so the redirect can't swallow the beacon.
+  it('reports InitiateCheckout with the amount when Pay is pressed', async () => {
+    startDeposit.mockResolvedValue({ ok: false, error: 'Channel closed.' });
+    await click(payButton());
+    expect(trackPixel).toHaveBeenCalledExactlyOnceWith('InitiateCheckout', {
+      value: 300,
+      currency: 'MYR',
+    });
   });
 
   it('sends the picked channel, not the backend default', async () => {

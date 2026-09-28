@@ -188,10 +188,10 @@ describe('GET /store/credits/deposit — in-flight deposits', () => {
       }),
       getRes,
     );
-    // Every read — pending, recently settled, first ever — not just the first.
-    const calls = listMock.mock.calls as unknown as [{ customer_id: string }][];
-    expect(calls).toHaveLength(3);
-    for (const [selector] of calls) expect(selector.customer_id).toBe('cus_1');
+    const [selector] = listMock.mock.calls[0] as unknown as [
+      { customer_id: string },
+    ];
+    expect(selector.customer_id).toBe('cus_1');
   });
 
   // The requested amount, never the gateway id or our internal status — the
@@ -222,61 +222,6 @@ describe('GET /store/credits/deposit — in-flight deposits', () => {
           payment_method_code: 'BQR',
           created_at: createdAt,
         },
-      ],
-      settled: [],
-    });
-  });
-
-  // Ads measurement: the storefront's Meta Pixel reports each settled deposit
-  // as Purchase (+ FirstDeposit), and settlement happens on the sweep, so this
-  // list is the only way it learns of one. The credited figure, the first-ever
-  // flag, and still hand-picked fields only.
-  it('lists recently settled deposits with the credited amount, flagging the first ever', async () => {
-    const settledRow = (id: string, ref: string, settled: number | null) => ({
-      id,
-      merchant_transaction_id: ref,
-      gateway_transaction_id: 'D999',
-      customer_id: 'cus_1',
-      status: 'settled',
-      amount_requested: 50,
-      amount_settled: settled,
-      payment_method_code: 'FPX',
-      created_at: new Date('2026-09-20T07:00:00.000Z'),
-    });
-    listMock
-      .mockResolvedValueOnce([]) // pending
-      .mockResolvedValueOnce([
-        settledRow('gpd_2', 'PC-2', 101),
-        settledRow('gpd_1', 'PC-1', null),
-      ]) // settled this week
-      .mockResolvedValueOnce([settledRow('gpd_1', 'PC-1', null)]); // first ever
-
-    const before = Date.now();
-    await GET(getReq(), getRes);
-    const after = Date.now();
-
-    const week = 7 * 24 * 60 * 60 * 1000;
-    const [recent, recentConfig] = listMock.mock.calls[1] as unknown as [
-      { status: string; settled_at: { $gte: Date } },
-      { order: Record<string, string> },
-    ];
-    expect(recent.status).toBe('settled');
-    expect(recent.settled_at.$gte.getTime()).toBeGreaterThanOrEqual(
-      before - week,
-    );
-    expect(recent.settled_at.$gte.getTime()).toBeLessThanOrEqual(after - week);
-    expect(recentConfig.order).toEqual({ settled_at: 'DESC' });
-    expect(listMock.mock.calls[2]).toEqual([
-      { customer_id: 'cus_1', status: 'settled' },
-      { take: 1, order: { settled_at: 'ASC' } },
-    ]);
-
-    expect(jsonMock).toHaveBeenCalledWith({
-      deposits: [],
-      settled: [
-        { merchant_transaction_id: 'PC-2', amount: 101, first: false },
-        // No settled figure on file: the requested one stands in.
-        { merchant_transaction_id: 'PC-1', amount: 50, first: true },
       ],
     });
   });

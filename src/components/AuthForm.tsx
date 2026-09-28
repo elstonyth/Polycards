@@ -188,9 +188,9 @@ export default function AuthForm({
   // so update context directly (no refetch flash) on success.
   function finishAuth(result: AuthResult) {
     if (result.ok) {
-      // In signup mode every result comes from signup(), which left the
-      // CompleteRegistration marker — report it now if consent allows.
-      if (isSignup) reportSignup();
+      // A sign-up (or a login after one whose auto-login failed) left the
+      // CompleteRegistration marker; without one this does nothing.
+      reportSignup();
       setCustomer(result.customer);
       onSuccess?.();
       router.refresh();

@@ -94,6 +94,12 @@ export const GatewayDeposit = model
     // on top of the reconcile sweep: it re-reads rows that are already final.
     audited_at: model.dateTime().nullable(),
     audit_note: model.text().nullable(),
+    // When the storefront's Meta Pixel reported this settled deposit as a
+    // Purchase (store/credits/deposit/unreported). Kept on the row, not in a
+    // browser, so a customer's devices don't each report it. NULL = not yet
+    // reported; the migration marked every deposit settled before it as
+    // reported, so history is never replayed.
+    pixel_reported_at: model.dateTime().nullable(),
   })
   .indexes([
     // Callback lookup path: they hand us a MerchantTransactionId and we must

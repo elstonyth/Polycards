@@ -588,20 +588,21 @@ export const PendingDepositSchema = z.looseObject({
   created_at: z.string(),
 });
 
-/** A top-up that settled recently — reported to the Meta Pixel as Purchase
- *  (and FirstDeposit when `first`), see lib/pixel.ts. */
-export const SettledDepositSchema = z.looseObject({
-  merchant_transaction_id: z.string(),
-  amount: finite,
-  first: z.boolean().optional(),
-});
-
-/** GET /store/credits/deposit — the list of those, plus recently settled ones.
- *  `settled` is optional: both apps redeploy at once, so this storefront can
- *  briefly talk to a backend that does not send it yet. */
+/** GET /store/credits/deposit — the list of those. */
 export const PendingDepositsSchema = z.looseObject({
   deposits: listOf(PendingDepositSchema),
-  settled: listOf(SettledDepositSchema).optional(),
+});
+
+/** GET /store/credits/deposit/unreported — settled top-ups no browser has
+ *  reported to the Meta Pixel yet (lib/pixel.ts reportDeposits). */
+export const UnreportedDepositsSchema = z.looseObject({
+  deposits: listOf(
+    z.looseObject({
+      merchant_transaction_id: z.string(),
+      amount: finite,
+      first: z.boolean().optional(),
+    }),
+  ),
 });
 
 /** POST /store/credits/deposit response — the real payment gateway. Unlike the

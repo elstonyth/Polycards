@@ -9,12 +9,14 @@
 //
 // Beacons (www.facebook.com/tr) are recorded, then ABORTED: a verification run
 // must never land test events in the real pixel's data. A beacon that is
-// issued at all already proves the CSP let it through. DELIVER=1 lets them
-// reach Meta instead (e.g. while watching Events Manager → Test events).
+// issued at all already proves the CSP let it through. DELIVER=1 (exactly)
+// lets them reach Meta instead (e.g. while watching Events Manager → Test
+// events); anything else, DELIVER=0 included, keeps them aborted.
 import { chromium } from 'playwright';
 
 const BASE = process.env.BASE_URL ?? 'https://polycards.gg';
 const PIXEL_ID = '1829134618519800';
+const DELIVER = process.env.DELIVER === '1';
 
 const browser = await chromium.launch();
 // fbevents.js bot-filters HeadlessChrome UAs and silently skips the /tr
@@ -49,7 +51,7 @@ page.on('request', (r) => {
 const beacons = [];
 await page.route(/^https:\/\/www\.facebook\.com\/tr/, (route) => {
   const request = route.request();
-  const fields = new URLSearchParams(new URL(request.url()).search);
+  const fields = new URL(request.url()).searchParams;
   const body = request.postData() ?? '';
   // Multipart (form POST into the hidden iframe) or urlencoded.
   const multipart = [...body.matchAll(/name="([^"]+)"\r\n\r\n([^\r]*)/g)];
@@ -60,7 +62,7 @@ await page.route(/^https:\/\/www\.facebook\.com\/tr/, (route) => {
       fields.append(key, value);
   }
   beacons.push(fields);
-  return process.env.DELIVER ? route.continue() : route.abort();
+  return DELIVER ? route.continue() : route.abort();
 });
 const beaconFor = (event) =>
   beacons.find((f) => f.get('id') === PIXEL_ID && f.get('ev') === event);
@@ -95,13 +97,26 @@ const packLink = page
 const href = await packLink.getAttribute('href').catch(() => null);
 const slug = href?.split('/')[2]?.split('?')[0];
 if (slug) {
-  await packLink.click();
+  // Guarded so a missed click still ends in the FAIL line and the summary.
+  await packLink
+    .click()
+    .catch((error) => console.log(`note: pack link click failed: ${error}`));
   await page.waitForURL(`**/slots/${slug}**`).catch(() => {});
   await page.waitForTimeout(4000);
 }
 const viewContent = beaconFor('ViewContent');
-const viewedIds = viewContent?.get('cd[content_ids]') ?? '';
-const viewedOk = Boolean(slug) && viewedIds.includes(slug);
+// Exact id, not a substring: 'gold-pack' must not pass on ["gold-pack-2"].
+const viewedIds = (() => {
+  try {
+    return JSON.parse(viewContent?.get('cd[content_ids]') ?? '[]');
+  } catch {
+    return [];
+  }
+})();
+const viewedOk =
+  Boolean(slug) &&
+  Array.isArray(viewedIds) &&
+  viewedIds.includes(decodeURIComponent(slug));
 console.log(
   viewedOk
     ? `ok: ViewContent fired for ${slug} (value ${viewContent.get('cd[value]')} ${viewContent.get('cd[currency]')})`
@@ -110,7 +125,7 @@ console.log(
 
 console.log(
   `beacons seen: ${beacons.map((f) => f.get('ev')).join(', ') || 'none'}` +
-    (process.env.DELIVER ? '' : ' (all aborted — none reached Meta)'),
+    (DELIVER ? '' : ' (all aborted — none reached Meta)'),
 );
 
 await browser.close();
