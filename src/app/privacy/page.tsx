@@ -18,6 +18,12 @@ export const metadata: Metadata = {
 // (modules/packs/telegram.ts) has an ADMINISTRATIVE disable only, no customer
 // opt-out — the copy says what is true rather than promising a control that
 // does not exist. Adding one is a product decision, not a copy edit.
+//
+// Updated 2026-09-28: the consented pixel now reports pack views, sign-ups,
+// top-ups started and completed (with their amount) and paid pack opens
+// (src/lib/pixel.ts), not just page views — the Cookies section says so,
+// including the one thing kept before an answer: the sign-up marker
+// (markSignup), which a reject deletes.
 
 const SECTIONS: { title: string; body: string }[] = [
   {
@@ -26,7 +32,7 @@ const SECTIONS: { title: string; body: string }[] = [
   },
   {
     title: 'Cookies',
-    body: 'We use cookies to keep you signed in and to remember choices like your referral invite. Analytics cookies (Meta Pixel) are set only if you accept them in the cookie banner — rejecting them keeps the site fully functional.',
+    body: 'We use cookies to keep you signed in and to remember choices like your referral invite. Analytics cookies (Meta Pixel) are set only if you accept them in the cookie banner — rejecting them keeps the site fully functional. If you accept, the pixel tells Meta which pages and packs you view, when you create an account, when you start a top-up and when it completes (and for how much), and when you open a pack with your balance, so we can see which of our ads work. If you sign up before answering the banner, a small first-party cookie remembers that until you do, so the sign-up can be counted if you accept; nothing reaches Meta unless you accept, and rejecting deletes it. The pixel never receives your password or payment details.',
   },
   {
     title: 'Payments',

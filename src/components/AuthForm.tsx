@@ -12,6 +12,7 @@ import {
   type AuthResult,
 } from '@/lib/actions/auth';
 import { leaveFor } from '@/lib/navigation';
+import { reportSignup } from '@/lib/pixel';
 import { useAuth } from './auth/AuthProvider';
 import {
   NAME_MAX,
@@ -187,6 +188,9 @@ export default function AuthForm({
   // so update context directly (no refetch flash) on success.
   function finishAuth(result: AuthResult) {
     if (result.ok) {
+      // A sign-up (or a login after one whose auto-login failed) left the
+      // CompleteRegistration marker; without one this does nothing.
+      reportSignup();
       setCustomer(result.customer);
       onSuccess?.();
       router.refresh();

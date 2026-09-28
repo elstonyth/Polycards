@@ -837,6 +837,27 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
+      // The caller's settled deposits the storefront's Meta Pixel has not
+      // reported yet (GET /store/credits/deposit/unreported). The method-less
+      // '/store/credits' entry above also wraps this path (Express mounts it
+      // by prefix), but that is an accident of its matcher; these entries
+      // state the auth and limits this path needs on their own. A read, so
+      // the shared store read budget.
+      matcher: '/store/credits/deposit/unreported',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // ...and the ack once reported (POST, same path). An idempotent flag
+      // write on the caller's own rows, on its own small tier.
+      matcher: '/store/credits/deposit/unreported',
+      method: 'POST',
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        rateLimit('deposit-pixel-ack'),
+      ],
+    },
+    {
       // Real gateway payout (POST /store/credits/withdraw). Money OUT, so it
       // shares the top-up write tier: authenticated, own limiter. The
       // gateway's callback (POST /hooks/tgpay/withdrawal) is deliberately

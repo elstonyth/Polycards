@@ -16,6 +16,7 @@ import {
 } from '@/lib/payment-limits';
 import { leaveFor } from '@/lib/navigation';
 import { markDepositInFlight } from '@/lib/deposit-return';
+import { trackPixel } from '@/lib/pixel';
 import { Pill } from '@/components/ui/pill';
 import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -178,6 +179,10 @@ export default function TopUpSheet({
     if (submitting || !canPay) return;
     setError(null);
     setSubmitting(true);
+    // Ads funnel (lib/pixel.ts): the customer has started a top-up. Sent
+    // before the checkout call so the beacon is out before the cashier
+    // redirect takes the page away.
+    trackPixel('InitiateCheckout', { value: amount, currency: 'MYR' });
     try {
       if (USE_GATEWAY) {
         const res = await startDeposit(amount, method);
