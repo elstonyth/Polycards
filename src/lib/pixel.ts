@@ -114,7 +114,10 @@ export function reportDeposits(
         seen.push(deposit.reference);
       }
     }
-    localStorage.setItem(key, JSON.stringify(seen.slice(-20)));
+    // Bounded, but far above the backend's SETTLED_LIMIT (10 newest): a
+    // reference only drops off after 100 newer ones, long after it could
+    // come back in that list and be reported twice.
+    localStorage.setItem(key, JSON.stringify(seen.slice(-100)));
   } catch {
     // Storage blocked or corrupt: skip rather than risk reporting twice.
   }

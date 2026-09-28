@@ -105,6 +105,15 @@ const PENDING_LIMIT = 5;
  */
 const SETTLED_REPORT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * How many of those settled deposits to hand over, newest first. The browser
+ * reads this on every visit and while a payment is outstanding, so a deposit
+ * is only missed if this many newer ones settle before it is ever read. Must
+ * stay well under the storefront's remembered-reference cap (reportDeposits
+ * in src/lib/pixel.ts), or a forgotten reference could be reported twice.
+ */
+const SETTLED_LIMIT = 10;
+
 // GET /store/credits/deposit — the caller's OWN in-flight top-ups.
 //
 // Why this exists: the ledger is the only thing /transactions could read, and a
@@ -152,7 +161,7 @@ export async function GET(
         status: 'settled',
         settled_at: { $gte: new Date(Date.now() - SETTLED_REPORT_WINDOW_MS) },
       },
-      { take: PENDING_LIMIT, order: { settled_at: 'DESC' } },
+      { take: SETTLED_LIMIT, order: { settled_at: 'DESC' } },
     ),
     // The customer's first settled deposit ever, for the FirstDeposit flag.
     packs.listGatewayDeposits(
