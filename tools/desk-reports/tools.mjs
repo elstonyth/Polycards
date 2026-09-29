@@ -44,6 +44,13 @@ export const TOOLS = {
       inputSchema: { ...windowArgs, ...groupArg },
       request: windowed('economy'),
     },
+    {
+      name: 'daily_economy',
+      description:
+        'The same totals as economy, split per Malaysia calendar day (days with no activity are left out). The window must be 93 days or less; all_time is not allowed.',
+      inputSchema: { ...windowArgs, ...groupArg },
+      request: windowed('daily'),
+    },
   ],
 };
 

@@ -41,3 +41,25 @@ export async function ledgerTotalsWhere(
   );
   return foldTotals(rows);
 }
+
+/** Ledger totals per Malaysia calendar day, oldest first; a day with no
+ *  ledger rows is left out. */
+export async function ledgerTotalsByDay(
+  db: ReportDb,
+  filter: SqlPart,
+): Promise<Array<{ day: string; totals: LedgerTotals }>> {
+  const { rows } = await db.raw<ReasonCents & { day: string }>(
+    "SELECT to_char(ct.created_at AT TIME ZONE 'Asia/Kuala_Lumpur', 'YYYY-MM-DD') AS day, " +
+      'ct.reason, COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS cents ' +
+      'FROM credit_transaction ct WHERE ct.deleted_at IS NULL' +
+      filter.sql +
+      ' GROUP BY 1, 2 ORDER BY 1',
+    filter.params,
+  );
+  const byDay = new Map<string, ReasonCents[]>();
+  for (const r of rows) byDay.set(r.day, [...(byDay.get(r.day) ?? []), r]);
+  return [...byDay].map(([day, dayRows]) => ({
+    day,
+    totals: foldTotals(dayRows),
+  }));
+}

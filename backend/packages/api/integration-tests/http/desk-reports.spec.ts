@@ -16,6 +16,10 @@ const FINANCE_KEY = 'f'.repeat(48);
 const STORE_KEY = 's'.repeat(48);
 process.env.REPORT_KEY_FINANCE = FINANCE_KEY;
 process.env.REPORT_KEY_STORE = STORE_KEY;
+// Raise the desk-reports limiter for this file: the specs make more report
+// requests than one real desk would, and Redis counters outlive a run.
+process.env.DESK_REPORTS_RATE_BURST_LIMIT = '1000';
+process.env.DESK_REPORTS_RATE_LIMIT = '6000';
 
 type Pg = {
   raw: (
@@ -287,6 +291,60 @@ medusaIntegrationTestRunner({
           from: '2026-01-01T00:00:00.000Z',
           to: '2026-02-01T00:00:00.000Z',
         });
+      });
+    });
+
+    describe('GET /reports/finance/daily', () => {
+      it('buckets totals by Malaysia calendar day', async () => {
+        const rows = await opens([
+          ['cus_day', 10],
+          ['cus_day', 20],
+          ['cus_day', 40],
+        ]);
+        // 23:30 MYT on the 28th, 00:30 MYT on the 29th, and outside the window.
+        await backdate(
+          'credit_transaction',
+          rows[0].id,
+          '2026-09-28T15:30:00.000Z',
+        );
+        await backdate(
+          'credit_transaction',
+          rows[1].id,
+          '2026-09-28T16:30:00.000Z',
+        );
+        await backdate(
+          'credit_transaction',
+          rows[2].id,
+          '2026-09-26T04:00:00.000Z',
+        );
+        const res = await report(
+          'daily?from=2026-09-27T16:00:00.000Z&to=2026-09-29T16:00:00.000Z',
+        );
+        expect(res.status).toBe(200);
+        expect(
+          res.data.days.map(
+            (d: { day: string; totals: { revenue: number } }) => [
+              d.day,
+              d.totals.revenue,
+            ],
+          ),
+        ).toEqual([
+          ['2026-09-28', 10],
+          ['2026-09-29', 20],
+        ]);
+      });
+
+      it('needs both bounds and at most 93 days', async () => {
+        expect(
+          (await report('daily?from=2026-09-01T00:00:00.000Z')).status,
+        ).toBe(400);
+        expect(
+          (
+            await report(
+              'daily?from=2026-01-01T00:00:00.000Z&to=2026-06-01T00:00:00.000Z',
+            )
+          ).status,
+        ).toBe(400);
       });
     });
   },

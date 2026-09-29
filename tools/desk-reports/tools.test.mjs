@@ -10,7 +10,7 @@ const config = {
 };
 
 test('the finance desk tools', () => {
-  assert.deepEqual(Object.keys(finance), ['economy']);
+  assert.deepEqual(Object.keys(finance), ['economy', 'daily_economy']);
 });
 
 test('economy maps a period and group onto the economy route', () => {
@@ -22,6 +22,20 @@ test('economy maps a period and group onto the economy route', () => {
       label: 'all time',
     },
   );
+});
+
+test('daily_economy maps onto the daily route', () => {
+  const r = finance.daily_economy.request({
+    period: 'custom',
+    from: '2026-09-01',
+    to: '2026-09-07',
+  });
+  assert.equal(r.path, 'daily');
+  assert.deepEqual(r.params, {
+    from: '2026-08-31T16:00:00.000Z',
+    to: '2026-09-07T16:00:00.000Z',
+    group: undefined,
+  });
 });
 
 test('runTool returns the report with its period, or the error as text', async () => {
