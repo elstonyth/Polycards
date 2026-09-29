@@ -795,6 +795,9 @@ export const useStats = (
     queryFn: () => getStatsReport(range, from, to),
     placeholderData: keepPreviousData,
     enabled: range !== 'custom' || (from !== '' && to !== '' && from <= to),
+    // The dashboard's QueryClient disables focus refetch; "today" is live,
+    // so coming back to the tab should show fresh numbers.
+    refetchOnWindowFocus: true,
   });
 ```
 
@@ -1094,6 +1097,10 @@ Start the local stack with the `launching-pokenic-stack` skill: backend on :9000
 2. Every preset switches the numbers without a skeleton flash.
 3. Custom with a reversed range shows the hint.
 4. Profile → Language → 简体中文 turns the page Chinese.
+5. The invite handoff works end to end:
+   - Settings → Users → Invite, with the Super Admin role selected.
+   - Copy invite link, and check its host and `/dashboard` base.
+   - Accept the invite in a private window, log in, then load Stats and one core page such as Orders.
 
 Take a screenshot of the English and the Chinese page. Cross-check the local numbers with the SQL from Task 2, run through the postgres MCP.
 
@@ -1108,4 +1115,4 @@ git commit -m "feat(admin): Stats page — sign-ups and top-ups vs the previous 
 
 ## Handoff: accounts (no code)
 
-After the change is deployed, the operator opens `https://admin.polycards.gg/dashboard`, goes to Settings → Users → Invite, enters each stakeholder's email, then uses "Copy invite link" and sends the link privately. Each person sets their own password. To see the page in Chinese, they choose Profile → Language → 简体中文.
+After the change is deployed, the operator opens `https://admin.polycards.gg/dashboard`, goes to Settings → Users → Invite, enters each stakeholder's email, **selects the Super Admin role** (RBAC gives an invite no default role), then uses "Copy invite link" and sends the link privately. Each person sets their own password. To see the page in Chinese, they choose Profile → Language → 简体中文.

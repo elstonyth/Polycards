@@ -25,6 +25,11 @@ against the previous period, and the previous value.
 4. **Accounts: the dashboard's built-in invite.** Settings → Users → Invite,
    then "Copy invite link". The operator sends the link privately and each
    person sets their own password. No provisioning code.
+
+   **Select the Super Admin role in the invite form.** RBAC is on, and
+   Medusa's accept-invite gives the new user only the roles attached to the
+   invite. It has no default, whatever the form's tooltip says, so a user
+   with no role is refused by every core route that declares a policy.
 5. **Chinese labels through i18n.** The page's strings get `en.json` keys plus
    a new `zhCN.json`. The page reads in Chinese when a user's dashboard
    language is 简体中文 (Profile → Language).
@@ -143,5 +148,6 @@ clamps that back. So on 31 March the previous window is all of February.
 - Withdrawals, active players, pack revenue and margin.
 - A read-only viewer role.
 - Env-driven provisioning of accounts.
-- Auto-refresh. React Query refetches when the window regains focus, which is
-  enough for "today".
+- Timed auto-refresh. The dashboard's QueryClient turns refetch-on-focus off
+  (`refetchOnWindowFocus: false`, `staleTime` 90s). `useStats` turns it back
+  on, so "today" updates whenever the tab regains focus, and that is enough.
