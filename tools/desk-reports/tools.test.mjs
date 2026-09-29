@@ -10,7 +10,11 @@ const config = {
 };
 
 test('the finance desk tools', () => {
-  assert.deepEqual(Object.keys(finance), ['economy', 'daily_economy']);
+  assert.deepEqual(Object.keys(finance), [
+    'economy',
+    'daily_economy',
+    'payments',
+  ]);
 });
 
 test('economy maps a period and group onto the economy route', () => {

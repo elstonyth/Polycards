@@ -51,6 +51,13 @@ export const TOOLS = {
       inputSchema: { ...windowArgs, ...groupArg },
       request: windowed('daily'),
     },
+    {
+      name: 'payments',
+      description:
+        'Payment-gateway deposits and withdrawals created in the window, counted and summed per status (pending, settled, failed, expired; withdrawals also held = waiting for admin approval), plus what is open right now whatever the window. Amounts in RM (MYR).',
+      inputSchema: { ...windowArgs, ...groupArg },
+      request: windowed('payments'),
+    },
   ],
 };
 

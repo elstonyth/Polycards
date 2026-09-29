@@ -347,5 +347,100 @@ medusaIntegrationTestRunner({
         ).toBe(400);
       });
     });
+
+    describe('GET /reports/finance/payments', () => {
+      it('counts deposits and withdrawals by status, scoped by group, plus what is open now', async () => {
+        const c = customers();
+        const plain = (
+          await c.createCustomers({ email: 'dr-pay-plain@test.dev' })
+        ).id;
+        const partner = (
+          await c.createCustomers({ email: 'dr-pay-partner@test.dev' })
+        ).id;
+        const partners = await c.createCustomerGroups({ name: 'Partners' });
+        await c.addCustomerToGroup({
+          customer_id: partner,
+          customer_group_id: partners.id,
+        });
+        const deposit = (
+          customer_id: string,
+          n: string,
+          status: 'pending' | 'settled' | 'failed',
+          requested: number,
+          settled: number | null = null,
+        ) => ({
+          merchant_transaction_id: `dr-dep-${n}`,
+          customer_id,
+          amount_requested: requested,
+          amount_settled: settled,
+          payment_method_code: 'BQR',
+          status,
+        });
+        const deposits = await packs().createGatewayDeposits([
+          deposit(plain, '1', 'settled', 100, 100),
+          deposit(plain, '2', 'pending', 50),
+          deposit(plain, '3', 'failed', 20),
+          deposit(partner, '4', 'settled', 70, 70),
+          deposit(plain, '5', 'pending', 15), // old: outside the window, still open
+        ]);
+        await backdate(
+          'gateway_deposit',
+          deposits[4].id,
+          '2026-01-10T00:00:00.000Z',
+        );
+        const withdrawal = (
+          customer_id: string,
+          n: string,
+          status: 'pending' | 'settled' | 'held',
+          amount: number,
+          settled: number | null = null,
+        ) => ({
+          merchant_transaction_id: `dr-wd-${n}`,
+          customer_id,
+          amount,
+          amount_settled: settled,
+          bank_code: 'MBB',
+          account_number: '1234567890',
+          account_holder_name: 'Test Person',
+          status,
+        });
+        await packs().createGatewayWithdrawals([
+          withdrawal(plain, '1', 'held', 30),
+          withdrawal(plain, '2', 'pending', 40),
+          withdrawal(plain, '3', 'settled', 60, 60),
+          withdrawal(partner, '4', 'held', 90),
+        ]);
+
+        const since = 'from=2026-06-01T00:00:00.000Z';
+        const all = await report(`payments?${since}`);
+        expect(all.status).toBe(200);
+        expect(all.data.deposits.by_status).toEqual({
+          pending: { count: 1, requested: 50, settled: 0 },
+          settled: { count: 2, requested: 170, settled: 170 },
+          failed: { count: 1, requested: 20, settled: 0 },
+          expired: { count: 0, requested: 0, settled: 0 },
+        });
+        expect(all.data.deposits.open_now).toEqual({
+          pending: { count: 2, requested: 65, settled: 0 },
+        });
+        expect(all.data.withdrawals.open_now).toEqual({
+          pending: { count: 1, requested: 40, settled: 0 },
+          held: { count: 2, requested: 120, settled: 0 },
+        });
+        expect(JSON.stringify(all.data)).not.toContain('1234567890');
+
+        const scoped = await report(`payments?${since}&group=default`);
+        expect(scoped.data.deposits.by_status.settled).toEqual({
+          count: 1,
+          requested: 100,
+          settled: 100,
+        });
+        expect(scoped.data.withdrawals.by_status.held).toEqual({
+          count: 1,
+          requested: 30,
+          settled: 0,
+        });
+      });
+    });
   },
 });

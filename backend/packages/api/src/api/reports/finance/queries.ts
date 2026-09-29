@@ -63,3 +63,57 @@ export async function ledgerTotalsByDay(
     totals: foldTotals(dayRows),
   }));
 }
+
+export type StatusTotals = {
+  count: number;
+  requested: number;
+  settled: number;
+};
+
+// Table and requested-amount column per gateway flow. Withdrawals are
+// requested on `amount` (the debit basis); both record `amount_settled`.
+const GATEWAY = {
+  deposits: { table: 'gateway_deposit', requested: 'amount_requested' },
+  withdrawals: { table: 'gateway_withdrawal', requested: 'amount' },
+} as const;
+
+/** Count and requested/settled sums per status over rows (alias g) matching
+ *  `filter` and in `statuses`; every listed status is present, zero when
+ *  empty. Never selects the bank account columns. */
+export async function statusTotals(
+  db: ReportDb,
+  kind: keyof typeof GATEWAY,
+  statuses: readonly string[],
+  filter: SqlPart,
+): Promise<Record<string, StatusTotals>> {
+  const { table, requested } = GATEWAY[kind];
+  const { rows } = await db.raw<{
+    status: string;
+    n: string;
+    requested_cents: string;
+    settled_cents: string;
+  }>(
+    'SELECT g.status, COUNT(*)::bigint AS n, ' +
+      `COALESCE(SUM(ROUND(g.${requested} * 100)), 0)::bigint AS requested_cents, ` +
+      'COALESCE(SUM(ROUND(g.amount_settled * 100)), 0)::bigint AS settled_cents ' +
+      `FROM ${table} g WHERE g.deleted_at IS NULL ` +
+      `AND g.status IN (${statuses.map(() => '?').join(', ')})` +
+      filter.sql +
+      ' GROUP BY g.status',
+    [...statuses, ...filter.params],
+  );
+  const found = new Map(rows.map((r) => [r.status, r]));
+  return Object.fromEntries(
+    statuses.map((status) => {
+      const r = found.get(status);
+      return [
+        status,
+        {
+          count: Number(r?.n ?? 0),
+          requested: Number(r?.requested_cents ?? 0) / 100,
+          settled: Number(r?.settled_cents ?? 0) / 100,
+        },
+      ];
+    }),
+  );
+}
