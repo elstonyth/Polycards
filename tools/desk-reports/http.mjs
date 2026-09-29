@@ -34,7 +34,14 @@ export async function getReport({
     );
   }
   const body = await res.json().catch(() => null);
-  if (res.ok) return body;
+  if (res.ok) {
+    // A 2xx that is not a JSON object (an HTML page, an empty or cut-off
+    // body) is a failure, never a blank report.
+    if (body !== null && typeof body === 'object') return body;
+    throw new ReportError(
+      'The backend sent an unreadable report. Try again in a minute.',
+    );
+  }
   if (res.status === 400 || res.status === 404) {
     throw new ReportError(
       body?.message ?? `The backend rejected the request (${res.status}).`,

@@ -64,6 +64,12 @@ test('turns every failure into a sentence without the key in it', async () => {
     ],
     [reply(429, {}), /Too many/],
     [reply(500, {}), /failed \(500\)/],
+    // A 2xx with no JSON object body is a failure, not a blank report.
+    [
+      async () => new Response('<html>oops</html>', { status: 200 }),
+      /unreadable/,
+    ],
+    [async () => new Response('', { status: 200 }), /unreadable/],
     [
       async () => {
         throw new TypeError('fetch failed');
