@@ -74,12 +74,14 @@ Discord ──► Hermes desk bot (owner's PC)
 
 `scripts/do-apply.ps1` replaces the whole app spec on every apply. A key set only in the DigitalOcean dashboard would therefore vanish at the next apply. The order is:
 
-1. Merge. The report routes answer 503 until their key exists, which is the fail-closed state.
-2. Generate one key and write it into `deploy/.env.deploy` (main checkout) and the desk profile's `.env`. The value is never printed.
-3. Add the `__SECRET__REPORT_KEY_<DESK>__` placeholder to `.do/backend.app.yaml` and the key name to `do-apply.ps1`, together.
-4. Apply.
+1. The feature PR carries the `__SECRET__REPORT_KEY_<DESK>__` placeholder (in `.do/backend.app.yaml`) and the key name in `do-apply.ps1`, together.
+2. Before merging, generate the key with `tools/desk-reports/provision-key.mjs` into `deploy/.env.deploy` (main checkout) and the desk profile's `.env`. The value is never printed.
+3. Merge. The report routes answer 503 until the key is applied, which is the fail-closed state.
+4. Apply with `do-apply.ps1` (`-Validate` first).
 
-Steps 2 and 4 each need the operator's explicit OK.
+Steps 2, 3 and 4 each need the operator's explicit OK.
+
+The key goes in before the merge because, once the PR is merged, every `do-apply.ps1 backend` run throws until `deploy/.env.deploy` holds a value for it.
 
 ## Phase A: Finance reports
 
