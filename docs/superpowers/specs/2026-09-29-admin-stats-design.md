@@ -100,7 +100,9 @@ clamps that back. So on 31 March the previous window is all of February.
 ## Admin page
 
 - `apps/admin/src/routes/stats/page.tsx`, with nav label "Stats",
-  `ChartBar` icon and a rank that sorts it first.
+  `ChartBar` icon and `rank: 0`. That puts it in the top group of the custom
+  nav: the SDK reads only a numeric literal, so a negative rank would be
+  ignored.
 - Layout:
   - A row of preset buttons. 自定义 reveals two `<Input type="date">` fields,
     following the ledger page's pattern.
