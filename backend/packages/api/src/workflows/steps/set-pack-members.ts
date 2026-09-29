@@ -10,10 +10,16 @@ import {
   type OddsRarity,
 } from '@acme/odds-math';
 import { pageAll } from '../../api/utils/page-all';
+import {
+  configAuditRow,
+  oddsSnapshot,
+  sameConfig,
+} from '../../modules/packs/config-audit';
 
 export type SetPackMembersInput = {
   pack_id: string; // = Pack.slug
   card_ids: string[]; // the DESIRED full membership (Card.handle list)
+  admin_id: string; // the acting admin (auth_context.actor_id), for the audit row
 };
 
 // A freshly added member gets a positive relative weight so it can be rolled
@@ -282,12 +288,48 @@ export const setPackMembersInvoke = async (
     locked: o.locked,
   }));
 
+  // Audit: the pool as stored before, and as this edit wrote it — survivors
+  // carry the weights written for them (balanced, or collapsed on the degraded
+  // path), new members join as unlocked Commons, removed cards are gone.
+  const collapsedIds = new Set(collapse.map((o) => o.id));
+  const survivorsAfter = survivors.map((o) => {
+    const row = rowByCard?.get(o.card_id);
+    if (row) return { ...o, ...row };
+    return collapsedIds.has(o.id)
+      ? { ...o, weight_2: null, weight_3: null }
+      : o;
+  });
+  const createdAfter = toAdd.map((card_id) => {
+    const row = rowByCard?.get(card_id);
+    return {
+      card_id,
+      rarity: 'Common',
+      weight: row?.weight ?? NEW_MEMBER_WEIGHT,
+      weight_2: row?.weight_2 ?? null,
+      weight_3: row?.weight_3 ?? null,
+      locked: false,
+    };
+  });
+  const before = oddsSnapshot(existing);
+  const after = oddsSnapshot([...survivorsAfter, ...createdAfter]);
+  const audit = sameConfig(before, after)
+    ? null
+    : configAuditRow({
+        adminId: input.admin_id,
+        entityType: 'pack',
+        entityId: input.pack_id,
+        action: 'edit_members',
+        before,
+        after,
+      });
+
   return new StepResponse(
     {
       pack_id: input.pack_id,
       members: desired,
       added: toAdd.length,
       removed: toRemove.length,
+      audit,
     },
     { createdIds, removed, reweighted } satisfies CompensateData,
   );

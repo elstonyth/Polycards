@@ -1,4 +1,8 @@
-import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import {
+  AuthenticatedMedusaRequest,
+  MedusaRequest,
+  MedusaResponse,
+} from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../../modules/packs';
@@ -169,9 +173,7 @@ export async function GET(
       // tier_settings singleton. Null vs {} matters: a stored (even empty)
       // map replaces the global ladder wholesale for this pack.
       tier_ranges:
-        pack.tier_ranges == null
-          ? null
-          : normalizeTierRanges(pack.tier_ranges),
+        pack.tier_ranges == null ? null : normalizeTierRanges(pack.tier_ranges),
     },
     odds: rows,
   });
@@ -274,27 +276,25 @@ export function coerceOddsEntries(raw: unknown): SetEntry[] {
 // even-split workflow. Domain validation (Σlocked ≤ 100, all-locked ⇒ Σ == 100,
 // card-set match) lives in the workflow; here we only coerce the body shape.
 export async function POST(
-  req: MedusaRequest,
+  req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
   const { slug } = req.params;
   const body = (req.body ?? {}) as SaveBody;
   const entries = coerceOddsEntries(body.entries);
   // Coerced/validated BEFORE the workflow runs, so a bad target 400s without
-  // writing any odds (see coerceTargetRtpBps above `bad`'s throw).
+  // writing any odds (see coerceTargetRtpBps above `bad`'s throw). The workflow
+  // writes it with the odds, so it is compensated and audited with them.
   const targetRtpBps = coerceTargetRtpBps(req.body ?? {});
 
   const { result } = await savePackOddsWorkflow(req.scope).run({
-    input: { pack_id: slug, entries },
+    input: {
+      pack_id: slug,
+      entries,
+      target_rtp_bps: targetRtpBps,
+      admin_id: req.auth_context.actor_id,
+    },
   });
-
-  if (targetRtpBps !== undefined) {
-    const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
-    const [pack] = await packs.listPacks({ slug }, { take: 1 });
-    if (pack) {
-      await packs.updatePacks([{ id: pack.id, target_rtp_bps: targetRtpBps }]);
-    }
-  }
 
   // A per-card rarity change is shown on the storefront detail (Top Hits +
   // the reel's rarity lighting), so bust the 30s detail cache IN THIS PROCESS;

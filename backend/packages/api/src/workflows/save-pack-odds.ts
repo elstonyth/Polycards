@@ -1,22 +1,28 @@
 import {
   createWorkflow,
+  transform,
   WorkflowResponse,
 } from "@medusajs/framework/workflows-sdk";
 import { savePackOddsStep, type SavePackOddsInput } from "./steps/save-pack-odds";
+import { recordAdminAuditStep } from "./steps/record-admin-audit";
 
 // save-pack-odds — the admin win-rate editor's save process.
 //
-//   validate + even-split + persist (compensated)
+//   validate + even-split + persist odds and target RTP (compensated)
+//   → record the before/after audit row
 //
-// A single mutating step today; the compensation (restore the prior odds
-// snapshot) is in place so an audit/event step can be appended later without
-// risking a half-applied save. The composition body stays pure — all logic
-// (validation, the even-split math, the DB read/write) lives inside the step.
+// The audit row is the LAST step: if it cannot be written, the engine restores
+// the prior odds (and target RTP) through the save step's compensation, so no
+// odds change ever lands without a record. The response is still the set-1
+// computed odds the editor reads.
 export const savePackOddsWorkflow = createWorkflow(
   "save-pack-odds",
   function (input: SavePackOddsInput) {
-    const computed = savePackOddsStep(input);
-    return new WorkflowResponse(computed);
+    const result = savePackOddsStep(input);
+    recordAdminAuditStep(transform({ result }, (d) => d.result.audit));
+    return new WorkflowResponse(
+      transform({ result }, (d) => d.result.computed)
+    );
   }
 );
 

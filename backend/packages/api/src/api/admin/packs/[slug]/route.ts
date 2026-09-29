@@ -1,4 +1,8 @@
-import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
+import {
+  AuthenticatedMedusaRequest,
+  MedusaRequest,
+  MedusaResponse,
+} from "@medusajs/framework/http";
 import PacksModuleService from "../../../../modules/packs/service";
 import { PACKS_MODULE } from "../../../../modules/packs";
 import { updatePackWorkflow } from "../../../../workflows/update-pack";
@@ -59,11 +63,15 @@ export async function GET(
 // POST /admin/packs/:slug — update a pack. `slug` is immutable (it keys PackOdds
 // and the /claw route), so it comes from the path, never the body.
 export async function POST(
-  req: MedusaRequest,
+  req: AuthenticatedMedusaRequest,
   res: MedusaResponse
 ): Promise<void> {
   const { slug } = req.params;
-  const input = coercePackBody((req.body ?? {}) as Record<string, unknown>, slug);
+  // admin_id from the verified session only — it attributes the audit row.
+  const input = {
+    ...coercePackBody((req.body ?? {}) as Record<string, unknown>, slug),
+    admin_id: req.auth_context.actor_id,
+  };
 
   // Only ONE free_welcome pack may be live. Re-saving the pack that IS the live
   // one passes (same slug); activating a second one 400s.
@@ -83,11 +91,13 @@ export async function POST(
 // DELETE /admin/packs/:slug — delete a pack and its prize-pool membership
 // (cards + Pull history kept).
 export async function DELETE(
-  req: MedusaRequest,
+  req: AuthenticatedMedusaRequest,
   res: MedusaResponse
 ): Promise<void> {
   const { slug } = req.params;
-  await deletePackWorkflow(req.scope).run({ input: { slug } });
+  await deletePackWorkflow(req.scope).run({
+    input: { slug, admin_id: req.auth_context.actor_id },
+  });
   bustPackCaches();
   res.json({ deleted: true, slug });
 }

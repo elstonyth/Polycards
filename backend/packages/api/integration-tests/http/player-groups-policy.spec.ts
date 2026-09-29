@@ -207,8 +207,8 @@ medusaIntegrationTestRunner({
       });
 
       // The native metadata write has no bounds and no audit, so the policy
-      // keys are refused there — /policy is their only writer. odds_set, the
-      // one key this app writes natively, still passes.
+      // keys are refused there — /policy is their only writer. An existing
+      // group's odds_set is refused there too — /odds-set is its only writer.
       it('refuses partner-policy keys on the native metadata routes', async () => {
         const smuggled = await unwrapResponse(
           api.post(
@@ -222,15 +222,38 @@ medusaIntegrationTestRunner({
         const stored = await customerModule().retrieveCustomerGroup(groupId);
         expect(stored.metadata?.partner_rate_bp).toBeUndefined();
 
-        const odds = await unwrapResponse(
+        // odds_set on an EXISTING group is refused natively too (2026-09-30):
+        // /odds-set is its only writer, so every change is recorded.
+        const nativeOdds = await unwrapResponse(
           api.post(
             `/admin/customer-groups/${groupId}`,
             { metadata: { odds_set: 3 } },
             { headers: adminHeaders() },
           ),
         );
+        expect(nativeOdds.status).toBe(400);
+        expect(nativeOdds.data.message).toMatch(
+          /customer-groups\/:id\/odds-set/,
+        );
+
+        const odds = await unwrapResponse(
+          api.post(
+            `/admin/customer-groups/${groupId}/odds-set`,
+            { odds_set: 3 },
+            { headers: adminHeaders() },
+          ),
+        );
         expect(odds.status).toBe(200);
         expect(odds.data.customer_group.metadata.odds_set).toBe(3);
+        const [audit] = await packs().listAdminActionAudits(
+          {
+            entity_type: 'customer_group',
+            entity_id: groupId,
+            action: 'edit_odds_set',
+          },
+          { take: 1 },
+        );
+        expect(audit?.after).toEqual({ odds_set: 3 });
       });
 
       it('refuses a manual partner rate while the player is in a partner group, and reports the source', async () => {

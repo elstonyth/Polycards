@@ -122,9 +122,7 @@ const coercePublishedOdds = (v: unknown): PublishedOdds | null | undefined => {
   ) {
     bad(`'published_odds.tiers' must be an object.`);
   }
-  const decimals = publishedDecimals(
-    (o as Record<string, unknown>).decimals,
-  );
+  const decimals = publishedDecimals((o as Record<string, unknown>).decimals);
   const tiersIn = (rawTiers ?? {}) as Record<string, unknown>;
   const tiers: PublishedOdds['tiers'] = {};
   for (const r of RARITIES) {
@@ -212,7 +210,12 @@ export function coercePackBody(raw: unknown, slug: string): PackWriteInput {
   // Buyback %: the INSTANT (on-the-spot) rate. Omitted → the flat rate (90).
   // A set rate may never undercut the flat rate — vault/inventory sells always
   // pay flat, so an instant rate below it would invert the keep/sell incentive.
-  const buybackPercent = Math.trunc(num(b, 'buyback_percent', FLAT_PERCENT));
+  // Whole numbers only, refused rather than truncated: 92.5 used to save as 92
+  // without a word, so what the operator typed was not what customers got.
+  const buybackPercent = num(b, 'buyback_percent', FLAT_PERCENT);
+  if (!Number.isInteger(buybackPercent)) {
+    bad(`'buyback_percent' must be a whole number (no decimals).`);
+  }
   if (buybackPercent < FLAT_PERCENT || buybackPercent > 100) {
     bad(
       `'buyback_percent' must be between the flat rate (${FLAT_PERCENT}) and 100.`,
