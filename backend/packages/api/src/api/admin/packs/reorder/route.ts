@@ -1,4 +1,7 @@
-import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import type {
+  AuthenticatedMedusaRequest,
+  MedusaResponse,
+} from '@medusajs/framework/http';
 import { reorderPacksWorkflow } from '../../../../workflows/reorder-packs';
 import { coerceReorderBody } from '../validate';
 import { clearPackListCache } from '../../../store/packs/route';
@@ -10,10 +13,14 @@ import { clearAdminPackListCache } from '../route';
 // updates, which half-applied a swap whenever one row tripped the activation
 // guard. Rank never affects rollability, so no guard runs here.
 export async function POST(
-  req: MedusaRequest,
+  req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const input = coerceReorderBody(req.body ?? {});
+  // admin_id from the verified session only — it attributes the audit row.
+  const input = {
+    ...coerceReorderBody(req.body ?? {}),
+    admin_id: req.auth_context.actor_id,
+  };
 
   const { result } = await reorderPacksWorkflow(req.scope).run({ input });
 

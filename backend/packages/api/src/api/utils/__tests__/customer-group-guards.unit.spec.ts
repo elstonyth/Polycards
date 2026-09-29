@@ -1,11 +1,63 @@
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import {
   blockGroupWithdrawals,
+  GROUP_ODDS_SET_METADATA_MESSAGE,
   GROUP_POLICY_METADATA_MESSAGE,
+  rejectGroupOddsSetUpdate,
   rejectGroupPolicyMetadata,
   stripAdditionalData,
   WITHDRAWALS_BLOCKED_MESSAGE,
 } from '../customer-group-guards';
+
+describe('rejectGroupOddsSetUpdate', () => {
+  const run = (path: string, body: unknown) =>
+    new Promise<unknown>((resolve) => {
+      rejectGroupOddsSetUpdate({ path, body } as never, {} as never, resolve);
+    });
+
+  // The native update merges metadata with no record, so changing an existing
+  // group's odds set must go through the audited /odds-set route.
+  it('refuses an odds_set change on the native update route', async () => {
+    const err = (await run('/admin/customer-groups/cg_1', {
+      metadata: { odds_set: 3 },
+    })) as MedusaError;
+    expect(err).toBeInstanceOf(MedusaError);
+    expect(err.type).toBe(MedusaError.Types.INVALID_DATA);
+    expect(err.message).toBe(GROUP_ODDS_SET_METADATA_MESSAGE);
+  });
+
+  // A new group has no members, so the set it is born with changes nobody's
+  // odds — the admin's create flow keeps using the native route.
+  it('passes the odds set a group is created with', async () => {
+    expect(
+      await run('/admin/customer-groups', {
+        name: 'pro',
+        metadata: { odds_set: 2 },
+      }),
+    ).toBeUndefined();
+    expect(
+      await run('/admin/customer-groups/', {
+        name: 'pro',
+        metadata: { odds_set: 2 },
+      }),
+    ).toBeUndefined();
+  });
+
+  it('passes a rename and the membership and policy routes', async () => {
+    expect(
+      await run('/admin/customer-groups/cg_1', { name: 'whales' }),
+    ).toBeUndefined();
+    expect(
+      await run('/admin/customer-groups/cg_1/customers', { add: ['cus_1'] }),
+    ).toBeUndefined();
+    expect(
+      await run('/admin/customer-groups/cg_1/policy', {
+        partner_rate_bp: null,
+      }),
+    ).toBeUndefined();
+    expect(await run('/admin/customer-groups/cg_1', undefined)).toBeUndefined();
+  });
+});
 
 describe('rejectGroupPolicyMetadata', () => {
   const run = (body: unknown) =>
@@ -20,7 +72,9 @@ describe('rejectGroupPolicyMetadata', () => {
     ['withdrawals_blocked', true],
     ['verification_exempt', false],
   ])('refuses metadata carrying %s', async (key, value) => {
-    const err = (await run({ metadata: { odds_set: 2, [key]: value } })) as MedusaError;
+    const err = (await run({
+      metadata: { odds_set: 2, [key]: value },
+    })) as MedusaError;
     expect(err).toBeInstanceOf(MedusaError);
     expect(err.type).toBe(MedusaError.Types.INVALID_DATA);
     expect(err.message).toBe(GROUP_POLICY_METADATA_MESSAGE);

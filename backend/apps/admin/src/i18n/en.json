@@ -613,7 +613,8 @@
     "action": {
       "freeze": "Freeze account",
       "unfreeze": "Unfreeze account",
-      "adjust_credit": "Adjust credits"
+      "adjust_credit": "Adjust credits",
+      "set_player_group": "Moved to another player group"
     }
   },
   "economy": {

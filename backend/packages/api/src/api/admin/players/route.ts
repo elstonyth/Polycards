@@ -231,7 +231,13 @@ export async function POST(
 
   const players: PartnerAccountRow[] = [];
   for (let i = 0; i < count; i++) {
-    players.push(await mintPartnerAccount(req.scope, { displayName, groupId }));
+    players.push(
+      await mintPartnerAccount(req.scope, {
+        displayName,
+        groupId,
+        adminId: req.auth_context.actor_id,
+      }),
+    );
   }
   res.status(201).json({ players });
 }

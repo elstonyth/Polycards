@@ -87,6 +87,47 @@ export function rejectGroupPolicyMetadata(
   next();
 }
 
+export const GROUP_ODDS_SET_METADATA_MESSAGE =
+  "A group's odds set is changed through POST /admin/customer-groups/:id/odds-set (the Odds sets screen), which records the change.";
+
+// POST /admin/customer-groups — the native CREATE route (trailing slash too).
+const NATIVE_CREATE_PATH = /^\/admin\/customer-groups\/?$/;
+
+/**
+ * Same matcher as stripAdditionalData: refuse `metadata.odds_set` on the
+ * native UPDATE route (and any sub-route), so an existing group's odds set is
+ * only ever changed through POST /admin/customer-groups/:id/odds-set, which
+ * records the change (editGroupOddsSet). Without this, the prebuilt
+ * dashboard's Metadata editor could move every member onto different odds
+ * with nothing in the audit trail.
+ *
+ * CREATE passes: a new group has no members, so the set it is born with
+ * changes nobody's odds, and the admin's create flow sends it there.
+ */
+export function rejectGroupOddsSetUpdate(
+  req: MedusaRequest,
+  _res: MedusaResponse,
+  next: MedusaNextFunction,
+): void {
+  const body = req.body as Record<string, unknown> | null | undefined;
+  const metadata = body?.metadata as Record<string, unknown> | null | undefined;
+  if (
+    metadata &&
+    typeof metadata === 'object' &&
+    'odds_set' in metadata &&
+    !NATIVE_CREATE_PATH.test((req.path ?? '').toLowerCase())
+  ) {
+    next(
+      new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        GROUP_ODDS_SET_METADATA_MESSAGE,
+      ),
+    );
+    return;
+  }
+  next();
+}
+
 export const WITHDRAWALS_BLOCKED_MESSAGE =
   'Withdrawals are not available on this account.';
 

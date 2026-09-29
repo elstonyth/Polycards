@@ -2,8 +2,10 @@ import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import { MedusaError } from '@medusajs/framework/utils';
 import { RARITIES, type OddsRarity, type TierRangeMap } from '@acme/odds-math';
 import { fillTierRanges } from '../../modules/packs/tier-settings-validate';
+import type { MedusaContainer } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
+import { configAuditRow, packConfig } from '../../modules/packs/config-audit';
 
 // PUBLIC display odds ({ overall win %, per-tier % }) shown to players —
 // completely decoupled from the secret PackOdds weights driving the draw.
@@ -90,69 +92,87 @@ export type PackWriteInput = {
 
 type CompensateData = { packId: string } | undefined;
 
+// admin_id is the acting admin (auth_context.actor_id) for the audit row.
+export type CreatePackInput = PackWriteInput & { admin_id: string };
+
 // create-pack — create a gacha Pack listing. A new pack has an EMPTY prize pool
 // (no PackOdds yet); cards are assigned via the membership editor. Compensation
-// deletes the created pack.
+// deletes the created pack. The output carries the audit row for the
+// workflow's final record-admin-audit step.
+export const createPackInvoke = async (
+  input: CreatePackInput,
+  { container }: { container: MedusaContainer },
+) => {
+  const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+
+  // A new pack's prize pool is empty by construction, so an active creation
+  // could never be opened — every storefront spin would fail. Enforce the
+  // draft → assign cards → activate lifecycle.
+  if (input.status === 'active') {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'A new pack starts with an empty prize pool and cannot be active. ' +
+        'Create it as a draft, add cards on the pack page, then activate it.',
+    );
+  }
+
+  const [existing] = await packs.listPacks({ slug: input.slug }, { take: 1 });
+  if (existing) {
+    throw new MedusaError(
+      MedusaError.Types.DUPLICATE_ERROR,
+      `A pack with slug '${input.slug}' already exists.`,
+    );
+  }
+
+  const [pack] = await packs.createPacks([
+    {
+      slug: input.slug,
+      title: input.title,
+      category: input.category,
+      price: input.price,
+      image: input.image,
+      display_image: input.display_image ?? null,
+      buyback_percent: input.buyback_percent,
+      boost: input.boost,
+      rank: input.rank,
+      status: input.status,
+      // Full-key shapes from birth (see fillPublishedTiers/fillTierRanges):
+      // an insert has no merge hazard itself, but a sparse stored map makes
+      // every LATER update/rollback merge-prone — store only null or the
+      // full-key form so the invariant holds everywhere.
+      published_odds: (input.published_odds == null
+        ? null
+        : {
+            overall: input.published_odds.overall,
+            tiers: fillPublishedTiers(input.published_odds.tiers),
+            decimals: input.published_odds.decimals,
+          }) as unknown as Record<string, unknown> | null,
+      tier_ranges: (input.tier_ranges == null
+        ? null
+        : fillTierRanges(input.tier_ranges)) as unknown as Record<
+        string,
+        unknown
+      > | null,
+    },
+  ]);
+
+  const audit = configAuditRow({
+    adminId: input.admin_id,
+    entityType: 'pack',
+    entityId: pack.slug,
+    action: 'create',
+    before: null,
+    after: packConfig(pack),
+  });
+
+  return new StepResponse({ slug: pack.slug, audit }, {
+    packId: pack.id,
+  } satisfies CompensateData);
+};
+
 export const createPackStep = createStep(
   'create-pack',
-  async (input: PackWriteInput, { container }) => {
-    const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-
-    // A new pack's prize pool is empty by construction, so an active creation
-    // could never be opened — every storefront spin would fail. Enforce the
-    // draft → assign cards → activate lifecycle.
-    if (input.status === 'active') {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        'A new pack starts with an empty prize pool and cannot be active. ' +
-          'Create it as a draft, add cards on the pack page, then activate it.',
-      );
-    }
-
-    const [existing] = await packs.listPacks({ slug: input.slug }, { take: 1 });
-    if (existing) {
-      throw new MedusaError(
-        MedusaError.Types.DUPLICATE_ERROR,
-        `A pack with slug '${input.slug}' already exists.`,
-      );
-    }
-
-    const [pack] = await packs.createPacks([
-      {
-        slug: input.slug,
-        title: input.title,
-        category: input.category,
-        price: input.price,
-        image: input.image,
-        display_image: input.display_image ?? null,
-        buyback_percent: input.buyback_percent,
-        boost: input.boost,
-        rank: input.rank,
-        status: input.status,
-        // Full-key shapes from birth (see fillPublishedTiers/fillTierRanges):
-        // an insert has no merge hazard itself, but a sparse stored map makes
-        // every LATER update/rollback merge-prone — store only null or the
-        // full-key form so the invariant holds everywhere.
-        published_odds: (input.published_odds == null
-          ? null
-          : {
-              overall: input.published_odds.overall,
-              tiers: fillPublishedTiers(input.published_odds.tiers),
-              decimals: input.published_odds.decimals,
-            }) as unknown as Record<string, unknown> | null,
-        tier_ranges: (input.tier_ranges == null
-          ? null
-          : fillTierRanges(input.tier_ranges)) as unknown as Record<
-          string,
-          unknown
-        > | null,
-      },
-    ]);
-
-    return new StepResponse({ slug: pack.slug }, {
-      packId: pack.id,
-    } satisfies CompensateData);
-  },
+  createPackInvoke,
   async (data: CompensateData, { container }) => {
     if (!data) return;
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);

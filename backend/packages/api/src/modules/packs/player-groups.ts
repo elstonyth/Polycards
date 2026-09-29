@@ -5,10 +5,13 @@ import type {
   MedusaContainer,
 } from '@medusajs/framework/types';
 import {
+  coerceOddsSet,
   DEFAULT_PLAYER_GROUP_FLAG,
   DEFAULT_PLAYER_GROUP_NAME,
   isDefaultPlayerGroup,
+  type OddsSet,
 } from './odds-sets';
+import { configAuditRow } from './config-audit';
 import {
   groupPolicyOf,
   PARTNER_RATE_KEY,
@@ -124,11 +127,18 @@ export async function ensureDefaultPlayerGroup(
  * never shows a blank cell after a move.
  *
  * Returns the group the player ended up in.
+ *
+ * Audited against the customer (action 'set_player_group') with the groups
+ * and odds sets before and after, so which odds a player rolled at any past
+ * moment can be read back. Two modules, so no shared transaction: the
+ * membership writes land first and the audit row second — a failed audit
+ * surfaces as a 500 the operator sees (same stance as editGroupPolicy).
  */
 export async function setPlayerGroup(
   container: MedusaContainer,
   customerId: string,
   groupId: string | null,
+  adminId: string,
 ): Promise<CustomerGroupDTO> {
   const customers = customerService(container);
 
@@ -169,7 +179,79 @@ export async function setPlayerGroup(
     );
   }
 
+  const added = !current.some((g) => g.id === target.id);
+  if (added || stale.length > 0) {
+    const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+    await packs.createAdminActionAudits([
+      configAuditRow({
+        adminId,
+        entityType: 'customer',
+        entityId: customerId,
+        action: 'set_player_group',
+        before: { groups: current.map(groupRecord) },
+        after: { group: groupRecord(target) },
+      }),
+    ]);
+  }
+
   return target;
+}
+
+/** The odds set a group's members actually roll — DEFAULT is always set 1,
+ *  whatever its row says (resolveOddsSetForCustomer's rule). */
+const rolledOddsSet = (g: CustomerGroupDTO): OddsSet =>
+  isDefaultPlayerGroup(g) ? 1 : coerceOddsSet(g.metadata?.odds_set);
+
+const groupRecord = (g: CustomerGroupDTO) => ({
+  id: g.id,
+  name: g.name,
+  odds_set: rolledOddsSet(g),
+});
+
+/**
+ * Change the odds set a player group's members roll. The one audited writer of
+ * `metadata.odds_set` on an existing group: the native update route refuses
+ * that key (rejectGroupOddsSetUpdate), so every change leaves a before/after
+ * row. The DEFAULT group is refused — its members always roll set 1.
+ */
+export async function editGroupOddsSet(
+  container: MedusaContainer,
+  input: { groupId: string; oddsSet: OddsSet; adminId: string },
+): Promise<CustomerGroupDTO> {
+  if (![1, 2, 3].includes(input.oddsSet)) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Odds set must be 1, 2 or 3.',
+    );
+  }
+  const customers = customerService(container);
+  const group = await customers.retrieveCustomerGroup(input.groupId);
+  if (isDefaultPlayerGroup(group)) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'The default player group always rolls odds set 1. Move the players into a group of their own first.',
+    );
+  }
+  const before = rolledOddsSet(group);
+  if (before === input.oddsSet) return group;
+
+  // Medusa merges metadata per key, so the partner policy and anything else
+  // on the row survives this write.
+  const updated = await customers.updateCustomerGroups(group.id, {
+    metadata: { odds_set: input.oddsSet },
+  });
+  const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+  await packs.createAdminActionAudits([
+    configAuditRow({
+      adminId: input.adminId,
+      entityType: 'customer_group',
+      entityId: group.id,
+      action: 'edit_odds_set',
+      before: { odds_set: before },
+      after: { odds_set: input.oddsSet },
+    }),
+  ]);
+  return updated;
 }
 
 /**

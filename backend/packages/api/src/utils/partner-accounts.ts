@@ -62,7 +62,8 @@ export const partnerCredentialOf = (
   metadata: Record<string, unknown> | null | undefined,
 ): PartnerCredential | null => {
   const v = metadata?.[PARTNER_CREDENTIAL_KEY] as
-    Partial<PartnerCredential> | undefined;
+    | Partial<PartnerCredential>
+    | undefined;
   return v && typeof v.password === 'string'
     ? { password: v.password, issued_at: String(v.issued_at ?? '') }
     : null;
@@ -92,7 +93,12 @@ export const partnerCredentialOf = (
  */
 export async function mintPartnerAccount(
   container: MedusaContainer,
-  input: { displayName: string | null; groupId: string | null },
+  input: {
+    displayName: string | null;
+    groupId: string | null;
+    // The acting admin — the group assignment is audited (setPlayerGroup).
+    adminId: string;
+  },
 ): Promise<PartnerAccountRow> {
   const customers = container.resolve<ICustomerModuleService>(Modules.CUSTOMER);
   const auth = container.resolve<IAuthModuleService>(Modules.AUTH);
@@ -151,7 +157,12 @@ export async function mintPartnerAccount(
       customerId,
       desired: input.displayName ?? generatedUsername(customerId),
     });
-    const group = await setPlayerGroup(container, customerId, input.groupId);
+    const group = await setPlayerGroup(
+      container,
+      customerId,
+      input.groupId,
+      input.adminId,
+    );
     return {
       id: customerId,
       email,

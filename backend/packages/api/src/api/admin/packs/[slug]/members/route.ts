@@ -1,4 +1,8 @@
-import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import {
+  AuthenticatedMedusaRequest,
+  MedusaRequest,
+  MedusaResponse,
+} from '@medusajs/framework/http';
 import PacksModuleService from '../../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import { setPackMembersWorkflow } from '../../../../../workflows/set-pack-members';
@@ -29,7 +33,7 @@ type Body = { card_ids?: unknown };
 // diffs against the current pool (adds new even-weighted rows, removes dropped
 // cards, keeps shared rows' tuned weights). Win rates are then tuned separately.
 export async function POST(
-  req: MedusaRequest,
+  req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
   const { slug } = req.params;
@@ -44,7 +48,7 @@ export async function POST(
   );
 
   const { result } = await setPackMembersWorkflow(req.scope).run({
-    input: { pack_id: slug, card_ids },
+    input: { pack_id: slug, card_ids, admin_id: req.auth_context.actor_id },
   });
   // Membership IS the pack's prize pool — the exact Pokémon the reel shows and
   // the Top-Hit candidates. Bust the 30s storefront detail cache so a pool edit
