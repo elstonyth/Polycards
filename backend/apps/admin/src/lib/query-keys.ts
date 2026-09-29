@@ -27,6 +27,9 @@ export const qk = {
   // plain read that only ever touches the one (page, status, sort) it fetched.
   gatewayWithdrawalsKey: ['admin', 'gateway-withdrawals'] as const,
   economy: ['admin', 'economy'] as const,
+  // (range, from, to) always render — custom dates are '' for the presets.
+  stats: (range: string, from: string, to: string) =>
+    ['admin', 'stats', range, from, to] as const,
   // (granularity, periods) always render — same always-rendered-segment rule
   // as qk.pulls: week and month views cache independently.
   settlement: (granularity: string, periods: number) =>

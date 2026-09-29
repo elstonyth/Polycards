@@ -213,7 +213,10 @@ export interface GroupCreditCustomer {
   last_name: string | null;
 }
 
-export const listGroupCreditCustomersPage = (groupId: string, offset: number) => {
+export const listGroupCreditCustomersPage = (
+  groupId: string,
+  offset: number,
+) => {
   const params = new URLSearchParams({
     groups: groupId,
     limit: '100',
@@ -384,6 +387,49 @@ export async function getEconomyReport(
   if (to) qs.set('to', to);
   const q = qs.toString();
   return getJson<EconomyReport>(`/admin/economy${q ? `?${q}` : ''}`);
+}
+
+// ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
+
+export type StatsRange =
+  | 'today'
+  | 'yesterday'
+  | '7d'
+  | '30d'
+  | 'month'
+  | 'last_month'
+  | 'custom';
+
+export interface SignupTopupStats {
+  signups: number;
+  topup_count: number;
+  topup_customers: number;
+  /** MYR. */
+  topup_amount: number;
+  first_topup_count: number;
+  /** MYR. */
+  first_topup_amount: number;
+}
+
+export interface StatsReport {
+  as_of: string;
+  /** ISO instants; windows are half-open [from, to). */
+  current: { from: string; to: string; stats: SignupTopupStats };
+  previous: { from: string; to: string; stats: SignupTopupStats };
+}
+
+// `from`/`to` are inclusive MYT days (YYYY-MM-DD), sent only for 'custom'.
+export async function getStatsReport(
+  range: StatsRange,
+  from: string,
+  to: string,
+): Promise<StatsReport> {
+  const qs = new URLSearchParams({ range });
+  if (range === 'custom') {
+    qs.set('from', from);
+    qs.set('to', to);
+  }
+  return getJson<StatsReport>(`/admin/stats?${qs.toString()}`);
 }
 
 // ── Gateway settlement report (calendar weekly/monthly gateway result) ───────
@@ -1102,7 +1148,11 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 // reconciliation sweep's window, i.e. a payment that may have landed at the
 // gateway without ever being credited here.
 export type GatewayDepositView =
-  'pending' | 'settled' | 'failed' | 'expired' | 'all';
+  | 'pending'
+  | 'settled'
+  | 'failed'
+  | 'expired'
+  | 'all';
 
 export interface GatewayDeposit {
   id: string;
@@ -1154,9 +1204,7 @@ export function getGatewayDeposits(
   // route's default order is status-dependent (pending = oldest-first work
   // queue) and an always-sent sort would silently flatten that.
   if (sort) params.set('sort', sort);
-  return getJson<GatewayDepositsResponse>(
-    `/admin/payments/deposits?${params}`,
-  );
+  return getJson<GatewayDepositsResponse>(`/admin/payments/deposits?${params}`);
 }
 
 // Gateway withdrawals (GET /admin/payments/withdrawals) — the money-OUT
@@ -1172,7 +1220,11 @@ export function getGatewayDeposits(
 // always sends `status` explicitly (see getGatewayWithdrawals below), so the
 // page's default view is what actually decides what an operator sees first.
 export type GatewayWithdrawalView =
-  'held' | 'pending' | 'settled' | 'failed' | 'all';
+  | 'held'
+  | 'pending'
+  | 'settled'
+  | 'failed'
+  | 'all';
 
 export interface GatewayWithdrawal {
   id: string;
