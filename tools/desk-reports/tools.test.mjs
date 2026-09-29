@@ -16,6 +16,7 @@ test('the finance desk tools', () => {
     'payments',
     'pack_sales',
     'player',
+    'groups',
   ]);
 });
 

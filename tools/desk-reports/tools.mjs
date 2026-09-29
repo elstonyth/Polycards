@@ -40,7 +40,7 @@ export const TOOLS = {
     {
       name: 'economy',
       description:
-        'Money totals exactly like the admin Economy page, for one Malaysia-time window and player group. revenue = credits spent on packs; payouts = buybacks paid; net = revenue - payouts (the gacha margin); topups = deposits credited; cashout = withdrawals; adjustments = admin credit changes; deliveryFees; referralCommission; rewardPromo = promo credits. Also the current vault and voucher liability for ALL players. Amounts in RM (MYR).',
+        'Money totals exactly like the admin Economy page, for one Malaysia-time window and player group. revenue = credits spent on packs; payouts = buybacks paid; net = revenue - payouts (the gacha margin); topups = deposits credited; cashout = withdrawals, a signed ledger sum (negative = money paid out to players; report it as an amount paid out); adjustments = admin credit changes (either sign); deliveryFees; referralCommission; rewardPromo = promo credits. Also the current vault and voucher liability for ALL players. Amounts in RM (MYR).',
       inputSchema: { ...windowArgs, ...groupArg },
       request: windowed('economy'),
     },
@@ -68,7 +68,7 @@ export const TOOLS = {
     {
       name: 'player',
       description:
-        "One player's account by username (never email): join date, current player group, disabled flag, credit balance, vault cards and value, lifetime and last-30-days ledger totals (revenue = their pack spend, payouts = buybacks to them), and their deposits and withdrawals by status. Amounts in RM (MYR).",
+        "One player's account by username (never email): join date, current player group, disabled flag, credit balance, vault cards and value, lifetime and last-30-days ledger totals (revenue = their pack spend, payouts = buybacks to them, cashout = their withdrawals as a signed sum, negative = paid out to them), and their deposits and withdrawals by status. Amounts in RM (MYR).",
       inputSchema: {
         username: z
           .string()
@@ -78,6 +78,13 @@ export const TOOLS = {
         path: 'player',
         params: { username: args.username },
       }),
+    },
+    {
+      name: 'groups',
+      description:
+        'The player groups and how many players each holds now (by current group). default_players counts players in no group other than DEFAULT. Use these names as the group argument of the other tools.',
+      inputSchema: {},
+      request: () => ({ path: 'groups', params: {} }),
     },
   ],
 };

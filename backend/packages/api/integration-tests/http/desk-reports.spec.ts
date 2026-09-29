@@ -560,5 +560,25 @@ medusaIntegrationTestRunner({
         expect((await report('player?username=a')).status).toBe(400);
       });
     });
+
+    describe('GET /reports/finance/groups', () => {
+      it('counts players per effective group', async () => {
+        await seedGroups();
+        const res = await report('groups');
+        expect(res.status).toBe(200);
+        // nogroup, defonly, renamed, left, deadgroup
+        expect(res.data.default_players).toBe(5);
+        expect(res.data.groups).toEqual(
+          expect.arrayContaining([
+            { name: 'Partners', players: 3 },
+            { name: 'Whales', players: 1 },
+          ]),
+        );
+        const names = res.data.groups.map((g: { name: string }) => g.name);
+        expect(names).not.toContain('House');
+        expect(names).not.toContain('DEFAULT');
+        expect(names).not.toContain('Old VIP');
+      });
+    });
   },
 });

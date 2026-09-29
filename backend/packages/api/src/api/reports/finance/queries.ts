@@ -3,7 +3,7 @@ import {
   ledgerTotals,
   type LedgerTotals,
 } from '../../../modules/packs/economy';
-import type { ReportDb, SqlPart } from '../sql';
+import { EFFECTIVE_GROUP_SQL, type ReportDb, type SqlPart } from '../sql';
 
 export type ReasonCents = { reason: string; cents: string };
 
@@ -167,4 +167,22 @@ export async function packSales(
     bySlug.set(r.pack_id, { ...row, opened: Number(r.n) });
   }
   return { bySlug, unattributedCents };
+}
+
+/** Live players per effective group; players with no row are DEFAULT. */
+export async function groupSizes(
+  db: ReportDb,
+): Promise<{ defaultPlayers: number; byGroup: Map<string, number> }> {
+  const { rows } = await db.raw<{ group_id: string | null; n: string }>(
+    'SELECT eff.group_id, COUNT(*)::bigint AS n FROM customer c ' +
+      `LEFT JOIN (${EFFECTIVE_GROUP_SQL}) eff ON eff.customer_id = c.id ` +
+      'WHERE c.deleted_at IS NULL GROUP BY eff.group_id',
+  );
+  let defaultPlayers = 0;
+  const byGroup = new Map<string, number>();
+  for (const r of rows) {
+    if (r.group_id === null) defaultPlayers = Number(r.n);
+    else byGroup.set(r.group_id, Number(r.n));
+  }
+  return { defaultPlayers, byGroup };
 }
