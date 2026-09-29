@@ -36,6 +36,10 @@ export function requireReportKey() {
     res: MedusaResponse,
     next: MedusaNextFunction,
   ): void => {
+    // First, so the 401 and 503 carry it too. RFC 9111 §3.5 keeps shared caches
+    // from storing responses to Authorization requests only; this key is a
+    // custom header, so nothing else stops a proxy caching a finance report.
+    res.setHeader('Cache-Control', 'no-store');
     const desk = deskOf(req.originalUrl);
     if (!desk) {
       res.status(401).json({ message: 'Unauthorized' });

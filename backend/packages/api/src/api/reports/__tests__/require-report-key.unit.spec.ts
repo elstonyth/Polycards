@@ -27,12 +27,18 @@ function run(
   const res = {
     statusCode: 0,
     body: undefined as unknown,
+    headers: {} as Record<string, string>,
     status(code: number) {
       this.statusCode = code;
       return this;
     },
     json(body: unknown) {
       this.body = body;
+      return this;
+    },
+    // Node lowercases header names when it reads them back; do the same.
+    setHeader(name: string, value: string) {
+      this.headers[name.toLowerCase()] = value;
       return this;
     },
   };
@@ -80,6 +86,7 @@ describe('requireReportKey', () => {
     delete process.env.REPORT_KEY_FINANCE;
     const { res, next } = run(ECONOMY, { 'x-report-key': FINANCE });
     expect(res.statusCode).toBe(503);
+    expect(res.headers['cache-control']).toBe('no-store');
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -92,6 +99,7 @@ describe('requireReportKey', () => {
     const { res, next } = run(ECONOMY, {});
     expect(res.statusCode).toBe(401);
     expect(res.body).toEqual({ message: 'Unauthorized' });
+    expect(res.headers['cache-control']).toBe('no-store');
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -114,9 +122,10 @@ describe('requireReportKey', () => {
   });
 
   it('refuses an unknown desk whatever key is sent', () => {
-    expect(
-      run('/reports/admin/economy', { 'x-report-key': FINANCE }).res.statusCode,
-    ).toBe(401);
+    const { res } = run('/reports/admin/economy', { 'x-report-key': FINANCE });
+    expect(res.statusCode).toBe(401);
+    // The earliest return: the header must not wait for the key checks.
+    expect(res.headers['cache-control']).toBe('no-store');
   });
 
   it('answers a bare 401, not a throw, for an absolute-form target', () => {
@@ -141,6 +150,7 @@ describe('requireReportKey', () => {
     const { res, next, info } = run(ECONOMY, { 'x-report-key': FINANCE });
     expect(next).toHaveBeenCalledTimes(1);
     expect(res.statusCode).toBe(0);
+    expect(res.headers['cache-control']).toBe('no-store');
     expect(info).toHaveBeenCalledWith(`[reports] finance ${ECONOMY}`);
   });
 
