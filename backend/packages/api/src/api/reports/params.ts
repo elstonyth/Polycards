@@ -5,6 +5,11 @@ import { isDefaultPlayerGroup } from '../../modules/packs/odds-sets';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// A bound is an ISO date-time with an explicit zone: one without would be read
+// in the server's zone (and Date.parse alone guesses at "1" or "29 Sep 2026").
+const ISO_INSTANT =
+  /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d)(?:\.\d{1,9})?)?(Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+
 /** Half-open [from, to) of ISO instants; an absent bound is open-ended. */
 export type ReportWindow = { from?: string; to?: string };
 
@@ -23,12 +28,21 @@ export function parseWindow(
   const bound = (key: 'from' | 'to'): string | undefined => {
     const value = query[key];
     if (value === undefined || value === '') return undefined;
-    if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) {
+    const m = typeof value === 'string' ? ISO_INSTANT.exec(value) : null;
+    const [year, month, day] = [Number(m?.[1]), Number(m?.[2]), Number(m?.[3])];
+    // Date.UTC rolls 2026-02-30 over to March, so the written day must survive
+    // the trip. Month 0 and 13 roll a whole year and would slip through it.
+    if (
+      !m ||
+      month < 1 ||
+      month > 12 ||
+      new Date(Date.UTC(year, month - 1, day)).getUTCDate() !== day
+    ) {
       throw invalid(
         `${key} must be one ISO date-time, e.g. 2026-09-28T16:00:00.000Z.`,
       );
     }
-    return new Date(value).toISOString();
+    return new Date(m[0]).toISOString();
   };
   const from = bound('from');
   const to = bound('to');

@@ -39,8 +39,26 @@ describe('parseWindow', () => {
     [{ to: ['2026-09-28T00:00:00Z', '2026-09-29T00:00:00Z'] }, 'to must be'],
     [{ from: '2026-09-29T00:00:00Z', to: '2026-09-28T00:00:00Z' }, 'before'],
     [{ from: '2026-09-29T00:00:00Z', to: '2026-09-29T00:00:00Z' }, 'before'],
+    // Only a zoned ISO instant is a bound; anything else would be guessed at.
+    [{ from: '2026-09-29' }, 'from must be'], // date-only
+    [{ from: '2026-09-29T00:00:00' }, 'from must be'], // no zone
+    [{ from: '1' }, 'from must be'], // a bare number
+    [{ from: '2026-02-30T00:00:00Z' }, 'from must be'], // rolls over to March
+    [{ from: '2026-13-01T00:00:00Z' }, 'from must be'], // there is no month 13
+    [{ to: '2026-00-10T00:00:00Z' }, 'to must be'], // nor month 0
   ])('rejects %p', (query, message) => {
     expect(invalid(() => parseWindow(query))).toContain(message);
+  });
+
+  it('accepts a zoned instant and normalises it to Z', () => {
+    // Midnight at +08:00 is 16:00 UTC the day before.
+    expect(parseWindow({ from: '2026-09-29T00:00:00+08:00' }).from).toBe(
+      '2026-09-28T16:00:00.000Z',
+    );
+    // Seconds are optional, and a real leap day is a real date.
+    expect(parseWindow({ from: '2028-02-29T00:00Z' }).from).toBe(
+      '2028-02-29T00:00:00.000Z',
+    );
   });
 
   it('enforces required bounds and the day cap', () => {
