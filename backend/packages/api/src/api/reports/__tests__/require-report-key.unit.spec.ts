@@ -62,6 +62,12 @@ describe('deskOf', () => {
     ['/reports//finance/economy', null],
     ['/reportsfinance/economy', null],
     ['/reports/fin%61nce/economy', null],
+    // Judged on the RAW path, as Express routes it: new URL() would collapse
+    // `\` and `..` and pick a different desk than the handler Express runs.
+    ['/reports/finance/player/..\\..\\store\\a', 'finance'],
+    ['/reports/store/../finance/economy', 'store'],
+    ['http://host:99999/reports/finance/economy', null],
+    ['/reports/store\\..\\finance/economy', null],
   ])('%s -> %p', (url, desk) => {
     expect(deskOf(url)).toBe(desk);
   });
@@ -111,6 +117,15 @@ describe('requireReportKey', () => {
     expect(
       run('/reports/admin/economy', { 'x-report-key': FINANCE }).res.statusCode,
     ).toBe(401);
+  });
+
+  it('answers a bare 401, not a throw, for an absolute-form target', () => {
+    const { res, next } = run('http://host:99999/reports/finance/economy', {
+      'x-report-key': FINANCE,
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual({ message: 'Unauthorized' });
+    expect(next).not.toHaveBeenCalled();
   });
 
   it('holds a mixed-case desk segment to that desk key', () => {

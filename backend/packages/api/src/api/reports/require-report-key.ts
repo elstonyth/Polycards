@@ -18,9 +18,14 @@ const MIN_KEY_LENGTH = 32;
 
 // The desk is the first path segment after /reports/, lowercased: Medusa
 // matches routes case-insensitively, so /reports/Finance/economy reaches the
-// finance handler and must be held to the finance key.
+// finance handler and must be held to the finance key. The path is read RAW,
+// exactly as Express routes it. new URL() would normalize `\` and `..` and let
+// the guard judge a different desk than the handler Express picks (a store
+// key on /reports/finance/player/..\..\store\a), and it throws on a bad
+// absolute-form target. Anything that is not an origin-form /reports/<desk>
+// path is null, so it gets the bare 401.
 export function deskOf(originalUrl: string): ReportDesk | null {
-  const { pathname } = new URL(originalUrl, 'http://reports.local');
+  const pathname = originalUrl.split(/[?#]/, 1)[0];
   const segment = /^\/reports\/([^/]+)/i.exec(pathname)?.[1]?.toLowerCase();
   return REPORT_DESKS.find((desk) => desk === segment) ?? null;
 }
