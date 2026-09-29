@@ -177,6 +177,7 @@ import {
   type RankPayout,
 } from './challenge-settle';
 import { weightedAverageCost } from './inventory-cost';
+import type { SignupTopupStats } from './stats';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
 // plan-033 playthrough basis: the "post-1b deposited" ledger predicate. Shared
@@ -800,7 +801,10 @@ class PacksModuleService extends MedusaService({
     | {
         bound: false;
         reason:
-          'self' | 'already_bound' | 'not_a_new_account' | 'referrer_disabled';
+          | 'self'
+          | 'already_bound'
+          | 'not_a_new_account'
+          | 'referrer_disabled';
       }
   > {
     if (input.customerId === input.referrerId) {
@@ -1073,7 +1077,8 @@ class PacksModuleService extends MedusaService({
       if (seen.has(m.customer_id) || isDefaultPlayerGroup(m)) continue;
       seen.add(m.customer_id); // the effective group, partner or not
       const rate = groupPolicyOf(m).partner_rate_bp;
-      if (rate !== null) out.set(m.customer_id, { name: m.name, rate_bp: rate });
+      if (rate !== null)
+        out.set(m.customer_id, { name: m.name, rate_bp: rate });
     }
     return out;
   }
@@ -2272,7 +2277,10 @@ class PacksModuleService extends MedusaService({
     | {
         claimed: false;
         reason:
-          'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
+          | 'not_found'
+          | 'not_completed'
+          | 'already_claimed'
+          | 'window_closed';
       }
   > {
     // Deliberately NOT filtered on active: retiring a task must never strand
@@ -6344,6 +6352,67 @@ class PacksModuleService extends MedusaService({
     }));
   }
 
+  // Sign-up and top-up figures for GET /admin/stats over one half-open
+  // [from, to) window, in one statement.
+  //
+  // Sign-ups count has_account customers, deleted rows included, so a past
+  // period never shrinks. Top-ups are the ledger's topup rows; in production
+  // those are the settled TGPay deposits (the mock path cannot boot there).
+  // A first top-up is ranked over the customer's WHOLE history before the
+  // window filter, so a returning customer's top-up in the window is not a
+  // first. Money is summed as integer cents, like ledgerReasonTotals.
+  @InjectManager()
+  async signupTopupStats(
+    from: Date,
+    to: Date,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<SignupTopupStats> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const bounds = [from.toISOString(), to.toISOString()];
+    const [row] = await em.execute<
+      {
+        signups: number;
+        topup_count: number;
+        topup_customers: number;
+        topup_cents: string;
+        first_topup_count: number;
+        first_topup_cents: string;
+      }[]
+    >(
+      `WITH topups AS (
+         SELECT customer_id, amount, created_at,
+                row_number() OVER (
+                  PARTITION BY customer_id ORDER BY created_at, id
+                ) AS nth
+         FROM credit_transaction
+         WHERE reason = 'topup' AND amount > 0 AND deleted_at IS NULL
+       )
+       SELECT
+         (SELECT count(*) FROM customer
+            WHERE has_account
+              AND created_at >= ?::timestamptz
+              AND created_at < ?::timestamptz)::int AS signups,
+         count(*)::int AS topup_count,
+         count(DISTINCT customer_id)::int AS topup_customers,
+         COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS topup_cents,
+         (count(*) FILTER (WHERE nth = 1))::int AS first_topup_count,
+         COALESCE(SUM(ROUND(amount * 100)) FILTER (WHERE nth = 1), 0)::bigint
+           AS first_topup_cents
+       FROM topups
+       WHERE created_at >= ?::timestamptz AND created_at < ?::timestamptz`,
+      [...bounds, ...bounds],
+    );
+    return {
+      signups: row.signups,
+      topup_count: row.topup_count,
+      topup_customers: row.topup_customers,
+      topup_amount: Number(row.topup_cents) / 100,
+      first_topup_count: row.first_topup_count,
+      first_topup_amount: Number(row.first_topup_cents) / 100,
+    };
+  }
+
   // Count-then-insert for a gateway deposit, serialized per customer.
   //
   // GATEWAY_MAX_RECENT_PENDING_PER_CUSTOMER used to be enforced by counting
@@ -7269,27 +7338,43 @@ class PacksModuleService extends MedusaService({
       idempotencyKey?: string;
     },
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ id: string; amount: number; balance: number; replayed?: boolean }> {
+  ): Promise<{
+    id: string;
+    amount: number;
+    balance: number;
+    replayed?: boolean;
+  }> {
     // Serialize retries BEFORE the mint-window and customer locks. Replays
     // must still succeed after a grant exhausts today's mint allowance.
     const requestReference = input.idempotencyKey
       ? `adjust-idem:${createHash('sha256')
-          .update(JSON.stringify([input.adminId, input.customerId, input.idempotencyKey]))
+          .update(
+            JSON.stringify([
+              input.adminId,
+              input.customerId,
+              input.idempotencyKey,
+            ]),
+          )
           .digest('hex')}`
       : undefined;
     if (requestReference) {
-      const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+      const em =
+        sharedContext.transactionManager as unknown as LedgerSqlManager;
       await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
         requestReference,
       ]);
       const [existing] = await this.listCreditTransactions(
-        { customer_id: input.customerId, source_transaction_id: requestReference },
+        {
+          customer_id: input.customerId,
+          source_transaction_id: requestReference,
+        },
         { take: 1 },
         sharedContext,
       );
       if (existing) {
         if (
-          Math.round(Number(existing.amount) * 100) !== Math.round(input.amount * 100) ||
+          Math.round(Number(existing.amount) * 100) !==
+            Math.round(input.amount * 100) ||
           existing.reference !== input.note
         ) {
           throw new MedusaError(
@@ -7297,7 +7382,10 @@ class PacksModuleService extends MedusaService({
             'This request ID was already used for a different adjustment.',
           );
         }
-        const { balance } = await this.creditSummary(input.customerId, sharedContext);
+        const { balance } = await this.creditSummary(
+          input.customerId,
+          sharedContext,
+        );
         return {
           id: existing.id,
           amount: Number(existing.amount),
@@ -9026,7 +9114,8 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      SettleSnapshot | undefined;
+      | SettleSnapshot
+      | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME
@@ -9441,7 +9530,8 @@ class PacksModuleService extends MedusaService({
   private async reserveSettledStock(
     winner: SettledWinner,
     decrementStock:
-      ((handle: string, qty: number) => Promise<boolean>) | undefined,
+      | ((handle: string, qty: number) => Promise<boolean>)
+      | undefined,
     weekStartIso: string,
   ): Promise<void> {
     if (!decrementStock) return;
