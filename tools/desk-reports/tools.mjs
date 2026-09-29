@@ -54,9 +54,16 @@ export const TOOLS = {
     {
       name: 'payments',
       description:
-        'Payment-gateway deposits and withdrawals created in the window, counted and summed per status (pending, settled, failed, expired; withdrawals also held = waiting for admin approval), plus what is open right now whatever the window. Amounts in RM (MYR).',
+        'Payment-gateway deposits and withdrawals created in the window, counted and summed per status, plus what is open right now whatever the window. Deposit statuses: pending, settled, failed, expired. Withdrawal statuses: pending, settled, failed, held (held = waiting for admin approval). Amounts in RM (MYR).',
       inputSchema: { ...windowArgs, ...groupArg },
       request: windowed('payments'),
+    },
+    {
+      name: 'pack_sales',
+      description:
+        'Per-pack sales in the window: packs opened (paid) and revenue (credits spent, net of reversals), largest first. unattributed_revenue is pack spend from older rows that cannot be linked to a pack; total_revenue equals economy revenue. Amounts in RM (MYR).',
+      inputSchema: { ...windowArgs, ...groupArg },
+      request: windowed('pack-sales'),
     },
   ],
 };

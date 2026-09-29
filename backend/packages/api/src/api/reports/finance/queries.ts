@@ -117,3 +117,54 @@ export async function statusTotals(
     }),
   );
 }
+
+/**
+ * Pack sales: revenue per pack from pack_open ledger rows (alias ct,
+ * filtered by `ledger`), linked to a pack through the open's pulls
+ * (credit_transaction.source_transaction_id = pull.open_id). Packs opened =
+ * paid pulls (alias p, filtered by `pulls`). A charge with no linked pull
+ * (rows from before open_id, or an open that never produced pulls) is
+ * unattributed, so every pack plus unattributed equals economy revenue.
+ * ponytail: the DISTINCT scans pull.open_id, which has no index; fine at
+ * report frequency. Add an index on pull(open_id) if this reaches slow logs.
+ */
+export async function packSales(
+  db: ReportDb,
+  ledger: SqlPart,
+  pulls: SqlPart,
+): Promise<{
+  bySlug: Map<string, { opened: number; cents: number }>;
+  unattributedCents: number;
+}> {
+  const revenue = await db.raw<{ pack_id: string | null; cents: string }>(
+    'SELECT op.pack_id, COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS cents ' +
+      'FROM credit_transaction ct ' +
+      'LEFT JOIN (SELECT DISTINCT open_id, pack_id FROM pull ' +
+      'WHERE open_id IS NOT NULL AND deleted_at IS NULL) op ' +
+      'ON op.open_id = ct.source_transaction_id ' +
+      "WHERE ct.deleted_at IS NULL AND ct.reason = 'pack_open'" +
+      ledger.sql +
+      ' GROUP BY op.pack_id',
+    ledger.params,
+  );
+  const opened = await db.raw<{ pack_id: string; n: string }>(
+    'SELECT p.pack_id, COUNT(*)::bigint AS n FROM pull p ' +
+      "WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
+      pulls.sql +
+      ' GROUP BY p.pack_id',
+    pulls.params,
+  );
+  const bySlug = new Map<string, { opened: number; cents: number }>();
+  let unattributedCents = 0;
+  for (const r of revenue.rows) {
+    // Ledger rows are negative for a charge; revenue reads positive.
+    const cents = -Number(r.cents);
+    if (r.pack_id === null) unattributedCents += cents;
+    else bySlug.set(r.pack_id, { opened: 0, cents });
+  }
+  for (const r of opened.rows) {
+    const row = bySlug.get(r.pack_id) ?? { opened: 0, cents: 0 };
+    bySlug.set(r.pack_id, { ...row, opened: Number(r.n) });
+  }
+  return { bySlug, unattributedCents };
+}

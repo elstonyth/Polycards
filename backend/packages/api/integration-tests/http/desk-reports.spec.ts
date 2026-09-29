@@ -442,5 +442,72 @@ medusaIntegrationTestRunner({
         });
       });
     });
+
+    describe('GET /reports/finance/pack-sales', () => {
+      it('attributes revenue to packs through open_id and sums to economy revenue', async () => {
+        const pack = (slug: string, title: string, rank: number) => ({
+          slug,
+          title,
+          category: 'pokemon',
+          price: 20,
+          image: '/qa.png',
+          status: 'active' as const,
+          rank,
+        });
+        await packs().createPacks([
+          pack('dr-alpha', 'Alpha Pack', 0),
+          pack('dr-beta', 'Beta Pack', 1),
+        ]);
+        const pull = (
+          open_id: string | null,
+          pack_id: string,
+          source: 'pack' | 'free' = 'pack',
+        ) => ({
+          customer_id: 'cus_sales',
+          pack_id,
+          card_id: 'dr-card',
+          status: 'vaulted' as const,
+          rolled_at: new Date(),
+          open_id,
+          source,
+        });
+        await packs().createPulls([
+          pull('open-a', 'dr-alpha'), // one batch open of two packs
+          pull('open-a', 'dr-alpha'),
+          pull('open-b', 'dr-beta'),
+          pull(null, 'dr-alpha', 'free'), // a free pack is not a sale
+        ]);
+        const charge = (
+          amount: number,
+          source_transaction_id: string | null,
+        ) => ({
+          customer_id: 'cus_sales',
+          amount,
+          reason: 'pack_open' as const,
+          source_transaction_id,
+        });
+        await packs().createCreditTransactions([
+          charge(-40, 'open-a'),
+          charge(-20, 'open-b'),
+          charge(-20, 'open-c'), // an open that failed: charged, then reversed,
+          charge(20, 'open-c'), // with no pulls
+          charge(-5, null), // a row from before open_id existed
+        ]);
+        const res = await report('pack-sales');
+        expect(res.status).toBe(200);
+        expect(res.data.packs).toEqual([
+          {
+            pack: 'dr-alpha',
+            title: 'Alpha Pack',
+            packs_opened: 2,
+            revenue: 40,
+          },
+          { pack: 'dr-beta', title: 'Beta Pack', packs_opened: 1, revenue: 20 },
+        ]);
+        expect(res.data.unattributed_revenue).toBe(5);
+        expect(res.data.total_revenue).toBe(65);
+        expect((await report('economy')).data.totals.revenue).toBe(65);
+      });
+    });
   },
 });

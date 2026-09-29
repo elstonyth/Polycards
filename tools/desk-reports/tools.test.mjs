@@ -14,6 +14,7 @@ test('the finance desk tools', () => {
     'economy',
     'daily_economy',
     'payments',
+    'pack_sales',
   ]);
 });
 
