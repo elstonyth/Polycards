@@ -5,32 +5,22 @@ Status: approved (operator, this session)
 
 ## Goal
 
-Two stakeholders (Jason, D3 SK) asked for a simple dashboard showing how many
-people registered and how many topped up, plus a login to see it. Their
-reference was a KPI-card dashboard: preset date tabs (今天 / 昨天 / 近7天 /
-近30天 / 本月 / 上月 / 自定义), and on every card the value, the % change
-against the previous period, and the previous value.
+The operators asked for a simple dashboard showing how many people registered
+and how many topped up. Their reference was a KPI-card dashboard: preset date
+tabs (今天 / 昨天 / 近7天 / 近30天 / 本月 / 上月 / 自定义), and on every card
+the value, the % change against the previous period, and the previous value.
 
 ## Decisions (operator-confirmed)
 
-1. **Access: admin accounts plus a Stats page in the existing admin dashboard.**
-   The stakeholders get ordinary super-admin logins. The operator chose this
-   over a separate read-only viewer login and accepts full admin power for
-   them. No new auth code.
+1. **Access: a Stats page in the existing admin dashboard.** Admins who can
+   already sign in to the dashboard see it in the left menu. There are no new
+   accounts, no invite step and no new auth code.
 2. **Metrics: the requested set only.** Six cards: 注册人数, 充值笔数, 充值金额,
    充值人数, 首充人数, 首充金额. The reference's withdrawals, active players and
    pack-money figures are out of scope.
 3. **Count everyone.** No exclusions for disabled, deleted, test or staff
    accounts. An account deleted later still counts in the period it signed up.
-4. **Accounts: the dashboard's built-in invite.** Settings → Users → Invite,
-   then "Copy invite link". The operator sends the link privately and each
-   person sets their own password. No provisioning code.
-
-   **Select the Super Admin role in the invite form.** RBAC is on, and
-   Medusa's accept-invite gives the new user only the roles attached to the
-   invite. It has no default, whatever the form's tooltip says, so a user
-   with no role is refused by every core route that declares a policy.
-5. **Chinese labels through i18n.** The page's strings get `en.json` keys plus
+4. **Chinese labels through i18n.** The page's strings get `en.json` keys plus
    a new `zhCN.json`. The page reads in Chinese when a user's dashboard
    language is 简体中文 (Profile → Language).
 

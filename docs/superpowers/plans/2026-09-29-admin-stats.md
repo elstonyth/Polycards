@@ -9,7 +9,7 @@
 - A pure module, `modules/packs/stats.ts`, turns a range name into current and previous `[from, to)` windows.
 - One packs-service SQL method counts the six figures for a single window.
 - `GET /admin/stats` runs that method for both windows.
-- The admin page follows the Economy page's stat-grid pattern and reads its labels through i18n. The zhCN locale is added for the Chinese-speaking stakeholders.
+- The admin page follows the Economy page's stat-grid pattern and reads its labels through i18n. The zhCN locale is added for Chinese-speaking admins.
 
 **Tech Stack:**
 
@@ -1097,10 +1097,6 @@ Start the local stack with the `launching-pokenic-stack` skill: backend on :9000
 2. Every preset switches the numbers without a skeleton flash.
 3. Custom with a reversed range shows the hint.
 4. Profile → Language → 简体中文 turns the page Chinese.
-5. The invite handoff works end to end:
-   - Settings → Users → Invite, with the Super Admin role selected.
-   - Copy invite link, and check its host and `/dashboard` base.
-   - Accept the invite in a private window, log in, then load Stats and one core page such as Orders.
 
 Take a screenshot of the English and the Chinese page. Cross-check the local numbers with the SQL from Task 2, run through the postgres MCP.
 
@@ -1113,6 +1109,6 @@ git commit -m "feat(admin): Stats page — sign-ups and top-ups vs the previous 
 
 ---
 
-## Handoff: accounts (no code)
+## Handoff
 
-After the change is deployed, the operator opens `https://admin.polycards.gg/dashboard`, goes to Settings → Users → Invite, enters each stakeholder's email, **selects the Super Admin role** (RBAC gives an invite no default role), then uses "Copy invite link" and sends the link privately. Each person sets their own password. To see the page in Chinese, they choose Profile → Language → 简体中文.
+After the change is deployed, any admin who signs in at `https://admin.polycards.gg/dashboard` finds **Stats** in the left menu. To see the page in Chinese, choose Profile → Language → 简体中文.
