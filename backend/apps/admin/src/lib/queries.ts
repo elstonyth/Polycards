@@ -648,7 +648,10 @@ export const useBulkUpdateDeliveryOrders = () => {
   });
 };
 
-export type { VoucherLadderDTO, VoucherRangeDTO } from './admin-rest';
+export type {
+  VoucherLadderDTO,
+  VoucherRangeDTO,
+} from './admin-rest';
 
 export const useVoucherLadder = (): UseQueryResult<VoucherLadderDTO> =>
   useQuery({ queryKey: qk.voucherLadder, queryFn: getVoucherLadder });

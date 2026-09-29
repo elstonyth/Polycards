@@ -1,5 +1,5 @@
-import en from './en.json';
-import zhCN from './zhCN.json';
+import en from "./en.json"
+import zhCN from "./zhCN.json"
 
 // Keys MUST match the core dashboard's language codes: the dashboard deep-merges
 // each entry into its own locale of the same key. zhCN only carries the Stats
@@ -11,6 +11,6 @@ const i18nResources = {
   zhCN: {
     translation: zhCN,
   },
-};
+}
 
-export default i18nResources;
+export default i18nResources

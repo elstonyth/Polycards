@@ -213,10 +213,7 @@ export interface GroupCreditCustomer {
   last_name: string | null;
 }
 
-export const listGroupCreditCustomersPage = (
-  groupId: string,
-  offset: number,
-) => {
+export const listGroupCreditCustomersPage = (groupId: string, offset: number) => {
   const params = new URLSearchParams({
     groups: groupId,
     limit: '100',
@@ -1148,11 +1145,7 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 // reconciliation sweep's window, i.e. a payment that may have landed at the
 // gateway without ever being credited here.
 export type GatewayDepositView =
-  | 'pending'
-  | 'settled'
-  | 'failed'
-  | 'expired'
-  | 'all';
+  'pending' | 'settled' | 'failed' | 'expired' | 'all';
 
 export interface GatewayDeposit {
   id: string;
@@ -1204,7 +1197,9 @@ export function getGatewayDeposits(
   // route's default order is status-dependent (pending = oldest-first work
   // queue) and an always-sent sort would silently flatten that.
   if (sort) params.set('sort', sort);
-  return getJson<GatewayDepositsResponse>(`/admin/payments/deposits?${params}`);
+  return getJson<GatewayDepositsResponse>(
+    `/admin/payments/deposits?${params}`,
+  );
 }
 
 // Gateway withdrawals (GET /admin/payments/withdrawals) — the money-OUT
@@ -1220,11 +1215,7 @@ export function getGatewayDeposits(
 // always sends `status` explicitly (see getGatewayWithdrawals below), so the
 // page's default view is what actually decides what an operator sees first.
 export type GatewayWithdrawalView =
-  | 'held'
-  | 'pending'
-  | 'settled'
-  | 'failed'
-  | 'all';
+  'held' | 'pending' | 'settled' | 'failed' | 'all';
 
 export interface GatewayWithdrawal {
   id: string;

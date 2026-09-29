@@ -801,10 +801,7 @@ class PacksModuleService extends MedusaService({
     | {
         bound: false;
         reason:
-          | 'self'
-          | 'already_bound'
-          | 'not_a_new_account'
-          | 'referrer_disabled';
+          'self' | 'already_bound' | 'not_a_new_account' | 'referrer_disabled';
       }
   > {
     if (input.customerId === input.referrerId) {
@@ -1077,8 +1074,7 @@ class PacksModuleService extends MedusaService({
       if (seen.has(m.customer_id) || isDefaultPlayerGroup(m)) continue;
       seen.add(m.customer_id); // the effective group, partner or not
       const rate = groupPolicyOf(m).partner_rate_bp;
-      if (rate !== null)
-        out.set(m.customer_id, { name: m.name, rate_bp: rate });
+      if (rate !== null) out.set(m.customer_id, { name: m.name, rate_bp: rate });
     }
     return out;
   }
@@ -2277,10 +2273,7 @@ class PacksModuleService extends MedusaService({
     | {
         claimed: false;
         reason:
-          | 'not_found'
-          | 'not_completed'
-          | 'already_claimed'
-          | 'window_closed';
+          'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
       }
   > {
     // Deliberately NOT filtered on active: retiring a task must never strand
@@ -7338,43 +7331,27 @@ class PacksModuleService extends MedusaService({
       idempotencyKey?: string;
     },
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<{
-    id: string;
-    amount: number;
-    balance: number;
-    replayed?: boolean;
-  }> {
+  ): Promise<{ id: string; amount: number; balance: number; replayed?: boolean }> {
     // Serialize retries BEFORE the mint-window and customer locks. Replays
     // must still succeed after a grant exhausts today's mint allowance.
     const requestReference = input.idempotencyKey
       ? `adjust-idem:${createHash('sha256')
-          .update(
-            JSON.stringify([
-              input.adminId,
-              input.customerId,
-              input.idempotencyKey,
-            ]),
-          )
+          .update(JSON.stringify([input.adminId, input.customerId, input.idempotencyKey]))
           .digest('hex')}`
       : undefined;
     if (requestReference) {
-      const em =
-        sharedContext.transactionManager as unknown as LedgerSqlManager;
+      const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
       await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
         requestReference,
       ]);
       const [existing] = await this.listCreditTransactions(
-        {
-          customer_id: input.customerId,
-          source_transaction_id: requestReference,
-        },
+        { customer_id: input.customerId, source_transaction_id: requestReference },
         { take: 1 },
         sharedContext,
       );
       if (existing) {
         if (
-          Math.round(Number(existing.amount) * 100) !==
-            Math.round(input.amount * 100) ||
+          Math.round(Number(existing.amount) * 100) !== Math.round(input.amount * 100) ||
           existing.reference !== input.note
         ) {
           throw new MedusaError(
@@ -7382,10 +7359,7 @@ class PacksModuleService extends MedusaService({
             'This request ID was already used for a different adjustment.',
           );
         }
-        const { balance } = await this.creditSummary(
-          input.customerId,
-          sharedContext,
-        );
+        const { balance } = await this.creditSummary(input.customerId, sharedContext);
         return {
           id: existing.id,
           amount: Number(existing.amount),
@@ -9114,8 +9088,7 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      | SettleSnapshot
-      | undefined;
+      SettleSnapshot | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME
@@ -9530,8 +9503,7 @@ class PacksModuleService extends MedusaService({
   private async reserveSettledStock(
     winner: SettledWinner,
     decrementStock:
-      | ((handle: string, qty: number) => Promise<boolean>)
-      | undefined,
+      ((handle: string, qty: number) => Promise<boolean>) | undefined,
     weekStartIso: string,
   ): Promise<void> {
     if (!decrementStock) return;
