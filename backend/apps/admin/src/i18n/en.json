@@ -116,7 +116,7 @@
       "price": "Price (RM)",
       "rank": "Rank (sort order)",
       "buybackPercent": "Instant buyback %",
-      "buybackHint": "\"Sell on the spot\" rate during the 30s keep/sell countdown at the reveal: this % of the card's market value as site credit. Must be at least the flat rate (90) — vaulted cards always sell back at flat 90%.",
+      "buybackHint": "\"Sell on the spot\" rate during the 30s keep/sell countdown at the reveal: this % of the card's market value as site credit. Must be a whole number from the flat rate (90) to 100 — vaulted cards always sell back at flat 90%.",
       "boost": "Boost",
       "boostHint": "Flags the pack as boosted/featured on the storefront.",
       "poolHint": "After creating, open the pack to add cards to its prize pool.",
