@@ -65,6 +65,20 @@ export const TOOLS = {
       inputSchema: { ...windowArgs, ...groupArg },
       request: windowed('pack-sales'),
     },
+    {
+      name: 'player',
+      description:
+        "One player's account by username (never email): join date, current player group, disabled flag, credit balance, vault cards and value, lifetime and last-30-days ledger totals (revenue = their pack spend, payouts = buybacks to them), and their deposits and withdrawals by status. Amounts in RM (MYR).",
+      inputSchema: {
+        username: z
+          .string()
+          .describe("The player's username, as shown on their public profile."),
+      },
+      request: (args) => ({
+        path: 'player',
+        params: { username: args.username },
+      }),
+    },
   ],
 };
 

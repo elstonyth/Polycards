@@ -509,5 +509,56 @@ medusaIntegrationTestRunner({
         expect((await report('economy')).data.totals.revenue).toBe(65);
       });
     });
+
+    describe('GET /reports/finance/player', () => {
+      it('reports one player by username, with no contact details', async () => {
+        const player = await customers().createCustomers({
+          email: 'dr-player@test.dev',
+          first_name: 'Ace_Puller',
+          last_name: 'Private',
+          phone: '+60123456789',
+        });
+        await packs().createCreditTransactions([
+          { customer_id: player.id, amount: 100, reason: 'topup' as const },
+          { customer_id: player.id, amount: -30, reason: 'pack_open' as const },
+        ]);
+        await packs().createGatewayDeposits([
+          {
+            merchant_transaction_id: 'dr-player-dep',
+            customer_id: player.id,
+            amount_requested: 100,
+            amount_settled: 100,
+            payment_method_code: 'BQR',
+            status: 'settled' as const,
+          },
+        ]);
+        const res = await report('player?username=ace_puller');
+        expect(res.status).toBe(200);
+        expect(res.data).toMatchObject({
+          currency: 'MYR',
+          username: 'Ace_Puller',
+          group: 'DEFAULT',
+          disabled: false,
+          balance: 70,
+          vault: { cards: 0, value: 0 },
+          lifetime: { topups: 100, revenue: 30 },
+          last_30_days: { topups: 100, revenue: 30 },
+        });
+        expect(res.data.deposits.settled).toEqual({
+          count: 1,
+          requested: 100,
+          settled: 100,
+        });
+        const body = JSON.stringify(res.data);
+        expect(body).not.toContain('@');
+        expect(body).not.toContain('60123456789');
+        expect(body).not.toContain('Private');
+      });
+
+      it('answers 404 for an unknown username and 400 for a malformed one', async () => {
+        expect((await report('player?username=nobody_here')).status).toBe(404);
+        expect((await report('player?username=a')).status).toBe(400);
+      });
+    });
   },
 });

@@ -15,6 +15,7 @@ test('the finance desk tools', () => {
     'daily_economy',
     'payments',
     'pack_sales',
+    'player',
   ]);
 });
 
@@ -40,6 +41,13 @@ test('daily_economy maps onto the daily route', () => {
     from: '2026-08-31T16:00:00.000Z',
     to: '2026-09-07T16:00:00.000Z',
     group: undefined,
+  });
+});
+
+test('player asks by username only', () => {
+  assert.deepEqual(finance.player.request({ username: 'Ace_Puller' }), {
+    path: 'player',
+    params: { username: 'Ace_Puller' },
   });
 });
 

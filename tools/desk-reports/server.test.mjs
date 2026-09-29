@@ -38,7 +38,7 @@ test('stdio round trip: read-only tools, the key on the wire, never in stderr', 
     const { tools } = await client.listTools();
     assert.deepEqual(
       tools.map((t) => t.name),
-      ['economy', 'daily_economy', 'payments', 'pack_sales'],
+      ['economy', 'daily_economy', 'payments', 'pack_sales', 'player'],
     );
     for (const t of tools) assert.equal(t.annotations?.readOnlyHint, true);
     const result = await client.callTool({
