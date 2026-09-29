@@ -23,6 +23,9 @@ module.exports = {
   moduleFileExtensions: ['js', 'ts', 'json'],
   modulePathIgnorePatterns: ['<rootDir>/dist/', '<rootDir>/.medusa/'],
   setupFiles: ['./integration-tests/setup.js'],
+  // Runs in the real jest process: fontconfig reads the real environment,
+  // which a test file's process.env (a jest copy) never reaches.
+  globalSetup: './integration-tests/global-setup-fonts.ts',
 };
 
 if (process.env.TEST_TYPE === 'integration:http') {
