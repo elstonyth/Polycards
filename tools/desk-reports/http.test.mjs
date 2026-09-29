@@ -34,6 +34,9 @@ test('sends the key header and only the params that are set', async () => {
     'https://backend.test/reports/finance/economy?from=2026-09-28T16%3A00%3A00.000Z&group=default',
   );
   assert.equal(seen.init.headers['x-report-key'], KEY);
+  // fetch drops Authorization on a cross-origin redirect but replays custom
+  // headers, so a redirect must fail instead of carrying the key along.
+  assert.equal(seen.init.redirect, 'error');
 });
 
 test('refuses to call without a real key', async () => {

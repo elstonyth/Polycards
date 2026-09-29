@@ -26,6 +26,9 @@ export async function getReport({
   try {
     res = await fetchImpl(url, {
       headers: { 'x-report-key': key, accept: 'application/json' },
+      // fetch strips Authorization and Cookie on a cross-origin redirect but
+      // replays custom headers such as x-report-key. Refuse to follow one.
+      redirect: 'error',
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
