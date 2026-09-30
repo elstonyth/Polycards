@@ -36,28 +36,59 @@ const REWARD_LABEL: Record<string, string> = {
   card: 'Card',
 };
 
-function rewardLabel(reward: TaskEntry['reward']): string {
+// Every reward reads "what · worth": the player sees which level pays what
+// before they claim it. `value` is null when the backend could not price it
+// (a deleted pack/card, or a backend that predates the field).
+function rewardLabel(reward: TaskEntry['reward']): {
+  name: string;
+  value: number | null;
+} {
   if (reward.type === 'credit' && typeof reward.amount_myr === 'number') {
-    return rm(reward.amount_myr);
+    return { name: `${rm(reward.amount_myr)} credit`, value: null };
   }
   // A free rip names its pack — "Free rip · Bronze Pack" — so the player
   // knows what they are working towards before they claim it. The slug is
   // the fallback (a backend that predates pack_title, or a pack that has
   // since been deleted): never a bare "Free rip" again.
   if (reward.type === 'pack' && (reward.pack_title || reward.pack_id)) {
-    return `Free rip · ${reward.pack_title || reward.pack_id}`;
+    return {
+      name: `Free rip · ${reward.pack_title || reward.pack_id}`,
+      value: reward.pack_price_myr ?? null,
+    };
   }
-  return REWARD_LABEL[reward.type] ?? 'Reward';
+  if (reward.type === 'card' && reward.card_name) {
+    return {
+      // Non-breaking space: "PSA 10" must not wrap as "PSA / 10".
+      name: reward.card_grade
+        ? `${reward.card_name} · ${reward.card_grade.replace(/ /g, ' ')}`
+        : reward.card_name,
+      value: reward.card_value_myr ?? null,
+    };
+  }
+  return { name: REWARD_LABEL[reward.type] ?? 'Reward', value: null };
 }
 
 // Deliberately NOT a link to the pack page: a draft or deleted pack 404s
 // there, and an 11px inline chip cannot meet the focus-ring / 44px tap-target
 // rules DESIGN.md sets for interactive elements. The name is the point.
+// Its own line under the progress bar, and the name WRAPS rather than
+// truncates: a card name like "Poncho-Wearing Pikachu Charizard #208/XY-P"
+// clipped to "Poncho-Weari…" on a phone is exactly the "what do I get?"
+// complaint this fixes. The RM value never clips.
 function RewardChip({ reward }: { reward: TaskEntry['reward'] }) {
+  const { name, value } = rewardLabel(reward);
   return (
-    <span className="inline-flex min-w-0 items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-neutral-300">
-      <Gift className="h-3 w-3 shrink-0" aria-hidden />
-      <span className="truncate">{rewardLabel(reward)}</span>
+    <span className="inline-flex max-w-full items-start gap-1 rounded-lg bg-white/5 px-2 py-1 text-[11px] leading-snug text-neutral-300">
+      <Gift className="mt-px h-3 w-3 shrink-0" aria-hidden />
+      <span className="min-w-0">
+        {name}
+        {value != null && value > 0 && (
+          <span className="text-chase font-semibold whitespace-nowrap tabular-nums">
+            {' '}
+            · worth {rm(value)}
+          </span>
+        )}
+      </span>
     </span>
   );
 }
@@ -115,7 +146,7 @@ function TaskRow({
     <li className="flex items-center gap-3 py-3">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm text-white">{task.title}</p>
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+        <div className="mt-1.5 flex items-center gap-2">
           <div
             className="h-1.5 w-28 overflow-hidden rounded-full bg-neutral-800"
             role="progressbar"
@@ -132,6 +163,8 @@ function TaskRow({
           <span className="text-xs text-white/40 tabular-nums">
             {task.progress.current}/{task.progress.target}
           </span>
+        </div>
+        <div className="mt-1.5">
           <RewardChip reward={task.reward} />
         </div>
       </div>

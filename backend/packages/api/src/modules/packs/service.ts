@@ -139,7 +139,7 @@ import { consumeExternalSen } from './external-funded';
 import { recomputeExternalStamps } from './external-backfill';
 import { levelForSpend } from './vip-ladder';
 import { levelsToGrant, rewardsForLevel } from './vip-rewards';
-import { fromSen, toSen } from './money';
+import { fromSen, toMoney, toSen } from './money';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   resolveFxRate,
@@ -2197,26 +2197,71 @@ class PacksModuleService extends MedusaService({
     // One IN query, bounded by the task count, never the catalog. A missing
     // pack resolves to null — the storefront falls back to the bare label,
     // and the admin console is where "(missing)" gets said.
+    // Card rewards get the same treatment plus their RM value (the same
+    // displayMarketPrice the vault shows, so the number promised here is the
+    // number the vault shows after the claim) — a bare "Card" told the player
+    // neither which card nor what it is worth.
     const packSlugs = new Set<string>(pendingSpins.map((s) => s.pack_id));
+    const cardHandles = new Set<string>();
     for (const d of live) {
       const r = d.reward as unknown as TaskReward;
       if (r.type === 'pack') packSlugs.add(r.pack_id);
+      if (r.type === 'card') cardHandles.add(r.card_handle);
     }
-    const packTitle = new Map<string, string>(
-      packSlugs.size
-        ? (
-            await this.listPacks(
-              { slug: [...packSlugs] },
-              { select: ['slug', 'title'], take: packSlugs.size },
-              sharedContext,
-            )
-          ).map((p) => [p.slug, p.title])
-        : [],
-    );
-    const hubReward = (reward: TaskReward): HubReward =>
-      reward.type === 'pack'
-        ? { ...reward, pack_title: packTitle.get(reward.pack_id) ?? null }
-        : reward;
+    const packRows = packSlugs.size
+      ? await this.listPacks(
+          { slug: [...packSlugs] },
+          { select: ['slug', 'title', 'price'], take: packSlugs.size },
+          sharedContext,
+        )
+      : [];
+    const cardRows = cardHandles.size
+      ? await this.listCards(
+          { handle: [...cardHandles] },
+          {
+            select: [
+              'handle',
+              'name',
+              'grader',
+              'grade',
+              'market_value',
+              'market_multiplier',
+            ],
+            take: cardHandles.size,
+          },
+          sharedContext,
+        )
+      : [];
+    const fxRate = cardRows.length ? await resolveFxRate(this) : DEFAULT_USD_MYR;
+    const packBySlug = new Map(packRows.map((p) => [p.slug, p]));
+    const cardByHandle = new Map(cardRows.map((c) => [c.handle, c]));
+    const packTitle = new Map(packRows.map((p) => [p.slug, p.title]));
+    const hubReward = (reward: TaskReward): HubReward => {
+      if (reward.type === 'pack') {
+        const p = packBySlug.get(reward.pack_id);
+        return {
+          ...reward,
+          pack_title: p?.title ?? null,
+          pack_price_myr: p ? toMoney(p.price) : null,
+        };
+      }
+      if (reward.type === 'card') {
+        const c = cardByHandle.get(reward.card_handle);
+        return {
+          ...reward,
+          card_name: c?.name ?? null,
+          card_grade: c?.grader && c.grade ? `${c.grader} ${c.grade}` : null,
+          card_value_myr: c
+            ? displayMarketPrice(
+                toMoney(c.market_value),
+                fxRate,
+                Number(c.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
+              )
+            : null,
+        };
+      }
+      return reward;
+    };
     return {
       week_start: week.weekStartIso,
       // The Achievements & VIP tab shows the rung the reach_level tasks are
