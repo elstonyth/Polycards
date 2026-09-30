@@ -104,12 +104,10 @@ export async function GET(
     return;
   }
 
-  // Stats — same definitions as the leaderboard: volume = Σ won-card MYR
-  // display value (FMV × multiplier × FX); it can drift from the board by
-  // cents (per-card rounding here vs one sum-level round there) and is
-  // computed over the newest-20k-capped pull set (pre-existing MAX_PULLS cap
-  // — the cap and the C1 source='pack' filter now live inside the SQL
-  // aggregate, see PacksModuleService.profileStatsForCustomer).
+  // Stats — the All Time board's figures for this customer: pulls and volume
+  // (draw-time pulled value × FX, rounded once) use the board's own
+  // expression, over the newest-20k-capped pull set (pre-existing MAX_PULLS
+  // cap — see PacksModuleService.profileStatsForCustomer).
   const stats = await packs.profileStatsForCustomer(customer.id);
   const byRarity = Object.fromEntries(
     RARITY_ORDER.map((r) => [r, 0]),
