@@ -19,12 +19,15 @@ type Scope = { resolve: <T>(key: string) => T };
 /** One alert per window, however many customers retry into the empty wallet. */
 export const PAYOUT_FLOAT_ALERT_EVERY_MS = 30 * 60_000;
 
-let lastPayoutFloatAlertAt = -Infinity;
+// Last send per muted tag. ponytail: per-process, and the web service runs 2
+// instances, so a burst can alert twice. A Redis SET NX key if that ever
+// matters.
+const lastAlertAt = new Map<string, number>();
 
 /** Test seam: module state outlives a test (one jest process is one module
  *  instance), same reason as resetTelegramWarnings. */
 export function resetOpsAlerts(): void {
-  lastPayoutFloatAlertAt = -Infinity;
+  lastAlertAt.clear();
 }
 
 /**
@@ -102,37 +105,39 @@ export function alertPayoutFloatEmpty(
   scope: Scope,
   detail: { amount: number; ref: string; via: string },
 ): Promise<void> {
-  const now = Date.now();
-  if (now - lastPayoutFloatAlertAt < PAYOUT_FLOAT_ALERT_EVERY_MS) {
-    return Promise.resolve();
-  }
-  // Stamped before the send, so a burst arriving together cannot all pass.
-  // ponytail: per-process, and the web service runs 2 instances, so a burst
-  // can alert twice. A Redis SET NX key if that ever matters.
-  lastPayoutFloatAlertAt = now;
-  const text =
+  return alertOps(
+    scope,
+    'payout-float-empty',
     `TGPay payout wallet is short: payouts are being refused with ` +
-    `"Insufficient payout credit balance". Latest: RM ${detail.amount} ` +
-    `(${detail.ref}, ${detail.via}), refunded to the customer. Every payout ` +
-    `fails until the TGPay payout wallet is topped up. Repeats muted for ` +
-    `${PAYOUT_FLOAT_ALERT_EVERY_MS / 60_000} min.`;
-  // Unmuted on a failed send, so the next refusal tries again instead of the
-  // window passing in silence.
-  return postOpsAlert(scope, 'payout-float-empty', text, () => {
-    lastPayoutFloatAlertAt = -Infinity;
-  });
+      `"Insufficient payout credit balance". Latest: RM ${detail.amount} ` +
+      `(${detail.ref}, ${detail.via}), refunded to the customer. Every payout ` +
+      `fails until the TGPay payout wallet is topped up. Repeats muted for ` +
+      `${PAYOUT_FLOAT_ALERT_EVERY_MS / 60_000} min.`,
+    { muteMs: PAYOUT_FLOAT_ALERT_EVERY_MS },
+  );
 }
 
 /**
- * A rare, must-see event (e.g. TGPay says it paid a payout we already
- * refunded). Not muted: every occurrence is its own investigation. Same
- * guarantees as alertPayoutFloatEmpty — never throws, never rejects, and the
- * caller must not put account numbers or names in `text`.
+ * Post an operator alert under `tag`. With `muteMs`, at most one per tag per
+ * window (for conditions that repeat per request); without it, every call
+ * sends (for rare, must-see events such as TGPay paying a payout we already
+ * refunded). Never throws, never rejects, and the caller must not put account
+ * numbers, names or phone numbers in `text`.
  */
 export function alertOps(
   scope: Scope,
   tag: string,
   text: string,
+  opts: { muteMs?: number } = {},
 ): Promise<void> {
-  return postOpsAlert(scope, tag, text);
+  if (!opts.muteMs) return postOpsAlert(scope, tag, text);
+  const now = Date.now();
+  if (now - (lastAlertAt.get(tag) ?? -Infinity) < opts.muteMs) {
+    return Promise.resolve();
+  }
+  // Stamped before the send, so a burst arriving together cannot all pass;
+  // cleared on a failed send, so the next occurrence tries again instead of
+  // the window passing in silence.
+  lastAlertAt.set(tag, now);
+  return postOpsAlert(scope, tag, text, () => lastAlertAt.delete(tag));
 }
