@@ -4557,6 +4557,18 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@mercurjs/dashboard-sdk@npm:2.3.5":
+  version: 2.3.5
+  resolution: "@mercurjs/dashboard-sdk@npm:2.3.5"
+  dependencies:
+    "@babel/parser": "npm:8.0.4"
+    "@babel/traverse": "npm:7.25.6"
+    "@babel/types": "npm:8.0.4"
+    esbuild-register: "npm:^3.6.0"
+  checksum: 10c0/30530627e689ed021a2eaccb2a9cec01e9f3b00c0b4cfb44e6d89e69b820f42338377f3a4d641ddbd57a3244308b1b483416e45eb281e801c1961267261973c0
+  languageName: node
+  linkType: hard
+
 "@mercurjs/dashboard-shared@npm:2.3.3":
   version: 2.3.3
   resolution: "@mercurjs/dashboard-shared@npm:2.3.3"
@@ -10812,7 +10824,7 @@ __metadata:
     "@medusajs/icons": "npm:2.19.0"
     "@medusajs/ui": "npm:4.2.1"
     "@mercurjs/client": "npm:2.3.3"
-    "@mercurjs/dashboard-sdk": "npm:2.3.3"
+    "@mercurjs/dashboard-sdk": "npm:2.3.5"
     "@mercurjs/dashboard-shared": "npm:2.3.3"
     "@tanstack/react-query": "npm:5.104.0"
     "@types/jsonwebtoken": "npm:^9.0.9"
