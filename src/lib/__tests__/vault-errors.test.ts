@@ -72,6 +72,16 @@ describe('VAULT_RULES backend-message contract', () => {
     expect(map('We could not start your withdrawal.')).toBe(refused);
   });
 
+  it('passes an empty-payout-wallet refusal through instead of blaming the bank details', () => {
+    // packs/gateway-withdrawal.ts, the TGPAY_PAYOUT_FLOAT_EMPTY branch. Our
+    // TGPay payout wallet was short on 2026-09-29 and the "check your bank
+    // details" copy sent a customer through nine attempts and three accounts.
+    const floatEmpty =
+      'Withdrawals are temporarily unavailable on our side and your balance has been returned. Your bank details are fine — there is no need to change them. Please try again later.';
+    expect(map(floatEmpty)).toBe(floatEmpty);
+    expect(map(floatEmpty)).not.toMatch(/check your bank details/i);
+  });
+
   it('points an unverified customer at the screen that clears the gate', () => {
     // Action-neutral copy: the same guard fires on topup AND withdrawal
     // (2026-08-05), so the message must not name either one.

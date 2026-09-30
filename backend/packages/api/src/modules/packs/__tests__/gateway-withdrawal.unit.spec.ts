@@ -1,12 +1,15 @@
-import { MedusaError } from '@medusajs/framework/utils';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
 import {
   GATEWAY_WD_MIN_RM,
   withdrawalsEnabled,
   startWithdrawal,
+  submitHeldWithdrawal,
   withdrawalDetailsError,
   withdrawalIdempotencyReference,
   withdrawalRefundReference,
 } from '../gateway-withdrawal';
+import { TGPAY_PAYOUT_FLOAT_EMPTY } from '../tgpay-client';
+import { resetOpsAlerts } from '../ops-alert';
 import {
   unknownWithdrawalAction,
   withdrawalReconcileAction,
@@ -855,6 +858,210 @@ describe('startWithdrawal — approval threshold (held)', () => {
     );
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
+  });
+});
+
+// Production 2026-09-06 and 2026-09-29: our TGPay payout wallet ran short and
+// every payout came back "Insufficient payout credit balance". Customers were
+// told to check their bank details, so they retried across three accounts and
+// name spellings, and nobody on our side knew until one complained. The money
+// handling was right and must stay exactly as it is; only what the customer is
+// told, and who else hears about it, changes.
+describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
+  const floatEmpty = () =>
+    new GatewayError(
+      'TGPay /transaction/payout/withdraw failed (HTTP 400): Insufficient payout credit balance',
+      [TGPAY_PAYOUT_FLOAT_EMPTY],
+      400,
+      true,
+    );
+  const originalFetch = global.fetch;
+  let sent: { chat_id: string; text: string }[];
+
+  beforeEach(() => {
+    resetOpsAlerts();
+    sent = [];
+    process.env.TELEGRAM_BOT_TOKEN = 'bot-test';
+    process.env.TELEGRAM_OPS_CHAT_ID = '-100ops';
+    process.env.TELEGRAM_CHAT_ID = '-100public';
+    // The ops alert is the only thing on these paths that reaches fetch — the
+    // gateway is the scripted fake.
+    global.fetch = jest.fn(async (_url: string, init: { body: string }) => {
+      sent.push(JSON.parse(init.body));
+      return { status: 200, json: async () => ({ ok: true }) };
+    }) as unknown as typeof fetch;
+    fakeGateway.script({ submitWithdrawal: floatEmpty() });
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    delete process.env.TELEGRAM_OPS_CHAT_ID;
+    delete process.env.TELEGRAM_CHAT_ID;
+  });
+
+  describe('startWithdrawal', () => {
+    it('refunds and closes the row exactly like any definite refusal', async () => {
+      const h = harness();
+      await expect(start(h)).rejects.toBeInstanceOf(MedusaError);
+      expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+      expect(h.packs.withdrawCreditsWithLedger.mock.calls[0][0]).toMatchObject({
+        customerId: 'cus_1',
+        amount: 50,
+        reason: 'cashout',
+      });
+      expect(
+        h.packs.withdrawCreditsWithLedger.mock.calls[0][0].idempotencyReference,
+      ).toMatch(/^wd-refund:/);
+      expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
+        id: 'gpw_1',
+        status: 'failed',
+        failure_reason: expect.stringContaining(TGPAY_PAYOUT_FLOAT_EMPTY),
+      });
+      // Refund before the close, as on every refusal.
+      expect(
+        h.packs.withdrawCreditsWithLedger.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        h.packs.updateGatewayWithdrawals.mock.invocationCallOrder[0],
+      );
+      // The per-refusal log line still fires, now carrying the code.
+      expect(h.logger.warn.mock.calls[0][0]).toMatch(
+        /TGPAY_PAYOUT_FLOAT_EMPTY/,
+      );
+    });
+
+    it('tells the customer it is on our side and their bank details are fine', async () => {
+      const error = (await start(harness()).catch((e: unknown) => e)) as Error;
+      expect(error.message).toMatch(
+        /withdrawals are temporarily unavailable on our side/i,
+      );
+      expect(error.message).toMatch(/balance has been returned/i);
+      expect(error.message).toMatch(/no need to change/i);
+      // The old copy is what sent customers round three bank accounts.
+      expect(error.message).not.toMatch(/check your bank details/i);
+    });
+
+    it('alerts the private ops chat once for a burst of retries', async () => {
+      for (let i = 0; i < 3; i++) {
+        await start(harness()).catch(() => undefined);
+      }
+      expect(sent).toHaveLength(1);
+      expect(sent[0].chat_id).toBe('-100ops');
+      expect(sent[0].text).toMatch(/payout wallet/i);
+      // Our reference and the amount; never the customer's account or name.
+      expect(sent[0].text).not.toMatch(/1234567890|AHMAD BIN ALI/i);
+    });
+
+    it('any other definite refusal keeps the generic copy and alerts nobody', async () => {
+      fakeGateway.script({
+        submitWithdrawal: new GatewayError('nope', ['PMT10013'], 200, true),
+      });
+      await expect(start(harness())).rejects.toThrow(
+        /refused by the payment provider/i,
+      );
+      expect(sent).toHaveLength(0);
+    });
+  });
+
+  describe('submitHeldWithdrawal (admin approve)', () => {
+    const heldRow = {
+      id: 'gpw_h1',
+      customer_id: 'cus_1',
+      merchant_transaction_id: 'PW-HELD-1',
+      // bigNumber column: arrives as a string.
+      amount: '1500',
+      bank_code: 'MBBEMYKL',
+      account_number: '1234567890',
+      account_holder_name: 'AHMAD BIN ALI',
+      gateway: 'fake',
+      status: 'held',
+      gateway_transaction_id: null,
+      gateway_status: null,
+      failure_reason: null,
+    };
+
+    function approveHarness() {
+      const packs = {
+        listGatewayWithdrawals: jest.fn().mockResolvedValue([heldRow]),
+        listCustomerAccountStates: jest.fn().mockResolvedValue([]),
+        claimWithdrawalAgainstDebit: jest
+          .fn()
+          .mockResolvedValue({ debited: true, claimed: true }),
+        withdrawCreditsWithLedger: jest.fn().mockResolvedValue({
+          id: 'ct_2',
+          balance: 1500,
+          amount: 1500,
+          replayed: false,
+          reference: null,
+        }),
+        updateGatewayWithdrawals: jest.fn().mockResolvedValue(undefined),
+      };
+      const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
+      const others: Record<string, unknown> = {
+        logger,
+        [Modules.CUSTOMER]: {
+          retrieveCustomer: async () => ({ email: 'payee@example.test' }),
+        },
+        [Modules.NOTIFICATION]: { createNotifications: jest.fn() },
+      };
+      const scope = {
+        resolve: (k: string) => others[k] ?? packs,
+      } as never;
+      const approve = () =>
+        submitHeldWithdrawal(scope, {
+          withdrawalId: heldRow.id,
+          adminId: 'usr_admin_1',
+          payerIp: '10.0.0.7',
+        });
+      return { packs, approve };
+    }
+
+    beforeEach(() => {
+      // Cached, so resolveActiveGateway never needs a site_settings table.
+      setActiveGateway('fake');
+      // https only: gatewayUrls treats anything else as unset and approve
+      // then fails closed before it reaches the gateway.
+      process.env.PAYMENT_CALLBACK_BASE = 'https://us.test';
+    });
+
+    afterEach(() => {
+      delete process.env.PAYMENT_CALLBACK_BASE;
+    });
+
+    it('refunds on the shared anchor, tells the admin to top up the wallet, and alerts ops', async () => {
+      const h = approveHarness();
+      const error = (await h.approve().catch((e: unknown) => e)) as Error;
+      expect(error.message).toMatch(/payout wallet is short/i);
+      expect(error.message).toMatch(/top up/i);
+      expect(error.message).toMatch(/refunded/i);
+
+      // The money path is refundWithdrawal's, unchanged.
+      expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+      expect(
+        h.packs.withdrawCreditsWithLedger.mock.calls[0][0].idempotencyReference,
+      ).toBe(withdrawalRefundReference('cus_1', 'PW-HELD-1'));
+      expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
+        selector: { id: 'gpw_h1', status: 'pending' },
+        data: expect.objectContaining({
+          status: 'failed',
+          failure_reason: expect.stringContaining(TGPAY_PAYOUT_FLOAT_EMPTY),
+        }),
+      });
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0].chat_id).toBe('-100ops');
+      expect(sent[0].text).toMatch(/admin approve/);
+    });
+
+    it('any other definite refusal keeps the generic admin message and alerts nobody', async () => {
+      fakeGateway.script({
+        submitWithdrawal: new GatewayError('nope', ['PMT10013'], 400, true),
+      });
+      await expect(approveHarness().approve()).rejects.toThrow(
+        /The gateway refused this payout/,
+      );
+      expect(sent).toHaveLength(0);
+    });
   });
 });
 
