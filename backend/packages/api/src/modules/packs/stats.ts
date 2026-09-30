@@ -21,17 +21,21 @@ export const STATS_RANGES = [
 export type StatsWindow = { from: Date; to: Date };
 export type StatsWindows = { current: StatsWindow; previous: StatsWindow };
 
+// Top-up figures are the payment gateway's settled deposits (gateway_deposit),
+// never wallet credits: manual adjustments do not count.
 export type SignupTopupStats = {
-  /** Accounts created (customer.has_account), deleted ones included. */
+  /** Accounts created (customer.has_account), deleted ones included,
+   *  operator-generated partner accounts excluded. */
   signups: number;
+  /** Settled gateway deposits. */
   topup_count: number;
-  /** Distinct customers with at least one top-up in the window. */
+  /** Distinct customers with at least one settled deposit in the window. */
   topup_customers: number;
-  /** MYR. */
+  /** MYR, Σ amount_settled. */
   topup_amount: number;
-  /** Customers whose first-ever top-up falls in the window. */
+  /** Customers whose first-ever settled deposit falls in the window. */
   first_topup_count: number;
-  /** MYR, the sum of those first top-ups. */
+  /** MYR, the sum of those first deposits. */
   first_topup_amount: number;
 };
 

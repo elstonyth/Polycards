@@ -6380,10 +6380,18 @@ class PacksModuleService extends MedusaService({
   // [from, to) window, in one statement.
   //
   // Sign-ups count has_account customers, deleted rows included, so a past
-  // period never shrinks. Top-ups are the ledger's topup rows; in production
-  // those are the settled TGPay deposits (the mock path cannot boot there).
-  // A first top-up is ranked over the customer's WHOLE history before the
-  // window filter, so a returning customer's top-up in the window is not a
+  // period never shrinks. Operator-minted partner accounts are left out: they
+  // are handed out, not signed up for. They carry metadata.partner_credential
+  // (PARTNER_CREDENTIAL_KEY in utils/partner-accounts.ts, named literally here
+  // because importing it would close a module cycle; admin-stats.spec mints
+  // through the real generator, so a renamed key fails it).
+  //
+  // Top-ups are the payment gateway's own record: settled gateway_deposit
+  // rows, by settled_at, at amount_settled. Only the gateway settles a deposit
+  // (its callback or the requery sweep; no admin route can), so wallet credits
+  // it never saw, manual adjustments or a stray ledger 'topup', cannot count.
+  // A first top-up is ranked over the customer's WHOLE deposit history before
+  // the window filter, so a returning customer's top-up in the window is not a
   // first. Money is summed as integer cents, like ledgerReasonTotals.
   @InjectManager()
   async signupTopupStats(
@@ -6405,16 +6413,18 @@ class PacksModuleService extends MedusaService({
       }[]
     >(
       `WITH topups AS (
-         SELECT customer_id, amount, created_at,
+         SELECT customer_id, amount_settled AS amount, settled_at,
                 row_number() OVER (
-                  PARTITION BY customer_id ORDER BY created_at, id
+                  PARTITION BY customer_id ORDER BY settled_at, id
                 ) AS nth
-         FROM credit_transaction
-         WHERE reason = 'topup' AND amount > 0 AND deleted_at IS NULL
+         FROM gateway_deposit
+         WHERE status = 'settled' AND deleted_at IS NULL
+           AND settled_at IS NOT NULL AND amount_settled > 0
        )
        SELECT
          (SELECT count(*) FROM customer
             WHERE has_account
+              AND metadata -> 'partner_credential' IS NULL
               AND created_at >= ?::timestamptz
               AND created_at < ?::timestamptz)::int AS signups,
          count(*)::int AS topup_count,
@@ -6424,7 +6434,7 @@ class PacksModuleService extends MedusaService({
          COALESCE(SUM(ROUND(amount * 100)) FILTER (WHERE nth = 1), 0)::bigint
            AS first_topup_cents
        FROM topups
-       WHERE created_at >= ?::timestamptz AND created_at < ?::timestamptz`,
+       WHERE settled_at >= ?::timestamptz AND settled_at < ?::timestamptz`,
       [...bounds, ...bounds],
     );
     return {
