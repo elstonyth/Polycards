@@ -12,14 +12,14 @@
 // the URL, and every rename retired a link that had already gone out — the
 // Telegram board posts /profile/<name> to a public channel, so a player who
 // hit an Immortal and then renamed left that post pointing at a 404, and at
-// whoever claimed the freed name next. Migration20260930120000 froze every
+// whoever claimed the freed name next. Migration20260930140000 froze every
 // live account's then-current name as its handle, so no link that worked
 // before the change stopped working because of it.
 //
 // Both values share one shape: ASCII `A-Za-z0-9_-`, 3..30, so either is a URL
 // segment without percent-encoding, and both are unique CASE-INSENSITIVELY
 // (partial unique indexes on lower(first_name) — Migration20260904120000 — and
-// on lower(metadata->>'handle') — Migration20260930120000). Display case is
+// on lower(metadata->>'handle') — Migration20260930140000). Display case is
 // preserved; only matching folds it. They are separate namespaces: a handle
 // can equal some OTHER player's display name, because the name a handle was
 // frozen from can be given up by its owner and then taken by someone else.

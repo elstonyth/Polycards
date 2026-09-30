@@ -29,7 +29,7 @@ import { Migration } from '@medusajs/framework/mikro-orm/migrations';
 // (`- 'handle'`), never a replacement, and a row whose metadata is not a JSON
 // object is left alone (an array `||` an object APPENDS instead of merging);
 // the notice counts those so the deploy log shows if any exist.
-export class Migration20260930120000 extends Migration {
+export class Migration20260930140000 extends Migration {
   override async up(): Promise<void> {
     this.addSql(`
       do $$

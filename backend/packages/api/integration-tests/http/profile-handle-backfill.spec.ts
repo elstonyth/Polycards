@@ -1,12 +1,12 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
-import { Migration20260930120000 } from '../../src/modules/packs/migrations/Migration20260930120000';
+import { Migration20260930140000 } from '../../src/modules/packs/migrations/Migration20260930140000';
 import { clearProfileCache } from '../../src/api/store/profiles/[handle]/route';
 import { unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
-// Migration20260930120000 against the data shapes production actually holds.
+// Migration20260930140000 against the data shapes production actually holds.
 // The suite's own migrate run happens on an empty table, which proves the SQL
 // parses and nothing else — the backfill's whole risk is in rows: a merge that
 // clobbers the payout accounts beside the handle, a pre-2026-09-04 slug
@@ -22,7 +22,7 @@ type Knex = {
 
 async function upSql(): Promise<string[]> {
   const sql: string[] = [];
-  const m = Object.create(Migration20260930120000.prototype) as {
+  const m = Object.create(Migration20260930140000.prototype) as {
     addSql: (s: string) => void;
     up: () => Promise<void>;
   };
@@ -34,7 +34,7 @@ async function upSql(): Promise<string[]> {
 medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ api, getContainer }) => {
-    describe('profile handle backfill (Migration20260930120000)', () => {
+    describe('profile handle backfill (Migration20260930140000)', () => {
       it('freezes each live name as its handle, merging into the blob and dropping stale slugs', async () => {
         clearProfileCache();
         const container = getContainer();

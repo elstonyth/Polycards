@@ -5041,7 +5041,7 @@ class PacksModuleService extends MedusaService({
    * The customer id whose permanent profile handle (metadata.handle) is this,
    * case-insensitively. Same raw-SQL reasoning as findCustomerIdByUsername
    * above; the expression is exactly the one IDX_customer_handle_lower_unique
-   * is built on (Migration20260930120000), so PG can use it.
+   * is built on (Migration20260930140000), so PG can use it.
    */
   @InjectManager()
   async findCustomerIdByHandle(

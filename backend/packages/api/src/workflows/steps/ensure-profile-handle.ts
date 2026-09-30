@@ -26,7 +26,7 @@ export type EnsureProfileHandleResult = {
 // only the display name; see utils/profile-handle.ts for why the two are kept
 // apart.
 //
-// After Migration20260930120000 every live customer already holds a handle, so
+// After Migration20260930140000 every live customer already holds a handle, so
 // the common path here writes nothing at all.
 export const ensureProfileHandleStep = createStep(
   'ensure-profile-handle',
