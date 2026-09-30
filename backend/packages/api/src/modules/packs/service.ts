@@ -177,6 +177,7 @@ import {
   type RankPayout,
 } from './challenge-settle';
 import { weightedAverageCost } from './inventory-cost';
+import type { SignupTopupStats } from './stats';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
 // plan-033 playthrough basis: the "post-1b deposited" ledger predicate. Shared
@@ -6342,6 +6343,67 @@ class PacksModuleService extends MedusaService({
       reason: r.reason,
       amount: Number(r.cents) / 100,
     }));
+  }
+
+  // Sign-up and top-up figures for GET /admin/stats over one half-open
+  // [from, to) window, in one statement.
+  //
+  // Sign-ups count has_account customers, deleted rows included, so a past
+  // period never shrinks. Top-ups are the ledger's topup rows; in production
+  // those are the settled TGPay deposits (the mock path cannot boot there).
+  // A first top-up is ranked over the customer's WHOLE history before the
+  // window filter, so a returning customer's top-up in the window is not a
+  // first. Money is summed as integer cents, like ledgerReasonTotals.
+  @InjectManager()
+  async signupTopupStats(
+    from: Date,
+    to: Date,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<SignupTopupStats> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const bounds = [from.toISOString(), to.toISOString()];
+    const [row] = await em.execute<
+      {
+        signups: number;
+        topup_count: number;
+        topup_customers: number;
+        topup_cents: string;
+        first_topup_count: number;
+        first_topup_cents: string;
+      }[]
+    >(
+      `WITH topups AS (
+         SELECT customer_id, amount, created_at,
+                row_number() OVER (
+                  PARTITION BY customer_id ORDER BY created_at, id
+                ) AS nth
+         FROM credit_transaction
+         WHERE reason = 'topup' AND amount > 0 AND deleted_at IS NULL
+       )
+       SELECT
+         (SELECT count(*) FROM customer
+            WHERE has_account
+              AND created_at >= ?::timestamptz
+              AND created_at < ?::timestamptz)::int AS signups,
+         count(*)::int AS topup_count,
+         count(DISTINCT customer_id)::int AS topup_customers,
+         COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS topup_cents,
+         (count(*) FILTER (WHERE nth = 1))::int AS first_topup_count,
+         COALESCE(SUM(ROUND(amount * 100)) FILTER (WHERE nth = 1), 0)::bigint
+           AS first_topup_cents
+       FROM topups
+       WHERE created_at >= ?::timestamptz AND created_at < ?::timestamptz`,
+      [...bounds, ...bounds],
+    );
+    return {
+      signups: row.signups,
+      topup_count: row.topup_count,
+      topup_customers: row.topup_customers,
+      topup_amount: Number(row.topup_cents) / 100,
+      first_topup_count: row.first_topup_count,
+      first_topup_amount: Number(row.first_topup_cents) / 100,
+    };
   }
 
   // Count-then-insert for a gateway deposit, serialized per customer.

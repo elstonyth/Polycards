@@ -37,6 +37,9 @@ import {
   getCustomerPulls,
   getDeliveryOrder,
   getEconomyReport,
+  getStatsReport,
+  type StatsRange,
+  type StatsReport,
   getSettlementReport,
   getGatewayBalance,
   getGatewayAudit,
@@ -218,6 +221,25 @@ export const useEconomy = (
     queryKey: [...qk.economy, from ?? 'all', to ?? 'all'],
     queryFn: () => getEconomyReport(from, to),
     placeholderData: keepPreviousData,
+  });
+
+// Stats page. keepPreviousData so switching presets swaps the numbers without
+// a skeleton flash (the economy precedent). The page passes '' for the dates
+// unless the range is 'custom'; a half-picked or reversed custom range never
+// fires (it could only 400), the page shows a hint instead.
+export const useStats = (
+  range: StatsRange,
+  from: string,
+  to: string,
+): UseQueryResult<StatsReport> =>
+  useQuery({
+    queryKey: qk.stats(range, from, to),
+    queryFn: () => getStatsReport(range, from, to),
+    placeholderData: keepPreviousData,
+    enabled: range !== 'custom' || (from !== '' && to !== '' && from <= to),
+    // The dashboard's QueryClient disables focus refetch; "today" is live,
+    // so coming back to the tab should show fresh numbers.
+    refetchOnWindowFocus: true,
   });
 
 // Calendar weekly/monthly gateway settlement report. keepPreviousData so the

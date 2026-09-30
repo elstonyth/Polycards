@@ -18,6 +18,16 @@ describe('qk', () => {
     ]);
     expect(qk.pullsKey).toEqual(['admin', 'pulls']);
     expect(qk.economy).toEqual(['admin', 'economy']);
+    // Custom dates always render ('' outside custom): same always-rendered-
+    // segment rule as qk.pulls, so no preset key prefixes another.
+    expect(qk.stats('today', '', '')).toEqual(['admin', 'stats', 'today', '', '']);
+    expect(qk.stats('custom', '2026-09-01', '2026-09-10')).toEqual([
+      'admin',
+      'stats',
+      'custom',
+      '2026-09-01',
+      '2026-09-10',
+    ]);
     expect(qk.eligibleProducts).toEqual(['admin', 'eligible-products']);
   });
 

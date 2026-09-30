@@ -386,6 +386,49 @@ export async function getEconomyReport(
   return getJson<EconomyReport>(`/admin/economy${q ? `?${q}` : ''}`);
 }
 
+// ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
+
+export type StatsRange =
+  | 'today'
+  | 'yesterday'
+  | '7d'
+  | '30d'
+  | 'month'
+  | 'last_month'
+  | 'custom';
+
+export interface SignupTopupStats {
+  signups: number;
+  topup_count: number;
+  topup_customers: number;
+  /** MYR. */
+  topup_amount: number;
+  first_topup_count: number;
+  /** MYR. */
+  first_topup_amount: number;
+}
+
+export interface StatsReport {
+  as_of: string;
+  /** ISO instants; windows are half-open [from, to). */
+  current: { from: string; to: string; stats: SignupTopupStats };
+  previous: { from: string; to: string; stats: SignupTopupStats };
+}
+
+// `from`/`to` are inclusive MYT days (YYYY-MM-DD), sent only for 'custom'.
+export async function getStatsReport(
+  range: StatsRange,
+  from: string,
+  to: string,
+): Promise<StatsReport> {
+  const qs = new URLSearchParams({ range });
+  if (range === 'custom') {
+    qs.set('from', from);
+    qs.set('to', to);
+  }
+  return getJson<StatsReport>(`/admin/stats?${qs.toString()}`);
+}
+
 // ── Gateway settlement report (calendar weekly/monthly gateway result) ───────
 
 export type SettlementGranularity = 'week' | 'month';
