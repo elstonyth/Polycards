@@ -31,7 +31,11 @@ export default function ProfileClient({
       value: user.rank == null ? '—' : `#${num(user.rank)}`,
     },
     { icon: Layers, label: 'All-time pulls', value: num(user.pulls) },
-    { icon: TrendingUp, label: 'All-time pulled value', value: rm(user.volume) },
+    {
+      icon: TrendingUp,
+      label: 'All-time pulled value',
+      value: rm(user.volume),
+    },
   ];
   // Profiles ship their pull activity. The fallback below derives a feed from
   // the collection — it survives the mock pool's removal because a real profile

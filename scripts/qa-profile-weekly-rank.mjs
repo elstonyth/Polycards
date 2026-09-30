@@ -21,7 +21,9 @@ for (const [i, href] of unique.entries()) {
   const shown = m ? m[1] : '(missing)';
   const ok = shown === `#${i + 1}`;
   if (!ok) failures++;
-  console.log(`${ok ? 'OK  ' : 'FAIL'} ${href} board=#${i + 1} profile=${shown}`);
+  console.log(
+    `${ok ? 'OK  ' : 'FAIL'} ${href} board=#${i + 1} profile=${shown}`,
+  );
   if (i === unique.length - 1) {
     await page.screenshot({ path: 'docs/research/qa-profile-weekly-rank.png' });
   }
