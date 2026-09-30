@@ -27,6 +27,7 @@ import {
 import { validateDeliverableAddress } from './utils/address-guard';
 import {
   blockGroupWithdrawals,
+  rejectGroupOddsSetUpdate,
   rejectGroupPolicyMetadata,
   stripAdditionalData,
 } from './utils/customer-group-guards';
@@ -1103,6 +1104,12 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Odds set of a player group (POST /admin/customer-groups/:id/odds-set).
+      matcher: '/admin/customer-groups/*/odds-set',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Native create/update customer-group routes: the prebuilt Edit form
       // posts `additional_data`, which core's strict validator refuses — see
       // stripAdditionalData. No rate limiter here: these are core routes, not
@@ -1123,7 +1130,14 @@ export default defineMiddlewares({
       // rejectGroupPolicyMetadata keeps the partner-policy keys off the
       // native metadata write path — POST /admin/customer-groups/:id/policy is
       // their only writer (bounds + audit).
-      middlewares: [stripAdditionalData, rejectGroupPolicyMetadata],
+      // rejectGroupOddsSetUpdate does the same for an EXISTING group's
+      // odds_set: POST /admin/customer-groups/:id/odds-set is its only
+      // writer (audited); create still carries the set a group is born with.
+      middlewares: [
+        stripAdditionalData,
+        rejectGroupPolicyMetadata,
+        rejectGroupOddsSetUpdate,
+      ],
     },
     {
       matcher: '/admin/rewards-settings',

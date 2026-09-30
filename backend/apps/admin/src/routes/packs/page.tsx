@@ -272,6 +272,7 @@ const PacksListPage = () => {
     form.image.trim() === '' && t('packs.form.image'),
     (form.price.trim() === '' || !(priceValue >= 0)) && t('packs.form.price'),
     (form.buybackPercent.trim() === '' ||
+      !Number.isInteger(buybackValue) ||
       !(buybackValue >= 90) ||
       !(buybackValue <= 100)) &&
       t('packs.form.buybackPercent'),

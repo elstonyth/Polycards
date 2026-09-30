@@ -108,6 +108,10 @@ function mkContainer(opts: Opts = {}) {
       return i.desired;
     },
     findCustomerIdByUsername: async () => opts.nameOwner ?? null,
+    createAdminActionAudits: async (rows: { action: string }[]) => {
+      calls.push(`audit:${rows.map((r) => r.action).join(',')}`);
+      return rows;
+    },
   };
   const container = {
     resolve: (key: string) =>
@@ -134,7 +138,10 @@ const mkRes = () => {
 
 const post = (scope: unknown, body: unknown) => {
   const { res, out } = mkRes();
-  return POST({ scope, body } as any, res).then(() => out);
+  return POST(
+    { scope, body, auth_context: { actor_id: 'user_admin' } } as any,
+    res,
+  ).then(() => out);
 };
 
 describe('mintPartnerAccount', () => {
@@ -143,6 +150,7 @@ describe('mintPartnerAccount', () => {
     const row = await mintPartnerAccount(container, {
       displayName: null,
       groupId: 'cgrp_partner',
+      adminId: 'user_admin',
     });
     expect(row.email).toMatch(EMAIL_RE);
     expect(row.password).toMatch(PASSWORD_RE);
@@ -165,6 +173,8 @@ describe('mintPartnerAccount', () => {
       'claimUsername',
       'retrieveCustomerGroup:cgrp_partner',
       'addCustomerToGroup:cgrp_partner',
+      // The group assignment is recorded, attributed to the admin.
+      'audit:set_player_group',
     ]);
   });
 
@@ -173,6 +183,7 @@ describe('mintPartnerAccount', () => {
     const row = await mintPartnerAccount(container, {
       displayName: 'Ada_1',
       groupId: null,
+      adminId: 'user_admin',
     });
     expect(seen.claimed).toBe('Ada_1');
     expect(row.group).toBe('DEFAULT');
@@ -180,7 +191,11 @@ describe('mintPartnerAccount', () => {
 
   it('skips a generated email that is already an account', async () => {
     const { container, calls } = mkContainer({ emailsTaken: 2 });
-    await mintPartnerAccount(container, { displayName: null, groupId: null });
+    await mintPartnerAccount(container, {
+        displayName: null,
+        groupId: null,
+        adminId: 'user_admin',
+      });
     expect(calls.filter((c) => c === 'register')).toHaveLength(1);
   });
 
@@ -189,7 +204,11 @@ describe('mintPartnerAccount', () => {
       registerError: 'Identity with email already exists',
     });
     await expect(
-      mintPartnerAccount(container, { displayName: null, groupId: null }),
+      mintPartnerAccount(container, {
+        displayName: null,
+        groupId: null,
+        adminId: 'user_admin',
+      }),
     ).rejects.toMatchObject({
       type: MedusaError.Types.DUPLICATE_ERROR,
       message: 'Identity with email already exists',
@@ -200,7 +219,11 @@ describe('mintPartnerAccount', () => {
   it('removes identity AND customer when a later write fails', async () => {
     const { container, calls } = mkContainer({ claimFails: true });
     await expect(
-      mintPartnerAccount(container, { displayName: null, groupId: null }),
+      mintPartnerAccount(container, {
+        displayName: null,
+        groupId: null,
+        adminId: 'user_admin',
+      }),
     ).rejects.toThrow('claim failed');
     expect(calls).toEqual([
       'register',

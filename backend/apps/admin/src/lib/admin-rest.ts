@@ -1519,9 +1519,10 @@ export const getCustomerDetail = (id: string) =>
 
 // ── Epic 3 (Odds) ────────────────────────────────────────────────────────────
 
-// Medusa's NATIVE admin customer-groups API (no repo-side route). The prebuilt
-// @mercurjs/admin bundle owns create/edit/membership at /customer-groups; this
-// app only reads the list and writes `metadata.odds_set` (1|2|3), which the
+// Medusa's NATIVE admin customer-groups API for list + create; odds-set edits
+// go through the repo's audited /odds-set route. The prebuilt @mercurjs/admin
+// bundle owns edit/membership at /customer-groups; this app reads the list and
+// sets `metadata.odds_set` (1|2|3), which the
 // draw path resolves per customer (see packs/odds-sets.ts `coerceOddsSet` —
 // anything that is not 2 or 3, including no metadata at all, is set 1).
 export interface AdminCustomerGroup {
@@ -1538,13 +1539,14 @@ export const listCustomerGroupsAdmin = () =>
     '/admin/customer-groups?limit=100&fields=id,name,metadata',
   );
 
-// Medusa MERGES metadata per key on update (verified live against the native
-// route: a sibling key survives this call), so posting only `odds_set` leaves
-// the rest of the group's metadata untouched — no read-modify-write needed.
+// Repo-side route, not the native metadata write: the server records the
+// change (before/after, who) and refuses the DEFAULT group, and the native
+// update now rejects `metadata.odds_set` so this is the only way to change it.
+// Same response shape as the native route.
 export const setGroupOddsSet = (id: string, set: 1 | 2 | 3) =>
   postJson<{ customer_group: AdminCustomerGroup }>(
-    `/admin/customer-groups/${encodeURIComponent(id)}`,
-    { metadata: { odds_set: set } },
+    `/admin/customer-groups/${encodeURIComponent(id)}/odds-set`,
+    { odds_set: set },
   );
 
 // The native create route takes `metadata` in the same body as `name`, so the

@@ -12,6 +12,33 @@ const base = {
   status: 'draft',
 };
 
+describe('coercePackBody — buyback_percent', () => {
+  // The admin's number is the truth: a rate the server cannot store exactly
+  // must be refused, never silently rewritten (92.5 used to save as 92).
+  it('refuses a decimal instant rate instead of truncating it', () => {
+    expect(() =>
+      coercePackBody({ ...base, buyback_percent: 92.5 }, 'test-pack'),
+    ).toThrow(/whole number/);
+  });
+
+  it('refuses a decimal sent as a string', () => {
+    expect(() =>
+      coercePackBody({ ...base, buyback_percent: '99.9' }, 'test-pack'),
+    ).toThrow(/whole number/);
+  });
+
+  it('keeps a whole-number rate exactly as sent', () => {
+    expect(
+      coercePackBody({ ...base, buyback_percent: 100 }, 'test-pack')
+        .buyback_percent,
+    ).toBe(100);
+    expect(
+      coercePackBody({ ...base, buyback_percent: '93' }, 'test-pack')
+        .buyback_percent,
+    ).toBe(93);
+  });
+});
+
 describe('coercePackBody — published_odds', () => {
   it('leaves published_odds undefined when the writer omits it (keep stored)', () => {
     expect(coercePackBody(base, 'test-pack').published_odds).toBeUndefined();

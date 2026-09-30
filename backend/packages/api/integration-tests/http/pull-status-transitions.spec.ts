@@ -111,7 +111,7 @@ medusaIntegrationTestRunner({
           // match on the message shape instead.
           await expect(
             deleteCardWorkflow(getContainer()).run({
-              input: { handle: CARD_HANDLE },
+              input: { handle: CARD_HANDLE, admin_id: 'user_test_admin' },
             }),
           ).rejects.toMatchObject({
             message: expect.stringMatching(/still hold/i),
@@ -127,7 +127,7 @@ medusaIntegrationTestRunner({
           await mkPull('delivering');
           await expect(
             deleteCardWorkflow(getContainer()).run({
-              input: { handle: CARD_HANDLE },
+              input: { handle: CARD_HANDLE, admin_id: 'user_test_admin' },
             }),
           ).rejects.toMatchObject({
             message: expect.stringMatching(/still hold/i),
@@ -142,7 +142,7 @@ medusaIntegrationTestRunner({
         it('history (bought_back) does NOT block deletion', async () => {
           await mkPull('bought_back');
           await deleteCardWorkflow(getContainer()).run({
-            input: { handle: CARD_HANDLE },
+            input: { handle: CARD_HANDLE, admin_id: 'user_test_admin' },
           });
           const cards = await packs.listCards(
             { handle: CARD_HANDLE },
@@ -156,11 +156,36 @@ medusaIntegrationTestRunner({
         it('agrees with foldLedgerRow on a mixed ledger', async () => {
           const CUS = 'cus_summary_oracle';
           await packs.createCreditTransactions([
-            { customer_id: CUS, amount: 100, reason: 'topup', external_funded_cents: 10000 },
-            { customer_id: CUS, amount: -30, reason: 'pack_open', external_funded_cents: -3000 },
-            { customer_id: CUS, amount: 21.6, reason: 'buyback', external_funded_cents: 0 },
-            { customer_id: CUS, amount: -5.55, reason: 'adjustment', external_funded_cents: 0 },
-            { customer_id: CUS, amount: 30, reason: 'pack_open', external_funded_cents: 3000 }, // reversal mirror
+            {
+              customer_id: CUS,
+              amount: 100,
+              reason: 'topup',
+              external_funded_cents: 10000,
+            },
+            {
+              customer_id: CUS,
+              amount: -30,
+              reason: 'pack_open',
+              external_funded_cents: -3000,
+            },
+            {
+              customer_id: CUS,
+              amount: 21.6,
+              reason: 'buyback',
+              external_funded_cents: 0,
+            },
+            {
+              customer_id: CUS,
+              amount: -5.55,
+              reason: 'adjustment',
+              external_funded_cents: 0,
+            },
+            {
+              customer_id: CUS,
+              amount: 30,
+              reason: 'pack_open',
+              external_funded_cents: 3000,
+            }, // reversal mirror
           ]);
           const sql = await packs.creditSummary(CUS);
           const rows = await packs.listCreditTransactions(

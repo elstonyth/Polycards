@@ -1,4 +1,8 @@
-import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import {
+  AuthenticatedMedusaRequest,
+  MedusaRequest,
+  MedusaResponse,
+} from '@medusajs/framework/http';
 import PacksModuleService from '../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../modules/packs';
 import { createPackWorkflow } from '../../../workflows/create-pack';
@@ -236,12 +240,16 @@ async function computePackListBody(req: MedusaRequest): Promise<unknown> {
 // POST /admin/packs — create a pack listing. A new pack starts with an empty
 // prize pool; cards are assigned via the membership editor.
 export async function POST(
-  req: MedusaRequest,
+  req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const slug = typeof body.slug === 'string' ? body.slug.trim() : '';
-  const input = coercePackBody(body, slug);
+  // admin_id from the verified session only — it attributes the audit row.
+  const input = {
+    ...coercePackBody(body, slug),
+    admin_id: req.auth_context.actor_id,
+  };
 
   // Only ONE free_welcome pack may be live — the lookup runs only when this
   // write is actually a free-pack write.

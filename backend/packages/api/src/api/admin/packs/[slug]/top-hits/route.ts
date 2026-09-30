@@ -1,7 +1,11 @@
-import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import type {
+  AuthenticatedMedusaRequest,
+  MedusaResponse,
+} from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../../modules/packs';
+import { configAuditRow } from '../../../../../modules/packs/config-audit';
 import { clearPackDetailCache } from '../../../../store/packs/[slug]/route';
 import { pageAll } from '../../../../utils/page-all';
 
@@ -12,7 +16,7 @@ import { pageAll } from '../../../../utils/page-all';
 // loses its order (not a Top Hit). Idempotent list semantics, so the admin UI
 // can save per edit.
 export async function POST(
-  req: MedusaRequest,
+  req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
@@ -64,15 +68,38 @@ export async function POST(
   // Write only the rows whose order actually changes. Order = 1-based index
   // in the submitted list; null for everything else.
   const orderOf = new Map(ordered.map((id, i) => [id, i + 1]));
-  const updates = cardRows
-    .filter(
-      (o) => (o.top_hit_order ?? null) !== (orderOf.get(o.card_id) ?? null),
-    )
-    .map((o) => ({ id: o.id, top_hit_order: orderOf.get(o.card_id) ?? null }));
+  const changed = cardRows.filter(
+    (o) => (o.top_hit_order ?? null) !== (orderOf.get(o.card_id) ?? null),
+  );
+  const updates = changed.map((o) => ({
+    id: o.id,
+    top_hit_order: orderOf.get(o.card_id) ?? null,
+  }));
   if (updates.length > 0) {
     await packs.updatePackOdds(updates);
     // Top Hit order is storefront-detail display data — reflect it now.
     clearPackDetailCache();
+    // Recorded after the write (a plain route write, no workflow to roll it
+    // back): a failed audit surfaces as a 500 the operator sees, never a
+    // silent change — same stance as editGroupPolicy.
+    await packs.createAdminActionAudits([
+      configAuditRow({
+        adminId: req.auth_context.actor_id,
+        entityType: 'pack',
+        entityId: slug,
+        action: 'edit_top_hits',
+        before: {
+          top_hits: Object.fromEntries(
+            changed.map((o) => [o.card_id, o.top_hit_order ?? null]),
+          ),
+        },
+        after: {
+          top_hits: Object.fromEntries(
+            changed.map((o) => [o.card_id, orderOf.get(o.card_id) ?? null]),
+          ),
+        },
+      }),
+    ]);
   }
 
   res.json({ top_hits: ordered, changed: updates.length });
