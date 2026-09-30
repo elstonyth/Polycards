@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // The guest demo spin draws on odds SET 3, which reaches the storefront as the
 // backend's `demo_odds`. Nothing on screen shows which odds the demo rolled —
@@ -13,6 +13,10 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { getPackDetail } from '@/lib/data/packs';
+import { clearTtlCache } from '@/lib/ttl-cache';
+
+// getPackDetail memoises per slug; each case scripts its own backend body.
+beforeEach(() => clearTtlCache());
 
 const ODDS_ROW = {
   handle: 'charizard-psa-10',
@@ -55,5 +59,30 @@ describe('pack detail: demo odds', () => {
       demo_odds: { tiers: { Legendary: 50, Bogus: 30, Common: 200 } },
     });
     expect(d?.demoOdds).toEqual({ tiers: { Legendary: 50 } });
+  });
+});
+
+// Every SSR, price poll and highlights refresh used to pay a backend hop and a
+// full-pool parse; the paid packs' detail reads were the slowest store route.
+describe('pack detail: per-process memo', () => {
+  it('serves repeat reads of one pack from a single backend call', async () => {
+    const mem = backend({
+      'GET /store/packs/:slug': { body: { odds: [ODDS_ROW] } },
+    });
+    const first = await getPackDetail('bronze-pack');
+    const second = await getPackDetail('bronze-pack');
+    expect(second).toEqual(first);
+    expect(mem.requests).toHaveLength(1);
+  });
+
+  // A miss must not be held for the window: a pack going live would stay
+  // hidden, and garbage slugs from the public route would fill the memo.
+  it('does not remember a miss', async () => {
+    const miss = backend({ 'GET /store/packs/:slug': { status: 404 } });
+    expect(await getPackDetail('bronze-pack')).toBeNull();
+    expect(miss.requests).toHaveLength(1);
+
+    backend({ 'GET /store/packs/:slug': { body: { odds: [ODDS_ROW] } } });
+    expect((await getPackDetail('bronze-pack'))?.pool).toHaveLength(1);
   });
 });

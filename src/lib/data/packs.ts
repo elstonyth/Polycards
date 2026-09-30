@@ -27,6 +27,7 @@ import {
   PackDetailPageSchema,
   RecentPullsPageSchema,
   PullGapsSchema,
+  type ZodType,
 } from '@/lib/data/schemas';
 import {
   CATEGORIES as CATEGORY_META,
@@ -190,6 +191,41 @@ export async function getPackBySlug(slug: string): Promise<PackBase | null> {
   };
 }
 
+// GET /store/packs/:slug, memoised per process. Every /slots/<slug> SSR, the
+// spin page, each open tab's 60s price poll, the home highlights refresh and —
+// for the unlisted free pack — every recent-pulls/pull-gaps poll paid a fresh
+// backend hop plus a zod parse of the whole pool (115–449 cards on the paid
+// packs), and on 2026-09-30 those reads were the slowest store route (p95
+// 1.2–1.5s). 15s, half the catalog's window: stacked on the backend's own 30s
+// it keeps an admin odds/price edit within ~45s of every surface (see the
+// staleness ladder in ttl-cache.ts). Keyed per reader because each parses the
+// body with its own schema.
+const PACK_DETAIL_TTL_MS = 15_000;
+
+/** The parsed row, or null on a 404 / outage / unusable body. A miss REJECTS
+ *  inside `cached` so it is evicted, not held for the window: a pack going live
+ *  is not hidden, and garbage slugs from the public /api/pack-detail route
+ *  never occupy an entry. */
+async function packRow<T>(
+  slug: string,
+  kind: 'pack-base' | 'pack-detail',
+  schema: ZodType<T>,
+): Promise<T | null> {
+  try {
+    return await cached(`${kind}:${slug}`, PACK_DETAIL_TTL_MS, async () => {
+      const r = await store.get(
+        `/store/packs/${encodeURIComponent(slug)}`,
+        schema,
+        PUBLIC,
+      );
+      if (!r.ok) throw new Error(`pack row miss: ${slug}`);
+      return r.data;
+    });
+  } catch {
+    return null;
+  }
+}
+
 /**
  * A pack that is REACHABLE but not LISTED — resolved from the detail route
  * (`GET /store/packs/:slug`) instead of the catalog list.
@@ -210,13 +246,9 @@ async function getUncatalogedPack(slug: string): Promise<PackBase | null> {
   // (category + finite price) to the single row, so a 404, an outage and a
   // 200 with no usable pack all answer null — as before. The port logged it,
   // with the slug in the path it names.
-  const r = await store.get(
-    `/store/packs/${encodeURIComponent(slug)}`,
-    UncatalogedPackSchema,
-    PUBLIC,
-  );
-  if (!r.ok) return null;
-  const pack = r.data.pack as unknown as BackendPack;
+  const row = await packRow(slug, 'pack-base', UncatalogedPackSchema);
+  if (!row) return null;
+  const pack = row.pack as unknown as BackendPack;
   const meta = CATEGORY_META.find((c) => c.id === pack.category);
   return {
     pack: {
@@ -298,14 +330,10 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
   // a 404, an outage, a non-array `odds`, an empty pool, or a pool whose rows
   // all failed the schema (unknown rarity / non-finite value — dropped so the
   // UI can't render NaN).
-  const r = await store.get(
-    `/store/packs/${encodeURIComponent(slug)}`,
-    PackDetailPageSchema,
-    PUBLIC,
-  );
-  if (!r.ok) return null;
-  const { published_odds, demo_odds } = r.data;
-  const valid = r.data.odds as unknown as BackendOddsEntry[];
+  const row = await packRow(slug, 'pack-detail', PackDetailPageSchema);
+  if (!row) return null;
+  const { published_odds, demo_odds } = row;
+  const valid = row.odds as unknown as BackendOddsEntry[];
   if (valid.length === 0) return null;
 
   // The tier is re-stated from the schema-guaranteed row so PackCard's
