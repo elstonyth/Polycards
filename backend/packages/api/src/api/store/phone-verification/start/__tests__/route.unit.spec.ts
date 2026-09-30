@@ -1,5 +1,6 @@
 import { POST as startVerification } from '../route';
 import * as phoneUtils from '../../../../../utils/phone-verification';
+import * as rateLimit from '../../../../utils/rate-limit';
 
 // Only the transport is mocked. `isAllowedSmsDestination` stays REAL — it is the
 // thing under test here, and stubbing it is exactly the red-green probe (see the
@@ -9,7 +10,12 @@ jest.mock('../../../../../utils/phone-verification', () => ({
   sendPhoneOtp: jest.fn(async () => undefined),
 }));
 
+jest.mock('../../../../utils/rate-limit', () => ({
+  consumeOtpSendBudget: jest.fn(async () => ({ allowed: true, retryAfterMs: 0 })),
+}));
+
 const sendPhoneOtp = phoneUtils.sendPhoneOtp as jest.Mock;
+const consumeOtpSendBudget = rateLimit.consumeOtpSendBudget as jest.Mock;
 
 // Assert on the CALL COUNT, not on the mock itself. The route passes
 // `process.env` as sendPhoneOtp's first argument, so a failing
@@ -27,6 +33,7 @@ const mkRes = () => {
 };
 
 const warn = jest.fn();
+const error = jest.fn();
 // `matches` is what listCustomers returns for the password-reset lookup: one
 // row means "exactly one account carries this phone", the only case that sends.
 const mkReq = (phone: string, purpose = 'signup', matches: unknown[] = [{ id: 'cus_1' }]) =>
@@ -35,14 +42,16 @@ const mkReq = (phone: string, purpose = 'signup', matches: unknown[] = [{ id: 'c
     scope: {
       resolve: (key: string) =>
         key === 'logger'
-          ? { warn }
+          ? { warn, error }
           : { listCustomers: jest.fn(async () => matches) },
     },
   }) as never;
 
 beforeEach(() => {
   warn.mockReset();
+  error.mockReset();
   sendPhoneOtp.mockClear();
+  consumeOtpSendBudget.mockClear();
 });
 
 describe('POST /store/phone-verification/start — destination allowlist', () => {
@@ -216,5 +225,48 @@ describe('POST /store/phone-verification/start — channel', () => {
       /invalid channel/i,
     );
     expect(sendCount()).toBe(0);
+  });
+});
+
+/**
+ * The sitewide spend ceiling (consumeOtpSendBudget). Per-phone and per-IP
+ * tiers never bounded a pumping run over fresh numbers behind rotating
+ * Cloudflare edges; this does, and only where texts cost money.
+ */
+describe('POST /store/phone-verification/start — sitewide send budget', () => {
+  const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+  afterEach(() => {
+    process.env.NODE_ENV = ORIGINAL_NODE_ENV;
+    consumeOtpSendBudget.mockResolvedValue({ allowed: true, retryAfterMs: 0 });
+  });
+
+  it('refuses the send and alerts ops once the budget is spent', async () => {
+    process.env.NODE_ENV = 'production';
+    consumeOtpSendBudget.mockResolvedValue({ allowed: false, retryAfterMs: 1 });
+
+    await expect(startVerification(mkReq(MY), mkRes().res)).rejects.toThrow(
+      /could not send the verification code/i,
+    );
+    expect(sendCount()).toBe(0);
+    const logged = error.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).toContain('[ops-alert] phone-otp-budget');
+    expect(logged).not.toContain(MY.slice(3));
+  });
+
+  it('spends budget only on a text that would really be sent', async () => {
+    process.env.NODE_ENV = 'production';
+    await startVerification(mkReq(GB), mkRes().res); // unserved: no send
+    await startVerification(mkReq(MY, 'password-reset', []), mkRes().res); // no account
+    expect(consumeOtpSendBudget.mock.calls.length).toBe(0);
+
+    await startVerification(mkReq(MY), mkRes().res);
+    expect(consumeOtpSendBudget.mock.calls.length).toBe(1);
+    expect(sendCount()).toBe(1);
+  });
+
+  it('leaves dev and test alone: the dev code costs nothing', async () => {
+    await startVerification(mkReq(MY), mkRes().res);
+    expect(consumeOtpSendBudget.mock.calls.length).toBe(0);
+    expect(sendCount()).toBe(1);
   });
 });

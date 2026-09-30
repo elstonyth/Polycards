@@ -20,7 +20,8 @@
 // STALENESS LADDER (worst case per layer; per instance, 2 instances of
 // each app since #473 — layers stack, they do not synchronize):
 //   backend route Map        30s (packs list/detail, leaderboard; pulls 5s)
-//   this storefront memo     30s (catalog, board) / 60s (avatar frames)
+//   this storefront memo     30s (catalog, board) / 15s (pack detail) /
+//                            60s (avatar frames)
 //   home route cache         15s (src/app/page.tsx revalidate)
 //   getPackHighlights        60s (unstable_cache, no tags)
 // ⇒ an admin pack edit can take ~60s to reach /slots, ~75s to reach /,

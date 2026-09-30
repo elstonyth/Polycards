@@ -2396,12 +2396,37 @@ class PacksModuleService extends MedusaService({
 
     let ref: string | null = null;
     if (reward.type === 'credit') {
-      const { id } = await this.mutateCreditAtomic(
+      const { id, amount } = await this.mutateCreditAtomic(
         {
           customerId: input.customerId,
           amount: reward.amount_myr,
           reason: 'reward_credit',
           idempotencyReference: `task:${def.id}:${input.customerId}:${periodKey || 'once'}`,
+        },
+        sharedContext,
+      );
+      // Its ledger row, in the same transaction — every other credit writer
+      // posts one, and the tasks spec pays out "through the same mechanics as
+      // the challenge payout path" (WP). Without it a claim moved the balance
+      // with nothing in the transaction history (two customers, RM 50 each,
+      // on 2026-09-30). refId = the credit row, like the top-up and
+      // adjustment writers, so the admin Wallet tab's display-id join finds it;
+      // a replayed credit re-dedupes on (WP, refId).
+      await this.recordLedgerEntry(
+        {
+          type: 'WP',
+          customerId: input.customerId,
+          refId: id,
+          walletDelta: amount,
+          vaultDelta: null,
+          payload: {
+            type: 'WP',
+            period: `task:${def.id}:${periodKey || 'once'}`,
+            stage: 0,
+            rank: 0,
+            sku: null,
+            value: 0,
+          },
         },
         sharedContext,
       );

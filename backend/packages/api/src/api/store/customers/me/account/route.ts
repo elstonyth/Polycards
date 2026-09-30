@@ -2,9 +2,9 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { MedusaError, Modules } from '@medusajs/framework/utils';
-import type { IAuthModuleService } from '@medusajs/framework/types';
+import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../modules/packs';
+import { linkedEmailpassLogin } from '../../../../utils/linked-login';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import { resolveGroupPolicyForCustomer } from '../../../../../modules/packs/group-policy';
 
@@ -27,23 +27,17 @@ export async function GET(
   if (!customerId) {
     throw new MedusaError(MedusaError.Types.UNAUTHORIZED, 'Unauthorized');
   }
-  const auth = req.scope.resolve<IAuthModuleService>(Modules.AUTH);
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const [identities, groupPolicy, partnerBp] = await Promise.all([
-    auth.listAuthIdentities(
-      { app_metadata: { customer_id: customerId } },
-      { relations: ['provider_identities'] },
-    ),
+  const [passwordLogin, groupPolicy, partnerBp] = await Promise.all([
+    // The same definition the phone-change and phone password-reset routes act
+    // on, so this answer and theirs cannot disagree (see linkedEmailpassLogin).
+    linkedEmailpassLogin(req.scope, customerId),
     resolveGroupPolicyForCustomer(req.scope, customerId),
     packs
       .partnerBpForCustomers([customerId])
       .then((m) => m.get(customerId) ?? null),
   ]);
-  const hasPassword = identities.some((identity) =>
-    (identity.provider_identities ?? []).some(
-      (provider) => provider.provider === 'emailpass',
-    ),
-  );
+  const hasPassword = passwordLogin !== null;
   // Partner groups (spec 2026-09-09): what the account tree needs to skip the
   // phone modal and to replace the withdrawal form with a notice. Both are UX
   // — the backend gates (requirePhoneVerified, blockGroupWithdrawals) are the

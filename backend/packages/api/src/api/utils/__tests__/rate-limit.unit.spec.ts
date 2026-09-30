@@ -16,6 +16,7 @@ import {
   STORE_READ_DEFAULTS,
   PROFILE_APPEARANCE_DEFAULTS,
   positiveIntFromEnv,
+  consumeOtpSendBudget,
   type RateLimitSpec,
   type RateLimitRule,
   type RateLimitStore,
@@ -571,6 +572,45 @@ describe('createRateLimitMiddleware', () => {
     expect(next).toHaveBeenCalledTimes(1);
     expect(out.statusCode).toBeUndefined();
     expect(onError).toHaveBeenCalledWith(boom);
+  });
+});
+
+describe('consumeOtpSendBudget', () => {
+  const ENV_KEYS = [
+    'PHONE_OTP_GLOBAL_HOURLY_LIMIT',
+    'PHONE_OTP_GLOBAL_DAILY_LIMIT',
+  ] as const;
+  const saved = ENV_KEYS.map((k) => process.env[k]);
+  afterEach(() =>
+    ENV_KEYS.forEach((k, i) => {
+      if (saved[i] === undefined) delete process.env[k];
+      else process.env[k] = saved[i];
+    }),
+  );
+
+  // Each case runs on its own day, far from the others, so the shared
+  // sitewide key never carries events from one case into the next.
+  it('refuses the send past the hourly ceiling, and frees it an hour later', async () => {
+    process.env.PHONE_OTP_GLOBAL_HOURLY_LIMIT = '2';
+    const t = T0 + 10 * 24 * 60 * MINUTE;
+    expect((await consumeOtpSendBudget(t)).allowed).toBe(true);
+    expect((await consumeOtpSendBudget(t + 1)).allowed).toBe(true);
+    expect((await consumeOtpSendBudget(t + 2)).allowed).toBe(false);
+    expect((await consumeOtpSendBudget(t + 60 * MINUTE + 1)).allowed).toBe(true);
+  });
+
+  it('also caps the day, however the sends are spread across its hours', async () => {
+    process.env.PHONE_OTP_GLOBAL_HOURLY_LIMIT = '100';
+    process.env.PHONE_OTP_GLOBAL_DAILY_LIMIT = '3';
+    const t = T0 + 20 * 24 * 60 * MINUTE;
+    for (let h = 0; h < 3; h++) {
+      expect((await consumeOtpSendBudget(t + h * 60 * MINUTE)).allowed).toBe(
+        true,
+      );
+    }
+    expect((await consumeOtpSendBudget(t + 5 * 60 * MINUTE)).allowed).toBe(
+      false,
+    );
   });
 });
 

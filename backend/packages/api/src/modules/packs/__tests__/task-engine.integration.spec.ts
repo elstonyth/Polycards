@@ -14,6 +14,8 @@ import Pull from '../models/pull';
 import Card from '../models/card';
 import Pack from '../models/pack';
 import PackOdds from '../models/pack-odds';
+import LedgerEntry from '../models/ledger-entry';
+import LedgerSequence from '../models/ledger-sequence';
 import { taskWeekFor } from '../referral';
 import { clearFxDisplayCache } from '../pricing';
 
@@ -35,6 +37,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
     Card,
     Pack,
     PackOdds,
+    LedgerEntry,
+    LedgerSequence,
   ],
   testSuite: ({ service }) => {
     it('check-in is once per MYT day', async () => {
@@ -87,6 +91,15 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
       expect(txns).toHaveLength(1);
       expect(Number(txns[0].amount)).toBe(2.5);
+      // And its transaction-history row, in the same transaction (2026-09-30:
+      // task credits moved balances with no ledger row).
+      const ledger = await service.listLedgerEntries({
+        type: 'WP',
+        customer_id: 'cus_t2',
+      });
+      expect(ledger).toHaveLength(1);
+      expect(ledger[0].ref_id).toBe(txns[0].id);
+      expect(Number(ledger[0].wallet_delta)).toBe(2.5);
 
       // Second claim in the same week is refused and pays nothing more.
       expect(
@@ -97,6 +110,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
           customer_id: 'cus_t2',
           reason: 'reward_credit',
         }),
+      ).toHaveLength(1);
+      expect(
+        await service.listLedgerEntries({ type: 'WP', customer_id: 'cus_t2' }),
       ).toHaveLength(1);
 
       // The hub now reports it claimed.

@@ -35,6 +35,19 @@ const resetProof = () => signPhoneProof(SECRET, PHONE, 'password-reset');
 let customers: { id: string; email: string }[];
 const listCustomers = jest.fn(async () => customers);
 
+type Identity = {
+  app_metadata: { customer_id?: string };
+  provider_identities: { provider: string; entity_id: string }[];
+};
+let identities: Identity[];
+// Filter-aware like the real query: only identities LINKED to the customer.
+const listAuthIdentities = jest.fn(
+  async (filter: { app_metadata?: { customer_id?: string } }) =>
+    identities.filter(
+      (i) => i.app_metadata.customer_id === filter.app_metadata?.customer_id,
+    ),
+);
+
 const mkReq = (body: Record<string, unknown>) =>
   ({
     body,
@@ -43,6 +56,7 @@ const mkReq = (body: Record<string, unknown>) =>
         if (key === 'configModule')
           return { projectConfig: { http: { jwtSecret: SECRET } } };
         if (key === Modules.CUSTOMER) return { listCustomers };
+        if (key === Modules.AUTH) return { listAuthIdentities };
         throw new Error(`unit scope: unexpected resolve('${key}')`);
       },
     },
@@ -74,6 +88,12 @@ const ORIGINAL_ENV = {
 beforeEach(() => {
   jest.clearAllMocks();
   customers = [{ id: 'cus_1', email: EMAIL }];
+  identities = [
+    {
+      app_metadata: { customer_id: 'cus_1' },
+      provider_identities: [{ provider: 'emailpass', entity_id: EMAIL }],
+    },
+  ];
   delete process.env.PHONE_GATE_REQUIRED;
   process.env.PHONE_VERIFICATION_REQUIRED = 'true';
 });
@@ -95,6 +115,30 @@ describe('POST /store/phone-verification/password-reset — phone gate on', () =
       token: 'reset_token_stub',
       maskedEmail: expect.stringMatching(/^.\*+@test\.dev$/),
     });
+  });
+
+  // 2026-09-30: an email signup attempted on a Google account's address leaves
+  // an emailpass identity with that email that is linked to NO customer. Keyed
+  // on the email, the workflow found it and handed out a reset for a login
+  // that signs into nothing.
+  it('gives a Google account with an UNLINKED emailpass identity the Google answer, and mints nothing', async () => {
+    identities = [
+      {
+        app_metadata: {},
+        provider_identities: [{ provider: 'emailpass', entity_id: EMAIL }],
+      },
+      {
+        app_metadata: { customer_id: 'cus_1' },
+        provider_identities: [{ provider: 'google', entity_id: 'g-123' }],
+      },
+    ];
+    const err = await rejection(
+      POST(mkReq({ token: resetProof() }), mkRes() as never),
+    );
+
+    expect(err.type).toBe(MedusaError.Types.NOT_ALLOWED);
+    expect(err.message).toBe('This account signs in with Google.');
+    expect(mintCount()).toBe(0);
   });
 });
 
