@@ -4216,6 +4216,15 @@
           "expression": "CREATE INDEX IF NOT EXISTS \"IDX_pull_rolled_at\" ON \"pull\" (\"rolled_at\") WHERE deleted_at IS NULL"
         },
         {
+          "keyName": "IDX_pull_pack_id_rolled_at",
+          "columnNames": [],
+          "composite": false,
+          "constraint": false,
+          "primary": false,
+          "unique": false,
+          "expression": "CREATE INDEX IF NOT EXISTS \"IDX_pull_pack_id_rolled_at\" ON \"pull\" (\"pack_id\", \"rolled_at\") WHERE deleted_at IS NULL"
+        },
+        {
           "keyName": "pull_pkey",
           "columnNames": [
             "id"
