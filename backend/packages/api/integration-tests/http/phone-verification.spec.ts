@@ -1,5 +1,7 @@
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils";
 import { Modules } from "@medusajs/framework/utils";
+// Workspace-root dependency, reached via hoisting — same as google-link.spec.ts.
+import jwt from "jsonwebtoken";
 import { postStoreCustomer, unwrapResponse } from "./utils";
 
 jest.setTimeout(240 * 1000);
@@ -426,6 +428,73 @@ medusaIntegrationTestRunner({
           expect(res.data).toMatchObject({
             message: "This phone number is already in use.",
           });
+        });
+
+        // 2026-09-30, three real users: an email signup attempted on a Google
+        // account's address registers an emailpass identity (then POST
+        // /store/customers 422s), leaving it linked to NO customer. The route
+        // used to pick the password branch by matching the email, so the
+        // phoneless Google account was asked for a password it never had and
+        // could never verify a phone. Real auth module, real identity rows.
+        it("lets a phoneless Google account add its first phone despite an UNLINKED emailpass identity on its email", async () => {
+          const email = "change-google-orphan@test.dev";
+          const phone = "+60107667806";
+          const container = getContainer();
+          const customer = await container
+            .resolve(Modules.CUSTOMER)
+            .createCustomers({ email, has_account: true });
+          const google = await container.resolve(Modules.AUTH).createAuthIdentities({
+            provider_identities: [
+              {
+                provider: "google",
+                entity_id: "g-orphan-sub",
+                user_metadata: { email },
+              },
+            ],
+            app_metadata: { customer_id: customer.id },
+          });
+          // The orphan: registered, never linked.
+          const orphan = await api.post("/auth/customer/emailpass/register", {
+            email,
+            password: `${PASSWORD}-orphan`,
+          });
+          expect(orphan.status).toBe(200);
+
+          const { jwtSecret } =
+            container.resolve("configModule").projectConfig.http;
+          const bearer = jwt.sign(
+            {
+              actor_id: customer.id,
+              actor_type: "customer",
+              auth_identity_id: google.id,
+              auth_provider: "google",
+              app_metadata: { customer_id: customer.id },
+            },
+            jwtSecret as string,
+            { expiresIn: "1h" },
+          );
+          const authHeaders = { ...headers, authorization: `Bearer ${bearer}` };
+
+          const account = await unwrapResponse(
+            api.get("/store/customers/me/account", { headers: authHeaders }),
+          );
+          expect(account.data.hasPassword).toBe(false);
+
+          await start({ phone, purpose: "phone-change" });
+          const checked = await check({
+            phone,
+            purpose: "phone-change",
+            code: "000000",
+          });
+          expect(checked.status).toBe(200);
+
+          // No password: the storefront (hasPassword false) never asks for one.
+          const res = await change(
+            { phone, token: checked.data.token },
+            authHeaders,
+          );
+          expect(res.status).toBe(200);
+          expect(res.data).toMatchObject({ customer: { phone } });
         });
 
         // This route's whole reason to exist is being the escape hatch

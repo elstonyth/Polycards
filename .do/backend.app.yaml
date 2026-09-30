@@ -309,6 +309,17 @@ envs:
   - key: ALLOWED_SMS_COUNTRIES
     scope: RUN_TIME
     value: "MY"
+  # Sitewide OTP send ceiling (consumeOtpSendBudget in api/utils/rate-limit.ts)
+  # is ON by default at 150/hour and 1500/day — a spend backstop against SMS
+  # pumping, sized well above the busiest legit launch hour (~35 sends). When
+  # it trips, codes are refused for everyone and an `[ops-alert]
+  # phone-otp-budget` line fires. Override only for real traffic:
+  # - key: PHONE_OTP_GLOBAL_HOURLY_LIMIT
+  #   scope: RUN_TIME
+  #   value: "150"
+  # - key: PHONE_OTP_GLOBAL_DAILY_LIMIT
+  #   scope: RUN_TIME
+  #   value: "1500"
   # ── Telegram apex-pull board (Legendary+ pulls → the public channel) ────────
   # Both keys were applied straight to the live app on 2026-08-21 (a surgical
   # `doctl apps update`, because this integration shipped after that day's spec
@@ -334,6 +345,15 @@ envs:
   - key: TELEGRAM_CHAT_ID
     scope: RUN_TIME
     value: "-1003945115527"
+  # TELEGRAM_OPS_CHAT_ID — PRIVATE ops group for operator alerts
+  # (modules/packs/ops-alert.ts: payout wallet short, paid-after-refund
+  # payouts, phone-OTP spend cap). Add the same bot to a private group and
+  # uncomment with that group's numeric id (quoted, like the one above). Must
+  # NOT be the public channel above — the alert refuses to send there. Unset =
+  # the alerts are only `[ops-alert]` log lines.
+  # - key: TELEGRAM_OPS_CHAT_ID
+  #   scope: RUN_TIME
+  #   value: "-100XXXXXXXXXX"
   # ── Money switches. GATEWAY_* names any active gateway's deposits/
   # withdrawals; the legacy GLOBEPAY_* spellings are still read as a fallback
   # (the GlobePay365 integration itself was removed

@@ -323,7 +323,7 @@ export function verifyPhoneProof(
   return { phone: parsed.phone };
 }
 
-const isDevOrTest = (env: PhoneVerificationEnv): boolean => {
+export const isDevOrTest = (env: PhoneVerificationEnv): boolean => {
   const nodeEnv = env.NODE_ENV ?? process.env.NODE_ENV;
   return nodeEnv === 'development' || nodeEnv === 'test';
 };

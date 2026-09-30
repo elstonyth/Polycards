@@ -13,3 +13,6 @@ delete process.env.PAYMENT_GATEWAY;
 // these specs assert. Specs that need a value set it themselves.
 delete process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS;
 delete process.env.PAYMENT_CALLBACK_BASE;
+// A scripted "payout wallet empty" refusal must never reach a developer's real
+// ops chat (modules/packs/ops-alert.ts). Specs that test the alert set it.
+delete process.env.TELEGRAM_OPS_CHAT_ID;

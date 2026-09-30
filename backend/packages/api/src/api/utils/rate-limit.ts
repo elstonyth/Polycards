@@ -1166,3 +1166,45 @@ export const RATE_LIMITS = {
 export function rateLimit(name: keyof typeof RATE_LIMITS): MiddlewareHandler {
   return createEnvRateLimit({ name, ...RATE_LIMITS[name] });
 }
+
+/**
+ * SITEWIDE ceiling on real OTP sends — a spend backstop, not a per-client
+ * limit. Every other phone-otp tier is keyed per phone or per request IP, and
+ * in prod the IP is a Cloudflare edge or a storefront pod, so a pumping run
+ * over fresh numbers was bounded by nothing (2026-09: ~44% of 30 days' sends,
+ * 229 texts in one 25-minute burst, ~$0.34 each).
+ *
+ * Called by the start route right before the send, AFTER its no-send exits
+ * (unserved destination, password-reset without exactly one account), so only
+ * texts we actually pay for count. Generous on purpose: the busiest legit
+ * launch hour so far was 23 signups (~35 sends), and a tight cap turns a
+ * marketing spike into a self-inflicted signup outage. Tune with
+ * PHONE_OTP_GLOBAL_HOURLY_LIMIT / PHONE_OTP_GLOBAL_DAILY_LIMIT; read per call.
+ *
+ * ponytail: a refused Twilio send still counts, so an outage like 2026-09-30
+ * can hold the budget full for up to an hour after Twilio recovers. Refund
+ * on provider refusal if that ever bites.
+ */
+let otpSendBudgetStore: RateLimitStore | null = null;
+export function consumeOtpSendBudget(
+  nowMs: number = Date.now(),
+): Promise<RateLimitDecision> {
+  otpSendBudgetStore ??= buildFailoverStore(
+    'phone-otp-global-rate-limit',
+    throttledWarn(60_000),
+  );
+  return otpSendBudgetStore.consume(
+    'rl:phone-otp-global:all',
+    [
+      {
+        limit: positiveIntFromEnv('PHONE_OTP_GLOBAL_HOURLY_LIMIT', 150),
+        windowMs: 60 * 60_000,
+      },
+      {
+        limit: positiveIntFromEnv('PHONE_OTP_GLOBAL_DAILY_LIMIT', 1500),
+        windowMs: 24 * 60 * 60_000,
+      },
+    ],
+    nowMs,
+  );
+}

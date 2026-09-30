@@ -292,6 +292,30 @@ describe('signup — phone verification enforcement (PHONE_VERIFICATION_REQUIRED
         'This phone number is already registered to another account. Log in instead, or use a different number.',
     });
   });
+
+  // The email belongs to a Google account. With a username set, the 422 used
+  // to fall through to the status check and read as "That username is taken".
+  it('sends an email that belongs to a Google account to Google sign-in, not to a new username', async () => {
+    backend(TOKENS);
+    mocks.customerCreate.mockRejectedValueOnce(
+      Object.assign(
+        new Error('Customer with this email already has an account'),
+        { status: 422 },
+      ),
+    );
+
+    const r = await signup({
+      email: 'taken@polycards.app',
+      password: 'PolycardsTest123!',
+      first_name: 'Nova',
+      phone: '010-766 7787',
+      phone_verification_token: 'proof-tok',
+    });
+
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toMatch(/Continue with Google/);
+    expect(!r.ok && r.error).not.toMatch(/username/i);
+  });
 });
 
 describe('resetPassword — password presence (#3)', () => {

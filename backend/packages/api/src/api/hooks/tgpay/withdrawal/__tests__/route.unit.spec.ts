@@ -197,6 +197,31 @@ describe('tgpay payout callback', () => {
     );
   });
 
+  it('a success on a payout we already refunded alerts ops, with references only', async () => {
+    const originalFetch = global.fetch;
+    const sent: { chat_id: string; text: string }[] = [];
+    process.env.TELEGRAM_BOT_TOKEN = 'bot-test';
+    process.env.TELEGRAM_OPS_CHAT_ID = '-100ops';
+    global.fetch = jest.fn(async (_url: string, init: { body: string }) => {
+      sent.push(JSON.parse(init.body));
+      return { status: 200, json: async () => ({ ok: true }) };
+    }) as unknown as typeof fetch;
+    try {
+      const h = harness({ ...pendingRow, status: 'failed' });
+      const res = await run(h, success);
+      expect(res.statusCode).toBe(200);
+      expect(applyWithdrawalOutcome).not.toHaveBeenCalled();
+      expect(sent).toHaveLength(1);
+      expect(sent[0].chat_id).toBe('-100ops');
+      expect(sent[0].text).toMatch(/PC-w1.*refunded AND paid/);
+      expect(sent[0].text).not.toMatch(/543478924652|Michael Yap/);
+    } finally {
+      global.fetch = originalFetch;
+      delete process.env.TELEGRAM_BOT_TOKEN;
+      delete process.env.TELEGRAM_OPS_CHAT_ID;
+    }
+  });
+
   it('a refund failure answers 500 so TGPay retries', async () => {
     (refundWithdrawal as jest.Mock).mockRejectedValueOnce(new Error('db down'));
     const h = harness(pendingRow);

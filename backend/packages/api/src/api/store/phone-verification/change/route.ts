@@ -13,6 +13,7 @@ import {
   verifyPhoneProof,
 } from '../../../../utils/phone-verification';
 import { assertPhoneUnclaimed } from '../../../utils/phone-claim';
+import { linkedEmailpassLogin } from '../../../utils/linked-login';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { isResendConfigured } from '../../../../modules/resend/options';
@@ -113,8 +114,8 @@ export async function POST(
     select: ['id', 'email', 'phone'],
   });
 
-  // No readable email = no way to tell an emailpass account from a Google-only
-  // one, since both branches below key off it. Refuse rather than fall through
+  // No readable email = nowhere to send the change notice below, and a row in
+  // a state this route was never designed for. Refuse rather than fall through
   // to the unguarded first-time branch, which would be a free pass.
   const email = current.email;
   if (typeof email !== 'string' || email === '')
@@ -124,16 +125,14 @@ export async function POST(
     );
 
   const authService = req.scope.resolve<IAuthModuleService>(Modules.AUTH);
-  // Same filter shape as scripts/reset-customer-password.ts:42-45. An account
-  // holding BOTH emailpass and Google identities lands in the password branch;
-  // that is the stricter of the two and is intentional — don't "fix" it by
-  // preferring the phone proof.
-  const emailpassIdentities = await authService.listAuthIdentities(
-    { provider_identities: { entity_id: email, provider: 'emailpass' } },
-    { relations: ['provider_identities'] },
-  );
+  // The password login LINKED to this customer — not any emailpass identity
+  // that merely shares its email (see linkedEmailpassLogin for the 2026-09-30
+  // incident that distinction caused). An account holding BOTH emailpass and
+  // Google identities lands in the password branch; that is the stricter of the
+  // two and is intentional — don't "fix" it by preferring the phone proof.
+  const passwordLogin = await linkedEmailpassLogin(req.scope, customerId);
 
-  if (emailpassIdentities.length > 0) {
+  if (passwordLogin) {
     // CONTRACT (read from the installed provider, not assumed):
     // node_modules/@medusajs/auth-emailpass/dist/services/emailpass.js:94-97
     // RETURNS `{ success: false, error: 'Invalid email or password' }` for a
@@ -147,7 +146,7 @@ export async function POST(
     const reauthed =
       typeof password === 'string' && password !== ''
         ? await authService.authenticate('emailpass', {
-            body: { email, password },
+            body: { email: passwordLogin, password },
           })
         : null;
     if (reauthed?.success !== true)

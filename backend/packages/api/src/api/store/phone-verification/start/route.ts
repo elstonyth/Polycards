@@ -4,11 +4,14 @@ import type { ICustomerModuleService } from '@medusajs/framework/types';
 import {
   E164_RE,
   isAllowedSmsDestination,
+  isDevOrTest,
   isPhoneOtpChannel,
   isPhoneOtpPurpose,
   sendPhoneOtp,
   unresolvableSmsCountries,
 } from '../../../../utils/phone-verification';
+import { consumeOtpSendBudget } from '../../../utils/rate-limit';
+import { alertOps } from '../../../../modules/packs/ops-alert';
 
 // Public: sends (or dev-logs) an OTP for one of the three phone flows. The
 // response is ALWAYS the generic { ok: true } — whether the phone belongs to
@@ -109,6 +112,22 @@ export async function POST(
       res.json({ ok: true });
       return;
     }
+  }
+
+  // Sitewide spend ceiling (consumeOtpSendBudget). Last, so only a text we
+  // would really pay for counts; skipped where the "SMS" is the dev log line.
+  if (!isDevOrTest(process.env) && !(await consumeOtpSendBudget()).allowed) {
+    // No phone in either line: same PII rule as the logs above.
+    void alertOps(
+      req.scope,
+      'phone-otp-budget',
+      'Phone-OTP sitewide send budget is exhausted: verification codes are being refused for everyone. Likely an SMS-pumping run — check Twilio (Fraud Guard, Messaging Insights). Raise PHONE_OTP_GLOBAL_HOURLY_LIMIT / _DAILY_LIMIT only if the traffic is real.',
+      { muteMs: 60 * 60_000 },
+    );
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'Could not send the verification code. Try again shortly.',
+    );
   }
 
   // purpose is validated above; it selects the Verify template so the SMS
