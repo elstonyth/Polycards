@@ -19,9 +19,10 @@ import {
 export const NAME_MAX = 30;
 
 /**
- * The display name doubles as the public profile URL (/profile/<name>), so its
- * charset is a hard constraint rather than a preference: ASCII letters, digits,
- * underscore and hyphen, 3..NAME_MAX. MUST stay identical to USERNAME_RE in
+ * The account's permanent profile URL (/profile/<handle>) is frozen from the
+ * display name on first login, so its charset is a hard constraint rather than
+ * a preference: ASCII letters, digits, underscore and hyphen, 3..NAME_MAX. MUST
+ * stay identical to USERNAME_RE in
  * `backend/packages/api/src/utils/profile-handle.ts` — the backend guard is the
  * one that actually refuses a bad name, and a form that accepts what the API
  * rejects just moves the error later. Widen both together, or neither.

@@ -417,10 +417,11 @@ export default defineMiddlewares({
       // lever) — see api/utils/phone-claim.ts.
       //
       // validateUsernameWrite('signup') (see utils/username-guard.ts):
-      // `first_name` is the public profile URL, so it is charset-checked and
-      // uniqueness-checked here rather than accepted as the free text Medusa's
-      // validator allows. Omitting it is still fine — the account is named
-      // anonymously on its first GET /store/profiles/me.
+      // `first_name` is the public display name, and the account's permanent
+      // profile handle is frozen from it on the first GET /store/profiles/me,
+      // so it is charset-checked and uniqueness-checked here rather than
+      // accepted as the free text Medusa's validator allows. Omitting it is
+      // still fine — the account is named anonymously on that same first read.
       matcher: '/store/customers',
       method: 'POST',
       middlewares: [
@@ -440,10 +441,11 @@ export default defineMiddlewares({
       // store/phone-verification/change route (Task 4); clearing to null
       // stays allowed.
       //
-      // validateUsernameWrite('update'): a rename MOVES the profile URL, so the
-      // new name must be a legal URL segment and unclaimed. Clearing it is
-      // refused here (unlike on signup) — a live profile cannot lose its
-      // address. The cache eviction that must follow a successful rename is in
+      // validateUsernameWrite('update'): a rename changes the display name
+      // only — the profile URL is the permanent handle and stays put — but the
+      // new name must still be URL-safe and unclaimed. Clearing it is refused
+      // here (unlike on signup) — a live profile cannot lose its name. The
+      // cache eviction that must follow a successful rename is in
       // renameProfileCacheEviction below, not here: this runs before the write.
       matcher: '/store/customers/me',
       method: 'POST',

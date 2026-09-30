@@ -1,6 +1,7 @@
 /**
  * Public-profile data seam. The handle in these URLs is the collector's
- * DISPLAY NAME — one value, so a rename moves the profile.
+ * PERMANENT profile handle — fixed when the account was first named, so a
+ * rename changes what the page shows, never where it lives.
  *
  * `GET /store/profiles/:handle` is the custom PUBLIC backend route (safe
  * subset only — display name, avatar seed, join date, pull stats, recent
@@ -63,8 +64,8 @@ export interface PublicProfile {
  * Result of a public-profile lookup. Three failure states, three different
  * pages, and they must stay distinct.
  *
- * `notfound` (404) means nobody holds this display name — a typo, or the old
- * URL of somebody who has since renamed. It is a real 404 page. It used to be
+ * `notfound` (404) means no account holds this handle — a typo, or a deleted
+ * account. It is a real 404 page. It used to be
  * answered with a deterministic MOCK persona so every /profile/<x> link kept
  * rendering; that is what got reported as leftover data on 2026-09-04, because
  * /profile/MOONBREON returned an invented collector and so did every other
@@ -74,8 +75,8 @@ export interface PublicProfile {
  * and says so — retryable, and never conflated with "does not exist".
  *
  * `unavailable` (410) is an administratively DISABLED player. Distinct from
- * `notfound` because a 404 now means the name is FREE: showing one for a
- * disabled account would advertise a name its owner still holds.
+ * `notfound` because a 404 means the handle is FREE: showing one for a
+ * disabled account would advertise a handle its owner still holds.
  */
 export type ProfileResult =
   | { status: 'ok'; profile: PublicProfile }
@@ -98,10 +99,10 @@ export const getPublicProfile = cache(
     );
     if (r.ok)
       return { status: 'ok', profile: r.data as unknown as PublicProfile };
-    // 404 = nobody holds this display name (typo, or a retired URL).
+    // 404 = no account holds this handle (a typo, or a deleted account).
     if (r.kind === 'not_found') return { status: 'notfound' };
-    // 410 = a real name the backend is deliberately hiding (disabled
-    // account). Not an error, and never a 404 — the name is still taken.
+    // 410 = a real handle the backend is deliberately hiding (disabled
+    // account). Not an error, and never a 404 — the handle is still taken.
     if (r.status === 410) return { status: 'unavailable' };
     // Everything else — 5xx, a network drop, a 200 that fails the schema — is
     // a profile we could not load, never "does not exist". The port logged it,

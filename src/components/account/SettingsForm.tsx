@@ -34,17 +34,19 @@ const READONLY_CLASS =
 // updates everywhere without a refetch flash. `email` is read-only — Medusa's
 // store customer-update endpoint doesn't accept it.
 
-type Props = { customer: ProfileCustomer };
+type Props = {
+  customer: ProfileCustomer;
+  /** The permanent profile handle (null if the read failed) — shown under the
+   *  username so a rename visibly leaves the profile link alone. */
+  handle: string | null;
+};
 
-export default function SettingsForm({ customer }: Props) {
+export default function SettingsForm({ customer, handle }: Props) {
   const router = useRouter();
   const { customer: authCustomer, setCustomer } = useAuth();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
-  // The username is the profile URL, so the field shows the link it is about to
-  // become as you type. Tracked rather than read on submit because the point is
-  // to make the consequence visible BEFORE saving — someone renaming themselves
-  // is also retiring their old link, and nothing else on this page says so.
+  // Tracked rather than read on submit so the field can validate as you type.
   const [nameDraft, setNameDraft] = useState(customer.first_name ?? '');
   // Local phone display, so a verified change reflects immediately without
   // waiting on the router.refresh() below to re-fetch the server component.
@@ -109,16 +111,14 @@ export default function SettingsForm({ customer }: Props) {
 
       if (result.ok) {
         // Sync the header's user menu (AuthCustomer has no phone — drop it).
-        // The handle is NOT name-independent any more: it IS the display name,
-        // so it has to be re-read from the saved customer. Carrying the old one
-        // over — which this did — left the "My profile" link pointing at the
-        // URL the rename had just vacated, i.e. a 404.
+        // The handle carries over unchanged: it is the permanent profile link,
+        // which a rename never moves.
         setCustomer({
           id: result.customer.id,
           email: result.customer.email,
           first_name: result.customer.first_name,
           last_name: result.customer.last_name,
-          handle: result.customer.first_name,
+          handle: authCustomer?.handle ?? handle,
           avatar_url: authCustomer?.avatar_url ?? null,
         });
         setNameDraft(result.customer.first_name ?? '');
@@ -241,7 +241,11 @@ export default function SettingsForm({ customer }: Props) {
   if (!PHONE_VERIFICATION_REQUIRED) {
     return (
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
-        <UsernameField value={nameDraft} onValueChange={setNameDraft} />
+        <UsernameField
+          value={nameDraft}
+          onValueChange={setNameDraft}
+          handle={handle}
+        />
         <Field
           label="Last name"
           name="last_name"
@@ -290,6 +294,7 @@ export default function SettingsForm({ customer }: Props) {
       <UsernameField
         value={nameDraft}
         onValueChange={setNameDraft}
+        handle={handle}
         form="settings-profile"
       />
       <Field
@@ -527,24 +532,26 @@ function SaveRow({
 }
 
 /**
- * The username field — the one input on this page that also rewrites a URL.
+ * The username field — the name every public surface shows.
  *
- * It shows the link live rather than describing it, because the consequence is
- * not obvious from a text box: changing this retires the old /profile/<name>
- * address, and anyone who bookmarked or shared it lands on a 404. Saying so
- * next to the value being typed is the only place that warning is actually read.
+ * Its hint shows the profile link, because the natural worry about renaming is
+ * the opposite of what happens: the link is the account's permanent handle, so
+ * every link already shared (the Telegram board, a copied @handle) keeps
+ * working. Saying so next to the value being typed is where it is read.
  *
  * Validation is local and immediate (`usernameError`), but it is a courtesy —
  * the backend's username guard is what refuses a bad or taken name, and the
- * unique index behind it is what makes "no two people, one link" true.
+ * unique index behind it is what makes "no two people, one name" true.
  */
 function UsernameField({
   value,
   onValueChange,
+  handle,
   form,
 }: {
   value: string;
   onValueChange: (next: string) => void;
+  handle: string | null;
   form?: string;
 }) {
   const trimmed = value.trim();
@@ -564,9 +571,9 @@ function UsernameField({
       aria-invalid={error ? true : undefined}
       hint={
         error ??
-        (trimmed === ''
-          ? 'This is also your public profile link.'
-          : `Your profile link: ${SITE_HOST}/profile/${trimmed} — changing it retires the old one.`)
+        (handle
+          ? `Your profile link stays ${SITE_HOST}/profile/${handle}, whatever you rename to.`
+          : 'Your profile link stays the same, whatever you rename to.')
       }
       hintTone={error ? 'error' : 'muted'}
     />

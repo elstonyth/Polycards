@@ -2,6 +2,23 @@ import { describe, it, expect } from 'vitest';
 import { toProfileView } from '@/lib/profile-view';
 import type { PublicProfile } from '@/lib/data/profiles';
 
+describe('toProfileView — identity', () => {
+  it('carries the permanent handle beside the renamable display name', () => {
+    // A player first named Collector6167 who renamed: the page says who they
+    // are NOW, and the handle ties that back to the link the visitor followed.
+    const view = toProfileView({
+      handle: 'Collector6167',
+      name: 'Elston',
+      seed: 1,
+      joined_at: '2026-01-01T00:00:00Z',
+      stats: { pulls: 0, volume: 0 },
+      recent: [],
+    } as unknown as PublicProfile);
+    expect(view.username).toBe('Elston');
+    expect(view.handle).toBe('Collector6167');
+  });
+});
+
 describe('toProfileView — tolerates a missing recent array', () => {
   it('does not throw and yields empty activity when recent is absent', () => {
     // PublicProfileSchema is intentionally loose (handle + stats), so a

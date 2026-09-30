@@ -43,7 +43,11 @@ import { FRAME_LEVELS } from './avatar-frames';
 import { challengePackId } from './challenge-prize';
 import { FREE_WELCOME_CATEGORY } from './free-pack';
 import { isGraded, isPsa10, type PoolComposition } from './card-view';
-import { suffixedUsername } from '../../utils/profile-handle';
+import {
+  USERNAME_RE,
+  generatedUsername,
+  suffixedUsername,
+} from '../../utils/profile-handle';
 import Pack from './models/pack';
 import Card from './models/card';
 import CardPriceHistory from './models/card-price-history';
@@ -5034,8 +5038,112 @@ class PacksModuleService extends MedusaService({
   }
 
   /**
-   * Claim `desired` as this customer's display name — and therefore their
-   * profile URL — or the next free deterministic variant of it.
+   * The customer id whose permanent profile handle (metadata.handle) is this,
+   * case-insensitively. Same raw-SQL reasoning as findCustomerIdByUsername
+   * above; the expression is exactly the one IDX_customer_handle_lower_unique
+   * is built on (Migration20260930120000), so PG can use it.
+   */
+  @InjectManager()
+  async findCustomerIdByHandle(
+    handle: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string | null> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ id: string }[]>(
+      "SELECT id FROM customer WHERE lower(metadata->>'handle') = lower(?) AND deleted_at IS NULL LIMIT 1",
+      [handle],
+    );
+    return rows[0]?.id ?? null;
+  }
+
+  /**
+   * The customer's permanent profile handle: assigned on the first call, from
+   * `desired` (the display name at that moment) or the next free deterministic
+   * variant of it, and returned UNCHANGED on every call after that, whatever
+   * `desired` then says. That second half is the whole point — a rename must
+   * never move the link (utils/profile-handle.ts).
+   *
+   * Locking mirrors assignReferralCode: the global `profile_handle:alloc` lock
+   * serializes the uniqueness probe with the write, then the per-customer
+   * `metadata:<id>` lock makes the read-modify-write of the blob safe against
+   * every other metadata writer (avatar, frame, bank accounts, referral code).
+   * Global first, per-customer second, like every other allocator here, so
+   * none of them can deadlock with each other. IDX_customer_handle_lower_unique
+   * is the backstop.
+   */
+  @InjectTransactionManager()
+  async claimHandle(
+    input: { customerId: string; desired: string; maxAttempts?: number },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      'profile_handle:alloc',
+    ]);
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `metadata:${input.customerId}`,
+    ]);
+    const rows = await em.execute<
+      { metadata: Record<string, unknown> | null }[]
+    >('SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL', [
+      input.customerId,
+    ]);
+    if (rows.length === 0) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Customer with id: ${input.customerId} was not found`,
+      );
+    }
+    const current = rows[0].metadata ?? {};
+    // Read INSIDE the lock: a concurrent first call that got here first has
+    // already fixed it, and that one wins.
+    if (
+      typeof current.handle === 'string' &&
+      USERNAME_RE.test(current.handle)
+    ) {
+      return current.handle;
+    }
+
+    const desired = USERNAME_RE.test(input.desired.trim())
+      ? input.desired.trim()
+      : generatedUsername(input.customerId);
+    const free = async (candidate: string): Promise<boolean> => {
+      const [row] = await em.execute<{ n: string }[]>(
+        "SELECT COUNT(*)::int AS n FROM customer WHERE lower(metadata->>'handle') = lower(?) AND deleted_at IS NULL AND id <> ?",
+        [candidate, input.customerId],
+      );
+      return Number(row?.n ?? 0) === 0;
+    };
+    let chosen: string | null = (await free(desired)) ? desired : null;
+    for (
+      let attempt = 0;
+      !chosen && attempt < (input.maxAttempts ?? 8);
+      attempt++
+    ) {
+      const candidate = suffixedUsername(desired, input.customerId, attempt);
+      if (await free(candidate)) chosen = candidate;
+    }
+    if (!chosen) {
+      // Unreachable short of an adversary squatting every variant of one stem.
+      throw new MedusaError(
+        MedusaError.Types.CONFLICT,
+        'Could not assign a profile handle',
+      );
+    }
+
+    await em.execute(
+      'UPDATE customer SET metadata = ?::jsonb, updated_at = now() WHERE id = ? AND deleted_at IS NULL',
+      [JSON.stringify({ ...current, handle: chosen }), input.customerId],
+    );
+    return chosen;
+  }
+
+  /**
+   * Claim `desired` as this customer's display name, or the next free
+   * deterministic variant of it. Display names are unique too
+   * (IDX_customer_first_name_lower_unique), just not permanent — the profile
+   * URL is the handle (claimHandle above).
    *
    * Allocation is serialized GLOBALLY (advisory lock `username:alloc`) with the
    * uniqueness probe inside that lock and in the same transaction as the write,
