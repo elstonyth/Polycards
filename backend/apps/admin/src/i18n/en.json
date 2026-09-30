@@ -639,6 +639,31 @@
     "empty": "No active packs.",
     "loadError": "Could not load the economy report."
   },
+  "statsBoard": {
+    "title": "Stats",
+    "subtitle": "Sign-ups and top-ups · {{current}} MYT · vs {{previous}}",
+    "ranges": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "7d": "Last 7 days",
+      "30d": "Last 30 days",
+      "month": "This month",
+      "last_month": "Last month",
+      "custom": "Custom"
+    },
+    "from": "From",
+    "to": "To",
+    "customHint": "Pick a start date on or before the end date.",
+    "signups": "Sign-ups",
+    "topup_customers": "Players who topped up",
+    "topup_count": "Top-ups",
+    "topup_amount": "Top-up amount",
+    "first_topup_count": "First-time top-ups",
+    "first_topup_amount": "First top-up amount",
+    "vsPrevious": "vs previous",
+    "previous": "Previous: {{value}}",
+    "loadError": "Could not load the stats."
+  },
   "settlement": {
     "title": "Settlement",
     "subtitle": "The payment gateway's weekly and monthly result, from this database — no gateway login needed.",
