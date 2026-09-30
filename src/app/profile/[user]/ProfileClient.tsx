@@ -22,14 +22,16 @@ export default function ProfileClient({
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const stats = [
-    // Real profiles carry no global rank (a leaderboard concern) — render "—".
+    // Rank is this week's board position; pulls/volume are all-time. The
+    // labels say so — unlabelled, "50 pulls" beside the board's "34 pulls"
+    // this week read as the two pages disagreeing.
     {
       icon: Trophy,
-      label: 'Rank',
+      label: 'Weekly rank',
       value: user.rank == null ? '—' : `#${num(user.rank)}`,
     },
-    { icon: Layers, label: 'Pulls', value: num(user.pulls) },
-    { icon: TrendingUp, label: 'Volume', value: rm(user.volume) },
+    { icon: Layers, label: 'All-time pulls', value: num(user.pulls) },
+    { icon: TrendingUp, label: 'All-time volume', value: rm(user.volume) },
   ];
   // Profiles ship their pull activity. The fallback below derives a feed from
   // the collection — it survives the mock pool's removal because a real profile

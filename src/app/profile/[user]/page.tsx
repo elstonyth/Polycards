@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getPublicProfile } from '@/lib/data/profiles';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
+import { getLeaderboard } from '@/lib/data/leaderboard';
 import { toProfileView } from '@/lib/profile-view';
 import ProfileClient from './ProfileClient';
 import { tabFromParam } from './tabs';
@@ -60,9 +61,12 @@ export default async function ProfilePage({
   searchParams: Promise<{ tab?: string }>;
 }) {
   const [{ user: handle }, { tab }] = await Promise.all([params, searchParams]);
-  const [result, avatarFrames] = await Promise.all([
+  // The weekly board is the same memoised read /leaderboard renders, so the
+  // profile's rank is that board's row, not a second computation of it.
+  const [result, avatarFrames, weeklyBoard] = await Promise.all([
     getPublicProfile(handle),
     getAvatarFrames(),
+    getLeaderboard('weekly'),
   ]);
   // A real 404: nobody holds this display name (or the holder renamed and this
   // is their old URL). Next's own not-found page, with its 404 status — an
@@ -90,6 +94,6 @@ export default async function ProfilePage({
       </div>
     );
   }
-  const view = toProfileView(result.profile, avatarFrames);
+  const view = toProfileView(result.profile, avatarFrames, weeklyBoard);
   return <ProfileClient user={view} initialTab={tabFromParam(tab)} />;
 }
