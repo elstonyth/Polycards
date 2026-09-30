@@ -143,6 +143,16 @@ const AUTH_RULES: ErrorRule[] = [
     /already exists/i,
     'An account with this email already exists. Sign in with your password instead.',
   ],
+  // Core's validateCustomerAccountCreation: a customer that already
+  // has_account holds this email, yet the emailpass register step just
+  // succeeded — so that account has no password login linked, i.e. it signed
+  // up with Google. Unmapped, this fell through to the status check below and
+  // told them "That username is taken"; on 2026-09-30 one person renamed
+  // themselves eight times in three minutes against it.
+  [
+    /already has an account/i,
+    'This email already has an account that signs in with Google. Use "Continue with Google" instead.',
+  ],
   [/invalid email or password/i, 'Incorrect email or password.'],
   // POLYCARD-BACK §4.2 — the backend blocks a disabled account at the emailpass
   // token exchange. Keep the pattern tight (not a bare /disabled/i) so it can't

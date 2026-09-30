@@ -32,13 +32,34 @@ const oldPhoneProof = () => signPhoneProof(SECRET, OLD_PHONE, 'phone-change');
 
 // Per-test fixture state, reset in beforeEach.
 let customerRow: { id: string; email: unknown; phone: string | null };
-let emailpassIdentities: unknown[];
+type Identity = {
+  app_metadata: { customer_id?: string };
+  provider_identities: { provider: string; entity_id: string }[];
+};
+let identities: Identity[];
 let passwordIsCorrect: boolean;
+
+const linked = (provider: string, entity_id: string): Identity => ({
+  app_metadata: { customer_id: CUSTOMER_ID },
+  provider_identities: [{ provider, entity_id }],
+});
+// An emailpass identity registered with the account's email but linked to NO
+// customer — what a failed email signup on a Google account's address leaves.
+const orphanEmailpass = (): Identity => ({
+  app_metadata: {},
+  provider_identities: [{ provider: 'emailpass', entity_id: EMAIL }],
+});
 
 const retrieveCustomer = jest.fn(async () => customerRow);
 const listCustomers = jest.fn(async () => [] as { id: string }[]);
 const updateCustomers = jest.fn(async () => undefined);
-const listAuthIdentities = jest.fn(async () => emailpassIdentities);
+// Filter-aware like the real query: only identities LINKED to the customer.
+const listAuthIdentities = jest.fn(
+  async (filter: { app_metadata?: { customer_id?: string } }) =>
+    identities.filter(
+      (i) => i.app_metadata.customer_id === filter.app_metadata?.customer_id,
+    ),
+);
 // Mirrors the real contract read from
 // node_modules/@medusajs/auth-emailpass/dist/services/emailpass.js:84-97 and
 // @medusajs/auth/dist/services/auth-module.js:73-80: a wrong password RETURNS
@@ -96,7 +117,7 @@ const ORIGINAL_ENV = {
 beforeEach(() => {
   jest.clearAllMocks();
   customerRow = { id: CUSTOMER_ID, email: EMAIL, phone: OLD_PHONE };
-  emailpassIdentities = [{ id: 'authid_1' }];
+  identities = [linked('emailpass', EMAIL)];
   passwordIsCorrect = true;
   // The route skips the send entirely unless Resend is configured, so the
   // notification cases would assert nothing without these.
@@ -244,7 +265,43 @@ describe('POST /store/phone-verification/change — emailpass accounts', () => {
 
 describe('POST /store/phone-verification/change — Google-only accounts', () => {
   beforeEach(() => {
-    emailpassIdentities = [];
+    identities = [linked('google', 'g-123')];
+  });
+
+  // 2026-09-30: three Google users with an orphan emailpass identity on their
+  // email were sent down the password branch — a 401 in a modal with no
+  // password field, one SMS per retry, no way out but logging out.
+  it('lets a phoneless Google account with an UNLINKED emailpass identity add its first phone', async () => {
+    identities = [linked('google', 'g-123'), orphanEmailpass()];
+    customerRow = { id: CUSTOMER_ID, email: EMAIL, phone: null };
+    const res = mkRes();
+    await POST(
+      mkReq({ phone: NEW_PHONE, token: newPhoneProof() }),
+      res as never,
+    );
+
+    expect(updateCustomers.mock.calls).toEqual([
+      [CUSTOMER_ID, { phone: NEW_PHONE }],
+    ]);
+    expect(authenticate.mock.calls.length).toBe(0);
+  });
+
+  // The other half of the same bug, and the dangerous one: a session thief who
+  // registers the victim's email with a password of their own must NOT get to
+  // swap the old-phone proof for that password.
+  it('still demands the old-phone proof when an UNLINKED emailpass identity exists, even with its password', async () => {
+    identities = [linked('google', 'g-123'), orphanEmailpass()];
+    const err = await rejection(
+      POST(
+        mkReq({ phone: NEW_PHONE, token: newPhoneProof(), password: PASSWORD }),
+        mkRes() as never,
+      ),
+    );
+
+    expect(err.type).toBe(MedusaError.Types.UNAUTHORIZED);
+    expect(err.message).toBe('Verify your current phone number to change it.');
+    expect(authenticate.mock.calls.length).toBe(0);
+    expect(updateCustomers.mock.calls.length).toBe(0);
   });
 
   it('rejects a phone move with no proof for the CURRENT number', async () => {
