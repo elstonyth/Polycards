@@ -242,10 +242,11 @@ export default function AuthForm({
     }
     const first_name = String(form.get('username') ?? '');
     // Shape-checked here for the same reason the referral code below is: the
-    // username is now the public profile URL, so a bad one fails the signup —
-    // and failing it AFTER a paid SMS, at the end of the OTP flow, is the worst
-    // possible moment to say "no spaces". Uniqueness still can't be settled
-    // client-side; signup() surfaces that.
+    // username must be URL-safe (the account's permanent profile link is frozen
+    // from it), so a bad one fails the signup — and failing it AFTER a paid
+    // SMS, at the end of the OTP flow, is the worst possible moment to say "no
+    // spaces". Uniqueness still can't be settled client-side; signup() surfaces
+    // that.
     if (first_name.trim()) {
       const bad = usernameError(first_name);
       if (bad) {
@@ -610,9 +611,10 @@ export default function AuthForm({
             name="username"
             type="text"
             placeholder="Username"
-            // Submitted as first_name — which is both the display name AND the
-            // public profile URL (/profile/<username>), so it is unique and
-            // restricted to URL-safe characters. Not a login identifier.
+            // Submitted as first_name — the display name, which the permanent
+            // profile URL (/profile/<handle>) is frozen from on first login, so
+            // it is unique and restricted to URL-safe characters. Renaming
+            // later changes the name only. Not a login identifier.
             autoComplete="nickname"
             maxLength={NAME_MAX}
             defaultValue={signupDraft?.first_name}

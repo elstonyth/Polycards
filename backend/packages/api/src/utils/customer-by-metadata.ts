@@ -19,12 +19,10 @@ async function findCustomerByMetadata(
   return matches[0] ?? null;
 }
 
-// There is no by-handle lookup here any more. A profile handle is the
-// customer's display name (`first_name`), not a metadata key, and it must be
-// matched case-insensitively against an expression index — see
-// PacksModuleService.findCustomerIdByUsername. Routing it through this file's
-// JSON-path equality would also have made `_` a LIKE wildcard on the way, which
-// is how `ash_red` could have resolved someone else's profile.
+// There is no by-handle lookup here. The profile handle IS a metadata key
+// (metadata.handle), but it must be matched case-insensitively against an
+// expression index, which this file's exact JSON-path equality cannot do — see
+// PacksModuleService.findCustomerIdByHandle.
 
 /**
  * By referral code (metadata.referral_code — written by

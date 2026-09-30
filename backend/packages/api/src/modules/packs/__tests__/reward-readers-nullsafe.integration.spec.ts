@@ -332,7 +332,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         const ids = mkIds('profilerte');
         await seed(ids);
 
-        // The route resolves a username to a customer id via the packs service
+        // The route resolves a handle to a customer id via the packs service
         // (raw SQL on `customer`) and then retrieves that customer. Neither can
         // run here: moduleIntegrationTestRunner builds a schema from the packs
         // models alone, so there IS no `customer` table, and no real
@@ -345,9 +345,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
         const testHandle = 'C3_profile_rt';
         const stubCustomer = {
           id: ids.customer, // same id used in seed() → listPulls hits the right rows
-          first_name: testHandle, // the display name IS the handle
+          first_name: testHandle,
           created_at: new Date().toISOString(),
-          metadata: {},
+          metadata: { handle: testHandle },
         };
         const stubCustomerModule = {
           retrieveCustomer: async () => stubCustomer,
@@ -355,8 +355,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // ponytail: prototype-preserving override — the route calls plenty of
         // other real service methods, so only the one DB-bound lookup is faked.
         const stubPacks = Object.create(service) as typeof service;
-        stubPacks.findCustomerIdByUsername = async (username: string) =>
-          username.toLowerCase() === testHandle.toLowerCase()
+        stubPacks.findCustomerIdByHandle = async (handle: string) =>
+          handle.toLowerCase() === testHandle.toLowerCase()
             ? ids.customer
             : null;
 

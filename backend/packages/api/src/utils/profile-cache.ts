@@ -1,5 +1,6 @@
 import { Modules } from '@medusajs/framework/utils';
 import type { MedusaContainer } from '@medusajs/framework/types';
+import { storedHandle } from './profile-handle';
 
 // Per-process cache of the public-profile body (GET /store/profiles/:handle),
 // the leaderboard pattern: profile stats are per-customer aggregates over the
@@ -9,13 +10,10 @@ import type { MedusaContainer } from '@medusajs/framework/types';
 // instance still serves its own copy for up to the TTL. Decision + upgrade
 // path recorded in plan 116.
 //
-// That trade-off got SHARPER when the display name became the profile URL, and
-// the old note ("display-only either way") no longer covers it. A rename now
-// retires a URL, and the instance that did not handle the rename can keep
-// answering 200 on the retired username for the rest of the TTL instead of
-// 404ing. Still bounded at 30s and still not a correctness issue for anything
-// downstream — but it is a stale PAGE, not just stale stats, so it is the first
-// thing to look at if someone reports "the old link still works for a bit".
+// Keyed by the PERMANENT handle (utils/profile-handle.ts), so a rename never
+// retires a key — it only makes the cached body's display name stale, which
+// the eviction below clears on the writing instance and the TTL everywhere
+// else. Display-only either way.
 // ponytail: fix is a shared invalidation channel (Valkey pub/sub, plan 116's
 // upgrade path) — worth it only if the 30s window is actually reported.
 //
@@ -47,24 +45,19 @@ export function clearProfileCache(): void {
 }
 
 /**
- * Drop one username's entry. Case-folded to match the key the route writes —
+ * Drop one handle's entry. Case-folded to match the key the route writes —
  * anything else evicts a spelling nobody cached and leaves the live one stale.
- *
- * A RENAME must call this for the OLD name as well as the new one: the old
- * username's body is not merely stale, it belongs to a URL that must now 404,
- * and leaving it in the Map keeps the abandoned profile answering for another
- * 30 seconds.
  */
-export function evictProfileUsername(username: string | null | undefined): void {
-  const key = (username ?? '').trim().toLowerCase();
+export function evictProfileHandle(handle: string | null | undefined): void {
+  const key = (handle ?? '').trim().toLowerCase();
   if (key !== '') profileCache.delete(key);
 }
 
 /**
  * Drop the cached profile of the customer that just changed something the
- * public profile renders (showcase toggle, avatar, frame). Best-effort: a
- * customer whose name is not yet a valid username has nothing cached, and a
- * failed lookup only means the old ≤30s staleness — never a failed mutation,
+ * public profile renders (display name, showcase toggle, avatar, frame,
+ * disable). Best-effort: a customer with no handle yet has nothing cached, and
+ * a failed lookup only means the old ≤30s staleness — never a failed mutation,
  * so callers don't need to guard it.
  */
 export async function invalidateProfileForCustomer(
@@ -74,11 +67,9 @@ export async function invalidateProfileForCustomer(
   try {
     const customers = scope.resolve(Modules.CUSTOMER);
     const customer = await customers.retrieveCustomer(customerId, {
-      select: ['id', 'first_name'],
+      select: ['id', 'metadata'],
     });
-    // The display name IS the cache key — there is no separate handle to look
-    // up any more (utils/profile-handle.ts).
-    evictProfileUsername(customer?.first_name);
+    evictProfileHandle(storedHandle(customer));
   } catch {
     // Swallowed on purpose — see the doc comment.
   }

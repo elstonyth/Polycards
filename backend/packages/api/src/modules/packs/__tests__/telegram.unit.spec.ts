@@ -282,12 +282,12 @@ const fakeContainer = (rows: {
   resolve: (key: string) => {
     if (key === 'customer') {
       return {
-        // Real shape: the display name IS the handle. A stale `metadata.handle`
-        // is left here on purpose — production rows still carry one from the
-        // old derived-slug model, and it must NOT be what the link points at.
+        // Real shape of the reported case: an account first named
+        // Collector6167 that has since renamed itself. The name shown is the
+        // display name; the link must be the permanent handle.
         retrieveCustomer: async () => ({
           first_name: 'Elston',
-          metadata: { handle: 'old-name-1a2b' },
+          metadata: { handle: 'Collector6167' },
         }),
       };
     }
@@ -374,12 +374,12 @@ describe('postApexPull', () => {
     const [call] = sent as { url: string; body: { caption: string } }[];
     expect(call.url).toContain('/sendPhoto');
     expect(call.body.caption).toContain('LEGENDARY PULL');
-    // The link target is the CURRENT display name, not the stale
-    // `metadata.handle` the fixture still carries. That stale value is the old
-    // model's leftover: it was a slug of the name at signup, never re-derived,
-    // so linking it announced a renamed customer at a URL that is now a 404.
+    // The link target is the PERMANENT handle, not the current display name. A
+    // post cannot be edited once it is out, so linking the name — which is
+    // what this did from 2026-09-04 — left every post of a player who later
+    // renamed pointing at a 404, or at whoever took the name next.
     expect(call.body.caption).toContain(
-      '<a href="https://polycards.gg/profile/Elston">Elston</a>',
+      '<a href="https://polycards.gg/profile/Collector6167">Elston</a>',
     );
   });
 
@@ -733,7 +733,7 @@ describe('postApexPull', () => {
     expect(uploaded[0].equals(jpeg)).toBe(true);
     expect(call.body.caption).toContain('LEGENDARY PULL');
     expect(call.body.caption).toContain(
-      '<a href="https://polycards.gg/profile/Elston">Elston</a>',
+      '<a href="https://polycards.gg/profile/Collector6167">Elston</a>',
     );
     expect(call.body.caption).toContain('Open your own pack');
     expect(call.body.caption).not.toContain('Meowth');

@@ -1,21 +1,28 @@
-// Public username rules. A customer's display name (`customer.first_name`) IS
-// their public profile URL: /profile/<display name>. There is no second
-// identifier — no `metadata.handle`, no slug, no id hash.
+// Public identity rules. Two values, deliberately kept apart:
 //
-// That equivalence is the whole point. The previous model derived a handle
-// once (name slug + id hash) and froze it, so every rename silently orphaned
-// the URL: in production on 2026-09-04, `wei-nguan-5ren` was displaying
-// "MOONBREON" and NOT ONE of the ten linked handles still matched its own
-// display name. Deriving nothing and looking the name up directly makes
-// "rename changes the URL" structurally true rather than something a write
-// hook has to remember to maintain.
+//  - the DISPLAY NAME (`customer.first_name`) — what every surface prints.
+//    The player may change it whenever they like.
+//  - the PROFILE HANDLE (`customer.metadata.handle`) — the permanent address,
+//    /profile/<handle>. Fixed once, from the name the account had when it was
+//    first given one (the name typed at signup, else "Collector####"), and
+//    never rewritten by a rename.
 //
-// Two invariants hold it together, both enforced below the app:
-//  - uniqueness is CASE-INSENSITIVE, so `MOONBREON` and `Moonbreon` cannot
-//    both exist and hand two users what reads as one link. Backed by a
-//    partial unique index on lower(first_name) (Migration20260904120000).
-//  - the charset is ASCII `A-Za-z0-9_-`, so a name is a URL without
-//    percent-encoding. Display case is preserved; only matching folds it.
+// The operator's rule (2026-09-30): the link is the ID card, the name is only
+// what is written on it. From 2026-09-04 to 2026-09-30 the display name WAS
+// the URL, and every rename retired a link that had already gone out — the
+// Telegram board posts /profile/<name> to a public channel, so a player who
+// hit an Immortal and then renamed left that post pointing at a 404, and at
+// whoever claimed the freed name next. Migration20260930140000 froze every
+// live account's then-current name as its handle, so no link that worked
+// before the change stopped working because of it.
+//
+// Both values share one shape: ASCII `A-Za-z0-9_-`, 3..30, so either is a URL
+// segment without percent-encoding, and both are unique CASE-INSENSITIVELY
+// (partial unique indexes on lower(first_name) — Migration20260904120000 — and
+// on lower(metadata->>'handle') — Migration20260930140000). Display case is
+// preserved; only matching folds it. They are separate namespaces: a handle
+// can equal some OTHER player's display name, because the name a handle was
+// frozen from can be given up by its owner and then taken by someone else.
 
 /** Username length bounds — also the storefront's input caps. */
 export const USERNAME_MIN = 3;
@@ -101,13 +108,29 @@ export function suffixedUsername(
 }
 
 /**
+ * The customer's permanent profile handle, or null while none is assigned.
+ *
+ * Null is a real state, not an error: the handle is assigned lazily (the
+ * ensure-profile-handle step, on the first GET /store/profiles/me — which every
+ * storefront login makes), so a row created some other way has none until
+ * then. Callers render that as "no link", never as a link built from the
+ * display name: that is the URL a rename would retire.
+ */
+export function storedHandle(
+  customer: { metadata?: Record<string, unknown> | null } | null | undefined,
+): string | null {
+  const handle = (customer?.metadata ?? {})['handle'];
+  return typeof handle === 'string' && USERNAME_RE.test(handle) ? handle : null;
+}
+
+/**
  * PII-safe public display fields for a ranked customer, shared by the store
  * leaderboard and the challenge top-N (both are public and must NEVER leak
  * email/id): a display name (first_name, else an anonymous "Collector ####"
- * from the seed), the public profile handle — which IS that display name when
- * it is a valid username — and the equipped avatar url if set. `customer` is
- * undefined when the id resolved to no customer record. Callers append
- * surface-specific fields (points, volume, equipped_frame_level, …).
+ * from the seed), the permanent profile handle the name links to, and the
+ * equipped avatar url if set. `customer` is undefined when the id resolved to
+ * no customer record. Callers append surface-specific fields (points, volume,
+ * equipped_frame_level, …).
  */
 export function publicProfileFields(
   customer:
@@ -120,11 +143,7 @@ export function publicProfileFields(
   const avatarUrl = meta['avatar_url'];
   return {
     name: first.length > 0 ? first : `Collector ${String(seed).slice(0, 4)}`,
-    // Null (not a guessed slug) when the name is not URL-usable: a link is
-    // only rendered for a handle that resolves. The backfill migration leaves
-    // no such rows behind, but a row written before it must degrade to "no
-    // link", never to a 404 link.
-    handle: isValidUsername(first) ? first : null,
+    handle: storedHandle(customer),
     avatarUrl: typeof avatarUrl === 'string' ? avatarUrl : null,
   };
 }

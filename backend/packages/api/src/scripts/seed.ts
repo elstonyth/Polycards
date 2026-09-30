@@ -677,8 +677,13 @@ export default async function seedDemoData({ container }: ExecArgs) {
   const demoToCreate = DEMO_COLLECTORS.filter(
     (c) => !existingDemoEmails.has(c.email),
   );
+  // Handle set here, frozen from the roster name: /profile/<x> resolves by the
+  // permanent handle (utils/profile-handle.ts), and these rows never log in,
+  // so nothing would ever assign one lazily.
   const createdDemoCustomers = demoToCreate.length
-    ? await customerModuleService.createCustomers(demoToCreate)
+    ? await customerModuleService.createCustomers(
+        demoToCreate.map((c) => ({ ...c, metadata: { handle: c.first_name } })),
+      )
     : [];
 
   // Order by the roster (createCustomers needn't preserve input order) so the
@@ -693,10 +698,9 @@ export default async function seedDemoData({ container }: ExecArgs) {
     demoByEmail.get(d.email),
   ).filter((c): c is NonNullable<typeof c> => !!c);
 
-  // No handle assignment: a collector's display name IS their profile URL, so
-  // /store/profiles/Kenji resolves the moment the row exists. Every name in
-  // DEMO_COLLECTORS above is already a valid username (see
-  // utils/profile-handle.ts) — keep it that way when editing the roster.
+  // Every name in DEMO_COLLECTORS above is a valid username AND handle (see
+  // utils/profile-handle.ts), so /store/profiles/Kenji resolves the moment the
+  // row exists — keep it that way when editing the roster.
 
   logger.info('Finished seeding demo gacha activity.');
 
@@ -726,11 +730,15 @@ export default async function seedDemoData({ container }: ExecArgs) {
     if (error || !authIdentity) {
       logger.warn(`Test customer auth register failed: ${error}`);
     } else {
+      // Handle preset so /profile/tester resolves before the first login
+      // (which would otherwise assign the same one lazily).
       const [testCustomer] = await customerModuleService.createCustomers([
-        { email: TEST_EMAIL, first_name: 'tester' },
+        {
+          email: TEST_EMAIL,
+          first_name: 'tester',
+          metadata: { handle: 'tester' },
+        },
       ]);
-      // 'tester' is itself the profile URL (/profile/tester) — nothing to
-      // assign.
       // Link the auth identity to the customer (actor_type customer) — mirrors
       // create-admin.ts's user_id linkage. Without this the login resolves no
       // actor and /store/customers/me returns nothing.

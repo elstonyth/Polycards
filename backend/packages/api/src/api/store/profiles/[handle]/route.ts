@@ -6,6 +6,7 @@ import {
   USERNAME_RE,
   normalizeUsername,
   seedOf,
+  storedHandle,
 } from '../../../../utils/profile-handle';
 import {
   getCachedProfile,
@@ -66,9 +67,9 @@ export async function GET(
     throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Profile not found');
   }
 
-  // Cache key folds case, like every other username comparison: /MOONBREON and
-  // /moonbreon are one profile, so they must be one entry — otherwise a rename
-  // evicts one spelling and leaves the other serving the old body for 30s.
+  // Cache key folds case, like every other handle comparison: /MOONBREON and
+  // /moonbreon are one profile, so they must be one entry — otherwise an
+  // eviction drops one spelling and leaves the other serving the old body.
   const cacheKey = normalizeUsername(handle);
   // Only successful bodies are ever stored (404 paths throw before the set
   // below), so a cache hit is always a real profile.
@@ -79,9 +80,11 @@ export async function GET(
   }
 
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
-  // The username IS the display name — no stored handle to resolve through, so
-  // a rename moves the profile's URL with it by construction.
-  const customerId = await packs.findCustomerIdByUsername(handle);
+  // Resolved by the PERMANENT handle only, never by display name: a rename
+  // must leave every link that went out still pointing at the same person, and
+  // a name lookup would both give one profile two URLs and hand a retired name's
+  // links to whoever claims it next (utils/profile-handle.ts).
+  const customerId = await packs.findCustomerIdByHandle(handle);
   if (!customerId) {
     throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Profile not found');
   }
@@ -307,7 +310,7 @@ export async function GET(
   const body = {
     // The stored spelling, not the URL's: a visitor arriving at /moonbreon
     // gets links and copy that read MOONBREON, the way its owner wrote it.
-    handle: first.length > 0 ? first : handle,
+    handle: storedHandle(customer) ?? handle,
     name: first.length > 0 ? first : `Collector ${String(seed).slice(0, 4)}`,
     seed,
     avatar_url: avatarUrl,

@@ -4,19 +4,24 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
-import { evictProfileUsername } from '../../utils/profile-cache';
+import { evictProfileHandle } from '../../utils/profile-cache';
 import {
   USERNAME_MAX,
   USERNAME_MIN,
   isValidUsername,
+  storedHandle,
 } from '../../utils/profile-handle';
 import PacksModuleService from '../../modules/packs/service';
 import { PACKS_MODULE } from '../../modules/packs';
 
-// `customer.first_name` is the storefront's "Username"/"Display name" AND the
-// public profile URL (/profile/<name>). Medusa's stock customer routes accept
-// it as free text, so without this guard a rename could put a space, a slash or
-// a duplicate of someone else's name straight into a URL.
+// `customer.first_name` is the storefront's "Username"/"Display name". It is no
+// longer the profile URL — that is the permanent handle, which a rename never
+// touches (utils/profile-handle.ts) — but it is the name every public surface
+// prints, and the one an account's handle is frozen from on its first profile
+// read, so it keeps the handle's shape: URL-safe, and unique
+// case-insensitively so two players can never show up as one name. Medusa's
+// stock customer routes accept it as free text; this guard refuses a space, a
+// slash or someone else's name.
 //
 // Registered with an explicit `method`, which is what keeps it OFF
 // /store/customers/me/addresses. Medusa registers a middleware that names a
@@ -56,7 +61,7 @@ function actorOf(req: MedusaRequest): string | undefined {
  * workflow. Touching only `req.body` is therefore invisible downstream: it was,
  * until this function, why a signup sending "   " stored three spaces and why a
  * name saved as " MOONBREON " could sit in the database one character off from
- * the URL that has to match it.
+ * the one the uniqueness check compared.
  *
  * The validator runs BEFORE this guard on those routes — measured, not assumed:
  * with only the `req.body` write, the nameless-signup spec stored the untouched
@@ -86,8 +91,7 @@ function rewriteName(req: MedusaRequest, value: unknown): void {
 
 export const CHARSET_MESSAGE =
   `Your display name can use letters, numbers, underscores and hyphens only, ` +
-  `and must be ${USERNAME_MIN}-${USERNAME_MAX} characters. It is also your ` +
-  `profile link.`;
+  `and must be ${USERNAME_MIN}-${USERNAME_MAX} characters.`;
 
 export function validateUsernameWrite(mode: 'signup' | 'update') {
   return async function usernameGuard(
@@ -121,12 +125,12 @@ export function validateUsernameWrite(mode: 'signup' | 'update') {
           next();
           return;
         }
-        // On update, clearing it would delete a live profile URL out from under
-        // every link pointing at it.
+        // On update, clearing it would leave a live public profile with no
+        // name to show.
         next(
           new MedusaError(
             MedusaError.Types.INVALID_DATA,
-            'A display name is required — it is your profile link.',
+            'A display name is required.',
           ),
         );
         return;
@@ -139,7 +143,7 @@ export function validateUsernameWrite(mode: 'signup' | 'update') {
 
       // Normalize the stored value to the trimmed form the checks ran against,
       // so a name saved as " MOONBREON " cannot sit in the DB one character off
-      // from the URL that has to match it.
+      // from the one the uniqueness check compared.
       rewriteName(req, value);
 
       const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
@@ -173,16 +177,12 @@ export function validateUsernameWrite(mode: 'signup' | 'update') {
 }
 
 /**
- * Evict BOTH sides of a rename from the 30s public-profile cache.
+ * Evict a renamed player's profile from the 30s public-profile cache, so their
+ * own page shows the new name straight away instead of half a minute later.
  *
- * The new name is obvious; the old one is the half that bites. After a rename
- * the old username's URL must 404, but its cached body is still in the Map and
- * keeps that abandoned profile answering — which reads exactly like "the fix
- * didn't work", for half a minute, on the one URL somebody is most likely to
- * re-check first.
- *
- * The old name is captured BEFORE the write (it is gone afterwards) and both
- * are dropped on `finish`, so a rejected or failed request evicts nothing.
+ * The cache is keyed by the permanent handle, which the rename does not touch,
+ * so there is exactly one entry to drop. It is looked up BEFORE the write and
+ * dropped on `finish`, so a rejected or failed request evicts nothing.
  */
 export async function renameProfileCacheEviction(
   req: MedusaRequest,
@@ -197,21 +197,20 @@ export async function renameProfileCacheEviction(
     next();
     return;
   }
-  let previous: string | null = null;
+  let handle: string | null = null;
   try {
     const customers = req.scope.resolve(Modules.CUSTOMER);
     const customer = await customers.retrieveCustomer(customerId, {
-      select: ['id', 'first_name'],
+      select: ['id', 'metadata'],
     });
-    previous = customer?.first_name ?? null;
+    handle = storedHandle(customer);
   } catch {
     // Best-effort, like invalidateProfileForCustomer: a missed eviction costs
     // ≤30s of staleness and must never fail the rename itself.
   }
   res.on('finish', () => {
     if (res.statusCode >= 400) return;
-    evictProfileUsername(previous);
-    evictProfileUsername(desired);
+    evictProfileHandle(handle);
   });
   next();
 }

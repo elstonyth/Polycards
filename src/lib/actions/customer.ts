@@ -89,7 +89,7 @@ export async function updateProfile(input: {
       };
     }
   }
-  // The display name is the public profile URL, so its shape is a hard rule,
+  // The display name keeps the profile handle's URL-safe shape, a hard rule,
   // not a preference. Checked here as well as in the backend's username guard
   // because a server action is a public endpoint in its own right.
   if (input.first_name !== undefined) {

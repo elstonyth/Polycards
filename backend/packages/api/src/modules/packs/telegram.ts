@@ -636,10 +636,12 @@ export async function postApexPull(
     if (!card) return null; // card removed since the roll — nothing to show
 
     // Public identity: the SAME source every other public surface uses
-    // (publicProfileFields — leaderboard, weekly challenge, profile page). Name
-    // and link target are now one value, the display name; `handle` comes back
-    // null when that name is not URL-usable, and the caption then shows the
-    // name without linking it rather than linking a 404.
+    // (publicProfileFields — leaderboard, weekly challenge, profile page). The
+    // name shown is the display name; the link is the PERMANENT handle, so a
+    // post keeps pointing at this player after they rename — a Telegram post
+    // cannot be edited once it is out. `handle` comes back null only for an
+    // account that has never loaded its own profile, and the caption then
+    // shows the name without linking it rather than linking a 404.
     // Never email, never customer_id. A customer-module failure degrades to
     // 'Anonymous'.
     const siteUrl = (

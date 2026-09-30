@@ -26,6 +26,10 @@ export interface ProfileViewActivity {
 
 export interface ProfileViewUser {
   username: string;
+  /** The permanent handle — this page's URL. Shown under the name because
+   *  the two can differ: a visitor arriving from an old link (a Telegram post
+   *  under the name the player had then) sees the handle it carried. */
+  handle: string;
   pfp: string;
   frame: string | null;
   /** Milestone level behind `frame` — drives the animated frame shader. */
@@ -83,6 +87,7 @@ export function toProfileView(
 
   return {
     username: profile.name,
+    handle: profile.handle,
     pfp: profile.avatar_url ?? avatarForSeed(profile.seed),
     frame: profile.equipped_frame_level
       ? (avatarFrames[String(profile.equipped_frame_level)] ?? null)
@@ -93,7 +98,7 @@ export function toProfileView(
         ? profile.equipped_frame_level
         : null,
     // Matched by seed (seedOf(customer_id) on both routes) — the same key the
-    // board's own "YOU" row uses; the handle can go stale on a rename.
+    // board's own "YOU" row uses.
     rank: weeklyBoard.find((e) => e.seed === profile.seed)?.rank ?? null,
     pulls: profile.stats.pulls,
     volume: profile.stats.volume,

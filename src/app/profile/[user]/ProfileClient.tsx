@@ -74,6 +74,9 @@ export default function ProfileClient({
             <h1 className="font-heading text-3xl font-bold tracking-tight text-white sm:text-4xl">
               {user.username}
             </h1>
+            <p className="mt-1 truncate text-[13px] font-semibold text-white/60">
+              @{user.handle}
+            </p>
             <p className="mt-1 flex items-center justify-center gap-1.5 text-[13px] text-white/50 sm:justify-start">
               <CalendarDays className="h-3.5 w-3.5" aria-hidden /> Collecting
               since {user.joined}
