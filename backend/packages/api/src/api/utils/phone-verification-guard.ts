@@ -4,6 +4,7 @@ import type {
   MedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
+import type { MedusaContainer } from '@medusajs/framework/types';
 import { MedusaError } from '@medusajs/framework/utils';
 import { assertPhoneUnclaimed } from './phone-claim';
 import { PACKS_MODULE } from '../../modules/packs';
@@ -111,6 +112,29 @@ export const requireSignupPhoneProof = async (
  * Reads the env flag per request for the same reason the two gates above do:
  * the http specs flip it without rebooting the app.
  */
+/**
+ * The money/goods gate's one decision, shared by requirePhoneVerified and the
+ * free welcome pack's claim step (which sits inside the open-pack workflow,
+ * where a route middleware cannot tell a free open from a paid one). True when
+ * the gate is off, the customer has completed phone verification, or they
+ * belong to a verification-exempt partner group. Throws on a read failure —
+ * callers must fail closed.
+ */
+export async function passesPhoneGate(
+  scope: MedusaContainer,
+  customerId: string,
+): Promise<boolean> {
+  if (!isPhoneGateRequired(process.env)) return true;
+  const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
+  if (await packs.isPhoneVerified(customerId)) return true;
+  // Partner groups (spec 2026-09-09): a member of a group whose policy has
+  // `verification_exempt` passes every phone-gate site without a verified
+  // phone. Checked AFTER the verified read, so the common case (verified
+  // player) never pays for the group lookup.
+  const policy = await resolveGroupPolicyForCustomer(scope, customerId);
+  return policy?.policy.verification_exempt === true;
+}
+
 export const requirePhoneVerified = async (
   req: AuthenticatedMedusaRequest,
   _res: MedusaResponse,
@@ -127,14 +151,7 @@ export const requirePhoneVerified = async (
     );
   }
   try {
-    const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-    if (await packs.isPhoneVerified(customerId)) return next();
-    // Partner groups (spec 2026-09-09): a member of a group whose policy has
-    // `verification_exempt` passes every requirePhoneVerified site without a
-    // verified phone. Checked AFTER the verified read, so the common case
-    // (verified player) never pays for the group lookup.
-    const policy = await resolveGroupPolicyForCustomer(req.scope, customerId);
-    if (policy?.policy.verification_exempt) return next();
+    if (await passesPhoneGate(req.scope, customerId)) return next();
   } catch (e) {
     // Fail CLOSED. A read failure here must not become a free pass on a money
     // path; the caller retries, and the storefront copy already tells them

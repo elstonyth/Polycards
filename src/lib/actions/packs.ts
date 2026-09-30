@@ -98,6 +98,13 @@ const PACKS_RULES: ErrorRule[] = [
     "You're opening packs too fast — give it a moment and try again.",
   ],
   [UNAUTHORIZED, LOGIN_TO_OPEN],
+  // The free welcome pack unlocks on a verified phone (backend claim-free-pack
+  // step). Keeps the "Verify your phone" lead so lib/phone-gate.ts still
+  // recognises it.
+  [
+    /verify your phone/i,
+    'Verify your phone number in Account settings to claim your free pack.',
+  ],
   [/not enough credits/i, 'Not enough credits to open this pack.'],
   // A pack whose prize pool is empty/zero-weight (mid-setup in admin). Must
   // precede the generic not-found rule: the backend throws it as NOT_FOUND.
