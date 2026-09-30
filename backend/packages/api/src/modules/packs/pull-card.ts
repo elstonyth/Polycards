@@ -198,7 +198,12 @@ async function nameLines(
   const words = name.split(/\s+/).filter(Boolean);
   for (let size = 64; size >= 48; size -= 4) {
     const font = display(size);
-    if ((await measure(name, font)) <= max) return { lines: [name], size };
+    const oneLine = await measure(name, font);
+    if (oneLine <= max) return { lines: [name], size };
+    // Two lines share the one-line ink less one word gap (under 1em), so the
+    // wider line is at least half of that: past 2x max no split can fit.
+    // Skipping them spares a pathological name ~2 renders per word per size.
+    if (oneLine - font.size > 2 * max) continue;
     let best: { lines: string[]; w: number } | null = null;
     for (let i = 1; i < words.length; i++) {
       const lines = [words.slice(0, i).join(' '), words.slice(i).join(' ')];
