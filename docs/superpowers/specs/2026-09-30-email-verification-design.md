@@ -93,7 +93,9 @@ exp }) + '.' + HMAC-SHA256(jwtSecret, 'email-proof.v1.' + payload)`.
   the token's email and `has_account`, then `markEmailVerified`. Answers
   `{ ok: true }`; any invalid, expired, mismatched or unknown token answers 400
   "This verification link is invalid or has expired." (one message, no oracle).
-  Rate-limited per IP (`email-verify-confirm`).
+  Rate-limited per request IP (`email-verify-confirm`: 10 per minute, 100 per
+  hour — an HMAC check is cheap, and in prod the IP is a shared edge bucket, so
+  the limit is a flood brake, not a per-person budget).
 
 ### 5. The gate — `requireEmailVerified`
 
