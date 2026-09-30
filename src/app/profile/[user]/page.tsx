@@ -63,10 +63,12 @@ export default async function ProfilePage({
   const [{ user: handle }, { tab }] = await Promise.all([params, searchParams]);
   // The weekly board is the same memoised read /leaderboard renders, so the
   // profile's rank is that board's row, not a second computation of it.
-  const [result, avatarFrames, weeklyBoard] = await Promise.all([
+  // Started alongside, awaited only once there is a profile to rank
+  // (getLeaderboard never rejects — it returns [] on failure).
+  const weeklyBoardPromise = getLeaderboard('weekly');
+  const [result, avatarFrames] = await Promise.all([
     getPublicProfile(handle),
     getAvatarFrames(),
-    getLeaderboard('weekly'),
   ]);
   // A real 404: nobody holds this display name (or the holder renamed and this
   // is their old URL). Next's own not-found page, with its 404 status — an
@@ -94,6 +96,10 @@ export default async function ProfilePage({
       </div>
     );
   }
-  const view = toProfileView(result.profile, avatarFrames, weeklyBoard);
+  const view = toProfileView(
+    result.profile,
+    avatarFrames,
+    await weeklyBoardPromise,
+  );
   return <ProfileClient user={view} initialTab={tabFromParam(tab)} />;
 }

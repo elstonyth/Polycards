@@ -6167,7 +6167,8 @@ class PacksModuleService extends MedusaService({
   //    leaderboardTop's wins CTE does. It used to be live-priced with per-card
   //    rounding, so a profile read RM 145,627.47 beside the board's
   //    RM 153,176.34 for the same 428 pulls (reported 2026-09-30) — the
-  //    profile and the board must show one number.
+  //    profile and the board must show one number. (Exact below the 20k
+  //    cap; the board has none — nobody is near it.)
   //  - by_rarity = COUNT per rarity resolved from the LIVE (pack_id, card_id)
   //    odds row, defaulting to 'Common' when none matches or rarity is NULL —
   //    mirrors makeRarityOf's `?? 'Common'` fallback (card-view.ts).

@@ -34,7 +34,7 @@ export interface ProfileViewUser {
    *  "—") when off it. Read from the board itself, never recomputed, so the
    *  profile and /leaderboard can't show two different ranks. */
   rank: number | null;
-  /** All-time figures — equal to the All Time board row, not the weekly board. */
+  /** All-time figures — the All Time board row's pulls and pulled value, not the weekly board's. */
   pulls: number;
   volume: number;
   joined: string;
