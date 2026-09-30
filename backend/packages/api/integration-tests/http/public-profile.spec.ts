@@ -4,6 +4,7 @@ import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { USERNAME_RE } from '../../src/utils/profile-handle';
 import { clearProfileCache } from '../../src/api/store/profiles/[handle]/route';
+import { clearLeaderboardCache } from '../../src/api/store/leaderboard/route';
 import { myrDisplay as MYR, postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -377,6 +378,45 @@ medusaIntegrationTestRunner({
           Rare: 13,
           Common: 30,
         });
+      });
+
+      // Reported 2026-09-30: MOONBREON's profile read RM 145,627.47 beside the
+      // All Time board's RM 153,176.34 for the same 428 pulls — the profile
+      // priced cards live, the board at draw time. They must be one number.
+      it('pulls and volume equal the All Time board row, draw-time value included', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        // A stamped pull whose recorded value is NOT the card's live value.
+        await packs.createPulls([
+          {
+            customer_id: seededCustomerId,
+            pack_id: PACK_SLUG,
+            card_id: RARE_CARD,
+            rolled_at: new Date('2026-06-04T10:00:00Z'),
+            recorded_value_usd: 12.34,
+          },
+        ] as Parameters<typeof packs.createPulls>[0]);
+        await packs.createCreditTransactions([
+          {
+            customer_id: seededCustomerId,
+            amount: -PACK_PRICE,
+            reason: 'pack_open' as const,
+          },
+        ] as Parameters<typeof packs.createCreditTransactions>[0]);
+        clearLeaderboardCache();
+
+        const profile = await getProfile(SEEDED_HANDLE);
+        const board = await unwrapResponse(
+          api.get('/store/leaderboard?period=alltime', {
+            headers: storeHeaders,
+          }),
+        );
+        const row = board.data.entries.find(
+          (e: { handle: string | null }) => e.handle === SEEDED_HANDLE,
+        );
+        expect(row).toBeDefined();
+        expect(profile.data.stats.pulls).toBe(4);
+        expect(profile.data.stats.pulls).toBe(row.pulls);
+        expect(profile.data.stats.volume).toBe(row.volume);
       });
 
       it('caches the body per handle for the TTL; clearProfileCache() makes new pulls visible', async () => {

@@ -84,3 +84,29 @@ describe('toProfileView — cards map through toCardView', () => {
     });
   });
 });
+
+// Reported 2026-09-30: /leaderboard listed MingKai at #10 while their profile
+// said "—". The profile's rank is now the weekly board's row for this seed.
+describe('toProfileView — rank comes from the weekly board', () => {
+  const profile = {
+    name: 'MingKai',
+    seed: 42,
+    joined_at: '2026-01-01T00:00:00Z',
+    stats: { pulls: 50, volume: 53536.76 },
+    collection: [],
+    recent: [],
+  } as unknown as PublicProfile;
+
+  it('takes the rank of the row with the same seed', () => {
+    const board = [
+      { rank: 9, seed: 7 },
+      { rank: 10, seed: 42 },
+    ];
+    expect(toProfileView(profile, {}, board).rank).toBe(10);
+  });
+
+  it('is null off the board, or when the board failed to load', () => {
+    expect(toProfileView(profile, {}, [{ rank: 1, seed: 7 }]).rank).toBeNull();
+    expect(toProfileView(profile).rank).toBeNull();
+  });
+});

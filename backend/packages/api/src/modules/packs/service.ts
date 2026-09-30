@@ -6158,18 +6158,18 @@ class PacksModuleService extends MedusaService({
 
   // Public-profile stats aggregated in the DB (plan 022) — replaces the
   // route's 20k-row JS fold. Same execution shape as leaderboardTop, scoped
-  // to one customer. Semantics pinned to the old in-route fold:
+  // to one customer:
   //  - only source='pack' pulls (C1: reward pulls are private vault items),
   //  - capped to the NEWEST 20k pulls (the route's documented MAX_PULLS
   //    aggregation cap — now the LIMIT in the `capped` CTE),
-  //  - volume = Σ per-card MYR display value with PER-CARD rounding, exactly
-  //    displayMarketPrice(fmv, fx, multiplier): ROUND(fmv × mult × fx, 2) —
-  //    deliberately LIVE-priced (vault/display semantics), NOT the
-  //    recorded_value_usd snapshot the leaderboard/challenge boards read, so
-  //    profile volume tracks current prices and may diverge from board volume,
-  //    degenerate inputs (fmv < 0 or multiplier ≤ 0) → 0, missing/deleted
-  //    card → 0 (the pull still counts). Per-card rounding keeps the
-  //    documented cents-level drift vs the leaderboard's sum-level round.
+  //  - volume = the All Time board's own figure for this customer: the shared
+  //    PULLED_VALUE_USD_SQL (draw-time recorded_value_usd, live fallback for
+  //    pre-backfill rows) summed, then × FX and rounded ONCE, exactly as
+  //    leaderboardTop's wins CTE does. It used to be live-priced with per-card
+  //    rounding, so a profile read RM 145,627.47 beside the board's
+  //    RM 153,176.34 for the same 428 pulls (reported 2026-09-30) — the
+  //    profile and the board must show one number. (Exact below the 20k
+  //    cap; the board has none — nobody is near it.)
   //  - by_rarity = COUNT per rarity resolved from the LIVE (pack_id, card_id)
   //    odds row, defaulting to 'Common' when none matches or rarity is NULL —
   //    mirrors makeRarityOf's `?? 'Common'` fallback (card-view.ts).
@@ -6193,7 +6193,7 @@ class PacksModuleService extends MedusaService({
       { rarity: string; pulls: string; volume_myr: string | null }[]
     >(
       `WITH capped AS (
-         SELECT pack_id, card_id
+         SELECT pack_id, card_id, recorded_value_usd
            FROM pull
           WHERE customer_id = ? AND source = 'pack' AND deleted_at IS NULL
           ORDER BY rolled_at DESC
@@ -6209,37 +6209,23 @@ class PacksModuleService extends MedusaService({
        )
        SELECT COALESCE(o.rarity, 'Common') AS rarity,
               COUNT(*)::bigint AS pulls,
-              COALESCE(SUM(
-                CASE
-                  WHEN c.handle IS NULL THEN 0
-                  WHEN COALESCE(c.market_value, 0) < 0
-                    OR COALESCE(c.market_multiplier, ?) <= 0 THEN 0
-                  ELSE ROUND(
-                         COALESCE(c.market_value, 0)
-                         * COALESCE(c.market_multiplier, ?)
-                         * ? * 100
-                       ) / 100
-                END
-              ), 0) AS volume_myr
-         FROM capped p
-         LEFT JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL
-         LEFT JOIN odds o ON o.pack_id = p.pack_id AND o.card_id = p.card_id
+              -- Total across ALL groups, rounded once like the board.
+              ROUND(COALESCE(SUM(SUM(${PULLED_VALUE_USD_SQL})) OVER (), 0) * ? * 100) / 100
+                AS volume_myr
+         FROM capped pu
+         LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL
+         LEFT JOIN odds o ON o.pack_id = pu.pack_id AND o.card_id = pu.card_id
         GROUP BY 1`,
-      [
-        customerId,
-        DEFAULT_MARKET_MULTIPLIER,
-        DEFAULT_MARKET_MULTIPLIER,
-        fxRate,
-      ],
+      [customerId, DEFAULT_MARKET_MULTIPLIER, fxRate],
     );
 
     let pulls = 0;
-    let volume = 0;
+    // Every row carries the same windowed total.
+    const volume = Number(rows[0]?.volume_myr ?? 0);
     const by_rarity: Record<string, number> = {};
     for (const r of rows) {
       const n = Number(r.pulls ?? 0);
       pulls += n;
-      volume += Number(r.volume_myr ?? 0);
       by_rarity[r.rarity] = (by_rarity[r.rarity] ?? 0) + n;
     }
     return { pulls, volume, by_rarity };
@@ -6698,8 +6684,8 @@ class PacksModuleService extends MedusaService({
   // the shared LIVE_VALUE_USD_SQL) is the basis buyback percents credit
   // against, so this is the obligation the operator actually owes if every
   // vaulted card were sold — raw FMV understated it by the markup (issue #263).
-  // profileStatsForCustomer and the economy report's EV/RTP already used this
-  // basis; the admin aggregates were the last raw-FMV holdouts.
+  // The economy report's EV/RTP already used this basis; the admin aggregates
+  // were the last raw-FMV holdouts.
   //
   // There is NO source filter: a vaulted pull is an obligation whoever won it,
   // so reward pulls count too — as they should, since the operator owes those
@@ -6775,7 +6761,7 @@ class PacksModuleService extends MedusaService({
   // (FMV × market_multiplier, issue #263), same 'vaulted' predicate, no source
   // filter, and the same INNER JOIN, so a vaulted pull whose card was soft-deleted drops out
   // of BOTH vault_count and vault_value (profileStatsForCustomer deliberately
-  // differs — its LEFT JOIN still counts the pull at 0). Keeping the twin exact
+  // differs — its LEFT JOIN still counts the pull, at its recorded value). Keeping the twin exact
   // is what makes the Players list and the economy dashboard agree.
   @InjectManager()
   async playersOverview(

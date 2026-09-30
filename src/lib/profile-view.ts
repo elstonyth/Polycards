@@ -9,6 +9,7 @@
 import type { PublicProfile } from '@/lib/data/profiles';
 import { relativeTime } from '@/lib/format';
 import { toCardView, type CardView } from '@/lib/card-view';
+import type { LeaderboardEntry } from '@/lib/data/leaderboard';
 
 /** A profile card: the card view (its `priceMyr` is null when the backend
  *  hasn't enriched marketPriceMyr — ProfileClient shows '—', never the raw USD
@@ -29,8 +30,11 @@ export interface ProfileViewUser {
   frame: string | null;
   /** Milestone level behind `frame` — drives the animated frame shader. */
   frameLevel: number | null;
-  /** Global rank is a leaderboard concern — null (rendered "—") for real profiles. */
+  /** Position on the WEEKLY board (the Ranks tab's top 10) — null (rendered
+   *  "—") when off it. Read from the board itself, never recomputed, so the
+   *  profile and /leaderboard can't show two different ranks. */
   rank: number | null;
+  /** All-time figures — the All Time board row's pulls and pulled value, not the weekly board's. */
   pulls: number;
   volume: number;
   joined: string;
@@ -59,6 +63,7 @@ function joinedYear(iso: string): string {
 export function toProfileView(
   profile: PublicProfile,
   avatarFrames: Record<string, string> = {},
+  weeklyBoard: Pick<LeaderboardEntry, 'rank' | 'seed'>[] = [],
 ): ProfileViewUser {
   // Collection = showcased cards (opt-in). Activity = all recent pulls.
   const collectionCards: ProfileViewCard[] = (profile.collection ?? []).map(
@@ -87,7 +92,9 @@ export function toProfileView(
       avatarFrames[String(profile.equipped_frame_level)]
         ? profile.equipped_frame_level
         : null,
-    rank: null,
+    // Matched by seed (seedOf(customer_id) on both routes) — the same key the
+    // board's own "YOU" row uses; the handle can go stale on a rename.
+    rank: weeklyBoard.find((e) => e.seed === profile.seed)?.rank ?? null,
     pulls: profile.stats.pulls,
     volume: profile.stats.volume,
     joined: joinedYear(profile.joined_at),
