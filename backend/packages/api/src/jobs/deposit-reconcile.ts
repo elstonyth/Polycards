@@ -44,6 +44,12 @@ import {
 // which forces a full sweep on the next run — more coverage, never less.
 let lastFullSweepAt: Date | null = null;
 
+// Where the 'expired' tier stopped on the previous full sweep: the created_at
+// of the oldest row that batch asked about. Same single-reader argument as
+// lastFullSweepAt, and a restart resets it to "start from the newest" — never
+// less coverage. See the revivable query for why it exists.
+let expiredCursor: Date | null = null;
+
 /**
  * Test seam, and the reason one exists.
  *
@@ -60,6 +66,7 @@ let lastFullSweepAt: Date | null = null;
  */
 export function __resetFullSweepMarkerForTests(): void {
   lastFullSweepAt = null;
+  expiredCursor = null;
 }
 
 export default async function depositReconcileJob(container: MedusaContainer) {
@@ -116,6 +123,14 @@ export default async function depositReconcileJob(container: MedusaContainer) {
           status: 'expired',
           created_at: {
             $gte: new Date(now.getTime() - GATEWAY_EXPIRED_RETRY_MS),
+            // Pages through the window, newest first. Without the cursor every
+            // full sweep re-read the SAME ten newest rows (a requery that finds
+            // an expired row still pending writes nothing, so nothing moves
+            // on), and the eleventh-newest expired deposit was never asked
+            // about again — only a callback could credit it, and in production
+            // the callback does not arrive. 11 rows were already inside the
+            // window on 2026-09-30, two days into launch.
+            ...(expiredCursor ? { $lt: expiredCursor } : {}),
           },
         },
         // NEWEST first, unlike the live queue above. Requerying an 'expired' row
@@ -131,6 +146,14 @@ export default async function depositReconcileJob(container: MedusaContainer) {
         // sort key available.
         { take: GATEWAY_EXPIRED_RETRY_BATCH, order: { created_at: 'DESC' } },
       );
+  // A full page means older rows may remain: continue below it next time. A
+  // short page reached the end of the window: wrap to the newest again.
+  if (fullSweep) {
+    expiredCursor =
+      revivable.length === GATEWAY_EXPIRED_RETRY_BATCH
+        ? new Date(revivable[revivable.length - 1].created_at)
+        : null;
+  }
 
   const outstanding = [...pending, ...revivable];
   if (outstanding.length === 0) return;
