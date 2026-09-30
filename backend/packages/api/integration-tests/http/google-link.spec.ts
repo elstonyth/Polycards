@@ -14,8 +14,8 @@ const PASSWORD = 'google-link-pw-1'; // gitleaks:allow
 // The unit spec pins the route's decisions; this pins the three things a mock
 // cannot: that core really does refuse the registration this recovers from,
 // that `app_metadata.customer_id` written here is what /auth/token/refresh
-// turns into an actor, and that the linked account still reads as a password
-// account afterwards.
+// turns into an actor, and that linking removes the account's password login
+// (the pre-hijack fix) — for real, against the auth module.
 medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ api, getContainer }) => {
@@ -132,12 +132,17 @@ medusaIntegrationTestRunner({
         });
         expect(me.data.customer.email).toBe(email);
 
-        // Still a password account — the phone-change re-auth gate keeps
-        // asking it for the password, and the modal cohort read says so.
+        // The password login is gone (operator decision 2026-09-30): Google
+        // proved the email, a password registered with it proved nothing —
+        // the account pre-hijack. It is a Google account now, and says so.
         const account = await api.get('/store/customers/me/account', {
           headers: authed(session),
         });
-        expect(account.data).toMatchObject({ hasPassword: true });
+        expect(account.data).toMatchObject({ hasPassword: false });
+        const passwordLogin = await unwrapResponse(
+          api.post('/auth/customer/emailpass', { email, password: PASSWORD }),
+        );
+        expect(passwordLogin.status).toBe(401);
 
         const [identity] = await auth().listAuthIdentities({
           id: [identityId],

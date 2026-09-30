@@ -1,6 +1,7 @@
 import ResendNotificationProviderService from '../service';
 import {
   BANK_ACCOUNT_ADDED_TEMPLATE,
+  GOOGLE_LINKED_TEMPLATE,
   PASSWORD_RESET_TEMPLATE,
   PHONE_CHANGED_TEMPLATE,
   escapeHtml,
@@ -249,6 +250,18 @@ describe('renderTemplate', () => {
       renderTemplate(PHONE_CHANGED_TEMPLATE, { new_phone_masked: '••••7790' }),
     ).toBeUndefined();
     expect(renderTemplate(PHONE_CHANGED_TEMPLATE, null)).toBeUndefined();
+  });
+
+  // link-google sends this with an empty payload when it removes a password
+  // login. It is the victim's only signal in the pre-hijack case, so both
+  // parts must say what happened AND what to check.
+  it('renders the google-linked notice from the route’s empty payload', () => {
+    const rendered = renderTemplate(GOOGLE_LINKED_TEMPLATE, {})!;
+    for (const body of [rendered.html, rendered.text]) {
+      expect(body).toMatch(/password/i);
+      expect(body).toMatch(/Google/);
+      expect(body).toMatch(/phone number and bank accounts/i);
+    }
   });
 
   // The bank-account-added alert reads `usable_from` and changes its promise on

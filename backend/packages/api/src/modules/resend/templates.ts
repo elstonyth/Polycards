@@ -13,6 +13,7 @@ export const WITHDRAWAL_RECEIPT_TEMPLATE = 'withdrawal-receipt';
 export const PHONE_CHANGED_TEMPLATE = 'phone-changed';
 export const BANK_ACCOUNT_ADDED_TEMPLATE = 'bank-account-added';
 export const BANK_ACCOUNT_REMOVED_TEMPLATE = 'bank-account-removed';
+export const GOOGLE_LINKED_TEMPLATE = 'google-linked';
 
 export type Rendered = { subject: string; html: string; text: string };
 
@@ -260,6 +261,45 @@ const phoneChanged = (oldMasked: string, newMasked: string): Rendered => {
 </html>`,
   };
 };
+
+// Sent by store/customers/link-google when linking a Google sign-in removed
+// the account's password login. For the owner who set that password, it says
+// how to sign in now. For the pre-hijack victim — someone registered their
+// email with a password of their own before they ever signed in — it is the
+// only signal that the account was never theirs alone, so it names exactly
+// what to check. No payload: nothing account-specific belongs in it.
+const googleLinked = (): Rendered => ({
+  subject: 'Your Polycards account now signs in with Google',
+  text: [
+    'Your Polycards account now signs in with Google',
+    '',
+    'You signed in with Google, and it is now linked to your Polycards',
+    'account. The password login on the account was removed, so from now on',
+    'sign in with Google.',
+    '',
+    'If you never set a password on Polycards, someone may have registered',
+    'your email before you. Check the phone number and bank accounts on your',
+    "account, and contact support if any of them aren't yours.",
+  ].join('\n'),
+  html: `<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#171717;">
+    <div style="max-width:520px;margin:0 auto;padding:40px 24px;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;color:#fafafa;">
+      <h1 style="margin:0 0 20px;font-size:24px;line-height:1.25;font-weight:800;letter-spacing:-0.01em;">Your account now signs in with Google</h1>
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
+        You signed in with Google, and it is now linked to your Polycards
+        account. The password login on the account was removed, so from now on
+        sign in with Google.
+      </p>
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
+        If you never set a password on Polycards, someone may have registered
+        your email before you. Check the phone number and bank accounts on your
+        account, and contact support if any of them aren't yours.
+      </p>
+    </div>
+  </body>
+</html>`,
+});
 
 // "A new bank account can now be paid out to" — the security alert half of the
 // payout-destination binding (plan 088). Deliberately blunt and action-first:
@@ -523,6 +563,7 @@ export const renderTemplate = (
     });
   }
 
+  if (template === GOOGLE_LINKED_TEMPLATE) return googleLinked();
   if (template === PHONE_CHANGED_TEMPLATE) {
     const oldMasked = data?.old_phone_masked;
     const newMasked = data?.new_phone_masked;
