@@ -13,6 +13,7 @@ import {
   refundWithdrawal,
 } from '../../../../modules/packs/gateway-withdrawal';
 import { rowGateway } from '../../../../modules/packs/gateway';
+import { alertOps } from '../../../../modules/packs/ops-alert';
 import { payoutCost, toOptionalMoney } from '../../../../modules/packs/money';
 
 // TGPay payout server-notify (docs "Payout callback"). Flat body, no wrapper,
@@ -106,6 +107,17 @@ export async function POST(
     if (contradicts) {
       logger.error(
         `[tgpay] withdrawal ${merchantTransactionId} callback says ${String(data.status)} (${state}) but the row is already ${withdrawal.status} — possible double payment, investigate (gateway ${gatewayTransactionId})`,
+      );
+      // A log line alone is read only when someone already suspects a problem;
+      // a paid-after-refund payout is real money gone twice. References only.
+      void alertOps(
+        req.scope,
+        'payout-contradiction',
+        `TGPay says payout ${merchantTransactionId} is ${state}, but our row is already ${withdrawal.status}` +
+          (state === 'success'
+            ? ' — the customer may have been refunded AND paid.'
+            : '.') +
+          ` Investigate TGPay ${gatewayTransactionId}.`,
       );
     }
     res.status(200).send('success');

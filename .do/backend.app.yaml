@@ -334,6 +334,15 @@ envs:
   - key: TELEGRAM_CHAT_ID
     scope: RUN_TIME
     value: "-1003945115527"
+  # TELEGRAM_OPS_CHAT_ID — PRIVATE ops group for operator alerts
+  # (modules/packs/ops-alert.ts: payout wallet short, paid-after-refund
+  # payouts, phone-OTP spend cap). Add the same bot to a private group and
+  # uncomment with that group's numeric id (quoted, like the one above). Must
+  # NOT be the public channel above — the alert refuses to send there. Unset =
+  # the alerts are only `[ops-alert]` log lines.
+  # - key: TELEGRAM_OPS_CHAT_ID
+  #   scope: RUN_TIME
+  #   value: "-100XXXXXXXXXX"
   # ── Money switches. GATEWAY_* names any active gateway's deposits/
   # withdrawals; the legacy GLOBEPAY_* spellings are still read as a fallback
   # (the GlobePay365 integration itself was removed

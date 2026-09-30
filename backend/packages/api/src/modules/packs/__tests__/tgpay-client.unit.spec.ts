@@ -11,8 +11,10 @@ import {
   callbackIpAllowed,
   tgpayConfigFromEnv,
   tgpayPaymentState,
+  queryPayout,
   TgpayError,
   TGPAY_NOT_FOUND,
+  TGPAY_PAYOUT_FLOAT_EMPTY,
   type TgpayConfig,
 } from '../tgpay-client';
 
@@ -187,6 +189,83 @@ describe('createPayout / balances', () => {
     expect(calls[0].url).toMatch(/\/transaction\/payout\/withdraw$/);
     expect(calls[0].body.amount).toBe(100.01);
     expect(r.transactionRefNum).toBe('tx-1');
+  });
+
+  const payout = {
+    merchantRefNum: 'PC-w1',
+    amount: 50,
+    email: 'a@x.test',
+    userName: 'A',
+    bankAccNumber: '1',
+    bankCode: 'DUMMYBANKVERIFIED',
+    bankName: 'Dummy Bank Verified',
+    notifyUrl: 'n',
+  };
+
+  // Production 2026-09-06 and 2026-09-29: our merchant payout wallet ran
+  // short and every payout came back with this 400. The customer's bank
+  // details were fine, so it needs its own code, and it stays DEFINITE
+  // because nothing was created on their side.
+  it('an "Insufficient payout credit balance" 400 is tagged TGPAY_PAYOUT_FLOAT_EMPTY and stays definite', async () => {
+    stubFetch(
+      { statusCode: 400, message: 'Insufficient payout credit balance' },
+      400,
+    );
+    const err = (await createPayout(payout, config).catch(
+      (e: unknown) => e,
+    )) as TgpayError;
+    expect(err.has(TGPAY_PAYOUT_FLOAT_EMPTY)).toBe(true);
+    expect(err.definite).toBe(true);
+    expect(err.httpStatus).toBe(400);
+  });
+
+  it('matches the text in whichever body field TGPay put it', async () => {
+    // Production logs only show the flattened message, so the field that
+    // carried it is unknown. `errors` wins the flattening when present.
+    stubFetch(
+      {
+        statusCode: 400,
+        errors: 'Bad Request',
+        msg: 'Insufficient payout credit balance',
+      },
+      400,
+    );
+    const err = (await createPayout(payout, config).catch(
+      (e: unknown) => e,
+    )) as TgpayError;
+    expect(err.has(TGPAY_PAYOUT_FLOAT_EMPTY)).toBe(true);
+  });
+
+  it('does not tag the same text off the payout path, or on a 5xx', async () => {
+    stubFetch(
+      { statusCode: 400, message: 'Insufficient payout credit balance' },
+      400,
+    );
+    const query = (await queryPayout('PC-w1', config).catch(
+      (e: unknown) => e,
+    )) as TgpayError;
+    expect(query.has(TGPAY_PAYOUT_FLOAT_EMPTY)).toBe(false);
+
+    // A 5xx is ambiguous (the payout may exist), so it must never carry a
+    // code whose handling assumes nothing was created.
+    stubFetch(
+      { statusCode: 500, message: 'Insufficient payout credit balance' },
+      500,
+    );
+    const ambiguous = (await createPayout(payout, config).catch(
+      (e: unknown) => e,
+    )) as TgpayError;
+    expect(ambiguous.has(TGPAY_PAYOUT_FLOAT_EMPTY)).toBe(false);
+    expect(ambiguous.definite).toBe(false);
+  });
+
+  it('a different payout refusal is not tagged', async () => {
+    stubFetch({ statusCode: 400, message: 'Invalid bank account' }, 400);
+    const err = (await createPayout(payout, config).catch(
+      (e: unknown) => e,
+    )) as TgpayError;
+    expect(err.has(TGPAY_PAYOUT_FLOAT_EMPTY)).toBe(false);
+    expect(err.definite).toBe(true);
   });
 
   it('reads both wallets', async () => {

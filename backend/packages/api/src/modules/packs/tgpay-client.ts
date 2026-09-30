@@ -60,6 +60,10 @@ export class TgpayError extends GatewayError {
 }
 
 export const TGPAY_NOT_FOUND = 'TGPAY_NOT_FOUND';
+/** OUR merchant payout wallet at TGPay is short. Not the customer's bank
+ *  details: on 2026-09-06 and 2026-09-29 customers retried against this
+ *  (8 and 9 attempts) while nobody on our side knew the wallet was empty. */
+export const TGPAY_PAYOUT_FLOAT_EMPTY = 'TGPAY_PAYOUT_FLOAT_EMPTY';
 
 type TgpayResponse<T> = { status?: number; msg?: string; data?: T };
 type TgpayErrorBody = {
@@ -124,6 +128,20 @@ async function post<T>(
       codes.push(TGPAY_NOT_FOUND);
     }
     if (response.status === 401) codes.push('TGPAY_UNAUTHORIZED');
+    // 4xx only: that is what makes it definite (nothing was created), and the
+    // refund that follows depends on it. Matched across every text field
+    // because only the flattened `detail` ever reached the logs, so which
+    // field TGPay uses for it is unknown.
+    if (
+      path === '/transaction/payout/withdraw' &&
+      response.status >= 400 &&
+      response.status < 500 &&
+      /insufficient (payout )?(credit )?balance/i.test(
+        [parsed.errors, parsed.message, parsed.msg].filter(Boolean).join(' '),
+      )
+    ) {
+      codes.push(TGPAY_PAYOUT_FLOAT_EMPTY);
+    }
     throw new TgpayError(
       `TGPay ${path} failed (HTTP ${response.status}): ${detail}`,
       codes,
