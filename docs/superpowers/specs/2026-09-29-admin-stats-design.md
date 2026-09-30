@@ -28,21 +28,24 @@ the value, the % change against the previous period, and the previous value.
 
 All six come from one SQL statement per window, in a new packs-service method.
 
-| Card                        | Definition                                                                                                                                                                                          |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 注册人数 signups            | `customer` rows with `has_account = true` and `created_at` in the window. Deleted rows are included, so past periods never shrink.                                                                  |
-| 充值笔数 topup_count        | Ledger rows with `reason = 'topup'`, `amount > 0` and `deleted_at IS NULL`, whose `created_at` is in the window.                                                                                    |
-| 充值金额 topup_amount       | Σ `amount` of those rows, in MYR, summed in integer cents.                                                                                                                                          |
-| 充值人数 topup_customers    | `count(DISTINCT customer_id)` of those rows.                                                                                                                                                        |
-| 首充人数 first_topup_count  | Customers whose first-ever top-up falls in the window. "First" is `row_number()` over the customer's whole top-up history, ordered by `(created_at, id)`, and is computed before the window filter. |
-| 首充金额 first_topup_amount | Σ of those first top-ups' amounts.                                                                                                                                                                  |
+| Card | Definition |
+| --- | --- |
+| 注册人数 signups | `customer` rows with `has_account = true` and `created_at` in the window. Deleted rows are included, so past periods never shrink. Operator-generated partner accounts (`metadata.partner_credential`) are excluded: they are handed out, not signed up for. |
+| 充值笔数 topup_count | Settled payment-gateway deposits: `gateway_deposit` rows with `status = 'settled'` and `deleted_at IS NULL`, whose `settled_at` is in the window. |
+| 充值金额 topup_amount | Σ `amount_settled` of those deposits, in MYR, summed in integer cents. |
+| 充值人数 topup_customers | `count(DISTINCT customer_id)` of those deposits. |
+| 首充人数 first_topup_count | Customers whose first-ever settled deposit falls in the window. "First" is `row_number()` over the customer's whole deposit history, ordered by `(settled_at, id)`, and is computed before the window filter. |
+| 首充金额 first_topup_amount | Σ of those first deposits' amounts. |
 
-**Why the ledger is the top-up source.** In production, `topup` rows are
-written only when a TGPay deposit settles. The mock top-up path refuses to
-boot in production when `ALLOW_MOCK_TOPUP` is set, and the prod spec does not
-set it. On local data, the settled `gateway_deposit` rows and the non-mock
-`topup` rows match one to one, about a second apart. `/admin/economy` already
-reads the same rows for its Top-ups figure.
+**Why the payment gateway is the top-up source** (operator request, 2026-09-30).
+The figures must match what the gateway actually received. Only the gateway
+settles a deposit, through its callback or the requery sweep; no admin route
+can. So manual wallet credits never count: admin adjustments (RM 1.15M
+across 141 credits in prod, including RM 780,000 to the 50 generated partner
+accounts) and any ledger `topup` without a deposit behind it. The first
+release read the ledger's `topup` rows. In prod those matched the settled
+deposits one to one (24 of 24, amounts equal), so switching sources changed no
+historical number.
 
 ## Windows (MYT, fixed UTC+8)
 

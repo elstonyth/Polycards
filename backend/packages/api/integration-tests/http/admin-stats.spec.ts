@@ -81,7 +81,7 @@ medusaIntegrationTestRunner({
         );
       });
 
-      it('counts sign-ups and top-ups per window, first top-ups over the whole history', async () => {
+      it('counts sign-ups and gateway top-ups per window, first top-ups over the whole history', async () => {
         const container = getContainer();
         const customers = container.resolve(Modules.CUSTOMER);
         const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
@@ -106,32 +106,73 @@ medusaIntegrationTestRunner({
         await seedCustomer('stats-g@test.dev', false, IN_CURRENT);
         await seedCustomer('stats-p@test.dev', true, IN_PREVIOUS);
 
-        // Ledger. X first topped up in the previous window, so X's current
-        // top-up is not a first. Y's first is 100 and Y's 20 is a repeat.
+        // An operator-generated partner account inside the window is not a
+        // sign-up. Minted through the real generator, so the marker the SQL
+        // excludes on is the one the generator actually writes.
+        const minted = await unwrapResponse(
+          api.post(
+            '/admin/players',
+            { count: 1 },
+            { headers: { authorization: `Bearer ${adminToken}` } },
+          ),
+        );
+        expect(minted.status).toBe(201);
+        await setCreatedAt('customer', minted.data.players[0].id, IN_CURRENT);
+
+        // Top-ups come from the payment gateway's settled deposits, by
+        // settled_at. X first paid in the previous window, so X's current
+        // deposit is not a first. Y's first is 100 and Y's 20 is a repeat.
         // W's first sits on the inclusive start. V's first is before both
-        // windows. Z sits on the exclusive end. X's pack_open is not a top-up.
-        const rows: [string, number, 'topup' | 'pack_open', string][] = [
-          ['cus_x', 50, 'topup', IN_PREVIOUS],
-          ['cus_x', 30, 'topup', IN_CURRENT],
-          ['cus_x', -25, 'pack_open', IN_CURRENT],
-          ['cus_y', 100, 'topup', IN_CURRENT],
-          ['cus_y', 20, 'topup', '2026-09-11T10:00:00.000Z'],
-          ['cus_w', 40, 'topup', FROM_EDGE],
-          ['cus_v', 10, 'topup', BEFORE_BOTH],
-          ['cus_v', 5, 'topup', IN_CURRENT],
-          ['cus_z', 70, 'topup', TO_EDGE],
+        // windows. Z sits on the exclusive end. Q and R never settled.
+        const deposits: [
+          string,
+          number,
+          'settled' | 'pending' | 'failed',
+          string,
+        ][] = [
+          ['cus_x', 50, 'settled', IN_PREVIOUS],
+          ['cus_x', 30, 'settled', IN_CURRENT],
+          ['cus_y', 100, 'settled', IN_CURRENT],
+          ['cus_y', 20, 'settled', '2026-09-11T10:00:00.000Z'],
+          ['cus_w', 40, 'settled', FROM_EDGE],
+          ['cus_v', 10, 'settled', BEFORE_BOTH],
+          ['cus_v', 5, 'settled', IN_CURRENT],
+          ['cus_z', 70, 'settled', TO_EDGE],
+          ['cus_q', 60, 'pending', IN_CURRENT],
+          ['cus_r', 80, 'failed', IN_CURRENT],
         ];
-        const created = await packs.createCreditTransactions(
-          rows.map(([customer_id, amount, reason]) => ({
+        await packs.createGatewayDeposits(
+          deposits.map(([customer_id, amount, status, at], i) => ({
+            merchant_transaction_id: `stats-mt-${i}`,
             customer_id,
-            amount,
-            reason,
-            pull_id: null,
-            reference: null,
+            amount_requested: amount,
+            amount_settled: status === 'settled' ? amount : null,
+            payment_method_code: 'BQR',
+            status,
+            settled_at: status === 'settled' ? new Date(at) : null,
           })),
         );
-        for (const [i, row] of created.entries()) {
-          await setCreatedAt('credit_transaction', row.id, rows[i][3]);
+
+        // Wallet credits the gateway never saw are not top-ups: M has a
+        // ledger 'topup' with no deposit behind it, N a manual adjustment.
+        const manual = await packs.createCreditTransactions([
+          {
+            customer_id: 'cus_m',
+            amount: 999,
+            reason: 'topup' as const,
+            pull_id: null,
+            reference: null,
+          },
+          {
+            customer_id: 'cus_n',
+            amount: 5000,
+            reason: 'adjustment' as const,
+            pull_id: null,
+            reference: 'grant',
+          },
+        ]);
+        for (const row of manual) {
+          await setCreatedAt('credit_transaction', row.id, IN_CURRENT);
         }
 
         const res = await stats('?range=custom&from=2026-09-10&to=2026-09-11');
