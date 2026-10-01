@@ -79,8 +79,12 @@ const icon = (
   `<g transform="translate(${x.toFixed(1)} ${(midY - size / 2).toFixed(1)}) scale(${size / 24})" ` +
   `fill="none" stroke="${stroke}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">${paths}</g>`;
 
+// Whole ringgit stay whole (RM 1,000); anything else shows sen (RM 2,500.50).
 const credits = (n: number): string =>
-  `RM ${n.toLocaleString('en-MY', { maximumFractionDigits: 2 })}`;
+  `RM ${n.toLocaleString('en-MY', {
+    minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`;
 
 /** The largest size from `from` down to `floor` at which every line fits. */
 async function sizeToFit(
@@ -128,11 +132,12 @@ const decode = (bytes: Buffer) =>
 /**
  * Compose the poster. `art` maps a podium rank to its prize image bytes
  * (null or missing = a labelled placeholder tile, never a failed poster).
+ * `placeholders` lists the ranks whose prize card is not shown as its art.
  */
 export async function composeChallengePoster(
   input: ChallengePosterInput,
   art: Map<number, Buffer | null>,
-): Promise<Buffer> {
+): Promise<{ jpeg: Buffer; placeholders: number[] }> {
   ensureBundledFonts(); // before the first text render in this process
   const mid = W / 2;
   const layers: OverlayOptions[] = [];
@@ -197,29 +202,47 @@ export async function composeChallengePoster(
   // ---- stage chips: gold when unlocked, graphite with a lock when not -----
   y += headSize / 2 + 70;
   const chipH = 64;
-  const chipSize = 28;
-  const chips = await Promise.all(
-    input.stages.map(async (s) => {
-      const text = `STAGE ${s.stage}`;
-      const w = Math.round(
-        (await measure(text, display(chipSize, 3))) + 26 + 12 + 2 * 28,
-      );
-      return { ...s, text, w };
-    }),
-  );
   const gap = 20;
-  let x =
-    mid - (chips.reduce((n, c) => n + c.w, 0) + gap * (chips.length - 1)) / 2;
+  // Type, icon and padding shrink together until the row fits (a ladder can
+  // have more stages than three).
+  const layoutChips = async (size: number, pad: number) =>
+    Promise.all(
+      input.stages.map(async (s) => {
+        const text = `STAGE ${s.stage}`;
+        const iconSize = Math.round(size * 0.93);
+        const w = Math.round(
+          (await measure(text, display(size, 3))) + iconSize + 12 + 2 * pad,
+        );
+        return { ...s, text, w, iconSize };
+      }),
+    );
+  const rowW = (cs: { w: number }[]) =>
+    cs.reduce((n, c) => n + c.w, 0) + gap * (cs.length - 1);
+  let chipSize = 28;
+  let chipPad = 28;
+  let chips = await layoutChips(chipSize, chipPad);
+  while (rowW(chips) > TEXT_W && chipSize > 14) {
+    chipSize -= 2;
+    chipPad = Math.max(12, chipPad - 2);
+    chips = await layoutChips(chipSize, chipPad);
+  }
+  let x = mid - rowW(chips) / 2;
   for (const c of chips) {
     const fill = c.unlocked ? CHASE : GRAPHITE;
     const ink = c.unlocked ? INK : SILVER;
     svg.push(
       `<rect x="${x.toFixed(1)}" y="${(y - chipH / 2).toFixed(1)}" width="${c.w}" height="${chipH}" ` +
         `rx="${chipH / 2}" fill="${fill}"${c.unlocked ? '' : ` stroke="${HAIRLINE}" stroke-width="2"`}/>`,
-      icon(c.unlocked ? ICON_CHECK : ICON_LOCK, x + 28, y, 26, ink),
+      icon(
+        c.unlocked ? ICON_CHECK : ICON_LOCK,
+        x + chipPad,
+        y,
+        c.iconSize,
+        ink,
+      ),
       textEl(
         c.text,
-        x + 28 + 26 + 12,
+        x + chipPad + c.iconSize + 12,
         baseline(y, chipSize),
         display(chipSize, 3),
         ink,
@@ -238,6 +261,10 @@ export async function composeChallengePoster(
   ];
   let panelBottom = 0;
   const podium: string[] = [];
+  // Ranks whose prize card is drawn as a placeholder tile (art that could not
+  // be fetched or decoded), so the caller can say so instead of calling the
+  // poster "the official art".
+  const placeholders: number[] = [];
   for (const slot of slots) {
     const prize = input.podium.find((p) => p.rank === slot.rank);
     const cx = slot.x + slot.w / 2;
@@ -276,13 +303,33 @@ export async function composeChallengePoster(
         `<rect x="${slot.x + 1}" y="${slot.top + 1}" width="${slot.w - 2}" height="${slot.h - 2}" rx="24" ` +
           `fill="${GRAPHITE}" stroke="${HAIRLINE}" stroke-width="2"/>`,
       );
-      if (prize && !prize.name && prize.credits > 0) {
+      const tileText = (text: string) =>
+        textEl(
+          text,
+          cx,
+          baseline(slot.top + slot.h / 2, 24),
+          body(24, 4),
+          SILVER,
+          'middle',
+        );
+      if (prize?.name) {
+        placeholders.push(slot.rank);
+        podium.push(tileText('PRIZE CARD'));
+      } else if (prize && prize.credits > 0) {
+        const amount = credits(prize.credits);
+        const size = await sizeToFit(
+          [amount],
+          (s) => display(s),
+          44,
+          24,
+          slot.w - 28,
+        );
         podium.push(
           textEl(
-            credits(prize.credits),
+            amount,
             cx,
-            baseline(slot.top + slot.h / 2 - 18, 44),
-            display(44),
+            baseline(slot.top + slot.h / 2 - 18, size),
+            display(size),
             CHASE,
             'middle',
           ),
@@ -296,21 +343,12 @@ export async function composeChallengePoster(
           ),
         );
       } else {
-        podium.push(
-          textEl(
-            'PRIZE CARD',
-            cx,
-            baseline(slot.top + slot.h / 2, 24),
-            body(24, 4),
-            SILVER,
-            'middle',
-          ),
-        );
+        // The stage pays nothing at this rank (the storefront leaves it out).
+        podium.push(tileText('NO PRIZE'));
       }
     }
     let ny = slot.top + slot.h + 40;
-    const label =
-      prize?.name ?? (prize && prize.credits > 0 ? '' : 'To be announced');
+    const label = prize?.name ?? '';
     for (const line of label
       ? await twoLines(label, nameFont, slot.w + 24)
       : []) {
@@ -353,8 +391,9 @@ export async function composeChallengePoster(
       ),
     );
     y += 64;
-    const colW = TEXT_W / 3;
-    for (const [i, leader] of input.leaders.slice(0, 3).entries()) {
+    const shown = input.leaders.slice(0, 3);
+    const colW = TEXT_W / shown.length; // fewer than 3 stay centred
+    for (const [i, leader] of shown.entries()) {
       const cx = PAD + colW * i + colW / 2;
       const name = await fit(imageSafeName(leader.name), body(32), colW - 24);
       const rank = `#${leader.rank}`;
@@ -414,28 +453,71 @@ export async function composeChallengePoster(
       `<ellipse cx="${mid}" cy="${spotY}" rx="420" ry="380" fill="url(#spot)"/>` +
       `${svg.join('')}</svg>`,
   );
-  return sharp(base)
+  const jpeg = await sharp(base)
     .composite(layers)
     .flatten({ background: INK })
     .jpeg({ quality: 90, chromaSubsampling: '4:4:4' })
     .toBuffer();
+  return { jpeg, placeholders: placeholders.sort((a, b) => a - b) };
 }
 
-/** Fetch each podium prize's official image, then compose. Art that cannot
- *  be fetched becomes a placeholder tile; `missing` names the ranks so the
- *  bot can say so. */
+/** Fetch each podium prize's official image, then compose. A prize card whose
+ *  art cannot be fetched or decoded becomes a placeholder tile; `missing`
+ *  names those ranks so the bot can say so. */
 export async function renderChallengePoster(
   input: ChallengePosterInput,
   urls: Map<number, string | null>,
 ): Promise<{ jpeg: Buffer; missing: number[] }> {
-  const missing: number[] = [];
   const art = new Map<number, Buffer | null>();
   await Promise.all(
     [...urls].map(async ([rank, url]) => {
-      const bytes = url ? await fetchBytes(url).catch(() => null) : null;
-      if (url && !bytes) missing.push(rank);
-      art.set(rank, bytes);
+      art.set(rank, url ? await fetchBytes(url).catch(() => null) : null);
     }),
   );
-  return { jpeg: await composeChallengePoster(input, art), missing };
+  const { jpeg, placeholders } = await composeChallengePoster(input, art);
+  return { jpeg, missing: placeholders };
+}
+
+/** The poster headline and default featured stage for a ladder and pool,
+ *  with the storefront's unlock rule (pool >= threshold; stages are 1..N with
+ *  rising thresholds, so the unlocked ones are a prefix). */
+export function posterHeadline(
+  stages: { stageNumber: number; thresholdMyr: number }[],
+  poolMyr: number,
+): { headline: string; featureStage: number } {
+  const unlocked = stages.filter((s) => poolMyr >= s.thresholdMyr);
+  const first = stages[0];
+  if (unlocked.length === 0) {
+    const rm = `RM ${first.thresholdMyr.toLocaleString('en-MY', { maximumFractionDigits: 0 })}`;
+    return {
+      headline: `STAGE ${first.stageNumber} UNLOCKS AT ${rm}`,
+      featureStage: first.stageNumber,
+    };
+  }
+  const top = unlocked[unlocked.length - 1].stageNumber;
+  if (unlocked.length < stages.length)
+    return { headline: `STAGE ${top} UNLOCKED`, featureStage: top };
+  return {
+    headline:
+      stages.length === 1
+        ? `STAGE ${top} UNLOCKED`
+        : `ALL ${stages.length} STAGES UNLOCKED`,
+    featureStage: top,
+  };
+}
+
+/** '28 SEPT – 4 OCT': the challenge week's first and last day in the
+ *  challenge's own timezone (the end is exclusive, so the day before it). */
+export function posterWeekLabel(
+  startUtc: Date,
+  endUtc: Date,
+  timeZone: string,
+): string {
+  const day = new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    timeZone,
+  });
+  const last = new Date(endUtc.getTime() - 1);
+  return `${day.format(startUtc)} – ${day.format(last)}`.toUpperCase();
 }

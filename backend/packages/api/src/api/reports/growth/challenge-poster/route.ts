@@ -2,24 +2,20 @@ import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
-import { renderChallengePoster } from '../../../../modules/packs/challenge-poster';
+import {
+  posterHeadline,
+  posterWeekLabel,
+  renderChallengePoster,
+} from '../../../../modules/packs/challenge-poster';
 import { buildChallengeView } from '../../../store/challenge/build';
-
-const MYT_DAY = new Intl.DateTimeFormat('en-GB', {
-  day: 'numeric',
-  month: 'short',
-  timeZone: 'Asia/Kuala_Lumpur',
-});
-const money = (n: number) =>
-  `RM ${n.toLocaleString('en-MY', { maximumFractionDigits: 0 })}`;
 
 // GET /reports/growth/challenge-poster?stage=&leaders=0|1: the running Weekly
 // Pulled Value Challenge as a finished poster JPEG for the Growth desk bot to
 // post as a draft. Built from the same view as the public Ranks page, with
 // each podium prize's official image (modules/packs/challenge-poster.ts).
 // stage defaults to the highest unlocked stage; leaders adds the current top 3
-// shown names. x-poster-missing-art names podium ranks whose art could not be
-// fetched (they render as placeholder tiles).
+// shown names. x-poster-missing-art names podium ranks whose prize card shows
+// as a placeholder tile (art that could not be fetched or decoded).
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
@@ -48,26 +44,17 @@ export async function GET(
     );
   }
   const pool = body.progress.pooledMyr;
-  const unlocked = body.stages.filter((s) => pool >= s.thresholdMyr);
-  const feature =
-    stage === undefined
-      ? (unlocked.at(-1) ?? body.stages[0])
-      : body.stages.find((s) => s.stageNumber === Number(stage));
+  const { headline, featureStage } = posterHeadline(body.stages, pool);
+  const feature = body.stages.find(
+    (s) =>
+      s.stageNumber === (stage === undefined ? featureStage : Number(stage)),
+  );
   if (!feature) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
       `There is no stage ${stage}. Stages: ${body.stages.map((s) => s.stageNumber).join(', ')}.`,
     );
   }
-  const total = body.stages.length;
-  const headline =
-    unlocked.length === 0
-      ? `STAGE ${body.stages[0].stageNumber} UNLOCKS AT ${money(body.stages[0].thresholdMyr)}`
-      : unlocked.length === total
-        ? total === 1
-          ? 'STAGE 1 UNLOCKED'
-          : `ALL ${total} STAGES UNLOCKED`
-        : `STAGE ${unlocked.at(-1)!.stageNumber} UNLOCKED`;
 
   const podium = ([1, 2, 3] as const).map((rank) => {
     const reward = feature.rankRewards.find((r) => r.rank === rank);
@@ -81,16 +68,15 @@ export async function GET(
   });
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const bounds = await packs.challengeWeekBounds(week);
-  // The week ends at the next reset (exclusive), so the last day shown is the
-  // day before it.
-  const lastDay = new Date(bounds.endUtc.getTime() - 1);
-  const weekLabel =
-    `${MYT_DAY.format(bounds.startUtc)} – ${MYT_DAY.format(lastDay)}`.toUpperCase();
 
   const { jpeg, missing } = await renderChallengePoster(
     {
       headline,
-      weekLabel,
+      weekLabel: posterWeekLabel(
+        bounds.startUtc,
+        bounds.endUtc,
+        body.settings.timezone,
+      ),
       stages: body.stages.map((s) => ({
         stage: s.stageNumber,
         unlocked: pool >= s.thresholdMyr,

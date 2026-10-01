@@ -30,7 +30,29 @@ test('image mode returns the bytes as base64 and keeps the key safe', async () =
   assert.deepEqual(img, {
     mimeType: 'image/jpeg',
     data: JPEG.toString('base64'),
+    missingArt: '',
   });
+});
+
+test('challenge_poster tells the bot when prize art is a placeholder', async () => {
+  const out = await runTool(
+    poster,
+    {},
+    {
+      ...base,
+      fetchImpl: async () =>
+        new Response(JPEG, {
+          status: 200,
+          headers: {
+            'content-type': 'image/jpeg',
+            'x-poster-missing-art': '1,3',
+          },
+        }),
+    },
+  );
+  assert.equal(out.content[0].type, 'image');
+  assert.match(out.content[1].text, /rank 1,3 could not be loaded/);
+  assert.doesNotMatch(out.content[1].text, /with the official card art/);
 });
 
 test('image mode refuses a non-image and still relays error messages', async () => {

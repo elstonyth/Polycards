@@ -45,7 +45,12 @@ export async function getReport({
     const mimeType = res.headers.get('content-type')?.split(';')[0] ?? '';
     const bytes = await res.arrayBuffer().catch(() => null);
     if (mimeType.startsWith('image/') && bytes?.byteLength)
-      return { mimeType, data: Buffer.from(bytes).toString('base64') };
+      return {
+        mimeType,
+        data: Buffer.from(bytes).toString('base64'),
+        // Podium ranks drawn as placeholder tiles, if any.
+        missingArt: res.headers.get('x-poster-missing-art') ?? '',
+      };
     throw new ReportError(
       'The backend sent an unreadable image. Try again in a minute.',
     );

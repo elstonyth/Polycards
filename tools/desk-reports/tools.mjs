@@ -117,7 +117,7 @@ TOOLS.growth = [
   {
     name: 'challenge_poster',
     description:
-      'A finished Weekly Pulled Value Challenge poster (1080x1350 JPEG) rendered from live data with the official card art: the unlock headline, the stage chips, and the podium prizes of one stage (default: the highest unlocked stage), optionally with the current top-3 leaders. Use it instead of drawing cards with image generation: post the image it returns. It is a draft; a human reviews it before it is published.',
+      'A finished Weekly Pulled Value Challenge poster (a tall portrait JPEG, 1080 px wide and about 1640 px high, taller with leaders) rendered from live data with the official card art: the unlock headline, the stage chips, and the podium prizes of one stage (default: the highest unlocked stage), optionally with the current top-3 leaders. Use it instead of drawing cards with image generation: post the image it returns. It is a draft; a human reviews it before it is published.',
     inputSchema: {
       stage: z
         .number()
@@ -189,14 +189,23 @@ export async function runTool(tool, args, config) {
         ],
       };
     }
-    const body = await getReport({ ...config, path, params, as });
+    // A poster fetches its prize art server-side, so it gets longer.
+    const body = await getReport({
+      ...config,
+      path,
+      params,
+      as,
+      ...(as === 'image' ? { timeoutMs: 45_000 } : {}),
+    });
     if (as === 'image') {
       return {
         content: [
           { type: 'image', data: body.data, mimeType: body.mimeType },
           {
             type: 'text',
-            text: 'Rendered from live data with the official card art. Post this image as the draft; a human reviews it before it is published.',
+            text: body.missingArt
+              ? `Rendered from live data, but the prize card art for rank ${body.missingArt} could not be loaded and shows as a plain placeholder tile. Say so when you post it, and do not call it the official card art; try again later for the full poster.`
+              : 'Rendered from live data with the official card art. Post this image as the draft; a human reviews it before it is published.',
           },
         ],
       };
