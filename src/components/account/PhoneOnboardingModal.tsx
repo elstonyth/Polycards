@@ -9,13 +9,14 @@ import { Pill } from '@/components/ui/pill';
 import { INPUT_CLASS } from '@/components/account/ui';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { logout } from '@/lib/actions/auth';
-import { changePhone, startPhoneOtp } from '@/lib/actions/phone-verification';
+import { changePhone } from '@/lib/actions/phone-verification';
 import {
   PHONE_OTP_COOLDOWN_SECONDS,
   type PhoneOtpChannel,
 } from '@/lib/phone-verification';
 import { normalizePhone } from '@/lib/profile-validation';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { usePhoneOtpSender } from '@/lib/use-phone-otp-sender';
 
 // Escape is deliberately inert: the gate has no dismiss (see below).
 const noop = () => {};
@@ -57,6 +58,7 @@ export function PhoneOnboardingModal() {
   // Set after a successful save: hides the gate for the beat between the
   // write landing and router.refresh() re-rendering the layout without it.
   const [done, setDone] = useState(false);
+  const sender = usePhoneOtpSender();
 
   useModalA11y(panelRef, !done, noop);
 
@@ -85,7 +87,7 @@ export function PhoneOnboardingModal() {
     setBusy(true);
     setCooldown(PHONE_OTP_COOLDOWN_SECONDS);
     try {
-      const result = await startPhoneOtp({
+      const result = await sender.send({
         phone: normalized,
         purpose: 'phone-change',
         ...(via ? { channel: via } : {}),
@@ -227,6 +229,11 @@ export function PhoneOnboardingModal() {
             >
               {error}
             </p>
+            {/* Turnstile slot — empty unless Cloudflare wants a click. */}
+            <div
+              ref={sender.challengeRef}
+              className="isolate flex justify-center empty:hidden"
+            />
             <Pill
               type="submit"
               size="lg"

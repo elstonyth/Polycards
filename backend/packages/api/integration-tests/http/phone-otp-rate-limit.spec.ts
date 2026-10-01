@@ -112,6 +112,44 @@ medusaIntegrationTestRunner({
           ].sort(),
         );
       });
+
+      // requireTurnstile must run BEFORE the per-phone tier in the real
+      // router, or a script without a token still burns a victim number's
+      // slots. Only the app's siteverify call is stubbed — the `api` client
+      // is axios over node http, not fetch.
+      it("refuses a send with no human-check token before it spends a per-phone slot", async () => {
+        const PHONE_C = "+60177000003";
+        const slot = `rl:phone-otp-start-phone:phone:${PHONE_C}`;
+        const previous = process.env.TURNSTILE_SECRET_KEY;
+        process.env.TURNSTILE_SECRET_KEY = "test-secret";
+        const siteverify = jest.spyOn(globalThis, "fetch").mockResolvedValue(
+          new Response(JSON.stringify({ success: true, action: "phone-otp" }), {
+            status: 200,
+          }),
+        );
+        try {
+          const refused = await start(PHONE_C);
+          expect(refused.status).toBe(400);
+          expect(refused.data.message).toMatch(/security check failed/i);
+          expect(siteverify).not.toHaveBeenCalled();
+          expect(await redis.exists(slot)).toBe(0);
+
+          const sent = await unwrapResponse(
+            api.post(
+              "/store/phone-verification/start",
+              { phone: PHONE_C, purpose: "signup", turnstile_token: "tok" },
+              { headers },
+            ),
+          );
+          expect(sent.status).toBe(200);
+          expect(siteverify).toHaveBeenCalledTimes(1);
+          expect(await redis.exists(slot)).toBe(1);
+        } finally {
+          siteverify.mockRestore();
+          if (previous === undefined) delete process.env.TURNSTILE_SECRET_KEY;
+          else process.env.TURNSTILE_SECRET_KEY = previous;
+        }
+      });
     });
   },
 });

@@ -87,6 +87,13 @@ ARG NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=true
 # form). Same rule as the ARGs above: this default is what reaches the bundle;
 # moves together with the .do/storefront.app.yaml value.
 ARG NEXT_PUBLIC_WITHDRAWALS_ENABLED=true
+# Cloudflare Turnstile SITE key (public, not a secret) for the human check on
+# every OTP send (src/lib/use-phone-otp-sender.ts). Empty = no check, the
+# shipped state. Deploy order (CONTEXT.md → Phone Verification): put the key
+# HERE first and let that storefront build go ACTIVE; only then set the
+# backend's TURNSTILE_SECRET_KEY. The reverse order refuses every code request,
+# because the backend demands a token this bundle cannot mint.
+ARG NEXT_PUBLIC_TURNSTILE_SITE_KEY=
 # NOT a NEXT_PUBLIC_ var — server-side only, but it MUST be present at BUILD
 # time all the same. next.config.ts picks the CSP header NAME via cspEnforced()
 # and Next serialises headers() into routes-manifest.json during `npm run build`,
@@ -105,6 +112,7 @@ ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 ENV NEXT_PUBLIC_PAYMENTS_PROVIDER=$NEXT_PUBLIC_PAYMENTS_PROVIDER
 ENV NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=$NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED
 ENV NEXT_PUBLIC_WITHDRAWALS_ENABLED=$NEXT_PUBLIC_WITHDRAWALS_ENABLED
+ENV NEXT_PUBLIC_TURNSTILE_SITE_KEY=$NEXT_PUBLIC_TURNSTILE_SITE_KEY
 ENV CSP_ENFORCE=$CSP_ENFORCE
 # Salt for every Server Action ID (`next build --webpack` hashes each action ID
 # with the actions encryption key). Unset, each build generates a random key,

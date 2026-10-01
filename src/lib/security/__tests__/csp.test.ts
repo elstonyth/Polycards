@@ -69,6 +69,16 @@ describe('buildCsp', () => {
     expect(csp).toMatch(/frame-src https:\/\/www\.facebook\.com/);
   });
 
+  // Turnstile (src/lib/use-phone-otp-sender.ts): api.js loads from Cloudflare
+  // and the challenge runs in its iframe. Blocked under the enforced policy,
+  // no token is ever minted and every OTP send fails once the backend secret
+  // is set — a signup outage.
+  it('allows Cloudflare Turnstile script and frame', () => {
+    const csp = buildCsp();
+    expect(csp).toMatch(/script-src[^;]*https:\/\/challenges\.cloudflare\.com/);
+    expect(csp).toMatch(/frame-src[^;]*https:\/\/challenges\.cloudflare\.com/);
+  });
+
   it('allows the jsDelivr sprite CDN in img-src', () => {
     const csp = buildCsp();
     expect(csp).toMatch(/img-src[^;]*https:\/\/cdn\.jsdelivr\.net/);

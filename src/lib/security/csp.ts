@@ -75,6 +75,11 @@ export function buildCsp(): string {
   // "openbridge") names a host fbevents.js fetch()es every event to — that
   // host then belongs in connect-src too.
 
+  // Cloudflare Turnstile (lib/use-phone-otp-sender.ts): api.js plus the
+  // challenge iframe, both on this one origin (Cloudflare's documented CSP).
+  // Blocked here, no OTP send can mint its token once the backend requires one.
+  const turnstile = 'https://challenges.cloudflare.com';
+
   const connect = ["'self'", backend, media, sentry, fbScript, fbTrack]
     .filter(Boolean)
     .join(' ');
@@ -105,12 +110,12 @@ export function buildCsp(): string {
 
   const directives = [
     `default-src 'self'`,
-    `script-src 'self' 'unsafe-inline' ${fbScript}`,
+    `script-src 'self' 'unsafe-inline' ${fbScript} ${turnstile}`,
     `style-src 'self' 'unsafe-inline'`,
     `img-src ${img}`,
     `font-src 'self'`,
     `connect-src ${connect}`,
-    `frame-src ${fbTrack}`,
+    `frame-src ${fbTrack} ${turnstile}`,
     `object-src 'none'`,
     `base-uri 'self'`,
     `form-action 'self' ${fbTrack}`,

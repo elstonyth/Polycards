@@ -14,7 +14,8 @@ import {
 } from '@/lib/profile-validation';
 import { PhoneField } from '@/components/PhoneField';
 import { PhoneOtpStep } from '@/components/auth/PhoneOtpStep';
-import { startPhoneOtp, changePhone } from '@/lib/actions/phone-verification';
+import { changePhone } from '@/lib/actions/phone-verification';
+import { usePhoneOtpSender } from '@/lib/use-phone-otp-sender';
 import {
   PHONE_VERIFICATION_REQUIRED,
   type PhoneOtpChannel,
@@ -94,6 +95,9 @@ export default function SettingsForm({ customer, handle }: Props) {
   // the outer profile <form> is invalid HTML and unpredictable) — read its
   // hidden E.164 input straight off the DOM instead of via FormData.
   const newPhoneWrapRef = useRef<HTMLDivElement>(null);
+  // Both sends below (new number, then possibly the old one) share one
+  // Turnstile slot, rendered under whichever phone step is showing.
+  const sender = usePhoneOtpSender();
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -195,7 +199,7 @@ export default function SettingsForm({ customer, handle }: Props) {
       setNote({ ok: false, text: 'Please refresh the page and try again.' });
       return;
     }
-    const sent = await startPhoneOtp({ phone, purpose: 'phone-change' });
+    const sent = await sender.send({ phone, purpose: 'phone-change' });
     if (!sent.ok) {
       setPhoneChange('entry');
       setNote({ ok: false, text: sent.error });
@@ -226,7 +230,7 @@ export default function SettingsForm({ customer, handle }: Props) {
 
     setBusy(true);
     try {
-      const result = await startPhoneOtp({
+      const result = await sender.send({
         phone: normalized,
         purpose: 'phone-change',
       });
@@ -471,6 +475,11 @@ export default function SettingsForm({ customer, handle }: Props) {
             />
           </div>
         )}
+        {/* Turnstile slot — empty unless Cloudflare wants a click. */}
+        <div
+          ref={sender.challengeRef}
+          className="mt-3 isolate flex justify-center empty:hidden"
+        />
         {phoneChange === 'closed' && (
           <span className="mt-1 block text-[11px] text-white/55">
             Changing your phone requires a verification code, and your account
