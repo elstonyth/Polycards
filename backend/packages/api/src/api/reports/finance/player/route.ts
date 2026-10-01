@@ -30,13 +30,20 @@ export async function GET(
   }
   const username = raw.trim();
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const id = await packs.findCustomerIdByUsername(username);
+  // Staff may have the shown name or the permanent profile handle from a
+  // /profile/<handle> link (utils/profile-handle.ts). The two are separate
+  // namespaces, so one string can name two players: the shown name wins and
+  // the answer says the handle belongs to someone else.
+  const byName = await packs.findCustomerIdByUsername(username);
+  const byHandle = await packs.findCustomerIdByHandle(username);
+  const id = byName ?? byHandle;
   if (!id) {
     throw new MedusaError(
       MedusaError.Types.NOT_FOUND,
-      `No player with username ${username}.`,
+      `No player with username or profile handle ${username}.`,
     );
   }
+  const clash = !!byName && !!byHandle && byHandle !== byName;
   const customers = req.scope.resolve<ICustomerModuleService>(Modules.CUSTOMER);
   const customer = await customers.retrieveCustomer(id, {
     select: ['id', 'first_name', 'created_at'],
@@ -79,5 +86,10 @@ export async function GET(
       theirs,
     ),
     note: 'For one player: revenue = their pack spend, payouts = buybacks paid to them, topups = their deposits credited.',
+    ...(clash
+      ? {
+          lookup_note: `${username} is also the profile handle of a different player. To report on that player, use the name shown on their profile.`,
+        }
+      : {}),
   });
 }

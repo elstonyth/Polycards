@@ -72,7 +72,9 @@ export const TOOLS = {
       inputSchema: {
         username: z
           .string()
-          .describe("The player's username, as shown on their public profile."),
+          .describe(
+            "The player's username as shown on their public profile, or their profile handle (the part after /profile/ in their link). If the reply has a lookup_note, tell staff what it says.",
+          ),
       },
       request: (args) => ({
         path: 'player',
