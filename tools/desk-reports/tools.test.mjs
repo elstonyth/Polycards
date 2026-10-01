@@ -83,7 +83,11 @@ test('the store desk tools', () => {
   });
   assert.deepEqual(store.low_stock.request({ max: 2 }), {
     path: 'stock',
-    params: { max: 2 },
+    params: { max: 2, limit: undefined },
+  });
+  assert.deepEqual(store.low_stock.request({ max: -1, limit: 200 }), {
+    path: 'stock',
+    params: { max: -1, limit: 200 },
   });
 });
 
@@ -121,6 +125,9 @@ test('runTool returns the report with its period, or the error as text', async (
     period: 'all time',
     totals: { revenue: 1 },
   });
+  // Compact: Hermes spills MCP results over 50K chars to a file the bot
+  // cannot read, and indentation alone can add a third.
+  assert.doesNotMatch(ok.content[0].text, /\n/);
   const bad = await runTool(
     finance.economy,
     { period: 'custom' },
