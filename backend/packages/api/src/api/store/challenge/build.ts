@@ -18,15 +18,12 @@ const TOP_N = 10;
 const FETCH_N = TOP_N * 2;
 
 /**
- * weeksBack: 0 = the running challenge week, 1 = the week that last ended.
- * hiddenAboveCut counts administratively disabled players dropped from the
- * displayed top 10. Settlement still ranks and pays them, so while it is
- * above 0 a displayed rank is not the rank that gets paid.
+ * The running challenge week's view. hiddenAboveCut counts administratively
+ * disabled players dropped from the displayed top 10. Settlement still ranks
+ * and pays them, so while it is above 0 a displayed rank is not the rank that
+ * gets paid. `week` is the anchor the queries used, for challengeWeekBounds.
  */
-export async function buildChallengeView(
-  scope: MedusaContainer,
-  weeksBack = 0,
-) {
+export async function buildChallengeView(scope: MedusaContainer) {
   const packs: PacksModuleService = scope.resolve(PACKS_MODULE);
   const customerService = scope.resolve(Modules.CUSTOMER);
 
@@ -35,7 +32,6 @@ export async function buildChallengeView(
     timezone: settings.timezone,
     resetDay: settings.reset_day,
     resetHour: settings.reset_hour,
-    weeksBack,
   };
   const [pool, rankedAll, stageRows] = await Promise.all([
     // Real community pulled-value this week (ledger aggregate) — the anchor

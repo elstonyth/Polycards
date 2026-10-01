@@ -3,12 +3,12 @@ import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { describeScope, loadGroupScope, parseWindow } from '../../params';
 import { and, reportDb, scopeFilter, windowFilter } from '../../sql';
-import { packSales } from '../../finance/queries';
+import { packOpens } from '../../finance/queries';
 
 // GET /reports/growth/packs?from&to&group: packs opened per Malaysia day (one
 // pull = one pack; paid packs are source 'pack', free welcome packs 'free';
 // task and challenge prize draws are not counted) and the most-opened packs,
-// from the same packSales query as the Finance pack-sales report. Opens
+// from the same packOpens query as the Finance pack-sales report. Opens
 // only: revenue stays on the Finance desk.
 export async function GET(
   req: MedusaRequest,
@@ -30,17 +30,8 @@ export async function GET(
       ' GROUP BY 1 ORDER BY 1',
     pulls.params,
   );
-  const { bySlug } = await packSales(
-    db,
-    and(
-      windowFilter(window, 'ct.created_at'),
-      scopeFilter(scope, 'ct.customer_id'),
-    ),
-    pulls,
-  );
-  const opened = [...bySlug]
-    .filter(([, s]) => s.opened > 0)
-    .sort(([a, x], [b, y]) => y.opened - x.opened || a.localeCompare(b))
+  const opened = [...(await packOpens(db, pulls))]
+    .sort(([a, x], [b, y]) => y - x || a.localeCompare(b))
     .slice(0, 10);
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const titles = new Map(
@@ -64,11 +55,11 @@ export async function GET(
     packs_opened: days.reduce((n, d) => n + d.packs_opened, 0),
     free_packs_opened: days.reduce((n, d) => n + d.free_packs_opened, 0),
     days,
-    top_packs: opened.map(([slug, s]) => ({
+    top_packs: opened.map(([slug, n]) => ({
       pack: slug,
       title: titles.get(slug) ?? slug,
-      packs_opened: s.opened,
+      packs_opened: n,
     })),
-    note: 'One pull is one pack opened. Free packs are the free welcome packs; task and challenge prize draws are not counted. Days are Malaysia days.',
+    note: 'One pull is one pack opened. Free packs are the free welcome packs; task and challenge prize draws are not counted. Days are Malaysia days; days with no packs opened are left out.',
   });
 }

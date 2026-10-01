@@ -118,8 +118,23 @@ medusaIntegrationTestRunner({
             rolled_at: now,
             source: 'pack' as const,
           }));
+        // A real player carrying everything a report must never show.
+        const [realPlayer] = await customers().createCustomers([
+          {
+            email: 'gp-real@test.dev',
+            first_name: 'Real_Puller',
+            last_name: 'Private',
+            phone: '+60123450000',
+            metadata: {
+              handle: 'Real_Handle',
+              bank_accounts: [{ account_number: '9988776655' }],
+              partner_credential: { password: 'pw-secret-1' },
+            },
+          },
+        ]);
         await packs().createPulls([
           ...pull('cus_gp_1', GX, 3), // 150 USD
+          ...pull(realPlayer.id, GY, 2), // 60 USD
           ...pull('cus_gp_2', GY, 1), // 30 USD
         ]);
         await packs().saveChallengeStages({
@@ -156,7 +171,7 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(200);
         const r = res.data;
         expect(r.pool_myr).toBe(site.progress.pooledMyr);
-        expect(r.pool_myr).toBe(MYR(180));
+        expect(r.pool_myr).toBe(MYR(240));
         expect(
           r.stages.map((s: { stage: number; threshold_myr: number }) => [
             s.stage,
@@ -208,7 +223,7 @@ medusaIntegrationTestRunner({
         expect(r.stages[1]).toMatchObject({
           stage: 2,
           unlocked: false,
-          remaining_myr: Math.round((1_000_000 - MYR(180)) * 100) / 100,
+          remaining_myr: Math.round((1_000_000 - MYR(240)) * 100) / 100,
         });
         // Stage 2 is locked, so its Y card and 5000 credits are not paid.
         expect(r.prizes_if_week_ended_now).toEqual([
@@ -222,7 +237,6 @@ medusaIntegrationTestRunner({
         expect(new Date(r.week.start).getTime()).toBeLessThan(
           new Date(r.week.end).getTime(),
         );
-        expect(r.week.which).toBe('current');
       });
 
       it('flags a hidden player above the cut and never exposes ids or contact details', async () => {
@@ -234,11 +248,26 @@ medusaIntegrationTestRunner({
         });
         const r = (await report('challenge')).data;
         expect(r.hidden_players_above_cut).toBe(1);
-        expect(r.standings).toHaveLength(1);
-        expect(r.standings[0]).toMatchObject({ rank: 1, pulls: 1 });
+        expect(r.standings).toHaveLength(2);
+        expect(r.standings[0]).toMatchObject({
+          rank: 1,
+          name: 'Real_Puller',
+          handle: 'Real_Handle',
+          pulls: 2,
+        });
         const body = JSON.stringify(r);
-        expect(body).not.toContain('cus_gp_');
-        expect(body).not.toContain('@');
+        for (const secret of [
+          'cus_',
+          '@',
+          '60123450000',
+          'Private',
+          '9988776655',
+          'pw-secret-1',
+          'bank',
+          'partner',
+        ]) {
+          expect(body).not.toContain(secret);
+        }
       });
 
       it('renders the poster as a JPEG, placeholder tiles for unreachable art', async () => {
@@ -270,14 +299,11 @@ medusaIntegrationTestRunner({
         expect((await report('challenge-poster')).status).toBe(404);
       });
 
-      it('reports last week, and refuses an unknown week', async () => {
-        const current = (await report('challenge')).data;
-        const last = await report('challenge?week=last');
-        expect(last.status).toBe(200);
-        expect(last.data.week.which).toBe('last');
-        expect(last.data.week.end).toBe(current.week.start);
-        expect(last.data.pool_myr).toBe(0);
-        expect((await report('challenge?week=next')).status).toBe(400);
+      // An ended week recomputed live could announce prizes nobody was paid,
+      // so only the running week is served.
+      it('serves the running week only', async () => {
+        expect((await report('challenge?week=current')).status).toBe(200);
+        expect((await report('challenge?week=last')).status).toBe(400);
       });
     });
 

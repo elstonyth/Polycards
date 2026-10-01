@@ -115,8 +115,8 @@ const adminActionRateLimit = rateLimit('admin-action');
 const gatewayHookRateLimit = rateLimit('gateway-hook');
 // TGPay's source allowlist (src/api/utils/payer-ip.ts) — after the limiter.
 const tgpayCallbackAllowlist = createTgpayCallbackAllowlist();
-// Desk reports (GET /reports/*): one budget for every staff desk bot, which
-// all call from the owner's PC.
+// Desk reports (GET /reports/*): one budget per desk (desk + caller address),
+// since every staff desk bot calls from the owner's PC.
 const deskReportsRateLimit = rateLimit('desk-reports');
 
 // In-memory multipart parsing for the custom image-upload route. memoryStorage

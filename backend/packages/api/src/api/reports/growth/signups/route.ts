@@ -34,6 +34,6 @@ export async function GET(
       count: stats.first_topup_count,
       amount_myr: stats.first_topup_amount,
     },
-    note: 'Counted like the admin Stats page: new accounts, including ones since deleted; accounts made by staff are left out. Days are Malaysia days.',
+    note: "Counted like the admin Stats page: new accounts, including ones since deleted; accounts made by staff are left out. Days are Malaysia days; days with no sign-ups are left out. first_topups counts players whose first-ever deposit settled in the window, whenever they signed up; it is not a conversion rate of this window's sign-ups.",
   });
 }

@@ -123,9 +123,10 @@ Rules for every Phase B report (decided 2026-10-01):
 
 | Route | Returns |
 | --- | --- |
-| `GET /reports/growth/challenge?week=current\|last` | The public Ranks page's challenge board, from the same builder (`src/api/store/challenge/build.ts`). It returns the challenge week's own bounds, stages (threshold, unlocked, remaining, prizes), `prizes_if_week_ended_now` (settlement's cumulative rule), and the top 10 (shown name, handle, pulls, pulled value). It also returns `hidden_players_above_cut`: while that is above 0, prizes are paid by original rank. |
+| `GET /reports/growth/challenge` | The RUNNING week's public Ranks page challenge board, from the same builder (`src/api/store/challenge/build.ts`). Past weeks are refused: recomputed live they would use today's FX and the promoted ladder, not what settlement paid. Each prize carries its official card image. It returns the challenge week's own bounds, stages (threshold, unlocked, remaining, prizes), `prizes_if_week_ended_now` (settlement's cumulative rule), and the top 10 (shown name, handle, pulls, pulled value). It also returns `hidden_players_above_cut`: while that is above 0, prizes are paid by original rank. |
 | `GET /reports/growth/signups?from&to` | New accounts per Malaysia day, counted like the admin Stats page (`signupTopupStats`), plus first top-ups. At most 93 days. |
-| `GET /reports/growth/packs?from&to&group` | Paid and free packs opened per Malaysia day, and the 10 most-opened packs (Finance's `packSales`, opens only). At most 93 days. |
+| `GET /reports/growth/packs?from&to&group` | Paid and free packs opened per Malaysia day, and the 10 most-opened packs (`packOpens`, shared with Finance's pack-sales; opens only). At most 93 days. |
+| `GET /reports/growth/challenge-poster?stage&leaders` | A finished 1080-wide JPEG for a post: the unlock headline, stage chips, the featured stage's top-3 prize slabs from their official images (never an AI redraw), optional current leaders, the site address. Unreachable art becomes a placeholder tile. The MCP tool returns it as an image block, which Hermes posts. |
 
 **Wave 2 (planned):**
 
@@ -172,5 +173,4 @@ Rules for every Phase B report (decided 2026-10-01):
 
 - Any write through the report system.
 - Admin dashboard changes.
-- Phase B routes (next plan).
 - The marketing publisher (paused).

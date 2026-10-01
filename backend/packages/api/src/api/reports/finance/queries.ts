@@ -147,13 +147,7 @@ export async function packSales(
       ' GROUP BY op.pack_id',
     ledger.params,
   );
-  const opened = await db.raw<{ pack_id: string; n: string }>(
-    'SELECT p.pack_id, COUNT(*)::bigint AS n FROM pull p ' +
-      "WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
-      pulls.sql +
-      ' GROUP BY p.pack_id',
-    pulls.params,
-  );
+  const opened = await packOpens(db, pulls);
   const bySlug = new Map<string, { opened: number; cents: number }>();
   let unattributedCents = 0;
   for (const r of revenue.rows) {
@@ -162,11 +156,27 @@ export async function packSales(
     if (r.pack_id === null) unattributedCents += cents;
     else bySlug.set(r.pack_id, { opened: 0, cents });
   }
-  for (const r of opened.rows) {
-    const row = bySlug.get(r.pack_id) ?? { opened: 0, cents: 0 };
-    bySlug.set(r.pack_id, { ...row, opened: Number(r.n) });
+  for (const [slug, n] of opened) {
+    const row = bySlug.get(slug) ?? { opened: 0, cents: 0 };
+    bySlug.set(slug, { ...row, opened: n });
   }
   return { bySlug, unattributedCents };
+}
+
+/** Paid packs opened per pack (one pull = one pack; source 'pack'). Shared
+ *  by Finance pack-sales and the Growth packs report, so both count alike. */
+export async function packOpens(
+  db: ReportDb,
+  pulls: SqlPart,
+): Promise<Map<string, number>> {
+  const { rows } = await db.raw<{ pack_id: string; n: string }>(
+    'SELECT p.pack_id, COUNT(*)::bigint AS n FROM pull p ' +
+      "WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
+      pulls.sql +
+      ' GROUP BY p.pack_id',
+    pulls.params,
+  );
+  return new Map(rows.map((r) => [r.pack_id, Number(r.n)]));
 }
 
 /** Live players per effective group; players with no row are DEFAULT. */
