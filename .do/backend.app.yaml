@@ -322,6 +322,13 @@ envs:
   - key: PHONE_OTP_GLOBAL_DAILY_LIMIT
     scope: RUN_TIME
     value: "400"
+  # Per-number code requests a day (default 6). Raised to 10 on 2026-10-01:
+  # people whose SMS never arrived had used all 6 on Resend before resends
+  # became calls, and were locked out for 24 h. Applied live with doctl the
+  # same day; this keeps a full-spec apply from reverting it.
+  - key: PHONE_OTP_START_PHONE_RATE_LIMIT
+    scope: RUN_TIME
+    value: "10"
   # ── Telegram apex-pull board (Legendary+ pulls → the public channel) ────────
   # Both keys were applied straight to the live app on 2026-08-21 (a surgical
   # `doctl apps update`, because this integration shipped after that day's spec
