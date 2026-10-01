@@ -16,7 +16,8 @@ import { alertOps } from '../../../../modules/packs/ops-alert';
 // Public: sends (or dev-logs) an OTP for one of the three phone flows. The
 // success includes only the delivery channel — whether the phone belongs to
 // an account is never disclosed here. SMS-pumping protection is layered:
-// the phone-otp-start IP limiter (middlewares.ts), Twilio Verify's own
+// the Turnstile human check (utils/turnstile-guard.ts, runs first), the
+// phone-otp-start IP limiter (middlewares.ts), Twilio Verify's own
 // per-number caps, and — for password-reset — no SMS at all unless exactly
 // one registered account carries the phone (a pumping run would otherwise
 // use the reset flow to text arbitrary numbers on our bill).

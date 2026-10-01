@@ -41,6 +41,7 @@ import {
 } from './utils/cache-headers';
 import { refuseCrossOriginAdminWrite } from './utils/admin-origin-guard';
 import { requireReportKey } from './reports/require-report-key';
+import { requireTurnstile } from './utils/turnstile-guard';
 
 // Custom-route middleware. /store/* is NOT a default customer-protected prefix
 // (only /store/customers/me/* is), so every customer-owned route here must opt
@@ -345,9 +346,14 @@ export default defineMiddlewares({
       // prod), so an IP-only limiter here would be one shared bucket for
       // every visitor — see the "Phone-OTP limiters" comment in
       // utils/rate-limit.ts for the full rationale.
+      //
+      // requireTurnstile runs before both: neither tier can tell a script from
+      // a person, so a request without a human-check token must not spend a
+      // per-phone slot or the sitewide budget (utils/turnstile-guard.ts).
       matcher: '/store/phone-verification/start',
       method: 'POST',
       middlewares: [
+        requireTurnstile,
         rateLimit('phone-otp-start-phone'),
         rateLimit('phone-otp-start'),
       ],

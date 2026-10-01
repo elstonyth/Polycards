@@ -124,6 +124,44 @@ describe('startPhoneOtp — delivery refusals', () => {
   });
 });
 
+// The human-check token (src/lib/use-phone-otp-sender.ts) rides to the backend's
+// requireTurnstile guard under its snake_case wire name, and only when there
+// is one: no site key configured means no token and an unchanged body.
+describe('startPhoneOtp — Turnstile token', () => {
+  const bodyOf = () => mem.requests[0]!.body;
+
+  it('forwards turnstile_token when the caller has one', async () => {
+    await startPhoneOtp({
+      phone: MY,
+      purpose: 'signup',
+      turnstileToken: 'cf-token',
+    });
+    expect(bodyOf()).toEqual({
+      phone: MY,
+      purpose: 'signup',
+      turnstile_token: 'cf-token',
+    });
+  });
+
+  it('sends the unchanged body without one', async () => {
+    await startPhoneOtp({ phone: MY, purpose: 'signup' });
+    expect(bodyOf()).toEqual({ phone: MY, purpose: 'signup' });
+  });
+
+  // The guard runs before the per-phone limiter, so no slot was spent and the
+  // caller may retry at once — never the 30s default cooldown.
+  it('maps the guard refusal to an immediate retry', async () => {
+    refuses(START, 'Security check failed. Please try again.');
+    await expect(
+      startPhoneOtp({ phone: MY, purpose: 'signup', turnstileToken: 'bad' }),
+    ).resolves.toEqual({
+      ok: false,
+      error: 'Security check failed. Please try again.',
+      retryAfterSeconds: 1,
+    });
+  });
+});
+
 // The re-auth fields the backend's phone-change gate needs. `password` must
 // reach the wire (an omitted one 401s), and it must be OMITTED rather than sent
 // empty — the route distinguishes "no password supplied" from "wrong password"

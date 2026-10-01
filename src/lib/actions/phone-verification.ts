@@ -127,11 +127,18 @@ const PHONE_CHANGE_RULES: ErrorRule[] = [
   ],
 ];
 
+// backend/packages/api/src/api/utils/turnstile-guard.ts's refusal.
+const SECURITY_CHECK_FAILED = /security check failed/i;
+const SECURITY_CHECK_COPY = 'Security check failed. Please try again.';
+
 export async function startPhoneOtp(input: {
   phone: string;
   purpose: PhoneOtpPurpose;
   /** Omitted = SMS. */
   channel?: PhoneOtpChannel;
+  /** Cloudflare Turnstile token for the backend's requireTurnstile guard.
+   *  Single-use: mint a fresh one per send (usePhoneOtpSender does). */
+  turnstileToken?: string;
 }): Promise<{ ok: true; channel: PhoneOtpChannel } | Fail> {
   const phone = normalizePhone(input.phone);
   if (!phone)
@@ -151,10 +158,17 @@ export async function startPhoneOtp(input: {
       phone,
       purpose: input.purpose,
       ...(input.channel ? { channel: input.channel } : {}),
+      ...(input.turnstileToken
+        ? { turnstile_token: input.turnstileToken }
+        : {}),
     },
     { auth: 'none' },
   );
   if (!r.ok) {
+    // The human check runs before every limiter, so its refusal spent no
+    // cooldown slot — retry at once instead of the 30s default below.
+    if (SECURITY_CHECK_FAILED.test(r.text))
+      return { ...fail(SECURITY_CHECK_COPY), retryAfterSeconds: 1 };
     const retry = /try again in (\d+)s/i.exec(r.text);
     return {
       ok: false,

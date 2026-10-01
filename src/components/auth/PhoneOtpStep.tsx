@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Loader2 } from 'lucide-react';
-import { startPhoneOtp, checkPhoneOtp } from '@/lib/actions/phone-verification';
+import { checkPhoneOtp } from '@/lib/actions/phone-verification';
 import {
   PHONE_OTP_COOLDOWN_SECONDS,
   type PhoneOtpChannel,
   type PhoneOtpPurpose,
 } from '@/lib/phone-verification';
+import { usePhoneOtpSender } from '@/lib/use-phone-otp-sender';
 
 const RESEND_COOLDOWN_S = PHONE_OTP_COOLDOWN_SECONDS;
 
@@ -38,6 +39,7 @@ export function PhoneOtpStep({
   // the subscriber never sees it (Digi/016, 2026-09-07).
   const [via, setVia] = useState<PhoneOtpChannel>(channel);
   const inputRef = useRef<HTMLInputElement>(null);
+  const sender = usePhoneOtpSender();
 
   // Focus once on mount only — NOT on every cooldown tick (that would yank
   // focus off Resend/Back once a second).
@@ -85,7 +87,7 @@ export function PhoneOtpStep({
     // both channels: a call and an SMS to the same number are the same budget.
     setCooldown(RESEND_COOLDOWN_S);
     try {
-      const result = await startPhoneOtp({ phone, purpose, channel });
+      const result = await sender.send({ phone, purpose, channel });
       if (result.ok) setVia(result.channel);
       else {
         setError(result.error);
@@ -174,6 +176,11 @@ export function PhoneOtpStep({
           </button>
         </div>
       </div>
+      {/* Turnstile slot for resends — empty unless Cloudflare wants a click. */}
+      <div
+        ref={sender.challengeRef}
+        className="mt-3 isolate flex justify-center empty:hidden"
+      />
     </div>
   );
 }

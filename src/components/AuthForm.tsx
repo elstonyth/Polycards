@@ -21,14 +21,12 @@ import {
 } from '@/lib/profile-validation';
 import { PhoneField } from '@/components/PhoneField';
 import { PhoneOtpStep } from '@/components/auth/PhoneOtpStep';
-import {
-  startPhoneOtp,
-  resetPasswordByPhone,
-} from '@/lib/actions/phone-verification';
+import { resetPasswordByPhone } from '@/lib/actions/phone-verification';
 import {
   PHONE_VERIFICATION_REQUIRED,
   type PhoneOtpChannel,
 } from '@/lib/phone-verification';
+import { usePhoneOtpSender } from '@/lib/use-phone-otp-sender';
 
 // The Field inputs below carry a pl-9 for their leading icon; PhoneField has
 // no icon, so it gets the same chrome with plain px-3.
@@ -88,6 +86,9 @@ export default function AuthForm({
   const { setCustomer } = useAuth();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
+  // First code for signup and for forgot-by-phone. Only one of those two forms
+  // renders at a time, so one Turnstile slot ref serves both.
+  const sender = usePhoneOtpSender();
   // Forgot-password lives inside the login mode as a sub-view (the live site
   // keeps everything in the one modal): "form" collects the email, "sent" is
   // the always-the-same confirmation (no account enumeration — the backend
@@ -174,7 +175,7 @@ export default function AuthForm({
 
     setBusy(true);
     try {
-      const result = await startPhoneOtp({ phone, purpose: 'password-reset' });
+      const result = await sender.send({ phone, purpose: 'password-reset' });
       if (!result.ok) {
         setNote({ text: result.error });
         return;
@@ -314,7 +315,7 @@ export default function AuthForm({
           // and fall through to a fresh OTP.
           setSignupDraft({ ...signupDraft, proofToken: null });
         }
-        const otpResult = await startPhoneOtp({ phone, purpose: 'signup' });
+        const otpResult = await sender.send({ phone, purpose: 'signup' });
         if (!otpResult.ok) {
           setNote({ text: otpResult.error });
           return;
@@ -475,6 +476,11 @@ export default function AuthForm({
               <p className="text-[12px] text-white/50">
                 If an account uses this number, we&apos;ll send a code.
               </p>
+              {/* Turnstile slot — empty unless Cloudflare wants a click. */}
+              <div
+                ref={sender.challengeRef}
+                className="isolate flex justify-center empty:hidden"
+              />
               <button
                 type="submit"
                 disabled={busy}
@@ -715,6 +721,14 @@ export default function AuthForm({
           >
             Forgot password?
           </button>
+        )}
+
+        {isSignup && (
+          // Turnstile slot — empty unless Cloudflare wants a click.
+          <div
+            ref={sender.challengeRef}
+            className="isolate flex justify-center empty:hidden"
+          />
         )}
 
         <button
