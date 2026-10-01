@@ -59,7 +59,11 @@ Discord ──► Hermes desk bot (owner's PC)
 - The key never reaches the model: Hermes injects it from the profile's `.env` into the server's environment.
 - On startup the server writes one line to stderr: `key configured: yes|no (N chars)`. Hermes keeps MCP stderr in a log, so this line proves the `${VAR}` interpolation worked without exposing the key.
 - Hermes launches it with the absolute path to `node.exe`, because the gateway's PATH can be minimal.
-- All tools carry `readOnlyHint: true`, and the Hermes entry sets `trust: untrusted`. Any write-capable tool added later would then need approval.
+- All tools carry `readOnlyHint: true`. The Hermes entry sets `trust: full`, because Hermes 0.21.5 cannot see that hint.
+  - Its check reads the `readOnlyHint` attribute, but the bundled Python MCP SDK 2.0 names it `read_only_hint`. Every tool therefore counts as write-capable.
+  - Under `trust: untrusted`, every report call was denied in a local agent test (2026-10-01). The gateway would ask for approval on each call instead.
+  - The boundary that matters is the backend: a desk key opens only `GET /reports/<desk>/*`.
+  - Switch back to `untrusted` once Hermes reads the hint correctly. Any write-capable tool added later would then need approval again.
 - Installed on the PC under `%LOCALAPPDATA%\hermes\ops\desk-reports`, copied from the repo, so a branch switch in the main checkout cannot break the bots.
 
 ### Hermes wiring (per desk)
@@ -85,14 +89,14 @@ The key goes in before the merge because, once the PR is merged, every `do-apply
 
 ## Phase A: Finance reports
 
-| Route                                                                    | Returns                                                                                                                                                                                                                                                  |
-| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /reports/finance/economy?from&to&group`                             | The dashboard's ledger totals (`ledgerTotals`: revenue, payouts, top-ups, adjustments, cashout, delivery fees, referral commission, rewards/promo, net) for `[from, to)`, scoped by player group; plus current vault and voucher liability (all players) |
-| `GET /reports/finance/daily?from&to&group`                               | The same totals per Malaysia day (range ≤ 93 days)                                                                                                                                                                                                       |
-| `GET /reports/finance/payments?from&to&group` | Deposits and withdrawals in one answer: count, requested and settled sums per status for rows created in the window, plus what is open right now (pending, and held withdrawals) |
-| `GET /reports/finance/pack-sales?from&to&group`                          | Opens and net revenue per pack, plus an "unattributed" line for opens that predate `open_id`, so packs sum to economy revenue                                                                                                                            |
-| `GET /reports/finance/player?username`                                   | One player: joined date, group, disabled flag, balance, all-time and last-30-days ledger totals, settled deposits and withdrawals                                                                                                                        |
-| `GET /reports/finance/groups` | The player groups a `group` scope can name, with how many players each holds now by effective group, plus the DEFAULT count. The live partition check (`tools/desk-reports/live-check.mjs`) uses it |
+| Route                                           | Returns                                                                                                                                                                                                                                                  |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /reports/finance/economy?from&to&group`    | The dashboard's ledger totals (`ledgerTotals`: revenue, payouts, top-ups, adjustments, cashout, delivery fees, referral commission, rewards/promo, net) for `[from, to)`, scoped by player group; plus current vault and voucher liability (all players) |
+| `GET /reports/finance/daily?from&to&group`      | The same totals per Malaysia day (range ≤ 93 days)                                                                                                                                                                                                       |
+| `GET /reports/finance/payments?from&to&group`   | Deposits and withdrawals in one answer: count, requested and settled sums per status for rows created in the window, plus what is open right now (pending, and held withdrawals)                                                                         |
+| `GET /reports/finance/pack-sales?from&to&group` | Opens and net revenue per pack, plus an "unattributed" line for opens that predate `open_id`, so packs sum to economy revenue                                                                                                                            |
+| `GET /reports/finance/player?username`          | One player: joined date, group, disabled flag, balance, all-time and last-30-days ledger totals, settled deposits and withdrawals                                                                                                                        |
+| `GET /reports/finance/groups`                   | The player groups a `group` scope can name, with how many players each holds now by effective group, plus the DEFAULT count. The live partition check (`tools/desk-reports/live-check.mjs`) uses it                                                      |
 
 **Group scope** (`group` query param):
 
