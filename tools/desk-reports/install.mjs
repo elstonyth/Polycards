@@ -18,6 +18,8 @@ for (const file of [
 ]) {
   cpSync(join(here, file), join(target, file));
 }
+// The official logo files the brand_logo tool returns.
+cpSync(join(here, 'brand'), join(target, 'brand'), { recursive: true });
 // npm is npm.cmd on Windows, which needs a shell to start.
 execFileSync('npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], {
   cwd: target,

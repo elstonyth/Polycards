@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { getReport } from './http.mjs';
@@ -78,4 +79,25 @@ test('challenge_poster asks for an image and returns an MCP image block', async 
     mimeType: 'image/jpeg',
   });
   assert.equal(out.content[1].type, 'text');
+});
+
+test('brand_logo returns the official file unchanged, without the backend', async () => {
+  const logo = TOOLS.growth.find((t) => t.name === 'brand_logo');
+  const noBackend = {
+    ...base,
+    fetchImpl: async () => assert.fail('must not call the backend'),
+  };
+  for (const [variant, file] of [
+    [undefined, 'polycards-wordmark-white.png'],
+    ['mark', 'polycards-mark.png'],
+  ]) {
+    const out = await runTool(logo, { variant }, noBackend);
+    assert.ok(!out.isError);
+    assert.equal(out.content[0].type, 'image');
+    assert.equal(out.content[0].mimeType, 'image/png');
+    const bytes = readFileSync(new URL(`./brand/${file}`, import.meta.url));
+    assert.equal(out.content[0].data, bytes.toString('base64'));
+    // PNG signature: the file shipped is a real PNG.
+    assert.equal(bytes.subarray(1, 4).toString(), 'PNG');
+  }
 });

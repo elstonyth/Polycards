@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import * as z from 'zod';
 import { getReport } from './http.mjs';
 import { PERIODS, resolvePeriod } from './periods.mjs';
@@ -142,12 +143,52 @@ TOOLS.growth = [
       as: 'image',
     }),
   },
+  {
+    name: 'brand_logo',
+    description:
+      'An official Polycards logo file, for designs and posts. wordmark (default): the white "Polycards" wordmark on a transparent background (PNG, 360x97), for dark designs. mark: the app icon, the white card mark on a near-black square (PNG, 512x512). Use the file exactly as it is: attach it, or place it unchanged. Never draw, redraw, recolour or imitate the logo with image generation. The challenge poster already carries the logo.',
+    inputSchema: {
+      variant: z
+        .enum(['wordmark', 'mark'])
+        .optional()
+        .describe('wordmark (default) or mark.'),
+    },
+    request: (args) => ({ brand: BRAND[args.variant ?? 'wordmark'] }),
+  },
 ];
+
+// The official logo files, shipped with this server (copies of the
+// storefront's public/branding/polycards-logo.png and src/app/icon.png).
+const BRAND = {
+  wordmark: {
+    file: 'polycards-wordmark-white.png',
+    note: 'The official Polycards wordmark: white on transparent, 360x97 px, for dark backgrounds. Use it unchanged.',
+  },
+  mark: {
+    file: 'polycards-mark.png',
+    note: 'The official Polycards app icon: the white card mark on a #171717 square, 512x512 px. Use it unchanged.',
+  },
+};
 
 // Runs one tool call; failures come back as text the bot can relay.
 export async function runTool(tool, args, config) {
   try {
-    const { path, params, label, as } = tool.request(args);
+    const { path, params, label, as, brand } = tool.request(args);
+    if (brand) {
+      const data = await readFile(
+        new URL(`./brand/${brand.file}`, import.meta.url),
+      );
+      return {
+        content: [
+          {
+            type: 'image',
+            data: data.toString('base64'),
+            mimeType: 'image/png',
+          },
+          { type: 'text', text: brand.note },
+        ],
+      };
+    }
     const body = await getReport({ ...config, path, params, as });
     if (as === 'image') {
       return {
