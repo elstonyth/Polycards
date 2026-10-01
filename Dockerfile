@@ -88,12 +88,13 @@ ARG NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=true
 # moves together with the .do/storefront.app.yaml value.
 ARG NEXT_PUBLIC_WITHDRAWALS_ENABLED=true
 # Cloudflare Turnstile SITE key (public, not a secret) for the human check on
-# every OTP send (src/lib/use-phone-otp-sender.ts). Empty = no check, the
-# shipped state. Deploy order (CONTEXT.md → Phone Verification): put the key
-# HERE first and let that storefront build go ACTIVE; only then set the
+# every OTP send (src/lib/use-phone-otp-sender.ts). Empty = no check. This is
+# the "Polycards phone OTP" widget (Managed; polycards.gg + www.polycards.gg),
+# created 2026-10-02. Deploy order (CONTEXT.md → Phone Verification): put the
+# key HERE first and let that storefront build go ACTIVE; only then set the
 # backend's TURNSTILE_SECRET_KEY. The reverse order refuses every code request,
 # because the backend demands a token this bundle cannot mint.
-ARG NEXT_PUBLIC_TURNSTILE_SITE_KEY=
+ARG NEXT_PUBLIC_TURNSTILE_SITE_KEY=0x4AAAAAAFLUYYKm-rxvIR3J
 # NOT a NEXT_PUBLIC_ var — server-side only, but it MUST be present at BUILD
 # time all the same. next.config.ts picks the CSP header NAME via cspEnforced()
 # and Next serialises headers() into routes-manifest.json during `npm run build`,

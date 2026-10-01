@@ -257,6 +257,14 @@ envs:
     scope: RUN_TIME
     type: SECRET
     value: __SECRET__TWILIO_VERIFY_SERVICE_SID__
+  # Cloudflare Turnstile secret for the human check in front of every OTP send
+  # (api/utils/turnstile-guard.ts). Unset, the check steps aside. Apply only
+  # once a storefront build carrying the site key (root Dockerfile ARG) is
+  # ACTIVE, or every code request is refused (CONTEXT.md → Phone Verification).
+  - key: TURNSTILE_SECRET_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: __SECRET__TURNSTILE_SECRET_KEY__
   # Per-purpose Verify TEMPLATE SIDs — the mitigation for the cross-purpose OTP
   # pretext (audit run-5 hardening note). Twilio verifies on (phone, code)
   # ALONE, and the default template reads identically for all three flows, so a
