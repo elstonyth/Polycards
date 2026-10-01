@@ -130,7 +130,7 @@ const PHONE_CHANGE_RULES: ErrorRule[] = [
 export async function startPhoneOtp(input: {
   phone: string;
   purpose: PhoneOtpPurpose;
-  /** Omitted = configured backend default. */
+  /** Omitted = SMS. */
   channel?: PhoneOtpChannel;
 }): Promise<{ ok: true; channel: PhoneOtpChannel } | Fail> {
   const phone = normalizePhone(input.phone);
