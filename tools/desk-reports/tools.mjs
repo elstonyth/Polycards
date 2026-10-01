@@ -170,6 +170,38 @@ const BRAND = {
   },
 };
 
+TOOLS.support = [
+  {
+    name: 'order',
+    description:
+      "One delivery order by the number the customer sees (like #A1B2C3) or its full id: status and the customer's wording for it, the player's shown name, the cards in it, tracking number, fees, when it was requested, shipped and completed, and staff status changes. If several orders share the number, all are listed. The delivery address and phone are never included: ask the customer to check them in their account.",
+    inputSchema: {
+      number: z
+        .string()
+        .describe(
+          'The order number, like #A1B2C3 or A1B2C3, or the full order id.',
+        ),
+    },
+    request: (args) => ({ path: 'order', params: { number: args.number } }),
+  },
+  {
+    name: 'account',
+    description:
+      "One player's account status by shown name or profile handle (never email or phone): join date, disabled, frozen, phone verified yes/no, VIP level, pulls (lifetime and last 30 days), the last 5 delivery orders, and deposits and withdrawals created in the last 30 days by status. If the reply has a lookup_note, tell staff what it says. Amounts in RM (MYR).",
+    inputSchema: {
+      username: z
+        .string()
+        .describe(
+          "The player's shown name, or their profile handle (the part after /profile/ in their link).",
+        ),
+    },
+    request: (args) => ({
+      path: 'account',
+      params: { username: args.username },
+    }),
+  },
+];
+
 // Runs one tool call; failures come back as text the bot can relay.
 export async function runTool(tool, args, config) {
   try {
