@@ -10,4 +10,4 @@ export type PhoneOtpPurpose = 'signup' | 'phone-change' | 'password-reset';
 
 /** Mirror of the backend's PHONE_OTP_CHANNELS. 'call' = Twilio reads the code
  *  aloud — the fallback for numbers whose SMS is "Delivered" but never read. */
-export type PhoneOtpChannel = 'sms' | 'call';
+export type PhoneOtpChannel = 'sms' | 'call' | 'whatsapp';

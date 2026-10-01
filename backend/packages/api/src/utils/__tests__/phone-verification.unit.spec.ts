@@ -55,10 +55,10 @@ describe('channel guard', () => {
   // Anything else — 'whatsapp' included — needs its own channel enabled on
   // the Verify service first, so the guard refuses it rather than letting
   // Twilio 400 with a message that echoes the number.
-  it('accepts sms and call only', () => {
+  it('accepts supported Verify transports', () => {
     expect(isPhoneOtpChannel('sms')).toBe(true);
     expect(isPhoneOtpChannel('call')).toBe(true);
-    expect(isPhoneOtpChannel('whatsapp')).toBe(false);
+    expect(isPhoneOtpChannel('whatsapp')).toBe(true);
     expect(isPhoneOtpChannel('')).toBe(false);
     expect(isPhoneOtpChannel(undefined)).toBe(false);
   });
@@ -318,7 +318,7 @@ describe('twilio transport', () => {
   // Voice fallback: Channel is a plain pass-through to Verify, and TemplateSid
   // is SMS-only (Twilio 60408 rejects it on a call) so it must not ride along
   // even when that purpose has a template configured.
-  it('send posts Channel=call for the voice channel and drops TemplateSid', async () => {
+  it.each(['call', 'whatsapp'] as const)('send posts Channel=%s without an SMS template', async (channel) => {
     const fetchMock = jest
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response(JSON.stringify({ status: 'pending' }), { status: 201 }));
@@ -327,10 +327,10 @@ describe('twilio transport', () => {
       noopLogger,
       PHONE,
       'signup',
-      'call',
+      channel,
     );
     const body = String(fetchMock.mock.calls[0][1]?.body);
-    expect(body).toContain('Channel=call');
+    expect(body).toContain(`Channel=${channel}`);
     expect(body).not.toContain('TemplateSid');
   });
   it('check maps approved → true, anything else → false', async () => {

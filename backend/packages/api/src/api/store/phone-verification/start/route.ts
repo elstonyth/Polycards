@@ -3,6 +3,7 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import {
   E164_RE,
+  defaultPhoneOtpChannel,
   isAllowedSmsDestination,
   isDevOrTest,
   isPhoneOtpChannel,
@@ -14,13 +15,13 @@ import { consumeOtpSendBudget } from '../../../utils/rate-limit';
 import { alertOps } from '../../../../modules/packs/ops-alert';
 
 // Public: sends (or dev-logs) an OTP for one of the three phone flows. The
-// response is ALWAYS the generic { ok: true } — whether the phone belongs to
+// success includes only configured channel — whether the phone belongs to
 // an account is never disclosed here. SMS-pumping protection is layered:
 // the phone-otp-start IP limiter (middlewares.ts), Twilio Verify's own
 // per-number caps, and — for password-reset — no SMS at all unless exactly
 // one registered account carries the phone (a pumping run would otherwise
 // use the reset flow to text arbitrary numbers on our bill).
-// `channel` is optional and defaults to sms; 'call' is the voice fallback
+// `channel` is optional and uses the configured default; 'call' is the voice fallback
 // (see PHONE_OTP_CHANNELS). Validated here so an unknown value never reaches
 // Twilio, whose 400 body would echo the number.
 type Body = { phone?: unknown; purpose?: unknown; channel?: unknown };
@@ -38,11 +39,37 @@ export async function POST(
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid phone number.');
   if (!isPhoneOtpPurpose(purpose))
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid purpose.');
-  const channel = rawChannel === undefined ? 'sms' : rawChannel;
+  const defaultChannel = defaultPhoneOtpChannel(process.env);
+  const channel = rawChannel === undefined ? defaultChannel : rawChannel;
   if (!isPhoneOtpChannel(channel))
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid channel.');
+  if (channel === 'whatsapp' && defaultChannel !== 'whatsapp')
+    throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'WhatsApp verification is not configured.');
+  // Channel is configuration, never evidence that this number has an account.
+  const response = { ok: true, channel };
 
   const logger = req.scope.resolve('logger') as { warn: (msg: string) => void };
+
+  // Charge every valid attempt before account-sensitive branches. Otherwise a
+  // reset followed by signup reveals account existence through cooldown/call
+  // quota state. This is a conservative request ceiling, not a billing ledger.
+  if (!isDevOrTest(process.env)) {
+    const budget = await consumeOtpSendBudget(phone, channel);
+    if (!budget.allowed) {
+      if (budget.sitewide) void alertOps(
+        req.scope,
+        'phone-otp-budget',
+        'Phone-OTP sitewide send or call budget exhausted. Check Twilio traffic before raising PHONE_OTP_GLOBAL_HOURLY_LIMIT / _DAILY_LIMIT.',
+        { muteMs: 60 * 60_000 },
+      );
+      const retry = Math.max(1, Math.ceil(budget.retryAfterMs / 1000));
+      res.status(429).set('Retry-After', String(retry)).json({
+        type: 'rate_limit_exceeded',
+        message: `Too many code requests. Try again in ${retry}s.`,
+      });
+      return;
+    }
+  }
 
   // password-reset is EXEMPT, and deliberately so: the branch below refuses to
   // send unless exactly ONE registered account carries this phone, so that
@@ -80,7 +107,7 @@ export async function POST(
       logger.warn(
         `[phone-otp] ALLOWED_SMS_COUNTRIES lists ISO codes with no dialling-code row: ${dead.join(', ')}`,
       );
-    res.json({ ok: true });
+    res.json(response);
     return;
   }
 
@@ -109,29 +136,18 @@ export async function POST(
       logger.warn(
         `[phone-otp] password-reset start matched ${matches.length} accounts — no SMS sent`,
       );
-      res.json({ ok: true });
+      res.json(response);
       return;
     }
   }
 
-  // Sitewide spend ceiling (consumeOtpSendBudget). Last, so only a text we
-  // would really pay for counts; skipped where the "SMS" is the dev log line.
-  if (!isDevOrTest(process.env) && !(await consumeOtpSendBudget()).allowed) {
-    // No phone in either line: same PII rule as the logs above.
-    void alertOps(
-      req.scope,
-      'phone-otp-budget',
-      'Phone-OTP sitewide send budget is exhausted: verification codes are being refused for everyone. Likely an SMS-pumping run — check Twilio (Fraud Guard, Messaging Insights). Raise PHONE_OTP_GLOBAL_HOURLY_LIMIT / _DAILY_LIMIT only if the traffic is real.',
-      { muteMs: 60 * 60_000 },
-    );
-    throw new MedusaError(
-      MedusaError.Types.NOT_ALLOWED,
-      'Could not send the verification code. Try again shortly.',
-    );
-  }
-
   // purpose is validated above; it selects the Verify template so the SMS
   // names the flow the code is for.
-  await sendPhoneOtp(process.env, logger, phone, purpose, channel);
-  res.json({ ok: true });
+  try {
+    await sendPhoneOtp(process.env, logger, phone, purpose, channel);
+  } catch (error) {
+    if (purpose !== 'password-reset') throw error;
+    // Provider errors must not reveal whether a reset account exists.
+  }
+  res.json(response);
 }

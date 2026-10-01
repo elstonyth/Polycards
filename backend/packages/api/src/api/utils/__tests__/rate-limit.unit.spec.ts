@@ -593,10 +593,10 @@ describe('consumeOtpSendBudget', () => {
   it('refuses the send past the hourly ceiling, and frees it an hour later', async () => {
     process.env.PHONE_OTP_GLOBAL_HOURLY_LIMIT = '2';
     const t = T0 + 10 * 24 * 60 * MINUTE;
-    expect((await consumeOtpSendBudget(t)).allowed).toBe(true);
-    expect((await consumeOtpSendBudget(t + 1)).allowed).toBe(true);
-    expect((await consumeOtpSendBudget(t + 2)).allowed).toBe(false);
-    expect((await consumeOtpSendBudget(t + 60 * MINUTE + 1)).allowed).toBe(true);
+    expect((await consumeOtpSendBudget('+60177000001', 'sms', t)).allowed).toBe(true);
+    expect((await consumeOtpSendBudget('+60177000002', 'whatsapp', t + 1)).allowed).toBe(true);
+    expect((await consumeOtpSendBudget('+60177000003', 'call', t + 2)).allowed).toBe(false);
+    expect((await consumeOtpSendBudget('+60177000004', 'sms', t + 60 * MINUTE + 1)).allowed).toBe(true);
   });
 
   it('also caps the day, however the sends are spread across its hours', async () => {
@@ -604,13 +604,57 @@ describe('consumeOtpSendBudget', () => {
     process.env.PHONE_OTP_GLOBAL_DAILY_LIMIT = '3';
     const t = T0 + 20 * 24 * 60 * MINUTE;
     for (let h = 0; h < 3; h++) {
-      expect((await consumeOtpSendBudget(t + h * 60 * MINUTE)).allowed).toBe(
+      expect((await consumeOtpSendBudget('+60177000001', 'sms', t + h * 60 * MINUTE)).allowed).toBe(
         true,
       );
     }
-    expect((await consumeOtpSendBudget(t + 5 * 60 * MINUTE)).allowed).toBe(
+    expect((await consumeOtpSendBudget('+60177000001', 'sms', t + 5 * 60 * MINUTE)).allowed).toBe(
       false,
     );
+  });
+
+  it('switching channel cannot bypass cooldown; voice stops after two calls per day', async () => {
+    const t = T0 + 30 * 24 * 60 * MINUTE;
+    const phone = '+60177000001';
+    expect((await consumeOtpSendBudget(phone, 'whatsapp', t)).allowed).toBe(true);
+    expect(await consumeOtpSendBudget(phone, 'call', t + 1)).toMatchObject({
+      allowed: false, retryAfterMs: 59_999, sitewide: false,
+    });
+    expect((await consumeOtpSendBudget(phone, 'call', t + MINUTE)).allowed).toBe(true);
+    expect((await consumeOtpSendBudget(phone, 'call', t + 2 * MINUTE)).allowed).toBe(true);
+    expect((await consumeOtpSendBudget(phone, 'call', t + 3 * MINUTE)).allowed).toBe(false);
+    expect((await consumeOtpSendBudget(phone, 'sms', t + 4 * MINUTE)).allowed).toBe(true);
+  });
+
+  it('bounds rotating phone numbers to ten calls an hour', async () => {
+    const t = T0 + 40 * 24 * 60 * MINUTE;
+    for (let i = 0; i < 10; i++) {
+      expect((await consumeOtpSendBudget(`+601770000${i}`, 'call', t + i)).allowed).toBe(true);
+    }
+    expect(await consumeOtpSendBudget('+60177000111', 'call', t + 11)).toMatchObject({
+      allowed: false, sitewide: true,
+    });
+  });
+
+  it('zero is a stop switch, not a request to use the default cap', async () => {
+    process.env.PHONE_OTP_GLOBAL_DAILY_LIMIT = '0';
+    expect((await consumeOtpSendBudget('+60177000001', 'sms', T0 + 50 * 24 * 60 * MINUTE)).allowed).toBe(false);
+  });
+
+  it('refuses paid sends in production when the shared Redis budget is unavailable', async () => {
+    const nodeEnv = process.env.NODE_ENV;
+    const redisUrl = process.env.REDIS_URL;
+    process.env.NODE_ENV = 'production';
+    delete process.env.REDIS_URL;
+    try {
+      let consume: typeof consumeOtpSendBudget;
+      jest.isolateModules(() => { consume = require('../rate-limit').consumeOtpSendBudget; });
+      expect((await consume!('+60177000001', 'call', T0)).allowed).toBe(false);
+    } finally {
+      process.env.NODE_ENV = nodeEnv;
+      if (redisUrl === undefined) delete process.env.REDIS_URL;
+      else process.env.REDIS_URL = redisUrl;
+    }
   });
 });
 

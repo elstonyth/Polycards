@@ -25,7 +25,10 @@ import {
   startPhoneOtp,
   resetPasswordByPhone,
 } from '@/lib/actions/phone-verification';
-import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
+import {
+  PHONE_VERIFICATION_REQUIRED,
+  type PhoneOtpChannel,
+} from '@/lib/phone-verification';
 
 // The Field inputs below carry a pl-9 for their leading icon; PhoneField has
 // no icon, so it gets the same chrome with plain px-3.
@@ -94,6 +97,7 @@ export default function AuthForm({
   >('none');
   // Phone entered on the 'phone' sub-view, carried into 'phone-otp'.
   const [forgotPhone, setForgotPhone] = useState('');
+  const [otpChannel, setOtpChannel] = useState<PhoneOtpChannel>('sms');
   // Signup-only sub-view: once the phone OTP is sent, hold the rest of the
   // form's values here so `onVerified` can finish the real signup() call.
   const [otp, setOtp] = useState<{
@@ -176,6 +180,7 @@ export default function AuthForm({
         return;
       }
       setForgotPhone(phone);
+      setOtpChannel(result.channel);
       setForgot('phone-otp');
     } catch (err) {
       setNote(failureNote(err));
@@ -314,6 +319,7 @@ export default function AuthForm({
           setNote({ text: otpResult.error });
           return;
         }
+        setOtpChannel(otpResult.channel);
         // Defer the real signup() call until the code is verified — pending
         // fields ride along in state for onVerified to use. signupDraft is
         // the same values, but kept around after setOtp(null) (see its
@@ -467,7 +473,7 @@ export default function AuthForm({
                 required
               />
               <p className="text-[12px] text-white/50">
-                If an account uses this number, we&apos;ll text a code.
+                If an account uses this number, we&apos;ll send a code.
               </p>
               <button
                 type="submit"
@@ -486,6 +492,7 @@ export default function AuthForm({
         {forgot === 'phone-otp' && (
           <PhoneOtpStep
             phone={forgotPhone}
+            channel={otpChannel}
             purpose="password-reset"
             onBack={() => setForgot('phone')}
             onVerified={async (proofToken) => {
@@ -549,6 +556,7 @@ export default function AuthForm({
         </h2>
         <PhoneOtpStep
           phone={otp.phone}
+          channel={otpChannel}
           purpose="signup"
           onBack={() => setOtp(null)}
           onVerified={async (token) => {

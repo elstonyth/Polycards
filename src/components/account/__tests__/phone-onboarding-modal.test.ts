@@ -90,7 +90,7 @@ async function submit(form: HTMLFormElement) {
 
 /** Entry → code step by SMS with a valid MY number; returns the code input. */
 async function reachCodeStep() {
-  mocks.startPhoneOtp.mockResolvedValueOnce({ ok: true });
+  mocks.startPhoneOtp.mockResolvedValueOnce({ ok: true, channel: 'sms' });
   await mount();
   typeInto(tel()!, '012-345 6789');
   await submit(container.querySelector('form')!);
@@ -100,6 +100,34 @@ async function reachCodeStep() {
 }
 
 describe('PhoneOnboardingModal (required gate)', () => {
+  test('shows WhatsApp delivery and sends the call fallback only after the shared cooldown', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.startPhoneOtp.mockResolvedValueOnce({
+        ok: true,
+        channel: 'whatsapp',
+      });
+      await mount();
+      typeInto(tel()!, '012-345 6789');
+      await submit(container.querySelector('form')!);
+      expect(dialog()?.textContent).toContain('on WhatsApp');
+      expect(button('Get a call instead')?.disabled).toBe(true);
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+      mocks.startPhoneOtp.mockResolvedValueOnce({ ok: true, channel: 'call' });
+      await act(async () => button('Get a call instead')!.click());
+      expect(mocks.startPhoneOtp).toHaveBeenLastCalledWith({
+        phone: '+60123456789',
+        purpose: 'phone-change',
+        channel: 'call',
+      });
+      expect(dialog()?.textContent).toContain("We're calling");
+      expect(button('Call again')?.disabled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   test('has no dismiss: no Skip control, Escape leaves it open', async () => {
     await mount();
     expect(dialog()?.textContent).toContain('Verify your phone');
@@ -145,12 +173,10 @@ describe('PhoneOnboardingModal (required gate)', () => {
   });
 
   test('"Get a call instead" sends the first code by voice and says so', async () => {
-    mocks.startPhoneOtp.mockResolvedValueOnce({ ok: true });
+    mocks.startPhoneOtp.mockResolvedValueOnce({ ok: true, channel: 'call' });
     await mount();
     typeInto(tel()!, '012-345 6789');
-    await act(async () =>
-      button("Can't receive SMS? Get a call instead")!.click(),
-    );
+    await act(async () => button('Get code by phone call')!.click());
 
     expect(mocks.startPhoneOtp).toHaveBeenCalledWith({
       phone: '+60123456789',
@@ -166,9 +192,7 @@ describe('PhoneOnboardingModal (required gate)', () => {
   test('"Get a call instead" still validates the number first', async () => {
     await mount();
     typeInto(tel()!, '123');
-    await act(async () =>
-      button("Can't receive SMS? Get a call instead")!.click(),
-    );
+    await act(async () => button('Get code by phone call')!.click());
     expect(mocks.startPhoneOtp).not.toHaveBeenCalled();
     expect(
       container.querySelector('#phone-onboarding-error')?.textContent,

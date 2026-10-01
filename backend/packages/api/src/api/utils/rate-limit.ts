@@ -5,7 +5,7 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import Redis from 'ioredis';
-import { E164_RE } from '../../utils/phone-verification';
+import { E164_RE, type PhoneOtpChannel } from '../../utils/phone-verification';
 import { callbackSourceIp } from './payer-ip';
 
 // Shared sliding-window rate limiting for every configured endpoint. The
@@ -448,15 +448,14 @@ function throttledWarn(
 function buildFailoverStore(
   connectionName: string,
   warn: ReturnType<typeof throttledWarn>,
+  fallback: RateLimitStore = new InMemorySlidingWindowStore(),
 ): RateLimitStore {
-  const memory = new InMemorySlidingWindowStore();
-
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
     console.warn(
-      `[rate-limit] REDIS_URL not set — ${connectionName} limiter is per-process (in-memory) only`,
+      `[rate-limit] REDIS_URL not set — ${connectionName} using fallback`,
     );
-    return memory;
+    return fallback;
   }
 
   const client = new Redis(redisUrl, {
@@ -474,8 +473,8 @@ function buildFailoverStore(
   client.connect().catch((err) => warn('initial redis connect failed', err));
   return new FailoverRateLimitStore(
     new RedisSlidingWindowStore(client),
-    memory,
-    (err) => warn('redis consume failed; using in-memory fallback', err),
+    fallback,
+    (err) => warn('redis consume failed; using fallback', err),
   );
 }
 
@@ -1174,37 +1173,72 @@ export function rateLimit(name: keyof typeof RATE_LIMITS): MiddlewareHandler {
  * over fresh numbers was bounded by nothing (2026-09: ~44% of 30 days' sends,
  * 229 texts in one 25-minute burst, ~$0.34 each).
  *
- * Called by the start route right before the send, AFTER its no-send exits
- * (unserved destination, password-reset without exactly one account), so only
- * texts we actually pay for count. Generous on purpose: the busiest legit
- * launch hour so far was 23 signups (~35 sends), and a tight cap turns a
- * marketing spike into a self-inflicted signup outage. Tune with
+ * Called before the start route's account lookup, so known and unknown reset
+ * numbers consume identical state. Counts requests, including no-send exits.
+ * Shared by SMS, WhatsApp and voice:
+ * changing channel/purpose cannot buy a fresh budget. Tune with
  * PHONE_OTP_GLOBAL_HOURLY_LIMIT / PHONE_OTP_GLOBAL_DAILY_LIMIT; read per call.
  *
- * ponytail: a refused Twilio send still counts, so an outage like 2026-09-30
- * can hold the budget full for up to an hour after Twilio recovers. Refund
- * on provider refusal if that ever bites.
+ * Production fails CLOSED when Redis is unavailable: process-local counters
+ * reset on restart and multiply the spend ceiling across replicas.
+ * ponytail: sequential buckets conservatively count an attempt when a later
+ * bucket/provider refuses it. Never refund ambiguous provider timeouts.
  */
 let otpSendBudgetStore: RateLimitStore | null = null;
-export function consumeOtpSendBudget(
+export async function consumeOtpSendBudget(
+  phone: string,
+  channel: PhoneOtpChannel,
   nowMs: number = Date.now(),
-): Promise<RateLimitDecision> {
+): Promise<RateLimitDecision & { sitewide: boolean }> {
   otpSendBudgetStore ??= buildFailoverStore(
     'phone-otp-global-rate-limit',
     throttledWarn(60_000),
+    process.env.NODE_ENV === 'production'
+      ? { consume: async () => ({ allowed: false, retryAfterMs: 60_000 }) }
+      : new InMemorySlidingWindowStore(),
   );
-  return otpSendBudgetStore.consume(
-    'rl:phone-otp-global:all',
+  const recipient = await otpSendBudgetStore.consume(
+    `rl:phone-otp-cooldown:${phone}`,
+    [{ limit: 1, windowMs: 60_000 }],
+    nowMs,
+  );
+  if (!recipient.allowed) return { ...recipient, sitewide: false };
+  if (channel === 'call') {
+    const personalCalls = await otpSendBudgetStore.consume(
+      `rl:phone-otp-calls:${phone}`,
+      [{ limit: 2, windowMs: 24 * 60 * 60_000 }],
+      nowMs,
+    );
+    if (!personalCalls.allowed) return { ...personalCalls, sitewide: false };
+    const calls = await otpSendBudgetStore.consume(
+      'rl:phone-otp-calls:all',
+      [
+        { limit: 10, windowMs: 60 * 60_000 },
+        { limit: 20, windowMs: 24 * 60 * 60_000 },
+      ],
+      nowMs,
+    );
+    if (!calls.allowed) return { ...calls, sitewide: true };
+  }
+  const hourly = nonNegativeIntFromEnv('PHONE_OTP_GLOBAL_HOURLY_LIMIT', 40);
+  const daily = nonNegativeIntFromEnv('PHONE_OTP_GLOBAL_DAILY_LIMIT', 100);
+  if (hourly === 0 || daily === 0)
+    return { allowed: false, retryAfterMs: 60_000, sitewide: true };
+  const global = await otpSendBudgetStore.consume(
+    // New policy window starts at rollout; old key includes the outage's
+    // hundreds of failed sends. Keep this key stable on subsequent deploys.
+    'rl:phone-otp-global:v2:all',
     [
       {
-        limit: positiveIntFromEnv('PHONE_OTP_GLOBAL_HOURLY_LIMIT', 150),
+        limit: hourly,
         windowMs: 60 * 60_000,
       },
       {
-        limit: positiveIntFromEnv('PHONE_OTP_GLOBAL_DAILY_LIMIT', 1500),
+        limit: daily,
         windowMs: 24 * 60 * 60_000,
       },
     ],
     nowMs,
   );
+  return { ...global, sitewide: true };
 }

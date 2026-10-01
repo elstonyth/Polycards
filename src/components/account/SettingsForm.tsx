@@ -15,7 +15,10 @@ import {
 import { PhoneField } from '@/components/PhoneField';
 import { PhoneOtpStep } from '@/components/auth/PhoneOtpStep';
 import { startPhoneOtp, changePhone } from '@/lib/actions/phone-verification';
-import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
+import {
+  PHONE_VERIFICATION_REQUIRED,
+  type PhoneOtpChannel,
+} from '@/lib/phone-verification';
 import { SITE_URL } from '@/lib/site';
 
 // The profile-link preview shows a host, not a full URL — the deployed origin
@@ -73,6 +76,7 @@ export default function SettingsForm({ customer, handle }: Props) {
     'closed' | 'entry' | 'otp' | 'old-otp'
   >('closed');
   const [pendingPhone, setPendingPhone] = useState('');
+  const [otpChannel, setOtpChannel] = useState<PhoneOtpChannel>('sms');
   // The new number's proof token, held only long enough to survive the round
   // trip through 'old-otp' and be replayed with the second proof. The OLD
   // number's token is deliberately never stored — it is consumed in the same
@@ -198,6 +202,7 @@ export default function SettingsForm({ customer, handle }: Props) {
       return;
     }
     setNote(null);
+    setOtpChannel(sent.channel);
     setPhoneChange('old-otp');
   }
 
@@ -230,6 +235,7 @@ export default function SettingsForm({ customer, handle }: Props) {
         return;
       }
       setPendingPhone(normalized);
+      setOtpChannel(result.channel);
       setPhoneChange('otp');
     } catch {
       setNote({ ok: false, text: 'Something went wrong. Please try again.' });
@@ -421,6 +427,7 @@ export default function SettingsForm({ customer, handle }: Props) {
         {phoneChange === 'otp' && (
           <PhoneOtpStep
             phone={pendingPhone}
+            channel={otpChannel}
             purpose="phone-change"
             onBack={() => {
               setNewPhoneToken('');
@@ -452,6 +459,7 @@ export default function SettingsForm({ customer, handle }: Props) {
               // Non-null: startOldPhoneOtp refuses to enter this state without
               // a stored number.
               phone={phone ?? ''}
+              channel={otpChannel}
               purpose="phone-change"
               onBack={() => {
                 setNewPhoneToken('');

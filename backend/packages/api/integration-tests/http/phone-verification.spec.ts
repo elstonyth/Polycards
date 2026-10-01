@@ -98,7 +98,7 @@ medusaIntegrationTestRunner({
         it("200-oks a valid E.164 + purpose", async () => {
           const res = await start({ phone: PHONE, purpose: "signup" });
           expect(res.status).toBe(200);
-          expect(res.data).toEqual({ ok: true });
+          expect(res.data).toEqual({ ok: true, channel: "sms" });
         });
 
         it("400s a non-E.164 phone and an unknown purpose", async () => {
@@ -123,7 +123,7 @@ medusaIntegrationTestRunner({
               purpose: "password-reset",
             });
             expect(res.status).toBe(200);
-            expect(res.data).toEqual({ ok: true });
+            expect(res.data).toEqual({ ok: true, channel: "sms" });
           });
 
           it("200-oks the identical {ok:true} for a phone matching a real registered customer", async () => {
@@ -132,7 +132,7 @@ medusaIntegrationTestRunner({
 
             const res = await start({ phone, purpose: "password-reset" });
             expect(res.status).toBe(200);
-            expect(res.data).toEqual({ ok: true });
+            expect(res.data).toEqual({ ok: true, channel: "sms" });
           });
         });
       });
