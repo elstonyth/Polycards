@@ -51,12 +51,22 @@ page.on('request', (req) => {
 const cspErrors = [];
 // Only Turnstile's own violations: a local DB's image rows can point at a
 // backend port the build's img-src does not name, which is not this check.
+// Compare the exact host of the URL that was refused; a substring test would
+// also match the quoted directive, which itself names Cloudflare's origin.
+const refusedHost = (text) => {
+  const url = /Refused to [^']*'([^']+)'/.exec(text)?.[1];
+  try {
+    return url ? new URL(url).hostname : '';
+  } catch {
+    return '';
+  }
+};
 page.on('console', (msg) => {
   const text = msg.text();
   if (
     msg.type() === 'error' &&
     /Content Security Policy/i.test(text) &&
-    text.includes('challenges.cloudflare.com')
+    refusedHost(text) === 'challenges.cloudflare.com'
   )
     cspErrors.push(text);
 });
