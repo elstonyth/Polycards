@@ -11,6 +11,7 @@ export async function getReport({
   params = {},
   fetchImpl = fetch,
   timeoutMs = 15_000,
+  as = 'json',
 }) {
   if (!key || key.startsWith('${')) {
     throw new ReportError(
@@ -25,7 +26,10 @@ export async function getReport({
   let res;
   try {
     res = await fetchImpl(url, {
-      headers: { 'x-report-key': key, accept: 'application/json' },
+      headers: {
+        'x-report-key': key,
+        accept: as === 'image' ? 'image/*' : 'application/json',
+      },
       // fetch strips Authorization and Cookie on a cross-origin redirect but
       // replays custom headers such as x-report-key. Refuse to follow one.
       redirect: 'error',
@@ -34,6 +38,16 @@ export async function getReport({
   } catch {
     throw new ReportError(
       'Could not reach the Polycards backend. Try again in a minute.',
+    );
+  }
+  if (as === 'image' && res.ok) {
+    // A poster: the bytes go back as base64 for an MCP image block.
+    const mimeType = res.headers.get('content-type')?.split(';')[0] ?? '';
+    const bytes = await res.arrayBuffer().catch(() => null);
+    if (mimeType.startsWith('image/') && bytes?.byteLength)
+      return { mimeType, data: Buffer.from(bytes).toString('base64') };
+    throw new ReportError(
+      'The backend sent an unreadable image. Try again in a minute.',
     );
   }
   const body = await res.json().catch(() => null);

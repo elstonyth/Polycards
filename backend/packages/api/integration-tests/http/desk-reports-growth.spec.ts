@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
@@ -238,6 +239,35 @@ medusaIntegrationTestRunner({
         const body = JSON.stringify(r);
         expect(body).not.toContain('cus_gp_');
         expect(body).not.toContain('@');
+      });
+
+      it('renders the poster as a JPEG, placeholder tiles for unreachable art', async () => {
+        const res = await unwrapResponse(
+          api.get('/reports/growth/challenge-poster?leaders=1', {
+            headers: { 'x-report-key': GROWTH_KEY },
+            responseType: 'arraybuffer',
+          }),
+        );
+        expect(res.status).toBe(200);
+        expect(res.headers['content-type']).toMatch(/^image\/jpeg/);
+        expect(res.headers['cache-control']).toBe('no-store');
+        const meta = await sharp(Buffer.from(res.data)).metadata();
+        expect(meta.format).toBe('jpeg');
+        expect(meta.width).toBe(1080);
+        // The seeded art is a storefront-relative path nobody serves here.
+        expect(res.headers['x-poster-missing-art']).toBe('1');
+      });
+
+      it('refuses a bad poster request with a readable reason', async () => {
+        expect((await report('challenge-poster?stage=9')).status).toBe(400);
+        expect((await report('challenge-poster?stage=x')).status).toBe(400);
+        expect((await report('challenge-poster?leaders=yes')).status).toBe(400);
+        await packs().saveChallengeStages({
+          stages: [],
+          adminId: 'growth-challenge-test',
+          reason: 'clear',
+        });
+        expect((await report('challenge-poster')).status).toBe(404);
       });
 
       it('reports last week, and refuses an unknown week', async () => {

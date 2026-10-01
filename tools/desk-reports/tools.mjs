@@ -120,13 +120,53 @@ TOOLS.growth = [
     inputSchema: { ...windowArgs, ...groupArg },
     request: windowed('packs'),
   },
+  {
+    name: 'challenge_poster',
+    description:
+      'A finished Weekly Pulled Value Challenge poster (1080x1350 JPEG) rendered from live data with the official card art: the unlock headline, the stage chips, and the podium prizes of one stage (default: the highest unlocked stage), optionally with the current top-3 leaders. Use it instead of drawing cards with image generation: post the image it returns. It is a draft; a human reviews it before it is published.',
+    inputSchema: {
+      stage: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe(
+          'Which stage prizes to feature. Default: the highest unlocked stage.',
+        ),
+      leaders: z
+        .boolean()
+        .optional()
+        .describe(
+          'true adds the current top-3 leaders (shown names). Default false.',
+        ),
+    },
+    request: (args) => ({
+      path: 'challenge-poster',
+      params: {
+        stage: args.stage,
+        leaders: args.leaders === undefined ? undefined : args.leaders ? 1 : 0,
+      },
+      as: 'image',
+    }),
+  },
 ];
 
 // Runs one tool call; failures come back as text the bot can relay.
 export async function runTool(tool, args, config) {
   try {
-    const { path, params, label } = tool.request(args);
-    const body = await getReport({ ...config, path, params });
+    const { path, params, label, as } = tool.request(args);
+    const body = await getReport({ ...config, path, params, as });
+    if (as === 'image') {
+      return {
+        content: [
+          { type: 'image', data: body.data, mimeType: body.mimeType },
+          {
+            type: 'text',
+            text: 'Rendered from live data with the official card art. Post this image as the draft; a human reviews it before it is published.',
+          },
+        ],
+      };
+    }
     const text = JSON.stringify(
       label ? { period: label, ...body } : body,
       null,

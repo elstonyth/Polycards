@@ -109,26 +109,26 @@ const TILE_H = 200;
 const TILE_X = W - PAD - TILE_W;
 const TILE_INSET = 16;
 
-const esc = (s: string): string =>
+export const esc = (s: string): string =>
   s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-type Font = { family: string; size: number; spacing?: number };
-const display = (size: number, spacing = 0): Font => ({
+export type Font = { family: string; size: number; spacing?: number };
+export const display = (size: number, spacing = 0): Font => ({
   family: DISPLAY_FONT_FAMILY,
   size,
   spacing,
 });
-const body = (size: number, spacing = 0): Font => ({
+export const body = (size: number, spacing = 0): Font => ({
   family: BODY_FONT_FAMILY,
   size,
   spacing,
 });
 
-const textEl = (
+export const textEl = (
   text: string,
   x: number,
   y: number,
@@ -142,14 +142,15 @@ const textEl = (
 
 /** Baseline that optically centres a line of `size` on `mid` (cap height of
  *  both faces is ~0.7em). */
-const baseline = (mid: number, size: number): number => mid + size * 0.35;
+export const baseline = (mid: number, size: number): number =>
+  mid + size * 0.35;
 
 /**
  * Ink width of one line, measured by rendering it — the only width that is
  * right for whatever face fontconfig actually resolved (an estimate would be
  * wrong on exactly the fallback it would need to survive). Blank text is 0.
  */
-async function measure(text: string, font: Font): Promise<number> {
+export async function measure(text: string, font: Font): Promise<number> {
   if (!text.trim()) return 0;
   const h = Math.ceil(font.size * 2);
   const w = Math.ceil(
@@ -173,7 +174,11 @@ async function measure(text: string, font: Font): Promise<number> {
 
 /** Longest prefix of `text` (plus an ellipsis) that fits `max`, or the text
  *  itself when it already fits. */
-async function fit(text: string, font: Font, max: number): Promise<string> {
+export async function fit(
+  text: string,
+  font: Font,
+  max: number,
+): Promise<string> {
   if ((await measure(text, font)) <= max) return text;
   let lo = 0;
   let hi = text.length;
