@@ -515,6 +515,19 @@ services:
         scope: RUN_TIME
         type: SECRET
         value: __SECRET__REPORT_KEY_FINANCE__
+      # The other desks, same rules (Phase B of the desk-reports spec).
+      - key: REPORT_KEY_GROWTH
+        scope: RUN_TIME
+        type: SECRET
+        value: __SECRET__REPORT_KEY_GROWTH__
+      - key: REPORT_KEY_STORE
+        scope: RUN_TIME
+        type: SECRET
+        value: __SECRET__REPORT_KEY_STORE__
+      - key: REPORT_KEY_SUPPORT
+        scope: RUN_TIME
+        type: SECRET
+        value: __SECRET__REPORT_KEY_SUPPORT__
 
 workers:
   - name: worker

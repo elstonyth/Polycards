@@ -7,6 +7,7 @@ import type {
 import Redis from 'ioredis';
 import { E164_RE, type PhoneOtpChannel } from '../../utils/phone-verification';
 import { callbackSourceIp } from './payer-ip';
+import { deskOf } from '../reports/require-report-key';
 
 const PHONE_OTP_COOLDOWN_MS = 30_000;
 
@@ -1011,16 +1012,18 @@ export const RATE_LIMITS = {
    * Desk reports (GET /reports/*, spec 2026-09-29-desk-reports-design.md):
    * read by the staff Discord desk bots on the owner's PC, a few calls per
    * staff question. Runs BEFORE the key check, so a key-guessing loop 429s
-   * before any comparison. Keyed on the caller's address like gateway-hook
-   * (on App Platform req.ip is DigitalOcean's ingress), so every desk shares
-   * the PC's one budget. The two rules are CONSISTENT (20 per 10s = 120 per
-   * minute), as the gateway-hook note requires. Env-tunable:
+   * before any comparison. Keyed on the desk in the path plus the caller's
+   * address like gateway-hook (on App Platform the ingress sends the client
+   * in do-connecting-ip): every desk bot runs on the one PC, so a busy desk
+   * must not spend the others' budget. The two rules are CONSISTENT (20 per
+   * 10s = 120 per minute), as the gateway-hook note requires. Env-tunable:
    * DESK_REPORTS_RATE_BURST_LIMIT / DESK_REPORTS_RATE_BURST_WINDOW_MS (20/10s)
    * DESK_REPORTS_RATE_LIMIT / DESK_REPORTS_RATE_WINDOW_MS (120/60s)
    */
   'desk-reports': {
     message: 'Too many report requests.',
-    keyOf: (req) => `ip:${callbackSourceIp(req) || 'unknown'}`,
+    keyOf: (req) =>
+      `${deskOf(req.originalUrl) ?? 'none'}:ip:${callbackSourceIp(req) || 'unknown'}`,
     defaults: {
       burstLimit: 20,
       burstWindowMs: 10_000,

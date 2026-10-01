@@ -91,6 +91,37 @@ export const TOOLS = {
   ],
 };
 
+TOOLS.growth = [
+  {
+    name: 'challenge',
+    description:
+      "The Weekly Pulled Value Challenge exactly as the public Ranks page shows it: the community pool, each stage with its threshold, whether it is unlocked and how much is still needed, each stage's prizes, the prizes the top 10 would get if the week ended now, and the live top-10 standings (shown name, profile handle, pulls, pulled value). week: current (default) or last. The response gives the challenge week's own start and end; until it ends, the top player is the current leader, not the winner. If hidden_players_above_cut is above 0, prizes are paid by original rank, so do not pair displayed ranks with prizes. Amounts in RM (MYR).",
+    inputSchema: {
+      week: z
+        .enum(['current', 'last'])
+        .optional()
+        .describe(
+          'current (default): the running week; last: the week that ended.',
+        ),
+    },
+    request: (args) => ({ path: 'challenge', params: { week: args.week } }),
+  },
+  {
+    name: 'signups',
+    description:
+      'New player accounts per Malaysia day, counted like the admin Stats page, plus first top-ups (the first payment new players made) in the window. The window must be 93 days or less; all_time is not allowed.',
+    inputSchema: { ...windowArgs },
+    request: windowed('signups'),
+  },
+  {
+    name: 'packs_opened',
+    description:
+      'Packs opened per Malaysia day (paid packs, plus free welcome packs counted separately; task and challenge prize draws are not counted) and the 10 most-opened packs, for one window and player group. The window must be 93 days or less; all_time is not allowed.',
+    inputSchema: { ...windowArgs, ...groupArg },
+    request: windowed('packs'),
+  },
+];
+
 // Runs one tool call; failures come back as text the bot can relay.
 export async function runTool(tool, args, config) {
   try {

@@ -1,4 +1,6 @@
 import * as fs from 'fs';
+import type { MedusaRequest } from '@medusajs/framework/http';
+import { RATE_LIMITS } from '../../utils/rate-limit';
 import {
   MIDDLEWARES_PATH,
   extractLimiterEntries,
@@ -24,5 +26,20 @@ describe('/reports/* middleware registration', () => {
 
   it('binds the desk-reports limiter once', () => {
     expect(src.match(/rateLimit\('desk-reports'\)/g)).toHaveLength(1);
+  });
+
+  // Every desk bot calls from the one PC, so an IP-only key would let a busy
+  // desk spend every other desk's budget.
+  it('keys the desk-reports limiter by desk and caller address', () => {
+    const keyOf = RATE_LIMITS['desk-reports'].keyOf;
+    const req = (originalUrl: string, ip: string) =>
+      ({ originalUrl, ip, headers: {} }) as unknown as MedusaRequest;
+    expect(keyOf(req('/reports/finance/economy', '1.2.3.4'))).toBe(
+      'finance:ip:1.2.3.4',
+    );
+    expect(keyOf(req('/reports/growth/challenge?week=last', '1.2.3.4'))).toBe(
+      'growth:ip:1.2.3.4',
+    );
+    expect(keyOf(req('/reports/nope/x', '5.6.7.8'))).toBe('none:ip:5.6.7.8');
   });
 });
