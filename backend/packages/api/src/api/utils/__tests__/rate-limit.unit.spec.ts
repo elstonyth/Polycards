@@ -576,6 +576,72 @@ describe('createRateLimitMiddleware', () => {
 });
 
 describe('consumeOtpSendBudget', () => {
+  // prod 2026-10-01: the budget store was built by the first send, so its
+  // Redis connection was still opening (enableOfflineQueue is off) and the
+  // fail-closed fallback refused every fresh instance's first code request
+  // with "Try again in 60s". Built at boot, the connection is open by then.
+  it('a send after boot-time warming is not refused by a connection still opening', async () => {
+    const nodeEnv = process.env.NODE_ENV;
+    const redisUrl = process.env.REDIS_URL;
+    process.env.NODE_ENV = 'production';
+    process.env.REDIS_URL = 'redis://fake';
+    // Answers like ioredis does before 'ready' with the offline queue off.
+    class FakeRedis {
+      private ready = false;
+      on() {
+        return this;
+      }
+      connect() {
+        return new Promise<void>((done) =>
+          setTimeout(() => {
+            this.ready = true;
+            done();
+          }, 5),
+        );
+      }
+      defineCommand(name: string) {
+        (this as unknown as Record<string, unknown>)[name] = async () => {
+          if (!this.ready)
+            throw new Error(
+              "Stream isn't writeable and enableOfflineQueue options is false",
+            );
+          return [1, 0];
+        };
+      }
+    }
+    const load = () => {
+      let mod!: typeof import('../rate-limit');
+      jest.isolateModules(() => {
+        jest.doMock('ioredis', () => ({ __esModule: true, default: FakeRedis }));
+        mod = require('../rate-limit');
+      });
+      return mod;
+    };
+    try {
+      // Built by the send itself (the old wiring): refused while connecting.
+      const cold = load();
+      expect((await cold.consumeOtpSendBudget('+60177000001', 'sms')).allowed).toBe(false);
+      // Warmed at boot, as middlewares.ts now does: the send goes through.
+      const warm = load();
+      warm.warmOtpSendBudget();
+      await new Promise((r) => setTimeout(r, 20));
+      expect((await warm.consumeOtpSendBudget('+60177000001', 'sms')).allowed).toBe(true);
+    } finally {
+      jest.dontMock('ioredis');
+      process.env.NODE_ENV = nodeEnv;
+      if (redisUrl === undefined) delete process.env.REDIS_URL;
+      else process.env.REDIS_URL = redisUrl;
+    }
+  });
+
+  it('middlewares.ts warms the budget at boot', () => {
+    const src = require('fs').readFileSync(
+      require('path').join(__dirname, '../../middlewares.ts'),
+      'utf8',
+    );
+    expect(src).toContain('\nwarmOtpSendBudget();\n');
+  });
+
   it('cooldown retries do not spend another per-number attempt or cause a ten-minute lockout', async () => {
     const redisUrl = process.env.REDIS_URL;
     delete process.env.REDIS_URL;
@@ -660,46 +726,65 @@ describe('consumeOtpSendBudget', () => {
 
   // Each case runs on its own day, far from the others, so the shared
   // sitewide key never carries events from one case into the next.
-  it('refuses the send past the hourly ceiling, and frees it an hour later', async () => {
+  // The SMS budget no longer refuses a person: once it is spent the code goes
+  // out as a call, and the SMS budget frees as its window slides.
+  it('a spent SMS budget sends a call instead of refusing, and frees an hour later', async () => {
     process.env.PHONE_OTP_GLOBAL_HOURLY_LIMIT = '2';
     const t = T0 + 10 * 24 * 60 * MINUTE;
-    expect((await consumeOtpSendBudget('+60177000001', 'sms', t)).allowed).toBe(true);
-    expect((await consumeOtpSendBudget('+60177000002', 'sms', t + 1)).allowed).toBe(true);
-    expect((await consumeOtpSendBudget('+60177000003', 'call', t + 2)).allowed).toBe(false);
-    expect((await consumeOtpSendBudget('+60177000004', 'sms', t + 60 * MINUTE + 1)).allowed).toBe(true);
+    expect(await consumeOtpSendBudget('+60177000001', 'sms', t)).toMatchObject({ allowed: true, channel: 'sms' });
+    expect(await consumeOtpSendBudget('+60177000002', 'sms', t + 1)).toMatchObject({ allowed: true, channel: 'sms' });
+    expect(await consumeOtpSendBudget('+60177000003', 'sms', t + 2)).toMatchObject({ allowed: true, channel: 'call' });
+    expect(await consumeOtpSendBudget('+60177000004', 'sms', t + 60 * MINUTE + 1)).toMatchObject({
+      allowed: true,
+      channel: 'sms',
+    });
   });
 
-  it('also caps the day, however the sends are spread across its hours', async () => {
+  it('also caps the day of SMS, however the sends are spread across its hours', async () => {
     process.env.PHONE_OTP_GLOBAL_HOURLY_LIMIT = '100';
     process.env.PHONE_OTP_GLOBAL_DAILY_LIMIT = '3';
     const t = T0 + 20 * 24 * 60 * MINUTE;
     for (let h = 0; h < 3; h++) {
-      expect((await consumeOtpSendBudget('+60177000001', 'sms', t + h * 60 * MINUTE)).allowed).toBe(
-        true,
-      );
+      expect(await consumeOtpSendBudget('+60177000001', 'sms', t + h * 60 * MINUTE)).toMatchObject({
+        allowed: true,
+        channel: 'sms',
+      });
     }
-    expect((await consumeOtpSendBudget('+60177000001', 'sms', t + 5 * 60 * MINUTE)).allowed).toBe(
-      false,
-    );
+    expect(await consumeOtpSendBudget('+60177000001', 'sms', t + 5 * 60 * MINUTE)).toMatchObject({
+      allowed: true,
+      channel: 'call',
+    });
   });
 
-  it('voice stops after two calls per day while the shared SMS budget remains available', async () => {
+  // prod 2026-10-01: SMS that never arrived made people press Resend until
+  // Twilio refused (60203). Asking again inside the code lifetime means the
+  // SMS did not land, so that request is a call — and calls spend none of the
+  // SMS budget, so the next person still gets an SMS.
+  it('a second request inside the code lifetime goes out as a call', async () => {
+    process.env.PHONE_OTP_GLOBAL_HOURLY_LIMIT = '2';
     const t = T0 + 30 * 24 * 60 * MINUTE;
     const phone = '+60177000001';
-    expect((await consumeOtpSendBudget(phone, 'sms', t)).allowed).toBe(true);
-    expect((await consumeOtpSendBudget(phone, 'call', t + MINUTE)).allowed).toBe(true);
-    expect((await consumeOtpSendBudget(phone, 'call', t + 2 * MINUTE)).allowed).toBe(true);
-    expect((await consumeOtpSendBudget(phone, 'call', t + 3 * MINUTE)).allowed).toBe(false);
-    expect((await consumeOtpSendBudget(phone, 'sms', t + 4 * MINUTE)).allowed).toBe(true);
+    expect(await consumeOtpSendBudget(phone, 'sms', t)).toMatchObject({ allowed: true, channel: 'sms' });
+    expect(await consumeOtpSendBudget(phone, 'sms', t + MINUTE)).toMatchObject({ allowed: true, channel: 'call' });
+    expect(await consumeOtpSendBudget(phone, 'call', t + 2 * MINUTE)).toMatchObject({ allowed: true, channel: 'call' });
+    expect(await consumeOtpSendBudget('+60177000002', 'sms', t + 3 * MINUTE)).toMatchObject({
+      allowed: true,
+      channel: 'sms',
+    });
+    // Past the code lifetime the first number may have an SMS again.
+    process.env.PHONE_OTP_GLOBAL_HOURLY_LIMIT = '3';
+    expect(await consumeOtpSendBudget(phone, 'sms', t + 11 * MINUTE)).toMatchObject({ allowed: true, channel: 'sms' });
   });
 
-  it('bounds rotating phone numbers to ten calls an hour', async () => {
+  it('bounds rotating phone numbers to sixty calls an hour', async () => {
     const t = T0 + 40 * 24 * 60 * MINUTE;
-    for (let i = 0; i < 10; i++) {
-      expect((await consumeOtpSendBudget(`+601770000${i}`, 'call', t + i)).allowed).toBe(true);
+    for (let i = 0; i < 60; i++) {
+      const phone = `+6017700${String(i).padStart(4, '0')}`;
+      expect((await consumeOtpSendBudget(phone, 'call', t + i)).allowed).toBe(true);
     }
-    expect(await consumeOtpSendBudget('+60177000111', 'call', t + 11)).toMatchObject({
-      allowed: false, sitewide: true,
+    expect(await consumeOtpSendBudget('+60177009999', 'call', t + 61)).toMatchObject({
+      allowed: false,
+      sitewide: true,
     });
   });
 

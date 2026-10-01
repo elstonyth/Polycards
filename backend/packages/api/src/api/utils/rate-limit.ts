@@ -1214,11 +1214,19 @@ export function rateLimit(name: keyof typeof RATE_LIMITS): MiddlewareHandler {
  * bucket/provider refuses it. Never refund ambiguous provider timeouts.
  */
 let otpSendBudgetStore: RateLimitStore | null = null;
-export async function consumeOtpSendBudget(
-  phone: string,
-  channel: PhoneOtpChannel,
-  nowMs: number = Date.now(),
-): Promise<RateLimitDecision & { sitewide: boolean }> {
+
+/**
+ * Builds the budget store, which opens its Redis connection. middlewares.ts
+ * calls this at boot.
+ *
+ * Why at boot: the client runs with enableOfflineQueue off, so a command
+ * sent while the connection is still opening fails at once, and in
+ * production this store fails CLOSED. When the store was built lazily by the
+ * first send, every fresh instance refused its first code request with "Too
+ * many code requests. Try again in 60s" (prod 2026-10-01: once per instance
+ * after every deploy — two instances, about ten deploys that day).
+ */
+export function warmOtpSendBudget(): RateLimitStore {
   otpSendBudgetStore ??= buildFailoverStore(
     'phone-otp-global-rate-limit',
     throttledWarn(60_000),
@@ -1226,44 +1234,75 @@ export async function consumeOtpSendBudget(
       ? { consume: async () => ({ allowed: false, retryAfterMs: 60_000 }) }
       : new InMemorySlidingWindowStore(),
   );
-  // The per-phone middleware owns the atomic cooldown + daily quota. A second
-  // cooldown clock here could reject a request after middleware spent its slot.
-  if (channel === 'call') {
-    const personalCalls = await otpSendBudgetStore.consume(
-      `rl:phone-otp-calls:${phone}`,
-      [{ limit: 2, windowMs: 24 * 60 * 60_000 }],
+  return otpSendBudgetStore;
+}
+
+// Twilio Verify keeps one code alive for 10 minutes; resends inside it reuse it.
+const OTP_CODE_LIFETIME_MS = 10 * 60_000;
+const warnSmsBudgetSpent = throttledWarn(60 * 60_000);
+
+/**
+ * Decides HOW a code goes out, and whether it may. The returned `channel` is
+ * the one to send on — it can differ from the one asked for:
+ *
+ * - One SMS per number per code lifetime. Asking again inside it means the
+ *   SMS did not arrive (prod 2026-10-01: Malaysian carriers dropped some
+ *   Verify SMS, and people pressed Resend six times until Twilio refused with
+ *   60203), so the code goes out as a call instead.
+ * - A spent SMS budget sends a call rather than refusing the person.
+ *
+ * A call reaches every handset (no carrier SMS filtering, no Fraud Guard),
+ * costs $0.08 a minute against $0.3389 an SMS segment to a Malaysian mobile,
+ * and pays an SMS-pumping run nothing — so calls are the fallback, with their
+ * own sitewide ceiling, and never spend the SMS budget. The per-phone
+ * middleware still owns the cooldown and the 6-a-day quota per number.
+ */
+export async function consumeOtpSendBudget(
+  phone: string,
+  channel: PhoneOtpChannel,
+  nowMs: number = Date.now(),
+): Promise<
+  RateLimitDecision & { sitewide: boolean; channel: PhoneOtpChannel }
+> {
+  const store = warmOtpSendBudget();
+  const hourly = nonNegativeIntFromEnv('PHONE_OTP_GLOBAL_HOURLY_LIMIT', 40);
+  const daily = nonNegativeIntFromEnv('PHONE_OTP_GLOBAL_DAILY_LIMIT', 100);
+  // The incident stop lever: 0 stops every paid send, calls included.
+  if (hourly === 0 || daily === 0)
+    return { allowed: false, retryAfterMs: 60_000, sitewide: true, channel };
+
+  let via = channel;
+  if (via === 'sms') {
+    const firstSms = await store.consume(
+      `rl:phone-otp-sms:${phone}`,
+      [{ limit: 1, windowMs: OTP_CODE_LIFETIME_MS }],
       nowMs,
     );
-    if (!personalCalls.allowed) return { ...personalCalls, sitewide: false };
-    const calls = await otpSendBudgetStore.consume(
-      'rl:phone-otp-calls:all',
+    if (!firstSms.allowed) via = 'call';
+  }
+  if (via === 'sms') {
+    const sms = await store.consume(
+      // New policy window starts at rollout; old key includes the outage's
+      // hundreds of failed sends. Keep this key stable on subsequent deploys.
+      'rl:phone-otp-global:v2:all',
       [
-        { limit: 10, windowMs: 60 * 60_000 },
-        { limit: 20, windowMs: 24 * 60 * 60_000 },
+        { limit: hourly, windowMs: 60 * 60_000 },
+        { limit: daily, windowMs: 24 * 60 * 60_000 },
       ],
       nowMs,
     );
-    if (!calls.allowed) return { ...calls, sitewide: true };
+    if (sms.allowed) return { ...sms, sitewide: true, channel: 'sms' };
+    warnSmsBudgetSpent('phone-otp SMS budget spent; codes go out as calls');
+    via = 'call';
   }
-  const hourly = nonNegativeIntFromEnv('PHONE_OTP_GLOBAL_HOURLY_LIMIT', 40);
-  const daily = nonNegativeIntFromEnv('PHONE_OTP_GLOBAL_DAILY_LIMIT', 100);
-  if (hourly === 0 || daily === 0)
-    return { allowed: false, retryAfterMs: 60_000, sitewide: true };
-  const global = await otpSendBudgetStore.consume(
-    // New policy window starts at rollout; old key includes the outage's
-    // hundreds of failed sends. Keep this key stable on subsequent deploys.
-    'rl:phone-otp-global:v2:all',
+  // ~$24 a day at most: a ceiling against a voice run, far above real use.
+  const calls = await store.consume(
+    'rl:phone-otp-calls:all',
     [
-      {
-        limit: hourly,
-        windowMs: 60 * 60_000,
-      },
-      {
-        limit: daily,
-        windowMs: 24 * 60 * 60_000,
-      },
+      { limit: 60, windowMs: 60 * 60_000 },
+      { limit: 300, windowMs: 24 * 60 * 60_000 },
     ],
     nowMs,
   );
-  return { ...global, sitewide: true };
+  return { ...calls, sitewide: true, channel: via };
 }

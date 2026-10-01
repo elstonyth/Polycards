@@ -41,8 +41,10 @@ export async function POST(
   const channel = rawChannel === undefined ? 'sms' : rawChannel;
   if (!isPhoneOtpChannel(channel))
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid channel.');
-  // Channel never reveals whether this number has an account.
-  const response = { ok: true, channel };
+  // The budget may swap an SMS for a call (consumeOtpSendBudget); `via` is
+  // what actually goes out. It is decided per number and budget, never per
+  // account, so it reveals nothing about whether this number has one.
+  let via = channel;
 
   const logger = req.scope.resolve('logger') as { warn: (msg: string) => void };
 
@@ -65,7 +67,9 @@ export async function POST(
       });
       return;
     }
+    via = budget.channel;
   }
+  const response = { ok: true, channel: via };
 
   // password-reset is EXEMPT, and deliberately so: the branch below refuses to
   // send unless exactly ONE registered account carries this phone, so that
@@ -140,7 +144,7 @@ export async function POST(
   // purpose is validated above; it selects the Verify template so the SMS
   // names the flow the code is for.
   try {
-    await sendPhoneOtp(process.env, logger, phone, purpose, channel);
+    await sendPhoneOtp(process.env, logger, phone, purpose, via);
   } catch (error) {
     if (purpose !== 'password-reset') throw error;
     // Provider errors must not reveal whether a reset account exists.
