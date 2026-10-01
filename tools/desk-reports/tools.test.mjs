@@ -73,6 +73,33 @@ test('the growth desk tools', () => {
   assert.equal(growth.signups.request({ period: 'today' }).path, 'signups');
 });
 
+test('the store desk tools', () => {
+  const store = Object.fromEntries(TOOLS.store.map((t) => [t.name, t]));
+  assert.deepEqual(Object.keys(store), ['packs', 'pack', 'low_stock']);
+  assert.deepEqual(store.packs.request({}), { path: 'packs', params: {} });
+  assert.deepEqual(store.pack.request({ slug: 'silver-pack' }), {
+    path: 'pack',
+    params: { slug: 'silver-pack' },
+  });
+  assert.deepEqual(store.low_stock.request({ max: 2 }), {
+    path: 'stock',
+    params: { max: 2 },
+  });
+});
+
+test('the support desk tools', () => {
+  const support = Object.fromEntries(TOOLS.support.map((t) => [t.name, t]));
+  assert.deepEqual(Object.keys(support), ['order', 'account']);
+  assert.deepEqual(support.order.request({ number: '#A1B2C3' }), {
+    path: 'order',
+    params: { number: '#A1B2C3' },
+  });
+  assert.deepEqual(support.account.request({ username: 'Ace_Puller' }), {
+    path: 'account',
+    params: { username: 'Ace_Puller' },
+  });
+});
+
 test('player asks by username only', () => {
   assert.deepEqual(finance.player.request({ username: 'Ace_Puller' }), {
     path: 'player',
