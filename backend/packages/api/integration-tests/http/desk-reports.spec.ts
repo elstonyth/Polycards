@@ -544,6 +544,11 @@ medusaIntegrationTestRunner({
           lifetime: { topups: 100, revenue: 30 },
           last_30_days: { topups: 100, revenue: 30 },
         });
+        // The bot must be able to state the rolling window it reports.
+        const { from, to } = res.data.last_30_days_window;
+        expect(Date.parse(to) - Date.parse(from)).toBe(
+          30 * 24 * 60 * 60 * 1000,
+        );
         expect(res.data.deposits.settled).toEqual({
           count: 1,
           requested: 100,

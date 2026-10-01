@@ -51,7 +51,8 @@ export async function GET(
   );
   const db = reportDb(req);
   const mine = customerFilter(id, 'ct.customer_id');
-  const since = new Date(Date.now() - 30 * DAY_MS).toISOString();
+  const now = Date.now();
+  const since = new Date(now - 30 * DAY_MS).toISOString();
   const theirs = customerFilter(id, 'g.customer_id');
   res.json({
     currency: 'MYR',
@@ -69,6 +70,7 @@ export async function GET(
       db,
       and(windowFilter({ from: since }, 'ct.created_at'), mine),
     ),
+    last_30_days_window: { from: since, to: new Date(now).toISOString() },
     deposits: await statusTotals(db, 'deposits', DEPOSIT_STATUSES, theirs),
     withdrawals: await statusTotals(
       db,
