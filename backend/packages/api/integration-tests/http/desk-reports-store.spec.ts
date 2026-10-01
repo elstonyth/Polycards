@@ -186,7 +186,7 @@ medusaIntegrationTestRunner({
     });
 
     describe('stock', () => {
-      it('lists tracked cards at or below max, with the inventory page counts', async () => {
+      it('lists tracked cards at or below max, counts them all, and caps the list', async () => {
         const productModule = getContainer().resolve(Modules.PRODUCT);
         const card = (handle: string, name: string) =>
           packs().createCards([
@@ -217,51 +217,59 @@ medusaIntegrationTestRunner({
           },
         ]);
         await card('st-untracked', 'ST Untracked');
-        // TRACKED AT ZERO: variant + location + item + level + link, as in
-        // inventory-detail.spec.
-        const [tracked] = await productModule.createProducts([
-          {
-            title: 'ST Tracked',
-            handle: 'st-tracked',
-            status: ProductStatus.PUBLISHED,
-            options: [{ title: 'Format', values: ['Slab'] }],
-            variants: [
-              {
-                title: 'Slab',
-                sku: 'ST-TRACKED',
-                manage_inventory: true,
-                options: { Format: 'Slab' },
-              },
-            ],
-          },
-        ]);
-        await card('st-tracked', 'ST Tracked');
+        // TRACKED: variant + location + item + level + link, as in
+        // inventory-detail.spec; a negative adjustment is how live stock
+        // goes below 0 (units owed to winners).
         const location = await getContainer()
           .resolve(Modules.STOCK_LOCATION)
           .createStockLocations({ name: 'ST Warehouse' });
         const inventory = getContainer().resolve(Modules.INVENTORY);
-        const item = await inventory.createInventoryItems({
-          sku: 'ST-TRACKED',
-        });
-        await inventory.createInventoryLevels([
-          {
-            inventory_item_id: item.id,
-            location_id: location.id,
-            stocked_quantity: 0,
-          },
-        ]);
-        await getContainer()
-          .resolve(ContainerRegistrationKeys.LINK)
-          .create({
-            [Modules.PRODUCT]: { variant_id: tracked.variants[0].id },
-            [Modules.INVENTORY]: { inventory_item_id: item.id },
-          });
+        const tracked = async (handle: string, name: string, units: number) => {
+          const sku = handle.toUpperCase();
+          const [product] = await productModule.createProducts([
+            {
+              title: name,
+              handle,
+              status: ProductStatus.PUBLISHED,
+              options: [{ title: 'Format', values: ['Slab'] }],
+              variants: [
+                {
+                  title: 'Slab',
+                  sku,
+                  manage_inventory: true,
+                  options: { Format: 'Slab' },
+                },
+              ],
+            },
+          ]);
+          await card(handle, name);
+          const item = await inventory.createInventoryItems({ sku });
+          await inventory.createInventoryLevels([
+            {
+              inventory_item_id: item.id,
+              location_id: location.id,
+              stocked_quantity: 0,
+            },
+          ]);
+          await getContainer()
+            .resolve(ContainerRegistrationKeys.LINK)
+            .create({
+              [Modules.PRODUCT]: { variant_id: product.variants[0].id },
+              [Modules.INVENTORY]: { inventory_item_id: item.id },
+            });
+          if (units) {
+            await inventory.adjustInventory(item.id, location.id, units);
+          }
+        };
+        await tracked('st-tracked', 'ST Tracked', 0);
+        await tracked('st-owed', 'ST Owed', -2);
 
         const rows = (await admin('/admin/inventory')).data.rows as Array<{
           handle: string;
           on_hand: number | null;
         }>;
         expect(rows.find((r) => r.handle === 'st-tracked')!.on_hand).toBe(0);
+        expect(rows.find((r) => r.handle === 'st-owed')!.on_hand).toBe(-2);
         expect(
           rows.find((r) => r.handle === 'st-untracked')!.on_hand,
         ).toBeNull();
@@ -271,21 +279,46 @@ medusaIntegrationTestRunner({
         const handles = res.data.cards.map((c: { handle: string }) => c.handle);
         expect(handles).toContain('st-tracked');
         expect(handles).not.toContain('st-untracked');
+        // Lowest first.
+        expect(handles.indexOf('st-owed')).toBeLessThan(
+          handles.indexOf('st-tracked'),
+        );
         expect(
           res.data.cards.find(
             (c: { handle: string }) => c.handle === 'st-tracked',
           ),
         ).toMatchObject({ on_hand: 0, card: 'ST Tracked' });
         expect(JSON.stringify(res.data)).not.toContain('cost');
-        // Below the threshold: nothing at -1 or lower here.
+        // The counts cover every matching card, listed or not.
+        expect(res.data.matching_cards).toBe(
+          res.data.cards.length + res.data.cards_not_shown,
+        );
+        expect(res.data.owed.cards).toBeGreaterThanOrEqual(1);
+        expect(res.data.owed.units).toBeGreaterThanOrEqual(2);
+
+        // limit caps the list, lowest first; the counts stay whole.
+        const one = await report('stock?limit=1');
+        expect(one.status).toBe(200);
+        expect(one.data.cards).toHaveLength(1);
+        expect(one.data.cards[0].on_hand).toBeLessThanOrEqual(-2);
+        expect(one.data.matching_cards).toBe(res.data.matching_cards);
+        expect(one.data.cards_not_shown).toBe(res.data.matching_cards - 1);
+        expect(one.data.owed).toEqual(res.data.owed);
+
+        // Below the threshold: only the owed card, not the one at 0.
         const below = await report('stock?max=-1');
-        expect(
-          below.data.cards.map((c: { handle: string }) => c.handle),
-        ).not.toContain('st-tracked');
+        const belowHandles = below.data.cards.map(
+          (c: { handle: string }) => c.handle,
+        );
+        expect(belowHandles).toContain('st-owed');
+        expect(belowHandles).not.toContain('st-tracked');
       });
 
-      it('refuses a bad max', async () => {
+      it('refuses a bad max or limit', async () => {
         expect((await report('stock?max=abc')).status).toBe(400);
+        for (const limit of ['0', '201', 'abc', '-1']) {
+          expect((await report(`stock?limit=${limit}`)).status).toBe(400);
+        }
       });
     });
   },

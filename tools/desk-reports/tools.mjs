@@ -190,15 +190,27 @@ TOOLS.store = [
   {
     name: 'low_stock',
     description:
-      'Cards whose tracked stock on hand is at or below max (default 0; below 0 = units owed to winners), lowest first, with the active packs that can still draw them, plus the packs showing the sold-out badge. A card at 0 can still be drawn (buyback covers it). Cards with untracked stock are not listed. Amounts in RM (MYR).',
+      'Cards whose tracked stock on hand is at or below max (default 0; below 0 = units owed to winners): matching_cards and owed (cards and units) count all of them, and cards lists the lowest ones first (limit, default 50), with the active packs that can still draw them, plus the packs showing the sold-out badge. Give the counts, not the length of the list. A card at 0 can still be drawn (buyback covers it). Cards with untracked stock are not listed. Amounts in RM (MYR).',
     inputSchema: {
       max: z
         .number()
         .int()
         .optional()
-        .describe('List cards with on_hand at or below this. Default 0.'),
+        .describe(
+          'List cards with on_hand at or below this. Default 0; -1 = only cards owed to winners.',
+        ),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe('How many cards to list, lowest first. Default 50.'),
     },
-    request: (args) => ({ path: 'stock', params: { max: args.max } }),
+    request: (args) => ({
+      path: 'stock',
+      params: { max: args.max, limit: args.limit },
+    }),
   },
 ];
 
@@ -282,11 +294,9 @@ export async function runTool(tool, args, config) {
         ],
       };
     }
-    const text = JSON.stringify(
-      label ? { period: label, ...body } : body,
-      null,
-      2,
-    );
+    // Compact: Hermes spills an MCP result over 50K chars to a file the bot
+    // cannot read, and indentation alone can add a third.
+    const text = JSON.stringify(label ? { period: label, ...body } : body);
     return { content: [{ type: 'text', text }] };
   } catch (err) {
     return {
