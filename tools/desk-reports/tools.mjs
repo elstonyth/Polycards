@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import * as z from 'zod';
 import { getReport } from './http.mjs';
 import { PERIODS, resolvePeriod } from './periods.mjs';
@@ -91,11 +92,124 @@ export const TOOLS = {
   ],
 };
 
+TOOLS.growth = [
+  {
+    name: 'challenge',
+    description:
+      "The running Weekly Pulled Value Challenge exactly as the public Ranks page shows it: the community pool, each stage with its threshold, whether it is unlocked and how much is still needed, each stage's prizes with the official card image link (card_image: the real art the site shows; use it instead of drawing the card), the prizes the top 10 would get if the week ended now, and the live top-10 standings (shown name, profile handle, pulls, pulled value). Past weeks are not available here. The response gives the challenge week's own start and end; until it ends, the top player is the current leader, not the winner. If hidden_players_above_cut is above 0, prizes are paid by original rank, so do not pair displayed ranks with prizes. Amounts in RM (MYR).",
+    inputSchema: {},
+    request: () => ({ path: 'challenge', params: {} }),
+  },
+  {
+    name: 'signups',
+    description:
+      "New player accounts per Malaysia day (days with none are left out), counted like the admin Stats page, plus first top-ups: players whose first-ever deposit settled in the window, whenever they signed up (not a conversion rate of this window's sign-ups). The window must be 93 days or less; all_time is not allowed.",
+    inputSchema: { ...windowArgs },
+    request: windowed('signups'),
+  },
+  {
+    name: 'packs_opened',
+    description:
+      'Packs opened per Malaysia day (days with none are left out; paid packs, plus free welcome packs counted separately; task and challenge prize draws are not counted) and the 10 most-opened packs, for one window and player group. The window must be 93 days or less; all_time is not allowed.',
+    inputSchema: { ...windowArgs, ...groupArg },
+    request: windowed('packs'),
+  },
+  {
+    name: 'challenge_poster',
+    description:
+      'A finished Weekly Pulled Value Challenge poster (a tall portrait JPEG, 1080 px wide and about 1640 px high, taller with leaders) rendered from live data with the official card art: the unlock headline, the stage chips, and the podium prizes of one stage (default: the highest unlocked stage), optionally with the current top-3 leaders. Use it instead of drawing cards with image generation: post the image it returns. It is a draft; a human reviews it before it is published.',
+    inputSchema: {
+      stage: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe(
+          'Which stage prizes to feature. Default: the highest unlocked stage.',
+        ),
+      leaders: z
+        .boolean()
+        .optional()
+        .describe(
+          'true adds the current top-3 leaders (shown names). Default false.',
+        ),
+    },
+    request: (args) => ({
+      path: 'challenge-poster',
+      params: {
+        stage: args.stage,
+        leaders: args.leaders === undefined ? undefined : args.leaders ? 1 : 0,
+      },
+      as: 'image',
+    }),
+  },
+  {
+    name: 'brand_logo',
+    description:
+      'An official Polycards logo file, for designs and posts. wordmark (default): the white "Polycards" wordmark on a transparent background (PNG, 360x97), for dark designs. mark: the app icon, the white card mark on a near-black square (PNG, 512x512). Use the file exactly as it is: attach it, or place it unchanged. Never draw, redraw, recolour or imitate the logo with image generation. The challenge poster already carries the logo.',
+    inputSchema: {
+      variant: z
+        .enum(['wordmark', 'mark'])
+        .optional()
+        .describe('wordmark (default) or mark.'),
+    },
+    request: (args) => ({ brand: BRAND[args.variant ?? 'wordmark'] }),
+  },
+];
+
+// The official logo files, shipped with this server (copies of the
+// storefront's public/branding/polycards-logo.png and src/app/icon.png).
+const BRAND = {
+  wordmark: {
+    file: 'polycards-wordmark-white.png',
+    note: 'The official Polycards wordmark: white on transparent, 360x97 px, for dark backgrounds. Use it unchanged.',
+  },
+  mark: {
+    file: 'polycards-mark.png',
+    note: 'The official Polycards app icon: the white card mark on a #171717 square, 512x512 px. Use it unchanged.',
+  },
+};
+
 // Runs one tool call; failures come back as text the bot can relay.
 export async function runTool(tool, args, config) {
   try {
-    const { path, params, label } = tool.request(args);
-    const body = await getReport({ ...config, path, params });
+    const { path, params, label, as, brand } = tool.request(args);
+    if (brand) {
+      const data = await readFile(
+        new URL(`./brand/${brand.file}`, import.meta.url),
+      );
+      return {
+        content: [
+          {
+            type: 'image',
+            data: data.toString('base64'),
+            mimeType: 'image/png',
+          },
+          { type: 'text', text: brand.note },
+        ],
+      };
+    }
+    // A poster fetches its prize art server-side, so it gets longer.
+    const body = await getReport({
+      ...config,
+      path,
+      params,
+      as,
+      ...(as === 'image' ? { timeoutMs: 45_000 } : {}),
+    });
+    if (as === 'image') {
+      return {
+        content: [
+          { type: 'image', data: body.data, mimeType: body.mimeType },
+          {
+            type: 'text',
+            text: body.missingArt
+              ? `Rendered from live data, but the prize card art for rank ${body.missingArt} could not be loaded and shows as a plain placeholder tile. Say so when you post it, and do not call it the official card art; try again later for the full poster.`
+              : 'Rendered from live data with the official card art. Post this image as the draft; a human reviews it before it is published.',
+          },
+        ],
+      };
+    }
     const text = JSON.stringify(
       label ? { period: label, ...body } : body,
       null,

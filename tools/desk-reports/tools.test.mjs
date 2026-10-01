@@ -45,6 +45,34 @@ test('daily_economy maps onto the daily route', () => {
   });
 });
 
+const growth = Object.fromEntries(TOOLS.growth.map((t) => [t.name, t]));
+
+test('the growth desk tools', () => {
+  assert.deepEqual(Object.keys(growth), [
+    'challenge',
+    'signups',
+    'packs_opened',
+    'challenge_poster',
+    'brand_logo',
+  ]);
+  assert.deepEqual(growth.challenge.request({}), {
+    path: 'challenge',
+    params: {},
+  });
+  const packs = growth.packs_opened.request({
+    period: 'custom',
+    from: '2026-09-01',
+    group: 'default',
+  });
+  assert.equal(packs.path, 'packs');
+  assert.deepEqual(packs.params, {
+    from: '2026-08-31T16:00:00.000Z',
+    to: '2026-09-01T16:00:00.000Z',
+    group: 'default',
+  });
+  assert.equal(growth.signups.request({ period: 'today' }).path, 'signups');
+});
+
 test('player asks by username only', () => {
   assert.deepEqual(finance.player.request({ username: 'Ace_Puller' }), {
     path: 'player',

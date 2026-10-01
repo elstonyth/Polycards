@@ -109,19 +109,43 @@ The key goes in before the merge because, once the PR is merged, every `do-apply
 
 **Window:** `from` and `to` are ISO instants. The economy route may omit both (all time), like the dashboard. Rows are matched on `credit_transaction.created_at` (payments: the row's `created_at`).
 
-## Phase B (next plan)
+## Phase B: Growth, Store, Support
 
+Rules for every Phase B report (decided 2026-10-01):
+
+- **No player group per row, and no partner labels.** The operator's rule: never point out partner accounts unless staff ask. An aggregate `group` scope is allowed where staff ask for it.
+- **No `customer_id` and no `metadata`.** `customer.metadata` holds bank accounts and partner credentials; only `metadata->>'handle'` is safe.
+- Every report states its own window.
+- **The limiter is keyed by desk plus caller.** All bots share one PC address, so a busy desk must not spend another desk's budget.
+- **No live figures from the web tool.** On 2026-10-01 a desk's web tool returned a stale cached copy of polycards.gg. Every desk's SOUL forbids citing Polycards figures read that way.
+
+**Wave 1 (Growth):**
+
+| Route | Returns |
+| --- | --- |
+| `GET /reports/growth/challenge` | The RUNNING week's public Ranks page challenge board, from the same builder (`src/api/store/challenge/build.ts`). Past weeks are refused: recomputed live they would use today's FX and the promoted ladder, not what settlement paid. Each prize carries its official card image. It returns the challenge week's own bounds, stages (threshold, unlocked, remaining, prizes), `prizes_if_week_ended_now` (settlement's cumulative rule), and the top 10 (shown name, handle, pulls, pulled value). It also returns `hidden_players_above_cut`: while that is above 0, prizes are paid by original rank. |
+| `GET /reports/growth/signups?from&to` | New accounts per Malaysia day, counted like the admin Stats page (`signupTopupStats`), plus first top-ups. At most 93 days. |
+| `GET /reports/growth/packs?from&to&group` | Paid and free packs opened per Malaysia day, and the 10 most-opened packs (`packOpens`, shared with Finance's pack-sales; opens only). At most 93 days. |
+| `GET /reports/growth/challenge-poster?stage&leaders` | A finished 1080-wide JPEG for a post: the unlock headline, stage chips, the featured stage's top-3 prize slabs from their official images (never an AI redraw), optional current leaders, the site address. Unreachable art becomes a placeholder tile. The MCP tool returns it as an image block, which Hermes posts. |
+
+**Wave 2 (planned):**
+
+- **Growth: big pulls.**
+  - Sources are `pack` and `free`, at Legendary rarity or above.
+  - Disabled players are dropped.
+  - Value is the draw value at the live FX rate.
+  - The response states this rule.
+- **Growth: the week's tasks.** Claims per task, check-ins per day, and unspun free rips.
 - **Store:**
-  - packs: price, stock, sold-out status, odds summary, EV/RTP;
-  - cards: stock and display value;
-  - low-stock and sold-out lists.
+  - Packs: price, `in_stock` (a display flag only; a pack shown as sold out can still be opened), set-1 EV/RTP and published EV/RTP.
+  - One pack: a pool summary per rarity.
+  - Low stock: `on_hand ≤ 0` by default, with untracked cards left out.
+  - Never sent: per-card weights, odds sets 2 and 3, `target_rtp_bps` or `cost`.
 - **Support:**
-  - a delivery order's status, items and tracking, by order number;
-  - a player's account status by username: active or disabled, phone verified, recent orders.
-- **Growth:**
-  - sign-ups, packs opened, top packs and big pulls per day or week;
-  - Weekly Challenge state;
-  - the week's tasks.
+  - An order by number: the last 6 characters, or the exact `do_` id.
+  - An account by shown name or profile handle.
+  - Built from an allowlist of named fields. Every route is tested for no email, phone or address.
+  - Support loses the web tool in the same ship.
 
 ## Testing
 
@@ -149,5 +173,4 @@ The key goes in before the merge because, once the PR is merged, every `do-apply
 
 - Any write through the report system.
 - Admin dashboard changes.
-- Phase B routes (next plan).
 - The marketing publisher (paused).
