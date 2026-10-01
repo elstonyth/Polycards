@@ -1173,9 +1173,9 @@ export function rateLimit(name: keyof typeof RATE_LIMITS): MiddlewareHandler {
  * over fresh numbers was bounded by nothing (2026-09: ~44% of 30 days' sends,
  * 229 texts in one 25-minute burst, ~$0.34 each).
  *
- * Called by the start route right before the send, AFTER its no-send exits
- * (unserved destination, password-reset without exactly one account), so only
- * sends we actually pay for count. Shared by SMS, WhatsApp and voice:
+ * Called before the start route's account lookup, so known and unknown reset
+ * numbers consume identical state. Counts requests, including no-send exits.
+ * Shared by SMS, WhatsApp and voice:
  * changing channel/purpose cannot buy a fresh budget. Tune with
  * PHONE_OTP_GLOBAL_HOURLY_LIMIT / PHONE_OTP_GLOBAL_DAILY_LIMIT; read per call.
  *

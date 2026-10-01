@@ -41,9 +41,9 @@ const warn = jest.fn();
 const error = jest.fn();
 // `matches` is what listCustomers returns for the password-reset lookup: one
 // row means "exactly one account carries this phone", the only case that sends.
-const mkReq = (phone: string, purpose = 'signup', matches: unknown[] = [{ id: 'cus_1' }]) =>
+const mkReq = (phone: string, purpose = 'signup', matches: unknown[] = [{ id: 'cus_1' }], channel?: 'sms' | 'call') =>
   ({
-    body: { phone, purpose },
+    body: { phone, purpose, channel },
     scope: {
       resolve: (key: string) =>
         key === 'logger'
@@ -225,6 +225,13 @@ describe('POST /store/phone-verification/start — channel', () => {
     expect(channelArg()).toBe('sms');
   });
 
+  it('refuses WhatsApp until sender setup is enabled', async () => {
+    await expect(startVerification(reqWith('whatsapp'), mkRes().res)).rejects.toThrow(
+      /not configured/i,
+    );
+    expect(sendCount()).toBe(0);
+  });
+
   it('uses WhatsApp only after the operator enables the configured sender', async () => {
     const previous = process.env.PHONE_OTP_DEFAULT_CHANNEL;
     process.env.PHONE_OTP_DEFAULT_CHANNEL = 'whatsapp';
@@ -272,14 +279,14 @@ describe('POST /store/phone-verification/start — sitewide send budget', () => 
     expect(logged).not.toContain(MY.slice(3));
   });
 
-  it('spends budget only on a text that would really be sent', async () => {
+  it('charges every valid attempt before account-dependent exits', async () => {
     process.env.NODE_ENV = 'production';
     await startVerification(mkReq(GB), mkRes().res); // unserved: no send
     await startVerification(mkReq(MY, 'password-reset', []), mkRes().res); // no account
-    expect(consumeOtpSendBudget.mock.calls.length).toBe(0);
+    expect(consumeOtpSendBudget.mock.calls.length).toBe(2);
 
     await startVerification(mkReq(MY), mkRes().res);
-    expect(consumeOtpSendBudget.mock.calls.length).toBe(1);
+    expect(consumeOtpSendBudget.mock.calls.length).toBe(3);
     expect(sendCount()).toBe(1);
   });
 
@@ -289,16 +296,55 @@ describe('POST /store/phone-verification/start — sitewide send budget', () => 
     expect(sendCount()).toBe(1);
   });
 
-  it('shares the send budget with voice and WhatsApp, and hides reset failures', async () => {
+  it('returns the same cooldown response for known and unknown reset numbers', async () => {
     process.env.NODE_ENV = 'production';
     consumeOtpSendBudget.mockResolvedValue({ allowed: false, retryAfterMs: 60_000 });
     for (const matches of [[], [{ id: 'cus_1' }]]) {
       const { res, out } = mkRes();
       await startVerification(mkReq(MY, 'password-reset', matches), res);
-      expect(out.body).toEqual({ ok: true, channel: 'sms' });
-      expect(out.status).toBeUndefined();
+      expect(out.body).toEqual({
+        type: 'rate_limit_exceeded', message: 'Too many code requests. Try again in 60s.',
+      });
+      expect(out.status).toBe(429);
     }
     expect(sendCount()).toBe(0);
     expect(consumeOtpSendBudget).toHaveBeenCalledWith(MY, 'sms');
+  });
+
+  it('reset then signup cannot distinguish account existence via cooldown or call quota', async () => {
+    const real = jest.requireActual<typeof rateLimit>('../../../../utils/rate-limit');
+    const redisUrl = process.env.REDIS_URL;
+    delete process.env.REDIS_URL;
+    let now = 1_900_000_000_000;
+    consumeOtpSendBudget.mockImplementation(async (phone: string, channel: 'sms' | 'call') => {
+      // Real policy/store, local memory only; the route still runs its production gate.
+      process.env.NODE_ENV = 'test';
+      try { return await real.consumeOtpSendBudget(phone, channel, now); }
+      finally { process.env.NODE_ENV = 'production'; }
+    });
+    process.env.NODE_ENV = 'production';
+    try {
+      const observed: unknown[] = [];
+      for (const [phone, matches] of [
+        ['+60177000101', []], ['+60177000102', [{ id: 'cus_1' }]],
+      ] as const) {
+        const start = async (purpose: string) => {
+          const { res, out } = mkRes();
+          await startVerification(mkReq(phone, purpose, [...matches], 'call'), res);
+          return { status: out.status ?? 200, body: out.body };
+        };
+        const reset = await start('password-reset');
+        const immediateSignup = await start('signup');
+        now += 60_000;
+        await start('password-reset');
+        now += 60_000;
+        const thirdCall = await start('signup');
+        observed.push([reset.status, immediateSignup.status, thirdCall.status]);
+        now += 24 * 60 * 60_000;
+      }
+      expect(observed).toEqual([[200, 429, 429], [200, 429, 429]]);
+    } finally {
+      if (redisUrl !== undefined) process.env.REDIS_URL = redisUrl;
+    }
   });
 });

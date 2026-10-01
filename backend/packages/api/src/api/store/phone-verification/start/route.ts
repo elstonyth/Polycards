@@ -50,6 +50,27 @@ export async function POST(
 
   const logger = req.scope.resolve('logger') as { warn: (msg: string) => void };
 
+  // Charge every valid attempt before account-sensitive branches. Otherwise a
+  // reset followed by signup reveals account existence through cooldown/call
+  // quota state. This is a conservative request ceiling, not a billing ledger.
+  if (!isDevOrTest(process.env)) {
+    const budget = await consumeOtpSendBudget(phone, channel);
+    if (!budget.allowed) {
+      if (budget.sitewide) void alertOps(
+        req.scope,
+        'phone-otp-budget',
+        'Phone-OTP sitewide send or call budget exhausted. Check Twilio traffic before raising PHONE_OTP_GLOBAL_HOURLY_LIMIT / _DAILY_LIMIT.',
+        { muteMs: 60 * 60_000 },
+      );
+      const retry = Math.max(1, Math.ceil(budget.retryAfterMs / 1000));
+      res.status(429).set('Retry-After', String(retry)).json({
+        type: 'rate_limit_exceeded',
+        message: `Too many code requests. Try again in ${retry}s.`,
+      });
+      return;
+    }
+  }
+
   // password-reset is EXEMPT, and deliberately so: the branch below refuses to
   // send unless exactly ONE registered account carries this phone, so that
   // purpose can only ever text a number already on file. It is not a pumping
@@ -116,31 +137,6 @@ export async function POST(
         `[phone-otp] password-reset start matched ${matches.length} accounts — no SMS sent`,
       );
       res.json(response);
-      return;
-    }
-  }
-
-  // Sitewide spend ceiling (consumeOtpSendBudget). Last, so only a text we
-  // would really pay for counts; skipped where the "SMS" is the dev log line.
-  if (!isDevOrTest(process.env)) {
-    const budget = await consumeOtpSendBudget(phone, channel);
-    if (!budget.allowed) {
-      if (budget.sitewide) void alertOps(
-        req.scope,
-        'phone-otp-budget',
-        'Phone-OTP sitewide send or call budget exhausted. Check Twilio traffic before raising PHONE_OTP_GLOBAL_HOURLY_LIMIT / _DAILY_LIMIT.',
-        { muteMs: 60 * 60_000 },
-      );
-      // Match the unknown-account response even when delivery is unavailable.
-      if (purpose === 'password-reset') {
-        res.json(response);
-        return;
-      }
-      const retry = Math.max(1, Math.ceil(budget.retryAfterMs / 1000));
-      res.status(429).set('Retry-After', String(retry)).json({
-        type: 'rate_limit_exceeded',
-        message: `Too many code requests. Try again in ${retry}s.`,
-      });
       return;
     }
   }
