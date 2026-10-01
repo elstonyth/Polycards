@@ -22,7 +22,6 @@ export type PhoneVerificationEnv = {
   TWILIO_AUTH_TOKEN?: string;
   TWILIO_VERIFY_SERVICE_SID?: string;
   PHONE_OTP_DEV_CODE?: string;
-  PHONE_OTP_DEFAULT_CHANNEL?: string;
   // One Twilio Verify custom-template SID per purpose. Unset = Twilio's default
   // template, i.e. exactly today's behaviour, so this ships dark and the
   // operator turns it on per flow once the templates clear Twilio's approval.
@@ -224,16 +223,11 @@ export const isPhoneOtpPurpose = (v: unknown): v is PhoneOtpPurpose =>
  * and zero successful checks, while the other Malaysian carriers verified
  * normally. Nothing in this stack can tell carriers apart, so the user picks.
  *
- * WhatsApp requires an approved customer-owned sender linked to Verify.
- * Set PHONE_OTP_DEFAULT_CHANNEL=whatsapp only after that setup is complete.
  */
-export const PHONE_OTP_CHANNELS = ['sms', 'call', 'whatsapp'] as const;
+export const PHONE_OTP_CHANNELS = ['sms', 'call'] as const;
 export type PhoneOtpChannel = (typeof PHONE_OTP_CHANNELS)[number];
 export const isPhoneOtpChannel = (v: unknown): v is PhoneOtpChannel =>
   typeof v === 'string' && (PHONE_OTP_CHANNELS as readonly string[]).includes(v);
-
-export const defaultPhoneOtpChannel = (env: PhoneVerificationEnv): PhoneOtpChannel =>
-  env.PHONE_OTP_DEFAULT_CHANNEL === 'whatsapp' ? 'whatsapp' : 'sms';
 
 /** ponytail: 10m fixed TTL, no config knob — add one only if support tickets ask. */
 const PROOF_TTL_MS = 10 * 60_000;
@@ -437,12 +431,13 @@ export async function sendPhoneOtp(
     // Twilio 429s (per-number caps, Fraud Guard) land here too — surface a
     // retryable message, log the status and the error code only (never the
     // rest of the body: it echoes To=).
-    logger.warn(
-      `[phone-otp] twilio send failed with ${res.status} (code ${(await twilioErrorCode(res)) ?? 'none'})`,
-    );
+    const code = await twilioErrorCode(res);
+    logger.warn(`[phone-otp] twilio send failed with ${res.status} (code ${code ?? 'none'})`);
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
-      'Could not send the verification code. Try again shortly.',
+      channel === 'sms' && code === 60410
+        ? 'SMS delivery is temporarily blocked. Wait 30 seconds, then choose a phone call instead.'
+        : 'Could not send the verification code. Try again shortly.',
     );
   }
 }

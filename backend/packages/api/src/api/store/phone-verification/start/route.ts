@@ -3,7 +3,6 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import {
   E164_RE,
-  defaultPhoneOtpChannel,
   isAllowedSmsDestination,
   isDevOrTest,
   isPhoneOtpChannel,
@@ -39,12 +38,9 @@ export async function POST(
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid phone number.');
   if (!isPhoneOtpPurpose(purpose))
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid purpose.');
-  const defaultChannel = defaultPhoneOtpChannel(process.env);
-  const channel = rawChannel === undefined ? defaultChannel : rawChannel;
+  const channel = rawChannel === undefined ? 'sms' : rawChannel;
   if (!isPhoneOtpChannel(channel))
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid channel.');
-  if (channel === 'whatsapp' && defaultChannel !== 'whatsapp')
-    throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'WhatsApp verification is not configured.');
   // Channel is configuration, never evidence that this number has an account.
   const response = { ok: true, channel };
 

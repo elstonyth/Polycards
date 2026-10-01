@@ -576,6 +576,76 @@ describe('createRateLimitMiddleware', () => {
 });
 
 describe('consumeOtpSendBudget', () => {
+  it('cooldown retries do not spend another per-number attempt or cause a ten-minute lockout', async () => {
+    const redisUrl = process.env.REDIS_URL;
+    delete process.env.REDIS_URL;
+    const now = jest.spyOn(Date, 'now');
+    try {
+      const middleware = rateLimit('phone-otp-start-phone');
+      const phone = '+60177000901';
+      const start = T0;
+      const replies: number[] = [];
+      for (const elapsed of [0, 31_000, 77_000, 82_000]) {
+        now.mockReturnValue(start + elapsed);
+        let retry = 0;
+        const response = {
+          status() { return response; },
+          set(_name: string, value: string) { retry = Number(value); return response; },
+          json() { return response; },
+        };
+        let admitted = false;
+        await middleware({ body: { phone } } as MedusaRequest, response as unknown as MedusaResponse, (() => { admitted = true; }) as MedusaNextFunction);
+        if (!admitted) {
+          replies.push(retry);
+          continue;
+        }
+        const budget = await consumeOtpSendBudget(phone, 'sms', start + elapsed);
+        replies.push(budget.allowed ? 0 : Math.ceil(budget.retryAfterMs / 1000));
+      }
+      expect(replies).toEqual([0, 0, 0, 25]);
+    } finally {
+      now.mockRestore();
+      if (redisUrl !== undefined) process.env.REDIS_URL = redisUrl;
+    }
+  });
+
+  it('staggered middleware and route clocks cannot reject an admitted resend or spend rejected daily slots', async () => {
+    const redisUrl = process.env.REDIS_URL;
+    delete process.env.REDIS_URL;
+    const clock = jest.spyOn(Date, 'now');
+    try {
+      const middleware = rateLimit('phone-otp-start-phone');
+      const phone = '+60177000902';
+      const replies: number[] = [];
+      for (const [elapsed, routeDelay] of [
+        [0, 100], [30_000, 50], [31_000, 0], [60_000, 50],
+        [90_000, 50], [120_000, 50], [150_000, 50], [180_000, 50],
+      ]) {
+        clock.mockReturnValue(T0 + elapsed);
+        let retry = 0;
+        const response = {
+          status() { return response; },
+          set(_name: string, value: string) { retry = Number(value); return response; },
+          json() { return response; },
+        };
+        const next = jest.fn();
+        await middleware({ body: { phone } } as MedusaRequest, response as unknown as MedusaResponse, next);
+        if (!next.mock.calls.length) {
+          replies.push(retry);
+          continue;
+        }
+        // Middleware and route run at different times; switching to a call
+        // at exactly 30 seconds must not encounter a second cooldown clock.
+        const budget = await consumeOtpSendBudget(phone, elapsed === 30_000 ? 'call' : 'sms', T0 + elapsed + routeDelay);
+        replies.push(budget.allowed ? 0 : Math.ceil(budget.retryAfterMs / 1000));
+      }
+      expect(replies).toEqual([0, 0, 29, 0, 0, 0, 0, 86_220]);
+    } finally {
+      clock.mockRestore();
+      if (redisUrl !== undefined) process.env.REDIS_URL = redisUrl;
+    }
+  });
+
   const ENV_KEYS = [
     'PHONE_OTP_GLOBAL_HOURLY_LIMIT',
     'PHONE_OTP_GLOBAL_DAILY_LIMIT',
@@ -594,7 +664,7 @@ describe('consumeOtpSendBudget', () => {
     process.env.PHONE_OTP_GLOBAL_HOURLY_LIMIT = '2';
     const t = T0 + 10 * 24 * 60 * MINUTE;
     expect((await consumeOtpSendBudget('+60177000001', 'sms', t)).allowed).toBe(true);
-    expect((await consumeOtpSendBudget('+60177000002', 'whatsapp', t + 1)).allowed).toBe(true);
+    expect((await consumeOtpSendBudget('+60177000002', 'sms', t + 1)).allowed).toBe(true);
     expect((await consumeOtpSendBudget('+60177000003', 'call', t + 2)).allowed).toBe(false);
     expect((await consumeOtpSendBudget('+60177000004', 'sms', t + 60 * MINUTE + 1)).allowed).toBe(true);
   });
@@ -613,13 +683,10 @@ describe('consumeOtpSendBudget', () => {
     );
   });
 
-  it('switching channel cannot bypass cooldown; voice stops after two calls per day', async () => {
+  it('voice stops after two calls per day while the shared SMS budget remains available', async () => {
     const t = T0 + 30 * 24 * 60 * MINUTE;
     const phone = '+60177000001';
-    expect((await consumeOtpSendBudget(phone, 'whatsapp', t)).allowed).toBe(true);
-    expect(await consumeOtpSendBudget(phone, 'call', t + 1)).toMatchObject({
-      allowed: false, retryAfterMs: 59_999, sitewide: false,
-    });
+    expect((await consumeOtpSendBudget(phone, 'sms', t)).allowed).toBe(true);
     expect((await consumeOtpSendBudget(phone, 'call', t + MINUTE)).allowed).toBe(true);
     expect((await consumeOtpSendBudget(phone, 'call', t + 2 * MINUTE)).allowed).toBe(true);
     expect((await consumeOtpSendBudget(phone, 'call', t + 3 * MINUTE)).allowed).toBe(false);
@@ -703,7 +770,7 @@ describe('RATE_LIMITS', () => {
       'notification-read-all|5|10000|30|60000|Too many mark-all-read requests.||',
       'admin-action|30|10000|200|60000|Too many admin requests. Try again shortly.||',
       'gateway-hook|100|10000|600|60000|Too many callback requests.|<function>|',
-      'phone-otp-start-phone|3|600000|6|86400000|Too many code requests for this number.|phoneBodyKeyOf|',
+      'phone-otp-start-phone|1|30000|6|86400000|Too many code requests for this number.|phoneBodyKeyOf|',
       'phone-otp-start|30|60000|300|3600000|Too many code requests.||',
       'phone-otp-check-phone|10|600000|30|86400000|Too many verification attempts for this number.|phoneBodyKeyOf|',
       'phone-otp-check|60|60000|600|3600000|Too many verification attempts.||',

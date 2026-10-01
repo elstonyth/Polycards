@@ -8,6 +8,8 @@ import Redis from 'ioredis';
 import { E164_RE, type PhoneOtpChannel } from '../../utils/phone-verification';
 import { callbackSourceIp } from './payer-ip';
 
+const PHONE_OTP_COOLDOWN_MS = 30_000;
+
 // Shared sliding-window rate limiting for every configured endpoint. The
 // RATE_LIMITS table at the bottom owns endpoint-specific policy. There is no
 // rate-limit facility anywhere in the Medusa/Mercur
@@ -1032,15 +1034,17 @@ export const RATE_LIMITS = {
    * can cost real money (one SMS), layered under Twilio Verify's own
    * per-number caps. Runs BEFORE the IP tier below (middlewares.ts) so a
    * hammered number 429s before spending the sitewide budget. Env-tunable:
-   * PHONE_OTP_START_PHONE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 3/10min)
+   * Cooldown and daily quota share one atomic decision: rejected retries must
+   * not consume a daily slot before the route checks its send budget.
+   * PHONE_OTP_START_PHONE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 1/30s)
    * PHONE_OTP_START_PHONE_RATE_LIMIT / _WINDOW_MS (default 6/24h)
    */
   'phone-otp-start-phone': {
     message: 'Too many code requests for this number.',
     keyOf: phoneBodyKeyOf,
     defaults: {
-      burstLimit: 3,
-      burstWindowMs: 600_000,
+      burstLimit: 1,
+      burstWindowMs: PHONE_OTP_COOLDOWN_MS,
       limit: 6,
       windowMs: 86_400_000,
     },
@@ -1175,7 +1179,7 @@ export function rateLimit(name: keyof typeof RATE_LIMITS): MiddlewareHandler {
  *
  * Called before the start route's account lookup, so known and unknown reset
  * numbers consume identical state. Counts requests, including no-send exits.
- * Shared by SMS, WhatsApp and voice:
+ * Shared by SMS and voice:
  * changing channel/purpose cannot buy a fresh budget. Tune with
  * PHONE_OTP_GLOBAL_HOURLY_LIMIT / PHONE_OTP_GLOBAL_DAILY_LIMIT; read per call.
  *
@@ -1197,12 +1201,8 @@ export async function consumeOtpSendBudget(
       ? { consume: async () => ({ allowed: false, retryAfterMs: 60_000 }) }
       : new InMemorySlidingWindowStore(),
   );
-  const recipient = await otpSendBudgetStore.consume(
-    `rl:phone-otp-cooldown:${phone}`,
-    [{ limit: 1, windowMs: 60_000 }],
-    nowMs,
-  );
-  if (!recipient.allowed) return { ...recipient, sitewide: false };
+  // The per-phone middleware owns the atomic cooldown + daily quota. A second
+  // cooldown clock here could reject a request after middleware spent its slot.
   if (channel === 'call') {
     const personalCalls = await otpSendBudgetStore.consume(
       `rl:phone-otp-calls:${phone}`,

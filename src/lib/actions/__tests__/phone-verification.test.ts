@@ -96,6 +96,34 @@ describe('startPhoneOtp — served-destination gate', () => {
   });
 });
 
+describe('startPhoneOtp — delivery refusals', () => {
+  it('preserves the server retry window from a 429', async () => {
+    const message =
+      'Too many code requests for this number. Try again in 518s.';
+    backend({ ...OK, [START]: { status: 429, body: { message } } });
+    await expect(
+      startPhoneOtp({ phone: MY, purpose: 'signup' }),
+    ).resolves.toEqual({
+      ok: false,
+      error: message,
+      retryAfterSeconds: 518,
+    });
+  });
+
+  it('guides blocked SMS users to a call after the shared cooldown', async () => {
+    const message =
+      'SMS delivery is temporarily blocked. Wait 30 seconds, then choose a phone call instead.';
+    backend({ ...OK, [START]: { status: 403, body: { message } } });
+    await expect(
+      startPhoneOtp({ phone: MY, purpose: 'phone-change' }),
+    ).resolves.toEqual({
+      ok: false,
+      error: message,
+      retryAfterSeconds: 30,
+    });
+  });
+});
+
 // The re-auth fields the backend's phone-change gate needs. `password` must
 // reach the wire (an omitted one 401s), and it must be OMITTED rather than sent
 // empty — the route distinguishes "no password supplied" from "wrong password"
@@ -343,11 +371,11 @@ describe('startPhoneOtp — channel', () => {
   it('returns the configured delivery channel for every caller to display', async () => {
     mem = backend({
       ...OK,
-      [START]: { body: { ok: true, channel: 'whatsapp' } },
+      [START]: { body: { ok: true, channel: 'sms' } },
     });
     expect(await startPhoneOtp({ phone: MY, purpose: 'signup' })).toEqual({
       ok: true,
-      channel: 'whatsapp',
+      channel: 'sms',
     });
   });
   const bodyOf = () => mem.requests[0]!.body;

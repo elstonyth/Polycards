@@ -225,21 +225,21 @@ describe('POST /store/phone-verification/start — channel', () => {
     expect(channelArg()).toBe('sms');
   });
 
-  it('refuses WhatsApp until sender setup is enabled', async () => {
+  it('refuses the removed WhatsApp channel', async () => {
     await expect(startVerification(reqWith('whatsapp'), mkRes().res)).rejects.toThrow(
-      /not configured/i,
+      /invalid channel/i,
     );
     expect(sendCount()).toBe(0);
   });
 
-  it('uses WhatsApp only after the operator enables the configured sender', async () => {
+  it('always defaults to SMS even with a stale WhatsApp environment setting', async () => {
     const previous = process.env.PHONE_OTP_DEFAULT_CHANNEL;
     process.env.PHONE_OTP_DEFAULT_CHANNEL = 'whatsapp';
     try {
       const { res, out } = mkRes();
       await startVerification(mkReq(MY), res);
-      expect(channelArg()).toBe('whatsapp');
-      expect(out.body).toEqual({ ok: true, channel: 'whatsapp' });
+      expect(channelArg()).toBe('sms');
+      expect(out.body).toEqual({ ok: true, channel: 'sms' });
     } finally {
       if (previous === undefined) delete process.env.PHONE_OTP_DEFAULT_CHANNEL;
       else process.env.PHONE_OTP_DEFAULT_CHANNEL = previous;
@@ -316,6 +316,8 @@ describe('POST /store/phone-verification/start — sitewide send budget', () => 
     const redisUrl = process.env.REDIS_URL;
     delete process.env.REDIS_URL;
     let now = 1_900_000_000_000;
+    const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    const middleware = real.rateLimit('phone-otp-start-phone');
     consumeOtpSendBudget.mockImplementation(async (phone: string, channel: 'sms' | 'call') => {
       // Real policy/store, local memory only; the route still runs its production gate.
       process.env.NODE_ENV = 'test';
@@ -330,7 +332,10 @@ describe('POST /store/phone-verification/start — sitewide send budget', () => 
       ] as const) {
         const start = async (purpose: string) => {
           const { res, out } = mkRes();
-          await startVerification(mkReq(phone, purpose, [...matches], 'call'), res);
+          const req = mkReq(phone, purpose, [...matches], 'call');
+          const next = jest.fn();
+          await middleware(req, res, next);
+          if (next.mock.calls.length) await startVerification(req, res);
           return { status: out.status ?? 200, body: out.body };
         };
         const reset = await start('password-reset');
@@ -344,6 +349,7 @@ describe('POST /store/phone-verification/start — sitewide send budget', () => 
       }
       expect(observed).toEqual([[200, 429, 429], [200, 429, 429]]);
     } finally {
+      clock.mockRestore();
       if (redisUrl !== undefined) process.env.REDIS_URL = redisUrl;
     }
   });

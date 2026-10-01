@@ -58,7 +58,7 @@ describe('channel guard', () => {
   it('accepts supported Verify transports', () => {
     expect(isPhoneOtpChannel('sms')).toBe(true);
     expect(isPhoneOtpChannel('call')).toBe(true);
-    expect(isPhoneOtpChannel('whatsapp')).toBe(true);
+    expect(isPhoneOtpChannel('whatsapp')).toBe(false);
     expect(isPhoneOtpChannel('')).toBe(false);
     expect(isPhoneOtpChannel(undefined)).toBe(false);
   });
@@ -318,7 +318,7 @@ describe('twilio transport', () => {
   // Voice fallback: Channel is a plain pass-through to Verify, and TemplateSid
   // is SMS-only (Twilio 60408 rejects it on a call) so it must not ride along
   // even when that purpose has a template configured.
-  it.each(['call', 'whatsapp'] as const)('send posts Channel=%s without an SMS template', async (channel) => {
+  it.each(['call'] as const)('send posts Channel=%s without an SMS template', async (channel) => {
     const fetchMock = jest
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response(JSON.stringify({ status: 'pending' }), { status: 201 }));
@@ -364,7 +364,7 @@ describe('twilio transport', () => {
     );
     const logger = { warn: jest.fn(), error: jest.fn(), info: jest.fn() } as never;
     await expect(sendPhoneOtp(env, logger, PHONE, 'signup')).rejects.toThrow(
-      /could not send the verification code/i,
+      /SMS delivery is temporarily blocked.*phone call/i,
     );
     const line = (logger as { warn: jest.Mock }).warn.mock.calls[0][0] as string;
     expect(line).toContain('403');
