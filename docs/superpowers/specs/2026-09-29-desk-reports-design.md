@@ -142,7 +142,7 @@ Rules for every Phase B report (decided 2026-10-01):
   - Low stock: `on_hand ≤ 0` by default, with untracked cards left out.
   - Never sent: per-card weights, odds sets 2 and 3, `target_rtp_bps` or `cost`.
 - **Support:**
-  - An order by number: the last 6 characters, or the exact `do_` id.
+  - An order by number: the last 6 characters, or the full 26-character id.
   - An account by shown name or profile handle.
   - Built from an allowlist of named fields. Every route is tested for no email, phone or address.
   - Support loses the web tool in the same ship.

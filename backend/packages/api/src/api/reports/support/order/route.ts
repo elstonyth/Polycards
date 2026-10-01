@@ -12,6 +12,7 @@ const FULL_ID = /^[0-9A-Z]{26}$/i;
 // What a customer sees: '#' + the order id's last six characters
 // (storefront orders page, admin deliveries page).
 const NUMBER = /^[0-9A-Z]{6}$/i;
+const TRACKING = /^[A-Za-z0-9 -]{4,40}$/;
 
 // GET /reports/support/order?number=: a delivery order by the number the
 // customer sees (#A1B2C3) or its full id, for the Support desk. Every field is
@@ -25,7 +26,7 @@ export async function GET(
 ): Promise<void> {
   const raw =
     typeof req.query.number === 'string'
-      ? req.query.number.trim().replace(/^#/, '')
+      ? req.query.number.trim().replace(/^#\s*/, '').toUpperCase()
       : '';
   const fullId = FULL_ID.test(raw);
   if (!fullId && !NUMBER.test(raw)) {
@@ -54,10 +55,7 @@ export async function GET(
     { take: ids.length, order: { created_at: 'DESC' } },
   );
   const views = new Map(
-    (await serializeDeliveryOrders(packs, orders as never)).map((v) => [
-      v.id,
-      v,
-    ]),
+    (await serializeDeliveryOrders(packs, orders)).map((v) => [v.id, v]),
   );
   const customers = req.scope.resolve<ICustomerModuleService>(Modules.CUSTOMER);
   const owners = [...new Set(orders.map((o) => o.customer_id))];
@@ -95,7 +93,12 @@ export async function GET(
           card: i.card?.name ?? null,
           card_handle: i.card?.handle ?? null,
         })),
-        tracking_number: o.tracking_number ?? null,
+        // Staff-typed free text: passed on only in a courier-number shape,
+        // so it cannot carry instructions to the bot.
+        tracking_number: TRACKING.test(o.tracking_number ?? '')
+          ? o.tracking_number
+          : null,
+        has_tracking_number: Boolean(o.tracking_number),
         shipping_fee: v?.shipping_fee ?? null,
         insurance_fee: v?.insurance_fee ?? null,
         requested_at: o.created_at,
@@ -107,6 +110,6 @@ export async function GET(
           .map((m) => ({ from: m.from_status, to: m.to_status, at: m.at })),
       };
     }),
-    note: 'status_word is what the customer sees (completed reads as delivered). A customer can cancel or change the address only while an order is requested or processed. A canceled order with no staff status change was canceled by the customer. The delivery address and phone are never shown here.',
+    note: 'status_word is what the customer sees (completed reads as delivered). A customer can cancel or change the address only while an order is requested or processed. The delivery address and phone are never shown here. If has_tracking_number is true but tracking_number is null, the number has an unusual format: check it in the admin. Discuss an order only with the player named in player.',
   });
 }

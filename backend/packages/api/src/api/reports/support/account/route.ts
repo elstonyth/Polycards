@@ -1,6 +1,6 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
-import { Modules } from '@medusajs/framework/utils';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { resolveFxRate } from '../../../../modules/packs/pricing';
@@ -27,9 +27,15 @@ export async function GET(
   const { id, lookupNote } = await findReportPlayer(req);
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const customers = req.scope.resolve<ICustomerModuleService>(Modules.CUSTOMER);
-  const customer = await customers.retrieveCustomer(id, {
-    select: ['id', 'first_name', 'created_at'],
-  });
+  // listCustomers, not retrieveCustomer: a soft-delete between the lookup and
+  // this read would otherwise surface Medusa's 'Customer with id cus_...'.
+  const [customer] = await customers.listCustomers(
+    { id },
+    { select: ['id', 'first_name', 'created_at'], take: 1 },
+  );
+  if (!customer) {
+    throw new MedusaError(MedusaError.Types.NOT_FOUND, 'No such player.');
+  }
   const overview = await packs.playersOverview(
     [id],
     await resolveFxRate(packs),
@@ -43,14 +49,15 @@ export async function GET(
     customerFilter(id, 'g.customer_id'),
   );
   const { rows } = await db.raw<{ n: number }>(
-    'SELECT count(*)::int AS n FROM pull WHERE deleted_at IS NULL AND customer_id = ? AND rolled_at >= ?::timestamptz',
+    // Paid pack pulls, like the lifetime count from playersOverview.
+    "SELECT count(*)::int AS n FROM pull WHERE deleted_at IS NULL AND source = 'pack' AND customer_id = ? AND rolled_at >= ?::timestamptz",
     [id, since],
   );
   const orders = await packs.listDeliveryOrders(
     { customer_id: id },
     { take: 5, order: { created_at: 'DESC' } },
   );
-  const deliveries = await serializeDeliveryOrders(packs, orders as never);
+  const deliveries = await serializeDeliveryOrders(packs, orders);
   res.json({
     username: customer.first_name,
     joined_at: customer.created_at,
@@ -82,6 +89,6 @@ export async function GET(
     ),
     last_30_days_window: { from: since, to: new Date(now).toISOString() },
     ...(lookupNote ? { lookup_note: lookupNote } : {}),
-    note: 'recent_deliveries is the last 5 orders, newest first; use the order report for one order in full. Payment counts are rows created in the last 30 days, by status (amounts in RM). Disabled also covers deleted accounts.',
+    note: 'pulls count paid pack pulls only (no free or prize draws). recent_deliveries is the last 5 orders, newest first; use the order report for one order in full. Payment counts are rows created in the last 30 days, by status (amounts in RM). Disabled also covers deleted accounts.',
   });
 }
