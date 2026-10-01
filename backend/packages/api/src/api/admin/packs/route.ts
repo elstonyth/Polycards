@@ -94,7 +94,9 @@ export async function GET(
   res.json(await inFlight);
 }
 
-async function computePackListBody(req: MedusaRequest): Promise<unknown> {
+// Exported for the Store desk report (GET /reports/store/packs), which reads
+// the same per-pack numbers the dashboard shows.
+export async function computePackListBody(req: MedusaRequest) {
   const packsModuleService: PacksModuleService =
     req.scope.resolve(PACKS_MODULE);
 
@@ -209,6 +211,8 @@ async function computePackListBody(req: MedusaRequest): Promise<unknown> {
         display_image: p.display_image ?? null,
         buyback_percent: p.buyback_percent,
         boost: p.boost,
+        // The storefront sold-out badge (display only: opening is not blocked).
+        in_stock: p.in_stock,
         // Normalized (see above) — the editor seeds inputs with
         // String(tiers[r]), so a raw storage null would render as "null".
         published_odds: publishedOdds,

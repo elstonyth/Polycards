@@ -170,6 +170,38 @@ const BRAND = {
   },
 };
 
+TOOLS.store = [
+  {
+    name: 'packs',
+    description:
+      "Every pack with the numbers the admin pack list shows: title, category, status, whether it is listed publicly, the sold-out badge (display only: a pack showing it can still be opened), price, buyback %, pool mix (RAW, GRADED or MIX), the published tier odds with their EV and RTP, and the real EV and RTP of odds set 1 (what the DEFAULT group plays) at today's card prices. Amounts in RM (MYR).",
+    inputSchema: {},
+    request: () => ({ path: 'packs', params: {} }),
+  },
+  {
+    name: 'pack',
+    description:
+      'One pack by slug (drafts included): the same numbers as packs, plus its pool by rarity (cards, average display price, cards with no stock left, cards with untracked stock) and its top hits with their display price and stock on hand. Never per-card win chances.',
+    inputSchema: {
+      slug: z.string().describe('The pack slug, like silver-pack.'),
+    },
+    request: (args) => ({ path: 'pack', params: { slug: args.slug } }),
+  },
+  {
+    name: 'low_stock',
+    description:
+      'Cards whose tracked stock on hand is at or below max (default 0; below 0 = units owed to winners), lowest first, with the active packs that can still draw them, plus the packs showing the sold-out badge. A card at 0 can still be drawn (buyback covers it). Cards with untracked stock are not listed. Amounts in RM (MYR).',
+    inputSchema: {
+      max: z
+        .number()
+        .int()
+        .optional()
+        .describe('List cards with on_hand at or below this. Default 0.'),
+    },
+    request: (args) => ({ path: 'stock', params: { max: args.max } }),
+  },
+];
+
 TOOLS.support = [
   {
     name: 'order',
