@@ -28,8 +28,13 @@ const MY = '+60107667787';
 const GB = '+442079460958';
 
 const mkRes = () => {
-  const out: { body?: unknown } = {};
-  return { res: { json: (b: unknown) => (out.body = b) } as never, out };
+  const out: { body?: unknown; status?: number; retry?: string } = {};
+  const res = {
+    json: (b: unknown) => (out.body = b),
+    status: (status: number) => { out.status = status; return res; },
+    set: (_name: string, value: string) => { out.retry = value; return res; },
+  };
+  return { res: res as never, out };
 };
 
 const warn = jest.fn();
@@ -59,7 +64,7 @@ describe('POST /store/phone-verification/start — destination allowlist', () =>
     const { res, out } = mkRes();
     await startVerification(mkReq(MY), res);
     expect(sendCount()).toBe(1);
-    expect(out.body).toEqual({ ok: true });
+    expect(out.body).toEqual({ ok: true, channel: 'sms' });
   });
 
   // The whole point: this route is unauthenticated and every call bills an SMS.
@@ -70,7 +75,7 @@ describe('POST /store/phone-verification/start — destination allowlist', () =>
     expect(sendCount()).toBe(0);
     // Byte-identical to the success shape above and to the silent
     // password-reset branch — a distinct error would be a country-probe oracle.
-    expect(out.body).toEqual({ ok: true });
+    expect(out.body).toEqual({ ok: true, channel: 'sms' });
   });
 
   it('logs the calling-code prefix only, never the number', async () => {
@@ -88,7 +93,7 @@ describe('POST /store/phone-verification/start — destination allowlist', () =>
     const { res, out } = mkRes();
     await startVerification(mkReq(GB, 'password-reset'), res);
     expect(sendCount()).toBe(1);
-    expect(out.body).toEqual({ ok: true });
+    expect(out.body).toEqual({ ok: true, channel: 'sms' });
   });
 
   // …but the exemption rides on the account match, not on the purpose string:
@@ -97,7 +102,7 @@ describe('POST /store/phone-verification/start — destination allowlist', () =>
     const { res, out } = mkRes();
     await startVerification(mkReq(GB, 'password-reset', []), res);
     expect(sendCount()).toBe(0);
-    expect(out.body).toEqual({ ok: true });
+    expect(out.body).toEqual({ ok: true, channel: 'sms' });
   });
 
   // A configuration that refuses EVERY destination (including the default) is
@@ -143,7 +148,7 @@ describe('POST /store/phone-verification/start — duplicate-phone diagnosabilit
     const { res, out } = mkRes();
     await startVerification(mkReq(MY, 'password-reset', []), res);
     expect(sendCount()).toBe(0);
-    expect(out.body).toEqual({ ok: true });
+    expect(out.body).toEqual({ ok: true, channel: 'sms' });
     expect(line()).toContain('matched 0 accounts');
   });
 
@@ -156,7 +161,7 @@ describe('POST /store/phone-verification/start — duplicate-phone diagnosabilit
     expect(sendCount()).toBe(0);
     // Same object as the zero-match and the success branch — a distinct status,
     // body or message here is a phone-enumeration oracle.
-    expect(out.body).toEqual({ ok: true });
+    expect(out.body).toEqual({ ok: true, channel: 'sms' });
     expect(line()).toContain('matched 2 accounts');
   });
 
@@ -164,7 +169,7 @@ describe('POST /store/phone-verification/start — duplicate-phone diagnosabilit
     const { res, out } = mkRes();
     await startVerification(mkReq(MY, 'password-reset', [{ id: 'cus_1' }]), res);
     expect(sendCount()).toBe(1);
-    expect(out.body).toEqual({ ok: true });
+    expect(out.body).toEqual({ ok: true, channel: 'sms' });
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -212,7 +217,7 @@ describe('POST /store/phone-verification/start — channel', () => {
     await startVerification(reqWith('call'), res);
     expect(sendCount()).toBe(1);
     expect(channelArg()).toBe('call');
-    expect(out.body).toEqual({ ok: true });
+    expect(out.body).toEqual({ ok: true, channel: 'call' });
   });
 
   it('defaults to sms when the body names no channel', async () => {
@@ -220,8 +225,22 @@ describe('POST /store/phone-verification/start — channel', () => {
     expect(channelArg()).toBe('sms');
   });
 
+  it('uses WhatsApp only after the operator enables the configured sender', async () => {
+    const previous = process.env.PHONE_OTP_DEFAULT_CHANNEL;
+    process.env.PHONE_OTP_DEFAULT_CHANNEL = 'whatsapp';
+    try {
+      const { res, out } = mkRes();
+      await startVerification(mkReq(MY), res);
+      expect(channelArg()).toBe('whatsapp');
+      expect(out.body).toEqual({ ok: true, channel: 'whatsapp' });
+    } finally {
+      if (previous === undefined) delete process.env.PHONE_OTP_DEFAULT_CHANNEL;
+      else process.env.PHONE_OTP_DEFAULT_CHANNEL = previous;
+    }
+  });
+
   it('rejects an unknown channel before sending anything', async () => {
-    await expect(startVerification(reqWith('whatsapp'), mkRes().res)).rejects.toThrow(
+    await expect(startVerification(reqWith('email'), mkRes().res)).rejects.toThrow(
       /invalid channel/i,
     );
     expect(sendCount()).toBe(0);
@@ -242,11 +261,11 @@ describe('POST /store/phone-verification/start — sitewide send budget', () => 
 
   it('refuses the send and alerts ops once the budget is spent', async () => {
     process.env.NODE_ENV = 'production';
-    consumeOtpSendBudget.mockResolvedValue({ allowed: false, retryAfterMs: 1 });
-
-    await expect(startVerification(mkReq(MY), mkRes().res)).rejects.toThrow(
-      /could not send the verification code/i,
-    );
+    consumeOtpSendBudget.mockResolvedValue({ allowed: false, retryAfterMs: 1, sitewide: true });
+    const { res, out } = mkRes();
+    await startVerification(mkReq(MY), res);
+    expect(out.status).toBe(429);
+    expect(out.retry).toBe('1');
     expect(sendCount()).toBe(0);
     const logged = error.mock.calls.map((c) => String(c[0])).join('\n');
     expect(logged).toContain('[ops-alert] phone-otp-budget');
@@ -268,5 +287,18 @@ describe('POST /store/phone-verification/start — sitewide send budget', () => 
     await startVerification(mkReq(MY), mkRes().res);
     expect(consumeOtpSendBudget.mock.calls.length).toBe(0);
     expect(sendCount()).toBe(1);
+  });
+
+  it('shares the send budget with voice and WhatsApp, and hides reset failures', async () => {
+    process.env.NODE_ENV = 'production';
+    consumeOtpSendBudget.mockResolvedValue({ allowed: false, retryAfterMs: 60_000 });
+    for (const matches of [[], [{ id: 'cus_1' }]]) {
+      const { res, out } = mkRes();
+      await startVerification(mkReq(MY, 'password-reset', matches), res);
+      expect(out.body).toEqual({ ok: true, channel: 'sms' });
+      expect(out.status).toBeUndefined();
+    }
+    expect(sendCount()).toBe(0);
+    expect(consumeOtpSendBudget).toHaveBeenCalledWith(MY, 'sms');
   });
 });

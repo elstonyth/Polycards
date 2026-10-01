@@ -22,6 +22,7 @@ export type PhoneVerificationEnv = {
   TWILIO_AUTH_TOKEN?: string;
   TWILIO_VERIFY_SERVICE_SID?: string;
   PHONE_OTP_DEV_CODE?: string;
+  PHONE_OTP_DEFAULT_CHANNEL?: string;
   // One Twilio Verify custom-template SID per purpose. Unset = Twilio's default
   // template, i.e. exactly today's behaviour, so this ships dark and the
   // operator turns it on per flow once the templates clear Twilio's approval.
@@ -216,21 +217,23 @@ export const isPhoneOtpPurpose = (v: unknown): v is PhoneOtpPurpose =>
   typeof v === 'string' && (PHONE_OTP_PURPOSES as readonly string[]).includes(v);
 
 /**
- * Transports Verify may deliver the code over. 'sms' is the default. 'call'
+ * Transports Verify may deliver the code over. 'call'
  * (Twilio reads the code aloud) is the fallback for destinations whose carrier
  * reports the SMS delivered while the subscriber never sees it — on 2026-09-07
  * every Digi (016) number in 30 days of Verify logs had "Delivered" receipts
  * and zero successful checks, while the other Malaysian carriers verified
  * normally. Nothing in this stack can tell carriers apart, so the user picks.
  *
- * Every entry here must be ENABLED on the Verify service in the Twilio
- * console first ("API calls for this channel will fail" otherwise) — which is
- * why 'whatsapp' is absent: it needs a sender set up, not just a toggle.
+ * WhatsApp requires an approved customer-owned sender linked to Verify.
+ * Set PHONE_OTP_DEFAULT_CHANNEL=whatsapp only after that setup is complete.
  */
-export const PHONE_OTP_CHANNELS = ['sms', 'call'] as const;
+export const PHONE_OTP_CHANNELS = ['sms', 'call', 'whatsapp'] as const;
 export type PhoneOtpChannel = (typeof PHONE_OTP_CHANNELS)[number];
 export const isPhoneOtpChannel = (v: unknown): v is PhoneOtpChannel =>
   typeof v === 'string' && (PHONE_OTP_CHANNELS as readonly string[]).includes(v);
+
+export const defaultPhoneOtpChannel = (env: PhoneVerificationEnv): PhoneOtpChannel =>
+  env.PHONE_OTP_DEFAULT_CHANNEL === 'whatsapp' ? 'whatsapp' : 'sms';
 
 /** ponytail: 10m fixed TTL, no config knob — add one only if support tickets ask. */
 const PROOF_TTL_MS = 10 * 60_000;

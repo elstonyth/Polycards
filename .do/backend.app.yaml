@@ -309,17 +309,20 @@ envs:
   - key: ALLOWED_SMS_COUNTRIES
     scope: RUN_TIME
     value: "MY"
-  # Sitewide OTP send ceiling (consumeOtpSendBudget in api/utils/rate-limit.ts)
-  # is ON by default at 150/hour and 1500/day — a spend backstop against SMS
-  # pumping, sized well above the busiest legit launch hour (~35 sends). When
-  # it trips, codes are refused for everyone and an `[ops-alert]
-  # phone-otp-budget` line fires. Override only for real traffic:
-  # - key: PHONE_OTP_GLOBAL_HOURLY_LIMIT
-  #   scope: RUN_TIME
-  #   value: "150"
-  # - key: PHONE_OTP_GLOBAL_DAILY_LIMIT
-  #   scope: RUN_TIME
-  #   value: "1500"
+  # Switch to whatsapp only AFTER linking an approved company-owned sender
+  # and Messaging Service to Polycards Verify. No automatic paid fallback.
+  - key: PHONE_OTP_DEFAULT_CHANNEL
+    scope: RUN_TIME
+    value: "sms"
+  # Shared SMS/WhatsApp/call ceiling; 0 stops sends. Counters survive deploys.
+  # Calls additionally cap at 10/hour, 20/day sitewide and 2/day per number.
+  # Redis unavailable => no paid sends. Raise only for verified real traffic.
+  - key: PHONE_OTP_GLOBAL_HOURLY_LIMIT
+    scope: RUN_TIME
+    value: "40"
+  - key: PHONE_OTP_GLOBAL_DAILY_LIMIT
+    scope: RUN_TIME
+    value: "100"
   # ── Telegram apex-pull board (Legendary+ pulls → the public channel) ────────
   # Both keys were applied straight to the live app on 2026-08-21 (a surgical
   # `doctl apps update`, because this integration shipped after that day's spec

@@ -40,6 +40,7 @@ describe('startPhoneOtp — served-destination gate', () => {
       startPhoneOtp({ phone: MY, purpose: 'signup' }),
     ).resolves.toEqual({
       ok: true,
+      channel: 'sms',
     });
     expect(mem.requests).toHaveLength(1);
   });
@@ -66,7 +67,7 @@ describe('startPhoneOtp — served-destination gate', () => {
   it('lets a password reset through for an unserved number', async () => {
     await expect(
       startPhoneOtp({ phone: GB, purpose: 'password-reset' }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, channel: 'sms' });
     expect(mem.requests).toHaveLength(1);
   });
 
@@ -78,7 +79,7 @@ describe('startPhoneOtp — served-destination gate', () => {
   it('sends an E.164 stored number for phone-change', async () => {
     await expect(
       startPhoneOtp({ phone: MY, purpose: 'phone-change' }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, channel: 'sms' });
     expect(mem.requests).toHaveLength(1);
   });
 
@@ -258,7 +259,7 @@ describe('auth mode per route', () => {
     const guest = backend(OK, { token: null });
     await expect(
       startPhoneOtp({ phone: MY, purpose: 'password-reset' }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, channel: 'sms' });
     expect(guest.requests).toHaveLength(1);
   });
 
@@ -339,12 +340,22 @@ describe('resetPasswordByPhone migration seam', () => {
 // (Digi/016, 2026-09-07). The action forwards the choice verbatim; absent, it
 // sends no field at all so the backend's default (sms) stays the single source.
 describe('startPhoneOtp — channel', () => {
+  it('returns the configured delivery channel for every caller to display', async () => {
+    mem = backend({
+      ...OK,
+      [START]: { body: { ok: true, channel: 'whatsapp' } },
+    });
+    expect(await startPhoneOtp({ phone: MY, purpose: 'signup' })).toEqual({
+      ok: true,
+      channel: 'whatsapp',
+    });
+  });
   const bodyOf = () => mem.requests[0]!.body;
 
   it('passes the voice channel through to the backend', async () => {
     await expect(
       startPhoneOtp({ phone: MY, purpose: 'phone-change', channel: 'call' }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, channel: 'call' });
     expect(mem.requests).toHaveLength(1);
     expect(bodyOf()).toEqual({
       phone: MY,

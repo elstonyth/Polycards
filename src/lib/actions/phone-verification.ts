@@ -129,9 +129,9 @@ const PHONE_CHANGE_RULES: ErrorRule[] = [
 export async function startPhoneOtp(input: {
   phone: string;
   purpose: PhoneOtpPurpose;
-  /** Omitted = backend default (sms). Sent only when the user asked for it. */
+  /** Omitted = configured backend default. */
   channel?: PhoneOtpChannel;
-}): Promise<{ ok: true } | Fail> {
+}): Promise<{ ok: true; channel: PhoneOtpChannel } | Fail> {
   const phone = normalizePhone(input.phone);
   if (!phone)
     return fail('Please enter a valid phone number for the selected country.');
@@ -158,7 +158,15 @@ export async function startPhoneOtp(input: {
       messageOf(r.text, 'Could not send the code. Please try again.'),
     );
   }
-  return { ok: true };
+  const channel = (r.data as { channel?: unknown } | null)?.channel;
+  // Older backends omit channel during a rolling deployment.
+  return {
+    ok: true,
+    channel:
+      channel === 'whatsapp' || channel === 'call' || channel === 'sms'
+        ? channel
+        : (input.channel ?? 'sms'),
+  };
 }
 
 export async function checkPhoneOtp(input: {

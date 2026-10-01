@@ -33,7 +33,7 @@ const noop = () => {};
  * account would be asked here for a password this modal has no field for.
  *
  * The first code can go out by SMS or by voice call from the entry step. The
- * code step's own "Get a call instead" sits behind a 30s cooldown, and
+ * code step's own "Get a call instead" sits behind a 60s cooldown, and
  * someone whose carrier drops SMS (the Digi/016 case PhoneOtpStep documents)
  * should not have to wait it out inside a gate they cannot leave.
  */
@@ -58,7 +58,7 @@ export function PhoneOnboardingModal() {
 
   // One sender for both entry-step controls: the form's submit (SMS) and the
   // "get a call" button, which reads the same form.
-  async function send(form: HTMLFormElement, via: PhoneOtpChannel) {
+  async function send(form: HTMLFormElement, via?: PhoneOtpChannel) {
     if (busy) return;
     setError(null);
     // PhoneField submits E.164 in its hidden input.
@@ -74,15 +74,14 @@ export function PhoneOnboardingModal() {
       const result = await startPhoneOtp({
         phone: normalized,
         purpose: 'phone-change',
-        // Omitted for SMS — the backend default; sent only when asked for.
-        ...(via === 'call' ? { channel: via } : {}),
+        ...(via ? { channel: via } : {}),
       });
       if (!result.ok) {
         setError(result.error);
         return;
       }
       setPhone(normalized);
-      setChannel(via);
+      setChannel(result.channel);
       setStep('otp');
     } catch {
       setError('Something went wrong. Please try again.');
@@ -93,7 +92,7 @@ export function PhoneOnboardingModal() {
 
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    void send(e.currentTarget, 'sms');
+    void send(e.currentTarget);
   }
 
   async function onVerified(token: string) {
@@ -173,7 +172,7 @@ export function PhoneOnboardingModal() {
         <p className="mt-2 text-sm leading-relaxed text-neutral-400">
           A verified phone number is required to finish setting up your account.
           It secures your account and unlocks top-ups, withdrawals and
-          deliveries. We&apos;ll text you a code, or call you with it.
+          deliveries. Get a verification code, or choose a call instead.
         </p>
 
         {step === 'entry' ? (
@@ -222,7 +221,7 @@ export function PhoneOnboardingModal() {
               }}
               className="min-h-11 text-[13px] font-medium text-neutral-400 transition-colors hover:text-white disabled:opacity-50"
             >
-              Can&apos;t receive SMS? Get a call instead
+              Get code by phone call
             </button>
           </form>
         ) : (
