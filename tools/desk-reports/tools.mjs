@@ -95,7 +95,7 @@ TOOLS.growth = [
   {
     name: 'challenge',
     description:
-      "The Weekly Pulled Value Challenge exactly as the public Ranks page shows it: the community pool, each stage with its threshold, whether it is unlocked and how much is still needed, each stage's prizes, the prizes the top 10 would get if the week ended now, and the live top-10 standings (shown name, profile handle, pulls, pulled value). week: current (default) or last. The response gives the challenge week's own start and end; until it ends, the top player is the current leader, not the winner. If hidden_players_above_cut is above 0, prizes are paid by original rank, so do not pair displayed ranks with prizes. Amounts in RM (MYR).",
+      "The Weekly Pulled Value Challenge exactly as the public Ranks page shows it: the community pool, each stage with its threshold, whether it is unlocked and how much is still needed, each stage's prizes with the official card image link (card_image: the real art the site shows; use it instead of drawing the card), the prizes the top 10 would get if the week ended now, and the live top-10 standings (shown name, profile handle, pulls, pulled value). week: current (default) or last. The response gives the challenge week's own start and end; until it ends, the top player is the current leader, not the winner. If hidden_players_above_cut is above 0, prizes are paid by original rank, so do not pair displayed ranks with prizes. Amounts in RM (MYR).",
     inputSchema: {
       week: z
         .enum(['current', 'last'])

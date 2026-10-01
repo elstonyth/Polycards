@@ -36,6 +36,10 @@ export async function GET(
   const pool = body.progress.pooledMyr;
   const cardName = (id: string | null) =>
     id ? (body.cards[id]?.name ?? 'a prize card') : null;
+  // The official art the site shows (graded slab preferred), so a post can
+  // use the real card instead of an AI redraw.
+  const cardImage = (id: string | null) =>
+    id ? (body.cards[id]?.image ?? null) : null;
 
   // Cumulative prizes, computed the way settlement pays them.
   const settle = body.stages.map((s) => ({
@@ -52,7 +56,10 @@ export async function GET(
     .map((p) => ({
       rank: p.rank,
       credits: p.credits,
-      cards: p.cardIds.map(cardName),
+      cards: p.cardIds.map((id) => ({
+        name: cardName(id),
+        image: cardImage(id),
+      })),
     }));
 
   res.json({
@@ -73,6 +80,7 @@ export async function GET(
       prizes: s.rankRewards.map((r) => ({
         rank: r.rank,
         card: cardName(r.cardId),
+        card_image: cardImage(r.cardId),
         credits: r.credits,
       })),
     })),

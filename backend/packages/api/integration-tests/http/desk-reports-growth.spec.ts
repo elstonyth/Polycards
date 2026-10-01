@@ -200,8 +200,8 @@ medusaIntegrationTestRunner({
           unlocked: true,
           remaining_myr: 0,
           prizes: [
-            { rank: 1, card: 'X Card', credits: 0 },
-            { rank: 4, card: null, credits: 1000 },
+            { rank: 1, card: 'X Card', card_image: '/x.webp', credits: 0 },
+            { rank: 4, card: null, card_image: null, credits: 1000 },
           ],
         });
         expect(r.stages[1]).toMatchObject({
@@ -211,7 +211,11 @@ medusaIntegrationTestRunner({
         });
         // Stage 2 is locked, so its Y card and 5000 credits are not paid.
         expect(r.prizes_if_week_ended_now).toEqual([
-          { rank: 1, credits: 0, cards: ['X Card'] },
+          {
+            rank: 1,
+            credits: 0,
+            cards: [{ name: 'X Card', image: '/x.webp' }],
+          },
           { rank: 4, credits: 1000, cards: [] },
         ]);
         expect(new Date(r.week.start).getTime()).toBeLessThan(
