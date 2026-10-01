@@ -11,7 +11,12 @@ jest.mock('../../../../../utils/phone-verification', () => ({
 }));
 
 jest.mock('../../../../utils/rate-limit', () => ({
-  consumeOtpSendBudget: jest.fn(async () => ({ allowed: true, retryAfterMs: 0 })),
+  consumeOtpSendBudget: jest.fn(async (_phone: string, channel: string) => ({
+    allowed: true,
+    retryAfterMs: 0,
+    sitewide: true,
+    channel,
+  })),
 }));
 
 const sendPhoneOtp = phoneUtils.sendPhoneOtp as jest.Mock;
@@ -259,6 +264,30 @@ describe('POST /store/phone-verification/start — channel', () => {
  * tiers never bounded a pumping run over fresh numbers behind rotating
  * Cloudflare edges; this does, and only where texts cost money.
  */
+describe('POST /store/phone-verification/start — budget-chosen channel', () => {
+  const nodeEnv = process.env.NODE_ENV;
+  afterEach(() => {
+    process.env.NODE_ENV = nodeEnv;
+  });
+
+  // A resend inside the code lifetime (or a spent SMS budget) comes back as
+  // a call; the route must call, and tell the storefront it is calling.
+  it('sends on, and reports, the channel the budget swapped in', async () => {
+    process.env.NODE_ENV = 'production';
+    consumeOtpSendBudget.mockResolvedValueOnce({
+      allowed: true,
+      retryAfterMs: 0,
+      sitewide: true,
+      channel: 'call',
+    });
+    const { res, out } = mkRes();
+    await startVerification(mkReq(MY), res);
+    expect(sendCount()).toBe(1);
+    expect(sendPhoneOtp.mock.calls[0][4]).toBe('call');
+    expect(out.body).toEqual({ ok: true, channel: 'call' });
+  });
+});
+
 describe('POST /store/phone-verification/start — sitewide send budget', () => {
   const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
   afterEach(() => {
@@ -347,7 +376,7 @@ describe('POST /store/phone-verification/start — sitewide send budget', () => 
         observed.push([reset.status, immediateSignup.status, thirdCall.status]);
         now += 24 * 60 * 60_000;
       }
-      expect(observed).toEqual([[200, 429, 429], [200, 429, 429]]);
+      expect(observed).toEqual([[200, 429, 200], [200, 429, 200]]);
     } finally {
       clock.mockRestore();
       if (redisUrl !== undefined) process.env.REDIS_URL = redisUrl;

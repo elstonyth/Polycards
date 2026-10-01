@@ -309,8 +309,9 @@ envs:
   - key: ALLOWED_SMS_COUNTRIES
     scope: RUN_TIME
     value: "MY"
-  # Shared SMS/call ceiling; 0 stops sends. Counters survive deploys.
-  # Calls additionally cap at 10/hour, 20/day sitewide and 2/day per number.
+  # SMS ceiling; 0 stops every send, calls included. Counters survive deploys.
+  # A resend inside the 10-minute code lifetime, or a spent SMS budget, goes
+  # out as a call instead (calls: 60/hour, 300/day sitewide).
   # Redis unavailable => no paid sends. Raise only for verified real traffic.
   - key: PHONE_OTP_GLOBAL_HOURLY_LIMIT
     scope: RUN_TIME

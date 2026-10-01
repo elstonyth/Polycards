@@ -8,7 +8,7 @@ import {
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import multer from 'multer';
-import { rateLimit } from './utils/rate-limit';
+import { rateLimit, warmOtpSendBudget } from './utils/rate-limit';
 import { createResetTokenSingleUseGuard } from './utils/reset-token-guard';
 import {
   rejectCustomerMetadata,
@@ -115,6 +115,11 @@ const adminActionRateLimit = rateLimit('admin-action');
 const gatewayHookRateLimit = rateLimit('gateway-hook');
 // TGPay's source allowlist (src/api/utils/payer-ip.ts) — after the limiter.
 const tgpayCallbackAllowlist = createTgpayCallbackAllowlist();
+// Open the phone-OTP send budget's Redis connection at boot, like the
+// limiters above, not on the first code request: that store fails CLOSED in
+// production, so a connection still opening refused every fresh instance's
+// first send (warmOtpSendBudget in utils/rate-limit.ts).
+warmOtpSendBudget();
 // Desk reports (GET /reports/*): one budget per desk (desk + caller address),
 // since every staff desk bot calls from the owner's PC.
 const deskReportsRateLimit = rateLimit('desk-reports');
