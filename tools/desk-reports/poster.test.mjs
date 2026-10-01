@@ -13,6 +13,10 @@ const jpegReply = async () =>
     headers: { 'content-type': 'image/jpeg' },
   });
 const poster = TOOLS.growth.find((t) => t.name === 'challenge_poster');
+// Hermes attaches an MCP image only when the reply carries its MEDIA: line
+// (MCP tools are not on the gateway's auto-attach list), so every image
+// result must say so.
+const ATTACH = /copy this result's MEDIA: line onto its own line in your reply/;
 
 test('image mode returns the bytes as base64 and keeps the key safe', async () => {
   let seen;
@@ -53,6 +57,7 @@ test('challenge_poster tells the bot when prize art is a placeholder', async () 
   assert.equal(out.content[0].type, 'image');
   assert.match(out.content[1].text, /rank 1,3 could not be loaded/);
   assert.doesNotMatch(out.content[1].text, /with the official card art/);
+  assert.match(out.content[1].text, ATTACH);
 });
 
 test('image mode refuses a non-image and still relays error messages', async () => {
@@ -101,6 +106,7 @@ test('challenge_poster asks for an image and returns an MCP image block', async 
     mimeType: 'image/jpeg',
   });
   assert.equal(out.content[1].type, 'text');
+  assert.match(out.content[1].text, ATTACH);
 });
 
 test('brand_logo returns the official file unchanged, without the backend', async () => {
@@ -119,6 +125,7 @@ test('brand_logo returns the official file unchanged, without the backend', asyn
     assert.equal(out.content[0].mimeType, 'image/png');
     const bytes = readFileSync(new URL(`./brand/${file}`, import.meta.url));
     assert.equal(out.content[0].data, bytes.toString('base64'));
+    assert.match(out.content[1].text, ATTACH);
     // PNG signature: the file shipped is a real PNG.
     assert.equal(bytes.subarray(1, 4).toString(), 'PNG');
   }

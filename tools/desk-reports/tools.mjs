@@ -234,6 +234,12 @@ TOOLS.support = [
   },
 ];
 
+// Hermes saves an image result to its cache and hands the bot a MEDIA: line,
+// but attaches the file to the chat only when the reply repeats that line
+// (MCP tools are not on its auto-attach list).
+const ATTACH =
+  "To show it, copy this result's MEDIA: line onto its own line in your reply, unchanged and not in backticks: that line attaches the file.";
+
 // Runs one tool call; failures come back as text the bot can relay.
 export async function runTool(tool, args, config) {
   try {
@@ -249,7 +255,7 @@ export async function runTool(tool, args, config) {
             data: data.toString('base64'),
             mimeType: 'image/png',
           },
-          { type: 'text', text: brand.note },
+          { type: 'text', text: `${brand.note} ${ATTACH}` },
         ],
       };
     }
@@ -267,9 +273,11 @@ export async function runTool(tool, args, config) {
           { type: 'image', data: body.data, mimeType: body.mimeType },
           {
             type: 'text',
-            text: body.missingArt
-              ? `Rendered from live data, but the prize card art for rank ${body.missingArt} could not be loaded and shows as a plain placeholder tile. Say so when you post it, and do not call it the official card art; try again later for the full poster.`
-              : 'Rendered from live data with the official card art. Post this image as the draft; a human reviews it before it is published.',
+            text: `${
+              body.missingArt
+                ? `Rendered from live data, but the prize card art for rank ${body.missingArt} could not be loaded and shows as a plain placeholder tile. Say so when you post it, and do not call it the official card art; try again later for the full poster.`
+                : 'Rendered from live data with the official card art. Post this image as the draft; a human reviews it before it is published.'
+            } ${ATTACH}`,
           },
         ],
       };
