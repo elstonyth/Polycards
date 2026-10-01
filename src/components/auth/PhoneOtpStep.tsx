@@ -3,12 +3,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Loader2 } from 'lucide-react';
 import { startPhoneOtp, checkPhoneOtp } from '@/lib/actions/phone-verification';
-import type {
-  PhoneOtpChannel,
-  PhoneOtpPurpose,
+import {
+  PHONE_OTP_COOLDOWN_SECONDS,
+  type PhoneOtpChannel,
+  type PhoneOtpPurpose,
 } from '@/lib/phone-verification';
 
-const RESEND_COOLDOWN_S = 60;
+const RESEND_COOLDOWN_S = PHONE_OTP_COOLDOWN_SECONDS;
 
 /** Code-entry step shared by signup, phone-change, and forgot-by-phone.
  * The PARENT sends the first code (so it can gate on its own validation);
@@ -78,7 +79,7 @@ export function PhoneOtpStep({
     setBusy(true);
     // Set the cooldown BEFORE the request resolves — a double-click while the
     // first request is in flight must not fire a second SMS (the start route
-    // is budgeted at 3 per 10 min per phone and each send costs real money —
+    // is budgeted at 1 per 30 seconds per phone and each send costs real money —
     // see the phone-OTP limiter module comment in
     // backend/packages/api/src/api/utils/rate-limit.ts). One cooldown for
     // both channels: a call and an SMS to the same number are the same budget.
@@ -86,7 +87,15 @@ export function PhoneOtpStep({
     try {
       const result = await startPhoneOtp({ phone, purpose, channel });
       if (result.ok) setVia(result.channel);
-      else setError(result.error);
+      else {
+        setError(result.error);
+        setCooldown(
+          Math.min(
+            RESEND_COOLDOWN_S,
+            result.retryAfterSeconds ?? RESEND_COOLDOWN_S,
+          ),
+        );
+      }
     } catch {
       setError('Something went wrong. Please try again.');
     } finally {
@@ -107,7 +116,7 @@ export function PhoneOtpStep({
           <>
             Enter the 6-digit code we sent to{' '}
             <span className="text-white">{phone}</span>
-            {via === 'whatsapp' ? ' on WhatsApp.' : ' by SMS.'}
+            {' by SMS.'}
           </>
         )}
       </p>

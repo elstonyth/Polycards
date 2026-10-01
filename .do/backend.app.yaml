@@ -309,12 +309,7 @@ envs:
   - key: ALLOWED_SMS_COUNTRIES
     scope: RUN_TIME
     value: "MY"
-  # Switch to whatsapp only AFTER linking an approved company-owned sender
-  # and Messaging Service to Polycards Verify. No automatic paid fallback.
-  - key: PHONE_OTP_DEFAULT_CHANNEL
-    scope: RUN_TIME
-    value: "sms"
-  # Shared SMS/WhatsApp/call ceiling; 0 stops sends. Counters survive deploys.
+  # Shared SMS/call ceiling; 0 stops sends. Counters survive deploys.
   # Calls additionally cap at 10/hour, 20/day sitewide and 2/day per number.
   # Redis unavailable => no paid sends. Raise only for verified real traffic.
   - key: PHONE_OTP_GLOBAL_HOURLY_LIMIT

@@ -34,13 +34,14 @@ import {
   normalizePhone,
   UNSERVED_PHONE_COUNTRY_ERROR,
 } from '@/lib/profile-validation';
-import type {
-  PhoneOtpChannel,
-  PhoneOtpPurpose,
+import {
+  PHONE_OTP_COOLDOWN_SECONDS,
+  type PhoneOtpChannel,
+  type PhoneOtpPurpose,
 } from '@/lib/phone-verification';
 import { friendlyError, type ErrorRule } from '@/lib/errors';
 
-type Fail = { ok: false; error: string };
+type Fail = { ok: false; error: string; retryAfterSeconds?: number };
 const fail = (error: string): Fail => ({ ok: false, error });
 
 // 429s carry a useful retry message; keep it, genericize everything else.
@@ -129,7 +130,7 @@ const PHONE_CHANGE_RULES: ErrorRule[] = [
 export async function startPhoneOtp(input: {
   phone: string;
   purpose: PhoneOtpPurpose;
-  /** Omitted = configured backend default. */
+  /** Omitted = SMS. */
   channel?: PhoneOtpChannel;
 }): Promise<{ ok: true; channel: PhoneOtpChannel } | Fail> {
   const phone = normalizePhone(input.phone);
@@ -154,16 +155,23 @@ export async function startPhoneOtp(input: {
     { auth: 'none' },
   );
   if (!r.ok) {
-    return fail(
-      messageOf(r.text, 'Could not send the code. Please try again.'),
-    );
+    const retry = /try again in (\d+)s/i.exec(r.text);
+    return {
+      ok: false,
+      error: /SMS delivery is temporarily blocked/i.test(r.text)
+        ? 'SMS delivery is temporarily blocked. Wait 30 seconds, then choose a phone call instead.'
+        : messageOf(r.text, 'Could not send the code. Please try again.'),
+      retryAfterSeconds: retry
+        ? Math.max(1, Number(retry[1]))
+        : PHONE_OTP_COOLDOWN_SECONDS,
+    };
   }
   const channel = (r.data as { channel?: unknown } | null)?.channel;
   // Older backends omit channel during a rolling deployment.
   return {
     ok: true,
     channel:
-      channel === 'whatsapp' || channel === 'call' || channel === 'sms'
+      channel === 'call' || channel === 'sms'
         ? channel
         : (input.channel ?? 'sms'),
   };

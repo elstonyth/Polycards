@@ -3,7 +3,6 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import {
   E164_RE,
-  defaultPhoneOtpChannel,
   isAllowedSmsDestination,
   isDevOrTest,
   isPhoneOtpChannel,
@@ -15,13 +14,13 @@ import { consumeOtpSendBudget } from '../../../utils/rate-limit';
 import { alertOps } from '../../../../modules/packs/ops-alert';
 
 // Public: sends (or dev-logs) an OTP for one of the three phone flows. The
-// success includes only configured channel — whether the phone belongs to
+// success includes only the delivery channel — whether the phone belongs to
 // an account is never disclosed here. SMS-pumping protection is layered:
 // the phone-otp-start IP limiter (middlewares.ts), Twilio Verify's own
 // per-number caps, and — for password-reset — no SMS at all unless exactly
 // one registered account carries the phone (a pumping run would otherwise
 // use the reset flow to text arbitrary numbers on our bill).
-// `channel` is optional and uses the configured default; 'call' is the voice fallback
+// `channel` is optional and defaults to SMS; 'call' is the voice fallback
 // (see PHONE_OTP_CHANNELS). Validated here so an unknown value never reaches
 // Twilio, whose 400 body would echo the number.
 type Body = { phone?: unknown; purpose?: unknown; channel?: unknown };
@@ -39,13 +38,10 @@ export async function POST(
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid phone number.');
   if (!isPhoneOtpPurpose(purpose))
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid purpose.');
-  const defaultChannel = defaultPhoneOtpChannel(process.env);
-  const channel = rawChannel === undefined ? defaultChannel : rawChannel;
+  const channel = rawChannel === undefined ? 'sms' : rawChannel;
   if (!isPhoneOtpChannel(channel))
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid channel.');
-  if (channel === 'whatsapp' && defaultChannel !== 'whatsapp')
-    throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'WhatsApp verification is not configured.');
-  // Channel is configuration, never evidence that this number has an account.
+  // Channel never reveals whether this number has an account.
   const response = { ok: true, channel };
 
   const logger = req.scope.resolve('logger') as { warn: (msg: string) => void };
