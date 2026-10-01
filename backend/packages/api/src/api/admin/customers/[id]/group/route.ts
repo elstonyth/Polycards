@@ -34,6 +34,11 @@ export async function POST(
   const groupId =
     typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : null;
 
-  const group = await setPlayerGroup(req.scope, customerId, groupId);
+  const group = await setPlayerGroup(
+    req.scope,
+    customerId,
+    groupId,
+    req.auth_context.actor_id,
+  );
   res.json({ group: { id: group.id, name: group.name } });
 }

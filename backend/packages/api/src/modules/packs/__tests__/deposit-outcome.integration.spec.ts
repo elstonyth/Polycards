@@ -356,5 +356,34 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect((await reread(row.id)).status).toBe('settled');
       });
     });
+
+    // jobs/deposit-reconcile.ts pages the 'expired' tier with exactly this
+    // selector (created_at $gte + $lt cursor, newest first, `take`). Its unit
+    // spec proves the paging logic against a mock; this proves the real query
+    // honours the operators — a selector the ORM rejected would throw on every
+    // full sweep, and that sweep is the only thing crediting deposits in prod.
+    describe('the expired-tier page query', () => {
+      it('walks older rows with a created_at $lt cursor, newest first', async () => {
+        const ids: string[] = [];
+        for (let i = 0; i < 4; i++) {
+          ids.push((await seed(`page${i}`, 'expired')).id);
+          await new Promise((r) => setTimeout(r, 5)); // distinct created_at
+        }
+        const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const page = (cursor?: Date) =>
+          service.listGatewayDeposits(
+            {
+              status: 'expired',
+              created_at: { $gte: since, ...(cursor ? { $lt: cursor } : {}) },
+            },
+            { take: 2, order: { created_at: 'DESC' } },
+          );
+
+        const first = await page();
+        expect(first.map((r) => r.id)).toEqual([ids[3], ids[2]]);
+        const second = await page(new Date(first[1].created_at));
+        expect(second.map((r) => r.id)).toEqual([ids[1], ids[0]]);
+      });
+    });
   },
 });

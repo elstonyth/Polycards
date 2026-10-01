@@ -1,5 +1,9 @@
 import type { MedusaContainer } from '@medusajs/framework/types';
-import { ensureDefaultPlayerGroup, setPlayerGroup } from '../player-groups';
+import {
+  editGroupOddsSet,
+  ensureDefaultPlayerGroup,
+  setPlayerGroup,
+} from '../player-groups';
 import { DEFAULT_PLAYER_GROUP_NAME } from '../odds-sets';
 
 // Exclusive membership is what makes resolveOddsSetForCustomer's "multi-group
@@ -23,6 +27,7 @@ function buildContainer(opts: {
     removed: [] as { customer_id: string; customer_group_id: string }[],
     created: [] as { name: string; metadata?: Record<string, unknown> }[],
     updated: [] as { id: string; metadata?: Record<string, unknown> }[],
+    audits: [] as unknown[],
   };
   let groups = [...(opts.groups ?? [])];
 
@@ -89,6 +94,11 @@ function buildContainer(opts: {
     }),
     removeCustomerFromGroup: jest.fn(async (pairs) => {
       calls.removed.push(...(Array.isArray(pairs) ? pairs : [pairs]));
+    }),
+    // The packs module resolves to this same stub; audit rows land here.
+    createAdminActionAudits: jest.fn(async (rows: unknown[]) => {
+      calls.audits.push(...rows);
+      return rows;
     }),
   };
 
@@ -197,7 +207,7 @@ describe('setPlayerGroup', () => {
       groups: [DEF, PRO],
       memberships: [DEF],
     });
-    const g = await setPlayerGroup(container, 'cus_1', PRO.id);
+    const g = await setPlayerGroup(container, 'cus_1', PRO.id, 'user_admin');
     expect(g.id).toBe(PRO.id);
     expect(calls.added).toEqual([
       { customer_id: 'cus_1', customer_group_id: PRO.id },
@@ -214,7 +224,7 @@ describe('setPlayerGroup', () => {
       groups: [DEF, PRO],
       memberships: [DEF],
     });
-    await setPlayerGroup(container, 'cus_1', PRO.id);
+    await setPlayerGroup(container, 'cus_1', PRO.id, 'user_admin');
     expect(service.addCustomerToGroup.mock.invocationCallOrder[0]).toBeLessThan(
       service.removeCustomerFromGroup.mock.invocationCallOrder[0],
     );
@@ -226,7 +236,7 @@ describe('setPlayerGroup', () => {
       groups: [DEF, PRO, other],
       memberships: [DEF, other],
     });
-    await setPlayerGroup(container, 'cus_1', PRO.id);
+    await setPlayerGroup(container, 'cus_1', PRO.id, 'user_admin');
     expect(calls.removed.map((r) => r.customer_group_id).sort()).toEqual(
       [DEF.id, other.id].sort(),
     );
@@ -237,7 +247,7 @@ describe('setPlayerGroup', () => {
       groups: [DEF, PRO],
       memberships: [PRO],
     });
-    await setPlayerGroup(container, 'cus_1', PRO.id);
+    await setPlayerGroup(container, 'cus_1', PRO.id, 'user_admin');
     expect(calls.added).toHaveLength(0);
     expect(calls.removed).toHaveLength(0);
   });
@@ -249,7 +259,7 @@ describe('setPlayerGroup', () => {
       groups: [DEF, PRO],
       memberships: [PRO],
     });
-    const g = await setPlayerGroup(container, 'cus_1', null);
+    const g = await setPlayerGroup(container, 'cus_1', null, 'user_admin');
     expect(g.id).toBe(DEF.id);
     expect(calls.added).toEqual([
       { customer_id: 'cus_1', customer_group_id: DEF.id },
@@ -265,7 +275,7 @@ describe('setPlayerGroup', () => {
       memberships: [DEF],
     });
     await expect(
-      setPlayerGroup(container, 'cus_1', 'cg_nope'),
+      setPlayerGroup(container, 'cus_1', 'cg_nope', 'user_admin'),
     ).rejects.toThrow();
     expect(calls.added).toHaveLength(0);
     expect(calls.removed).toHaveLength(0);
@@ -280,9 +290,110 @@ describe('setPlayerGroup', () => {
       customerMissing: true,
     });
     await expect(
-      setPlayerGroup(container, 'cus_gone', PRO.id),
+      setPlayerGroup(container, 'cus_gone', PRO.id, 'user_admin'),
     ).rejects.toThrow();
     expect(calls.added).toHaveLength(0);
     expect(calls.removed).toHaveLength(0);
+  });
+});
+
+describe('setPlayerGroup — audit', () => {
+  const PRO = { id: 'cg_pro', name: 'pro', metadata: { odds_set: 2 } };
+  const DEF = {
+    id: 'cg_def',
+    name: DEFAULT_PLAYER_GROUP_NAME,
+    metadata: { odds_set: 1, is_default: true },
+  };
+
+  it('records the move with the odds set the player rolled before and after', async () => {
+    const { container, calls } = buildContainer({
+      groups: [DEF, PRO],
+      memberships: [DEF],
+    });
+    await setPlayerGroup(container, 'cus_1', PRO.id, 'user_admin');
+    expect(calls.audits).toEqual([
+      expect.objectContaining({
+        admin_id: 'user_admin',
+        entity_type: 'customer',
+        entity_id: 'cus_1',
+        action: 'set_player_group',
+        before: { groups: [{ id: DEF.id, name: DEF.name, odds_set: 1 }] },
+        after: { group: { id: PRO.id, name: 'pro', odds_set: 2 } },
+      }),
+    ]);
+  });
+
+  it('records nothing when the player was already only in that group', async () => {
+    const { container, calls } = buildContainer({
+      groups: [DEF, PRO],
+      memberships: [PRO],
+    });
+    await setPlayerGroup(container, 'cus_1', PRO.id, 'user_admin');
+    expect(calls.audits).toHaveLength(0);
+  });
+});
+
+describe('editGroupOddsSet', () => {
+  const PRO = { id: 'cg_pro', name: 'pro', metadata: { odds_set: 2 } };
+  const DEF = {
+    id: 'cg_def',
+    name: DEFAULT_PLAYER_GROUP_NAME,
+    metadata: { odds_set: 1, is_default: true },
+  };
+
+  it('writes the new set and records before and after', async () => {
+    const { container, calls } = buildContainer({ groups: [DEF, PRO] });
+    await editGroupOddsSet(container, {
+      groupId: PRO.id,
+      oddsSet: 3,
+      adminId: 'user_admin',
+    });
+    expect(calls.updated).toEqual([{ id: PRO.id, metadata: { odds_set: 3 } }]);
+    expect(calls.audits).toEqual([
+      expect.objectContaining({
+        admin_id: 'user_admin',
+        entity_type: 'customer_group',
+        entity_id: PRO.id,
+        action: 'edit_odds_set',
+        before: { odds_set: 2 },
+        after: { odds_set: 3 },
+      }),
+    ]);
+  });
+
+  it('writes and records nothing when the set is unchanged', async () => {
+    const { container, calls } = buildContainer({ groups: [DEF, PRO] });
+    await editGroupOddsSet(container, {
+      groupId: PRO.id,
+      oddsSet: 2,
+      adminId: 'user_admin',
+    });
+    expect(calls.updated).toHaveLength(0);
+    expect(calls.audits).toHaveLength(0);
+  });
+
+  // DEFAULT always rolls set 1 (resolveOddsSetForCustomer ignores its row),
+  // so accepting a set there would record a change that changes nothing.
+  it('refuses the default group', async () => {
+    const { container, calls } = buildContainer({ groups: [DEF, PRO] });
+    await expect(
+      editGroupOddsSet(container, {
+        groupId: DEF.id,
+        oddsSet: 2,
+        adminId: 'user_admin',
+      }),
+    ).rejects.toThrow(/default/i);
+    expect(calls.updated).toHaveLength(0);
+  });
+
+  it('refuses anything but set 1, 2 or 3', async () => {
+    const { container } = buildContainer({ groups: [DEF, PRO] });
+    await expect(
+      editGroupOddsSet(container, {
+        groupId: PRO.id,
+        oddsSet: 4 as 1,
+        adminId: 'user_admin',
+      }),
+    ).rejects.toThrow(/1, 2 or 3/);
   });
 });

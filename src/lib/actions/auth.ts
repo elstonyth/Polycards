@@ -126,7 +126,7 @@ const AUTH_RULES: ErrorRule[] = [
     /phone number is already in use/i,
     'This phone number is already registered to another account. Log in instead, or use a different number.',
   ],
-  // One username = one profile URL (the username guard, and the unique index
+  // One username = one player (the username guard, and the unique index
   // under it). Must sit ABOVE the /already exists/ email rule: this message is
   // about the username, and the generic "account with this email" copy would
   // send them to a login screen for an account that does not exist.
@@ -142,6 +142,16 @@ const AUTH_RULES: ErrorRule[] = [
   [
     /already exists/i,
     'An account with this email already exists. Sign in with your password instead.',
+  ],
+  // Core's validateCustomerAccountCreation: a customer that already
+  // has_account holds this email, yet the emailpass register step just
+  // succeeded — so that account has no password login linked, i.e. it signed
+  // up with Google. Unmapped, this fell through to the status check below and
+  // told them "That username is taken"; on 2026-09-30 one person renamed
+  // themselves eight times in three minutes against it.
+  [
+    /already has an account/i,
+    'This email already has an account that signs in with Google. Use "Continue with Google" instead.',
   ],
   [/invalid email or password/i, 'Incorrect email or password.'],
   // POLYCARD-BACK §4.2 — the backend blocks a disabled account at the emailpass
@@ -274,7 +284,7 @@ export async function signup(input: {
       ok: false,
       error: 'Please enter a valid phone number for the selected country.',
     };
-  // The username is the public profile URL, so it is validated by the same rule
+  // The username seeds the profile handle, so it is validated by the same rule
   // updateProfile applies — a name accepted at signup can never be refused
   // later on the settings page. Left optional: an account created without one
   // is named anonymously on its first profile read, and refusing the whole
@@ -495,16 +505,15 @@ export async function googleCallback(query: {
         });
         return { ok: false, reason: 'email' };
       }
-      // Deliberately NO first_name. It is the public profile URL now, and
-      // Google's `given_name` is a legal first name — "Wei Nguan", spaces and
-      // all. Forwarding it would either fail the username guard outright, or
-      // publish someone's real name as their permanent public address, which is
-      // the exact shape of the URL this change exists to get rid of. It would
-      // also collide for the second Googler with a common first name and 409
-      // the whole signup. Instead the account is named anonymously
-      // ("Collector4809") on its first profile read, and the user picks a real
-      // username in settings. `last_name` is not public and not the URL, so it
-      // rides along unchanged.
+      // Deliberately NO first_name. The permanent profile URL is frozen from
+      // it on first login, and Google's `given_name` is a legal first name —
+      // "Wei Nguan", spaces and all. Forwarding it would either fail the
+      // username guard outright, or publish someone's real name as their
+      // permanent public address. It would also collide for the second
+      // Googler with a common first name and 409 the whole signup. Instead the
+      // account is named anonymously ("Collector4809") on its first profile
+      // read, and the user picks a display name in settings; the handle stays.
+      // `last_name` is not public and not the URL, so it rides along unchanged.
       try {
         await sdk.store.customer.create(
           {

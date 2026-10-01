@@ -1,8 +1,14 @@
 import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import { MedusaError } from '@medusajs/framework/utils';
+import type { MedusaContainer } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import { pageAll } from '../../api/utils/page-all';
+import {
+  configAuditRow,
+  oddsSnapshot,
+  sameConfig,
+} from '../../modules/packs/config-audit';
 import {
   computeSetWeights,
   PCT_SCALE,
@@ -16,6 +22,18 @@ export type SavePackOddsInput = {
   // One per card in the pack: { card_id, locked, pct, rarity } plus the set-2/3
   // overrides (pct_2 / pct_3 — null = inherit the previous set for that card).
   entries: SetEntry[];
+  // The acting admin (auth_context.actor_id) for the audit row.
+  admin_id: string;
+  // The pack's auto-split target RTP (basis points), when the editor sent one.
+  // Written HERE rather than by the route after the workflow, so it is
+  // compensated with the odds and recorded in the same audit row.
+  target_rtp_bps?: number;
+};
+
+type CompensateData = {
+  odds: OddsSnapshot[];
+  // The target RTP this save replaced; null when the save left it alone.
+  pack: { id: string; target_rtp_bps: number } | null;
 };
 
 // OddsInput carries rarity as a plain string (the route validates it); narrow it
@@ -54,101 +72,139 @@ type OddsSnapshot = {
 //   - computeSetWeights must return no error, for EVERY set (Σpinned ≤ 100;
 //     no unlocked Common ⇒ Σ == 100 exactly; each rate in 0–100). Set 2/3
 //     failures come back prefixed 'Set N: '.
+//
+// The output carries the before/after audit row (null when the save changed
+// nothing) for the workflow's final record-admin-audit step.
+export const savePackOddsInvoke = async (
+  input: SavePackOddsInput,
+  { container }: { container: MedusaContainer },
+) => {
+  const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+
+  const [pack] = await packs.listPacks({ slug: input.pack_id }, { take: 1 });
+  if (!pack) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_FOUND,
+      `Pack '${input.pack_id}' is not available.`,
+    );
+  }
+
+  // PAGED, not take:1000 — the set-equality guard below must see EVERY
+  // existing row, or a >1,000-card pool can never be saved again (the GET
+  // route and set-pack-members already page for the same reason).
+  const allExisting = await pageAll((opts) =>
+    packs.listPackOdds({ pack_id: input.pack_id }, opts),
+  );
+  // The win-rate editor only ever touches card rows — reward rows (card_id
+  // null) are managed elsewhere and must not be matched/normalized here.
+  const existing = allExisting.filter(
+    (o): o is typeof o & { card_id: string; rarity: OddsRarity } =>
+      o.card_id != null,
+  );
+  if (existing.length === 0) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_FOUND,
+      `Pack '${input.pack_id}' has no odds configured.`,
+    );
+  }
+
+  // The submitted entries must match the pack's card set exactly — guards
+  // against a stale form (cards added/removed since load) or injected ids.
+  const existingIds = new Set(existing.map((o) => o.card_id));
+  const submittedIds = new Set(input.entries.map((e) => e.card_id));
+  const sameSet =
+    existingIds.size === submittedIds.size &&
+    [...existingIds].every((id) => submittedIds.has(id));
+  if (!sameSet) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      "Submitted cards do not match this pack's prize pool. Reload and retry.",
+    );
+  }
+
+  const { rows, error } = computeSetWeights(input.entries);
+  if (error) {
+    throw new MedusaError(MedusaError.Types.INVALID_DATA, error);
+  }
+
+  const idByCard = new Map(existing.map((o) => [o.card_id, o.id]));
+  // Rarity rides along with the save: the editor chooses the per-pack tier and
+  // the weights computed FROM it in one submit.
+  const rarityByCard = new Map(input.entries.map((e) => [e.card_id, e.rarity]));
+  // weight_2/weight_3 are written UNCONDITIONALLY (null included): dropping
+  // the only explicit pct_2 returns that set to pure inheritance, and the
+  // stale materialized bps must be cleared, not left behind.
+  const updates: OddsSnapshot[] = rows.map((r) => ({
+    id: idByCard.get(r.card_id)!,
+    rarity: toRarity(rarityByCard.get(r.card_id)),
+    weight: r.weight,
+    weight_2: r.weight_2,
+    weight_3: r.weight_3,
+    locked: r.locked,
+  }));
+
+  const snapshot: OddsSnapshot[] = existing.map((o) => ({
+    id: o.id,
+    rarity: o.rarity,
+    weight: o.weight,
+    weight_2: o.weight_2 ?? null,
+    weight_3: o.weight_3 ?? null,
+    locked: o.locked,
+  }));
+
+  await packs.updatePackOdds(updates);
+
+  // The target RTP rides the same step: written here, restored by the same
+  // compensation, recorded in the same audit row.
+  const targetBefore = pack.target_rtp_bps ?? 7000;
+  const targetAfter = input.target_rtp_bps ?? targetBefore;
+  const targetChanged = targetAfter !== targetBefore;
+  if (targetChanged) {
+    await packs.updatePacks([{ id: pack.id, target_rtp_bps: targetAfter }]);
+  }
+
+  // Response contract (unchanged for the editor): the SET-1 computed odds.
+  const computed = rows.map((r) => ({
+    card_id: r.card_id,
+    weight: r.weight,
+    locked: r.locked,
+    pct: r.weight / PCT_SCALE,
+  }));
+
+  // Audit: the odds table as stored before, and as this save wrote it (the
+  // written columns over the stored rows, so Top Hits order carries over).
+  const writtenById = new Map(updates.map((u) => [u.id, u]));
+  const before = { ...oddsSnapshot(existing), target_rtp_bps: targetBefore };
+  const after = {
+    ...oddsSnapshot(existing.map((o) => ({ ...o, ...writtenById.get(o.id) }))),
+    target_rtp_bps: targetAfter,
+  };
+  const audit = sameConfig(before, after)
+    ? null
+    : configAuditRow({
+        adminId: input.admin_id,
+        entityType: 'pack',
+        entityId: pack.slug,
+        action: 'edit_odds',
+        before,
+        after,
+      });
+
+  // Return the computed odds; carry the snapshot as the compensation payload.
+  return new StepResponse({ computed, audit }, {
+    odds: snapshot,
+    pack: targetChanged ? { id: pack.id, target_rtp_bps: targetBefore } : null,
+  } satisfies CompensateData);
+};
+
 export const savePackOddsStep = createStep(
   'save-pack-odds',
-  async (input: SavePackOddsInput, { container }) => {
+  savePackOddsInvoke,
+  async (data: CompensateData | undefined, { container }) => {
+    if (!data) return;
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-
-    const [pack] = await packs.listPacks({ slug: input.pack_id }, { take: 1 });
-    if (!pack) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_FOUND,
-        `Pack '${input.pack_id}' is not available.`,
-      );
-    }
-
-    // PAGED, not take:1000 — the set-equality guard below must see EVERY
-    // existing row, or a >1,000-card pool can never be saved again (the GET
-    // route and set-pack-members already page for the same reason).
-    const allExisting = await pageAll((opts) =>
-      packs.listPackOdds({ pack_id: input.pack_id }, opts),
-    );
-    // The win-rate editor only ever touches card rows — reward rows (card_id
-    // null) are managed elsewhere and must not be matched/normalized here.
-    const existing = allExisting.filter(
-      (o): o is typeof o & { card_id: string; rarity: OddsRarity } =>
-        o.card_id != null,
-    );
-    if (existing.length === 0) {
-      throw new MedusaError(
-        MedusaError.Types.NOT_FOUND,
-        `Pack '${input.pack_id}' has no odds configured.`,
-      );
-    }
-
-    // The submitted entries must match the pack's card set exactly — guards
-    // against a stale form (cards added/removed since load) or injected ids.
-    const existingIds = new Set(existing.map((o) => o.card_id));
-    const submittedIds = new Set(input.entries.map((e) => e.card_id));
-    const sameSet =
-      existingIds.size === submittedIds.size &&
-      [...existingIds].every((id) => submittedIds.has(id));
-    if (!sameSet) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        "Submitted cards do not match this pack's prize pool. Reload and retry.",
-      );
-    }
-
-    const { rows, error } = computeSetWeights(input.entries);
-    if (error) {
-      throw new MedusaError(MedusaError.Types.INVALID_DATA, error);
-    }
-
-    const idByCard = new Map(existing.map((o) => [o.card_id, o.id]));
-    // Rarity rides along with the save: the editor chooses the per-pack tier and
-    // the weights computed FROM it in one submit.
-    const rarityByCard = new Map(
-      input.entries.map((e) => [e.card_id, e.rarity]),
-    );
-    // weight_2/weight_3 are written UNCONDITIONALLY (null included): dropping
-    // the only explicit pct_2 returns that set to pure inheritance, and the
-    // stale materialized bps must be cleared, not left behind.
-    const updates: OddsSnapshot[] = rows.map((r) => ({
-      id: idByCard.get(r.card_id)!,
-      rarity: toRarity(rarityByCard.get(r.card_id)),
-      weight: r.weight,
-      weight_2: r.weight_2,
-      weight_3: r.weight_3,
-      locked: r.locked,
-    }));
-
-    const snapshot: OddsSnapshot[] = existing.map((o) => ({
-      id: o.id,
-      rarity: o.rarity,
-      weight: o.weight,
-      weight_2: o.weight_2 ?? null,
-      weight_3: o.weight_3 ?? null,
-      locked: o.locked,
-    }));
-
-    await packs.updatePackOdds(updates);
-
-    // Response contract (unchanged for the editor): the SET-1 computed odds.
-    const computed = rows.map((r) => ({
-      card_id: r.card_id,
-      weight: r.weight,
-      locked: r.locked,
-      pct: r.weight / PCT_SCALE,
-    }));
-
-    // Return the computed odds; carry the snapshot as the compensation payload.
-    return new StepResponse(computed, snapshot);
-  },
-  async (snapshot, { container }) => {
-    if (!snapshot) return;
-    const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-    await packs.updatePackOdds(snapshot);
+    await packs.updatePackOdds(data.odds);
+    if (data.pack) await packs.updatePacks([data.pack]);
   },
 );
 

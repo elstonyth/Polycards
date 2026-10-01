@@ -6,14 +6,14 @@ import {
   normalizeUsername,
   publicProfileFields,
   sanitizeUsername,
+  storedHandle,
   suffixedUsername,
 } from "../profile-handle";
 
-// A customer's display name IS their public profile URL. These rules are what
-// makes that safe: a fixed ASCII charset so a name is a URL segment without
-// encoding, and a case fold so two people can never hold what reads as one
-// link. Nothing here is derived or stored separately — that was the old model,
-// and it silently orphaned every URL on rename.
+// A customer has a display name (changeable) and a permanent profile handle
+// (the URL). Both share these rules: a fixed ASCII charset so a value is a URL
+// segment without encoding, and a case fold so two people can never hold what
+// reads as one name or one link.
 
 describe("USERNAME_RE", () => {
   it("accepts the shapes real display names take", () => {
@@ -118,21 +118,43 @@ describe("suffixedUsername", () => {
   });
 });
 
-describe("publicProfileFields", () => {
-  it("uses the display name as the handle", () => {
-    expect(
-      publicProfileFields({ first_name: "MOONBREON", metadata: {} }, 12345),
-    ).toEqual({ name: "MOONBREON", handle: "MOONBREON", avatarUrl: null });
+describe("storedHandle", () => {
+  it("reads the permanent handle out of metadata", () => {
+    expect(storedHandle({ metadata: { handle: "Collector6167" } })).toBe(
+      "Collector6167",
+    );
   });
 
-  it("returns no handle when the name could not be a URL", () => {
-    // A row written before the backfill must degrade to "no link", never to a
-    // link that 404s.
+  it("is null before one is assigned, or when the stored value is unusable", () => {
+    expect(storedHandle(undefined)).toBeNull();
+    expect(storedHandle({ metadata: null })).toBeNull();
+    expect(storedHandle({ metadata: {} })).toBeNull();
+    expect(storedHandle({ metadata: { handle: "has space" } })).toBeNull();
+    expect(storedHandle({ metadata: { handle: 42 } })).toBeNull();
+  });
+});
+
+describe("publicProfileFields", () => {
+  // The reported case (2026-09-30): an account first named Collector6167
+  // that renamed after its Immortal pull went out on Telegram. The post's
+  // link has to keep resolving, so it is the handle — never the name.
+  it("shows the display name but links the permanent handle", () => {
+    expect(
+      publicProfileFields(
+        { first_name: "MOONBREON", metadata: { handle: "Collector6167" } },
+        12345,
+      ),
+    ).toEqual({ name: "MOONBREON", handle: "Collector6167", avatarUrl: null });
+  });
+
+  it("links nothing until a handle is assigned — not even a URL-safe name", () => {
+    // Falling back to the display name would mint exactly the link a rename
+    // retires.
     const { name, handle } = publicProfileFields(
-      { first_name: "爱动漫的", metadata: {} },
+      { first_name: "MOONBREON", metadata: {} },
       98765,
     );
-    expect(name).toBe("爱动漫的");
+    expect(name).toBe("MOONBREON");
     expect(handle).toBeNull();
   });
 

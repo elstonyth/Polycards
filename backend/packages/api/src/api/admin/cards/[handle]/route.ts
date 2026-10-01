@@ -1,4 +1,8 @@
-import { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
+import {
+  AuthenticatedMedusaRequest,
+  MedusaRequest,
+  MedusaResponse,
+} from '@medusajs/framework/http';
 import PacksModuleService from '../../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import { updateCardWorkflow } from '../../../../workflows/update-card';
@@ -46,10 +50,12 @@ export async function POST(
 // DELETE /admin/cards/:handle — unregister a card from the gacha system (card +
 // PackOdds membership). The inventory Product and Pull history are KEPT.
 export async function DELETE(
-  req: MedusaRequest,
+  req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
   const { handle } = req.params;
-  await deleteCardWorkflow(req.scope).run({ input: { handle } });
+  await deleteCardWorkflow(req.scope).run({
+    input: { handle, admin_id: req.auth_context.actor_id },
+  });
   res.json({ deleted: true, handle });
 }

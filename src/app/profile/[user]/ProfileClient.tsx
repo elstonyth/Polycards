@@ -22,14 +22,20 @@ export default function ProfileClient({
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const stats = [
-    // Real profiles carry no global rank (a leaderboard concern) — render "—".
+    // Rank is this week's board position; pulls/volume are all-time. The
+    // labels say so — unlabelled, "50 pulls" beside the board's "34 pulls"
+    // this week read as the two pages disagreeing.
     {
       icon: Trophy,
-      label: 'Rank',
+      label: 'Weekly rank',
       value: user.rank == null ? '—' : `#${num(user.rank)}`,
     },
-    { icon: Layers, label: 'Pulls', value: num(user.pulls) },
-    { icon: TrendingUp, label: 'Volume', value: rm(user.volume) },
+    { icon: Layers, label: 'All-time pulls', value: num(user.pulls) },
+    {
+      icon: TrendingUp,
+      label: 'All-time pulled value',
+      value: rm(user.volume),
+    },
   ];
   // Profiles ship their pull activity. The fallback below derives a feed from
   // the collection — it survives the mock pool's removal because a real profile
@@ -68,6 +74,9 @@ export default function ProfileClient({
             <h1 className="font-heading text-3xl font-bold tracking-tight text-white sm:text-4xl">
               {user.username}
             </h1>
+            <p className="mt-1 truncate text-[13px] font-semibold text-white/60">
+              @{user.handle}
+            </p>
             <p className="mt-1 flex items-center justify-center gap-1.5 text-[13px] text-white/50 sm:justify-start">
               <CalendarDays className="h-3.5 w-3.5" aria-hidden /> Collecting
               since {user.joined}
@@ -85,7 +94,7 @@ export default function ProfileClient({
                 className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-center sm:text-left"
               >
                 <div className="flex items-center justify-center gap-1.5 text-white/60 sm:justify-start">
-                  <Icon className="h-3.5 w-3.5" aria-hidden />
+                  <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
                   <span className="text-[11px] uppercase tracking-wide">
                     {s.label}
                   </span>

@@ -27,6 +27,7 @@ import {
 import { validateDeliverableAddress } from './utils/address-guard';
 import {
   blockGroupWithdrawals,
+  rejectGroupOddsSetUpdate,
   rejectGroupPolicyMetadata,
   stripAdditionalData,
 } from './utils/customer-group-guards';
@@ -430,10 +431,11 @@ export default defineMiddlewares({
       // lever) — see api/utils/phone-claim.ts.
       //
       // validateUsernameWrite('signup') (see utils/username-guard.ts):
-      // `first_name` is the public profile URL, so it is charset-checked and
-      // uniqueness-checked here rather than accepted as the free text Medusa's
-      // validator allows. Omitting it is still fine — the account is named
-      // anonymously on its first GET /store/profiles/me.
+      // `first_name` is the public display name, and the account's permanent
+      // profile handle is frozen from it on the first GET /store/profiles/me,
+      // so it is charset-checked and uniqueness-checked here rather than
+      // accepted as the free text Medusa's validator allows. Omitting it is
+      // still fine — the account is named anonymously on that same first read.
       matcher: '/store/customers',
       method: 'POST',
       middlewares: [
@@ -453,10 +455,11 @@ export default defineMiddlewares({
       // store/phone-verification/change route (Task 4); clearing to null
       // stays allowed.
       //
-      // validateUsernameWrite('update'): a rename MOVES the profile URL, so the
-      // new name must be a legal URL segment and unclaimed. Clearing it is
-      // refused here (unlike on signup) — a live profile cannot lose its
-      // address. The cache eviction that must follow a successful rename is in
+      // validateUsernameWrite('update'): a rename changes the display name
+      // only — the profile URL is the permanent handle and stays put — but the
+      // new name must still be URL-safe and unclaimed. Clearing it is refused
+      // here (unlike on signup) — a live profile cannot lose its name. The
+      // cache eviction that must follow a successful rename is in
       // renameProfileCacheEviction below, not here: this runs before the write.
       matcher: '/store/customers/me',
       method: 'POST',
@@ -1117,6 +1120,12 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Odds set of a player group (POST /admin/customer-groups/:id/odds-set).
+      matcher: '/admin/customer-groups/*/odds-set',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Native create/update customer-group routes: the prebuilt Edit form
       // posts `additional_data`, which core's strict validator refuses — see
       // stripAdditionalData. No rate limiter here: these are core routes, not
@@ -1137,7 +1146,14 @@ export default defineMiddlewares({
       // rejectGroupPolicyMetadata keeps the partner-policy keys off the
       // native metadata write path — POST /admin/customer-groups/:id/policy is
       // their only writer (bounds + audit).
-      middlewares: [stripAdditionalData, rejectGroupPolicyMetadata],
+      // rejectGroupOddsSetUpdate does the same for an EXISTING group's
+      // odds_set: POST /admin/customer-groups/:id/odds-set is its only
+      // writer (audited); create still carries the set a group is born with.
+      middlewares: [
+        stripAdditionalData,
+        rejectGroupPolicyMetadata,
+        rejectGroupOddsSetUpdate,
+      ],
     },
     {
       matcher: '/admin/rewards-settings',

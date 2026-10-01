@@ -60,6 +60,11 @@ export const VAULT_RULES: ErrorRule[] = [
     // was refusing everything, because the old copy read as their mistake.
     'Your withdrawal was refused by the payment provider and your balance has been returned. Check your bank details are correct — if they are, contact support rather than retrying.',
   ],
+  // Our TGPay payout wallet is short (backend TGPAY_PAYOUT_FLOAT_EMPTY). The
+  // backend copy already says it is our side and the bank details are fine;
+  // without this rule it fell through to "Something went wrong. Please try
+  // again." — the retry loop this message exists to stop.
+  [/withdrawals are temporarily unavailable/i, (text) => text],
   [/withdrawals are not open/i, 'Withdrawals are not open yet.'],
   // The band message names the ACTIVE gateway's own floor and ceiling
   // (gateways differ), so it passes through verbatim — a fixed

@@ -216,16 +216,13 @@ export const isPhoneOtpPurpose = (v: unknown): v is PhoneOtpPurpose =>
   typeof v === 'string' && (PHONE_OTP_PURPOSES as readonly string[]).includes(v);
 
 /**
- * Transports Verify may deliver the code over. 'sms' is the default. 'call'
+ * Transports Verify may deliver the code over. 'call'
  * (Twilio reads the code aloud) is the fallback for destinations whose carrier
  * reports the SMS delivered while the subscriber never sees it — on 2026-09-07
  * every Digi (016) number in 30 days of Verify logs had "Delivered" receipts
  * and zero successful checks, while the other Malaysian carriers verified
  * normally. Nothing in this stack can tell carriers apart, so the user picks.
  *
- * Every entry here must be ENABLED on the Verify service in the Twilio
- * console first ("API calls for this channel will fail" otherwise) — which is
- * why 'whatsapp' is absent: it needs a sender set up, not just a toggle.
  */
 export const PHONE_OTP_CHANNELS = ['sms', 'call'] as const;
 export type PhoneOtpChannel = (typeof PHONE_OTP_CHANNELS)[number];
@@ -323,7 +320,7 @@ export function verifyPhoneProof(
   return { phone: parsed.phone };
 }
 
-const isDevOrTest = (env: PhoneVerificationEnv): boolean => {
+export const isDevOrTest = (env: PhoneVerificationEnv): boolean => {
   const nodeEnv = env.NODE_ENV ?? process.env.NODE_ENV;
   return nodeEnv === 'development' || nodeEnv === 'test';
 };
@@ -434,12 +431,13 @@ export async function sendPhoneOtp(
     // Twilio 429s (per-number caps, Fraud Guard) land here too — surface a
     // retryable message, log the status and the error code only (never the
     // rest of the body: it echoes To=).
-    logger.warn(
-      `[phone-otp] twilio send failed with ${res.status} (code ${(await twilioErrorCode(res)) ?? 'none'})`,
-    );
+    const code = await twilioErrorCode(res);
+    logger.warn(`[phone-otp] twilio send failed with ${res.status} (code ${code ?? 'none'})`);
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
-      'Could not send the verification code. Try again shortly.',
+      channel === 'sms' && code === 60410
+        ? 'SMS delivery is temporarily blocked. Wait 30 seconds, then choose a phone call instead.'
+        : 'Could not send the verification code. Try again shortly.',
     );
   }
 }

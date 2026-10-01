@@ -43,7 +43,11 @@ import { FRAME_LEVELS } from './avatar-frames';
 import { challengePackId } from './challenge-prize';
 import { FREE_WELCOME_CATEGORY } from './free-pack';
 import { isGraded, isPsa10, type PoolComposition } from './card-view';
-import { suffixedUsername } from '../../utils/profile-handle';
+import {
+  USERNAME_RE,
+  generatedUsername,
+  suffixedUsername,
+} from '../../utils/profile-handle';
 import Pack from './models/pack';
 import Card from './models/card';
 import CardPriceHistory from './models/card-price-history';
@@ -139,7 +143,7 @@ import { consumeExternalSen } from './external-funded';
 import { recomputeExternalStamps } from './external-backfill';
 import { levelForSpend } from './vip-ladder';
 import { levelsToGrant, rewardsForLevel } from './vip-rewards';
-import { fromSen, toSen } from './money';
+import { fromSen, toMoney, toSen } from './money';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   resolveFxRate,
@@ -177,6 +181,7 @@ import {
   type RankPayout,
 } from './challenge-settle';
 import { weightedAverageCost } from './inventory-cost';
+import type { SignupTopupStats } from './stats';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
 // plan-033 playthrough basis: the "post-1b deposited" ledger predicate. Shared
@@ -2196,26 +2201,71 @@ class PacksModuleService extends MedusaService({
     // One IN query, bounded by the task count, never the catalog. A missing
     // pack resolves to null — the storefront falls back to the bare label,
     // and the admin console is where "(missing)" gets said.
+    // Card rewards get the same treatment plus their RM value (the same
+    // displayMarketPrice the vault shows, so the number promised here is the
+    // number the vault shows after the claim) — a bare "Card" told the player
+    // neither which card nor what it is worth.
     const packSlugs = new Set<string>(pendingSpins.map((s) => s.pack_id));
+    const cardHandles = new Set<string>();
     for (const d of live) {
       const r = d.reward as unknown as TaskReward;
       if (r.type === 'pack') packSlugs.add(r.pack_id);
+      if (r.type === 'card') cardHandles.add(r.card_handle);
     }
-    const packTitle = new Map<string, string>(
-      packSlugs.size
-        ? (
-            await this.listPacks(
-              { slug: [...packSlugs] },
-              { select: ['slug', 'title'], take: packSlugs.size },
-              sharedContext,
-            )
-          ).map((p) => [p.slug, p.title])
-        : [],
-    );
-    const hubReward = (reward: TaskReward): HubReward =>
-      reward.type === 'pack'
-        ? { ...reward, pack_title: packTitle.get(reward.pack_id) ?? null }
-        : reward;
+    const packRows = packSlugs.size
+      ? await this.listPacks(
+          { slug: [...packSlugs] },
+          { select: ['slug', 'title', 'price'], take: packSlugs.size },
+          sharedContext,
+        )
+      : [];
+    const cardRows = cardHandles.size
+      ? await this.listCards(
+          { handle: [...cardHandles] },
+          {
+            select: [
+              'handle',
+              'name',
+              'grader',
+              'grade',
+              'market_value',
+              'market_multiplier',
+            ],
+            take: cardHandles.size,
+          },
+          sharedContext,
+        )
+      : [];
+    const fxRate = cardRows.length ? await resolveFxRate(this) : DEFAULT_USD_MYR;
+    const packBySlug = new Map(packRows.map((p) => [p.slug, p]));
+    const cardByHandle = new Map(cardRows.map((c) => [c.handle, c]));
+    const packTitle = new Map(packRows.map((p) => [p.slug, p.title]));
+    const hubReward = (reward: TaskReward): HubReward => {
+      if (reward.type === 'pack') {
+        const p = packBySlug.get(reward.pack_id);
+        return {
+          ...reward,
+          pack_title: p?.title ?? null,
+          pack_price_myr: p ? toMoney(p.price) : null,
+        };
+      }
+      if (reward.type === 'card') {
+        const c = cardByHandle.get(reward.card_handle);
+        return {
+          ...reward,
+          card_name: c?.name ?? null,
+          card_grade: c?.grader && c.grade ? `${c.grader} ${c.grade}` : null,
+          card_value_myr: c
+            ? displayMarketPrice(
+                toMoney(c.market_value),
+                fxRate,
+                Number(c.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
+              )
+            : null,
+        };
+      }
+      return reward;
+    };
     return {
       week_start: week.weekStartIso,
       // The Achievements & VIP tab shows the rung the reach_level tasks are
@@ -2346,12 +2396,37 @@ class PacksModuleService extends MedusaService({
 
     let ref: string | null = null;
     if (reward.type === 'credit') {
-      const { id } = await this.mutateCreditAtomic(
+      const { id, amount } = await this.mutateCreditAtomic(
         {
           customerId: input.customerId,
           amount: reward.amount_myr,
           reason: 'reward_credit',
           idempotencyReference: `task:${def.id}:${input.customerId}:${periodKey || 'once'}`,
+        },
+        sharedContext,
+      );
+      // Its ledger row, in the same transaction — every other credit writer
+      // posts one, and the tasks spec pays out "through the same mechanics as
+      // the challenge payout path" (WP). Without it a claim moved the balance
+      // with nothing in the transaction history (two customers, RM 50 each,
+      // on 2026-09-30). refId = the credit row, like the top-up and
+      // adjustment writers, so the admin Wallet tab's display-id join finds it;
+      // a replayed credit re-dedupes on (WP, refId).
+      await this.recordLedgerEntry(
+        {
+          type: 'WP',
+          customerId: input.customerId,
+          refId: id,
+          walletDelta: amount,
+          vaultDelta: null,
+          payload: {
+            type: 'WP',
+            period: `task:${def.id}:${periodKey || 'once'}`,
+            stage: 0,
+            rank: 0,
+            sku: null,
+            value: 0,
+          },
         },
         sharedContext,
       );
@@ -4988,8 +5063,112 @@ class PacksModuleService extends MedusaService({
   }
 
   /**
-   * Claim `desired` as this customer's display name — and therefore their
-   * profile URL — or the next free deterministic variant of it.
+   * The customer id whose permanent profile handle (metadata.handle) is this,
+   * case-insensitively. Same raw-SQL reasoning as findCustomerIdByUsername
+   * above; the expression is exactly the one IDX_customer_handle_lower_unique
+   * is built on (Migration20260930140000), so PG can use it.
+   */
+  @InjectManager()
+  async findCustomerIdByHandle(
+    handle: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string | null> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ id: string }[]>(
+      "SELECT id FROM customer WHERE lower(metadata->>'handle') = lower(?) AND deleted_at IS NULL LIMIT 1",
+      [handle],
+    );
+    return rows[0]?.id ?? null;
+  }
+
+  /**
+   * The customer's permanent profile handle: assigned on the first call, from
+   * `desired` (the display name at that moment) or the next free deterministic
+   * variant of it, and returned UNCHANGED on every call after that, whatever
+   * `desired` then says. That second half is the whole point — a rename must
+   * never move the link (utils/profile-handle.ts).
+   *
+   * Locking mirrors assignReferralCode: the global `profile_handle:alloc` lock
+   * serializes the uniqueness probe with the write, then the per-customer
+   * `metadata:<id>` lock makes the read-modify-write of the blob safe against
+   * every other metadata writer (avatar, frame, bank accounts, referral code).
+   * Global first, per-customer second, like every other allocator here, so
+   * none of them can deadlock with each other. IDX_customer_handle_lower_unique
+   * is the backstop.
+   */
+  @InjectTransactionManager()
+  async claimHandle(
+    input: { customerId: string; desired: string; maxAttempts?: number },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      'profile_handle:alloc',
+    ]);
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `metadata:${input.customerId}`,
+    ]);
+    const rows = await em.execute<
+      { metadata: Record<string, unknown> | null }[]
+    >('SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL', [
+      input.customerId,
+    ]);
+    if (rows.length === 0) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Customer with id: ${input.customerId} was not found`,
+      );
+    }
+    const current = rows[0].metadata ?? {};
+    // Read INSIDE the lock: a concurrent first call that got here first has
+    // already fixed it, and that one wins.
+    if (
+      typeof current.handle === 'string' &&
+      USERNAME_RE.test(current.handle)
+    ) {
+      return current.handle;
+    }
+
+    const desired = USERNAME_RE.test(input.desired.trim())
+      ? input.desired.trim()
+      : generatedUsername(input.customerId);
+    const free = async (candidate: string): Promise<boolean> => {
+      const [row] = await em.execute<{ n: string }[]>(
+        "SELECT COUNT(*)::int AS n FROM customer WHERE lower(metadata->>'handle') = lower(?) AND deleted_at IS NULL AND id <> ?",
+        [candidate, input.customerId],
+      );
+      return Number(row?.n ?? 0) === 0;
+    };
+    let chosen: string | null = (await free(desired)) ? desired : null;
+    for (
+      let attempt = 0;
+      !chosen && attempt < (input.maxAttempts ?? 8);
+      attempt++
+    ) {
+      const candidate = suffixedUsername(desired, input.customerId, attempt);
+      if (await free(candidate)) chosen = candidate;
+    }
+    if (!chosen) {
+      // Unreachable short of an adversary squatting every variant of one stem.
+      throw new MedusaError(
+        MedusaError.Types.CONFLICT,
+        'Could not assign a profile handle',
+      );
+    }
+
+    await em.execute(
+      'UPDATE customer SET metadata = ?::jsonb, updated_at = now() WHERE id = ? AND deleted_at IS NULL',
+      [JSON.stringify({ ...current, handle: chosen }), input.customerId],
+    );
+    return chosen;
+  }
+
+  /**
+   * Claim `desired` as this customer's display name, or the next free
+   * deterministic variant of it. Display names are unique too
+   * (IDX_customer_first_name_lower_unique), just not permanent — the profile
+   * URL is the handle (claimHandle above).
    *
    * Allocation is serialized GLOBALLY (advisory lock `username:alloc`) with the
    * uniqueness probe inside that lock and in the same transaction as the write,
@@ -6157,18 +6336,18 @@ class PacksModuleService extends MedusaService({
 
   // Public-profile stats aggregated in the DB (plan 022) — replaces the
   // route's 20k-row JS fold. Same execution shape as leaderboardTop, scoped
-  // to one customer. Semantics pinned to the old in-route fold:
+  // to one customer:
   //  - only source='pack' pulls (C1: reward pulls are private vault items),
   //  - capped to the NEWEST 20k pulls (the route's documented MAX_PULLS
   //    aggregation cap — now the LIMIT in the `capped` CTE),
-  //  - volume = Σ per-card MYR display value with PER-CARD rounding, exactly
-  //    displayMarketPrice(fmv, fx, multiplier): ROUND(fmv × mult × fx, 2) —
-  //    deliberately LIVE-priced (vault/display semantics), NOT the
-  //    recorded_value_usd snapshot the leaderboard/challenge boards read, so
-  //    profile volume tracks current prices and may diverge from board volume,
-  //    degenerate inputs (fmv < 0 or multiplier ≤ 0) → 0, missing/deleted
-  //    card → 0 (the pull still counts). Per-card rounding keeps the
-  //    documented cents-level drift vs the leaderboard's sum-level round.
+  //  - volume = the All Time board's own figure for this customer: the shared
+  //    PULLED_VALUE_USD_SQL (draw-time recorded_value_usd, live fallback for
+  //    pre-backfill rows) summed, then × FX and rounded ONCE, exactly as
+  //    leaderboardTop's wins CTE does. It used to be live-priced with per-card
+  //    rounding, so a profile read RM 145,627.47 beside the board's
+  //    RM 153,176.34 for the same 428 pulls (reported 2026-09-30) — the
+  //    profile and the board must show one number. (Exact below the 20k
+  //    cap; the board has none — nobody is near it.)
   //  - by_rarity = COUNT per rarity resolved from the LIVE (pack_id, card_id)
   //    odds row, defaulting to 'Common' when none matches or rarity is NULL —
   //    mirrors makeRarityOf's `?? 'Common'` fallback (card-view.ts).
@@ -6192,7 +6371,7 @@ class PacksModuleService extends MedusaService({
       { rarity: string; pulls: string; volume_myr: string | null }[]
     >(
       `WITH capped AS (
-         SELECT pack_id, card_id
+         SELECT pack_id, card_id, recorded_value_usd
            FROM pull
           WHERE customer_id = ? AND source = 'pack' AND deleted_at IS NULL
           ORDER BY rolled_at DESC
@@ -6208,37 +6387,23 @@ class PacksModuleService extends MedusaService({
        )
        SELECT COALESCE(o.rarity, 'Common') AS rarity,
               COUNT(*)::bigint AS pulls,
-              COALESCE(SUM(
-                CASE
-                  WHEN c.handle IS NULL THEN 0
-                  WHEN COALESCE(c.market_value, 0) < 0
-                    OR COALESCE(c.market_multiplier, ?) <= 0 THEN 0
-                  ELSE ROUND(
-                         COALESCE(c.market_value, 0)
-                         * COALESCE(c.market_multiplier, ?)
-                         * ? * 100
-                       ) / 100
-                END
-              ), 0) AS volume_myr
-         FROM capped p
-         LEFT JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL
-         LEFT JOIN odds o ON o.pack_id = p.pack_id AND o.card_id = p.card_id
+              -- Total across ALL groups, rounded once like the board.
+              ROUND(COALESCE(SUM(SUM(${PULLED_VALUE_USD_SQL})) OVER (), 0) * ? * 100) / 100
+                AS volume_myr
+         FROM capped pu
+         LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL
+         LEFT JOIN odds o ON o.pack_id = pu.pack_id AND o.card_id = pu.card_id
         GROUP BY 1`,
-      [
-        customerId,
-        DEFAULT_MARKET_MULTIPLIER,
-        DEFAULT_MARKET_MULTIPLIER,
-        fxRate,
-      ],
+      [customerId, DEFAULT_MARKET_MULTIPLIER, fxRate],
     );
 
     let pulls = 0;
-    let volume = 0;
+    // Every row carries the same windowed total.
+    const volume = Number(rows[0]?.volume_myr ?? 0);
     const by_rarity: Record<string, number> = {};
     for (const r of rows) {
       const n = Number(r.pulls ?? 0);
       pulls += n;
-      volume += Number(r.volume_myr ?? 0);
       by_rarity[r.rarity] = (by_rarity[r.rarity] ?? 0) + n;
     }
     return { pulls, volume, by_rarity };
@@ -6342,6 +6507,77 @@ class PacksModuleService extends MedusaService({
       reason: r.reason,
       amount: Number(r.cents) / 100,
     }));
+  }
+
+  // Sign-up and top-up figures for GET /admin/stats over one half-open
+  // [from, to) window, in one statement.
+  //
+  // Sign-ups count has_account customers, deleted rows included, so a past
+  // period never shrinks. Operator-minted partner accounts are left out: they
+  // are handed out, not signed up for. They carry metadata.partner_credential
+  // (PARTNER_CREDENTIAL_KEY in utils/partner-accounts.ts, named literally here
+  // because importing it would close a module cycle; admin-stats.spec mints
+  // through the real generator, so a renamed key fails it).
+  //
+  // Top-ups are the payment gateway's own record: settled gateway_deposit
+  // rows, by settled_at, at amount_settled. Only the gateway settles a deposit
+  // (its callback or the requery sweep; no admin route can), so wallet credits
+  // it never saw, manual adjustments or a stray ledger 'topup', cannot count.
+  // A first top-up is ranked over the customer's WHOLE deposit history before
+  // the window filter, so a returning customer's top-up in the window is not a
+  // first. Money is summed as integer cents, like ledgerReasonTotals.
+  @InjectManager()
+  async signupTopupStats(
+    from: Date,
+    to: Date,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<SignupTopupStats> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const bounds = [from.toISOString(), to.toISOString()];
+    const [row] = await em.execute<
+      {
+        signups: number;
+        topup_count: number;
+        topup_customers: number;
+        topup_cents: string;
+        first_topup_count: number;
+        first_topup_cents: string;
+      }[]
+    >(
+      `WITH topups AS (
+         SELECT customer_id, amount_settled AS amount, settled_at,
+                row_number() OVER (
+                  PARTITION BY customer_id ORDER BY settled_at, id
+                ) AS nth
+         FROM gateway_deposit
+         WHERE status = 'settled' AND deleted_at IS NULL
+           AND settled_at IS NOT NULL AND amount_settled > 0
+       )
+       SELECT
+         (SELECT count(*) FROM customer
+            WHERE has_account
+              AND metadata -> 'partner_credential' IS NULL
+              AND created_at >= ?::timestamptz
+              AND created_at < ?::timestamptz)::int AS signups,
+         count(*)::int AS topup_count,
+         count(DISTINCT customer_id)::int AS topup_customers,
+         COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS topup_cents,
+         (count(*) FILTER (WHERE nth = 1))::int AS first_topup_count,
+         COALESCE(SUM(ROUND(amount * 100)) FILTER (WHERE nth = 1), 0)::bigint
+           AS first_topup_cents
+       FROM topups
+       WHERE settled_at >= ?::timestamptz AND settled_at < ?::timestamptz`,
+      [...bounds, ...bounds],
+    );
+    return {
+      signups: row.signups,
+      topup_count: row.topup_count,
+      topup_customers: row.topup_customers,
+      topup_amount: Number(row.topup_cents) / 100,
+      first_topup_count: row.first_topup_count,
+      first_topup_amount: Number(row.first_topup_cents) / 100,
+    };
   }
 
   // Count-then-insert for a gateway deposit, serialized per customer.
@@ -6636,8 +6872,8 @@ class PacksModuleService extends MedusaService({
   // the shared LIVE_VALUE_USD_SQL) is the basis buyback percents credit
   // against, so this is the obligation the operator actually owes if every
   // vaulted card were sold — raw FMV understated it by the markup (issue #263).
-  // profileStatsForCustomer and the economy report's EV/RTP already used this
-  // basis; the admin aggregates were the last raw-FMV holdouts.
+  // The economy report's EV/RTP already used this basis; the admin aggregates
+  // were the last raw-FMV holdouts.
   //
   // There is NO source filter: a vaulted pull is an obligation whoever won it,
   // so reward pulls count too — as they should, since the operator owes those
@@ -6713,7 +6949,7 @@ class PacksModuleService extends MedusaService({
   // (FMV × market_multiplier, issue #263), same 'vaulted' predicate, no source
   // filter, and the same INNER JOIN, so a vaulted pull whose card was soft-deleted drops out
   // of BOTH vault_count and vault_value (profileStatsForCustomer deliberately
-  // differs — its LEFT JOIN still counts the pull at 0). Keeping the twin exact
+  // differs — its LEFT JOIN still counts the pull, at its recorded value). Keeping the twin exact
   // is what makes the Players list and the economy dashboard agree.
   @InjectManager()
   async playersOverview(

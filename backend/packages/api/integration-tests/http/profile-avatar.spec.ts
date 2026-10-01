@@ -90,9 +90,9 @@ medusaIntegrationTestRunner({
         const token = await registerCustomer('avatar-happy@test.dev');
 
         // Seed a pre-existing metadata key so the upload's read-modify-write
-        // can be proven to MERGE, not clobber. This used to lean on the lazily
-        // assigned `metadata.handle`; nothing writes that any more (the display
-        // name IS the profile URL). Seeded through the module rather than the
+        // can be proven to MERGE, not clobber — the permanent profile handle
+        // lives in this same blob, and an upload that dropped it would move
+        // the player's profile link. Seeded through the module rather than the
         // API on purpose: rejectCustomerMetadata refuses client-supplied
         // metadata on /store/customers/me, which is the whole reason the
         // reserved keys in this blob are worth protecting.

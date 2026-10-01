@@ -5,8 +5,10 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import Redis from 'ioredis';
-import { E164_RE } from '../../utils/phone-verification';
+import { E164_RE, type PhoneOtpChannel } from '../../utils/phone-verification';
 import { callbackSourceIp } from './payer-ip';
+
+const PHONE_OTP_COOLDOWN_MS = 30_000;
 
 // Shared sliding-window rate limiting for every configured endpoint. The
 // RATE_LIMITS table at the bottom owns endpoint-specific policy. There is no
@@ -448,15 +450,14 @@ function throttledWarn(
 function buildFailoverStore(
   connectionName: string,
   warn: ReturnType<typeof throttledWarn>,
+  fallback: RateLimitStore = new InMemorySlidingWindowStore(),
 ): RateLimitStore {
-  const memory = new InMemorySlidingWindowStore();
-
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
     console.warn(
-      `[rate-limit] REDIS_URL not set — ${connectionName} limiter is per-process (in-memory) only`,
+      `[rate-limit] REDIS_URL not set — ${connectionName} using fallback`,
     );
-    return memory;
+    return fallback;
   }
 
   const client = new Redis(redisUrl, {
@@ -474,8 +475,8 @@ function buildFailoverStore(
   client.connect().catch((err) => warn('initial redis connect failed', err));
   return new FailoverRateLimitStore(
     new RedisSlidingWindowStore(client),
-    memory,
-    (err) => warn('redis consume failed; using in-memory fallback', err),
+    fallback,
+    (err) => warn('redis consume failed; using fallback', err),
   );
 }
 
@@ -1055,15 +1056,17 @@ export const RATE_LIMITS = {
    * can cost real money (one SMS), layered under Twilio Verify's own
    * per-number caps. Runs BEFORE the IP tier below (middlewares.ts) so a
    * hammered number 429s before spending the sitewide budget. Env-tunable:
-   * PHONE_OTP_START_PHONE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 3/10min)
+   * Cooldown and daily quota share one atomic decision: rejected retries must
+   * not consume a daily slot before the route checks its send budget.
+   * PHONE_OTP_START_PHONE_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 1/30s)
    * PHONE_OTP_START_PHONE_RATE_LIMIT / _WINDOW_MS (default 6/24h)
    */
   'phone-otp-start-phone': {
     message: 'Too many code requests for this number.',
     keyOf: phoneBodyKeyOf,
     defaults: {
-      burstLimit: 3,
-      burstWindowMs: 600_000,
+      burstLimit: 1,
+      burstWindowMs: PHONE_OTP_COOLDOWN_MS,
       limit: 6,
       windowMs: 86_400_000,
     },
@@ -1187,4 +1190,77 @@ export const RATE_LIMITS = {
  */
 export function rateLimit(name: keyof typeof RATE_LIMITS): MiddlewareHandler {
   return createEnvRateLimit({ name, ...RATE_LIMITS[name] });
+}
+
+/**
+ * SITEWIDE ceiling on real OTP sends — a spend backstop, not a per-client
+ * limit. Every other phone-otp tier is keyed per phone or per request IP, and
+ * in prod the IP is a Cloudflare edge or a storefront pod, so a pumping run
+ * over fresh numbers was bounded by nothing (2026-09: ~44% of 30 days' sends,
+ * 229 texts in one 25-minute burst, ~$0.34 each).
+ *
+ * Called before the start route's account lookup, so known and unknown reset
+ * numbers consume identical state. Counts requests, including no-send exits.
+ * Shared by SMS and voice:
+ * changing channel/purpose cannot buy a fresh budget. Tune with
+ * PHONE_OTP_GLOBAL_HOURLY_LIMIT / PHONE_OTP_GLOBAL_DAILY_LIMIT; read per call.
+ *
+ * Production fails CLOSED when Redis is unavailable: process-local counters
+ * reset on restart and multiply the spend ceiling across replicas.
+ * ponytail: sequential buckets conservatively count an attempt when a later
+ * bucket/provider refuses it. Never refund ambiguous provider timeouts.
+ */
+let otpSendBudgetStore: RateLimitStore | null = null;
+export async function consumeOtpSendBudget(
+  phone: string,
+  channel: PhoneOtpChannel,
+  nowMs: number = Date.now(),
+): Promise<RateLimitDecision & { sitewide: boolean }> {
+  otpSendBudgetStore ??= buildFailoverStore(
+    'phone-otp-global-rate-limit',
+    throttledWarn(60_000),
+    process.env.NODE_ENV === 'production'
+      ? { consume: async () => ({ allowed: false, retryAfterMs: 60_000 }) }
+      : new InMemorySlidingWindowStore(),
+  );
+  // The per-phone middleware owns the atomic cooldown + daily quota. A second
+  // cooldown clock here could reject a request after middleware spent its slot.
+  if (channel === 'call') {
+    const personalCalls = await otpSendBudgetStore.consume(
+      `rl:phone-otp-calls:${phone}`,
+      [{ limit: 2, windowMs: 24 * 60 * 60_000 }],
+      nowMs,
+    );
+    if (!personalCalls.allowed) return { ...personalCalls, sitewide: false };
+    const calls = await otpSendBudgetStore.consume(
+      'rl:phone-otp-calls:all',
+      [
+        { limit: 10, windowMs: 60 * 60_000 },
+        { limit: 20, windowMs: 24 * 60 * 60_000 },
+      ],
+      nowMs,
+    );
+    if (!calls.allowed) return { ...calls, sitewide: true };
+  }
+  const hourly = nonNegativeIntFromEnv('PHONE_OTP_GLOBAL_HOURLY_LIMIT', 40);
+  const daily = nonNegativeIntFromEnv('PHONE_OTP_GLOBAL_DAILY_LIMIT', 100);
+  if (hourly === 0 || daily === 0)
+    return { allowed: false, retryAfterMs: 60_000, sitewide: true };
+  const global = await otpSendBudgetStore.consume(
+    // New policy window starts at rollout; old key includes the outage's
+    // hundreds of failed sends. Keep this key stable on subsequent deploys.
+    'rl:phone-otp-global:v2:all',
+    [
+      {
+        limit: hourly,
+        windowMs: 60 * 60_000,
+      },
+      {
+        limit: daily,
+        windowMs: 24 * 60 * 60_000,
+      },
+    ],
+    nowMs,
+  );
+  return { ...global, sitewide: true };
 }

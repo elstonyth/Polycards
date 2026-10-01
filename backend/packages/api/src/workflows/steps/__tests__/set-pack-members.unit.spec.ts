@@ -86,7 +86,7 @@ const buildContainer = (packs: ReturnType<typeof buildPacks>) =>
 async function run(existing: OddsRow[], card_ids: string[]) {
   const packs = buildPacks(existing);
   const res = await setPackMembersInvoke(
-    { pack_id: PACK.slug, card_ids },
+    { pack_id: PACK.slug, card_ids, admin_id: 'user_admin' },
     { container: buildContainer(packs) },
   );
   const diff = packs.applyPackMemberDiff.mock.calls[0][0];
@@ -120,7 +120,10 @@ const resolvedSum = (
 
 describe('set-pack-members — balancer semantics', () => {
   it('(a) a new member joins the balancer pool; pinned survivors keep their rate', async () => {
-    const existing = [odd('alpha', 'Rare', 300_000), odd('beta', 'Common', 700_000)];
+    const existing = [
+      odd('alpha', 'Rare', 300_000),
+      odd('beta', 'Common', 700_000),
+    ];
     const { diff } = await run(existing, ['alpha', 'beta', 'gamma']);
 
     // gamma enters unlocked/Common → it IS a balancer, so it splits the

@@ -116,7 +116,7 @@
       "price": "Price (RM)",
       "rank": "Rank (sort order)",
       "buybackPercent": "Instant buyback %",
-      "buybackHint": "\"Sell on the spot\" rate during the 30s keep/sell countdown at the reveal: this % of the card's market value as site credit. Must be at least the flat rate (90) — vaulted cards always sell back at flat 90%.",
+      "buybackHint": "\"Sell on the spot\" rate during the 30s keep/sell countdown at the reveal: this % of the card's market value as site credit. Must be a whole number from the flat rate (90) to 100 — vaulted cards always sell back at flat 90%.",
       "boost": "Boost",
       "boostHint": "Flags the pack as boosted/featured on the storefront.",
       "poolHint": "After creating, open the pack to add cards to its prize pool.",
@@ -613,7 +613,8 @@
     "action": {
       "freeze": "Freeze account",
       "unfreeze": "Unfreeze account",
-      "adjust_credit": "Adjust credits"
+      "adjust_credit": "Adjust credits",
+      "set_player_group": "Moved to another player group"
     }
   },
   "economy": {
@@ -637,6 +638,31 @@
     "rtp": "RTP",
     "empty": "No active packs.",
     "loadError": "Could not load the economy report."
+  },
+  "statsBoard": {
+    "title": "Stats",
+    "subtitle": "Sign-ups and top-ups · {{current}} MYT · vs {{previous}}",
+    "ranges": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "7d": "Last 7 days",
+      "30d": "Last 30 days",
+      "month": "This month",
+      "last_month": "Last month",
+      "custom": "Custom"
+    },
+    "from": "From",
+    "to": "To",
+    "customHint": "Pick a start date on or before the end date.",
+    "signups": "Sign-ups",
+    "topup_customers": "Players who topped up",
+    "topup_count": "Top-ups",
+    "topup_amount": "Top-up amount",
+    "first_topup_count": "First-time top-ups",
+    "first_topup_amount": "First top-up amount",
+    "vsPrevious": "vs previous",
+    "previous": "Previous: {{value}}",
+    "loadError": "Could not load the stats."
   },
   "settlement": {
     "title": "Settlement",

@@ -6,6 +6,7 @@ import {
   isPhoneVerificationRequired,
   verifyPhoneProof,
 } from '../../../../utils/phone-verification';
+import { linkedEmailpassLogin } from '../../../utils/linked-login';
 
 // Workflow contract (Task 5 Step 1 — verified against @medusajs/medusa dist
 // and @medusajs/core-flows dist, not guessed):
@@ -138,11 +139,22 @@ export async function POST(req: MedusaRequest<Body>, res: MedusaResponse): Promi
     );
 
   const email = matches[0].email;
+  // Reset the password login LINKED to this account. Keyed on the email, the
+  // workflow also finds an UNLINKED emailpass identity that shares it (a failed
+  // email signup on a Google account's address leaves one) and hands out a
+  // reset for a login that signs into nothing. Same answer as a Google-only
+  // account, which is what this one is.
+  const passwordLogin = await linkedEmailpassLogin(req.scope, matches[0].id);
+  if (!passwordLogin)
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'This account signs in with Google.',
+    );
   let result: string;
   try {
     ({ result } = await generateResetPasswordTokenWorkflow(req.scope).run({
       input: {
-        entityId: email,
+        entityId: passwordLogin,
         actorType: 'customer',
         provider: 'emailpass',
         secret: jwtSecret,

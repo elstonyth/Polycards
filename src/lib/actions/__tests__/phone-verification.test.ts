@@ -40,6 +40,7 @@ describe('startPhoneOtp — served-destination gate', () => {
       startPhoneOtp({ phone: MY, purpose: 'signup' }),
     ).resolves.toEqual({
       ok: true,
+      channel: 'sms',
     });
     expect(mem.requests).toHaveLength(1);
   });
@@ -66,7 +67,7 @@ describe('startPhoneOtp — served-destination gate', () => {
   it('lets a password reset through for an unserved number', async () => {
     await expect(
       startPhoneOtp({ phone: GB, purpose: 'password-reset' }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, channel: 'sms' });
     expect(mem.requests).toHaveLength(1);
   });
 
@@ -78,7 +79,7 @@ describe('startPhoneOtp — served-destination gate', () => {
   it('sends an E.164 stored number for phone-change', async () => {
     await expect(
       startPhoneOtp({ phone: MY, purpose: 'phone-change' }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, channel: 'sms' });
     expect(mem.requests).toHaveLength(1);
   });
 
@@ -92,6 +93,34 @@ describe('startPhoneOtp — served-destination gate', () => {
       error: 'Please enter a valid phone number for the selected country.',
     });
     expect(mem.requests).toEqual([]);
+  });
+});
+
+describe('startPhoneOtp — delivery refusals', () => {
+  it('preserves the server retry window from a 429', async () => {
+    const message =
+      'Too many code requests for this number. Try again in 518s.';
+    backend({ ...OK, [START]: { status: 429, body: { message } } });
+    await expect(
+      startPhoneOtp({ phone: MY, purpose: 'signup' }),
+    ).resolves.toEqual({
+      ok: false,
+      error: message,
+      retryAfterSeconds: 518,
+    });
+  });
+
+  it('guides blocked SMS users to a call after the shared cooldown', async () => {
+    const message =
+      'SMS delivery is temporarily blocked. Wait 30 seconds, then choose a phone call instead.';
+    backend({ ...OK, [START]: { status: 403, body: { message } } });
+    await expect(
+      startPhoneOtp({ phone: MY, purpose: 'phone-change' }),
+    ).resolves.toEqual({
+      ok: false,
+      error: message,
+      retryAfterSeconds: 30,
+    });
   });
 });
 
@@ -258,7 +287,7 @@ describe('auth mode per route', () => {
     const guest = backend(OK, { token: null });
     await expect(
       startPhoneOtp({ phone: MY, purpose: 'password-reset' }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, channel: 'sms' });
     expect(guest.requests).toHaveLength(1);
   });
 
@@ -339,12 +368,22 @@ describe('resetPasswordByPhone migration seam', () => {
 // (Digi/016, 2026-09-07). The action forwards the choice verbatim; absent, it
 // sends no field at all so the backend's default (sms) stays the single source.
 describe('startPhoneOtp — channel', () => {
+  it('returns the configured delivery channel for every caller to display', async () => {
+    mem = backend({
+      ...OK,
+      [START]: { body: { ok: true, channel: 'sms' } },
+    });
+    expect(await startPhoneOtp({ phone: MY, purpose: 'signup' })).toEqual({
+      ok: true,
+      channel: 'sms',
+    });
+  });
   const bodyOf = () => mem.requests[0]!.body;
 
   it('passes the voice channel through to the backend', async () => {
     await expect(
       startPhoneOtp({ phone: MY, purpose: 'phone-change', channel: 'call' }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, channel: 'call' });
     expect(mem.requests).toHaveLength(1);
     expect(bodyOf()).toEqual({
       phone: MY,

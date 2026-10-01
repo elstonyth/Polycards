@@ -4,6 +4,7 @@ import SettingsForm from '@/components/account/SettingsForm';
 import CookieSettings from './CookieSettings';
 import DangerZone from '@/components/account/DangerZone';
 import { getAccountInfo, getCustomer } from '@/lib/data/customer';
+import { getOwnProfileHandle } from '@/lib/data/profiles';
 
 export const metadata: Metadata = { title: 'Settings' };
 
@@ -13,9 +14,10 @@ export const dynamic = 'force-dynamic';
 export default async function SettingsPage() {
   // getCustomer() is cache()-wrapped and already resolved by the layout's auth
   // gate, so the only real round-trip here is the account read.
-  const [customer, accountInfo] = await Promise.all([
+  const [customer, accountInfo, handle] = await Promise.all([
     getCustomer(),
     getAccountInfo(),
+    getOwnProfileHandle(),
   ]);
   // The account layout gate redirects unauthenticated visitors, so this is a
   // defensive guard for the nullable type rather than a reachable state.
@@ -37,6 +39,7 @@ export default async function SettingsPage() {
               last_name: customer.last_name ?? null,
               phone: customer.phone ?? null,
             }}
+            handle={handle}
           />
         </Panel>
         <Panel>

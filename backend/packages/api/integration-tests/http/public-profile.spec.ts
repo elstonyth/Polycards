@@ -4,6 +4,7 @@ import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { USERNAME_RE } from '../../src/utils/profile-handle';
 import { clearProfileCache } from '../../src/api/store/profiles/[handle]/route';
+import { clearLeaderboardCache } from '../../src/api/store/leaderboard/route';
 import { myrDisplay as MYR, postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -23,10 +24,19 @@ const EPIC_FMV = 10;
 // leaderboard. No FxRate row is seeded and cards carry the model-default
 // multiplier, so values follow the shared myrDisplay helper (see utils).
 
-// The display name IS the handle now — one value, deliberately not two.
+// Seeded rows carry their handle up front, as seed.ts writes them: the URL
+// resolves by `metadata.handle` only, and these rows never log in to have one
+// assigned. The name matches the handle here; the rename cases below are
+// where the two part ways.
 const SEEDED_NAME = 'Kenji_Test';
 const SEEDED_HANDLE = SEEDED_NAME;
 const SEEDED_EMAIL = 'pp-collector@test.dev';
+
+const collector = (email: string, name: string) => ({
+  email,
+  first_name: name,
+  metadata: { handle: name },
+});
 
 medusaIntegrationTestRunner({
   inApp: true,
@@ -98,14 +108,12 @@ medusaIntegrationTestRunner({
           },
         ]);
 
-        // A "seeded demo collector": a customer whose display name IS their
-        // profile URL (exactly what seed.ts writes) plus a pull history put
-        // straight on the ledger — no opens/credits needed.
+        // A "seeded demo collector" (exactly what seed.ts writes) plus a pull
+        // history put straight on the ledger — no opens/credits needed.
         const customerModule = container.resolve(Modules.CUSTOMER);
-        const seeded = await customerModule.createCustomers({
-          email: SEEDED_EMAIL,
-          first_name: SEEDED_NAME,
-        });
+        const seeded = await customerModule.createCustomers(
+          collector(SEEDED_EMAIL, SEEDED_NAME),
+        );
         seededCustomerId = seeded.id;
 
         await packs.createPulls([
@@ -144,7 +152,10 @@ medusaIntegrationTestRunner({
           api.get(`/store/profiles/${handle}`, { headers: storeHeaders }),
         );
 
-      const registerCustomer = async (email: string): Promise<string> => {
+      const registerCustomer = async (
+        email: string,
+        firstName?: string,
+      ): Promise<string> => {
         const reg = await api.post('/auth/customer/emailpass/register', {
           email,
           password: PASSWORD,
@@ -152,7 +163,7 @@ medusaIntegrationTestRunner({
         await postStoreCustomer(
           api,
           getContainer(),
-          { email },
+          firstName ? { email, first_name: firstName } : { email },
           {
             headers: {
               ...storeHeaders,
@@ -241,10 +252,9 @@ medusaIntegrationTestRunner({
           },
         ]);
 
-        const parity = await customerModule.createCustomers({
-          email: 'pp-parity@test.dev',
-          first_name: 'Parity',
-        });
+        const parity = await customerModule.createCustomers(
+          collector('pp-parity@test.dev', 'Parity'),
+        );
         await packs.createPulls([
           {
             customer_id: parity.id,
@@ -318,10 +328,9 @@ medusaIntegrationTestRunner({
         const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
         const customerModule = container.resolve(Modules.CUSTOMER);
 
-        const customer = await customerModule.createCustomers({
-          email: 'pp-recent@test.dev',
-          first_name: 'Recent',
-        });
+        const customer = await customerModule.createCustomers(
+          collector('pp-recent@test.dev', 'Recent'),
+        );
 
         // A card that will be deleted AFTER its pulls are recorded. 30 pulls
         // of it sit NEWEST, so the first recent page (3×12=36) yields only 6
@@ -377,6 +386,45 @@ medusaIntegrationTestRunner({
           Rare: 13,
           Common: 30,
         });
+      });
+
+      // Reported 2026-09-30: MOONBREON's profile read RM 145,627.47 beside the
+      // All Time board's RM 153,176.34 for the same 428 pulls — the profile
+      // priced cards live, the board at draw time. They must be one number.
+      it('pulls and volume equal the All Time board row, draw-time value included', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        // A stamped pull whose recorded value is NOT the card's live value.
+        await packs.createPulls([
+          {
+            customer_id: seededCustomerId,
+            pack_id: PACK_SLUG,
+            card_id: RARE_CARD,
+            rolled_at: new Date('2026-06-04T10:00:00Z'),
+            recorded_value_usd: 12.34,
+          },
+        ] as Parameters<typeof packs.createPulls>[0]);
+        await packs.createCreditTransactions([
+          {
+            customer_id: seededCustomerId,
+            amount: -PACK_PRICE,
+            reason: 'pack_open' as const,
+          },
+        ] as Parameters<typeof packs.createCreditTransactions>[0]);
+        clearLeaderboardCache();
+
+        const profile = await getProfile(SEEDED_HANDLE);
+        const board = await unwrapResponse(
+          api.get('/store/leaderboard?period=alltime', {
+            headers: storeHeaders,
+          }),
+        );
+        const row = board.data.entries.find(
+          (e: { handle: string | null }) => e.handle === SEEDED_HANDLE,
+        );
+        expect(row).toBeDefined();
+        expect(profile.data.stats.pulls).toBe(4);
+        expect(profile.data.stats.pulls).toBe(row.pulls);
+        expect(profile.data.stats.volume).toBe(row.volume);
       });
 
       it('caches the body per handle for the TTL; clearProfileCache() makes new pulls visible', async () => {
@@ -490,16 +538,12 @@ medusaIntegrationTestRunner({
         expect(pub.data.recent).toEqual([]);
       });
 
-      // THE regression this whole change exists for. Before it, a handle was
-      // derived once and frozen: production on 2026-09-04 was serving
-      // /profile/wei-nguan-5ren for an account displaying "MOONBREON", and not
-      // one of the ten linked handles still matched its own display name.
-      //
-      // Both halves are asserted deliberately. A rename that lights up the new
-      // URL while the old one keeps working has not moved the profile — it has
-      // published the same collector at two addresses, which is the duplicate
-      // link the operator asked us to make impossible.
-      it('a rename MOVES the profile URL — new one resolves, old one 404s', async () => {
+      // THE regression this change exists for (2026-09-30). From 2026-09-04
+      // the display name WAS the URL, so a rename retired every link already
+      // out — production's Telegram post for Collector6167's Immortal pull
+      // 404'd the next day. The link is the ID card; the name is only what is
+      // written on it.
+      it('a rename keeps the profile URL — the handle still resolves, now showing the new name', async () => {
         const token = await registerCustomer('pp-rename@test.dev');
         const authedHeaders = {
           ...storeHeaders,
@@ -508,8 +552,10 @@ medusaIntegrationTestRunner({
         const before = await unwrapResponse(
           api.get('/store/profiles/me', { headers: authedHeaders }),
         );
-        const oldHandle = before.data.handle as string;
-        expect((await getProfile(oldHandle)).status).toBe(200);
+        const handle = before.data.handle as string;
+        // Primes the 30s profile cache, so the check below also proves the
+        // rename evicts it (keyed by the handle the rename does not touch).
+        expect((await getProfile(handle)).data.name).toBe(handle);
 
         const renamed = await unwrapResponse(
           api.post(
@@ -520,14 +566,71 @@ medusaIntegrationTestRunner({
         );
         expect(renamed.status).toBe(200);
 
-        expect((await getProfile('RenamedCollector')).status).toBe(200);
-        expect((await getProfile(oldHandle)).status).toBe(404);
+        const same = await getProfile(handle);
+        expect(same.status).toBe(200);
+        expect(same.data.handle).toBe(handle);
+        expect(same.data.name).toBe('RenamedCollector');
+        // One profile, one URL: the new name is not a second address.
+        expect((await getProfile('RenamedCollector')).status).toBe(404);
 
-        // …and /me agrees, so the "My profile" link never points at the 404.
         const after = await unwrapResponse(
           api.get('/store/profiles/me', { headers: authedHeaders }),
         );
-        expect(after.data.handle).toBe('RenamedCollector');
+        expect(after.data.handle).toBe(handle);
+      });
+
+      // The other half of the old bug: a retired name went back in the pool,
+      // so an old link could land on a STRANGER. A handle is never freed by a
+      // rename, so whoever takes the name later gets the name only.
+      it('a name given up by its owner cannot capture their link', async () => {
+        const firstToken = await registerCustomer(
+          'pp-original@test.dev',
+          'Original_Name',
+        );
+        const first = await unwrapResponse(
+          api.get('/store/profiles/me', {
+            headers: { ...storeHeaders, authorization: `Bearer ${firstToken}` },
+          }),
+        );
+        // Frozen from the name the account registered with.
+        expect(first.data.handle).toBe('Original_Name');
+        await unwrapResponse(
+          api.post(
+            '/store/customers/me',
+            { first_name: 'Moved_On' },
+            {
+              headers: {
+                ...storeHeaders,
+                authorization: `Bearer ${firstToken}`,
+              },
+            },
+          ),
+        );
+
+        // A newcomer signs up with the freed name: allowed as a NAME, but the
+        // handle it would have been frozen from is taken, so theirs is a
+        // suffixed variant.
+        const newcomerToken = await registerCustomer(
+          'pp-newcomer@test.dev',
+          'Original_Name',
+        );
+        const newcomer = await unwrapResponse(
+          api.get('/store/profiles/me', {
+            headers: {
+              ...storeHeaders,
+              authorization: `Bearer ${newcomerToken}`,
+            },
+          }),
+        );
+        expect(newcomer.status).toBe(200);
+        expect(newcomer.data.handle).toMatch(/^Original_Name\d{4}$/);
+
+        // The original link still shows the original owner.
+        const original = await getProfile('Original_Name');
+        expect(original.status).toBe(200);
+        expect(original.data.name).toBe('Moved_On');
+        const theirs = await getProfile(newcomer.data.handle);
+        expect(theirs.data.name).toBe('Original_Name');
       });
 
       it('refuses a display name that is taken, or that is not a URL', async () => {
@@ -565,7 +668,7 @@ medusaIntegrationTestRunner({
           expect(res.status).toBe(400);
         }
 
-        // Clearing it would leave a live profile with no address at all.
+        // Clearing it would leave a live profile with no name to show.
         const cleared = await unwrapResponse(
           api.post(
             '/store/customers/me',
@@ -673,7 +776,8 @@ medusaIntegrationTestRunner({
         );
         // Surrounding whitespace is trimmed BEFORE the write, not just before
         // the checks: a stored ' RECASE_ME ' would be one character off from
-        // every URL that has to match it.
+        // the name the uniqueness check compared — and from the handle the
+        // first profile read freezes out of it.
         const same = await unwrapResponse(
           api.post(
             '/store/customers/me',
@@ -683,6 +787,9 @@ medusaIntegrationTestRunner({
         );
         expect(same.status).toBe(200);
         expect(same.data.customer.first_name).toBe('RECASE_ME');
+        await unwrapResponse(
+          api.get('/store/profiles/me', { headers: authedHeaders }),
+        );
         const pub = await getProfile('recase_me');
         expect(pub.status).toBe(200);
         expect(pub.data.handle).toBe('RECASE_ME');
@@ -718,13 +825,12 @@ medusaIntegrationTestRunner({
           },
         ]);
 
-        const collector = await customerModule.createCustomers({
-          email: 'pp-showcase@test.dev',
-          first_name: 'Showcase',
-        });
+        const showcaser = await customerModule.createCustomers(
+          collector('pp-showcase@test.dev', 'Showcase'),
+        );
         await packs.createPulls([
           {
-            customer_id: collector.id,
+            customer_id: showcaser.id,
             pack_id: SHOWCASE_PACK,
             card_id: RARE_CARD,
             rolled_at: new Date('2026-06-04T10:00:00Z'),
@@ -733,7 +839,7 @@ medusaIntegrationTestRunner({
           },
           // Not showcased — must not appear in the collection at all.
           {
-            customer_id: collector.id,
+            customer_id: showcaser.id,
             pack_id: PACK_SLUG,
             card_id: EPIC_CARD,
             rolled_at: new Date('2026-06-05T10:00:00Z'),
@@ -771,13 +877,12 @@ medusaIntegrationTestRunner({
         ]);
         // Deliberately NO createPackOdds for (ORPHAN_PACK, EPIC_CARD).
 
-        const collector = await customerModule.createCustomers({
-          email: 'pp-orphan@test.dev',
-          first_name: 'Orphan',
-        });
+        const orphan = await customerModule.createCustomers(
+          collector('pp-orphan@test.dev', 'Orphan'),
+        );
         await packs.createPulls([
           {
-            customer_id: collector.id,
+            customer_id: orphan.id,
             pack_id: ORPHAN_PACK,
             card_id: EPIC_CARD,
             rolled_at: new Date('2026-06-06T10:00:00Z'),

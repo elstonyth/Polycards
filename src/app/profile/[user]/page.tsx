@@ -2,14 +2,15 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getPublicProfile } from '@/lib/data/profiles';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
+import { getLeaderboard } from '@/lib/data/leaderboard';
 import { toProfileView } from '@/lib/profile-view';
 import ProfileClient from './ProfileClient';
 import { tabFromParam } from './tabs';
 
-// Public profiles. The param is the collector's DISPLAY NAME — that is the
-// whole identity now (see backend utils/profile-handle.ts): rename yourself and
-// this URL moves with you, because there is no second stored handle to drift
-// out of step with the name.
+// Public profiles. The param is the collector's PERMANENT handle (see backend
+// utils/profile-handle.ts) — fixed when the account was first named, so a
+// rename changes the name this page shows and never the URL, and every link
+// already shared (the Telegram board, a copied @handle) keeps working.
 //
 // An unknown name is a 404, full stop. It used to render a deterministic MOCK
 // persona so that "every /profile/<user> URL keeps rendering", and that is what
@@ -60,13 +61,18 @@ export default async function ProfilePage({
   searchParams: Promise<{ tab?: string }>;
 }) {
   const [{ user: handle }, { tab }] = await Promise.all([params, searchParams]);
+  // The weekly board is the same memoised read /leaderboard renders, so the
+  // profile's rank is that board's row, not a second computation of it.
+  // Started alongside, awaited only once there is a profile to rank
+  // (getLeaderboard never rejects — it returns [] on failure).
+  const weeklyBoardPromise = getLeaderboard('weekly');
   const [result, avatarFrames] = await Promise.all([
     getPublicProfile(handle),
     getAvatarFrames(),
   ]);
-  // A real 404: nobody holds this display name (or the holder renamed and this
-  // is their old URL). Next's own not-found page, with its 404 status — an
-  // invented collector is not an acceptable substitute for one.
+  // A real 404: no account holds this handle. Next's own not-found page,
+  // with its 404 status — an invented collector is not an acceptable
+  // substitute for one.
   if (result.status === 'notfound') {
     notFound();
   }
@@ -90,6 +96,10 @@ export default async function ProfilePage({
       </div>
     );
   }
-  const view = toProfileView(result.profile, avatarFrames);
+  const view = toProfileView(
+    result.profile,
+    avatarFrames,
+    await weeklyBoardPromise,
+  );
   return <ProfileClient user={view} initialTab={tabFromParam(tab)} />;
 }

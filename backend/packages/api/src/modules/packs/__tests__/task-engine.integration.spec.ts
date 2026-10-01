@@ -14,7 +14,10 @@ import Pull from '../models/pull';
 import Card from '../models/card';
 import Pack from '../models/pack';
 import PackOdds from '../models/pack-odds';
+import LedgerEntry from '../models/ledger-entry';
+import LedgerSequence from '../models/ledger-sequence';
 import { taskWeekFor } from '../referral';
+import { clearFxDisplayCache } from '../pricing';
 
 jest.setTimeout(300 * 1000);
 
@@ -34,6 +37,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
     Card,
     Pack,
     PackOdds,
+    LedgerEntry,
+    LedgerSequence,
   ],
   testSuite: ({ service }) => {
     it('check-in is once per MYT day', async () => {
@@ -86,6 +91,15 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
       expect(txns).toHaveLength(1);
       expect(Number(txns[0].amount)).toBe(2.5);
+      // And its transaction-history row, in the same transaction (2026-09-30:
+      // task credits moved balances with no ledger row).
+      const ledger = await service.listLedgerEntries({
+        type: 'WP',
+        customer_id: 'cus_t2',
+      });
+      expect(ledger).toHaveLength(1);
+      expect(ledger[0].ref_id).toBe(txns[0].id);
+      expect(Number(ledger[0].wallet_delta)).toBe(2.5);
 
       // Second claim in the same week is refused and pays nothing more.
       expect(
@@ -96,6 +110,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
           customer_id: 'cus_t2',
           reason: 'reward_credit',
         }),
+      ).toHaveLength(1);
+      expect(
+        await service.listLedgerEntries({ type: 'WP', customer_id: 'cus_t2' }),
       ).toHaveLength(1);
 
       // The hub now reports it claimed.
@@ -139,6 +156,18 @@ moduleIntegrationTestRunner<PacksModuleService>({
         sort: 1,
         adminId: 'admin_1',
         reason: 'seed',
+      });
+      // The hub names the card and its RM value, so the player knows what the
+      // achievement pays before claiming. No FxRate row in this module test →
+      // the 4.7 display fallback: 10 USD × 4.7 × 1.2 default markup = 56.40.
+      clearFxDisplayCache();
+      const hub = await service.taskHubFor({ customerId: 'cus_t3' });
+      expect(hub.tasks.find((t) => t.id === id)?.reward).toEqual({
+        type: 'card',
+        card_handle: 'reward-card',
+        card_name: 'Reward Card',
+        card_grade: 'PSA 9',
+        card_value_myr: 56.4,
       });
       // No stock hook: the route takes the unit AFTER this commits (a take
       // inside the transaction outlived a rolled-back claim).
@@ -234,6 +263,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           type: 'pack',
           pack_id: 'bronze',
           pack_title: 'Bronze Pack',
+          pack_price_myr: 300,
         });
       });
 

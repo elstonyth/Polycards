@@ -209,3 +209,66 @@ describe('deposit sweep — settling from a requery', () => {
     );
   });
 });
+
+describe('deposit sweep — the expired tier reaches every row in its window', () => {
+  // The real query's paging semantics for the 'expired' tier: newest first,
+  // honouring the created_at bounds and `take`. The harness above ignores all
+  // three, which is how the stuck-on-the-newest-ten bug went unseen.
+  const HOUR = 60 * 60 * 1000;
+  const t0 = new Date('2026-09-30T12:00:00Z');
+  const expiredRows = Array.from({ length: 11 }, (_, i) => ({
+    ...pendingRow,
+    id: `gpd_e${i}`,
+    merchant_transaction_id: `PC-E${i}`,
+    status: 'expired' as const,
+    // PC-E0 is the newest (2h old), PC-E10 the oldest (12h old).
+    created_at: new Date(t0.getTime() - (2 + i) * HOUR),
+  }));
+
+  function pagedHarness() {
+    const h = harness();
+    h.packs.listGatewayDeposits.mockImplementation(
+      (
+        selector: Record<string, unknown> = {},
+        config: Record<string, unknown> = {},
+      ) => {
+        if (selector.status !== 'expired') return Promise.resolve([]);
+        const range = (selector.created_at ?? {}) as {
+          $gte?: Date;
+          $lt?: Date;
+        };
+        const rows = expiredRows
+          .filter(
+            (r) =>
+              (!range.$gte || r.created_at >= range.$gte) &&
+              (!range.$lt || r.created_at < range.$lt),
+          )
+          .sort((a, b) => b.created_at.getTime() - a.created_at.getTime())
+          .slice(0, (config.take as number | undefined) ?? Infinity);
+        return Promise.resolve(rows);
+      },
+    );
+    return h;
+  }
+
+  afterEach(() => jest.useRealTimers());
+
+  it('asks about the oldest expired row on a later full sweep', async () => {
+    jest.useFakeTimers({
+      doNotFake: ['nextTick', 'queueMicrotask', 'setImmediate'],
+    });
+    jest.setSystemTime(t0);
+    const h = pagedHarness();
+    // Still pending at the gateway: nothing to credit, the rows stay expired.
+    fakeGateway.script({ getDepositDetail: { state: 'pending' } });
+
+    await depositReconcileJob(h.container);
+    expect(fakeGateway.calls.depositDetails).toHaveLength(10);
+    expect(fakeGateway.calls.depositDetails).not.toContain('PC-E10');
+
+    jest.setSystemTime(new Date(t0.getTime() + 11 * 60 * 1000)); // next full sweep
+    await depositReconcileJob(h.container);
+    expect(fakeGateway.calls.depositDetails).toContain('PC-E10');
+    expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
+  });
+});

@@ -1116,6 +1116,12 @@ export const TaskEntrySchema = z.looseObject({
     // predates the field omits it, a deleted pack nulls it — both fall back
     // to the bare "Free rip" label.
     pack_title: z.string().nullable().optional(),
+    // What each reward is worth, so every row reads "what · RM value". Same
+    // optional+nullable skew rule: absent/null just drops the RM figure.
+    pack_price_myr: finite.nullable().optional(),
+    card_name: z.string().nullable().optional(),
+    card_grade: z.string().nullable().optional(),
+    card_value_myr: finite.nullable().optional(),
   }),
   progress: z.looseObject({
     current: finite,

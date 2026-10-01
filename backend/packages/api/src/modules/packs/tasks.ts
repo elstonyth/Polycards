@@ -23,13 +23,26 @@ export type TaskReward =
   | { type: 'pack'; pack_id: string }
   | { type: 'card'; card_handle: string };
 
-/** A reward as GET /store/tasks sends it: a pack reward also carries the
- *  pack's title, so the row can name the pack instead of a bare "Free rip".
- *  null = the pack row is gone (the claim will fail at claim time; the admin
+/** A reward as GET /store/tasks sends it: pack and card rewards also carry
+ *  what they are and what they are worth (RM), so the row can say "Free rip ·
+ *  Silver Pack · RM 30" instead of a bare "Free rip" / "Card". null = the
+ *  pack/card row is gone (the claim will fail at claim time; the admin
  *  console is where that gets flagged). */
 export type HubReward =
-  | Exclude<TaskReward, { type: 'pack' }>
-  | { type: 'pack'; pack_id: string; pack_title: string | null };
+  | { type: 'credit'; amount_myr: number }
+  | {
+      type: 'pack';
+      pack_id: string;
+      pack_title: string | null;
+      pack_price_myr: number | null;
+    }
+  | {
+      type: 'card';
+      card_handle: string;
+      card_name: string | null;
+      card_grade: string | null;
+      card_value_myr: number | null;
+    };
 
 export type TaskKind = 'weekly' | 'achievement';
 

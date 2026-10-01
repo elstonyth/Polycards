@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, ShieldCheck } from 'lucide-react';
 import { PhoneField } from '@/components/PhoneField';
@@ -10,7 +10,10 @@ import { INPUT_CLASS } from '@/components/account/ui';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { logout } from '@/lib/actions/auth';
 import { changePhone, startPhoneOtp } from '@/lib/actions/phone-verification';
-import type { PhoneOtpChannel } from '@/lib/phone-verification';
+import {
+  PHONE_OTP_COOLDOWN_SECONDS,
+  type PhoneOtpChannel,
+} from '@/lib/phone-verification';
 import { normalizePhone } from '@/lib/profile-validation';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
@@ -33,7 +36,7 @@ const noop = () => {};
  * account would be asked here for a password this modal has no field for.
  *
  * The first code can go out by SMS or by voice call from the entry step. The
- * code step's own "Get a call instead" sits behind a 30s cooldown, and
+ * code step's own "Get a call instead" sits behind a 60s cooldown, and
  * someone whose carrier drops SMS (the Digi/016 case PhoneOtpStep documents)
  * should not have to wait it out inside a gate they cannot leave.
  */
@@ -50,16 +53,26 @@ export function PhoneOnboardingModal() {
   const [channel, setChannel] = useState<PhoneOtpChannel>('sms');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cooldown, setCooldown] = useState(0);
   // Set after a successful save: hides the gate for the beat between the
   // write landing and router.refresh() re-rendering the layout without it.
   const [done, setDone] = useState(false);
 
   useModalA11y(panelRef, !done, noop);
 
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setInterval(
+      () => setCooldown((left) => Math.max(0, left - 1)),
+      1_000,
+    );
+    return () => clearInterval(timer);
+  }, [cooldown]);
+
   // One sender for both entry-step controls: the form's submit (SMS) and the
   // "get a call" button, which reads the same form.
-  async function send(form: HTMLFormElement, via: PhoneOtpChannel) {
-    if (busy) return;
+  async function send(form: HTMLFormElement, via?: PhoneOtpChannel) {
+    if (busy || cooldown > 0) return;
     setError(null);
     // PhoneField submits E.164 in its hidden input.
     const normalized = normalizePhone(
@@ -70,19 +83,25 @@ export function PhoneOnboardingModal() {
       return;
     }
     setBusy(true);
+    setCooldown(PHONE_OTP_COOLDOWN_SECONDS);
     try {
       const result = await startPhoneOtp({
         phone: normalized,
         purpose: 'phone-change',
-        // Omitted for SMS — the backend default; sent only when asked for.
-        ...(via === 'call' ? { channel: via } : {}),
+        ...(via ? { channel: via } : {}),
       });
       if (!result.ok) {
         setError(result.error);
+        setCooldown(
+          Math.min(
+            PHONE_OTP_COOLDOWN_SECONDS,
+            result.retryAfterSeconds ?? PHONE_OTP_COOLDOWN_SECONDS,
+          ),
+        );
         return;
       }
       setPhone(normalized);
-      setChannel(via);
+      setChannel(result.channel);
       setStep('otp');
     } catch {
       setError('Something went wrong. Please try again.');
@@ -93,7 +112,7 @@ export function PhoneOnboardingModal() {
 
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    void send(e.currentTarget, 'sms');
+    void send(e.currentTarget);
   }
 
   async function onVerified(token: string) {
@@ -173,7 +192,7 @@ export function PhoneOnboardingModal() {
         <p className="mt-2 text-sm leading-relaxed text-neutral-400">
           A verified phone number is required to finish setting up your account.
           It secures your account and unlocks top-ups, withdrawals and
-          deliveries. We&apos;ll text you a code, or call you with it.
+          deliveries. Get a verification code, or choose a call instead.
         </p>
 
         {step === 'entry' ? (
@@ -208,21 +227,26 @@ export function PhoneOnboardingModal() {
             >
               {error}
             </p>
-            <Pill type="submit" size="lg" disabled={busy} className="w-full">
+            <Pill
+              type="submit"
+              size="lg"
+              disabled={busy || cooldown > 0}
+              className="w-full"
+            >
               {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-              Send code
+              {cooldown > 0 ? `Send code in ${cooldown}s` : 'Send code'}
             </Pill>
             {/* type="button", not a second submit: the form's submit is the
                 SMS path, and Enter in the number field must keep meaning SMS. */}
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || cooldown > 0}
               onClick={() => {
                 if (formRef.current) void send(formRef.current, 'call');
               }}
               className="min-h-11 text-[13px] font-medium text-neutral-400 transition-colors hover:text-white disabled:opacity-50"
             >
-              Can&apos;t receive SMS? Get a call instead
+              Get code by phone call
             </button>
           </form>
         ) : (

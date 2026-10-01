@@ -148,7 +148,7 @@ if (process.env.PW_JWT_FILE) {
   // Voice-call first send: the code step must open on the call copy. Then
   // Back, and continue by SMS (two of the 3-per-10-min per-phone budget).
   await gate.getByLabel('Phone number').fill(PHONE);
-  await gate.getByRole('button', { name: /get a call instead/i }).click();
+  await gate.getByRole('button', { name: /get code by phone call/i }).click();
   const codeInput = gate.getByPlaceholder('Verification code');
   await codeInput.waitFor({ state: 'visible', timeout: 15000 });
   check(
