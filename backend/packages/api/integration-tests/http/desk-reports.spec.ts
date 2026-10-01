@@ -560,6 +560,37 @@ medusaIntegrationTestRunner({
         expect(body).not.toContain('Private');
       });
 
+      it('finds a player by profile handle, and prefers the shown name when the two collide', async () => {
+        // Since the permanent-handle change (utils/profile-handle.ts) the
+        // profile link carries metadata.handle, which can differ from the
+        // shown name and can even equal ANOTHER player's shown name.
+        await customers().createCustomers([
+          {
+            email: 'dr-handle@test.dev',
+            first_name: 'Shown_Now',
+            metadata: { handle: 'Link_Only' },
+          },
+          {
+            email: 'dr-renamed@test.dev',
+            first_name: 'Renamed_Since',
+            metadata: { handle: 'Taken_Name' },
+          },
+          { email: 'dr-taker@test.dev', first_name: 'Taken_Name' },
+        ]);
+
+        const byHandle = await report('player?username=link_only');
+        expect(byHandle.status).toBe(200);
+        expect(byHandle.data.username).toBe('Shown_Now');
+        expect(byHandle.data.lookup_note).toBeUndefined();
+
+        const clash = await report('player?username=taken_name');
+        expect(clash.status).toBe(200);
+        expect(clash.data.username).toBe('Taken_Name');
+        expect(clash.data.lookup_note).toMatch(
+          /profile handle of a different player/,
+        );
+      });
+
       it('answers 404 for an unknown username and 400 for a malformed one', async () => {
         expect((await report('player?username=nobody_here')).status).toBe(404);
         expect((await report('player?username=a')).status).toBe(400);
