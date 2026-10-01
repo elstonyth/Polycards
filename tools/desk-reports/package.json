@@ -1,0 +1,17 @@
+{
+  "name": "polycards-desk-reports",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MCP server giving the Polycards staff desk bots read-only access to the backend's /reports/<desk>/* routes.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.6.5"
+  }
+}

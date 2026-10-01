@@ -508,6 +508,13 @@ services:
       - key: MEDUSA_WORKER_MODE
         scope: RUN_TIME
         value: server
+      # Finance desk-report key (GET /reports/finance/*, spec 2026-09-29
+      # desk reports). Web service only: the worker serves no HTTP. Unset =
+      # those routes answer 503.
+      - key: REPORT_KEY_FINANCE
+        scope: RUN_TIME
+        type: SECRET
+        value: __SECRET__REPORT_KEY_FINANCE__
 
 workers:
   - name: worker

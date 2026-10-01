@@ -40,6 +40,7 @@ import {
   noStoreForAuthenticatedStore,
 } from './utils/cache-headers';
 import { refuseCrossOriginAdminWrite } from './utils/admin-origin-guard';
+import { requireReportKey } from './reports/require-report-key';
 
 // Custom-route middleware. /store/* is NOT a default customer-protected prefix
 // (only /store/customers/me/* is), so every customer-owned route here must opt
@@ -114,6 +115,9 @@ const adminActionRateLimit = rateLimit('admin-action');
 const gatewayHookRateLimit = rateLimit('gateway-hook');
 // TGPay's source allowlist (src/api/utils/payer-ip.ts) — after the limiter.
 const tgpayCallbackAllowlist = createTgpayCallbackAllowlist();
+// Desk reports (GET /reports/*): one budget for every staff desk bot, which
+// all call from the owner's PC.
+const deskReportsRateLimit = rateLimit('desk-reports');
 
 // In-memory multipart parsing for the custom image-upload route. memoryStorage
 // hands the route a Buffer (no temp files); the 20 MB cap is the hard edge gate
@@ -318,6 +322,16 @@ export default defineMiddlewares({
       matcher: '/hooks/tgpay/*',
       method: 'POST',
       middlewares: [gatewayHookRateLimit, tgpayCallbackAllowlist],
+    },
+    {
+      // Desk reports (spec 2026-09-29-desk-reports-design.md): read-only
+      // numbers for the staff Discord desk bots. A top-level prefix like
+      // /hooks, so no publishable key and no session; each desk's own key is
+      // the lock. Limiter FIRST so a key-guessing loop 429s before any
+      // comparison.
+      matcher: '/reports/*',
+      method: 'GET',
+      middlewares: [deskReportsRateLimit, requireReportKey()],
     },
     {
       // OTP send — TWO independent limiter tiers, per-phone FIRST so a
