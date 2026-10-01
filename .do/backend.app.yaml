@@ -312,13 +312,16 @@ envs:
   # SMS ceiling; 0 stops every send, calls included. Counters survive deploys.
   # A resend inside the 10-minute code lifetime, or a spent SMS budget, goes
   # out as a call instead (calls: 60/hour, 300/day sitewide).
+  # Raised 40/100 -> 100/400 on 2026-10-01 (operator call): real evening
+  # traffic was ~6 people per 10 minutes. Applied live with doctl the same
+  # day; this keeps a full-spec apply from reverting it.
   # Redis unavailable => no paid sends. Raise only for verified real traffic.
   - key: PHONE_OTP_GLOBAL_HOURLY_LIMIT
     scope: RUN_TIME
-    value: "40"
+    value: "100"
   - key: PHONE_OTP_GLOBAL_DAILY_LIMIT
     scope: RUN_TIME
-    value: "100"
+    value: "400"
   # ── Telegram apex-pull board (Legendary+ pulls → the public channel) ────────
   # Both keys were applied straight to the live app on 2026-08-21 (a surgical
   # `doctl apps update`, because this integration shipped after that day's spec
