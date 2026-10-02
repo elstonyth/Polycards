@@ -4,6 +4,7 @@ import {
   POSTER_H,
   POSTER_W,
   posterFigure,
+  posterRm,
   posterTextError,
 } from '../brand-poster';
 
@@ -23,6 +24,13 @@ describe('posterFigure', () => {
 
   it('keeps a count under a hundred exact', () => {
     expect(posterFigure(99, 'hundred')).toBe('99');
+  });
+});
+
+describe('posterRm', () => {
+  it('prints a price like the storefront: RM with sen', () => {
+    expect(posterRm(204223.74)).toBe('RM 204,223.74');
+    expect(posterRm(5000)).toBe('RM 5,000.00');
   });
 });
 
@@ -54,11 +62,16 @@ describe('composeBrandPoster', () => {
   it('draws a 4:5 feed JPEG and names the slabs drawn as placeholders', async () => {
     const { jpeg, placeholders } = await composeBrandPoster(
       {
-        kicker: 'Milestone',
-        headline: 'Collectors and counting',
+        kicker: 'Community milestone',
+        headline: 'Collectors and counting.',
         stat: '400+',
         subline: 'Thank you for ripping with us.',
-        cards: ['Card A', 'Card B', 'Card C'],
+        cards: [
+          { name: 'Card A', rarity: 'Immortal' },
+          { name: 'Card B', rarity: 'Legendary' },
+          { name: 'Card C', rarity: 'Rare' },
+        ],
+        chase: { priceMyr: 204223.74, name: 'Card A', pack: 'Diamond Pack' },
         siteHost: 'polycards.gg',
       },
       [null, Buffer.from('not an image'), null],
@@ -69,14 +82,15 @@ describe('composeBrandPoster', () => {
     expect(placeholders).toEqual([1, 2, 3]);
   });
 
-  it('lays out without a figure or cards', async () => {
+  it('lays out type only when there are no cards', async () => {
     const { jpeg, placeholders } = await composeBrandPoster(
       {
         kicker: '',
-        headline: 'Something new is coming',
+        headline: 'Something new is coming.',
         stat: null,
         subline: '',
         cards: [],
+        chase: null,
         siteHost: 'polycards.gg',
       },
       [],

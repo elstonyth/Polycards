@@ -5,7 +5,7 @@ import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { clearChallengeCache } from '../../src/api/store/challenge/route';
-import { topHits } from '../../src/api/reports/growth/brand-poster/route';
+import { topChaseCards } from '../../src/api/reports/growth/brand-poster/route';
 import { myrDisplay as MYR, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -495,13 +495,20 @@ medusaIntegrationTestRunner({
         expect(words.headers['x-poster-figure']).toBeUndefined();
       });
 
-      it("takes the public packs' three most valuable top hits as the hero", async () => {
+      it("takes the home page's top chase cards as the hero", async () => {
         await packs().createPacks([
           {
             slug: 'bp-listed',
             title: 'BP Listed',
             category: 'pokemon',
-            price: 20,
+            price: 600,
+            image: '/x.webp',
+          },
+          {
+            slug: 'bp-premium',
+            title: 'BP Premium',
+            category: 'pokemon',
+            price: 5000,
             image: '/x.webp',
           },
           {
@@ -519,8 +526,21 @@ medusaIntegrationTestRunner({
             image: '/x.webp',
             status: 'draft',
           },
+          {
+            slug: 'bp-soldout',
+            title: 'BP Sold Out',
+            category: 'pokemon',
+            price: 20,
+            image: '/x.webp',
+            in_stock: false,
+          },
         ]);
-        const card = (handle: string, name: string, mv: number) => ({
+        const card = (
+          handle: string,
+          name: string,
+          mv: number,
+          slab = true,
+        ) => ({
           handle,
           name,
           set: 'S',
@@ -528,45 +548,67 @@ medusaIntegrationTestRunner({
           grade: '10',
           market_value: mv,
           image: `/${handle}.webp`,
+          slab_image: slab ? `/slab-${handle}.webp` : null,
         });
         await packs().createCards([
           card('bp-a', 'BP A', 90),
           card('bp-b', 'BP B', 50),
           card('bp-c', 'BP C', 20),
           card('bp-d', 'BP D', 10),
+          card('bp-no-slab', 'BP No Slab', 1000, false),
           card('bp-welcome-hit', 'BP Welcome Hit', 500),
           card('bp-draft-hit', 'BP Draft Hit', 400),
-          card('bp-not-hit', 'BP Not A Hit', 1000),
+          card('bp-soldout-hit', 'BP Sold Out Hit', 300),
         ]);
         const odds = (
           pack_id: string,
           card_id: string,
-          top_hit_order: number | null,
-        ) => ({
-          pack_id,
-          card_id,
-          weight: 100,
-          locked: false,
-          rarity: 'Rare' as const,
-          top_hit_order,
-        });
+          rarity: 'Immortal' | 'Legendary' | 'Rare' | 'Common',
+        ) => ({ pack_id, card_id, weight: 100, locked: false, rarity });
         await packs().createPackOdds([
-          odds('bp-listed', 'bp-c', 1),
-          odds('bp-listed', 'bp-a', 2),
-          odds('bp-listed', 'bp-d', 3),
-          odds('bp-listed', 'bp-b', 4),
-          odds('bp-listed', 'bp-not-hit', null),
-          odds('bp-welcome', 'bp-welcome-hit', 1),
-          odds('bp-draft', 'bp-draft-hit', 1),
+          odds('bp-listed', 'bp-a', 'Legendary'),
+          odds('bp-premium', 'bp-a', 'Immortal'),
+          odds('bp-listed', 'bp-b', 'Rare'),
+          odds('bp-listed', 'bp-c', 'Rare'),
+          odds('bp-listed', 'bp-d', 'Common'),
+          odds('bp-listed', 'bp-no-slab', 'Immortal'),
+          odds('bp-welcome', 'bp-welcome-hit', 'Immortal'),
+          odds('bp-draft', 'bp-draft-hit', 'Immortal'),
+          odds('bp-soldout', 'bp-soldout-hit', 'Immortal'),
         ]);
-        const hero = await topHits(packs());
-        expect(hero).toEqual([
-          { name: 'BP A', image: '/bp-a.webp' },
-          { name: 'BP B', image: '/bp-b.webp' },
-          { name: 'BP C', image: '/bp-c.webp' },
+        const hero = await topChaseCards(packs());
+        // Slabs only, from packs customers can open now, most valuable first;
+        // each with its best tier there and its priciest pack.
+        expect(
+          hero.map(({ name, image, pack, rarity }) => ({
+            name,
+            image,
+            pack,
+            rarity,
+          })),
+        ).toEqual([
+          {
+            name: 'BP A',
+            image: '/slab-bp-a.webp',
+            pack: 'BP Premium',
+            rarity: 'Immortal',
+          },
+          {
+            name: 'BP B',
+            image: '/slab-bp-b.webp',
+            pack: 'BP Listed',
+            rarity: 'Rare',
+          },
+          {
+            name: 'BP C',
+            image: '/slab-bp-c.webp',
+            pack: 'BP Listed',
+            rarity: 'Rare',
+          },
         ]);
+        expect(hero[0].priceMyr).toBeGreaterThan(hero[1].priceMyr);
         // The seeded art is a relative path nobody serves here: placeholders.
-        const res = await poster({ headline: 'Chase the top hits' });
+        const res = await poster({ headline: 'Chase the top hits.' });
         expect(res.status).toBe(200);
         expect(res.headers['x-poster-missing-art']).toBe('1,2,3');
       });

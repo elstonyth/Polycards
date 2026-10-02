@@ -24,8 +24,8 @@ const METRICS = ['none', 'players', 'new_players'] as const;
 // bot writes the words; a figure only comes from `metric`, counted live like
 // the admin Stats page's sign-ups (signupTopupStats: accounts, deleted ones
 // included, partner-minted ones left out), so a poster can never carry a
-// number the data does not show. The hero is the three most valuable top
-// hits of the public packs, as their official images.
+// number the data does not show. The hero is the home page's top chase
+// cards, as their official slab images in their tier frames.
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
@@ -97,7 +97,7 @@ export async function GET(
         : new Date(to.getTime() - Number(rawDays) * 86_400_000);
     figure = (await packs.signupTopupStats(from, to)).signups;
   }
-  const hero = art === 'none' ? [] : await topHits(packs);
+  const hero = art === 'none' ? [] : await topChaseCards(packs);
 
   const { jpeg, missing } = await renderBrandPoster(
     {
@@ -105,7 +105,10 @@ export async function GET(
       headline,
       stat: figure === null ? null : posterFigure(figure, round),
       subline,
-      cards: hero.map((c) => c.name),
+      cards: hero.map(({ name, rarity }) => ({ name, rarity })),
+      chase: hero[0]
+        ? { priceMyr: hero[0].priceMyr, name: hero[0].name, pack: hero[0].pack }
+        : null,
       siteHost: 'polycards.gg',
     },
     hero.map((c) => c.image),
@@ -116,46 +119,87 @@ export async function GET(
   res.status(200).send(jpeg);
 }
 
-/** The three most valuable cards among the public packs' top hits, at
- *  today's display price, each with its official image (slab first). */
-export async function topHits(
-  packs: PacksModuleService,
-): Promise<{ name: string; image: string }[]> {
-  const listed = (
+const TIERS = [
+  'Immortal',
+  'Legendary',
+  'Mythical',
+  'Rare',
+  'Uncommon',
+  'Common',
+];
+
+/** The home hero's top chase cards (src/app/page.tsx): the most valuable
+ *  slabs in the packs customers can open now, at today's display price (the
+ *  store's seam: FMV x FX x the card's markup). Each comes with the best tier
+ *  it holds in those packs (as /store/cards/:handle shows it) and the
+ *  priciest of them, where it is the chase. */
+export async function topChaseCards(packs: PacksModuleService): Promise<
+  {
+    name: string;
+    image: string;
+    priceMyr: number;
+    pack: string;
+    rarity: string;
+  }[]
+> {
+  const open = (
     await packs.listPacks({ status: 'active' }, { take: 1000 })
-  ).filter((p) => !UNLISTED.has(p.category));
-  if (!listed.length) return [];
-  const odds = await pageAll((opts) =>
-    packs.listPackOdds(
-      { pack_id: listed.map((p) => p.slug) },
-      { ...opts, select: ['card_id', 'top_hit_order'] },
-    ),
-  );
-  const handles = [
-    ...new Set(
-      odds
-        .filter((o) => o.card_id != null && o.top_hit_order != null)
-        .map((o) => o.card_id as string),
-    ),
-  ];
+  ).filter((p) => !UNLISTED.has(p.category) && p.in_stock !== false);
+  if (!open.length) return [];
+  const bySlug = new Map(open.map((p) => [p.slug, p]));
+  const rows = (
+    await pageAll((opts) =>
+      packs.listPackOdds(
+        { pack_id: [...bySlug.keys()] },
+        { ...opts, select: ['pack_id', 'card_id', 'rarity'] },
+      ),
+    )
+  ).filter((o): o is typeof o & { card_id: string } => o.card_id != null);
+  const handles = [...new Set(rows.map((o) => o.card_id))];
   if (!handles.length) return [];
-  const cards = await packs.listCards(
-    { handle: handles },
-    { take: handles.length },
+  const cards = await pageAll((opts) =>
+    packs.listCards(
+      { handle: handles },
+      {
+        ...opts,
+        select: [
+          'handle',
+          'name',
+          'slab_image',
+          'market_value',
+          'market_multiplier',
+        ],
+      },
+    ),
   );
   const fx = await resolveFxRate(packs);
   return cards
+    .filter((c): c is typeof c & { slab_image: string } => !!c.slab_image)
     .map((c) => ({
-      name: c.name,
-      image: c.slab_image ?? c.image,
+      c,
       price: displayMarketPrice(
         toMoney(c.market_value),
         fx,
         toMoney(c.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
       ),
     }))
-    .filter((c) => !!c.image)
-    .sort((a, b) => b.price - a.price || a.name.localeCompare(b.name))
+    .sort((a, b) => b.price - a.price || a.c.name.localeCompare(b.c.name))
     .slice(0, 3)
-    .map(({ name, image }) => ({ name, image }));
+    .map(({ c, price }) => {
+      const mine = rows.filter((o) => o.card_id === c.handle);
+      const rarity =
+        mine
+          .map((o) => o.rarity ?? 'Common')
+          .sort((a, b) => TIERS.indexOf(a) - TIERS.indexOf(b))[0] ?? 'Common';
+      const pack = mine
+        .map((o) => bySlug.get(o.pack_id)!)
+        .sort((a, b) => Number(b.price) - Number(a.price))[0];
+      return {
+        name: c.name,
+        image: c.slab_image,
+        priceMyr: price,
+        pack: pack.title,
+        rarity,
+      };
+    });
 }

@@ -146,24 +146,24 @@ TOOLS.growth = [
   {
     name: 'brand_poster',
     description:
-      "A finished post graphic in the website's own design, for milestones, sign-ups and announcements (the weekly challenge has challenge_poster): the official logo top-left, a big Nekst headline on ink-black, an optional live figure in chase gold, the three most valuable top-hit slabs of the public packs as the hero (their official images), a quiet subline and polycards.gg in the footer. 1080x1350, the 4:5 feed size. Text is English letters and punctuation only (the brand fonts have no Chinese), and numbers cannot be typed in: a figure comes only from metric, live. players = every registered player ever, counted like the admin Stats page; new_players = sign-ups in the last `days` days. round shows the figure exactly or rounded DOWN to the hundred (480 shows as 400+, never 500+). The reply gives the exact live figure: if staff asked for a number the data does not support, tell them the real one. It is a draft; a human reviews it before it is published.",
+      "A finished post graphic drawn as the website's own home hero, for milestones, sign-ups and announcements (the weekly challenge has challenge_poster): the official logo, a small eyebrow, an optional live figure in chase gold, a big sentence-case Nekst headline, a quiet line, the white Open a pack pill with polycards.gg, the site's top 3 chase cards fanned in their tier frames, and the site's Top 3 chase cards panel with the lead card's live price. 1080x1350, the 4:5 feed size. Write like the site's hero: short sentence-case lines ending in a full stop, e.g. headline 'Collectors and counting.' Text is English letters and punctuation only (the brand fonts have no Chinese), and numbers cannot be typed in: a figure comes only from metric, live. players = every registered player ever, counted like the admin Stats page; new_players = sign-ups in the last `days` days. round shows the figure exactly or rounded DOWN to the hundred (480 shows as 400+, never 500+). The reply gives the exact live figure: if staff asked for a number the data does not support, tell them the real one. It is a draft; a human reviews it before it is published.",
     inputSchema: {
       headline: z
         .string()
         .describe(
-          'The claim, in English, up to 60 characters, no digits. With a figure it reads as the figure\'s label, e.g. "Collectors and counting".',
+          'The claim in English, sentence case like the site ("Open packs. Pull real cards."), up to 60 characters, no digits. With a figure it reads as its label, e.g. "Collectors and counting."',
         ),
       kicker: z
         .string()
         .optional()
         .describe(
-          'Optional small label top-right, up to 28 characters, e.g. "Community milestone".',
+          'Optional eyebrow above the headline, up to 28 characters, e.g. "Community milestone".',
         ),
       subline: z
         .string()
         .optional()
         .describe(
-          'Optional quiet line under the art, up to 120 characters, e.g. "Thank you for every rip."',
+          'Optional quiet line under the headline, up to 120 characters, e.g. "Thank you for every rip."',
         ),
       metric: z
         .enum(['none', 'players', 'new_players'])
@@ -184,7 +184,7 @@ TOOLS.growth = [
         .enum(['top_hits', 'none'])
         .optional()
         .describe(
-          'top_hits (default): three real slabs as the hero; none: type only.',
+          "top_hits (default): the site's top 3 chase cards as the hero; none: type only.",
         ),
     },
     request: (args) => ({
