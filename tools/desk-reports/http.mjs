@@ -50,6 +50,8 @@ export async function getReport({
         data: Buffer.from(bytes).toString('base64'),
         // Podium ranks drawn as placeholder tiles, if any.
         missingArt: res.headers.get('x-poster-missing-art') ?? '',
+        // The exact live figure behind a brand poster, if it shows one.
+        figure: res.headers.get('x-poster-figure') ?? '',
       };
     throw new ReportError(
       'The backend sent an unreadable image. Try again in a minute.',

@@ -127,6 +127,9 @@ Rules for every Phase B report (decided 2026-10-01):
 | `GET /reports/growth/signups?from&to` | New accounts per Malaysia day, counted like the admin Stats page (`signupTopupStats`), plus first top-ups. At most 93 days. |
 | `GET /reports/growth/packs?from&to&group` | Paid and free packs opened per Malaysia day, and the 10 most-opened packs (`packOpens`, shared with Finance's pack-sales; opens only). At most 93 days. |
 | `GET /reports/growth/challenge-poster?stage&leaders` | A finished 1080-wide JPEG for a post: the unlock headline, stage chips, the featured stage's top-3 prize slabs from their official images (never an AI redraw), optional current leaders, the site address. Unreachable art becomes a placeholder tile. The MCP tool returns it as an image block, which Hermes posts. |
+| `GET /reports/growth/brand-poster?headline&kicker&subline&metric&days&round&art` | A finished 1080×1350 (4:5) post graphic in the site design for milestones, sign-ups and announcements: the official logo, a Nekst headline, an optional figure in chase gold, the three most valuable top hits of the public packs as the hero. Text is English only and refuses digits: a figure comes only from `metric` (`players` = every sign-up ever, `new_players` = sign-ups in the last `days`), counted like the admin Stats page, shown exactly or rounded **down** to the hundred. The exact figure comes back in `x-poster-figure`, so the bot can correct a number staff asked for. |
+
+Every image the Growth bot generates with `image_gen` gets the official wordmark from a Hermes `post_tool_call` hook (`tools/desk-reports/hooks/stamp-logo.py`, matcher `^image_generate$`) before the gateway attaches it. The hook stamps the file in place, in the calmest corner, so the bot cannot skip the logo.
 
 **Wave 2 (planned):**
 

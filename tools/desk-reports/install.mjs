@@ -20,6 +20,13 @@ for (const file of [
 }
 // The official logo files the brand_logo tool returns.
 cpSync(join(here, 'brand'), join(target, 'brand'), { recursive: true });
+// The hook that stamps that logo on every generated image (a desk profile's
+// hooks.post_tool_call runs it; it reads ../brand).
+mkdirSync(join(target, 'hooks'), { recursive: true });
+cpSync(
+  join(here, 'hooks', 'stamp-logo.py'),
+  join(target, 'hooks', 'stamp-logo.py'),
+);
 // npm is npm.cmd on Windows, which needs a shell to start.
 execFileSync('npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], {
   cwd: target,

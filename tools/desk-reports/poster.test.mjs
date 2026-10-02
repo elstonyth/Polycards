@@ -35,7 +35,48 @@ test('image mode returns the bytes as base64 and keeps the key safe', async () =
     mimeType: 'image/jpeg',
     data: JPEG.toString('base64'),
     missingArt: '',
+    figure: '',
   });
+});
+
+test('brand_poster maps its arguments and tells the bot the live figure', async () => {
+  const brand = TOOLS.growth.find((t) => t.name === 'brand_poster');
+  assert.deepEqual(
+    brand.request({
+      headline: 'Collectors and counting',
+      kicker: 'Milestone',
+      metric: 'players',
+      round: 'hundred',
+    }),
+    {
+      path: 'brand-poster',
+      params: {
+        headline: 'Collectors and counting',
+        kicker: 'Milestone',
+        subline: undefined,
+        metric: 'players',
+        days: undefined,
+        round: 'hundred',
+        art: undefined,
+      },
+      as: 'image',
+    },
+  );
+  const out = await runTool(
+    brand,
+    { headline: 'Collectors and counting', metric: 'players' },
+    {
+      ...base,
+      fetchImpl: async () =>
+        new Response(JPEG, {
+          status: 200,
+          headers: { 'content-type': 'image/jpeg', 'x-poster-figure': '480' },
+        }),
+    },
+  );
+  assert.equal(out.content[0].type, 'image');
+  assert.match(out.content[1].text, /live figure is 480/);
+  assert.match(out.content[1].text, ATTACH);
 });
 
 test('challenge_poster tells the bot when prize art is a placeholder', async () => {

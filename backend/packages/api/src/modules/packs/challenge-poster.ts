@@ -87,7 +87,7 @@ const credits = (n: number): string =>
   })}`;
 
 /** The largest size from `from` down to `floor` at which every line fits. */
-async function sizeToFit(
+export async function sizeToFit(
   lines: string[],
   font: (size: number) => Font,
   from: number,
@@ -103,7 +103,7 @@ async function sizeToFit(
 
 /** A name as at most two balanced lines that fit `max`, the second one
  *  ellipsized if it must be. */
-async function twoLines(
+export async function twoLines(
   text: string,
   font: Font,
   max: number,
