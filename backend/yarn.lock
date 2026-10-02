@@ -48,7 +48,7 @@ __metadata:
     "@medusajs/test-utils": "npm:2.19.0"
     "@mercurjs/cli": "npm:2.3.3"
     "@mercurjs/core": "npm:2.3.3"
-    "@mercurjs/types": "npm:2.3.3"
+    "@mercurjs/types": "npm:2.3.5"
     "@swc/core": "npm:^1.16.2"
     "@swc/jest": "npm:^0.2.36"
     "@types/jest": "npm:^30.0.0"
@@ -4260,6 +4260,23 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@medusajs/types@npm:2.20.1":
+  version: 2.20.1
+  resolution: "@medusajs/types@npm:2.20.1"
+  dependencies:
+    bignumber.js: "npm:^9.1.2"
+  peerDependencies:
+    ioredis: ^5.4.1
+    vite: ">=5"
+  peerDependenciesMeta:
+    ioredis:
+      optional: true
+    vite:
+      optional: true
+  checksum: 10c0/799b940fda916c5ce302e56521cb86098b451c6f8807a9ead85aa921a3fe8da6536716d47be39eafcb0b28638d4a008626a181a37ce083bc4aa23e5b09a18b46
+  languageName: node
+  linkType: hard
+
 "@medusajs/ui-preset@npm:2.19.0":
   version: 2.19.0
   resolution: "@medusajs/ui-preset@npm:2.19.0"
@@ -4606,12 +4623,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@mercurjs/types@npm:2.3.3":
-  version: 2.3.3
-  resolution: "@mercurjs/types@npm:2.3.3"
+"@mercurjs/types@npm:2.3.5":
+  version: 2.3.5
+  resolution: "@mercurjs/types@npm:2.3.5"
   dependencies:
-    "@medusajs/types": "npm:2.18.0"
-  checksum: 10c0/3b6449026ad11436c794562eb6ee86a6a57d1c67fce53a99d57e3256661e6ae54b0bc998c19e562410c114f7e4cebb3ce3ec91dba9c8e2bb465ba1f52f1337d4
+    "@medusajs/types": "npm:2.20.1"
+  checksum: 10c0/b282f38bc07e075c773bc3f6d944ff9738fd22a9ea9c5cfae8ad7853013b6c9546da6ba20cd5a4d9f73c1302ac8e463e982f4780408fe4eed029a606c7124b60
   languageName: node
   linkType: hard
 
