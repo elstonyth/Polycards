@@ -143,11 +143,9 @@ export async function GET(
         : `joined in the last ${rawDays} days`;
   const { jpeg, missing } = await renderBrandPoster(
     {
-      kicker:
-        target && !target.reached
-          ? `Road to ${goal!.toLocaleString('en-MY')}`
-          : kicker,
+      kicker,
       headline,
+      statPrefix: target && !target.reached ? 'Road to' : undefined,
       stat: target
         ? target.figure
         : figure === null
