@@ -5,6 +5,7 @@ import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { clearChallengeCache } from '../../src/api/store/challenge/route';
+import { topHits } from '../../src/api/reports/growth/brand-poster/route';
 import { myrDisplay as MYR, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -433,6 +434,167 @@ medusaIntegrationTestRunner({
 
       it('needs both window bounds', async () => {
         expect((await report('packs')).status).toBe(400);
+      });
+    });
+
+    describe('GET /reports/growth/brand-poster', () => {
+      const poster = (query: Record<string, string>) =>
+        unwrapResponse(
+          api.get(
+            `/reports/growth/brand-poster?${new URLSearchParams(query)}`,
+            {
+              headers: { 'x-report-key': GROWTH_KEY },
+              responseType: 'arraybuffer',
+            },
+          ),
+        );
+
+      it('prints only the live figure, counted like the admin Stats page', async () => {
+        await customers().createCustomers([
+          { email: 'bp-a@test.dev', has_account: true },
+          { email: 'bp-b@test.dev', has_account: true },
+          { email: 'bp-guest@test.dev', has_account: false },
+          {
+            email: 'bp-staff@test.dev',
+            has_account: true,
+            metadata: { partner_credential: { username: 'x' } },
+          },
+        ]);
+        const res = await poster({
+          headline: 'Collectors and counting',
+          metric: 'players',
+          round: 'hundred',
+          art: 'none',
+        });
+        expect(res.status).toBe(200);
+        expect(res.headers['content-type']).toMatch(/^image\/jpeg/);
+        expect(res.headers['cache-control']).toBe('no-store');
+        const all = await packs().signupTopupStats(new Date(0), new Date());
+        // The header carries the exact count, whatever the poster rounds to.
+        expect(res.headers['x-poster-figure']).toBe(String(all.signups));
+        expect(all.signups).toBeGreaterThanOrEqual(2);
+        const meta = await sharp(Buffer.from(res.data)).metadata();
+        expect(meta.format).toBe('jpeg');
+        expect([meta.width, meta.height]).toEqual([1080, 1350]);
+        expect(res.headers['x-poster-missing-art']).toBeUndefined();
+
+        const recent = await poster({
+          headline: 'New collectors',
+          metric: 'new_players',
+          days: '3',
+          art: 'none',
+        });
+        const since = await packs().signupTopupStats(
+          new Date(Date.now() - 3 * DAY_MS),
+          new Date(),
+        );
+        expect(recent.headers['x-poster-figure']).toBe(String(since.signups));
+
+        const words = await poster({ headline: 'Something new', art: 'none' });
+        expect(words.status).toBe(200);
+        expect(words.headers['x-poster-figure']).toBeUndefined();
+      });
+
+      it("takes the public packs' three most valuable top hits as the hero", async () => {
+        await packs().createPacks([
+          {
+            slug: 'bp-listed',
+            title: 'BP Listed',
+            category: 'pokemon',
+            price: 20,
+            image: '/x.webp',
+          },
+          {
+            slug: 'bp-welcome',
+            title: 'BP Welcome',
+            category: 'free_welcome',
+            price: 0,
+            image: '/x.webp',
+          },
+          {
+            slug: 'bp-draft',
+            title: 'BP Draft',
+            category: 'pokemon',
+            price: 20,
+            image: '/x.webp',
+            status: 'draft',
+          },
+        ]);
+        const card = (handle: string, name: string, mv: number) => ({
+          handle,
+          name,
+          set: 'S',
+          grader: 'PSA',
+          grade: '10',
+          market_value: mv,
+          image: `/${handle}.webp`,
+        });
+        await packs().createCards([
+          card('bp-a', 'BP A', 90),
+          card('bp-b', 'BP B', 50),
+          card('bp-c', 'BP C', 20),
+          card('bp-d', 'BP D', 10),
+          card('bp-welcome-hit', 'BP Welcome Hit', 500),
+          card('bp-draft-hit', 'BP Draft Hit', 400),
+          card('bp-not-hit', 'BP Not A Hit', 1000),
+        ]);
+        const odds = (
+          pack_id: string,
+          card_id: string,
+          top_hit_order: number | null,
+        ) => ({
+          pack_id,
+          card_id,
+          weight: 100,
+          locked: false,
+          rarity: 'Rare' as const,
+          top_hit_order,
+        });
+        await packs().createPackOdds([
+          odds('bp-listed', 'bp-c', 1),
+          odds('bp-listed', 'bp-a', 2),
+          odds('bp-listed', 'bp-d', 3),
+          odds('bp-listed', 'bp-b', 4),
+          odds('bp-listed', 'bp-not-hit', null),
+          odds('bp-welcome', 'bp-welcome-hit', 1),
+          odds('bp-draft', 'bp-draft-hit', 1),
+        ]);
+        const hero = await topHits(packs());
+        expect(hero).toEqual([
+          { name: 'BP A', image: '/bp-a.webp' },
+          { name: 'BP B', image: '/bp-b.webp' },
+          { name: 'BP C', image: '/bp-c.webp' },
+        ]);
+        // The seeded art is a relative path nobody serves here: placeholders.
+        const res = await poster({ headline: 'Chase the top hits' });
+        expect(res.status).toBe(200);
+        expect(res.headers['x-poster-missing-art']).toBe('1,2,3');
+      });
+
+      it('refuses typed numbers, other scripts and bad options', async () => {
+        const text = (query: Record<string, string>) =>
+          report(`brand-poster?${new URLSearchParams(query)}`);
+        expect((await text({})).status).toBe(400);
+        const typed = await text({ headline: '600+ registered players' });
+        expect(typed.status).toBe(400);
+        expect(JSON.stringify(typed.data)).toMatch(/metric/);
+        const chinese = await text({ headline: '累计注册超过' });
+        expect(chinese.status).toBe(400);
+        expect(JSON.stringify(chinese.data)).toMatch(/English/);
+        const bads: Record<string, string>[] = [
+          { headline: 'Hi', kicker: 'K'.repeat(29) },
+          { headline: 'Hi', metric: 'revenue' },
+          { headline: 'Hi', metric: 'new_players', days: '0' },
+          { headline: 'Hi', metric: 'new_players', days: '94' },
+          { headline: 'Hi', round: 'up' },
+          { headline: 'Hi', art: 'ai' },
+        ];
+        for (const bad of bads) {
+          expect((await text(bad)).status).toBe(400);
+        }
+        expect((await report('brand-poster?headline=Hi', null)).status).toBe(
+          401,
+        );
       });
     });
   },

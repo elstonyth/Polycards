@@ -144,9 +144,67 @@ TOOLS.growth = [
     }),
   },
   {
+    name: 'brand_poster',
+    description:
+      "A finished post graphic in the website's own design, for milestones, sign-ups and announcements (the weekly challenge has challenge_poster): the official logo top-left, a big Nekst headline on ink-black, an optional live figure in chase gold, the three most valuable top-hit slabs of the public packs as the hero (their official images), a quiet subline and polycards.gg in the footer. 1080x1350, the 4:5 feed size. Text is English letters and punctuation only (the brand fonts have no Chinese), and numbers cannot be typed in: a figure comes only from metric, live. players = every registered player ever, counted like the admin Stats page; new_players = sign-ups in the last `days` days. round shows the figure exactly or rounded DOWN to the hundred (480 shows as 400+, never 500+). The reply gives the exact live figure: if staff asked for a number the data does not support, tell them the real one. It is a draft; a human reviews it before it is published.",
+    inputSchema: {
+      headline: z
+        .string()
+        .describe(
+          'The claim, in English, up to 60 characters, no digits. With a figure it reads as the figure\'s label, e.g. "Collectors and counting".',
+        ),
+      kicker: z
+        .string()
+        .optional()
+        .describe(
+          'Optional small label top-right, up to 28 characters, e.g. "Community milestone".',
+        ),
+      subline: z
+        .string()
+        .optional()
+        .describe(
+          'Optional quiet line under the art, up to 120 characters, e.g. "Thank you for every rip."',
+        ),
+      metric: z
+        .enum(['none', 'players', 'new_players'])
+        .optional()
+        .describe('The live figure to show. Default none.'),
+      days: z
+        .number()
+        .int()
+        .min(1)
+        .max(93)
+        .optional()
+        .describe('new_players only: how many days back. Default 3.'),
+      round: z
+        .enum(['exact', 'hundred'])
+        .optional()
+        .describe('exact (default) or hundred: rounded down, like 400+.'),
+      art: z
+        .enum(['top_hits', 'none'])
+        .optional()
+        .describe(
+          'top_hits (default): three real slabs as the hero; none: type only.',
+        ),
+    },
+    request: (args) => ({
+      path: 'brand-poster',
+      params: {
+        headline: args.headline,
+        kicker: args.kicker,
+        subline: args.subline,
+        metric: args.metric,
+        days: args.days,
+        round: args.round,
+        art: args.art,
+      },
+      as: 'image',
+    }),
+  },
+  {
     name: 'brand_logo',
     description:
-      'An official Polycards logo file, for designs and posts. wordmark (default): the white "Polycards" wordmark on a transparent background (PNG, 360x97), for dark designs. mark: the app icon, the white card mark on a near-black square (PNG, 512x512). Use the file exactly as it is: attach it, or place it unchanged. Never draw, redraw, recolour or imitate the logo with image generation. The challenge poster already carries the logo.',
+      'An official Polycards logo file, for designs and posts. wordmark (default): the white "Polycards" wordmark on a transparent background (PNG, 360x97), for dark designs. mark: the app icon, the white card mark on a near-black square (PNG, 512x512). Use the file exactly as it is: attach it, or place it unchanged. Never draw, redraw, recolour or imitate the logo with image generation. The challenge and brand posters already carry the logo, and every generated image gets it added automatically.',
     inputSchema: {
       variant: z
         .enum(['wordmark', 'mark'])
@@ -289,6 +347,10 @@ export async function runTool(tool, args, config) {
               body.missingArt
                 ? `Rendered from live data, but the prize card art for rank ${body.missingArt} could not be loaded and shows as a plain placeholder tile. Say so when you post it, and do not call it the official card art; try again later for the full poster.`
                 : 'Rendered from live data with the official card art. Post this image as the draft; a human reviews it before it is published.'
+            }${
+              body.figure
+                ? ` The live figure is ${body.figure} (exact, whatever the poster rounds to): say this number if staff asked for a different one.`
+                : ''
             } ${ATTACH}`,
           },
         ],

@@ -53,6 +53,7 @@ test('the growth desk tools', () => {
     'signups',
     'packs_opened',
     'challenge_poster',
+    'brand_poster',
     'brand_logo',
   ]);
   assert.deepEqual(growth.challenge.request({}), {
