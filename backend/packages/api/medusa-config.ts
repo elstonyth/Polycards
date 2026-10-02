@@ -2,7 +2,6 @@ import { loadEnv, defineConfig } from '@medusajs/framework/utils';
 import { DashboardModuleOptions } from '@mercurjs/types';
 import path from 'path';
 import { assertMockTopupSafe } from './src/modules/packs/topup';
-import { warnLegacyGatewayEnv } from './src/modules/packs/gateway-env';
 import { isResendConfigured } from './src/modules/resend/options';
 import { resolvePhoneGateState } from './src/utils/phone-verification';
 import { productionDatabaseDriverOptions } from './src/utils/db-driver-options';
@@ -13,11 +12,6 @@ loadEnv(process.env.NODE_ENV || 'development', process.cwd());
 // (ALLOW_MOCK_TOPUP=true in prod). Runs at config load, the same fail-fast point
 // as the JWT/COOKIE secret checks below.
 assertMockTopupSafe(process.env);
-
-// Boot EVIDENCE (2026-09-07): the GATEWAY_* switches still honour their legacy
-// GLOBEPAY_* spellings until the production spec is renamed. One warn line
-// naming each legacy variable still set; silent once the spec has moved.
-warnLegacyGatewayEnv(process.env);
 
 // Boot EVIDENCE, not a guard — the opposite of the line above, deliberately.
 // The phone gates fail OPEN (CONTEXT.md's documented rollback lever, flipped

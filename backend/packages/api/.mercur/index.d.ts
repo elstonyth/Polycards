@@ -467,18 +467,6 @@ export type Routes = {
         gacha: {
             eligibleProducts: typeof import("../../src/api/admin/gacha/eligible-products/route");
         };
-        globepay: {
-            balance: typeof import("../../src/api/admin/globepay/balance/route");
-            deposits: typeof import("../../src/api/admin/globepay/deposits/route");
-            settlement: typeof import("../../src/api/admin/globepay/settlement/route");
-            withdrawals: typeof import("../../src/api/admin/globepay/withdrawals/route") & {
-                $id: {
-                    account: typeof import("../../src/api/admin/globepay/withdrawals/[id]/account/route");
-                    approve: typeof import("../../src/api/admin/globepay/withdrawals/[id]/approve/route");
-                    deny: typeof import("../../src/api/admin/globepay/withdrawals/[id]/deny/route");
-                };
-            };
-        };
         inventory: typeof import("../../src/api/admin/inventory/route") & {
             $handle: typeof import("../../src/api/admin/inventory/[handle]/route");
             "export.xlsx": typeof import("../../src/api/admin/inventory/export.xlsx/route");

@@ -1,7 +1,6 @@
 import * as tgpay from './tgpay-client';
 import type { TgpayConfig } from './tgpay-client';
 import { fakeGateway, type FakeConfig } from './fake-gateway';
-import { gatewayEnv } from './gateway-env';
 import { PACKS_MODULE } from './index';
 import {
   banksFor,
@@ -43,9 +42,7 @@ export type {
 // Naming note: the tables (gateway_deposit / gateway_withdrawal), the
 // orchestration files (gateway-deposit.ts / gateway-withdrawal.ts), the
 // /admin/payments/* routes and the GATEWAY_* switches are gateway-neutral.
-// They carried the first gateway's name until 2026-09-07 (operator: "we no
-// longer use GlobePay, remove it"); the old GLOBEPAY_* env names are still
-// read as a fallback (gateway-env.ts) until the production spec moves.
+// They carried the first gateway's name until 2026-09-07.
 //
 // The orchestration (gateway-deposit.ts, gateway-withdrawal.ts), the
 // reconcile jobs and the admin/store routes are gateway-agnostic through this
@@ -309,8 +306,7 @@ export function gatewayUrls(
     path && base ? `${base}${path}` : '';
   return {
     notifyUrl: hook(def.hooks.deposit),
-    // PAYMENT_RETURN_URL, or its legacy name until the spec moves (gateway-env).
-    returnUrl: gatewayEnv('PAYMENT_RETURN_URL', env) ?? '',
+    returnUrl: env.PAYMENT_RETURN_URL ?? '',
     withdrawNotifyUrl: hook(def.hooks.withdrawal),
     payoutVerifyUrl: hook(def.hooks.payoutVerify),
     hasPayoutVerify: Boolean(def.hooks.payoutVerify),

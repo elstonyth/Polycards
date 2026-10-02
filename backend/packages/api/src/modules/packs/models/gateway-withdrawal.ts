@@ -71,9 +71,9 @@ export const GatewayWithdrawal = model
     // refunded).
     status: model.enum([...WITHDRAWAL_STATUSES]).default('pending'),
     // Their raw numeric status from the last callback/requery, for gateways
-    // that have one (GlobePay: 4 = success, 5 = fail, else processing). NULL
-    // for every gateway whose statuses are strings — TGPay — so support reads
-    // `failure_reason` / `audit_note` instead.
+    // that have one (only retired-gateway history rows do). NULL for TGPay,
+    // whose statuses are strings, so support reads `failure_reason` /
+    // `audit_note` instead.
     gateway_status: model.number().nullable(),
     settled_at: model.dateTime().nullable(),
     // Client-supplied retry token, scoped to the customer. NULL for callers
@@ -85,7 +85,7 @@ export const GatewayWithdrawal = model
     // FORENSICS (plan 095). Both columns exist because a payout that dies at
     // the gateway leaves nothing behind that outlives DigitalOcean's log
     // retention: the run logs only cover the CURRENT deployment, and the
-    // 2026-08-11 production failures (8 payouts created at GlobePay and
+    // 2026-08-11 production failures (8 payouts created at the gateway and
     // immediately marked statusId 5) were already unreadable the next morning.
     // A row that records its own cause is the difference between "we know
     // within one attempt" and "wait for another customer to lose a day".
@@ -106,9 +106,8 @@ export const GatewayWithdrawal = model
     // Which gateway this row was created under. The sweeps and the admin
     // approve route talk to THIS gateway, not the active one, so switching
     // gateways never strands money already in flight on the old one. The
-    // orchestration always sets it; the column default ('globepay', from the
-    // 2026-09-05 migration) only ever applied to rows that predate it, and a
-    // row that somehow lands with a retired gateway is skipped by every sweep.
+    // orchestration always sets it (the column default is only a safety net),
+    // and a row that names a retired gateway is skipped by every sweep.
     gateway: model.text().default('tgpay'),
     // Gateway audit (plan 130): when the audit sweep last requeried the
     // gateway for this row, and what it disagreed about. NULL note = the

@@ -1,6 +1,5 @@
 import { POST, GET } from '../route';
 import { GATEWAY_STALE_AFTER_MS } from '../../../../../modules/packs/gateway-reconcile';
-import { legacyGatewayEnvName } from '../../../../../modules/packs/gateway-env';
 
 // The IP we send as the gateway's `IPAddress` must be the one the proxy chain
 // derived, not one the caller typed. Medusa's express-loader sets
@@ -45,14 +44,9 @@ const mkReq = (over: Record<string, unknown> = {}) =>
 
 const sentIp = () => startMock.mock.calls[0][1].ipAddress;
 
-// The pre-rename name is still read as a fallback (gateway-env.ts); a dev box
-// with it set in its local env would otherwise keep the fail-closed test green.
-const LEGACY_RETURN_URL = legacyGatewayEnvName('PAYMENT_RETURN_URL');
-
 const ORIGINAL_ENV = {
   PAYMENT_CALLBACK_BASE: process.env.PAYMENT_CALLBACK_BASE,
   PAYMENT_RETURN_URL: process.env.PAYMENT_RETURN_URL,
-  [LEGACY_RETURN_URL]: process.env[LEGACY_RETURN_URL],
   TGPAY_API_BASE: process.env.TGPAY_API_BASE,
   TGPAY_PUBLIC_KEY: process.env.TGPAY_PUBLIC_KEY,
   TGPAY_SECRET_KEY: process.env.TGPAY_SECRET_KEY,
@@ -125,7 +119,6 @@ describe('POST /store/credits/deposit — customer IP', () => {
     'fails closed when %s is unset — money in, no credit',
     async (missing) => {
       delete process.env[missing];
-      delete process.env[LEGACY_RETURN_URL];
       await expect(POST(mkReq({ ip: '203.0.113.7' }), res)).rejects.toThrow(
         /temporarily unavailable/i,
       );

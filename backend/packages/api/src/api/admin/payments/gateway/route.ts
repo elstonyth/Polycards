@@ -7,7 +7,6 @@ import {
   MedusaError,
 } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
-import { gatewayEnv } from '../../../../modules/packs/gateway-env';
 import type PacksModuleService from '../../../../modules/packs/service';
 import {
   GATEWAYS,
@@ -76,7 +75,7 @@ export async function POST(
   // PAYMENT_CALLBACK_BASE every notify URL is empty (gatewayUrls), so a
   // deploy that never set it cannot switch gateways by accident.
   const urls = gatewayUrls(wanted);
-  const withdrawalsOn = gatewayEnv('GATEWAY_WITHDRAWALS_ENABLED') === 'true';
+  const withdrawalsOn = process.env.GATEWAY_WITHDRAWALS_ENABLED === 'true';
   if (
     !urls.notifyUrl ||
     (withdrawalsOn &&

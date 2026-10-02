@@ -1,7 +1,6 @@
 import type { SettlementState } from './gateway-types';
 import { GatewayError } from './gateway-types';
 import { GATEWAY_MAX_RM } from './gateway-deposit';
-import { gatewayEnv } from './gateway-env';
 import { TGPAY_NOT_FOUND } from './tgpay-client';
 
 // Reconciliation policy for outstanding gateway deposits. Pure decisions,
@@ -255,7 +254,7 @@ export const GATEWAY_AMBIGUOUS_GIVEUP_DEFAULT_MS = 7 * 24 * 60 * 60 * 1000;
 export function ambiguousGiveUpMs(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
-  const raw = Number(gatewayEnv('GATEWAY_AMBIGUOUS_GIVEUP_MS', env));
+  const raw = Number(env.GATEWAY_AMBIGUOUS_GIVEUP_MS);
   return Number.isFinite(raw) && raw > 0
     ? raw
     : GATEWAY_AMBIGUOUS_GIVEUP_DEFAULT_MS;

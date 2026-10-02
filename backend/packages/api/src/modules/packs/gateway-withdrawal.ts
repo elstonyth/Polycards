@@ -21,7 +21,6 @@ import {
 import { alertPayoutFloatEmpty } from './ops-alert';
 import { contactIfNeeded } from '../../api/utils/customer-contact';
 import { newMerchantTransactionId } from './gateway-deposit';
-import { gatewayEnv, gatewayEnvName } from './gateway-env';
 import { withdrawalGateError } from './withdrawable';
 import { nonNegativeIntFromEnv } from '../../api/utils/rate-limit';
 import { notifyFeed } from './notify-feed';
@@ -56,8 +55,6 @@ import { sendWithdrawalReceipt } from './withdrawal-receipt';
  * exported only because `gateway-withdrawal.unit.spec.ts` still imports it
  * as a fixture value; it happens to equal the live TGPay floor (RM 50) but
  * is NOT itself read by any request-time validation — the registry is.
- * `GATEWAY_WD_MAX_RM` (formerly RM 50,000, the GlobePay-era ceiling; the
- * live TGPay ceiling is RM 30,000) had no remaining reader and was removed.
  */
 export const GATEWAY_WD_MIN_RM = 50;
 
@@ -115,8 +112,8 @@ export function withdrawalsEnabled(
 ): boolean {
   const configured = GATEWAYS[gateway].configured(env);
   return (
-    gatewayEnv('GATEWAY_ENABLED', env) === 'true' &&
-    gatewayEnv('GATEWAY_WITHDRAWALS_ENABLED', env) === 'true' &&
+    env.GATEWAY_ENABLED === 'true' &&
+    env.GATEWAY_WITHDRAWALS_ENABLED === 'true' &&
     configured
   );
 }
@@ -495,7 +492,7 @@ export async function startWithdrawal(
   const held =
     Math.round(amount * 100) >
     nonNegativeIntFromEnv(
-      gatewayEnvName('GATEWAY_WD_APPROVAL_ABOVE_RM'),
+      'GATEWAY_WD_APPROVAL_ABOVE_RM',
       GATEWAY_WD_APPROVAL_ABOVE_RM_DEFAULT,
     ) *
       100;

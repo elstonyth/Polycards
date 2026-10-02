@@ -371,11 +371,8 @@ envs:
   # - key: TELEGRAM_OPS_CHAT_ID
   #   scope: RUN_TIME
   #   value: "-100XXXXXXXXXX"
-  # ── Money switches. GATEWAY_* names any active gateway's deposits/
-  # withdrawals; the legacy GLOBEPAY_* spellings are still read as a fallback
-  # (the GlobePay365 integration itself was removed
-  # 2026-09-06 — its settled rows remain as history on the audit panel).
-  # Fail closed: without ENABLED the deposit route refuses every top-up.
+  # ── Money switches. GATEWAY_* names the active gateway's deposits and
+  # withdrawals. Fail closed: without ENABLED the deposit route refuses every top-up.
   - key: GATEWAY_ENABLED
     scope: RUN_TIME
     value: "true"
@@ -429,9 +426,7 @@ envs:
   # callback while this is unset, so it ships alongside the code.
   # PAYMENT_GATEWAY is the boot/fallback gateway, read while the admin
   # setting (site_settings.payment_gateway) is NULL. Set to tgpay at the
-  # 2026-09-06 cutover: production deposits and payouts go through TGPay
-  # from this apply on; GlobePay stays only to settle its own historical rows
-  # until it is removed.
+  # 2026-09-06 cutover: production deposits and payouts go through TGPay.
   - key: PAYMENT_GATEWAY
     scope: RUN_TIME
     value: tgpay

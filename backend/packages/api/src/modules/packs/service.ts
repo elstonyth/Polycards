@@ -87,7 +87,6 @@ import {
   type LedgerType,
 } from './ledger';
 import type { GatewayPeriodRow, LedgerPeriodRow } from './gateway-settlement';
-import { gatewayEnvName } from './gateway-env';
 import PurchaseInvoice from './models/purchase-invoice';
 import PurchaseInvoiceLine from './models/purchase-invoice-line';
 import StockMovement from './models/stock-movement';
@@ -3357,7 +3356,7 @@ class PacksModuleService extends MedusaService({
     // ignored.
     const capCents =
       nonNegativeIntFromEnv(
-        gatewayEnvName('GATEWAY_WD_DAILY_MAX_RM'),
+        'GATEWAY_WD_DAILY_MAX_RM',
         GATEWAY_WD_DAILY_MAX_RM_DEFAULT,
       ) * 100;
     const capRows = await em.execute<{ sum_cents: string | null }[]>(

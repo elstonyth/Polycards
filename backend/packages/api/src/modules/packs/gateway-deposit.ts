@@ -16,7 +16,6 @@ import { sendTopupReceipt } from './topup-receipt';
 import { notifyFeed } from './notify-feed';
 import { topupFeedKey } from './feed-events';
 import type { DEPOSIT_STATUSES } from './models/gateway-deposit';
-import { gatewayEnv } from './gateway-env';
 
 /** The gateway_deposit.status domain, from the model. */
 type DepositStatus = (typeof DEPOSIT_STATUSES)[number];
@@ -88,13 +87,12 @@ export function gatewayEnabled(
   env: Partial<NodeJS.ProcessEnv> = process.env,
   gateway: PaymentGateway = paymentGateway(env),
 ): boolean {
-  // GATEWAY_ENABLED is the master "real gateway" switch (read through
-  // gatewayEnv, which still accepts its legacy name); the credential that
+  // GATEWAY_ENABLED is the master "real gateway" switch; the credential that
   // proves a gateway is configured is that gateway's own. Callers that
   // already pinned a gateway for the request pass it, so the check and the
   // submit cannot straddle an admin switch.
   return (
-    gatewayEnv('GATEWAY_ENABLED', env) === 'true' &&
+    env.GATEWAY_ENABLED === 'true' &&
     GATEWAYS[gateway].configured(env)
   );
 }

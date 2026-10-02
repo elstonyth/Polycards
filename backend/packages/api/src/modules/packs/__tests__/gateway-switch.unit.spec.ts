@@ -81,7 +81,6 @@ describe('resolveActiveGateway', () => {
 
 describe('gatewayUrls', () => {
   it('with PAYMENT_CALLBACK_BASE the gateway gets its own hook paths and PAYMENT_RETURN_URL', () => {
-    // The legacy spelling of the return URL is gateway-env.unit.spec.ts's.
     const env = {
       PAYMENT_CALLBACK_BASE: 'https://api.example/',
       PAYMENT_RETURN_URL: 'https://shop/wallet',
