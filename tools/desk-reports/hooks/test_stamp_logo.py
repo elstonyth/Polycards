@@ -20,6 +20,13 @@ stamp_logo = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(stamp_logo)
 
 
+def hermes_python():
+    """Hermes's own interpreter (<hermes>/tools/python-*/python.exe), or None."""
+    tools = Path(os.environ.get("LOCALAPPDATA", "")) / "hermes" / "tools"
+    found = sorted(tools.glob("python-*/python.exe")) if tools.is_dir() else []
+    return found[-1] if found else None
+
+
 def payload(path, tool="image_generate", success=True):
     result = json.dumps({"success": success, "image": str(path)})
     return {"hook_event_name": "post_tool_call", "tool_name": tool, "extra": {"result": result}}
@@ -108,11 +115,21 @@ class StampLogo(unittest.TestCase):
 
     def test_runs_as_hermes_runs_it(self):
         # Hermes spawns a .py hook as [its bare interpreter, script] with the
-        # event on stdin: Pillow is not on that interpreter's own path.
-        path = self.image("spawned.png", (10, 10, 10))
+        # event on stdin. Run it on that interpreter, not on whichever one runs
+        # these tests: one with Pillow of its own would pass without the
+        # dependency activation this checks.
+        python = hermes_python()
+        if python is None:
+            self.skipTest("needs Hermes's own interpreter")
         env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        bare = subprocess.run(
+            [str(python), "-c", "import PIL"], capture_output=True, env=env, timeout=60
+        )
+        if bare.returncode == 0:
+            self.skipTest("this Hermes interpreter imports Pillow by itself")
+        path = self.image("spawned.png", (10, 10, 10))
         done = subprocess.run(
-            [sys.executable, str(HERE / "stamp-logo.py")],
+            [str(python), str(HERE / "stamp-logo.py")],
             input=json.dumps(payload(path)),
             capture_output=True,
             text=True,
@@ -123,6 +140,24 @@ class StampLogo(unittest.TestCase):
         self.assertEqual(done.stderr, "")
         with Image.open(path) as im:
             self.assertEqual(im.info.get(stamp_logo.MARK_KEY), "1")
+
+    def test_a_failed_dependency_setup_fails_open(self):
+        path = self.image("no-pillow.png", (10, 10, 10))
+        before = path.read_bytes()
+        real = stamp_logo._pillow
+
+        def broken():
+            raise RuntimeError("dependency tree locked")
+
+        stamp_logo._pillow = broken
+        try:
+            err = io.StringIO()
+            with redirect_stderr(err):
+                stamp_logo.run(payload(path))  # reports, does not raise
+        finally:
+            stamp_logo._pillow = real
+        self.assertIn("left no-pillow.png unstamped: dependency tree locked", err.getvalue())
+        self.assertEqual(path.read_bytes(), before)
 
     def test_a_broken_file_never_raises(self):
         path = self.cache / "broken.png"

@@ -8,8 +8,9 @@ names the generated file, which is edited in place. So whatever the bot does
 next, the picture staff see carries the real logo, never an AI imitation of
 it, and a bot cannot skip it.
 
-Fail-open by design: a file this cannot read is left as it is and the reason
-goes to stderr (Hermes logs it), so a broken image never blocks a reply.
+Fail-open by design: a file this cannot read, or a failed dependency setup,
+leaves the image as it is and the reason goes to stderr (Hermes logs it), so
+a broken image never blocks a reply.
 """
 
 import json
@@ -54,9 +55,15 @@ def _hermes_packages():
             return
 
 
-_hermes_packages()
-from PIL import Image, ImageFilter, ImageStat  # noqa: E402
-from PIL.PngImagePlugin import PngInfo  # noqa: E402
+def _pillow():
+    """Pillow, loaded only once there is a file to stamp: a dependency setup
+    failure then lands in run()'s fail-open handler, not at import."""
+    _hermes_packages()
+    from PIL import Image, ImageFilter, ImageStat
+    from PIL.PngImagePlugin import PngInfo
+
+    return Image, ImageFilter, ImageStat, PngInfo
+
 
 # The storefront's own wordmark, shipped beside this script by install.mjs.
 WORDMARK = Path(__file__).resolve().parent.parent / "brand" / "polycards-wordmark-white.png"
@@ -87,6 +94,7 @@ def target(event):
 
 
 def stamp(path):
+    Image, ImageFilter, ImageStat, PngInfo = _pillow()
     with Image.open(path) as source:
         if source.info.get(MARK_KEY) or source.info.get("comment") == MARK_KEY.encode():
             return
