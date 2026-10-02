@@ -146,7 +146,7 @@ TOOLS.growth = [
   {
     name: 'brand_poster',
     description:
-      "A finished post graphic drawn as the website's own home hero, for milestones, sign-ups and announcements (the weekly challenge has challenge_poster): the official logo, a small eyebrow, an optional live figure in chase gold, a big sentence-case Nekst headline, a quiet line, the white Open a pack pill with polycards.gg, the site's top 3 chase cards fanned in their tier frames, and the site's Top 3 chase cards panel with the lead card's live price. 1080x1350, the 4:5 feed size. Write like the site's hero: short sentence-case lines ending in a full stop, e.g. headline 'Collectors and counting.' Text is English letters and punctuation only (the brand fonts have no Chinese), and numbers cannot be typed in: a figure comes only from metric, live. players = every registered player ever, counted like the admin Stats page; new_players = sign-ups in the last `days` days. round shows the figure exactly or rounded DOWN to the hundred (480 shows as 400+, never 500+). The reply gives the exact live figure: if staff asked for a number the data does not support, tell them the real one. It is a draft; a human reviews it before it is published.",
+      "A finished post graphic drawn as the website's own home hero, for milestones, sign-ups and announcements (the weekly challenge has challenge_poster): the official logo, a small eyebrow, an optional live figure in chase gold, a big sentence-case Nekst headline, a quiet line, the white Open a pack pill with polycards.gg, the site's top 3 chase cards fanned in their tier frames, and the site's Top 3 chase cards panel with the lead card's live price. 1080x1350, the 4:5 feed size. Write like the site's hero: short sentence-case lines ending in a full stop, e.g. headline 'Collectors and counting.' Text is English letters and punctuation only (the brand fonts have no Chinese), and numbers cannot be typed in: a figure comes only from metric, live. players = every registered player ever, counted like the admin Stats page; new_players = sign-ups in the last `days` days; packs_opened = paid packs opened since launch (a big true number). round shows the figure exactly or rounded DOWN to the hundred (480 shows as 400+, never 500+). When staff ask for a number the live figure has not reached (like 1,000 when 485 have signed up), do not refuse: pass it as goal, and the poster shows it big as 'Road to 1,000' with the live progress. The reply gives the exact live figure. It is a draft; a human reviews it before it is published.",
     inputSchema: {
       headline: z
         .string()
@@ -166,9 +166,20 @@ TOOLS.growth = [
           'Optional quiet line under the headline, up to 120 characters, e.g. "Thank you for every rip."',
         ),
       metric: z
-        .enum(['none', 'players', 'new_players'])
+        .enum(['none', 'players', 'new_players', 'packs_opened'])
         .optional()
-        .describe('The live figure to show. Default none.'),
+        .describe(
+          'The live figure to show. players = every registered player ever; new_players = sign-ups in the last `days`; packs_opened = paid packs opened since launch. Default none.',
+        ),
+      goal: z
+        .number()
+        .int()
+        .min(10)
+        .max(10_000_000)
+        .optional()
+        .describe(
+          'A target for the metric, e.g. 1000. Until the live figure reaches it, the poster shows it as the goal ("Road to 1,000", the big number in gold, with the live progress like "485 of 1,000"); once reached, it shows "1,000+". Use it whenever staff ask for a number the live figure has not reached.',
+        ),
       days: z
         .number()
         .int()
@@ -196,6 +207,7 @@ TOOLS.growth = [
         metric: args.metric,
         days: args.days,
         round: args.round,
+        goal: args.goal,
         art: args.art,
       },
       as: 'image',
@@ -310,6 +322,15 @@ TOOLS.support = [
 const ATTACH =
   "To show it, copy this result's MEDIA: line onto its own line in your reply, unchanged and not in backticks: that line attaches the file.";
 
+// What a goal poster shows, for the bot to tell staff in one line.
+const goalNote = (body, goal) => {
+  if (!goal || !body.goalReached) return '';
+  const g = Number(goal).toLocaleString('en-MY');
+  return body.goalReached === '1'
+    ? ` The goal is reached: the poster shows ${g}+.`
+    : ` It is a goal poster: "Road to ${g}", with ${g} in gold and the live progress (${Number(body.figure).toLocaleString('en-MY')} of ${g}). Post it, and tell staff in one friendly line that ${g} is shown as the goal because the live figure is ${Number(body.figure).toLocaleString('en-MY')}.`;
+};
+
 // Runs one tool call; failures come back as text the bot can relay.
 export async function runTool(tool, args, config) {
   try {
@@ -351,7 +372,7 @@ export async function runTool(tool, args, config) {
               body.figure
                 ? ` The live figure is ${body.figure} (exact, whatever the poster rounds to): say this number if staff asked for a different one.`
                 : ''
-            } ${ATTACH}`,
+            }${goalNote(body, args.goal)} ${ATTACH}`,
           },
         ],
       };

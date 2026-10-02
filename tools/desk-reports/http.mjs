@@ -52,6 +52,8 @@ export async function getReport({
         missingArt: res.headers.get('x-poster-missing-art') ?? '',
         // The exact live figure behind a brand poster, if it shows one.
         figure: res.headers.get('x-poster-figure') ?? '',
+        // '0' when a goal is drawn as the goal, '1' once the data reached it.
+        goalReached: res.headers.get('x-poster-goal-reached') ?? '',
       };
     throw new ReportError(
       'The backend sent an unreadable image. Try again in a minute.',

@@ -613,6 +613,70 @@ medusaIntegrationTestRunner({
         expect(res.headers['x-poster-missing-art']).toBe('1,2,3');
       });
 
+      it('counts packs opened and frames a goal the data has not reached', async () => {
+        const at = new Date();
+        const pulls = (source: 'pack' | 'free' | 'reward', n: number) =>
+          Array.from({ length: n }, () => ({
+            customer_id: 'cus_bp_goal',
+            pack_id: GP_PACK,
+            card_id: GX,
+            rolled_at: at,
+            source,
+          }));
+        await packs().createPulls([
+          ...pulls('pack', 12),
+          ...pulls('free', 2),
+          ...pulls('reward', 3),
+        ]);
+        const { rows } = (await pg().raw(
+          "SELECT count(*)::int AS n FROM pull WHERE deleted_at IS NULL AND source = 'pack'",
+        )) as { rows: { n: number }[] };
+        const opened = rows[0].n;
+        expect(opened).toBeGreaterThanOrEqual(12);
+
+        // Paid packs only, like the Growth packs report's packs_opened.
+        const packsPoster = await poster({
+          headline: 'Packs ripped since launch.',
+          metric: 'packs_opened',
+          art: 'none',
+        });
+        expect(packsPoster.status).toBe(200);
+        expect(packsPoster.headers['x-poster-figure']).toBe(String(opened));
+
+        // A goal above the live figure is drawn as the goal, with progress.
+        const ahead = await poster({
+          headline: 'Be one of the first.',
+          metric: 'packs_opened',
+          goal: String(opened + 1000),
+          art: 'none',
+        });
+        expect(ahead.status).toBe(200);
+        expect(ahead.headers['x-poster-figure']).toBe(String(opened));
+        expect(ahead.headers['x-poster-goal-reached']).toBe('0');
+
+        // Once the data reaches it, it is the milestone.
+        const reached = await poster({
+          headline: 'Packs ripped.',
+          metric: 'packs_opened',
+          goal: '10',
+          art: 'none',
+        });
+        expect(reached.headers['x-poster-goal-reached']).toBe('1');
+
+        // A goal needs a live figure to measure against.
+        const badGoals: Record<string, string>[] = [
+          {},
+          { metric: 'players', goal: 'x' },
+          { metric: 'players', goal: '5' },
+        ];
+        for (const goal of badGoals) {
+          const bad = await report(
+            `brand-poster?${new URLSearchParams({ headline: 'Hi', goal: '1000', ...goal })}`,
+          );
+          expect(bad.status).toBe(400);
+        }
+      });
+
       it('refuses typed numbers, other scripts and bad options', async () => {
         const text = (query: Record<string, string>) =>
           report(`brand-poster?${new URLSearchParams(query)}`);

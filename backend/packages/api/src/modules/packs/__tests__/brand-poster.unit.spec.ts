@@ -4,6 +4,7 @@ import {
   POSTER_H,
   POSTER_W,
   posterFigure,
+  posterGoal,
   posterRm,
   posterTextError,
 } from '../brand-poster';
@@ -24,6 +25,29 @@ describe('posterFigure', () => {
 
   it('keeps a count under a hundred exact', () => {
     expect(posterFigure(99, 'hundred')).toBe('99');
+  });
+});
+
+describe('posterGoal', () => {
+  it('shows the goal with live progress until the data reaches it', () => {
+    expect(posterGoal(485, 1000)).toEqual({
+      reached: false,
+      figure: '1,000',
+      fraction: 0.485,
+    });
+  });
+
+  it('becomes the reached milestone once the live figure gets there', () => {
+    expect(posterGoal(485, 400)).toEqual({
+      reached: true,
+      figure: '400+',
+      fraction: 1,
+    });
+    expect(posterGoal(1000, 1000)).toEqual({
+      reached: true,
+      figure: '1,000+',
+      fraction: 1,
+    });
   });
 });
 
@@ -80,6 +104,24 @@ describe('composeBrandPoster', () => {
     expect(meta.format).toBe('jpeg');
     expect([meta.width, meta.height]).toEqual([POSTER_W, POSTER_H]);
     expect(placeholders).toEqual([1, 2, 3]);
+  });
+
+  it('draws a goal with its live progress', async () => {
+    const { jpeg } = await composeBrandPoster(
+      {
+        kicker: 'Road to 1,000',
+        headline: 'Be one of the first.',
+        stat: '1,000',
+        progress: { fraction: 0.485, label: '485 of 1,000 registered' },
+        subline: '',
+        cards: [{ name: 'Card A', rarity: 'Immortal' }],
+        chase: { priceMyr: 204223.74, name: 'Card A', pack: 'Diamond Pack' },
+        siteHost: 'polycards.gg',
+      },
+      [null],
+    );
+    const meta = await sharp(jpeg).metadata();
+    expect([meta.width, meta.height]).toEqual([POSTER_W, POSTER_H]);
   });
 
   it('lays out type only when there are no cards', async () => {
