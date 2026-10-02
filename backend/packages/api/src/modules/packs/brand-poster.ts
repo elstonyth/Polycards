@@ -36,6 +36,9 @@ export type BrandPosterInput = {
   /** The live figure as shown, e.g. '484' or '400+', or a goal not yet
    *  reached ('1,000', with `progress`); null = no figure. */
   stat: string | null;
+  /** A gold line drawn as part of the figure, e.g. 'Road to' over a goal,
+   *  so "Road to 1,000" reads as one phrase. */
+  statPrefix?: string;
   /** A goal's live progress, drawn under the headline. */
   progress?: { fraction: number; label: string } | null;
   /** One quiet line or two under the headline; '' = none. */
@@ -120,6 +123,20 @@ export function posterGoal(
   return live >= goal
     ? { reached: true, figure: `${fmt}+`, fraction: 1 }
     : { reached: false, figure: fmt, fraction: Math.max(0, live / goal) };
+}
+
+/** The quiet line under the headline. With a figure and cards there is room
+ *  for one line, so it shrinks (32 down to 24 px) before it is ever cut
+ *  short; otherwise it uses up to two lines at full size. */
+export async function posterSubline(
+  text: string,
+  oneLine: boolean,
+): Promise<{ lines: string[]; size: number }> {
+  if (!oneLine) {
+    return { lines: await twoLines(text, body(32), TEXT_W - 80), size: 32 };
+  }
+  const size = await sizeToFit([text], (s) => body(s), 32, 24, TEXT_W);
+  return { lines: [await fit(text, body(size), TEXT_W)], size };
 }
 
 /** A price as the storefront prints it (lib/format rm): RM with sen. */
@@ -306,12 +323,16 @@ export async function composeBrandPoster(
     48,
     TEXT_W,
   );
-  const subFont = body(32);
-  const sub = input.subline
-    ? input.stat && hasHero
-      ? [await fit(input.subline, subFont, TEXT_W)]
-      : await twoLines(input.subline, subFont, TEXT_W - 80)
-    : [];
+  const subFit = input.subline
+    ? await posterSubline(input.subline, Boolean(input.stat && hasHero))
+    : { lines: [], size: 32 };
+  const sub = subFit.lines;
+  const subSize = subFit.size;
+  const subFont = body(subSize);
+  const prefixSize =
+    input.statPrefix && input.stat
+      ? Math.max(30, Math.round(statSize * 0.24))
+      : 0;
   const ctaFont = body(32);
   const ctaLabel = 'Open a pack';
   const pillH = 84;
@@ -323,10 +344,11 @@ export async function composeBrandPoster(
   const headAdvance = Math.round(head.size * 0.98);
   const parts = [
     eyebrow ? capH(24) + 36 : 0,
+    prefixSize ? capH(prefixSize) + 18 : 0,
     input.stat ? capH(statSize) + 30 : 0,
     capH(head.size) + (head.lines.length - 1) * headAdvance,
     progress ? 46 + 16 + 22 + capH(28) : 0,
-    sub.length ? 46 + capH(32) + (sub.length - 1) * 46 : 0,
+    sub.length ? 46 + capH(subSize) + (sub.length - 1) * 46 : 0,
     48 + pillH,
   ];
   const textH = parts.reduce((a, b) => a + b, 0);
@@ -344,6 +366,22 @@ export async function composeBrandPoster(
       textEl(eyebrow, x + iconSize + 14, baseline(cy, 24), eyebrowFont, SILVER),
     );
     y += capH(24) + 36;
+  }
+  if (prefixSize) {
+    // Part of the figure, in its gold: "ROAD TO" over "1,000" reads as one
+    // phrase, so a goal never passes for a count already reached.
+    const cy = y + capH(prefixSize) / 2;
+    svg.push(
+      textEl(
+        input.statPrefix!.toUpperCase(),
+        mid,
+        baseline(cy, prefixSize),
+        display(prefixSize, 2),
+        CHASE,
+        'middle',
+      ),
+    );
+    y += capH(prefixSize) + 18;
   }
   if (input.stat) {
     const cy = y + capH(statSize) / 2;
@@ -403,10 +441,12 @@ export async function composeBrandPoster(
   if (sub.length) {
     y += 46; // clear of the headline's descenders
     for (const [i, line] of sub.entries()) {
-      const cy = y + capH(32) / 2 + i * 46;
-      svg.push(textEl(line, mid, baseline(cy, 32), subFont, SILVER, 'middle'));
+      const cy = y + capH(subSize) / 2 + i * 46;
+      svg.push(
+        textEl(line, mid, baseline(cy, subSize), subFont, SILVER, 'middle'),
+      );
     }
-    y += capH(32) + (sub.length - 1) * 46;
+    y += capH(subSize) + (sub.length - 1) * 46;
   }
   // The hero's CTA row: the white pill, then the quiet link.
   y += 48;

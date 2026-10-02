@@ -6,6 +6,7 @@ import {
   posterFigure,
   posterGoal,
   posterRm,
+  posterSubline,
   posterTextError,
 } from '../brand-poster';
 
@@ -48,6 +49,31 @@ describe('posterGoal', () => {
       figure: '1,000+',
       fraction: 1,
     });
+  });
+});
+
+describe('posterSubline', () => {
+  const long =
+    'Real cards. A shared passion. Thank you for being part of Polycards.';
+
+  it('shrinks a one-line subline to fit before it ever cuts it', async () => {
+    const { lines, size } = await posterSubline(long, true);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toBe(long);
+    expect(size).toBeLessThan(32);
+  });
+
+  it('keeps the full size when it fits', async () => {
+    expect(await posterSubline('Thank you.', true)).toEqual({
+      lines: ['Thank you.'],
+      size: 32,
+    });
+  });
+
+  it('cuts only text too long even at the smallest size', async () => {
+    const { lines } = await posterSubline(long.repeat(4), true);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].endsWith('…')).toBe(true);
   });
 });
 
@@ -109,8 +135,9 @@ describe('composeBrandPoster', () => {
   it('draws a goal with its live progress', async () => {
     const { jpeg } = await composeBrandPoster(
       {
-        kicker: 'Road to 1,000',
+        kicker: 'Community milestone',
         headline: 'Be one of the first.',
+        statPrefix: 'Road to',
         stat: '1,000',
         progress: { fraction: 0.485, label: '485 of 1,000 registered' },
         subline: '',
