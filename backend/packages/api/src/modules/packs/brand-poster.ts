@@ -33,8 +33,11 @@ export type BrandPosterInput = {
   kicker: string;
   /** Written like the site's hero: short sentence-case lines. */
   headline: string;
-  /** The live figure as shown, e.g. '484' or '400+'; null = no figure. */
+  /** The live figure as shown, e.g. '484' or '400+', or a goal not yet
+   *  reached ('1,000', with `progress`); null = no figure. */
   stat: string | null;
+  /** A goal's live progress, drawn under the headline. */
+  progress?: { fraction: number; label: string } | null;
   /** One quiet line or two under the headline; '' = none. */
   subline: string;
   /** Up to 3 hero slabs, the most valuable first (centre, right, left). */
@@ -103,6 +106,20 @@ export function posterFigure(n: number, round: 'exact' | 'hundred'): string {
     return `${fmt(Math.floor(n / 100) * 100)}+`;
   }
   return fmt(n);
+}
+
+/** A goal for a live figure. Until the data reaches it, the poster shows
+ *  the goal itself (framed as "Road to", with the live progress); once it
+ *  does, the goal becomes the reached milestone ('1,000+'). Either way the
+ *  poster states nothing the data does not show. */
+export function posterGoal(
+  live: number,
+  goal: number,
+): { reached: boolean; figure: string; fraction: number } {
+  const fmt = goal.toLocaleString('en-MY');
+  return live >= goal
+    ? { reached: true, figure: `${fmt}+`, fraction: 1 }
+    : { reached: false, figure: fmt, fraction: Math.max(0, live / goal) };
 }
 
 /** A price as the storefront prints it (lib/format rm): RM with sen. */
@@ -269,15 +286,20 @@ export async function composeBrandPoster(
   const eyebrow = input.kicker
     ? await fit(input.kicker.toUpperCase(), eyebrowFont, TEXT_W - 60)
     : '';
+  const progress = input.progress ?? null;
   const statSize = input.stat
     ? await sizeToFit(
         [input.stat],
         (s) => display(s, -0.03 * s),
-        hasHero ? 190 : 260,
+        hasHero ? (progress ? 170 : 190) : 260,
         110,
         TEXT_W,
       )
     : 0;
+  const progressFont = body(28);
+  const progressLabel = progress
+    ? await fit(progress.label, progressFont, TEXT_W)
+    : '';
   const head = await headlineLines(
     input.headline,
     input.stat ? (hasHero ? 84 : 104) : hasHero ? 108 : 132,
@@ -303,6 +325,7 @@ export async function composeBrandPoster(
     eyebrow ? capH(24) + 36 : 0,
     input.stat ? capH(statSize) + 30 : 0,
     capH(head.size) + (head.lines.length - 1) * headAdvance,
+    progress ? 46 + 16 + 22 + capH(28) : 0,
     sub.length ? 46 + capH(32) + (sub.length - 1) * 46 : 0,
     48 + pillH,
   ];
@@ -350,6 +373,33 @@ export async function composeBrandPoster(
     );
   }
   y += capH(head.size) + (head.lines.length - 1) * headAdvance;
+  if (progress) {
+    // The goal's live progress: a chase-gold bar on a graphite track.
+    y += 46;
+    const barH = 16;
+    const barW = Math.round(TEXT_W * 0.62);
+    const bx = mid - barW / 2;
+    const done = Math.max(
+      barH,
+      Math.round(barW * Math.min(1, Math.max(0, progress.fraction))),
+    );
+    svg.push(
+      `<rect x="${bx.toFixed(1)}" y="${y}" width="${barW}" height="${barH}" rx="${barH / 2}" fill="${GRAPHITE}"/>`,
+      `<rect x="${bx.toFixed(1)}" y="${y}" width="${done}" height="${barH}" rx="${barH / 2}" fill="${CHASE}"/>`,
+    );
+    y += barH + 22;
+    svg.push(
+      textEl(
+        progressLabel,
+        mid,
+        baseline(y + capH(28) / 2, 28),
+        progressFont,
+        SILVER,
+        'middle',
+      ),
+    );
+    y += capH(28);
+  }
   if (sub.length) {
     y += 46; // clear of the headline's descenders
     for (const [i, line] of sub.entries()) {
@@ -392,7 +442,11 @@ export async function composeBrandPoster(
     for (const slot of slots) {
       const lead = slot.i === 0;
       const w = Math.round(lead ? fw : fw * SIDE_SCALE);
-      const tile = await framedTile(art[slot.i] ?? null, cards[slot.i].rarity, w);
+      const tile = await framedTile(
+        art[slot.i] ?? null,
+        cards[slot.i].rarity,
+        w,
+      );
       if (tile.placeholder) placeholders.push(slot.i + 1);
       const turned = await sharp(tile.png)
         .rotate(slot.tilt, { background: { r: 0, g: 0, b: 0, alpha: 0 } })

@@ -4,9 +4,12 @@ import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import {
   posterFigure,
+  posterGoal,
   posterTextError,
   renderBrandPoster,
 } from '../../../../modules/packs/brand-poster';
+import { packOpens } from '../../finance/queries';
+import { and, reportDb } from '../../sql';
 import { toMoney } from '../../../../modules/packs/money';
 import {
   DEFAULT_MARKET_MULTIPLIER,
@@ -17,15 +20,18 @@ import { pageAll } from '../../../utils/page-all';
 
 // Categories the public catalogue never lists (store/packs/route.ts).
 const UNLISTED = new Set(['reward_box', 'free_welcome']);
-const METRICS = ['none', 'players', 'new_players'] as const;
+const METRICS = ['none', 'players', 'new_players', 'packs_opened'] as const;
 
 // GET /reports/growth/brand-poster: a finished post graphic in the site's own
 // design (brand-poster.ts) for milestones, sign-ups and announcements. The
-// bot writes the words; a figure only comes from `metric`, counted live like
-// the admin Stats page's sign-ups (signupTopupStats: accounts, deleted ones
-// included, partner-minted ones left out), so a poster can never carry a
-// number the data does not show. The hero is the home page's top chase
-// cards, as their official slab images in their tier frames.
+// bot writes the words; a figure only comes from `metric`, counted live:
+// sign-ups like the admin Stats page (signupTopupStats: accounts, deleted
+// ones included, partner-minted ones left out), or paid packs opened like the
+// Growth packs report. A `goal` above the live figure is drawn as the goal,
+// framed "Road to" with the live progress, so a poster can ask for 1,000
+// without claiming it. A poster never carries a number the data does not
+// show. The hero is the home page's top chase cards, as their official slab
+// images in their tier frames.
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
@@ -57,8 +63,30 @@ export async function GET(
   if (!METRICS.includes(metric as (typeof METRICS)[number])) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      'metric must be none, players or new_players.',
+      'metric must be none, players, new_players or packs_opened.',
     );
+  }
+  let goal: number | null = null;
+  if (q.goal !== undefined) {
+    const raw = q.goal;
+    if (
+      typeof raw !== 'string' ||
+      !/^\d{1,8}$/.test(raw) ||
+      Number(raw) < 10 ||
+      Number(raw) > 10_000_000
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'goal must be a whole number from 10 to 10,000,000.',
+      );
+    }
+    if (metric === 'none') {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'goal needs a metric: its progress comes from live data.',
+      );
+    }
+    goal = Number(raw);
   }
   const rawDays = q.days ?? '3';
   if (
@@ -89,7 +117,11 @@ export async function GET(
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   let figure: number | null = null;
-  if (metric !== 'none') {
+  if (metric === 'packs_opened') {
+    // Paid packs since launch: the Growth packs report's packs_opened, unwindowed.
+    const opened = await packOpens(reportDb(req), and());
+    figure = [...opened.values()].reduce((n, x) => n + x, 0);
+  } else if (metric !== 'none') {
     const to = new Date();
     const from =
       metric === 'players'
@@ -99,11 +131,35 @@ export async function GET(
   }
   const hero = art === 'none' ? [] : await topChaseCards(packs);
 
+  // A goal the data has not reached is shown as the goal, framed "Road to"
+  // with the live progress; once reached it is the milestone itself.
+  const target =
+    goal !== null && figure !== null ? posterGoal(figure, goal) : null;
+  const noun =
+    metric === 'packs_opened'
+      ? 'packs ripped'
+      : metric === 'players'
+        ? 'registered'
+        : `joined in the last ${rawDays} days`;
   const { jpeg, missing } = await renderBrandPoster(
     {
-      kicker,
+      kicker:
+        target && !target.reached
+          ? `Road to ${goal!.toLocaleString('en-MY')}`
+          : kicker,
       headline,
-      stat: figure === null ? null : posterFigure(figure, round),
+      stat: target
+        ? target.figure
+        : figure === null
+          ? null
+          : posterFigure(figure, round),
+      progress:
+        target && !target.reached
+          ? {
+              fraction: target.fraction,
+              label: `${figure!.toLocaleString('en-MY')} of ${goal!.toLocaleString('en-MY')} ${noun}`,
+            }
+          : null,
       subline,
       cards: hero.map(({ name, rarity }) => ({ name, rarity })),
       chase: hero[0]
@@ -116,6 +172,8 @@ export async function GET(
   res.setHeader('Content-Type', 'image/jpeg');
   if (missing.length) res.setHeader('x-poster-missing-art', missing.join(','));
   if (figure !== null) res.setHeader('x-poster-figure', String(figure));
+  if (target)
+    res.setHeader('x-poster-goal-reached', target.reached ? '1' : '0');
   res.status(200).send(jpeg);
 }
 

@@ -36,6 +36,7 @@ test('image mode returns the bytes as base64 and keeps the key safe', async () =
     data: JPEG.toString('base64'),
     missingArt: '',
     figure: '',
+    goalReached: '',
   });
 });
 
@@ -57,6 +58,7 @@ test('brand_poster maps its arguments and tells the bot the live figure', async 
         metric: 'players',
         days: undefined,
         round: 'hundred',
+        goal: undefined,
         art: undefined,
       },
       as: 'image',
@@ -77,6 +79,40 @@ test('brand_poster maps its arguments and tells the bot the live figure', async 
   assert.equal(out.content[0].type, 'image');
   assert.match(out.content[1].text, /live figure is 480/);
   assert.match(out.content[1].text, ATTACH);
+});
+
+test('brand_poster says when a goal is shown as the goal, not as reached', async () => {
+  const brand = TOOLS.growth.find((t) => t.name === 'brand_poster');
+  assert.equal(
+    brand.request({
+      headline: 'Be one of the first.',
+      metric: 'players',
+      goal: 1000,
+    }).params.goal,
+    1000,
+  );
+  const reply = (reached) =>
+    runTool(
+      brand,
+      { headline: 'Be one of the first.', metric: 'players', goal: 1000 },
+      {
+        ...base,
+        fetchImpl: async () =>
+          new Response(JPEG, {
+            status: 200,
+            headers: {
+              'content-type': 'image/jpeg',
+              'x-poster-figure': '485',
+              'x-poster-goal-reached': reached,
+            },
+          }),
+      },
+    );
+  const ahead = await reply('0');
+  assert.match(ahead.content[1].text, /Road to 1,000/);
+  assert.match(ahead.content[1].text, /485 of 1,000/);
+  const reached = await reply('1');
+  assert.match(reached.content[1].text, /goal is reached/);
 });
 
 test('challenge_poster tells the bot when prize art is a placeholder', async () => {
