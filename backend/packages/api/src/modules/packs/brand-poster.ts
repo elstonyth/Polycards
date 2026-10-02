@@ -127,7 +127,7 @@ export function posterGoal(
 
 /** The quiet line under the headline. With a figure and cards there is room
  *  for one line, so it shrinks (32 down to 24 px) before it is ever cut
- *  short; otherwise it wraps to two lines at full size. */
+ *  short; otherwise it uses up to two lines at full size. */
 export async function posterSubline(
   text: string,
   oneLine: boolean,
