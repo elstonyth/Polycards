@@ -18,8 +18,45 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PIL import Image, ImageFilter, ImageStat
-from PIL.PngImagePlugin import PngInfo
+
+def _hermes_packages():
+    """Hermes runs a .py hook with its bare interpreter, where Pillow is not on
+    the path: it lives in Hermes's committed dependency tree, which
+    pm.environments.activate_dependencies selects (the step every Hermes
+    process runs at boot, ~0.1 s). Not the whole hermes_bootstrap: that also
+    runs a launch-time dependency sync, which can take minutes."""
+    try:
+        import PIL  # noqa: F401
+        return
+    except ImportError:
+        pass
+    for root in (
+        Path(sys.executable).resolve().parents[2],  # <hermes>/tools/<python>/python.exe
+        Path(os.environ.get("LOCALAPPDATA", "")) / "hermes",
+    ):
+        agent = root / "hermes-agent"
+        if (agent / "pm" / "environments.py").is_file():
+            sys.path.insert(0, str(agent))
+            from pm.environments import activate_dependencies
+
+            # Dependency state belongs to the install, not the profile: point
+            # HERMES_HOME at the install root for the lookup, then restore the
+            # profile home that target() reads.
+            profile_home = os.environ.get("HERMES_HOME")
+            os.environ["HERMES_HOME"] = str(root)
+            try:
+                activate_dependencies(agent)
+            finally:
+                if profile_home is None:
+                    os.environ.pop("HERMES_HOME", None)
+                else:
+                    os.environ["HERMES_HOME"] = profile_home
+            return
+
+
+_hermes_packages()
+from PIL import Image, ImageFilter, ImageStat  # noqa: E402
+from PIL.PngImagePlugin import PngInfo  # noqa: E402
 
 # The storefront's own wordmark, shipped beside this script by install.mjs.
 WORDMARK = Path(__file__).resolve().parent.parent / "brand" / "polycards-wordmark-white.png"

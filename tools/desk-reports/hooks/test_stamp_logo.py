@@ -5,6 +5,8 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr
@@ -103,6 +105,24 @@ class StampLogo(unittest.TestCase):
         stamp_logo.run(payload(path, tool="vision_analyze"))
         stamp_logo.run(payload(path, success=False))
         self.assertEqual(path.read_bytes(), before)
+
+    def test_runs_as_hermes_runs_it(self):
+        # Hermes spawns a .py hook as [its bare interpreter, script] with the
+        # event on stdin: Pillow is not on that interpreter's own path.
+        path = self.image("spawned.png", (10, 10, 10))
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        done = subprocess.run(
+            [sys.executable, str(HERE / "stamp-logo.py")],
+            input=json.dumps(payload(path)),
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stderr, "")
+        with Image.open(path) as im:
+            self.assertEqual(im.info.get(stamp_logo.MARK_KEY), "1")
 
     def test_a_broken_file_never_raises(self):
         path = self.cache / "broken.png"

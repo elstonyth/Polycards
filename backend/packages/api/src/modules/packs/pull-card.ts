@@ -57,12 +57,12 @@ export type PullCardArt = {
   pack: Buffer | null;
 };
 
-type Rgb = readonly [number, number, number];
+export type Rgb = readonly [number, number, number];
 
 /** Mirror of the storefront's RARITY_RGB (src/lib/rarity.ts) — the tier
  *  colour of the glow, the spotlight and the chip. Unknown tiers read as
  *  Common, like rarityRgb. */
-const RARITY_RGB: Record<string, Rgb> = {
+export const RARITY_RGB: Record<string, Rgb> = {
   Immortal: [251, 146, 60],
   Legendary: [236, 72, 153],
   Mythical: [168, 85, 247],
