@@ -157,6 +157,12 @@ export default function WithdrawForm({
   async function submit() {
     if (submitting || !formValid || withdrawalsClosed) return;
     setError(null);
+    // A locked balance (withdrawable is 0) gets its reason before the band
+    // check, so typing RM 30 never reads as a mere minimum-amount problem.
+    if (gateReason) {
+      setError(gateReason);
+      return;
+    }
     if (amount < limits.withdrawal.minRm || amount > limits.withdrawal.maxRm) {
       setError(
         `Withdrawals must be between ${rm0(limits.withdrawal.minRm)} and ${rm0(limits.withdrawal.maxRm)}.`,
@@ -164,7 +170,7 @@ export default function WithdrawForm({
       return;
     }
     if (withdrawable != null && amount > withdrawable) {
-      setError(gateReason ?? 'That is more than you can withdraw right now.');
+      setError('That is more than you can withdraw right now.');
       return;
     }
     setSubmitting(true);

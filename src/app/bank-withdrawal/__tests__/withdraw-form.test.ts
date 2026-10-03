@@ -312,6 +312,16 @@ describe('WithdrawForm', () => {
     expect(startWithdrawal).not.toHaveBeenCalled();
   });
 
+  it('a locked customer under the band minimum still gets the reason, not the band line', async () => {
+    await render([READY_ACCOUNT], { withdrawable: 0, isFrozen: true });
+    fillValidForm('30');
+    await submit();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'Withdrawals are unavailable while your account is under review. Contact support.',
+    );
+    expect(startWithdrawal).not.toHaveBeenCalled();
+  });
+
   it('submits an ACCOUNT ID and shows the async success state — "on its way", never "paid"', async () => {
     await render();
     startWithdrawal.mockResolvedValue({
