@@ -351,6 +351,12 @@ TOOLS.support = [
   },
 ];
 
+// Every desk reads every desk's reports (2026-10-03): one flat list, each
+// tool tagged with the desk whose route it calls. Names are unique.
+export const ALL_TOOLS = Object.entries(TOOLS).flatMap(([desk, tools]) =>
+  tools.map((tool) => ({ ...tool, desk })),
+);
+
 // Hermes saves an image result to its cache and hands the bot a MEDIA: line,
 // but attaches the file to the chat only when the reply repeats that line
 // (MCP tools are not on its auto-attach list).
@@ -415,6 +421,8 @@ export async function runTool(tool, args, config) {
     // A poster fetches its prize art server-side, so it gets longer.
     const body = await getReport({
       ...config,
+      // The tool's own desk: any desk's server serves every desk's tools.
+      desk: tool.desk ?? config.desk,
       path,
       params,
       as,

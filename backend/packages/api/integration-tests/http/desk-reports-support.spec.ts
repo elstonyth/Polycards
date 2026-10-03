@@ -136,11 +136,14 @@ medusaIntegrationTestRunner({
       ]);
     });
 
-    describe('the support key', () => {
-      it('opens support reports and nothing else opens them', async () => {
+    describe('the report keys', () => {
+      it("open support reports with any desk's key, never without one", async () => {
         const n = orderId.slice(-6);
         expect((await report(`order?number=${n}`)).status).toBe(200);
         expect((await report(`order?number=${n}`, GROWTH_KEY)).status).toBe(
+          200,
+        );
+        expect((await report(`order?number=${n}`, 'x'.repeat(48))).status).toBe(
           401,
         );
         expect((await report(`order?number=${n}`, null)).status).toBe(401);

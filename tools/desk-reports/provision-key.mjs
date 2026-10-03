@@ -6,7 +6,7 @@
 // replaced by renaming a temp file over it, so a failed run never leaves a
 // half-written secrets file. No .bak copy is made: it would be one more
 // plaintext copy of every production secret.
-// Usage: node tools/desk-reports/provision-key.mjs <finance|store|support|growth> <main checkout path>
+// Usage: node tools/desk-reports/provision-key.mjs <finance|store|support|growth|developer> <main checkout path>
 import { randomBytes } from 'node:crypto';
 import {
   existsSync,
@@ -18,9 +18,9 @@ import {
 import { join } from 'node:path';
 
 const [desk, repo] = process.argv.slice(2);
-if (!['finance', 'store', 'support', 'growth'].includes(desk) || !repo) {
+if (!['finance', 'store', 'support', 'growth', 'developer'].includes(desk) || !repo) {
   throw new Error(
-    'usage: provision-key.mjs <finance|store|support|growth> <main checkout path>',
+    'usage: provision-key.mjs <finance|store|support|growth|developer> <main checkout path>',
   );
 }
 if (!process.env.LOCALAPPDATA) {

@@ -2,21 +2,25 @@ import { deskOf, requireReportKey } from '../require-report-key';
 
 const FINANCE = 'f'.repeat(40);
 const STORE = 's'.repeat(40);
-const saved = {
-  finance: process.env.REPORT_KEY_FINANCE,
-  store: process.env.REPORT_KEY_STORE,
-};
+const DEVELOPER = 'd'.repeat(40);
+const NAMES = [
+  'REPORT_KEY_FINANCE',
+  'REPORT_KEY_STORE',
+  'REPORT_KEY_SUPPORT',
+  'REPORT_KEY_GROWTH',
+  'REPORT_KEY_DEVELOPER',
+];
+const saved = Object.fromEntries(NAMES.map((n) => [n, process.env[n]]));
 beforeEach(() => {
+  for (const n of NAMES) delete process.env[n];
   process.env.REPORT_KEY_FINANCE = FINANCE;
   process.env.REPORT_KEY_STORE = STORE;
 });
 afterAll(() => {
-  const restore = (name: string, value: string | undefined) => {
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
-  };
-  restore('REPORT_KEY_FINANCE', saved.finance);
-  restore('REPORT_KEY_STORE', saved.store);
+  for (const n of NAMES) {
+    if (saved[n] === undefined) delete process.env[n];
+    else process.env[n] = saved[n];
+  }
 });
 
 function run(
@@ -82,8 +86,9 @@ describe('deskOf', () => {
 describe('requireReportKey', () => {
   const ECONOMY = '/reports/finance/economy?group=default';
 
-  it('answers 503 and never calls next when the desk key is unset', () => {
+  it('answers 503 and never calls next when no desk key is set', () => {
     delete process.env.REPORT_KEY_FINANCE;
+    delete process.env.REPORT_KEY_STORE;
     const { res, next } = run(ECONOMY, { 'x-report-key': FINANCE });
     expect(res.statusCode).toBe(503);
     expect(res.headers['cache-control']).toBe('no-store');
@@ -92,6 +97,8 @@ describe('requireReportKey', () => {
 
   it('treats a key shorter than 32 characters as unset', () => {
     process.env.REPORT_KEY_FINANCE = 'short';
+    expect(run(ECONOMY, { 'x-report-key': 'short' }).res.statusCode).toBe(401);
+    delete process.env.REPORT_KEY_STORE;
     expect(run(ECONOMY, { 'x-report-key': 'short' }).res.statusCode).toBe(503);
   });
 
@@ -115,10 +122,25 @@ describe('requireReportKey', () => {
     );
   });
 
-  it("refuses another desk's key: the store key cannot open finance", () => {
-    const { res, next } = run(ECONOMY, { 'x-report-key': STORE });
-    expect(res.statusCode).toBe(401);
-    expect(next).not.toHaveBeenCalled();
+  it("opens every desk's reports with any desk's key, and logs who read what", () => {
+    const { next, info } = run(ECONOMY, { 'x-report-key': STORE });
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledWith(`[reports] store ${ECONOMY}`);
+  });
+
+  it('opens them with the developer key, which owns no reports of its own', () => {
+    process.env.REPORT_KEY_DEVELOPER = DEVELOPER;
+    const { next, info } = run('/reports/store/packs', {
+      'x-report-key': DEVELOPER,
+    });
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledWith(
+      '[reports] developer /reports/store/packs',
+    );
+    // Still no developer routes: the path must name a report desk.
+    expect(
+      run('/reports/developer/x', { 'x-report-key': DEVELOPER }).res.statusCode,
+    ).toBe(401);
   });
 
   it('refuses an unknown desk whatever key is sent', () => {
@@ -142,7 +164,8 @@ describe('requireReportKey', () => {
       run('/reports/Finance/economy', { 'x-report-key': FINANCE }).next,
     ).toHaveBeenCalledTimes(1);
     expect(
-      run('/reports/Finance/economy', { 'x-report-key': STORE }).res.statusCode,
+      run('/reports/Finance/economy', { 'x-report-key': 'x'.repeat(40) }).res
+        .statusCode,
     ).toBe(401);
   });
 

@@ -53,10 +53,11 @@ medusaIntegrationTestRunner({
         }),
       );
 
-    describe('the growth key', () => {
-      it('opens growth reports and nothing else opens them', async () => {
+    describe('the report keys', () => {
+      it("open growth reports with any desk's key, never without one", async () => {
         expect((await report('challenge')).status).toBe(200);
-        expect((await report('challenge', FINANCE_KEY)).status).toBe(401);
+        expect((await report('challenge', FINANCE_KEY)).status).toBe(200);
+        expect((await report('challenge', 'x'.repeat(48))).status).toBe(401);
         expect((await report('challenge', null)).status).toBe(401);
       });
     });

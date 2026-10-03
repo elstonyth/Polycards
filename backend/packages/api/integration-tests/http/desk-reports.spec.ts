@@ -139,18 +139,30 @@ medusaIntegrationTestRunner({
       return ids;
     }
 
-    describe('the /reports/finance key', () => {
-      it('answers 401 without a key and for another desk key', async () => {
-        expect((await report('economy', null)).status).toBe(401);
-        expect((await report('economy', STORE_KEY)).status).toBe(401);
+    describe('the report keys', () => {
+      it("open finance reports with any desk's key, the developer's too", async () => {
+        expect((await report('economy', STORE_KEY)).status).toBe(200);
+        process.env.REPORT_KEY_DEVELOPER = 'd'.repeat(48);
+        try {
+          expect((await report('economy', 'd'.repeat(48))).status).toBe(200);
+        } finally {
+          delete process.env.REPORT_KEY_DEVELOPER;
+        }
       });
 
-      it('answers 503 while the finance key is unset', async () => {
+      it('answers 401 without a key or for an unknown one', async () => {
+        expect((await report('economy', null)).status).toBe(401);
+        expect((await report('economy', 'x'.repeat(48))).status).toBe(401);
+      });
+
+      it('answers 503 while no desk key is set', async () => {
         delete process.env.REPORT_KEY_FINANCE;
+        delete process.env.REPORT_KEY_STORE;
         try {
           expect((await report('economy')).status).toBe(503);
         } finally {
           process.env.REPORT_KEY_FINANCE = FINANCE_KEY;
+          process.env.REPORT_KEY_STORE = STORE_KEY;
         }
       });
     });

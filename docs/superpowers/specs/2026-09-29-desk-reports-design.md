@@ -15,6 +15,7 @@ Staff ask the desk bots questions that need live production data. On 2026-09-29,
 | Privacy                  | No email, phone, address or bank details in any report. Players are identified by their public username (`customer.first_name`, unique case-insensitively).                                                                                                                                                                                                                                          |
 | Support web access       | Removed when Support gets order data (prompt-injection exfiltration). Its public policy text is loaded into it directly. Store and Growth keep web; their data is not personal. Finance already has no web.                                                                                                                                                                                          |
 | Admin Economy page       | Unchanged for now. The group-scoped query is written so the page can adopt it later.                                                                                                                                                                                                                                                                                                                 |
+| Cross-desk access (2026-10-03) | The operator chose full read-only access for every desk bot: any desk's key opens every desk's reports, and Developer gets a key too. Keys stay per desk, so the log names the reader and one bot can be cut off by rotating its key. Still no email, phone, address or bank details anywhere. Growth, Store and Developer keep web (operator's call); their SOULs forbid putting figures or player data into web searches or URLs. Rejected: one shared key (no attribution, one rotation hits every desk) and every bot holding every key. |
 
 ## Architecture
 
@@ -34,11 +35,12 @@ Discord ──► Hermes desk bot (owner's PC)
 ### Backend: `/reports/<desk>/*`
 
 - One middleware entry for `GET /reports/*`: the `desk-reports` rate limiter (keyed on the caller IP via `callbackSourceIp`), then `requireReportKey()`.
-- `requireReportKey()` reads the desk from the path (`/reports/<desk>/…`) and compares `x-report-key` in constant time against `REPORT_KEY_<DESK>` (for example `REPORT_KEY_FINANCE`).
-  - An unset key, or one shorter than 32 characters, answers 503.
-  - A wrong key answers a bare 401.
-  - A desk's key opens only that desk's routes.
-  - Every authorised call is logged: desk, path and query.
+- `requireReportKey()` reads the desk from the path (`/reports/<desk>/…`) and compares `x-report-key` in constant time against every configured desk key (`REPORT_KEY_FINANCE`, `_STORE`, `_SUPPORT`, `_GROWTH`, `_DEVELOPER`).
+  - A key shorter than 32 characters counts as unset. With no key configured at all, every request answers 503.
+  - A wrong key answers a bare 401. The path must still name a report desk.
+  - Since 2026-10-03 any desk's key opens every desk's routes (see Decisions). Until then a key opened only its own desk's.
+  - Every authorised call is logged with the reader's desk, path and query: `[reports] growth /reports/finance/economy?...`.
+  - The rate limiter still keys on the desk in the path, so cross-desk reads share that data area's budget.
 - The report SQL lives beside the routes, in `src/api/reports/`, and reads through the app's shared Postgres connection. The money-path service is not touched.
   - Ledger rows go through the dashboard's own `ledgerTotals` fold.
   - Liabilities come from the same service methods the dashboard uses.
@@ -47,7 +49,7 @@ Discord ──► Hermes desk bot (owner's PC)
 
 ### MCP server: `tools/desk-reports/`
 
-- Node 24, `@modelcontextprotocol/sdk`, stdio. Configured by env: `REPORTS_BASE_URL`, `REPORTS_DESK`, `REPORTS_KEY`. It registers only its desk's tools.
+- Node 24, `@modelcontextprotocol/sdk`, stdio. Configured by env: `REPORTS_BASE_URL`, `REPORTS_DESK`, `REPORTS_KEY`. Since 2026-10-03 it registers every desk's tools (`ALL_TOOLS`), each calling its own desk's route with this desk's key. `REPORTS_DESK` may be `developer`, which owns no reports.
 - **Periods** are resolved in **Malaysia time (UTC+8)**:
   - `today`, `yesterday`, `this_week` (Mon–Sun), `last_week`, `this_month`, `last_month`;
   - `last_7_days` and `last_30_days`, which are rolling and match the dashboard's Weekly and Monthly;
@@ -62,7 +64,7 @@ Discord ──► Hermes desk bot (owner's PC)
 - All tools carry `readOnlyHint: true`. The Hermes entry sets `trust: full`, because Hermes 0.21.5 cannot see that hint.
   - Its check reads the `readOnlyHint` attribute, but the bundled Python MCP SDK 2.0 names it `read_only_hint`. Every tool therefore counts as write-capable.
   - Under `trust: untrusted`, every report call was denied in a local agent test (2026-10-01). The gateway would ask for approval on each call instead.
-  - The boundary that matters is the backend: a desk key opens only `GET /reports/<desk>/*`.
+  - The boundary that matters is the backend: a desk key opens only `GET /reports/*`, which is read-only.
   - Switch back to `untrusted` once Hermes reads the hint correctly. Any write-capable tool added later would then need approval again.
 - Installed on the PC under `%LOCALAPPDATA%\hermes\ops\desk-reports`, copied from the repo, so a branch switch in the main checkout cannot break the bots.
 
@@ -72,7 +74,7 @@ Discord ──► Hermes desk bot (owner's PC)
 - `REPORT_KEY_<DESK>` in the profile's `.env`.
 - `polycards_<desk>` added to `platform_toolsets.discord`.
 - A SOUL rule: use the report tools for any live figure, say the window and scope, and never estimate.
-- The ops `audit` check uses a per-desk tool allowlist. Only the owning desk may list `polycards_<desk>`, and every other profile must have no `mcp_servers` at all. `hermes -p <profile> tools --summary` confirms this after each restart.
+- The ops `audit` check uses a per-desk tool allowlist: each desk with `reports: true` in `desks.json` lists only its own `polycards_<desk>` server (all five since 2026-10-03), and any other profile must have no `mcp_servers` at all. `hermes -p <profile> tools --summary` confirms this after each restart.
 
 ### Deploy and secret order
 

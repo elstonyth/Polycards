@@ -26,20 +26,20 @@ const OTHER = `REPORT_KEY_STORE=${'s'.repeat(64)}`;
 const ANY_KEY = /[0-9a-f]{64}/;
 
 // content: string | Buffer, or null to leave that file missing.
-function setup(t, deploy, profile) {
+function setup(t, deploy, profile, desk = 'finance') {
   const root = mkdtempSync(join(tmpdir(), 'provision-key-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const repo = join(root, 'repo');
   const local = join(root, 'localappdata');
   const files = [
     join(repo, 'deploy', '.env.deploy'),
-    join(local, 'hermes', 'profiles', 'polycards-finance', '.env'),
+    join(local, 'hermes', 'profiles', `polycards-${desk}`, '.env'),
   ];
   [deploy, profile].forEach((content, i) => {
     mkdirSync(dirname(files[i]), { recursive: true });
     if (content !== null) writeFileSync(files[i], content);
   });
-  return { root, repo, local, files };
+  return { root, repo, local, files, desk };
 }
 
 function run(fx, { localAppData = fx.local, execArgv = [], env = {} } = {}) {
@@ -56,11 +56,11 @@ function run(fx, { localAppData = fx.local, execArgv = [], env = {} } = {}) {
     Object.keys(childEnv).filter((key) => key.toUpperCase() === 'LOCALAPPDATA'),
     localAppData ? ['LOCALAPPDATA'] : [],
   );
-  return spawnSync(
-    process.execPath,
-    [...execArgv, SCRIPT, 'finance', fx.repo],
-    { env: { ...childEnv, ...env }, encoding: 'utf8', timeout: 30_000 },
-  );
+  return spawnSync(process.execPath, [...execArgv, SCRIPT, fx.desk, fx.repo], {
+    env: { ...childEnv, ...env },
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
 }
 
 const snapshot = (fx) =>
@@ -98,6 +98,16 @@ test('appends one fresh 64-hex key to both files and prints no value', (t) => {
   assert.equal(res.stdout, `${NAME} written to 2 files (value not shown).\n`);
   assert.ok(!res.stdout.includes(key) && !res.stderr.includes(key));
   assertNoTempFiles(fx);
+});
+
+test('provisions the developer desk, which reads every report', (t) => {
+  const fx = setup(t, 'A=1\n', 'X=1\n', 'developer');
+  const res = run(fx);
+  assert.equal(res.status, 0, res.stderr);
+  const [deploy, profile] = fx.files.map((file) => readFileSync(file, 'utf8'));
+  const key = /^REPORT_KEY_DEVELOPER=([0-9a-f]{64})$/m.exec(deploy)?.[1];
+  assert.ok(key, 'the deploy file ends with a fresh developer key line');
+  assert.equal(profile, `X=1\nREPORT_KEY_DEVELOPER=${key}\n`);
 });
 
 test('replaces an existing key line instead of duplicating it', (t) => {

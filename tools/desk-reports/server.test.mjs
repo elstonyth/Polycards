@@ -8,7 +8,7 @@ import {
   getDefaultEnvironment,
 } from '@modelcontextprotocol/sdk/client/stdio.js';
 
-test('stdio round trip: read-only tools, the key on the wire, never in stderr', async () => {
+test('stdio round trip: every desk gets every read-only tool, the key on the wire, never in stderr', async () => {
   const seen = [];
   const backend = createServer((req, res) => {
     seen.push({ url: req.url, key: req.headers['x-report-key'] });
@@ -22,7 +22,8 @@ test('stdio round trip: read-only tools, the key on the wire, never in stderr', 
     args: [fileURLToPath(new URL('./server.mjs', import.meta.url))],
     env: {
       ...getDefaultEnvironment(),
-      REPORTS_DESK: 'finance',
+      // Developer owns no reports, and still reads them all.
+      REPORTS_DESK: 'developer',
       REPORTS_KEY: key,
       REPORTS_BASE_URL: `http://127.0.0.1:${backend.address().port}`,
     },
@@ -45,6 +46,19 @@ test('stdio round trip: read-only tools, the key on the wire, never in stderr', 
         'pack_sales',
         'player',
         'groups',
+        'challenge',
+        'signups',
+        'packs_opened',
+        'tasks',
+        'challenge_poster',
+        'brand_poster',
+        'achievements_poster',
+        'brand_logo',
+        'packs',
+        'pack',
+        'low_stock',
+        'order',
+        'account',
       ],
     );
     for (const t of tools) assert.equal(t.annotations?.readOnlyHint, true);
@@ -54,8 +68,11 @@ test('stdio round trip: read-only tools, the key on the wire, never in stderr', 
     });
     assert.ok(!result.isError);
     assert.equal(JSON.parse(result.content[0].text).totals.revenue, 12.5);
+    // Each tool calls its own desk's route, with this desk's one key.
+    await client.callTool({ name: 'packs', arguments: {} });
     assert.deepEqual(seen, [
       { url: '/reports/finance/economy?group=default', key },
+      { url: '/reports/store/packs', key },
     ]);
     assert.match(stderr, /key configured: yes \(64 chars\)/);
     assert.ok(!stderr.includes(key));
