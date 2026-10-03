@@ -61,9 +61,10 @@ export interface WithdrawalGateWallet {
  * Who matches on these strings, if you are considering a reword: the backend
  * unit tests in __tests__/gateway-withdrawal.unit.spec.ts assert them by
  * regex (both the caller-level precheck cases and the service-level gate
- * cases). Nothing under storefront `src/` matches them today — the customer
- * sees whatever the API returns — so a reword is a backend-test change, not a
- * frontend one. Update them together.
+ * cases). The storefront's src/app/bank-withdrawal/WithdrawForm.tsx shows the
+ * freeze and playthrough sentences BEFORE a submit (so a customer at RM 0.00
+ * withdrawable is told why), and its unit test pins them — so a reword is a
+ * backend-test change AND a frontend one. Update all three together.
  *
  * Order matters: freeze outranks playthrough, which outranks the plain
  * "you can withdraw up to X" cap — a frozen account must never be told it is

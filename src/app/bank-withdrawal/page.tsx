@@ -26,8 +26,7 @@ export default async function BankWithdrawalPage() {
   const [walletResult, account] = customer
     ? await Promise.all([getWallet(), getAccountInfo()])
     : [null, null];
-  const withdrawable =
-    walletResult && walletResult.ok ? walletResult.wallet.withdrawable : null;
+  const wallet = walletResult && walletResult.ok ? walletResult.wallet : null;
   // Partner groups (spec 2026-09-09): a member of a group that blocks
   // withdrawals gets the notice instead of a form the backend
   // (blockGroupWithdrawals) would refuse on submit. UX only — the refusal
@@ -59,7 +58,11 @@ export default async function BankWithdrawalPage() {
             </span>
           </div>
         ) : WITHDRAWALS_OPEN ? (
-          <WithdrawForm withdrawable={withdrawable} />
+          <WithdrawForm
+            withdrawable={wallet?.withdrawable ?? null}
+            isFrozen={wallet?.isFrozen}
+            playthroughRemaining={wallet?.playthrough.remaining}
+          />
         ) : (
           <>
             <div className="mt-6 flex items-start gap-2.5 rounded-xl border border-white/10 bg-neutral-900 px-4 py-3.5 text-sm text-white/80">

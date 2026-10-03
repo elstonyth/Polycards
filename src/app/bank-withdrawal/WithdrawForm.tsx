@@ -64,9 +64,14 @@ function unusableReason(account: SavedBankAccount, now: Date): string | null {
  */
 export default function WithdrawForm({
   withdrawable,
+  isFrozen = false,
+  playthroughRemaining = 0,
 }: {
   /** The server's freeze/locked/playthrough-gated figure — NOT raw balance. */
   withdrawable: number | null;
+  /** Why `withdrawable` is held back, from the same wallet read. */
+  isFrozen?: boolean;
+  playthroughRemaining?: number;
 }) {
   // The payout debits the balance server-side; repaint it here so the header
   // chip is not stale. (This used to light the Me-tab money dot too — that dot
@@ -89,6 +94,17 @@ export default function WithdrawForm({
   // on startWithdrawal), and rotated only after a confirmed success so the
   // next withdrawal starts a fresh attempt. Mirrors TopUpSheet's attemptKey.
   const attemptKey = useRef<string | null>(null);
+
+  // Why the balance cannot leave, said up front instead of only after a
+  // refused submit. Same sentences and precedence (freeze outranks
+  // playthrough) as the backend's withdrawalGateError in
+  // backend/packages/api/src/modules/packs/withdrawable.ts — reword both
+  // together.
+  const gateReason = isFrozen
+    ? 'Withdrawals are unavailable while your account is under review. Contact support.'
+    : playthroughRemaining > 0
+      ? `${rm(playthroughRemaining)} of your deposits must be spent on packs before you can withdraw.`
+      : null;
 
   const [limits, setLimits] = useState<PaymentLimits>(DEFAULT_PAYMENT_LIMITS);
   // The channel itself, not the band — the admin can close withdrawals
@@ -148,7 +164,7 @@ export default function WithdrawForm({
       return;
     }
     if (withdrawable != null && amount > withdrawable) {
-      setError('That is more than you can withdraw right now.');
+      setError(gateReason ?? 'That is more than you can withdraw right now.');
       return;
     }
     setSubmitting(true);
@@ -226,6 +242,22 @@ export default function WithdrawForm({
             {withdrawable == null ? '—' : rm(withdrawable)}
           </span>
         </div>
+        {gateReason && (
+          <p className="mt-2 text-[13px] leading-relaxed text-neutral-400">
+            {gateReason}
+            {!isFrozen && (
+              <>
+                {' '}
+                <Link
+                  href="/wallet"
+                  className="font-semibold text-white underline underline-offset-2 hover:text-white/80"
+                >
+                  See your progress
+                </Link>
+              </>
+            )}
+          </p>
+        )}
       </div>
 
       {saved !== null && accounts.length === 0 && (

@@ -72,13 +72,16 @@ const NEEDS_RESAVE_ACCOUNT = {
   usableFrom: null,
 };
 
-async function render(accounts: unknown[] = [READY_ACCOUNT]) {
+async function render(
+  accounts: unknown[] = [READY_ACCOUNT],
+  props: Partial<Parameters<typeof WithdrawForm>[0]> = {},
+) {
   fetchSavedBankAccounts.mockResolvedValue({ ok: true, accounts });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(createElement(WithdrawForm, { withdrawable: 100 }));
+    root.render(createElement(WithdrawForm, { withdrawable: 100, ...props }));
   });
 }
 
@@ -264,6 +267,47 @@ describe('WithdrawForm', () => {
     await submit();
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(
       'That is more than you can withdraw right now.',
+    );
+    expect(startWithdrawal).not.toHaveBeenCalled();
+  });
+
+  // Withdrawable 0 with no reason sent customers to support (2026-10-03: RM
+  // 190.85 balance, RM 5 of deposits still to play through). The reason is
+  // shown up front, in the backend's own words (withdrawalGateError), with
+  // freeze outranking playthrough exactly as the gate does.
+  it('says how much playthrough is left when that is what locks withdrawals', async () => {
+    await render([READY_ACCOUNT], { withdrawable: 0, playthroughRemaining: 5 });
+    expect(container.textContent).toContain(
+      'RM 5.00 of your deposits must be spent on packs before you can withdraw.',
+    );
+    expect(container.querySelector('a[href="/wallet"]')).toBeTruthy();
+  });
+
+  it('a frozen account gets the freeze copy only, never the playthrough line', async () => {
+    await render([READY_ACCOUNT], {
+      withdrawable: 0,
+      isFrozen: true,
+      playthroughRemaining: 5,
+    });
+    expect(container.textContent).toContain(
+      'Withdrawals are unavailable while your account is under review. Contact support.',
+    );
+    expect(container.textContent).not.toContain('of your deposits');
+  });
+
+  it('shows no gate note when nothing locks withdrawals', async () => {
+    await render();
+    expect(container.textContent).not.toContain('of your deposits');
+    expect(container.textContent).not.toContain('under review');
+    expect(container.querySelector('a[href="/wallet"]')).toBeNull();
+  });
+
+  it('an over-amount while locked names the reason, not the generic cap line', async () => {
+    await render([READY_ACCOUNT], { withdrawable: 0, playthroughRemaining: 5 });
+    fillValidForm('50');
+    await submit();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'RM 5.00 of your deposits must be spent on packs before you can withdraw.',
     );
     expect(startWithdrawal).not.toHaveBeenCalled();
   });
