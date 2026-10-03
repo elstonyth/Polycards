@@ -36,6 +36,11 @@ export const USERNAME_RE = new RegExp(
  *  and the settings paths so the two can't drift apart. */
 export const USERNAME_TAKEN = 'That username is taken — please pick another.';
 
+/** The rename hint when the handle isn't in hand, shared by /settings and the
+ *  /me Edit Profile name editor for the same reason. */
+export const RENAME_KEEPS_LINK =
+  'Your profile link stays the same, whatever you rename to.';
+
 /**
  * Why this display name can't be used, or null when it's fine. Deliberately
  * specific about which rule was broken — "invalid username" tells someone with
