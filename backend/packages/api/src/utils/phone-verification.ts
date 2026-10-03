@@ -123,7 +123,9 @@ export const E164_RE = /^\+[1-9]\d{6,14}$/;
  *
  * Default is MY alone: CONTEXT.md records Malaysia (+60) as the one country
  * confirmed enabled in Twilio's SMS geo permissions, and DEFAULT_PHONE_COUNTRY
- * is 'MY'. Widen via ALLOWED_SMS_COUNTRIES.
+ * is 'MY'. Widen via ALLOWED_SMS_COUNTRIES. Production sets MY,SG since
+ * 2026-10-03, when Singapore was enabled in Twilio's Messaging, Voice and
+ * Verify geo permissions.
  *
  * PAIRED with the storefront picker (ALLOWED_PHONE_COUNTRIES in
  * src/lib/profile-validation.ts, rendered by src/components/PhoneField.tsx).
@@ -163,6 +165,8 @@ export const DEFAULT_ALLOWED_SMS_COUNTRIES = ['MY'] as const;
 // case — loudly inert rather than quietly over-broad.
 const SMS_DIAL_PREFIX: Record<string, string> = {
   MY: '+60',
+  // +65 is Singapore and nothing else, so a prefix is exact here.
+  SG: '+65',
 };
 
 /**
