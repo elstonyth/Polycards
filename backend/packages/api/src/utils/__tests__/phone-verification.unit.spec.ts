@@ -231,18 +231,27 @@ describe('sms destination allowlist', () => {
   // resolves to no prefix, so naming it widens NOTHING — pinned here so the
   // half-landed widening is a failing test, not a silent production surprise.
   it('ignores an ISO code with no dialling-code row', () => {
-    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'SG' }, '+6561234567')).toBe(
+    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'TH' }, '+66812345678')).toBe(
       false,
     );
     // Worse than "widens nothing": a non-empty value suppresses the default, so
     // this configuration also stops the numbers that USED to work. Every send
     // dies at once, which is why unresolvableSmsCountries exists.
-    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'SG' }, PHONE)).toBe(false);
+    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'TH' }, PHONE)).toBe(false);
+  });
+
+  // Production since 2026-10-03: ALLOWED_SMS_COUNTRIES=MY,SG.
+  it('serves Singapore when listed, alongside Malaysia', () => {
+    const SG = '+6591234567';
+    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'MY,SG' }, SG)).toBe(true);
+    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'MY,SG' }, PHONE)).toBe(true);
+    expect(isAllowedSmsDestination({ ALLOWED_SMS_COUNTRIES: 'MY' }, SG)).toBe(false);
+    expect(unresolvableSmsCountries({ ALLOWED_SMS_COUNTRIES: 'MY,SG' })).toEqual([]);
   });
 
   it('reports the ISO codes that resolve to nothing', () => {
-    expect(unresolvableSmsCountries({ ALLOWED_SMS_COUNTRIES: ' my , sg , zz ' })).toEqual(
-      ['SG', 'ZZ'],
+    expect(unresolvableSmsCountries({ ALLOWED_SMS_COUNTRIES: ' my , th , zz ' })).toEqual(
+      ['TH', 'ZZ'],
     );
     // Silence when the configuration is sound — including the fallback path,
     // so a blank env never produces a spurious misconfiguration warning.
