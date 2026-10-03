@@ -37,10 +37,9 @@ const growthScripts = join(
   'scripts',
 );
 mkdirSync(growthScripts, { recursive: true });
-cpSync(
-  join(here, 'cron', 'daily_hits.py'),
-  join(growthScripts, 'daily_hits.py'),
-);
+for (const script of ['daily_hits.py', 'daily_excel.py']) {
+  cpSync(join(here, 'cron', script), join(growthScripts, script));
+}
 // npm is npm.cmd on Windows, which needs a shell to start.
 execFileSync('npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], {
   cwd: target,
