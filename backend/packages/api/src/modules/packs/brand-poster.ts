@@ -84,7 +84,7 @@ const ICON_LAYERS =
   '<path d="m20 14.285 1.5.845a1 1 0 0 1 0 1.74L13 21.74a2 2 0 0 1-2 0l-8.5-4.87a1 1 0 0 1 0-1.74l1.5-.845"/>';
 const ICON_ARROW = '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>';
 const ICON_ARROW_UP = '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>';
-const icon = (
+export const icon = (
   paths: string,
   x: number,
   midY: number,
@@ -95,10 +95,35 @@ const icon = (
   `fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</g>`;
 
 // Ink height of a line: the cap height of both faces is ~0.7em.
-const capH = (size: number): number => size * 0.72;
+export const capH = (size: number): number => size * 0.72;
 // The hero headline's tracking (tracking-[-0.04em] on the site), eased to
 // -0.03em: at poster size the tighter value makes Nekst's letters touch.
-const headFont = (size: number) => display(size, -0.03 * size);
+export const headFont = (size: number) => display(size, -0.03 * size);
+
+export const CTA_H = 84;
+
+/** The hero's CTA row, centred on `mid` with its top at `y`: the white
+ *  "Open a pack" pill, then the quiet link to `host`. */
+export async function ctaRow(
+  mid: number,
+  y: number,
+  host: string,
+): Promise<string> {
+  const font = body(32);
+  const label = 'Open a pack';
+  const pillW = Math.round((await measure(label, font)) + 30 + 12 + 88);
+  const shown = await fit(host, font, 360);
+  const hostW = Math.round((await measure(shown, font)) + 12 + 28);
+  const x = mid - (pillW + 48 + hostW) / 2;
+  const pillMid = y + CTA_H / 2;
+  return (
+    `<rect x="${x.toFixed(1)}" y="${y}" width="${pillW}" height="${CTA_H}" rx="${CTA_H / 2}" fill="${WHITE}"/>` +
+    textEl(label, x + 44, baseline(pillMid, 32), font, INK) +
+    icon(ICON_ARROW, x + pillW - 44 - 30, pillMid, 30, INK) +
+    textEl(shown, x + pillW + 48, baseline(pillMid, 32), font, WHITE) +
+    icon(ICON_ARROW_UP, x + pillW + 48 + hostW - 28, pillMid, 26, WHITE)
+  );
+}
 
 /** The live figure as the poster shows it: exact (480, 12,345), or rounded
  *  DOWN to the hundred with a plus (400+). Never rounded up: a poster must
@@ -333,14 +358,6 @@ export async function composeBrandPoster(
     input.statPrefix && input.stat
       ? Math.max(30, Math.round(statSize * 0.24))
       : 0;
-  const ctaFont = body(32);
-  const ctaLabel = 'Open a pack';
-  const pillH = 84;
-  const pillW = Math.round((await measure(ctaLabel, ctaFont)) + 30 + 12 + 88);
-  const host = await fit(input.siteHost, ctaFont, 360);
-  const hostW = Math.round((await measure(host, ctaFont)) + 12 + 28);
-  const rowW = pillW + 48 + hostW;
-
   const headAdvance = Math.round(head.size * 0.98);
   const parts = [
     eyebrow ? capH(24) + 36 : 0,
@@ -349,7 +366,7 @@ export async function composeBrandPoster(
     capH(head.size) + (head.lines.length - 1) * headAdvance,
     progress ? 46 + 16 + 22 + capH(28) : 0,
     sub.length ? 46 + capH(subSize) + (sub.length - 1) * 46 : 0,
-    48 + pillH,
+    48 + CTA_H,
   ];
   const textH = parts.reduce((a, b) => a + b, 0);
   let y = hasHero
@@ -450,16 +467,8 @@ export async function composeBrandPoster(
   }
   // The hero's CTA row: the white pill, then the quiet link.
   y += 48;
-  const rowX = mid - rowW / 2;
-  const pillMid = y + pillH / 2;
-  svg.push(
-    `<rect x="${rowX.toFixed(1)}" y="${y}" width="${pillW}" height="${pillH}" rx="${pillH / 2}" fill="${WHITE}"/>`,
-    textEl(ctaLabel, rowX + 44, baseline(pillMid, 32), ctaFont, INK),
-    icon(ICON_ARROW, rowX + pillW - 44 - 30, pillMid, 30, INK),
-    textEl(host, rowX + pillW + 48, baseline(pillMid, 32), ctaFont, WHITE),
-    icon(ICON_ARROW_UP, rowX + pillW + 48 + hostW - 28, pillMid, 26, WHITE),
-  );
-  y += pillH;
+  svg.push(await ctaRow(mid, y, input.siteHost));
+  y += CTA_H;
 
   // ---- the hero: the chase slabs fanned, the panel over their feet -----------
   const placeholders: number[] = [];

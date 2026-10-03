@@ -52,10 +52,13 @@ test('the growth desk tools', () => {
     'challenge',
     'signups',
     'packs_opened',
+    'tasks',
     'challenge_poster',
     'brand_poster',
+    'achievements_poster',
     'brand_logo',
   ]);
+  assert.deepEqual(growth.tasks.request({}), { path: 'tasks', params: {} });
   assert.deepEqual(growth.challenge.request({}), {
     path: 'challenge',
     params: {},

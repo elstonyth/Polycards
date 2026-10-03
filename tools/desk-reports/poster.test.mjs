@@ -37,6 +37,8 @@ test('image mode returns the bytes as base64 and keeps the key safe', async () =
     missingArt: '',
     figure: '',
     goalReached: '',
+    levels: '',
+    skipped: '',
   });
 });
 
@@ -62,6 +64,7 @@ test('brand_poster maps its arguments and tells the bot the live figure', async 
         art: undefined,
       },
       as: 'image',
+      artOf: 'hero card',
     },
   );
   const out = await runTool(
@@ -133,8 +136,62 @@ test('challenge_poster tells the bot when prize art is a placeholder', async () 
   );
   assert.equal(out.content[0].type, 'image');
   assert.match(out.content[1].text, /rank 1,3 could not be loaded/);
-  assert.doesNotMatch(out.content[1].text, /with the official card art/);
+  assert.doesNotMatch(out.content[1].text, /with the official art/);
   assert.match(out.content[1].text, ATTACH);
+});
+
+test('achievements_poster maps its range and names what it drew', async () => {
+  const ladder = TOOLS.growth.find((t) => t.name === 'achievements_poster');
+  assert.deepEqual(ladder.request({ min_level: 60, max_level: 100 }), {
+    path: 'achievements-poster',
+    params: { min_level: 60, max_level: 100 },
+    as: 'image',
+    artOf: 'level',
+  });
+  assert.deepEqual(ladder.request({}).params, {
+    min_level: undefined,
+    max_level: undefined,
+  });
+  const out = await runTool(
+    ladder,
+    {},
+    {
+      ...base,
+      fetchImpl: async () =>
+        new Response(JPEG, {
+          status: 200,
+          headers: {
+            'content-type': 'image/jpeg',
+            'x-poster-levels': '10,20,30',
+            'x-poster-missing-art': '20',
+          },
+        }),
+    },
+  );
+  assert.equal(out.content[0].type, 'image');
+  assert.match(out.content[1].text, /level 20 could not be loaded/);
+  assert.match(out.content[1].text, /Lv\.10, Lv\.20 and Lv\.30/);
+  assert.match(out.content[1].text, ATTACH);
+  assert.doesNotMatch(out.content[1].text, /left off/);
+
+  const gone = await runTool(
+    ladder,
+    {},
+    {
+      ...base,
+      fetchImpl: async () =>
+        new Response(JPEG, {
+          status: 200,
+          headers: {
+            'content-type': 'image/jpeg',
+            'x-poster-levels': '10,30',
+            'x-poster-skipped': '20',
+          },
+        }),
+    },
+  );
+  assert.match(gone.content[1].text, /Lv\.20 is left off/);
+  assert.match(gone.content[1].text, /admin Tasks console/);
 });
 
 test('image mode refuses a non-image and still relays error messages', async () => {

@@ -127,7 +127,7 @@ export function isAllowedImageUrl(url: string): boolean {
 // Operator config — the same source password-reset.ts builds links from — not
 // admin input, so resolving against it (even localhost in dev) is not an SSRF
 // widening: a relative path can only ever land on our own storefront.
-const assetOrigin = (): string =>
+export const assetOrigin = (): string =>
   (process.env.STOREFRONT_URL ?? 'http://localhost:4000').replace(/\/+$/, '');
 
 const MAX_REDIRECTS = 3;

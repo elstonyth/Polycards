@@ -115,6 +115,13 @@ TOOLS.growth = [
     request: windowed('packs'),
   },
   {
+    name: 'tasks',
+    description:
+      "The weekly tasks and achievements exactly as the /task page shows them right now: each task's title, what it asks for in plain English (requirement; level = the VIP level a reach_level achievement needs), its prize as the page words it, what the page says the prize is worth (value_myr: a credit's amount, a free rip's pack price, a card's market price today, which moves with the market), the prize's official picture link (image) and when the task stops showing (ends_at). Achievements are listed by VIP level and each is claimed once per account; weekly tasks reset every Monday 00:00 Malaysia time. Use it for anything about tasks, achievements, level or VIP rewards, check-in rewards and free rips: never ask staff for a screenshot of the /task page. Amounts in RM (MYR).",
+    inputSchema: {},
+    request: () => ({ path: 'tasks', params: {} }),
+  },
+  {
     name: 'challenge_poster',
     description:
       'A finished Weekly Pulled Value Challenge poster (a tall portrait JPEG, 1080 px wide and about 1640 px high, taller with leaders) rendered from live data with the official card art: the unlock headline, the stage chips, and the podium prizes of one stage (default: the highest unlocked stage), optionally with the current top-3 leaders. Use it instead of drawing cards with image generation: post the image it returns. It is a draft; a human reviews it before it is published.',
@@ -211,6 +218,34 @@ TOOLS.growth = [
         art: args.art,
       },
       as: 'image',
+      artOf: 'hero card',
+    }),
+  },
+  {
+    name: 'achievements_poster',
+    description:
+      "A finished poster of the VIP-level achievements ladder, drawn from live data in the website's design (1080x1350, the 4:5 feed size): the official logo, the Achievements eyebrow, the headline 'Level up. Unlock real rewards.', one tile per level with the prize's official picture, its name as the /task page words it and what /task says it is worth in chase gold, and the Open a pack pill with polycards.gg/task. Nothing on it is typed in (the words are fixed; every prize and value is live), so it takes no text. Default: every live VIP-level achievement (a poster fits 10); min_level and max_level narrow it, e.g. 60 to 100 for the card prizes. Use it whenever staff want a post about achievements, level rewards or what players win by levelling up. It is a draft; a human reviews it before it is published.",
+    inputSchema: {
+      min_level: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe('The lowest VIP level to show. Default: all.'),
+      max_level: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe('The highest VIP level to show. Default: all.'),
+    },
+    request: (args) => ({
+      path: 'achievements-poster',
+      params: { min_level: args.min_level, max_level: args.max_level },
+      as: 'image',
+      artOf: 'level',
     }),
   },
   {
@@ -331,10 +366,37 @@ const goalNote = (body, goal) => {
     : ` It is a goal poster: "Road to ${g}", with ${g} in gold and the live progress (${Number(body.figure).toLocaleString('en-MY')} of ${g}). Post it, and tell staff in one friendly line that ${g} is shown as the goal because the live figure is ${Number(body.figure).toLocaleString('en-MY')}.`;
 };
 
+// '10,20,30' as the bot should say it: 'Lv.10, Lv.20 and Lv.30'.
+const levelList = (levels) => {
+  const named = levels.split(',').map((l) => `Lv.${l}`);
+  return named.length > 1
+    ? `${named.slice(0, -1).join(', ')} and ${named.at(-1)}`
+    : named[0];
+};
+
+// What an achievements poster drew, and what it left off.
+const levelsNote = (body) =>
+  `${
+    body.levels
+      ? ` It shows ${levelList(body.levels)}, with today's values (card values move with the market).`
+      : ''
+  }${
+    body.skipped
+      ? ` ${levelList(body.skipped)} ${body.skipped.includes(',') ? 'are' : 'is'} left off: that prize no longer exists, so nobody can claim it. Tell staff to fix that achievement in the admin Tasks console.`
+      : ''
+  }`;
+
 // Runs one tool call; failures come back as text the bot can relay.
 export async function runTool(tool, args, config) {
   try {
-    const { path, params, label, as, brand } = tool.request(args);
+    const {
+      path,
+      params,
+      label,
+      as,
+      brand,
+      artOf = 'podium rank',
+    } = tool.request(args);
     if (brand) {
       const data = await readFile(
         new URL(`./brand/${brand.file}`, import.meta.url),
@@ -366,9 +428,9 @@ export async function runTool(tool, args, config) {
             type: 'text',
             text: `${
               body.missingArt
-                ? `Rendered from live data, but the prize card art for rank ${body.missingArt} could not be loaded and shows as a plain placeholder tile. Say so when you post it, and do not call it the official card art; try again later for the full poster.`
-                : 'Rendered from live data with the official card art. Post this image as the draft; a human reviews it before it is published.'
-            }${
+                ? `Rendered from live data, but the art for ${artOf} ${body.missingArt} could not be loaded and shows as a plain placeholder tile. Say so when you post it, and do not call it the official art; try again later for the full poster.`
+                : 'Rendered from live data with the official art. Post this image as the draft; a human reviews it before it is published.'
+            }${levelsNote(body)}${
               body.figure
                 ? ` The live figure is ${body.figure} (exact, whatever the poster rounds to): say this number if staff asked for a different one.`
                 : ''
