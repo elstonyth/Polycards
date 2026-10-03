@@ -123,6 +123,33 @@ describe('VAULT_RULES backend-message contract', () => {
     expect(map('Top-Ups Are Temporarily Unavailable.')).toBe(map(paused));
   });
 
+  it('passes every withdrawal refusal through verbatim, never the generic retry', () => {
+    // The literal backend strings. Before 2026-10-03 every one of these fell
+    // to VAULT_FALLBACK, so a customer short of playthrough was told to retry.
+    const literals = [
+      // withdrawable.ts withdrawalGateError — freeze, playthrough, cap
+      'Withdrawals are unavailable while your account is under review. Contact support.',
+      'RM 5.00 of your deposits must be spent on packs before you can withdraw.',
+      'You can withdraw up to RM 12.34 right now.',
+      // service.ts withdrawForCashout
+      'Daily withdrawal limit reached. You can withdraw RM 100.00 more today.',
+      'This withdrawal is no longer open, so nothing was debited. Start a new one.',
+      // customer-group-guards.ts WITHDRAWALS_BLOCKED_MESSAGE
+      'Withdrawals are not available on this account.',
+      // saved-accounts.ts resolveWithdrawalDestination
+      'Select a saved bank account.',
+      'This bank account was saved before withdrawal checks were added. Remove it and save it again to use it.',
+      'This bank account is not available for withdrawals yet — try again in about 3 hours.',
+      // gateway-withdrawal.ts startWithdrawal / withdrawalDetailsError
+      'This bank account is not available with the current payout provider. Pick another saved account, or try again later.',
+      'Add an email address to your account before withdrawing.',
+      'Choose a bank from the list.',
+      'Enter a valid account number (digits only).',
+      'Enter the account holder name exactly as the bank has it.',
+    ];
+    for (const msg of literals) expect(map(msg)).toBe(msg);
+  });
+
   it('falls back for an unrecognised message', () => {
     expect(map('kaboom')).toBe(VAULT_FALLBACK);
   });
