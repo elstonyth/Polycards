@@ -20,6 +20,7 @@ import datetime
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -74,15 +75,26 @@ def _key():
     raise SystemExit("REPORT_KEY_GROWTH is not set in the growth profile's .env.")
 
 
-def _get(path, params, key):
+def _get(path, params, key, tries=3):
+    """One report, retried on a timeout or a 5xx (an edge 504 while a card
+    renders is transient); a 4xx is final."""
     query = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
     request = urllib.request.Request(
         f"{BASE_URL}/reports/{path}?{query}",
         headers={"x-report-key": key, "accept": "*/*", "user-agent": "polycards-daily-hits"},
     )
     opener = urllib.request.build_opener(_NoRedirect)
-    with opener.open(request, timeout=TIMEOUT) as response:
-        return response.read()
+    for attempt in range(1, tries + 1):
+        try:
+            with opener.open(request, timeout=TIMEOUT) as response:
+                return response.read()
+        except urllib.error.HTTPError as err:
+            if err.code < 500 or attempt == tries:
+                raise
+        except (urllib.error.URLError, TimeoutError):
+            if attempt == tries:
+                raise
+        time.sleep(5 * attempt)
 
 
 def _save(folder, name, data):
@@ -104,26 +116,26 @@ def main():
         try:
             files.append(_save("images", f"hits-{day}-poster.jpg",
                                _get("growth/top-pulls-poster", {"day": day}, key)))
-        except urllib.error.URLError as err:
+        except OSError as err:  # URLError and timeouts
             notes.append(f"The posting poster could not be drawn ({err}).")
         for pull in pulls:
             try:
                 files.append(_save("images", f"hits-{day}-{pull['rank']:02d}.jpg",
                                    _get("growth/pull-card", {"pull": pull["pull_id"]}, key)))
-            except urllib.error.URLError as err:
+            except OSError as err:  # URLError and timeouts
                 notes.append(f"The Telegram card for #{pull['rank']} could not be drawn ({err}).")
 
     try:
         files.append(_save("documents", f"polycards-daily-{day}.xlsx",
                            _get("growth/daily-report", {"day": day}, key)))
-    except urllib.error.URLError as err:
+    except OSError as err:  # URLError and timeouts
         notes.append(f"The staff Excel could not be built ({err}).")
 
     start, end = day_window(day)
     try:
         payments = json.loads(_get("finance/payments", {"from": start, "to": end, "group": "all"}, key))
         withdrawals = withdrawal_line(payments.get("withdrawals", {}).get("by_status"))
-    except urllib.error.URLError as err:
+    except OSError as err:  # URLError and timeouts
         withdrawals = "unavailable"
         notes.append(f"The withdrawal summary could not be read ({err}).")
 
@@ -161,6 +173,9 @@ def _self_test():
 
 
 if __name__ == "__main__":
+    # Hermes reads a cron script's stdout as UTF-8 on Windows, whatever the
+    # console's code page; without this "·" arrives as a replacement mark.
+    sys.stdout.reconfigure(encoding="utf-8")
     if "--self-test" in sys.argv:
         _self_test()
     else:
