@@ -1,12 +1,12 @@
 /**
- * getAccountInfo (src/lib/data/customer.ts) — the one fact the Settings page's
- * delete confirmation branches on.
+ * getAccountInfo (src/lib/data/customer.ts) — the facts the account layout's
+ * required-phone gate branches on.
  *
  * `hasPassword` defaults to TRUE for anything unreadable, and the direction
- * matters: too-true only asks for more proof than needed, while too-false
- * removes the password box from an account that HAS one, and every delete then
- * fails PASSWORD_REQUIRED with no way to comply. That is why the schema makes
- * the field required rather than letting an absent one read as `false`.
+ * matters: too-true only skips a UX gate the backend enforces anyway, while
+ * too-false raises the phone gate on an account that HAS a password, which it
+ * can never complete. That is why the schema makes the field required rather
+ * than letting an absent one read as `false`.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { storeShim, backend } from '@/lib/__tests__/store-shim';

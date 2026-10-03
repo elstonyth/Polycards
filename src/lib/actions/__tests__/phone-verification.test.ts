@@ -7,6 +7,14 @@ import type { MemoryRoutes } from '@/lib/store-memory';
 // beneath the port (SDK, cookies, logger) is mocked.
 vi.mock('@/lib/store', () => ({ store: storeShim }));
 
+// The visitor-country gate reads the ingress's do-connecting-ip header; a test
+// sets `visitor.ip`, and every other test runs with no header at all.
+const visitor = vi.hoisted(() => ({ ip: undefined as string | undefined }));
+vi.mock('next/headers', () => ({
+  headers: async () =>
+    new Headers(visitor.ip ? { 'do-connecting-ip': visitor.ip } : {}),
+}));
+
 const { startPhoneOtp, checkPhoneOtp, changePhone, resetPasswordByPhone } =
   await import('@/lib/actions/phone-verification');
 
@@ -32,13 +40,44 @@ const refuses = (route: string, message: string) =>
 let mem = backend(OK);
 beforeEach(() => {
   mem = backend(OK);
+  visitor.ip = undefined;
+});
+
+describe('startPhoneOtp — visitor country gate', () => {
+  const OUTSIDE =
+    "Verification codes can only be requested from Malaysia or Singapore. If you're using a VPN, turn it off and try again.";
+
+  it.each(['signup', 'phone-change', 'password-reset'] as const)(
+    'refuses a visitor outside Malaysia and Singapore for %s, before any request',
+    async (purpose) => {
+      visitor.ip = '156.222.253.157'; // Egypt, the 2026-10-03 farming burst
+      await expect(startPhoneOtp({ phone: MY, purpose })).resolves.toEqual({
+        ok: false,
+        error: OUTSIDE,
+      });
+      expect(mem.requests).toEqual([]);
+    },
+  );
+
+  it.each([
+    ['Malaysia', '175.143.0.1'],
+    ['Singapore', '202.166.0.1'],
+    ['an IPv6 address (country unknown)', '2405:3800:8fa:b723::1'],
+  ])('sends for a visitor from %s', async (_, ip) => {
+    visitor.ip = ip;
+    await expect(
+      startPhoneOtp({ phone: MY, purpose: 'signup' }),
+    ).resolves.toEqual({ ok: true, channel: 'sms' });
+    expect(mem.requests).toHaveLength(1);
+  });
 });
 
 describe('startPhoneOtp — served-destination gate', () => {
-  it('sends for a served number', async () => {
-    await expect(
-      startPhoneOtp({ phone: MY, purpose: 'signup' }),
-    ).resolves.toEqual({
+  it.each([
+    ['Malaysian', MY],
+    ['Singapore', '+6591234567'],
+  ])('sends for a served %s number', async (_, phone) => {
+    await expect(startPhoneOtp({ phone, purpose: 'signup' })).resolves.toEqual({
       ok: true,
       channel: 'sms',
     });
@@ -54,7 +93,7 @@ describe('startPhoneOtp — served-destination gate', () => {
       expect(result).toEqual({
         ok: false,
         error:
-          'We can only send verification codes to Malaysian (+60) numbers right now.',
+          'We can only send verification codes to Malaysian (+60) and Singapore (+65) numbers right now.',
       });
       // Never reached the network: no wasted call, and no silent failure.
       expect(mem.requests).toEqual([]);

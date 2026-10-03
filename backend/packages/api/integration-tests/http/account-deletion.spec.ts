@@ -1,20 +1,20 @@
-// integration-tests/http/account-self-service.spec.ts
-// Permanent customer-initiated account deletion, end to end against a real
-// server and a real database. (Disabling an account is an ADMIN action — see
-// admin-disable.spec.ts; the only disable case here is the one that proves a
-// banned account cannot delete itself out from under the ban.)
+// integration-tests/http/account-deletion.spec.ts
+// Permanent account deletion (purgeAndDeleteAccount), end to end against a
+// real server and a real database. Its only caller is the operator script
+// src/scripts/delete-customer-account.ts: customer self-service deletion was
+// removed on 2026-10-03.
 //
-// This suite is the ONLY place on this branch where any of it runs for real.
-// Every sibling unit spec fabricates its request object or mocks the service,
-// so a handful of invariants are green there by construction rather than by
-// evidence. Two in particular are provable only from here:
+// This suite is the ONLY place any of it runs for real. Every sibling unit spec
+// fabricates its container or mocks the service, so a handful of invariants
+// are green there by construction rather than by evidence. Two in particular
+// are provable only from here:
 //
 //  1. `rawLedgerBalanceCents`' SUM(ROUND(amount*100))::bigint has never run
 //     against Postgres. The negative-balance leg of the delete-guards test is
 //     what proves the sign survives the round trip, not just the JS.
 //  2. The CUSTOMER-module half of the purge — the email scrub, the metadata
 //     clear, the address delete and the notification delete. The unit spec
-//     mocks those modules, so it can only assert that the route CALLED them
+//     mocks those modules, so it can only assert that the purge CALLED them
 //     with a given shape; whether the rows are actually gone is knowable only
 //     here. The notification rows matter most: they carry live password-reset
 //     URLs and bank-account last4, and a soft delete would leave both in place.
@@ -30,19 +30,17 @@ import { CUSTOMER_FEED_CHANNEL } from '../../src/modules/packs/notify-feed';
 import { seedOf } from '../../src/utils/profile-handle';
 import { clearLeaderboardCache } from '../../src/api/store/leaderboard/route';
 import { clearChallengeCache } from '../../src/api/store/challenge/route';
+import { purgeAndDeleteAccount } from '../../src/api/utils/account-deletion';
 import { postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
-const PASSWORD = 'account-self-service-pw-1'; // gitleaks:allow
-
-/** The shipped admin-disable refusal copy, asserted verbatim (see below). */
-const DISABLED_COPY = 'This account has been disabled. Please contact support.';
+const PASSWORD = 'account-deletion-pw-1'; // gitleaks:allow
 
 medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ api, getContainer }) => {
-    describe('customer self-service account deletion', () => {
+    describe('account deletion (the operator purge)', () => {
       let storeHeaders: Record<string, string>;
 
       const packsOf = (): PacksModuleService =>
@@ -81,15 +79,16 @@ medusaIntegrationTestRunner({
         authorization: `Bearer ${token}`,
       });
 
-      const post = (path: string, body: unknown, token: string) =>
-        unwrapResponse(api.post(path, body, { headers: authed(token) }));
+      // What the operator script runs once CONFIRM_DELETE matches.
+      const purge = (customerId: string) =>
+        purgeAndDeleteAccount(getContainer(), customerId);
 
       beforeEach(async () => {
         const apiKeyModule = getContainer().resolve(Modules.API_KEY);
         const key = await apiKeyModule.createApiKeys({
-          title: 'account-self-service-test',
+          title: 'account-deletion-test',
           type: 'publishable',
-          created_by: 'account-self-service-test',
+          created_by: 'account-deletion-test',
         });
         storeHeaders = { 'x-publishable-api-key': key.token };
         // Both public boards cache for 30s in module state, which outlives a
@@ -99,72 +98,35 @@ medusaIntegrationTestRunner({
         clearChallengeCache();
       });
 
-      // The security property behind admin disable: a banned account cannot
-      // delete itself out from under the ban. The session guard is total, so
-      // the request never reaches the route — which is exactly what must stay
-      // true, because a delete that DID reach it would purge the payout details
-      // and withdrawal counterparties the ban exists to preserve.
-      it('an admin-disabled account cannot delete itself', async () => {
-        const { id, token } = await register('admin-disabled@test.dev');
-        const packs = packsOf();
-        await packs.setAccountDisabled({
-          customerId: id,
-          adminId: 'admin_test',
-          disabled: true,
-          reason: 'support hold',
-        });
-
-        const res = await post(
-          '/store/customers/me/delete',
-          { password: PASSWORD },
-          token,
+      // The product decision behind this suite: a customer cannot delete
+      // their own account. The removed self-service route must not answer,
+      // even to a valid session that names a real password.
+      it('has no customer-facing delete route', async () => {
+        const { id, token } = await register('delete-route-gone@test.dev');
+        const res = await unwrapResponse(
+          api.post(
+            '/store/customers/me/delete',
+            { password: PASSWORD },
+            { headers: authed(token) },
+          ),
         );
-        expect(res.status).toBe(403);
-        expect(res.data.message).toBe(DISABLED_COPY);
-        expect(await packs.isAccountDisabled(id)).toBe(true);
+        expect(res.status).toBe(404);
+        expect(await packsOf().isAccountDisabled(id)).toBe(false);
       });
 
-      it('a register-phase token (empty actor_id) is refused with 401', async () => {
-        // Deliberately NOT linked with postStoreCustomer: until that runs the
-        // JWT carries actor_id ''. The guard passes it through (no actor) and
-        // the route itself must refuse it, so this pins the route's own check
-        // rather than the guard's.
-        const reg = await api.post('/auth/customer/emailpass/register', {
-          email: 'register-token@test.dev',
-          password: PASSWORD,
-        });
-        const res = await post(
-          '/store/customers/me/delete',
-          { password: PASSWORD },
-          reg.data.token,
-        );
-        expect(res.status).toBe(401);
-      });
-
-      it('delete refuses a wrong password and a non-zero balance (both signs)', async () => {
+      it('delete refuses a non-zero balance (both signs)', async () => {
         const { id, token } = await register('delete-guards@test.dev');
         const packs = packsOf();
-
-        const wrongPw = await post(
-          '/store/customers/me/delete',
-          { password: 'not-the-password' },
-          token,
-        );
-        expect(wrongPw.status).toBe(400);
-        expect(wrongPw.data.message).toBe('PASSWORD_INCORRECT');
 
         await packs.mutateCreditAtomic({
           customerId: id,
           amount: 25,
           reason: 'adjustment',
         });
-        const withBalance = await post(
-          '/store/customers/me/delete',
-          { password: PASSWORD },
-          token,
-        );
-        expect(withBalance.status).toBe(400);
-        expect(withBalance.data.message).toBe('BALANCE_NOT_ZERO');
+        expect(await purge(id)).toMatchObject({
+          ok: false,
+          reason: 'BALANCE_NOT_ZERO',
+        });
 
         // The NEGATIVE direction, and the only place the signed SQL behind it
         // runs against Postgres at all. Written straight to the ledger rather
@@ -176,13 +138,10 @@ medusaIntegrationTestRunner({
         ] as Parameters<typeof packs.createCreditTransactions>[0]);
         expect(await packs.rawLedgerBalanceCents(id)).toBe(-2500);
 
-        const owing = await post(
-          '/store/customers/me/delete',
-          { password: PASSWORD },
-          token,
-        );
-        expect(owing.status).toBe(400);
-        expect(owing.data.message).toBe('BALANCE_NOT_ZERO');
+        expect(await purge(id)).toMatchObject({
+          ok: false,
+          reason: 'BALANCE_NOT_ZERO',
+        });
 
         // Still fully usable — a refused delete must change nothing.
         const stillThere = await unwrapResponse(
@@ -193,7 +152,7 @@ medusaIntegrationTestRunner({
       });
 
       it('refuses a FROZEN account, and the balance read stays freeze-blind', async () => {
-        const { id, token } = await register('delete-frozen@test.dev');
+        const { id } = await register('delete-frozen@test.dev');
         const packs = packsOf();
 
         await packs.setManualFreeze({
@@ -204,14 +163,11 @@ medusaIntegrationTestRunner({
 
         // At a ZERO balance the freeze is the only thing that can refuse this:
         // every other preflight check passes. It is also checked first, so this
-        // is the reason the customer is given.
-        const res = await post(
-          '/store/customers/me/delete',
-          { password: PASSWORD },
-          token,
-        );
-        expect(res.status).toBe(400);
-        expect(res.data.message).toBe('ACCOUNT_FROZEN');
+        // is the reason the operator is given.
+        expect(await purge(id)).toMatchObject({
+          ok: false,
+          reason: 'ACCOUNT_FROZEN',
+        });
 
         // And the property that outlives the ordering above: a frozen account
         // holding RM 25 must still read as holding it. availableBalance()
@@ -293,10 +249,10 @@ medusaIntegrationTestRunner({
             ],
           }),
         });
-        // Notification rows, under BOTH addressing conventions the route
+        // Notification rows, under BOTH addressing conventions the purge
         // queries: the EMAIL (transactional mail — the password-reset payload
         // carries a working reset URL) and the CUSTOMER ID (the in-app feed —
-        // its payloads carry bank names and account last4). The route comment
+        // its payloads carry bank names and account last4). The purge's comment
         // warns against narrowing that filter back to the email alone, so both
         // halves get a row here.
         //
@@ -362,13 +318,7 @@ medusaIntegrationTestRunner({
           reason: 'adjustment',
         });
 
-        const res = await post(
-          '/store/customers/me/delete',
-          { password: PASSWORD },
-          token,
-        );
-        expect(res.status).toBe(200);
-        expect(res.data.deleted).toBe(true);
+        expect(await purge(id)).toEqual({ ok: true });
 
         // Login is gone for good — and reads as bad credentials, not "disabled".
         const relogin = await unwrapResponse(
@@ -480,7 +430,7 @@ medusaIntegrationTestRunner({
             action: 'delete_account',
             before: { deleted: false },
             after: { deleted: true },
-            reason: 'Customer deleted their own account.',
+            reason: 'Account deleted by an operator.',
           },
         ]);
         expect(await packs.deletedCustomerIds([id, ghost])).toEqual(
@@ -499,17 +449,17 @@ medusaIntegrationTestRunner({
         expect(again.status).toBe(200);
       });
 
-      // Pins the route's chunked notification delete (step 4): the generated
+      // Pins the purge's chunked notification delete (step 4): the generated
       // MedusaService `deleteNotifications` hands its whole id array to one
       // `DELETE ... WHERE id IN (...)` (mikro-orm-repository.js's `delete`, no
-      // internal batching), so the route now loops in batches of 1,000.
+      // internal batching), so the purge loops in batches of 1,000.
       // 1,001 addressed rows crosses exactly one chunk boundary — enough to
       // prove the loop iterates more than once and still finishes, without
       // literally reproducing Postgres's 65,535-bind-parameter ceiling (which
       // would need over 65,535 seeded rows to hit for real).
       it('chunks the notification purge past one batch boundary', async () => {
         const email = 'delete-bulk-notifications@test.dev';
-        const { id, token } = await register(email);
+        const { id } = await register(email);
         const notifications =
           getContainer().resolve<INotificationModuleService>(
             Modules.NOTIFICATION,
@@ -529,12 +479,7 @@ medusaIntegrationTestRunner({
           BULK_COUNT,
         );
 
-        const res = await post(
-          '/store/customers/me/delete',
-          { password: PASSWORD },
-          token,
-        );
-        expect(res.status).toBe(200);
+        expect(await purge(id)).toEqual({ ok: true });
 
         // withDeleted: true — a soft delete would leave these `to id` rows
         // readable this way; only a real hard delete zeroes this out.
@@ -566,7 +511,7 @@ medusaIntegrationTestRunner({
       // staying green.
       it('drops a deleted player from the public boards (the purge disables them)', async () => {
         const email = 'delete-ranked@test.dev';
-        const { id, token } = await register(email);
+        const { id } = await register(email);
         const packs = packsOf();
 
         // A BOUGHT-BACK pull: it still counts toward the week's pulled value
@@ -584,12 +529,7 @@ medusaIntegrationTestRunner({
           },
         ]);
 
-        const del = await post(
-          '/store/customers/me/delete',
-          { password: PASSWORD },
-          token,
-        );
-        expect(del.status).toBe(200);
+        expect(await purge(id)).toEqual({ ok: true });
 
         // Positive control, and the reason the absence assertion below means
         // anything: the retained `pull` row must still RANK them in the

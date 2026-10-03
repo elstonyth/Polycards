@@ -67,8 +67,8 @@ export const ADMIN_AUDIT_ACTIONS = [
   // A read that exposes data the list view masks — see
   // Migration20260812000000.
   'reveal',
-  // Customer self-service account deletion. admin_id carries the
-  // CUSTOMER's own id for this action — see service.purgeAccountPacksData.
+  // Account deletion (operator-run only since 2026-10-03). admin_id carries
+  // the CUSTOMER's own id for this action — see service.purgeAccountPacksData.
   'delete_account',
   // Referral rebuild (spec 2026-08-24): partner-rate changes audit against
   // entity_type 'customer'; the settlement lifecycle against

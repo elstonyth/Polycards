@@ -136,8 +136,8 @@ function listOf<T>(item: z.ZodType<T>) {
  * The `Store` port takes a schema per call, and two kinds of call must not have
  * one:
  *
- * - the response is IGNORED, a 2xx IS the answer (the account-delete route, the
- *   avatar-frame POST, the close-instant ping);
+ * - the response is IGNORED, a 2xx IS the answer (the avatar-frame POST, the
+ *   close-instant ping);
  * - the response must not be REJECTED at the envelope because the customer has
  *   already been CHARGED (`openPack`/`openBatch`/the free-rip spend). A drifted
  *   field would classify as `invalid_shape`, and that action's copy for a
@@ -398,12 +398,12 @@ export const AvatarFramesSchema = z.looseObject({
 /** GET /store/profiles/me — `{ handle }`. */
 export const ProfileHandleSchema = z.looseObject({ handle: z.string() });
 
-/** GET /store/customers/me/account — the Settings page's Danger zone facts
- *  plus the account-tree policy.
+/** GET /store/customers/me/account — the required-phone gate's facts plus the
+ *  account-tree policy.
  *  `hasPassword` is REQUIRED here on purpose: data/customer.ts answers `true`
  *  for anything it cannot read, and a body missing the field would otherwise
- *  read as `false` — dropping the password box from an account that HAS one,
- *  whose every delete then fails PASSWORD_REQUIRED with no way to comply.
+ *  read as `false` — raising the phone gate on an account that HAS a password,
+ *  which it can never complete.
  *  `policy` is the partner-group block (spec 2026-09-09) — OPTIONAL so a
  *  deploy-skew backend without it still parses; the consumer defaults every
  *  flag to false (no exemption, no block), which is the pre-feature behaviour. */

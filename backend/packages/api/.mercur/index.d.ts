@@ -573,7 +573,6 @@ export type Routes = {
                     $addressId: typeof import("@medusajs/medusa/api/store/customers/me/addresses/[address_id]/route");
                 };
                 account: typeof import("../../src/api/store/customers/me/account/route");
-                delete: typeof import("../../src/api/store/customers/me/delete/route");
             };
             linkGoogle: typeof import("../../src/api/store/customers/link-google/route");
         };

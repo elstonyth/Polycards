@@ -847,7 +847,6 @@ describe('RATE_LIMITS', () => {
       'delivery-write|10|10000|30|60000|<function>||',
       'auth|50|10000|300|60000|Too many sign-in attempts.||',
       'auth-identifier|5|60000|20|3600000|Too many sign-in attempts for this account.|emailBodyKeyOf|true',
-      'account-delete|3|60000|20|3600000|Too many delete attempts for this account.||',
       'profile-read|60|10000|600|60000|Too many requests.||',
       'store-read|120|10000|480|60000|Too many requests.||',
       'profile-appearance|15|10000|60|60000|Too many appearance changes.||',

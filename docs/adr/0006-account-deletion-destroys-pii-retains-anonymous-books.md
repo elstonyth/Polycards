@@ -1,5 +1,15 @@
 # Account deletion destroys PII and retains anonymous books
 
+> **Amended 2026-10-03 — operator-only.** Customers can no longer delete their
+> own account: `POST /store/customers/me/delete` and the Settings page's
+> Danger zone were removed. The purge below is unchanged and is still the only
+> definition of a deletion — `purgeAndDeleteAccount`
+> (`backend/packages/api/src/api/utils/account-deletion.ts`), now called only
+> by the operator script `backend/packages/api/src/scripts/delete-customer-account.ts`
+> when a customer asks support (see `/privacy`). Its tombstone and audit rows
+> now read "Account deleted by an operator." References below to the route,
+> the modal and the customer's password proof are history.
+
 Customer-initiated account deletion (`POST /store/customers/me/delete`,
 `backend/packages/api/src/api/store/customers/me/delete/route.ts`, shipped
 in #434) destroys the customer's personal data and makes login on that
@@ -70,9 +80,10 @@ From `purgeAccountPacksData`, `backend/packages/api/src/modules/packs/service.ts
   outright. Reason: pure personal data with no business value on the row —
   nothing here needs to survive for the books to balance.
 - **`customer_account_state`**: tombstoned, not soft-deleted —
-  `disabled = true`, `disabled_reason = 'Account deleted by the
-  customer.'`, `disabled_at` stamped (`disabled_by` is left `null`: this is
-  a customer-initiated purge, not an admin action). Reason: soft-deleting
+  `disabled = true`, `disabled_reason = 'Account deleted by an
+  operator.'` (`'Account deleted by the customer.'` before 2026-10-03),
+  `disabled_at` stamped (`disabled_by` is left `null`: the purge has no
+  admin identity to record). Reason: soft-deleting
   this row is what would *re-open* the account.
   `PacksModuleService#isAccountDisabled` — the same read both guards in
   `backend/packages/api/src/api/utils/disabled-guard.ts` share — goes
@@ -138,9 +149,10 @@ together, or the text just moves to whichever column was left out.
   (`backend/packages/api/src/utils/profile-handle.ts`) already renders a
   deleted-but-ranked player as `Collector ####` with `handle: null` — this
   is the intended behavior, not a bug to fix.
-- A stolen customer session cookie can still delete a Google-only account:
-  for such an account the session bearer is the only gate, since the
-  storefront's typed-`DELETE` confirmation is enforced in the modal, not
+- *(Moot since 2026-10-03 — no customer-facing delete route remains.)* A
+  stolen customer session cookie could delete a Google-only account: for
+  such an account the session bearer was the only gate, since the
+  storefront's typed-`DELETE` confirmation was enforced in the modal, not
   on the route itself.
 - Re-signup with the same email is expected to succeed and create a fresh,
   empty account — this is the proof that the email scrub and the hard

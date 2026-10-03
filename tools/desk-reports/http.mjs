@@ -54,6 +54,10 @@ export async function getReport({
         figure: res.headers.get('x-poster-figure') ?? '',
         // '0' when a goal is drawn as the goal, '1' once the data reached it.
         goalReached: res.headers.get('x-poster-goal-reached') ?? '',
+        // The VIP levels an achievements poster drew, like '10,20,30'.
+        levels: res.headers.get('x-poster-levels') ?? '',
+        // Levels left off because their prize no longer exists.
+        skipped: res.headers.get('x-poster-skipped') ?? '',
       };
     throw new ReportError(
       'The backend sent an unreadable image. Try again in a minute.',
