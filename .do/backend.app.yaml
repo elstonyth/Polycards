@@ -242,7 +242,7 @@ envs:
   # permissions. Re-arm is storefront ARG first, this second.
   - key: PHONE_VERIFICATION_REQUIRED
     scope: RUN_TIME
-    value: 'true'
+    value: "true"
   - key: TWILIO_ACCOUNT_SID
     scope: RUN_TIME
     type: SECRET
@@ -318,7 +318,7 @@ envs:
   # Messaging, Voice and Verify geo permissions.
   - key: ALLOWED_SMS_COUNTRIES
     scope: RUN_TIME
-    value: 'MY,SG'
+    value: "MY,SG"
   # SMS ceiling; 0 stops every send, calls included. Counters survive deploys.
   # A resend inside the 10-minute code lifetime, or a spent SMS budget, goes
   # out as a call instead (calls: 60/hour, 300/day sitewide).
@@ -328,17 +328,17 @@ envs:
   # Redis unavailable => no paid sends. Raise only for verified real traffic.
   - key: PHONE_OTP_GLOBAL_HOURLY_LIMIT
     scope: RUN_TIME
-    value: '100'
+    value: "100"
   - key: PHONE_OTP_GLOBAL_DAILY_LIMIT
     scope: RUN_TIME
-    value: '400'
+    value: "400"
   # Per-number code requests a day (default 6). Raised to 10 on 2026-10-01:
   # people whose SMS never arrived had used all 6 on Resend before resends
   # became calls, and were locked out for 24 h. Applied live with doctl the
   # same day; this keeps a full-spec apply from reverting it.
   - key: PHONE_OTP_START_PHONE_RATE_LIMIT
     scope: RUN_TIME
-    value: '10'
+    value: "10"
   # ── Telegram apex-pull board (Legendary+ pulls → the public channel) ────────
   # Both keys were applied straight to the live app on 2026-08-21 (a surgical
   # `doctl apps update`, because this integration shipped after that day's spec
@@ -363,7 +363,7 @@ envs:
     value: __SECRET__TELEGRAM_BOT_TOKEN__
   - key: TELEGRAM_CHAT_ID
     scope: RUN_TIME
-    value: '-1003945115527'
+    value: "-1003945115527"
   # TELEGRAM_OPS_CHAT_ID — PRIVATE ops group for operator alerts
   # (modules/packs/ops-alert.ts: payout wallet short, paid-after-refund
   # payouts, phone-OTP spend cap). Add the same bot to a private group and
@@ -380,14 +380,14 @@ envs:
   # Fail closed: without ENABLED the deposit route refuses every top-up.
   - key: GATEWAY_ENABLED
     scope: RUN_TIME
-    value: 'true'
+    value: "true"
   # Withdrawals ARMED 2026-08-05 (operator decision). The customer withdrawal
   # route and the admin held-approval both refuse while this is off.
   # NEXT_PUBLIC_WITHDRAWALS_ENABLED flips on the storefront in the same window
   # (Dockerfile ARG default + .do/storefront.app.yaml, both).
   - key: GATEWAY_WITHDRAWALS_ENABLED
     scope: RUN_TIME
-    value: 'true'
+    value: "true"
   # Where the customer's browser lands after the gateway's checkout — the
   # pretty storefront domain (customer-facing, unlike the callback base below).
   - key: PAYMENT_RETURN_URL
@@ -408,7 +408,7 @@ envs:
   # deleting this key (back to 24) or setting a positive number of hours.
   - key: PAYOUT_DESTINATION_COOLDOWN_HOURS
     scope: RUN_TIME
-    value: '0'
+    value: "0"
 
   # ── TGPay (plan 130) — the payment gateway since the 2026-09-06 cutover.
   # The key pair comes from the production back office (admin.tgpay365.com →
@@ -443,11 +443,11 @@ envs:
   - key: TGPAY_PUBLIC_KEY
     scope: RUN_TIME
     type: SECRET
-    value: '__SECRET__TGPAY_PUBLIC_KEY__'
+    value: "__SECRET__TGPAY_PUBLIC_KEY__"
   - key: TGPAY_SECRET_KEY
     scope: RUN_TIME
     type: SECRET
-    value: '__SECRET__TGPAY_SECRET_KEY__'
+    value: "__SECRET__TGPAY_SECRET_KEY__"
   - key: PAYMENT_CALLBACK_BASE
     scope: RUN_TIME
     value: https://polycards-backend-gce6p.ondigitalocean.app
