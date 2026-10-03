@@ -73,10 +73,11 @@ describe('startPhoneOtp — visitor country gate', () => {
 });
 
 describe('startPhoneOtp — served-destination gate', () => {
-  it('sends for a served number', async () => {
-    await expect(
-      startPhoneOtp({ phone: MY, purpose: 'signup' }),
-    ).resolves.toEqual({
+  it.each([
+    ['Malaysian', MY],
+    ['Singapore', '+6591234567'],
+  ])('sends for a served %s number', async (_, phone) => {
+    await expect(startPhoneOtp({ phone, purpose: 'signup' })).resolves.toEqual({
       ok: true,
       channel: 'sms',
     });
@@ -92,7 +93,7 @@ describe('startPhoneOtp — served-destination gate', () => {
       expect(result).toEqual({
         ok: false,
         error:
-          'We can only send verification codes to Malaysian (+60) numbers right now.',
+          'We can only send verification codes to Malaysian (+60) and Singapore (+65) numbers right now.',
       });
       // Never reached the network: no wasted call, and no silent failure.
       expect(mem.requests).toEqual([]);

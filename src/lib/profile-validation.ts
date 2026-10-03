@@ -68,14 +68,20 @@ export const DEFAULT_PHONE_COUNTRY: CountryCode = 'MY';
  * the backend refuses is the worst failure available here: the user picks it,
  * types a real number, and the verification code silently never arrives. Widen
  * both together, or neither.
+ *
+ * SG added 2026-10-03 with the backend's ALLOWED_SMS_COUNTRIES=MY,SG and
+ * Singapore enabled in Twilio's Messaging, Voice and Verify geo permissions.
+ * SMS to Singapore from an unregistered sender arrives labelled "Likely-SCAM"
+ * (SGNIC sender ID registry, which needs a Singapore-registered business);
+ * calls are unaffected.
  */
-export const ALLOWED_PHONE_COUNTRIES: readonly CountryCode[] = ['MY'];
+export const ALLOWED_PHONE_COUNTRIES: readonly CountryCode[] = ['MY', 'SG'];
 
 /** Shown when someone TYPES a number outside the served set. Prose, so it
  *  cannot be derived from the list above (Intl has no demonyms) — reword it in
  *  the same change that widens ALLOWED_PHONE_COUNTRIES. */
 export const UNSERVED_PHONE_COUNTRY_ERROR =
-  'We can only send verification codes to Malaysian (+60) numbers right now.';
+  'We can only send verification codes to Malaysian (+60) and Singapore (+65) numbers right now.';
 
 /**
  * True iff the backend will actually SMS this E.164 number.
