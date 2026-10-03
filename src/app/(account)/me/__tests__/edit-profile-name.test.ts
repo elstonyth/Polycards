@@ -32,6 +32,7 @@ import { EditProfileModal } from '../EditProfileModal';
 
 let container: HTMLDivElement;
 let root: Root;
+const onClose = vi.fn();
 
 function render() {
   container = document.createElement('div');
@@ -41,7 +42,7 @@ function render() {
     root.render(
       createElement(EditProfileModal, {
         open: true,
-        onClose: vi.fn(),
+        onClose,
         // displayName joins first + last; only first_name is editable.
         displayName: 'qqqqqqq Tan',
         username: 'qqqqqqq',
@@ -152,6 +153,55 @@ describe('EditProfileModal name editor', () => {
     await click(button(/^Save$/));
     expect(nameInput()).toBeNull();
     expect(updateProfile).not.toHaveBeenCalled();
+  });
+
+  it('Escape backs out of the edit without closing the modal', async () => {
+    render();
+    await click(button(/change username/));
+    act(() => {
+      nameInput()!.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    expect(nameInput()).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    // A second Escape, with no editor open, still closes the modal.
+    act(() => {
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('closing the modal mid-edit drops the editor', async () => {
+    render();
+    await click(button(/change username/));
+    await click(
+      document.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!,
+    );
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(nameInput()).toBeNull();
+  });
+
+  it('keeps the editor usable when the action throws', async () => {
+    updateProfile.mockRejectedValue(new Error('network'));
+    render();
+    await click(button(/change username/));
+    type('new_name');
+    await click(button(/^Save$/));
+    expect(nameInput()?.value).toBe('new_name');
+    expect(nameInput()?.disabled).toBe(false);
+    expect(document.body.textContent).toContain('Couldn’t save your username');
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it('keeps the editor open with the server refusal on a taken name', async () => {
