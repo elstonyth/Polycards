@@ -20,7 +20,11 @@ import { Pill } from '@/components/ui/pill';
 import { FRAME_LEVELS } from '@/lib/frame-levels';
 import { uploadAvatar, setAvatarFrame } from '@/lib/actions/profile-appearance';
 import { updateProfile } from '@/lib/actions/customer';
-import { NAME_MAX, usernameError } from '@/lib/profile-validation';
+import {
+  NAME_MAX,
+  RENAME_KEEPS_LINK,
+  usernameError,
+} from '@/lib/profile-validation';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { cn } from '@/lib/utils';
 import { useEquippedFrame } from './equipped-frame';
@@ -287,6 +291,13 @@ export function EditProfileModal({
                       setNameDraft(e.target.value);
                       setNameError(null);
                     }}
+                    // Escape backs out of the edit, not the whole modal
+                    // (useModalA11y skips a prevented Escape).
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Escape') return;
+                      e.preventDefault();
+                      endNameEdit();
+                    }}
                     aria-label="Username"
                     autoComplete="nickname"
                     autoCapitalize="none"
@@ -306,8 +317,7 @@ export function EditProfileModal({
                       liveNameError ? 'text-red-300' : 'text-neutral-400'
                     }`}
                   >
-                    {liveNameError ??
-                      'Your profile link stays the same, whatever you rename to.'}
+                    {liveNameError ?? RENAME_KEEPS_LINK}
                   </p>
                   <div className="mt-3 flex gap-2">
                     <Pill

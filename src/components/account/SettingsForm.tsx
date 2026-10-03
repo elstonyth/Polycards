@@ -10,6 +10,7 @@ import { INPUT_CLASS } from '@/components/account/ui';
 import {
   NAME_MAX,
   normalizePhone,
+  RENAME_KEEPS_LINK,
   usernameError,
 } from '@/lib/profile-validation';
 import { PhoneField } from '@/components/PhoneField';
@@ -590,7 +591,7 @@ function UsernameField({
         error ??
         (handle
           ? `Your profile link stays ${SITE_HOST}/profile/${handle}, whatever you rename to.`
-          : 'Your profile link stays the same, whatever you rename to.')
+          : RENAME_KEEPS_LINK)
       }
       hintTone={error ? 'error' : 'muted'}
     />
