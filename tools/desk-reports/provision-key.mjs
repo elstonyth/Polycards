@@ -18,7 +18,10 @@ import {
 import { join } from 'node:path';
 
 const [desk, repo] = process.argv.slice(2);
-if (!['finance', 'store', 'support', 'growth', 'developer'].includes(desk) || !repo) {
+if (
+  !['finance', 'store', 'support', 'growth', 'developer'].includes(desk) ||
+  !repo
+) {
   throw new Error(
     'usage: provision-key.mjs <finance|store|support|growth|developer> <main checkout path>',
   );
