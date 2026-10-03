@@ -122,6 +122,7 @@ export default async function MePage() {
         </p>
         <MeHeader
           displayName={displayName}
+          username={customer.first_name ?? ''}
           handle={handle}
           pulls={profile ? profile.stats.pulls : null}
           avatarUrl={avatarUrl}

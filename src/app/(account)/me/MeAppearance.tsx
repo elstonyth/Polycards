@@ -12,12 +12,14 @@ import { useEquippedFrame } from './equipped-frame';
  * — the Show "Me" header adapted to Polycards data.
  *
  * Tapping the avatar OR the name opens the Edit Profile modal, which owns the
- * photo (crop → upload) and frame controls. They used to be a photo-only
- * shortcut here plus a separate frames card lower on the page; the operator
- * asked for the Show layout where both live behind the name (2026-07-19).
+ * photo (crop → upload), username and frame controls. Photo and frames used to
+ * be a photo-only shortcut here plus a separate frames card lower on the page;
+ * the operator asked for the Show layout where both live behind the name
+ * (2026-07-19), and the username joined them on 2026-10-03.
  */
 export function MeHeader({
   displayName,
+  username,
   handle,
   pulls,
   avatarUrl,
@@ -25,6 +27,8 @@ export function MeHeader({
   highestLevel,
 }: {
   displayName: string;
+  /** first_name alone — the editable part of displayName. */
+  username: string;
   handle: string | null;
   /** null = profile read unavailable — the stats row is hidden. */
   pulls: number | null;
@@ -119,6 +123,7 @@ export function MeHeader({
         open={editing}
         onClose={() => setEditing(false)}
         displayName={displayName}
+        username={username}
         handle={handle}
         avatarUrl={avatarUrl}
         frames={frames}
