@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { CheckCircle2, Clock, Landmark } from 'lucide-react';
+import { CheckCircle2, Clock, Landmark, Lock } from 'lucide-react';
 import { rm, rm0, timeUntil } from '@/lib/format';
 import {
   fetchSavedBankAccounts,
@@ -17,6 +17,7 @@ import {
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { PhoneGateAction } from '@/components/account/PhoneGateAction';
+import { PlaythroughProgress } from '@/components/account/PlaythroughProgress';
 import { cn } from '@/lib/utils';
 
 // The payout band (and whether withdrawals are even open) belongs to
@@ -48,6 +49,70 @@ function unusableReason(account: SavedBankAccount, now: Date): string | null {
   return wait ? `available ${wait}` : null;
 }
 
+/** Digits (commas allowed as thousands separators), at most one dot and two
+ *  decimals. Anything else never reaches state — typed or pasted. */
+const AMOUNT_PATTERN = /^[\d,]*(\.\d{0,2})?$/;
+
+/** The amount field's next text, or `prev` when `next` is not an amount at
+ *  all. A figure above `withdrawable` snaps down to it (floored to sen), so the
+ *  field can never show more than the customer may take out. UX only: the
+ *  backend's locked wallet gate is the enforcement, and a null `withdrawable`
+ *  (wallet failed to load) leaves the field uncapped for it to judge. */
+export function nextAmountText(
+  prev: string,
+  next: string,
+  withdrawable: number | null,
+): string {
+  if (!AMOUNT_PATTERN.test(next)) return prev;
+  if (withdrawable == null) return next;
+  // The epsilon keeps 0.29 * 100 (28.999…) from flooring a whole sen away.
+  const cap = Math.floor(Math.max(withdrawable, 0) * 100 + 1e-6) / 100;
+  return Number(next.replace(/,/g, '')) > cap ? cap.toFixed(2) : next;
+}
+
+/** Backend refusal → the screen that fixes it. Matches the backend's own
+ *  wording, which reaches this form verbatim through lib/vault-errors.ts's
+ *  withdrawal pass-through rule. Refusals that already say what to do (the
+ *  cap, the daily limit, a paused channel) get no link. The phone gate has
+ *  its own PhoneGateAction. */
+const REMEDIES: [RegExp, string, string][] = [
+  [/deposits must be spent on packs/i, '/slots', 'Open packs'],
+  [/under review/i, '/contact', 'Contact support'],
+  [/add an email address/i, '/settings', 'Add an email address'],
+  [
+    // NOT "bank details": the paused-payouts refusal says "Your bank details
+    // are fine", and linking it to /bank would contradict it.
+    /bank account|account number|account holder name|choose a bank/i,
+    '/bank',
+    'Manage bank accounts',
+  ],
+];
+
+export function withdrawRemedy(
+  error: string,
+): { href: string; label: string } | null {
+  const hit = REMEDIES.find(([test]) => test.test(error));
+  return hit ? { href: hit[1], label: hit[2] } : null;
+}
+
+function WithdrawRemedy({ error }: { error: string }) {
+  const remedy = withdrawRemedy(error);
+  if (!remedy) return null;
+  return (
+    <Link
+      href={remedy.href}
+      // secondary, for the reason PhoneGateAction gives: it sits right above
+      // the white full-width Withdraw button.
+      className={cn(
+        pillVariants({ variant: 'secondary', size: 'sm' }),
+        'mt-2 w-full',
+      )}
+    >
+      {remedy.label}
+    </Link>
+  );
+}
+
 /**
  * Bank-withdrawal form. The balance is debited the moment the request is
  * accepted — the success state says "on its way", never "paid", because the
@@ -64,10 +129,22 @@ function unusableReason(account: SavedBankAccount, now: Date): string | null {
  */
 export default function WithdrawForm({
   withdrawable,
+  frozen = false,
+  playthrough = null,
 }: {
   /** The server's freeze/locked/playthrough-gated figure — NOT raw balance. */
   withdrawable: number | null;
+  /** The account is frozen for review — outranks playthrough. */
+  frozen?: boolean;
+  /** Set only while the playthrough gate is what holds the balance (not
+   *  frozen, remaining > 0). The form then says how much more to spend on
+   *  packs instead of a bare RM 0.00 and a generic refusal. */
+  playthrough?: { deposited: number; used: number; remaining: number } | null;
 }) {
+  const locked = !frozen && playthrough !== null && playthrough.remaining > 0;
+  // Either hold means no amount can pass the server's gate, so the form says
+  // why up front and does not invite an attempt that is certain to fail.
+  const onHold = frozen || locked;
   // The payout debits the balance server-side; repaint it here so the header
   // chip is not stale. (This used to light the Me-tab money dot too — that dot
   // was suspended 2026-08-11; see components/account/credit-dot.tsx.)
@@ -94,6 +171,16 @@ export default function WithdrawForm({
   // The channel itself, not the band — the admin can close withdrawals
   // outright while a gateway stays configured (getPaymentLimits, plan 135).
   const withdrawalsClosed = !limits.withdrawalsEnabled;
+  // Gate open but less than the payout floor: no amount can pass the band, and
+  // nextAmountText would snap every attempt down below it — say so instead.
+  const belowMin =
+    !onHold && withdrawable != null && withdrawable < limits.withdrawal.minRm;
+  const blocked = onHold || belowMin;
+  const guidanceId = withdrawalsClosed
+    ? 'withdraw-amount-guidance'
+    : blocked
+      ? 'withdraw-hold-reason'
+      : undefined;
   useEffect(() => {
     let cancelled = false;
     getPaymentLimits()
@@ -130,16 +217,15 @@ export default function WithdrawForm({
   const accounts = saved ?? [];
   const usableAccounts = accounts.filter((a) => isUsable(a, now));
 
-  const amount = Number.parseFloat(amountText);
-  const amountValid =
-    Number.isFinite(amount) &&
-    amount > 0 &&
-    Math.abs(amount * 100 - Math.round(amount * 100)) < 1e-6;
+  // nextAmountText already limited the text to digits, commas and two
+  // decimals, so stripping the commas leaves a plain number (or "." -> NaN).
+  const amount = Number(amountText.replace(/,/g, ''));
+  const amountValid = Number.isFinite(amount) && amount > 0;
   const selected = usableAccounts.find((a) => a.id === accountId);
   const formValid = amountValid && selected !== undefined;
 
   async function submit() {
-    if (submitting || !formValid || withdrawalsClosed) return;
+    if (submitting || !formValid || withdrawalsClosed || blocked) return;
     setError(null);
     if (amount < limits.withdrawal.minRm || amount > limits.withdrawal.maxRm) {
       setError(
@@ -148,7 +234,9 @@ export default function WithdrawForm({
       return;
     }
     if (withdrawable != null && amount > withdrawable) {
-      setError('That is more than you can withdraw right now.');
+      // The backend's own cap wording (withdrawalGateError), so the figure the
+      // customer may take out is named instead of a bare "too much".
+      setError(`You can withdraw up to ${rm(withdrawable)} right now.`);
       return;
     }
     setSubmitting(true);
@@ -228,6 +316,73 @@ export default function WithdrawForm({
         </div>
       </div>
 
+      {locked && (
+        <div
+          id="withdraw-hold-reason"
+          role="status"
+          className="mt-4 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3.5"
+        >
+          <p className="flex items-center gap-2 text-sm font-semibold text-white">
+            <Lock className="h-4 w-4 shrink-0 text-sky-400" aria-hidden />
+            Spend {rm(playthrough.remaining)} more on packs to withdraw
+          </p>
+          <p className="mt-1 text-[13px] text-white/60">
+            Your deposit must be spent on packs first. Selling cards back
+            doesn&apos;t count.
+          </p>
+          <PlaythroughProgress {...playthrough} />
+          <div className="mt-3 flex items-center gap-3">
+            <Link href="/slots" className={pillVariants({ size: 'sm' })}>
+              Open packs
+            </Link>
+            <Link
+              href="/wallet"
+              className="text-[13px] text-white/60 underline-offset-2 hover:text-white hover:underline"
+            >
+              How it works
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {frozen && (
+        <div
+          id="withdraw-hold-reason"
+          role="status"
+          className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3.5"
+        >
+          <p className="flex items-center gap-2 text-sm font-semibold text-amber-300">
+            <Lock className="h-4 w-4 shrink-0" aria-hidden />
+            Your account is under review
+          </p>
+          <p className="mt-1 text-[13px] text-white/60">
+            Your balance is safe. Contact support to withdraw.
+          </p>
+          <Link
+            href="/contact"
+            className={cn(pillVariants({ size: 'sm' }), 'mt-3')}
+          >
+            Contact support
+          </Link>
+        </div>
+      )}
+
+      {belowMin && (
+        <div
+          id="withdraw-hold-reason"
+          role="status"
+          className="mt-4 rounded-xl border border-white/10 bg-neutral-900 px-4 py-3.5"
+        >
+          <p className="text-sm font-semibold text-white">
+            Minimum withdrawal is {rm0(limits.withdrawal.minRm)}
+          </p>
+          <p className="mt-1 text-[13px] text-white/60">
+            You have {rm(withdrawable ?? 0)}. Reach{' '}
+            {rm0(limits.withdrawal.minRm)} to withdraw.
+          </p>
+        </div>
+      )}
+
       {saved !== null && accounts.length === 0 && (
         <div className="mt-4 rounded-2xl border border-white/10 bg-neutral-900 px-5 py-6 text-center">
           <Landmark className="mx-auto h-8 w-8 text-neutral-500" aria-hidden />
@@ -281,9 +436,14 @@ export default function WithdrawForm({
 
       {accounts.length > 0 && usableAccounts.length === 0 && (
         <p className="mt-2 text-[13px] text-neutral-400">
-          A newly saved bank account waits before it can receive withdrawals —
-          the picker says how long. This protects your balance if someone else
-          ever gets into your account.
+          New bank accounts need a short wait before first use, to keep your
+          money safe.{' '}
+          <Link
+            href="/bank"
+            className="text-white/80 underline underline-offset-2 hover:text-white"
+          >
+            Manage bank accounts
+          </Link>
         </p>
       )}
 
@@ -295,12 +455,14 @@ export default function WithdrawForm({
             type="text"
             inputMode="decimal"
             value={amountText}
-            onChange={(e) => setAmountText(e.target.value)}
-            disabled={withdrawalsClosed}
-            aria-label="Withdrawal amount in RM"
-            aria-describedby={
-              withdrawalsClosed ? 'withdraw-amount-guidance' : undefined
+            onChange={(e) =>
+              setAmountText(
+                nextAmountText(amountText, e.target.value, withdrawable),
+              )
             }
+            disabled={withdrawalsClosed || blocked}
+            aria-label="Withdrawal amount in RM"
+            aria-describedby={guidanceId}
             placeholder="0.00"
             className="h-11 w-full bg-transparent text-sm text-white outline-none placeholder:text-neutral-600 disabled:opacity-50"
           />
@@ -311,7 +473,7 @@ export default function WithdrawForm({
           id="withdraw-amount-guidance"
           className="mt-2 text-[12px] leading-relaxed text-neutral-400"
         >
-          Withdrawals are paused right now.
+          Withdrawals are paused. Your balance is safe — try again later.
         </p>
       )}
 
@@ -324,12 +486,13 @@ export default function WithdrawForm({
         >
           <p className="text-[13px] font-medium text-red-300">{error}</p>
           <PhoneGateAction error={error} />
+          <WithdrawRemedy error={error} />
         </div>
       )}
 
       <Pill
         onClick={submit}
-        disabled={submitting || !formValid || withdrawalsClosed}
+        disabled={submitting || !formValid || withdrawalsClosed || blocked}
         size="lg"
         className="mt-4 w-full"
       >

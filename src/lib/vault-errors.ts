@@ -65,6 +65,24 @@ export const VAULT_RULES: ErrorRule[] = [
   // without this rule it fell through to "Something went wrong. Please try
   // again." — the retry loop this message exists to stop.
   [/withdrawals are temporarily unavailable/i, (text) => text],
+  // Every other withdrawal refusal. Each already names its cause AND its fix
+  // (spend RM X on packs, contact support, the RM figure you may take out,
+  // which bank account and why), so they pass through verbatim. Before this
+  // rule none of them matched and all fell to "Something went wrong. Please
+  // try again." — a customer 5 ringgit short of playthrough was told to
+  // retry a refusal that could never succeed (2026-10-03).
+  //
+  // Explicit phrases, not a broad /withdraw/: the sources are
+  // withdrawable.ts (withdrawalGateError), service.ts (daily cap, closed
+  // row), saved-accounts.ts, gateway-withdrawal.ts (details/email) and
+  // customer-group-guards.ts. WithdrawForm's REMEDIES match these same
+  // phrases to add a link — reword one, update all three places.
+  //
+  // Above /amount/i and /not found|404/i, per the ORDER note.
+  [
+    /deposits must be spent on packs|under review|you can withdraw up to|daily withdrawal limit|withdrawals are not available on this account|this bank account|select a saved bank account|choose a bank from the list|valid account number|account holder name|add an email address|withdrawal is no longer open/i,
+    (text) => text,
+  ],
   [/withdrawals are not open/i, 'Withdrawals are not open yet.'],
   // The band message names the ACTIVE gateway's own floor and ceiling
   // (gateways differ), so it passes through verbatim — a fixed
