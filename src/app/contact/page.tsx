@@ -13,6 +13,10 @@ export const metadata: Metadata = {
 };
 
 // Support is chat-only by design: no support email, no contact form.
+// Support DMs go to the admin account; t.me/polycardsgg is a broadcast
+// channel (the community banner's link), which customers cannot message.
+const SUPPORT_TELEGRAM = 'https://t.me/polycardsadmin';
+
 const SOCIALS = [
   {
     label: 'Instagram',
@@ -94,7 +98,7 @@ export default function ContactPage() {
           className="mt-8 flex flex-wrap justify-center gap-3"
         >
           <a
-            href="https://t.me/polycardsgg"
+            href={SUPPORT_TELEGRAM}
             target="_blank"
             rel="noopener noreferrer"
             className={cn(pillVariants({ variant: 'primary', size: 'lg' }))}
@@ -119,7 +123,7 @@ export default function ContactPage() {
         <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-5">
           <Reveal className="lg:col-span-3">
             <a
-              href="https://t.me/polycardsgg"
+              href={SUPPORT_TELEGRAM}
               target="_blank"
               rel="noopener noreferrer"
               className="group flex h-full flex-col justify-between gap-8 rounded-2xl border border-white/10 bg-neutral-900 p-6 transition-colors hover:border-white/25"
@@ -134,8 +138,10 @@ export default function ContactPage() {
                 />
               </div>
               <div>
-                <p className="font-heading text-[clamp(1.75rem,5vw,3rem)] leading-none text-white">
-                  @POLYCARDSGG
+                {/* 7vw keeps the 15-char handle inside the card down to a
+                    320px viewport (the old 1.75rem floor overflowed at 360) */}
+                <p className="font-heading text-[clamp(1.25rem,7vw,3rem)] leading-none text-white">
+                  @POLYCARDSADMIN
                 </p>
                 <p className="mt-3 max-w-sm text-[13px] leading-relaxed text-neutral-400">
                   Straight line to the team — order trouble, shipping, buyback,
