@@ -549,6 +549,12 @@ services:
         scope: RUN_TIME
         type: SECRET
         value: __SECRET__REPORT_KEY_SUPPORT__
+      # The Developer desk owns no reports; since 2026-10-03 every desk key
+      # reads every desk's reports, this one included.
+      - key: REPORT_KEY_DEVELOPER
+        scope: RUN_TIME
+        type: SECRET
+        value: __SECRET__REPORT_KEY_DEVELOPER__
 
 workers:
   - name: worker

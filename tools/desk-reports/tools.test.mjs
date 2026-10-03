@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TOOLS, runTool } from './tools.mjs';
+import { ALL_TOOLS, TOOLS, runTool } from './tools.mjs';
 
 const finance = Object.fromEntries(TOOLS.finance.map((t) => [t.name, t]));
 const config = {
@@ -106,6 +106,35 @@ test('the support desk tools', () => {
     path: 'account',
     params: { username: 'Ace_Puller' },
   });
+});
+
+test('every desk gets every tool once, each bound to its own desk', () => {
+  assert.equal(ALL_TOOLS.length, 19);
+  assert.equal(new Set(ALL_TOOLS.map((t) => t.name)).size, 19);
+  for (const [desk, tools] of Object.entries(TOOLS)) {
+    for (const tool of tools) {
+      assert.equal(ALL_TOOLS.find((t) => t.name === tool.name).desk, desk);
+    }
+  }
+});
+
+test("runTool calls the tool's own desk, whichever desk asks", async () => {
+  let url;
+  const store = ALL_TOOLS.find((t) => t.name === 'packs');
+  const out = await runTool(
+    store,
+    {},
+    {
+      ...config,
+      desk: 'growth',
+      fetchImpl: async (u) => {
+        url = String(u);
+        return new Response('{"packs":[]}');
+      },
+    },
+  );
+  assert.ok(!out.isError);
+  assert.equal(url, 'https://backend.test/reports/store/packs');
 });
 
 test('player asks by username only', () => {
