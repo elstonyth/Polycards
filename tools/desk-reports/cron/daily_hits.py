@@ -125,11 +125,9 @@ def main():
             except OSError as err:  # URLError and timeouts
                 notes.append(f"The Telegram card for #{pull['rank']} could not be drawn ({err}).")
 
-    try:
-        files.append(_save("documents", f"polycards-daily-{day}.xlsx",
-                           _get("growth/daily-report", {"day": day}, key)))
-    except OSError as err:  # URLError and timeouts
-        notes.append(f"The staff Excel could not be built ({err}).")
+    # The staff Excel is NOT fetched here: the model would decide for itself
+    # whether to attach customers' bank details, and on 2026-10-04 it chose
+    # not to. daily_excel.py posts it from its own no-AI job instead.
 
     start, end = day_window(day)
     try:
@@ -149,7 +147,7 @@ def main():
         pack = pull["pack"]["title"] or pull["pack"]["slug"]
         print(f"{pull['rank']}. {title} | {rm(pull['value_myr'])} | {card['rarity']} | {pack} | {pull['player']['name']}")
     print(f"WITHDRAWALS REQUESTED THAT DAY (status count (RM requested)): {withdrawals}")
-    print("STAFF EXCEL: full customer details for the top pulls and every withdrawal (phone, email, bank). Staff only, never to be posted publicly.")
+    print("STAFF EXCEL: posted separately at 00:05 by its own job (full customer details: phone, email, bank). Staff only, never to be posted publicly.")
     for note in notes:
         print(f"PROBLEM: {note}")
     print("FILES (copy every MEDIA line below into the post, unchanged):")
@@ -157,8 +155,36 @@ def main():
         print(f"MEDIA:{path}")
 
 
+def day_label(day):
+    """'2026-10-03' as '3 Oct 2026'."""
+    d = datetime.date.fromisoformat(day)
+    return f"{d.day} {d.strftime('%b %Y')}"
+
+
+def excel_message(day, path):
+    """What the no-AI Excel job posts: a short staff-only note and the file."""
+    return (
+        f"**Staff Excel · Daily Top Hits {day_label(day)}**\n"
+        "Full customer details for the top 10 pulls and every withdrawal "
+        "(phone, email, bank). Staff only: never post this file or its contents publicly.\n"
+        f"MEDIA:{path}"
+    )
+
+
+def excel_main():
+    """The 00:05 no-AI job: fetch yesterday's staff Excel and print the post.
+    A failure exits non-zero, which Hermes reports in the channel."""
+    day = yesterday_myt()
+    path = _save("documents", f"polycards-daily-{day}.xlsx",
+                 _get("growth/daily-report", {"day": day}, _key()))
+    print(excel_message(day, path))
+
+
 def _self_test():
     utc = datetime.timezone.utc
+    assert day_label("2026-10-03") == "3 Oct 2026"
+    assert excel_message("2026-10-03", "C:\\x.xlsx").endswith("\nMEDIA:C:\\x.xlsx")
+    assert "Staff only" in excel_message("2026-10-03", "C:\\x.xlsx")
     assert yesterday_myt(datetime.datetime(2026, 10, 4, 16, 30, tzinfo=utc)) == "2026-10-04"
     assert yesterday_myt(datetime.datetime(2026, 10, 4, 15, 59, tzinfo=utc)) == "2026-10-03"
     assert day_window("2026-10-03") == ("2026-10-02T16:00:00.000Z", "2026-10-03T16:00:00.000Z")

@@ -35,8 +35,9 @@ The admin Withdrawals page masks account numbers in lists and reveals them one r
 
 ### Hermes
 
-- Pre-run script `daily_hits.py` (Python, stdlib only) in the Growth profile's `scripts/`. It reads the Growth key from the profile's `.env` and fetches yesterday's top pulls, the 10 pull cards, the poster, the Excel and the Finance `payments` summary. It saves the files under the profile's `cache/images` and `cache/documents` (allowed by strict media delivery), and prints a data block with no personal details plus one `MEDIA:` line per file.
-- Cron job `0 0 * * *` on `polycards-growth`, `--script daily_hits.py`, delivered to the Growth desk. The prompt tells the bot to write the post (the list, the withdrawal summary and an English caption draft) and copy every `MEDIA:` line unchanged.
+- Pre-run script `daily_hits.py` (Python, stdlib only) in the Growth profile's `scripts/`. It reads the Growth key from the profile's `.env` and fetches yesterday's top pulls, the 10 pull cards, the poster and the Finance `payments` summary. It saves the files under the profile's `cache/images` (allowed by strict media delivery), and prints a data block with no personal details plus one `MEDIA:` line per file.
+- Cron job `growth-daily-hits` at `0 0 * * *` on `polycards-growth`, `--script daily_hits.py`, delivered to the Growth desk. The prompt tells the bot to write the post (the list, the withdrawal summary and an English caption draft) and copy every `MEDIA:` line unchanged.
+- Cron job `growth-daily-excel` at `5 0 * * *`, `--script daily_excel.py --no-agent`: posts the staff Excel verbatim, with a staff-only note, five minutes after the post. The Excel never goes through the AI: on the first live run (2026-10-04) the model withheld it on its own judgment, so it now has a job no model can veto.
 - Growth config: `platform_toolsets.cron: [polycards_growth]` and `cron.wrap_response: false`.
 
 ## Testing
