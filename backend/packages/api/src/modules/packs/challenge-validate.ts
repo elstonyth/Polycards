@@ -1,5 +1,4 @@
 import { MedusaError } from '@medusajs/framework/utils';
-import { MAX_VOUCHER_MYR } from './voucher-ranges';
 
 // threshold_myr is a community-pool rung, not a payout — prod already renders
 // RM 1.5M pools, so the cap only needs to reject absurd values (RM 100M).
@@ -65,18 +64,22 @@ function validateRankRewards(
       );
     if (seen.has(rank as number)) bad(`${label}: duplicate rank ${String(rank)}.`);
     seen.add(rank as number);
-    // Per-rank credits mint real balance, so they share the voucher ceiling
-    // (plan 044): a fat-fingered figure or a stolen admin token cannot
-    // configure an unbounded payout.
+    // Per-rank credits mint real balance, so a fat-fingered figure or a stolen
+    // admin token must not configure an unbounded payout. Capped at the same
+    // figure as a rank's summed total (see MAX_AGGREGATE_RANK_CREDITS_MYR) —
+    // NOT the voucher ceiling this used to borrow (plan 044): RM 10,000 refused
+    // the operator's RM 18,000 rank-4 prize on a RM 5M stage (2026-10-04), and
+    // since the aggregate check bounds the total anyway, matching it here does
+    // not raise the worst-case payout per rank.
     const credits = r.credits ?? 0;
     if (
       typeof credits !== 'number' ||
       !Number.isFinite(credits) ||
       credits < 0 ||
-      credits > MAX_VOUCHER_MYR
+      credits > MAX_AGGREGATE_RANK_CREDITS_MYR
     )
       bad(
-        `${label}: rank ${String(rank)} credits must be between 0 and ${MAX_VOUCHER_MYR}.`,
+        `${label}: rank ${String(rank)} credits must be between 0 and ${MAX_AGGREGATE_RANK_CREDITS_MYR}.`,
       );
     const cardId = r.card_id ?? null;
     if (
@@ -101,7 +104,7 @@ function validateRankRewards(
 /**
  * Ceiling on the number of stages in one ladder, and on a single rank's TOTAL
  * credit once summed across all of them. Without the aggregate bound, a
- * configuration where every individual value satisfies MAX_VOUCHER_MYR can
+ * configuration where every individual value satisfies the per-stage cap can
  * still mint an effectively unbounded payout.
  */
 export const MAX_STAGES = 100;
@@ -145,7 +148,7 @@ export function validateChallengeStages(raw: unknown): ChallengeStageInput[] {
     });
   }
 
-  // MAX_VOUCHER_MYR bounds each rank reward PER STAGE, but payoutByRank SUMS a
+  // The per-stage cap bounds each rank reward PER STAGE, but payoutByRank SUMS a
   // rank's credits across every unlocked stage — so N stages at the cap multiply
   // it by N, and nothing downstream bounds the total (mutateCreditAtomic has no
   // maximum-amount guard). The per-rank cap's own comment names "a stolen admin

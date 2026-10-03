@@ -121,10 +121,11 @@ interface StageRow {
   ranks: RankRow[];
 }
 
-// COUPLED MIRROR of modules/packs/challenge-validate.ts (MAX_VOUCHER_MYR /
-// MAX_THRESHOLD_MYR). Kept as literals — separate builds, no shared package
-// (same convention as lib/purchase-invoice-form.ts).
-const MAX_CREDITS_MYR = 10_000;
+// COUPLED MIRROR of modules/packs/challenge-validate.ts
+// (MAX_AGGREGATE_RANK_CREDITS_MYR / MAX_THRESHOLD_MYR). Kept as literals —
+// separate builds, no shared package (same convention as
+// lib/purchase-invoice-form.ts).
+const MAX_CREDITS_MYR = 50_000;
 const MAX_THRESHOLD_MYR = 100_000_000;
 
 // ONE parser drives validation, the pays-anything filter and serialization so
