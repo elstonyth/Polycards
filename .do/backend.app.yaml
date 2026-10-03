@@ -314,9 +314,11 @@ envs:
   # src/utils/phone-verification.ts and the storefront's ALLOWED_PHONE_COUNTRIES
   # must move in the same change, or the picker offers a country whose code
   # never arrives. Twilio's own SMS geo permissions are the upstream half.
+  # MY,SG since 2026-10-03: Singapore enabled the same day in Twilio's
+  # Messaging, Voice and Verify geo permissions.
   - key: ALLOWED_SMS_COUNTRIES
     scope: RUN_TIME
-    value: "MY"
+    value: "MY,SG"
   # SMS ceiling; 0 stops every send, calls included. Counters survive deploys.
   # A resend inside the 10-minute code lifetime, or a spent SMS budget, goes
   # out as a call instead (calls: 60/hour, 300/day sitewide).
