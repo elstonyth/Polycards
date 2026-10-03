@@ -173,9 +173,11 @@ _Avoid_: bank account (fine as plain English inside a definition; Payout
 Destination is the domain term when naming the entity)
 
 **Account Deletion**:
-Permanent, customer-initiated account removal. Personal data is destroyed
-(payout destination account numbers scrubbed to the last 4, holder names
-and delivery addresses emptied) while money records — Withdrawal rows,
+Permanent account removal, run by an operator when a customer asks support
+(`scripts/delete-customer-account.ts`) — customers cannot delete their own
+account (self-service deletion was removed 2026-10-03). Personal data is
+destroyed (payout destination account numbers scrubbed to the last 4, holder
+names and delivery addresses emptied) while money records — Withdrawal rows,
 Delivery Orders, the credit ledger — are retained as anonymous books so the
 figures still reconcile. Login becomes impossible forever on the deleted
 identity; the same email may re-signup as a new account, but the old one is

@@ -392,7 +392,7 @@ export type DailyState = {
   vouchers: { claimable: GrantView[]; claimed: GrantView[] };
 };
 
-/** Why an account may not be deleted yet. The storefront switches on these. */
+/** Why an account may not be deleted yet. The operator script prints these. */
 export type DeleteBlockReason =
   | 'ACCOUNT_FROZEN'
   | 'BALANCE_NOT_ZERO'
@@ -5656,13 +5656,13 @@ class PacksModuleService extends MedusaService({
   // Everything that must be settled before an account may be deleted.
   //
   // A PLAIN READ, holding no lock and running in no transaction — it is
-  // @InjectManager, and the delete route calls it bare. Its job is the fast,
-  // friendly rejection that hands the customer one actionable reason. The
+  // @InjectManager, and purgeAndDeleteAccount calls it bare. Its job is the
+  // fast rejection that hands the operator one actionable reason. The
   // authoritative check is this same method re-run INSIDE
   // purgeAccountPacksData's advisory lock; do not read this comment as a
   // guarantee that the two are one atomic step, because they are not.
   //
-  // Order is cheapest-first, and each check returns immediately: the customer
+  // Order is cheapest-first, and each check returns immediately: the operator
   // gets ONE actionable instruction rather than a list, and a blocked delete
   // costs one query in the common case.
   @InjectManager()
@@ -5830,8 +5830,9 @@ class PacksModuleService extends MedusaService({
   //
   // Transactional within this module. The rest of the purge (customer row,
   // notifications, auth identities, avatar object) lives in other modules and
-  // cannot join this transaction — see the route for the ordering that makes a
-  // partial failure recoverable.
+  // cannot join this transaction — see purgeAndDeleteAccount
+  // (api/utils/account-deletion.ts) for the ordering that makes a partial
+  // failure recoverable.
   //
   // What is deliberately NOT touched: credit_transaction, ledger_entry,
   // gateway_deposit, pull and vip_member_state. Those are the business books.
@@ -5846,8 +5847,8 @@ class PacksModuleService extends MedusaService({
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
       `credit:${customerId}`,
     ]);
-    // Re-check INSIDE the lock. The route's earlier preflight is the fast,
-    // friendly rejection that gives the customer an actionable reason; THIS one
+    // Re-check INSIDE the lock. The caller's earlier preflight is the fast
+    // rejection that gives the operator an actionable reason; THIS one
     // is the correctness gate. Without it a spin, sell, deposit credit or
     // withdrawal landing between the two calls would be purged straight
     // through — and that window is minutes wide in production, because
@@ -5913,12 +5914,12 @@ class PacksModuleService extends MedusaService({
     // account with no tombstone at all.
     //
     // CONSEQUENCE, deliberate: from this write on, the blanket /store/* session
-    // guard 403s this customer's own bearer, so the customer cannot re-drive the
-    // route after a later step fails. Finishing a half-done purge is a manual
-    // job; see the route header for exactly how narrow that is.
+    // guard 403s this customer's own bearer. Finishing a half-done purge is a
+    // manual job; see the purgeAndDeleteAccount header
+    // (api/utils/account-deletion.ts) for exactly how narrow that is.
     const tombstone = {
       disabled: true,
-      disabled_reason: 'Account deleted by the customer.',
+      disabled_reason: 'Account deleted by an operator.',
       disabled_at: new Date(),
     };
     const [state] = await this.listCustomerAccountStates(
@@ -5961,7 +5962,7 @@ class PacksModuleService extends MedusaService({
           action: 'delete_account',
           before: { deleted: false },
           after: { deleted: true },
-          reason: 'Customer deleted their own account.',
+          reason: 'Account deleted by an operator.',
         },
         sharedContext,
       );

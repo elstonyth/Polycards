@@ -84,7 +84,7 @@ export default async function reportDuplicatePhones({
 
   // Page every account with has_account: true. Soft-deleted rows are
   // excluded by listAndCountCustomers's default — deliberate here, not a gap
-  // to "fix": store/customers/me/delete nulls `phone` on delete, so a
+  // to "fix": the account-deletion purge nulls `phone` on delete, so a
   // deleted account never holds a number. `has_account` + the soft-delete
   // default are exactly the two filters assertPhoneUnclaimed applies;
   // reproduce them here or this report stops predicting whether the unique

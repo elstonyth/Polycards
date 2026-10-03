@@ -11,9 +11,10 @@ import { resolveGroupPolicyForCustomer } from '../../../../../modules/packs/grou
 // GET /store/customers/me/account — what the storefront needs to know about an
 // account before it renders anything that depends on the account's state.
 //
-// `hasPassword` is false for a Google-only signup, which changes the delete
-// modal: there is no password to ask for. Answering it up front is the
-// difference between a correct form and a Delete button that always fails.
+// `hasPassword` is false for a Google-only signup. The storefront raises its
+// required-phone gate only for that password-less cohort: the phone-change
+// route asks a password account for its password, and the gate has no field
+// for it.
 //
 // Deliberately NOT a disabled/enabled read. Disabling is an ADMIN action only,
 // and the session guard 403s a disabled customer on every /store route — so

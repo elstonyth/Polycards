@@ -104,9 +104,6 @@ const deliveryWriteRateLimit = rateLimit('delivery-write');
 const profileAppearanceRateLimit = rateLimit('profile-appearance');
 const referralBindRateLimit = rateLimit('referral-bind');
 const taskActionRateLimit = rateLimit('task-action');
-// Permanent account deletion — its own tier because the route takes a password
-// and the write tier is no throttle for one (see the account-delete spec).
-const accountDeleteRateLimit = rateLimit('account-delete');
 // One instance shared by all admin money-mutation matchers: they share one
 // budget and one Redis connection (a compromised admin token is throttled
 // across all mutation routes together).
@@ -496,10 +493,8 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [validateDeliverableAddress('update')],
     },
-    // Customer self-service account deletion. Two tiers, not one: /delete has
-    // its own stricter tier because it carries a password field (see its
-    // entry), and /account is a plain read. authenticate() FIRST on both: the
-    // array is the execution order, and the limiters key on
+    // The account facts read (hasPassword + partner policy). authenticate()
+    // FIRST: the array is the execution order, and the limiter keys on
     // auth_context.actor_id, so an unauthenticated request must 401 before it
     // consumes anyone's budget.
     //
@@ -511,19 +506,6 @@ export default defineMiddlewares({
     // to ['bearer'] is stricter than the framework default and matches this
     // repo's policy at middlewares.ts:58-64, so it stays; a future reader
     // must not delete it as dead.
-    {
-      matcher: '/store/customers/me/delete',
-      method: 'POST',
-      // The delete tier ONLY — not authRateLimit as well. That limiter keys on
-      // actor_id here, which makes it strictly weaker than the write tier and
-      // no throttle at all on a password field; see its comment in
-      // rate-limit.ts. authenticate() stays first so an unauthenticated request
-      // 401s before it consumes anyone's budget.
-      middlewares: [
-        authenticate('customer', ['bearer']),
-        accountDeleteRateLimit,
-      ],
-    },
     {
       matcher: '/store/customers/me/account',
       method: 'GET',

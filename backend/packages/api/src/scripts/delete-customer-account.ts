@@ -9,14 +9,14 @@ import type PacksModuleService from '../modules/packs/service';
 import { purgeAndDeleteAccount } from '../api/utils/account-deletion';
 
 /**
- * Operator-initiated account deletion — the admin counterpart to
- * POST /store/customers/me/delete. Runs the exact same purge
- * (purgeAndDeleteAccount, api/utils/account-deletion.ts) that route runs, so
- * an operator deletion destroys PII and retains anonymous books identically
- * to a self-service one (docs/adr/0006-account-deletion-destroys-pii-retains-
- * anonymous-books.md). It never bypasses deleteAccountPreflight — this script
- * skips only the customer's own password proof; running this script AT ALL is
- * the operator's proof of intent.
+ * Operator-initiated account deletion — the ONLY way an account is deleted
+ * since customer self-service deletion (POST /store/customers/me/delete) was
+ * removed on 2026-10-03; a customer asks support instead (see /privacy). Runs
+ * the shared purge (purgeAndDeleteAccount, api/utils/account-deletion.ts),
+ * which destroys PII and retains anonymous books (docs/adr/0006-account-
+ * deletion-destroys-pii-retains-anonymous-books.md). It never bypasses
+ * deleteAccountPreflight; running this script AT ALL is the operator's proof
+ * of intent.
  *
  * DRY RUN BY DEFAULT — resolves the account, prints identity + preflight
  * verdict, writes nothing:
@@ -119,7 +119,7 @@ export default async function deleteCustomerAccount({ container }: ExecArgs) {
     `[delete-customer-account] CONFIRM_DELETE matched — deleting ${customerId}.`,
   );
   // Never bypass the preflight: purgeAndDeleteAccount re-runs it and writes
-  // nothing when refused, same as the self-service route.
+  // nothing when refused.
   const result = await purgeAndDeleteAccount(container, customerId);
   if (!result.ok) {
     logger.error(

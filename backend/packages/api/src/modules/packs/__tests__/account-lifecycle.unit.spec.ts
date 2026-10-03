@@ -296,7 +296,7 @@ describe('purgeAccountPacksData', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           disabled: true,
-          disabled_reason: 'Account deleted by the customer.',
+          disabled_reason: 'Account deleted by an operator.',
         }),
       }),
       expect.anything(),

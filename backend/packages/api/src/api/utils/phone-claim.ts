@@ -17,10 +17,10 @@ import type {
  * gets here (storefront normalizePhone, E164_RE on both OTP routes) — verified
  * against the live customer table: zero rows store anything but `+…`.
  *
- * Soft-deleted customers are excluded (listCustomers' default) and
- * store/customers/me/delete nulls `phone` outright, so deleting an account
- * releases its number. Deliberate: a number held hostage by a deleted row has
- * no owner left to release it.
+ * Soft-deleted customers are excluded (listCustomers' default) and the
+ * account-deletion purge (api/utils/account-deletion.ts) nulls `phone`
+ * outright, so deleting an account releases its number. Deliberate: a number
+ * held hostage by a deleted row has no owner left to release it.
  *
  * The `has_account: true` filter above (and any report or index that scopes
  * to it, e.g. scripts/report-duplicate-phones.ts) is only complete if `phone`
@@ -31,9 +31,10 @@ import type {
  * guest rows as `{ email }` only; signup's phone write forces
  * `has_account: !!authIdentityId` in the SAME core-flows transform that
  * carries the phone field (createCustomerAccountWorkflow); and this repo's
- * own two phone writers — this function's callers below, plus
- * store/customers/me/delete which nulls it — both act only on
+ * own phone writers — this function's callers below — act only on
  * `req.auth_context.actor_id`, and a guest customer has no session to be one.
+ * (The account-deletion purge only ever writes `phone: null`, which claims
+ * nothing.)
  *
  * WAS NOT true for the admin API — CLOSED 2026-08-19. `POST /admin/customers`
  * (@medusajs/medusa admin/customers/route.js) calls createCustomersWorkflow

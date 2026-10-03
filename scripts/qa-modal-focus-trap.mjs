@@ -115,19 +115,17 @@ await page.waitForSelector(PANEL);
 await page.screenshot({ path: 'docs/research/qa-modal-focus-trap.png' });
 
 // ---------------------------------------------------------------------------
-// Phase B: the two login-gated dialogs. DangerZone is where the bug was
-// reported (its retry button is disabled while it holds focus), and
-// SellConfirmModal is the other dialog migrated off a hand-rolled trap.
-// Needs a backend carrying this branch's routes; skipped, loudly, without one.
+// Phase B: SellConfirmModal, the login-gated dialog migrated off a hand-rolled
+// trap. (The bug was first reported against the account-delete dialog, which
+// has since been removed.) Needs a backend carrying this branch's routes;
+// skipped, loudly, without one.
 // ---------------------------------------------------------------------------
 const backendUp = await fetch(`${BACKEND}/health`)
   .then((r) => r.ok)
   .catch(() => false);
 
 if (!backendUp) {
-  console.log(
-    `\nSKIP  DangerZone + SellConfirmModal — no backend on ${BACKEND}`,
-  );
+  console.log(`\nSKIP  SellConfirmModal — no backend on ${BACKEND}`);
 } else {
   const EMAIL = `qa-trap-${Date.now()}@test.dev`;
   const PASSWORD = 'TrapQA12345!';
@@ -200,24 +198,7 @@ if (!backendUp) {
     );
   }
 
-  // B1. DangerZone — /settings, "Delete account". This is the dialog the bug
-  // was reported against; its Delete button is disabled until the confirmation
-  // is typed, which is exactly the blur-to-<body> shape.
-  await page.goto(`${BASE}/settings`, { waitUntil: 'networkidle' });
-  await page
-    .getByRole('button', { name: /delete account/i })
-    .first()
-    .click();
-  await page.waitForSelector(PANEL, { timeout: 10_000 });
-  await trapHoldsAfterDisable('DangerZone');
-  await page.screenshot({
-    path: 'docs/research/qa-modal-focus-trap-danger.png',
-  });
-  await page.keyboard.press('Escape');
-  await page.waitForSelector(PANEL, { state: 'detached', timeout: 5_000 });
-  check(true, 'DangerZone: Escape still closes after the hook change');
-
-  // B2. SellConfirmModal — /vault, select a card, Sell. The action bar holding
+  // SellConfirmModal — /vault, select a card, Sell. The action bar holding
   // the Sell button renders only once cookie consent has been ANSWERED
   // (`consent !== null` in VaultClient), so an undismissed banner means there
   // is no Sell button to click at all.
