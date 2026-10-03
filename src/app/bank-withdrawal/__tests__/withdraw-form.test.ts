@@ -234,9 +234,7 @@ describe('WithdrawForm', () => {
       )?.disabled,
     ).toBe(true);
     expect(submitButton().disabled).toBe(true);
-    expect(container.textContent).toContain(
-      'Withdrawals are paused.',
-    );
+    expect(container.textContent).toContain('Withdrawals are paused.');
     await submit();
     expect(startWithdrawal).not.toHaveBeenCalled();
   });
@@ -420,9 +418,9 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
       'Spend RM 5.00 more on packs to withdraw',
     );
     expect(
-      container.querySelector('[role="progressbar"]')?.getAttribute(
-        'aria-valuenow',
-      ),
+      container
+        .querySelector('[role="progressbar"]')
+        ?.getAttribute('aria-valuenow'),
     ).toBe('90');
     expect(container.querySelector('a[href="/slots"]')?.textContent).toBe(
       'Open packs',
