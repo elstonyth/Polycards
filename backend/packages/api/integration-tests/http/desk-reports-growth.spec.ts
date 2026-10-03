@@ -902,10 +902,45 @@ medusaIntegrationTestRunner({
         // Nobody serves the seeded art here; the credit has none to miss.
         expect(res.headers['x-poster-missing-art']).toBe('20,90');
 
+        expect(res.headers['x-poster-skipped']).toBeUndefined();
+
         const some = await poster('?min_level=20&max_level=90');
         expect(some.headers['x-poster-levels']).toBe('20,90');
         const top = await poster('?min_level=50');
         expect(top.headers['x-poster-levels']).toBe('90');
+      });
+
+      it('leaves a prize nobody can claim off the poster and names its level', async () => {
+        await packs().createTaskDefinitions([
+          {
+            kind: 'achievement' as const,
+            title: 'Reach lvl 50',
+            requirement: { type: 'reach_level', level: 50 },
+            reward: { type: 'pack', pack_id: 'tk-gone' },
+          },
+        ]);
+        // Staff still see it in the report, marked missing.
+        const list = (await report('tasks')).data;
+        expect(
+          list.achievements.find((t: { level: number }) => t.level === 50),
+        ).toMatchObject({
+          prize: 'Free rip · tk-gone (missing)',
+          value_myr: null,
+        });
+        const res = await unwrapResponse(
+          api.get('/reports/growth/achievements-poster', {
+            headers: { 'x-report-key': GROWTH_KEY },
+            responseType: 'arraybuffer',
+          }),
+        );
+        expect(res.status).toBe(200);
+        expect(res.headers['x-poster-levels']).toBe('10,20,90');
+        expect(res.headers['x-poster-skipped']).toBe('50');
+        const only = await report(
+          'achievements-poster?min_level=50&max_level=50',
+        );
+        expect(only.status).toBe(404);
+        expect(JSON.stringify(only.data)).toMatch(/no longer exists/);
       });
 
       it('refuses a bad range with a readable reason', async () => {

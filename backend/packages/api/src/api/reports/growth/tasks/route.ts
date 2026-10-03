@@ -1,7 +1,12 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
+import { assetOrigin } from '../../../utils/image-fetch';
 import { taskCatalogue } from './catalogue';
+
+// A stored picture is often storefront-relative; the bot needs a full link.
+const absolute = (url: string | null): string | null =>
+  url?.startsWith('/') ? `${assetOrigin()}${url}` : url;
 
 // GET /reports/growth/tasks: the weekly tasks and achievements exactly as the
 // /task page shows them right now, with each prize, what the page says it is
@@ -12,7 +17,10 @@ export async function GET(
 ): Promise<void> {
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const { week_start, tasks } = await taskCatalogue(packs);
-  const strip = ({ kind: _kind, ...t }: (typeof tasks)[number]) => t;
+  const strip = ({ kind: _kind, image, ...t }: (typeof tasks)[number]) => ({
+    ...t,
+    image: absolute(image),
+  });
   res.json({
     week_start,
     achievements: tasks.filter((t) => t.kind === 'achievement').map(strip),

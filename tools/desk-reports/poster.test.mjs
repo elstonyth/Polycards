@@ -38,6 +38,7 @@ test('image mode returns the bytes as base64 and keeps the key safe', async () =
     figure: '',
     goalReached: '',
     levels: '',
+    skipped: '',
   });
 });
 
@@ -171,6 +172,26 @@ test('achievements_poster maps its range and names what it drew', async () => {
   assert.match(out.content[1].text, /level 20 could not be loaded/);
   assert.match(out.content[1].text, /Lv\.10, Lv\.20 and Lv\.30/);
   assert.match(out.content[1].text, ATTACH);
+  assert.doesNotMatch(out.content[1].text, /left off/);
+
+  const gone = await runTool(
+    ladder,
+    {},
+    {
+      ...base,
+      fetchImpl: async () =>
+        new Response(JPEG, {
+          status: 200,
+          headers: {
+            'content-type': 'image/jpeg',
+            'x-poster-levels': '10,30',
+            'x-poster-skipped': '20',
+          },
+        }),
+    },
+  );
+  assert.match(gone.content[1].text, /Lv\.20 is left off/);
+  assert.match(gone.content[1].text, /admin Tasks console/);
 });
 
 test('image mode refuses a non-image and still relays error messages', async () => {

@@ -6,7 +6,6 @@ import type {
   TaskRequirement,
 } from '../../../../modules/packs/tasks';
 import { resolveTaskLabels } from '../../../admin/tasks/labels';
-import { assetOrigin } from '../../../utils/image-fetch';
 
 export type CatalogueTask = {
   title: string;
@@ -20,7 +19,8 @@ export type CatalogueTask = {
   /** What /task says it is worth: the credit, the pack price, the card's
    *  display price today; null when the pack or card is gone. */
   value_myr: number | null;
-  /** The prize's official picture, absolute; null for a credit. */
+  /** The prize's official picture as stored (often storefront-relative,
+   *  which is what fetchBytes resolves itself); null for a credit. */
   image: string | null;
   ends_at: string | null;
 };
@@ -60,9 +60,6 @@ export function prizeLabel(reward: HubReward): {
 // on the customer, so reading the hub as nobody gives the live catalogue
 // exactly as /task shows it, with the same prices, and no one's progress.
 const NOBODY = 'report:catalogue';
-
-const absolute = (url: string | null | undefined): string | null =>
-  !url ? null : url.startsWith('/') ? `${assetOrigin()}${url}` : url;
 
 /** Every task the /task page shows right now (switched on and inside its run
  *  window), with its prize, today's value and the prize's picture.
@@ -126,13 +123,12 @@ export async function taskCatalogue(
       level: requirement.type === 'reach_level' ? requirement.level : null,
       ...prizeLabel(t.reward),
       prize_type: t.reward.type,
-      image: absolute(
-        t.reward.type === 'pack'
+      image:
+        (t.reward.type === 'pack'
           ? packArt.get(t.reward.pack_id)
           : t.reward.type === 'card'
             ? cardArt.get(t.reward.card_handle)
-            : null,
-      ),
+            : null) || null,
       ends_at: ends ? new Date(ends).toISOString() : null,
     };
   });

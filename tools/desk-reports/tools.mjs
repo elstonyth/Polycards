@@ -366,16 +366,25 @@ const goalNote = (body, goal) => {
     : ` It is a goal poster: "Road to ${g}", with ${g} in gold and the live progress (${Number(body.figure).toLocaleString('en-MY')} of ${g}). Post it, and tell staff in one friendly line that ${g} is shown as the goal because the live figure is ${Number(body.figure).toLocaleString('en-MY')}.`;
 };
 
-// The levels an achievements poster drew, as the bot should name them.
-const levelsNote = (levels) => {
-  if (!levels) return '';
+// '10,20,30' as the bot should say it: 'Lv.10, Lv.20 and Lv.30'.
+const levelList = (levels) => {
   const named = levels.split(',').map((l) => `Lv.${l}`);
-  const list =
-    named.length > 1
-      ? `${named.slice(0, -1).join(', ')} and ${named.at(-1)}`
-      : named[0];
-  return ` It shows ${list}, with today's values (card values move with the market).`;
+  return named.length > 1
+    ? `${named.slice(0, -1).join(', ')} and ${named.at(-1)}`
+    : named[0];
 };
+
+// What an achievements poster drew, and what it left off.
+const levelsNote = (body) =>
+  `${
+    body.levels
+      ? ` It shows ${levelList(body.levels)}, with today's values (card values move with the market).`
+      : ''
+  }${
+    body.skipped
+      ? ` ${levelList(body.skipped)} ${body.skipped.includes(',') ? 'are' : 'is'} left off: that prize no longer exists, so nobody can claim it. Tell staff to fix that achievement in the admin Tasks console.`
+      : ''
+  }`;
 
 // Runs one tool call; failures come back as text the bot can relay.
 export async function runTool(tool, args, config) {
@@ -421,7 +430,7 @@ export async function runTool(tool, args, config) {
               body.missingArt
                 ? `Rendered from live data, but the art for ${artOf} ${body.missingArt} could not be loaded and shows as a plain placeholder tile. Say so when you post it, and do not call it the official art; try again later for the full poster.`
                 : 'Rendered from live data with the official art. Post this image as the draft; a human reviews it before it is published.'
-            }${levelsNote(body.levels)}${
+            }${levelsNote(body)}${
               body.figure
                 ? ` The live figure is ${body.figure} (exact, whatever the poster rounds to): say this number if staff asked for a different one.`
                 : ''

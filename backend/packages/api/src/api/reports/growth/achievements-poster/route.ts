@@ -13,7 +13,9 @@ import { taskCatalogue } from '../tasks/catalogue';
 // per level with the prize's official picture and what /task says it is
 // worth (modules/packs/achievements-poster.ts). Nothing on it is typed in.
 // x-poster-levels lists the levels drawn; x-poster-missing-art the levels
-// whose picture could not be loaded (drawn as a plain gift box).
+// whose picture could not be loaded (drawn as a plain gift box);
+// x-poster-skipped the levels left off because their prize is gone. Art is
+// fetched from the stored paths, which fetchBytes resolves itself.
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
@@ -48,7 +50,20 @@ export async function GET(
     (t): t is typeof t & { level: number } =>
       t.kind === 'achievement' && t.level !== null,
   );
-  const shown = ladder.filter((t) => t.level >= min && t.level <= max);
+  const inRange = ladder.filter((t) => t.level >= min && t.level <= max);
+  // A free rip or card whose pack or card is gone (the only way /task shows
+  // no value for one) cannot be claimed, so it never goes on a public
+  // poster; x-poster-skipped names those levels for staff to fix.
+  const gone = (t: (typeof ladder)[number]) =>
+    t.prize_type !== 'credit' && t.value_myr === null;
+  const skipped = inRange.filter(gone).map((t) => t.level);
+  const shown = inRange.filter((t) => !gone(t));
+  if (!shown.length && skipped.length) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_FOUND,
+      `Every achievement from Lv.${min} to Lv.${max} has a prize that no longer exists (Lv.${skipped.join(', Lv.')}): fix them in the admin Tasks console.`,
+    );
+  }
   if (!shown.length) {
     throw new MedusaError(
       MedusaError.Types.NOT_FOUND,
@@ -78,6 +93,7 @@ export async function GET(
   );
   res.setHeader('Content-Type', 'image/jpeg');
   res.setHeader('x-poster-levels', shown.map((t) => t.level).join(','));
+  if (skipped.length) res.setHeader('x-poster-skipped', skipped.join(','));
   if (missing.length) res.setHeader('x-poster-missing-art', missing.join(','));
   res.status(200).send(jpeg);
 }
