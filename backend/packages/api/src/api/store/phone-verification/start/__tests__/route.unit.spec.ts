@@ -115,12 +115,12 @@ describe('POST /store/phone-verification/start — destination allowlist', () =>
   // name itself in the log rather than just going quiet.
   it('names dead ISO codes in the log when the allowlist resolves to nothing', async () => {
     const prev = process.env.ALLOWED_SMS_COUNTRIES;
-    process.env.ALLOWED_SMS_COUNTRIES = 'SG';
+    process.env.ALLOWED_SMS_COUNTRIES = 'TH';
     try {
       await startVerification(mkReq(MY), mkRes().res);
       expect(sendCount()).toBe(0); // even the default destination is dead now
       const lines = warn.mock.calls.map((c) => c[0] as string);
-      expect(lines.some((l) => l.includes('ALLOWED_SMS_COUNTRIES') && l.includes('SG'))).toBe(
+      expect(lines.some((l) => l.includes('ALLOWED_SMS_COUNTRIES') && l.includes('TH'))).toBe(
         true,
       );
     } finally {
