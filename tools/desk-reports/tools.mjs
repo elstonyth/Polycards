@@ -122,6 +122,28 @@ TOOLS.growth = [
     request: () => ({ path: 'tasks', params: {} }),
   },
   {
+    name: 'top_pulls',
+    description:
+      "One Malaysia day's most valuable paid pulls (default yesterday, top 10): rank, when, the card (name, grade, set, tier, slab image), the pack, the pulled value in RM (the card's value when it was pulled, as the Ranks page counts it) and the player's public name and profile handle (the names the site and the Telegram channel already show). Free welcome packs and prize draws are not counted; disabled players are left out. Never contact details. Amounts in RM (MYR).",
+    inputSchema: {
+      day: z
+        .string()
+        .optional()
+        .describe('The Malaysia day, YYYY-MM-DD. Default: yesterday.'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(20)
+        .optional()
+        .describe('How many pulls. Default 10.'),
+    },
+    request: (args) => ({
+      path: 'top-pulls',
+      params: { day: args.day, limit: args.limit },
+    }),
+  },
+  {
     name: 'challenge_poster',
     description:
       'A finished Weekly Pulled Value Challenge poster (a tall portrait JPEG, 1080 px wide and about 1640 px high, taller with leaders) rendered from live data with the official card art: the unlock headline, the stage chips, and the podium prizes of one stage (default: the highest unlocked stage), optionally with the current top-3 leaders. Use it instead of drawing cards with image generation: post the image it returns. It is a draft; a human reviews it before it is published.',
@@ -246,6 +268,30 @@ TOOLS.growth = [
       params: { min_level: args.min_level, max_level: args.max_level },
       as: 'image',
       artOf: 'level',
+    }),
+  },
+  {
+    name: 'top_pulls_poster',
+    description:
+      "A finished posting poster of one Malaysia day's top paid pulls (default yesterday, top 10), drawn from live data in the website's design (1080x1350, the 4:5 feed size): the official logo, a trophy eyebrow with the date, the headline 'Real cards. Real pulls.', one tile per pull with the card's official slab, its rank, the player's public name, the card and its pulled value in chase gold, and the Open a pack pill. Nothing on it is typed in, so it takes no text. Use it for any post about top hits, big pulls or the day's best cards. It is a draft; a human reviews it before it is published.",
+    inputSchema: {
+      day: z
+        .string()
+        .optional()
+        .describe('The Malaysia day, YYYY-MM-DD. Default: yesterday.'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(10)
+        .optional()
+        .describe('How many pulls on the poster. Default 10.'),
+    },
+    request: (args) => ({
+      path: 'top-pulls-poster',
+      params: { day: args.day, limit: args.limit },
+      as: 'image',
+      artOf: 'rank',
     }),
   },
   {

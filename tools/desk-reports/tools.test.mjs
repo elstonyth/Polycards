@@ -53,12 +53,24 @@ test('the growth desk tools', () => {
     'signups',
     'packs_opened',
     'tasks',
+    'top_pulls',
     'challenge_poster',
     'brand_poster',
     'achievements_poster',
+    'top_pulls_poster',
     'brand_logo',
   ]);
   assert.deepEqual(growth.tasks.request({}), { path: 'tasks', params: {} });
+  assert.deepEqual(growth.top_pulls.request({ day: '2026-10-03', limit: 5 }), {
+    path: 'top-pulls',
+    params: { day: '2026-10-03', limit: 5 },
+  });
+  assert.deepEqual(growth.top_pulls_poster.request({}), {
+    path: 'top-pulls-poster',
+    params: { day: undefined, limit: undefined },
+    as: 'image',
+    artOf: 'rank',
+  });
   assert.deepEqual(growth.challenge.request({}), {
     path: 'challenge',
     params: {},
@@ -109,8 +121,8 @@ test('the support desk tools', () => {
 });
 
 test('every desk gets every tool once, each bound to its own desk', () => {
-  assert.equal(ALL_TOOLS.length, 19);
-  assert.equal(new Set(ALL_TOOLS.map((t) => t.name)).size, 19);
+  assert.equal(ALL_TOOLS.length, 21);
+  assert.equal(new Set(ALL_TOOLS.map((t) => t.name)).size, 21);
   for (const [desk, tools] of Object.entries(TOOLS)) {
     for (const tool of tools) {
       assert.equal(ALL_TOOLS.find((t) => t.name === tool.name).desk, desk);

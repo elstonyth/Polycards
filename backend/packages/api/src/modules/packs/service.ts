@@ -805,7 +805,10 @@ class PacksModuleService extends MedusaService({
     | {
         bound: false;
         reason:
-          'self' | 'already_bound' | 'not_a_new_account' | 'referrer_disabled';
+          | 'self'
+          | 'already_bound'
+          | 'not_a_new_account'
+          | 'referrer_disabled';
       }
   > {
     if (input.customerId === input.referrerId) {
@@ -1078,7 +1081,8 @@ class PacksModuleService extends MedusaService({
       if (seen.has(m.customer_id) || isDefaultPlayerGroup(m)) continue;
       seen.add(m.customer_id); // the effective group, partner or not
       const rate = groupPolicyOf(m).partner_rate_bp;
-      if (rate !== null) out.set(m.customer_id, { name: m.name, rate_bp: rate });
+      if (rate !== null)
+        out.set(m.customer_id, { name: m.name, rate_bp: rate });
     }
     return out;
   }
@@ -2236,7 +2240,9 @@ class PacksModuleService extends MedusaService({
           sharedContext,
         )
       : [];
-    const fxRate = cardRows.length ? await resolveFxRate(this) : DEFAULT_USD_MYR;
+    const fxRate = cardRows.length
+      ? await resolveFxRate(this)
+      : DEFAULT_USD_MYR;
     const packBySlug = new Map(packRows.map((p) => [p.slug, p]));
     const cardByHandle = new Map(cardRows.map((c) => [c.handle, c]));
     const packTitle = new Map(packRows.map((p) => [p.slug, p.title]));
@@ -2322,7 +2328,10 @@ class PacksModuleService extends MedusaService({
     | {
         claimed: false;
         reason:
-          'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
+          | 'not_found'
+          | 'not_completed'
+          | 'already_claimed'
+          | 'window_closed';
       }
   > {
     // Deliberately NOT filtered on active: retiring a task must never strand
@@ -6152,6 +6161,59 @@ class PacksModuleService extends MedusaService({
     }));
   }
 
+  // The single most valuable pulls in [from, to): the Growth desk's daily top
+  // hits. Each pull's value is the boards' own pulled value (the shared
+  // PULLED_VALUE_USD_SQL x live FX, rounded once, as leaderboardTop does), and
+  // only source='pack' pulls count, the boards' positive filter. Ties go to
+  // the earlier pull, then the id, so the order is stable.
+  @InjectManager()
+  async topPullsInWindow(
+    opts: { from: Date; to: Date; limit: number },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<
+    {
+      id: string;
+      customer_id: string;
+      pack_id: string;
+      card_id: string;
+      rolled_at: string | Date;
+      value_myr: number;
+    }[]
+  > {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const fxRate = await resolveFxRate(this);
+    const rows = await em.execute<
+      {
+        id: string;
+        customer_id: string;
+        pack_id: string;
+        card_id: string;
+        rolled_at: string | Date;
+        value_myr: string | null;
+      }[]
+    >(
+      'SELECT pu.id, pu.customer_id, pu.pack_id, pu.card_id, pu.rolled_at, ' +
+        '       ROUND(' +
+        PULLED_VALUE_USD_SQL +
+        ' * ? * 100) / 100 AS value_myr ' +
+        '  FROM pull pu ' +
+        '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
+        " WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source = 'pack' " +
+        '   AND pu.rolled_at >= ?::timestamptz AND pu.rolled_at < ?::timestamptz ' +
+        ' ORDER BY value_myr DESC NULLS LAST, pu.rolled_at ASC, pu.id ASC ' +
+        ' LIMIT ?',
+      [
+        DEFAULT_MARKET_MULTIPLIER,
+        fxRate,
+        opts.from.toISOString(),
+        opts.to.toISOString(),
+        opts.limit,
+      ],
+    );
+    return rows.map((r) => ({ ...r, value_myr: Number(r.value_myr ?? 0) }));
+  }
+
   // The public live-pulls feed (GET /store/pulls/recent), newest first, with
   // an optional TIER filter. Raw SQL rather than listPulls because the tier is
   // a join: rarity is a PACK-level property (pack_odds), not a column on pull,
@@ -7506,27 +7568,43 @@ class PacksModuleService extends MedusaService({
       idempotencyKey?: string;
     },
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ id: string; amount: number; balance: number; replayed?: boolean }> {
+  ): Promise<{
+    id: string;
+    amount: number;
+    balance: number;
+    replayed?: boolean;
+  }> {
     // Serialize retries BEFORE the mint-window and customer locks. Replays
     // must still succeed after a grant exhausts today's mint allowance.
     const requestReference = input.idempotencyKey
       ? `adjust-idem:${createHash('sha256')
-          .update(JSON.stringify([input.adminId, input.customerId, input.idempotencyKey]))
+          .update(
+            JSON.stringify([
+              input.adminId,
+              input.customerId,
+              input.idempotencyKey,
+            ]),
+          )
           .digest('hex')}`
       : undefined;
     if (requestReference) {
-      const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+      const em =
+        sharedContext.transactionManager as unknown as LedgerSqlManager;
       await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
         requestReference,
       ]);
       const [existing] = await this.listCreditTransactions(
-        { customer_id: input.customerId, source_transaction_id: requestReference },
+        {
+          customer_id: input.customerId,
+          source_transaction_id: requestReference,
+        },
         { take: 1 },
         sharedContext,
       );
       if (existing) {
         if (
-          Math.round(Number(existing.amount) * 100) !== Math.round(input.amount * 100) ||
+          Math.round(Number(existing.amount) * 100) !==
+            Math.round(input.amount * 100) ||
           existing.reference !== input.note
         ) {
           throw new MedusaError(
@@ -7534,7 +7612,10 @@ class PacksModuleService extends MedusaService({
             'This request ID was already used for a different adjustment.',
           );
         }
-        const { balance } = await this.creditSummary(input.customerId, sharedContext);
+        const { balance } = await this.creditSummary(
+          input.customerId,
+          sharedContext,
+        );
         return {
           id: existing.id,
           amount: Number(existing.amount),
@@ -9263,7 +9344,8 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      SettleSnapshot | undefined;
+      | SettleSnapshot
+      | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME
@@ -9678,7 +9760,8 @@ class PacksModuleService extends MedusaService({
   private async reserveSettledStock(
     winner: SettledWinner,
     decrementStock:
-      ((handle: string, qty: number) => Promise<boolean>) | undefined,
+      | ((handle: string, qty: number) => Promise<boolean>)
+      | undefined,
     weekStartIso: string,
   ): Promise<void> {
     if (!decrementStock) return;

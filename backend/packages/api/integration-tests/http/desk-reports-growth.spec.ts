@@ -7,6 +7,9 @@ import type PacksModuleService from '../../src/modules/packs/service';
 import { clearChallengeCache } from '../../src/api/store/challenge/route';
 import { topChaseCards } from '../../src/api/reports/growth/brand-poster/route';
 import { assetOrigin } from '../../src/api/utils/image-fetch';
+import { unzipSync, strFromU8 } from 'fflate';
+import { DEFAULT_USD_MYR } from '../../src/modules/packs/pricing';
+import { findBank } from '../../src/modules/packs/banks';
 import { myrDisplay as MYR, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -969,6 +972,271 @@ medusaIntegrationTestRunner({
         expect(JSON.stringify(many.data)).toMatch(/fits 10/);
         expect((await report('achievements-poster', null)).status).toBe(401);
         expect((await report('tasks', null)).status).toBe(401);
+      });
+    });
+
+    describe('the daily top pulls and their report', () => {
+      // One Malaysia day: 2026-09-20 00:00 MYT = 2026-09-19T16:00Z.
+      const DAY = '2026-09-20';
+      const inDay = (hourUtc: number) =>
+        new Date(Date.UTC(2026, 8, 19, 16 + hourUtc));
+      const fx = (usd: number) => Math.round(usd * DEFAULT_USD_MYR * 100) / 100;
+      const ids: Record<string, string> = {};
+
+      beforeEach(async () => {
+        await packs().createPacks([
+          {
+            slug: 'dh-pack',
+            title: 'DH Pack',
+            category: 'pokemon',
+            price: 100,
+            image: '/images/dh-pack.webp',
+          },
+        ]);
+        const card = (handle: string, name: string, mv: number) => ({
+          handle,
+          name,
+          set: 'DH Set',
+          grader: 'PSA',
+          grade: '10',
+          market_value: mv,
+          image: '/x.webp',
+          slab_image: `https://cdn.test/${handle}.webp`,
+        });
+        await packs().createCards([
+          card('dh-a', 'Latias & Latios GX #105', 100),
+          card('dh-b', 'DH B', 50),
+          card('dh-c', 'DH C', 10),
+          card('dh-d', 'DH D', 500),
+        ]);
+        await packs().createPackOdds(
+          [
+            ['dh-a', 'Legendary'],
+            ['dh-b', 'Rare'],
+            ['dh-c', 'Common'],
+            ['dh-d', 'Immortal'],
+          ].map(([card_id, rarity]) => ({
+            pack_id: 'dh-pack',
+            card_id,
+            weight: 100,
+            locked: false,
+            rarity: rarity as 'Legendary',
+          })),
+        );
+        const made = await customers().createCustomers([
+          {
+            email: 'ace@test.dev',
+            first_name: 'Ace_Puller',
+            last_name: 'Private',
+            phone: '+60111111111',
+            has_account: true,
+          },
+          {
+            email: 'bee@test.dev',
+            first_name: 'Bee',
+            phone: '+60122222222',
+            has_account: true,
+          },
+          {
+            email: 'hidden@test.dev',
+            first_name: 'Hidden',
+            phone: '+60133333333',
+            has_account: true,
+          },
+        ]);
+        const [ace, bee, hidden] = made.map((c) => c.id);
+        Object.assign(ids, { ace, bee, hidden });
+        await packs().setAccountDisabled({
+          customerId: hidden,
+          adminId: 'user_dh_admin',
+          disabled: true,
+          reason: 'test disable',
+        });
+        const pull = (
+          customer_id: string,
+          card_id: string,
+          usd: number,
+          rolled_at: Date,
+          source: 'pack' | 'reward' = 'pack',
+        ) => ({
+          customer_id,
+          pack_id: 'dh-pack',
+          card_id,
+          rolled_at,
+          source,
+          recorded_value_usd: usd,
+        });
+        const pulls = await packs().createPulls([
+          pull(ace, 'dh-a', 100, inDay(2)),
+          pull(bee, 'dh-b', 50, inDay(3)),
+          pull(ace, 'dh-c', 10, inDay(4)),
+          // Not on the board: a disabled player, a prize draw, the next day.
+          pull(hidden, 'dh-d', 500, inDay(5)),
+          pull(bee, 'dh-d', 500, inDay(6), 'reward'),
+          pull(ace, 'dh-d', 500, inDay(24)),
+        ]);
+        ids.top = pulls[0].id;
+        ids.hiddenPull = pulls[3].id;
+        ids.rewardPull = pulls[4].id;
+        const withdrawal = (
+          customer_id: string,
+          n: string,
+          status: 'held' | 'settled',
+          amount: number,
+        ) => ({
+          merchant_transaction_id: `dh-wd-${n}`,
+          customer_id,
+          amount,
+          bank_code: 'MBBEMYKL',
+          account_number: `55667788${n}`,
+          account_holder_name: `Holder ${n}`,
+          status,
+        });
+        const wds = await packs().createGatewayWithdrawals([
+          withdrawal(bee, '1', 'held', 30),
+          withdrawal(ace, '2', 'settled', 70),
+          withdrawal(ace, '3', 'settled', 999),
+        ]);
+        await pg().raw(
+          'UPDATE gateway_withdrawal SET created_at = ? WHERE id IN (?, ?)',
+          [inDay(7), wds[0].id, wds[1].id],
+        );
+        await pg().raw(
+          'UPDATE gateway_withdrawal SET created_at = ? WHERE id = ?',
+          [inDay(30), wds[2].id],
+        );
+      });
+
+      it('ranks the paid pulls of one Malaysia day by pulled value, public data only', async () => {
+        const res = await report(`top-pulls?day=${DAY}`);
+        expect(res.status).toBe(200);
+        expect(res.data.day).toBe(DAY);
+        expect(
+          res.data.pulls.map(
+            (p: {
+              rank: number;
+              card: { name: string; rarity: string };
+              value_myr: number;
+              player: { name: string };
+            }) => [
+              p.rank,
+              p.card.name,
+              p.card.rarity,
+              p.value_myr,
+              p.player.name,
+            ],
+          ),
+        ).toEqual([
+          [1, 'Latias & Latios GX #105', 'Legendary', fx(100), 'Ace_Puller'],
+          [2, 'DH B', 'Rare', fx(50), 'Bee'],
+          [3, 'DH C', 'Common', fx(10), 'Ace_Puller'],
+        ]);
+        expect(res.data.pulls[0]).toMatchObject({
+          pull_id: ids.top,
+          card: {
+            grade: 'PSA 10',
+            slab_image: 'https://cdn.test/dh-a.webp',
+          },
+          pack: { slug: 'dh-pack', title: 'DH Pack' },
+        });
+        const body = JSON.stringify(res.data);
+        for (const secret of [
+          '@',
+          '+60',
+          'Private',
+          'customer',
+          ids.ace,
+          'Hidden',
+        ]) {
+          expect(body).not.toContain(secret);
+        }
+        const two = await report(`top-pulls?day=${DAY}&limit=2`);
+        expect(two.data.pulls).toHaveLength(2);
+        for (const bad of [
+          'day=2026-13-01',
+          'day=yesterday',
+          'limit=0',
+          'limit=21',
+        ]) {
+          expect((await report(`top-pulls?${bad}`)).status).toBe(400);
+        }
+      });
+
+      it('draws the Telegram pull card for one paid pull, nothing else', async () => {
+        // Nobody serves the seeded art here, so the card cannot be drawn; the
+        // route says so instead of sending a broken picture (pull-card's
+        // unit spec covers the drawing itself).
+        const res = await report(`pull-card?pull=${ids.top}`);
+        expect(res.status).toBe(502);
+        expect(JSON.stringify(res.data)).toMatch(/art could not be loaded/);
+        for (const pull of [ids.rewardPull, ids.hiddenPull, 'pull_nope']) {
+          expect((await report(`pull-card?pull=${pull}`)).status).toBe(404);
+        }
+        expect((await report('pull-card')).status).toBe(400);
+      });
+
+      it('renders the top pulls as a posting poster', async () => {
+        const res = await unwrapResponse(
+          api.get(`/reports/growth/top-pulls-poster?day=${DAY}`, {
+            headers: { 'x-report-key': GROWTH_KEY },
+            responseType: 'arraybuffer',
+          }),
+        );
+        expect(res.status).toBe(200);
+        const meta = await sharp(Buffer.from(res.data)).metadata();
+        expect([meta.format, meta.width, meta.height]).toEqual([
+          'jpeg',
+          1080,
+          1350,
+        ]);
+        expect(res.headers['x-poster-ranks']).toBe('1,2,3');
+        // Nobody serves the seeded slab art here.
+        expect(res.headers['x-poster-missing-art']).toBe('1,2,3');
+        expect((await report('top-pulls-poster?day=2026-01-01')).status).toBe(
+          404,
+        );
+      });
+
+      it('puts the full customer details in the Excel, for the Growth key only', async () => {
+        const res = await unwrapResponse(
+          api.get(`/reports/growth/daily-report?day=${DAY}`, {
+            headers: { 'x-report-key': GROWTH_KEY },
+            responseType: 'arraybuffer',
+          }),
+        );
+        expect(res.status).toBe(200);
+        expect(res.headers['content-type']).toBe(
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        );
+        expect(res.headers['content-disposition']).toBe(
+          `attachment; filename="polycards-daily-${DAY}.xlsx"`,
+        );
+        const files = unzipSync(new Uint8Array(Buffer.from(res.data)));
+        const strings = strFromU8(files['xl/sharedStrings.xml']);
+        const workbook = strFromU8(files['xl/workbook.xml']);
+        expect(workbook).toContain('name="Top pulls"');
+        expect(workbook).toContain('name="Withdrawals"');
+        for (const detail of [
+          'Ace_Puller',
+          '+60111111111',
+          'ace@test.dev',
+          'Latias &amp; Latios GX #105',
+          '556677881',
+          'Holder 1',
+          findBank('MBBEMYKL')!.name,
+        ]) {
+          expect(strings).toContain(detail);
+        }
+        // Other days' withdrawals and the hidden player's pull stay out.
+        expect(strings).not.toContain('556677883');
+        expect(strings).not.toContain('+60133333333');
+
+        expect(
+          (await report(`daily-report?day=${DAY}`, FINANCE_KEY)).status,
+        ).toBe(403);
+        expect((await report(`daily-report?day=${DAY}`, null)).status).toBe(
+          401,
+        );
       });
     });
   },

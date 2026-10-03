@@ -21,7 +21,14 @@ export type ReportDesk = (typeof REPORT_DESKS)[number];
 // The desks holding a key: every report desk, plus Developer, which has no
 // reports of its own.
 const KEY_OWNERS = [...REPORT_DESKS, 'developer'] as const;
+export type ReportCaller = (typeof KEY_OWNERS)[number];
 const MIN_KEY_LENGTH = 32;
+
+// Whose key opened this request, for the few routes that hold back from the
+// other desks (the Growth daily report's customer details).
+const callers = new WeakMap<object, ReportCaller>();
+export const reportCallerOf = (req: MedusaRequest): ReportCaller | null =>
+  callers.get(req) ?? null;
 
 // The desk is the first path segment after /reports/, lowercased: Medusa
 // matches routes case-insensitively, so /reports/Finance/economy reaches the
@@ -66,7 +73,7 @@ export function requireReportKey() {
     // one matched.
     const caller =
       typeof given === 'string'
-        ? keys.reduce<string | null>(
+        ? keys.reduce<ReportCaller | null>(
             (found, k) => (sameKey(given, k.key) ? k.owner : found),
             null,
           )
@@ -75,6 +82,7 @@ export function requireReportKey() {
       res.status(401).json({ message: 'Unauthorized' });
       return;
     }
+    callers.set(req, caller);
     req.scope
       .resolve(ContainerRegistrationKeys.LOGGER)
       .info(`[reports] ${caller} ${req.originalUrl}`);
