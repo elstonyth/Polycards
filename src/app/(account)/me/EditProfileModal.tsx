@@ -16,13 +16,13 @@ import { FramedAvatar } from '@/components/FramedAvatar';
 import { AnimatedFrame } from '@/components/AnimatedFrame';
 import { AvatarCropper } from '@/components/account/AvatarCropper';
 import { INPUT_CLASS } from '@/components/account/ui';
-import { useAuth } from '@/components/auth/AuthProvider';
 import { Pill } from '@/components/ui/pill';
 import { FRAME_LEVELS } from '@/lib/frame-levels';
 import { uploadAvatar, setAvatarFrame } from '@/lib/actions/profile-appearance';
 import { updateProfile } from '@/lib/actions/customer';
 import { NAME_MAX, usernameError } from '@/lib/profile-validation';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { cn } from '@/lib/utils';
 import { useEquippedFrame } from './equipped-frame';
 
 /**
@@ -70,8 +70,11 @@ export function EditProfileModal({
   const [frameBusy, setFrameBusy] = useState<number | 'unequip' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { equipped, setEquipped } = useEquippedFrame();
-  const { customer: authCustomer, setCustomer } = useAuth();
   const [nameEditing, setNameEditing] = useState(false);
+  // Cancel/Save unmount the focused control; this hands focus back to the
+  // name button when it remounts instead of dropping it on <body>. Not set by
+  // close(): a closing modal restores focus to its own trigger.
+  const refocusName = useRef(false);
   const [nameDraft, setNameDraft] = useState(username);
   const [nameError, setNameError] = useState<string | null>(null);
   const [nameSaving, setNameSaving] = useState(false);
@@ -146,12 +149,17 @@ export function EditProfileModal({
     setNameEditing(true);
   }
 
+  function endNameEdit() {
+    refocusName.current = true;
+    setNameEditing(false);
+  }
+
   async function saveName(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (nameBusy) return;
     const next = nameDraft.trim();
     if (next === username) {
-      setNameEditing(false);
+      endNameEdit();
       return;
     }
     const bad = usernameError(next);
@@ -169,14 +177,10 @@ export function EditProfileModal({
         setNameError(res.error);
         return;
       }
-      // Sync the header user menu, as SettingsForm does after a rename.
-      if (authCustomer) {
-        setCustomer({ ...authCustomer, first_name: res.customer.first_name });
-      }
       // Leave edit mode inside the refresh transition so this panel and the
       // page header swap to the new name together, without flashing the old.
       startRefresh(() => {
-        setNameEditing(false);
+        endNameEdit();
         router.refresh();
       });
     } catch {
@@ -291,7 +295,10 @@ export function EditProfileModal({
                     disabled={nameBusy}
                     aria-invalid={liveNameError ? true : undefined}
                     aria-describedby={nameHintId}
-                    className={`${INPUT_CLASS} text-center text-[15px] font-semibold`}
+                    className={cn(
+                      INPUT_CLASS,
+                      'text-center text-[15px] font-semibold',
+                    )}
                   />
                   <p
                     id={nameHintId}
@@ -306,7 +313,7 @@ export function EditProfileModal({
                     <Pill
                       variant="ghost"
                       className="flex-1"
-                      onClick={() => setNameEditing(false)}
+                      onClick={endNameEdit}
                       disabled={nameBusy}
                     >
                       Cancel
@@ -319,6 +326,12 @@ export function EditProfileModal({
               ) : (
                 <>
                   <button
+                    ref={(el) => {
+                      if (el && refocusName.current) {
+                        refocusName.current = false;
+                        el.focus();
+                      }
+                    }}
                     type="button"
                     onClick={startNameEdit}
                     className="mt-1 flex min-h-11 max-w-full items-center gap-1.5 text-[15px] font-semibold text-white transition-colors hover:text-white/80"

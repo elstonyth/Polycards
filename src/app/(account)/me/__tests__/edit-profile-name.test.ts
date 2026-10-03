@@ -20,18 +20,6 @@ const refresh = vi.fn();
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh }),
 }));
-const setCustomer = vi.fn();
-const AUTH_CUSTOMER = {
-  id: 'cus_1',
-  email: 'q@example.com',
-  first_name: 'qqqqqqq',
-  last_name: 'Tan',
-  handle: 'qqqqqqq',
-  avatar_url: null,
-};
-vi.mock('@/components/auth/AuthProvider', () => ({
-  useAuth: () => ({ customer: AUTH_CUSTOMER, setCustomer }),
-}));
 vi.mock('../equipped-frame', () => ({
   useEquippedFrame: () => ({ equipped: null, setEquipped: vi.fn() }),
 }));
@@ -100,7 +88,8 @@ async function click(btn: HTMLButtonElement) {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  // reset, not clear: no test may inherit another's resolved value.
+  vi.resetAllMocks();
 });
 
 afterEach(() => {
@@ -125,10 +114,16 @@ describe('EditProfileModal name editor', () => {
     expect(document.body.textContent).toContain('can’t contain spaces');
   });
 
-  it('saves first_name alone, then syncs the header and refreshes', async () => {
+  it('saves first_name alone, then refreshes and refocuses the name', async () => {
     updateProfile.mockResolvedValue({
       ok: true,
-      customer: { ...AUTH_CUSTOMER, first_name: 'new_name', phone: null },
+      customer: {
+        id: 'cus_1',
+        email: 'q@example.com',
+        first_name: 'new_name',
+        last_name: 'Tan',
+        phone: null,
+      },
     });
     render();
     await click(button(/change username/));
@@ -138,12 +133,25 @@ describe('EditProfileModal name editor', () => {
     expect(updateProfile.mock.calls[0]![0]).toStrictEqual({
       first_name: 'new_name',
     });
-    expect(setCustomer).toHaveBeenCalledWith({
-      ...AUTH_CUSTOMER,
-      first_name: 'new_name',
-    });
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(nameInput()).toBeNull();
+    expect(document.activeElement).toBe(button(/change username/));
+  });
+
+  it('Cancel and an unchanged Save close the editor without a write', async () => {
+    render();
+    await click(button(/change username/));
+    type('something_else');
+    await click(button(/^Cancel$/));
+    expect(nameInput()).toBeNull();
+    // Focus goes back to the name, not <body>.
+    expect(document.activeElement).toBe(button(/change username/));
+
+    await click(button(/change username/));
+    expect(nameInput()?.value).toBe('qqqqqqq');
+    await click(button(/^Save$/));
+    expect(nameInput()).toBeNull();
+    expect(updateProfile).not.toHaveBeenCalled();
   });
 
   it('keeps the editor open with the server refusal on a taken name', async () => {
