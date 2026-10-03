@@ -1,17 +1,17 @@
 // The deletion sequence itself (purgeAndDeleteAccount) already has coverage —
-// self-service.unit.spec.ts and account-lifecycle.unit.spec.ts. This file
+// account-deletion.unit.spec.ts and account-lifecycle.unit.spec.ts. This file
 // covers only the SCRIPT's own guards: the env-var gate, the echo-the-id
 // confirm, and that a preflight refusal is never bypassed. The write path is
 // mocked out wholesale so a bug in this file can never mask (or be masked by)
 // a bug in the shared purge — jest allows a factory to close over a variable
-// whose name starts with `mock`, same idiom as self-service.unit.spec.ts:6-9.
+// whose name starts with `mock`, same idiom as account-deletion.unit.spec.ts:6-9.
 const mockPurgeAndDeleteAccount = jest.fn();
 // Wrapped in a lazily-invoked arrow rather than passed directly: the factory
 // below runs at hoist time, BEFORE the `const` on the line above initializes
 // — a direct `purgeAndDeleteAccount: mockPurgeAndDeleteAccount` reference
 // hits the TDZ. The wrapper defers the read until the mock is actually
 // CALLED, by which point module evaluation has finished. Same shape as
-// self-service.unit.spec.ts:6-9's `deleteFilesWorkflow: jest.fn(() => ({
+// account-deletion.unit.spec.ts:6-9's `deleteFilesWorkflow: jest.fn(() => ({
 // run: mockRunWorkflow }))`.
 jest.mock('../../api/utils/account-deletion', () => ({
   purgeAndDeleteAccount: (...args: unknown[]) => mockPurgeAndDeleteAccount(...args),

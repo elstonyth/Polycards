@@ -327,7 +327,7 @@ describe('rate-limit-coverage-helpers regression tests (regex shapes that silent
           matcher: '/store/example-delete',
           method: 'POST',
           // A multi-line comment sitting between the method and middlewares
-          // fields, the exact shape /store/customers/me/delete has.
+          // fields, the exact shape /admin/customer-groups* has.
           middlewares: [
             authenticate('customer', ['bearer']),
             rateLimit('example-delete'),

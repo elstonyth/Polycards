@@ -148,8 +148,8 @@ export const ALL_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 // which is the first user of this scanner with nested-bracket entries.
 //
 // Comment lines can sit between ANY two fields, not just before `matcher:`
-// (the admin-only shape again — e.g. `/store/customers/me/delete` has a
-// 5-line comment between `method: 'POST',` and `middlewares:`). CGAP is that
+// (the admin-only shape again — e.g. `/admin/customer-groups*` has a
+// 6-line comment between `method: 'POST',` and `middlewares:`). CGAP is that
 // same optional-comment-run allowed at every field boundary.
 const CGAP = '\\s*(?:\\/\\/[^\\n]*\\n\\s*)*';
 const ENTRY_RE = new RegExp(

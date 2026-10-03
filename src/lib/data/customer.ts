@@ -203,20 +203,15 @@ const ACCOUNT_INFO_FALLBACK: AccountInfo = {
 };
 
 /**
- * Account facts the Settings page needs before rendering the Danger zone, and
- * the account layout needs for the required-phone gate (shouldGatePhone).
+ * Account facts the account layout needs for the required-phone gate
+ * (shouldGatePhone), and /bank-withdrawal needs for the partner policy.
  *
- * `hasPassword` is false for a Google-only signup, which removes the password
- * field from the delete confirmation. Defaults to `true` on any failure — the
- * safer shape, since it asks for MORE proof rather than less. Getting it wrong
- * the other way would drop the password field for an account that does have
- * one, and every delete would then fail PASSWORD_REQUIRED with no way to
- * comply. For the phone gate the same default means NO gate on a failed read
- * (fail-open); that is deliberate — the backend money/goods gates are the
- * enforcement, and a gate raised on a password account can never be completed.
+ * `hasPassword` is false for a Google-only signup. Defaults to `true` on any
+ * failure, which means NO phone gate on a failed read (fail-open); that is
+ * deliberate — the backend money/goods gates are the enforcement, and a gate
+ * raised on a password account can never be completed.
  *
- * Request-scoped cache: the layout and /settings both read it on a gated
- * request.
+ * Request-scoped cache: the layout's two gate thunks share one read.
  */
 export const getAccountInfo = cache(async (): Promise<AccountInfo> => {
   // The port reports backend refusals as `{ ok: false }`, but the call itself

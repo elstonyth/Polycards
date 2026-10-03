@@ -2,8 +2,7 @@ import type { Metadata } from 'next';
 import { AccountHeader, Panel } from '@/components/account/ui';
 import SettingsForm from '@/components/account/SettingsForm';
 import CookieSettings from './CookieSettings';
-import DangerZone from '@/components/account/DangerZone';
-import { getAccountInfo, getCustomer } from '@/lib/data/customer';
+import { getCustomer } from '@/lib/data/customer';
 import { getOwnProfileHandle } from '@/lib/data/profiles';
 
 export const metadata: Metadata = { title: 'Settings' };
@@ -13,10 +12,9 @@ export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
   // getCustomer() is cache()-wrapped and already resolved by the layout's auth
-  // gate, so the only real round-trip here is the account read.
-  const [customer, accountInfo, handle] = await Promise.all([
+  // gate, so the only real round-trip here is the handle read.
+  const [customer, handle] = await Promise.all([
     getCustomer(),
-    getAccountInfo(),
     getOwnProfileHandle(),
   ]);
   // The account layout gate redirects unauthenticated visitors, so this is a
@@ -56,7 +54,6 @@ export default async function SettingsPage() {
           Email notifications, pull alerts, and two-factor authentication are
           still to come.
         </p>
-        <DangerZone hasPassword={accountInfo.hasPassword} />
       </div>
     </>
   );

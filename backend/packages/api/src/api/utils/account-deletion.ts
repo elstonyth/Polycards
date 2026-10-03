@@ -27,24 +27,48 @@ type NotificationModuleWithDelete = INotificationModuleService & {
 export type AccountDeletionResult =
   { ok: true } | { ok: false; reason: string; detail: string };
 
-// The single definition of "delete an account" — moved here verbatim from
-// POST /store/customers/me/delete (store/customers/me/delete/route.ts) so an
-// operator-initiated deletion (src/scripts/delete-customer-account.ts) can run
-// the exact same sequence a customer's own self-service delete runs.
+// The single definition of "delete an account". Its only caller is the
+// operator-run src/scripts/delete-customer-account.ts: customer self-service
+// deletion (POST /store/customers/me/delete) was removed on 2026-10-03, and an
+// account is now deleted only on request, by an operator.
 //
 // Personal data is destroyed and login becomes impossible forever; the money
 // records survive as anonymous books (see purgeAccountPacksData). The order
 // below is load-bearing and governed by
-// docs/adr/0006-account-deletion-destroys-pii-retains-anonymous-books.md — see
-// the route for the full recovery-window rationale that order protects.
+// docs/adr/0006-account-deletion-destroys-pii-retains-anonymous-books.md.
 //
-// This does NOT run the caller's proof-of-intent check (password
-// verification, or an operator's own authorization) — that is the caller's
-// responsibility, before this is invoked. It also does not log or throw on a
-// preflight refusal; it returns `{ ok: false, reason, detail }` having
-// written nothing, and it is the caller's job to log and surface that refusal
-// however fits its own context (an HTTP error for the route, a non-zero exit
-// for the script).
+// This is NOT one transaction, and pretending otherwise would mislead whoever
+// reads it next: the purge spans the packs module, the customer module, the
+// notification module, the auth module and the file provider, and a Medusa
+// sharedContext covers one module only. What holds instead is ORDERING —
+// everything that can still fail runs before the two irreversible steps, so a
+// partial failure leaves the account in a state a human can finish from.
+//
+// Be honest about what recovery actually exists, because it is thinner than
+// "just re-run it" suggests and this is a deletion path:
+//   - There is NO automated retry. The operator script is a fresh one-shot
+//     deletion an operator chooses to run, not a resume of a partial purge,
+//     so a failed purge is still finished by hand.
+//   - RECOVERING an account instead of finishing the purge takes a step that
+//     has nothing to do with logging in: DELETE that customer's
+//     `delete_account` row from admin_action_audit (written in step 3, inside
+//     the packs transaction). It is not bookkeeping to tidy later — it is the
+//     row `deletedCustomerIds` (modules/packs/service.ts) reads, and both paths
+//     that consult it, settleChallengeWeek among them, SKIP every customer it
+//     names. Leave it behind and the recovered account looks entirely alive —
+//     it logs in, spins, deposits, withdraws — while weekly-challenge winnings
+//     stop permanently, with no error and nothing on any surface that explains
+//     why. Marking a half-purged account as deleted is deliberate and correct;
+//     un-marking it is what makes recovery real.
+//   - A failure at or after step 6 needs manual intervention against the
+//     database. Nothing in this codebase automates it.
+// The step order below is what keeps a failure before step 6 finishable; it is
+// not a promise of self-healing.
+//
+// Step 1, proof of intent, is the caller's: running the operator script AT ALL
+// is that proof. This also does not log or throw on a preflight refusal; it
+// returns `{ ok: false, reason, detail }` having written nothing, and the
+// caller logs that refusal and exits non-zero.
 export async function purgeAndDeleteAccount(
   scope: MedusaContainer,
   customerId: string,
@@ -57,11 +81,9 @@ export async function purgeAndDeleteAccount(
   );
   const packs = scope.resolve<PacksModuleService>(PACKS_MODULE);
 
-  // 2. Settlement guards. `reason` is the whole client-facing contract: the
-  //    framework's error handler sends only { code, type, message }, so a
-  //    `detail` property on the error would be silently dropped. The sentence
-  //    the customer reads comes from the storefront's DELETE_COPY map; the
-  //    numbers live in the log line below, where support can find them.
+  // 2. Settlement guards. A refusal writes nothing and comes back as the
+  //    reason code plus the numbers behind it (`detail`), for the caller to
+  //    print.
   const preflight = await packs.deleteAccountPreflight(customerId);
   if (!preflight.ok) {
     return { ok: false, reason: preflight.reason, detail: preflight.detail };
@@ -180,7 +202,7 @@ export async function purgeAndDeleteAccount(
   logger.info(`[account-delete] auth identities removed for ${customerId}`);
 
   // 7. Soft-delete the customer row — AFTER the identities, and this order is
-  //    load-bearing for what recovery there is (see the route header for its
+  //    load-bearing for what recovery there is (see the header above for its
   //    real, narrow shape).
   //
   //    mutateCustomerMetadata (step 5) is scoped `AND deleted_at IS NULL`, so it
