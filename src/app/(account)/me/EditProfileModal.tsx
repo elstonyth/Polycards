@@ -1,14 +1,27 @@
 'use client';
 
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useTransition,
+  type ChangeEvent,
+  type FormEvent,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { Camera, Lock, X } from 'lucide-react';
+import { Camera, Lock, Pencil, X } from 'lucide-react';
 import { FramedAvatar } from '@/components/FramedAvatar';
 import { AnimatedFrame } from '@/components/AnimatedFrame';
 import { AvatarCropper } from '@/components/account/AvatarCropper';
+import { INPUT_CLASS } from '@/components/account/ui';
+import { useAuth } from '@/components/auth/AuthProvider';
+import { Pill } from '@/components/ui/pill';
 import { FRAME_LEVELS } from '@/lib/frame-levels';
 import { uploadAvatar, setAvatarFrame } from '@/lib/actions/profile-appearance';
+import { updateProfile } from '@/lib/actions/customer';
+import { NAME_MAX, usernameError } from '@/lib/profile-validation';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useEquippedFrame } from './equipped-frame';
 
@@ -17,9 +30,12 @@ import { useEquippedFrame } from './equipped-frame';
  * pattern the operator asked for, 2026-07-19). Photo and frames live together
  * here because they're one decision: the frame rings the photo.
  *
- * Everything applies immediately (no Save button): the photo POSTs after the
+ * Photo and frame apply immediately (no Save button): the photo POSTs after the
  * crop, a frame POSTs on tap and updates the header through the shared
- * equipped-frame context.
+ * equipped-frame context. The username (tap the name, 2026-10-03 — support kept
+ * having to point players at /settings) is the one typed field, so it alone
+ * gets Save/Cancel; it saves through the same updateProfile action /settings
+ * uses.
  *
  * ponytail: no "Choose Avatar" tab — Polycards has no preset-avatar catalog to
  * put in one. Add tabs when preset avatars exist.
@@ -28,6 +44,7 @@ export function EditProfileModal({
   open,
   onClose,
   displayName,
+  username,
   handle,
   avatarUrl,
   frames,
@@ -36,6 +53,9 @@ export function EditProfileModal({
   open: boolean;
   onClose: () => void;
   displayName: string;
+  /** first_name alone — what the name editor edits. displayName can fall back
+   *  to the handle or email, which must never prefill (and then save as) it. */
+  username: string;
   handle: string | null;
   avatarUrl: string | null;
   frames: Record<string, string>;
@@ -50,10 +70,29 @@ export function EditProfileModal({
   const [frameBusy, setFrameBusy] = useState<number | 'unequip' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { equipped, setEquipped } = useEquippedFrame();
+  const { customer: authCustomer, setCustomer } = useAuth();
+  const [nameEditing, setNameEditing] = useState(false);
+  const [nameDraft, setNameDraft] = useState(username);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [nameSaving, setNameSaving] = useState(false);
+  const [refreshing, startRefresh] = useTransition();
+  const nameHintId = useId();
+  const nameBusy = nameSaving || refreshing;
+  // Server refusal first (taken name), then the live format check — but only
+  // once they've typed something; an empty field isn't a mistake yet.
+  const liveNameError =
+    nameError ?? (nameDraft.trim() === '' ? null : usernameError(nameDraft));
+
+  // This component stays mounted while closed, so a half-typed rename would
+  // otherwise still be open the next time the panel is.
+  function close() {
+    setNameEditing(false);
+    onClose();
+  }
 
   // The cropper overlay renders above this panel and owns focus while it's up,
   // so hand the trap over rather than yanking Tab back down here.
-  useModalA11y(panelRef, open && !picked, onClose);
+  useModalA11y(panelRef, open && !picked, close);
 
   const initial = (displayName[0] ?? '?').toUpperCase();
   const equippedFrameUrl = equipped ? (frames[String(equipped)] ?? null) : null;
@@ -101,6 +140,52 @@ export function EditProfileModal({
     }
   }
 
+  function startNameEdit() {
+    setNameDraft(username);
+    setNameError(null);
+    setNameEditing(true);
+  }
+
+  async function saveName(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (nameBusy) return;
+    const next = nameDraft.trim();
+    if (next === username) {
+      setNameEditing(false);
+      return;
+    }
+    const bad = usernameError(next);
+    if (bad) {
+      setNameError(bad);
+      return;
+    }
+    setNameSaving(true);
+    setNameError(null);
+    try {
+      // first_name ONLY: an absent key is left alone, whereas an empty
+      // last_name would clear it.
+      const res = await updateProfile({ first_name: next });
+      if (!res.ok) {
+        setNameError(res.error);
+        return;
+      }
+      // Sync the header user menu, as SettingsForm does after a rename.
+      if (authCustomer) {
+        setCustomer({ ...authCustomer, first_name: res.customer.first_name });
+      }
+      // Leave edit mode inside the refresh transition so this panel and the
+      // page header swap to the new name together, without flashing the old.
+      startRefresh(() => {
+        setNameEditing(false);
+        router.refresh();
+      });
+    } catch {
+      setNameError('Couldn’t save your username. Please try again.');
+    } finally {
+      setNameSaving(false);
+    }
+  }
+
   async function handleFrame(level: number | null) {
     if (frameBusy) return;
     setFrameBusy(level === null ? 'unequip' : level);
@@ -130,7 +215,7 @@ export function EditProfileModal({
             type="button"
             aria-hidden="true"
             tabIndex={-1}
-            onClick={onClose}
+            onClick={close}
             className="absolute inset-0 cursor-default bg-black/60"
           />
           <div
@@ -143,7 +228,7 @@ export function EditProfileModal({
           >
             <button
               type="button"
-              onClick={onClose}
+              onClick={close}
               aria-label="Close"
               className="absolute right-2.5 top-2.5 flex h-11 w-11 items-center justify-center rounded-lg text-white/50 transition-colors hover:bg-white/5 hover:text-white"
             >
@@ -183,15 +268,78 @@ export function EditProfileModal({
                 className="hidden"
                 onChange={pickFile}
               />
-              <p className="mt-3 text-center text-[15px] font-semibold text-white">
-                {displayName}
-              </p>
-              {handle && (
-                <p className="text-[12px] text-neutral-500">@{handle}</p>
+              {nameEditing ? (
+                <form
+                  onSubmit={(e) => void saveName(e)}
+                  noValidate
+                  className="mt-3 w-full"
+                >
+                  <input
+                    // They just tapped the name to edit it — caret (and the
+                    // phone keyboard) go straight there.
+                    autoFocus
+                    value={nameDraft}
+                    onChange={(e) => {
+                      setNameDraft(e.target.value);
+                      setNameError(null);
+                    }}
+                    aria-label="Username"
+                    autoComplete="nickname"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    maxLength={NAME_MAX}
+                    disabled={nameBusy}
+                    aria-invalid={liveNameError ? true : undefined}
+                    aria-describedby={nameHintId}
+                    className={`${INPUT_CLASS} text-center text-[15px] font-semibold`}
+                  />
+                  <p
+                    id={nameHintId}
+                    className={`mt-1.5 text-center text-[12px] ${
+                      liveNameError ? 'text-red-300' : 'text-neutral-400'
+                    }`}
+                  >
+                    {liveNameError ??
+                      'Your profile link stays the same, whatever you rename to.'}
+                  </p>
+                  <div className="mt-3 flex gap-2">
+                    <Pill
+                      variant="ghost"
+                      className="flex-1"
+                      onClick={() => setNameEditing(false)}
+                      disabled={nameBusy}
+                    >
+                      Cancel
+                    </Pill>
+                    <Pill type="submit" className="flex-1" disabled={nameBusy}>
+                      {nameBusy ? 'Saving…' : 'Save'}
+                    </Pill>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={startNameEdit}
+                    className="mt-1 flex min-h-11 max-w-full items-center gap-1.5 text-[15px] font-semibold text-white transition-colors hover:text-white/80"
+                  >
+                    <span className="truncate">{displayName}</span>
+                    <Pencil
+                      className="h-3.5 w-3.5 shrink-0 text-neutral-500"
+                      aria-hidden
+                    />
+                    <span className="sr-only">, change username</span>
+                  </button>
+                  {handle && (
+                    <p className="text-[12px] text-neutral-500">@{handle}</p>
+                  )}
+                  <p className="mt-1 text-[12px] text-neutral-400">
+                    {busy
+                      ? 'Uploading…'
+                      : 'Tap your photo or name to change them'}
+                  </p>
+                </>
               )}
-              <p className="mt-1 text-[12px] text-neutral-400">
-                {busy ? 'Uploading…' : 'Tap the photo to change it'}
-              </p>
             </div>
 
             {error && (
