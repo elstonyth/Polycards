@@ -123,6 +123,22 @@ describe('openPack', () => {
     });
   });
 
+  // The free welcome pack unlocks on a verified phone (backend claim step).
+  // Unmapped, the refusal fell through to "Could not open the pack. Please
+  // try again." — an invitation to retry something that cannot succeed.
+  it('tells an unverified account to verify its phone to claim the free pack', async () => {
+    backend({
+      'POST /store/packs/:slug/open': {
+        status: 400,
+        body: { message: 'Verify your phone number to claim your free pack.' },
+      },
+    });
+    const r = await openPack('free-welcome');
+    expect(r).toMatchObject({ ok: false, needsTopUp: false });
+    expect(!r.ok && r.error).toMatch(/verify your phone/i);
+    expect(!r.ok && r.error).toMatch(/account settings/i);
+  });
+
   it('maps an empty prize pool ahead of the generic not-found copy', async () => {
     backend({
       'POST /store/packs/:slug/open': {

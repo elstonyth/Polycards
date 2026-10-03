@@ -361,6 +361,35 @@ moduleIntegrationTestRunner<PacksModuleService>({
         },
       );
 
+      // Operator decision 2026-09-30: the free pack unlocks on a verified
+      // phone. Same place and same reason as the freeze gate: before the claim,
+      // so the refusal leaves the one-time pack unspent.
+      it('with the phone gate on, an unverified account is refused until it verifies, and the claim survives', async () => {
+        const previous = process.env.PHONE_VERIFICATION_REQUIRED;
+        process.env.PHONE_VERIFICATION_REQUIRED = 'true';
+        try {
+          await service.markFreePackAvailable(customerId);
+
+          expect(await openFails(FREE_SLUG, customerId)).toMatch(
+            /verify your phone/i,
+          );
+          const state = (await claimState(customerId))!;
+          expect(state.free_pack_claimed_at).toBeNull();
+          expect(
+            await service.listPulls({ customer_id: customerId }),
+          ).toHaveLength(0);
+
+          await service.markPhoneVerified(customerId);
+          const { result } = await open(FREE_SLUG, customerId);
+          expect(result.price).toBe(0);
+          expect((await latestPull(customerId, FREE_SLUG)).source).toBe('free');
+        } finally {
+          if (previous === undefined)
+            delete process.env.PHONE_VERIFICATION_REQUIRED;
+          else process.env.PHONE_VERIFICATION_REQUIRED = previous;
+        }
+      });
+
       it('second free open is refused (claim consumed)', async () => {
         await service.markFreePackAvailable(customerId);
         await open(FREE_SLUG, customerId);
