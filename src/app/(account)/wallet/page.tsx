@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Check, Lock } from 'lucide-react';
 import { AccountHeader, Panel, StatCards } from '@/components/account/ui';
+import { PlaythroughProgress } from '@/components/account/PlaythroughProgress';
 import { getWallet } from '@/lib/actions/wallet';
 import { rm } from '@/lib/format';
 
@@ -27,11 +28,9 @@ export default async function WalletPage() {
 
   // Playthrough gate progress. deposited === 0 (no post-1b deposits) means the
   // gate is open with nothing to show — render the unlocked state, not a 0/0
-  // bar. used can exceed deposited once the customer keeps playing, so clamp.
-  const { deposited, used, remaining } = w.playthrough;
+  // bar.
+  const { deposited, remaining } = w.playthrough;
   const gateOpen = remaining <= 0;
-  const pct =
-    deposited > 0 ? Math.min(100, Math.round((used / deposited) * 100)) : 100;
 
   return (
     <>
@@ -82,36 +81,7 @@ export default async function WalletPage() {
         </div>
 
         {deposited > 0 ? (
-          <>
-            <div
-              className="mt-4 h-2 overflow-hidden rounded-full bg-neutral-800"
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={pct}
-              aria-label="Deposit playthrough progress"
-            >
-              <div
-                className={`h-full rounded-full ${
-                  gateOpen ? 'bg-buyback' : 'bg-sky-400'
-                }`}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-            <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-sm">
-              <span className="text-white/70">
-                {rm(Math.min(used, deposited))} of {rm(deposited)} deposits
-                played through
-              </span>
-              <span
-                className={
-                  gateOpen ? 'text-buyback-fg' : 'font-semibold text-white'
-                }
-              >
-                {gateOpen ? 'Fully played through' : `${rm(remaining)} to go`}
-              </span>
-            </div>
-          </>
+          <PlaythroughProgress {...w.playthrough} />
         ) : (
           <p className="mt-4 text-sm text-white/70">
             No deposits to play through. Withdrawals require a saved bank

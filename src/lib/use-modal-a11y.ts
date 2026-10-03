@@ -80,7 +80,11 @@ export function useModalA11y(
       // (per the boundary rule below) yank it down out of the overlay.
       if (panel && modalStack[modalStack.length - 1] !== panel) return;
       if (e.key === 'Escape') {
-        onCloseRef.current();
+        // A control inside the panel that consumed Escape (an inline editor
+        // backing out of its edit) calls preventDefault in its own handler.
+        // React handles keys at the root, which is registered before this
+        // listener, so that flag is already set by the time we see it.
+        if (!e.defaultPrevented) onCloseRef.current();
         return;
       }
       if (e.key !== 'Tab' || !panel) return;

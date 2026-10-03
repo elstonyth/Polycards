@@ -30,7 +30,7 @@ vi.mock('@/components/app-shell/TopUpProvider', () => ({
   useTopUp: () => ({ applyBalance }),
 }));
 
-import WithdrawForm from '../WithdrawForm';
+import WithdrawForm, { nextAmountText, withdrawRemedy } from '../WithdrawForm';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -72,13 +72,20 @@ const NEEDS_RESAVE_ACCOUNT = {
   usableFrom: null,
 };
 
-async function render(accounts: unknown[] = [READY_ACCOUNT]) {
+async function render(
+  accounts: unknown[] = [READY_ACCOUNT],
+  withdrawable: number | null = 100,
+  hold: {
+    frozen?: boolean;
+    playthrough?: { deposited: number; used: number; remaining: number };
+  } = {},
+) {
   fetchSavedBankAccounts.mockResolvedValue({ ok: true, accounts });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(createElement(WithdrawForm, { withdrawable: 100 }));
+    root.render(createElement(WithdrawForm, { withdrawable, ...hold }));
   });
 }
 
@@ -121,6 +128,12 @@ function setValue(selector: string, value: string) {
 function fillValidForm(amount = '50') {
   setValue('select[aria-label="Saved bank account"]', READY_ACCOUNT.id);
   setValue('input[aria-label="Withdrawal amount in RM"]', amount);
+}
+
+function amountInput(): HTMLInputElement {
+  return container.querySelector<HTMLInputElement>(
+    'input[aria-label="Withdrawal amount in RM"]',
+  )!;
 }
 
 function submitButton(): HTMLButtonElement {
@@ -221,9 +234,7 @@ describe('WithdrawForm', () => {
       )?.disabled,
     ).toBe(true);
     expect(submitButton().disabled).toBe(true);
-    expect(container.textContent).toContain(
-      'Withdrawals are paused right now.',
-    );
+    expect(container.textContent).toContain('Withdrawals are paused.');
     await submit();
     expect(startWithdrawal).not.toHaveBeenCalled();
   });
@@ -231,7 +242,7 @@ describe('WithdrawForm', () => {
   it.each(['49', '50001'])(
     'rejects RM %s in the form without touching the backend',
     async (amount) => {
-      await render();
+      await render([READY_ACCOUNT], 100000);
       fillValidForm(amount);
       await submit();
       expect(container.querySelector('[role="alert"]')?.textContent).toBe(
@@ -249,7 +260,7 @@ describe('WithdrawForm', () => {
       depositsEnabled: true,
       withdrawalsEnabled: true,
     });
-    await render();
+    await render([READY_ACCOUNT], 100000);
     fillValidForm('40000');
     await submit();
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(
@@ -258,14 +269,40 @@ describe('WithdrawForm', () => {
     expect(startWithdrawal).not.toHaveBeenCalled();
   });
 
-  it('rejects an amount above the withdrawable figure without touching the backend', async () => {
+  it('caps a typed or pasted amount at the withdrawable figure', async () => {
     await render();
     fillValidForm('200');
+    expect(amountInput().value).toBe('100.00');
+    startWithdrawal.mockResolvedValue({ ok: false, error: 'x' });
     await submit();
-    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
-      'That is more than you can withdraw right now.',
+    expect(startWithdrawal).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 100 }),
     );
-    expect(startWithdrawal).not.toHaveBeenCalled();
+  });
+
+  it('refuses keystrokes that are not an amount, keeping the last good value', async () => {
+    await render();
+    for (const [good, bad] of [
+      ['60', '60abc'],
+      ['1.23', '1.234'],
+      ['5.5', '5.5.'],
+      ['70', '-70'],
+    ] as const) {
+      setValue('input[aria-label="Withdrawal amount in RM"]', good);
+      setValue('input[aria-label="Withdrawal amount in RM"]', bad);
+      expect(amountInput().value).toBe(good);
+    }
+  });
+
+  it('reads "1,000" as RM 1,000, not RM 1', async () => {
+    await render([READY_ACCOUNT], 5000);
+    fillValidForm('1,000');
+    expect(amountInput().value).toBe('1,000');
+    startWithdrawal.mockResolvedValue({ ok: false, error: 'x' });
+    await submit();
+    expect(startWithdrawal).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 1000 }),
+    );
   });
 
   it('submits an ACCOUNT ID and shows the async success state — "on its way", never "paid"', async () => {
@@ -369,5 +406,101 @@ describe('WithdrawForm', () => {
       { idempotencyKey: string },
     ];
     expect(secondCall.idempotencyKey).toBe(firstCall.idempotencyKey);
+  });
+});
+
+describe('WithdrawForm — why the balance is held, and the way out', () => {
+  const SHORT = { deposited: 50, used: 45, remaining: 5 };
+
+  it('names the playthrough shortfall and disables the form instead of a bare RM 0.00', async () => {
+    await render([READY_ACCOUNT], 0, { playthrough: SHORT });
+    expect(container.textContent).toContain(
+      'Spend RM 5.00 more on packs to withdraw',
+    );
+    expect(
+      container
+        .querySelector('[role="progressbar"]')
+        ?.getAttribute('aria-valuenow'),
+    ).toBe('90');
+    expect(container.querySelector('a[href="/slots"]')?.textContent).toBe(
+      'Open packs',
+    );
+    expect(amountInput().disabled).toBe(true);
+    expect(submitButton().disabled).toBe(true);
+  });
+
+  it('a frozen account gets the review notice, never "spend more"', async () => {
+    // Freeze outranks playthrough (withdrawable.ts): telling a frozen account
+    // to open packs would send it down a path that still ends refused.
+    await render([READY_ACCOUNT], 0, { frozen: true, playthrough: SHORT });
+    expect(container.textContent).toContain('under review');
+    expect(container.textContent).not.toContain('Spend RM');
+    expect(container.querySelector('a[href="/contact"]')).not.toBeNull();
+    expect(amountInput().disabled).toBe(true);
+    expect(submitButton().disabled).toBe(true);
+  });
+
+  it('puts the fix under a backend refusal', async () => {
+    startWithdrawal.mockResolvedValue({
+      ok: false,
+      error:
+        'RM 5.00 of your deposits must be spent on packs before you can withdraw.',
+    });
+    await render();
+    fillValidForm();
+    await submit();
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('must be spent on packs');
+    expect(alert?.querySelector('a[href="/slots"]')?.textContent).toBe(
+      'Open packs',
+    );
+  });
+
+  it('explains a balance under the payout floor instead of snapping the field', async () => {
+    await render([READY_ACCOUNT], 30);
+    expect(container.textContent).toContain('Minimum withdrawal is RM 50');
+    expect(container.textContent).toContain('You have RM 30.00');
+    expect(amountInput().disabled).toBe(true);
+    expect(amountInput().getAttribute('aria-describedby')).toBe(
+      'withdraw-hold-reason',
+    );
+    expect(submitButton().disabled).toBe(true);
+  });
+
+  it('maps each refusal to the screen that fixes it, and nothing for the rest', () => {
+    expect(
+      withdrawRemedy(
+        'Withdrawals are unavailable while your account is under review. Contact support.',
+      )?.href,
+    ).toBe('/contact');
+    expect(
+      withdrawRemedy('Add an email address to your account before withdrawing.')
+        ?.href,
+    ).toBe('/settings');
+    expect(
+      withdrawRemedy(
+        'This bank account is not available for withdrawals yet — try again in about 3 hours.',
+      )?.href,
+    ).toBe('/bank');
+    // Says the bank details are FINE — a /bank link would contradict it.
+    expect(
+      withdrawRemedy(
+        'Withdrawals are temporarily unavailable on our side and your balance has been returned. Your bank details are fine — there is no need to change them. Please try again later.',
+      ),
+    ).toBeNull();
+    expect(withdrawRemedy('You can withdraw up to RM 12.34 right now.')).toBe(
+      null,
+    );
+  });
+});
+
+describe('nextAmountText', () => {
+  it('floors the cap to whole sen and leaves an unknown balance uncapped', () => {
+    // 0.29 * 100 is 28.999… in floating point — must not lose a sen.
+    expect(nextAmountText('', '1', 0.29)).toBe('0.29');
+    expect(nextAmountText('', '20', 12.345)).toBe('12.34');
+    expect(nextAmountText('', '5', 0)).toBe('0.00');
+    expect(nextAmountText('', '99999', null)).toBe('99999');
+    expect(nextAmountText('7', '', 100)).toBe('');
   });
 });
