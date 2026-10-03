@@ -6,6 +6,7 @@ import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { clearChallengeCache } from '../../src/api/store/challenge/route';
 import { topChaseCards } from '../../src/api/reports/growth/brand-poster/route';
+import { assetOrigin } from '../../src/api/utils/image-fetch';
 import { myrDisplay as MYR, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -701,6 +702,237 @@ medusaIntegrationTestRunner({
         expect((await report('brand-poster?headline=Hi', null)).status).toBe(
           401,
         );
+      });
+    });
+
+    describe('GET /reports/growth/tasks and achievements-poster', () => {
+      const origin = assetOrigin();
+      const weeklyEnds = new Date(Date.now() + 3 * DAY_MS);
+
+      beforeEach(async () => {
+        await packs().createPacks([
+          {
+            slug: 'tk-bronze',
+            title: 'TK Bronze',
+            category: 'pokemon',
+            price: 300,
+            image: '/images/tk-bronze.webp',
+            display_image: '/images/tk-bronze-factory.webp',
+          },
+          {
+            slug: 'tk-weekly',
+            title: 'TK Weekly',
+            category: 'pokemon',
+            price: 45,
+            image: 'https://cdn.test/tk-weekly.png',
+          },
+        ]);
+        await packs().createCards([
+          {
+            handle: 'tk-latias',
+            name: 'Latias & Latios GX #105',
+            set: 'S',
+            grader: 'PSA',
+            grade: '10',
+            market_value: 100,
+            image: '/x.webp',
+            slab_image: 'https://cdn.test/slab-latias.webp',
+          },
+        ]);
+        const achievement = (
+          title: string,
+          requirement: Record<string, unknown>,
+          reward: Record<string, unknown>,
+          extra: Record<string, unknown> = {},
+        ) => ({
+          kind: 'achievement' as const,
+          title,
+          requirement,
+          reward,
+          ...extra,
+        });
+        await packs().createTaskDefinitions([
+          achievement(
+            'Reach lvl 20',
+            { type: 'reach_level', level: 20 },
+            { type: 'pack', pack_id: 'tk-bronze' },
+          ),
+          achievement(
+            'Reach lvl 10',
+            { type: 'reach_level', level: 10 },
+            { type: 'credit', amount_myr: 50 },
+          ),
+          achievement(
+            'Reach lvl 90',
+            { type: 'reach_level', level: 90 },
+            { type: 'card', card_handle: 'tk-latias' },
+          ),
+          achievement(
+            'Vault 5 cards',
+            { type: 'vault_count', count: 5 },
+            { type: 'credit', amount_myr: 5 },
+          ),
+          // Switched off, and past its window: the page shows neither.
+          achievement(
+            'Reach lvl 30',
+            { type: 'reach_level', level: 30 },
+            { type: 'credit', amount_myr: 30 },
+            { active: false },
+          ),
+          achievement(
+            'Reach lvl 40',
+            { type: 'reach_level', level: 40 },
+            { type: 'credit', amount_myr: 40 },
+            { ends_at: new Date(Date.now() - DAY_MS) },
+          ),
+          {
+            kind: 'weekly' as const,
+            title: 'Check in 5 days',
+            requirement: { type: 'checkin_days', days: 5 },
+            reward: { type: 'pack', pack_id: 'tk-weekly' },
+            ends_at: weeklyEnds,
+          },
+        ]);
+      });
+
+      it('lists the live tasks with the prizes and values the /task page shows', async () => {
+        const res = await report('tasks');
+        expect(res.status).toBe(200);
+        const r = res.data;
+        expect(r.achievements).toEqual([
+          {
+            title: 'Reach lvl 10',
+            requirement: 'Reach VIP level 10',
+            level: 10,
+            prize: 'RM 50.00 credit',
+            prize_type: 'credit',
+            value_myr: 50,
+            image: null,
+            ends_at: null,
+          },
+          {
+            title: 'Reach lvl 20',
+            requirement: 'Reach VIP level 20',
+            level: 20,
+            prize: 'Free rip · TK Bronze',
+            prize_type: 'pack',
+            value_myr: 300,
+            image: `${origin}/images/tk-bronze.webp`,
+            ends_at: null,
+          },
+          {
+            title: 'Reach lvl 90',
+            requirement: 'Reach VIP level 90',
+            level: 90,
+            prize: 'Latias & Latios GX #105 · PSA 10',
+            prize_type: 'card',
+            value_myr: expect.any(Number),
+            image: 'https://cdn.test/slab-latias.webp',
+            ends_at: null,
+          },
+          {
+            title: 'Vault 5 cards',
+            requirement: 'Vault 5 cards',
+            level: null,
+            prize: 'RM 5.00 credit',
+            prize_type: 'credit',
+            value_myr: 5,
+            image: null,
+            ends_at: null,
+          },
+        ]);
+        expect(r.weekly).toEqual([
+          {
+            title: 'Check in 5 days',
+            requirement: 'Check in on 5 days this week',
+            level: null,
+            prize: 'Free rip · TK Weekly',
+            prize_type: 'pack',
+            value_myr: 45,
+            image: 'https://cdn.test/tk-weekly.png',
+            ends_at: weeklyEnds.toISOString(),
+          },
+        ]);
+
+        // Every value is the one the player's own hub promises.
+        const hub = await packs().taskHubFor({ customerId: 'cus_tk_player' });
+        const worth = new Map(
+          hub.tasks.map((t) => [
+            t.title,
+            t.reward.type === 'credit'
+              ? t.reward.amount_myr
+              : t.reward.type === 'pack'
+                ? t.reward.pack_price_myr
+                : t.reward.card_value_myr,
+          ]),
+        );
+        for (const t of [...r.achievements, ...r.weekly]) {
+          expect(t.value_myr).toBe(worth.get(t.title));
+        }
+        expect(worth.get('Reach lvl 90')).toBeGreaterThan(0);
+
+        // The catalogue, never anyone's progress.
+        const body = JSON.stringify(r);
+        expect(body).not.toMatch(
+          /"(progress|claimed|pending_spins|vip_level|id)":/,
+        );
+        expect(body).not.toContain('report:catalogue');
+      });
+
+      it('renders the VIP-level ladder as a JPEG, art misses named by level', async () => {
+        const poster = (query = '') =>
+          unwrapResponse(
+            api.get(`/reports/growth/achievements-poster${query}`, {
+              headers: { 'x-report-key': GROWTH_KEY },
+              responseType: 'arraybuffer',
+            }),
+          );
+        const res = await poster();
+        expect(res.status).toBe(200);
+        expect(res.headers['content-type']).toMatch(/^image\/jpeg/);
+        expect(res.headers['cache-control']).toBe('no-store');
+        const meta = await sharp(Buffer.from(res.data)).metadata();
+        expect([meta.format, meta.width, meta.height]).toEqual([
+          'jpeg',
+          1080,
+          1350,
+        ]);
+        // VIP-level achievements only; the vault one is not on the ladder.
+        expect(res.headers['x-poster-levels']).toBe('10,20,90');
+        // Nobody serves the seeded art here; the credit has none to miss.
+        expect(res.headers['x-poster-missing-art']).toBe('20,90');
+
+        const some = await poster('?min_level=20&max_level=90');
+        expect(some.headers['x-poster-levels']).toBe('20,90');
+        const top = await poster('?min_level=50');
+        expect(top.headers['x-poster-levels']).toBe('90');
+      });
+
+      it('refuses a bad range with a readable reason', async () => {
+        for (const q of [
+          'min_level=x',
+          'max_level=0',
+          'min_level=101',
+          'min_level=60&max_level=20',
+        ]) {
+          expect((await report(`achievements-poster?${q}`)).status).toBe(400);
+        }
+        const none = await report('achievements-poster?min_level=95');
+        expect(none.status).toBe(404);
+        expect(JSON.stringify(none.data)).toMatch(/10, 20, 90/);
+        await packs().createTaskDefinitions(
+          [41, 42, 43, 44, 45, 46, 47, 48].map((level) => ({
+            kind: 'achievement' as const,
+            title: `Reach lvl ${level}`,
+            requirement: { type: 'reach_level', level },
+            reward: { type: 'credit', amount_myr: 1 },
+          })),
+        );
+        const many = await report('achievements-poster');
+        expect(many.status).toBe(400);
+        expect(JSON.stringify(many.data)).toMatch(/fits 10/);
+        expect((await report('achievements-poster', null)).status).toBe(401);
+        expect((await report('tasks', null)).status).toBe(401);
       });
     });
   },
