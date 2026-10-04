@@ -126,6 +126,14 @@ const nextConfig: NextConfig = {
   // server from `.next/standalone/server.js`. Without this, that dir is never
   // emitted and the Dockerfile's runner stage has nothing to copy.
   output: 'standalone',
+  // geoip-country (src/lib/visitor-country.ts) reads its GeoLite2 data files
+  // from a path built at runtime, which neither bundling nor file tracing can
+  // follow: keep it external and trace the files in explicitly, or the OTP
+  // country check crashes in the standalone build.
+  serverExternalPackages: ['geoip-country'],
+  outputFileTracingIncludes: {
+    '/*': ['./node_modules/geoip-country/data/*.dat'],
+  },
   images: { remotePatterns, dangerouslyAllowLocalIP },
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];

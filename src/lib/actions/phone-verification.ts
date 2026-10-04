@@ -134,7 +134,7 @@ const SECURITY_CHECK_FAILED = /security check failed/i;
 const SECURITY_CHECK_COPY = 'Security check failed. Please try again.';
 
 const OUTSIDE_SERVED_COUNTRIES =
-  "Verification codes can only be requested from Malaysia or Singapore. If you're using a VPN, turn it off and try again.";
+  "Verification codes can only be requested from Malaysia. If you're using a VPN, turn it off and try again.";
 
 /** The visitor's country, or null when unknown. The gate lives here, not in the
  *  backend, because the backend only ever sees this server's egress IP (see

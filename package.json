@@ -50,7 +50,7 @@
     "@medusajs/types": "^2.21.1",
     "@sentry/nextjs": "^10.75.0",
     "clsx": "^2.1.1",
-    "ip3country": "5.0.0",
+    "geoip-country": "5.0.202610030217",
     "libphonenumber-js": "^1.13.14",
     "lucide-react": "^1.48.0",
     "motion": "^13.4.4",

@@ -45,10 +45,10 @@ beforeEach(() => {
 
 describe('startPhoneOtp — visitor country gate', () => {
   const OUTSIDE =
-    "Verification codes can only be requested from Malaysia or Singapore. If you're using a VPN, turn it off and try again.";
+    "Verification codes can only be requested from Malaysia. If you're using a VPN, turn it off and try again.";
 
   it.each(['signup', 'phone-change', 'password-reset'] as const)(
-    'refuses a visitor outside Malaysia and Singapore for %s, before any request',
+    'refuses a visitor outside Malaysia for %s, before any request',
     async (purpose) => {
       visitor.ip = '156.222.253.157'; // Egypt, the 2026-10-03 farming burst
       await expect(startPhoneOtp({ phone: MY, purpose })).resolves.toEqual({
@@ -60,9 +60,20 @@ describe('startPhoneOtp — visitor country gate', () => {
   );
 
   it.each([
-    ['Malaysia', '175.143.0.1'],
     ['Singapore', '202.166.0.1'],
-    ['an IPv6 address (country unknown)', '2405:3800:8fa:b723::1'],
+    ['the United States, as through a VPN', '8.8.8.8'],
+    ['Egypt over IPv6', '2c0f:fc88::1'],
+  ])('refuses a visitor from %s', async (_, ip) => {
+    visitor.ip = ip;
+    await expect(
+      startPhoneOtp({ phone: MY, purpose: 'signup' }),
+    ).resolves.toEqual({ ok: false, error: OUTSIDE });
+    expect(mem.requests).toEqual([]);
+  });
+
+  it.each([
+    ['Malaysia', '175.143.0.1'],
+    ['Malaysia over IPv6', '2405:3800:8fa:b723::1'],
   ])('sends for a visitor from %s', async (_, ip) => {
     visitor.ip = ip;
     await expect(
