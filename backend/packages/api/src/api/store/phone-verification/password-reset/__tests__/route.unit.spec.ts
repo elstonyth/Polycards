@@ -15,10 +15,18 @@ jest.mock('@medusajs/core-flows', () => ({
     run: jest.fn(async () => ({ result: 'reset_token_stub' })),
   })),
 }));
+// Every account here is in a verification-exempt partner group. The route must
+// not consult it — see the exempt case below.
+jest.mock('../../../../../modules/packs/group-policy', () => ({
+  resolveGroupPolicyForCustomer: jest.fn(async () => ({
+    policy: { verification_exempt: true },
+  })),
+}));
 
 import { generateResetPasswordTokenWorkflow } from '@medusajs/core-flows';
 import { POST } from '../route';
 import { signPhoneProof } from '../../../../../utils/phone-verification';
+import { PACKS_MODULE } from '../../../../../modules/packs';
 
 const workflow = generateResetPasswordTokenWorkflow as unknown as jest.Mock;
 /** Call count only — a failing `expect(mock).not.toHaveBeenCalled()`
@@ -34,6 +42,10 @@ const resetProof = () => signPhoneProof(SECRET, PHONE, 'password-reset');
 
 let customers: { id: string; email: string }[];
 const listCustomers = jest.fn(async () => customers);
+
+// customer_account_state.phone_verified_at, as the packs service reads it.
+let phoneVerified: boolean;
+const isPhoneVerified = jest.fn(async (_customerId: string) => phoneVerified);
 
 type Identity = {
   app_metadata: { customer_id?: string };
@@ -57,6 +69,7 @@ const mkReq = (body: Record<string, unknown>) =>
           return { projectConfig: { http: { jwtSecret: SECRET } } };
         if (key === Modules.CUSTOMER) return { listCustomers };
         if (key === Modules.AUTH) return { listAuthIdentities };
+        if (key === PACKS_MODULE) return { isPhoneVerified };
         throw new Error(`unit scope: unexpected resolve('${key}')`);
       },
     },
@@ -88,6 +101,7 @@ const ORIGINAL_ENV = {
 beforeEach(() => {
   jest.clearAllMocks();
   customers = [{ id: 'cus_1', email: EMAIL }];
+  phoneVerified = true;
   identities = [
     {
       app_metadata: { customer_id: 'cus_1' },
@@ -138,6 +152,38 @@ describe('POST /store/phone-verification/password-reset — phone gate on', () =
 
     expect(err.type).toBe(MedusaError.Types.NOT_ALLOWED);
     expect(err.message).toBe('This account signs in with Google.');
+    expect(mintCount()).toBe(0);
+  });
+
+  // A number that never passed an OTP on this account (written while the
+  // flag was off, say) says nothing about who holds the account.
+  it('refuses an account whose phone was never verified, and mints nothing', async () => {
+    phoneVerified = false;
+    const err = await rejection(
+      POST(mkReq({ token: resetProof() }), mkRes() as never),
+    );
+
+    expect(err.type).toBe(MedusaError.Types.NOT_ALLOWED);
+    expect(err.message).toBe(
+      'This phone number is not verified on its account. Reset by email instead.',
+    );
+    expect(isPhoneVerified).toHaveBeenCalledWith('cus_1');
+    expect(mintCount()).toBe(0);
+    // Refused before the login lookup, so the answer says nothing about how
+    // the account signs in.
+    expect(listAuthIdentities.mock.calls.length).toBe(0);
+  });
+
+  // Every account in this file sits in a verification-exempt group (see the
+  // jest.mock at the top). That exemption waives the money/goods gate only; it
+  // does not make an unproven number a way into the account.
+  it('ignores a verification-exempt group: an unverified partner is refused too', async () => {
+    phoneVerified = false;
+    const err = await rejection(
+      POST(mkReq({ token: resetProof() }), mkRes() as never),
+    );
+
+    expect(err.type).toBe(MedusaError.Types.NOT_ALLOWED);
     expect(mintCount()).toBe(0);
   });
 });
