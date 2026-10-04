@@ -7,6 +7,7 @@ import type {
 import Redis from 'ioredis';
 import { E164_RE, type PhoneOtpChannel } from '../../utils/phone-verification';
 import { callbackSourceIp } from './payer-ip';
+import { visitorBucket, vouchedVisitorIp } from './visitor-ip';
 import { deskOf } from '../reports/require-report-key';
 
 const PHONE_OTP_COOLDOWN_MS = 30_000;
@@ -290,6 +291,11 @@ type MiddlewareHandler = (
   next: MedusaNextFunction,
 ) => Promise<void>;
 
+const ipKeyOf = (req: MedusaRequest): string => {
+  const vouched = vouchedVisitorIp(req);
+  return vouched ? visitorBucket(vouched) : (req.ip ?? 'unknown');
+};
+
 /**
  * Express-style middleware. Keys on the authenticated actor id (this must run
  * AFTER authenticate(), which populates req.auth_context); if there is no
@@ -332,9 +338,13 @@ export function createRateLimitMiddleware(
         next();
         return;
       }
+      // No key of its own and no actor: the caller's address. That is the
+      // visitor the storefront vouched for when the request carries a valid
+      // signature (utils/visitor-ip.ts); otherwise req.ip, which on App
+      // Platform is the ingress — one budget shared by every unsigned caller.
       const keys = ownKeys.length
         ? ownKeys
-        : [auth?.actor_id || `ip:${req.ip ?? 'unknown'}`];
+        : [auth?.actor_id || `ip:${ipKeyOf(req)}`];
       // First denial wins. ponytail: the all-or-nothing guarantee holds per
       // key, not across keys — when one of several keys denies, the earlier
       // ones have already recorded their event. Bounded at one extra event on
@@ -525,9 +535,10 @@ const MAX_EMAIL_LEN = 254;
 
 /**
  * Per-identifier key for the credential endpoints — the email sibling of
- * `phoneBodyKeyOf`, for the same shared-egress-IP reason (see the "Phone-OTP
- * limiters" comment below; the storefront issues every login/register/reset
- * from a server action, so the backend sees one egress IP for every visitor).
+ * `phoneBodyKeyOf`, for the same reason (see the "Phone-OTP limiters" comment
+ * below; the storefront issues every login/register/reset from a server
+ * action, so an address key sees the visitor only through the storefront's
+ * signature, and no address key bounds one account against many addresses).
  *
  * Field names verified against the installed packages, not assumed:
  * - `email`      — POST /auth/:actor/emailpass (login) and .../register:
@@ -758,16 +769,18 @@ export const RATE_LIMITS = {
   },
 
   /**
-   * The auth-endpoint limiter, SITEWIDE (login / register / password reset /
+   * The auth-endpoint limiter, PER ADDRESS (login / register / password reset /
    * reset-completion). These routes are PUBLIC — there is no auth_context yet —
-   * so the middleware keys on the request IP (its designed fallback), and the
-   * storefront issues every credential request from a SERVER ACTION
-   * (src/lib/actions/auth.ts is 'use server'; src/lib/medusa.ts forwards no
-   * client headers), so in production that IP is the one Next.js egress IP for
-   * every visitor. This tier is therefore a whole-site CIRCUIT BREAKER, not
-   * per-client fairness — same stance as the `profile-read` and phone-OTP IP
-   * tiers. `auth-identifier` below is the tier that
-   * bounds attempts against ONE account; it runs first (middlewares.ts).
+   * so the middleware keys on the caller's address (its designed fallback).
+   * The storefront issues every credential request from a SERVER ACTION
+   * (src/lib/actions/auth.ts is 'use server'), so that address is the visitor
+   * only when the storefront signed it (utils/visitor-ip.ts). An unsigned
+   * request keys on req.ip — on App Platform the ingress — so for every
+   * unsigned caller together (the admin and vendor dashboards' logins
+   * included) this tier is a whole-site CIRCUIT BREAKER, not per-client
+   * fairness — same stance as the `profile-read` tier. `auth-identifier`
+   * below is the tier that bounds attempts against ONE account; it runs first
+   * (middlewares.ts).
    *
    * Its own defaults object, NOT the shared `DEFAULTS`: that one is also read by
    * `pack-open` / `pack-open-batch`, and widening it in
@@ -795,12 +808,13 @@ export const RATE_LIMITS = {
   /**
    * The auth-endpoint limiter, PER-IDENTIFIER (login / register / password
    * reset). Keys on the email in the request body (`emailBodyKeyOf`) so it
-   * survives the single-egress-IP topology described above — the email sibling
-   * of `phone-otp-start-phone`, and the reason this plan exists: an
-   * IP-only auth limiter is one sitewide bucket, so one user's retries can 429
-   * every other user's sign-in, and anyone who knows that can hold the bucket
-   * empty. Runs BEFORE the IP tier (middlewares.ts) so a hammered account 429s
-   * before spending the sitewide budget.
+   * holds whatever the address tier above can see — the email sibling of
+   * `phone-otp-start-phone`, and the reason this plan exists: an IP-only auth
+   * limiter was one sitewide bucket before the storefront signed its
+   * visitors, so one user's retries could 429 every other user's sign-in, and
+   * an address tier still cannot bound one account against many addresses.
+   * Runs BEFORE the IP tier (middlewares.ts) so a hammered account 429s
+   * before spending the address budget.
    *
    * `skipWhenNoKey` because the '/auth/*' wildcard matcher also covers the
    * emailpass `update` route, which carries no identifier: without it that route
@@ -1024,21 +1038,22 @@ export const RATE_LIMITS = {
   // Phone-OTP limiters are keyed in TWO independent dimensions, both applied
   // (see middlewares.ts): a per-phone tier (below) and this IP tier. Why both —
   // the storefront's phone-verification server actions proxy every OTP request
-  // through the Next.js server (src/lib/actions/phone-verification.ts), so in
-  // production the backend sees exactly ONE egress IP for every visitor. An
-  // IP-only limiter is therefore a SITEWIDE bucket, not per-client fairness:
-  // one user's retries can 429 every other user's signup/change/reset OTPs,
-  // and it's trivially DoS-able by anyone who knows that. The per-phone tier
-  // (`phone-otp-start-phone` / `phone-otp-check-phone`)
-  // keys on the phone number in the request body instead, so it survives the
-  // shared-IP topology and is the real per-client / SMS-cost cap. This IP tier
-  // is kept as a second, deliberately generous circuit breaker against
-  // whole-site SMS-spend abuse — sized above legitimate sitewide traffic, with
-  // Twilio's own Fraud Guard + geo-lock as the upstream defense. Both entries
-  // below build their own env-driven limiter (own Redis connection) rather than
-  // sharing one instance — they are genuinely distinct budgets (per-phone vs.
-  // sitewide), so collapsing them into one shared limiter would silently merge
-  // the two buckets back into the single-bucket bug this split fixes.
+  // through the Next.js server (src/lib/actions/phone-verification.ts), so the
+  // backend sees the visitor only through the address the storefront signs
+  // onto each request (utils/visitor-ip.ts). With a valid signature the IP tier
+  // keys on that visitor (an IPv6 visitor on their /64); without one it keys on
+  // req.ip, which on App Platform is the ingress — ONE bucket for every
+  // unsigned caller, where one caller's retries can 429 everyone else's. The
+  // per-phone tier (`phone-otp-start-phone` / `phone-otp-check-phone`) keys on
+  // the phone number in the request body instead, so it holds either way and
+  // is the real per-number / SMS-cost cap: no address tier bounds a caller
+  // with many addresses. This IP tier is kept as a second, deliberately
+  // generous budget per address, with the sitewide send budget below
+  // (consumeOtpSendBudget) and Twilio's own Fraud Guard + geo-lock as the
+  // spend ceilings. Both entries below build their own env-driven limiter (own
+  // Redis connection) rather than sharing one instance — they are genuinely
+  // distinct budgets (per-phone vs. per-address), so collapsing them into one
+  // shared limiter would silently merge the two buckets back into one.
 
   /**
    * The phone-OTP send limiter, PER-PHONE (POST /store/phone-verification/start).
@@ -1065,11 +1080,11 @@ export const RATE_LIMITS = {
   },
 
   /**
-   * The phone-OTP send limiter, SITEWIDE (POST /store/phone-verification/start).
-   * PUBLIC route — keys on the request IP (its designed fallback), which in
-   * production is the storefront's one egress IP (see the module comment
-   * above) — so this is a whole-storefront SMS-spend circuit breaker, NOT
-   * per-client fairness (`phone-otp-start-phone` is that tier).
+   * The phone-OTP send limiter, PER ADDRESS (POST /store/phone-verification/start).
+   * PUBLIC route — keys on the caller's address (its designed fallback): the
+   * visitor the storefront signed, else req.ip, one bucket for every unsigned
+   * caller (see the module comment above). Not per-number fairness
+   * (`phone-otp-start-phone` is that tier).
    * Env-tunable:
    * PHONE_OTP_START_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 30/60s)
    * PHONE_OTP_START_RATE_LIMIT / _WINDOW_MS (default 300/1h)
@@ -1104,10 +1119,11 @@ export const RATE_LIMITS = {
   },
 
   /**
-   * The phone-OTP check limiter, SITEWIDE (POST /store/phone-verification/check).
-   * PUBLIC — keys on IP, which in production is the storefront's one egress IP
-   * (see the module comment above): a sitewide circuit breaker, not per-client
-   * fairness (`phone-otp-check-phone` is that tier). Env-tunable:
+   * The phone-OTP check limiter, PER ADDRESS (POST /store/phone-verification/check).
+   * PUBLIC — keys on the caller's address: the visitor the storefront signed,
+   * else req.ip, one bucket for every unsigned caller (see the module comment
+   * above). Not per-number fairness (`phone-otp-check-phone` is that tier).
+   * Env-tunable:
    * PHONE_OTP_CHECK_RATE_BURST_LIMIT / _BURST_WINDOW_MS (default 60/60s)
    * PHONE_OTP_CHECK_RATE_LIMIT / _WINDOW_MS (default 600/1h)
    */
@@ -1186,10 +1202,11 @@ export function rateLimit(name: keyof typeof RATE_LIMITS): MiddlewareHandler {
 
 /**
  * SITEWIDE ceiling on real OTP sends — a spend backstop, not a per-client
- * limit. Every other phone-otp tier is keyed per phone or per request IP, and
- * in prod the IP is a Cloudflare edge or a storefront pod, so a pumping run
- * over fresh numbers was bounded by nothing (2026-09: ~44% of 30 days' sends,
- * 229 texts in one 25-minute burst, ~$0.34 each).
+ * limit. Every other phone-otp tier is keyed per phone or per caller address,
+ * and a pumping run brings fresh numbers and as many addresses as it can
+ * rent — before the storefront signed its visitors the address was even one
+ * shared ingress — so such a run was bounded by nothing (2026-09: ~44% of 30
+ * days' sends, 229 texts in one 25-minute burst, ~$0.34 each).
  *
  * Called before the start route's account lookup, so known and unknown reset
  * numbers consume identical state. Counts requests, including no-send exits.
