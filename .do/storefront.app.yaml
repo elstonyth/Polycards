@@ -1,8 +1,9 @@
 # DigitalOcean App Platform spec — polycards-storefront (Next.js 16).
 #
-# COMMITTED IaC (single source of truth). One secret, redacted to a
-# placeholder that scripts/do-apply.ps1 fills from gitignored
-# deploy/.env.deploy (NEXT_SERVER_ACTIONS_ENCRYPTION_KEY, below). The backend
+# COMMITTED IaC (single source of truth). Two secrets, redacted to
+# placeholders that scripts/do-apply.ps1 fills from gitignored
+# deploy/.env.deploy (NEXT_SERVER_ACTIONS_ENCRYPTION_KEY and
+# STOREFRONT_VISITOR_SECRET, below). The backend
 # URL and the publishable key are NEXT_PUBLIC_* (public by design) and are
 # baked at BUILD time, so the backend must already be live before a build.
 #
@@ -194,6 +195,16 @@ services:
         scope: BUILD_TIME
         type: SECRET
         value: __SECRET__NEXT_SERVER_ACTIONS_ENCRYPTION_KEY__
+      # Shared with the backend (.do/backend.app.yaml): signs the visitor's
+      # address onto the backend requests made on their behalf
+      # (src/lib/visitor-ip.ts). RUN_TIME, unlike the key above: server code
+      # reads it per request, so a spec apply reaches it with no rebuild.
+      # Rollout: this app FIRST — signing changes nothing while the backend
+      # lacks the value — and the backend only once this deploy is ACTIVE.
+      - key: STOREFRONT_VISITOR_SECRET
+        scope: RUN_TIME
+        type: SECRET
+        value: __SECRET__STOREFRONT_VISITOR_SECRET__
       # Phone-OTP UI gate. Build-time inlined, so flipping this needs a REBUILD,
       # not a restart — and it must not go true until the backend is already
       # serving /store/phone-verification/* with the Twilio secrets set, or the

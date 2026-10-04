@@ -265,6 +265,20 @@ envs:
     scope: RUN_TIME
     type: SECRET
     value: __SECRET__TURNSTILE_SECRET_KEY__
+  # Shared with the storefront (.do/storefront.app.yaml): checks the visitor
+  # address the storefront signs onto its requests (api/utils/visitor-ip.ts).
+  # Set, it keys the IP rate limits on that visitor and REFUSES
+  # POST /store/phone-verification/start without a valid signature. Apply
+  # only once a storefront deploy carrying the SAME value is ACTIVE, or every
+  # code request is refused. do-apply.ps1 requires every name on its list, so
+  # once the value is in deploy/.env.deploy ANY backend apply arms this, even
+  # one made for an unrelated change: put the value there only when the
+  # storefront goes first. Rollback: drop this entry and its do-apply.ps1
+  # name, then apply (CONTEXT.md → Phone Verification).
+  - key: STOREFRONT_VISITOR_SECRET
+    scope: RUN_TIME
+    type: SECRET
+    value: __SECRET__STOREFRONT_VISITOR_SECRET__
   # Per-purpose Verify TEMPLATE SIDs — the mitigation for the cross-purpose OTP
   # pretext (audit run-5 hardening note). Twilio verifies on (phone, code)
   # ALONE, and the default template reads identically for all three flows, so a

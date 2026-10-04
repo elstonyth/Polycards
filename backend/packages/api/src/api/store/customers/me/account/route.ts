@@ -11,7 +11,7 @@ import { resolveGroupPolicyForCustomer } from '../../../../../modules/packs/grou
 // GET /store/customers/me/account — what the storefront needs to know about an
 // account before it renders anything that depends on the account's state.
 //
-// `hasPassword` is false for a Google-only signup. The storefront raises its
+// `hasPassword` is false for a Google-only account. The storefront raises its
 // required-phone gate only for that password-less cohort: the phone-change
 // route asks a password account for its password, and the gate has no field
 // for it.

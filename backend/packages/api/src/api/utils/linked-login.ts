@@ -1,9 +1,14 @@
 import { Modules } from '@medusajs/framework/utils';
-import type { IAuthModuleService } from '@medusajs/framework/types';
+import type {
+  AuthIdentityDTO,
+  IAuthModuleService,
+  ProviderIdentityDTO,
+} from '@medusajs/framework/types';
 
 /**
  * The email+password login LINKED to this customer — its provider entity_id —
- * or null for an account with no password (Google-only signup).
+ * or null for an account with no password (a Google signup, or an account
+ * store/customers/link-google has attached Google to).
  *
  * "Linked" means the auth identity's app_metadata.customer_id is this
  * customer. Matching on the customer's email instead also finds an UNLINKED
@@ -23,6 +28,24 @@ export async function linkedEmailpassLogin(
   scope: { resolve: <T>(key: string) => T },
   customerId: string,
 ): Promise<string | null> {
+  return (
+    (await linkedEmailpassIdentity(scope, customerId))?.provider.entity_id ??
+    null
+  );
+}
+
+/**
+ * The same password login as linkedEmailpassLogin, as the rows that hold it:
+ * its auth identity (with every provider identity on it) and the emailpass
+ * provider identity itself — for store/customers/link-google, which removes it.
+ */
+export async function linkedEmailpassIdentity(
+  scope: { resolve: <T>(key: string) => T },
+  customerId: string,
+): Promise<{
+  identity: AuthIdentityDTO;
+  provider: ProviderIdentityDTO;
+} | null> {
   const auth = scope.resolve<IAuthModuleService>(Modules.AUTH);
   const identities = await auth.listAuthIdentities(
     { app_metadata: { customer_id: customerId } },
@@ -30,7 +53,7 @@ export async function linkedEmailpassLogin(
   );
   for (const identity of identities) {
     for (const provider of identity.provider_identities ?? []) {
-      if (provider.provider === 'emailpass') return provider.entity_id;
+      if (provider.provider === 'emailpass') return { identity, provider };
     }
   }
   return null;

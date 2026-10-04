@@ -293,6 +293,29 @@ describe('signup — phone verification enforcement (PHONE_VERIFICATION_REQUIRED
     });
   });
 
+  // A spent or expired signup proof. The copy must keep "verif": AuthForm's
+  // draft retry falls through to a fresh code only on /verif/i, so the generic
+  // failure would leave them replaying a dead proof.
+  it('asks for a fresh verification when the signup proof is spent or expired', async () => {
+    backend(TOKENS);
+    mocks.customerCreate.mockRejectedValueOnce(
+      new Error('Phone verification required.'),
+    );
+
+    const r = await signup({
+      email: 'new@polycards.app',
+      password: 'PolycardsTest123!',
+      phone: '010-766 7787',
+      phone_verification_token: 'proof-tok',
+    });
+
+    expect(r).toEqual({
+      ok: false,
+      error:
+        'Your phone verification expired. Please verify your number again.',
+    });
+  });
+
   // The email belongs to a Google account. With a username set, the 422 used
   // to fall through to the status check and read as "That username is taken".
   it('sends an email that belongs to a Google account to Google sign-in, not to a new username', async () => {

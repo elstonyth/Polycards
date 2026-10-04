@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import type {
   MedusaNextFunction,
   MedusaRequest,
@@ -252,6 +253,112 @@ describe('createRateLimitMiddleware', () => {
       rules,
       expect.any(Number),
     );
+  });
+
+  // The storefront signs the visitor's address onto the requests it makes for
+  // them (utils/visitor-ip.ts). A pair that verifies IS the caller's address;
+  // anything less keys on req.ip exactly as before — never on a header value
+  // the caller wrote.
+  describe('the IP key', () => {
+    const SECRET = 'visitor-secret';
+    const signed = (
+      ip: string,
+      { secret = SECRET, ageS = 0 }: { secret?: string; ageS?: number } = {},
+    ) => {
+      const ts = Math.floor(Date.now() / 1000) - ageS;
+      const mac = createHmac('sha256', secret)
+        .update(`${ip}|${ts}`)
+        .digest('hex');
+      return { 'x-visitor-ip': ip, 'x-visitor-sig': `${ts}.${mac}` };
+    };
+    const keysFor = async (
+      req: MedusaRequest,
+      keyOf?: (req: MedusaRequest) => string | undefined,
+    ): Promise<string[]> => {
+      const consume = jest
+        .fn()
+        .mockResolvedValue({ allowed: true, retryAfterMs: 0 });
+      const mw = createRateLimitMiddleware({
+        store: { consume },
+        rules,
+        prefix: 'rl:t:',
+        keyOf,
+      });
+      await mw(req, makeRes().res, jest.fn() as unknown as MedusaNextFunction);
+      return consume.mock.calls.map(([key]) => key as string);
+    };
+
+    const ORIGINAL = process.env.STOREFRONT_VISITOR_SECRET;
+    beforeEach(() => {
+      process.env.STOREFRONT_VISITOR_SECRET = SECRET;
+    });
+    afterEach(() => {
+      if (ORIGINAL === undefined) delete process.env.STOREFRONT_VISITOR_SECRET;
+      else process.env.STOREFRONT_VISITOR_SECRET = ORIGINAL;
+    });
+
+    it('keys on the visitor the storefront vouched for', async () => {
+      expect(
+        await keysFor(makeReq({ headers: signed('175.143.0.1') })),
+      ).toEqual(['rl:t:ip:175.143.0.1']);
+    });
+
+    it('keys two addresses in one IPv6 /64 on one bucket, and another /64 apart', async () => {
+      const bucketOf = async (ip: string) =>
+        keysFor(makeReq({ headers: signed(ip) }));
+      expect(await bucketOf('2405:3800:8fa:b723::1')).toEqual([
+        'rl:t:ip:2405:3800:8fa:b723::/64',
+      ]);
+      expect(await bucketOf('2405:3800:8fa:b723:9c1e:4d2a:77f0:1b3c')).toEqual([
+        'rl:t:ip:2405:3800:8fa:b723::/64',
+      ]);
+      expect(await bucketOf('2405:3800:8fa:b724::1')).toEqual([
+        'rl:t:ip:2405:3800:8fa:b724::/64',
+      ]);
+    });
+
+    it.each([
+      ['an address with no signature', { 'x-visitor-ip': '175.143.0.1' }],
+      ['an ingress header alone', { 'do-connecting-ip': '175.143.0.1' }],
+      [
+        'a pair signed with another secret',
+        signed('175.143.0.1', { secret: 'other-secret' }),
+      ],
+      [
+        'a pair whose address was changed after signing',
+        { ...signed('175.143.0.1'), 'x-visitor-ip': '175.143.0.2' },
+      ],
+      ['a stale pair', signed('175.143.0.1', { ageS: 301 })],
+    ])('keys on req.ip for %s', async (_, headers) => {
+      expect(await keysFor(makeReq({ headers }))).toEqual(['rl:t:ip:10.0.0.1']);
+    });
+
+    // Rollout order: the storefront signs first; until the backend has the
+    // secret too, keys stay exactly what they were.
+    it('keys on req.ip while the secret is unset', async () => {
+      delete process.env.STOREFRONT_VISITOR_SECRET;
+      expect(
+        await keysFor(makeReq({ headers: signed('175.143.0.1') })),
+      ).toEqual(['rl:t:ip:10.0.0.1']);
+    });
+
+    it('still keys on the actor, and on keyOf, ahead of a vouched visitor', async () => {
+      const headers = signed('175.143.0.1');
+      expect(
+        await keysFor(
+          makeReq({
+            headers,
+            auth_context: { actor_id: 'cus_7', actor_type: 'customer' },
+          }),
+        ),
+      ).toEqual(['rl:t:cus_7']);
+      expect(
+        await keysFor(
+          makeReq({ headers, body: { phone: '+60123456789' } }),
+          phoneBodyKeyOf,
+        ),
+      ).toEqual(['rl:t:phone:+60123456789']);
+    });
   });
 
   // Finding 1 (phone-verification pre-merge review): a route fronted by a
@@ -1038,9 +1145,9 @@ describe("rateLimit('admin-action')", () => {
       rules: [{ limit: 60, windowMs: 60_000 }],
       prefix: 'rl:admin-action:',
     });
-    const noAuthReq = { ip: '192.168.1.1' } as unknown as MedusaRequest;
+    const anonymousReq = { ip: '192.168.1.1' } as unknown as MedusaRequest;
     await mw(
-      noAuthReq,
+      anonymousReq,
       makeRes().res,
       jest.fn() as unknown as MedusaNextFunction,
     );

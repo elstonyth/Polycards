@@ -24,7 +24,7 @@ const makeReq = (
     body,
     headers,
     scope: {
-      // Only the two keys the guards actually resolve. A catch-all would hand a
+      // Only the keys the guards actually resolve. A catch-all would hand a
       // future guard a customer-module stub for whatever it asked for and pass
       // vacuously.
       resolve: (key: string) => {
@@ -32,17 +32,45 @@ const makeReq = (
           return { projectConfig: { http: { jwtSecret: SECRET } } };
         if (key === Modules.CUSTOMER)
           return { listCustomers: async () => claimants };
+        if (key === 'logger') return { warn: () => undefined };
         return undefined;
       },
     },
   }) as never;
 
+// The response as the signup guard sees it: a status code, read once the
+// response has finished. `finish(status)` plays the create route answering.
+const makeRes = () => {
+  const finishers: (() => void)[] = [];
+  const res = {
+    statusCode: 200,
+    on: (event: string, cb: () => void) => {
+      if (event === 'finish') finishers.push(cb);
+      return res;
+    },
+  };
+  return {
+    res: res as never,
+    finish: (status: number) => {
+      res.statusCode = status;
+      finishers.forEach((cb) => cb());
+    },
+  };
+};
+
 describe('requireSignupPhoneProof', () => {
-  // Capture whatever this key was before the suite (a stray-set env, e.g. a
+  // Capture whatever these keys were before the suite (a stray-set env, e.g. a
   // gitignored local .env, must not leak a permanent delete into other spec
-  // files sharing this jest worker process) and restore it once, at the end.
+  // files sharing this jest worker process) and restore them once, at the end.
+  // REDIS_URL is cleared so the proof claims below use the per-process store;
+  // the "on Redis" cases load their own copy of the module.
   const ORIGINAL_PHONE_VERIFICATION_REQUIRED =
     process.env.PHONE_VERIFICATION_REQUIRED;
+  const ORIGINAL_REDIS_URL = process.env.REDIS_URL;
+  const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+  beforeAll(() => {
+    delete process.env.REDIS_URL;
+  });
   afterAll(() => {
     if (ORIGINAL_PHONE_VERIFICATION_REQUIRED === undefined) {
       delete process.env.PHONE_VERIFICATION_REQUIRED;
@@ -50,16 +78,24 @@ describe('requireSignupPhoneProof', () => {
       process.env.PHONE_VERIFICATION_REQUIRED =
         ORIGINAL_PHONE_VERIFICATION_REQUIRED;
     }
+    if (ORIGINAL_REDIS_URL === undefined) delete process.env.REDIS_URL;
+    else process.env.REDIS_URL = ORIGINAL_REDIS_URL;
   });
 
   // Stands in for the framework's wrapHandler (framework/dist/http/router.js
   // registers every defineMiddlewares entry through it): await the handler and
   // funnel a throw into the same `next(err)` channel, so a rejection and a
   // next(err) are indistinguishable here exactly as they are in the app.
-  const run = (req: never) =>
+  const runWith = (
+    guard: typeof requireSignupPhoneProof,
+    req: never,
+    res: never = makeRes().res,
+  ) =>
     new Promise<unknown>((resolve) => {
-      requireSignupPhoneProof(req, {} as never, resolve).catch(resolve);
+      guard(req, res, resolve).catch(resolve);
     });
+  const run = (req: never, res?: never) =>
+    runWith(requireSignupPhoneProof, req, res);
 
   it('passes untouched when enforcement is off', async () => {
     delete process.env.PHONE_VERIFICATION_REQUIRED;
@@ -141,6 +177,223 @@ describe('requireSignupPhoneProof', () => {
       ).toBeInstanceOf(Error);
     });
   });
+
+  // One signup proof, one account. A distinct number per case: two proofs
+  // signed in the same millisecond for one number are byte-identical, and
+  // would share one claim.
+  let seq = 0;
+  const freshProof = (nowMs?: number) => {
+    const phone = `+6011${String(1_000_000 + seq++)}`;
+    return { phone, token: signPhoneProof(SECRET, phone, 'signup', nowMs) };
+  };
+  const signupReq = (
+    proof: { phone: string; token: string },
+    claimants: { id: string }[] = [],
+  ) =>
+    makeReq(
+      { phone: proof.phone },
+      { 'x-phone-verification': proof.token },
+      claimants,
+    );
+
+  describe('single-use proofs', () => {
+    beforeEach(() => {
+      process.env.PHONE_VERIFICATION_REQUIRED = 'true';
+    });
+    afterEach(() => {
+      delete process.env.PHONE_VERIFICATION_REQUIRED;
+    });
+
+    it('refuses a proof that already created an account, exactly like a missing one', async () => {
+      const proof = freshProof();
+      const first = makeRes();
+      expect(await run(signupReq(proof), first.res)).toBeUndefined();
+      first.finish(200);
+
+      const replay = (await run(signupReq(proof))) as MedusaError;
+      const missing = (await run(
+        makeReq({ phone: proof.phone }),
+      )) as MedusaError;
+      expect(replay).toBeInstanceOf(MedusaError);
+      expect(replay.type).toBe(missing.type);
+      expect(replay.message).toBe(missing.message);
+    });
+
+    it('refuses a second use while the first signup is still being created', async () => {
+      const proof = freshProof();
+      expect(await run(signupReq(proof))).toBeUndefined(); // never finishes
+      const second = (await run(signupReq(proof))) as Error;
+      expect(second.message).toBe('Phone verification required.');
+    });
+
+    // Both requests pass the proof check and see the number free before
+    // either claims — the claim alone decides.
+    it('lets one of two concurrent signups on one proof through', async () => {
+      const proof = freshProof();
+      const results = await Promise.all([
+        run(signupReq(proof)),
+        run(signupReq(proof)),
+      ]);
+      expect(results.filter((r) => r === undefined)).toHaveLength(1);
+      expect(
+        (results.find((r) => r !== undefined) as Error).message,
+      ).toBe('Phone verification required.');
+    });
+
+    it('gives the proof back when the account create fails', async () => {
+      const proof = freshProof();
+      const first = makeRes();
+      expect(await run(signupReq(proof), first.res)).toBeUndefined();
+      first.finish(400);
+      expect(await run(signupReq(proof))).toBeUndefined();
+    });
+
+    it('does not spend the proof on a number another account holds', async () => {
+      const proof = freshProof();
+      const dup = (await run(
+        signupReq(proof, [{ id: 'cus_existing' }]),
+      )) as Error;
+      expect(dup.message).toMatch(/already in use/i);
+      expect(await run(signupReq(proof))).toBeUndefined();
+    });
+
+    it('claims nothing while enforcement is off', async () => {
+      delete process.env.PHONE_VERIFICATION_REQUIRED;
+      const proof = freshProof();
+      expect(await run(signupReq(proof))).toBeUndefined();
+      expect(await run(signupReq(proof))).toBeUndefined();
+    });
+
+    it('is opened at boot, not by the first signup', () => {
+      // A client still connecting refuses its first command, and the claim
+      // fails closed — see warmOtpSendBudget for the incident.
+      const src = require('fs').readFileSync(
+        require('path').join(__dirname, '../../middlewares.ts'),
+        'utf8',
+      );
+      expect(src).toContain('\nwarmSignupProofClaims();\n');
+    });
+  });
+
+  describe('single-use proofs on Redis', () => {
+    // Honours SET key value PX ms NX the way Redis does. `down` makes every
+    // command fail the way ioredis does with the connection gone.
+    class FakeRedis {
+      static held = new Map<string, number>();
+      static sets: unknown[][] = [];
+      static dels: string[] = [];
+      static down = false;
+      on() {
+        return this;
+      }
+      async connect() {}
+      async set(key: string, ...args: unknown[]) {
+        if (FakeRedis.down) throw new Error('Connection is closed.');
+        FakeRedis.sets.push([key, ...args]);
+        const ttl = args[2] as number; // value, 'PX', ttl, 'NX'
+        if ((FakeRedis.held.get(key) ?? 0) > Date.now()) return null;
+        FakeRedis.held.set(key, Date.now() + ttl);
+        return 'OK';
+      }
+      async del(key: string) {
+        if (FakeRedis.down) throw new Error('Connection is closed.');
+        FakeRedis.dels.push(key);
+        return FakeRedis.held.delete(key) ? 1 : 0;
+      }
+    }
+    const load = () => {
+      let guard!: typeof requireSignupPhoneProof;
+      jest.isolateModules(() => {
+        jest.doMock('ioredis', () => ({
+          __esModule: true,
+          default: FakeRedis,
+        }));
+        guard = require('../phone-verification-guard').requireSignupPhoneProof;
+      });
+      return guard;
+    };
+
+    beforeEach(() => {
+      process.env.PHONE_VERIFICATION_REQUIRED = 'true';
+      process.env.REDIS_URL = 'redis://fake';
+      FakeRedis.held.clear();
+      FakeRedis.sets = [];
+      FakeRedis.dels = [];
+      FakeRedis.down = false;
+    });
+    afterEach(() => {
+      jest.dontMock('ioredis');
+      delete process.env.PHONE_VERIFICATION_REQUIRED;
+      delete process.env.REDIS_URL;
+      if (ORIGINAL_NODE_ENV === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = ORIGINAL_NODE_ENV;
+    });
+
+    it('claims a hash of the proof, never the proof, for its remaining lifetime', async () => {
+      const guard = load();
+      const proof = freshProof(Date.now() - 4 * 60_000); // 6 minutes left
+      expect(await runWith(guard, signupReq(proof))).toBeUndefined();
+
+      expect(FakeRedis.sets).toHaveLength(1);
+      const [key, value, px, ttl, nx] = FakeRedis.sets[0];
+      expect(key).toMatch(/^phone-proof:signup:[0-9a-f]{64}$/);
+      expect(value).not.toBe(proof.token);
+      expect([px, nx]).toEqual(['PX', 'NX']);
+      expect(ttl).toBeGreaterThan(5 * 60_000);
+      expect(ttl).toBeLessThanOrEqual(6 * 60_000);
+    });
+
+    it('refuses a replay, and gives the proof back after a failed create', async () => {
+      const guard = load();
+      const proof = freshProof();
+      const first = makeRes();
+      expect(await runWith(guard, signupReq(proof), first.res)).toBeUndefined();
+      expect(
+        ((await runWith(guard, signupReq(proof))) as Error).message,
+      ).toBe('Phone verification required.');
+
+      first.finish(500);
+      await new Promise((r) => setImmediate(r));
+      expect(FakeRedis.dels).toEqual([FakeRedis.sets[0][0]]);
+      expect(await runWith(guard, signupReq(proof))).toBeUndefined();
+    });
+
+    it('lets one of two concurrent signups on one proof through', async () => {
+      const guard = load();
+      const proof = freshProof();
+      const results = await Promise.all([
+        runWith(guard, signupReq(proof)),
+        runWith(guard, signupReq(proof)),
+      ]);
+      expect(results.filter((r) => r === undefined)).toHaveLength(1);
+    });
+
+    // Fail CLOSED: another process cannot see a claim this one keeps in
+    // memory, so letting the signup through would let each replica accept
+    // the same proof once. (Matched on shape, not instanceof: the isolated
+    // module carries its own copy of MedusaError.)
+    const RETRYABLE = {
+      type: MedusaError.Types.NOT_ALLOWED,
+      message: 'Could not verify your phone right now. Try again shortly.',
+    };
+
+    it('refuses with a retryable error when Redis is unreachable', async () => {
+      const guard = load();
+      FakeRedis.down = true;
+      expect(await runWith(guard, signupReq(freshProof()))).toMatchObject(
+        RETRYABLE,
+      );
+    });
+
+    it('refuses in production when no Redis is configured', async () => {
+      delete process.env.REDIS_URL;
+      process.env.NODE_ENV = 'production';
+      const guard = load();
+      expect(await runWith(guard, signupReq(freshProof()))).toMatchObject(
+        RETRYABLE,
+      );
+    });
+  });
 });
 
 describe('blockUnverifiedPhoneWrite', () => {
@@ -161,9 +414,14 @@ describe('blockUnverifiedPhoneWrite', () => {
       blockUnverifiedPhoneWrite(req, {} as never, resolve),
     );
 
-  it('passes when enforcement is off', async () => {
+  it.each([
+    ['a number', { phone: PHONE }],
+    ['null', { phone: null }],
+    ['an empty string', { phone: '' }],
+    ['no phone key', { first_name: 'A' }],
+  ])('passes %s when enforcement is off', async (_label, body) => {
     delete process.env.PHONE_VERIFICATION_REQUIRED;
-    expect(await run(makeReq({ phone: PHONE }))).toBeUndefined();
+    expect(await run(makeReq(body))).toBeUndefined();
   });
   describe('enforcement on', () => {
     beforeEach(() => {
@@ -173,12 +431,21 @@ describe('blockUnverifiedPhoneWrite', () => {
       delete process.env.PHONE_VERIFICATION_REQUIRED;
     });
 
-    it('rejects a string phone', async () => {
-      expect(await run(makeReq({ phone: PHONE }))).toBeInstanceOf(Error);
+    // Presence, not type: clearing the number here would keep the account's
+    // phone_verified_at stamp and free the number for another signup.
+    it.each([
+      ['a number', PHONE],
+      ['null', null],
+      ['an empty string', ''],
+    ])('refuses %s', async (_label, phone) => {
+      const err = (await run(makeReq({ phone }))) as MedusaError;
+      expect(err).toBeInstanceOf(MedusaError);
+      expect(err.type).toBe(MedusaError.Types.INVALID_DATA);
+      expect(err.message).toBe('Phone changes require verification.');
     });
-    it('allows clearing (null) and phoneless updates', async () => {
-      expect(await run(makeReq({ phone: null }))).toBeUndefined();
+    it('passes an update with no phone key, or no body', async () => {
       expect(await run(makeReq({ first_name: 'A' }))).toBeUndefined();
+      expect(await run(makeReq(undefined))).toBeUndefined();
     });
   });
 });

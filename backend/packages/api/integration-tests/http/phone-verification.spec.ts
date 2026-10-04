@@ -845,12 +845,11 @@ medusaIntegrationTestRunner({
         // cannot catch a matcher that misses /store/customers or a helper that
         // resolves the wrong module.
         //
-        // The replay is the real attack, not a contrivance: a signup proof is
-        // purpose-scoped but NOT single-use and lives 10 minutes, so one OTP
-        // buys as many create attempts as fit in the window. The check route
-        // refuses the SECOND request for a claimed number (next case), which is
-        // exactly why the second account can only be attempted by replaying the
-        // first proof — and why the middleware has to refuse it too.
+        // The second attempt replays the first proof on purpose: the check
+        // route refuses a new proof for a claimed number (next case), so a
+        // replay is the only way left to try. Signup proofs are single-use
+        // (requireSignupPhoneProof's Redis claim), but the claim is taken after
+        // this duplicate check, so the refusal still names the number.
         it("refuses a second account on a number already claimed, even replaying the proof", async () => {
           const phone = "+60199999993";
           const tokenA = await register("gated-dup-a@test.dev");

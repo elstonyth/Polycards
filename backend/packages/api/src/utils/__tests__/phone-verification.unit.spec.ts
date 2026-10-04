@@ -262,9 +262,12 @@ describe('sms destination allowlist', () => {
 });
 
 describe('proof token', () => {
-  it('round-trips phone + purpose', () => {
-    const token = signPhoneProof(SECRET, PHONE, 'signup');
-    expect(verifyPhoneProof(SECRET, token, 'signup')).toEqual({ phone: PHONE });
+  it('round-trips phone + purpose, and says when the proof dies', () => {
+    const token = signPhoneProof(SECRET, PHONE, 'signup', 1_000);
+    expect(verifyPhoneProof(SECRET, token, 'signup', 1_000)).toEqual({
+      phone: PHONE,
+      exp: 1_000 + 10 * 60_000,
+    });
   });
   it('rejects wrong purpose', () => {
     const token = signPhoneProof(SECRET, PHONE, 'signup');
@@ -470,6 +473,6 @@ describe('empty-secret guard', () => {
 
   it('still signs and verifies with a real secret', () => {
     const token = signPhoneProof(SECRET, PHONE, 'signup');
-    expect(verifyPhoneProof(SECRET, token, 'signup')).toEqual({ phone: PHONE });
+    expect(verifyPhoneProof(SECRET, token, 'signup')).toMatchObject({ phone: PHONE });
   });
 });

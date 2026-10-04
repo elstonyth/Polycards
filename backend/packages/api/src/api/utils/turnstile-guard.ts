@@ -10,16 +10,19 @@ import { MedusaError } from '@medusajs/framework/utils';
 // That route is public and every call it lets through bills a real SMS
 // (Malaysia: $0.3389 a segment) or a voice call. Its other limits cannot tell a
 // script from a person: the per-phone tier is useless against a pumping run
-// over fresh numbers, the IP tier sees a Cloudflare edge or the storefront pod
-// (one bucket for everyone), and the sitewide budget only turns the spend into
-// a lockout of real customers once a bot drains it. On 2026-10-01 a script was
-// still requesting a signup code for a fresh +60 number every ten minutes
-// through the storefront's server action and never checking one. A human check
-// per send is the control that tells them apart.
+// over fresh numbers, the IP tier at best sees one address per visitor (the
+// storefront's signature, utils/visitor-ip.ts) and a run can rotate those
+// too, and the sitewide budget only turns the spend into a lockout of real
+// customers once a bot drains it. On 2026-10-01 a script was still requesting
+// a signup code for a fresh +60 number every ten minutes through the
+// storefront's server action and never checking one. A human check per send
+// is the control that tells them apart.
 //
-// Runs FIRST on the start matcher (middlewares.ts), so a request without a
-// valid token spends neither a per-phone slot nor the sitewide budget, and the
-// refusal is identical for every purpose — it says nothing about accounts.
+// Runs ahead of both limiter tiers on the start matcher (middlewares.ts; only
+// the storefront-signature check, which costs no network call, runs before
+// it), so a request without a valid token spends neither a per-phone slot nor
+// the sitewide budget, and the refusal is identical for every purpose — it
+// says nothing about accounts.
 //
 // TURNSTILE_SECRET_KEY unset = skip. That is how this ships dark, and unsetting
 // it is the rollback lever. Set it only once a storefront build carrying
