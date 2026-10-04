@@ -311,6 +311,56 @@ medusaIntegrationTestRunner({
         expect((await report('challenge?week=current')).status).toBe(200);
         expect((await report('challenge?week=last')).status).toBe(400);
       });
+
+      it('reads the next challenge waiting in the queue, and draws its poster', async () => {
+        expect((await report('challenge?week=next')).status).toBe(404);
+        const startsAt = new Date(Date.now() + 3 * DAY_MS);
+        await packs().createChallengeSchedules([
+          {
+            starts_at: startsAt,
+            label: 'Next week',
+            // A json column: the model types it as a record.
+            stages: [
+              {
+                stage_number: 1,
+                threshold_myr: 5000,
+                rank_rewards: [
+                  { rank: 2, card_id: null, credits: 300 },
+                  { rank: 1, card_id: cyId, credits: 0 },
+                ],
+              },
+            ] as unknown as Record<string, unknown>,
+          },
+        ]);
+        const res = await report('challenge?week=next');
+        expect(res.status).toBe(200);
+        expect(res.data).toMatchObject({
+          queued: true,
+          starts_at: startsAt.toISOString(),
+          label: 'Next week',
+          stages: [
+            {
+              stage: 1,
+              threshold_myr: 5000,
+              prizes: [
+                { rank: 1, card: 'Y Card', card_image: '/x.webp', credits: 0 },
+                { rank: 2, card: null, card_image: null, credits: 300 },
+              ],
+            },
+          ],
+        });
+        const poster = await unwrapResponse(
+          api.get('/reports/growth/challenge-poster?week=next', {
+            headers: { 'x-report-key': GROWTH_KEY },
+            responseType: 'arraybuffer',
+          }),
+        );
+        expect(poster.status).toBe(200);
+        expect((await sharp(Buffer.from(poster.data)).metadata()).format).toBe(
+          'jpeg',
+        );
+        expect((await report('challenge-poster?week=last')).status).toBe(400);
+      });
     });
 
     describe('GET /reports/growth/signups', () => {

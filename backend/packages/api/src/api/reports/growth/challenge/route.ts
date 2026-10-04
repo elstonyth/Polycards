@@ -7,6 +7,7 @@ import {
   unlockedStages,
 } from '../../../../modules/packs/challenge-settle';
 import { buildChallengeView } from '../../../store/challenge/build';
+import { nextQueuedChallenge } from './queued';
 
 const round2 = (x: number) => Math.round(x * 100) / 100;
 
@@ -16,22 +17,57 @@ const round2 = (x: number) => Math.round(x * 100) / 100;
 // how far off the next one is, and what the top 10 would get if the week
 // ended now. No player ids and no player groups.
 //
-// Running week only, on purpose: an ended week recomputed live would use
-// today's FX rate and whatever prize ladder was promoted after settlement, so
-// it could announce prizes nobody was paid. What a past week actually paid
-// lives in the settlement snapshot and needs its own report.
+// ?week=next serves the next edition waiting in the admin queue instead
+// (challenge_schedule): its start, label, thresholds and prizes.
+//
+// No past weeks, on purpose: an ended week recomputed live would use today's
+// FX rate and whatever prize ladder was promoted after settlement, so it could
+// announce prizes nobody was paid. What a past week actually paid lives in
+// the settlement snapshot (/admin/challenge/winners, via the admin proxy).
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  if (req.query.week !== undefined && req.query.week !== 'current') {
+  const which = req.query.week ?? 'current';
+  if (which !== 'current' && which !== 'next') {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      'Only the running challenge week is available.',
+      'week must be current (the running week) or next (the next one queued). Past weeks: /admin/challenge/winners.',
     );
   }
-  const { body, hiddenAboveCut, week } = await buildChallengeView(req.scope);
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  if (which === 'next') {
+    const queued = await nextQueuedChallenge(packs);
+    if (!queued) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        'No challenge is waiting in the admin queue.',
+      );
+    }
+    const settings = await packs.challengeSettings();
+    res.json({
+      currency: 'MYR',
+      queued: true,
+      starts_at: queued.startsAt.toISOString(),
+      timezone: settings.timezone,
+      label: queued.label,
+      stages: queued.stages.map((s) => ({
+        stage: s.stageNumber,
+        threshold_myr: s.thresholdMyr,
+        prizes: s.rankRewards.map((r) => ({
+          rank: r.rank,
+          card: r.cardId
+            ? (queued.cards[r.cardId]?.name ?? 'a prize card')
+            : null,
+          card_image: r.cardId ? (queued.cards[r.cardId]?.image ?? null) : null,
+          credits: r.credits,
+        })),
+      })),
+      note: 'The next challenge in the admin queue. It takes over at starts_at; until then the running week stands. Nothing is unlocked yet: the pool starts at 0 when it begins, and each stage pays its prizes once the pool reaches its threshold, adding up across stages as the running week does.',
+    });
+    return;
+  }
+  const { body, hiddenAboveCut, week } = await buildChallengeView(req.scope);
   const bounds = await packs.challengeWeekBounds(week);
   const pool = body.progress.pooledMyr;
   const cardName = (id: string | null) =>

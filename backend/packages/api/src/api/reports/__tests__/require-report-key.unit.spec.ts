@@ -66,7 +66,8 @@ describe('deskOf', () => {
     ['/reports/FINANCE/economy', 'finance'],
     ['/REPORTS/finance/economy', 'finance'],
     ['/reports/store/packs', 'store'],
-    ['/reports/admin/economy', null],
+    ['/reports/nope/economy', null],
+    ['/reports/admin/read', 'admin'],
     ['/reports', null],
     ['/reports/', null],
     ['/reports//finance/economy', null],
@@ -144,7 +145,7 @@ describe('requireReportKey', () => {
   });
 
   it('refuses an unknown desk whatever key is sent', () => {
-    const { res } = run('/reports/admin/economy', { 'x-report-key': FINANCE });
+    const { res } = run('/reports/nope/economy', { 'x-report-key': FINANCE });
     expect(res.statusCode).toBe(401);
     // The earliest return: the header must not wait for the key checks.
     expect(res.headers['cache-control']).toBe('no-store');

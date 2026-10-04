@@ -17,7 +17,10 @@ import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 // as unset. The comparison is constant-time and every refusal is the same
 // bare 401.
 export const REPORT_DESKS = ['finance', 'store', 'support', 'growth'] as const;
-export type ReportDesk = (typeof REPORT_DESKS)[number];
+// The report areas a path may name: every desk's, plus `admin`, the desk
+// bots' read-only admin proxy (reports/admin/proxy.ts), which any key opens.
+const REPORT_AREAS = [...REPORT_DESKS, 'admin'] as const;
+export type ReportDesk = (typeof REPORT_AREAS)[number];
 // The desks holding a key: every report desk, plus Developer, which has no
 // reports of its own.
 const KEY_OWNERS = [...REPORT_DESKS, 'developer'] as const;
@@ -41,7 +44,7 @@ export const reportCallerOf = (req: MedusaRequest): ReportCaller | null =>
 export function deskOf(originalUrl: string): ReportDesk | null {
   const pathname = originalUrl.split(/[?#]/, 1)[0];
   const segment = /^\/reports\/([^/]+)/i.exec(pathname)?.[1]?.toLowerCase();
-  return REPORT_DESKS.find((desk) => desk === segment) ?? null;
+  return REPORT_AREAS.find((desk) => desk === segment) ?? null;
 }
 
 export function requireReportKey() {
