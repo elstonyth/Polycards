@@ -58,6 +58,8 @@ export async function getReport({
         levels: res.headers.get('x-poster-levels') ?? '',
         // Levels left off because their prize no longer exists.
         skipped: res.headers.get('x-poster-skipped') ?? '',
+        // What the poster left off or could not draw, in plain words.
+        note: res.headers.get('x-poster-note') ?? '',
       };
     throw new ReportError(
       'The backend sent an unreadable image. Try again in a minute.',

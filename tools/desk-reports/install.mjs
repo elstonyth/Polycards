@@ -27,8 +27,9 @@ cpSync(
   join(here, 'hooks', 'stamp-logo.py'),
   join(target, 'hooks', 'stamp-logo.py'),
 );
-// The Growth desk's 12 a.m. cron pre-run script: Hermes runs scripts only
-// from the profile's own scripts folder.
+// The Growth desk's cron scripts (the 12 a.m. drop, its Excel, the Monday
+// 9 a.m. posts): Hermes runs scripts only from the profile's own scripts
+// folder.
 const growthScripts = join(
   process.env.LOCALAPPDATA,
   'hermes',
@@ -37,7 +38,7 @@ const growthScripts = join(
   'scripts',
 );
 mkdirSync(growthScripts, { recursive: true });
-for (const script of ['daily_hits.py', 'daily_excel.py']) {
+for (const script of ['daily_hits.py', 'daily_excel.py', 'weekly_posts.py']) {
   cpSync(join(here, 'cron', script), join(growthScripts, script));
 }
 // npm is npm.cmd on Windows, which needs a shell to start.

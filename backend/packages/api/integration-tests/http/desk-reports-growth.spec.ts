@@ -361,6 +361,187 @@ medusaIntegrationTestRunner({
         );
         expect((await report('challenge-poster?week=last')).status).toBe(400);
       });
+
+      it('draws every stage of the running or the queued challenge on one poster', async () => {
+        const poster = (query = '') =>
+          unwrapResponse(
+            api.get(`/reports/growth/challenge-stages-poster${query}`, {
+              headers: { 'x-report-key': GROWTH_KEY },
+              responseType: 'arraybuffer',
+            }),
+          );
+        const res = await poster();
+        expect(res.status).toBe(200);
+        expect(res.headers['content-type']).toMatch(/^image\/jpeg/);
+        const meta = await sharp(Buffer.from(res.data)).metadata();
+        expect([meta.format, meta.width]).toEqual(['jpeg', 1080]);
+        // Both stages' #1 card; the seeded art is served by nobody here.
+        expect(res.headers['x-poster-missing-art']).toBe('1:1,2:1');
+
+        expect((await report('challenge-stages-poster?week=next')).status).toBe(
+          404,
+        );
+        await packs().createChallengeSchedules([
+          {
+            starts_at: new Date(Date.now() + 3 * DAY_MS),
+            label: null,
+            stages: [
+              {
+                stage_number: 1,
+                threshold_myr: 5000,
+                rank_rewards: [{ rank: 1, card_id: cyId, credits: 0 }],
+              },
+            ] as unknown as Record<string, unknown>,
+          },
+        ]);
+        const next = await poster('?week=next');
+        expect(next.status).toBe(200);
+        expect(next.headers['x-poster-missing-art']).toBe('1:1');
+        expect((await report('challenge-stages-poster?week=last')).status).toBe(
+          400,
+        );
+      });
+
+      it("reports last week's results as settlement paid them, public names only", async () => {
+        expect((await report('challenge-results')).status).toBe(404);
+        expect((await report('challenge-results-poster')).status).toBe(404);
+
+        const s = await packs().challengeSettings();
+        const last = await packs().challengeWeekBounds({
+          timezone: s.timezone,
+          resetDay: s.reset_day,
+          resetHour: s.reset_hour,
+          weeksBack: 1,
+        });
+        const [real] = await customers().listCustomers(
+          { email: 'gp-real@test.dev' },
+          { take: 1 },
+        );
+        const lastWeek = new Date(last.startUtc.getTime() + DAY_MS);
+        await packs().createPulls([
+          ...[1, 2].map(() => ({
+            customer_id: real.id,
+            pack_id: GP_PACK,
+            card_id: GX,
+            rolled_at: lastWeek,
+            source: 'pack' as const,
+          })),
+          {
+            customer_id: 'cus_gp_w2',
+            pack_id: GP_PACK,
+            card_id: GY,
+            rolled_at: lastWeek,
+            source: 'pack' as const,
+          },
+        ]);
+        const snap = { pool_myr: 5000, unlocked_stages: [1, 2] };
+        const payout = (
+          customer_id: string,
+          rank: number,
+          kind: 'card' | 'credits',
+          card_id: string,
+          credits: number,
+          extra: Record<string, unknown> = {},
+        ) => ({
+          week_start: last.startUtc,
+          customer_id,
+          rank,
+          kind,
+          card_id,
+          credits,
+          snapshot: { ...snap, ...extra } as unknown as Record<string, unknown>,
+        });
+        await packs().createChallengePayouts([
+          payout(real.id, 1, 'card', cxId, 0, { qty: 2 }),
+          payout(real.id, 1, 'credits', '', 150),
+          payout('cus_gp_w2', 2, 'credits', '', 300),
+          payout('cus_gp_1', 3, 'credits', '', 100),
+        ]);
+        await packs().setAccountDisabled({
+          customerId: 'cus_gp_1',
+          adminId: 'user_gp_admin',
+          disabled: true,
+          reason: 'test disable',
+        });
+
+        const res = await report('challenge-results');
+        expect(res.status).toBe(200);
+        const r = res.data;
+        expect(r).toMatchObject({
+          currency: 'MYR',
+          week: {
+            start: last.startUtc.toISOString(),
+            end: last.endUtc.toISOString(),
+          },
+          pool_myr: 5000,
+          unlocked_stages: [1, 2],
+          hidden_winners: 1,
+        });
+        expect(r.winners).toEqual([
+          {
+            rank: 1,
+            name: 'Real_Puller',
+            handle: 'Real_Handle',
+            pulled_value_myr: MYR(100),
+            credits: 150,
+            cards: [
+              {
+                name: 'X Card · PSA 10',
+                image: `${assetOrigin()}/x.webp`,
+                qty: 2,
+                value_myr: expect.any(Number),
+              },
+            ],
+            prize_value_myr: expect.any(Number),
+          },
+          {
+            rank: 2,
+            name: expect.stringMatching(/^Collector \d+$/),
+            handle: null,
+            pulled_value_myr: MYR(30),
+            credits: 300,
+            cards: [],
+            prize_value_myr: 300,
+          },
+        ]);
+        // The prize is the credits plus both cards at today's value.
+        const card = r.winners[0].cards[0];
+        expect(card.value_myr).toBeGreaterThan(0);
+        expect(r.winners[0].prize_value_myr).toBe(
+          Math.round((150 + 2 * card.value_myr) * 100) / 100,
+        );
+        const body = JSON.stringify(r);
+        for (const secret of [
+          'cus_',
+          '@',
+          '60123450000',
+          'Private',
+          '9988776655',
+          'pw-secret-1',
+          'bank',
+          'partner',
+        ]) {
+          expect(body).not.toContain(secret);
+        }
+
+        const poster = await unwrapResponse(
+          api.get('/reports/growth/challenge-results-poster', {
+            headers: { 'x-report-key': GROWTH_KEY },
+            responseType: 'arraybuffer',
+          }),
+        );
+        expect(poster.status).toBe(200);
+        expect(poster.headers['content-type']).toMatch(/^image\/jpeg/);
+        const meta = await sharp(Buffer.from(poster.data)).metadata();
+        expect([meta.format, meta.width]).toEqual(['jpeg', 1080]);
+        expect(poster.headers['x-poster-week']).toBe(
+          last.startUtc.toISOString(),
+        );
+        expect(poster.headers['x-poster-missing-art']).toBe('1');
+        expect(poster.headers['x-poster-note']).toMatch(
+          /^1 winner is left off/,
+        );
+      });
     });
 
     describe('GET /reports/growth/signups', () => {
@@ -858,6 +1039,7 @@ medusaIntegrationTestRunner({
             title: 'Reach lvl 10',
             requirement: 'Reach VIP level 10',
             level: 10,
+            checkin_days: null,
             prize: 'RM 50.00 credit',
             prize_type: 'credit',
             value_myr: 50,
@@ -868,6 +1050,7 @@ medusaIntegrationTestRunner({
             title: 'Reach lvl 20',
             requirement: 'Reach VIP level 20',
             level: 20,
+            checkin_days: null,
             prize: 'Free rip · TK Bronze',
             prize_type: 'pack',
             value_myr: 300,
@@ -878,6 +1061,7 @@ medusaIntegrationTestRunner({
             title: 'Reach lvl 90',
             requirement: 'Reach VIP level 90',
             level: 90,
+            checkin_days: null,
             prize: 'Latias & Latios GX #105 · PSA 10',
             prize_type: 'card',
             value_myr: expect.any(Number),
@@ -888,6 +1072,7 @@ medusaIntegrationTestRunner({
             title: 'Vault 5 cards',
             requirement: 'Vault 5 cards',
             level: null,
+            checkin_days: null,
             prize: 'RM 5.00 credit',
             prize_type: 'credit',
             value_myr: 5,
@@ -900,6 +1085,7 @@ medusaIntegrationTestRunner({
             title: 'Check in 5 days',
             requirement: 'Check in on 5 days this week',
             level: null,
+            checkin_days: 5,
             prize: 'Free rip · TK Weekly',
             prize_type: 'pack',
             value_myr: 45,
@@ -995,6 +1181,46 @@ medusaIntegrationTestRunner({
         );
         expect(only.status).toBe(404);
         expect(JSON.stringify(only.data)).toMatch(/no longer exists/);
+      });
+
+      it("draws the week's tasks as a poster: check-ins as one strip, a tile per other task", async () => {
+        await packs().createTaskDefinitions([
+          {
+            kind: 'weekly' as const,
+            title: 'Rip 10 Bronze',
+            requirement: { type: 'rip_count', count: 10, pack_id: 'tk-bronze' },
+            reward: { type: 'pack', pack_id: 'tk-bronze' },
+            ends_at: weeklyEnds,
+          },
+          {
+            kind: 'weekly' as const,
+            title: 'Rip for a gone pack',
+            requirement: { type: 'rip_count', count: 1 },
+            reward: { type: 'pack', pack_id: 'tk-gone' },
+            ends_at: weeklyEnds,
+          },
+        ]);
+        const res = await unwrapResponse(
+          api.get('/reports/growth/tasks-poster', {
+            headers: { 'x-report-key': GROWTH_KEY },
+            responseType: 'arraybuffer',
+          }),
+        );
+        expect(res.status).toBe(200);
+        expect(res.headers['content-type']).toMatch(/^image\/jpeg/);
+        const meta = await sharp(Buffer.from(res.data)).metadata();
+        expect([meta.format, meta.width, meta.height]).toEqual([
+          'jpeg',
+          1080,
+          1350,
+        ]);
+        // Nobody serves the seeded art here: the check-in tier and the tile.
+        expect(res.headers['x-poster-missing-art']).toBe('checkin:5,task:0');
+        // A prize nobody can claim is left off, and staff are told.
+        expect(res.headers['x-poster-note']).toMatch(
+          /Rip for a gone pack.*admin Tasks console/,
+        );
+        expect((await report('tasks-poster', null)).status).toBe(401);
       });
 
       it('refuses a bad range with a readable reason', async () => {

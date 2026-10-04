@@ -39,7 +39,30 @@ test('image mode returns the bytes as base64 and keeps the key safe', async () =
     goalReached: '',
     levels: '',
     skipped: '',
+    note: '',
   });
+});
+
+test("a poster's plain-words note reaches the bot unchanged", async () => {
+  const results = TOOLS.growth.find(
+    (t) => t.name === 'challenge_results_poster',
+  );
+  const note = '1 winner is left off: their account is disabled.';
+  const out = await runTool(
+    results,
+    {},
+    {
+      ...base,
+      fetchImpl: async () =>
+        new Response(JPEG, {
+          status: 200,
+          headers: { 'content-type': 'image/jpeg', 'x-poster-note': note },
+        }),
+    },
+  );
+  assert.ok(!out.isError);
+  assert.ok(out.content[1].text.includes(note));
+  assert.match(out.content[1].text, ATTACH);
 });
 
 test('brand_poster maps its arguments and tells the bot the live figure', async () => {

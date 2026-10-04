@@ -13,6 +13,8 @@ export type CatalogueTask = {
   requirement: string;
   /** The VIP level a reach_level achievement asks for; null otherwise. */
   level: number | null;
+  /** The check-in days a checkin_days task asks for; null otherwise. */
+  checkin_days: number | null;
   /** As the /task page words it: 'Free rip · Silver Pack'. */
   prize: string;
   prize_type: HubReward['type'];
@@ -121,6 +123,8 @@ export async function taskCatalogue(
       title: t.title,
       requirement: labels.get(t.id)!.requirement,
       level: requirement.type === 'reach_level' ? requirement.level : null,
+      checkin_days:
+        requirement.type === 'checkin_days' ? requirement.days : null,
       ...prizeLabel(t.reward),
       prize_type: t.reward.type,
       image:
