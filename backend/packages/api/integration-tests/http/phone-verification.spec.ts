@@ -4,6 +4,7 @@ import { Modules } from "@medusajs/framework/utils";
 import jwt from "jsonwebtoken";
 import { PACKS_MODULE } from "../../src/modules/packs";
 import type PacksModuleService from "../../src/modules/packs/service";
+import { signPhoneProof } from "../../src/utils/phone-verification";
 import { postStoreCustomer, unwrapResponse } from "./utils";
 
 jest.setTimeout(240 * 1000);
@@ -74,6 +75,22 @@ medusaIntegrationTestRunner({
         unwrapResponse(
           api.post("/store/phone-verification/check", body, { headers }),
         );
+
+      // While enforcement is on, POST /auth/customer/emailpass/register wants
+      // a valid 'signup' proof (requireRegisterPhoneProof). Signed here the
+      // way the check route mints one, so fixtures spend no OTP budget; the
+      // header is inert while the flag is off, and register binds no phone.
+      const registerProofHeaders = (): Record<string, string> => {
+        const { jwtSecret } =
+          getContainer().resolve("configModule").projectConfig.http;
+        return {
+          "x-phone-verification": signPhoneProof(
+            jwtSecret as string,
+            PHONE,
+            "signup",
+          ),
+        };
+      };
 
       // Register + link (POST /auth/.../register -> POST /store/customers)
       // is what sets has_account: true (core create-customer-account
@@ -185,10 +202,12 @@ medusaIntegrationTestRunner({
         const createLoggedInCustomer = async (
           email: string,
         ): Promise<Record<string, string>> => {
-          const reg = await api.post("/auth/customer/emailpass/register", {
-            email,
-            password: PASSWORD,
-          });
+          // Also called under enforcement ("with enforcement on" below).
+          const reg = await api.post(
+            "/auth/customer/emailpass/register",
+            { email, password: PASSWORD },
+            { headers: registerProofHeaders() },
+          );
           await postStoreCustomer(
             api,
             getContainer(),
@@ -817,14 +836,56 @@ medusaIntegrationTestRunner({
         });
 
         // Register-only helper (no /store/customers call yet) so each test
-        // controls its own create-attempt body/headers.
+        // controls its own create-attempt body/headers. Register itself wants
+        // a signup proof under enforcement; the tests below are about the
+        // customer-create gate, so it always carries one.
         const register = async (email: string): Promise<string> => {
-          const reg = await api.post("/auth/customer/emailpass/register", {
-            email,
-            password: PASSWORD,
-          });
+          const reg = await api.post(
+            "/auth/customer/emailpass/register",
+            { email, password: PASSWORD },
+            { headers: registerProofHeaders() },
+          );
           return reg.data.token as string;
         };
+
+        // The email/password login is only created behind a valid signup
+        // proof, so a refused attempt leaves no login behind: the same email
+        // then registers cleanly once a proof is presented.
+        it("refuses an email/password registration without a valid signup proof, and creates no login", async () => {
+          const email = "gated-register@test.dev";
+          const attempt = (extra: Record<string, string>) =>
+            unwrapResponse(
+              api.post(
+                "/auth/customer/emailpass/register",
+                { email, password: PASSWORD },
+                { headers: extra },
+              ),
+            );
+          const { jwtSecret } =
+            getContainer().resolve("configModule").projectConfig.http;
+
+          const bare = await attempt({});
+          expect(bare.status).toBe(400);
+          expect(bare.data).toMatchObject({
+            message: "Phone verification required.",
+          });
+
+          const wrongPurpose = await attempt({
+            "x-phone-verification": signPhoneProof(
+              jwtSecret as string,
+              PHONE,
+              "phone-change",
+            ),
+          });
+          expect(wrongPurpose.status).toBe(400);
+          expect(wrongPurpose.data).toMatchObject({
+            message: "Phone verification required.",
+          });
+
+          const proven = await attempt(registerProofHeaders());
+          expect(proven.status).toBe(200);
+          expect(typeof proven.data.token).toBe("string");
+        });
 
         it("refuses registration with a phone but no proof", async () => {
           const email = "gated-no-proof@test.dev";
@@ -1076,10 +1137,11 @@ medusaIntegrationTestRunner({
           // Register + link WITHOUT a phone — the shape the large majority of
           // live accounts are in, and the one the gate has to refuse.
           const registerUnverified = async (email: string) => {
-            const reg = await api.post("/auth/customer/emailpass/register", {
-              email,
-              password: PASSWORD,
-            });
+            const reg = await api.post(
+              "/auth/customer/emailpass/register",
+              { email, password: PASSWORD },
+              { headers: registerProofHeaders() },
+            );
             await postStoreCustomer(
               api,
               getContainer(),

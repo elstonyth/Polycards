@@ -51,13 +51,9 @@ page.on('request', (req) => {
 // ── 0. Seed a customer with a VERIFIED phone via the backend API ───────────
 // checkPhoneOtpCode short-circuits to `code === devCode` in dev/test (see
 // backend/packages/api/src/utils/phone-verification.ts) — no prior /start
-// call is needed for the check to accept '000000'.
-const reg = await fetch(`${BACKEND}/auth/customer/emailpass/register`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email: EMAIL, password: OLD_PASSWORD }),
-}).then((r) => r.json());
-
+// call is needed for the check to accept '000000'. The proof comes FIRST:
+// with PHONE_VERIFICATION_REQUIRED=true the register call wants it too
+// (requireRegisterPhoneProof), not only POST /store/customers.
 const { token: seedProof } = await fetch(
   `${BACKEND}/store/phone-verification/check`,
   {
@@ -74,6 +70,15 @@ const { token: seedProof } = await fetch(
   },
 ).then((r) => r.json());
 check(Boolean(seedProof), 'seed: phone OTP proof issued');
+
+const reg = await fetch(`${BACKEND}/auth/customer/emailpass/register`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'x-phone-verification': seedProof,
+  },
+  body: JSON.stringify({ email: EMAIL, password: OLD_PASSWORD }),
+}).then((r) => r.json());
 
 // requireSignupPhoneProof (backend/.../utils/phone-verification-guard.ts)
 // rejects a phone-bearing POST /store/customers without a valid

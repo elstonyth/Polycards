@@ -315,3 +315,41 @@ export function rejectAdminPhoneWrite(
   }
   next();
 }
+
+/**
+ * POST /auth/customer/emailpass/register — while phone verification is
+ * enforced, the email/password login is only created for a caller holding a
+ * valid, unexpired 'signup' proof.
+ *
+ * The storefront's signup registers that login FIRST and creates the customer
+ * second, and requireSignupPhoneProof above only sees the second call. Without
+ * this the login was created whatever the proof, so the register step
+ * disclosed whether an email was already taken, and could leave behind a login
+ * the address's owner never made (their own signup then collides with it).
+ *
+ * Checks signature, expiry and purpose only. The proof is not bound to a phone
+ * here (the body has none) and is not spent: POST /store/customers needs the
+ * same proof next, and binds it to the phone being written. Customer actor
+ * only (the matcher in middlewares.ts): Google sign-up never calls this route,
+ * and admin/vendor logins register under their own actors (/auth/user,
+ * /auth/member).
+ */
+export const requireRegisterPhoneProof = (
+  req: MedusaRequest,
+  _res: MedusaResponse,
+  next: MedusaNextFunction,
+): void => {
+  if (!isPhoneVerificationRequired(process.env)) return next();
+  const header = req.headers[PHONE_VERIFICATION_HEADER];
+  const token = typeof header === 'string' ? header : '';
+  if (!token || !verifyPhoneProof(secretOf(req), token, 'signup')) {
+    // Same refusal as the signup gate: the storefront already maps it.
+    return next(
+      new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Phone verification required.',
+      ),
+    );
+  }
+  next();
+};
