@@ -54,12 +54,43 @@ test('the growth desk tools', () => {
     'packs_opened',
     'tasks',
     'top_pulls',
+    'challenge_results',
     'challenge_poster',
+    'challenge_results_poster',
+    'challenge_stages_poster',
     'brand_poster',
     'achievements_poster',
+    'tasks_poster',
     'top_pulls_poster',
     'brand_logo',
   ]);
+  // The Monday posts: last week's results, every stage, the week's tasks.
+  assert.deepEqual(growth.challenge_results.request({}), {
+    path: 'challenge-results',
+    params: {},
+  });
+  assert.deepEqual(growth.challenge_results_poster.request({}), {
+    path: 'challenge-results-poster',
+    params: {},
+    as: 'image',
+    artOf: 'podium rank',
+  });
+  assert.deepEqual(growth.challenge_stages_poster.request({}), {
+    path: 'challenge-stages-poster',
+    params: {},
+    as: 'image',
+    artOf: 'stage:rank',
+  });
+  assert.deepEqual(
+    growth.challenge_stages_poster.request({ week: 'next' }).params,
+    { week: 'next' },
+  );
+  assert.deepEqual(growth.tasks_poster.request({}), {
+    path: 'tasks-poster',
+    params: {},
+    as: 'image',
+    artOf: 'prize',
+  });
   assert.deepEqual(growth.tasks.request({}), { path: 'tasks', params: {} });
   assert.deepEqual(growth.top_pulls.request({ day: '2026-10-03', limit: 5 }), {
     path: 'top-pulls',
@@ -153,8 +184,8 @@ test('admin_read reads one admin screen, its filters passed on', () => {
 });
 
 test('every desk gets every tool once, each bound to its own desk', () => {
-  assert.equal(ALL_TOOLS.length, 22);
-  assert.equal(new Set(ALL_TOOLS.map((t) => t.name)).size, 22);
+  assert.equal(ALL_TOOLS.length, 26);
+  assert.equal(new Set(ALL_TOOLS.map((t) => t.name)).size, 26);
   for (const [desk, tools] of Object.entries(TOOLS)) {
     for (const tool of tools) {
       assert.equal(ALL_TOOLS.find((t) => t.name === tool.name).desk, desk);

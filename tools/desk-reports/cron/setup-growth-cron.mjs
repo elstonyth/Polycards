@@ -1,7 +1,7 @@
 // Sets up the Growth desk's nightly Hermes cron jobs (spec
 // docs/superpowers/specs/2026-10-04-growth-daily-hits-design.md), after
-// install.mjs has put daily_hits.py and daily_excel.py in the growth
-// profile's scripts folder:
+// install.mjs has put daily_hits.py, daily_excel.py and weekly_posts.py in
+// the growth profile's scripts folder:
 //
 //   node tools/desk-reports/cron/setup-growth-cron.mjs
 //
@@ -9,6 +9,8 @@
 //                                 poster and the 10 Telegram pull cards
 //   growth-daily-excel 5 0 * * *  the staff Excel, posted verbatim (no AI), so
 //                                 no model decides whether bank details go out
+//   growth-weekly-posts 0 9 * * 1  Mondays: the AI-written weekly posts, with
+//                                 the results, stages and tasks posters
 //
 // It locks the profile's cron toolset to the report tools (a cron job would
 // otherwise get Hermes' full cron bundle, terminal and file tools included)
@@ -42,6 +44,13 @@ const PROMPT = `You are posting tonight's Daily Top Hits drop in the Growth desk
 5. One line: the staff Excel with full customer details follows at 00:05 in its own message, for staff only.
 Then copy every MEDIA: line from the script output, each on its own line, unchanged and not in backticks: they attach the poster and the Telegram pull cards.
 If the script output says DAILY TOP HITS FAILED or lists a PROBLEM, say so plainly in one line and still post what you have. If there were no paid pulls, say so and skip the caption.`;
+
+// Spec docs/superpowers/specs/2026-10-04-growth-weekly-posts-design.md.
+const WEEKLY_PROMPT = `You are posting this Monday's weekly posts in the Growth desk. The script output above is your only data: last week's Weekly Challenge result, this week's challenge stages, this week's tasks and the three poster files. Write ONE post for staff, in this order:
+1. A bold first line: Weekly Posts, then this week's dates exactly as the data words them.
+2. For each poster, in the order results, challenge stages, tasks: a short bold heading, then a ready-to-post English caption for Instagram and Facebook: hype, premium and trustworthy, two to four short lines plus three to five hashtags, mentioning polycards.gg. Use only the names, cards and figures in the data; do not re-rank, round differently or add any number. The results caption congratulates the top winners by their public names. The stages caption says every reward stacks: each stage the community pool unlocks adds its prizes for the top 10 on top of the earlier stages. The tasks caption names the tasks and their prizes. No promises of winning, no casino or gambling words, nothing about odds.
+Then copy every MEDIA: line from the script output, each on its own line, unchanged and not in backticks: they attach the posters.
+If the script output says WEEKLY POSTS FAILED or lists a PROBLEM, say so plainly in one line and still post what you have; skip the caption of a poster that is missing.`;
 
 /** The id of the job called `name` in `hermes cron list`, or null. */
 function jobId(name) {
@@ -96,5 +105,25 @@ if (jobId('growth-daily-excel')) {
     DELIVER,
   );
   console.log('growth-daily-excel: created');
+}
+
+const weekly = jobId('growth-weekly-posts');
+if (weekly) {
+  hermes('cron', 'edit', weekly, '--prompt', WEEKLY_PROMPT);
+  console.log(`growth-weekly-posts (${weekly}): prompt updated`);
+} else {
+  hermes(
+    'cron',
+    'create',
+    '0 9 * * 1',
+    WEEKLY_PROMPT,
+    '--name',
+    'growth-weekly-posts',
+    '--script',
+    'weekly_posts.py',
+    '--deliver',
+    DELIVER,
+  );
+  console.log('growth-weekly-posts: created');
 }
 console.log(hermes('cron', 'list').trim());

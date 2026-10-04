@@ -151,6 +151,13 @@ TOOLS.growth = [
     }),
   },
   {
+    name: 'challenge_results',
+    description:
+      "Last week's Weekly Pulled Value Challenge result, exactly as settlement paid it (the most recently settled week): the week's dates, the pool and the stages it unlocked, and for each winner the paid rank, public name and profile handle, that week's pulled value, the cards they received (name, official image, quantity, today's value) and credits, and what the prize is worth today in total. A disabled winner is left out (hidden_winners counts them); the others keep the rank they were paid. Never contact details. Amounts in RM (MYR).",
+    inputSchema: {},
+    request: () => ({ path: 'challenge-results', params: {} }),
+  },
+  {
     name: 'challenge_poster',
     description:
       'A finished Weekly Pulled Value Challenge poster (a tall portrait JPEG, 1080 px wide and about 1640 px high, taller with leaders) rendered from live data with the official card art: the unlock headline, the stage chips, and the podium prizes of one stage (default: the highest unlocked stage), optionally with the current top-3 leaders. week next draws the next challenge waiting in the admin queue instead (its own dates; no stage unlocked yet; stage 1 featured by default; no leaders). Use it instead of drawing cards with image generation: post the image it returns. It is a draft; a human reviews it before it is published.',
@@ -184,6 +191,37 @@ TOOLS.growth = [
         ...(args.week ? { week: args.week } : {}),
       },
       as: 'image',
+    }),
+  },
+  {
+    name: 'challenge_results_poster',
+    description:
+      "A finished results poster of the most recently settled Weekly Challenge week (a tall portrait JPEG, 1080 px wide): the week's dates, the pool and the stages it unlocked, the top 3 on a podium with each winner's best prize card (marked '+N more cards' when they won several), their public name, what they pulled and what they won, then ranks 4 to 10 with what they pulled and won. Every figure comes from settlement's own records; nothing is typed in. Use it for any post about last week's winners or results. It is a draft; a human reviews it before it is published.",
+    inputSchema: {},
+    request: () => ({
+      path: 'challenge-results-poster',
+      params: {},
+      as: 'image',
+      artOf: 'podium rank',
+    }),
+  },
+  {
+    name: 'challenge_stages_poster',
+    description:
+      "A finished poster of every stage of the Weekly Pulled Value Challenge on one image (a tall portrait JPEG, 1080 px wide): each stage's unlock threshold, its #1 to #3 prizes as the official card art, and what ranks 4 to 10 win, under the line that every reward stacks. week current (default): the running week, with its unlocked stages marked; week next: the next challenge waiting in the admin queue. Use it for posts about the new week's prizes or all the stages at once (challenge_poster features one stage with a big podium). It is a draft; a human reviews it before it is published.",
+    inputSchema: {
+      week: z
+        .enum(['current', 'next'])
+        .optional()
+        .describe(
+          'current (default): the running week. next: the next queued challenge.',
+        ),
+    },
+    request: (args) => ({
+      path: 'challenge-stages-poster',
+      params: args.week ? { week: args.week } : {},
+      as: 'image',
+      artOf: 'stage:rank',
     }),
   },
   {
@@ -282,6 +320,18 @@ TOOLS.growth = [
       params: { min_level: args.min_level, max_level: args.max_level },
       as: 'image',
       artOf: 'level',
+    }),
+  },
+  {
+    name: 'tasks_poster',
+    description:
+      "A finished poster of this week's tasks exactly as the /task page shows them right now (1080x1350, the 4:5 feed size): the daily check-in tiers as one strip (each day count with its prize and value), then one tile per other weekly task (like 'Rip 10 × Bronze Pack') with its prize and what /task says it is worth. Nothing on it is typed in. Use it for any post about the week's tasks, check-in rewards or free rips. It is a draft; a human reviews it before it is published.",
+    inputSchema: {},
+    request: () => ({
+      path: 'tasks-poster',
+      params: {},
+      as: 'image',
+      artOf: 'prize',
     }),
   },
   {
@@ -525,7 +575,7 @@ export async function runTool(tool, args, config) {
               body.missingArt
                 ? `Rendered from live data, but the art for ${artOf} ${body.missingArt} could not be loaded and shows as a plain placeholder tile. Say so when you post it, and do not call it the official art; try again later for the full poster.`
                 : 'Rendered from live data with the official art. Post this image as the draft; a human reviews it before it is published.'
-            }${levelsNote(body)}${
+            }${levelsNote(body)}${body.note ? ` ${body.note}` : ''}${
               body.figure
                 ? ` The live figure is ${body.figure} (exact, whatever the poster rounds to): say this number if staff asked for a different one.`
                 : ''
