@@ -74,8 +74,7 @@ export type AuthCustomer = {
 };
 
 export type AuthResult =
-  | { ok: true; customer: AuthCustomer }
-  | { ok: false; error: string };
+  { ok: true; customer: AuthCustomer } | { ok: false; error: string };
 
 /**
  * Why a Google sign-in did not complete — a short CODE, never copy. The
