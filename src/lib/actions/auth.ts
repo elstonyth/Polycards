@@ -126,6 +126,13 @@ const AUTH_RULES: ErrorRule[] = [
     /phone number is already in use/i,
     'This phone number is already registered to another account. Log in instead, or use a different number.',
   ],
+  // The signup gate's refusal for a missing, expired or already-used proof (a
+  // proof creates one account). The copy keeps "verif" on purpose: AuthForm's
+  // draft retry sends a fresh code only on /verif/i.
+  [
+    /phone verification required/i,
+    'Your phone verification expired. Please verify your number again.',
+  ],
   // One username = one player (the username guard, and the unique index
   // under it). Must sit ABOVE the /already exists/ email rule: this message is
   // about the username, and the generic "account with this email" copy would

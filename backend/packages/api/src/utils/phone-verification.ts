@@ -6,8 +6,10 @@ import { MedusaError } from '@medusajs/framework/utils';
 // A passed check mints a short-lived HMAC "proof token" that the write gates
 // (see api/utils/phone-verification-guard.ts and the phone-verification
 // routes) accept as evidence of phone possession. Stateless by design: no
-// table, no migration; replay inside the 10m TTL only lets the same PROVEN
-// phone be used again, which every consumer tolerates.
+// table, no migration. Phone-change and password-reset proofs may be replayed
+// inside the 10m TTL, which only lets the same PROVEN phone be used again; a
+// SIGNUP proof creates one account, enforced by a Redis claim the signup gate
+// takes (requireSignupPhoneProof), not by anything in the token.
 //
 // Mirrors modules/resend/options.ts: one env predicate shared by everything
 // that gates on configuration, and dev/test NEVER touches the live transport
@@ -290,7 +292,7 @@ export function verifyPhoneProof(
   token: string,
   purpose: PhoneOtpPurpose,
   nowMs: number = Date.now(),
-): { phone: string } | null {
+): { phone: string; exp: number } | null {
   assertSecret(secret);
   const dot = token.lastIndexOf('.');
   if (dot <= 0) return null;
@@ -321,7 +323,7 @@ export function verifyPhoneProof(
   if (parsed.purpose !== purpose) return null;
   if (typeof parsed.exp !== 'number' || parsed.exp <= nowMs) return null;
   if (typeof parsed.phone !== 'string' || !E164_RE.test(parsed.phone)) return null;
-  return { phone: parsed.phone };
+  return { phone: parsed.phone, exp: parsed.exp };
 }
 
 export const isDevOrTest = (env: PhoneVerificationEnv): boolean => {

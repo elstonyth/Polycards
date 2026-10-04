@@ -8,7 +8,11 @@ import {
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import multer from 'multer';
-import { rateLimit, warmOtpSendBudget } from './utils/rate-limit';
+import {
+  rateLimit,
+  warmOtpSendBudget,
+  warmSignupProofClaims,
+} from './utils/rate-limit';
 import { createResetTokenSingleUseGuard } from './utils/reset-token-guard';
 import {
   rejectCustomerMetadata,
@@ -118,6 +122,9 @@ const tgpayCallbackAllowlist = createTgpayCallbackAllowlist();
 // production, so a connection still opening refused every fresh instance's
 // first send (warmOtpSendBudget in utils/rate-limit.ts).
 warmOtpSendBudget();
+// Same for the claims that make a signup phone proof single-use: they fail
+// closed too, so a connection still opening would refuse a real signup.
+warmSignupProofClaims();
 // Desk reports (GET /reports/*): one budget per desk (desk + caller address),
 // since every staff desk bot calls from the owner's PC.
 const deskReportsRateLimit = rateLimit('desk-reports');
@@ -433,10 +440,11 @@ export default defineMiddlewares({
       // when PHONE_VERIFICATION_REQUIRED is on and the body carries a phone,
       // the request must also carry a verified 'signup'-purpose proof for
       // that exact number — the enforcement gate that makes Task 2's OTP
-      // routes mandatory instead of opt-in. It ALSO refuses a number another
-      // account already holds, and that half runs whatever the flag says (one
-      // phone = one account is a business rule, not part of the OTP rollback
-      // lever) — see api/utils/phone-claim.ts.
+      // routes mandatory instead of opt-in, and each proof creates one account
+      // (a Redis claim, given back if the create fails). It ALSO refuses a
+      // number another account already holds, and that half runs whatever the
+      // flag says (one phone = one account is a business rule, not part of the
+      // OTP rollback lever) — see api/utils/phone-claim.ts.
       //
       // validateUsernameWrite('signup') (see utils/username-guard.ts):
       // `first_name` is the public display name, and the account's permanent
@@ -458,10 +466,9 @@ export default defineMiddlewares({
       // utils/customer-metadata-guard.ts).
       //
       // blockUnverifiedPhoneWrite (see utils/phone-verification-guard.ts):
-      // when PHONE_VERIFICATION_REQUIRED is on, a direct string `phone` write
-      // here is rejected — phone CHANGES must go through the verified
-      // store/phone-verification/change route (Task 4); clearing to null
-      // stays allowed.
+      // when PHONE_VERIFICATION_REQUIRED is on, any `phone` key here is
+      // rejected, null and '' included — the number changes only through the
+      // verified store/phone-verification/change route (Task 4).
       //
       // validateUsernameWrite('update'): a rename changes the display name
       // only — the profile URL is the permanent handle and stays put — but the
