@@ -5,7 +5,9 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
+import { createHash } from 'node:crypto';
 import { assertPhoneUnclaimed } from './phone-claim';
+import { warmSignupProofClaims } from './rate-limit';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import { resolveGroupPolicyForCustomer } from '../../modules/packs/group-policy';
@@ -39,34 +41,40 @@ const secretOf = (req: MedusaRequest): string => {
   return secret;
 };
 
+// Refuses a missing, invalid, expired or already-used signup proof alike, so
+// a caller cannot tell those apart.
+const signupProofRequired = (): MedusaError =>
+  new MedusaError(
+    MedusaError.Types.INVALID_DATA,
+    'Phone verification required.',
+  );
+
 /**
  * POST /store/customers — a signup that writes a phone must prove it, and must
  * not reuse a number another account already holds.
  */
 export const requireSignupPhoneProof = async (
   req: MedusaRequest<{ phone?: unknown }>,
-  _res: MedusaResponse,
+  res: MedusaResponse,
   next: MedusaNextFunction,
 ): Promise<void> => {
   const phone = req.body?.phone;
   if (typeof phone !== 'string') return next(); // Google signup has no phone
 
+  // Set only when enforcement is on and the proof checked out.
+  let proof: { token: string; exp: number } | undefined;
   if (isPhoneVerificationRequired(process.env)) {
     const header = req.headers[PHONE_VERIFICATION_HEADER];
     const token = typeof header === 'string' ? header : '';
-    const proof = token
+    const verified = token
       ? verifyPhoneProof(secretOf(req), token, 'signup')
       : null;
-    if (!proof || proof.phone !== phone) {
+    if (!verified || verified.phone !== phone) {
       // next(err) — repo convention for surfacing middleware errors (see
       // blockUnusedVendorSelfRegistration in middlewares.ts).
-      return next(
-        new MedusaError(
-          MedusaError.Types.INVALID_DATA,
-          'Phone verification required.',
-        ),
-      );
+      return next(signupProofRequired());
     }
+    proof = { token, exp: verified.exp };
   }
 
   // One phone = one account. Runs whatever the flag says —
@@ -83,13 +91,61 @@ export const requireSignupPhoneProof = async (
   // Why this site exists at all when the check route refuses duplicates too:
   // that one is what gives the user a usable error (it fires before the auth
   // identity is registered), this one is authoritative. A proof is good for 10
-  // minutes and is not single-use, so without this a token minted while the
-  // number was free still creates the second account.
+  // minutes, so without this a proof minted while the number was free would
+  // still create an account after another one claimed the number.
   //
   // A throw here reaches the error handler: the framework registers
   // defineMiddlewares entries through wrapHandler, which awaits and forwards to
   // next(err) (framework/dist/http/{router,utils/wrap-handler}.js).
   await assertPhoneUnclaimed(req.scope, phone);
+
+  if (proof) {
+    // One proof, one account. assertPhoneUnclaimed above is a read, so
+    // concurrent signups replaying one proof would all see the number free;
+    // the atomic claim lets exactly one through. Taken LAST, so a request
+    // refused above never spends the proof. Keyed on a hash — the store never
+    // holds a live proof — and kept for the proof's remaining lifetime
+    // (at least 1 ms: Redis rejects a zero expiry).
+    const claims = warmSignupProofClaims();
+    const key = `phone-proof:signup:${createHash('sha256').update(proof.token).digest('hex')}`;
+    const logger = req.scope.resolve('logger') as {
+      warn: (msg: string) => void;
+    };
+    let claimed: boolean;
+    try {
+      claimed = await claims.claim(key, Math.max(1, proof.exp - Date.now()));
+    } catch (e) {
+      // Fail CLOSED: see warmSignupProofClaims. The proof stays good, so the
+      // retry the message invites costs the customer no second code.
+      logger.warn(
+        `[phone-otp] signup proof claim failed (${e instanceof Error ? e.message : String(e)})`,
+      );
+      return next(
+        new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          'Could not verify your phone right now. Try again shortly.',
+        ),
+      );
+    }
+    if (!claimed) return next(signupProofRequired());
+    // The request failed after the claim (validation, auth, the create
+    // itself): give the proof back so the customer's retry needs no second
+    // code. A plain DEL can only drop this request's own claim: the key lives
+    // exactly as long as the proof, and an expired proof is refused before
+    // any claim. Accepted edge, as in reset-token-guard: a dropped connection
+    // emits 'close' without 'finish', so that proof stays spent until it
+    // expires and the customer requests a new code.
+    res.on('finish', () => {
+      if (res.statusCode < 400) return;
+      claims
+        .release(key)
+        .catch((e) =>
+          logger.warn(
+            `[phone-otp] signup proof release failed (${e instanceof Error ? e.message : String(e)})`,
+          ),
+        );
+    });
+  }
   next();
 };
 
@@ -149,15 +205,28 @@ export const requirePhoneVerified = async (
   );
 };
 
-/** POST /store/customers/me — phone CHANGES go through the verified route
- *  (store/phone-verification/change); clearing to null stays allowed. */
+/**
+ * POST /store/customers/me — while verification is enforced, `phone` is not
+ * writable here at all: the number changes only through the verified route
+ * (store/phone-verification/change).
+ *
+ * Refuses on PRESENCE of the key, like rejectAdminPhoneWrite below —
+ * `phone: null` and `phone: ''` too. Clearing the number would leave the
+ * account's phone_verified_at stamp in place (markPhoneVerified is
+ * first-write-wins and nothing unstamps it), while assertPhoneUnclaimed would
+ * stop counting the account and let the next signup take the number: one
+ * verified number behind two verified accounts. The storefront omits `phone`
+ * from this route under enforcement (src/lib/actions/customer.ts
+ * updateProfile).
+ */
 export const blockUnverifiedPhoneWrite = (
   req: MedusaRequest<{ phone?: unknown }>,
   _res: MedusaResponse,
   next: MedusaNextFunction,
 ): void => {
   if (!isPhoneVerificationRequired(process.env)) return next();
-  if (typeof req.body?.phone === 'string') {
+  const body = req.body as Record<string, unknown> | null | undefined;
+  if (body && typeof body === 'object' && 'phone' in body) {
     return next(
       new MedusaError(
         MedusaError.Types.INVALID_DATA,

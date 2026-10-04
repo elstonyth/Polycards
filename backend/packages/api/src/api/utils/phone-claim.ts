@@ -66,11 +66,12 @@ import type {
  * a has_account: true-scoped report or index stops covering the whole
  * phone-holding population with no error to say so.
  *
- * NOT atomic — check-then-write, no lock or unique index. State the real
- * exposure rather than the change route's old one: at SIGNUP a proof token is
- * purpose-scoped but not single-use, so one person with one handset can fire
- * two concurrent POST /store/customers inside the proof's 10-minute window and
- * have both reads see zero claimants. The backstop is a partial unique index
+ * NOT atomic — check-then-write, no lock or unique index. At SIGNUP the proof
+ * is single-use (requireSignupPhoneProof claims it in Redis after this check),
+ * so one proof cannot back two concurrent creates. The claim is keyed on the
+ * proof, not the number, so two proofs for one number (two OTPs, bounded by
+ * the per-number send limits) are not serialized by it, and their concurrent
+ * reads can both see zero claimants. The backstop is a partial unique index
  * on customer(phone) WHERE deleted_at IS NULL, and the release-on-delete
  * behaviour above means it carries no soft-delete hazard. Core Medusa's email
  * precedent (IDX_customer_email_has_account_unique) is actually COMPOSITE —

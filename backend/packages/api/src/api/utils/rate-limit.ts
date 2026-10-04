@@ -446,19 +446,19 @@ function throttledWarn(
   };
 }
 
-// Redis-backed store with in-memory failover — shared by every limiter so each
-// endpoint gets its own connection name but identical fail-fast semantics.
-function buildFailoverStore(
+// One Redis connection per store, each with its own connection name but
+// identical fail-fast semantics. Undefined when REDIS_URL is unset — the
+// caller picks its own fallback.
+function connectRedis(
   connectionName: string,
   warn: ReturnType<typeof throttledWarn>,
-  fallback: RateLimitStore = new InMemorySlidingWindowStore(),
-): RateLimitStore {
+): Redis | undefined {
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
     console.warn(
       `[rate-limit] REDIS_URL not set — ${connectionName} using fallback`,
     );
-    return fallback;
+    return undefined;
   }
 
   const client = new Redis(redisUrl, {
@@ -474,6 +474,17 @@ function buildFailoverStore(
   // exceptions; reconnection is automatic, so just log (throttled).
   client.on('error', (err) => warn('redis connection error', err));
   client.connect().catch((err) => warn('initial redis connect failed', err));
+  return client;
+}
+
+// Redis-backed store with in-memory failover — shared by every limiter.
+function buildFailoverStore(
+  connectionName: string,
+  warn: ReturnType<typeof throttledWarn>,
+  fallback: RateLimitStore = new InMemorySlidingWindowStore(),
+): RateLimitStore {
+  const client = connectRedis(connectionName, warn);
+  if (!client) return fallback;
   return new FailoverRateLimitStore(
     new RedisSlidingWindowStore(client),
     fallback,
@@ -1283,4 +1294,64 @@ export async function consumeOtpSendBudget(
     nowMs,
   );
   return { ...calls, sitewide: true, channel: via };
+}
+
+/** One-time claims on signup phone proofs (requireSignupPhoneProof). */
+export interface ProofClaimStore {
+  /** True iff this call took the claim; false when it is already held. */
+  claim(key: string, ttlMs: number): Promise<boolean>;
+  release(key: string): Promise<void>;
+}
+
+let signupProofClaims: ProofClaimStore | null = null;
+
+/**
+ * The store that makes a signup proof single-use, opened at boot by
+ * middlewares.ts for the reason warmOtpSendBudget is: a client still
+ * connecting refuses its first command, and this store fails closed.
+ *
+ * One SET NX per claim, so of two signups racing on one proof exactly one
+ * wins. Errors propagate and the signup gate refuses the request: with
+ * REDIS_URL configured, Redis is the only store every replica shares, and a
+ * per-process fallback would let each replica accept the same proof once.
+ * Refusing costs little. While Redis is down production mints no proofs
+ * anyway (the send budget refuses every code), and the account create runs
+ * on the Redis-backed workflow engine, event bus and locking. No REDIS_URL:
+ * production refuses every claim; dev and test keep the claims in memory.
+ */
+export function warmSignupProofClaims(): ProofClaimStore {
+  if (signupProofClaims) return signupProofClaims;
+  const client = connectRedis('signup-proof-claim', throttledWarn(60_000));
+  if (client) {
+    signupProofClaims = {
+      claim: async (key, ttlMs) =>
+        (await client.set(key, '1', 'PX', ttlMs, 'NX')) === 'OK',
+      release: async (key) => {
+        await client.del(key);
+      },
+    };
+  } else if (process.env.NODE_ENV === 'production') {
+    signupProofClaims = {
+      claim: async () => {
+        throw new Error('REDIS_URL is not set');
+      },
+      release: async () => undefined,
+    };
+  } else {
+    // ponytail: unbounded, an expired key stays until claimed again; fine for
+    // one local process, and production never builds this branch.
+    const expiries = new Map<string, number>();
+    signupProofClaims = {
+      claim: async (key, ttlMs) => {
+        const now = Date.now();
+        if ((expiries.get(key) ?? 0) > now) return false;
+        expiries.set(key, now + ttlMs);
+        return true;
+      },
+      release: async (key) => {
+        expiries.delete(key);
+      },
+    };
+  }
+  return signupProofClaims;
 }
