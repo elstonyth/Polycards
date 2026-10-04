@@ -29,7 +29,7 @@
 import { headers } from 'next/headers';
 import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
-import { countryOfIp, OTP_VISITOR_COUNTRIES } from '@/lib/visitor-country';
+import { visitorRefusal } from '@/lib/visitor-country';
 import { UncheckedSchema } from '@/lib/data/schemas';
 import {
   isServedPhoneCountry,
@@ -136,12 +136,11 @@ const SECURITY_CHECK_COPY = 'Security check failed. Please try again.';
 const OUTSIDE_SERVED_COUNTRIES =
   "Verification codes can only be requested from Malaysia. If you're using a VPN, turn it off and try again.";
 
-/** The visitor's country, or null when unknown. The gate lives here, not in the
- *  backend, because the backend only ever sees this server's egress IP (see
- *  the module comment). No request scope (tests, build) also reads as null. */
-async function visitorCountry(): Promise<string | null> {
+/** The ingress's client-IP header, or null without one. No request scope
+ *  (tests, build) also reads as null. */
+async function ingressClientIp(): Promise<string | null> {
   try {
-    return countryOfIp((await headers()).get('do-connecting-ip'));
+    return (await headers()).get('do-connecting-ip');
   } catch {
     return null;
   }
@@ -157,11 +156,9 @@ export async function startPhoneOtp(input: {
   turnstileToken?: string;
 }): Promise<{ ok: true; channel: PhoneOtpChannel } | Fail> {
   // Every purpose, password reset included: a refused visitor spends nothing.
-  const country = await visitorCountry();
-  if (country && !OTP_VISITOR_COUNTRIES.includes(country)) {
-    logger.warn(
-      `[phone-otp] refused a code request from visitor country ${country}`,
-    );
+  const refusal = visitorRefusal(await ingressClientIp());
+  if (refusal) {
+    logger.warn(`[phone-otp] refused a code request from ${refusal}`);
     return fail(OUTSIDE_SERVED_COUNTRIES);
   }
   const phone = normalizePhone(input.phone);

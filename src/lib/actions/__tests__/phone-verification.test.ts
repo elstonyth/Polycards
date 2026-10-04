@@ -63,6 +63,11 @@ describe('startPhoneOtp — visitor country gate', () => {
     ['Singapore', '202.166.0.1'],
     ['the United States, as through a VPN', '8.8.8.8'],
     ['Egypt over IPv6', '2c0f:fc88::1'],
+    [
+      'a forged Malaysian address joined with the real one',
+      '175.143.0.1, 8.8.8.8',
+    ],
+    ['an address the gate cannot read', 'not-an-ip'],
   ])('refuses a visitor from %s', async (_, ip) => {
     visitor.ip = ip;
     await expect(
