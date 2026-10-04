@@ -12,9 +12,9 @@
 // covers.
 //
 // Flow: login modal -> Forgot password -> Use phone number instead -> enter
-// the seeded phone -> dev code -> lands on /reset-password (masked email in
-// the URL, never the real one) -> set a new password -> log in with it.
-// Screenshots to docs/research/.
+// the seeded phone -> dev code -> new-password step inside the same modal
+// (masked email shown, never the real one; the reset token never reaches a
+// URL) -> set a new password -> log in with it. Screenshots to docs/research/.
 import { chromium } from 'playwright';
 
 const BASE = 'http://localhost:4100';
@@ -42,6 +42,11 @@ const check = (ok, label) => {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${label}`);
   if (!ok) failures++;
 };
+// The reset token must stay in the modal's state; no request URL carries one.
+const tokenUrls = [];
+page.on('request', (req) => {
+  if (/[?&]token=/.test(req.url())) tokenUrls.push(req.url());
+});
 
 // ── 0. Seed a customer with a VERIFIED phone via the backend API ───────────
 // checkPhoneOtpCode short-circuits to `code === devCode` in dev/test (see
@@ -121,51 +126,56 @@ const otpStepShown = await page
 check(otpStepShown, 'phone submit opens the OTP step');
 await page.screenshot({ path: 'docs/research/qa-phone-forgot-2-otp-step.png' });
 
-// ── 3. Correct dev code → redirect to /reset-password ───────────────────────
+// ── 3. Correct dev code → new-password step, same modal ─────────────────────
 await page.getByPlaceholder('Verification code').fill(DEV_CODE);
 await page.getByRole('button', { name: 'Verify' }).click();
-const landed = await page
-  .waitForURL(/\/reset-password\?/, { timeout: 20000 })
+const resetStep = await page
+  .getByPlaceholder('New password', { exact: true })
+  .waitFor({ state: 'visible', timeout: 20000 })
   .then(
     () => true,
     () => false,
   );
-check(landed, 'verified code redirects to /reset-password');
+check(resetStep, 'verified code opens the new-password step in the modal');
+check(
+  new URL(page.url()).pathname === '/',
+  `no navigation away from the page (at ${new URL(page.url()).pathname})`,
+);
 
-const url = new URL(page.url());
-const maskedEmailParam = url.searchParams.get('email');
 const localPart = EMAIL.split('@')[0];
 const expectedMasked = `${localPart[0]}${'*'.repeat(Math.max(localPart.length - 1, 2))}@test.dev`;
 check(
-  maskedEmailParam === expectedMasked,
-  `redirect carries the MASKED email, never the real one (got "${maskedEmailParam}", expected "${expectedMasked}")`,
+  await page.getByText(expectedMasked).isVisible(),
+  `step names the MASKED email (${expectedMasked})`,
 );
-const pageHtml = await page.content();
 check(
-  !pageHtml.includes(EMAIL),
-  'the real email never appears on the reset-password page',
+  !(await page.content()).includes(EMAIL),
+  'the real email never appears on the page',
 );
 await page.screenshot({
-  path: 'docs/research/qa-phone-forgot-3-reset-page.png',
+  path: 'docs/research/qa-phone-forgot-3-new-password-step.png',
 });
 
 // ── 4. Set a new password ───────────────────────────────────────────────────
-check(
-  await page.getByText('Choose a new password').isVisible(),
-  '/reset-password form renders',
-);
 await page.getByPlaceholder('New password', { exact: true }).fill(NEW_PASSWORD);
 await page.getByPlaceholder('Confirm new password').fill(NEW_PASSWORD);
 await page.getByRole('button', { name: 'Update password' }).click();
-await page.waitForURL(/\/(\?.*)?$/, { timeout: 15000 });
-await page.waitForTimeout(800);
-check(
-  await page.getByRole('dialog', { name: 'Log in' }).isVisible(),
-  'success redirects to / with the login modal open',
-);
+const updated = await page
+  .getByText('Password updated.')
+  .waitFor({ state: 'visible', timeout: 15000 })
+  .then(
+    () => true,
+    () => false,
+  );
+check(updated, 'the modal confirms the new password');
 await page.screenshot({
-  path: 'docs/research/qa-phone-forgot-4-back-to-login.png',
+  path: 'docs/research/qa-phone-forgot-4-password-updated.png',
 });
+await page.getByRole('button', { name: 'Back to log in' }).click();
+check(
+  tokenUrls.length === 0,
+  `no request URL carried a token (${tokenUrls.length})`,
+);
 
 // ── 5. Log in with the new password ─────────────────────────────────────────
 await page.getByPlaceholder('Email').fill(EMAIL);
