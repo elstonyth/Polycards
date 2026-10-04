@@ -1145,9 +1145,9 @@ describe("rateLimit('admin-action')", () => {
       rules: [{ limit: 60, windowMs: 60_000 }],
       prefix: 'rl:admin-action:',
     });
-    const noAuthReq = { ip: '192.168.1.1' } as unknown as MedusaRequest;
+    const anonymousReq = { ip: '192.168.1.1' } as unknown as MedusaRequest;
     await mw(
-      noAuthReq,
+      anonymousReq,
       makeRes().res,
       jest.fn() as unknown as MedusaNextFunction,
     );
