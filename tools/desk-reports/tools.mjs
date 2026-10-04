@@ -196,7 +196,7 @@ TOOLS.growth = [
   {
     name: 'challenge_results_poster',
     description:
-      "A finished results poster of the most recently settled Weekly Challenge week (a tall portrait JPEG, 1080 px wide): the week's dates, the pool and the stages it unlocked, the top 3 on a podium with each winner's best prize card (marked '+N more cards' when they won several), their public name, what they pulled and what they won, then ranks 4 to 10 with what they pulled and won. Every figure comes from settlement's own records; nothing is typed in. Use it for any post about last week's winners or results. It is a draft; a human reviews it before it is published.",
+      "A finished results poster of the most recently settled Weekly Challenge week (a tall portrait JPEG, 1080 px wide): the week's dates, the pool and the stages it unlocked, the top 3 on a podium, each with every prize card they won fanned out like a hand (the most valuable in front), their public name, what they pulled and what they won, then ranks 4 to 10 with what they pulled and won. Every figure comes from settlement's own records; nothing is typed in. Use it for any post about last week's winners or results. It is a draft; a human reviews it before it is published.",
     inputSchema: {},
     request: () => ({
       path: 'challenge-results-poster',

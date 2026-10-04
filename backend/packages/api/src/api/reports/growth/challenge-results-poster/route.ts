@@ -9,7 +9,7 @@ import { latestChallengeResults } from '../challenge-results/results';
 
 // GET /reports/growth/challenge-results-poster: the most recently settled
 // Weekly Challenge week as a posting poster (challenge-results-poster.ts):
-// the top 3 with their best prize card, what they pulled and what they won,
+// the top 3 with every prize card they won, what they pulled and won,
 // then ranks 4-10. x-poster-week is the week's start; x-poster-missing-art
 // names podium ranks whose card shows as a placeholder; x-poster-note says
 // in plain words when a disabled winner was left out.
@@ -25,6 +25,10 @@ export async function GET(
     );
   }
   const top = results.winners.filter((w) => w.rank <= 3);
+  // Every card each winner received, most valuable first, once per pull
+  // minted (two stages can award one card twice).
+  const hand = (w: (typeof top)[number]) =>
+    w.cards.flatMap((c) => Array.from({ length: c.qty }, () => c));
   const { jpeg, missing } = await renderResultsPoster(
     {
       weekLabel: posterWeekLabel(
@@ -39,9 +43,7 @@ export async function GET(
         pulledMyr: w.pulledMyr,
         prizeMyr: w.prizeMyr,
         credits: w.credits,
-        card: w.cards[0]?.name ?? null,
-        // Each pull minted counts: two stages can award one card twice.
-        moreCards: Math.max(0, w.cards.reduce((n, c) => n + c.qty, 0) - 1),
+        cards: hand(w).map((c) => c.name),
       })),
       list: results.winners
         .filter((w) => w.rank > 3 && w.rank <= 10)
@@ -53,7 +55,7 @@ export async function GET(
         })),
       siteHost: 'polycards.gg/leaderboard',
     },
-    new Map(top.map((w) => [w.rank, w.cards[0]?.image ?? null])),
+    new Map(top.map((w) => [w.rank, hand(w).map((c) => c.image)])),
   );
   res.setHeader('Content-Type', 'image/jpeg');
   res.setHeader('x-poster-week', results.weekStart.toISOString());
