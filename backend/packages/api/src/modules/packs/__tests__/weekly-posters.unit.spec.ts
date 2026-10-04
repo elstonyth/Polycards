@@ -2,6 +2,8 @@ import sharp from 'sharp';
 import { POSTER_H, POSTER_W } from '../brand-poster';
 import {
   composeResultsPoster,
+  fanPosition,
+  MAX_FAN,
   resultsHeadline,
   rmWhole,
 } from '../challenge-results-poster';
@@ -46,8 +48,7 @@ describe('results poster', () => {
             pulledMyr: 452123.4,
             prizeMyr: 12400,
             credits: 0,
-            card: 'Gengar VMAX #271',
-            moreCards: 2,
+            cards: ['Gengar VMAX #271', 'Mew ex #232', 'Mew ex #232'],
           },
           {
             rank: 2,
@@ -55,8 +56,7 @@ describe('results poster', () => {
             pulledMyr: 301000,
             prizeMyr: 9000,
             credits: 0,
-            card: 'Charizard GX #SV49',
-            moreCards: 1,
+            cards: ['Charizard GX #SV49'],
           },
           // Credits only: a money tile, never a missing-art placeholder.
           {
@@ -65,8 +65,7 @@ describe('results poster', () => {
             pulledMyr: 250000,
             prizeMyr: 2500,
             credits: 2500,
-            card: null,
-            moreCards: 0,
+            cards: [],
           },
         ],
         list: Array.from({ length: 7 }, (_, i) => ({
@@ -84,6 +83,41 @@ describe('results poster', () => {
     expect(size.width).toBe(1080);
     expect(size.height).toBeGreaterThan(1600);
     expect(placeholders).toEqual([1, 2]);
+  });
+
+  it('fans a hand out from the front card: right, left, right, left', () => {
+    expect([0, 1, 2, 3, 4].map(fanPosition)).toEqual([0, 1, -1, 2, -2]);
+    expect(MAX_FAN).toBe(5);
+  });
+
+  it('draws a whole hand from real art, the cards past the fifth as a tab', async () => {
+    const slab = await sharp({
+      create: { width: 160, height: 259, channels: 4, background: '#3366ff' },
+    })
+      .png()
+      .toBuffer();
+    const seven = Array.from({ length: 7 }, (_, i) => `Card ${i + 1}`);
+    const { jpeg, placeholders } = await composeResultsPoster(
+      {
+        weekLabel: '28 SEPT – 4 OCT',
+        headline: 'RM 1 POOLED · 1 STAGE UNLOCKED',
+        podium: [
+          {
+            rank: 1,
+            name: 'A',
+            pulledMyr: 1,
+            prizeMyr: 1,
+            credits: 0,
+            cards: seven,
+          },
+        ],
+        list: [],
+        siteHost: 'polycards.gg/leaderboard',
+      },
+      new Map([[1, seven.map(() => slab)]]),
+    );
+    expect((await jpegSize(jpeg)).width).toBe(1080);
+    expect(placeholders).toEqual([]);
   });
 });
 

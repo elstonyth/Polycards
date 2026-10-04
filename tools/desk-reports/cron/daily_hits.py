@@ -50,6 +50,17 @@ def rm(value):
     return f"RM {value:,.2f}"
 
 
+# The tiers a Telegram pull card is drawn for (the operator's call,
+# 2026-10-05): Legendary and above, in the site's order Immortal > Legendary
+# > Mythical > Rare > Uncommon > Common. The poster still shows the top 10.
+CARD_TIERS = ("Immortal", "Legendary")
+
+
+def gets_pull_card(pull):
+    """Whether a top pull gets its own Telegram pull card."""
+    return pull["card"].get("rarity") in CARD_TIERS
+
+
 def withdrawal_line(by_status):
     """'settled 5 (RM 1,234.00) · held 1 (RM 1,925.11) · ...' for the statuses
     the payments report returns, busiest first; 'none' when empty."""
@@ -118,7 +129,7 @@ def main():
                                _get("growth/top-pulls-poster", {"day": day}, key)))
         except OSError as err:  # URLError and timeouts
             notes.append(f"The posting poster could not be drawn ({err}).")
-        for pull in pulls:
+        for pull in filter(gets_pull_card, pulls):
             try:
                 files.append(_save("images", f"hits-{day}-{pull['rank']:02d}.jpg",
                                    _get("growth/pull-card", {"pull": pull["pull_id"]}, key)))
@@ -146,6 +157,11 @@ def main():
         title = f"{card['name']} · {card['grade']}" if card["grade"] else card["name"]
         pack = pull["pack"]["title"] or pull["pack"]["slug"]
         print(f"{pull['rank']}. {title} | {rm(pull['value_myr'])} | {card['rarity']} | {pack} | {pull['player']['name']}")
+    carded = [p["rank"] for p in pulls if gets_pull_card(p)]
+    print(
+        "TELEGRAM PULL CARDS (Legendary and Immortal pulls only): "
+        + (", ".join(f"#{r}" for r in carded) if carded else "none: no Legendary or Immortal pull in the top 10")
+    )
     print(f"WITHDRAWALS REQUESTED THAT DAY (status count (RM requested)): {withdrawals}")
     print("STAFF EXCEL: posted separately at 00:05 by its own job (full customer details: phone, email, bank). Staff only, never to be posted publicly.")
     for note in notes:
@@ -195,6 +211,8 @@ def _self_test():
         "pending": {"count": 0, "requested": 0},
     }) == "settled 5 (RM 1,234.00) · held 1 (RM 1,925.11)"
     assert withdrawal_line({}) == "none"
+    tiers = ["Immortal", "Legendary", "Mythical", "Rare", "Uncommon", "Common", None]
+    assert [gets_pull_card({"card": {"rarity": t}}) for t in tiers] == [True, True, False, False, False, False, False]
     print("self-test ok")
 
 

@@ -16,7 +16,7 @@ import {
 // Last week's Weekly Challenge result as a posting poster for the Growth desk
 // (GET /reports/growth/challenge-results-poster and the Monday 9 a.m. drop):
 // the challenge poster's language (ink stage, charcoal panels, Nekst claims,
-// chase gold for money), the top 3 on a podium with their best prize card,
+// chase gold for money), the top 3 on a podium with every prize card they won,
 // what they pulled and what they won, then ranks 4-10 as a ledger. Every
 // figure comes from settlement's own rows; nothing is typed in.
 //
@@ -30,10 +30,9 @@ export type ResultsPodiumEntry = {
   pulledMyr: number | null;
   prizeMyr: number;
   credits: number;
-  /** The most valuable card won; null = credits only. */
-  card: string | null;
-  /** Cards won besides the one shown (counting each pull minted). */
-  moreCards: number;
+  /** Every card won, most valuable first, once per pull minted (two
+   *  stages can award one card twice); empty = credits only. */
+  cards: string[];
 };
 
 export type ResultsListEntry = {
@@ -98,14 +97,127 @@ export function resultsHeadline(
 const decode = (bytes: Buffer) =>
   sharp(bytes, { limitInputPixels: MAX_DECODE_PIXELS });
 
+// The side steps' centre line (the centre step sits on the poster's).
+const SIDE_CX = PAD + 40 + SIDE.w / 2;
+// A hand shows at most this many cards; more get a "+N MORE" tab.
+export const MAX_FAN = 5;
+// A hand splays from one base like cards held in a hand: each card leans
+// this many degrees further out than the one inside it, its foot this share
+// of a card's width further along, so the tops (the slab label and the art)
+// of the cards behind stay in view.
+const FAN_TILT = 11;
+const FAN_SPREAD = 0.12;
+
+/** Where the i-th card of a hand sits: the front card in the middle (0),
+ *  then right, left, right, left (1, -1, 2, -2). */
+export const fanPosition = (i: number): number =>
+  i === 0 ? 0 : i % 2 ? (i + 1) / 2 : -i / 2;
+
+/** A card's art contained in a w x h box, or null when it does not decode. */
+async function cardPng(
+  bytes: Buffer | null,
+  w: number,
+  h: number,
+): Promise<Buffer | null> {
+  if (!bytes) return null;
+  try {
+    return await decode(bytes)
+      .resize(w, h, {
+        fit: 'contain',
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      })
+      .png()
+      .toBuffer();
+  } catch {
+    return null;
+  }
+}
+
+/** The tile a card whose art could not be loaded is drawn as. */
+const placeholderPng = (w: number, h: number): Promise<Buffer> =>
+  sharp(
+    Buffer.from(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">` +
+        `<rect x="1" y="1" width="${w - 2}" height="${h - 2}" rx="20" fill="${GRAPHITE}" stroke="${HAIRLINE}" stroke-width="2"/>` +
+        textEl(
+          'PRIZE CARD',
+          w / 2,
+          baseline(h / 2, 20),
+          body(20, 4),
+          SILVER,
+          'middle',
+        ) +
+        '</svg>',
+    ),
+  )
+    .png()
+    .toBuffer();
+
+/** One winner's cards as composite layers: a single slab, or a hand splayed
+ *  from one base under `cx`, its front (most valuable) card upright with its
+ *  top at `top`, drawn last, the others a shade darker behind it. `bottom`
+ *  is the lowest pixel drawn. */
+async function cardFan(
+  count: number,
+  art: (Buffer | null)[],
+  cx: number,
+  top: number,
+  cardW: number,
+): Promise<{ layers: OverlayOptions[]; missing: boolean; bottom: number }> {
+  const n = Math.min(count, MAX_FAN);
+  const cardH = Math.round(cardW / SLAB);
+  // The hand turns about the front card's foot.
+  const base = top + cardH;
+  // An even hand has no middle card: centre it on its positions' mean.
+  const positions = Array.from({ length: n }, (_, i) => fanPosition(i));
+  const mean = positions.reduce((a, b) => a + b, 0) / n;
+  // Outermost first, so the cards further in overlap them.
+  const order = Array.from({ length: n }, (_, i) => i).sort(
+    (a, b) => Math.abs(positions[b]) - Math.abs(positions[a]) || b - a,
+  );
+  const layers: OverlayOptions[] = [];
+  let missing = false;
+  let bottom = base;
+  for (const i of order) {
+    const p = positions[i] - mean;
+    let card = await cardPng(art[i] ?? null, cardW, cardH);
+    if (!card) {
+      missing = true;
+      card = await placeholderPng(cardW, cardH);
+    }
+    let img = sharp(card);
+    if (i > 0) img = img.modulate({ brightness: 0.8 });
+    const tilt = p * FAN_TILT;
+    if (tilt !== 0) {
+      img = img.rotate(tilt, { background: { r: 0, g: 0, b: 0, alpha: 0 } });
+    }
+    const { data, info } = await img
+      .png()
+      .toBuffer({ resolveWithObject: true });
+    // sharp turns about the centre; place that centre where a turn about the
+    // card's own foot (on the hand's base line) would put it.
+    const rad = (tilt * Math.PI) / 180;
+    const footX = cx + p * cardW * FAN_SPREAD;
+    const midX = footX + (cardH / 2) * Math.sin(rad);
+    const midY = base - (cardH / 2) * Math.cos(rad);
+    layers.push({
+      input: data,
+      left: Math.round(midX - info.width / 2),
+      top: Math.round(midY - info.height / 2),
+    });
+    bottom = Math.max(bottom, Math.round(midY + info.height / 2));
+  }
+  return { layers, missing, bottom };
+}
+
 /**
- * Compose the poster. `art` maps a podium rank to its prize card's bytes
- * (null or missing = a placeholder tile, never a failed poster).
- * `placeholders` lists the ranks whose card is not shown as its art.
+ * Compose the poster. `art` maps a podium rank to its cards' bytes, in the
+ * order of its `cards` (null or missing = a placeholder tile, never a failed
+ * poster). `placeholders` lists the ranks with a card not shown as its art.
  */
 export async function composeResultsPoster(
   input: ResultsPosterInput,
-  art: Map<number, Buffer | null>,
+  art: Map<number, (Buffer | null)[]>,
 ): Promise<{ jpeg: Buffer; placeholders: number[] }> {
   ensureBundledFonts(); // before the first text render in this process
   const mid = W / 2;
@@ -167,130 +279,105 @@ export async function composeResultsPoster(
   );
 
   // ---- the podium ----------------------------------------------------------
+  // Every card a winner received is on show: one card as a single slab,
+  // several fanned like a hand with the most valuable in front.
   const panelY = Math.round(y + headSize / 2 + 48);
-  const slots = [
-    { rank: 2, x: PAD + 40, top: panelY + 170, ...SIDE },
-    { rank: 1, x: mid - CENTER.w / 2, top: panelY + 110, ...CENTER },
-    { rank: 3, x: W - PAD - 40 - SIDE.w, top: panelY + 170, ...SIDE },
+  const steps = [
+    { rank: 2, cx: SIDE_CX, top: panelY + 170, single: SIDE, fanW: 160 },
+    { rank: 1, cx: mid, top: panelY + 110, single: CENTER, fanW: 190 },
+    { rank: 3, cx: W - SIDE_CX, top: panelY + 170, single: SIDE, fanW: 160 },
   ];
   const placeholders: number[] = [];
   const podium: string[] = [];
   let panelBottom = panelY + 110 + CENTER.h;
-  for (const slot of slots) {
-    const winner = input.podium.find((p) => p.rank === slot.rank);
+  for (const step of steps) {
+    const winner = input.podium.find((p) => p.rank === step.rank);
     if (!winner) continue; // a hidden winner leaves the step empty
-    const cx = slot.x + slot.w / 2;
+    const { cx, top } = step;
     podium.push(
       textEl(
-        `#${slot.rank}${RANK_SUFFIX[slot.rank]}`,
+        `#${step.rank}${RANK_SUFFIX[step.rank]}`,
         cx,
-        baseline(slot.top - 34, 40),
+        baseline(top - 34, 40),
         display(40),
-        RANK_TONE[slot.rank],
+        RANK_TONE[step.rank],
         'middle',
       ),
     );
-    const bytes = art.get(slot.rank) ?? null;
-    let drawn = false;
-    if (bytes && winner.card) {
-      try {
+    let bottom: number;
+    if (!winner.cards.length) {
+      // Credits only: the amount on a plain tile.
+      const { w, h } = step.single;
+      const x = cx - w / 2;
+      const amount = rmWhole(winner.credits);
+      const size = await sizeToFit([amount], (s) => display(s), 44, 24, w - 28);
+      podium.push(
+        `<rect x="${x + 1}" y="${top + 1}" width="${w - 2}" height="${h - 2}" rx="24" ` +
+          `fill="${GRAPHITE}" stroke="${HAIRLINE}" stroke-width="2"/>`,
+        textEl(
+          amount,
+          cx,
+          baseline(top + h / 2 - 18, size),
+          display(size),
+          CHASE,
+          'middle',
+        ),
+        textEl(
+          'CREDITS',
+          cx,
+          baseline(top + h / 2 + 34, 24),
+          body(24, 4),
+          SILVER,
+          'middle',
+        ),
+      );
+      bottom = top + h;
+    } else {
+      const fan = await cardFan(
+        winner.cards.length,
+        art.get(step.rank) ?? [],
+        cx,
+        top,
+        winner.cards.length === 1 ? step.single.w : step.fanW,
+      );
+      layers.push(...fan.layers);
+      if (fan.missing) placeholders.push(step.rank);
+      bottom = fan.bottom;
+      const extra = winner.cards.length - MAX_FAN;
+      if (extra > 0) {
+        // More cards than a hand shows: a gold tab over its foot.
+        const tag = `+${extra} MORE`;
+        const tagFont = body(20, 2);
+        const tagW = Math.round((await measure(tag, tagFont)) + 36);
+        const tagH = 40;
         layers.push({
-          input: await decode(bytes)
-            .resize(slot.w, slot.h, {
-              fit: 'contain',
-              background: { r: 0, g: 0, b: 0, alpha: 0 },
-            })
+          input: await sharp(
+            Buffer.from(
+              `<svg xmlns="http://www.w3.org/2000/svg" width="${tagW}" height="${tagH}">` +
+                `<rect width="${tagW}" height="${tagH}" rx="${tagH / 2}" fill="${CHASE}"/>` +
+                textEl(
+                  tag,
+                  tagW / 2,
+                  baseline(tagH / 2, 20),
+                  tagFont,
+                  INK,
+                  'middle',
+                ) +
+                '</svg>',
+            ),
+          )
             .png()
             .toBuffer(),
-          left: Math.round(slot.x),
-          top: Math.round(slot.top),
+          left: Math.round(cx - tagW / 2),
+          top: Math.round(bottom - tagH / 2 - 6),
         });
-        drawn = true;
-      } catch {
-        // Undecodable art costs this tile its picture, never the poster.
       }
     }
-    if (!drawn) {
-      podium.push(
-        `<rect x="${slot.x + 1}" y="${slot.top + 1}" width="${slot.w - 2}" height="${slot.h - 2}" rx="24" ` +
-          `fill="${GRAPHITE}" stroke="${HAIRLINE}" stroke-width="2"/>`,
-      );
-      if (winner.card) {
-        placeholders.push(slot.rank);
-        podium.push(
-          textEl(
-            'PRIZE CARD',
-            cx,
-            baseline(slot.top + slot.h / 2, 24),
-            body(24, 4),
-            SILVER,
-            'middle',
-          ),
-        );
-      } else {
-        const amount = rmWhole(winner.credits);
-        const size = await sizeToFit(
-          [amount],
-          (s) => display(s),
-          44,
-          24,
-          slot.w - 28,
-        );
-        podium.push(
-          textEl(
-            amount,
-            cx,
-            baseline(slot.top + slot.h / 2 - 18, size),
-            display(size),
-            CHASE,
-            'middle',
-          ),
-          textEl(
-            'CREDITS',
-            cx,
-            baseline(slot.top + slot.h / 2 + 34, 24),
-            body(24, 4),
-            SILVER,
-            'middle',
-          ),
-        );
-      }
-    }
-    if (winner.moreCards > 0) {
-      // "+1 MORE CARD" as a gold tab over the slab's foot.
-      const tag = `+${winner.moreCards} MORE CARD${winner.moreCards === 1 ? '' : 'S'}`;
-      const tagFont = body(20, 2);
-      const tagW = Math.round((await measure(tag, tagFont)) + 36);
-      const tagH = 40;
-      // Its own layer, composited after the art: drawn in the base SVG, the
-      // slab would cover it.
-      layers.push({
-        input: await sharp(
-          Buffer.from(
-            `<svg xmlns="http://www.w3.org/2000/svg" width="${tagW}" height="${tagH}">` +
-              `<rect width="${tagW}" height="${tagH}" rx="${tagH / 2}" fill="${CHASE}"/>` +
-              textEl(
-                tag,
-                tagW / 2,
-                baseline(tagH / 2, 20),
-                tagFont,
-                INK,
-                'middle',
-              ) +
-              '</svg>',
-          ),
-        )
-          .png()
-          .toBuffer(),
-        left: Math.round(cx - tagW / 2),
-        top: Math.round(slot.top + slot.h - tagH / 2 - 6),
-      });
-    }
-    let ny = slot.top + slot.h + 46;
+    let ny = bottom + 46;
     const nameFont = body(30);
     podium.push(
       textEl(
-        await fit(imageSafeName(winner.name), nameFont, slot.w + 40),
+        await fit(imageSafeName(winner.name), nameFont, step.single.w + 40),
         cx,
         baseline(ny, 30),
         nameFont,
@@ -303,7 +390,7 @@ export async function composeResultsPoster(
       const pulled = `PULLED ${rmWhole(winner.pulledMyr)}`;
       podium.push(
         textEl(
-          await fit(pulled, body(20, 2), slot.w + 40),
+          await fit(pulled, body(20, 2), step.single.w + 40),
           cx,
           baseline(ny, 20),
           body(20, 2),
@@ -319,7 +406,7 @@ export async function composeResultsPoster(
       (s) => display(s),
       32,
       22,
-      slot.w + 40,
+      step.single.w + 40,
     );
     podium.push(
       textEl(won, cx, baseline(ny, wonSize), display(wonSize), CHASE, 'middle'),
@@ -449,12 +536,24 @@ export async function composeResultsPoster(
  *  whose card could not be fetched or decoded. */
 export async function renderResultsPoster(
   input: ResultsPosterInput,
-  urls: Map<number, string | null>,
+  urls: Map<number, (string | null)[]>,
 ): Promise<{ jpeg: Buffer; missing: number[] }> {
-  const art = new Map<number, Buffer | null>();
+  // One fetch per picture: a card won twice is the same picture twice.
+  const fetched = new Map<string, Promise<Buffer | null>>();
+  const get = (url: string | null) => {
+    if (!url) return Promise.resolve(null);
+    if (!fetched.has(url)) {
+      fetched.set(
+        url,
+        fetchBytes(url).catch(() => null),
+      );
+    }
+    return fetched.get(url)!;
+  };
+  const art = new Map<number, (Buffer | null)[]>();
   await Promise.all(
-    [...urls].map(async ([rank, url]) => {
-      art.set(rank, url ? await fetchBytes(url).catch(() => null) : null);
+    [...urls].map(async ([rank, list]) => {
+      art.set(rank, await Promise.all(list.map(get)));
     }),
   );
   const { jpeg, placeholders } = await composeResultsPoster(input, art);
