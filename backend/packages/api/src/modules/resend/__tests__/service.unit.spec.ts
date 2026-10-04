@@ -1,6 +1,7 @@
 import ResendNotificationProviderService from '../service';
 import {
   BANK_ACCOUNT_ADDED_TEMPLATE,
+  GOOGLE_LINKED_TEMPLATE,
   PASSWORD_RESET_TEMPLATE,
   PHONE_CHANGED_TEMPLATE,
   escapeHtml,
@@ -249,6 +250,17 @@ describe('renderTemplate', () => {
       renderTemplate(PHONE_CHANGED_TEMPLATE, { new_phone_masked: '••••7790' }),
     ).toBeUndefined();
     expect(renderTemplate(PHONE_CHANGED_TEMPLATE, null)).toBeUndefined();
+  });
+
+  // store/customers/link-google/route.ts sends this template with no data.
+  // The route spec mocks the send, so without this case a missing branch here
+  // would only show up as `send` logging an error and recording SUCCESS.
+  it('renders the google-linked notice with no payload', () => {
+    const rendered = renderTemplate(GOOGLE_LINKED_TEMPLATE, undefined)!;
+    for (const body of [rendered.html, rendered.text]) {
+      expect(body).toContain('your password login was removed');
+      expect(body).toContain('support@polycards.gg');
+    }
   });
 
   // The bank-account-added alert reads `usable_from` and changes its promise on

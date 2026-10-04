@@ -14,8 +14,8 @@ const PASSWORD = 'google-link-pw-1'; // gitleaks:allow
 // The unit spec pins the route's decisions; this pins the three things a mock
 // cannot: that core really does refuse the registration this recovers from,
 // that `app_metadata.customer_id` written here is what /auth/token/refresh
-// turns into an actor, and that the linked account still reads as a password
-// account afterwards.
+// turns into an actor, and that the account's password login is really gone
+// afterwards.
 medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ api, getContainer }) => {
@@ -94,7 +94,7 @@ medusaIntegrationTestRunner({
         storeHeaders = { 'x-publishable-api-key': key.token };
       });
 
-      it('attaches the Google identity to the password account holding its email; refresh yields that account', async () => {
+      it('attaches the Google identity to the password account holding its email and removes its password login; refresh yields that account', async () => {
         const email = 'linked@test.dev';
         const customerId = await registerWithPassword(email);
         const { identityId, token } = await googleRegisterToken(
@@ -132,12 +132,16 @@ medusaIntegrationTestRunner({
         });
         expect(me.data.customer.email).toBe(email);
 
-        // Still a password account — the phone-change re-auth gate keeps
-        // asking it for the password, and the modal cohort read says so.
+        // Google-only from here: the password no longer signs in, and the
+        // account reads as password-less to the phone gates.
         const account = await api.get('/store/customers/me/account', {
           headers: authed(session),
         });
-        expect(account.data).toMatchObject({ hasPassword: true });
+        expect(account.data).toMatchObject({ hasPassword: false });
+        const passwordLogin = await unwrapResponse(
+          api.post('/auth/customer/emailpass', { email, password: PASSWORD }),
+        );
+        expect(passwordLogin.status).toBe(401);
 
         const [identity] = await auth().listAuthIdentities({
           id: [identityId],

@@ -13,6 +13,7 @@ export const WITHDRAWAL_RECEIPT_TEMPLATE = 'withdrawal-receipt';
 export const PHONE_CHANGED_TEMPLATE = 'phone-changed';
 export const BANK_ACCOUNT_ADDED_TEMPLATE = 'bank-account-added';
 export const BANK_ACCOUNT_REMOVED_TEMPLATE = 'bank-account-removed';
+export const GOOGLE_LINKED_TEMPLATE = 'google-linked';
 
 export type Rendered = { subject: string; html: string; text: string };
 
@@ -260,6 +261,38 @@ const phoneChanged = (oldMasked: string, newMasked: string): Rendered => {
 </html>`,
   };
 };
+
+// Security notice for store/customers/link-google/route.ts, which removes an
+// account's password login when it attaches a Google sign-in. It goes to the
+// address Google just verified, and says how to sign in from now on, because
+// the password the owner may still try no longer works.
+const googleLinked = (): Rendered => ({
+  subject: 'Google sign-in was connected to your Polycards account',
+  text: [
+    'Google sign-in was connected to your Polycards account',
+    '',
+    'Google sign-in was connected to your Polycards account, and your password login was removed.',
+    'Sign in with "Continue with Google" from now on.',
+    '',
+    "If this wasn't you, contact support@polycards.gg.",
+  ].join('\n'),
+  html: `<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#171717;">
+    <div style="max-width:520px;margin:0 auto;padding:40px 24px;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;color:#fafafa;">
+      <h1 style="margin:0 0 20px;font-size:24px;line-height:1.25;font-weight:800;letter-spacing:-0.01em;">Google sign-in was connected</h1>
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
+        Google sign-in was connected to your Polycards account, and your password login was removed.
+        Sign in with <strong style="color:#fafafa;">Continue with Google</strong> from now on.
+      </p>
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d4d4d4;">
+        If this wasn't you, contact
+        <a href="mailto:support@polycards.gg" style="color:#fafafa;text-decoration:underline;">support@polycards.gg</a>.
+      </p>
+    </div>
+  </body>
+</html>`,
+});
 
 // "A new bank account can now be paid out to" — the security alert half of the
 // payout-destination binding (plan 088). Deliberately blunt and action-first:
@@ -535,6 +568,9 @@ export const renderTemplate = (
       return undefined;
     return phoneChanged(oldMasked, newMasked);
   }
+
+  // No payload: nothing in this notice varies.
+  if (template === GOOGLE_LINKED_TEMPLATE) return googleLinked();
 
   if (template === BANK_ACCOUNT_ADDED_TEMPLATE) {
     const bankName = data?.bank_name;
