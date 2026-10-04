@@ -25,14 +25,14 @@ export const metadata: Metadata = {
 // including the one thing kept before an answer: the sign-up marker
 // (markSignup), which a reject deletes.
 //
-// Updated 2026-10-03: verification codes can only be requested from Malaysia
-// or Singapore, judged from the visitor's IP (src/lib/visitor-country.ts). The
-// IP2Location LITE credit is required by that data's licence.
+// Updated 2026-10-04: verification codes can only be requested from Malaysia,
+// judged from the visitor's IP (src/lib/visitor-country.ts). The MaxMind
+// GeoLite2 credit is required by that data's licence.
 
 const SECTIONS: { title: string; body: string }[] = [
   {
     title: 'What we collect',
-    body: 'Your account details (email, mobile phone number, display handle), your pack, vault, and transaction history, and the technical basics every web service receives — IP address and browser information. A mobile number is required to open and keep an account: we verify it by SMS at signup, and again if you change it or reset your password. If you sign in with Google, we receive your name and email from Google. To stop abuse, verification codes can only be requested from Malaysia or Singapore, which we judge from your IP address. This site includes IP2Location LITE data available from https://lite.ip2location.com.',
+    body: 'Your account details (email, mobile phone number, display handle), your pack, vault, and transaction history, and the technical basics every web service receives — IP address and browser information. A mobile number is required to open and keep an account: we verify it by SMS at signup, and again if you change it or reset your password. If you sign in with Google, we receive your name and email from Google. To stop abuse, verification codes can only be requested from Malaysia, which we judge from your IP address. This product includes GeoLite2 data created by MaxMind, available from https://www.maxmind.com.',
   },
   {
     title: 'Cookies',
