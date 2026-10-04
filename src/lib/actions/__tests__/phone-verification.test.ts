@@ -455,6 +455,29 @@ describe('resetPasswordByPhone migration seam', () => {
       error: 'This account signs in with Google.',
     });
   });
+  // The account holds the number but never verified it, so the phone cannot
+  // stand in for the password. Say so, and point at the flow that works.
+  it('names the unverified-number refusal and sends them to the email reset', async () => {
+    backend(
+      {
+        [route]: {
+          status: 400,
+          body: {
+            message:
+              'This phone number is not verified on its account. Reset by email instead.',
+          },
+        },
+      },
+      { token: null },
+    );
+    await expect(
+      resetPasswordByPhone({ token: 'phone-proof' }),
+    ).resolves.toEqual({
+      ok: false,
+      error:
+        "This number hasn't been verified on its account, so it can't reset the password. Reset by email instead.",
+    });
+  });
 });
 
 // Voice fallback for destinations whose SMS is "Delivered" but never read

@@ -3,9 +3,15 @@ import {
   blockUnverifiedPhoneWrite,
   requirePhoneVerified,
   rejectAdminPhoneWrite,
+  requireRegisterPhoneProof,
 } from '../phone-verification-guard';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { signPhoneProof } from '../../../utils/phone-verification';
+import * as fs from 'fs';
+import {
+  MIDDLEWARES_PATH,
+  extractLimiterEntries,
+} from '../../__tests__/rate-limit-coverage-helpers';
 
 const SECRET = 'test-secret';
 const PHONE = '+60107667787';
@@ -646,5 +652,92 @@ describe('rejectAdminPhoneWrite', () => {
   it('does not throw on a null or undefined body', async () => {
     expect(await run(makeReq(undefined))).toBeUndefined();
     expect(await run(makeReq(null))).toBeUndefined();
+  });
+});
+
+describe('requireRegisterPhoneProof', () => {
+  // Same capture/restore as the signup gate's suite above: the flag is
+  // process-wide and shared with every spec file in this worker.
+  const ORIGINAL_PHONE_VERIFICATION_REQUIRED =
+    process.env.PHONE_VERIFICATION_REQUIRED;
+  afterEach(() => {
+    if (ORIGINAL_PHONE_VERIFICATION_REQUIRED === undefined) {
+      delete process.env.PHONE_VERIFICATION_REQUIRED;
+    } else {
+      process.env.PHONE_VERIFICATION_REQUIRED =
+        ORIGINAL_PHONE_VERIFICATION_REQUIRED;
+    }
+  });
+
+  // Same wrapHandler stand-in as the suites above.
+  const run = (req: never) =>
+    new Promise<unknown>((resolve) => {
+      Promise.resolve(
+        requireRegisterPhoneProof(req, {} as never, resolve),
+      ).catch(resolve);
+    });
+  // The emailpass register body: credentials only, no phone.
+  const register = (headers: Record<string, string> = {}) =>
+    makeReq({ email: 'new@test.dev', password: 'a-password' }, headers);
+  const proofHeader = (token: string) => ({ 'x-phone-verification': token });
+
+  // Customer actor only: admin (/auth/user) and vendor (/auth/member)
+  // registration, and Google sign-up, must never meet this gate.
+  it('is registered on POST /auth/customer/emailpass/register and nowhere else', () => {
+    const wired = extractLimiterEntries(
+      fs.readFileSync(MIDDLEWARES_PATH, 'utf8'),
+    ).filter((e) => e.middlewares.includes('requireRegisterPhoneProof'));
+    expect(wired.map((e) => [e.matcher, e.methods])).toEqual([
+      ['/auth/customer/emailpass/register', ['POST']],
+    ]);
+  });
+
+  it('passes untouched when enforcement is off', async () => {
+    delete process.env.PHONE_VERIFICATION_REQUIRED;
+    expect(await run(register())).toBeUndefined();
+  });
+
+  describe('enforcement on', () => {
+    beforeEach(() => {
+      process.env.PHONE_VERIFICATION_REQUIRED = 'true';
+    });
+
+    it('passes a valid signup proof', async () => {
+      const token = signPhoneProof(SECRET, PHONE, 'signup');
+      expect(await run(register(proofHeader(token)))).toBeUndefined();
+    });
+
+    // Verified, not spent: POST /store/customers needs the same proof next,
+    // and that is where it is bound to the phone being written.
+    it('leaves the proof usable: the same token passes twice', async () => {
+      const token = signPhoneProof(SECRET, PHONE, 'signup');
+      expect(await run(register(proofHeader(token)))).toBeUndefined();
+      expect(await run(register(proofHeader(token)))).toBeUndefined();
+    });
+
+    it('refuses a missing header with the same refusal as the signup gate', async () => {
+      const err = (await run(register())) as MedusaError;
+      expect(err).toBeInstanceOf(MedusaError);
+      expect(err.type).toBe(MedusaError.Types.INVALID_DATA);
+      expect(err.message).toBe('Phone verification required.');
+    });
+
+    it.each([
+      ['another purpose', () => signPhoneProof(SECRET, PHONE, 'phone-change')],
+      [
+        'an expired proof',
+        () =>
+          signPhoneProof(SECRET, PHONE, 'signup', Date.now() - 11 * 60_000),
+      ],
+      [
+        'a proof signed with another secret',
+        () => signPhoneProof('not-the-secret', PHONE, 'signup'),
+      ],
+      ['a malformed token', () => 'not-a-proof'],
+    ])('refuses %s', async (_case, token) => {
+      const err = (await run(register(proofHeader(token())))) as MedusaError;
+      expect(err).toBeInstanceOf(MedusaError);
+      expect(err.message).toBe('Phone verification required.');
+    });
   });
 });

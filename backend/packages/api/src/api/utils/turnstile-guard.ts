@@ -27,8 +27,10 @@ import { MedusaError } from '@medusajs/framework/utils';
 // TURNSTILE_SECRET_KEY unset = skip. That is how this ships dark, and unsetting
 // it is the rollback lever. Set it only once a storefront build carrying
 // NEXT_PUBLIC_TURNSTILE_SITE_KEY is live, or every code request is refused.
+// Every host that serves the storefront must be listed in STORE_CORS, or sends
+// from it are refused (logged as "wrong hostname").
 
-/** Must equal the storefront widget's `action` (src/lib/turnstile.ts). */
+/** Must equal the storefront widget's `action` (src/lib/use-phone-otp-sender.ts). */
 export const TURNSTILE_ACTION = 'phone-otp';
 
 const SITEVERIFY_URL =
@@ -37,8 +39,26 @@ const SITEVERIFY_TIMEOUT_MS = 5_000;
 // Cloudflare's documented maximum; anything longer is not a token.
 const MAX_TOKEN_LENGTH = 2048;
 
+/**
+ * The storefront's hostnames: those of the STORE_CORS origins, the backend's
+ * existing list of where the storefront is served. An entry that is not a URL
+ * (Medusa also accepts /regex/ origins) names no host and is skipped.
+ */
+export const storefrontHosts = (storeCors: string): string[] =>
+  storeCors.split(',').flatMap((origin) => {
+    try {
+      return [new URL(origin.trim()).hostname];
+    } catch {
+      return [];
+    }
+  });
+
 /** Why the token was refused, or null when Cloudflare vouches for it. */
-async function refusal(secret: string, token: unknown): Promise<string | null> {
+async function refusal(
+  secret: string,
+  token: unknown,
+  hosts: string[],
+): Promise<string | null> {
   if (typeof token !== 'string' || !token) return 'missing token';
   if (token.length > MAX_TOKEN_LENGTH) return 'oversized token';
   let res: Response;
@@ -59,6 +79,8 @@ async function refusal(secret: string, token: unknown): Promise<string | null> {
   const body = (await res.json().catch(() => ({}))) as {
     success?: unknown;
     action?: unknown;
+    hostname?: unknown;
+    metadata?: { result_with_testing_key?: unknown };
     'error-codes'?: unknown;
   };
   if (body.success !== true) {
@@ -69,10 +91,28 @@ async function refusal(secret: string, token: unknown): Promise<string | null> {
     // EVERY send is being refused — the code is the whole diagnosis.
     return `rejected: ${codes || 'no error codes'}`;
   }
-  // Cloudflare's testing secrets answer without an `action`; a real key always
-  // echoes the widget's, so only a mismatch is refused.
-  if ((body.action ?? TURNSTILE_ACTION) !== TURNSTILE_ACTION)
-    return 'wrong action';
+  // Cloudflare's published test secrets answer every token with hostname
+  // "example.com", no action, and this flag; a real secret never sets it.
+  // Outside production that answer skips the two checks below, so local QA on
+  // the test keys keeps working (scripts/qa-phone-otp-turnstile.mjs) — a test
+  // secret passes any token anyway. In production a test secret would switch
+  // the human check off, so it is refused, by name.
+  if (body.metadata?.result_with_testing_key === true)
+    return process.env.NODE_ENV === 'production'
+      ? 'test secret in production'
+      : null;
+  // A real secret always echoes the action of the widget that minted the
+  // token; anything else (another widget, none) is not a phone-OTP token.
+  if (body.action !== TURNSTILE_ACTION)
+    return `wrong action ${JSON.stringify(body.action)}`;
+  // Beside the widget's own hostname list in Cloudflare: a token solved
+  // anywhere but the storefront is refused. With no hosts to compare against
+  // (STORE_CORS unset, or regex-only), only this check steps aside.
+  if (
+    hosts.length > 0 &&
+    !hosts.includes(String(body.hostname).toLowerCase())
+  )
+    return `wrong hostname ${JSON.stringify(body.hostname)}`;
   return null;
 }
 
@@ -83,9 +123,11 @@ export async function requireTurnstile(
 ): Promise<void> {
   const secret = process.env.TURNSTILE_SECRET_KEY;
   if (!secret) return next();
+  const { storeCors } = req.scope.resolve('configModule').projectConfig.http;
   const why = await refusal(
     secret,
     (req.body as { turnstile_token?: unknown } | undefined)?.turnstile_token,
+    storefrontHosts(storeCors ?? ''),
   );
   if (!why) return next();
   // Never the token or the phone — the reason alone is the diagnosis.

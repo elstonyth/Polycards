@@ -126,9 +126,10 @@ const AUTH_RULES: ErrorRule[] = [
     /phone number is already in use/i,
     'This phone number is already registered to another account. Log in instead, or use a different number.',
   ],
-  // The signup gate's refusal for a missing, expired or already-used proof (a
-  // proof creates one account). The copy keeps "verif" on purpose: AuthForm's
-  // draft retry sends a fresh code only on /verif/i.
+  // The signup gate's refusal for a missing, expired or already-used proof —
+  // register and create both check it, and a proof creates one account. The
+  // copy keeps "verif" on purpose: AuthForm's draft retry sends a fresh code
+  // only on /verif/i instead of replaying the dead proof.
   [
     /phone verification required/i,
     'Your phone verification expired. Please verify your number again.',
@@ -174,6 +175,7 @@ async function exchangeToken(
   path: string,
   email: string,
   password: string,
+  headers?: Record<string, string>,
 ): Promise<string> {
   // Unchecked at the envelope, exactly as the pre-port fetch generic was: the
   // caller's `catch` owns every failure here, and the copy it picks comes from
@@ -183,7 +185,7 @@ async function exchangeToken(
       path,
       UncheckedSchema,
       { email, password },
-      { auth: 'none' },
+      { auth: 'none', headers },
     ),
   );
   return (data as TokenResponse).token;
@@ -311,21 +313,25 @@ export async function signup(input: {
   const referral = await checkReferralCode({ code: input.referral_code ?? '' });
   if (!referral.ok) return referral;
 
+  // Sent on BOTH calls: the backend checks the proof before it creates the
+  // email/password login (requireRegisterPhoneProof), so a bad proof leaves no
+  // login behind, and again when the customer is created, where it must match
+  // the phone (requireSignupPhoneProof).
+  const proofHeader: Record<string, string> = input.phone_verification_token
+    ? { 'x-phone-verification': input.phone_verification_token }
+    : {};
+
   try {
     const registerToken = await exchangeToken(
       '/auth/customer/emailpass/register',
       email,
       input.password,
+      proofHeader,
     );
     await sdk.store.customer.create(
       { email, first_name, phone },
       {},
-      {
-        Authorization: `Bearer ${registerToken}`,
-        ...(input.phone_verification_token
-          ? { 'x-phone-verification': input.phone_verification_token }
-          : {}),
-      },
+      { Authorization: `Bearer ${registerToken}`, ...proofHeader },
     );
     // The account exists from here, whatever the auto-login below does — a
     // failed login still leaves a sign-up for the pixel to count.

@@ -61,7 +61,7 @@ const messageOf = (text: string, fallback: string): string =>
 const loggedOut = (f: Failure): boolean =>
   f.kind === 'unauthenticated' && f.status === undefined;
 
-// The three post-OTP outcomes password-reset/route.ts is DESIGNED to
+// The post-OTP outcomes password-reset/route.ts is DESIGNED to
 // disclose to a proven phone-holder (Task 5 comment) — a raw FetchError's
 // `.message` is the backend MedusaError's literal text, unwrapped (verified
 // against node_modules/@medusajs/js-sdk's FetchError: `super(jsonError.message
@@ -76,6 +76,13 @@ const PHONE_RESET_RULES: ErrorRule[] = [
     'More than one account uses this phone number. Reset by email instead.',
   ],
   [/this account signs in with google/i, 'This account signs in with Google.'],
+  // The account holds the number but never verified it (written before
+  // verification was enforced), so the number cannot stand in for the
+  // password. The email reset is the way through.
+  [
+    /not verified on its account/i,
+    "This number hasn't been verified on its account, so it can't reset the password. Reset by email instead.",
+  ],
 ];
 
 // The change route's two re-auth refusals. These MUST survive `messageOf`'s

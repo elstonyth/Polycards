@@ -216,6 +216,9 @@ describe('signup — required phone', () => {
     expect(r.ok).toBe(true);
     const [body] = mocks.customerCreate.mock.calls[0]!;
     expect(body.phone).toBe('+60107667787');
+    // No proof to forward: the register call goes out bare.
+    expect(mem.requests[0]!.path).toBe('/auth/customer/emailpass/register');
+    expect(mem.requests[0]!.headers).toEqual({});
   });
 });
 
@@ -266,6 +269,36 @@ describe('signup — phone verification enforcement (PHONE_VERIFICATION_REQUIRED
     const [, , headers] = mocks.customerCreate.mock.calls[0]!;
     expect(headers.Authorization).toBe('Bearer reg-tok');
     expect(headers['x-phone-verification']).toBe('proof-tok');
+    // The register call carries it too: the backend checks the proof BEFORE
+    // it creates the email/password login (requireRegisterPhoneProof).
+    expect(
+      mem.requests.find((q) => q.path === '/auth/customer/emailpass/register'),
+    ).toMatchObject({ headers: { 'x-phone-verification': 'proof-tok' } });
+  });
+
+  // An expired, consumed or unknown proof is refused at register now, before
+  // any login exists. The copy has to say "verif": AuthForm reads that as
+  // "this proof is dead" and sends a fresh code instead of retrying it.
+  it('a refused proof reads as a verification problem and creates nothing', async () => {
+    refuses(
+      'POST /auth/customer/emailpass/register',
+      'Phone verification required.',
+    );
+
+    const r = await signup({
+      email: 'new@polycards.app',
+      password: 'PolycardsTest123!',
+      phone: '010-766 7787',
+      phone_verification_token: 'expired-proof',
+    });
+
+    expect(r).toEqual({
+      ok: false,
+      error:
+        'Your phone verification expired. Please verify your number again.',
+    });
+    expect(!r.ok && /verif/i.test(r.error)).toBe(true);
+    expect(mocks.customerCreate).not.toHaveBeenCalled();
   });
 
   // One phone = one account. The signup gate (backend

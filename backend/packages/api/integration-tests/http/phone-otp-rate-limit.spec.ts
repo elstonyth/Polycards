@@ -6,6 +6,7 @@ import {
   TEST_REDIS_URL,
   unwrapResponse,
 } from "./utils";
+import { storefrontHosts } from "../../src/api/utils/turnstile-guard";
 
 jest.setTimeout(240 * 1000);
 
@@ -122,10 +123,18 @@ medusaIntegrationTestRunner({
         const slot = `rl:phone-otp-start-phone:phone:${PHONE_C}`;
         const previous = process.env.TURNSTILE_SECRET_KEY;
         process.env.TURNSTILE_SECRET_KEY = "test-secret";
+        // A genuine answer: the widget's action, solved on a storefront host.
+        // The guard reads its hosts from STORE_CORS, which a local .env may
+        // set (loadEnv loads it beside .env.test); unset, there is none and
+        // the guard skips that check.
+        const [hostname] = storefrontHosts(
+          getContainer().resolve("configModule").projectConfig.http.storeCors,
+        );
         const siteverify = jest.spyOn(globalThis, "fetch").mockResolvedValue(
-          new Response(JSON.stringify({ success: true, action: "phone-otp" }), {
-            status: 200,
-          }),
+          new Response(
+            JSON.stringify({ success: true, action: "phone-otp", hostname }),
+            { status: 200 },
+          ),
         );
         try {
           const refused = await start(PHONE_C);

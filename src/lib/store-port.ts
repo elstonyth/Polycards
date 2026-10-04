@@ -68,6 +68,12 @@ export type StoreOptions = {
    * `auth` says.
    */
   bearer?: string;
+  /**
+   * Extra request headers (the signup register call's `x-phone-verification`
+   * proof). Written before the port's own, so they can never replace the
+   * bearer or the Idempotency-Key; use `bearer` / `idempotencyKey` for those.
+   */
+  headers?: Record<string, string>;
   query?: Record<string, string | number | boolean>;
   idempotencyKey?: string;
   /**
@@ -182,6 +188,7 @@ export function createStore(transport: Transport, log: Log): Store {
       method,
       path,
       headers: {
+        ...o.headers,
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(o.idempotencyKey ? { 'Idempotency-Key': o.idempotencyKey } : {}),
       },

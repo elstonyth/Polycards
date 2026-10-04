@@ -108,6 +108,34 @@ describe('store — what reaches the wire', () => {
     });
   });
 
+  // The signup register call carries its phone proof this way. The port's own
+  // headers are written last, so a caller's can never replace the bearer.
+  it("adds the caller's headers beside the port's, never over them", async () => {
+    await store.post(
+      '/auth/customer/emailpass/register',
+      BalanceSchema,
+      { email: 'a@b.c' },
+      {
+        headers: {
+          'x-phone-verification': 'proof',
+          Authorization: 'Bearer not-this-one',
+        },
+      },
+    );
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      '/auth/customer/emailpass/register',
+      {
+        method: 'POST',
+        headers: {
+          'x-phone-verification': 'proof',
+          Authorization: 'Bearer tok',
+        },
+        cache: 'no-store',
+        body: { email: 'a@b.c' },
+      },
+    );
+  });
+
   it('DELETE carries a body (the saved-accounts route takes the id there)', async () => {
     await store.del('/store/credits/withdraw/accounts', BalanceSchema, {
       id: 'acct_1',
