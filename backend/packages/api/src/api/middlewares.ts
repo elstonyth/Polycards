@@ -46,6 +46,7 @@ import {
 import { refuseCrossOriginAdminWrite } from './utils/admin-origin-guard';
 import { requireReportKey } from './reports/require-report-key';
 import { requireTurnstile } from './utils/turnstile-guard';
+import { requireVouchedVisitor } from './utils/visitor-ip';
 
 // Custom-route middleware. /store/* is NOT a default customer-protected prefix
 // (only /store/customers/me/* is), so every customer-owned route here must opt
@@ -65,18 +66,17 @@ import { requireTurnstile } from './utils/turnstile-guard';
 // execution order, so auth_context.actor_id is populated for keying, and
 // unauthenticated requests are rejected with 401 before consuming any budget.
 // The auth endpoints have no auth_context by nature — that limiter keys on the
-// request IP (the middleware's designed fallback). /store/free-pack is the
-// one deliberate exception: it authenticates with { allowUnauthenticated:
+// caller's address (the middleware's designed fallback). /store/free-pack is
+// the one deliberate exception: it authenticates with { allowUnauthenticated:
 // true }, so storeReadRateLimit runs for anonymous callers too — it falls
-// back to the same per-IP key (rate-limit.ts's `auth?.actor_id || ip:...`).
-// In production that IS one shared bucket, not per-visitor: the badge is
-// site-wide (every route, not just /slots — #442), and every guest read is
-// proxied server-side through the storefront's ONE Next.js egress IP (the
-// same single-egress-IP topology the auth / profile-read limiters
-// already document — see rate-limit.ts ~750-760), so this is a
-// whole-storefront CIRCUIT BREAKER on the badge's guest read
-// (STORE_READ_DEFAULTS: 120/10s burst, 480/60s sustained sitewide), the same
-// accepted stance as those other public-read tiers. Overflow fails closed at
+// back to the same address key (rate-limit.ts's `auth?.actor_id || ip:...`).
+// Every guest read is proxied server-side by the storefront, so that address
+// is the visitor only when the storefront signed it (utils/visitor-ip.ts);
+// an unsigned read keys on req.ip, which on App Platform is the ingress — one
+// shared bucket. For those the limiter is a whole-storefront CIRCUIT BREAKER
+// on the badge's guest read, which is site-wide (every route, not just
+// /slots — #442) (STORE_READ_DEFAULTS: 120/10s burst, 480/60s sustained), the
+// same accepted stance as the other public-read tiers. Overflow fails closed at
 // the badge only — src/lib/data/free-pack.ts's try/catch maps any non-2xx
 // (including a 429) to `hidden`, so the catalog itself is unaffected. The
 // actual per-egress-IP call volume is throttled well below this ceiling by
@@ -293,12 +293,13 @@ export default defineMiddlewares({
     // would log users out under normal use.
     //
     // TWO independent tiers, per-identifier FIRST so a hammered account 429s
-    // before spending the sitewide budget — the same ordering rule (and the
+    // before spending the address budget — the same ordering rule (and the
     // same reason) as the OTP matchers below: the storefront issues every
-    // credential request from a server action, so in prod the backend sees ONE
-    // egress IP for every visitor and an IP-only limiter here is a single
-    // sitewide bucket. See the "Phone-OTP limiters" comment in
-    // utils/rate-limit.ts for the full shared-egress-IP rationale.
+    // credential request from a server action, so the address tier sees each
+    // visitor only through the storefront's signature (utils/visitor-ip.ts),
+    // every unsigned caller shares one bucket, and no address tier can bound
+    // one account against many addresses. See the "Phone-OTP limiters"
+    // comment in utils/rate-limit.ts for the full rationale.
     //
     // The wildcard matcher also covers .../emailpass/update (reset completion),
     // which carries a token + password and NO identifier. authIdentifierRateLimit
@@ -345,18 +346,23 @@ export default defineMiddlewares({
     },
     {
       // OTP send — TWO independent limiter tiers, per-phone FIRST so a
-      // hammered number 429s before spending the sitewide budget. The
-      // storefront proxies every OTP request server-side (one egress IP in
-      // prod), so an IP-only limiter here would be one shared bucket for
-      // every visitor — see the "Phone-OTP limiters" comment in
-      // utils/rate-limit.ts for the full rationale.
+      // hammered number 429s before spending the address budget. The
+      // storefront proxies every OTP request server-side, so the address tier
+      // sees the visitor only through the storefront's signature — see the
+      // "Phone-OTP limiters" comment in utils/rate-limit.ts for the full
+      // rationale.
       //
-      // requireTurnstile runs before both: neither tier can tell a script from
-      // a person, so a request without a human-check token must not spend a
-      // per-phone slot or the sitewide budget (utils/turnstile-guard.ts).
+      // requireVouchedVisitor runs first: once STOREFRONT_VISITOR_SECRET is
+      // set, only a request the storefront signed may ask for a code, so the
+      // storefront's visitor-country gate cannot be stepped around
+      // (utils/visitor-ip.ts). Then requireTurnstile: neither tier can tell a
+      // script from a person, so a request without a human-check token must
+      // not spend a per-phone slot or the sitewide budget
+      // (utils/turnstile-guard.ts).
       matcher: '/store/phone-verification/start',
       method: 'POST',
       middlewares: [
+        requireVouchedVisitor,
         requireTurnstile,
         rateLimit('phone-otp-start-phone'),
         rateLimit('phone-otp-start'),

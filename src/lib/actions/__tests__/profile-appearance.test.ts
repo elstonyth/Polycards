@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { storeShim, backend } from '@/lib/__tests__/store-shim';
 
 // `setAvatarFrame` imports the port's HTTP adapter; point that import at an
-// in-memory backend per test (src/lib/__tests__/store-shim.ts). The two Next
+// in-memory backend per test (src/lib/__tests__/store-shim.ts). The Next
 // server-only modules the file also pulls in are stubbed: `revalidatePath` is
-// asserted, `cookies` is only reached by the multipart upload.
+// asserted, `cookies` is only reached by the multipart upload, and
+// `server-only` arrives through src/lib/medusa.ts's visitor signing.
 const mocks = vi.hoisted(() => ({ revalidatePath: vi.fn() }));
+vi.mock('server-only', () => ({}));
 vi.mock('@/lib/store', () => ({ store: storeShim }));
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock('next/headers', () => ({ cookies: vi.fn() }));

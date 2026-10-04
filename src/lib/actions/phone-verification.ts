@@ -16,14 +16,18 @@
  * schema now would turn a drifted field into an `invalid_shape` failure whose
  * copy ("Invalid or expired code.") would send the caller round a resend loop.
  *
- * It does NOT let the backend see the visitor: the port's transport
- * (src/lib/medusa.ts's `sdk`) is built from a base URL and a publishable key
- * and forwards no client headers, so every OTP request arrives from this
- * server's single egress IP. The
- * backend's IP-keyed OTP limiters are therefore a whole-STOREFRONT circuit
- * breaker, and the PER-PHONE tier is the only real per-client / SMS-cost
- * budget — do not delete it as "redundant with the IP tier". Full topology:
- * the phone-OTP limiter module comment in
+ * Every OTP request still arrives at the backend from this server. The
+ * backend sees the visitor only through the address the port's transport
+ * (src/lib/medusa.ts's `sdk`) signs onto it with STOREFRONT_VISITOR_SECRET
+ * (src/lib/visitor-ip.ts): with a valid signature its IP-keyed OTP limiters
+ * key on that visitor, and without one (secret unset, no `do-connecting-ip`)
+ * every request shares the one budget they always did. Either way the
+ * PER-PHONE tier is the real per-number / SMS-cost budget — no address tier
+ * bounds a caller with many addresses, so do not delete it as "redundant
+ * with the IP tier". Once the backend has the secret it also refuses a start
+ * the storefront did not sign, so the visitor-country gate below cannot be
+ * stepped around by calling the backend directly. Full topology: the
+ * phone-OTP limiter module comment in
  * backend/packages/api/src/api/utils/rate-limit.ts.
  */
 import { headers } from 'next/headers';
