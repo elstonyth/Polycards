@@ -96,9 +96,16 @@ TOOLS.growth = [
   {
     name: 'challenge',
     description:
-      "The running Weekly Pulled Value Challenge exactly as the public Ranks page shows it: the community pool, each stage with its threshold, whether it is unlocked and how much is still needed, each stage's prizes with the official card image link (card_image: the real art the site shows; use it instead of drawing the card), the prizes the top 10 would get if the week ended now, and the live top-10 standings (shown name, profile handle, pulls, pulled value). Past weeks are not available here. The response gives the challenge week's own start and end; until it ends, the top player is the current leader, not the winner. If hidden_players_above_cut is above 0, prizes are paid by original rank, so do not pair displayed ranks with prizes. Amounts in RM (MYR).",
-    inputSchema: {},
-    request: () => ({ path: 'challenge', params: {} }),
+      "The Weekly Pulled Value Challenge. week current (default): the running week exactly as the public Ranks page shows it: the community pool, each stage with its threshold, whether it is unlocked and how much is still needed, each stage's prizes with the official card image link (card_image: the real art the site shows; use it instead of drawing the card), the prizes the top 10 would get if the week ended now, and the live top-10 standings (shown name, profile handle, pulls, pulled value). Until the week ends, the top player is the current leader, not the winner. If hidden_players_above_cut is above 0, prizes are paid by original rank, so do not pair displayed ranks with prizes. week next: the next challenge waiting in the admin queue (the one that takes over when it starts): when it starts, its label, each stage's threshold and prizes with official card images; nothing has unlocked yet. Past weeks: use admin_read /admin/challenge/winners. Amounts in RM (MYR).",
+    inputSchema: {
+      week: z
+        .enum(['current', 'next'])
+        .optional()
+        .describe(
+          'current (default): the running week. next: the next queued challenge.',
+        ),
+    },
+    request: (args) => ({ path: 'challenge', params: { week: args.week } }),
   },
   {
     name: 'signups',
@@ -146,8 +153,14 @@ TOOLS.growth = [
   {
     name: 'challenge_poster',
     description:
-      'A finished Weekly Pulled Value Challenge poster (a tall portrait JPEG, 1080 px wide and about 1640 px high, taller with leaders) rendered from live data with the official card art: the unlock headline, the stage chips, and the podium prizes of one stage (default: the highest unlocked stage), optionally with the current top-3 leaders. Use it instead of drawing cards with image generation: post the image it returns. It is a draft; a human reviews it before it is published.',
+      'A finished Weekly Pulled Value Challenge poster (a tall portrait JPEG, 1080 px wide and about 1640 px high, taller with leaders) rendered from live data with the official card art: the unlock headline, the stage chips, and the podium prizes of one stage (default: the highest unlocked stage), optionally with the current top-3 leaders. week next draws the next challenge waiting in the admin queue instead (its own dates; no stage unlocked yet; stage 1 featured by default; no leaders). Use it instead of drawing cards with image generation: post the image it returns. It is a draft; a human reviews it before it is published.',
     inputSchema: {
+      week: z
+        .enum(['current', 'next'])
+        .optional()
+        .describe(
+          'current (default): the running week. next: the next queued challenge.',
+        ),
       stage: z
         .number()
         .int()
@@ -168,6 +181,7 @@ TOOLS.growth = [
       params: {
         stage: args.stage,
         leaders: args.leaders === undefined ? undefined : args.leaders ? 1 : 0,
+        ...(args.week ? { week: args.week } : {}),
       },
       as: 'image',
     }),
@@ -393,6 +407,33 @@ TOOLS.support = [
     request: (args) => ({
       path: 'account',
       params: { username: args.username },
+    }),
+  },
+];
+
+// Any admin dashboard screen, read-only (2026-10-04, the owner's "full
+// access"): backend reports/admin/proxy.ts holds the rules and the blocks.
+TOOLS.admin = [
+  {
+    name: 'admin_read',
+    description:
+      'Read any admin dashboard screen, read-only: the same data the admin dashboard shows, for anything the other tools do not cover. Use it before ever asking staff for a screenshot. path is the admin API path; put filters in params (limit, offset, q to search, fields to pick columns). Useful paths: customers /admin/customers (q=search), /admin/customers/{id}, /admin/customers/{id}/transactions, /admin/customers/{id}/pulls, /admin/customers/{id}/spend-report, /admin/customers/{id}/audit, /admin/customers/{id}/referral, /admin/customer-groups, /admin/players (q=username); delivery /admin/delivery-orders, /admin/delivery-orders/{id}; packs and cards /admin/packs, /admin/packs/{slug}, /admin/packs/{slug}/odds, /admin/cards, /admin/cards/{handle}, /admin/inventory, /admin/inventory/{handle}, /admin/pulls; money /admin/economy, /admin/ledger, /admin/stats, /admin/payments/deposits, /admin/payments/withdrawals (bank numbers masked), /admin/payments/settlement, /admin/payments/balance (the payout float), /admin/purchase-invoices; challenge /admin/challenge/stages (live), /admin/challenge/schedule (the queue of coming weeks), /admin/challenge/settings, /admin/challenge/winners (past weeks); tasks and VIP /admin/tasks, /admin/vip-levels, /admin/tier-settings; referral /admin/referrals/settings, /admin/referrals/settlements; settings /admin/site-settings, /admin/rewards-settings, /admin/pricing/fx. Not open: staff logins, API keys, full bank numbers, PriceCharting lookups, file exports. Passwords and secrets come back as [hidden], and bank account numbers as their last 4 digits. An answer over 40,000 characters comes back cut (truncated: true): ask again narrower. Customer contact details stay in this staff channel: never post them publicly or put them into web searches or URLs.',
+    inputSchema: {
+      path: z
+        .string()
+        .describe(
+          'The admin API path, starting /admin/, like /admin/customers.',
+        ),
+      params: z
+        .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+        .optional()
+        .describe(
+          'Filters for that screen, like {"q": "Ace", "limit": 20, "offset": 0}.',
+        ),
+    },
+    request: (args) => ({
+      path: 'read',
+      params: { ...(args.params ?? {}), path: args.path },
     }),
   },
 ];

@@ -61,6 +61,7 @@ test('stdio round trip: every desk gets every read-only tool, the key on the wir
         'low_stock',
         'order',
         'account',
+        'admin_read',
       ],
     );
     for (const t of tools) assert.equal(t.annotations?.readOnlyHint, true);

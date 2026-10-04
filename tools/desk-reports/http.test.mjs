@@ -60,6 +60,18 @@ test('turns every failure into a sentence without the key in it', async () => {
       /Unknown player group/,
     ],
     [reply(404, { message: 'No player with username bob.' }), /No player/],
+    // The admin proxy says why it refused (a blocked screen, a file answer).
+    [
+      reply(403, {
+        message: 'That screen (API keys) is not open to the desk bots.',
+      }),
+      /not open to the desk bots/,
+    ],
+    [
+      reply(415, { message: 'That admin path does not answer JSON.' }),
+      /does not answer JSON/,
+    ],
+    [reply(404, {}), /rejected the request \(404\)/],
     [reply(401, { message: 'Unauthorized' }), /not set up/],
     [
       reply(503, { message: 'Reports are not configured for this desk.' }),

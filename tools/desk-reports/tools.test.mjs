@@ -73,8 +73,16 @@ test('the growth desk tools', () => {
   });
   assert.deepEqual(growth.challenge.request({}), {
     path: 'challenge',
-    params: {},
+    params: { week: undefined },
   });
+  // The queued edition (the next challenge) for the report and the poster.
+  assert.deepEqual(growth.challenge.request({ week: 'next' }).params, {
+    week: 'next',
+  });
+  assert.equal(
+    growth.challenge_poster.request({ week: 'next' }).params.week,
+    'next',
+  );
   const packs = growth.packs_opened.request({
     period: 'custom',
     from: '2026-09-01',
@@ -120,9 +128,33 @@ test('the support desk tools', () => {
   });
 });
 
+test('admin_read reads one admin screen, its filters passed on', () => {
+  const [read] = TOOLS.admin;
+  assert.equal(read.name, 'admin_read');
+  assert.deepEqual(
+    read.request({
+      path: '/admin/customers',
+      params: { q: 'Ace', limit: 20 },
+    }),
+    {
+      path: 'read',
+      params: { q: 'Ace', limit: 20, path: '/admin/customers' },
+    },
+  );
+  // A filter named path can never redirect the read.
+  assert.equal(
+    read.request({ path: '/admin/packs', params: { path: '/admin/users' } })
+      .params.path,
+    '/admin/packs',
+  );
+  assert.deepEqual(read.request({ path: '/admin/stats' }).params, {
+    path: '/admin/stats',
+  });
+});
+
 test('every desk gets every tool once, each bound to its own desk', () => {
-  assert.equal(ALL_TOOLS.length, 21);
-  assert.equal(new Set(ALL_TOOLS.map((t) => t.name)).size, 21);
+  assert.equal(ALL_TOOLS.length, 22);
+  assert.equal(new Set(ALL_TOOLS.map((t) => t.name)).size, 22);
   for (const [desk, tools] of Object.entries(TOOLS)) {
     for (const tool of tools) {
       assert.equal(ALL_TOOLS.find((t) => t.name === tool.name).desk, desk);
