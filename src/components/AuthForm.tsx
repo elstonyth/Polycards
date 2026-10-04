@@ -8,6 +8,7 @@ import {
   signup,
   checkReferralCode,
   requestPasswordReset,
+  resetPassword,
   googleLoginStart,
   type AuthResult,
 } from '@/lib/actions/auth';
@@ -94,10 +95,23 @@ export default function AuthForm({
   // the always-the-same confirmation (no account enumeration — the backend
   // 201s for unknown emails too).
   const [forgot, setForgot] = useState<
-    'none' | 'form' | 'sent' | 'phone' | 'phone-otp'
+    | 'none'
+    | 'form'
+    | 'sent'
+    | 'phone'
+    | 'phone-otp'
+    | 'phone-reset'
+    | 'phone-done'
   >('none');
   // Phone entered on the 'phone' sub-view, carried into 'phone-otp'.
   const [forgotPhone, setForgotPhone] = useState('');
+  // The single-use reset token a verified phone buys, held here until the
+  // 'phone-reset' step spends it. Never put in a URL: a query string reaches
+  // request logs, browser history, Referer headers and error breadcrumbs.
+  const [phoneReset, setPhoneReset] = useState<{
+    token: string;
+    maskedEmail: string;
+  } | null>(null);
   const [otpChannel, setOtpChannel] = useState<PhoneOtpChannel>('sms');
   // Signup-only sub-view: once the phone OTP is sent, hold the rest of the
   // form's values here so `onVerified` can finish the real signup() call.
@@ -183,6 +197,35 @@ export default function AuthForm({
       setForgotPhone(phone);
       setOtpChannel(result.channel);
       setForgot('phone-otp');
+    } catch (err) {
+      setNote(failureNote(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // The same reset action the emailed link's /reset-password page calls.
+  async function onPhoneResetSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (busy || !phoneReset) return;
+    setNote(null);
+
+    const form = new FormData(e.currentTarget);
+    const password = String(form.get('password') ?? '');
+    if (password !== String(form.get('confirmPassword') ?? '')) {
+      setNote({ text: "Passwords don't match.", field: 'password' });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const result = await resetPassword({ token: phoneReset.token, password });
+      if (result.ok) {
+        setPhoneReset(null);
+        setForgot('phone-done');
+        return;
+      }
+      setNote({ text: result.error });
     } catch (err) {
       setNote(failureNote(err));
     } finally {
@@ -506,12 +549,14 @@ export default function AuthForm({
                 token: proofToken,
               });
               if (result.ok) {
-                // Full-page load on purpose: AuthForm only ever renders
-                // inside AuthModal, so a client-side push would navigate the
-                // page behind a still-mounted overlay.
-                leaveFor(
-                  `/reset-password?token=${encodeURIComponent(result.token)}&email=${encodeURIComponent(result.maskedEmail)}`,
-                );
+                // The new password is set right here (see phoneReset), not
+                // on /reset-password: reaching that page means a URL that
+                // carries the token.
+                setPhoneReset({
+                  token: result.token,
+                  maskedEmail: result.maskedEmail,
+                });
+                setForgot('phone-reset');
                 return;
               }
               setForgot('phone');
@@ -520,10 +565,68 @@ export default function AuthForm({
           />
         )}
 
+        {forgot === 'phone-reset' && phoneReset && (
+          <>
+            <p className="mt-1.5 text-sm text-white/50">
+              Set a new password for{' '}
+              <span className="text-white/80">{phoneReset.maskedEmail}</span>.
+            </p>
+            <form
+              onSubmit={onPhoneResetSubmit}
+              className="mt-6 flex flex-col gap-3"
+            >
+              <Field
+                icon={Lock}
+                name="password"
+                type="password"
+                placeholder="New password"
+                autoComplete="new-password"
+                required
+                minLength={8}
+                aria-invalid={note?.field === 'password' || undefined}
+                aria-describedby={
+                  note?.field === 'password' ? 'auth-form-error' : undefined
+                }
+              />
+              <Field
+                icon={Lock}
+                name="confirmPassword"
+                type="password"
+                placeholder="Confirm new password"
+                autoComplete="new-password"
+                required
+                aria-invalid={note?.field === 'password' || undefined}
+                aria-describedby={
+                  note?.field === 'password' ? 'auth-form-error' : undefined
+                }
+              />
+              <button
+                type="submit"
+                disabled={busy}
+                className="mt-1 inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-white to-neutral-300 text-sm font-semibold text-neutral-950 shadow-[0_8px_20px_-8px_rgba(255,255,255,0.35)] transition-colors hover:to-neutral-100 disabled:opacity-70"
+              >
+                {busy && (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                )}
+                Update password
+              </button>
+            </form>
+          </>
+        )}
+
+        {forgot === 'phone-done' && (
+          <p className="mt-1.5 text-sm text-white/50">
+            Password updated. Log in with your new password.
+          </p>
+        )}
+
         {/* Persistent live region: an alert node inserted already-populated may
             not be announced; keeping it mounted (sr-only while empty) and only
-            swapping its text is announced reliably. */}
+            swapping its text is announced reliably. Shares the main form's id
+            (only one of the two renders) for the new-password step's
+            aria-describedby. */}
         <p
+          id="auth-form-error"
           aria-live="assertive"
           aria-atomic="true"
           className={
@@ -534,12 +637,13 @@ export default function AuthForm({
         </p>
 
         <p className="mt-6 text-center text-[13px] text-white/50">
-          Remembered it?{' '}
+          {forgot === 'phone-done' ? '' : 'Remembered it? '}
           <button
             type="button"
             onClick={() => {
               setForgot('none');
               setNote(null);
+              setPhoneReset(null);
             }}
             className="font-semibold text-white hover:underline"
           >

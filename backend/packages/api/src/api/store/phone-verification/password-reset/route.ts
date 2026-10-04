@@ -6,6 +6,8 @@ import {
   isPhoneVerificationRequired,
   verifyPhoneProof,
 } from '../../../../utils/phone-verification';
+import { PACKS_MODULE } from '../../../../modules/packs';
+import type PacksModuleService from '../../../../modules/packs/service';
 import { linkedEmailpassLogin } from '../../../utils/linked-login';
 
 // Workflow contract (Task 5 Step 1 — verified against @medusajs/medusa dist
@@ -136,6 +138,34 @@ export async function POST(req: MedusaRequest<Body>, res: MedusaResponse): Promi
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'More than one account uses this phone number. Reset by email instead.',
+    );
+
+  // ── THE NUMBER MUST HAVE BEEN VERIFIED ON THIS ACCOUNT ─────────────────────
+  // The flag check above covers numbers written from now on, not the ones
+  // already stored: a number written while PHONE_VERIFICATION_REQUIRED was off
+  // (or before it existed) went onto the row unproven, and holding it says
+  // nothing about who holds the account. `phone_verified_at` is stamped only
+  // by the paths that demand an OTP proof (the phone-change route and the
+  // signup subscriber), so it is the persisted answer.
+  //
+  // A partner group's `verification_exempt` deliberately does NOT apply. It
+  // waives requirePhoneVerified's money/goods gate for accounts the operator
+  // vouches for; it says nothing about who holds the number on the row, and
+  // honouring it here would turn an exemption from a check into a way into
+  // the account. Exempt players reset by email like any unverified account.
+  //
+  // Before the login lookup, so an unverified match learns nothing about how
+  // the account signs in.
+  //
+  // ponytail: the stamp is per account and first-write-wins, not per number,
+  // so it cannot tell whether the CURRENT number is the one that was verified.
+  // Every phone write requires a proof while the flag is on; record the
+  // verified number itself if a path that skips the proof ever appears.
+  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  if (!(await packs.isPhoneVerified(matches[0].id)))
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'This phone number is not verified on its account. Reset by email instead.',
     );
 
   const email = matches[0].email;

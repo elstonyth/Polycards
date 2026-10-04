@@ -73,18 +73,14 @@ page.on('console', (msg) => {
 });
 
 // ── 0. Seed a customer via the backend API ──────────────────────────────────
-const reg = await fetch(`${BACKEND}/auth/customer/emailpass/register`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
-}).then((r) => r.json());
-
-let created;
+// 'on': the signup proof comes FIRST, because the register call wants it too
+// (requireRegisterPhoneProof), not only POST /store/customers.
+// checkPhoneOtpCode short-circuits to `code === devCode` in dev/test (see
+// backend/packages/api/src/utils/phone-verification.ts) — no prior /start
+// call is needed for the check to accept '000000'.
+let seedProof;
 if (MODE === 'on') {
-  // checkPhoneOtpCode short-circuits to `code === devCode` in dev/test (see
-  // backend/packages/api/src/utils/phone-verification.ts) — no prior /start
-  // call is needed for the check to accept '000000'.
-  const { token: seedProof } = await fetch(
+  ({ token: seedProof } = await fetch(
     `${BACKEND}/store/phone-verification/check`,
     {
       method: 'POST',
@@ -98,9 +94,21 @@ if (MODE === 'on') {
         code: DEV_CODE,
       }),
     },
-  ).then((r) => r.json());
+  ).then((r) => r.json()));
   check(Boolean(seedProof), 'seed: phone OTP proof issued');
+}
 
+const reg = await fetch(`${BACKEND}/auth/customer/emailpass/register`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    ...(seedProof ? { 'x-phone-verification': seedProof } : {}),
+  },
+  body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
+}).then((r) => r.json());
+
+let created;
+if (MODE === 'on') {
   created = await fetch(`${BACKEND}/store/customers`, {
     method: 'POST',
     headers: {

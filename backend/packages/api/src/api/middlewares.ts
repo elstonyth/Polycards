@@ -27,6 +27,7 @@ import {
   blockUnverifiedPhoneWrite,
   requirePhoneVerified,
   rejectAdminPhoneWrite,
+  requireRegisterPhoneProof,
 } from './utils/phone-verification-guard';
 import { validateDeliverableAddress } from './utils/address-guard';
 import {
@@ -422,6 +423,16 @@ export default defineMiddlewares({
       matcher: '/auth/customer/emailpass',
       method: 'POST',
       middlewares: [blockDisabledEmailpassLogin],
+    },
+    {
+      // While phone verification is enforced, signup's email/password login
+      // is created only for a caller holding a valid 'signup' phone proof (see
+      // requireRegisterPhoneProof). Customer actor only: admin (/auth/user)
+      // and vendor (/auth/member, refused above) registration are untouched,
+      // and Google sign-up never calls this route.
+      matcher: '/auth/customer/emailpass/register',
+      method: 'POST',
+      middlewares: [requireRegisterPhoneProof],
     },
     // Password-reset tokens are single-use: core validates the 15m JWT but
     // never invalidates it after a successful update, so a consumed link

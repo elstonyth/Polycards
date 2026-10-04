@@ -2,6 +2,9 @@ import { medusaIntegrationTestRunner } from "@medusajs/test-utils";
 import { Modules } from "@medusajs/framework/utils";
 // Workspace-root dependency, reached via hoisting — same as google-link.spec.ts.
 import jwt from "jsonwebtoken";
+import { PACKS_MODULE } from "../../src/modules/packs";
+import type PacksModuleService from "../../src/modules/packs/service";
+import { signPhoneProof } from "../../src/utils/phone-verification";
 import { postStoreCustomer, unwrapResponse } from "./utils";
 
 jest.setTimeout(240 * 1000);
@@ -73,6 +76,22 @@ medusaIntegrationTestRunner({
           api.post("/store/phone-verification/check", body, { headers }),
         );
 
+      // While enforcement is on, POST /auth/customer/emailpass/register wants
+      // a valid 'signup' proof (requireRegisterPhoneProof). Signed here the
+      // way the check route mints one, so fixtures spend no OTP budget; the
+      // header is inert while the flag is off, and register binds no phone.
+      const registerProofHeaders = (): Record<string, string> => {
+        const { jwtSecret } =
+          getContainer().resolve("configModule").projectConfig.http;
+        return {
+          "x-phone-verification": signPhoneProof(
+            jwtSecret as string,
+            PHONE,
+            "signup",
+          ),
+        };
+      };
+
       // Register + link (POST /auth/.../register -> POST /store/customers)
       // is what sets has_account: true (core create-customer-account
       // workflow: `has_account: !!data.input.authIdentityId`) - same flow
@@ -81,17 +100,18 @@ medusaIntegrationTestRunner({
       const registerCustomerWithPhone = async (
         email: string,
         phone: string,
-      ): Promise<void> => {
+      ): Promise<string> => {
         const reg = await api.post("/auth/customer/emailpass/register", {
           email,
           password: PASSWORD,
         });
-        await postStoreCustomer(
+        const created = await postStoreCustomer(
           api,
           getContainer(),
           { email, phone },
           { headers: { ...headers, authorization: `Bearer ${reg.data.token}` } },
         );
+        return created.data.customer.id as string;
       };
 
       describe("POST /store/phone-verification/start", () => {
@@ -182,10 +202,12 @@ medusaIntegrationTestRunner({
         const createLoggedInCustomer = async (
           email: string,
         ): Promise<Record<string, string>> => {
-          const reg = await api.post("/auth/customer/emailpass/register", {
-            email,
-            password: PASSWORD,
-          });
+          // Also called under enforcement ("with enforcement on" below).
+          const reg = await api.post(
+            "/auth/customer/emailpass/register",
+            { email, password: PASSWORD },
+            { headers: registerProofHeaders() },
+          );
           await postStoreCustomer(
             api,
             getContainer(),
@@ -579,11 +601,22 @@ medusaIntegrationTestRunner({
           }
         };
 
+        // The route also wants the account's phone VERIFIED
+        // (customer_account_state.phone_verified_at). The fixtures register
+        // with the flag off, so the signup subscriber never stamps them; this
+        // seeds the stamp an OTP-proven signup would have left.
+        const markPhoneVerified = (customerId: string) =>
+          getContainer()
+            .resolve<PacksModuleService>(PACKS_MODULE)
+            .markPhoneVerified(customerId);
+
         it("runs the full loop: proof -> reset token -> emailpass update -> login with the new password", async () => {
           const email = "pw-reset-happy@test.dev";
           const phone = "+60107667800";
           const newPassword = "phone-verify-new-pw-2";
-          await registerCustomerWithPhone(email, phone);
+          await markPhoneVerified(
+            await registerCustomerWithPhone(email, phone),
+          );
 
           await start({ phone, purpose: "password-reset" });
           const checked = await check({
@@ -700,11 +733,14 @@ medusaIntegrationTestRunner({
           const container = getContainer();
           const customerService = container.resolve(Modules.CUSTOMER);
           const authService = container.resolve(Modules.AUTH);
-          await customerService.createCustomers({
+          const customer = await customerService.createCustomers({
             email,
             phone,
             has_account: true,
           });
+          // A Google account's phone arrives through the verified change
+          // route, which stamps it.
+          await markPhoneVerified(customer.id);
           await authService.createAuthIdentities({
             provider_identities: [{ provider: "google", entity_id: email }],
           });
@@ -722,6 +758,30 @@ medusaIntegrationTestRunner({
           expect(res.data).toMatchObject({
             message: "This account signs in with Google.",
           });
+        });
+
+        // Registered with the flag off, so the number went onto the account
+        // without an OTP and the account was never stamped verified. Holding
+        // that number now must not reset the password.
+        it("400s and mints no reset token for an account whose phone was never verified", async () => {
+          const phone = "+60107667807";
+          await registerCustomerWithPhone("pw-reset-unverified@test.dev", phone);
+
+          await start({ phone, purpose: "password-reset" });
+          const checked = await check({
+            phone,
+            purpose: "password-reset",
+            code: "000000",
+          });
+          expect(checked.status).toBe(200);
+
+          const res = await passwordReset({ token: checked.data.token });
+          expect(res.status).toBe(400);
+          expect(res.data).toMatchObject({
+            message:
+              "This phone number is not verified on its account. Reset by email instead.",
+          });
+          expect(res.data.token).toBeUndefined();
         });
 
         // The flag-off bypass, end to end. PHONE_VERIFICATION_REQUIRED is the
@@ -776,14 +836,56 @@ medusaIntegrationTestRunner({
         });
 
         // Register-only helper (no /store/customers call yet) so each test
-        // controls its own create-attempt body/headers.
+        // controls its own create-attempt body/headers. Register itself wants
+        // a signup proof under enforcement; the tests below are about the
+        // customer-create gate, so it always carries one.
         const register = async (email: string): Promise<string> => {
-          const reg = await api.post("/auth/customer/emailpass/register", {
-            email,
-            password: PASSWORD,
-          });
+          const reg = await api.post(
+            "/auth/customer/emailpass/register",
+            { email, password: PASSWORD },
+            { headers: registerProofHeaders() },
+          );
           return reg.data.token as string;
         };
+
+        // The email/password login is only created behind a valid signup
+        // proof, so a refused attempt leaves no login behind: the same email
+        // then registers cleanly once a proof is presented.
+        it("refuses an email/password registration without a valid signup proof, and creates no login", async () => {
+          const email = "gated-register@test.dev";
+          const attempt = (extra: Record<string, string>) =>
+            unwrapResponse(
+              api.post(
+                "/auth/customer/emailpass/register",
+                { email, password: PASSWORD },
+                { headers: extra },
+              ),
+            );
+          const { jwtSecret } =
+            getContainer().resolve("configModule").projectConfig.http;
+
+          const bare = await attempt({});
+          expect(bare.status).toBe(400);
+          expect(bare.data).toMatchObject({
+            message: "Phone verification required.",
+          });
+
+          const wrongPurpose = await attempt({
+            "x-phone-verification": signPhoneProof(
+              jwtSecret as string,
+              PHONE,
+              "phone-change",
+            ),
+          });
+          expect(wrongPurpose.status).toBe(400);
+          expect(wrongPurpose.data).toMatchObject({
+            message: "Phone verification required.",
+          });
+
+          const proven = await attempt(registerProofHeaders());
+          expect(proven.status).toBe(200);
+          expect(typeof proven.data.token).toBe("string");
+        });
 
         it("refuses registration with a phone but no proof", async () => {
           const email = "gated-no-proof@test.dev";
@@ -1035,10 +1137,11 @@ medusaIntegrationTestRunner({
           // Register + link WITHOUT a phone — the shape the large majority of
           // live accounts are in, and the one the gate has to refuse.
           const registerUnverified = async (email: string) => {
-            const reg = await api.post("/auth/customer/emailpass/register", {
-              email,
-              password: PASSWORD,
-            });
+            const reg = await api.post(
+              "/auth/customer/emailpass/register",
+              { email, password: PASSWORD },
+              { headers: registerProofHeaders() },
+            );
             await postStoreCustomer(
               api,
               getContainer(),
