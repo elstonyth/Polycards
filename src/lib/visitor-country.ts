@@ -13,6 +13,12 @@ import geoip from 'geoip-country';
  * The visitor's address comes from `do-connecting-ip`, which DigitalOcean's
  * App Platform ingress sets on every request; App Platform does not forward
  * Cloudflare's CF-IPCountry, so the country is looked up here.
+ *
+ * The gate runs only here, in the storefront. What keeps it in front of every
+ * code request is the backend: once it has STOREFRONT_VISITOR_SECRET it
+ * refuses an OTP start that the storefront did not sign
+ * (backend/packages/api/src/api/utils/visitor-ip.ts), so a direct call to the
+ * backend cannot step around it.
  */
 export const OTP_VISITOR_COUNTRIES: readonly string[] = ['MY'];
 
