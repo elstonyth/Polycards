@@ -72,11 +72,6 @@ export async function getReport({
       'The backend sent an unreadable report. Try again in a minute.',
     );
   }
-  if (res.status === 400 || res.status === 404) {
-    throw new ReportError(
-      body?.message ?? `The backend rejected the request (${res.status}).`,
-    );
-  }
   if (res.status === 401 || res.status === 503) {
     throw new ReportError(
       'Live reports are not set up for this desk yet (the backend refused the key). Tell the admin.',
@@ -86,5 +81,14 @@ export async function getReport({
     throw new ReportError(
       'Too many report requests. Wait a minute, then try again.',
     );
+  // Any other refusal says why (a bad filter, a missing row, an admin screen
+  // the desk bots may not open): pass that sentence on.
+  if (res.status >= 400 && res.status < 500) {
+    throw new ReportError(
+      typeof body?.message === 'string'
+        ? body.message
+        : `The backend rejected the request (${res.status}).`,
+    );
+  }
   throw new ReportError(`The backend failed (${res.status}). Try again later.`);
 }
