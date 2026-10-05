@@ -9,24 +9,35 @@ const ok = {
   image_url: 'https://cdn.example.com/a.webp',
   title: null,
   link_url: null,
+  sort: 0,
   startsAt: null,
   endsAt: null,
 };
 
 describe('validateAnnouncement', () => {
-  it('accepts an http(s) or same-origin image and trims', () => {
+  it('accepts an absolute http(s) image and trims it', () => {
     expect(validateAnnouncement(ok).image_url).toBe(ok.image_url);
     expect(
-      validateAnnouncement({ ...ok, image_url: '  /static/a.webp ' }).image_url,
-    ).toBe('/static/a.webp');
+      validateAnnouncement({
+        ...ok,
+        image_url: '  http://localhost:9000/static/a.webp ',
+      }).image_url,
+    ).toBe('http://localhost:9000/static/a.webp');
   });
 
   it.each([
     ['empty', ''],
+    ['relative', '/static/a.webp'],
+    ['relative with a query', '/static/a.webp?x=1'],
     ['protocol-relative', '//evil.example/a.webp'],
     ['javascript:', 'javascript:alert(1)'],
     ['data:', 'data:image/png;base64,AAAA'],
     ['bare word', 'a.webp'],
+    ['SVG', 'https://cdn.example.com/a.svg'],
+    ['SVG behind a query', 'https://cdn.example.com/a.SVG?v=2'],
+    ['backslash', 'https://cdn.example.com\\a.webp'],
+    ['inner space', 'https://cdn.example.com/a b.webp'],
+    ['control char', 'https://cdn.example.com/a\u0001.webp'],
     ['over 2048 chars', 'https://x/' + 'a'.repeat(2048)],
   ])('rejects a %s image_url', (_label, image_url) => {
     expect(() => validateAnnouncement({ ...ok, image_url })).toThrow(
@@ -52,16 +63,32 @@ describe('validateAnnouncement', () => {
     ).toThrow(/title/);
   });
 
-  it('applies the URL rule to link_url (it becomes an href)', () => {
-    expect(validateAnnouncement({ ...ok, link_url: '/slots/x' }).link_url).toBe(
-      '/slots/x',
-    );
-    expect(() =>
-      validateAnnouncement({ ...ok, link_url: 'javascript:alert(1)' }),
-    ).toThrow(/link_url/);
-    expect(() =>
-      validateAnnouncement({ ...ok, link_url: '//evil.example' }),
-    ).toThrow(/link_url/);
+  it.each([['/slots/x'], ['/'], ['https://example.com/drop?ref=popup']])(
+    'accepts %s as link_url',
+    (link_url) => {
+      expect(validateAnnouncement({ ...ok, link_url }).link_url).toBe(link_url);
+    },
+  );
+
+  it.each([
+    ['javascript:', 'javascript:alert(1)'],
+    ['protocol-relative', '//evil.example'],
+    ['backslash-relative', '/\\evil.example'],
+    ['backslash anywhere', '/slots\\x'],
+    ['inner space', '/slots/a b'],
+    ['tab', '/\tevil.example'],
+    ['bare word', 'slots/x'],
+  ])('rejects a %s link_url (it becomes an href)', (_label, link_url) => {
+    expect(() => validateAnnouncement({ ...ok, link_url })).toThrow(/link_url/);
+  });
+
+  it('bounds sort to ±1,000,000 whole numbers', () => {
+    for (const sort of [-1_000_000, 0, 1_000_000]) {
+      expect(() => validateAnnouncement({ ...ok, sort })).not.toThrow();
+    }
+    for (const sort of [1_000_001, -1_000_001, 1.5, Number.NaN]) {
+      expect(() => validateAnnouncement({ ...ok, sort })).toThrow(/sort/);
+    }
   });
 
   it('requires the end after the start', () => {

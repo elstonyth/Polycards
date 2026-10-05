@@ -81,14 +81,32 @@ export async function POST(
     }
     return d;
   };
+  // An update rewrites every field, so a missing or mistyped active/sort must
+  // be refused, not defaulted — "on" / 0 would quietly re-publish a slide the
+  // operator switched off. Only a create may omit them (on, sort 0).
+  const editId = typeof b.id === 'string' ? b.id : undefined;
+  const isUpdate = editId !== undefined;
+  if (typeof b.active !== 'boolean' && (isUpdate || b.active !== undefined)) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'active must be true or false.',
+    );
+  }
+  const sortOk = typeof b.sort === 'number' && Number.isInteger(b.sort);
+  if (!sortOk && (isUpdate || b.sort !== undefined)) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'sort must be a whole number.',
+    );
+  }
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const { id } = await packs.saveAnnouncement({
-    id: typeof b.id === 'string' ? b.id : undefined,
+    id: editId,
     image_url: b.image_url,
     title: text(b.title, 'title'),
     link_url: text(b.link_url, 'link_url'),
-    active: b.active !== false,
-    sort: typeof b.sort === 'number' && Number.isInteger(b.sort) ? b.sort : 0,
+    active: typeof b.active === 'boolean' ? b.active : true,
+    sort: typeof b.sort === 'number' ? b.sort : 0,
     startsAt: when(b.starts_at, 'starts_at'),
     endsAt: when(b.ends_at, 'ends_at'),
     adminId: req.auth_context.actor_id,

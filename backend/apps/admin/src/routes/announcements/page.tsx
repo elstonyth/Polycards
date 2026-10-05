@@ -72,17 +72,27 @@ const draftFrom = (a: AdminAnnouncement): Draft => ({
   endsAt: a.ends_at ? toLocalInput(new Date(a.ends_at)) : '',
 });
 
-// Mirrors the server rule (modules/packs/announcements.ts): a same-origin
-// /path or an http(s) URL; '//' is an off-origin URL in disguise.
+// Mirrors the server rule (modules/packs/announcements.ts): an in-site /path
+// (never `//` or `/\`, which a browser treats as off-origin) or an http(s)
+// URL, with no whitespace, backslash or control character anywhere.
 const linkOk = (v: string): boolean => {
   const t = v.trim();
-  return (
-    t === '' ||
-    (t.length <= 2048 &&
-      ((t.startsWith('/') && !t.startsWith('//')) ||
-        t.startsWith('http://') ||
-        t.startsWith('https://')))
-  );
+  if (t === '') return true;
+  if (
+    t.length > 2048 ||
+    /[\s\\]/.test(t) ||
+    [...t].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f)
+  ) {
+    return false;
+  }
+  return /^\/(?![/\\])/.test(t) || /^https?:\/\//i.test(t);
+};
+
+// Mirrors the server's ANNOUNCEMENT_SORT_MAX.
+const SORT_MAX = 1_000_000;
+const sortOk = (v: string): boolean => {
+  const n = Number(v);
+  return v.trim() !== '' && Number.isInteger(n) && Math.abs(n) <= SORT_MAX;
 };
 
 const dateLabel = (iso: string | null): string =>
@@ -188,10 +198,12 @@ function AnnouncementEditor({
 
   const scheduleValid = scheduleOk(draft);
   const linkValid = linkOk(draft.link_url);
+  const sortValid = sortOk(draft.sort);
   const valid = Boolean(
     draft.image_url &&
     draft.title.trim().length <= TITLE_MAX &&
     linkValid &&
+    sortValid &&
     scheduleValid &&
     reason.trim(),
   );
@@ -225,7 +237,7 @@ function AnnouncementEditor({
         title: draft.title.trim() || null,
         link_url: draft.link_url.trim() || null,
         active: draft.active,
-        sort: Number.parseInt(draft.sort, 10) || 0,
+        sort: Number(draft.sort),
         starts_at: toIso(draft.startsAt),
         ends_at: toIso(draft.endsAt),
         reason: reason.trim(),
@@ -345,6 +357,12 @@ function AnnouncementEditor({
                         onChange({ ...draft, sort: e.target.value })
                       }
                     />
+                    {!sortValid && (
+                      <Text size="small" className="text-ui-fg-error">
+                        A whole number between -{SORT_MAX.toLocaleString()} and{' '}
+                        {SORT_MAX.toLocaleString()}.
+                      </Text>
+                    )}
                   </Field>
                   <Field
                     label="Active"
@@ -428,11 +446,13 @@ function AnnouncementEditor({
 }
 
 const AnnouncementsPage = () => {
-  const { data, isLoading, isError } = useAnnouncements();
+  // Status is "as of the last fetch" — dataUpdatedAt, not a Date.now() in
+  // render (impure; the React compiler lint refuses it). The list refetches
+  // after every save, so it is never staler than the operator's last action.
+  const { data, isLoading, isError, dataUpdatedAt } = useAnnouncements();
   const save = useSaveAnnouncement();
   const remove = useDeleteAnnouncement();
   const [editing, setEditing] = useState<Draft | null>(null);
-  const now = Date.now();
 
   // The row switch is the common on/off case, applied without the form. Same
   // audited POST as a save, with a fixed reason.
@@ -518,7 +538,7 @@ const AnnouncementsPage = () => {
           </Table.Header>
           <Table.Body>
             {data.map((a) => {
-              const status = statusOf(a, now);
+              const status = statusOf(a, dataUpdatedAt);
               const subject = a.title ?? 'Untitled announcement';
               return (
                 <Table.Row key={a.id}>

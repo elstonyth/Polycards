@@ -13,19 +13,44 @@ export const LIVE_ANNOUNCEMENTS_CAP = 10;
 const invalid = (message: string) =>
   new MedusaError(MedusaError.Types.INVALID_DATA, message);
 
-// Same rule as site-settings' slab_frame_url: a same-origin path or an
-// explicit http(s) URL, ≤ 2048 chars. '//' is protocol-relative — an
-// off-origin URL in disguise — so it is refused, as is any other scheme
-// (javascript:, data:), which matters doubly here: link_url becomes an href.
-function cleanUrl(value: string): string | null {
+export const ANNOUNCEMENT_SORT_MAX = 1_000_000;
+
+// Whitespace, backslashes and control characters: a browser strips or
+// reinterprets them (it reads `\` as `/`, so `/\evil.example` is
+// protocol-relative), and a URL carrying one can mean something other than
+// what the checks below saw.
+const hasUnsafeChar = (v: string): boolean =>
+  /[\s\\]/.test(v) ||
+  [...v].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
+
+const isHttpUrl = (v: string): boolean => {
+  if (!/^https?:\/\//i.test(v)) return false;
+  try {
+    const { protocol } = new URL(v);
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
+// The image is always an /admin/media upload, which returns an ABSOLUTE URL
+// (the S3/CDN host in prod, the backend's /static locally). Relative paths are
+// refused: next/image throws on some of them (a `?` in a local src) and that
+// would take the storefront to its error page. SVG is refused too — it is a
+// document, not a picture, and /admin/media never produces one.
+function cleanImageUrl(value: string): string | null {
   const v = value.trim();
-  return v.length > 0 &&
-    v.length <= 2048 &&
-    ((v.startsWith('/') && !v.startsWith('//')) ||
-      v.startsWith('http://') ||
-      v.startsWith('https://'))
-    ? v
-    : null;
+  if (!v || v.length > 2048 || hasUnsafeChar(v) || !isHttpUrl(v)) return null;
+  return /\.svg$/i.test(new URL(v).pathname) ? null : v;
+}
+
+// link_url becomes an href: an in-site path (`/x`, never `//` or `/\`, which
+// a browser treats as off-origin) or an explicit http(s) URL. Any other
+// scheme (javascript:, data:) is refused.
+function cleanLinkUrl(value: string): string | null {
+  const v = value.trim();
+  if (!v || v.length > 2048 || hasUnsafeChar(v)) return null;
+  return /^\/(?![/\\])/.test(v) || isHttpUrl(v) ? v : null;
 }
 
 export interface AnnouncementFields {
@@ -40,12 +65,15 @@ export function validateAnnouncement(input: {
   image_url: string;
   title: string | null;
   link_url: string | null;
+  sort: number;
   startsAt: Date | null;
   endsAt: Date | null;
 }): AnnouncementFields {
-  const image_url = cleanUrl(input.image_url);
+  const image_url = cleanImageUrl(input.image_url);
   if (!image_url) {
-    throw invalid('image_url must be a /path or http(s) URL (≤ 2048 chars).');
+    throw invalid(
+      'image_url must be an absolute http(s) image URL (not SVG, ≤ 2048 chars) — upload it through /admin/media.',
+    );
   }
   const title = input.title?.trim() || null;
   if (title && title.length > ANNOUNCEMENT_TITLE_MAX) {
@@ -53,10 +81,20 @@ export function validateAnnouncement(input: {
   }
   let link_url: string | null = null;
   if (input.link_url?.trim()) {
-    link_url = cleanUrl(input.link_url);
+    link_url = cleanLinkUrl(input.link_url);
     if (!link_url) {
-      throw invalid('link_url must be a /path or http(s) URL (≤ 2048 chars).');
+      throw invalid(
+        'link_url must be a site path like /slots/x or an http(s) URL (≤ 2048 chars, no spaces or backslashes).',
+      );
     }
+  }
+  if (
+    !Number.isInteger(input.sort) ||
+    Math.abs(input.sort) > ANNOUNCEMENT_SORT_MAX
+  ) {
+    throw invalid(
+      `sort must be a whole number between -${ANNOUNCEMENT_SORT_MAX} and ${ANNOUNCEMENT_SORT_MAX}.`,
+    );
   }
   if (
     input.startsAt &&

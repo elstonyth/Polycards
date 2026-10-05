@@ -2694,6 +2694,7 @@ class PacksModuleService extends MedusaService({
       image_url: input.image_url,
       title: input.title,
       link_url: input.link_url,
+      sort: input.sort,
       startsAt: input.startsAt ?? null,
       endsAt: input.endsAt ?? null,
     });
