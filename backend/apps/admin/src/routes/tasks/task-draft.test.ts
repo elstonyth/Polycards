@@ -227,3 +227,17 @@ describe('daily cadence (2026-10-06)', () => {
     ).toEqual(requirement);
   });
 });
+
+test('a hidden, stale count box never blocks a daily check-in save', () => {
+  // Daily + rip_count, count cleared, then the goal switched to "Check in
+  // today" (which hides the box): the save must still go through.
+  expect(
+    draftToPayload({
+      ...blankDraft(),
+      kind: 'daily',
+      reqType: 'checkin_days',
+      reqN: '',
+      rewardValue: '1',
+    })!.requirement,
+  ).toEqual({ type: 'checkin_days', days: 1 });
+});

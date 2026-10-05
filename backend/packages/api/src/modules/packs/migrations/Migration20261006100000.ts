@@ -28,10 +28,16 @@ export class Migration20261006100000 extends Migration {
     this.addSql(
       `alter table if exists "task_definition" drop column if exists "retired_at";`,
     );
-    // NOT VALID: a rollback must not fail on daily rows already written —
-    // they stay (retire them in the admin), new ones are refused.
+    // Daily rows cannot survive a rollback: the old code keys their claims
+    // once-ever and its storefront schema rejects the whole hub over one
+    // unknown kind. Retire AND soft-delete them (the old reads skip
+    // deleted_at rows), BEFORE the narrower CHECK goes back on. NOT VALID
+    // keeps the re-add from scanning rows it would otherwise refuse.
     this.addSql(
       `alter table if exists "task_definition" drop constraint if exists "task_definition_kind_check";`,
+    );
+    this.addSql(
+      `update "task_definition" set "active" = false, "deleted_at" = now() where "kind" = 'daily' and "deleted_at" is null;`,
     );
     this.addSql(
       `alter table if exists "task_definition" add constraint "task_definition_kind_check" check ("kind" in ('weekly', 'achievement')) not valid;`,

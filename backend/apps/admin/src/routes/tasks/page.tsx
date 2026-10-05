@@ -308,7 +308,11 @@ function TaskEditor({
                       onChange({
                         ...draft,
                         kind: k,
-                        reqType: REQUIREMENT_TYPES[k][0],
+                        // Keep a goal the new cadence also allows (weekly
+                        // → daily keeps "rip N packs" and its pack).
+                        reqType: REQUIREMENT_TYPES[k].includes(draft.reqType)
+                          ? draft.reqType
+                          : REQUIREMENT_TYPES[k][0],
                       });
                     }}
                   >

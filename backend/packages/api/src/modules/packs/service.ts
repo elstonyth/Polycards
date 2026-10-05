@@ -2046,12 +2046,13 @@ class PacksModuleService extends MedusaService({
         ),
         em.execute<{ pack_id: string; n: string; n_day: string }[]>(
           'SELECT pack_id, COUNT(*)::bigint AS n, ' +
-            '  COUNT(*) FILTER (WHERE created_at >= ?)::bigint AS n_day ' +
+            '  COUNT(*) FILTER (WHERE created_at >= ? AND created_at < ?)::bigint AS n_day ' +
             'FROM pull ' +
             "WHERE customer_id = ? AND source = 'pack' AND deleted_at IS NULL " +
             '  AND created_at >= ? AND created_at < ? GROUP BY pack_id',
           [
             input.day.startUtc,
+            input.day.endUtcExcl,
             input.customerId,
             input.week.startUtc,
             input.week.endUtcExcl,
@@ -2187,8 +2188,11 @@ class PacksModuleService extends MedusaService({
       claimed: boolean;
     }[];
   }> {
-    const week = taskWeekFor(input.now ?? new Date());
-    const day = taskDayFor(input.now ?? new Date());
+    // ONE clock read: the day must sit inside the week it is measured with,
+    // which two separate reads across Monday 00:00 MYT would not guarantee.
+    const at = input.now ?? new Date();
+    const week = taskWeekFor(at);
+    const day = taskDayFor(at);
     const period = { weekStartIso: week.weekStartIso, dayIso: day.dayIso };
     const [defs, facts, claims, unspent] = await Promise.all([
       this.listTaskDefinitions(
@@ -2243,7 +2247,6 @@ class PacksModuleService extends MedusaService({
       ),
     ]);
     const claimed = new Set(claims.map((c) => `${c.task_id}:${c.period_key}`));
-    const at = input.now ?? new Date();
     const titleById = new Map(defs.map((d) => [d.id, d.title]));
     // Unspent pack entitlements. `claim_ref` null is the whole test — it is
     // stamped with the pull id the moment the spin commits. Kept in JS as well
@@ -2435,10 +2438,12 @@ class PacksModuleService extends MedusaService({
     // Its OWN reason, not 'not_found': the window can close between the page
     // load and the tap, and a finished 3/3 task answering "not completed yet"
     // is the most confusing thing this endpoint could say.
-    if (!taskIsLive(def, input.now ?? new Date()))
+    // One clock read for the window, the week and the day (see taskHubFor).
+    const at = input.now ?? new Date();
+    if (!taskIsLive(def, at))
       return { claimed: false, reason: 'window_closed' };
-    const week = taskWeekFor(input.now ?? new Date());
-    const day = taskDayFor(input.now ?? new Date());
+    const week = taskWeekFor(at);
+    const day = taskDayFor(at);
     const kind = def.kind as TaskKind;
     const periodKey = taskPeriodKey(kind, {
       weekStartIso: week.weekStartIso,

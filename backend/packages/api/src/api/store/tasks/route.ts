@@ -19,9 +19,10 @@ export async function GET(
   }
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const hub = await packs.taskHubFor({ customerId });
-  const day = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+  // The hub's own day, so the button state and the day's counts can never
+  // straddle MYT midnight between two clock reads.
   const [todays] = await packs.listDailyCheckins(
-    { customer_id: customerId, checkin_date: day },
+    { customer_id: customerId, checkin_date: hub.day_key },
     { take: 1 },
   );
   res.json({ ...hub, checked_in_today: Boolean(todays) });

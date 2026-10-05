@@ -126,6 +126,7 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
           variant={claimable ? 'primary' : 'ghost'}
           disabled={!claimable || claimingId === task.id}
           onClick={() => onClaim(task)}
+          aria-label={`Claim ${task.title}`}
           className={cn('shrink-0', claimable && 'claim-sweep')}
         >
           Claim

@@ -155,7 +155,9 @@ export function draftToPayload(d: Draft): {
   requirement: Record<string, unknown>;
   reward: Record<string, unknown>;
 } | null {
-  const n = Number(d.reqN);
+  // A goal with no count box (the daily check-in) must not be blocked by
+  // whatever the hidden box last held — the operator could not fix it.
+  const n = countApplies(d) ? Number(d.reqN) : 1;
   if (!Number.isInteger(n) || n <= 0) return null;
   let requirement: Record<string, unknown>;
   switch (d.reqType) {

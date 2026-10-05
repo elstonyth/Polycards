@@ -26,10 +26,18 @@ test('up() swaps the kind CHECK to exactly the kinds tasks.ts knows', async () =
   );
 });
 
-test('down() narrows back without failing on daily rows (NOT VALID)', async () => {
-  expect(await emit('down')).toContain(
+test('down() retires + soft-deletes daily rows, THEN narrows the CHECK', async () => {
+  // A daily row left live would be claimable once-ever by the old code and
+  // blank the old storefront's whole hub (review 2026-10-06).
+  const sql = await emit('down');
+  const retire = sql.indexOf(
+    `update "task_definition" set "active" = false, "deleted_at" = now() where "kind" = 'daily' and "deleted_at" is null;`,
+  );
+  const narrow = sql.indexOf(
     `check ("kind" in ('weekly', 'achievement')) not valid;`,
   );
+  expect(retire).toBeGreaterThan(-1);
+  expect(narrow).toBeGreaterThan(retire);
 });
 
 test("up() adds the nullable retired_at that bounds a retired task's claims", async () => {

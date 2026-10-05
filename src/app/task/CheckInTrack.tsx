@@ -190,16 +190,18 @@ export function CheckInTrack({
                   aria-label={`Day ${day} reward: ${worth(lead)}. ${claimable ? 'Ready — claim it.' : claimed ? 'Claimed.' : `Unlocks at ${day} check-ins.`}`}
                   className={cn(
                     tile,
-                    'outline-none focus-visible:ring-2 focus-visible:ring-white/40 active:scale-[0.97] motion-reduce:active:scale-100',
+                    // An OUTLINE focus ring: the claimable glow animates
+                    // box-shadow, which would paint over a ring-* focus style.
+                    'outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70 active:scale-[0.97] motion-reduce:active:scale-100',
                   )}
                 >
                   {face}
                 </button>
               ) : (
-                <div
-                  className={tile}
-                  aria-label={`Day ${day}${done ? ', checked in' : ''}`}
-                >
+                <div className={tile}>
+                  <span className="sr-only">
+                    {`Day ${day}${done ? ', checked in' : ''}`}
+                  </span>
                   {face}
                 </div>
               )}
