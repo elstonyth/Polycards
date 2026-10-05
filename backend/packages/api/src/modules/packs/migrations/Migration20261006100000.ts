@@ -16,9 +16,18 @@ export class Migration20261006100000 extends Migration {
     this.addSql(
       `alter table if exists "task_definition" add constraint "task_definition_kind_check" check ("kind" in ('daily', 'weekly', 'achievement'));`,
     );
+    // When a task was switched off: bounds a retired repeating task's claims
+    // to the period it was retired in (see the model). Existing inactive rows
+    // stay null, which reads as "retired before now" — they were.
+    this.addSql(
+      `alter table if exists "task_definition" add column if not exists "retired_at" timestamptz null;`,
+    );
   }
 
   override async down(): Promise<void> {
+    this.addSql(
+      `alter table if exists "task_definition" drop column if exists "retired_at";`,
+    );
     // NOT VALID: a rollback must not fail on daily rows already written —
     // they stay (retire them in the admin), new ones are refused.
     this.addSql(

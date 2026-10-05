@@ -661,6 +661,71 @@ moduleIntegrationTestRunner<PacksModuleService>({
       ).toEqual(['2026-10-07', '2026-10-08']);
     });
 
+    // A retired repeating task pays only for the period it was retired in —
+    // check-ins are free, so an open-ended retired daily task would pay out
+    // every day to anyone who kept its id (security review 2026-10-06).
+    it('a retired daily task honours today only, never the days after', async () => {
+      const base = {
+        kind: 'daily' as const,
+        title: 'Check in today',
+        requirement: { type: 'checkin_days', days: 1 },
+        reward: { type: 'credit', amount_myr: 1 },
+        sort: 0,
+        adminId: 'admin_1',
+      };
+      const { id } = await service.saveTaskDefinition({
+        ...base,
+        active: true,
+        reason: 'seed',
+      });
+      await service.saveTaskDefinition({
+        ...base,
+        id,
+        active: false,
+        reason: 'retire',
+      });
+      const [row] = await service.listTaskDefinitions({ id });
+      expect(row.retired_at).not.toBeNull();
+      const cus = 'cus_retired_daily';
+      const retiredAt = new Date(row.retired_at!);
+      // Claims are measured against the real retire instant: a day that
+      // contains it is honoured, the next day is not.
+      const sameDay = new Date(retiredAt.getTime() + 60_000);
+      const nextDay = new Date(retiredAt.getTime() + 24 * 3600 * 1000);
+      await service.checkInDaily({ customerId: cus, now: sameDay });
+      await service.checkInDaily({ customerId: cus, now: nextDay });
+      // (sameDay may cross MYT midnight in the minute after the retire; if so
+      // it is a LATER day and must be refused too.)
+      const sameMytDay =
+        new Date(sameDay.getTime() + 8 * 3600 * 1000)
+          .toISOString()
+          .slice(0, 10) ===
+        new Date(retiredAt.getTime() + 8 * 3600 * 1000)
+          .toISOString()
+          .slice(0, 10);
+      expect(
+        (await service.claimTask({ customerId: cus, taskId: id, now: sameDay }))
+          .claimed,
+      ).toBe(sameMytDay);
+      expect(
+        await service.claimTask({ customerId: cus, taskId: id, now: nextDay }),
+      ).toEqual({ claimed: false, reason: 'window_closed' });
+
+      // Switching it back on clears the stamp: it pays again.
+      await service.saveTaskDefinition({
+        ...base,
+        id,
+        active: true,
+        reason: 'reactivate',
+      });
+      const [back] = await service.listTaskDefinitions({ id });
+      expect(back.retired_at).toBeNull();
+      expect(
+        (await service.claimTask({ customerId: cus, taskId: id, now: nextDay }))
+          .claimed,
+      ).toBe(true);
+    });
+
     // The period FILTERs run on real Postgres: today's paid rips and pixel
     // pulls count for a daily task, the week's for a weekly one, and a
     // reward pull counts for neither (it would let a prize feed a task).

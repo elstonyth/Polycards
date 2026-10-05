@@ -22,6 +22,12 @@ export const TaskDefinition = model.define('task_definition', {
   // kill switch on top of it.
   starts_at: model.dateTime().nullable(),
   ends_at: model.dateTime().nullable(),
+  // When the task was last switched OFF (null while active). A retired
+  // daily/weekly task stays claimable only for the period it was retired in
+  // — "never strand someone who already finished it" — not for every period
+  // after (security review 2026-10-06: a retired daily task otherwise paid
+  // out every day, forever, to anyone holding its id).
+  retired_at: model.dateTime().nullable(),
 });
 
 export default TaskDefinition;

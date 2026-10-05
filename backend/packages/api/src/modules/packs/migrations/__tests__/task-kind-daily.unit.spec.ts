@@ -31,3 +31,10 @@ test('down() narrows back without failing on daily rows (NOT VALID)', async () =
     `check ("kind" in ('weekly', 'achievement')) not valid;`,
   );
 });
+
+test("up() adds the nullable retired_at that bounds a retired task's claims", async () => {
+  expect(await emit('up')).toContain(
+    'add column if not exists "retired_at" timestamptz null;',
+  );
+  expect(await emit('down')).toContain('drop column if exists "retired_at"');
+});

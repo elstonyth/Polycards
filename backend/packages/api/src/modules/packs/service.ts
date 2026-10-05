@@ -2444,6 +2444,19 @@ class PacksModuleService extends MedusaService({
       weekStartIso: week.weekStartIso,
       dayIso: day.dayIso,
     });
+    // A RETIRED daily/weekly task honours only the period it was retired in:
+    // that is the whole of "never strand someone who already finished it".
+    // Every later period is a new reward nobody was promised — and since
+    // check-ins are free, an open-ended retired daily task paid out every day
+    // to anyone who kept its id (security review 2026-10-06). retired_at null
+    // on an inactive row = retired before the column existed = long ago.
+    // Achievements keep the old rule: once ever, so retiring strands nobody.
+    if (!def.active && kind !== 'achievement') {
+      const periodStart = kind === 'daily' ? day.startUtc : week.startUtc;
+      const retiredAt = def.retired_at ? new Date(def.retired_at) : null;
+      if (!retiredAt || retiredAt.getTime() < periodStart.getTime())
+        return { claimed: false, reason: 'window_closed' };
+    }
     const requirement = def.requirement as unknown as TaskRequirement;
     const reward = def.reward as unknown as TaskReward;
 
@@ -2717,6 +2730,13 @@ class PacksModuleService extends MedusaService({
       sort: input.sort,
       starts_at: input.startsAt ?? null,
       ends_at: input.endsAt ?? null,
+      // Stamped when the task goes OFF, cleared when it comes back on, kept
+      // through any other edit (claimTask reads it — see the model).
+      retired_at: input.active
+        ? null
+        : existing && !existing.active
+          ? (existing.retired_at ?? null)
+          : new Date(),
     };
     let id = input.id;
     let before: Record<string, unknown> | null = null;
