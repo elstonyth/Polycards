@@ -1,6 +1,7 @@
 import type PacksModuleService from '../../../modules/packs/service';
 import { asPixelPokemonCrud } from '../../../modules/packs/pixel-pokemon-service';
 import type {
+  TaskKind,
   TaskRequirement,
   TaskReward,
 } from '../../../modules/packs/tasks';
@@ -74,7 +75,14 @@ const name = (map: Map<string, string>, id: string): string =>
 
 export async function resolveTaskLabels(
   packs: PacksModuleService,
-  rows: { id: string; requirement: unknown; reward: unknown }[],
+  rows: {
+    id: string;
+    /** Picks "today" / "this week" / lifetime wording. Absent = the
+     *  pre-daily reading, where the goal type alone implied the cadence. */
+    kind?: string;
+    requirement: unknown;
+    reward: unknown;
+  }[],
 ): Promise<Map<string, TaskLabels>> {
   const refs = collect(rows);
   const [packRows, cardRows, pixelRows] = await Promise.all([
@@ -119,7 +127,12 @@ export async function resolveTaskLabels(
   const out = new Map<string, TaskLabels>();
   for (const row of rows) {
     out.set(row.id, {
-      requirement: requirementLabel(row.requirement, packTitle, pixelName),
+      requirement: requirementLabel(
+        row.requirement,
+        row.kind as TaskKind | undefined,
+        packTitle,
+        pixelName,
+      ),
       reward: rewardLabel(row.reward, packTitle, cardName),
     });
   }
@@ -128,26 +141,43 @@ export async function resolveTaskLabels(
 
 function requirementLabel(
   raw: unknown,
+  kind: TaskKind | undefined,
   packTitle: Map<string, string>,
   pixelName: Map<string, string>,
 ): string {
   const r = (raw ?? {}) as Record<string, unknown>;
   const n = Number(r.days ?? r.count ?? r.level ?? 0);
+  // Daily/weekly goals count one period's activity; an achievement counts a
+  // lifetime. Without a kind, check-ins and rips were weekly-only.
+  const when =
+    kind === 'daily'
+      ? 'today'
+      : kind === 'weekly' ||
+          (!kind && (r.type === 'checkin_days' || r.type === 'rip_count'))
+        ? 'this week'
+        : null;
   switch (r.type) {
     case 'checkin_days':
-      return `Check in on ${plural(n, 'day', 'days')} this week`;
+      return when === 'today'
+        ? 'Check in today'
+        : `Check in on ${plural(n, 'day', 'days')} this week`;
     case 'rip_count':
       return typeof r.pack_id === 'string' && r.pack_id
-        ? `Rip ${n} × ${name(packTitle, r.pack_id)} this week`
-        : `Rip ${plural(n, 'pack', 'packs')} this week`;
+        ? `Rip ${n} × ${name(packTitle, r.pack_id)} ${when}`
+        : `Rip ${plural(n, 'pack', 'packs')} ${when}`;
     case 'reach_level':
       return `Reach VIP level ${n}`;
     case 'vault_count':
       return `Vault ${plural(n, 'card', 'cards')}`;
-    case 'vault_pixel_count':
-      return typeof r.pixel_pokemon_id === 'string' && r.pixel_pokemon_id
-        ? `Vault ${n} × ${name(pixelName, r.pixel_pokemon_id)}`
-        : `Vault ${n} Pokémon (pixel) ${n === 1 ? 'card' : 'cards'}`;
+    case 'vault_pixel_count': {
+      // A period goal counts paid PULLS in that period; an achievement, the
+      // cards ever vaulted.
+      const what =
+        typeof r.pixel_pokemon_id === 'string' && r.pixel_pokemon_id
+          ? `${n} × ${name(pixelName, r.pixel_pokemon_id)}`
+          : `${n} Pokémon (pixel) ${n === 1 ? 'card' : 'cards'}`;
+      return when ? `Pull ${what} ${when}` : `Vault ${what}`;
+    }
     default:
       // A requirement type this build does not know cannot be evaluated
       // either — taskProgress fails it closed — so say so rather than

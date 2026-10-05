@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useMemo, useState, useTransition } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { CalendarCheck, Check, Crown, Gift, ListChecks } from 'lucide-react';
-import { checkInToday, claimTaskReward } from '@/lib/actions/tasks';
+import { Check, Crown, ListChecks, Sun } from 'lucide-react';
+import { checkInToday } from '@/lib/actions/tasks';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { HelpTip } from '@/components/ui/help-tip';
 import {
@@ -17,138 +18,85 @@ import {
 import { cn } from '@/lib/utils';
 import { rm } from '@/lib/format';
 import type { TaskEntry, TaskHub } from '@/lib/data/schemas';
+import { CheckInTrack } from './CheckInTrack';
+import { RewardArt } from './reward-art';
+import {
+  checkinCount,
+  claimableCounts,
+  isClaimable,
+  rewardLabel,
+  splitHub,
+  type HubTabs,
+} from './task-hub';
+import { useClaimTask } from './use-claim-task';
 
-// Two tabs since 2026-08-25: Referral moved to its own /referral page (linked
-// from the Me quick-access grid), and the VIP rebate it sat beside was
-// removed outright. VIP survives inside this tab as the ladder the
-// "Reach level N" achievements are measured against — hence the level stat,
-// even though the tab itself is just called Achievements.
-type TabKey = 'weekly' | 'achievements';
+// Three tabs since 2026-10-06 (daily cadence). Daily opens first: the check-in
+// track is the one thing worth doing every visit. Referral lives on its own
+// /referral page; VIP survives inside Achievements as the ladder the "Reach
+// level N" achievements are measured against.
+type TabKey = 'daily' | 'weekly' | 'achievements';
 
-const TABS: { key: TabKey; label: string; icon: typeof ListChecks }[] = [
-  { key: 'weekly', label: 'Weekly Tasks', icon: ListChecks },
-  { key: 'achievements', label: 'Achievements', icon: Crown },
+const TABS: { key: TabKey; label: string }[] = [
+  { key: 'daily', label: 'Daily' },
+  { key: 'weekly', label: 'Weekly' },
+  { key: 'achievements', label: 'Achievements' },
 ];
 
-const REWARD_LABEL: Record<string, string> = {
-  credit: 'Credit',
-  pack: 'Free rip',
-  card: 'Card',
+type Claim = {
+  onClaim: (t: TaskEntry) => void;
+  claimingId: string | null;
 };
 
-// Every reward reads "what · worth": the player sees which level pays what
-// before they claim it. `value` is null when the backend could not price it
-// (a deleted pack/card, or a backend that predates the field).
-function rewardLabel(reward: TaskEntry['reward']): {
-  name: string;
-  value: number | null;
-} {
-  if (reward.type === 'credit' && typeof reward.amount_myr === 'number') {
-    return { name: `${rm(reward.amount_myr)} credit`, value: null };
-  }
-  // A free rip names its pack — "Free rip · Bronze Pack" — so the player
-  // knows what they are working towards before they claim it. The slug is
-  // the fallback (a backend that predates pack_title, or a pack that has
-  // since been deleted): never a bare "Free rip" again.
-  if (reward.type === 'pack' && (reward.pack_title || reward.pack_id)) {
-    return {
-      name: `Free rip · ${reward.pack_title || reward.pack_id}`,
-      value: reward.pack_price_myr ?? null,
-    };
-  }
-  if (reward.type === 'card' && reward.card_name) {
-    return {
-      // Non-breaking space: "PSA 10" must not wrap as "PSA / 10".
-      name: reward.card_grade
-        ? `${reward.card_name} · ${reward.card_grade.replace(/ /g, ' ')}`
-        : reward.card_name,
-      value: reward.card_value_myr ?? null,
-    };
-  }
-  return { name: REWARD_LABEL[reward.type] ?? 'Reward', value: null };
-}
-
-// Deliberately NOT a link to the pack page: a draft or deleted pack 404s
-// there, and an 11px inline chip cannot meet the focus-ring / 44px tap-target
-// rules DESIGN.md sets for interactive elements. The name is the point.
-// Its own line under the progress bar, and the name WRAPS rather than
-// truncates: a card name like "Poncho-Wearing Pikachu Charizard #208/XY-P"
-// clipped to "Poncho-Weari…" on a phone is exactly the "what do I get?"
-// complaint this fixes. The RM value never clips.
-function RewardChip({ reward }: { reward: TaskEntry['reward'] }) {
-  const { name, value } = rewardLabel(reward);
-  return (
-    <span className="inline-flex max-w-full items-start gap-1 rounded-lg bg-white/5 px-2 py-1 text-[11px] leading-snug text-neutral-300">
-      <Gift className="mt-px h-3 w-3 shrink-0" aria-hidden />
-      <span className="min-w-0">
-        {name}
-        {value != null && value > 0 && (
-          <span className="text-chase font-semibold whitespace-nowrap tabular-nums">
-            {' '}
-            · worth {rm(value)}
-          </span>
-        )}
-      </span>
-    </span>
-  );
-}
-
-// Every way a claim can decline, in the customer's words.
-const CLAIM_FAILURE_COPY: Record<string, string> = {
-  already_claimed: 'Already claimed.',
-  not_completed: 'Not completed yet.',
-  window_closed: 'This task has ended.',
-  not_found: 'This task is no longer available.',
-};
-const CLAIM_FALLBACK = 'Could not claim this right now.';
-
-function TaskRow({
-  task,
-  onDone,
-}: {
-  task: TaskEntry;
-  onDone: (message: string) => void;
-}) {
-  const [pending, startTransition] = useTransition();
-  const router = useRouter();
-  const pctDone =
+/**
+ * One task: the prize's own art on the left (so the player SEES what they are
+ * working towards, not just reads it), the goal and its progress, the claim
+ * on the right. A claimable row lifts onto a gold hairline with the prize
+ * sparkling and a light sweeping its Claim pill; a claimed one steps back.
+ */
+function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
+  const claimable = isClaimable(task);
+  const { name, value } = rewardLabel(task.reward);
+  const pct =
     task.progress.target > 0
       ? Math.round((task.progress.current / task.progress.target) * 100)
       : 0;
-  const claim = () =>
-    startTransition(async () => {
-      const res = await claimTaskReward(task.id);
-      if (res.ok && res.claimed) {
-        // A pack reward is a free RIP, so the claim hands the player to the
-        // slot to take it. The entitlement is already recorded server-side —
-        // if they never arrive, or bail before spinning, it waits for them on
-        // /task rather than evaporating.
-        if (res.spin) {
-          onDone('Free rip unlocked — spinning it up…');
-          router.push(
-            `/slots/${encodeURIComponent(res.spin.packId)}/spin?freeRip=${encodeURIComponent(res.spin.claimId)}`,
-          );
-          return;
-        }
-        onDone(
-          res.rewardType === 'credit'
-            ? 'Credit added to your wallet.'
-            : 'Card added to your vault.',
-        );
-      } else if (res.ok && !res.claimed) {
-        onDone(CLAIM_FAILURE_COPY[res.reason] ?? CLAIM_FALLBACK);
-      } else if (!res.ok) {
-        onDone(res.error);
-      }
-      router.refresh();
-    });
   return (
-    <li className="flex items-center gap-3 py-3">
+    <li
+      className={cn(
+        'flex items-center gap-3 rounded-xl px-2.5 py-3',
+        claimable && 'bg-chase/[0.06] ring-chase/40 ring-1',
+      )}
+    >
+      <RewardArt
+        reward={task.reward}
+        claimable={claimable}
+        claimed={task.claimed}
+        className="h-[76px] w-16"
+      />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-white">{task.title}</p>
-        <div className="mt-1.5 flex items-center gap-2">
+        <p
+          className={cn(
+            'text-sm leading-snug font-semibold',
+            task.claimed ? 'text-neutral-400' : 'text-white',
+          )}
+        >
+          {task.title}
+        </p>
+        {/* The name WRAPS rather than truncates: a card name clipped to
+            "Poncho-Weari…" on a phone is exactly the "what do I get?"
+            complaint this page exists to answer. */}
+        <p className="mt-0.5 text-xs leading-snug text-neutral-300">
+          {name}
+          {task.reward.type !== 'credit' && value != null && value > 0 && (
+            <span className="text-chase font-semibold whitespace-nowrap tabular-nums">
+              {' '}
+              · worth {rm(value)}
+            </span>
+          )}
+        </p>
+        <div className="mt-2 flex items-center gap-2">
           <div
-            className="h-1.5 w-28 overflow-hidden rounded-full bg-neutral-800"
+            className="h-1.5 flex-1 overflow-hidden rounded-full bg-neutral-800"
             role="progressbar"
             aria-valuenow={task.progress.current}
             aria-valuemin={0}
@@ -156,28 +104,30 @@ function TaskRow({
             aria-label={`${task.title} progress`}
           >
             <div
-              className="bg-chase h-full rounded-full"
-              style={{ width: `${pctDone}%` }}
+              className={cn(
+                'h-full rounded-full',
+                task.claimed ? 'bg-neutral-600' : 'bg-chase',
+              )}
+              style={{ width: `${pct}%` }}
             />
           </div>
-          <span className="text-xs text-white/40 tabular-nums">
+          <span className="text-[11px] text-neutral-400 tabular-nums">
             {task.progress.current}/{task.progress.target}
           </span>
         </div>
-        <div className="mt-1.5">
-          <RewardChip reward={task.reward} />
-        </div>
       </div>
       {task.claimed ? (
-        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-300 uppercase">
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/[0.06] px-2.5 py-1 text-[11px] font-semibold text-neutral-400">
           <Check className="h-3 w-3" aria-hidden /> Claimed
         </span>
       ) : (
         <Pill
           size="sm"
-          variant={task.progress.completed ? 'primary' : 'ghost'}
-          disabled={!task.progress.completed || pending}
-          onClick={claim}
+          variant={claimable ? 'primary' : 'ghost'}
+          disabled={!claimable || claimingId === task.id}
+          onClick={() => onClaim(task)}
+          aria-label={`Claim ${task.title}`}
+          className={cn('shrink-0', claimable && 'claim-sweep')}
         >
           Claim
         </Pill>
@@ -186,29 +136,107 @@ function TaskRow({
   );
 }
 
-function WeeklyTab({
-  data,
-  isLoggedIn,
+function TaskList({
+  heading,
+  icon: Icon,
+  resets,
+  tasks,
+  empty,
+  ...claim
 }: {
-  data: TaskHub | null;
-  isLoggedIn: boolean;
-}) {
-  const [pending, startTransition] = useTransition();
-  const [notice, setNotice] = useState<string | null>(null);
-  const router = useRouter();
-  if (!data) {
-    return isLoggedIn ? (
-      <UnavailablePanel />
-    ) : (
-      <SignInPrompt what="your weekly tasks" />
-    );
-  }
+  heading: string;
+  icon: typeof ListChecks;
+  resets?: string;
+  tasks: TaskEntry[];
+  empty: string;
+} & Claim) {
+  return (
+    <Panel className="px-2 pt-3 pb-1">
+      <div className="flex items-center justify-between gap-2 px-2.5">
+        <p className="flex items-center gap-1.5 text-sm font-semibold text-white">
+          <Icon className="h-4 w-4 text-neutral-400" aria-hidden /> {heading}
+        </p>
+        {resets && <p className="text-[11px] text-neutral-400">{resets}</p>}
+      </div>
+      {tasks.length === 0 ? (
+        <p className="px-2.5 py-5 text-center text-sm text-neutral-400">
+          {empty}
+        </p>
+      ) : (
+        <ul className="mt-1 space-y-1">
+          {tasks.map((t) => (
+            <TaskRow key={t.id} task={t} {...claim} />
+          ))}
+        </ul>
+      )}
+    </Panel>
+  );
+}
 
-  const weekly = data.tasks.filter((t) => t.kind === 'weekly');
+// An entitlement outlives the task that granted it — a retired task, or one
+// whose window closed, must not take an unspent free rip with it. So this is
+// driven by the claims, not by the rows, and sits above the tabs: a free rip
+// waiting is no single tab's business.
+function PendingSpins({ spins }: { spins: TaskHub['pending_spins'] }) {
+  if (spins.length === 0) return null;
+  return (
+    <Panel className="border-chase/40 bg-chase/[0.06]">
+      <p className="text-sm font-semibold text-white">
+        {spins.length === 1
+          ? 'You have a free rip waiting'
+          : `You have ${spins.length} free rips waiting`}
+      </p>
+      <ul className="mt-3 space-y-2">
+        {spins.map((s) => (
+          <li key={s.claim_id} className="flex items-center gap-3">
+            <span className="relative h-12 w-10 shrink-0">
+              {s.pack_image && (
+                <Image
+                  src={s.pack_image}
+                  alt=""
+                  fill
+                  sizes="40px"
+                  className="object-contain"
+                />
+              )}
+            </span>
+            <span className="min-w-0 flex-1 text-xs text-neutral-400">
+              <span className="block truncate">{s.title}</span>
+              {(s.pack_title || s.pack_id) && (
+                <span className="block truncate text-sm font-semibold text-white">
+                  {s.pack_title || s.pack_id}
+                </span>
+              )}
+            </span>
+            <Link
+              href={`/slots/${encodeURIComponent(s.pack_id)}/spin?freeRip=${encodeURIComponent(s.claim_id)}`}
+              className={cn(pillVariants({ size: 'sm' }), 'claim-sweep')}
+            >
+              Spin it
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  );
+}
+
+function DailyTab({
+  hub,
+  tabs,
+  onNotice,
+  ...claim
+}: {
+  hub: TaskHub;
+  tabs: HubTabs;
+  onNotice: (m: string) => void;
+} & Claim) {
+  const [checkingIn, startTransition] = useTransition();
+  const router = useRouter();
   const checkIn = () =>
     startTransition(async () => {
       const res = await checkInToday();
-      setNotice(
+      onNotice(
         res.ok
           ? res.checked
             ? 'Checked in — see you tomorrow!'
@@ -217,133 +245,56 @@ function WeeklyTab({
       );
       router.refresh();
     });
+  return (
+    <div className="space-y-4">
+      <CheckInTrack
+        count={checkinCount(hub, tabs)}
+        checkedInToday={hub.checked_in_today}
+        milestones={tabs.milestones}
+        onCheckIn={checkIn}
+        checkingIn={checkingIn}
+        onClaim={claim.onClaim}
+        claimingId={claim.claimingId}
+        onNotice={onNotice}
+      />
+      <TaskList
+        heading="Today"
+        icon={Sun}
+        resets="Resets 00:00 MYT"
+        tasks={tabs.daily}
+        empty="No daily tasks right now — check back tomorrow."
+        {...claim}
+      />
+    </div>
+  );
+}
 
+function WeeklyTab({ tabs, ...claim }: { tabs: HubTabs } & Claim) {
   return (
     <div>
       <TabBanner
         src="/images/task/tasks-banner.webp"
         title="WEEKLY TASKS"
-        sub="Check in, rip packs, claim the rewards — every week."
+        sub="Rip packs and chase the pulls — fresh goals every Monday."
       />
-      <div className="space-y-4">
-        <Panel className="flex items-center gap-3">
-          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-neutral-900">
-            <CalendarCheck className="text-chase h-5 w-5" aria-hidden />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="flex items-center gap-1 text-sm font-semibold text-white">
-              Daily check-in
-              <HelpTip label="How the weekly reset works">
-                Weekly tasks and their progress reset every Monday at 00:00
-                (Malaysia time). Anything you have finished but not claimed by
-                then is gone, so claim before the reset.
-              </HelpTip>
-            </p>
-            <p className="text-xs text-neutral-500">
-              Week of {data.week_start} — check-ins feed the weekly tasks.
-            </p>
-          </div>
-          <Pill
-            size="sm"
-            variant={data.checked_in_today ? 'ghost' : 'primary'}
-            disabled={data.checked_in_today || pending}
-            onClick={checkIn}
-          >
-            {data.checked_in_today ? (
-              <>
-                <Check className="h-4 w-4" aria-hidden /> Done
-              </>
-            ) : (
-              'Check in'
-            )}
-          </Pill>
-        </Panel>
-
-        {notice && (
-          <p
-            aria-live="polite"
-            className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-neutral-300"
-          >
-            {notice}
-          </p>
-        )}
-
-        {data.pending_spins.length > 0 && (
-          // An entitlement outlives the task that granted it — a retired task,
-          // or one whose window closed, must not take an unspent free rip with
-          // it. So this is driven by the claims, not by the rows above.
-          <Panel className="border-chase/40 bg-chase/[0.06]">
-            <p className="text-sm font-semibold text-white">
-              {data.pending_spins.length === 1
-                ? 'You have a free rip waiting'
-                : `You have ${data.pending_spins.length} free rips waiting`}
-            </p>
-            <ul className="mt-2 space-y-2">
-              {data.pending_spins.map((s) => (
-                <li
-                  key={s.claim_id}
-                  className="flex items-center justify-between gap-3"
-                >
-                  <span className="min-w-0 flex-1 text-xs text-neutral-400">
-                    <span className="block truncate">{s.title}</span>
-                    {(s.pack_title || s.pack_id) && (
-                      <span className="block truncate text-neutral-200">
-                        {s.pack_title || s.pack_id}
-                      </span>
-                    )}
-                  </span>
-                  <Link
-                    href={`/slots/${encodeURIComponent(s.pack_id)}/spin?freeRip=${encodeURIComponent(s.claim_id)}`}
-                    className={cn(pillVariants({ size: 'sm' }))}
-                  >
-                    Spin it
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </Panel>
-        )}
-
-        <Panel>
-          <p className="mb-1 flex items-center gap-1.5 text-[11px] tracking-wide text-white/40 uppercase">
-            <ListChecks className="h-3.5 w-3.5" aria-hidden /> This week
-          </p>
-          {weekly.length === 0 ? (
-            <p className="py-3 text-center text-sm text-neutral-500">
-              No weekly tasks right now — check back soon.
-            </p>
-          ) : (
-            <ul className="divide-y divide-white/5">
-              {weekly.map((t) => (
-                <TaskRow key={t.id} task={t} onDone={setNotice} />
-              ))}
-            </ul>
-          )}
-        </Panel>
-      </div>
+      <TaskList
+        heading="This week"
+        icon={ListChecks}
+        resets="Resets Monday 00:00 MYT"
+        tasks={tabs.weekly}
+        empty="No weekly tasks right now — check back soon."
+        {...claim}
+      />
     </div>
   );
 }
 
 function AchievementsTab({
-  data,
-  isLoggedIn,
-}: {
-  data: TaskHub | null;
-  isLoggedIn: boolean;
-}) {
-  const [notice, setNotice] = useState<string | null>(null);
-  if (!data) {
-    return isLoggedIn ? (
-      <UnavailablePanel />
-    ) : (
-      <SignInPrompt what="your achievements" />
-    );
-  }
-
-  const achievements = data.tasks.filter((t) => t.kind === 'achievement');
-  const done = achievements.filter((t) => t.claimed).length;
-
+  hub,
+  tabs,
+  ...claim
+}: { hub: TaskHub; tabs: HubTabs } & Claim) {
+  const done = tabs.achievements.filter((t) => t.claimed).length;
   return (
     <div>
       <TabBanner
@@ -355,7 +306,7 @@ function AchievementsTab({
         <div className="grid grid-cols-2 gap-2">
           <Stat
             label="VIP level"
-            value={`L${data.vip_level}`}
+            value={`L${hub.vip_level}`}
             help={
               <HelpTip label="How VIP levels work">
                 Your VIP level rises with lifetime spend. Achievements below
@@ -364,34 +315,15 @@ function AchievementsTab({
               </HelpTip>
             }
           />
-          <Stat label="Claimed" value={`${done}/${achievements.length}`} />
+          <Stat label="Claimed" value={`${done}/${tabs.achievements.length}`} />
         </div>
-
-        {notice && (
-          <p
-            aria-live="polite"
-            className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-neutral-300"
-          >
-            {notice}
-          </p>
-        )}
-
-        <Panel>
-          <p className="mb-1 flex items-center gap-1.5 text-[11px] tracking-wide text-white/40 uppercase">
-            <Crown className="h-3.5 w-3.5" aria-hidden /> Achievements
-          </p>
-          {achievements.length === 0 ? (
-            <p className="py-3 text-center text-sm text-neutral-500">
-              No achievements configured yet.
-            </p>
-          ) : (
-            <ul className="divide-y divide-white/5">
-              {achievements.map((t) => (
-                <TaskRow key={t.id} task={t} onDone={setNotice} />
-              ))}
-            </ul>
-          )}
-        </Panel>
+        <TaskList
+          heading="Achievements"
+          icon={Crown}
+          tasks={tabs.achievements}
+          empty="No achievements configured yet."
+          {...claim}
+        />
       </div>
     </div>
   );
@@ -404,39 +336,100 @@ export function TaskHubClient({
   taskHub: TaskHub | null;
   isLoggedIn: boolean;
 }) {
-  const [tab, setTab] = useState<TabKey>('weekly');
+  const [tab, setTab] = useState<TabKey>('daily');
+  const [notice, setNotice] = useState<string | null>(null);
+  const { claim, pendingId } = useClaimTask(setNotice);
+  const tabs = useMemo(
+    () => (taskHub ? splitHub(taskHub.tasks) : null),
+    [taskHub],
+  );
+  const ready = tabs ? claimableCounts(tabs) : null;
+  const claimProps: Claim = { onClaim: claim, claimingId: pendingId };
+
   return (
     <div className="px-fluid mx-auto w-full max-w-2xl py-6">
       <h1 className="font-heading text-3xl text-white">TASK</h1>
+
+      {taskHub && (
+        <div className="mt-4">
+          <PendingSpins spins={taskHub.pending_spins} />
+        </div>
+      )}
+
+      {/* Plain toggle buttons (aria-pressed), the leaderboard's segmented
+          pill. A gold count marks every tab holding something to claim, so
+          the player knows where to look without opening each one. */}
       <div
-        role="tablist"
+        role="group"
         aria-label="Task hub sections"
-        className="mt-4 flex gap-2"
+        className="mt-4 grid grid-cols-[1fr_1fr_1.45fr] gap-1 rounded-full border border-white/10 bg-neutral-900 p-1 sm:grid-cols-3"
       >
-        {TABS.map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            role="tab"
-            aria-selected={tab === key}
-            onClick={() => setTab(key)}
-            className={cn(
-              pillVariants({
-                variant: tab === key ? 'primary' : 'ghost',
-                size: 'sm',
-              }),
-            )}
-          >
-            <Icon className="h-4 w-4" aria-hidden />
-            {label}
-          </button>
-        ))}
+        {TABS.map(({ key, label }) => {
+          const n = ready?.[key] ?? 0;
+          return (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={tab === key}
+              onClick={() => setTab(key)}
+              aria-label={n > 0 ? `${label}, ${n} to claim` : label}
+              className={cn(
+                'flex min-h-11 items-center justify-center gap-1 rounded-full px-1.5 text-[13px] font-semibold transition-colors sm:gap-1.5 sm:px-2 sm:text-sm',
+                'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+                tab === key
+                  ? 'bg-neutral-50 text-neutral-950'
+                  : 'text-neutral-400 hover:text-white',
+              )}
+            >
+              {label}
+              {n > 0 && (
+                <span
+                  aria-hidden
+                  className="bg-chase inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold text-neutral-950 tabular-nums"
+                >
+                  {n}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
+
+      {notice && (
+        <p
+          aria-live="polite"
+          className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-neutral-300"
+        >
+          {notice}
+        </p>
+      )}
+
       <div className="mt-4">
-        {tab === 'weekly' && (
-          <WeeklyTab data={taskHub} isLoggedIn={isLoggedIn} />
-        )}
-        {tab === 'achievements' && (
-          <AchievementsTab data={taskHub} isLoggedIn={isLoggedIn} />
+        {!taskHub || !tabs ? (
+          isLoggedIn ? (
+            <UnavailablePanel />
+          ) : (
+            <SignInPrompt
+              what={
+                tab === 'achievements'
+                  ? 'your achievements'
+                  : tab === 'weekly'
+                    ? 'your weekly tasks'
+                    : 'your daily check-in'
+              }
+            />
+          )
+        ) : tab === 'daily' ? (
+          <DailyTab
+            hub={taskHub}
+            tabs={tabs}
+            onNotice={setNotice}
+            {...claimProps}
+          />
+        ) : tab === 'weekly' ? (
+          <WeeklyTab tabs={tabs} {...claimProps} />
+        ) : (
+          <AchievementsTab hub={taskHub} tabs={tabs} {...claimProps} />
         )}
       </div>
     </div>

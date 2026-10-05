@@ -77,44 +77,14 @@ export async function taskCatalogue(
   const hub = await packs.taskHubFor({ customerId: NOBODY, now });
   if (!hub.tasks.length) return { week_start: hub.week_start, tasks: [] };
   const ids = hub.tasks.map((t) => t.id);
-  const packSlugs = hub.tasks.flatMap((t) =>
-    t.reward.type === 'pack' ? [t.reward.pack_id] : [],
-  );
-  const cardHandles = hub.tasks.flatMap((t) =>
-    t.reward.type === 'card' ? [t.reward.card_handle] : [],
-  );
-  const [labels, defs, packRows, cardRows] = await Promise.all([
+  const [labels, defs] = await Promise.all([
     resolveTaskLabels(packs, hub.tasks),
     packs.listTaskDefinitions(
       { id: ids },
       { select: ['id', 'ends_at'], take: ids.length },
     ),
-    packSlugs.length
-      ? packs.listPacks(
-          { slug: packSlugs },
-          {
-            select: ['slug', 'image', 'display_image'],
-            take: packSlugs.length,
-          },
-        )
-      : Promise.resolve([]),
-    cardHandles.length
-      ? packs.listCards(
-          { handle: cardHandles },
-          {
-            select: ['handle', 'image', 'slab_image'],
-            take: cardHandles.length,
-          },
-        )
-      : Promise.resolve([]),
   ]);
   const endsAt = new Map(defs.map((d) => [d.id, d.ends_at]));
-  const packArt = new Map(
-    packRows.map((p) => [p.slug, p.image || p.display_image]),
-  );
-  const cardArt = new Map(
-    cardRows.map((c) => [c.handle, c.slab_image || c.image]),
-  );
   const tasks = hub.tasks.map((t) => {
     const requirement = t.requirement as TaskRequirement;
     const ends = endsAt.get(t.id);
@@ -127,12 +97,14 @@ export async function taskCatalogue(
         requirement.type === 'checkin_days' ? requirement.days : null,
       ...prizeLabel(t.reward),
       prize_type: t.reward.type,
+      // The hub already resolved the prize's picture (pack shot, else hero;
+      // slab, else raw scan) — the same one /task shows beside the task.
       image:
-        (t.reward.type === 'pack'
-          ? packArt.get(t.reward.pack_id)
+        t.reward.type === 'pack'
+          ? t.reward.pack_image
           : t.reward.type === 'card'
-            ? cardArt.get(t.reward.card_handle)
-            : null) || null,
+            ? t.reward.card_image
+            : null,
       ends_at: ends ? new Date(ends).toISOString() : null,
     };
   });

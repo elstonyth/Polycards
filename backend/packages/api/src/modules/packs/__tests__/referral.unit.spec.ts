@@ -4,6 +4,7 @@ import {
   payoutCents,
   referralWeekFor,
   resolveRateBp,
+  taskDayFor,
   taskWeekFor,
 } from '../referral';
 
@@ -98,5 +99,37 @@ describe('task week (Mon 00:00 MYT → Mon 00:00 MYT)', () => {
     const at = new Date('2026-08-26T02:00:00Z'); // Wed MYT
     expect(taskWeekFor(at).weekStartIso).toBe('2026-08-24'); // Mon
     expect(referralWeekFor(at).weekStartIso).toBe('2026-08-25'); // Tue
+  });
+});
+
+// The daily board's day cuts at MYT midnight, not UTC midnight — 8 hours of
+// every day would otherwise belong to the wrong daily claim.
+describe('task day (00:00 MYT → 00:00 MYT)', () => {
+  it('07:59 UTC on the 6th is 15:59 MYT on the 6th', () => {
+    const d = taskDayFor(new Date('2026-10-06T07:59:00Z'));
+    expect(d.dayIso).toBe('2026-10-06');
+    expect(d.startUtc.toISOString()).toBe('2026-10-05T16:00:00.000Z');
+    expect(d.endUtcExcl.toISOString()).toBe('2026-10-06T16:00:00.000Z');
+  });
+
+  it('16:00 UTC is already the next MYT day', () => {
+    expect(taskDayFor(new Date('2026-10-06T16:00:00Z')).dayIso).toBe(
+      '2026-10-07',
+    );
+    expect(taskDayFor(new Date('2026-10-06T15:59:59Z')).dayIso).toBe(
+      '2026-10-06',
+    );
+  });
+
+  it('always sits inside the task week', () => {
+    for (const iso of ['2026-10-04T16:00:00Z', '2026-10-11T15:59:59Z']) {
+      const at = new Date(iso);
+      const d = taskDayFor(at);
+      const w = taskWeekFor(at);
+      expect(d.startUtc.getTime()).toBeGreaterThanOrEqual(w.startUtc.getTime());
+      expect(d.endUtcExcl.getTime()).toBeLessThanOrEqual(
+        w.endUtcExcl.getTime(),
+      );
+    }
   });
 });

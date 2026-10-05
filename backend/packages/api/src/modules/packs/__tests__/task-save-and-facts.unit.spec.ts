@@ -1,5 +1,5 @@
 import PacksModuleService from '../service';
-import { taskWeekFor } from '../referral';
+import { taskDayFor, taskWeekFor } from '../referral';
 import type { TaskFacts } from '../tasks';
 
 /**
@@ -211,12 +211,20 @@ describe('taskFactsFor reads the VIP high-water mark', () => {
     const facts: TaskFacts = await (
       svc as unknown as {
         taskFactsFor: (
-          input: { customerId: string; week: ReturnType<typeof taskWeekFor> },
+          input: {
+            customerId: string;
+            week: ReturnType<typeof taskWeekFor>;
+            day: ReturnType<typeof taskDayFor>;
+          },
           ctx: unknown,
         ) => Promise<TaskFacts>;
       }
     ).taskFactsFor(
-      { customerId: 'cus_1', week: taskWeekFor(new Date()) },
+      {
+        customerId: 'cus_1',
+        week: taskWeekFor(new Date()),
+        day: taskDayFor(new Date()),
+      },
       { manager: em },
     );
     expect(facts.vipLevel).toBe(10);
@@ -225,5 +233,56 @@ describe('taskFactsFor reads the VIP high-water mark', () => {
     expect(listVipMemberStates.mock.calls[0][1]).toMatchObject({
       select: ['highest_level_ever'],
     });
+  });
+});
+
+describe('taskFactsFor splits today out of the task week', () => {
+  it('reads the day from the week rows — check-in dates and FILTERed counts', async () => {
+    const svc = Object.create(
+      PacksModuleService.prototype,
+    ) as PacksModuleService;
+    const now = new Date('2026-10-07T04:00:00Z'); // Wed 12:00 MYT
+    const week = taskWeekFor(now);
+    const day = taskDayFor(now);
+    Object.assign(svc, {
+      listDailyCheckins: jest.fn(async () => [
+        { checkin_date: '2026-10-05' },
+        { checkin_date: '2026-10-07' },
+      ]),
+      listVipMemberStates: jest.fn(async () => []),
+    });
+    const execute = jest.fn(async (sql: string, _params: unknown[]) => {
+      if (sql.includes('GROUP BY pack_id'))
+        return [
+          { pack_id: 'bronze', n: '4', n_day: '1' },
+          { pack_id: 'gold', n: '2', n_day: '0' },
+        ];
+      if (sql.includes('GROUP BY c.pixel_pokemon_id'))
+        return [{ pixel_pokemon_id: 'px_1', n: '9', n_week: '3', n_day: '2' }];
+      return [{ n: '20' }];
+    });
+    const facts: TaskFacts = await (
+      svc as unknown as {
+        taskFactsFor: (input: unknown, ctx: unknown) => Promise<TaskFacts>;
+      }
+    ).taskFactsFor(
+      { customerId: 'cus_1', week, day },
+      { manager: { execute } },
+    );
+    expect(facts.week.checkinDays).toBe(2);
+    expect(facts.day.checkinDays).toBe(1);
+    expect(facts.week.rips).toBe(6);
+    expect(facts.day.rips).toBe(1);
+    expect(facts.day.ripsByPack.get('gold')).toBeUndefined();
+    expect(facts.week.pixelPulls).toBe(3);
+    expect(facts.day.pixelPullsById.get('px_1')).toBe(2);
+    expect(facts.vaultPixelCount).toBe(9);
+    expect(facts.vaultCount).toBe(20);
+    // The period pixel counts are paid pulls only; the lifetime one is not.
+    const pixelSql = execute.mock.calls.find(([sql]) =>
+      sql.includes('GROUP BY c.pixel_pokemon_id'),
+    )![0];
+    expect(pixelSql.match(/p\.source = 'pack'/g)).toHaveLength(2);
+    expect(pixelSql).not.toMatch(/WHERE p\.customer_id = \? AND p\.source/);
   });
 });

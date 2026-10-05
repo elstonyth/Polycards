@@ -102,6 +102,29 @@ export function taskWeekFor(at: Date): ReferralWeek {
   return weekAnchoredOn(at, MONDAY);
 }
 
+/** The /task daily board's day — the MYT calendar day containing `at`
+ *  (00:00 MYT inclusive to the next 00:00 MYT exclusive). Always inside
+ *  `taskWeekFor(at)`, since both cut at MYT midnight. `dayIso` is also the
+ *  daily_checkin.checkin_date and a daily task's claim period. */
+export function taskDayFor(at: Date): {
+  dayIso: string;
+  startUtc: Date;
+  endUtcExcl: Date;
+} {
+  const myt = new Date(at.getTime() + MYT_OFFSET_MS);
+  const midnightMyt = Date.UTC(
+    myt.getUTCFullYear(),
+    myt.getUTCMonth(),
+    myt.getUTCDate(),
+  );
+  const startUtc = new Date(midnightMyt - MYT_OFFSET_MS);
+  return {
+    dayIso: new Date(midnightMyt).toISOString().slice(0, 10),
+    startUtc,
+    endUtcExcl: new Date(startUtc.getTime() + DAY_MS),
+  };
+}
+
 // The most recently ENDED week — what the Tuesday close job settles.
 export function lastClosedReferralWeek(now: Date): ReferralWeek {
   const current = referralWeekFor(now);

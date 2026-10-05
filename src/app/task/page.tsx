@@ -5,12 +5,13 @@ import { TaskHubClient } from './TaskHubClient';
 
 export const metadata: Metadata = {
   title: 'Task',
-  description: 'Weekly tasks, achievements and your VIP level on Polycards.',
+  description:
+    'Daily check-in, daily and weekly tasks, achievements and your VIP level on Polycards.',
 };
 
-// The Task hub (referral rebuild, spec 2026-08-24; restructured 2026-08-25):
-// two tabs — Weekly Tasks and Achievements. Referral has its own page
-// at /referral. Server component per the house split; the loader returns null
+// The Task hub (referral rebuild, spec 2026-08-24; restructured 2026-08-25;
+// three tabs since 2026-10-06): Daily (check-in track + today's tasks),
+// Weekly and Achievements. Referral has its own page at /referral. Server component per the house split; the loader returns null
 // when logged out and the client tabs render a sign-in prompt instead.
 //
 // isLoggedIn comes from the customer read, not cookie presence: an expired

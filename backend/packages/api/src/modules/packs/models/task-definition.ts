@@ -1,6 +1,7 @@
 import { model } from '@medusajs/framework/utils';
 
 // One configurable task (spec 2026-08-24 Phase B). `kind` picks the cadence:
+// daily tasks reset at 00:00 MYT (spec 2026-10-06);
 // weekly tasks reset on the task week (Mon 00:00 MYT — the player-facing
 // week, deliberately NOT the Tuesday settlement week); achievements are
 // once-per-account. `requirement` and `reward` are the discriminated unions in
@@ -9,7 +10,7 @@ import { model } from '@medusajs/framework/utils';
 // underlying facts (check-ins, pulls, vip state); only claims are stored.
 export const TaskDefinition = model.define('task_definition', {
   id: model.id().primaryKey(),
-  kind: model.enum(['weekly', 'achievement']),
+  kind: model.enum(['daily', 'weekly', 'achievement']),
   title: model.text(),
   requirement: model.json(),
   reward: model.json(),
@@ -21,6 +22,12 @@ export const TaskDefinition = model.define('task_definition', {
   // kill switch on top of it.
   starts_at: model.dateTime().nullable(),
   ends_at: model.dateTime().nullable(),
+  // When the task was last switched OFF (null while active). A retired
+  // daily/weekly task stays claimable only for the period it was retired in
+  // — "never strand someone who already finished it" — not for every period
+  // after (security review 2026-10-06: a retired daily task otherwise paid
+  // out every day, forever, to anyone holding its id).
+  retired_at: model.dateTime().nullable(),
 });
 
 export default TaskDefinition;
