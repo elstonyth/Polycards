@@ -75,6 +75,11 @@ test('the growth desk tools', () => {
     as: 'image',
     artOf: 'podium rank',
   });
+  // The week's second image: ranks 4-10.
+  assert.deepEqual(
+    growth.challenge_results_poster.request({ part: 'rest' }).params,
+    { part: 'rest' },
+  );
   assert.deepEqual(growth.challenge_stages_poster.request({}), {
     path: 'challenge-stages-poster',
     params: {},

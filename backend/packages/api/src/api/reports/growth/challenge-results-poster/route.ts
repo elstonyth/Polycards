@@ -7,16 +7,23 @@ import {
 } from '../../../../modules/packs/challenge-results-poster';
 import { latestChallengeResults } from '../challenge-results/results';
 
-// GET /reports/growth/challenge-results-poster: the most recently settled
-// Weekly Challenge week as a posting poster (challenge-results-poster.ts):
-// the top 3 with every prize card they won, what they pulled and won,
-// then ranks 4-10. x-poster-week is the week's start; x-poster-missing-art
+// GET /reports/growth/challenge-results-poster?part=top|rest: the most
+// recently settled Weekly Challenge week as two 1080x1350 posting images
+// (challenge-results-poster.ts): part top (default), the top 3 with every
+// prize card they won, what they pulled and won; part rest, ranks 4-10. x-poster-week is the week's start; x-poster-missing-art
 // names podium ranks whose card shows as a placeholder; x-poster-note says
 // in plain words when a disabled winner was left out.
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
+  const part = req.query.part ?? 'top';
+  if (part !== 'top' && part !== 'rest') {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'part must be top (the top 3 with their cards) or rest (ranks 4-10).',
+    );
+  }
   const results = await latestChallengeResults(req.scope);
   if (!results) {
     throw new MedusaError(
@@ -56,9 +63,11 @@ export async function GET(
       siteHost: 'polycards.gg/leaderboard',
     },
     new Map(top.map((w) => [w.rank, hand(w).map((c) => c.image)])),
+    part,
   );
   res.setHeader('Content-Type', 'image/jpeg');
   res.setHeader('x-poster-week', results.weekStart.toISOString());
+  res.setHeader('x-poster-part', part);
   if (missing.length) res.setHeader('x-poster-missing-art', missing.join(','));
   if (results.hidden) {
     res.setHeader(

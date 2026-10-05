@@ -1,12 +1,13 @@
 import sharp from 'sharp';
 import { POSTER_H, POSTER_W } from '../brand-poster';
 import {
+  cardWidth,
   composeResultsPoster,
   MAX_ROW_CARDS,
   resultsHeadline,
-  rowCardWidth,
   rmWhole,
 } from '../challenge-results-poster';
+import { fitToFeed } from '../feed-size';
 import {
   composeStagesPoster,
   restLine,
@@ -36,61 +37,67 @@ describe('results poster', () => {
     expect(resultsHeadline(null, [])).toBe('NO STAGE UNLOCKED');
   });
 
-  it('draws the podium and the ledger, naming the ranks without art', async () => {
-    const { jpeg, placeholders } = await composeResultsPoster(
-      {
-        weekLabel: '28 SEPT – 4 OCT',
-        headline: 'RM 2,317,411 POOLED · 3 STAGES UNLOCKED',
-        podium: [
-          {
-            rank: 1,
-            name: 'AhBiiiii',
-            pulledMyr: 452123.4,
-            prizeMyr: 12400,
-            credits: 0,
-            cards: ['Gengar VMAX #271', 'Mew ex #232', 'Mew ex #232'],
-          },
-          {
-            rank: 2,
-            name: 'coco',
-            pulledMyr: 301000,
-            prizeMyr: 9000,
-            credits: 0,
-            cards: ['Charizard GX #SV49'],
-          },
-          // Credits only: a money tile, never a missing-art placeholder.
-          {
-            rank: 3,
-            name: 'squirtle',
-            pulledMyr: 250000,
-            prizeMyr: 2500,
-            credits: 2500,
-            cards: [],
-          },
-        ],
-        list: Array.from({ length: 7 }, (_, i) => ({
-          rank: i + 4,
-          name: `player_${i + 4}`,
-          pulledMyr: 100000 - i * 9000,
-          prizeMyr: 2000 - i * 250,
-        })),
-        siteHost: 'polycards.gg/leaderboard',
-      },
-      new Map(),
-    );
-    const size = await jpegSize(jpeg);
-    expect(size.format).toBe('jpeg');
-    expect(size.width).toBe(1080);
-    expect(size.height).toBeGreaterThan(1600);
-    expect(placeholders).toEqual([1, 2]);
+  it('draws the top 3 and the ledger as two feed-size images, naming the ranks without art', async () => {
+    const input = {
+      weekLabel: '28 SEPT – 4 OCT',
+      headline: 'RM 2,317,411 POOLED · 3 STAGES UNLOCKED',
+      podium: [
+        {
+          rank: 1,
+          name: 'AhBiiiii',
+          pulledMyr: 452123.4,
+          prizeMyr: 12400,
+          credits: 0,
+          cards: ['Gengar VMAX #271', 'Mew ex #232', 'Mew ex #232'],
+        },
+        {
+          rank: 2,
+          name: 'coco',
+          pulledMyr: 301000,
+          prizeMyr: 9000,
+          credits: 0,
+          cards: ['Charizard GX #SV49'],
+        },
+        // Credits only: a money tile, never a missing-art placeholder.
+        {
+          rank: 3,
+          name: 'squirtle',
+          pulledMyr: 250000,
+          prizeMyr: 2500,
+          credits: 2500,
+          cards: [],
+        },
+      ],
+      list: Array.from({ length: 7 }, (_, i) => ({
+        rank: i + 4,
+        name: `player_${i + 4}`,
+        pulledMyr: 100000 - i * 9000,
+        prizeMyr: 2000 - i * 250,
+      })),
+      siteHost: 'polycards.gg/leaderboard',
+    };
+    const top = await composeResultsPoster(input, new Map(), 'top');
+    expect(await jpegSize(top.jpeg)).toEqual({
+      format: 'jpeg',
+      width: POSTER_W,
+      height: POSTER_H,
+    });
+    expect(top.placeholders).toEqual([1, 2]);
+    const rest = await composeResultsPoster(input, new Map(), 'rest');
+    expect(await jpegSize(rest.jpeg)).toEqual({
+      format: 'jpeg',
+      width: POSTER_W,
+      height: POSTER_H,
+    });
+    expect(rest.placeholders).toEqual([]);
   });
 
-  it('sizes a row of cards to the room, the winner largest', () => {
+  it('sizes a row of cards to the room, never past its cap', () => {
     // Three cards fit at full size; five shrink to share the room.
-    expect(rowCardWidth(3, 1, 584)).toBe(170);
-    expect(rowCardWidth(3, 2, 584)).toBe(150);
-    expect(rowCardWidth(5, 1, 584)).toBe(Math.floor((584 - 4 * 16) / 5));
-    expect(rowCardWidth(0, 1, 584)).toBe(0);
+    expect(cardWidth(3, 584, 170, 16)).toBe(170);
+    expect(cardWidth(3, 420, 140, 12)).toBe(132);
+    expect(cardWidth(5, 584, 170, 16)).toBe(Math.floor((584 - 4 * 16) / 5));
+    expect(cardWidth(0, 584, 170, 16)).toBe(0);
     expect(MAX_ROW_CARDS).toBe(5);
   });
 
@@ -120,8 +127,38 @@ describe('results poster', () => {
       },
       new Map([[1, seven.map(() => slab)]]),
     );
-    expect((await jpegSize(jpeg)).width).toBe(1080);
+    expect(await jpegSize(jpeg)).toEqual({
+      format: 'jpeg',
+      width: POSTER_W,
+      height: POSTER_H,
+    });
     expect(placeholders).toEqual([]);
+  });
+});
+
+describe('fitToFeed', () => {
+  it('fits a tall poster whole onto 1080x1350 and leaves one that size alone', async () => {
+    const tall = await sharp({
+      create: { width: 1080, height: 2000, channels: 3, background: '#ffb020' },
+    })
+      .jpeg()
+      .toBuffer();
+    expect(await jpegSize(await fitToFeed(tall))).toEqual({
+      format: 'jpeg',
+      width: POSTER_W,
+      height: POSTER_H,
+    });
+    const exact = await sharp({
+      create: {
+        width: POSTER_W,
+        height: POSTER_H,
+        channels: 3,
+        background: '#0a0a0a',
+      },
+    })
+      .jpeg()
+      .toBuffer();
+    expect(await fitToFeed(exact)).toBe(exact);
   });
 });
 
@@ -185,8 +222,11 @@ describe('stages poster', () => {
       },
       new Map(),
     );
-    const size = await jpegSize(jpeg);
-    expect([size.format, size.width]).toEqual(['jpeg', 1080]);
+    expect(await jpegSize(jpeg)).toEqual({
+      format: 'jpeg',
+      width: POSTER_W,
+      height: POSTER_H,
+    });
     expect(placeholders).toEqual(['1:1', '1:2', '2:1', '2:2', '3:1', '3:2']);
   });
 });
