@@ -124,6 +124,8 @@ import DailyCheckin from './models/daily-checkin';
 import ReferralSettings from './models/referral-settings';
 import WeeklySettlement from './models/weekly-settlement';
 import WeeklySettlementLine from './models/weekly-settlement-line';
+import Announcement from './models/announcement';
+import { pickLiveAnnouncements, validateAnnouncement } from './announcements';
 import { pageAll } from '../../api/utils/page-all';
 import {
   positiveIntFromEnv,
@@ -579,6 +581,7 @@ class PacksModuleService extends MedusaService({
   TaskDefinition,
   TaskClaim,
   DailyCheckin,
+  Announcement,
 }) {
   // Every audit row in this service goes through here — one place that knows
   // the shape, and one place a reviewer checks that the row rides the caller's
@@ -2664,6 +2667,137 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return { id };
+  }
+
+  // Admin CRUD for the storefront announcement popup (spec 2026-10-06 §5) —
+  // validated + audited, same discipline as saveTaskDefinition. Singular
+  // names, so they never shadow the generated createAnnouncements /
+  // deleteAnnouncements.
+  @InjectTransactionManager()
+  async saveAnnouncement(
+    input: {
+      id?: string;
+      image_url: string;
+      title: string | null;
+      link_url: string | null;
+      active: boolean;
+      sort: number;
+      /** Optional run window; omitted means "unscheduled" (null/null). */
+      startsAt?: Date | null;
+      endsAt?: Date | null;
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ id: string }> {
+    const fields = validateAnnouncement({
+      image_url: input.image_url,
+      title: input.title,
+      link_url: input.link_url,
+      startsAt: input.startsAt ?? null,
+      endsAt: input.endsAt ?? null,
+    });
+    const [existing] = input.id
+      ? await this.listAnnouncements(
+          { id: input.id },
+          { take: 1 },
+          sharedContext,
+        )
+      : [];
+    if (input.id && !existing) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Announcement ${input.id} not found.`,
+      );
+    }
+    const data = {
+      ...fields,
+      active: input.active,
+      sort: input.sort,
+      starts_at: input.startsAt ?? null,
+      ends_at: input.endsAt ?? null,
+    };
+    let id = input.id;
+    let before: Record<string, unknown> | null = null;
+    if (existing) {
+      id = existing.id;
+      before = {
+        image_url: existing.image_url,
+        title: existing.title,
+        link_url: existing.link_url,
+        active: existing.active,
+        sort: existing.sort,
+        starts_at: existing.starts_at,
+        ends_at: existing.ends_at,
+      };
+      await this.updateAnnouncements({ selector: { id }, data }, sharedContext);
+    } else {
+      const [row] = await this.createAnnouncements([data], sharedContext);
+      id = row.id;
+    }
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'announcement',
+        entity_id: id,
+        action: before ? 'edit' : 'create',
+        before,
+        after: data,
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+    return { id };
+  }
+
+  // Soft delete (deleted_at), so the audit row's entity_id still resolves to
+  // what was shown. Switching `active` off is the reversible alternative.
+  @InjectTransactionManager()
+  async deleteAnnouncement(
+    input: { id: string; adminId: string; reason: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const [existing] = await this.listAnnouncements(
+      { id: input.id },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!existing) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Announcement ${input.id} not found.`,
+      );
+    }
+    await this.softDeleteAnnouncements([input.id], {}, sharedContext);
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'announcement',
+        entity_id: input.id,
+        action: 'delete',
+        before: {
+          image_url: existing.image_url,
+          title: existing.title,
+          link_url: existing.link_url,
+          active: existing.active,
+          sort: existing.sort,
+          starts_at: existing.starts_at,
+          ends_at: existing.ends_at,
+        },
+        after: null,
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+  }
+
+  /** The popup's live set: GET /store/announcements. Only `active` filters in
+   *  SQL; the window, order and cap are pickLiveAnnouncements (unit-tested). */
+  async liveAnnouncements(now: Date = new Date()) {
+    // ponytail: 500-row read of active rows; filter the window in SQL if an
+    // operator ever keeps hundreds of active-but-expired slides around.
+    const rows = await this.listAnnouncements({ active: true }, { take: 500 });
+    return pickLiveAnnouncements(rows, now);
   }
 
   // Admin edit of the avatar-frame catalog — upsert + audit, same discipline

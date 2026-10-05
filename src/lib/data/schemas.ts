@@ -395,6 +395,24 @@ export const AvatarFramesSchema = z.looseObject({
   frames: z.record(z.string(), z.string()),
 });
 
+// --- data/announcements.ts --------------------------------------------------
+
+/** One slide of the storefront announcement popup (spec 2026-10-06 §5). */
+export const AnnouncementSchema = z.looseObject({
+  id: z.string(),
+  image_url: z.string(),
+  title: z.string().nullable(),
+  link_url: z.string().nullable(),
+  /** Part of the dismissal signature — an edit re-shows the popup. */
+  updated_at: z.string(),
+});
+export type Announcement = z.infer<typeof AnnouncementSchema>;
+
+/** GET /store/announcements — the live set, already in carousel order. */
+export const AnnouncementsSchema = z.looseObject({
+  announcements: z.array(AnnouncementSchema),
+});
+
 /** GET /store/profiles/me — `{ handle }`. */
 export const ProfileHandleSchema = z.looseObject({ handle: z.string() });
 

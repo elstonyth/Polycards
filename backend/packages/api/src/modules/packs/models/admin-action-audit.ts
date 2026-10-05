@@ -39,6 +39,9 @@ export const ADMIN_AUDIT_ENTITY_TYPES = [
   // proven rather than inferred from sales.
   'pack',
   'card',
+  // Storefront announcement popup (spec 2026-10-06 §5) — see
+  // Migration20261006110000. Reuses 'create' / 'edit' / 'delete'.
+  'announcement',
 ] as const;
 
 export const ADMIN_AUDIT_ACTIONS = [

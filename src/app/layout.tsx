@@ -13,6 +13,8 @@ import { AuthProvider } from '@/components/auth/AuthProvider';
 import { SoundProvider } from '@/lib/use-sound';
 import { GlobalFreePackBadge } from '@/components/FreePackBadge';
 import { TelegramBanner } from '@/components/app-shell/TelegramBanner';
+import { AnnouncementPopup } from '@/components/app-shell/AnnouncementPopup';
+import { getAnnouncements } from '@/lib/data/announcements';
 import SkipLink from '@/components/SkipLink';
 import CookieConsent from '@/components/CookieConsent';
 import MetaPixel from '@/components/MetaPixel';
@@ -63,11 +65,21 @@ export const metadata: Metadata = {
   // Favicon + apple-touch icon come from src/app/icon.png + apple-icon.png.
 };
 
+// The announcement popup's live set is fetched here, so every prerendered
+// page carries a copy of it. Without a revalidate, the fully static pages
+// (/about, /privacy, /how-it-works …) would keep the BUILD-time set until the
+// next deploy — and the root layout is not re-fetched on client navigation,
+// so a visitor landing on one would never see a new announcement. The lowest
+// revalidate across a route's segments wins, so home keeps its 15s and
+// force-dynamic routes are unaffected.
+export const revalidate = 60;
+
 export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const announcements = await getAnnouncements();
   return (
     <html
       lang="en"
@@ -114,6 +126,9 @@ export default async function RootLayout({
                     server state, so the global one skips that route. */}
                   <GlobalFreePackBadge />
                   <TelegramBanner />
+                  {/* Admin-uploaded promo popup, once per MYT day; waits for
+                    the cookie-consent answer like the badge and banner. */}
+                  <AnnouncementPopup announcements={announcements} />
                   <CookieConsent />
                 </VaultDotProvider>
               </TopUpProvider>

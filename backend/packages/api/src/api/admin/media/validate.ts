@@ -22,7 +22,8 @@ export type ImageKind =
   | 'frame'
   | 'avatar'
   | 'avatar-frame'
-  | 'delivery';
+  | 'delivery'
+  | 'announcement';
 
 export interface ImageFacts {
   width: number;
@@ -179,6 +180,17 @@ export const IMAGE_RULES = {
       targetRatio: 1,
       aspectTolerance: 1.0,
     },
+    // Storefront announcement popup (spec 2026-10-06 §5): a promo poster in
+    // whatever shape marketing made it (4:5 feed posts, 9:16 stories, square)
+    // — the popup letterboxes it object-contain. So NO aspect gate (infinite
+    // tolerance); the min only keeps it sharp across a ~420px-wide phone
+    // popup at 1x and rejects tracking-pixel junk.
+    announcement: {
+      minWidth: 400,
+      minHeight: 200,
+      targetRatio: 1,
+      aspectTolerance: Number.POSITIVE_INFINITY,
+    },
   } satisfies Record<ImageKind, ProfileRule>,
 } as const;
 
@@ -260,7 +272,9 @@ export function validateImage(
                 ? 'Frame'
                 : kind === 'delivery'
                   ? 'Delivery photo'
-                  : 'Sprite';
+                  : kind === 'announcement'
+                    ? 'Announcement'
+                    : 'Sprite';
     return fail(
       'too_small',
       `${label} art must be at least ${profile.minWidth}×${profile.minHeight}px.`,
