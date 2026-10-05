@@ -13,10 +13,11 @@ const STAR =
 // Where the stars sit around the art, as % of the box, with their size and
 // twinkle offset — staggered so they never all flash at once.
 const STARS = [
-  { pos: '-left-1.5 -top-1.5', size: 'h-3 w-3', delay: '0s' },
-  { pos: '-right-2 top-1/4', size: 'h-2.5 w-2.5', delay: '0.6s' },
-  { pos: '-bottom-1 left-1/3', size: 'h-2 w-2', delay: '1.1s' },
-  { pos: '-right-1 -bottom-2', size: 'h-3.5 w-3.5', delay: '1.5s' },
+  { pos: '-left-2 -top-2', size: 'h-4 w-4', delay: '0s' },
+  { pos: '-right-2.5 top-1/4', size: 'h-3 w-3', delay: '0.5s' },
+  { pos: '-bottom-1.5 left-1/4', size: 'h-2.5 w-2.5', delay: '1s' },
+  { pos: '-right-1.5 -bottom-2', size: 'h-4 w-4', delay: '1.4s' },
+  { pos: '-left-2 top-1/2', size: 'h-2 w-2', delay: '0.8s' },
 ] as const;
 
 /** Gold stars twinkling around a claimable reward. Decorative: the Claim

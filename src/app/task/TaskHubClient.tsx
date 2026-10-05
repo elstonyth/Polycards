@@ -361,7 +361,7 @@ export function TaskHubClient({
       <div
         role="group"
         aria-label="Task hub sections"
-        className="mt-4 grid grid-cols-3 gap-1 rounded-full border border-white/10 bg-neutral-900 p-1"
+        className="mt-4 grid grid-cols-[1fr_1fr_1.45fr] gap-1 rounded-full border border-white/10 bg-neutral-900 p-1 sm:grid-cols-3"
       >
         {TABS.map(({ key, label }) => {
           const n = ready?.[key] ?? 0;
@@ -373,7 +373,7 @@ export function TaskHubClient({
               onClick={() => setTab(key)}
               aria-label={n > 0 ? `${label}, ${n} to claim` : label}
               className={cn(
-                'flex min-h-11 items-center justify-center gap-1.5 rounded-full px-2 text-sm font-semibold transition-colors',
+                'flex min-h-11 items-center justify-center gap-1 rounded-full px-1.5 text-[13px] font-semibold transition-colors sm:gap-1.5 sm:px-2 sm:text-sm',
                 'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
                 tab === key
                   ? 'bg-neutral-50 text-neutral-950'

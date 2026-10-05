@@ -117,24 +117,38 @@ export function CheckInTrack({
 
           const face = (
             <>
-              <span
-                className={cn(
-                  'absolute top-1 left-1.5 text-[9px] font-semibold tabular-nums sm:text-[10px]',
-                  done ? 'text-white' : 'text-neutral-500',
-                )}
-              >
-                {day}
-              </span>
+              {(lead || done) && (
+                <span
+                  className={cn(
+                    'absolute top-1 left-1.5 text-[9px] font-semibold tabular-nums sm:text-[10px]',
+                    done ? 'text-white' : 'text-neutral-400',
+                  )}
+                >
+                  {day}
+                </span>
+              )}
               {lead ? (
                 <RewardArt
                   reward={lead.reward}
                   claimed={claimed}
                   compact
-                  className="h-[64%] w-[78%] rounded-md border-0 bg-transparent"
+                  className="h-[72%] w-[88%] rounded-md border-0 bg-transparent"
                 />
               ) : done ? (
                 <Check className="h-4 w-4 text-white" aria-hidden />
-              ) : null}
+              ) : (
+                // A slot with no prize still reads as a day to fill: its
+                // numeral, set large in Nekst, lit when it is the next one.
+                <span
+                  aria-hidden
+                  className={cn(
+                    'font-heading text-lg tabular-nums sm:text-3xl',
+                    isNext ? 'text-white' : 'text-neutral-700',
+                  )}
+                >
+                  {day}
+                </span>
+              )}
               {done && lead && (
                 <span className="absolute right-1 bottom-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white text-neutral-950">
                   <Check className="h-2.5 w-2.5" strokeWidth={3} aria-hidden />
