@@ -734,6 +734,90 @@
   }
 }
 
+/* Claimable sparkle (/task, 2026-10-06 — DESIGN.md "Claimable sparkle"). A
+   reward the player can claim RIGHT NOW: four-point stars twinkling around its
+   art, a breathing gold ring, a light sweep across its Claim pill. Chase gold
+   only, and only on claimable things — the glow is inherited from the prize
+   (Glow Is Earned), never ambient. Reduced motion: everything holds still,
+   lit. rgb(255 176 32) is --color-chase (keyframes can't read the token). */
+@keyframes claim-twinkle {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.3) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1) rotate(45deg);
+  }
+}
+@keyframes claim-breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgb(255 176 32 / 0.55),
+      0 0 14px rgb(255 176 32 / 0.22);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgb(255 176 32 / 0.9),
+      0 0 24px rgb(255 176 32 / 0.45);
+  }
+}
+@keyframes claim-sweep {
+  0% {
+    transform: translateX(-150%) skewX(-20deg);
+  }
+  55%,
+  100% {
+    transform: translateX(350%) skewX(-20deg);
+  }
+}
+
+@layer utilities {
+  .claim-star {
+    animation: claim-twinkle 1.9s ease-in-out infinite;
+    animation-delay: var(--twinkle-delay, 0s);
+  }
+  .claim-ring {
+    animation: claim-breathe 2.4s ease-in-out infinite;
+  }
+  .claim-sweep {
+    position: relative;
+    overflow: hidden;
+  }
+  .claim-sweep::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    width: 35%;
+    pointer-events: none;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgb(255 176 32 / 0.55),
+      transparent
+    );
+    animation: claim-sweep 2.8s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .claim-star {
+      animation: none;
+      opacity: 0.9;
+      transform: scale(0.85);
+    }
+    .claim-ring {
+      animation: none;
+      box-shadow:
+        0 0 0 1px rgb(255 176 32 / 0.75),
+        0 0 18px rgb(255 176 32 / 0.35);
+    }
+    .claim-sweep::after {
+      display: none;
+    }
+  }
+}
+
 /* iOS Safari zooms the whole page when a focused field renders under 16px, and
    it never zooms back out. Every form shape in the app is text-sm (14px), so
    pin the floor once here rather than in eight copies of the same input class

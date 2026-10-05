@@ -49,8 +49,8 @@ Four operator asks, one design:
 
 ## 2. Reward images + check-in data (backend, `GET /store/tasks`)
 
-- `HubReward` gains `pack_image` (pack `display_image ?? image`) and `card_image`
-  (card `slab_image ?? image`), resolved in the same bounded IN queries
+- `HubReward` gains `pack_image` (the pack shot `image`, else the hero
+  `display_image`) and `card_image` (card `slab_image`, else `image`), resolved in the same bounded IN queries
   `taskHubFor` already runs. `pending_spins[]` gains `pack_image`.
 - Credit rewards carry no image; the storefront uses `/images/task/credits-coins.webp`.
 - New top-level fields: `checkins_this_week` (number) and `day_key` (today's MYT

@@ -125,3 +125,23 @@ describe('resolveTaskLabels', () => {
     expect(out.get('a')!.reward).toMatch(/Unknown reward/);
   });
 });
+
+describe('resolveTaskLabels — cadence wording (daily tasks, 2026-10-06)', () => {
+  it('says today / this week / lifetime by kind', async () => {
+    const credit = { type: 'credit', amount_myr: 1 };
+    const out = await resolveTaskLabels(stub, [
+      { id: 'a', kind: 'daily', requirement: { type: 'checkin_days', days: 1 }, reward: credit },
+      { id: 'b', kind: 'daily', requirement: { type: 'rip_count', count: 1, pack_id: null }, reward: credit },
+      { id: 'c', kind: 'daily', requirement: { type: 'vault_pixel_count', count: 2, pixel_pokemon_id: 'px_1' }, reward: credit },
+      { id: 'd', kind: 'weekly', requirement: { type: 'vault_pixel_count', count: 3 }, reward: credit },
+      { id: 'e', kind: 'achievement', requirement: { type: 'vault_pixel_count', count: 3 }, reward: credit },
+      { id: 'f', kind: 'weekly', requirement: { type: 'rip_count', count: 2, pack_id: 'bronze' }, reward: credit },
+    ]);
+    expect(out.get('a')!.requirement).toBe('Check in today');
+    expect(out.get('b')!.requirement).toBe('Rip 1 pack today');
+    expect(out.get('c')!.requirement).toBe('Pull 2 × #25 Pikachu today');
+    expect(out.get('d')!.requirement).toBe('Pull 3 Pokémon (pixel) cards this week');
+    expect(out.get('e')!.requirement).toBe('Vault 3 Pokémon (pixel) cards');
+    expect(out.get('f')!.requirement).toBe('Rip 2 × Pack bronze this week');
+  });
+});

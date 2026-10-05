@@ -28,24 +28,27 @@ import {
 import {
   ANY,
   COUNT_LABEL,
-  REQUIREMENT_LABEL,
+  KIND_LABEL,
   REQUIREMENT_TYPES,
   REWARD_LABEL,
   REWARD_TYPES,
   blankDraft,
+  countApplies,
   draftFrom,
   draftToPayload,
   labelsOf,
+  requirementLabel,
   scheduleOk,
   toIso,
   windowLabel,
   type Draft,
+  type TaskKind,
 } from "./task-draft";
 import { LoadingSkeleton } from "../../components/LoadingSkeleton";
 import { RowActions } from "../../components/RowActions";
 
-// Tasks — the /task hub's weekly-task / achievement definitions (spec
-// 2026-08-24 Phase B). Progress is computed live on read, so a definition edit
+// Tasks — the /task hub's daily / weekly task and achievement definitions
+// (spec 2026-08-24 Phase B; daily cadence 2026-10-06). Progress is computed live on read, so a definition edit
 // never corrupts anyone's history; only claims are stored, and they freeze the
 // reward they granted.
 //
@@ -288,7 +291,7 @@ function TaskEditor({
                   hint={
                     draft.id
                       ? "Locked after creation — retire this task and make a new one instead."
-                      : "Weekly resets every Monday 00:00 MYT. An achievement pays once per account, ever."
+                      : "Daily resets every day 00:00 MYT, weekly every Monday 00:00 MYT. An achievement pays once per account, ever."
                   }
                   className="w-56"
                 >
@@ -305,7 +308,11 @@ function TaskEditor({
                       onChange({
                         ...draft,
                         kind: k,
-                        reqType: REQUIREMENT_TYPES[k][0],
+                        // Keep a goal the new cadence also allows (weekly
+                        // → daily keeps "rip N packs" and its pack).
+                        reqType: REQUIREMENT_TYPES[k].includes(draft.reqType)
+                          ? draft.reqType
+                          : REQUIREMENT_TYPES[k][0],
                       });
                     }}
                   >
@@ -313,8 +320,11 @@ function TaskEditor({
                       <Select.Value />
                     </Select.Trigger>
                     <Select.Content>
-                      <Select.Item value="weekly">Weekly task</Select.Item>
-                      <Select.Item value="achievement">Achievement</Select.Item>
+                      {(Object.keys(KIND_LABEL) as TaskKind[]).map((k) => (
+                        <Select.Item key={k} value={k}>
+                          {KIND_LABEL[k]}
+                        </Select.Item>
+                      ))}
                     </Select.Content>
                   </Select>
                 </Field>
@@ -322,7 +332,7 @@ function TaskEditor({
                 <Field
                   label="Order"
                   htmlFor="task-sort"
-                  hint="Low numbers first. One list — weekly tasks and achievements share it."
+                  hint="Low numbers first. One list — daily, weekly and achievements share it."
                   className="w-40"
                 >
                   <Input
@@ -370,16 +380,20 @@ function TaskEditor({
                     <Select.Content>
                       {REQUIREMENT_TYPES[draft.kind].map((t) => (
                         <Select.Item key={t} value={t}>
-                          {REQUIREMENT_LABEL[t]}
+                          {requirementLabel(draft.kind, t)}
                         </Select.Item>
                       ))}
                     </Select.Content>
                   </Select>
                 </Field>
 
+                {countApplies(draft) && (
                 <Field
                   label={COUNT_LABEL[draft.reqType] ?? "Amount"}
                   htmlFor="task-count"
+                  hint={
+                    draft.reqType === "checkin_days" ? "1 to 7." : undefined
+                  }
                   className="w-32"
                 >
                   {draft.reqType === "reach_level" ? (
@@ -404,6 +418,8 @@ function TaskEditor({
                     <Input
                       id="task-count"
                       type="number"
+                      min={1}
+                      max={draft.reqType === "checkin_days" ? 7 : undefined}
                       value={draft.reqN}
                       onChange={(e) =>
                         onChange({ ...draft, reqN: e.target.value })
@@ -411,6 +427,7 @@ function TaskEditor({
                     />
                   )}
                 </Field>
+                )}
 
                 {draft.reqType === "rip_count" && (
                   <Field
@@ -725,6 +742,7 @@ const TasksPage = () => {
     );
   };
 
+  const daily = (data ?? []).filter((t) => t.kind === "daily");
   const weekly = (data ?? []).filter((t) => t.kind === "weekly");
   const achievements = (data ?? []).filter((t) => t.kind === "achievement");
 
@@ -758,6 +776,22 @@ const TasksPage = () => {
         </div>
       ) : (
         <>
+          <div className="border-ui-border-base flex items-center gap-x-2 border-t px-6 py-3">
+            <Text weight="plus">Daily tasks</Text>
+            <Tooltip content="Progress and claims reset every day at 00:00 MYT. Anything finished but unclaimed at midnight is lost.">
+              <InformationCircleSolid className="text-ui-fg-muted" />
+            </Tooltip>
+          </div>
+          {daily.length === 0 ? (
+            <EmptyRow what="daily tasks" />
+          ) : (
+            <TaskTable
+              rows={daily}
+              onEdit={(t) => setEditing(draftFrom(t))}
+              onToggleActive={toggleActive}
+            />
+          )}
+
           <div className="border-ui-border-base flex items-center gap-x-2 border-t px-6 py-3">
             <Text weight="plus">Weekly tasks</Text>
             <Tooltip content="Progress and claims reset every Monday 00:00 MYT. Anything finished but unclaimed at the reset is lost.">

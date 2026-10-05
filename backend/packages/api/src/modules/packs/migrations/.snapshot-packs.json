@@ -5347,6 +5347,7 @@
           "primary": false,
           "nullable": false,
           "enumItems": [
+            "daily",
             "weekly",
             "achievement"
           ],
@@ -5411,6 +5412,16 @@
         },
         "ends_at": {
           "name": "ends_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        },
+        "retired_at": {
+          "name": "retired_at",
           "type": "timestamptz",
           "unsigned": false,
           "autoincrement": false,

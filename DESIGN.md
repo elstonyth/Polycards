@@ -293,6 +293,27 @@ One panel for the global feed and a pack's own history:
   its tick (dataviz: text never wears the series colour). Bars grow from the
   baseline (`bar-grow`), re-keyed per tier.
 
+### Signature: Task Hub (/task, 2026-10-06)
+
+Spec: `docs/superpowers/specs/2026-10-06-task-hub-v2-and-announcements-design.md`.
+
+- **Tabs** — Daily · Weekly · Achievements as the leaderboard's segmented
+  pill. A tab holding something claimable carries a Chase Gold count badge,
+  so the player never has to open every tab to find a reward.
+- **Prize art** — every task shows the prize itself on a neutral pedestal
+  (white/4%): the card's slab lit by its own value tier (Glow Is Earned), the
+  pack's shot, or the credit coins; the worth sits under it in Nekst.
+- **Check-in track** — seven card-shaped (5:7) slots, Day 1…Day 7 — the COUNT
+  of check-ins this task week, not weekdays. Weekly "check in on N days" tasks
+  render on slot N as their prize art (and nowhere else), and the slot is the
+  claim button. The next slot to fill wears a white hairline.
+- **Claimable sparkle** — the one sanctioned twinkle in the system: gold
+  four-point stars around a prize the player can claim RIGHT NOW, a breathing
+  gold ring, a light sweep across its Claim pill (`.claim-star`,
+  `.claim-ring`, `.claim-sweep` in globals.css). Chase Gold only, only on
+  claimable things, never ambient — it marks a real prize, which is why it is
+  not the confetti/coin-shower the Don'ts ban. Reduced motion: still and lit.
+
 ## 6. Do's and Don'ts
 
 ### Do:

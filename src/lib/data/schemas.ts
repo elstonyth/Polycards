@@ -1136,7 +1136,7 @@ export type ReferralCodeLookup = z.infer<typeof ReferralCodeLookupSchema>;
  *  type must not crash the page). */
 export const TaskEntrySchema = z.looseObject({
   id: z.string(),
-  kind: z.enum(['weekly', 'achievement']),
+  kind: z.enum(['daily', 'weekly', 'achievement']),
   title: z.string(),
   requirement: z.looseObject({ type: z.string() }),
   reward: z.looseObject({
@@ -1152,6 +1152,10 @@ export const TaskEntrySchema = z.looseObject({
     card_name: z.string().nullable().optional(),
     card_grade: z.string().nullable().optional(),
     card_value_myr: finite.nullable().optional(),
+    // The prize's picture, as stored (often storefront-relative). Same skew
+    // rule: absent/null falls back to the reward-type art.
+    pack_image: z.string().nullable().optional(),
+    card_image: z.string().nullable().optional(),
   }),
   progress: z.looseObject({
     current: finite,
@@ -1170,16 +1174,30 @@ export const PendingSpinSchema = z.looseObject({
   title: z.string(),
   pack_id: z.string(),
   pack_title: z.string().nullable().optional(),
+  pack_image: z.string().nullable().optional(),
 });
 
 export const TaskHubSchema = z.looseObject({
   week_start: z.string(),
+  // Today's MYT date (a daily task's period) and this week's check-in count
+  // (the strip's filled slots). Optional: a backend that predates them still
+  // renders, the strip falling back to what the tasks themselves say.
+  day_key: z.string().optional(),
+  checkins_this_week: finite.optional(),
   vip_level: finite,
   checked_in_today: z.boolean(),
   // `.catch([])` is the deploy-skew guard: a backend that predates the field
   // must not drop the whole hub payload and blank the page.
   pending_spins: z.array(PendingSpinSchema).catch([]),
-  tasks: z.array(TaskEntrySchema),
+  // Parsed row by row, so ONE task this build cannot read (a cadence added
+  // to the backend first) is dropped alone instead of failing the array —
+  // and with it the whole hub, which would blank /task.
+  tasks: z.array(z.unknown()).transform((rows) =>
+    rows.flatMap((row) => {
+      const r = TaskEntrySchema.safeParse(row);
+      return r.success ? [r.data] : [];
+    }),
+  ),
 });
 export type TaskHub = z.infer<typeof TaskHubSchema>;
 

@@ -168,6 +168,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
         card_name: 'Reward Card',
         card_grade: 'PSA 9',
         card_value_myr: 56.4,
+        // No slab on this card → the raw scan is the prize's picture.
+        card_image: 'x.png',
       });
       // No stock hook: the route takes the unit AFTER this commits (a take
       // inside the transaction outlived a rolled-back claim).
@@ -258,12 +260,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(hub.pending_spins[0]).toMatchObject({
           pack_id: 'bronze',
           pack_title: 'Bronze Pack',
+          pack_image: '/x.webp',
         });
         expect(hub.tasks.find((t) => t.id === id)?.reward).toEqual({
           type: 'pack',
           pack_id: 'bronze',
           pack_title: 'Bronze Pack',
           pack_price_myr: 300,
+          pack_image: '/x.webp',
         });
       });
 
@@ -591,6 +595,237 @@ moduleIntegrationTestRunner<PacksModuleService>({
           taskId: 'task_ghost',
         }),
       ).toEqual({ claimed: false, reason: 'not_found' });
+    });
+
+    // Daily cadence (spec 2026-10-06): the claim period is the MYT date, so
+    // the same task pays once per day — and the next day is a fresh period.
+    // This is the money path: one credit row per day, never two.
+    it('daily task: once per MYT day, claimable again the next day', async () => {
+      const day1 = new Date('2026-10-07T04:00:00Z'); // Wed 12:00 MYT
+      const day2 = new Date('2026-10-08T04:00:00Z'); // Thu 12:00 MYT
+      const { id } = await service.saveTaskDefinition({
+        kind: 'daily',
+        title: 'Check in today',
+        requirement: { type: 'checkin_days', days: 1 },
+        reward: { type: 'credit', amount_myr: 1 },
+        active: true,
+        sort: 0,
+        adminId: 'admin_1',
+        reason: 'seed',
+      });
+      const cus = 'cus_daily';
+      const row = async (now: Date) =>
+        (await service.taskHubFor({ customerId: cus, now })).tasks.find(
+          (t) => t.id === id,
+        )!;
+
+      expect((await row(day1)).progress.completed).toBe(false);
+      await service.checkInDaily({ customerId: cus, now: day1 });
+      const hub1 = await service.taskHubFor({ customerId: cus, now: day1 });
+      expect(hub1.day_key).toBe('2026-10-07');
+      expect(hub1.checkins_this_week).toBe(1);
+      expect((await row(day1)).kind).toBe('daily');
+      expect((await row(day1)).progress.completed).toBe(true);
+
+      expect(
+        await service.claimTask({ customerId: cus, taskId: id, now: day1 }),
+      ).toMatchObject({ claimed: true });
+      expect(
+        await service.claimTask({ customerId: cus, taskId: id, now: day1 }),
+      ).toEqual({ claimed: false, reason: 'already_claimed' });
+      expect((await row(day1)).claimed).toBe(true);
+
+      // Next MYT day: unclaimed again, and incomplete until today's tap.
+      expect((await row(day2)).claimed).toBe(false);
+      expect(
+        await service.claimTask({ customerId: cus, taskId: id, now: day2 }),
+      ).toEqual({ claimed: false, reason: 'not_completed' });
+      await service.checkInDaily({ customerId: cus, now: day2 });
+      expect(
+        (await service.taskHubFor({ customerId: cus, now: day2 }))
+          .checkins_this_week,
+      ).toBe(2);
+      expect(
+        await service.claimTask({ customerId: cus, taskId: id, now: day2 }),
+      ).toMatchObject({ claimed: true });
+
+      const txns = await service.listCreditTransactions({
+        customer_id: cus,
+        reason: 'reward_credit',
+      });
+      expect(txns).toHaveLength(2);
+      expect(
+        (await service.listTaskClaims({ customer_id: cus, task_id: id }))
+          .map((c) => c.period_key)
+          .sort(),
+      ).toEqual(['2026-10-07', '2026-10-08']);
+    });
+
+    // A retired repeating task pays only for the period it was retired in —
+    // check-ins are free, so an open-ended retired daily task would pay out
+    // every day to anyone who kept its id (security review 2026-10-06).
+    it('a retired daily task honours today only, never the days after', async () => {
+      const base = {
+        kind: 'daily' as const,
+        title: 'Check in today',
+        requirement: { type: 'checkin_days', days: 1 },
+        reward: { type: 'credit', amount_myr: 1 },
+        sort: 0,
+        adminId: 'admin_1',
+      };
+      const { id } = await service.saveTaskDefinition({
+        ...base,
+        active: true,
+        reason: 'seed',
+      });
+      await service.saveTaskDefinition({
+        ...base,
+        id,
+        active: false,
+        reason: 'retire',
+      });
+      const [row] = await service.listTaskDefinitions({ id });
+      expect(row.retired_at).not.toBeNull();
+      const cus = 'cus_retired_daily';
+      const retiredAt = new Date(row.retired_at!);
+      // Claims are measured against the real retire instant: a day that
+      // contains it is honoured, the next day is not.
+      const sameDay = new Date(retiredAt.getTime() + 60_000);
+      const nextDay = new Date(retiredAt.getTime() + 24 * 3600 * 1000);
+      await service.checkInDaily({ customerId: cus, now: sameDay });
+      await service.checkInDaily({ customerId: cus, now: nextDay });
+      // (sameDay may cross MYT midnight in the minute after the retire; if so
+      // it is a LATER day and must be refused too.)
+      const sameMytDay =
+        new Date(sameDay.getTime() + 8 * 3600 * 1000)
+          .toISOString()
+          .slice(0, 10) ===
+        new Date(retiredAt.getTime() + 8 * 3600 * 1000)
+          .toISOString()
+          .slice(0, 10);
+      expect(
+        (await service.claimTask({ customerId: cus, taskId: id, now: sameDay }))
+          .claimed,
+      ).toBe(sameMytDay);
+      expect(
+        await service.claimTask({ customerId: cus, taskId: id, now: nextDay }),
+      ).toEqual({ claimed: false, reason: 'window_closed' });
+
+      // Switching it back on clears the stamp: it pays again.
+      await service.saveTaskDefinition({
+        ...base,
+        id,
+        active: true,
+        reason: 'reactivate',
+      });
+      const [back] = await service.listTaskDefinitions({ id });
+      expect(back.retired_at).toBeNull();
+      expect(
+        (await service.claimTask({ customerId: cus, taskId: id, now: nextDay }))
+          .claimed,
+      ).toBe(true);
+    });
+
+    // The period FILTERs run on real Postgres: today's paid rips and pixel
+    // pulls count for a daily task, the week's for a weekly one, and a
+    // reward pull counts for neither (it would let a prize feed a task).
+    it('daily and weekly rip / pixel goals read their own window, paid pulls only', async () => {
+      await service.createCards([
+        {
+          handle: 'pika-card',
+          name: 'Pikachu',
+          set: 'S',
+          grader: 'PSA',
+          grade: '10',
+          market_value: 10,
+          image: 'p.png',
+          pixel_pokemon_id: 'px_pika',
+        },
+      ]);
+      // A pack-scoped goal must name a pack that exists (save-time guard).
+      await service.createPacks([
+        {
+          slug: 'bronze',
+          title: 'Bronze Pack',
+          category: 'standard',
+          price: 300,
+          image: '/x.webp',
+          status: 'active',
+        },
+      ]);
+      const cus = 'cus_window';
+      const now = new Date();
+      await service.createPulls([
+        {
+          customer_id: cus,
+          pack_id: 'bronze',
+          card_id: 'pika-card',
+          rolled_at: now,
+        },
+        {
+          customer_id: cus,
+          pack_id: 'bronze',
+          card_id: 'pika-card',
+          rolled_at: now,
+        },
+        {
+          customer_id: cus,
+          pack_id: 'task-reward',
+          card_id: 'pika-card',
+          rolled_at: now,
+          source: 'reward' as const,
+        },
+      ]);
+      const save = async (
+        kind: 'daily' | 'weekly',
+        requirement: Record<string, unknown>,
+      ) =>
+        (
+          await service.saveTaskDefinition({
+            kind,
+            title: `${kind} ${String(requirement.type)}`,
+            requirement,
+            reward: { type: 'credit', amount_myr: 1 },
+            active: true,
+            sort: 0,
+            adminId: 'admin_1',
+            reason: 'seed',
+          })
+        ).id;
+      const ripDaily = await save('daily', { type: 'rip_count', count: 3 });
+      const ripPack = await save('daily', {
+        type: 'rip_count',
+        count: 2,
+        pack_id: 'bronze',
+      });
+      // Any species: a named one needs the pixel_pokemon table, which this
+      // module test does not load; the period FILTER is the same either way.
+      const pikaWeekly = await save('weekly', {
+        type: 'vault_pixel_count',
+        count: 2,
+      });
+
+      const hub = await service.taskHubFor({ customerId: cus, now });
+      const progress = (id: string) =>
+        hub.tasks.find((t) => t.id === id)!.progress;
+      expect(progress(ripDaily)).toEqual({
+        current: 2,
+        target: 3,
+        completed: false,
+      });
+      expect(progress(ripPack).completed).toBe(true);
+      expect(progress(pikaWeekly)).toEqual({
+        current: 2,
+        target: 2,
+        completed: true,
+      });
+
+      // Tomorrow, today's pulls no longer count for the daily task.
+      const tomorrow = new Date(now.getTime() + 24 * 3600 * 1000);
+      const next = await service.taskHubFor({ customerId: cus, now: tomorrow });
+      expect(next.tasks.find((t) => t.id === ripDaily)!.progress.current).toBe(
+        0,
+      );
     });
   },
 });
