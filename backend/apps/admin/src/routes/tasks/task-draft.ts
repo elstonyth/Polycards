@@ -6,12 +6,22 @@
 // is node-environment with no plugins, by deliberate choice).
 import type { AdminTaskDefinition } from '../../lib/admin-rest';
 
-export const REQUIREMENT_TYPES: Record<
-  'weekly' | 'achievement',
-  readonly string[]
-> = {
-  weekly: ['checkin_days', 'rip_count'],
+export type TaskKind = AdminTaskDefinition['kind'];
+
+// Mirrors TYPES_BY_KIND in the backend's tasks.ts (the gate that matters):
+// daily and weekly share the repeating goals; lifetime ratchets (VIP level,
+// vault size) are achievement-only.
+const PERIODIC = ['checkin_days', 'rip_count', 'vault_pixel_count'] as const;
+export const REQUIREMENT_TYPES: Record<TaskKind, readonly string[]> = {
+  daily: PERIODIC,
+  weekly: PERIODIC,
   achievement: ['reach_level', 'vault_count', 'vault_pixel_count'],
+};
+
+export const KIND_LABEL: Record<TaskKind, string> = {
+  daily: 'Daily task',
+  weekly: 'Weekly task',
+  achievement: 'Achievement',
 };
 
 export const REQUIREMENT_LABEL: Record<string, string> = {
@@ -21,6 +31,20 @@ export const REQUIREMENT_LABEL: Record<string, string> = {
   vault_count: 'Vault N cards',
   vault_pixel_count: 'Vault N Pokémon (pixel) cards',
 };
+
+/** The goal select's wording for one cadence. A daily check-in is a single
+ *  day's tap; a repeating pixel goal counts that period's PULLS, not the
+ *  cards ever vaulted. */
+export const requirementLabel = (kind: TaskKind, type: string): string => {
+  if (kind === 'daily' && type === 'checkin_days') return 'Check in today';
+  if (kind !== 'achievement' && type === 'vault_pixel_count')
+    return 'Pull N Pokémon (pixel) cards';
+  return REQUIREMENT_LABEL[type] ?? type;
+};
+
+/** Whether the goal takes a number at all — a daily check-in is always 1. */
+export const countApplies = (d: Pick<Draft, 'kind' | 'reqType'>): boolean =>
+  !(d.kind === 'daily' && d.reqType === 'checkin_days');
 
 /** What the number beside the requirement select actually counts. */
 export const COUNT_LABEL: Record<string, string> = {
@@ -47,7 +71,7 @@ export const ANY = '__any__';
 
 export interface Draft {
   id?: string;
-  kind: 'weekly' | 'achievement';
+  kind: TaskKind;
   title: string;
   reqType: string;
   reqN: string;
@@ -136,6 +160,13 @@ export function draftToPayload(d: Draft): {
   let requirement: Record<string, unknown>;
   switch (d.reqType) {
     case 'checkin_days':
+      // A day holds one check-in and a week seven — the backend refuses
+      // anything else, so refuse it here before the round trip.
+      if (d.kind === 'daily') {
+        requirement = { type: d.reqType, days: 1 };
+        break;
+      }
+      if (n > 7) return null;
       requirement = { type: d.reqType, days: n };
       break;
     case 'rip_count':

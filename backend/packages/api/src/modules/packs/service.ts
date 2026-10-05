@@ -99,6 +99,7 @@ import {
   REFERRAL_BIND_WINDOW_MS,
   REFERRAL_CLOSE_GRACE_MS,
   referralWeekFor,
+  taskDayFor,
   taskWeekFor,
   resolveRateBp,
   type ReferralTier,
@@ -109,10 +110,13 @@ import { groupPolicyOf, partnerGroupLockMessage } from './group-policy';
 import { isDefaultPlayerGroup } from './odds-sets';
 import {
   taskIsLive,
+  taskPeriodKey,
   taskProgress,
   validateTaskRequirement,
   validateTaskReward,
+  type PeriodFacts,
   type TaskFacts,
+  type TaskKind,
   type TaskRequirement,
   type HubReward,
   type TaskReward,
@@ -1978,10 +1982,7 @@ class PacksModuleService extends MedusaService({
     input: { customerId: string; now?: Date },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ checked: boolean; day: string }> {
-    const MYT_OFFSET_MS = 8 * 60 * 60 * 1000;
-    const day = new Date((input.now ?? new Date()).getTime() + MYT_OFFSET_MS)
-      .toISOString()
-      .slice(0, 10);
+    const day = taskDayFor(input.now ?? new Date()).dayIso;
     // Explicit pre-check: MikroORM's UoW buffers creates until flush, so a
     // duplicate would otherwise surface as a framework DUPLICATE_ERROR after
     // this method returns (same reasoning as recordLedgerEntry's pre-check).
@@ -2009,11 +2010,17 @@ class PacksModuleService extends MedusaService({
   }
 
   // The facts every task requirement evaluates against, counted once per
-  // request. Weekly facts scope to the referral week containing `now`;
-  // lifetime facts (level, vault) ignore it.
+  // request. Period facts scope to the TASK week (Monday) and the MYT day
+  // containing `now` — the day always sits inside the week, so each period
+  // query reads the week once and FILTERs out the day; lifetime facts (level,
+  // vault) ignore both.
   @InjectManager()
   protected async taskFactsFor(
-    input: { customerId: string; week: ReferralWeek },
+    input: {
+      customerId: string;
+      week: ReferralWeek;
+      day: { dayIso: string; startUtc: Date; endUtcExcl: Date };
+    },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<TaskFacts> {
     const em = (sharedContext.transactionManager ??
@@ -2034,14 +2041,21 @@ class PacksModuleService extends MedusaService({
       await Promise.all([
         this.listDailyCheckins(
           { customer_id: input.customerId, checkin_date: weekDays },
-          { select: ['id'], take: 7 },
+          { select: ['checkin_date'], take: 7 },
           sharedContext,
         ),
-        em.execute<{ pack_id: string; n: string }[]>(
-          'SELECT pack_id, COUNT(*)::bigint AS n FROM pull ' +
+        em.execute<{ pack_id: string; n: string; n_day: string }[]>(
+          'SELECT pack_id, COUNT(*)::bigint AS n, ' +
+            '  COUNT(*) FILTER (WHERE created_at >= ?)::bigint AS n_day ' +
+            'FROM pull ' +
             "WHERE customer_id = ? AND source = 'pack' AND deleted_at IS NULL " +
             '  AND created_at >= ? AND created_at < ? GROUP BY pack_id',
-          [input.customerId, input.week.startUtc, input.week.endUtcExcl],
+          [
+            input.day.startUtc,
+            input.customerId,
+            input.week.startUtc,
+            input.week.endUtcExcl,
+          ],
         ),
         // highest_level_ever, NOT current_level: that one is the net basis
         // and drops after reverseOpen (ADR 0003), which would UN-complete a
@@ -2069,27 +2083,68 @@ class PacksModuleService extends MedusaService({
         // LINK — a card an admin has not linked yet does not count, and
         // linking it later advances progress (admin data, honest either way).
         // Grouped so a task can name ONE Pokémon; the ungrouped total is the
-        // sum of the groups.
-        em.execute<{ pixel_pokemon_id: string; n: string }[]>(
-          'SELECT c.pixel_pokemon_id, COUNT(*)::bigint AS n ' +
+        // sum of the groups. The same scan also FILTERs the period counts
+        // daily/weekly pixel tasks read — those count PAID pulls only
+        // (source='pack', like rip counts), so a task's own card prize can
+        // never feed a task; the lifetime achievement count keeps every
+        // source.
+        em.execute<
+          { pixel_pokemon_id: string; n: string; n_week: string; n_day: string }[]
+        >(
+          'SELECT c.pixel_pokemon_id, COUNT(*)::bigint AS n, ' +
+            "  COUNT(*) FILTER (WHERE p.source = 'pack' " +
+            '    AND p.created_at >= ? AND p.created_at < ?)::bigint AS n_week, ' +
+            "  COUNT(*) FILTER (WHERE p.source = 'pack' " +
+            '    AND p.created_at >= ? AND p.created_at < ?)::bigint AS n_day ' +
             'FROM pull p JOIN card c ON c.handle = p.card_id ' +
             'WHERE p.customer_id = ? AND p.deleted_at IS NULL ' +
             '  AND c.deleted_at IS NULL AND c.pixel_pokemon_id IS NOT NULL ' +
             'GROUP BY c.pixel_pokemon_id',
-          [input.customerId],
+          [
+            input.week.startUtc,
+            input.week.endUtcExcl,
+            input.day.startUtc,
+            input.day.endUtcExcl,
+            input.customerId,
+          ],
         ),
       ]);
-    const byPack = new Map(ripRows.map((r) => [r.pack_id, Number(r.n)]));
-    const byPixel = new Map(
-      pixelRows.map((r) => [r.pixel_pokemon_id, Number(r.n)]),
+    const sum = (m: Map<string, number>) =>
+      [...m.values()].reduce((a, b) => a + b, 0);
+    const tally = <R>(rows: R[], key: (r: R) => string, n: (r: R) => string) =>
+      new Map(
+        rows.map((r) => [key(r), Number(n(r))] as const).filter(([, v]) => v),
+      );
+    const period = (
+      checkinDays: number,
+      ripsByPack: Map<string, number>,
+      pixelPullsById: Map<string, number>,
+    ): PeriodFacts => ({
+      checkinDays,
+      rips: sum(ripsByPack),
+      ripsByPack,
+      pixelPulls: sum(pixelPullsById),
+      pixelPullsById,
+    });
+    const byPixel = tally(
+      pixelRows,
+      (r) => r.pixel_pokemon_id,
+      (r) => r.n,
     );
     return {
-      checkinDaysThisWeek: checkins.length,
-      ripsThisWeek: [...byPack.values()].reduce((a, b) => a + b, 0),
-      ripsThisWeekByPack: byPack,
+      day: period(
+        checkins.filter((c) => c.checkin_date === input.day.dayIso).length,
+        tally(ripRows, (r) => r.pack_id, (r) => r.n_day),
+        tally(pixelRows, (r) => r.pixel_pokemon_id, (r) => r.n_day),
+      ),
+      week: period(
+        checkins.length,
+        tally(ripRows, (r) => r.pack_id, (r) => r.n),
+        tally(pixelRows, (r) => r.pixel_pokemon_id, (r) => r.n_week),
+      ),
       vipLevel: stateRow ? Number(stateRow.highest_level_ever) : 1,
       vaultCount: Number(vaultRows[0]?.n ?? 0),
-      vaultPixelCount: [...byPixel.values()].reduce((a, b) => a + b, 0),
+      vaultPixelCount: sum(byPixel),
       vaultPixelCountById: byPixel,
     };
   }
@@ -2102,6 +2157,11 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
     week_start: string;
+    /** Today's MYT date — a daily task's claim period. */
+    day_key: string;
+    /** Check-ins this task week: the /task strip's filled slots, and exactly
+     *  what weekly checkin_days tasks measure. */
+    checkins_this_week: number;
     vip_level: number;
     /** Free rips this customer has claimed but not yet spun. Listed at the top
      *  level rather than on the task row on purpose: the task that granted it
@@ -2114,10 +2174,12 @@ class PacksModuleService extends MedusaService({
       pack_id: string;
       /** The pack's title, so the row can say WHICH pack; null = pack gone. */
       pack_title: string | null;
+      /** The pack's art, as stored; null = pack gone or no art. */
+      pack_image: string | null;
     }[];
     tasks: {
       id: string;
-      kind: 'weekly' | 'achievement';
+      kind: TaskKind;
       title: string;
       requirement: TaskRequirement;
       reward: HubReward;
@@ -2126,6 +2188,8 @@ class PacksModuleService extends MedusaService({
     }[];
   }> {
     const week = taskWeekFor(input.now ?? new Date());
+    const day = taskDayFor(input.now ?? new Date());
+    const period = { weekStartIso: week.weekStartIso, dayIso: day.dayIso };
     const [defs, facts, claims, unspent] = await Promise.all([
       this.listTaskDefinitions(
         { active: true },
@@ -2134,11 +2198,14 @@ class PacksModuleService extends MedusaService({
         { order: { sort: 'ASC' }, take: 500 },
         sharedContext,
       ),
-      this.taskFactsFor({ customerId: input.customerId, week }, sharedContext),
+      this.taskFactsFor(
+        { customerId: input.customerId, week, day },
+        sharedContext,
+      ),
       this.listTaskClaims(
         {
           customer_id: input.customerId,
-          period_key: [week.weekStartIso, ''],
+          period_key: [week.weekStartIso, day.dayIso, ''],
         },
         {
           select: [
@@ -2219,7 +2286,10 @@ class PacksModuleService extends MedusaService({
     const packRows = packSlugs.size
       ? await this.listPacks(
           { slug: [...packSlugs] },
-          { select: ['slug', 'title', 'price'], take: packSlugs.size },
+          {
+            select: ['slug', 'title', 'price', 'image', 'display_image'],
+            take: packSlugs.size,
+          },
           sharedContext,
         )
       : [];
@@ -2234,6 +2304,8 @@ class PacksModuleService extends MedusaService({
               'grade',
               'market_value',
               'market_multiplier',
+              'image',
+              'slab_image',
             ],
             take: cardHandles.size,
           },
@@ -2245,7 +2317,14 @@ class PacksModuleService extends MedusaService({
       : DEFAULT_USD_MYR;
     const packBySlug = new Map(packRows.map((p) => [p.slug, p]));
     const cardByHandle = new Map(cardRows.map((c) => [c.handle, c]));
-    const packTitle = new Map(packRows.map((p) => [p.slug, p.title]));
+    // The prize's picture: a pack's product shot (`image`; the hero
+    // `display_image` only when there is none), a card's graded slab (the
+    // raw scan only when there is none). As stored — the storefront
+    // resolves relative paths like every other pack/card image.
+    const packArt = (slug: string): string | null => {
+      const p = packBySlug.get(slug);
+      return p?.image || p?.display_image || null;
+    };
     const hubReward = (reward: TaskReward): HubReward => {
       if (reward.type === 'pack') {
         const p = packBySlug.get(reward.pack_id);
@@ -2253,6 +2332,7 @@ class PacksModuleService extends MedusaService({
           ...reward,
           pack_title: p?.title ?? null,
           pack_price_myr: p ? toMoney(p.price) : null,
+          pack_image: packArt(reward.pack_id),
         };
       }
       if (reward.type === 'card') {
@@ -2268,30 +2348,34 @@ class PacksModuleService extends MedusaService({
                 Number(c.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
               )
             : null,
+          card_image: c?.slab_image || c?.image || null,
         };
       }
       return reward;
     };
     return {
       week_start: week.weekStartIso,
+      day_key: day.dayIso,
+      checkins_this_week: facts.week.checkinDays,
       // The Achievements & VIP tab shows the rung the reach_level tasks are
       // measured against; taskFactsFor already loaded it.
       vip_level: facts.vipLevel,
       pending_spins: pendingSpins.map((s) => ({
         ...s,
-        pack_title: packTitle.get(s.pack_id) ?? null,
+        pack_title: packBySlug.get(s.pack_id)?.title ?? null,
+        pack_image: packArt(s.pack_id),
       })),
       tasks: live.map((d) => {
         const requirement = d.requirement as unknown as TaskRequirement;
-        const periodKey = d.kind === 'weekly' ? week.weekStartIso : '';
+        const kind = d.kind as TaskKind;
         return {
           id: d.id,
-          kind: d.kind,
+          kind,
           title: d.title,
           requirement,
           reward: hubReward(d.reward as unknown as TaskReward),
-          progress: taskProgress(requirement, facts),
-          claimed: claimed.has(`${d.id}:${periodKey}`),
+          progress: taskProgress(kind, requirement, facts),
+          claimed: claimed.has(`${d.id}:${taskPeriodKey(kind, period)}`),
         };
       }),
     };
@@ -2354,15 +2438,20 @@ class PacksModuleService extends MedusaService({
     if (!taskIsLive(def, input.now ?? new Date()))
       return { claimed: false, reason: 'window_closed' };
     const week = taskWeekFor(input.now ?? new Date());
-    const periodKey = def.kind === 'weekly' ? week.weekStartIso : '';
+    const day = taskDayFor(input.now ?? new Date());
+    const kind = def.kind as TaskKind;
+    const periodKey = taskPeriodKey(kind, {
+      weekStartIso: week.weekStartIso,
+      dayIso: day.dayIso,
+    });
     const requirement = def.requirement as unknown as TaskRequirement;
     const reward = def.reward as unknown as TaskReward;
 
     const facts = await this.taskFactsFor(
-      { customerId: input.customerId, week },
+      { customerId: input.customerId, week, day },
       sharedContext,
     );
-    if (!taskProgress(requirement, facts).completed) {
+    if (!taskProgress(kind, requirement, facts).completed) {
       return { claimed: false, reason: 'not_completed' };
     }
 
@@ -2500,7 +2589,7 @@ class PacksModuleService extends MedusaService({
   async saveTaskDefinition(
     input: {
       id?: string;
-      kind: 'weekly' | 'achievement';
+      kind: TaskKind;
       title: string;
       requirement: unknown;
       reward: unknown;

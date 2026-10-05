@@ -6,6 +6,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import { reqReason } from '../rewards-settings/validate';
+import { TASK_KINDS, type TaskKind } from '../../../modules/packs/tasks';
 import { resolveTaskLabels } from './labels';
 
 // GET /admin/tasks — every definition (active and retired), sorted. Each row
@@ -55,10 +56,10 @@ export async function POST(
   res: MedusaResponse,
 ): Promise<void> {
   const b = req.body ?? {};
-  if (b.kind !== 'weekly' && b.kind !== 'achievement') {
+  if (!TASK_KINDS.includes(b.kind as TaskKind)) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      "kind must be 'weekly' or 'achievement'.",
+      `kind must be one of ${TASK_KINDS.map((k) => `'${k}'`).join(', ')}.`,
     );
   }
   if (typeof b.title !== 'string') {
@@ -80,7 +81,7 @@ export async function POST(
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const { id } = await packs.saveTaskDefinition({
     id: typeof b.id === 'string' ? b.id : undefined,
-    kind: b.kind,
+    kind: b.kind as TaskKind,
     title: b.title,
     requirement: b.requirement,
     reward: b.reward,

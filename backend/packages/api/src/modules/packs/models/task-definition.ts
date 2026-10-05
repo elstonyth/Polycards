@@ -1,6 +1,7 @@
 import { model } from '@medusajs/framework/utils';
 
 // One configurable task (spec 2026-08-24 Phase B). `kind` picks the cadence:
+// daily tasks reset at 00:00 MYT (spec 2026-10-06);
 // weekly tasks reset on the task week (Mon 00:00 MYT — the player-facing
 // week, deliberately NOT the Tuesday settlement week); achievements are
 // once-per-account. `requirement` and `reward` are the discriminated unions in
@@ -9,7 +10,7 @@ import { model } from '@medusajs/framework/utils';
 // underlying facts (check-ins, pulls, vip state); only claims are stored.
 export const TaskDefinition = model.define('task_definition', {
   id: model.id().primaryKey(),
-  kind: model.enum(['weekly', 'achievement']),
+  kind: model.enum(['daily', 'weekly', 'achievement']),
   title: model.text(),
   requirement: model.json(),
   reward: model.json(),

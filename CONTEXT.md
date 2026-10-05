@@ -253,9 +253,12 @@ of that spec still describe the rebate as part of the engine; a reader who
 meets the word there needs to be able to look it up and find "not a thing".
 
 **Task / Achievement**:
-An admin-defined goal on the /task hub (Phase B of the same spec). Weekly
-tasks (check-in days, rip counts — optionally per pack) reset with the Task
-Week (Monday), NOT the Tuesday Referral Week that settles the money;
+An admin-defined goal on the /task hub (Phase B of the same spec). Daily
+tasks reset at 00:00 MYT (claim period = the MYT date; added 2026-10-06).
+Weekly tasks (check-in days, rip counts — optionally per pack — and pixel
+Pokémon pulls, which daily tasks share) reset with the Task Week (Monday),
+NOT the Tuesday Referral Week that settles the money; repeating goals count
+paid pack pulls only;
 achievements (reach VIP level, vault N cards, vault N pixel
 Pokémon) are once per account. Progress is computed live from the underlying
 facts; only claims are stored (`task_claim`, one per customer × task ×

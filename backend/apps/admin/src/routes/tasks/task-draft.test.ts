@@ -1,10 +1,13 @@
 import { describe, expect, test } from 'vitest';
 import {
   ANY,
+  REQUIREMENT_TYPES,
   blankDraft,
+  countApplies,
   draftFrom,
   draftToPayload,
   labelsOf,
+  requirementLabel,
   scheduleOk,
   toIso,
   windowLabel,
@@ -171,5 +174,56 @@ describe('windowLabel', () => {
     expect(windowLabel(task({ ends_at: '2026-09-01T00:00:00.000Z' }))).toMatch(
       /^— → /,
     );
+  });
+});
+
+describe('daily cadence (2026-10-06)', () => {
+  test('daily and weekly offer the same repeating goals; achievements the lifetime ones', () => {
+    expect(REQUIREMENT_TYPES.daily).toEqual(REQUIREMENT_TYPES.weekly);
+    expect(REQUIREMENT_TYPES.daily).toContain('vault_pixel_count');
+    expect(REQUIREMENT_TYPES.daily).not.toContain('reach_level');
+  });
+
+  test('a daily check-in is always one day, whatever the count box held', () => {
+    const d: Draft = {
+      ...blankDraft(),
+      kind: 'daily',
+      reqN: '5',
+      rewardValue: '1',
+    };
+    expect(countApplies(d)).toBe(false);
+    expect(draftToPayload(d)!.requirement).toEqual({
+      type: 'checkin_days',
+      days: 1,
+    });
+  });
+
+  test('a weekly check-in over seven days is refused before the round trip', () => {
+    expect(
+      draftToPayload({ ...blankDraft(), kind: 'weekly', reqN: '8', rewardValue: '1' }),
+    ).toBeNull();
+    expect(
+      draftToPayload({ ...blankDraft(), kind: 'weekly', reqN: '7', rewardValue: '1' })!
+        .requirement,
+    ).toEqual({ type: 'checkin_days', days: 7 });
+  });
+
+  test('the goal wording follows the cadence', () => {
+    expect(requirementLabel('daily', 'checkin_days')).toBe('Check in today');
+    expect(requirementLabel('weekly', 'checkin_days')).toBe('Check in on N days');
+    expect(requirementLabel('daily', 'vault_pixel_count')).toBe(
+      'Pull N Pokémon (pixel) cards',
+    );
+    expect(requirementLabel('achievement', 'vault_pixel_count')).toBe(
+      'Vault N Pokémon (pixel) cards',
+    );
+  });
+
+  test('a daily task round-trips', () => {
+    const requirement = { type: 'rip_count', count: 2, pack_id: 'bronze-pack' };
+    expect(
+      draftToPayload(draftFrom(task({ kind: 'daily', requirement })))!
+        .requirement,
+    ).toEqual(requirement);
   });
 });

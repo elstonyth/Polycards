@@ -2008,7 +2008,7 @@ export async function setPartnerRate(
 
 export interface AdminTaskDefinition {
   id: string;
-  kind: 'weekly' | 'achievement';
+  kind: 'daily' | 'weekly' | 'achievement';
   title: string;
   requirement: Record<string, unknown>;
   reward: Record<string, unknown>;
@@ -2034,7 +2034,7 @@ export async function listTaskDefinitions(): Promise<AdminTaskDefinition[]> {
 
 export async function saveTaskDefinition(input: {
   id?: string;
-  kind: 'weekly' | 'achievement';
+  kind: AdminTaskDefinition['kind'];
   title: string;
   requirement: Record<string, unknown>;
   reward: Record<string, unknown>;
