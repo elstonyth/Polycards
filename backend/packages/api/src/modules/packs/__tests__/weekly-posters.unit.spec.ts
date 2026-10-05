@@ -37,6 +37,47 @@ describe('results poster', () => {
     expect(resultsHeadline(null, [])).toBe('NO STAGE UNLOCKED');
   });
 
+  it('centres a lone second-row panel when the other winner is hidden', async () => {
+    const { jpeg } = await composeResultsPoster(
+      {
+        weekLabel: '28 SEPT – 4 OCT',
+        headline: 'RM 1 POOLED · 1 STAGE UNLOCKED',
+        podium: [
+          {
+            rank: 1,
+            name: 'A',
+            pulledMyr: 1,
+            prizeMyr: 1,
+            credits: 9,
+            cards: [],
+          },
+          // #2 is hidden: #3 is the only panel on its row.
+          {
+            rank: 3,
+            name: 'C',
+            pulledMyr: 1,
+            prizeMyr: 1,
+            credits: 5,
+            cards: [],
+          },
+        ],
+        list: [],
+        siteHost: 'polycards.gg/leaderboard',
+      },
+      new Map(),
+    );
+    // x = 320 is inside a centred panel (306-774) but left of where a
+    // right-hand panel would start (556): the panel's charcoal, not the ink.
+    const { data, info } = await sharp(jpeg)
+      .extract({ left: 320, top: 700, width: 1, height: 500 })
+      .greyscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const lit = [...data].filter((v) => v > 16).length;
+    expect(info.height).toBe(500);
+    expect(lit).toBeGreaterThan(100);
+  });
+
   it('draws the top 3 and the ledger as two feed-size images, naming the ranks without art', async () => {
     const input = {
       weekLabel: '28 SEPT – 4 OCT',

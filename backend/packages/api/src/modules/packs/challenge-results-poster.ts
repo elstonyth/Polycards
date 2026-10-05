@@ -462,10 +462,14 @@ export async function composeResultsPoster(
       ry += h + 16;
     }
 
-    // Second and third, side by side.
+    // Second and third, side by side; one alone (the other hidden) is
+    // centred rather than leaving an empty half.
     const h2 = rowH2();
-    for (const winner of others) {
-      const px = PAD + (winner.rank === 2 ? 0 : HALF_W + 16);
+    for (const [i, winner] of others.entries()) {
+      const px =
+        others.length === 1
+          ? PAD + (TEXT_W - HALF_W) / 2
+          : PAD + i * (HALF_W + 16);
       panels.push(
         `<rect x="${px + 1}" y="${ry + 1}" width="${HALF_W - 2}" height="${h2 - 2}" rx="28" ` +
           `fill="${CHARCOAL}" stroke="${HAIRLINE}" stroke-width="2"/>`,
