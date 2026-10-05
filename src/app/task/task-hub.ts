@@ -7,6 +7,10 @@ import type { TaskEntry, TaskHub } from '@/lib/data/schemas';
 
 export const CREDIT_ART = '/images/task/credits-coins.webp';
 
+// Built from its code point: a literal U+00A0 (or its escape) in source has
+// already been flattened back into a plain space once, silently.
+const NBSP = String.fromCharCode(0xa0);
+
 const REWARD_LABEL: Record<string, string> = {
   credit: 'Credit',
   pack: 'Free rip',
@@ -38,7 +42,7 @@ export function rewardLabel(reward: TaskEntry['reward']): {
     return {
       // Non-breaking space: "PSA 10" must not wrap as "PSA / 10".
       name: reward.card_grade
-        ? `${reward.card_name} · ${reward.card_grade.replace(/ /g, ' ')}`
+        ? `${reward.card_name} · ${reward.card_grade.replace(/ /g, NBSP)}`
         : reward.card_name,
       value: reward.card_value_myr ?? null,
     };

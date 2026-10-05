@@ -136,7 +136,10 @@ describe('reward art and label', () => {
         card_grade: 'PSA 10',
         card_value_myr: 120,
       }),
-    ).toEqual({ name: 'Pikachu · PSA 10', value: 120 });
+    ).toEqual({
+      name: `Pikachu · PSA${String.fromCharCode(0xa0)}10`,
+      value: 120,
+    });
     expect(
       rewardLabel({ type: 'pack', pack_id: 'bronze', pack_price_myr: 30 }),
     ).toEqual({ name: 'Free rip · bronze', value: 30 });
