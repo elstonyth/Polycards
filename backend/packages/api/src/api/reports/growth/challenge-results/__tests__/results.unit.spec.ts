@@ -97,9 +97,9 @@ describe('groupPayouts', () => {
 
 describe('prizeValue and byValue', () => {
   const cards = [
-    { name: 'Cheap', image: null, qty: 2, valueMyr: 10.5 },
-    { name: 'Gone', image: null, qty: 1, valueMyr: null },
-    { name: 'Chase', image: null, qty: 1, valueMyr: 3332.95 },
+    { name: 'Cheap', title: 'Cheap', image: null, qty: 2, valueMyr: 10.5 },
+    { name: 'Gone', title: 'Gone', image: null, qty: 1, valueMyr: null },
+    { name: 'Chase', title: 'Chase', image: null, qty: 1, valueMyr: 3332.95 },
   ];
 
   it('adds the credits and every card at its value, a gone card as nothing', () => {

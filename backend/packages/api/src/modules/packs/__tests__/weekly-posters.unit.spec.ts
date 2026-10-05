@@ -2,9 +2,9 @@ import sharp from 'sharp';
 import { POSTER_H, POSTER_W } from '../brand-poster';
 import {
   composeResultsPoster,
-  fanPosition,
-  MAX_FAN,
+  MAX_ROW_CARDS,
   resultsHeadline,
+  rowCardWidth,
   rmWhole,
 } from '../challenge-results-poster';
 import {
@@ -85,12 +85,16 @@ describe('results poster', () => {
     expect(placeholders).toEqual([1, 2]);
   });
 
-  it('fans a hand out from the front card: right, left, right, left', () => {
-    expect([0, 1, 2, 3, 4].map(fanPosition)).toEqual([0, 1, -1, 2, -2]);
-    expect(MAX_FAN).toBe(5);
+  it('sizes a row of cards to the room, the winner largest', () => {
+    // Three cards fit at full size; five shrink to share the room.
+    expect(rowCardWidth(3, 1, 584)).toBe(170);
+    expect(rowCardWidth(3, 2, 584)).toBe(150);
+    expect(rowCardWidth(5, 1, 584)).toBe(Math.floor((584 - 4 * 16) / 5));
+    expect(rowCardWidth(0, 1, 584)).toBe(0);
+    expect(MAX_ROW_CARDS).toBe(5);
   });
 
-  it('draws a whole hand from real art, the cards past the fifth as a tab', async () => {
+  it('draws every card from real art side by side, counting the ones past the fifth', async () => {
     const slab = await sharp({
       create: { width: 160, height: 259, channels: 4, background: '#3366ff' },
     })
