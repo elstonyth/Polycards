@@ -13,6 +13,7 @@ import {
   displayMarketPrice,
   resolveFxRate,
 } from '../../../../modules/packs/pricing';
+import { fitToFeed } from '../../../../modules/packs/feed-size';
 import { renderPullCard } from '../../../../modules/packs/pull-card';
 import { stripAutolinks } from '../../../../modules/packs/telegram';
 import { loadPullerProfiles } from '../../../store/pulls/pullers';
@@ -98,5 +99,7 @@ export async function GET(
     return;
   }
   res.setHeader('Content-Type', 'image/jpeg');
-  res.status(200).send(rendered.photo);
+  // The Telegram card as drawn for the channel, fitted to the 1080x1350 feed
+  // size the desk posts at (the channel itself is untouched).
+  res.status(200).send(await fitToFeed(rendered.photo));
 }

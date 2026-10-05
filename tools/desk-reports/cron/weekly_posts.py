@@ -108,7 +108,7 @@ def main():
 
     print(f"WEEKLY POSTS DATA for {week_words(week['start'], week['end'])} (Malaysia time)")
 
-    print("1) LAST WEEK'S CHALLENGE RESULT (prizes exactly as settlement paid them; names are public display names):")
+    print("1) LAST WEEK'S CHALLENGE RESULT (two images, the top 3 then ranks 4-10, posted together; prizes exactly as settlement paid them; names are public display names):")
     if results and not settled_last_week(results["week"]["start"], week["start"]):
         notes.append(
             "Last week has not been settled yet (the latest settled week is "
@@ -123,10 +123,14 @@ def main():
             print(winner_line(w))
         if results.get("hidden_winners"):
             print(f"({results['hidden_winners']} winner(s) left out: disabled account; the others keep their paid rank)")
-        try:
-            files.append(_save("images", f"weekly-{stamp}-1-results.jpg", _get("growth/challenge-results-poster", {}, key)))
-        except OSError as err:
-            notes.append(f"The results poster could not be drawn: {_why(err)}")
+        # Two 1080x1350 images, posted together: the top 3 with every card
+        # they won, then ranks 4-10.
+        for part, label in (("top", "the top 3"), ("rest", "ranks 4-10")):
+            try:
+                files.append(_save("images", f"weekly-{stamp}-1-results-{part}.jpg",
+                                   _get("growth/challenge-results-poster", {"part": part}, key)))
+            except OSError as err:
+                notes.append(f"The results poster ({label}) could not be drawn: {_why(err)}")
     else:
         print("none")
 

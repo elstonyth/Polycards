@@ -1,5 +1,6 @@
-"""Hermes post_tool_call hook: puts the official Polycards wordmark on every
-image a desk bot generates, before the gateway attaches it to the chat.
+"""Hermes post_tool_call hook: fits every image a desk bot generates to
+1080x1350 (the 4:5 size Facebook and Instagram feeds show whole) and puts the
+official Polycards wordmark on it, before the gateway attaches it to the chat.
 
 The desk profile's config.yaml runs this for image_generate (hooks:
 post_tool_call, matcher ^image_generate$), with the profile's HERMES_HOME in
@@ -69,6 +70,27 @@ def _pillow():
 WORDMARK = Path(__file__).resolve().parent.parent / "brand" / "polycards-wordmark-white.png"
 INK = (10, 10, 10)  # DESIGN.md ink-black
 MARK_KEY = "polycards-logo"  # set on a stamped file, so it is never stamped twice
+# The 4:5 size Facebook and Instagram feeds show whole (taller is cropped in
+# the feed): every generated image is fitted to it, ready to post.
+FEED = (1080, 1350)
+
+
+def to_feed(canvas, Image):
+    """The art centre-cropped to 4:5 (the middle is kept, the edges trimmed)
+    and resized to exactly 1080x1350."""
+    w, h = canvas.size
+    if (w, h) == FEED:
+        return canvas
+    want = FEED[0] / FEED[1]
+    if w / h > want:  # too wide: trim the sides
+        keep = round(h * want)
+        left = (w - keep) // 2
+        canvas = canvas.crop((left, 0, left + keep, h))
+    else:  # too tall: trim the top and the bottom
+        keep = round(w / want)
+        top = (h - keep) // 2
+        canvas = canvas.crop((0, top, w, top + keep))
+    return canvas.resize(FEED, Image.LANCZOS)
 
 
 def target(event):
@@ -101,6 +123,7 @@ def stamp(path):
         fmt = source.format
         alpha = "A" in source.getbands()
         canvas = source.convert("RGBA")
+    canvas = to_feed(canvas, Image)
     width = canvas.width
 
     # A fifth of the width, never past the source file's own 360 px.

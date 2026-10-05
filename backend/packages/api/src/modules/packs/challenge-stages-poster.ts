@@ -1,13 +1,14 @@
 import sharp, { type OverlayOptions } from 'sharp';
 import { ensureBundledFonts } from '../../api/admin/media/label-font';
 import { fetchBytes, MAX_DECODE_PIXELS } from '../../api/utils/image-fetch';
-import { icon } from './brand-poster';
+import { icon, POSTER_H } from './brand-poster';
 import { rmWhole } from './challenge-results-poster';
 import { sizeToFit } from './challenge-poster';
 import { BRAND_LOGO_B64 } from './pull-card-assets';
 import { baseline, body, display, fit, measure, textEl } from './pull-card';
 
-// Every stage of one Weekly Challenge on one poster, for the Growth desk
+// Every stage of one Weekly Challenge on one 1080x1350 poster (the 4:5 size
+// Facebook and Instagram feeds show whole), for the Growth desk
 // (GET /reports/growth/challenge-stages-poster and the Monday 9 a.m. drop):
 // the challenge poster's language, then a grid of stage panels, each with its
 // unlock threshold, its #1-#3 prizes as the official card art and a line for
@@ -129,9 +130,15 @@ const BLOCK_W = (TEXT_W - GAP) / 2;
 const INNER = 28;
 const SLAB = 1600 / 2590;
 const CARD_GAP = 12;
-const CARD_W = Math.floor((BLOCK_W - 2 * INNER - 2 * CARD_GAP) / 3);
-const CARD_H = Math.round(CARD_W / SLAB);
-const BLOCK_H = 84 + 40 + CARD_H + 76;
+// The widest a prize card is drawn; shorter grids (more rows) draw it smaller.
+const CARD_W_MAX = Math.floor((BLOCK_W - 2 * INNER - 2 * CARD_GAP) / 3);
+// A panel around its cards: the stage header, the rank tags, the line for
+// ranks 4-10.
+const BLOCK_CHROME = 84 + 40 + 64;
+// 1080x1350, the 4:5 size Facebook and Instagram feeds show whole.
+const H = POSTER_H;
+const PILL_H = 84;
+const PILL_Y = H - 56 - PILL_H;
 
 // Lucide `check` and `lock`.
 const ICON_CHECK = '<polyline points="20 6 9 17 4 12"/>';
@@ -175,31 +182,28 @@ export async function composeStagesPoster(
   ];
 
   // ---- title and the gold line ---------------------------------------------
-  const title = ['WEEKLY PULLED VALUE', 'CHALLENGE'];
-  const titleSize = await sizeToFit(title, (s) => display(s), 96, 56, TEXT_W);
-  let y = PAD + LOGO_H + 52 + titleSize / 2;
-  for (const line of title) {
-    svg.push(
-      textEl(
-        line,
-        mid,
-        baseline(y, titleSize),
-        display(titleSize),
-        WHITE,
-        'middle',
-      ),
-    );
-    y += Math.round(titleSize * 1.04);
-  }
+  const title = 'WEEKLY PULLED VALUE CHALLENGE';
+  const titleSize = await sizeToFit([title], (s) => display(s), 64, 36, TEXT_W);
+  let y = PAD + LOGO_H + 44 + titleSize / 2;
+  svg.push(
+    textEl(
+      title,
+      mid,
+      baseline(y, titleSize),
+      display(titleSize),
+      WHITE,
+      'middle',
+    ),
+  );
   const headline = input.headline.toUpperCase();
   const headSize = await sizeToFit(
     [headline],
     (s) => display(s),
-    56,
-    30,
+    40,
+    22,
     TEXT_W,
   );
-  y += 8;
+  y += titleSize / 2 + 24 + headSize / 2;
   svg.push(
     textEl(
       headline,
@@ -212,10 +216,21 @@ export async function composeStagesPoster(
   );
 
   // ---- the stage grid --------------------------------------------------------
-  const gridTop = Math.round(y + headSize / 2 + 48);
+  const gridTop = Math.round(y + headSize / 2 + 36);
+  const gridBottom = PILL_Y - 95;
   const placeholders: string[] = [];
   const panels: string[] = [];
   const rows = Math.ceil(input.stages.length / 2);
+  const BLOCK_H = Math.floor(
+    (gridBottom - gridTop - (rows - 1) * GAP) / Math.max(1, rows),
+  );
+  const CARD_W = Math.max(
+    40,
+    Math.min(CARD_W_MAX, Math.floor((BLOCK_H - BLOCK_CHROME) * SLAB)),
+  );
+  const CARD_H = Math.round(CARD_W / SLAB);
+  // Cards narrower than the panel stay centred in it.
+  const cardsInset = (BLOCK_W - (3 * CARD_W + 2 * CARD_GAP)) / 2;
   for (const [i, block] of input.stages.entries()) {
     const row = Math.floor(i / 2);
     const alone = i === input.stages.length - 1 && i % 2 === 0;
@@ -262,7 +277,7 @@ export async function composeStagesPoster(
     // The #1-#3 prizes.
     const cardsTop = by + 84 + 40;
     for (const rank of [1, 2, 3] as const) {
-      const cx0 = bx + INNER + (rank - 1) * (CARD_W + CARD_GAP);
+      const cx0 = bx + cardsInset + (rank - 1) * (CARD_W + CARD_GAP);
       const cx = cx0 + CARD_W / 2;
       svg.push(
         textEl(
@@ -348,7 +363,7 @@ export async function composeStagesPoster(
     }
     // Ranks 4 and below.
     if (block.rest) {
-      const ly = cardsTop + CARD_H + 40;
+      const ly = cardsTop + CARD_H + 36;
       const line = await fit(
         restLine(block.rest),
         body(20, 1),
@@ -366,34 +381,29 @@ export async function composeStagesPoster(
       );
     }
   }
-  y = gridTop + rows * BLOCK_H + (rows - 1) * GAP;
-
   // ---- the rule and the address ----------------------------------------------
-  y += 70;
   const rule = await fit(
     "REWARDS STACK · THE WEEK'S TOP 10 CLAIM THEM ALL",
     body(26, 2),
     TEXT_W,
   );
-  svg.push(textEl(rule, mid, baseline(y, 26), body(26, 2), SILVER, 'middle'));
-  const pillH = 84;
-  const pillY = y + 50;
+  svg.push(
+    textEl(rule, mid, baseline(PILL_Y - 46, 26), body(26, 2), SILVER, 'middle'),
+  );
   const pillFont = body(34);
   const pillW = Math.round((await measure(input.siteHost, pillFont)) + 104);
   svg.push(
-    `<rect x="${(mid - pillW / 2).toFixed(1)}" y="${pillY}" width="${pillW}" height="${pillH}" ` +
-      `rx="${pillH / 2}" fill="${GRAPHITE}"/>`,
+    `<rect x="${(mid - pillW / 2).toFixed(1)}" y="${PILL_Y}" width="${pillW}" height="${PILL_H}" ` +
+      `rx="${PILL_H / 2}" fill="${GRAPHITE}"/>`,
     textEl(
       input.siteHost,
       mid,
-      baseline(pillY + pillH / 2, 34),
+      baseline(PILL_Y + PILL_H / 2, 34),
       pillFont,
       WHITE,
       'middle',
     ),
   );
-
-  const H = Math.round(pillY + pillH + PAD);
   const base = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">` +
       `<defs><radialGradient id="wash" cx="0.5" cy="0.5" r="0.5">` +

@@ -288,7 +288,7 @@ medusaIntegrationTestRunner({
         expect(res.headers['cache-control']).toBe('no-store');
         const meta = await sharp(Buffer.from(res.data)).metadata();
         expect(meta.format).toBe('jpeg');
-        expect(meta.width).toBe(1080);
+        expect([meta.width, meta.height]).toEqual([1080, 1350]);
         // The seeded art is a storefront-relative path nobody serves here.
         expect(res.headers['x-poster-missing-art']).toBe('1');
       });
@@ -374,7 +374,11 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(200);
         expect(res.headers['content-type']).toMatch(/^image\/jpeg/);
         const meta = await sharp(Buffer.from(res.data)).metadata();
-        expect([meta.format, meta.width]).toEqual(['jpeg', 1080]);
+        expect([meta.format, meta.width, meta.height]).toEqual([
+          'jpeg',
+          1080,
+          1350,
+        ]);
         // Both stages' #1 card; the seeded art is served by nobody here.
         expect(res.headers['x-poster-missing-art']).toBe('1:1,2:1');
 
@@ -533,13 +537,33 @@ medusaIntegrationTestRunner({
         expect(poster.status).toBe(200);
         expect(poster.headers['content-type']).toMatch(/^image\/jpeg/);
         const meta = await sharp(Buffer.from(poster.data)).metadata();
-        expect([meta.format, meta.width]).toEqual(['jpeg', 1080]);
+        // The 4:5 size Facebook and Instagram feeds show whole.
+        expect([meta.format, meta.width, meta.height]).toEqual([
+          'jpeg',
+          1080,
+          1350,
+        ]);
+        expect(poster.headers['x-poster-part']).toBe('top');
         expect(poster.headers['x-poster-week']).toBe(
           last.startUtc.toISOString(),
         );
         expect(poster.headers['x-poster-missing-art']).toBe('1');
         expect(poster.headers['x-poster-note']).toMatch(
           /^1 winner is left off/,
+        );
+        // Ranks 4-10 are the week's second image.
+        const rest = await unwrapResponse(
+          api.get('/reports/growth/challenge-results-poster?part=rest', {
+            headers: { 'x-report-key': GROWTH_KEY },
+            responseType: 'arraybuffer',
+          }),
+        );
+        expect(rest.status).toBe(200);
+        expect(rest.headers['x-poster-part']).toBe('rest');
+        const restMeta = await sharp(Buffer.from(rest.data)).metadata();
+        expect([restMeta.width, restMeta.height]).toEqual([1080, 1350]);
+        expect((await report('challenge-results-poster?part=all')).status).toBe(
+          400,
         );
       });
     });

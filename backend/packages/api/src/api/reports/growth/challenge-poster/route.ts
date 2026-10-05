@@ -7,6 +7,7 @@ import {
   posterWeekLabel,
   renderChallengePoster,
 } from '../../../../modules/packs/challenge-poster';
+import { fitToFeed } from '../../../../modules/packs/feed-size';
 import { buildChallengeView } from '../../../store/challenge/build';
 import { nextQueuedChallenge } from '../challenge/queued';
 
@@ -110,7 +111,8 @@ export async function GET(
   );
   res.setHeader('Content-Type', 'image/jpeg');
   if (missing.length) res.setHeader('x-poster-missing-art', missing.join(','));
-  res.status(200).send(jpeg);
+  // Drawn taller than the feed; posted at 1080x1350.
+  res.status(200).send(await fitToFeed(jpeg));
 }
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -178,5 +180,6 @@ async function queuedPoster(
   );
   res.setHeader('Content-Type', 'image/jpeg');
   if (missing.length) res.setHeader('x-poster-missing-art', missing.join(','));
-  res.status(200).send(jpeg);
+  // Drawn taller than the feed; posted at 1080x1350.
+  res.status(200).send(await fitToFeed(jpeg));
 }

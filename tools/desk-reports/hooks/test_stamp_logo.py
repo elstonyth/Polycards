@@ -61,7 +61,8 @@ class StampLogo(unittest.TestCase):
         stamp_logo.run(payload(path))
         self.assertGreater(sum(self.logo_pixels(path)), 3 * 40)
         with Image.open(path) as im:
-            self.assertEqual(im.size, (1024, 1536))
+            # The 4:5 size Facebook and Instagram feeds show whole.
+            self.assertEqual(im.size, (1080, 1350))
             self.assertEqual(im.info.get(stamp_logo.MARK_KEY), "1")
 
     def test_stamps_a_dark_wordmark_on_a_light_image(self):
@@ -78,12 +79,30 @@ class StampLogo(unittest.TestCase):
         im.save(path)
         stamp_logo.run(payload(path))
         with Image.open(path) as out:
-            w = out.width
+            w, h = out.size
             m = round(w * 0.045)
             lw, lh = round(w * 0.2), round(w * 0.2 * 97 / 360)
-            box = (m, w - m - lh, m + lw, w - m)  # bottom-left
+            box = (m, h - m - lh, m + lw, h - m)  # bottom-left
             spot = out.convert("RGB").crop(box).resize((1, 1), Image.BOX).getpixel((0, 0))
         self.assertGreater(sum(spot), 3 * 40)
+
+    def test_fits_tall_and_square_art_to_the_feed_size_keeping_its_middle(self):
+        # A 2:3 portrait: red bands top and bottom, blue in the middle.
+        tall = self.cache / "tall.png"
+        im = Image.new("RGB", (1024, 1536), (20, 40, 200))
+        im.paste((200, 20, 20), (0, 0, 1024, 100))
+        im.paste((200, 20, 20), (0, 1436, 1024, 1536))
+        im.save(tall)
+        stamp_logo.run(payload(tall))
+        with Image.open(tall) as out:
+            self.assertEqual(out.size, (1080, 1350))
+            # The bands are trimmed away; the middle stays.
+            r, g, b = out.convert("RGB").getpixel((540, 1340))
+            self.assertGreater(b, r)
+        square = self.image("square.png", (10, 10, 10), size=(1254, 1254))
+        stamp_logo.run(payload(square))
+        with Image.open(square) as out:
+            self.assertEqual(out.size, (1080, 1350))
 
     def test_stamps_once(self):
         path = self.image("once.png", (10, 10, 10))
@@ -98,7 +117,7 @@ class StampLogo(unittest.TestCase):
         stamp_logo.run(payload(path))
         with Image.open(path) as im:
             self.assertEqual(im.format, "JPEG")
-            self.assertEqual(im.size, (1536, 1024))
+            self.assertEqual(im.size, (1080, 1350))
 
     def test_touches_nothing_outside_the_image_cache(self):
         outside = self.image("outside.png", (10, 10, 10), folder=self.home)
