@@ -8,49 +8,72 @@ import { usePathname } from 'next/navigation';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { useConsent } from '@/lib/use-consent';
 import { useModalA11y } from '@/lib/use-modal-a11y';
-import type { Announcement } from '@/lib/data/schemas';
+import {
+  AnnouncementsSchema,
+  hasUnsafeUrlChar,
+  parseOne,
+  type Announcement,
+} from '@/lib/data/schemas';
 import {
   ANNOUNCEMENT_SEEN_KEY,
-  announcementSig,
   mytDay,
-  shouldShowAnnouncements,
+  recordSeen,
+  unseenAnnouncements,
 } from '@/lib/announcement-seen';
 
 // Let the page settle (and any dialog it opens on load) before interrupting.
 const OPEN_DELAY_MS = 1200;
+const SPIN_ROUTE = /^\/slots\/[^/]+\/spin/;
 
-// The backend only stores /paths and http(s) URLs, but this becomes an href:
-// re-check rather than trust, and treat anything else as "no link".
-const linkKind = (href: string | null): 'internal' | 'external' | null =>
-  !href
-    ? null
-    : href.startsWith('/') && !href.startsWith('//')
-      ? 'internal'
-      : /^https?:\/\//i.test(href)
-        ? 'external'
-        : null;
+// Module state lives for exactly one full page load: the root layout keeps
+// this component mounted across client navigations, and a reload re-runs the
+// module. `shownThisLoad` is checked FIRST and set on open, so a throwing
+// localStorage.setItem can never reopen the popup in a loop.
+let shownThisLoad = false;
+let loading: Promise<Announcement[]> | null = null;
+
+/** One fetch per page load. Any failure (network, non-2xx, bad shape) = no
+ *  popup; the schema also drops a slide whose image URL is not absolute. */
+function loadAnnouncements(): Promise<Announcement[]> {
+  loading ??= fetch('/api/announcements')
+    .then((r) => (r.ok ? r.json() : null))
+    .then(
+      (body: unknown) =>
+        parseOne(AnnouncementsSchema, body)?.announcements ?? [],
+    )
+    .catch(() => []);
+  return loading;
+}
+
+// The backend only stores in-site paths and http(s) URLs, but this becomes an
+// href: re-check rather than trust. `//` and `/\` are off-origin to a browser,
+// and whitespace / `\` / control characters get stripped or reinterpreted, so
+// anything carrying them gets no link at all.
+const linkKind = (href: string | null): 'internal' | 'external' | null => {
+  if (!href || hasUnsafeUrlChar(href)) return null;
+  if (/^\/(?![/\\])/.test(href)) return 'internal';
+  return /^https?:\/\//i.test(href) ? 'external' : null;
+};
 
 const roundIcon =
   'flex size-8 items-center justify-center rounded-full border border-white/20 bg-neutral-950/70 text-white';
 
 /**
  * Admin-uploaded announcement popup (ads, upcoming drops, news — spec
- * 2026-10-06 §5). Every visitor, logged in or not, sees the live set once per
- * MYT day; the stored dismissal names the set (ids + updated_at), so a new or
- * edited announcement shows again at once. Several slides = one swipe
- * carousel (CSS scroll-snap), with arrows on desktop and dots everywhere.
+ * 2026-10-06 §5). Every visitor, logged in or not, is shown each live slide
+ * once per MYT day: the stored record is the day's union of slide keys
+ * (id@updated_at), so an added or edited slide shows on its own, and a slide
+ * removed or switched off never re-shows the others. Several slides = one
+ * swipe carousel (CSS scroll-snap), with arrows on desktop and dots everywhere.
  *
- * Waits for the cookie-consent answer (the banner owns the screen until
- * then), skips the spin reel, and never opens over another dialog.
+ * Fetches its own data (GET /api/announcements) so no page has to carry it.
+ * Waits for the cookie-consent answer (the banner owns the screen until then),
+ * skips the spin reel and ?auth= arrivals, and never opens over a dialog.
  */
-export function AnnouncementPopup({
-  announcements,
-}: {
-  announcements: Announcement[];
-}) {
+export function AnnouncementPopup() {
   const pathname = usePathname();
   const consent = useConsent();
-  const [open, setOpen] = useState(false);
+  const [slides, setSlides] = useState<Announcement[] | null>(null);
   const [index, setIndex] = useState(0);
   // Captured at hydration, before AuthModal strips ?auth= from the URL: a
   // visitor sent here to log in gets the login form, not an ad.
@@ -61,43 +84,55 @@ export function AnnouncementPopup({
   );
   const panelRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
-  const sig = announcementSig(announcements);
-  const close = () => setOpen(false);
+  const open = slides !== null;
+  const close = () => setSlides(null);
 
   useModalA11y(panelRef, open, close);
 
   useEffect(() => {
-    if (open || consent === null || arrivedForAuth) return;
-    if (/^\/slots\/[^/]+\/spin/.test(pathname)) return;
-    let stored: string | null = null;
-    try {
-      stored = localStorage.getItem(ANNOUNCEMENT_SEEN_KEY);
-    } catch {
-      // Storage blocked: shows once per page load, which is the best we can do.
-    }
-    const day = mytDay(Date.now());
-    if (!shouldShowAnnouncements(stored, sig, day)) return;
-    const timer = window.setTimeout(() => {
-      if (document.querySelector('[role="dialog"]')) return;
-      // Recorded on OPEN, not on close: tapping through to a page or
-      // reloading must not bring it straight back the same day.
-      try {
-        localStorage.setItem(
-          ANNOUNCEMENT_SEEN_KEY,
-          JSON.stringify({ sig, day }),
-        );
-      } catch {
-        // Storage blocked — see above.
-      }
-      setIndex(0);
-      setOpen(true);
-    }, OPEN_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [open, consent, arrivedForAuth, pathname, sig]);
+    if (shownThisLoad || consent === null || arrivedForAuth) return;
+    if (SPIN_ROUTE.test(pathname)) return;
+    if (document.querySelector('[role="dialog"]')) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    void loadAnnouncements().then((live) => {
+      if (cancelled || live.length === 0) return;
+      timer = window.setTimeout(() => {
+        // Re-checked at open time: the page may have opened a dialog since.
+        if (shownThisLoad || document.querySelector('[role="dialog"]')) return;
+        const day = mytDay(Date.now());
+        let stored: string | null = null;
+        try {
+          stored = localStorage.getItem(ANNOUNCEMENT_SEEN_KEY);
+        } catch {
+          // Storage blocked: once per page load is the best we can do.
+        }
+        const unseen = unseenAnnouncements(live, stored, day);
+        if (unseen.length === 0) return;
+        shownThisLoad = true;
+        // Recorded on OPEN, not on close: tapping through to a page or
+        // reloading must not bring the same slides back the same day.
+        try {
+          localStorage.setItem(
+            ANNOUNCEMENT_SEEN_KEY,
+            recordSeen(stored, unseen, day),
+          );
+        } catch {
+          // Storage blocked — see above.
+        }
+        setIndex(0);
+        setSlides(unseen);
+      }, OPEN_DELAY_MS);
+    });
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [consent, arrivedForAuth, pathname]);
 
-  if (!open) return null;
+  if (!slides) return null;
 
-  const count = announcements.length;
+  const count = slides.length;
   // scrollTo without `behavior` follows the track's CSS scroll-behavior, so
   // motion-safe:scroll-smooth below already honours reduced motion.
   const goTo = (i: number) => {
@@ -132,7 +167,7 @@ export function AnnouncementPopup({
           }}
           className="flex snap-x snap-mandatory overflow-x-auto overscroll-x-contain motion-safe:scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
-          {announcements.map((a, i) => (
+          {slides.map((a, i) => (
             <div
               key={a.id}
               role="group"
@@ -162,7 +197,7 @@ export function AnnouncementPopup({
 
         {count > 1 && (
           <div className="flex justify-center py-2">
-            {announcements.map((a, i) => (
+            {slides.map((a, i) => (
               <button
                 key={a.id}
                 type="button"

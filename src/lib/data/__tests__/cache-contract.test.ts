@@ -106,8 +106,9 @@ describe('getAvatarFrames cache contract', () => {
 describe('getAnnouncements cache contract', () => {
   it('a schema-invalid body is NOT cached: degrades to [] and the next call re-fetches', async () => {
     const live = queued('GET /store/announcements');
-    // image_url is required — a slide without one fails AnnouncementsSchema.
-    live.push({ body: { announcements: [{ id: 'ann_1' }] } });
+    // A non-list body fails AnnouncementsSchema (a single bad SLIDE is only
+    // dropped — that is a valid, cacheable answer).
+    live.push({ body: { announcements: 'garbage' } });
     expect(await getAnnouncements()).toEqual([]);
 
     live.push({ body: { announcements: [] } });
