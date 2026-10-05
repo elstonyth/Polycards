@@ -395,6 +395,36 @@ export const AvatarFramesSchema = z.looseObject({
   frames: z.record(z.string(), z.string()),
 });
 
+// --- data/announcements.ts --------------------------------------------------
+
+/** Whitespace, `\` or a control character: a browser strips or reinterprets
+ *  them (`\` reads as `/`), so a URL carrying one is not the URL a check saw. */
+export const hasUnsafeUrlChar = (s: string): boolean =>
+  /[\s\\]/.test(s) ||
+  [...s].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
+
+/** One slide of the storefront announcement popup (spec 2026-10-06 §5). */
+export const AnnouncementSchema = z.looseObject({
+  id: z.string(),
+  // Absolute http(s) only, mirroring the backend write gate. A relative src
+  // with a `?` throws inside next/image and would take the page to
+  // global-error, so this is checked again here rather than trusted.
+  image_url: z
+    .string()
+    .refine((s) => /^https?:\/\/[^/]/i.test(s) && !hasUnsafeUrlChar(s)),
+  title: z.string().nullable(),
+  link_url: z.string().nullable(),
+  /** Part of the dismissal key — an edited slide shows again. */
+  updated_at: z.string(),
+});
+export type Announcement = z.infer<typeof AnnouncementSchema>;
+
+/** GET /store/announcements — the live set, already in carousel order. A slide
+ *  that fails the schema is DROPPED, not allowed to blank the others. */
+export const AnnouncementsSchema = z.looseObject({
+  announcements: droppableArray(AnnouncementSchema),
+});
+
 /** GET /store/profiles/me — `{ handle }`. */
 export const ProfileHandleSchema = z.looseObject({ handle: z.string() });
 

@@ -757,6 +757,15 @@ export default defineMiddlewares({
       ],
     },
     {
+      // The storefront announcement popup's live set (GET
+      // /store/announcements). Public — no authenticate. Read budget, keyed by
+      // caller address; the storefront's 60s server-side cache means real
+      // traffic is about one call a minute per Next instance.
+      matcher: '/store/announcements',
+      method: 'GET',
+      middlewares: [storeReadRateLimit],
+    },
+    {
       // The /task Tasks tab payload (GET /store/tasks).
       matcher: '/store/tasks',
       method: 'GET',
@@ -1239,6 +1248,19 @@ export default defineMiddlewares({
       // Task-definition CRUD (POST /admin/tasks).
       matcher: '/admin/tasks',
       method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Announcement popup create/update (POST /admin/announcements) — repaints
+      // the storefront for every visitor; same admin budget as site-settings.
+      matcher: '/admin/announcements',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Announcement soft delete (DELETE /admin/announcements/:id).
+      matcher: '/admin/announcements/*',
+      method: 'DELETE',
       middlewares: [adminActionRateLimit],
     },
     {

@@ -45,7 +45,8 @@ export async function uploadImage(
     | 'sprite'
     | 'frame'
     | 'avatar-frame'
-    | 'delivery',
+    | 'delivery'
+    | 'announcement',
 ): Promise<string> {
   const body = new FormData();
   body.append('files', file);
@@ -2045,4 +2046,60 @@ export async function saveTaskDefinition(input: {
   reason: string;
 }): Promise<{ id: string }> {
   return postJson<{ id: string }>('/admin/tasks', input);
+}
+
+// ── Announcement popup (spec 2026-10-06 §5) ──────────────────────────────────
+
+export interface AdminAnnouncement {
+  id: string;
+  image_url: string;
+  title: string | null;
+  link_url: string | null;
+  active: boolean;
+  sort: number;
+  /** Optional run window (ISO). null/null = live until switched off. */
+  starts_at: string | null;
+  ends_at: string | null;
+  updated_at: string | null;
+}
+
+export async function listAnnouncements(): Promise<AdminAnnouncement[]> {
+  const data = await getJson<{ announcements: AdminAnnouncement[] }>(
+    '/admin/announcements',
+  );
+  return data.announcements;
+}
+
+export async function saveAnnouncement(input: {
+  id?: string;
+  image_url: string;
+  title: string | null;
+  link_url: string | null;
+  active: boolean;
+  sort: number;
+  starts_at: string | null;
+  ends_at: string | null;
+  reason: string;
+}): Promise<{ id: string }> {
+  return postJson<{ id: string }>('/admin/announcements', input);
+}
+
+// DELETE with a JSON body: the audit reason rides there (the other DELETE
+// helpers above send no body, hence no Content-Type).
+export async function deleteAnnouncement(
+  id: string,
+  reason: string,
+): Promise<void> {
+  const res = await fetch(
+    `${__BACKEND_URL__}/admin/announcements/${encodeURIComponent(id)}`,
+    {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    },
+  );
+  if (!res.ok) {
+    throw await httpError(res);
+  }
 }

@@ -32,6 +32,7 @@ vi.mock('@/lib/logger', () => ({
 
 import { getPackCategories, getPullGaps } from '@/lib/data/packs';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
+import { getAnnouncements } from '@/lib/data/announcements';
 import { getLeaderboard } from '@/lib/data/leaderboard';
 import { getChallenge } from '@/lib/data/challenge';
 import { cachedJson, clearTtlCache } from '@/lib/ttl-cache';
@@ -99,6 +100,28 @@ describe('getAvatarFrames cache contract', () => {
     frames.push({ body: { frames: { '1': '/frame-1.webp' } } });
     await getAvatarFrames();
     expect(frames.mem.requests).toHaveLength(2);
+  });
+});
+
+describe('getAnnouncements cache contract', () => {
+  it('a schema-invalid body is NOT cached: degrades to [] and the next call re-fetches', async () => {
+    const live = queued('GET /store/announcements');
+    // A non-list body fails AnnouncementsSchema (a single bad SLIDE is only
+    // dropped — that is a valid, cacheable answer).
+    live.push({ body: { announcements: 'garbage' } });
+    expect(await getAnnouncements()).toEqual([]);
+
+    live.push({ body: { announcements: [] } });
+    await getAnnouncements();
+    expect(live.mem.requests).toHaveLength(2);
+  });
+
+  it('a genuinely empty set IS cached for the window', async () => {
+    const live = queued('GET /store/announcements');
+    live.push({ body: { announcements: [] } });
+    expect(await getAnnouncements()).toEqual([]);
+    expect(await getAnnouncements()).toEqual([]);
+    expect(live.mem.requests).toHaveLength(1);
   });
 });
 

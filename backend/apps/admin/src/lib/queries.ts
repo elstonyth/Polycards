@@ -129,6 +129,10 @@ import {
   listTaskDefinitions,
   saveTaskDefinition,
   type AdminTaskDefinition,
+  listAnnouncements,
+  saveAnnouncement,
+  deleteAnnouncement,
+  type AdminAnnouncement,
   setCustomerReferrer,
   setPartnerRate,
   voidReferralSettlement,
@@ -614,7 +618,8 @@ export const useUploadImage = () =>
         | 'sprite'
         | 'frame'
         | 'avatar-frame'
-        | 'delivery';
+        | 'delivery'
+        | 'announcement';
     }) => uploadImage(vars.file, vars.kind),
   });
 
@@ -1566,5 +1571,28 @@ export const useSaveTaskDefinition = () => {
     mutationFn: (input: Parameters<typeof saveTaskDefinition>[0]) =>
       saveTaskDefinition(input),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.taskDefinitions }),
+  });
+};
+
+export type { AdminAnnouncement } from './admin-rest';
+
+export const useAnnouncements = (): UseQueryResult<AdminAnnouncement[]> =>
+  useQuery({ queryKey: qk.announcements, queryFn: listAnnouncements });
+
+export const useSaveAnnouncement = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Parameters<typeof saveAnnouncement>[0]) =>
+      saveAnnouncement(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.announcements }),
+  });
+};
+
+export const useDeleteAnnouncement = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; reason: string }) =>
+      deleteAnnouncement(vars.id, vars.reason),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.announcements }),
   });
 };

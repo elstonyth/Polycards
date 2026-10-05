@@ -13,6 +13,7 @@ import { AuthProvider } from '@/components/auth/AuthProvider';
 import { SoundProvider } from '@/lib/use-sound';
 import { GlobalFreePackBadge } from '@/components/FreePackBadge';
 import { TelegramBanner } from '@/components/app-shell/TelegramBanner';
+import { AnnouncementPopup } from '@/components/app-shell/AnnouncementPopup';
 import SkipLink from '@/components/SkipLink';
 import CookieConsent from '@/components/CookieConsent';
 import MetaPixel from '@/components/MetaPixel';
@@ -114,6 +115,11 @@ export default async function RootLayout({
                     server state, so the global one skips that route. */}
                   <GlobalFreePackBadge />
                   <TelegramBanner />
+                  {/* Admin-uploaded promo popup, once per MYT day. Fetches its
+                    own data client-side (/api/announcements), so the static
+                    pages stay static; waits for the cookie-consent answer like
+                    the badge and banner. */}
+                  <AnnouncementPopup />
                   <CookieConsent />
                 </VaultDotProvider>
               </TopUpProvider>

@@ -10,7 +10,8 @@ export type ImageKind =
   | 'card'
   | 'sprite'
   | 'frame'
-  | 'avatar-frame';
+  | 'avatar-frame'
+  | 'announcement';
 
 const ALLOWED_MIME = [
   'image/webp',
@@ -73,6 +74,13 @@ const PROFILES: Record<
     targetRatio: 1,
     aspectTolerance: 0.05,
   },
+  // Announcement popup poster — any aspect ratio (the popup letterboxes it).
+  announcement: {
+    minWidth: 400,
+    minHeight: 200,
+    targetRatio: 1,
+    aspectTolerance: Number.POSITIVE_INFINITY,
+  },
 };
 
 function readDimensions(
@@ -130,7 +138,9 @@ export async function validateImageFile(
             ? 'Display'
             : kind === 'frame' || kind === 'avatar-frame'
               ? 'Frame'
-              : 'Sprite';
+              : kind === 'announcement'
+                ? 'Announcement'
+                : 'Sprite';
     return `${label} art must be at least ${profile.minWidth}×${profile.minHeight}px.`;
   }
 
