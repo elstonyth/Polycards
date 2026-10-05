@@ -43,7 +43,7 @@ export async function GET(
         pulledMyr: w.pulledMyr,
         prizeMyr: w.prizeMyr,
         credits: w.credits,
-        cards: hand(w).map((c) => c.name),
+        cards: hand(w).map((c) => c.title),
       })),
       list: results.winners
         .filter((w) => w.rank > 3 && w.rank <= 10)

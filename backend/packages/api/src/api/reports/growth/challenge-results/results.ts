@@ -23,7 +23,10 @@ import { publicProfileFields, seedOf } from '../../../../utils/profile-handle';
 // disabled winner is left out, as on every public surface.
 
 export type PrizeCard = {
+  /** With the grade: 'Mew ex #232 · PSA 10'. */
   name: string;
+  /** Without it, for a label under the slab, which shows the grade itself. */
+  title: string;
   image: string | null;
   qty: number;
   /** One unit at today's display market price; null when the card is gone. */
@@ -212,10 +215,17 @@ export async function latestChallengeResults(
       w.cards.map(({ cardId, qty }) => {
         const c = cardById.get(cardId);
         if (!c)
-          return { name: 'A prize card', image: null, qty, valueMyr: null };
+          return {
+            name: 'A prize card',
+            title: 'A prize card',
+            image: null,
+            qty,
+            valueMyr: null,
+          };
         return {
           name:
             c.grader && c.grade ? `${c.name} · ${c.grader} ${c.grade}` : c.name,
+          title: c.name,
           image: c.slab_image ?? c.image ?? null,
           qty,
           valueMyr: displayMarketPrice(

@@ -1,7 +1,8 @@
 import sharp, { type OverlayOptions } from 'sharp';
 import { ensureBundledFonts } from '../../api/admin/media/label-font';
 import { fetchBytes, MAX_DECODE_PIXELS } from '../../api/utils/image-fetch';
-import { sizeToFit } from './challenge-poster';
+import { capH } from './brand-poster';
+import { sizeToFit, twoLines } from './challenge-poster';
 import { BRAND_LOGO_B64 } from './pull-card-assets';
 import {
   baseline,
@@ -16,8 +17,9 @@ import {
 // Last week's Weekly Challenge result as a posting poster for the Growth desk
 // (GET /reports/growth/challenge-results-poster and the Monday 9 a.m. drop):
 // the challenge poster's language (ink stage, charcoal panels, Nekst claims,
-// chase gold for money), the top 3 on a podium with every prize card they won,
-// what they pulled and what they won, then ranks 4-10 as a ledger. Every
+// chase gold for money), the top 3 one row each with every prize card they
+// won side by side, what they pulled and what they won, then ranks 4-10 as a
+// ledger. Every
 // figure comes from settlement's own rows; nothing is typed in.
 //
 // Text is SVG rendered by sharp against the bundled fonts, so judge the look
@@ -61,6 +63,7 @@ const GRAPHITE = '#262626';
 const HAIRLINE = 'rgba(255,255,255,0.1)';
 const WHITE = '#fafafa';
 const SILVER = '#a3a3a3';
+const SOFT = '#d4d4d4';
 const CHASE = '#ffb020';
 const RANK_TONE: Record<number, string> = {
   1: CHASE,
@@ -75,8 +78,6 @@ const TEXT_W = W - 2 * PAD;
 const LOGO_H = 50;
 const LOGO_W = Math.round((LOGO_H * 360) / 97); // polycards-logo.png is 360x97
 const SLAB = 1600 / 2590;
-const CENTER = { w: 280, h: Math.round(280 / SLAB) };
-const SIDE = { w: 220, h: Math.round(220 / SLAB) };
 const ROW_H = 78;
 
 /** Whole ringgit, as a post reads money: RM 452,123. */
@@ -97,21 +98,15 @@ export function resultsHeadline(
 const decode = (bytes: Buffer) =>
   sharp(bytes, { limitInputPixels: MAX_DECODE_PIXELS });
 
-// The side steps' centre line (the centre step sits on the poster's).
-const SIDE_CX = PAD + 40 + SIDE.w / 2;
-// A hand shows at most this many cards; more get a "+N MORE" tab.
-export const MAX_FAN = 5;
-// A hand splays from one base like cards held in a hand: each card leans
-// this many degrees further out than the one inside it, its foot this share
-// of a card's width further along, so the tops (the slab label and the art)
-// of the cards behind stay in view.
-const FAN_TILT = 11;
-const FAN_SPREAD = 0.12;
-
-/** Where the i-th card of a hand sits: the front card in the middle (0),
- *  then right, left, right, left (1, -1, 2, -2). */
-export const fanPosition = (i: number): number =>
-  i === 0 ? 0 : i % 2 ? (i + 1) / 2 : -i / 2;
+// A winner's row shows at most this many cards; more are counted under
+// what they won ("+2 MORE CARDS").
+export const MAX_ROW_CARDS = 5;
+// The left of a row: rank, name, what they pulled and won.
+const INFO_W = 280;
+const CARD_GAP = 16;
+const ROW_PAD = 28;
+// The tallest the left block gets, so a row never cuts it.
+const INFO_H = 220;
 
 /** A card's art contained in a w x h box, or null when it does not decode. */
 async function cardPng(
@@ -142,8 +137,8 @@ const placeholderPng = (w: number, h: number): Promise<Buffer> =>
         textEl(
           'PRIZE CARD',
           w / 2,
-          baseline(h / 2, 20),
-          body(20, 4),
+          baseline(h / 2, 18),
+          body(18, 3),
           SILVER,
           'middle',
         ) +
@@ -153,61 +148,14 @@ const placeholderPng = (w: number, h: number): Promise<Buffer> =>
     .png()
     .toBuffer();
 
-/** One winner's cards as composite layers: a single slab, or a hand splayed
- *  from one base under `cx`, its front (most valuable) card upright with its
- *  top at `top`, drawn last, the others a shade darker behind it. `bottom`
- *  is the lowest pixel drawn. */
-async function cardFan(
-  count: number,
-  art: (Buffer | null)[],
-  cx: number,
-  top: number,
-  cardW: number,
-): Promise<{ layers: OverlayOptions[]; missing: boolean; bottom: number }> {
-  const n = Math.min(count, MAX_FAN);
-  const cardH = Math.round(cardW / SLAB);
-  // The hand turns about the front card's foot.
-  const base = top + cardH;
-  // An even hand has no middle card: centre it on its positions' mean.
-  const positions = Array.from({ length: n }, (_, i) => fanPosition(i));
-  const mean = positions.reduce((a, b) => a + b, 0) / n;
-  // Outermost first, so the cards further in overlap them.
-  const order = Array.from({ length: n }, (_, i) => i).sort(
-    (a, b) => Math.abs(positions[b]) - Math.abs(positions[a]) || b - a,
+/** How wide each of a row's `n` cards is drawn: as big as the room allows,
+ *  up to 170 px for the winner and 150 px for second and third. */
+export function rowCardWidth(n: number, rank: number, room: number): number {
+  if (n <= 0) return 0;
+  return Math.min(
+    rank === 1 ? 170 : 150,
+    Math.floor((room - (n - 1) * CARD_GAP) / n),
   );
-  const layers: OverlayOptions[] = [];
-  let missing = false;
-  let bottom = base;
-  for (const i of order) {
-    const p = positions[i] - mean;
-    let card = await cardPng(art[i] ?? null, cardW, cardH);
-    if (!card) {
-      missing = true;
-      card = await placeholderPng(cardW, cardH);
-    }
-    let img = sharp(card);
-    if (i > 0) img = img.modulate({ brightness: 0.8 });
-    const tilt = p * FAN_TILT;
-    if (tilt !== 0) {
-      img = img.rotate(tilt, { background: { r: 0, g: 0, b: 0, alpha: 0 } });
-    }
-    const { data, info } = await img
-      .png()
-      .toBuffer({ resolveWithObject: true });
-    // sharp turns about the centre; place that centre where a turn about the
-    // card's own foot (on the hand's base line) would put it.
-    const rad = (tilt * Math.PI) / 180;
-    const footX = cx + p * cardW * FAN_SPREAD;
-    const midX = footX + (cardH / 2) * Math.sin(rad);
-    const midY = base - (cardH / 2) * Math.cos(rad);
-    layers.push({
-      input: data,
-      left: Math.round(midX - info.width / 2),
-      top: Math.round(midY - info.height / 2),
-    });
-    bottom = Math.max(bottom, Math.round(midY + info.height / 2));
-  }
-  return { layers, missing, bottom };
 }
 
 /**
@@ -278,148 +226,187 @@ export async function composeResultsPoster(
     ),
   );
 
-  // ---- the podium ----------------------------------------------------------
-  // Every card a winner received is on show: one card as a single slab,
-  // several fanned like a hand with the most valuable in front.
-  const panelY = Math.round(y + headSize / 2 + 48);
-  const steps = [
-    { rank: 2, cx: SIDE_CX, top: panelY + 170, single: SIDE, fanW: 160 },
-    { rank: 1, cx: mid, top: panelY + 110, single: CENTER, fanW: 190 },
-    { rank: 3, cx: W - SIDE_CX, top: panelY + 170, single: SIDE, fanW: 160 },
-  ];
+  // ---- the top 3: one row each, every card they won side by side -----------
+  // Who on the left (rank, name, what they pulled and what they won); on the
+  // right each card they received, once per pull minted, upright and whole
+  // with its name under it, the most valuable first.
+  y = Math.round(y + headSize / 2 + 48);
   const placeholders: number[] = [];
-  const podium: string[] = [];
-  let panelBottom = panelY + 110 + CENTER.h;
-  for (const step of steps) {
-    const winner = input.podium.find((p) => p.rank === step.rank);
-    if (!winner) continue; // a hidden winner leaves the step empty
-    const { cx, top } = step;
-    podium.push(
-      textEl(
-        `#${step.rank}${RANK_SUFFIX[step.rank]}`,
-        cx,
-        baseline(top - 34, 40),
-        display(40),
-        RANK_TONE[step.rank],
-        'middle',
-      ),
+  const panels: string[] = [];
+  let spotY = y + INFO_H / 2;
+  const cardsX = PAD + 32 + INFO_W + 24;
+  const cardsW = W - PAD - 32 - cardsX;
+  for (const winner of [...input.podium].sort((a, b) => a.rank - b.rank)) {
+    const first = winner.rank === 1;
+    const n = Math.min(winner.cards.length, MAX_ROW_CARDS);
+    const cardW = rowCardWidth(n, winner.rank, cardsW);
+    const cardH = Math.round(cardW / SLAB);
+    // The cards and up to two lines of names; or the credits tile.
+    const contentH = n ? cardH + 14 + 50 : 180;
+    const rowH = Math.max(contentH, INFO_H) + 2 * ROW_PAD;
+    const rowY = y;
+    panels.push(
+      `<rect x="${PAD + 1}" y="${rowY + 1}" width="${TEXT_W - 2}" height="${rowH - 2}" rx="32" ` +
+        `fill="${CHARCOAL}" stroke="${first ? CHASE : HAIRLINE}" stroke-width="2"/>`,
     );
-    let bottom: number;
-    if (!winner.cards.length) {
+    if (first) spotY = rowY + rowH / 2;
+
+    // Who: the rank, the name, what they pulled, what they won.
+    const infoX = PAD + 40;
+    const nameFont = body(32);
+    const won = `WON ${rmWhole(winner.prizeMyr)}`;
+    const wonSize = await sizeToFit([won], (s) => display(s), 36, 22, INFO_W);
+    const extra = winner.cards.length - n;
+    const lines: {
+      h: number;
+      gap: number;
+      el: (mid: number) => Promise<string>;
+    }[] = [
+      {
+        h: capH(48),
+        gap: 24,
+        el: async (m) =>
+          textEl(
+            `#${winner.rank}${RANK_SUFFIX[winner.rank] ?? ''}`,
+            infoX,
+            baseline(m, 48),
+            display(48),
+            RANK_TONE[winner.rank] ?? WHITE,
+          ),
+      },
+      {
+        h: capH(32),
+        gap: 20,
+        el: async (m) =>
+          textEl(
+            await fit(imageSafeName(winner.name), nameFont, INFO_W),
+            infoX,
+            baseline(m, 32),
+            nameFont,
+            WHITE,
+          ),
+      },
+      ...(winner.pulledMyr !== null
+        ? [
+            {
+              h: capH(20),
+              gap: 20,
+              el: async (m: number) =>
+                textEl(
+                  await fit(
+                    `PULLED ${rmWhole(winner.pulledMyr as number)}`,
+                    body(20, 2),
+                    INFO_W,
+                  ),
+                  infoX,
+                  baseline(m, 20),
+                  body(20, 2),
+                  SILVER,
+                ),
+            },
+          ]
+        : []),
+      {
+        h: capH(wonSize),
+        gap: extra > 0 ? 18 : 0,
+        el: async (m) =>
+          textEl(won, infoX, baseline(m, wonSize), display(wonSize), CHASE),
+      },
+      ...(extra > 0
+        ? [
+            {
+              h: capH(20),
+              gap: 0,
+              el: async (m: number) =>
+                textEl(
+                  `+${extra} MORE CARD${extra === 1 ? '' : 'S'}`,
+                  infoX,
+                  baseline(m, 20),
+                  body(20, 2),
+                  CHASE,
+                ),
+            },
+          ]
+        : []),
+    ];
+    const blockH = lines.reduce((sum, l) => sum + l.h + l.gap, 0);
+    let ly = rowY + (rowH - blockH) / 2;
+    for (const line of lines) {
+      svg.push(await line.el(ly + line.h / 2));
+      ly += line.h + line.gap;
+    }
+
+    // What: every card, side by side, its name under it.
+    const top = rowY + ROW_PAD;
+    if (n) {
+      const total = n * cardW + (n - 1) * CARD_GAP;
+      const x0 = cardsX + (cardsW - total) / 2;
+      const pics = art.get(winner.rank) ?? [];
+      for (let i = 0; i < n; i++) {
+        const x = Math.round(x0 + i * (cardW + CARD_GAP));
+        let card = await cardPng(pics[i] ?? null, cardW, cardH);
+        if (!card) {
+          if (!placeholders.includes(winner.rank))
+            placeholders.push(winner.rank);
+          card = await placeholderPng(cardW, cardH);
+        }
+        layers.push({ input: card, left: x, top });
+        let ny = top + cardH + 14 + capH(18) / 2;
+        for (const line of await twoLines(
+          winner.cards[i],
+          body(18),
+          cardW + CARD_GAP - 4,
+        )) {
+          svg.push(
+            textEl(
+              line,
+              x + cardW / 2,
+              baseline(ny, 18),
+              body(18),
+              SOFT,
+              'middle',
+            ),
+          );
+          ny += 24;
+        }
+      }
+    } else {
       // Credits only: the amount on a plain tile.
-      const { w, h } = step.single;
-      const x = cx - w / 2;
+      const tileW = 300;
+      const tileX = cardsX + (cardsW - tileW) / 2;
+      const tileY = rowY + (rowH - 180) / 2;
       const amount = rmWhole(winner.credits);
-      const size = await sizeToFit([amount], (s) => display(s), 44, 24, w - 28);
-      podium.push(
-        `<rect x="${x + 1}" y="${top + 1}" width="${w - 2}" height="${h - 2}" rx="24" ` +
+      const size = await sizeToFit(
+        [amount],
+        (s) => display(s),
+        48,
+        24,
+        tileW - 40,
+      );
+      svg.push(
+        `<rect x="${tileX.toFixed(1)}" y="${tileY}" width="${tileW}" height="180" rx="24" ` +
           `fill="${GRAPHITE}" stroke="${HAIRLINE}" stroke-width="2"/>`,
         textEl(
           amount,
-          cx,
-          baseline(top + h / 2 - 18, size),
+          tileX + tileW / 2,
+          baseline(tileY + 72, size),
           display(size),
           CHASE,
           'middle',
         ),
         textEl(
           'CREDITS',
-          cx,
-          baseline(top + h / 2 + 34, 24),
-          body(24, 4),
-          SILVER,
-          'middle',
-        ),
-      );
-      bottom = top + h;
-    } else {
-      const fan = await cardFan(
-        winner.cards.length,
-        art.get(step.rank) ?? [],
-        cx,
-        top,
-        winner.cards.length === 1 ? step.single.w : step.fanW,
-      );
-      layers.push(...fan.layers);
-      if (fan.missing) placeholders.push(step.rank);
-      bottom = fan.bottom;
-      const extra = winner.cards.length - MAX_FAN;
-      if (extra > 0) {
-        // More cards than a hand shows: a gold tab over its foot.
-        const tag = `+${extra} MORE`;
-        const tagFont = body(20, 2);
-        const tagW = Math.round((await measure(tag, tagFont)) + 36);
-        const tagH = 40;
-        layers.push({
-          input: await sharp(
-            Buffer.from(
-              `<svg xmlns="http://www.w3.org/2000/svg" width="${tagW}" height="${tagH}">` +
-                `<rect width="${tagW}" height="${tagH}" rx="${tagH / 2}" fill="${CHASE}"/>` +
-                textEl(
-                  tag,
-                  tagW / 2,
-                  baseline(tagH / 2, 20),
-                  tagFont,
-                  INK,
-                  'middle',
-                ) +
-                '</svg>',
-            ),
-          )
-            .png()
-            .toBuffer(),
-          left: Math.round(cx - tagW / 2),
-          top: Math.round(bottom - tagH / 2 - 6),
-        });
-      }
-    }
-    let ny = bottom + 46;
-    const nameFont = body(30);
-    podium.push(
-      textEl(
-        await fit(imageSafeName(winner.name), nameFont, step.single.w + 40),
-        cx,
-        baseline(ny, 30),
-        nameFont,
-        WHITE,
-        'middle',
-      ),
-    );
-    if (winner.pulledMyr !== null) {
-      ny += 40;
-      const pulled = `PULLED ${rmWhole(winner.pulledMyr)}`;
-      podium.push(
-        textEl(
-          await fit(pulled, body(20, 2), step.single.w + 40),
-          cx,
-          baseline(ny, 20),
-          body(20, 2),
+          tileX + tileW / 2,
+          baseline(tileY + 126, 22),
+          body(22, 4),
           SILVER,
           'middle',
         ),
       );
     }
-    ny += 44;
-    const won = `WON ${rmWhole(winner.prizeMyr)}`;
-    const wonSize = await sizeToFit(
-      [won],
-      (s) => display(s),
-      32,
-      22,
-      step.single.w + 40,
-    );
-    podium.push(
-      textEl(won, cx, baseline(ny, wonSize), display(wonSize), CHASE, 'middle'),
-    );
-    panelBottom = Math.max(panelBottom, ny + 36);
+    y = rowY + rowH + 20;
   }
-  const panelH = panelBottom - panelY;
-  const panels = [
-    `<rect x="${PAD + 1}" y="${panelY + 1}" width="${TEXT_W - 2}" height="${panelH - 2}" rx="40" ` +
-      `fill="${CHARCOAL}" stroke="${HAIRLINE}" stroke-width="2"/>`,
-  ];
-  svg.push(...podium);
-  y = panelY + panelH;
+  y -= 20;
 
   // ---- ranks 4-10 as a ledger ------------------------------------------------
   if (input.list.length) {
@@ -513,7 +500,6 @@ export async function composeResultsPoster(
   );
 
   const H = Math.round(pillY + pillH + PAD);
-  const spotY = panelY + 110 + CENTER.h / 2;
   const base = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">` +
       `<defs><radialGradient id="spot" cx="0.5" cy="0.5" r="0.5">` +
