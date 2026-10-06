@@ -1,4 +1,7 @@
-import type { MedusaContainer } from '@medusajs/framework/types';
+import type {
+  IRbacModuleService,
+  MedusaContainer,
+} from '@medusajs/framework/types';
 import { Modules } from '@medusajs/framework/utils';
 
 // The desk bots' read-only admin proxy (GET /reports/admin/read): the owner's
@@ -101,32 +104,66 @@ export function capBody(data: unknown, max = MAX_CHARS) {
   };
 }
 
-/** The id of DESK_BOT_ROLE, created on first use with its one policy
- *  (read on every resource), the way Medusa seeds its own super-admin role.
- *  Looked up on every read, never cached: a token naming a role that has
- *  since been deleted is refused by RBAC on every core screen. */
+/** The id of DESK_BOT_ROLE, with its one policy (read on every resource)
+ *  made sure of on every read, never cached. The policy is declared in
+ *  src/policies/desk-bots.ts so the boot-time policy sync keeps it; this
+ *  also heals a role whose policy was deleted anyway (restored, never
+ *  duplicated) or whose link is missing, so the bots cannot silently lose
+ *  every core screen again. RBAC reads role policies from the database on
+ *  each request, so a heal takes effect at once. */
 export async function deskBotRoleId(scope: MedusaContainer): Promise<string> {
   const rbac = scope.resolve(Modules.RBAC);
+  const policy = await readEverythingPolicy(rbac);
   const [existing] = await rbac.listRbacRoles(
     { name: DESK_BOT_ROLE },
     { order: { created_at: 'ASC' }, take: 1 },
   );
-  if (existing) return existing.id as string;
-  const [readAll] = await rbac.listRbacPolicies({ key: '*:read' }, { take: 1 });
-  const policy =
-    readAll ??
-    (await rbac.createRbacPolicies({
-      key: '*:read',
-      resource: '*',
-      operation: 'read',
-      name: 'Read everything',
-      description: 'Read on every resource, nothing else.',
+  const role =
+    existing ??
+    (await rbac.createRbacRoles({
+      name: DESK_BOT_ROLE,
+      description:
+        'The staff Discord desk bots: read-only access to the admin API through /reports/admin/read.',
     }));
-  const role = await rbac.createRbacRoles({
-    name: DESK_BOT_ROLE,
-    description:
-      'The staff Discord desk bots: read-only access to the admin API through /reports/admin/read.',
-  });
-  await rbac.createRbacRolePolicies({ role_id: role.id, policy_id: policy.id });
+  const [link] = await rbac.listRbacRolePolicies(
+    { role_id: role.id, policy_id: policy.id },
+    { take: 1 },
+  );
+  if (!link) {
+    await rbac.createRbacRolePolicies({
+      role_id: role.id,
+      policy_id: policy.id,
+    });
+  }
   return role.id as string;
 }
+
+/** The live `*:read` policy: restored if it was soft-deleted, created only
+ *  when there has never been one. */
+async function readEverythingPolicy(
+  rbac: IRbacModuleService,
+): Promise<{ id: string }> {
+  const [live] = await rbac.listRbacPolicies(
+    { key: READ_EVERYTHING },
+    { take: 1 },
+  );
+  if (live) return live;
+  const [deleted] = await rbac.listRbacPolicies(
+    { key: READ_EVERYTHING },
+    { take: 1, withDeleted: true },
+  );
+  if (deleted) {
+    await rbac.restoreRbacPolicies([deleted.id]);
+    return deleted;
+  }
+  return rbac.createRbacPolicies({
+    key: READ_EVERYTHING,
+    resource: '*',
+    operation: 'read',
+    name: 'DeskBotsReadEverything',
+    description:
+      'Read on every resource, nothing else: the staff Discord desk bots.',
+  });
+}
+
+const READ_EVERYTHING = '*:read';
