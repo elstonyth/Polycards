@@ -99,6 +99,11 @@ export const ADMIN_AUDIT_ACTIONS = [
   'reorder',
   'edit_odds_set',
   'set_player_group',
+  // Real name + phone lock (spec 2026-10-06): customer service corrects a
+  // player's real name or moves their verified phone — the customer can no
+  // longer do either. entity_type 'customer'. See Migration20261006120000.
+  'set_real_name',
+  'set_phone',
   // Pack gifts and bonus credit (spec 2026-10-07) — see
   // Migration20261007120000.
   'grant_pack_gift',

@@ -24,7 +24,7 @@ import {
 } from './utils/username-guard';
 import {
   requireSignupPhoneProof,
-  blockUnverifiedPhoneWrite,
+  blockCustomerPhoneWrite,
   requirePhoneVerified,
   rejectAdminPhoneWrite,
   requireRegisterPhoneProof,
@@ -346,6 +346,13 @@ export default defineMiddlewares({
       middlewares: [deskReportsRateLimit, requireReportKey()],
     },
     {
+      // The one desk-report POST, the read-only SQL (reports/admin/sql):
+      // same limiter and key. A POST keeps the query out of URLs and logs.
+      matcher: '/reports/*',
+      method: 'POST',
+      middlewares: [deskReportsRateLimit, requireReportKey()],
+    },
+    {
       // OTP send — TWO independent limiter tiers, per-phone FIRST so a
       // hammered number 429s before spending the address budget. The
       // storefront proxies every OTP request server-side, so the address tier
@@ -383,7 +390,7 @@ export default defineMiddlewares({
       // Verified phone change (Task 4) — unlike start/check above, this one is
       // AUTHED: it consumes a 'phone-change'-purpose proof from the OTP flow
       // and is the only way to set a new phone once PHONE_VERIFICATION_REQUIRED
-      // is on (blockUnverifiedPhoneWrite closes the direct /me write). Shares
+      // is on (blockCustomerPhoneWrite closes the direct /me write). Shares
       // the write-tier budget with the rest of the authed mutation matchers.
       matcher: '/store/phone-verification/change',
       method: 'POST',
@@ -482,10 +489,11 @@ export default defineMiddlewares({
       // client-supplied `metadata` (reserved for server-validated keys — see
       // utils/customer-metadata-guard.ts).
       //
-      // blockUnverifiedPhoneWrite (see utils/phone-verification-guard.ts):
-      // when PHONE_VERIFICATION_REQUIRED is on, any `phone` key here is
-      // rejected, null and '' included — the number changes only through the
-      // verified store/phone-verification/change route (Task 4).
+      // blockCustomerPhoneWrite (see utils/phone-verification-guard.ts):
+      // any `phone` key here is rejected, null and '' included, whatever
+      // PHONE_VERIFICATION_REQUIRED says — the number is set only through the
+      // verified store/phone-verification/change route, and once verified
+      // only customer service moves it (spec 2026-10-06).
       //
       // validateUsernameWrite('update'): a rename changes the display name
       // only — the profile URL is the permanent handle and stays put — but the
@@ -497,7 +505,7 @@ export default defineMiddlewares({
       method: 'POST',
       middlewares: [
         rejectCustomerMetadata,
-        blockUnverifiedPhoneWrite,
+        blockCustomerPhoneWrite,
         validateUsernameWrite('update'),
         renameProfileCacheEviction,
       ],
@@ -532,6 +540,23 @@ export default defineMiddlewares({
     // must not delete it as dead.
     {
       matcher: '/store/customers/me/account',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
+      // The customer's one-time real-name write (spec 2026-10-06). Same
+      // bearer-only authenticate as the entry above, for the same reason; the
+      // write tier every other authed account mutation shares.
+      matcher: '/store/customers/me/real-name',
+      method: 'POST',
+      middlewares: [
+        authenticate('customer', ['bearer']),
+        deliveryWriteRateLimit,
+      ],
+    },
+    {
+      // Its one-row read, for the account layout's real-name gate.
+      matcher: '/store/customers/me/real-name',
       method: 'GET',
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
@@ -1070,6 +1095,19 @@ export default defineMiddlewares({
     },
     {
       matcher: '/admin/customers/*/enable',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    // Customer-service corrections (spec 2026-10-06). The phone route's body
+    // key is `new_phone` because rejectAdminPhoneWrite on the
+    // '/admin/customers/*' entry below also matches this path.
+    {
+      matcher: '/admin/customers/*/real-name',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/customers/*/phone',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

@@ -297,6 +297,9 @@ describe('purgeAccountPacksData', () => {
         data: expect.objectContaining({
           disabled: true,
           disabled_reason: 'Account deleted by an operator.',
+          // Spec 2026-10-06: the deleted person's real name does not survive.
+          real_name: null,
+          real_name_set_at: null,
         }),
       }),
       expect.anything(),

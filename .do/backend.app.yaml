@@ -217,7 +217,7 @@ envs:
   # file fails the apply instead of shipping a broken half-configured gateway.
   #
   # Registering these does NOT enforce anything: sendPhoneOtp starts working,
-  # but requireSignupPhoneProof / blockUnverifiedPhoneWrite stay open until
+  # but requireSignupPhoneProof stays open until
   # PHONE_VERIFICATION_REQUIRED is set below.
   #
   # PHONE_VERIFICATION_REQUIRED added 2026-08-04 (Deploy Order step 4) — the

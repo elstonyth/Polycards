@@ -1,27 +1,40 @@
 import { createPgConnection } from '@medusajs/framework/utils';
+import { maskForLog } from '../require-report-key';
+import { redact } from './proxy';
 
-// Read-only SQL for the desk bots (GET /reports/admin/sql): the owner's call
+// Read-only SQL for the desk bots (POST /reports/admin/sql): the owner's call
 // on 2026-10-06 was "just give it everything", read-only, so any desk key may
 // run one query against the live database. It runs as the app's own database
 // user, so the guarantees are layered rather than one role's grants:
 //
 //   - Postgres refuses every write: the query runs in a READ ONLY transaction
-//     on a connection of its own, closed afterwards.
-//   - One statement only: the query travels with a bound parameter (the row
-//     cap), so Postgres parses it as a prepared statement, which refuses a
-//     second command after a semicolon.
-//   - It runs as a subquery, SELECT * FROM (<query>) LIMIT 501, so only a
-//     query expression parses: no SET, no data-modifying WITH.
+//     on a connection of its own, closed afterwards. That also refuses row
+//     locks (FOR UPDATE) and nextval/setval.
+//   - One statement only: every statement carrying the query also carries a
+//     bound parameter, so Postgres parses it as a prepared statement, which
+//     refuses a second command after a semicolon.
+//   - It runs as a subquery, so only a query expression parses: no SET, no
+//     data-modifying WITH.
 //   - The few functions a read-only transaction still runs that reach beyond
 //     the query (other sessions, server files and settings, locks, SQL run
 //     from a string), the tables holding passwords, login tokens and reset
 //     links, and any mention of a password are refused before anything runs.
-//   - Stopped after 20 seconds, at most 500 rows, one query at a time per
-//     server: the site's own 5-connection pool is never touched.
+//   - Secrets never leave: every stored partner login password is masked in
+//     the answer and in any error message, however the query reshaped it
+//     (a jsonb column cast to text, say), and any password, token or key
+//     field is hidden by name, inside JSON text too.
+//   - Bounded: 20 s, 500 rows, 16 KB a row and 1 MB in all, built as JSON by
+//     Postgres so the web process never holds more than that; one query at a
+//     time per server, at most two waiting. The site's own connection pool is
+//     never touched.
 
 export const MAX_ROWS = 500;
-// It travels in the URL, and Node refuses request headers over 16 KB.
 const MAX_SQL = 8_000;
+const MAX_ROW_BYTES = 16_000;
+const MAX_JSON_BYTES = 1_000_000;
+// What the bot gets: Hermes spills a tool result over 50K characters to a
+// file the bot cannot read.
+export const MAX_ANSWER_CHARS = 38_000;
 
 // Matched as whole words in any case, comments and strings included: a false
 // alarm costs the bot a rephrase, a miss could stop the site.
@@ -35,6 +48,9 @@ const REFUSED_FUNCTIONS = new RegExp(
     'pg_create_restore_point',
     'pg_(?:start_|stop_)?backup\\w*',
     'pg_stat_reset\\w*',
+    // Every session's live SQL, client address and application.
+    'pg_stat_activity',
+    'pg_stat_get_\\w*activity\\w*',
     'pg_read_\\w+',
     'pg_ls_\\w+',
     'pg_stat_file',
@@ -58,20 +74,25 @@ const REFUSED_FUNCTIONS = new RegExp(
     'ts_rewrite',
     'dblink\\w*',
     'lo_\\w+',
-    'nextval',
-    'setval',
   ].join('|')})\\b`,
   'i',
 );
-// Password hashes, API keys, invite, reset and MFA tokens, and notification
-// contents (reset links).
+// Password hashes, API keys, invite, reset, verification and MFA tokens, and
+// notification contents (reset links).
 const REFUSED_TABLES =
-  /\b(provider_identity|api_key|(?:member_)?invite|notification|workflow_execution|auth_(?:verification|mfa_\w+|password_reset_token))\b/i;
+  /\b(provider_identity|api_key|(?:member_)?invite|notification|workflow_execution|auth_(?:verification|mfa|password_reset)\w*)\b/i;
 // Partner logins keep their generated password in customer.metadata.
 const PASSWORDS = /\b\w*(password|partner_credential)\w*\b/i;
-const ROW_LOCKS = /\bfor\s+(?:no\s+key\s+update|key\s+share|update|share)\b/i;
+// Real names (spec 2026-10-06): refused by NAME in the query, not only
+// redacted by key in the result — an alias (`real_name AS n`) would walk
+// straight past the key-based redaction. A query that never names the column
+// (a whole row cast to text) is met by the value mask (SECRET_VALUES_SQL).
+const REAL_NAMES = /\breal_name\w*\b/i;
 // U&"..." spells a name in escapes the checks above would not recognize.
 const UNICODE_ESCAPES = /\bu&['"]/i;
+// The statements carry their own bound values ($1 to $3): a placeholder in
+// the query would bind to those, or fail as a protocol error.
+const PLACEHOLDERS = /\$\d/;
 const LEADING_COMMENTS = /^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*/;
 const READ_START = /^(?:select|with|values|table|\()/i;
 
@@ -95,33 +116,108 @@ export function sqlRefusal(sql: unknown): string | null {
     return `The ${table} table is not open to the desk bots: it holds passwords, login tokens or reset links.`;
   }
   if (PASSWORDS.test(sql)) return 'Passwords stay hidden from the desk bots.';
-  if (ROW_LOCKS.test(sql)) {
-    return 'Row locks (FOR UPDATE, FOR SHARE) are not available: the query only reads.';
-  }
+  if (REAL_NAMES.test(sql))
+    return 'Customers’ real names stay hidden from the desk bots.';
   if (UNICODE_ESCAPES.test(sql)) {
     return 'Unicode-escaped names (U&"...") are not accepted: write names plainly.';
+  }
+  if (PLACEHOLDERS.test(sql)) {
+    return 'Placeholders like $1 are not accepted: write the values into the query.';
   }
   return null;
 }
 
-/** The query as it runs: a subquery capped by the one bound parameter. The
- *  newlines keep a trailing -- comment from swallowing the closing paren. */
+/** The query as a capped subquery: $1 is the row cap. The newlines keep a
+ *  trailing -- comment from swallowing the closing paren. */
 export const wrapQuery = (sql: string): string =>
   `SELECT * FROM (\n${sql.trim().replace(/;+$/, '')}\n) AS desk_bot_query LIMIT $1`;
 
-export type SqlAnswer = {
-  columns: string[];
-  rows: Record<string, unknown>[];
-  row_count: number;
-  more_rows: boolean;
-  ms: number;
-};
+/** The rows as one JSON text built by Postgres: rows over $2 bytes are
+ *  counted instead of sent, and a total over $3 bytes comes back null, so
+ *  the web process never holds a big answer. JSON also keeps every value as
+ *  Postgres shows it (a timestamp without time zone stays one). The row is
+ *  `desk_bot_row.*`: a bare name would mean a column of that name first. */
+export const dataQuery = (sql: string): string =>
+  'SELECT CASE WHEN octet_length(t.j) <= $3 THEN t.j END AS rows, ' +
+  'octet_length(t.j) AS bytes, t.n, t.too_big FROM (' +
+  'SELECT coalesce(json_agg(desk_bot_row.*) FILTER (WHERE pg_column_size(desk_bot_row.*) <= $2), ' +
+  "'[]')::text AS j, count(*)::int AS n, " +
+  'count(*) FILTER (WHERE pg_column_size(desk_bot_row.*) > $2)::int AS too_big ' +
+  `FROM (${wrapQuery(sql)}) AS desk_bot_row) AS t`;
+
+// Every partner login password, and every customer's real name (spec
+// 2026-10-06: real names never reach a Discord report), stored where the bots
+// can read. Fetched in the query's own REPEATABLE READ transaction: the same
+// snapshot the query sees, so one saved in between cannot slip past the mask.
+// A name under 6 characters is left to the name and key checks: masking "Tan"
+// would mangle every "Tanjung".
+const SECRET_VALUES_SQL =
+  "SELECT metadata->'partner_credential'->>'password' AS s FROM customer WHERE metadata ? 'partner_credential' " +
+  'UNION SELECT real_name FROM customer_account_state WHERE real_name IS NOT NULL';
+
+/** `text` with every secret value replaced by [hidden], as written and as
+ *  JSON escapes it (a value inside JSON text). */
+export function scrubSecrets(text: string, secrets: readonly string[]): string {
+  let out = text;
+  for (const secret of secrets) {
+    if (secret.length < 6) continue;
+    for (const form of new Set([secret, JSON.stringify(secret).slice(1, -1)])) {
+      out = out.split(form).join('[hidden]');
+    }
+  }
+  return out;
+}
+
+/** What the bot is sent: the counts first and as many whole rows as fit, so a
+ *  cut answer still says it is cut. */
+export function fitAnswer(
+  columns: string[],
+  rows: unknown[],
+  moreRows: boolean,
+  ms: number,
+  maxChars = MAX_ANSWER_CHARS,
+) {
+  const head = { columns, row_count: rows.length, more_rows: moreRows, ms };
+  // Measured as Hermes does: the answer's JSON escaped once more as a
+  // string. Plus room for the rows_shown count and the note.
+  const escaped = (value: unknown) =>
+    JSON.stringify(JSON.stringify(value)).length;
+  let size = escaped({ ...head, rows: [] }) + 400;
+  const shown: unknown[] = [];
+  for (const row of rows) {
+    size += escaped(row) - 1;
+    if (size > maxChars) break;
+    shown.push(row);
+  }
+  if (shown.length === rows.length) return { ...head, rows: shown };
+  return {
+    ...head,
+    rows_shown: shown.length,
+    note: `Only the first ${shown.length} of ${rows.length} rows fit in one answer. Ask again narrower: aggregate in SQL (COUNT, SUM, GROUP BY), select fewer columns, or add LIMIT and OFFSET.`,
+    rows: shown,
+  };
+}
+
+/** A refusal found while running: the bot is told why, with a 400. */
+export class SqlRefused extends Error {}
+/** More queries waiting than this server takes: a 429. */
+export class SqlBusy extends Error {}
+/** The caller left before its turn: nothing to answer. */
+export class SqlCallerGone extends Error {}
+
+export type SqlAnswer = ReturnType<typeof fitAnswer>;
 
 // The slices of knex and node-postgres used here.
+type PgResult = {
+  rows: Record<string, unknown>[];
+  fields: { name: string }[];
+};
 type PgClient = {
-  query(
-    q: string | { text: string; values: unknown[] },
-  ): Promise<{ rows: Record<string, unknown>[]; fields: { name: string }[] }>;
+  query(q: {
+    text: string;
+    values?: unknown[];
+    query_timeout?: number;
+  }): Promise<PgResult>;
 };
 type Knexish = {
   client: {
@@ -135,45 +231,40 @@ type Knexish = {
   destroy(): Promise<void>;
 };
 
+const MAX_WAITING = 2;
+let waiting = 0;
 let queue: Promise<unknown> = Promise.resolve();
 
 /** Runs `sql` (already past sqlRefusal) read-only, after any query still
  *  running on this server. `shared` is the app's PG_CONNECTION: its settings
- *  (the database URL and TLS) open the query's own connection. */
+ *  (the database URL and TLS) open the query's own connection. `gone` says
+ *  whether the caller has left, checked when the query's turn comes. */
 export function runReadOnlyQuery(
   shared: unknown,
   sql: string,
   timeoutMs: number,
+  gone: () => boolean = () => false,
 ): Promise<SqlAnswer> {
-  const run = queue.then(() =>
-    // Postgres stops the query itself; this only keeps a dead connection
-    // from holding up every later query.
-    withDeadline(
-      runNow(shared as Knexish, sql, timeoutMs),
-      timeoutMs + 15_000,
-    ),
+  if (waiting >= MAX_WAITING) {
+    return Promise.reject(
+      new SqlBusy(
+        'The database tool is busy with other questions. Try again in a minute.',
+      ),
+    );
+  }
+  waiting += 1;
+  const run = queue.then(() => {
+    waiting -= 1;
+    if (gone()) throw new SqlCallerGone();
+    return runNow(shared as Knexish, sql, timeoutMs);
+  });
+  // Keep the chain, not the answer.
+  queue = run.then(
+    () => undefined,
+    () => undefined,
   );
-  queue = run.catch(() => undefined);
   return run;
 }
-
-const withDeadline = <T>(work: Promise<T>, ms: number): Promise<T> =>
-  new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error('The database did not answer in time.')),
-      ms,
-    );
-    work.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (err: unknown) => {
-        clearTimeout(timer);
-        reject(err);
-      },
-    );
-  });
 
 async function runNow(
   shared: Knexish,
@@ -192,57 +283,139 @@ async function runNow(
     pool: { min: 0, max: 1, acquireTimeoutMillis: 15_000 },
   }) as unknown as Knexish;
   const started = Date.now();
+  let secrets: string[] = [];
   try {
     const conn = await db.client.acquireConnection();
+    // node-postgres gives up on any one statement after this, so a dead
+    // connection cannot hold the queue: Postgres stops the query itself at
+    // timeoutMs.
+    const step = (text: string, values?: unknown[]) =>
+      conn.query({ text, values, query_timeout: timeoutMs + 5_000 });
     try {
-      await conn.query('BEGIN TRANSACTION READ ONLY');
-      await conn.query(
-        `SET LOCAL statement_timeout = ${Math.trunc(timeoutMs)}`,
+      // One round trip, no caller text, so the simple protocol is fine here.
+      await step(
+        // One snapshot for the secrets and the answer (see SECRET_VALUES_SQL).
+        'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY; ' +
+          `SET LOCAL statement_timeout = ${Math.trunc(timeoutMs)}; ` +
+          'SET LOCAL lock_timeout = 2000; ' +
+          // Ends the transaction if this server vanishes mid-query.
+          'SET LOCAL idle_in_transaction_session_timeout = 30000; ' +
+          "SET LOCAL application_name = 'desk-bots-sql'",
       );
-      await conn.query('SET LOCAL lock_timeout = 2000');
-      await conn.query("SET LOCAL application_name = 'desk-bots-sql'");
-      const result = await conn.query({
-        text: wrapQuery(sql),
-        values: [MAX_ROWS + 1],
-      });
-      const rows = result.rows.slice(0, MAX_ROWS);
-      return {
-        columns: result.fields.map((f) => f.name),
-        rows,
-        row_count: rows.length,
-        more_rows: result.rows.length > MAX_ROWS,
-        ms: Date.now() - started,
-      };
+      secrets = (await step(SECRET_VALUES_SQL)).rows
+        .map((r) => r.s)
+        .filter((s): s is string => typeof s === 'string');
+      // The columns first (LIMIT 0 runs nothing): rows are JSON objects, so
+      // a name used twice would keep only one of its values.
+      const columns = (await step(wrapQuery(sql), [0])).fields.map(
+        (f) => f.name,
+      );
+      const twice = columns.find((c, i) => columns.indexOf(c) !== i);
+      if (twice) {
+        throw new SqlRefused(
+          `Two columns are both named ${twice}: give each its own name with AS.`,
+        );
+      }
+      const [result] = (
+        await step(dataQuery(sql), [
+          MAX_ROWS + 1,
+          MAX_ROW_BYTES,
+          MAX_JSON_BYTES,
+        ])
+      ).rows as {
+        rows: string | null;
+        bytes: number;
+        n: number;
+        too_big: number;
+      }[];
+      if (result.too_big > 0) {
+        throw new SqlRefused(
+          `${result.too_big} of the rows are over 16 KB each, too big to send. Select fewer or narrower columns (one field of a JSON column rather than all of it).`,
+        );
+      }
+      if (result.rows === null) {
+        throw new SqlRefused(
+          `The answer is ${(result.bytes / 1e6).toFixed(1)} MB, too big to send. Ask again narrower: aggregate in SQL, select fewer columns, or add LIMIT.`,
+        );
+      }
+      const rows = (
+        JSON.parse(scrubSecrets(result.rows, secrets)) as unknown[]
+      ).slice(0, MAX_ROWS);
+      return fitAnswer(
+        columns,
+        redact(rows) as unknown[],
+        result.n > MAX_ROWS,
+        Date.now() - started,
+      );
     } finally {
       await db.client.releaseConnection(conn);
     }
+  } catch (err) {
+    // Postgres repeats bad input in its errors (a cast's value, which can be
+    // megabytes): mask a start long enough to hold any whole secret near the
+    // cut, then keep what a bot can read.
+    if (err instanceof Error) {
+      err.message = scrubSecrets(err.message.slice(0, 4_000), secrets).slice(
+        0,
+        2_000,
+      );
+    }
+    throw err;
   } finally {
     // Closing the connection ends the transaction: nothing is ever committed.
-    await db.destroy();
+    // Not awaited: a dead socket must not hold the next query.
+    void db.destroy().catch(() => undefined);
   }
 }
 
-/** A Postgres error as the sentence the bot gets, or null for any other
- *  failure (the database did not answer). */
+// SQLSTATE classes that mean the database, not the query, failed: connection
+// (08, except 08P01, a query's own protocol error), resources (53), operator
+// intervention (57, except 57014, our own timeout) and system (58) errors.
+// Internal errors (XX) stay with the query: a huge value causes them.
+const UNAVAILABLE = /^(08(?!P01)|53|58|57(?!014))/;
+
+/** A Postgres error about the query as the sentence the bot gets, or null
+ *  for any other failure (the database did not answer). */
 export function sqlErrorMessage(err: unknown): string | null {
   const e = (err ?? {}) as {
     code?: unknown;
     message?: unknown;
     hint?: unknown;
+    severity?: unknown;
   };
-  if (typeof e.code !== 'string' || !/^[0-9A-Z]{5}$/.test(e.code)) return null;
+  // Only node-postgres's DatabaseError carries a severity; a socket error's
+  // code (EPIPE) has the same shape as a SQLSTATE.
+  if (typeof e.severity !== 'string' || typeof e.code !== 'string') {
+    return null;
+  }
+  if (UNAVAILABLE.test(e.code)) return null;
   if (e.code === '57014') {
     return 'The query ran too long and was stopped. Narrow it: filter on an indexed column such as created_at or customer_id, aggregate in SQL, or add LIMIT.';
   }
   if (e.code === '25006') {
-    return 'That would change the database: the desk bots can only read.';
+    return 'That would change the database (or lock rows): the desk bots can only read.';
   }
   const hint = typeof e.hint === 'string' && e.hint ? ` Hint: ${e.hint}` : '';
-  const tables =
+  const lookup =
     e.code === '42P01'
       ? " To list tables: SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'."
       : e.code === '42703'
         ? " To list a table's columns: SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '<table>'."
         : '';
-  return `Postgres: ${String(e.message)}.${hint}${tables}`;
+  return `Postgres: ${String(e.message)}.${hint}${lookup}`;
 }
+
+/** The query as it is logged: comments dropped and every quoted value,
+ *  quoted name, email and long number masked, so an email, phone or bank
+ *  number a bot filtered on never reaches the logs. */
+export const sqlForLog = (sql: string): string =>
+  maskForLog(
+    sql
+      .replace(/\$(\w*)\$[\s\S]*?\$\1\$/g, "'…'")
+      .replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/"(?:[^"]|"")*"/g, '"…"')
+      .replace(/'(?:[^'\\]|\\.|'')*'/g, "'…'"),
+  )
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 500);

@@ -1,6 +1,6 @@
 # ADR 0009 — The staff desk bots read the admin API through a read-only proxy
 
-- **Status**: Accepted
+- **Status**: Accepted (amended 2026-10-06, see the end)
 - **Date**: 2026-10-04
 - **Extends**: `docs/superpowers/specs/2026-09-29-desk-reports-design.md`
   (the desk-report keys) and the 2026-10-03 change that let every desk key open
@@ -67,3 +67,37 @@ covered. The owner asked for "full access", read-only, for every bot.
   (`provision-key.mjs <desk>`, then do-apply). To cut every bot off the admin
   API, remove the route. Deleting the role does not work: it is recreated on
   the next read.
+
+## Amendment 2026-10-06: everything, read-only
+
+On 2026-10-06 the owner widened the access: the bots answer whatever staff ask
+and never refuse for privacy, because Discord roles already decide who talks
+to them. Passwords, API keys and login tokens stay hidden. This replaces parts
+of the decision above.
+
+- **The `*:read` policy is declared** in `src/policies/desk-bots.ts` (#692).
+  Created at run time, the boot-time policy sync soft-deleted it at the next
+  deploy, and every core screen refused the bots for two days.
+- **Open now** (#693): the staff list (`/admin/users`) and the two full
+  bank-number reveals. Account numbers are no longer cut to their last 4
+  digits. Still blocked: invites, API keys, workflow executions,
+  notifications, uploads, PriceCharting and file exports.
+- **A payout-details reveal writes its audit row** (actor
+  `desk-bots-readonly`). That GET is not pure, on purpose: it is the reveal's
+  audit trail, and the "keep GET handlers pure" rule above stays for every
+  other route.
+- **Read-only SQL** (`POST /reports/admin/sql`, MCP tool `db_query`): one
+  query on the live database in a READ ONLY transaction on its own connection,
+  checked before it runs and bounded in time, rows and bytes
+  (`reports/admin/db-query.ts` lists every rule). Field-name redaction cannot
+  protect SQL rows, because a query picks its own shape. So every stored
+  partner password is also masked by value, in answers and in errors. A query
+  that deliberately transforms a value gets past a mask. Encrypting partner
+  passwords at rest is the fix that closes this.
+- **The website's code, read-only** (`code_files`, `code_search`,
+  `code_read`): a shallow bare clone of master beside the MCP server, with env
+  files, deploy specs and key files refused.
+- **Customer details now include full bank account numbers**, and staff
+  emails come with the staff list. The tool descriptions and every SOUL keep
+  them in the staff channel: never in public posts, captions, web searches or
+  URLs.

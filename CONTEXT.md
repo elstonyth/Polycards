@@ -53,8 +53,25 @@ The one-time free pack a newly registered account may open once (`category=
 `reward_box`; storefront entry is the floating badge only). Its Pull has
 `source='free'`: excluded from the leaderboard/challenge/feed like `'reward'`,
 and LOCKED from Buyback and Delivery until the customer's first paid Open
-(computed — any `source='pack'` Pull unlocks it).
+(computed — any `source='pack'` Pull unlocks it). Since 2026-10-06 the claim
+also needs a verified phone AND a Real Name on file (anti-farm gate in
+`claimFreePackStep`, unconditional — no flag, no partner exemption); a refused
+claim stays unspent, and `GET /store/free-pack` lists what is `missing`.
 _Avoid_: reward (that is the daily VIP draw), demo spin
+
+**Real Name**:
+The name the account's phone number is registered to in Touch 'n Go eWallet
+(`customer_account_state.real_name`, spec
+docs/superpowers/specs/2026-10-06-real-name-and-phone-lock-design.md). Staff
+search the phone in TNG and compare names when a big hit looks like a farmed
+account. Required at emailpass signup (form + double confirm, saved by
+`POST /store/customers/me/real-name` right after the account exists); every
+account without one meets a non-dismissable gate on the account pages
+(`RealNameModal`, after the phone gate). The customer sets it ONCE; only
+customer service changes it (`POST /admin/customers/:id/real-name`, audited
+`set_real_name`). Private: never on a public profile, log line or report.
+_Avoid_: legal name, full name (in code), `last_name` (that is a separate,
+client-editable Medusa field Google fills)
 
 **Vault**:
 A customer's held Pulls — the cards they keep. Not a table: a vault item is a
@@ -351,14 +368,16 @@ Phone number confirmation via SMS-delivered OTP (one-time password). When enable
 _Avoid_: token (that's the proof token below), password (this is a numeric code)
 
 **Proof Token**:
-Stateless HMAC-signed token — NOT a JWT: a custom 2-segment `base64url(payload).base64url(hmac)` format, domain-separated from the app's own HS256 JWTs (which share the same `jwtSecret`) via a fixed prefix in the HMAC input. 10-minute TTL, issued after successful OTP check. Single-purpose: proves one phone number for one flow (`signup` | `phone-change` | `password-reset`). Replay within TTL on the same phone is accepted for `phone-change` and `password-reset` (OTP resend cost is negligible). A `signup` proof creates one account: `requireSignupPhoneProof` claims it in Redis (SET NX, keyed on a hash of the token) and gives it back if the create fails; the claim fails closed when Redis is unreachable. Different phones produce cryptographically distinct tokens.
+Stateless HMAC-signed token — NOT a JWT: a custom 2-segment `base64url(payload).base64url(hmac)` format, domain-separated from the app's own HS256 JWTs (which share the same `jwtSecret`) via a fixed prefix in the HMAC input. 10-minute TTL, issued after successful OTP check. Single-purpose: proves one phone number for one flow (`signup` | `phone-change` | `password-reset`). Replay within TTL on the same phone is accepted for `password-reset` (OTP resend cost is negligible). A `signup` proof creates one account: `requireSignupPhoneProof` claims it in Redis (SET NX, keyed on a hash of the token) and gives it back if the create fails; the claim fails closed when Redis is unreachable. A `phone-change` proof is single-use the same way since 2026-10-07 (same store, key prefix `phone-proof:phone-change:`): the change route claims it after the phone lock and the re-auth gate, and gives it back if the write is refused. Before that, one code fired at once from many phoneless accounts landed the same verified number on all of them (the 2026-10-06 welcome-pack farming finding). Different phones produce cryptographically distinct tokens.
 
 **Feature Flags** — two backend env vars, deliberately separate because they have very different blast radii:
 
-- `PHONE_VERIFICATION_REQUIRED` — gates WRITING a phone: signup (`requireSignupPhoneProof`) and phone-change (`blockUnverifiedPhoneWrite`). Affects new signups only; turning it off costs nothing already banked. Also decides whether the `customer.created` subscriber stamps `phone_verified_at` (a phone written while it was off was never proven).
+- `PHONE_VERIFICATION_REQUIRED` — gates WRITING a phone at signup (`requireSignupPhoneProof`). Since 2026-10-06 it no longer governs `blockCustomerPhoneWrite`, which refuses a `phone` key on `POST /store/customers/me` unconditionally. Affects new signups only; turning it off costs nothing already banked. Also decides whether the `customer.created` subscriber stamps `phone_verified_at` (a phone written while it was off was never proven).
 - `PHONE_GATE_REQUIRED` — gates SPENDING and SHIPPING: `requirePhoneVerified` on `POST /store/credits/topup`, `/store/credits/deposit`, `/store/delivery-orders`. Blocks every account without a `customer_account_state.phone_verified_at` stamp — the large majority at cutover. **Unset means "follow `PHONE_VERIFICATION_REQUIRED`"**, so nothing has to be configured for the intended behaviour; it exists so the money path can be reopened in a hurry without also reopening unproven phone writes. Deliberately NOT applied to cancel or any read: an unverified player must still be able to unwind an order and see their own data.
 
 Build-time storefront flag `NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED` displays OTP UI; flag drift is UX-only, backend gates are authoritative. Verification state is visible per player in the admin Players list ("Phone verified" column).
+
+**Phone lock (operator decision 2026-10-06).** Once an account has verified a number (`phone_verified_at` set) the customer can never change it: `POST /store/phone-verification/change` refuses it first thing ("Contact customer service"), and Settings shows the number read-only. An account that never verified still goes through the change route exactly once: with no number on file it adds one (a Google signup's first number), and with an unverified pre-enforcement number on file it may only verify THAT number — any other is refused ("contact customer service"). Customer service moves a number with `POST /admin/customers/:id/phone` (body key `new_phone` — `rejectAdminPhoneWrite` still refuses `phone` on every `/admin/customers/*` POST): one-phone-one-account, `has_account` rows only, stamps the account verified, audits `set_phone`, and emails the account a masked change notice. The lock is unconditional, like the re-auth gate — not part of the flag rollback lever.
 
 **Required-phone gate (operator decision 2026-09-08).** A phone is required to hold an account. The emailpass signup form collects and verifies one inline; a first Google login is the only path that creates a phoneless account, so the account layout (`src/app/(account)/layout.tsx`, `shouldGatePhone`) mounts a non-dismissable `PhoneOnboardingModal` over every account page for a **password-less account with no phone** until a number is verified (SMS first, or a voice call up front; Log out is the only other exit). Existing phoneless Google accounts meet it on their next account-page visit. Password accounts with no phone (legacy, pre-enforcement) are deliberately exempt — the change route demands their password first and the gate has no field for it — and keep the Settings flow plus the `/me` Settings-tile highlight. Scope is the account tree only: a gated player can still browse the catalog; the money and goods paths are refused by `requirePhoneVerified` and `PhoneGateAction` sends them to `/settings`, where the gate waits. The account read that decides the cohort fails OPEN (no gate) on error — the backend gates, not the modal, are the enforcement.
 
@@ -399,7 +418,7 @@ What shipped: every backend request the storefront makes for a visitor goes thro
 **Flows**:
 
 - **Signup**: POST /store/customers with `x-phone-verification` header (proof token) when a phone is provided and feature flag is on.
-- **Phone change**: POST /store/phone-verification/change (authed; body {phone, token}) exchanges proof token for verified phone write. POST /store/customers/me rejects any `phone` key (null and empty included) under enforcement.
+- **Phone change**: POST /store/phone-verification/change (authed; body {phone, token}) exchanges proof token for verified phone write — only while the account has never verified, and only for the number already on file when there is one (phone lock, above). POST /store/customers/me rejects any `phone` key (null and empty included), whatever the flag says.
 - **Password reset**: OTP is sent to on-file phone via POST /store/phone-verification/start (purpose 'password-reset'), exchanged for proof token at POST /store/phone-verification/check, then exchanged for single-use reset token at POST /store/phone-verification/password-reset.
 
 **Rate Limits** (`phone-otp`):
@@ -417,7 +436,7 @@ Tunable via env vars — per-phone: `PHONE_OTP_START_PHONE_RATE_BURST_LIMIT`, `P
 
 **Accepted Ceilings** (scope boundaries):
 
-- Phone-change and password-reset proof replay within 10m TTL on the same phone number (acceptable). Signup proofs are single-use.
+- Password-reset proof replay within 10m TTL on the same phone number (acceptable). Signup and phone-change proofs are single-use.
 - Legacy non-E.164 phones cannot initiate password reset (only E.164-normalized phones from signup flow work).
 - Phoneless direct-API signup unaffected (unchanged pre-existing behavior).
 - OTP codes are per-phone, not per-purpose: Twilio re-triggers the SAME code for a number within the 10-minute window regardless of which flow requested it, and POST /store/phone-verification/start is public — so a code phished from a user for one purpose could be checked and exchanged for a proof token under a different purpose. The proof TOKEN itself remains purpose-bound (verifyPhoneProof rejects a mismatched purpose), and every password-reset proof mint still emails the account owner before anything usable comes back. True separation would need one Twilio Verify Service per purpose (three SIDs instead of one) — noted as a hardening option, deliberately not shipped.
@@ -440,7 +459,7 @@ Reordered from the original plan (Finding 3, pre-merge review): the original ord
 
 1. Merge all code changes (Tasks 1–8) and deploy to production with **both flags unset** — zero behavior change, OTP routes and proof logic live but gates are off.
 2. At deploy time: add the three Twilio secrets ONLY (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`) to backend DO app spec (app-level, alongside Resend vars) — **do not set `PHONE_VERIFICATION_REQUIRED` yet**. DONE 2026-08-04: the three placeholders are in `.do/backend.app.yaml` and the three names are in `do-apply.ps1`'s required-key list, with real values in `deploy/.env.deploy`. **Placeholders and values move in the same change — an unresolved token aborts every backend apply, not just this feature.** Note: this alone makes POST /store/phone-verification/start a live SMS sender even with the backend flag off (that route isn't flag-gated) — acceptable (it's already rate-limited, see above), but keep this step immediately adjacent to step 3 rather than leaving it live unattended.
-3. Set `NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=true` in storefront **build environment** and rebuild — build-time-inlined, rebuilds ship the OTP UI. DONE 2026-08-04: root Dockerfile ARG default (the value that actually reaches the bundle — App Platform build-time env is unreliable) + the matching `.do/storefront.app.yaml` env; ships on merge (deploy_on_push). Signup/change/reset now work end-to-end WITHOUT enforcement: the OTP routes and the `x-phone-verification` header plumbing (`src/lib/actions/auth.ts`) aren't flag-gated, only `requireSignupPhoneProof`/`blockUnverifiedPhoneWrite` are — so there is no window where the storefront sends a proof token the backend doesn't yet require, or the reverse.
+3. Set `NEXT_PUBLIC_PHONE_VERIFICATION_REQUIRED=true` in storefront **build environment** and rebuild — build-time-inlined, rebuilds ship the OTP UI. DONE 2026-08-04: root Dockerfile ARG default (the value that actually reaches the bundle — App Platform build-time env is unreliable) + the matching `.do/storefront.app.yaml` env; ships on merge (deploy_on_push). Signup/change/reset now work end-to-end WITHOUT enforcement: the OTP routes and the `x-phone-verification` header plumbing (`src/lib/actions/auth.ts`) aren't flag-gated, only `requireSignupPhoneProof`/`blockCustomerPhoneWrite` are — so there is no window where the storefront sends a proof token the backend doesn't yet require, or the reverse.
 4. Set backend `PHONE_VERIFICATION_REQUIRED=true` — enforcement turns on. The storefront has been sending proof tokens since step 3, so this step alone flips the gate closed with no outage: unlike the original order, nothing here waits on a storefront rebuild. DONE 2026-08-04: the flag is in `.do/backend.app.yaml`; it goes LIVE on the next `do-apply.ps1 backend`, run only after the step-3 storefront build is ACTIVE.
 5. Smoke test production: signup with a real phone number (operator's), phone change, forgot-by-phone flow. Watch backend logs for `[phone-otp]` warnings; monitor Twilio console for delivery success.
 6. Rollback levers — pick by what is actually hurting:

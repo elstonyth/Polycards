@@ -439,6 +439,11 @@ export const ProfileHandleSchema = z.looseObject({ handle: z.string() });
  *  flag to false (no exemption, no block), which is the pre-feature behaviour. */
 export const AccountInfoSchema = z.looseObject({
   hasPassword: z.boolean(),
+  // Real name + phone lock (spec 2026-10-06). OPTIONAL for deploy skew: an
+  // absent field reads as "unknown", which raises no gate and offers no
+  // phone edit (see getAccountInfo).
+  realName: z.string().nullable().optional(),
+  phoneVerified: z.boolean().optional(),
   policy: z
     .looseObject({
       partner: z.boolean(),
@@ -446,6 +451,14 @@ export const AccountInfoSchema = z.looseObject({
       verification_exempt: z.boolean(),
     })
     .optional(),
+});
+
+/** POST /store/customers/me/real-name — the stored (normalized) name. */
+export const RealNameSchema = z.looseObject({ real_name: z.string() });
+
+/** GET /store/customers/me/real-name — the name on file, or null. */
+export const RealNameReadSchema = z.looseObject({
+  real_name: z.string().nullable(),
 });
 
 // --- actions/vault.ts -------------------------------------------------------
@@ -503,6 +516,10 @@ export const VaultPageSchema = z.looseObject({
 export const FreePackSchema = z.looseObject({
   eligible: z.boolean(),
   slug: z.string().nullable(),
+  /** Authed answers only (spec 2026-10-06): what the claim would still be
+   *  refused for. Optional for deploy skew — absent reads as nothing missing,
+   *  and the backend claim step stays the enforcement. */
+  missing: z.array(z.enum(['phone', 'real_name'])).optional(),
   /** Anonymous answers only: "an active free pack exists" (the signup hook). */
   promo: z.boolean().optional(),
 });

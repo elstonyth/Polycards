@@ -15,12 +15,10 @@ import {
 } from '@/lib/profile-validation';
 import { PhoneField } from '@/components/PhoneField';
 import { PhoneOtpStep } from '@/components/auth/PhoneOtpStep';
+import { RealNameEntry } from '@/components/account/RealNameEntry';
 import { changePhone } from '@/lib/actions/phone-verification';
 import { usePhoneOtpSender } from '@/lib/use-phone-otp-sender';
-import {
-  PHONE_VERIFICATION_REQUIRED,
-  type PhoneOtpChannel,
-} from '@/lib/phone-verification';
+import type { PhoneOtpChannel } from '@/lib/phone-verification';
 import { SITE_URL } from '@/lib/site';
 
 // The profile-link preview shows a host, not a full URL — the deployed origin
@@ -28,8 +26,7 @@ import { SITE_URL } from '@/lib/site';
 // isn't serving.
 const SITE_HOST = SITE_URL.replace(/^https?:\/\//, '');
 
-// Read-only treatment shared by the email field and (under enforcement) the
-// phone field — copied from the email input's classes below.
+// Read-only treatment shared by the email, phone and real-name fields.
 const READONLY_CLASS =
   'h-11 w-full cursor-not-allowed overflow-hidden rounded-xl border border-white/10 bg-white/[0.02] px-3 text-sm text-ellipsis text-white/55 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-0';
 
@@ -44,9 +41,23 @@ type Props = {
   /** The permanent profile handle (null if the read failed) — shown under the
    *  username so a rename visibly leaves the profile link alone. */
   handle: string | null;
+  /** Spec 2026-10-06 (getAccountInfo): the account's real name — a string
+   *  once set (read-only from then on), `null` when none is on file (the
+   *  one-time entry shows), `undefined` when it could not be read. */
+  realName?: string | null;
+  /** `true` once the account verified a phone, which locks it: only customer
+   *  service can move it. `undefined` (unread) is treated as locked too — the
+   *  change route refuses a verified account, so offering the flow on a guess
+   *  would only spend an OTP to be refused. */
+  phoneVerified?: boolean;
 };
 
-export default function SettingsForm({ customer, handle }: Props) {
+export default function SettingsForm({
+  customer,
+  handle,
+  realName: initialRealName,
+  phoneVerified,
+}: Props) {
   const router = useRouter();
   const { customer: authCustomer, setCustomer } = useAuth();
   const [busy, setBusy] = useState(false);
@@ -56,20 +67,32 @@ export default function SettingsForm({ customer, handle }: Props) {
   // Local phone display, so a verified change reflects immediately without
   // waiting on the router.refresh() below to re-fetch the server component.
   const [phone, setPhone] = useState(customer.phone ?? null);
-  // National format for display — matches what the flag-off editable
-  // PhoneField already shows (e.g. "010-766 7787", not raw "+60107667787");
-  // the stored/submitted value stays E.164 either way.
+  // National format for display — matches what the PhoneField shows (e.g.
+  // "010-766 7787", not raw "+60107667787"); the stored value stays E.164.
   const displayPhone = phone
     ? (parsePhoneNumberFromString(phone)?.formatNational() ?? phone)
     : 'Not set';
-  // Verified phone-change panel (PHONE_VERIFICATION_REQUIRED only): 'closed'
-  // (read-only value + Change button) -> 'entry' (new-number PhoneField) ->
+  // Phone lock (spec 2026-10-06): a verified number is customer service's to
+  // move. When the account read failed (`phoneVerified` undefined) the stored
+  // number decides: a number on file is treated as locked (the change route
+  // refuses a verified one, so offering the flow on a guess only spends an
+  // OTP), but an account with NO number keeps its Add button — a verified
+  // account always has one, and the legacy password cohort the phone modal
+  // exempts can add a number nowhere else. A successful change locks it.
+  const [phoneLocked, setPhoneLocked] = useState(
+    phoneVerified ?? customer.phone != null,
+  );
+  // Local copy so a confirmed save shows read-only at once.
+  const [realName, setRealName] = useState(initialRealName);
+  // Phone add/verify panel (until the phone is verified): 'closed'
+  // (read-only value + Add/Verify button) -> 'entry' (PhoneField) ->
   // 'otp' (PhoneOtpStep) -> optionally 'old-otp'. `pendingPhone` carries the
   // normalized new number from 'entry' into 'otp' (and into the changePhone
   // call after verifying).
   //
-  // 'old-otp' exists for ONE cohort: a Google-only account that already has a
-  // phone. The backend refuses to move that account's number on the new-number
+  // 'old-otp' exists for ONE cohort: a Google-only account that already has an
+  // UNVERIFIED phone (e.g. a pre-enforcement password account whose password
+  // went when it linked Google). The backend refuses to move that account's number on the new-number
   // proof alone — with no password to ask for, the equivalent identity proof is
   // an OTP to the number being moved AWAY from — and it is the only thing that
   // knows which cohort this is (see changePhone's `needsOldPhoneProof`). So the
@@ -108,14 +131,11 @@ export default function SettingsForm({ customer, handle }: Props) {
     const form = new FormData(e.currentTarget);
     setBusy(true);
     try {
+      // Never the phone: it is written only through changePhone (OTP), and
+      // once verified only customer service moves it.
       const result = await updateProfile({
         first_name: String(form.get('first_name') ?? ''),
         last_name: String(form.get('last_name') ?? ''),
-        // Under enforcement there's no editable phone field in this form
-        // (see below) — phone writes go through changePhone instead.
-        ...(PHONE_VERIFICATION_REQUIRED
-          ? {}
-          : { phone: String(form.get('phone') ?? '') }),
       });
 
       if (result.ok) {
@@ -166,7 +186,9 @@ export default function SettingsForm({ customer, handle }: Props) {
       setPhone(result.phone);
       clearPhoneChangeSecrets();
       setPhoneChange('closed');
-      setNote({ ok: true, text: 'Phone updated.' });
+      // The change route stamps the account verified — locked from here.
+      setPhoneLocked(true);
+      setNote({ ok: true, text: 'Phone verified.' });
       router.refresh();
       return;
     }
@@ -249,43 +271,7 @@ export default function SettingsForm({ customer, handle }: Props) {
     }
   }
 
-  if (!PHONE_VERIFICATION_REQUIRED) {
-    return (
-      <form onSubmit={onSubmit} className="flex flex-col gap-4">
-        <UsernameField
-          value={nameDraft}
-          onValueChange={setNameDraft}
-          handle={handle}
-        />
-        <Field
-          label="Last name"
-          name="last_name"
-          defaultValue={customer.last_name ?? ''}
-          autoComplete="family-name"
-          placeholder="Optional"
-          maxLength={NAME_MAX}
-        />
-        <label className="block">
-          <span className="mb-1.5 block text-[12px] font-medium text-white/55">
-            Phone
-          </span>
-          <PhoneField
-            name="phone"
-            defaultValue={customer.phone ?? ''}
-            inputClassName={INPUT_CLASS}
-            placeholder="Phone number"
-          />
-          <span className="mt-1 block text-[11px] text-white/55">
-            Used for delivery updates. Pick your country code.
-          </span>
-        </label>
-        <EmailField email={customer.email} />
-        <SaveRow busy={busy} note={note} />
-      </form>
-    );
-  }
-
-  // PHONE_VERIFICATION_REQUIRED: the name inputs + Save button must stay
+  // The name inputs + Save button must stay
   // mounted across every phoneChange sub-state, including 'otp' (which
   // renders PhoneOtpStep's own <form> — code input + Verify — and forms
   // can't validly nest). An earlier version of this file solved the nesting
@@ -317,6 +303,14 @@ export default function SettingsForm({ customer, handle }: Props) {
         placeholder="Optional"
         maxLength={NAME_MAX}
       />
+      <RealNameField
+        realName={realName}
+        onSaved={(name) => {
+          setRealName(name);
+          setNote({ ok: true, text: 'Real name saved.' });
+          router.refresh();
+        }}
+      />
       {/* Not a <label> — this block holds several interactive controls
           (Change button, or the entry/OTP step's own inputs), and a <label>
           forwards clicks/announces to only the first one. The read-only
@@ -325,7 +319,16 @@ export default function SettingsForm({ customer, handle }: Props) {
         <span className="mb-1.5 block text-[12px] font-medium text-white/55">
           Phone
         </span>
-        {phoneChange === 'closed' && (
+        {phoneChange === 'closed' && phoneLocked && (
+          <input
+            type="tel"
+            value={displayPhone}
+            readOnly
+            aria-label="Phone (read-only)"
+            className={READONLY_CLASS}
+          />
+        )}
+        {phoneChange === 'closed' && !phoneLocked && (
           <div className="flex items-center gap-3">
             <input
               type="tel"
@@ -340,15 +343,19 @@ export default function SettingsForm({ customer, handle }: Props) {
               onClick={() => {
                 setNote(null);
                 clearPhoneChangeSecrets();
+                // "Verify" a number already on file: the backend accepts only
+                // THAT number (spec 2026-10-06), so start from it rather than
+                // an empty field.
+                if (phone) setPendingPhone(phone);
                 setPhoneChange('entry');
               }}
               className="h-11 shrink-0 rounded-xl border border-white/10 bg-white/[0.05] px-4 text-sm font-medium text-white transition-colors hover:bg-white/[0.1] disabled:opacity-70"
             >
-              {/* "Add" for an account with no number yet — most accounts, and
-                  the ones sent here by the topup/delivery verification gate.
-                  Labelling that button "Change" reads as "change what?" and
-                  makes the screen look like the wrong one. */}
-              {phone ? 'Change' : 'Add'}
+              {/* "Add" for an account with no number yet — the ones sent here
+                  by the topup/delivery verification gate. A number already on
+                  file but never verified (pre-enforcement accounts) gets
+                  "Verify": this is its one chance to set the number it keeps. */}
+              {phone ? 'Verify' : 'Add'}
             </button>
           </div>
         )}
@@ -483,14 +490,59 @@ export default function SettingsForm({ customer, handle }: Props) {
         />
         {phoneChange === 'closed' && (
           <span className="mt-1 block text-[11px] text-white/55">
-            Changing your phone requires a verification code, and your account
-            password if you have one.
+            {phoneLocked
+              ? 'Your phone number is verified. To change it, contact customer service.'
+              : 'Verifying needs a code sent to the number, and your account password if you have one. Once verified, only customer service can change it.'}
           </span>
         )}
       </div>
       <EmailField email={customer.email} />
       <SaveRow busy={busy} note={note} formAttr="settings-profile" />
     </div>
+  );
+}
+
+/**
+ * Real name (spec 2026-10-06): read-only once on file — only customer service
+ * can correct it — and the one-time confirm-then-save entry while it is not.
+ * Not rendered when the account read failed (`undefined`): there is nothing
+ * true to show, and the backend refuses a second write anyway.
+ */
+function RealNameField({
+  realName,
+  onSaved,
+}: {
+  realName: string | null | undefined;
+  onSaved: (name: string) => void;
+}) {
+  if (realName === undefined) return null;
+  if (realName === null) {
+    return (
+      <div className="block">
+        <span className="mb-1.5 block text-[12px] font-medium text-white/55">
+          Real name
+        </span>
+        <RealNameEntry onSaved={onSaved} />
+      </div>
+    );
+  }
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-[12px] font-medium text-white/55">
+        Real name
+      </span>
+      <input
+        type="text"
+        value={realName}
+        readOnly
+        aria-label="Real name (read-only)"
+        className={READONLY_CLASS}
+      />
+      <span className="mt-1 block text-[11px] text-white/55">
+        Private — only used to verify prize winners. To correct it, contact
+        customer service.
+      </span>
+    </label>
   );
 }
 

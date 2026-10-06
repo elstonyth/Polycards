@@ -141,10 +141,13 @@ export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
+  // The Excel is the Growth desk's 12 a.m. file. Since 2026-10-06 every desk
+  // reads the same customer details through db_query and admin_read, so the
+  // others are pointed there rather than at a file meant for that job.
   if (reportCallerOf(req) !== 'growth') {
     res.status(403).json({
       message:
-        "The daily report holds customers' contact and bank details, so only the Growth desk's 12 a.m. job can fetch it.",
+        "The daily Excel is the Growth desk's 12 a.m. file. For the same figures and customer details, use db_query or admin_read.",
     });
     return;
   }

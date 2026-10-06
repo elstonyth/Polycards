@@ -102,6 +102,9 @@ const ACTIONS_BEFORE = [
   'reorder',
   'edit_odds_set',
   'set_player_group',
+  // Migration20261006120000 (real name + phone lock).
+  'set_real_name',
+  'set_phone',
 ];
 const ACTIONS_AFTER = [
   ...ACTIONS_BEFORE,

@@ -25,6 +25,24 @@ export const FREE_WELCOME_CATEGORY = 'free_welcome';
 export const FREE_PULL_LOCKED_MESSAGE =
   'Purchase & open any pack to unlock selling & delivery.';
 
+/** What the backend claim step still refuses for (spec 2026-10-06). */
+export type FreePackRequirement = 'phone' | 'real_name';
+
+/** The prompt the free pack's detail page shows instead of opening, naming
+ *  exactly what is left (spec 2026-10-06). Client-safe, which is why it lives
+ *  here and not in the server-only data/free-pack.ts. */
+export function freePackVerifyMessage(missing: FreePackRequirement[]): string {
+  const phone = missing.includes('phone');
+  const name = missing.includes('real_name');
+  const todo =
+    phone && name
+      ? 'verify your phone number and add your real name'
+      : phone
+        ? 'verify your phone number'
+        : 'add your real name';
+  return `To claim your welcome pack, ${todo} in Settings.`;
+}
+
 export type Pack = {
   id: string;
   name: string;

@@ -83,6 +83,14 @@ export async function createCustomer(fundUsd = 0): Promise<CustomerCreds> {
     method: 'POST',
     body: { email, password },
   });
+  // Spec 2026-10-06: every account without a real name meets a
+  // non-dismissable gate on the account pages (/vault, /orders, …), so a
+  // customer that skipped the signup form must still get one, as signup() does.
+  await api('/store/customers/me/real-name', {
+    method: 'POST',
+    token: login.token,
+    body: { real_name: 'Playwright Tester' },
+  });
   const creds: CustomerCreds = { email, password, token: login.token };
   if (fundUsd > 0) await topup(creds.token, fundUsd);
   return creds;

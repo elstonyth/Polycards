@@ -71,6 +71,13 @@ const login = await api('/auth/customer/emailpass', {
   body: { email: EMAIL, password: PASSWORD },
 });
 const token = login.token;
+// Spec 2026-10-06: an account with no real name meets a non-dismissable gate
+// on the account pages (/vault included), so give the fixture one.
+await api('/store/customers/me/real-name', {
+  method: 'POST',
+  token,
+  body: { real_name: 'Qa Delivery Fee' },
+});
 
 const { packs } = await api('/store/packs', { token });
 const pack = [...packs].sort((a, b) => a.price - b.price)[0];

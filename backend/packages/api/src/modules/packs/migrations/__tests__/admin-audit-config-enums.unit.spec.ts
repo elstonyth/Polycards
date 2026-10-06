@@ -3,7 +3,8 @@ import {
   ADMIN_AUDIT_ENTITY_TYPES,
 } from '../../models/admin-action-audit';
 // Always the LATEST migration that rewrites the CHECKs (each one re-emits the
-// full lists): Migration20261007120000 added 'pack_gift' and the gift/bonus actions.
+// full lists): Migration20261007120000 added 'pack_gift' and the gift/bonus
+// actions, on top of Migration20261006120000's 'set_real_name' / 'set_phone'.
 import * as migrationModule from '../Migration20261007120000';
 
 const { Migration20261007120000 } = migrationModule;
@@ -70,6 +71,8 @@ describe('admin_action_audit CHECK lists (config-change audit)', () => {
       'reorder',
       'edit_odds_set',
       'set_player_group',
+      'set_real_name',
+      'set_phone',
       'grant_pack_gift',
       'revoke_pack_gift',
       'grant_bonus_credit',
