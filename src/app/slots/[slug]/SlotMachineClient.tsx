@@ -17,6 +17,8 @@ import {
   closeInstantWindow,
 } from '@/lib/actions/packs';
 import { spinTaskReward } from '@/lib/actions/tasks';
+import { getPackGifts } from '@/lib/actions/pack-gifts';
+import { giftsHeldFor, giftsUsed, spinBetLabel } from '@/lib/vault-packs';
 import type { WonCard } from '@/lib/actions/packs';
 import { sellBackPull } from '@/lib/actions/vault';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
@@ -136,10 +138,14 @@ export default function SlotMachineClient({
   demoPool = null,
   demoOdds = null,
   freeRipClaimId = null,
+  giftsHeld = null,
 }: {
   pack: ResolvedPack & Pack;
   recentPulls: RecentPull[];
   count: number;
+  /** Vault packs (gifts) held for THIS pack, read server-side; null = not
+   *  read (a guest, or a failed call) — re-read once a customer is known. */
+  giftsHeld?: number | null;
   /** Admin-published PUBLIC odds for the OddsSheet; null = not published. */
   publishedOdds: PublishedOdds | null;
   /** Odds SET 3's real tier split (backend-aggregated) — the demo draw's
@@ -209,6 +215,33 @@ export default function SlotMachineClient({
   // Reel count — prop is the initial value (already clamped from ?count=); the
   // player adds/removes reels in-machine. cost * reels is the batch price.
   const [reels, setReels] = useState(isFreePack || isFreeRip ? 1 : count);
+
+  // Vault packs (spec 2026-10-07 §1). Use order on every open is gifts →
+  // bonus credit → normal credit; gifts cover rows first, and only on the
+  // PAID route — a free rip / welcome pack is already free and wins. null =
+  // unknown: re-read whenever a signed-in customer has no count (a guest who
+  // just logged in, or a stale-gift refusal), and the paid Spin waits for it
+  // so a press can never pay for a row a gift would have covered. An unread
+  // call settles at 0 (giftsHeldFor(null)) — the price the screen shows.
+  const [held, setHeld] = useState<number | null>(giftsHeld);
+  const giftsPending = customer != null && held === null;
+  useEffect(() => {
+    if (!giftsPending) return;
+    let live = true;
+    void getPackGifts()
+      .then((g) => {
+        if (live) setHeld(giftsHeldFor(g, pack.id));
+      })
+      .catch(() => {
+        if (live) setHeld(0);
+      });
+    return () => {
+      live = false;
+    };
+  }, [giftsPending, pack.id]);
+  const vaultGifts = mode === 'paid' ? giftsUsed(reels, held ?? 0) : 0;
+  // What this press actually charges: the rows no gift covers.
+  const paidCost = cost * (reels - vaultGifts);
   // Shrink the cell so multiple reels fit across the viewport. On a roomy
   // viewport the cell grows instead: the phone layout on a desktop left the
   // machine a ~110px band floating in ~900px of empty room, which reads as an
@@ -371,7 +404,7 @@ export default function SlotMachineClient({
   const canAfford =
     isFreePack ||
     isFreeRip ||
-    (balance !== null && affordable(balance, cost * reels));
+    (balance !== null && affordable(balance, paidCost));
   // Spin + reel add/remove are locked for the ENTIRE non-idle flow — resolve,
   // spin, the reveal theater (flood/transform), AND the review/sell window
   // (spec #43). They only re-enable once every card is sold/kept and the reveal
@@ -410,6 +443,7 @@ export default function SlotMachineClient({
   // every route but one, and the demo Spin is the exception, not the shape.
   async function handleRoll() {
     if (spinGuarded || modeUndecided) return;
+    if (mode === 'paid' && giftsPending) return;
     play('tap');
     // Clear any in-flight reveal-theater timers (same as skipToCards) so a
     // stale flood→transform→review handoff can't fire over the new roll.
@@ -425,6 +459,7 @@ export default function SlotMachineClient({
       mode,
       packId: pack.id,
       reels,
+      gifts: vaultGifts,
       freeRipClaimId,
       demoPool: demoPool ?? [],
       demoOdds: rows?.length ? rows : ODDS,
@@ -442,7 +477,7 @@ export default function SlotMachineClient({
       if (
         mode === 'paid' &&
         balance !== null &&
-        !affordable(balance, cost * reels)
+        !affordable(balance, paidCost)
       ) {
         setNeedsTopUp(true);
         setError('Not enough credits to spin.');
@@ -483,6 +518,10 @@ export default function SlotMachineClient({
       // Nothing spun on any failure path, so the button must not read "Spin
       // again" over the error.
       setHasSpun(false);
+      // A press that offered gifts may have spent them (a lost response, a
+      // post-charge mapping failure) or found them gone (409): re-read the
+      // count rather than trust the one on screen — the Spin waits for it.
+      if (request.gifts > 0) setHeld(null);
       if (res.kind === 'unreachable') {
         // The charge may well have landed (the server executed, the response
         // did not transport back). Telling the player to check their balance
@@ -516,7 +555,12 @@ export default function SlotMachineClient({
         return;
       }
       if (res.needsAuth) openAuth('login');
-      else {
+      else if (res.staleGifts) {
+        // The screen offered gifts that are gone (opened in another tab,
+        // revoked). Refused BEFORE any charge, so no balance hazard: show the
+        // backend's sentence (the gifts are re-read above).
+        setError(res.error);
+      } else {
         setError(res.error);
         setNeedsTopUp(res.needsTopUp === true);
         // Same hazard, narrower: openBatch maps a post-charge mapping failure
@@ -545,12 +589,14 @@ export default function SlotMachineClient({
     // Ads funnel (lib/pixel.ts): a pack opened WITH BALANCE — auxiliary
     // analysis, never a Purchase (the money came in as a top-up already). Free
     // claims and the guest demo spend nothing, so they are not opens here.
-    if (batch.mode === 'paid') {
+    // Rows a vault pack covered spent nothing, so they are not opens here.
+    const paidRows = batch.cards.length - batch.giftsUsed;
+    if (batch.mode === 'paid' && paidRows > 0) {
       trackPixel('OpenPack', {
         content_ids: [pack.id],
         content_name: pack.name,
-        num_items: batch.cards.length,
-        value: Math.round(cost * batch.cards.length * 100) / 100,
+        num_items: paidRows,
+        value: Math.round(cost * paidRows * 100) / 100,
         currency: 'MYR',
       });
     }
@@ -564,6 +610,10 @@ export default function SlotMachineClient({
     // balance and no account, so both guards below simply never fire for it.
     if (batch.balance != null && batch.forId === customerIdRef.current) {
       applyBalance(batch.balance);
+    }
+    // The gifts this open consumed are gone — same identity guard.
+    if (batch.giftsUsed > 0 && batch.forId === customerIdRef.current) {
+      setHeld((h) => (h === null ? h : Math.max(0, h - batch.giftsUsed)));
     }
 
     // The cards are in the vault as of this response — the open workflow writes
@@ -1099,6 +1149,10 @@ export default function SlotMachineClient({
                 <span>Your free rip from Tasks — nothing charged</span>
               ) : isFreePack ? (
                 <span>Your free welcome pack — nothing charged</span>
+              ) : vaultGifts > 0 ? (
+                // "Bet Vault x1" / "Bet Vault x1 + RM300.00" — the gifts
+                // already say how many rows, so no "× N" chip.
+                <span>{spinBetLabel(reels, vaultGifts, cost)}</span>
               ) : (
                 <span className="inline-flex items-center">
                   <span>Bet </span>
@@ -1121,6 +1175,7 @@ export default function SlotMachineClient({
               spinGuarded ||
               cooldown ||
               modeUndecided ||
+              (mode === 'paid' && giftsPending) ||
               (customer != null && !canAfford)
             }
             label={
@@ -1161,8 +1216,8 @@ export default function SlotMachineClient({
               {needsTopUp && (
                 <>
                   {' '}
-                  {balance !== null && cost * reels - balance > 0 && (
-                    <>You&apos;re {rm(cost * reels - balance)} short. </>
+                  {balance !== null && paidCost - balance > 0 && (
+                    <>You&apos;re {rm(paidCost - balance)} short. </>
                   )}
                   {/* A link, not openTopUp(): the sheet renders at z-[70]
                       under this z-[100] room. /me is the page that carries

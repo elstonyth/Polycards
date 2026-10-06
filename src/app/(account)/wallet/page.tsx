@@ -31,6 +31,12 @@ export default async function WalletPage() {
   // bar.
   const { deposited, remaining } = w.playthrough;
   const gateOpen = remaining <= 0;
+  // Bonus credit is inside the balance but spend only. The Normal line is the
+  // part that can ever be withdrawn — computed in sen so float noise never
+  // prints. Hidden while there is no bonus: a zero row would only confuse.
+  const hasBonus = Math.round(w.bonus * 100) > 0;
+  const normal =
+    (Math.round(w.balance * 100) - Math.round(w.bonus * 100)) / 100;
 
   return (
     <>
@@ -97,6 +103,16 @@ export default async function WalletPage() {
         <StatCards
           items={[
             { label: 'Total balance', value: rm(w.balance) },
+            ...(hasBonus
+              ? [
+                  { label: 'Normal', value: rm(normal) },
+                  {
+                    label: 'Bonus',
+                    value: rm(w.bonus),
+                    sub: 'spend only · can’t withdraw',
+                  },
+                ]
+              : []),
             { label: 'Withdrawable', value: rm(w.withdrawable) },
           ]}
         />
@@ -120,7 +136,7 @@ export default async function WalletPage() {
             },
             {
               title: 'Then the whole balance unlocks',
-              body: 'Once you are fully played through, your entire available balance is withdrawable — winnings included, not just your deposit back. Nothing expires and there is no waiting period.',
+              body: 'Once you are fully played through, your entire available balance is withdrawable — winnings included, not just your deposit back. Bonus credit is the one exception: it can only be spent on packs. Nothing expires and there is no waiting period.',
             },
           ].map((s, i) => (
             <li key={s.title} className="flex gap-3">

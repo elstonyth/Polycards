@@ -87,8 +87,10 @@ describe('NOTIFICATION_COPY', () => {
       [
         'bank_account_added',
         'bank_account_removed',
+        'bonus_credit_received',
         'challenge_payout',
         'delivery_status',
+        'pack_gift_received',
         'vip_level_up',
         'withdrawal_paid',
         'withdrawal_refunded',
@@ -188,6 +190,25 @@ describe('body rendering', () => {
     expect(copyFor('withdrawal_refunded').body({ amount_myr: 50 })).toBe(
       'The transfer could not be completed — RM 50.00 is back in your balance.',
     );
+  });
+
+  // Spec 2026-10-07 §1, verbatim.
+  it('announces a gifted pack and bonus credit', () => {
+    expect(
+      copyFor('pack_gift_received').body({
+        pack_id: 'bronze',
+        title: 'Bronze Pack',
+        quantity: 2,
+      }),
+    ).toBe('You received 2× Bronze Pack — open it from your Vault.');
+    expect(copyFor('pack_gift_received').href).toBe('/vault');
+    expect(copyFor('bonus_credit_received').body({ amount: 300 })).toBe(
+      'You received RM 300.00 bonus credit.',
+    );
+    expect(copyFor('bonus_credit_received').href).toBe('/wallet');
+    // A payload missing its facts degrades to no detail line.
+    expect(copyFor('pack_gift_received').body({ quantity: 2 })).toBeNull();
+    expect(copyFor('bonus_credit_received').body({})).toBeNull();
   });
 
   it('describes a challenge payout without linking to suspended surfaces', () => {

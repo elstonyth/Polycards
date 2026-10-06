@@ -293,6 +293,39 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
     href: '/leaderboard',
     action: 'View challenge',
   },
+
+  pack_gift_received: {
+    icon: Gift,
+    variant: 'reward',
+    // An admin grant lands server-side, between the customer's sessions —
+    // nothing else announces it.
+    policy: 'always',
+    title: 'A pack is waiting in your Vault',
+    body: (data) => {
+      const title = strOf(data, 'title');
+      const quantity = numOf(data, 'quantity');
+      if (!title || quantity === null || quantity < 1) return null;
+      return `You received ${quantity}× ${title} — open it from your Vault.`;
+    },
+    href: '/vault',
+    action: 'Open Vault',
+  },
+
+  bonus_credit_received: {
+    icon: Sparkles,
+    variant: 'reward',
+    // Same as the pack gift: an admin grant nobody else announces.
+    policy: 'always',
+    title: 'Bonus credit added',
+    body: (data) => {
+      const amount = numOf(data, 'amount');
+      return amount === null || amount <= 0
+        ? null
+        : `You received ${rm(amount)} bonus credit.`;
+    },
+    href: '/wallet',
+    action: 'View wallet',
+  },
 };
 
 /**

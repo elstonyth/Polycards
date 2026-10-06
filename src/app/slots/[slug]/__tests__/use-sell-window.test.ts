@@ -61,6 +61,7 @@ function offerAt(deadlineMs: number): SellBackOffer {
     vaultAmount: 50,
     instantDeadlineMs: deadlineMs,
     firm: true,
+    bonus: 0,
   };
 }
 

@@ -26,6 +26,9 @@ export type Wallet = {
   withdrawable: number;
   /** Playthrough gate: deposits must be fully used on packs to unlock. */
   playthrough: { deposited: number; used: number; remaining: number };
+  /** Bonus credit inside `balance` — spend only, never withdrawable (the
+   *  backend already leaves it out of `withdrawable`). */
+  bonus: number;
 };
 
 export type WalletResult =
@@ -75,6 +78,8 @@ export async function getWallet(): Promise<WalletResult> {
       // — never another balance field — so unknown never overstates.
       withdrawable: w.withdrawable ?? 0,
       playthrough: w.playthrough ?? { deposited: 0, used: 0, remaining: 0 },
+      // An older backend has no bonus credit at all.
+      bonus: w.bonus ?? 0,
     },
   };
 }

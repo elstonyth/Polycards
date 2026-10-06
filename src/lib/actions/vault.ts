@@ -510,6 +510,9 @@ export type CreditTxn = {
   // Channel + gateway-confirmed outcome behind that reference, so every money
   // row on the statement traces to the gateway record. Null when unknown.
   gateway: { method: string; status: string } | null;
+  // Signed bonus-credit part of `amount` (spend-only credit); 0 when none or
+  // when an older backend omits it.
+  bonus: number;
 };
 
 export type TransactionsResult =
@@ -563,6 +566,7 @@ export async function getTransactions(
       createdAt: row.created_at,
       reference: row.reference ?? null,
       gateway: row.gateway ?? null,
+      bonus: row.bonus ?? 0,
     })),
     page: safePage,
     hasMore: totals?.has_more ?? false,

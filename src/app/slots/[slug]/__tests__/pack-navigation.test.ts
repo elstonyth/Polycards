@@ -38,6 +38,8 @@ vi.mock('@/components/app-shell/TopUpProvider', () => ({
 vi.mock('@/lib/use-pack-detail-poll', () => ({
   usePackDetailPoll: (_slug: string, initial: PackDetail | null) => initial,
 }));
+// A 'use server' action — the page reads vault packs after mount. None here.
+vi.mock('@/lib/actions/pack-gifts', () => ({ getPackGifts: async () => null }));
 vi.mock('@/components/Reveal', () => ({
   default: ({ children }: { children: ReactNode }) =>
     createElement('div', null, children),

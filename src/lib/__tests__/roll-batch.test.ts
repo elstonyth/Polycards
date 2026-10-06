@@ -50,6 +50,7 @@ function deps(over: Partial<RollDeps> = {}) {
       price: 0,
       total: 0,
       balance: null,
+      giftsUsed: 0,
     })),
     openPack: vi.fn(async () => ({
       ok: false as const,
@@ -73,6 +74,7 @@ const req = (over: Partial<RollRequest> = {}): RollRequest => ({
   mode: 'paid',
   packId: 'bronze',
   reels: 1,
+  gifts: 0,
   freeRipClaimId: null,
   demoPool: [],
   demoOdds: [{ rarity: 'Common', chance: '100%' }],
@@ -200,6 +202,7 @@ describe('rollBatch — demo Spin', () => {
           price: 10,
           total: 10,
           balance: 7,
+          giftsUsed: 0,
         })),
       }),
     );
@@ -313,6 +316,7 @@ describe('rollBatch — free rip', () => {
             vaultAmount: 18,
             instantDeadlineMs: 2_000_000,
             firm: true,
+            bonus: 0,
           },
         })),
       }),
@@ -386,6 +390,7 @@ describe('rollBatch — free welcome pack', () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.batch.cards).toHaveLength(1);
+    expect(res.batch.giftsUsed).toBe(0);
     expect(res.batch.balance).toBe(42);
     // Read off the response, never derived from "it was free".
     expect(res.batch.locked).toBe(true);
@@ -408,6 +413,7 @@ describe('rollBatch — paid open', () => {
             vaultAmount: 14,
             instantDeadlineMs: 555,
             firm: false,
+            bonus: 0,
           },
         },
         { card: won('b'), pullId: null, marketValue: 1, buyback: null },
@@ -415,6 +421,7 @@ describe('rollBatch — paid open', () => {
       price: 10,
       total: 20,
       balance: 7,
+      giftsUsed: 0,
     }));
 
     const res = await rollBatch(
@@ -423,7 +430,7 @@ describe('rollBatch — paid open', () => {
     );
 
     expect(openBatch).toHaveBeenCalledTimes(1);
-    expect(openBatch).toHaveBeenCalledWith('bronze', 2);
+    expect(openBatch).toHaveBeenCalledWith('bronze', 2, 0);
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.batch.cards.map((c) => c.handle)).toEqual(['a', 'b']);
@@ -467,6 +474,7 @@ describe('rollBatch — paid open', () => {
       price: 10,
       total: 0,
       balance: 7,
+      giftsUsed: 0,
     }));
 
     const res = await rollBatch(req({ mode: 'paid' }), deps({ openBatch }));
@@ -476,6 +484,92 @@ describe('rollBatch — paid open', () => {
     if (res.ok || res.kind !== 'rejected') return;
     expect(res.error).toMatch(/Nothing was opened/);
     expect(res.needsTopUp).toBeUndefined();
+  });
+
+  it('passes the gifts through and reports how many the open used', async () => {
+    const openBatch = vi.fn(async () => ({
+      ok: true as const,
+      rolls: [
+        { card: won('a'), pullId: 'pull_a', marketValue: 1, buyback: null },
+        { card: won('b'), pullId: 'pull_b', marketValue: 1, buyback: null },
+      ],
+      price: 300,
+      total: 300,
+      balance: 7,
+      giftsUsed: 1,
+    }));
+
+    const res = await rollBatch(
+      req({ mode: 'paid', reels: 2, gifts: 1 }),
+      deps({ openBatch }),
+    );
+
+    expect(openBatch).toHaveBeenCalledTimes(1);
+    expect(openBatch).toHaveBeenCalledWith('bronze', 2, 1);
+    expect(res.ok && res.batch.giftsUsed).toBe(1);
+  });
+
+  // A stale "Vault x1" screen: nothing was charged, but it is still ONE call —
+  // the caller re-reads the gifts, it never re-opens on the player's behalf.
+  it('reports a stale-gift refusal once, flagged, and never retries', async () => {
+    const openBatch = vi.fn(async () => ({
+      ok: false as const,
+      error: 'Your vault pack is no longer available — refresh.',
+      staleGifts: true,
+    }));
+
+    const res = await rollBatch(
+      req({ mode: 'paid', gifts: 1 }),
+      deps({ openBatch }),
+    );
+
+    expect(openBatch).toHaveBeenCalledTimes(1);
+    expect(res).toEqual({
+      ok: false,
+      kind: 'rejected',
+      error: 'Your vault pack is no longer available — refresh.',
+      needsAuth: undefined,
+      needsTopUp: undefined,
+      staleGifts: true,
+    });
+  });
+
+  it("carries a quote's bonus part onto the offer the reveal sells from", async () => {
+    const openBatch = vi.fn(async () => ({
+      ok: true as const,
+      rolls: [
+        {
+          card: won('a'),
+          pullId: 'pull_a',
+          marketValue: 1,
+          buyback: {
+            percent: 90,
+            amount: 270,
+            vaultPercent: 70,
+            vaultAmount: 210,
+            instantDeadlineMs: 555,
+            firm: true,
+            bonus: 243,
+          },
+        },
+        { card: won('b'), pullId: 'pull_b', marketValue: 1, buyback: null },
+      ],
+      price: 300,
+      total: 600,
+      balance: 7,
+      giftsUsed: 0,
+    }));
+
+    const res = await rollBatch(
+      req({ mode: 'paid', reels: 2 }),
+      deps({ openBatch }),
+    );
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.batch.offers[0]?.bonus).toBe(243);
+    // The flat-rate fallback offer is all normal credit.
+    expect(res.batch.offers[1]?.bonus).toBe(0);
   });
 
   it('turns a transport throw into `unreachable` without re-calling', async () => {

@@ -17,6 +17,9 @@ describe('reasonLabel', () => {
   it('labels the cashout reason', () => {
     expect(reasonLabel('cashout')).toBe('Cashout');
   });
+  it('labels a bonus grant the way the player knows it', () => {
+    expect(reasonLabel('bonus_grant')).toBe('Bonus credit');
+  });
 
   // Audit 2026-07-07 #11: a backend reason added before the storefront
   // redeploys has no REASON_LABEL entry — it must still render a readable

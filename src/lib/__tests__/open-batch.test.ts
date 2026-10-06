@@ -156,6 +156,8 @@ describe('mapBatchRoll — buyback validation', () => {
       instantDeadlineMs: 1_750_000_000_000,
       // Absent from the raw offer = firm (older backend, pre-firmness).
       firm: true,
+      // Absent = all normal credit (older backend, pre-bonus).
+      bonus: 0,
     });
   });
 
@@ -167,6 +169,11 @@ describe('mapBatchRoll — buyback validation', () => {
     });
     const result = mapBatchRoll(roll);
     expect(result!.buyback!.firm).toBe(false);
+  });
+
+  it('passes the bonus part of a gift or bonus-funded quote through', () => {
+    const roll = rawRoll(undefined, { percent: 90, amount: 270, bonus: 243 });
+    expect(mapBatchRoll(roll)!.buyback!.bonus).toBe(243);
   });
 });
 

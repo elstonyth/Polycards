@@ -50,6 +50,13 @@ import {
   type CardSeed,
 } from '@/components/cards/CardDetailOverlay';
 import { usePackDetailPoll } from '@/lib/use-pack-detail-poll';
+import { getPackGifts } from '@/lib/actions/pack-gifts';
+import {
+  giftsHeldFor,
+  giftsUsed,
+  vaultButtonLabel,
+  vaultCostLabel,
+} from '@/lib/vault-packs';
 
 /**
  * Shown where the gift offer would be, when this visitor cannot claim it.
@@ -257,6 +264,40 @@ export default function PackDetailClient({
 
   // Real backend price, never re-parsed from the rounded display string.
   const priceNum = active.priceMyr;
+
+  // Vault packs: packs an admin gifted into this customer's vault apply
+  // themselves here, however the player arrived (spec 2026-10-07 §1). Read
+  // client-side after mount and only when signed in — the server loader stays
+  // customer-free. Keyed on customer + pack so a switch of either never shows
+  // the other's count; anything unread counts as no gifts (the reel then
+  // charges the price shown here). Never on the free welcome pack.
+  const customerId = customer?.id ?? null;
+  const giftKey =
+    customerId && !isFreePack ? `${customerId}:${active.id}` : null;
+  const [heldGifts, setHeldGifts] = useState<{
+    key: string;
+    count: number;
+  } | null>(null);
+  useEffect(() => {
+    if (!giftKey) return;
+    let live = true;
+    void getPackGifts()
+      .then((g) => {
+        if (live) {
+          setHeldGifts({ key: giftKey, count: giftsHeldFor(g, active.id) });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [giftKey, active.id]);
+  const held = heldGifts && heldGifts.key === giftKey ? heldGifts.count : 0;
+  // Gifts cover rows first; only the rest is paid (gifts → bonus → normal).
+  const vaultGifts = giftsUsed(qty, held);
+  const paidCost = priceNum * (qty - vaultGifts);
+  const vaultCost = vaultCostLabel(qty, vaultGifts, priceNum);
+  const openLabel = vaultButtonLabel(qty, vaultGifts) ?? 'Open Pack';
   // Baked Polycards tiers animate their factory stage (still poster otherwise).
   const heroVideo = factoryVideo(active.displayImage);
 
@@ -344,7 +385,7 @@ export default function PackDetailClient({
       router.push(`/slots/${active.id}/spin?count=1`);
       return;
     }
-    if (balance !== null && !affordable(balance, priceNum * qty)) {
+    if (balance !== null && !affordable(balance, paidCost)) {
       setNeedsTopUp(true);
       setOpenError('Not enough credits to open.');
       return;
@@ -631,10 +672,10 @@ export default function PackDetailClient({
                   {customer
                     ? isFreePack
                       ? 'Open Free Pack'
-                      : 'Open Pack'
+                      : openLabel
                     : 'Log in to open'}
                   <span className="flex items-center gap-1.5 font-heading text-base tracking-tight tabular-nums">
-                    {!isFreePack && rm(priceNum * qty)}
+                    {!isFreePack && (vaultCost ?? rm(priceNum * qty))}
                     <ArrowRight className="h-4 w-4" aria-hidden />
                   </span>
                 </Pill>
@@ -648,8 +689,8 @@ export default function PackDetailClient({
                   {needsTopUp && (
                     <>
                       {' '}
-                      {balance !== null && priceNum * qty - balance > 0 && (
-                        <>You&apos;re {rm(priceNum * qty - balance)} short. </>
+                      {balance !== null && paidCost - balance > 0 && (
+                        <>You&apos;re {rm(paidCost - balance)} short. </>
                       )}
                       <button
                         type="button"
@@ -806,14 +847,23 @@ export default function PackDetailClient({
                 ? 'Unavailable'
                 : isFreePack
                   ? 'Free'
-                  : rm(priceNum * qty)}
+                  : // A vault pack: the long "Vault x1 + RM 300.00" line
+                    // would truncate here, so the gifts take the big line
+                    // and the paid rows the small one below.
+                    vaultGifts > 0
+                    ? `Vault x${vaultGifts}`
+                    : rm(priceNum * qty)}
             </p>
             <p className="mt-1 text-[11px] leading-none text-white/60">
               {freeClaimUnavailable
                 ? 'Not available on this account'
                 : isFreePack
                   ? 'Your welcome pack'
-                  : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% during reveal`}
+                  : vaultGifts > 0
+                    ? qty > vaultGifts
+                      ? `+ ${rm(paidCost)}`
+                      : 'Gift from Polycards'
+                    : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% during reveal`}
             </p>
           </div>
           <div
@@ -854,7 +904,7 @@ export default function PackDetailClient({
               {customer
                 ? isFreePack
                   ? 'Open Free Pack'
-                  : 'Open Pack'
+                  : openLabel
                 : 'Log in'}
             </Pill>
           )}
@@ -865,8 +915,8 @@ export default function PackDetailClient({
             {needsTopUp && (
               <>
                 {' '}
-                {balance !== null && priceNum * qty - balance > 0 && (
-                  <>You&apos;re {rm(priceNum * qty - balance)} short. </>
+                {balance !== null && paidCost - balance > 0 && (
+                  <>You&apos;re {rm(paidCost - balance)} short. </>
                 )}
                 <button
                   type="button"

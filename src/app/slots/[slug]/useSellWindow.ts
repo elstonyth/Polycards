@@ -40,6 +40,9 @@ export type SellBackOffer = {
    *  selling would be refused ("Exchange rate unavailable") — render the
    *  unavailable state instead of a firm offer (sim finding P1-1). */
   firm: boolean;
+  /** MYR part of the instant `amount` paid back as bonus credit (a gift or
+   *  bonus-funded pull); 0 = all normal credit. Names the sell button only. */
+  bonus: number;
 };
 
 export type SellBackFn = (
