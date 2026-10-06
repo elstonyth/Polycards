@@ -3,10 +3,10 @@ import {
   ADMIN_AUDIT_ENTITY_TYPES,
 } from '../../models/admin-action-audit';
 // Always the LATEST migration that rewrites the CHECKs (each one re-emits the
-// full lists): Migration20261006110000 added 'announcement'.
-import * as migrationModule from '../Migration20261006110000';
+// full lists): Migration20261007120000 added 'pack_gift' and the gift/bonus actions.
+import * as migrationModule from '../Migration20261007120000';
 
-const { Migration20261006110000 } = migrationModule;
+const { Migration20261007120000 } = migrationModule;
 
 // The DB CHECKs on admin_action_audit are only rewritten by an explicit
 // migration (Migration20260906090000 learned this the hard way). A value the
@@ -19,8 +19,8 @@ const { Migration20261006110000 } = migrationModule;
 
 async function checkLists(): Promise<Record<string, string[]>> {
   const sql: string[] = [];
-  const m = Object.create(Migration20261006110000.prototype) as InstanceType<
-    typeof Migration20261006110000
+  const m = Object.create(Migration20261007120000.prototype) as InstanceType<
+    typeof Migration20261007120000
   > & {
     addSql: (s: string) => void;
   };
@@ -56,6 +56,7 @@ describe('admin_action_audit CHECK lists (config-change audit)', () => {
       'customer_group',
       'customer',
       'announcement',
+      'pack_gift',
     ]) {
       expect(entity_type).toContain(t);
     }
@@ -69,12 +70,15 @@ describe('admin_action_audit CHECK lists (config-change audit)', () => {
       'reorder',
       'edit_odds_set',
       'set_player_group',
+      'grant_pack_gift',
+      'revoke_pack_gift',
+      'grant_bonus_credit',
     ]) {
       expect(action).toContain(a);
     }
   });
 
   it('exports only the migration class (the loader instantiates the first export)', async () => {
-    expect(Object.keys(migrationModule)).toEqual(['Migration20261006110000']);
+    expect(Object.keys(migrationModule)).toEqual(['Migration20261007120000']);
   });
 });

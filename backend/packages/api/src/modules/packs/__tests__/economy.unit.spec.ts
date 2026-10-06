@@ -95,6 +95,8 @@ describe('ledgerTotals', () => {
       { reason: 'topup', amount: 100 },
       { reason: 'adjustment', amount: 5 },
       { reason: 'adjustment', amount: -2.5 },
+      { reason: 'bonus_grant', amount: 300 },
+      { reason: 'bonus_grant', amount: -30 },
     ];
     expect(ledgerTotals(rows)).toEqual({
       revenue: 25.3, // |Σ pack_open|
@@ -106,6 +108,7 @@ describe('ledgerTotals', () => {
       rewardPromo: 0,
       deliveryFees: 0,
       referralCommission: 0,
+      bonusPromo: 270, // spend-only grants net of take-backs, outside net
     });
   });
 
@@ -120,6 +123,7 @@ describe('ledgerTotals', () => {
       rewardPromo: 0,
       deliveryFees: 0,
       referralCommission: 0,
+      bonusPromo: 0,
     });
   });
 

@@ -129,6 +129,7 @@ import ReferralSettings from './models/referral-settings';
 import WeeklySettlement from './models/weekly-settlement';
 import WeeklySettlementLine from './models/weekly-settlement-line';
 import Announcement from './models/announcement';
+import PackGift from './models/pack-gift';
 import { pickLiveAnnouncements, validateAnnouncement } from './announcements';
 import { pageAll } from '../../api/utils/page-all';
 import {
@@ -249,7 +250,8 @@ export type CreditMutationReason =
   | 'voucher_claim'
   | 'reward_credit'
   | 'daily_reward'
-  | 'delivery_fee';
+  | 'delivery_fee'
+  | 'bonus_grant';
 
 export type CreditMutationInput = {
   customerId: string;
@@ -586,6 +588,7 @@ class PacksModuleService extends MedusaService({
   TaskClaim,
   DailyCheckin,
   Announcement,
+  PackGift,
 }) {
   // Every audit row in this service goes through here — one place that knows
   // the shape, and one place a reviewer checks that the row rides the caller's

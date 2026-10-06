@@ -42,6 +42,9 @@ export const ADMIN_AUDIT_ENTITY_TYPES = [
   // Storefront announcement popup (spec 2026-10-06 §5) — see
   // Migration20261006110000. Reuses 'create' / 'edit' / 'delete'.
   'announcement',
+  // Pack gifts (spec 2026-10-07): grants and revokes audit against the gift
+  // row — see Migration20261007120000. Bonus credit grants audit as 'credit'.
+  'pack_gift',
 ] as const;
 
 export const ADMIN_AUDIT_ACTIONS = [
@@ -96,6 +99,11 @@ export const ADMIN_AUDIT_ACTIONS = [
   'reorder',
   'edit_odds_set',
   'set_player_group',
+  // Pack gifts and bonus credit (spec 2026-10-07) — see
+  // Migration20261007120000.
+  'grant_pack_gift',
+  'revoke_pack_gift',
+  'grant_bonus_credit',
 ] as const;
 
 // admin_action_audit — append-only record of every admin money mutation

@@ -105,6 +105,11 @@ export type LedgerTotals = {
   /** Σ referral_commission — the weekly referrer payout; operator promo cost
    *  like rewardPromo, excluded from net/revenue. */
   referralCommission: number;
+  /** Σ bonus_grant — spend-only bonus credit (泥码) granted net of take-backs;
+   *  operator promo cost like rewardPromo, excluded from net/revenue. The
+   *  pack_open / buyback lines carry only their NORMAL part (callers subtract
+   *  bonus_cents in SQL), so bonus spent and paid back never reads as cash. */
+  bonusPromo: number;
 };
 
 /** Lifetime ledger totals bucketed by reason (exact cent math). */
@@ -117,6 +122,7 @@ export function ledgerTotals(rows: LedgerRow[]): LedgerTotals {
   let rewardPromoCents = 0;
   let deliveryFeeCents = 0;
   let referralCommissionCents = 0;
+  let bonusPromoCents = 0;
 
   for (const row of rows) {
     if (!Number.isFinite(row.amount)) continue;
@@ -129,6 +135,7 @@ export function ledgerTotals(rows: LedgerRow[]): LedgerTotals {
     else if (row.reason === 'delivery_fee') deliveryFeeCents += cents;
     else if (row.reason === 'referral_commission')
       referralCommissionCents += cents;
+    else if (row.reason === 'bonus_grant') bonusPromoCents += cents;
     else if (
       row.reason === 'voucher_claim' ||
       row.reason === 'reward_credit' ||
@@ -158,6 +165,7 @@ export function ledgerTotals(rows: LedgerRow[]): LedgerTotals {
     // line reads "collected" (same -0 collapse as revenue).
     deliveryFees: -deliveryFeeCents / 100 || 0,
     referralCommission: referralCommissionCents / 100,
+    bonusPromo: bonusPromoCents / 100,
     // Cashout is a balance move, excluded. rewardPromo / referralCommission are
     // also excluded (operator cost tracked separately); deliveryFees is a
     // courier pass-through, not gacha margin.

@@ -29,6 +29,9 @@ export const CreditTransaction = model
       // delivery request, positive on the cancel refund (reference
       // `refund:<order_id>`). Sign-agnostic, like adjustment.
       'delivery_fee',
+      // Bonus credit (泥码, spec 2026-10-07): an admin grant (+) or take-back
+      // (−) of spend-only credit. Its bonus_cents equals its amount in sen.
+      'bonus_grant',
     ]),
     // The pull this credit came from (buyback rows only; null for top-ups).
     // UNIQUE — the DB itself guarantees a pull can never be credited twice,
@@ -48,6 +51,12 @@ export const CreditTransaction = model
     // open-settlement idempotency index (Task 12) keys on this. Forward-only;
     // never back-filled.
     source_transaction_id: model.text().nullable(),
+    // Bonus credit (spec 2026-10-07 §3.2) — the signed sen of this row that is
+    // spend-only bonus: + on a bonus_grant or the bonus share of a buyback,
+    // − on the bonus a pack_open spent (bonus is spent first), restored by a
+    // reversal. Bonus Balance = Σ this; Normal Balance = Balance − Bonus.
+    // NULL on rows written before it existed (read as 0, forward-only).
+    bonus_cents: model.number().nullable(),
   })
   // Balance Σ + credits feed + admin gacha all read by customer_id ordered by
   // created_at; composite serves the filter + ORDER BY (+ pagination) in one scan.
