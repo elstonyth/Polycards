@@ -145,10 +145,35 @@ export function runReadOnlyQuery(
   sql: string,
   timeoutMs: number,
 ): Promise<SqlAnswer> {
-  const run = queue.then(() => runNow(shared as Knexish, sql, timeoutMs));
+  const run = queue.then(() =>
+    // Postgres stops the query itself; this only keeps a dead connection
+    // from holding up every later query.
+    withDeadline(
+      runNow(shared as Knexish, sql, timeoutMs),
+      timeoutMs + 15_000,
+    ),
+  );
   queue = run.catch(() => undefined);
   return run;
 }
+
+const withDeadline = <T>(work: Promise<T>, ms: number): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error('The database did not answer in time.')),
+      ms,
+    );
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
 
 async function runNow(
   shared: Knexish,
@@ -163,7 +188,8 @@ async function runNow(
     clientUrl: connection.connectionString,
     schema: searchPath,
     driverOptions: { connection: { ssl: connection.ssl } },
-    pool: { min: 0, max: 1 },
+    // A database that will not connect fails the query in 15 s, not knex's 60.
+    pool: { min: 0, max: 1, acquireTimeoutMillis: 15_000 },
   }) as unknown as Knexish;
   const started = Date.now();
   try {
