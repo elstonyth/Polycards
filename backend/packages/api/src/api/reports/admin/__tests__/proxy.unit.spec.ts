@@ -87,11 +87,12 @@ describe('capBody', () => {
     expect(out.note).toMatch(/limit/);
   });
 
-  it('says how to narrow in the words it is given', () => {
-    const out = capBody({ s: 'x'.repeat(500) }, 100, 'Add LIMIT.') as {
-      note: string;
-    };
-    expect(out.note).toMatch(/too long to show whole\. Add LIMIT\.$/);
+  it('cuts the preview so it still fits once escaped as a JSON string', () => {
+    // Text that is all quotes doubles when the MCP result escapes it.
+    const quoted = { rows: Array.from({ length: 400 }, () => '"x"') };
+    const out = capBody(quoted, 2000) as { data_preview: string };
+    expect(JSON.stringify(out.data_preview).length).toBeLessThanOrEqual(2000);
+    expect(out.data_preview.length).toBeGreaterThan(500);
   });
 });
 
@@ -125,6 +126,24 @@ describe('redact', () => {
       client_secret: '[hidden]',
       password_hash: '[hidden]',
     });
+  });
+
+  it('hides them inside a string that holds JSON too (a jsonb cast to text)', () => {
+    const asText = JSON.stringify({
+      handle: 'ace',
+      partner_credential: { password: 'pw', issued_at: '2026-09-09' },
+    });
+    expect(redact({ metadata: asText, rows: [asText] })).toEqual({
+      metadata: '{"handle":"ace","partner_credential":"[hidden]"}',
+      rows: ['{"handle":"ace","partner_credential":"[hidden]"}'],
+    });
+    // Strings that only look like JSON stay as they are.
+    expect(redact(['[not json', '{oops}', '[]', 'x'])).toEqual([
+      '[not json',
+      '{oops}',
+      '[]',
+      'x',
+    ]);
   });
 
   it('shows bank account numbers whole (open since 2026-10-06)', () => {

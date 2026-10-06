@@ -346,6 +346,13 @@ export default defineMiddlewares({
       middlewares: [deskReportsRateLimit, requireReportKey()],
     },
     {
+      // The one desk-report POST, the read-only SQL (reports/admin/sql):
+      // same limiter and key. A POST keeps the query out of URLs and logs.
+      matcher: '/reports/*',
+      method: 'POST',
+      middlewares: [deskReportsRateLimit, requireReportKey()],
+    },
+    {
       // OTP send — TWO independent limiter tiers, per-phone FIRST so a
       // hammered number 429s before spending the address budget. The
       // storefront proxies every OTP request server-side, so the address tier

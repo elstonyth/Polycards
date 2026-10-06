@@ -18,9 +18,12 @@ import { generatedUsername } from './profile-handle';
  * keeps a hash. It is kept on the customer row under
  * `metadata.partner_credential`, which is also the marker the export scans
  * for. ponytail: plaintext at rest, scoped to operator-minted accounts and
- * readable only through admin-authenticated, rate-limited routes (and by the
- * account's own /store/customers/me); encrypt with an env key if that ever
- * stops being acceptable.
+ * readable through admin-authenticated, rate-limited routes (and by the
+ * account's own /store/customers/me). Since 2026-10-06 the staff desk bots'
+ * read-only SQL (api/reports/admin/db-query.ts) can reach customer.metadata
+ * too: it masks every stored partner password in its answers and errors, but
+ * a value a query deliberately transforms (reversed, split) gets past a mask.
+ * Encrypt with an env key to close that for good.
  */
 export const PARTNER_CREDENTIAL_KEY = 'partner_credential';
 

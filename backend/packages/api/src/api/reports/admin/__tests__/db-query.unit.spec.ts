@@ -1,4 +1,12 @@
-import { sqlErrorMessage, sqlRefusal, wrapQuery } from '../db-query';
+import {
+  dataQuery,
+  fitAnswer,
+  scrubSecrets,
+  sqlErrorMessage,
+  sqlForLog,
+  sqlRefusal,
+  wrapQuery,
+} from '../db-query';
 
 describe('sqlRefusal', () => {
   it.each([
@@ -15,7 +23,13 @@ describe('sqlRefusal', () => {
     'SELECT * FROM notification_read',
     'SELECT * FROM gateway_withdrawal',
     'SELECT * FROM player_payout_details',
+    'SELECT * FROM auth_identity',
     "SELECT * FROM customer WHERE metadata ? 'handle'",
+    // Postgres refuses these itself in the READ ONLY transaction (25006):
+    // a text check would only refuse "for update" inside a string as well.
+    'SELECT * FROM pull FOR UPDATE',
+    "SELECT nextval('seq')",
+    "SELECT * FROM delivery_order WHERE note ILIKE '%for update%'",
   ])('runs %p', (sql) => {
     expect(sqlRefusal(sql)).toBeNull();
   });
@@ -24,7 +38,7 @@ describe('sqlRefusal', () => {
     [undefined, /sql is required/],
     ['   ', /sql is required/],
     [['SELECT 1'], /sql is required/],
-    [`SELECT '${'x'.repeat(20_001)}'`, /too long/],
+    [`SELECT '${'x'.repeat(8_001)}'`, /too long/],
     ['DELETE FROM customer', /Only a read query/],
     ['update pack set price = 0', /Only a read query/],
     ['-- sneaky\nDROP TABLE pull', /Only a read query/],
@@ -52,11 +66,18 @@ describe('sqlRefusal', () => {
       /table_to_xml is not available/,
     ],
     ["SELECT pg_read_file('/etc/passwd')", /pg_read_file is not available/],
-    ["SELECT nextval('seq')", /nextval is not available/],
     ['SELECT lo_import(1)', /lo_import is not available/],
     [
       "SELECT most_common_vals FROM pg_stats WHERE tablename = 'x'",
       /pg_stats is not available/,
+    ],
+    [
+      'SELECT query, client_addr FROM pg_stat_activity',
+      /pg_stat_activity is not available/,
+    ],
+    [
+      'SELECT * FROM pg_stat_get_activity(NULL)',
+      /pg_stat_get_activity is not available/,
     ],
     ['SELECT * FROM provider_identity', /provider_identity table is not open/],
     ['SELECT * FROM public."api_key"', /api_key table is not open/],
@@ -72,6 +93,10 @@ describe('sqlRefusal', () => {
       /auth_mfa_recovery_code table is not open/,
     ],
     [
+      'SELECT entity_id, token_hash AS h FROM auth_verification_token',
+      /auth_verification_token table is not open/,
+    ],
+    [
       'SELECT context FROM workflow_execution',
       /workflow_execution table is not open/,
     ],
@@ -83,16 +108,13 @@ describe('sqlRefusal', () => {
       "SELECT metadata#>>'{partner_credential,password}' FROM customer",
       /Passwords stay hidden/,
     ],
-    ['SELECT * FROM customer FOR UPDATE', /Row locks/],
-    ['SELECT * FROM pull FOR NO KEY UPDATE', /Row locks/],
-    ['SELECT * FROM pack for share', /Row locks/],
     ['SELECT U&"\\0070g_sleep"(1)', /Unicode-escaped/],
   ])('refuses %p', (sql, why) => {
     expect(sqlRefusal(sql)).toMatch(why);
   });
 });
 
-describe('wrapQuery', () => {
+describe('wrapQuery and dataQuery', () => {
   it('runs the query as a subquery capped by the bound row limit', () => {
     expect(wrapQuery('  SELECT 1;; ')).toBe(
       'SELECT * FROM (\nSELECT 1\n) AS desk_bot_query LIMIT $1',
@@ -104,42 +126,138 @@ describe('wrapQuery', () => {
       'SELECT * FROM (\nSELECT 1 -- done\n) AS desk_bot_query LIMIT $1',
     );
   });
+
+  it('has Postgres build the rows as JSON, bounded per row and in all', () => {
+    const q = dataQuery('SELECT 1');
+    expect(q).toContain(`FROM (${wrapQuery('SELECT 1')}) AS q`);
+    expect(q).toContain('json_agg(q) FILTER (WHERE pg_column_size(q) <= $2)');
+    expect(q).toContain('CASE WHEN octet_length(t.j) <= $3 THEN t.j END');
+  });
+});
+
+describe('scrubSecrets', () => {
+  it('masks every stored secret, as written and as JSON escapes it', () => {
+    const secrets = ['Ab3dEf7hJk9mNp2q', 'pa"ss\\word99'];
+    expect(
+      scrubSecrets(
+        '{"metadata":"{\\"partner_credential\\": {\\"password\\": \\"Ab3dEf7hJk9mNp2q\\"}}","b":"pa\\"ss\\\\word99"}',
+        secrets,
+      ),
+    ).toBe(
+      '{"metadata":"{\\"partner_credential\\": {\\"password\\": \\"[hidden]\\"}}","b":"[hidden]"}',
+    );
+    expect(
+      scrubSecrets(
+        'invalid input syntax for type integer: "{... Ab3dEf7hJk9mNp2q ...}"',
+        secrets,
+      ),
+    ).toBe('invalid input syntax for type integer: "{... [hidden] ...}"');
+  });
+
+  it('leaves values too short to be a password alone', () => {
+    expect(scrubSecrets('a abc a', ['abc'])).toBe('a abc a');
+  });
+});
+
+describe('fitAnswer', () => {
+  it('sends a small answer whole, counts first and rows last', () => {
+    const answer = fitAnswer(['n'], [{ n: 1 }, { n: 2 }], false, 12);
+    expect(answer).toEqual({
+      columns: ['n'],
+      row_count: 2,
+      more_rows: false,
+      ms: 12,
+      rows: [{ n: 1 }, { n: 2 }],
+    });
+    expect(Object.keys(answer).at(-1)).toBe('rows');
+  });
+
+  it('keeps whole rows only, and says how many were left out', () => {
+    const rows = Array.from({ length: 500 }, (_, i) => ({
+      i,
+      s: 'x'.repeat(100),
+    }));
+    const answer = fitAnswer(['i', 's'], rows, true, 5, 10_000) as {
+      rows: unknown[];
+      rows_shown: number;
+      row_count: number;
+      more_rows: boolean;
+      note: string;
+    };
+    expect(JSON.stringify(answer).length).toBeLessThanOrEqual(10_000);
+    expect(answer.row_count).toBe(500);
+    expect(answer.more_rows).toBe(true);
+    expect(answer.rows_shown).toBe(answer.rows.length);
+    expect(answer.rows.length).toBeGreaterThan(50);
+    expect(answer.rows.length).toBeLessThan(500);
+    expect(answer.note).toMatch(/Only the first \d+ of 500 rows fit/);
+  });
 });
 
 describe('sqlErrorMessage', () => {
+  const pgError = (code: string, message: string, hint?: string) => ({
+    severity: 'ERROR',
+    code,
+    message,
+    hint,
+  });
+
   it('turns a statement timeout into advice', () => {
-    expect(sqlErrorMessage({ code: '57014', message: 'canceling' })).toMatch(
+    expect(sqlErrorMessage(pgError('57014', 'canceling'))).toMatch(
       /ran too long and was stopped/,
     );
   });
 
-  it('says a write is refused', () => {
-    expect(sqlErrorMessage({ code: '25006', message: 'read-only' })).toMatch(
+  it('says a write or a row lock is refused', () => {
+    expect(sqlErrorMessage(pgError('25006', 'read-only'))).toMatch(
       /can only read/,
     );
   });
 
-  it('passes a Postgres error on, with its hint and how to look things up', () => {
+  it('passes a Postgres error about the query on, with how to look things up', () => {
     expect(
-      sqlErrorMessage({
-        code: '42P01',
-        message: 'relation "pulls" does not exist',
-      }),
+      sqlErrorMessage(pgError('42P01', 'relation "pulls" does not exist')),
     ).toBe(
       'Postgres: relation "pulls" does not exist. To list tables: SELECT table_name FROM information_schema.tables WHERE table_schema = \'public\'.',
     );
     expect(
-      sqlErrorMessage({
-        code: '42703',
-        message: 'column "amt" does not exist',
-        hint: 'Perhaps you meant to reference the column "amount".',
-      }),
+      sqlErrorMessage(
+        pgError(
+          '42703',
+          'column "amt" does not exist',
+          'Perhaps you meant to reference the column "amount".',
+        ),
+      ),
     ).toMatch(/Hint: Perhaps you meant .*information_schema\.columns/);
   });
 
-  it('leaves a failure that is not a Postgres error to the caller', () => {
+  it('leaves the database failing, not the query, to the caller', () => {
+    // A socket error's code has a SQLSTATE's shape but no severity.
+    expect(sqlErrorMessage({ code: 'EPIPE', message: 'write EPIPE' })).toBe(
+      null,
+    );
     expect(sqlErrorMessage(new Error('connect ECONNREFUSED'))).toBeNull();
-    expect(sqlErrorMessage({ code: 'ECONNREFUSED' })).toBeNull();
     expect(sqlErrorMessage(null)).toBeNull();
+    for (const code of ['57P01', '08006', '53300', '58030', 'XX000']) {
+      expect(
+        sqlErrorMessage({ ...pgError(code, 'down'), severity: 'FATAL' }),
+      ).toBeNull();
+    }
+  });
+});
+
+describe('sqlForLog', () => {
+  it('masks every value a bot filtered on', () => {
+    expect(
+      sqlForLog(
+        "SELECT *  FROM customer\n WHERE email = 'ace@x.com' OR phone = '+60123456789' OR id = 5550001234 OR note = $$it's$$",
+      ),
+    ).toBe(
+      "SELECT * FROM customer WHERE email = '…' OR phone = '…' OR id = # OR note = '…'",
+    );
+  });
+
+  it('keeps a log line short', () => {
+    expect(sqlForLog(`SELECT ${'a, '.repeat(400)}1`).length).toBe(500);
   });
 });
