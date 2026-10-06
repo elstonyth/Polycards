@@ -1313,7 +1313,9 @@ export async function consumeOtpSendBudget(
   return { ...calls, sitewide: true, channel: via };
 }
 
-/** One-time claims on signup phone proofs (requireSignupPhoneProof). */
+/** One-time claims on phone proofs: signup (requireSignupPhoneProof) and,
+ *  since 2026-10-07, phone-change (store/phone-verification/change), under
+ *  their own key prefixes. */
 export interface ProofClaimStore {
   /** True iff this call took the claim; false when it is already held. */
   claim(key: string, ttlMs: number): Promise<boolean>;

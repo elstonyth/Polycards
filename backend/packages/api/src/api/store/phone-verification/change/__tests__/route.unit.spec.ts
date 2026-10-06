@@ -3,6 +3,24 @@ import { POST } from '../route';
 import { signPhoneProof } from '../../../../../utils/phone-verification';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 
+// The one-proof-one-account claim (Redis SET NX in production) as an in-memory
+// set: `mock`-prefixed so jest's hoisted factory may close over them.
+const mockClaimed = new Set<string>();
+let mockClaimFails = false;
+jest.mock('../../../../utils/rate-limit', () => ({
+  warmSignupProofClaims: () => ({
+    claim: async (key: string) => {
+      if (mockClaimFails) throw new Error('redis down');
+      if (mockClaimed.has(key)) return false;
+      mockClaimed.add(key);
+      return true;
+    },
+    release: async (key: string) => {
+      mockClaimed.delete(key);
+    },
+  }),
+}));
+
 // The re-auth gate on POST /store/phone-verification/change. Structural pattern
 // from store/credits/deposit/__tests__/route.unit.spec.ts: a fake `req` from a
 // mkReq helper, and process.env restored in afterEach.
@@ -123,6 +141,8 @@ beforeEach(() => {
   identities = [linked('emailpass', EMAIL)];
   passwordIsCorrect = true;
   phoneVerified = false;
+  mockClaimed.clear();
+  mockClaimFails = false;
   // The route skips the send entirely unless Resend is configured, so the
   // notification cases would assert nothing without these.
   process.env.RESEND_API_KEY = 'test-key';
@@ -422,5 +442,84 @@ describe('POST /store/phone-verification/change — phone lock (spec 2026-10-06)
       phone: NEW_PHONE,
     });
     expect(markPhoneVerified).toHaveBeenCalledWith(CUSTOMER_ID);
+  });
+});
+
+describe('POST /store/phone-verification/change — one proof, one account', () => {
+  // The 2026-10-06 review's HIGH: N phoneless accounts firing ONE code at once
+  // all saw the number free (assertPhoneUnclaimed is a read) and all landed
+  // it, each stamped verified.
+  it('refuses a second use of the same proof', async () => {
+    customerRow = { id: CUSTOMER_ID, email: EMAIL, phone: null };
+    const token = newPhoneProof();
+    await POST(
+      mkReq({ phone: NEW_PHONE, token, password: PASSWORD }),
+      mkRes() as never,
+    );
+
+    const err = await rejection(
+      POST(
+        mkReq({ phone: NEW_PHONE, token, password: PASSWORD }),
+        mkRes() as never,
+      ),
+    );
+    // A spent proof reads exactly like a missing or expired one.
+    expect(err.type).toBe(MedusaError.Types.INVALID_DATA);
+    expect(err.message).toBe('Phone verification required.');
+    expect(updateCustomers.mock.calls.length).toBe(1);
+  });
+
+  it('gives the proof back when the write is refused, so a retry needs no new code', async () => {
+    customerRow = { id: CUSTOMER_ID, email: EMAIL, phone: null };
+    const token = newPhoneProof();
+    listCustomers.mockResolvedValueOnce([{ id: 'cus_other' }]);
+    const first = await rejection(
+      POST(
+        mkReq({ phone: NEW_PHONE, token, password: PASSWORD }),
+        mkRes() as never,
+      ),
+    );
+    expect(first.message).toMatch(/already in use/i);
+
+    const res = mkRes();
+    await POST(
+      mkReq({ phone: NEW_PHONE, token, password: PASSWORD }),
+      res as never,
+    );
+    expect(updateCustomers.mock.calls).toEqual([
+      [CUSTOMER_ID, { phone: NEW_PHONE }],
+    ]);
+  });
+
+  it('fails closed when the claim store is unreachable', async () => {
+    customerRow = { id: CUSTOMER_ID, email: EMAIL, phone: null };
+    mockClaimFails = true;
+    const err = await rejection(
+      POST(
+        mkReq({ phone: NEW_PHONE, token: newPhoneProof(), password: PASSWORD }),
+        mkRes() as never,
+      ),
+    );
+    expect(err.type).toBe(MedusaError.Types.NOT_ALLOWED);
+    expect(updateCustomers.mock.calls.length).toBe(0);
+    expect(markPhoneVerified.mock.calls.length).toBe(0);
+  });
+
+  // The claim is taken after the re-auth gate: a Google-only account's first
+  // attempt, refused for the missing old-number proof, must leave the proof
+  // good for the retry that carries both.
+  it('does not spend the proof on a request the re-auth gate refuses', async () => {
+    identities = [linked('google', 'g-123')];
+    const token = oldPhoneProof();
+    const refused = await rejection(
+      POST(mkReq({ phone: OLD_PHONE, token }), mkRes() as never),
+    );
+    expect(refused.type).toBe(MedusaError.Types.UNAUTHORIZED);
+
+    await POST(
+      mkReq({ phone: OLD_PHONE, token, old_phone_token: oldPhoneProof() }),
+      mkRes() as never,
+    );
+    expect(updateCustomers.mock.calls.length).toBe(1);
   });
 });
