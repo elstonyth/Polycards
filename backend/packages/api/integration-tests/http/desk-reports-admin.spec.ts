@@ -143,6 +143,30 @@ medusaIntegrationTestRunner({
         expect((await read('/admin/customers', '', null)).status).toBe(401);
       });
 
+      // 2026-10-04: an undeclared `*:read` was soft-deleted by the next
+      // boot's policy sync, and every core screen then refused the bots
+      // ("Required policies: customer:read") until this was found.
+      it('keeps core screens open across the boot-time policy sync, and heals a deleted policy', async () => {
+        expect((await read('/admin/customers', '&limit=1')).status).toBe(200);
+        const rbac = getContainer().resolve(Modules.RBAC) as unknown as {
+          syncRegisteredPolicies(): Promise<void>;
+          listRbacPolicies(f: object): Promise<{ id: string }[]>;
+          softDeleteRbacPolicies(ids: string[]): Promise<void>;
+        };
+        // What every boot runs: soft-delete each policy nothing declares.
+        await rbac.syncRegisteredPolicies();
+        const live = await rbac.listRbacPolicies({ key: '*:read' });
+        expect(live).toHaveLength(1);
+        expect((await read('/admin/customers', '&limit=1')).status).toBe(200);
+
+        // Deleted anyway (by hand, or by an older build): the next read
+        // restores it instead of failing.
+        await rbac.softDeleteRbacPolicies([live[0].id]);
+        expect(await rbac.listRbacPolicies({ key: '*:read' })).toHaveLength(0);
+        expect((await read('/admin/customers', '&limit=1')).status).toBe(200);
+        expect(await rbac.listRbacPolicies({ key: '*:read' })).toHaveLength(1);
+      });
+
       it('relays an admin error instead of hiding it', async () => {
         const res = await read('/admin/packs/no-such-pack');
         expect(res.status).toBe(404);
