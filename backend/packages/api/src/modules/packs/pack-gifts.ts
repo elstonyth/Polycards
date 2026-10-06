@@ -12,10 +12,16 @@ export const GIFT_NOTE_MAX = 512;
 export const GIFT_CLAIM_LEASE_MINUTES = 10;
 
 /** SQL predicate (table pack_gift, unaliased) for a gift that may be opened
- *  or revoked: not revoked, no pull yet, never claimed or its claim lapsed. */
+ *  or revoked: not revoked, no pull yet, and never claimed — or its claim
+ *  lapsed AND that open wrote no pull. The pulls and the stamp commit in
+ *  separate workflow steps, so a crash between them leaves the open's pulls
+ *  with the gift unstamped; reclaiming that gift would hand out a second
+ *  card. Such a gift stays "stuck" for an operator instead. */
 export const UNOPENED_GIFT_SQL =
   'revoked_at IS NULL AND deleted_at IS NULL AND pull_id IS NULL ' +
-  `AND (opened_at IS NULL OR opened_at < now() - interval '${GIFT_CLAIM_LEASE_MINUTES} minutes')`;
+  'AND (opened_at IS NULL OR (' +
+  `opened_at < now() - interval '${GIFT_CLAIM_LEASE_MINUTES} minutes' ` +
+  'AND NOT EXISTS (SELECT 1 FROM pull p WHERE p.open_id = pack_gift.open_id AND p.deleted_at IS NULL)))';
 
 export const STALE_GIFT_MESSAGE =
   'Your vault pack is no longer available — refresh.';

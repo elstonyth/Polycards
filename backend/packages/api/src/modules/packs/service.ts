@@ -3140,7 +3140,7 @@ class PacksModuleService extends MedusaService({
       externalFundedSpendTotal: Number(r?.ext_spend_cents ?? 0) / 100,
       vipSpendTotal: Number(r?.vip_spend_cents ?? 0) / 100,
       depositedPlaythroughTotal: Number(r?.deposited_pt_cents ?? 0) / 100,
-      bonusBalance: Number(r?.bonus_cents ?? 0) / 100,
+      bonusBalance: Math.max(0, Number(r?.bonus_cents ?? 0)) / 100,
     };
   }
 
@@ -3310,7 +3310,9 @@ class PacksModuleService extends MedusaService({
     const beforeCents = Number(rows[0]?.balance_cents ?? 0);
     // Spend-only bonus credit (spec 2026-10-07): only a pack open may spend it
     // (settleOpen), so every other debit is floored against the NORMAL balance.
-    const bonusBeforeCents = Number(rows[0]?.bonus_cents ?? 0);
+    // Clamped: a negative Σ (only reachable by deleting a buyback row whose
+    // bonus was already spent) must never inflate the normal balance.
+    const bonusBeforeCents = Math.max(0, Number(rows[0]?.bonus_cents ?? 0));
     const deltaCents = Math.round(input.amount * 100);
     const floorCents = Math.round((input.floor ?? 0) * 100);
 
@@ -5838,7 +5840,7 @@ class PacksModuleService extends MedusaService({
     // on deposit money, so bonus-funded play banks no playthrough.
     const bonusUsedSen = consumeBonusSen(
       -deltaCents,
-      Number(rows[0]?.bonus_cents ?? 0),
+      Math.max(0, Number(rows[0]?.bonus_cents ?? 0)),
     );
     const externalFundedCents = -consumeExternalSen(
       -deltaCents - bonusUsedSen,
@@ -6471,7 +6473,7 @@ class PacksModuleService extends MedusaService({
       balance = Number(balRows[0]?.balance_cents ?? 0) / 100;
       depositedCents = Number(balRows[0]?.deposited_cents ?? 0);
       usedCents = Number(balRows[0]?.used_cents ?? 0);
-      bonusCents = Number(balRows[0]?.bonus_cents ?? 0);
+      bonusCents = Math.max(0, Number(balRows[0]?.bonus_cents ?? 0));
     }
 
     const frozen = await this.isFrozen(customerId, sharedContext);
@@ -6556,13 +6558,15 @@ class PacksModuleService extends MedusaService({
       // window subtracts from that week even if its original charge predates
       // it — intended (the week's honest net spend), not a bug.
       'WITH spend AS ( ' +
-        '  SELECT customer_id, ROUND(SUM(-amount) * 100)::bigint AS spend_cents ' +
+        // Normal part only: bonus-funded opens count toward nothing (spec
+        // 2026-10-07); bonus_cents is ≤ 0 on an open, ≥ 0 on its reversal.
+        '  SELECT customer_id, SUM(ROUND(-amount * 100) + COALESCE(bonus_cents, 0))::bigint AS spend_cents ' +
         '    FROM credit_transaction ' +
         "   WHERE reason = 'pack_open' " +
         '     AND deleted_at IS NULL AND customer_id IS NOT NULL ' +
         (since === null ? '' : '     AND created_at >= ?::timestamptz ') +
         '   GROUP BY customer_id ' +
-        '   HAVING ROUND(SUM(-amount) * 100) > 0 ' +
+        '   HAVING SUM(ROUND(-amount * 100) + COALESCE(bonus_cents, 0)) > 0 ' +
         '), wins AS ( ' +
         '  SELECT pu.customer_id, COUNT(*) AS pulls, ' +
         '         SUM(' +
@@ -7498,7 +7502,7 @@ class PacksModuleService extends MedusaService({
     >(
       'SELECT customer_id, ' +
         '  COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
-        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN ROUND(-amount * 100) ELSE 0 END), 0)::bigint AS vip_spend_cents, " +
+        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN ROUND(-amount * 100) + COALESCE(bonus_cents, 0) ELSE 0 END), 0)::bigint AS vip_spend_cents, " +
         "  MAX(created_at) FILTER (WHERE reason = 'pack_open') AS last_spend_at " +
         `FROM credit_transaction WHERE customer_id IN (${ph}) AND deleted_at IS NULL GROUP BY customer_id`,
       ids,
@@ -9106,10 +9110,11 @@ class PacksModuleService extends MedusaService({
         reason: string;
         amount: string;
         external_funded_cents: number | string | null;
+        bonus_cents: number | string | null;
         reference: string | null;
       }[]
     >(
-      `SELECT id, reason, amount, external_funded_cents, reference
+      `SELECT id, reason, amount, external_funded_cents, bonus_cents, reference
          FROM credit_transaction
         WHERE customer_id = ? AND deleted_at IS NULL
         ORDER BY created_at, id`,
@@ -9124,6 +9129,7 @@ class PacksModuleService extends MedusaService({
           r.external_funded_cents === null
             ? null
             : Number(r.external_funded_cents),
+        bonus_cents: r.bonus_cents === null ? null : Number(r.bonus_cents),
         reference: r.reference,
       })),
     );

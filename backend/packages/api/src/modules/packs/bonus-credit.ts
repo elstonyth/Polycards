@@ -40,19 +40,21 @@ export function allocateBonusSen(
   });
 }
 
-/** Share of a row's price paid in bonus, in basis points. */
+// Integer ceiling division: rounding always lands on the BONUS side, so a
+// rounding error can only keep value spend-only, never make it withdrawable.
+const ceilDiv = (a: number, b: number) => Math.floor((a + b - 1) / b);
+
+/** Share of a row's price paid in bonus, in basis points (rounded up). */
 export function bonusBpFor(bonusSen: number, priceSen: number): number {
   if (priceSen <= 0 || bonusSen <= 0) return 0;
-  return Math.min(
-    BONUS_BP_FULL,
-    Math.round((bonusSen * BONUS_BP_FULL) / priceSen),
-  );
+  return Math.min(BONUS_BP_FULL, ceilDiv(bonusSen * BONUS_BP_FULL, priceSen));
 }
 
-/** The bonus part of a sell-back of `amountSen`. */
+/** The bonus part of a sell-back of `amountSen` (rounded up). */
 export function bonusShareSen(amountSen: number, bp: number): number {
   const clamped = Math.max(0, Math.min(BONUS_BP_FULL, bp));
-  return Math.round((amountSen * clamped) / BONUS_BP_FULL);
+  if (amountSen <= 0 || clamped === 0) return 0;
+  return ceilDiv(amountSen * clamped, BONUS_BP_FULL);
 }
 
 export function bonusShareMyr(amount: number, bp: number): number {

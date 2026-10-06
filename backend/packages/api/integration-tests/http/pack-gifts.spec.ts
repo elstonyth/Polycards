@@ -291,7 +291,7 @@ medusaIntegrationTestRunner({
       expect(res.status).toBe(200);
       const [first, second] = res.data.rolls;
       expect(first.pull).toMatchObject({ source: 'bonus', bonus_bp: 10000 });
-      expect(second.pull).toMatchObject({ source: 'bonus', bonus_bp: 3333 });
+      expect(second.pull).toMatchObject({ source: 'bonus', bonus_bp: 3334 });
 
       const [debit] = await openRows();
       expect(debit.bonus_cents).toBe(-40000);

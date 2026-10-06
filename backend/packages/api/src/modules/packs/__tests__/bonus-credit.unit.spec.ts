@@ -27,8 +27,9 @@ describe('bonus credit math', () => {
   it('turns bonus sen into basis points of the row price', () => {
     expect(bonusBpFor(27000, 30000)).toBe(9000);
     expect(bonusBpFor(30000, 30000)).toBe(BONUS_BP_FULL);
-    expect(bonusBpFor(10000, 30000)).toBe(3333);
-    expect(bonusBpFor(1, 30000)).toBe(0);
+    // Rounded UP: a sliver of bonus never reads as an all-normal row.
+    expect(bonusBpFor(10000, 30000)).toBe(3334);
+    expect(bonusBpFor(1, 30000)).toBe(1);
     expect(bonusBpFor(100, 0)).toBe(0);
   });
 
@@ -37,6 +38,8 @@ describe('bonus credit math', () => {
     expect(bonusShareSen(27000, BONUS_BP_FULL)).toBe(27000);
     expect(bonusShareSen(27000, 0)).toBe(0);
     expect(bonusShareSen(27000, 20000)).toBe(27000);
+    expect(bonusShareSen(27001, 3334)).toBe(9003); // 9002.13 → up
+    expect(bonusShareSen(1, 1)).toBe(1);
     expect(bonusShareMyr(270, 9000)).toBe(243);
     expect(bonusShareMyr(0.07, 5000)).toBe(0.04);
   });

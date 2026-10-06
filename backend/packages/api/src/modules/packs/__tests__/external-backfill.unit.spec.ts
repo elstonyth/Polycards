@@ -86,3 +86,14 @@ it('ignores non-positive topups and is empty-safe', () => {
   const diff = recomputeExternalStamps([topup('t1', 0), topup('t2', -5)]);
   expect(diff.size).toBe(0);
 });
+
+it('spends bonus first, so only the normal part of an open consumes deposits', () => {
+  const diff = recomputeExternalStamps([
+    topup('t1', 100, 10000),
+    // RM 300 open, RM 270 of it bonus (spec 2026-10-07): only RM 30 is deposit.
+    { ...open('o1', -300, -3000), bonus_cents: -27000 },
+    { ...open('o2', -100, null), bonus_cents: 0 },
+  ]);
+  expect(diff.has('o1')).toBe(false); // already correct: no diff
+  expect(diff.get('o2')).toBe(-7000); // the RM 70 of deposit left
+});
