@@ -27,8 +27,8 @@ const KEY_OWNERS = [...REPORT_DESKS, 'developer'] as const;
 export type ReportCaller = (typeof KEY_OWNERS)[number];
 const MIN_KEY_LENGTH = 32;
 
-// Whose key opened this request, for the few routes that hold back from the
-// other desks (the Growth daily report's customer details).
+// Whose key opened this request: the log line names it, and the Growth
+// desk's daily Excel is kept for that desk's 12 a.m. job.
 const callers = new WeakMap<object, ReportCaller>();
 export const reportCallerOf = (req: MedusaRequest): ReportCaller | null =>
   callers.get(req) ?? null;
@@ -88,10 +88,20 @@ export function requireReportKey() {
     callers.set(req, caller);
     req.scope
       .resolve(ContainerRegistrationKeys.LOGGER)
-      .info(`[reports] ${caller} ${req.originalUrl}`);
+      .info(`[reports] ${caller} ${maskForLog(req.originalUrl)}`);
     next();
   };
 }
+
+/** `text` with emails and long numbers (phones, bank accounts) masked, for a
+ *  log line: a bot's customer search travels in the query string, and an
+ *  email arrives %40-encoded. */
+export const maskForLog = (text: string): string =>
+  text
+    .replace(/%40/gi, '@')
+    .replace(/%2B/gi, '+')
+    .replace(/[^\s'"&=?(),;]+@[^\s'"&=?(),;]+/g, '…@…')
+    .replace(/\d{5,}/g, '#');
 
 function sameKey(given: string, expected: string): boolean {
   const a = Buffer.from(given);

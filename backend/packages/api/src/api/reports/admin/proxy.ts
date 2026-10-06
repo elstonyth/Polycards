@@ -9,7 +9,9 @@ import { Modules } from '@medusajs/framework/utils';
 // desk key reads any admin dashboard screen except the blocked ones below.
 // The proxy itself only ever issues GET, and the token it mints carries one
 // role, DESK_BOT_ROLE, whose only policy is read on everything, so Medusa's
-// own RBAC refuses a write even if a GET route tried one.
+// own RBAC refuses every write route. A GET handler can still record that it
+// was read: a payout-details reveal writes its audit row (actor
+// DESK_BOT_ACTOR), which is that audit doing its job.
 
 /** The actor id the proxy's tokens carry: shows up wherever an admin route
  *  records who asked. */
@@ -66,13 +68,18 @@ export function blockedReason(path: string): string | null {
 // Secrets no desk bot sees, on whatever screen or query row carries them.
 // Core screens return customer.metadata whole, and it holds partner account
 // passwords (partner_credential): any password, secret, token, credential or
-// API key field is hidden. Bank account numbers come back whole (2026-10-06).
-// Real names (spec 2026-10-06) are hidden too: they are private to staff
-// checks in the admin panel and never reach a Discord report — that covers
-// the Players list's real_name, account_state, and the audit before/after.
+// API key field is hidden, also inside a string that holds JSON (a jsonb
+// column a query cast to text). Bank account numbers come back whole
+// (2026-10-06). Real names (spec 2026-10-06) are hidden too: they are private
+// to staff checks in the admin panel and never reach a Discord report — that
+// covers the Players list's real_name, account_state, and the audit
+// before/after. Field names alone cannot catch a value a query renamed or cut
+// out of its JSON: the SQL route masks the partner passwords and real names
+// themselves (db-query.ts).
 const HIDDEN = /password|secret|token|credential|api_?key|real_?name/i;
 
 export function redact(value: unknown): unknown {
+  if (typeof value === 'string') return redactJsonText(value);
   if (Array.isArray(value)) return value.map(redact);
   if (value === null || typeof value !== 'object') return value;
   return Object.fromEntries(
@@ -83,22 +90,40 @@ export function redact(value: unknown): unknown {
   );
 }
 
+function redactJsonText(text: string): string {
+  if (!/^\s*[[{]/.test(text)) return text;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return parsed !== null && typeof parsed === 'object'
+      ? JSON.stringify(redact(parsed))
+      : text;
+  } catch {
+    return text;
+  }
+}
+
 // Hermes spills a tool result over 50K characters to a file the bot cannot
 // read, so an answer is cut well below that, with a way to narrow it.
 const MAX_CHARS = 40_000;
 
-export function capBody(
-  data: unknown,
-  max = MAX_CHARS,
-  narrower = 'Ask again narrower: limit (rows per page), offset (to page on), fields (only the columns you need) or q (a search).',
-) {
+export function capBody(data: unknown, max = MAX_CHARS) {
+  // Measured as Hermes measures it: the tool's JSON text, escaped once more
+  // as a string, so every quote and backslash counts again.
+  const size = (value: unknown) =>
+    JSON.stringify(JSON.stringify(value)).length;
+  const whole = { truncated: false, data };
+  if (size(whole) <= max) return whole;
   const text = JSON.stringify(data);
-  if (text.length <= max) return { truncated: false, data };
-  return {
+  const cut = (preview: string) => ({
     truncated: true,
-    data_preview: text.slice(0, max),
-    note: `The answer is ${text.length.toLocaleString('en-MY')} characters, too long to show whole. ${narrower}`,
-  };
+    data_preview: preview,
+    note: `The answer is ${text.length.toLocaleString('en-MY')} characters, too long to show whole. Ask again narrower: limit (rows per page), offset (to page on), fields (only the columns you need) or q (a search).`,
+  });
+  let preview = text.slice(0, max);
+  while (preview && size(cut(preview)) > max) {
+    preview = preview.slice(0, Math.floor(preview.length * 0.9));
+  }
+  return cut(preview);
 }
 
 /** The id of DESK_BOT_ROLE, with its one policy (read on every resource)
