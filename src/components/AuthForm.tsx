@@ -800,7 +800,7 @@ export default function AuthForm({
               icon={IdCard}
               name="realName"
               type="text"
-              placeholder="Full name (as on IC / TNG eWallet)"
+              placeholder="Full name (as on your IC)"
               autoComplete="name"
               maxLength={REAL_NAME_MAX}
               required

@@ -74,9 +74,9 @@ export function RealNameModal() {
           Add your real name
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-neutral-400">
-          We need the name on your Touch ’n Go eWallet to confirm prize winners
-          and keep accounts one-per-person. It stays private — your username is
-          what other players see.
+          We use your real name for verification — to confirm prize winners and
+          keep accounts one-per-person. It stays private — your username is what
+          other players see.
         </p>
 
         <div className="mt-5">
