@@ -11,6 +11,36 @@ function foldAll(
   return rows.reduce(foldLedgerRow, EMPTY_TOTALS);
 }
 
+describe("foldLedgerRow — bonus credit (spec 2026-10-07)", () => {
+  const fold = (rows: Parameters<typeof foldLedgerRow>[1][]) =>
+    rows.reduce(foldLedgerRow, EMPTY_TOTALS);
+
+  it("tracks the bonus balance and keeps bonus-funded opens out of the VIP basis", () => {
+    const t = fold([
+      { amount: 270, reason: "bonus_grant", externalFundedCents: 0, bonusCents: 27000 },
+      { amount: 100, reason: "topup", externalFundedCents: 10000 },
+      // RM 300 open: RM 270 bonus first, RM 30 normal.
+      { amount: -300, reason: "pack_open", externalFundedCents: -3000, bonusCents: -27000 },
+      // its sell-back, 90% of it bonus
+      { amount: 250, reason: "buyback", externalFundedCents: null, bonusCents: 22500 },
+    ]);
+    expect(t.balanceCents).toBe(32000);
+    expect(t.bonusBalanceCents).toBe(22500);
+    expect(t.vipSpendCents).toBe(3000); // the normal RM 30 only
+    expect(totalsToUsd(t).bonusBalance).toBe(225);
+  });
+
+  it("nets a reversed bonus open back out of both", () => {
+    const t = fold([
+      { amount: 300, reason: "bonus_grant", externalFundedCents: 0, bonusCents: 30000 },
+      { amount: -300, reason: "pack_open", externalFundedCents: 0, bonusCents: -30000 },
+      { amount: 300, reason: "pack_open", externalFundedCents: 0, bonusCents: 30000 },
+    ]);
+    expect(t.bonusBalanceCents).toBe(30000);
+    expect(t.vipSpendCents).toBe(0);
+  });
+});
+
 describe("foldLedgerRow + totalsToUsd (external-funded)", () => {
   it("accumulates balance, topup, spend, external balance and external spend", () => {
     // topup RM100 (external +10000), open RM75 consuming 7500 external,
@@ -35,6 +65,7 @@ describe("foldLedgerRow + totalsToUsd (external-funded)", () => {
       externalFundedSpendTotal: 100,
       vipSpendTotal: 125,
       depositedPlaythroughTotal: 100, // the RM100 topup carries a non-null basis
+      bonusBalance: 0,
     });
   });
 

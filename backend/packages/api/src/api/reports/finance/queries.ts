@@ -33,7 +33,8 @@ export async function ledgerTotalsWhere(
   filter: SqlPart,
 ): Promise<LedgerTotals> {
   const { rows } = await db.raw<ReasonCents>(
-    'SELECT ct.reason, COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS cents ' +
+    // Normal part of each row: bonus credit (spec 2026-10-07) is not cash.
+    "SELECT ct.reason, COALESCE(SUM(ROUND(ct.amount * 100) - CASE WHEN ct.reason = 'bonus_grant' THEN 0 ELSE COALESCE(ct.bonus_cents, 0) END), 0)::bigint AS cents " +
       'FROM credit_transaction ct WHERE ct.deleted_at IS NULL' +
       filter.sql +
       ' GROUP BY ct.reason',
@@ -50,7 +51,7 @@ export async function ledgerTotalsByDay(
 ): Promise<Array<{ day: string; totals: LedgerTotals }>> {
   const { rows } = await db.raw<ReasonCents & { day: string }>(
     "SELECT to_char(ct.created_at AT TIME ZONE 'Asia/Kuala_Lumpur', 'YYYY-MM-DD') AS day, " +
-      'ct.reason, COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS cents ' +
+      "ct.reason, COALESCE(SUM(ROUND(ct.amount * 100) - CASE WHEN ct.reason = 'bonus_grant' THEN 0 ELSE COALESCE(ct.bonus_cents, 0) END), 0)::bigint AS cents " +
       'FROM credit_transaction ct WHERE ct.deleted_at IS NULL' +
       filter.sql +
       ' GROUP BY 1, 2 ORDER BY 1',
@@ -137,7 +138,7 @@ export async function packSales(
   unattributedCents: number;
 }> {
   const revenue = await db.raw<{ pack_id: string | null; cents: string }>(
-    'SELECT op.pack_id, COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS cents ' +
+    "SELECT op.pack_id, COALESCE(SUM(ROUND(ct.amount * 100) - CASE WHEN ct.reason = 'bonus_grant' THEN 0 ELSE COALESCE(ct.bonus_cents, 0) END), 0)::bigint AS cents " +
       'FROM credit_transaction ct ' +
       'LEFT JOIN (SELECT DISTINCT open_id, pack_id FROM pull ' +
       'WHERE open_id IS NOT NULL AND deleted_at IS NULL) op ' +

@@ -8,6 +8,12 @@
 // (pull.bonus_bp), and a sell-back pays that same share back as bonus, so the
 // value of a bonus grant or a gifted pack never becomes withdrawable.
 
+/** The refusal when a debit other than a pack open would need bonus credit
+ *  (delivery fee, withdrawal, admin deduction): the balance covers it, the
+ *  normal part does not. */
+export const BONUS_NOT_SPENDABLE_MESSAGE =
+  "Bonus credit can only be spent on packs — it can't pay for this.";
+
 /** A gifted pack's pull sells back entirely as bonus. */
 export const BONUS_BP_FULL = 10_000;
 

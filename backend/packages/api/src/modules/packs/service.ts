@@ -147,6 +147,10 @@ import {
   type BuybackRate,
 } from './buyback-rate';
 import { consumeExternalSen } from './external-funded';
+import {
+  BONUS_NOT_SPENDABLE_MESSAGE,
+  consumeBonusSen,
+} from './bonus-credit';
 import { recomputeExternalStamps } from './external-backfill';
 import { levelForSpend } from './vip-ladder';
 import { levelsToGrant, rewardsForLevel } from './vip-rewards';
@@ -275,6 +279,12 @@ export type CreditMutationInput = {
    * unique needed — the lock serializes check-then-insert per customer.
    */
   idempotencyReference?: string | null;
+  /**
+   * Bonus credit (spec 2026-10-07): the signed sen of this row that is
+   * spend-only bonus. Only a 'bonus_grant' row may carry it, and it must equal
+   * the row's amount in sen. Pack opens compute theirs in settleOpen.
+   */
+  bonusCents?: number;
 };
 
 export type RevealPullResult = {
@@ -297,6 +307,8 @@ export type SettleOpenInput = {
 export type SettleOpenResult = {
   id: string;
   balance: number;
+  /** Bonus credit this open spent, in sen (≥ 0) — spent before normal credit. */
+  bonusCents: number;
 };
 
 /** Phase 4 P4.2 — admin audit timeline row (read-only, zero migrations). */
@@ -1195,7 +1207,9 @@ class PacksModuleService extends MedusaService({
     const rows = await em.execute<
       { customer_id: string; turnover_cents: string }[]
     >(
-      'SELECT customer_id, COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS turnover_cents ' +
+      // Normal part only — bonus-funded opens pay no commission (spec
+      // 2026-10-07); bonus_cents is ≤ 0 on an open, ≥ 0 on its reversal.
+      'SELECT customer_id, COALESCE(SUM(ROUND(-amount * 100) + COALESCE(bonus_cents, 0)), 0)::bigint AS turnover_cents ' +
         'FROM credit_transaction ' +
         "WHERE reason = 'pack_open' AND deleted_at IS NULL " +
         filter +
@@ -1899,7 +1913,7 @@ class PacksModuleService extends MedusaService({
         'FROM ( ' +
         '  SELECT ra.customer_id, ' +
         '    COALESCE(SUM(CASE WHEN ct.created_at >= ? AND ct.created_at < ? ' +
-        '      THEN ROUND(-ct.amount * 100) ELSE 0 END), 0)::bigint AS per_customer ' +
+        '      THEN ROUND(-ct.amount * 100) + COALESCE(ct.bonus_cents, 0) ELSE 0 END), 0)::bigint AS per_customer ' +
         '  FROM referral_attribution ra ' +
         '  LEFT JOIN credit_transaction ct ON ct.customer_id = ra.customer_id ' +
         "    AND ct.reason = 'pack_open' AND ct.deleted_at IS NULL " +
@@ -3023,6 +3037,9 @@ class PacksModuleService extends MedusaService({
     // NOT topupTotal (which counts every positive topup). walletSummary reuses
     // this so the playthrough basis is defined in exactly one SQL query.
     depositedPlaythroughTotal: number;
+    // Bonus Balance (MYR, spec 2026-10-07): Σ bonus_cents — spend-only credit
+    // inside `balance`. Withdrawable never includes it.
+    bonusBalance: number;
   }> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
@@ -3034,6 +3051,7 @@ class PacksModuleService extends MedusaService({
         ext_spend_cents: string | null;
         vip_spend_cents: string | null;
         deposited_pt_cents: string | null;
+        bonus_cents: string | null;
       }[]
     >(
       'SELECT ' +
@@ -3041,8 +3059,11 @@ class PacksModuleService extends MedusaService({
         "  COALESCE(SUM(CASE WHEN reason = 'topup' AND amount > 0 THEN ROUND(amount * 100) ELSE 0 END), 0)::bigint AS topup_cents, " +
         '  COALESCE(SUM(CASE WHEN amount < 0 THEN ROUND(-amount * 100) ELSE 0 END), 0)::bigint AS spend_cents, ' +
         "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -external_funded_cents ELSE 0 END), 0)::bigint AS ext_spend_cents, " +
-        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN ROUND(-amount * 100) ELSE 0 END), 0)::bigint AS vip_spend_cents, " +
-        `  COALESCE(SUM(CASE WHEN ${DEPOSITED_PT_FILTER} THEN ROUND(amount * 100) ELSE 0 END), 0)::bigint AS deposited_pt_cents ` +
+        // VIP basis = the NORMAL part of opens: bonus-funded play counts
+        // toward nothing (spec 2026-10-07); bonus_cents is ≤ 0 on an open.
+        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN ROUND(-amount * 100) + COALESCE(bonus_cents, 0) ELSE 0 END), 0)::bigint AS vip_spend_cents, " +
+        `  COALESCE(SUM(CASE WHEN ${DEPOSITED_PT_FILTER} THEN ROUND(amount * 100) ELSE 0 END), 0)::bigint AS deposited_pt_cents, ` +
+        '  COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
         'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
       [customerId],
     );
@@ -3054,6 +3075,7 @@ class PacksModuleService extends MedusaService({
       externalFundedSpendTotal: Number(r?.ext_spend_cents ?? 0) / 100,
       vipSpendTotal: Number(r?.vip_spend_cents ?? 0) / 100,
       depositedPlaythroughTotal: Number(r?.deposited_pt_cents ?? 0) / 100,
+      bonusBalance: Number(r?.bonus_cents ?? 0) / 100,
     };
   }
 
@@ -3202,14 +3224,22 @@ class PacksModuleService extends MedusaService({
     //    only consumed by pack_open, but folding it into the existing balance
     //    scan avoids a second O(n) pass over the customer's ledger per open.
     const rows = await em.execute<
-      { balance_cents: string | null; ext_cents: string | null }[]
+      {
+        balance_cents: string | null;
+        ext_cents: string | null;
+        bonus_cents: string | null;
+      }[]
     >(
       'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
-        'COALESCE(SUM(external_funded_cents), 0)::bigint AS ext_cents ' +
+        'COALESCE(SUM(external_funded_cents), 0)::bigint AS ext_cents, ' +
+        'COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
         'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
       [input.customerId],
     );
     const beforeCents = Number(rows[0]?.balance_cents ?? 0);
+    // Spend-only bonus credit (spec 2026-10-07): only a pack open may spend it
+    // (settleOpen), so every other debit is floored against the NORMAL balance.
+    const bonusBeforeCents = Number(rows[0]?.bonus_cents ?? 0);
     const deltaCents = Math.round(input.amount * 100);
     const floorCents = Math.round((input.floor ?? 0) * 100);
 
@@ -3227,6 +3257,32 @@ class PacksModuleService extends MedusaService({
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
         'pack_open amount must be less than 0.',
+      );
+    }
+
+    // 2a') bonus_grant: the whole row is bonus, either sign, and the bonus
+    // balance can never go negative (a take-back larger than the bonus held).
+    let bonusDeltaCents = 0;
+    if (input.reason === 'bonus_grant') {
+      if (deltaCents === 0 || input.bonusCents !== deltaCents) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          'A bonus_grant row must carry bonusCents equal to its amount.',
+        );
+      }
+      if (bonusBeforeCents + deltaCents < 0) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          `Bonus credit cannot go below RM 0 (bonus balance RM ${(
+            bonusBeforeCents / 100
+          ).toFixed(2)}).`,
+        );
+      }
+      bonusDeltaCents = deltaCents;
+    } else if (input.bonusCents) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Only a bonus_grant row may carry bonusCents.',
       );
     }
 
@@ -3257,16 +3313,24 @@ class PacksModuleService extends MedusaService({
     }
 
     // 3) Floor check — covers both "enough credit to open" and "no overdraft".
-    if (deltaCents < 0 && beforeCents + deltaCents < floorCents) {
+    //    Only a pack open may spend bonus credit; every other debit is floored
+    //    against the NORMAL balance (a bonus take-back was bounded above).
+    const spendableCents =
+      input.reason === 'pack_open' || input.reason === 'bonus_grant'
+        ? beforeCents
+        : beforeCents - bonusBeforeCents;
+    if (deltaCents < 0 && spendableCents + deltaCents < floorCents) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         input.reason === 'pack_open'
           ? insufficientCreditsMessage(-deltaCents, beforeCents - floorCents)
-          : `Deduction exceeds the customer's balance (RM ${(
-              beforeCents / 100
-            ).toFixed(2)}) — the balance cannot go below RM ${(
-              floorCents / 100
-            ).toFixed(2)}.`,
+          : beforeCents + deltaCents >= floorCents
+            ? BONUS_NOT_SPENDABLE_MESSAGE
+            : `Deduction exceeds the customer's balance (RM ${(
+                beforeCents / 100
+              ).toFixed(2)}) — the balance cannot go below RM ${(
+                floorCents / 100
+              ).toFixed(2)}.`,
       );
     }
 
@@ -3287,6 +3351,7 @@ class PacksModuleService extends MedusaService({
           // (the dedupe target above) so the two never clobber each other.
           reference: input.reference ?? null,
           external_funded_cents: externalFundedCents,
+          bonus_cents: bonusDeltaCents,
           source_transaction_id:
             input.idempotencyReference ?? input.sourceTransactionId ?? null,
         },
@@ -4004,6 +4069,12 @@ class PacksModuleService extends MedusaService({
           pull_id: null, // unique pull_id belongs to the original only
           reference: `reversal:${transactionId}`,
           external_funded_cents: -originalExt, // restores external balance + basis
+          // restores the bonus the original spent (or clawed back)
+          bonus_cents:
+            0 -
+            Number(
+              (original as { bonus_cents?: number | null }).bonus_cents ?? 0,
+            ),
           source_transaction_id:
             (original as { source_transaction_id?: string | null })
               .source_transaction_id ?? null, // present after Task 4
@@ -4101,6 +4172,12 @@ class PacksModuleService extends MedusaService({
             pull_id: null,
             reference: `reversal:${original.id}`,
             external_funded_cents: -originalExt, // restores basis
+            // restores the bonus the open spent
+            bonus_cents:
+              0 -
+              Number(
+                (original as { bonus_cents?: number | null }).bonus_cents ?? 0,
+              ),
             source_transaction_id: sourceTransactionId,
           },
         ],
@@ -5669,19 +5746,31 @@ class PacksModuleService extends MedusaService({
       );
     }
 
-    // 2) Locked balance + external read (one scan), exact + soft-delete aware.
+    // 2) Locked balance + external + bonus read (one scan), exact +
+    //    soft-delete aware.
     const rows = await em.execute<
-      { balance_cents: string | null; ext_cents: string | null }[]
+      {
+        balance_cents: string | null;
+        ext_cents: string | null;
+        bonus_cents: string | null;
+      }[]
     >(
       'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
-        'COALESCE(SUM(external_funded_cents), 0)::bigint AS ext_cents ' +
+        'COALESCE(SUM(external_funded_cents), 0)::bigint AS ext_cents, ' +
+        'COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
         'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
       [input.customerId],
     );
     const beforeCents = Number(rows[0]?.balance_cents ?? 0);
     const externalBalanceSen = Number(rows[0]?.ext_cents ?? 0);
-    const externalFundedCents = -consumeExternalSen(
+    // Bonus credit is spent FIRST (spec 2026-10-07 §4.1); only the rest draws
+    // on deposit money, so bonus-funded play banks no playthrough.
+    const bonusUsedSen = consumeBonusSen(
       -deltaCents,
+      Number(rows[0]?.bonus_cents ?? 0),
+    );
+    const externalFundedCents = -consumeExternalSen(
+      -deltaCents - bonusUsedSen,
       externalBalanceSen,
     );
 
@@ -5727,6 +5816,7 @@ class PacksModuleService extends MedusaService({
             pull_id: null,
             reference: null,
             external_funded_cents: externalFundedCents,
+            bonus_cents: 0 - bonusUsedSen,
             source_transaction_id: input.sourceTransactionId,
           },
         ],
@@ -5749,6 +5839,7 @@ class PacksModuleService extends MedusaService({
     return {
       id: txn.id,
       balance: (beforeCents + deltaCents) / 100,
+      bonusCents: bonusUsedSen,
     };
   }
 
@@ -6250,6 +6341,7 @@ class PacksModuleService extends MedusaService({
       balance: number;
       depositedCents: number;
       usedCents: number;
+      bonusCents: number;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
@@ -6257,6 +6349,8 @@ class PacksModuleService extends MedusaService({
     available: number;
     isFrozen: boolean;
     withdrawable: number;
+    /** Spend-only bonus credit inside `balance` (MYR) — never withdrawable. */
+    bonus: number;
     playthrough: { deposited: number; used: number; remaining: number };
   }> {
     const em = (sharedContext.transactionManager ??
@@ -6275,27 +6369,32 @@ class PacksModuleService extends MedusaService({
     let balance: number;
     let depositedCents: number;
     let usedCents: number;
+    let bonusCents: number;
     if (precomputed) {
       balance = precomputed.balance;
       depositedCents = precomputed.depositedCents;
       usedCents = precomputed.usedCents;
+      bonusCents = precomputed.bonusCents;
     } else {
       const balRows = await em.execute<
         {
           balance_cents: string | null;
           deposited_cents: string | null;
           used_cents: string | null;
+          bonus_cents: string | null;
         }[]
       >(
         'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
           `COALESCE(SUM(ROUND(amount * 100)) FILTER (WHERE ${DEPOSITED_PT_FILTER}), 0)::bigint AS deposited_cents, ` +
-          "COALESCE(SUM(-external_funded_cents) FILTER (WHERE reason = 'pack_open'), 0)::bigint AS used_cents " +
+          "COALESCE(SUM(-external_funded_cents) FILTER (WHERE reason = 'pack_open'), 0)::bigint AS used_cents, " +
+          'COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
           'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
         [customerId],
       );
       balance = Number(balRows[0]?.balance_cents ?? 0) / 100;
       depositedCents = Number(balRows[0]?.deposited_cents ?? 0);
       usedCents = Number(balRows[0]?.used_cents ?? 0);
+      bonusCents = Number(balRows[0]?.bonus_cents ?? 0);
     }
 
     const frozen = await this.isFrozen(customerId, sharedContext);
@@ -6307,13 +6406,18 @@ class PacksModuleService extends MedusaService({
     // Playthrough gate: all-or-nothing on the available balance. Spending on
     // packs stays unrestricted either way — the gate only limits cashout.
     const gate = playthroughState({ depositedCents, usedCents });
-    const withdrawable = gate.withdrawable ? Math.max(0, available) : 0;
+    // Bonus credit is spend-only (spec 2026-10-07): it sits inside the
+    // balance but never inside what may leave.
+    const withdrawable = gate.withdrawable
+      ? Math.max(0, Math.round(available * 100) - bonusCents) / 100
+      : 0;
 
     return {
       balance,
       available,
       isFrozen: frozen,
       withdrawable,
+      bonus: bonusCents / 100,
       playthrough: {
         deposited: depositedCents / 100,
         used: usedCents / 100,
@@ -6803,7 +6907,9 @@ class PacksModuleService extends MedusaService({
       sharedContext.manager) as unknown as LedgerSqlManager;
     const params: unknown[] = [];
     let sql =
-      'SELECT reason, COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS cents ' +
+      // The NORMAL part of every row (spec 2026-10-07): bonus spent on opens
+      // and paid back on sells is not cash; bonus_grant is its own bucket.
+      "SELECT reason, COALESCE(SUM(ROUND(amount * 100) - CASE WHEN reason = 'bonus_grant' THEN 0 ELSE COALESCE(bonus_cents, 0) END), 0)::bigint AS cents " +
       'FROM credit_transaction WHERE deleted_at IS NULL';
     if (from) {
       sql += ' AND created_at >= ?::timestamptz';
@@ -8359,7 +8465,9 @@ class PacksModuleService extends MedusaService({
       //
       // Three audit passes have flagged `amount < 0` as a bug and one got as
       // far as changing it. WON'T-FIX — ADR 0003, "Reversal exclusion".
-      `SELECT COALESCE(SUM(ROUND(-amount * 100)), 0)::bigint AS sen
+      // The NORMAL part only: bonus-funded play counts toward nothing (spec
+      // 2026-10-07); bonus_cents is ≤ 0 on an open debit.
+      `SELECT COALESCE(SUM(ROUND(-amount * 100) + COALESCE(bonus_cents, 0)), 0)::bigint AS sen
          FROM credit_transaction
         WHERE customer_id = ? AND reason = 'pack_open' AND amount < 0 AND deleted_at IS NULL`,
       [customerId],
