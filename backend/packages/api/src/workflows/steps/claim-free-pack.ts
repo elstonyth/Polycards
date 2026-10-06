@@ -1,8 +1,10 @@
 import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
-import { MedusaError } from '@medusajs/framework/utils';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
+import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import {
+  FREE_PACK_SHARED_PHONE_MESSAGE,
   FREE_PACK_VERIFICATION_MESSAGE,
   FREE_WELCOME_CATEGORY,
 } from '../../modules/packs/free-pack';
@@ -13,6 +15,9 @@ export type ClaimFreePackResult = { free: boolean };
 // (the step may return no payload), so this type must NOT include it — the
 // StepResponse generic has to match the inferred TCompensateInput exactly.
 type CompensateData = { customer_id: string };
+// Same cast as api/utils/phone-claim.ts: `has_account` is a real column the
+// generated filter type omits.
+type CustomerFilters = Parameters<ICustomerModuleService['listCustomers']>[0];
 
 // claim-free-pack — the free pack's "payment": consume the account's one-time
 // claim BEFORE the charge seam. No-op ({ free: false }) for every non-free
@@ -57,6 +62,31 @@ export const claimFreePackStep = createStep(
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         FREE_PACK_VERIFICATION_MESSAGE,
+      );
+    }
+    // One phone, one welcome pack. assertPhoneUnclaimed (api/utils/phone-claim)
+    // is a read-then-write with no lock or unique index, so concurrent
+    // first-phone verifications replaying ONE OTP proof can land the same
+    // number — each stamped verified — on many fresh accounts. That race is the
+    // farming route this gate exists to close, so refuse here whatever put the
+    // number on more than one real account; customer service sorts the
+    // genuine case out. Same has_account scoping as phone-claim.ts.
+    const customers = container.resolve<ICustomerModuleService>(
+      Modules.CUSTOMER,
+    );
+    const { phone } = await customers.retrieveCustomer(input.customer_id, {
+      select: ['phone'],
+    });
+    const holders = phone
+      ? await customers.listCustomers(
+          { phone, has_account: true } as unknown as CustomerFilters,
+          { select: ['id'], take: 2 },
+        )
+      : [];
+    if (!phone || holders.length > 1) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        FREE_PACK_SHARED_PHONE_MESSAGE,
       );
     }
     const claimed = await packs.claimFreePack(input.customer_id);

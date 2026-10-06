@@ -25,9 +25,8 @@ export default async function AccountLayout({
   // next visit here. Only the password-less cohort: the change route asks a
   // password account for its password before it will add a phone, and the
   // gate has no field for it — those (legacy, pre-enforcement) rows keep the
-  // Settings flow and the /me tile highlight. Same flag as SettingsForm's OTP
-  // flow: enforcement off means a plain phone field there and nothing to
-  // verify.
+  // Settings flow and the /me tile highlight. Enforcement off means no phone
+  // gate here (signups may then carry unproven numbers).
   //
   // Scope: the ACCOUNT tree. A gated player can still browse /, /slots and
   // /task and open the top-up sheet; the money and goods paths refuse them at

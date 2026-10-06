@@ -107,6 +107,22 @@ moduleIntegrationTestRunner<PacksModuleService>({
     // The open saga touches modules this feature has nothing to do with: the
     // real packs service, inert fakes for the rest (vip-settle-step.unit
     // .spec.ts's container, minus its fake packs service).
+    // The claim step reads the customer's phone and refuses one shared by two
+    // real accounts (spec 2026-10-06). Every test customer gets its own number
+    // unless a test puts two on the same one through `phoneOf`.
+    const phoneOf = new Map<string, string>();
+    const fakeCustomers = {
+      listCustomerGroups: async () => [],
+      retrieveCustomer: async (id: string) => ({
+        id,
+        phone: phoneOf.get(id) ?? `+6011${[...id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 1e8, 7)}`,
+      }),
+      listCustomers: async (filter: { phone?: string }) =>
+        [...phoneOf.entries()]
+          .filter(([, p]) => p === filter.phone)
+          .map(([id]) => ({ id })),
+    };
+
     const buildContainer = (packs: unknown = service) => {
       const container = createMedusaContainer();
       container.register({
@@ -119,7 +135,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         [Modules.NOTIFICATION]: asValue({
           createNotifications: async (n: Record<string, unknown>) => [n],
         }),
-        [Modules.CUSTOMER]: asValue({ listCustomerGroups: async () => [] }),
+        [Modules.CUSTOMER]: asValue(fakeCustomers),
         logger: asValue({
           info: () => undefined,
           warn: () => undefined,
@@ -400,6 +416,25 @@ moduleIntegrationTestRunner<PacksModuleService>({
           expect((await latestPull(customerId, FREE_SLUG)).source).toBe('free');
         },
       );
+
+      // The HIGH from the 2026-10-06 review: one OTP proof replayed across many
+      // fresh accounts can land one number, verified, on all of them. One
+      // phone, one welcome pack — refused before the claim is spent.
+      it('refuses an account whose phone is also on another account, and the claim survives', async () => {
+        await stampEligible(customerId);
+        phoneOf.set(customerId, '+60111110000');
+        phoneOf.set(strangerId, '+60111110000');
+        try {
+          expect(await openFails(FREE_SLUG, customerId)).toMatch(
+            /linked to more than one account/i,
+          );
+          expect(
+            (await claimState(customerId))!.free_pack_claimed_at,
+          ).toBeNull();
+        } finally {
+          phoneOf.clear();
+        }
+      });
 
       it('second free open is refused (claim consumed)', async () => {
         await stampEligible(customerId);

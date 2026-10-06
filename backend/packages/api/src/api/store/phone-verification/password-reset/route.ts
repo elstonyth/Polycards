@@ -74,7 +74,10 @@ const maskEmail = (email: string): string => {
   return `${local.slice(0, 1)}${'*'.repeat(Math.max(local.length - 1, 2))}@${domain}`;
 };
 
-export async function POST(req: MedusaRequest<Body>, res: MedusaResponse): Promise<void> {
+export async function POST(
+  req: MedusaRequest<Body>,
+  res: MedusaResponse,
+): Promise<void> {
   const { token } = req.body ?? {};
   const { jwtSecret } = req.scope.resolve('configModule').projectConfig.http;
   // jwtSecret is typed `Secret` (string | Buffer | ...) by the framework, not
@@ -82,21 +85,28 @@ export async function POST(req: MedusaRequest<Body>, res: MedusaResponse): Promi
   // HMAC needs a plain string, so a non-string secret is treated the same as
   // unconfigured.
   if (typeof jwtSecret !== 'string' || !jwtSecret)
-    throw new MedusaError(MedusaError.Types.UNEXPECTED_STATE, 'Server misconfigured.');
+    throw new MedusaError(
+      MedusaError.Types.UNEXPECTED_STATE,
+      'Server misconfigured.',
+    );
 
   const proof =
-    typeof token === 'string' ? verifyPhoneProof(jwtSecret, token, 'password-reset') : null;
+    typeof token === 'string'
+      ? verifyPhoneProof(jwtSecret, token, 'password-reset')
+      : null;
   if (!proof)
-    throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Phone verification required.');
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Phone verification required.',
+    );
 
   // ── THE PHONE IS ONLY A FACTOR WHILE PHONE WRITES ARE GATED ────────────────
   // A phone can serve as an authentication factor only while the system claims
-  // phones are verified. With PHONE_VERIFICATION_REQUIRED off,
-  // blockCustomerPhoneWrite (api/utils/phone-verification-guard.ts) no-ops
-  // and any live customer session can write an arbitrary, unproven number
-  // straight to POST /store/customers/me — so the phone on the row proves
-  // nothing about who holds the account, and must not mint a password-reset
-  // token. Without this, flipping the documented fail-open rollback lever
+  // phones are verified. With PHONE_VERIFICATION_REQUIRED off, a SIGNUP may
+  // write an arbitrary, unproven number (requireSignupPhoneProof steps aside;
+  // POST /store/customers/me refuses `phone` unconditionally since the
+  // 2026-10-06 phone lock) — so the phone on the row proves nothing about who
+  // holds the account, and must not mint a password-reset token. Without this, flipping the documented fail-open rollback lever
   // (CONTEXT.md; exercised by PR #390/#391 during the Twilio 21608 outage)
   // reopens the exact takeover chain the re-auth gate in ../change/route.ts
   // closes, by routing around that route entirely.
@@ -127,13 +137,18 @@ export async function POST(req: MedusaRequest<Body>, res: MedusaResponse): Promi
       'Phone recovery is unavailable. Reset by email instead.',
     );
 
-  const customerService: ICustomerModuleService = req.scope.resolve(Modules.CUSTOMER);
+  const customerService: ICustomerModuleService = req.scope.resolve(
+    Modules.CUSTOMER,
+  );
   const matches = await customerService.listCustomers(
     { phone: proof.phone, has_account: true } as unknown as CustomerFilters,
     { select: ['id', 'email'], take: 2 },
   );
   if (matches.length === 0)
-    throw new MedusaError(MedusaError.Types.NOT_FOUND, 'No account uses this phone number.');
+    throw new MedusaError(
+      MedusaError.Types.NOT_FOUND,
+      'No account uses this phone number.',
+    );
   if (matches.length > 1)
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,

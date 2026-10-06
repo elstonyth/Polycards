@@ -2,7 +2,8 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
-import { MedusaError } from '@medusajs/framework/utils';
+import { MedusaError, Modules } from '@medusajs/framework/utils';
+import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import {
@@ -39,6 +40,11 @@ export async function POST(
   if (!realName) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, REAL_NAME_INVALID);
   }
+  // A mistyped id must 404, not leave an orphan account-state row and an
+  // audit row behind (retrieveCustomer throws NOT_FOUND).
+  await req.scope
+    .resolve<ICustomerModuleService>(Modules.CUSTOMER)
+    .retrieveCustomer(customerId, { select: ['id'] });
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   await packs.adminSetRealName({
     customerId,

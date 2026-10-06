@@ -86,6 +86,22 @@ moduleIntegrationTestRunner<PacksModuleService>({
   testSuite: ({ service }) => {
     const customerId = 'cus_free_reader';
 
+    // The claim step reads the customer's phone and refuses one shared by two
+    // real accounts (spec 2026-10-06). Every test customer gets its own number
+    // unless a test puts two on the same one through `phoneOf`.
+    const phoneOf = new Map<string, string>();
+    const fakeCustomers = {
+      listCustomerGroups: async () => [],
+      retrieveCustomer: async (id: string) => ({
+        id,
+        phone: phoneOf.get(id) ?? `+6011${[...id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 1e8, 7)}`,
+      }),
+      listCustomers: async (filter: { phone?: string }) =>
+        [...phoneOf.entries()]
+          .filter(([, p]) => p === filter.phone)
+          .map(([id]) => ({ id })),
+    };
+
     // The open saga touches modules this feature has nothing to do with: the
     // real packs service, inert fakes for the rest.
     const container = (() => {
@@ -100,7 +116,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         [Modules.NOTIFICATION]: asValue({
           createNotifications: async (n: Record<string, unknown>) => [n],
         }),
-        [Modules.CUSTOMER]: asValue({ listCustomerGroups: async () => [] }),
+        [Modules.CUSTOMER]: asValue(fakeCustomers),
         logger: asValue({
           info: () => undefined,
           warn: () => undefined,
