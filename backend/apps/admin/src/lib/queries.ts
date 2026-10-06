@@ -35,6 +35,10 @@ import {
   getCustomerGacha,
   getCustomerTransactions,
   getCustomerPulls,
+  getCustomerPackGifts,
+  grantPackGifts,
+  revokePackGift,
+  type PackGift,
   getDeliveryOrder,
   getEconomyReport,
   getStatsReport,
@@ -563,17 +567,77 @@ export const useSaveTopHits = () =>
     // edits. Flags are the only change, so local state == server state.
   });
 
+// kind 'bonus' = the Bonus credit panel. The idempotency key is minted by the
+// caller per confirmed submit, never here: a retry of mutationFn would mint a
+// second key and apply twice.
 export const useAdjustCredits = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { id: string; amount: number; note: string }) =>
-      adjustCustomerCredits(vars.id, vars.amount, vars.note),
+    mutationFn: (vars: {
+      id: string;
+      amount: number;
+      note: string;
+      idempotencyKey?: string;
+      kind?: 'bonus';
+    }) =>
+      adjustCustomerCredits(
+        vars.id,
+        vars.amount,
+        vars.note,
+        vars.idempotencyKey,
+        vars.kind,
+      ),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: qk.customerGacha(vars.id) });
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
       qc.invalidateQueries({ queryKey: qk.customerTransactionsKey(vars.id) });
       // The Players list shows the wallet column this just moved.
       qc.invalidateQueries({ queryKey: qk.playersKey });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useCustomerPackGifts = (id: string): UseQueryResult<PackGift[]> =>
+  useQuery({
+    queryKey: qk.customerPackGifts(id),
+    queryFn: () => getCustomerPackGifts(id).then((r) => r.gifts),
+    enabled: !!id,
+  });
+
+export const useGrantPackGifts = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      id: string;
+      pack_id: string;
+      quantity: number;
+      note: string;
+      idempotency_key: string;
+    }) => {
+      const { id, ...body } = vars;
+      return grantPackGifts(id, body);
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: qk.customerPackGifts(vars.id) });
+      qc.invalidateQueries({ queryKey: qk.customerGacha(vars.id) });
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useRevokePackGift = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { giftId: string; customerId: string }) =>
+      revokePackGift(vars.giftId),
+    // onSettled, not onSuccess: a 409 "Already opened" means the row moved
+    // under us, so the table must re-read either way.
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: qk.customerPackGifts(vars.customerId) });
+      qc.invalidateQueries({ queryKey: qk.customerGacha(vars.customerId) });
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.customerId) });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
