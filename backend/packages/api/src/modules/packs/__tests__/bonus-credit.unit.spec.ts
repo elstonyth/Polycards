@@ -1,0 +1,49 @@
+import {
+  BONUS_BP_FULL,
+  allocateBonusSen,
+  bonusBpFor,
+  bonusShareMyr,
+  bonusShareSen,
+  consumeBonusSen,
+  pullSourceFor,
+} from '../bonus-credit';
+
+describe('bonus credit math', () => {
+  it('consumes bonus first, never more than the total or the balance', () => {
+    expect(consumeBonusSen(30000, 27000)).toBe(27000);
+    expect(consumeBonusSen(30000, 50000)).toBe(30000);
+    expect(consumeBonusSen(30000, 0)).toBe(0);
+    expect(consumeBonusSen(30000, -5)).toBe(0);
+    expect(consumeBonusSen(0, 100)).toBe(0);
+  });
+
+  it('allocates bonus row by row, at most one partial row', () => {
+    expect(allocateBonusSen(30000, 2, 40000)).toEqual([30000, 10000]);
+    expect(allocateBonusSen(30000, 3, 27000)).toEqual([27000, 0, 0]);
+    expect(allocateBonusSen(30000, 1, 0)).toEqual([0]);
+    expect(allocateBonusSen(30000, 0, 500)).toEqual([]);
+  });
+
+  it('turns bonus sen into basis points of the row price', () => {
+    expect(bonusBpFor(27000, 30000)).toBe(9000);
+    expect(bonusBpFor(30000, 30000)).toBe(BONUS_BP_FULL);
+    expect(bonusBpFor(10000, 30000)).toBe(3333);
+    expect(bonusBpFor(1, 30000)).toBe(0);
+    expect(bonusBpFor(100, 0)).toBe(0);
+  });
+
+  it('splits a sell-back by basis points', () => {
+    expect(bonusShareSen(27000, 9000)).toBe(24300);
+    expect(bonusShareSen(27000, BONUS_BP_FULL)).toBe(27000);
+    expect(bonusShareSen(27000, 0)).toBe(0);
+    expect(bonusShareSen(27000, 20000)).toBe(27000);
+    expect(bonusShareMyr(270, 9000)).toBe(243);
+    expect(bonusShareMyr(0.07, 5000)).toBe(0.04);
+  });
+
+  it('labels a row by how it was paid', () => {
+    expect(pullSourceFor({ gift: true, bonusSen: 0 })).toBe('gift');
+    expect(pullSourceFor({ gift: false, bonusSen: 1 })).toBe('bonus');
+    expect(pullSourceFor({ gift: false, bonusSen: 0 })).toBe('pack');
+  });
+});
