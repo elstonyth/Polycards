@@ -1,4 +1,7 @@
-import type { MedusaContainer } from '@medusajs/framework/types';
+import type {
+  IRbacModuleService,
+  MedusaContainer,
+} from '@medusajs/framework/types';
 import { Modules } from '@medusajs/framework/utils';
 
 // The desk bots' read-only admin proxy (GET /reports/admin/read): the owner's
@@ -35,20 +38,16 @@ export function adminPathError(path: unknown): string | null {
   return null;
 }
 
-// Screens no desk bot reads, with the reason it is told.
+// Screens no desk bot reads, with the reason it is told. Since 2026-10-06
+// (the owner: "just give it everything") the staff list and full bank
+// numbers are open; what stays shut holds login secrets, costs money per
+// call, or is a file rather than a screen.
 const BLOCKED: [RegExp, string][] = [
-  [/^\/admin\/(users|invites)(\/|$)/, 'staff logins and invites'],
+  [/^\/admin\/invites(\/|$)/, 'staff invites (their links log in)'],
   [/^\/admin\/api-keys(\/|$)/, 'API keys'],
   [/^\/admin\/workflows-executions(\/|$)/, 'workflow internals'],
   [/^\/admin\/notifications(\/|$)/, 'notification contents (reset links)'],
   [/^\/admin\/uploads(\/|$)/, 'uploads'],
-  // Bank numbers stay masked, as on the dashboard's lists: the one-row
-  // reveal is an audited staff action, and payout-details holds them whole.
-  [
-    /^\/admin\/payments\/withdrawals\/[^/]+\/account$/,
-    'the full bank number reveal',
-  ],
-  [/\/payout-details$/, "customers' full bank numbers"],
   [
     /^\/admin\/pricecharting(\/|$)/,
     'PriceCharting lookups (each one costs an API call)',
@@ -64,13 +63,11 @@ export function blockedReason(path: string): string | null {
   return BLOCKED.find(([re]) => re.test(lower))?.[1] ?? null;
 }
 
-// Secrets no desk bot sees, on whatever screen carries them. Core screens
-// return customer.metadata whole, and it holds partner account passwords
-// (partner_credential) and saved payout banks (bank_accounts): any password,
-// secret, token, credential or API key is hidden, and a bank account number
-// keeps only its last 4 digits, as the dashboard's lists show it.
+// Secrets no desk bot sees, on whatever screen or query row carries them.
+// Core screens return customer.metadata whole, and it holds partner account
+// passwords (partner_credential): any password, secret, token, credential or
+// API key field is hidden. Bank account numbers come back whole (2026-10-06).
 const HIDDEN = /password|secret|token|credential|api_?key/i;
-const ACCOUNT_NUMBER = /account_?number/i;
 
 export function redact(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redact);
@@ -78,11 +75,7 @@ export function redact(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, v]) => [
       key,
-      HIDDEN.test(key)
-        ? '[hidden]'
-        : ACCOUNT_NUMBER.test(key) && typeof v === 'string'
-          ? `••••${v.replace(/\D/g, '').slice(-4)}`
-          : redact(v),
+      HIDDEN.test(key) ? '[hidden]' : redact(v),
     ]),
   );
 }
@@ -91,42 +84,80 @@ export function redact(value: unknown): unknown {
 // read, so an answer is cut well below that, with a way to narrow it.
 const MAX_CHARS = 40_000;
 
-export function capBody(data: unknown, max = MAX_CHARS) {
+export function capBody(
+  data: unknown,
+  max = MAX_CHARS,
+  narrower = 'Ask again narrower: limit (rows per page), offset (to page on), fields (only the columns you need) or q (a search).',
+) {
   const text = JSON.stringify(data);
   if (text.length <= max) return { truncated: false, data };
   return {
     truncated: true,
     data_preview: text.slice(0, max),
-    note: `The answer is ${text.length.toLocaleString('en-MY')} characters, too long to show whole. Ask again narrower: limit (rows per page), offset (to page on), fields (only the columns you need) or q (a search).`,
+    note: `The answer is ${text.length.toLocaleString('en-MY')} characters, too long to show whole. ${narrower}`,
   };
 }
 
-/** The id of DESK_BOT_ROLE, created on first use with its one policy
- *  (read on every resource), the way Medusa seeds its own super-admin role.
- *  Looked up on every read, never cached: a token naming a role that has
- *  since been deleted is refused by RBAC on every core screen. */
+/** The id of DESK_BOT_ROLE, with its one policy (read on every resource)
+ *  made sure of on every read, never cached. The policy is declared in
+ *  src/policies/desk-bots.ts so the boot-time policy sync keeps it; this
+ *  also heals a role whose policy was deleted anyway (restored, never
+ *  duplicated) or whose link is missing, so the bots cannot silently lose
+ *  every core screen again. RBAC reads role policies from the database on
+ *  each request, so a heal takes effect at once. */
 export async function deskBotRoleId(scope: MedusaContainer): Promise<string> {
   const rbac = scope.resolve(Modules.RBAC);
+  const policy = await readEverythingPolicy(rbac);
   const [existing] = await rbac.listRbacRoles(
     { name: DESK_BOT_ROLE },
     { order: { created_at: 'ASC' }, take: 1 },
   );
-  if (existing) return existing.id as string;
-  const [readAll] = await rbac.listRbacPolicies({ key: '*:read' }, { take: 1 });
-  const policy =
-    readAll ??
-    (await rbac.createRbacPolicies({
-      key: '*:read',
-      resource: '*',
-      operation: 'read',
-      name: 'Read everything',
-      description: 'Read on every resource, nothing else.',
+  const role =
+    existing ??
+    (await rbac.createRbacRoles({
+      name: DESK_BOT_ROLE,
+      description:
+        'The staff Discord desk bots: read-only access to the admin API through /reports/admin/read.',
     }));
-  const role = await rbac.createRbacRoles({
-    name: DESK_BOT_ROLE,
-    description:
-      'The staff Discord desk bots: read-only access to the admin API through /reports/admin/read.',
-  });
-  await rbac.createRbacRolePolicies({ role_id: role.id, policy_id: policy.id });
+  const [link] = await rbac.listRbacRolePolicies(
+    { role_id: role.id, policy_id: policy.id },
+    { take: 1 },
+  );
+  if (!link) {
+    await rbac.createRbacRolePolicies({
+      role_id: role.id,
+      policy_id: policy.id,
+    });
+  }
   return role.id as string;
 }
+
+/** The live `*:read` policy: restored if it was soft-deleted, created only
+ *  when there has never been one. */
+async function readEverythingPolicy(
+  rbac: IRbacModuleService,
+): Promise<{ id: string }> {
+  const [live] = await rbac.listRbacPolicies(
+    { key: READ_EVERYTHING },
+    { take: 1 },
+  );
+  if (live) return live;
+  const [deleted] = await rbac.listRbacPolicies(
+    { key: READ_EVERYTHING },
+    { take: 1, withDeleted: true },
+  );
+  if (deleted) {
+    await rbac.restoreRbacPolicies([deleted.id]);
+    return deleted;
+  }
+  return rbac.createRbacPolicies({
+    key: READ_EVERYTHING,
+    resource: '*',
+    operation: 'read',
+    name: 'DeskBotsReadEverything',
+    description:
+      'Read on every resource, nothing else: the staff Discord desk bots.',
+  });
+}
+
+const READ_EVERYTHING = '*:read';

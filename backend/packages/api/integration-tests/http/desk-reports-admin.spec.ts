@@ -86,7 +86,7 @@ medusaIntegrationTestRunner({
         ).toEqual(['*:read']);
       });
 
-      it('hides passwords and keeps only the last 4 digits of bank numbers', async () => {
+      it('hides passwords and shows bank numbers whole', async () => {
         const customers = getContainer().resolve(Modules.CUSTOMER);
         const customer = await customers.createCustomers({
           email: 'partner@test.dev',
@@ -111,25 +111,24 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(200);
         const text = JSON.stringify(res.data);
         expect(text).not.toContain('Sup3r-secret-pw');
-        expect(text).not.toContain('5550 0012 3456');
         expect(res.data.data.customer).toMatchObject({
           email: 'partner@test.dev',
           phone: '+60123456789',
           metadata: {
             handle: 'partner-ace',
             partner_credential: '[hidden]',
-            bank_accounts: [{ bankName: 'Maybank', accountNumber: '••••3456' }],
+            bank_accounts: [
+              { bankName: 'Maybank', accountNumber: '5550 0012 3456' },
+            ],
           },
         });
       });
 
       it('refuses blocked screens, bad paths and callers without a key', async () => {
         for (const path of [
-          '/admin/users',
-          '/admin/USERS',
+          '/admin/invites',
+          '/admin/INVITES',
           '/admin/api-keys',
-          '/admin/customers/cus_1/payout-details',
-          '/admin/payments/withdrawals/wd_1/account',
           '/admin/inventory/export.xlsx',
           '/admin/pricecharting/search',
         ]) {
@@ -141,6 +140,49 @@ medusaIntegrationTestRunner({
           expect((await read(path)).status).toBe(400);
         }
         expect((await read('/admin/customers', '', null)).status).toBe(401);
+      });
+
+      // 2026-10-04: an undeclared `*:read` was soft-deleted by the next
+      // boot's policy sync, and every core screen then refused the bots
+      // ("Required policies: customer:read") until this was found.
+      it('keeps core screens open across the boot-time policy sync, and heals a deleted policy', async () => {
+        expect((await read('/admin/customers', '&limit=1')).status).toBe(200);
+        const rbac = getContainer().resolve(Modules.RBAC) as unknown as {
+          syncRegisteredPolicies(): Promise<void>;
+          listRbacPolicies(f: object): Promise<{ id: string }[]>;
+          softDeleteRbacPolicies(ids: string[]): Promise<void>;
+        };
+        // What every boot runs: soft-delete each policy nothing declares.
+        await rbac.syncRegisteredPolicies();
+        const live = await rbac.listRbacPolicies({ key: '*:read' });
+        expect(live).toHaveLength(1);
+        expect((await read('/admin/customers', '&limit=1')).status).toBe(200);
+
+        // Deleted anyway (by hand, or by an older build): the next read
+        // restores it instead of failing.
+        await rbac.softDeleteRbacPolicies([live[0].id]);
+        expect(await rbac.listRbacPolicies({ key: '*:read' })).toHaveLength(0);
+        expect((await read('/admin/customers', '&limit=1')).status).toBe(200);
+        expect(await rbac.listRbacPolicies({ key: '*:read' })).toHaveLength(1);
+      });
+
+      // Open since 2026-10-06 (the owner: "just give it everything").
+      it('opens the staff list and the full bank number screens', async () => {
+        const users = await read('/admin/users');
+        expect(users.status).toBe(200);
+        expect(JSON.stringify(users.data)).toContain('proxy-admin@test.dev');
+        // Not blocked any more: an unknown row is the screen's own 404.
+        expect(
+          (await read('/admin/payments/withdrawals/wd_none/account')).status,
+        ).toBe(404);
+        const customers = getContainer().resolve(Modules.CUSTOMER);
+        const customer = await customers.createCustomers({
+          email: 'payout@test.dev',
+        });
+        const details = await read(
+          `/admin/customers/${customer.id}/payout-details`,
+        );
+        expect(details.status).toBe(200);
       });
 
       it('relays an admin error instead of hiding it', async () => {

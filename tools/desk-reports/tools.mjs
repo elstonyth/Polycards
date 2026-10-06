@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import * as z from 'zod';
+import { codeFiles, codeRead, codeSearch } from './code.mjs';
 import { getReport } from './http.mjs';
 import { PERIODS, resolvePeriod } from './periods.mjs';
 
@@ -160,7 +161,7 @@ TOOLS.growth = [
   {
     name: 'challenge_poster',
     description:
-      'A finished Weekly Pulled Value Challenge poster (1080x1350, the 4:5 feed size) rendered from live data with the official card art: the unlock headline, the stage chips, and the podium prizes of one stage (default: the highest unlocked stage), optionally with the current top-3 leaders. week next draws the next challenge waiting in the admin queue instead (its own dates; no stage unlocked yet; stage 1 featured by default; no leaders). Use it instead of drawing cards with image generation: post the image it returns. It is a draft; a human reviews it before it is published.',
+      'A finished Weekly Pulled Value Challenge poster (1080x1350, the 4:5 feed size) rendered from live data with the official card art: the unlock headline, the stage chips, and the podium prizes of one stage (default: the highest unlocked stage), optionally with the current top-3 leaders. While a stage is still locked it also shows a bar of the pool this week on its way to the next stage (RM pooled, RM to go; the result gives the exact figures): for a \"stage 1 unlocked, on to stage 2\" post, feature the next stage with stage 2. week next draws the next challenge waiting in the admin queue instead (its own dates; no stage unlocked yet; stage 1 featured by default; no leaders). Use it instead of drawing cards with image generation: post the image it returns. It is a draft; a human reviews it before it is published.',
     inputSchema: {
       week: z
         .enum(['current', 'next'])
@@ -474,7 +475,7 @@ TOOLS.admin = [
   {
     name: 'admin_read',
     description:
-      'Read any admin dashboard screen, read-only: the same data the admin dashboard shows, for anything the other tools do not cover. Use it before ever asking staff for a screenshot. path is the admin API path; put filters in params (limit and offset on lists, q to search, fields to pick columns on core screens; a single-record screen takes none of them). Useful paths: customers /admin/customers (q=search), /admin/customers/{id}, /admin/customers/{id}/transactions, /admin/customers/{id}/pulls, /admin/customers/{id}/spend-report, /admin/customers/{id}/audit, /admin/customers/{id}/referral, /admin/customer-groups, /admin/players (q=username); delivery /admin/delivery-orders, /admin/delivery-orders/{id}; packs and cards /admin/packs, /admin/packs/{slug}, /admin/packs/{slug}/odds, /admin/cards/{handle}, /admin/inventory (q=card name; unfiltered it lists every card, too long to read whole, like /admin/cards), /admin/inventory/{handle}, /admin/pulls; money /admin/economy, /admin/ledger, /admin/stats, /admin/payments/deposits, /admin/payments/withdrawals (bank numbers masked), /admin/payments/settlement, /admin/payments/balance (the payout float), /admin/purchase-invoices; challenge /admin/challenge/stages (live), /admin/challenge/schedule (the queue of coming weeks), /admin/challenge/settings, /admin/challenge/winners (past weeks); tasks and VIP /admin/tasks, /admin/vip-levels, /admin/tier-settings; referral /admin/referrals/settings, /admin/referrals/settlements; settings /admin/site-settings, /admin/rewards-settings, /admin/pricing/fx. Not open: staff logins, API keys, full bank numbers, PriceCharting lookups, file exports. Passwords and secrets come back as [hidden], and bank account numbers as their last 4 digits. An answer over 40,000 characters comes back cut (truncated: true): ask again narrower. Customer contact details stay in this staff channel: never post them publicly or put them into web searches or URLs.',
+      'Read any admin dashboard screen, read-only: the same data the admin dashboard shows, for anything the other tools do not cover. Use it before ever asking staff for a screenshot. path is the admin API path; put filters in params (limit and offset on lists, q to search, fields to pick columns on core screens; a single-record screen takes none of them). Useful paths: customers /admin/customers (q=search), /admin/customers/{id}, /admin/customers/{id}/transactions, /admin/customers/{id}/pulls, /admin/customers/{id}/spend-report, /admin/customers/{id}/audit, /admin/customers/{id}/referral, /admin/customer-groups, /admin/players (q=username); delivery /admin/delivery-orders, /admin/delivery-orders/{id}; packs and cards /admin/packs, /admin/packs/{slug}, /admin/packs/{slug}/odds, /admin/cards/{handle}, /admin/inventory (q=card name; unfiltered it lists every card, too long to read whole, like /admin/cards), /admin/inventory/{handle}, /admin/pulls; money /admin/economy, /admin/ledger, /admin/stats, /admin/payments/deposits, /admin/payments/withdrawals (the list masks bank numbers: /admin/payments/withdrawals/{id}/account gives one in full, as does /admin/customers/{id}/payout-details for the bank a player saved), /admin/payments/settlement, /admin/payments/balance (the payout float), /admin/purchase-invoices; challenge /admin/challenge/stages (live), /admin/challenge/schedule (the queue of coming weeks), /admin/challenge/settings, /admin/challenge/winners (past weeks); tasks and VIP /admin/tasks, /admin/vip-levels, /admin/tier-settings; referral /admin/referrals/settings, /admin/referrals/settlements; settings /admin/site-settings, /admin/rewards-settings, /admin/pricing/fx; staff /admin/users (the staff list). Not open: staff invites, API keys, PriceCharting lookups, file exports. Passwords and secrets come back as [hidden]; bank account numbers come back whole. For a question no screen answers, use db_query. An answer over 40,000 characters comes back cut (truncated: true): ask again narrower. Customer contact details stay in this staff channel: never post them publicly or put them into web searches or URLs.',
     inputSchema: {
       path: z
         .string()
@@ -492,6 +493,76 @@ TOOLS.admin = [
       path: 'read',
       params: { ...(args.params ?? {}), path: args.path },
     }),
+  },
+  {
+    name: 'db_query',
+    description:
+      "Run one read-only SQL query (PostgreSQL 16) on the live Polycards database: for any question the reports and admin screens do not answer directly (profit and margins, failed top-ups, cohorts, one player's full history, anything). Never refuse a data question or ask staff for a screenshot: look it up here. SELECT or WITH only; it runs in a read-only transaction (nothing can change), is stopped after 20 seconds and returns at most 500 rows (more_rows says there were more), so aggregate in SQL (COUNT, SUM, GROUP BY) rather than fetching rows. Times are stored in UTC: Malaysia time is created_at AT TIME ZONE 'Asia/Kuala_Lumpur'. Soft-deleted rows have deleted_at set: add deleted_at IS NULL. Main tables: customer (players: email, phone, metadata->>'handle', has_account), customer_account_state (frozen, disabled, phone_verified_at, free pack), credit_transaction (the wallet in RM: amount, + in and - out; reason pack_open, buyback, topup, cashout, adjustment, reward_credit, delivery_fee), ledger_entry (the same money as a numbered ledger: type TP top-up, SP pack spend, SE sell-back, WD withdrawal, AD adjustment, OD delivery; wallet_delta, vault_delta), gateway_deposit (top-ups through the payment gateway: status settled, failed, expired or pending; amount_requested, amount_settled, net_amount, payment_method_code, gateway, gateway_status), gateway_withdrawal (cash-outs: status, failure_reason, bank_code, account_number, account_holder_name), pull (every card opened: customer_id, pack_id, card_id, source pack, free or reward; status bought_back, vaulted or delivering; buyback_amount in RM, recorded_value_usd), pack (slug, title, price in RM, buyback_percent, status), pack_odds (each pack's cards and weights), card (name, grade, market_value in USD; fx_rate converts), card_price_history, delivery_order and delivery_order_item, challenge_stage, challenge_schedule (the coming weeks), challenge_payout (prizes paid), task_definition, task_claim, daily_checkin, vip_level, vip_member_state (lifetime spend in sen), vip_reward_grant, referral_attribution, weekly_settlement and weekly_settlement_line (referral commission, in cents), player_payout_details (saved bank accounts), admin_action_audit (who changed what in the admin dashboard), customer_group and customer_group_customer (player groups), purchase_invoice, stock_movement. A table's columns: SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'pull'. How a figure is computed: read the code with code_search. Not open: the password, login-token and reset-link tables; password fields come back [hidden]. Customer contact details stay in this staff channel: never post them publicly or put them into web searches or URLs.",
+    inputSchema: {
+      sql: z
+        .string()
+        .max(8000)
+        .describe(
+          'One SELECT (or WITH ... SELECT) query, up to 8,000 characters.',
+        ),
+    },
+    request: (args) => ({
+      path: 'sql',
+      params: { sql: args.sql },
+      timeoutMs: 60_000,
+    }),
+  },
+];
+
+// The Polycards source code, read-only (2026-10-06): code.mjs reads master.
+TOOLS.code = [
+  {
+    name: 'code_files',
+    description:
+      "List one folder of the Polycards source code (the storefront website, the backend and the admin dashboard) on master, as deployed. No path lists the top level; folders end in /. Where things live: backend/packages/api/src/modules/packs (the game rules: packs, odds, pulls, buyback, the wallet, the challenge, tasks, VIP), backend/packages/api/src/api (HTTP routes: admin for the admin dashboard, store for the storefront, reports for these desk tools), backend/packages/api/src/jobs and src/subscribers (scheduled jobs and event handlers), backend/apps/admin (the admin dashboard's screens), src/app and src/components (the storefront's pages), CONTEXT.md (the glossary) and docs/adr (decisions).",
+    inputSchema: {
+      path: z
+        .string()
+        .optional()
+        .describe('A folder, like backend/packages/api/src/modules/packs.'),
+    },
+    local: codeFiles,
+  },
+  {
+    name: 'code_search',
+    description:
+      'Search the Polycards source code on master for a regular expression (Perl syntax) and get path:line: text for each match, at most 150. path narrows it to a folder or file. Use it to answer how anything works (how a buyback is priced, when a top-up counts as failed, what a task needs), to explain a number, or to find the code behind a table or a screen; then read around a match with code_read.',
+    inputSchema: {
+      pattern: z
+        .string()
+        .describe('A regular expression, like buyback_percent.'),
+      path: z
+        .string()
+        .optional()
+        .describe('Only this folder or file, like backend/packages/api/src.'),
+      ignore_case: z.boolean().optional().describe('true: any letter case.'),
+    },
+    local: codeSearch,
+  },
+  {
+    name: 'code_read',
+    description:
+      'Read one file of the Polycards source code on master, with line numbers, at most 400 lines a call: from and to pick the lines, and the answer says how to read on. The env files and the deploy specs are not open (they hold secrets).',
+    inputSchema: {
+      path: z
+        .string()
+        .describe(
+          'The file, like backend/packages/api/src/modules/packs/service.ts.',
+        ),
+      from: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe('First line (default 1).'),
+      to: z.number().int().min(1).optional().describe('Last line.'),
+    },
+    local: codeRead,
   },
 ];
 
@@ -539,6 +610,10 @@ const levelsNote = (body) =>
 // Runs one tool call; failures come back as text the bot can relay.
 export async function runTool(tool, args, config) {
   try {
+    // Answered on this PC, without the backend.
+    if (tool.local) {
+      return { content: [{ type: 'text', text: await tool.local(args) }] };
+    }
     const {
       path,
       params,
@@ -546,6 +621,7 @@ export async function runTool(tool, args, config) {
       as,
       brand,
       artOf = 'podium rank',
+      timeoutMs,
     } = tool.request(args);
     if (brand) {
       const data = await readFile(
@@ -570,7 +646,11 @@ export async function runTool(tool, args, config) {
       path,
       params,
       as,
-      ...(as === 'image' ? { timeoutMs: 45_000 } : {}),
+      ...(timeoutMs
+        ? { timeoutMs }
+        : as === 'image'
+          ? { timeoutMs: 45_000 }
+          : {}),
     });
     if (as === 'image') {
       return {

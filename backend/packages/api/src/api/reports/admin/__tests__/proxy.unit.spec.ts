@@ -29,23 +29,18 @@ describe('adminPathError', () => {
 
 describe('blockedReason', () => {
   it.each([
-    ['/admin/users', /staff logins/],
-    ['/admin/users/me', /staff logins/],
-    ['/admin/invites', /staff logins/],
+    ['/admin/invites', /staff invites/],
+    ['/admin/invites/inv_1', /staff invites/],
     ['/admin/api-keys', /API keys/],
     ['/admin/workflows-executions', /workflow/],
     ['/admin/notifications', /notification/],
     ['/admin/uploads', /uploads/],
-    ['/admin/payments/withdrawals/wd_1/account', /full bank number/],
-    ['/admin/customers/cus_1/payout-details', /full bank number/],
     ['/admin/pricecharting/search', /PriceCharting/],
     ['/admin/inventory/export.xlsx', /file exports/],
     ['/admin/players/export', /file exports/],
     // Medusa matches routes case-insensitively: /admin/USERS runs /admin/users.
-    ['/admin/USERS', /staff logins/],
+    ['/admin/INVITES', /staff invites/],
     ['/admin/Api-Keys', /API keys/],
-    ['/admin/payments/withdrawals/wd_1/ACCOUNT', /full bank number/],
-    ['/admin/customers/cus_1/Payout-Details', /full bank number/],
     ['/admin/inventory/EXPORT.XLSX', /file exports/],
   ])('blocks %s', (path, why) => {
     expect(blockedReason(path)).toMatch(why);
@@ -57,6 +52,11 @@ describe('blockedReason', () => {
     '/admin/challenge/schedule',
     '/admin/userscore',
     '/admin/players',
+    // Open since 2026-10-06: the staff list and full bank numbers.
+    '/admin/users',
+    '/admin/users/user_1',
+    '/admin/payments/withdrawals/wd_1/account',
+    '/admin/customers/cus_1/payout-details',
   ])('allows %s', (path) => {
     expect(blockedReason(path)).toBeNull();
   });
@@ -85,6 +85,13 @@ describe('capBody', () => {
     expect(out.truncated).toBe(true);
     expect(out.data_preview.length).toBeLessThanOrEqual(2000);
     expect(out.note).toMatch(/limit/);
+  });
+
+  it('says how to narrow in the words it is given', () => {
+    const out = capBody({ s: 'x'.repeat(500) }, 100, 'Add LIMIT.') as {
+      note: string;
+    };
+    expect(out.note).toMatch(/too long to show whole\. Add LIMIT\.$/);
   });
 });
 
@@ -120,26 +127,17 @@ describe('redact', () => {
     });
   });
 
-  it('keeps only the last 4 digits of a bank account number', () => {
-    expect(
-      redact({
-        metadata: {
-          bank_accounts: [
-            { bankName: 'Maybank', accountNumber: '1234 5678 9012' },
-          ],
-        },
-        account_number: '****9012',
-        bank_account_number: '5550001234',
-        none: { account_number: null },
-      }),
-    ).toEqual({
+  it('shows bank account numbers whole (open since 2026-10-06)', () => {
+    const banks = {
       metadata: {
-        bank_accounts: [{ bankName: 'Maybank', accountNumber: '••••9012' }],
+        bank_accounts: [
+          { bankName: 'Maybank', accountNumber: '1234 5678 9012' },
+        ],
       },
-      account_number: '••••9012',
-      bank_account_number: '••••1234',
-      none: { account_number: null },
-    });
+      account_number: '1234 5678 9012',
+      bank_account_number: '5550001234',
+    };
+    expect(redact(banks)).toEqual(banks);
   });
 
   it('leaves everything else as it is', () => {
