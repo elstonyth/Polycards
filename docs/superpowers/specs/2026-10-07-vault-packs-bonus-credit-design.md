@@ -111,6 +111,11 @@ Total            RM 4,744.58
 Withdrawable     (normal only)
 ```
 
+Under Withdrawable the page states the minimum withdrawal ("Minimum withdrawal
+RM 50", read from the payment limits the withdraw form uses), adding how much
+more is needed when playthrough is done and the withdrawable amount is below it
+(operator request, 2026-10-07).
+
 The header pill and the spin page's CREDIT card show the **total**. The transactions
 list labels `bonus_grant` rows "Bonus credit" and tags any row whose bonus part is
 non-zero.
@@ -129,8 +134,8 @@ price instead.
 panels beside the existing credit adjust:
 
 - **Gift packs** — pack select, quantity 1–10, required note → Send. Below: this
-  customer's gifts — Unopened / Opened (link to the pull) / Revoked; **Revoke** on
-  unopened rows.
+  customer's gifts — Unopened / Opened (with the opened date; the admin has no
+  pull page to link to) / Revoked / Stuck; **Revoke** on unopened and stuck rows.
 - **Bonus credit** — shows the Bonus Balance; amount (+ give / − take back, cannot go
   below 0) and required note.
 
@@ -270,9 +275,10 @@ total ≥ 0` (unchanged; balance includes bonus). Returns `bonusUsed`.
     - SP payload gains optional `bonus` (MYR consumed) and `gifts` (count); a
       gift-only open books `wallet_delta` 0, like the free welcome open.
     - SE payload gains optional `bonus` (MYR of the sell-back paid as bonus).
-    - A bonus grant books **AD** with payload `reason: 'bonus_grant'` and
-      `wallet_delta` ±X; a pack gift books **AD** with `reason: 'pack_gift'`,
-      `detail` "<slug> ×N", no deltas, `ref_id` = the grant key.
+    - A bonus grant books **AD** with payload `detail: 'bonus'` (`reason` keeps
+      the admin note, as for every AD row) and `wallet_delta` ±X; a pack gift
+      books **AD** with `detail` "pack_gift <slug> ×N", no deltas, `ref_id` =
+      the grant key.
 
 ## 5. Opening with gifts
 
@@ -333,8 +339,11 @@ idempotency_key }` — N rows; replay of a `grant_key` returns the existing rows
 - `GET /admin/customers/:id/pack-gifts` — all states, newest first.
 - `POST /admin/pack-gifts/:id/revoke` — conditional on still unopened; otherwise
   409 "Already opened".
-- `POST /admin/customers/:id/bonus-credits` `{ amount (±, 2dp, ≤ RM 1,000,000),
-note, idempotency_key }` — writes `bonus_grant` via `mutateCreditAtomic`.
+- Bonus credit rides the EXISTING `POST /admin/customers/:id/credits` with
+  `kind: 'bonus'` (`{ amount (±, 2dp, ≤ RM 1,000,000), note, idempotency_key,
+  kind }`), so it shares the credit-adjust workflow, validation, audit and
+  compensation; it writes `bonus_grant` via `mutateCreditAtomic`. (As built —
+  the draft named a separate `/bonus-credits` route.)
 - The customer summary the 360 page reads gains `bonus_balance`.
 
 Grants post the customer feed notification (§1) through the existing
@@ -355,7 +364,8 @@ rule for free. These need an edit:
   `checkin_days` is unaffected.
 - `modules/packs/telegram.ts` `EXCLUDED_SOURCES` — add both.
 - `api/admin/customers/[id]/pulls/route.ts` source filter — accept both.
-- `api/reports/growth/packs/route.ts` paid/free counts — add gift and bonus columns.
+- `api/reports/growth/packs/route.ts` — no change: its `source IN ('pack', 'free')`
+  filter already leaves gift and bonus pulls out of the paid/free counts.
 - `modules/packs/delivery.ts` / `workflows/steps/buyback-pull.ts` — no change (both
   only special-case `reward` and `free`); covered by tests.
 - Storefront pull source mirror (`src/lib/data/schemas.ts:468`, see §3.4).
