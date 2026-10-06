@@ -188,13 +188,29 @@ test('admin_read reads one admin screen, its filters passed on', () => {
   });
 });
 
-test('db_query runs one query on the sql route, with a minute to answer', () => {
+test('db_query posts one query to the sql route, with a minute to answer', async () => {
   const query = TOOLS.admin.find((t) => t.name === 'db_query');
   assert.deepEqual(query.request({ sql: 'SELECT 1' }), {
     path: 'sql',
-    params: { sql: 'SELECT 1' },
+    post: { sql: 'SELECT 1' },
     timeoutMs: 60_000,
   });
+  let seen;
+  const out = await runTool(
+    ALL_TOOLS.find((t) => t.name === 'db_query'),
+    { sql: 'SELECT 1' },
+    {
+      ...config,
+      fetchImpl: async (url, init) => {
+        seen = { url: String(url), init };
+        return new Response('{"rows":[{"n":1}]}');
+      },
+    },
+  );
+  assert.ok(!out.isError);
+  assert.equal(seen.url, 'https://backend.test/reports/admin/sql');
+  assert.equal(seen.init.method, 'POST');
+  assert.deepEqual(JSON.parse(seen.init.body), { sql: 'SELECT 1' });
 });
 
 test('the code tools answer on this PC, without the backend', async () => {

@@ -1,6 +1,7 @@
-// One GET against the backend's report routes. The key travels only in a
-// header; every failure becomes a sentence the desk bot can pass to staff,
-// and none of them contains the key.
+// One request to the backend's report routes: a GET, or a POST when `post`
+// carries a JSON body (the SQL tool, so a query never sits in a URL). The key
+// travels only in a header; every failure becomes a sentence the desk bot can
+// pass to staff, and none of them contains the key.
 export class ReportError extends Error {}
 
 export async function getReport({
@@ -9,6 +10,7 @@ export async function getReport({
   key,
   path,
   params = {},
+  post,
   fetchImpl = fetch,
   timeoutMs = 15_000,
   as = 'json',
@@ -26,10 +28,13 @@ export async function getReport({
   let res;
   try {
     res = await fetchImpl(url, {
+      method: post ? 'POST' : 'GET',
       headers: {
         'x-report-key': key,
         accept: as === 'image' ? 'image/*' : 'application/json',
+        ...(post ? { 'content-type': 'application/json' } : {}),
       },
+      ...(post ? { body: JSON.stringify(post) } : {}),
       // fetch strips Authorization and Cookie on a cross-origin redirect but
       // replays custom headers such as x-report-key. Refuse to follow one.
       redirect: 'error',
@@ -84,13 +89,17 @@ export async function getReport({
       'Too many report requests. Wait a minute, then try again.',
     );
   // Any other refusal says why (a bad filter, a missing row, an admin screen
-  // the desk bots may not open): pass that sentence on.
-  if (res.status >= 400 && res.status < 500) {
-    throw new ReportError(
-      typeof body?.message === 'string'
-        ? body.message
-        : `The backend rejected the request (${res.status}).`,
-    );
+  // the desk bots may not open), and a 504 says what did not answer: pass
+  // that sentence on.
+  if (
+    typeof body?.message === 'string' &&
+    (res.status < 500 || res.status === 504)
+  ) {
+    throw new ReportError(body.message);
   }
-  throw new ReportError(`The backend failed (${res.status}). Try again later.`);
+  throw new ReportError(
+    res.status < 500
+      ? `The backend rejected the request (${res.status}).`
+      : `The backend failed (${res.status}). Try again later.`,
+  );
 }

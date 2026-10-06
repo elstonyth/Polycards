@@ -39,6 +39,29 @@ test('sends the key header and only the params that are set', async () => {
   assert.equal(seen.init.redirect, 'error');
 });
 
+test('posts a JSON body when there is one, so it never sits in the URL', async () => {
+  let seen;
+  const fetchImpl = async (url, init) => {
+    seen = { url: String(url), init };
+    return new Response('{"rows":[]}', { status: 200 });
+  };
+  await getReport({
+    ...base,
+    desk: 'admin',
+    path: 'sql',
+    post: { sql: "SELECT 1 WHERE 'a@b.c' = 'x'" },
+    fetchImpl,
+  });
+  assert.equal(seen.url, 'https://backend.test/reports/admin/sql');
+  assert.equal(seen.init.method, 'POST');
+  assert.equal(seen.init.headers['content-type'], 'application/json');
+  assert.equal(seen.init.headers['x-report-key'], KEY);
+  assert.deepEqual(JSON.parse(seen.init.body), {
+    sql: "SELECT 1 WHERE 'a@b.c' = 'x'",
+  });
+  assert.equal(seen.init.redirect, 'error');
+});
+
 test('refuses to call without a real key', async () => {
   let called = false;
   const fetchImpl = async () => {
@@ -79,6 +102,16 @@ test('turns every failure into a sentence without the key in it', async () => {
     ],
     [reply(429, {}), /Too many/],
     [reply(500, {}), /failed \(500\)/],
+    // A 500's message is the framework's, not ours: the generic sentence.
+    [reply(500, { message: 'An unknown error occurred.' }), /failed \(500\)/],
+    // A 504 says what did not answer (the SQL tool's database).
+    [
+      reply(504, {
+        message: 'The database did not answer. Try again in a minute.',
+      }),
+      /database did not answer/,
+    ],
+    [reply(504, {}), /failed \(504\)/],
     // A 2xx with no JSON object body is a failure, not a blank report.
     [
       async () => new Response('<html>oops</html>', { status: 200 }),
