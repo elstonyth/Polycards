@@ -594,15 +594,16 @@ function toPackGiftView(
     note: string;
     granted_by: string;
     grant_key: string;
-    created_at: Date | string;
+    created_at: Date | string | null | undefined;
     opened_at: Date | string | null;
     pull_id: string | null;
     revoked_at: Date | string | null;
   },
   packTitle: string,
 ): PackGiftView {
-  const iso = (d: Date | string | null) =>
-    d === null ? null : new Date(d).toISOString();
+  // Fresh (unflushed) rows carry undefined, not null, for unset columns.
+  const iso = (d: Date | string | null | undefined) =>
+    d == null ? null : new Date(d).toISOString();
   return {
     id: g.id,
     pack_id: g.pack_id,
@@ -611,9 +612,11 @@ function toPackGiftView(
     note: g.note,
     granted_by: g.granted_by,
     grant_key: g.grant_key,
-    created_at: new Date(g.created_at).toISOString(),
+    // A row created in this transaction has no created_at until it flushes
+    // (the column defaults to now() in the database): it was created now.
+    created_at: (g.created_at ? new Date(g.created_at) : new Date()).toISOString(),
     opened_at: iso(g.opened_at),
-    pull_id: g.pull_id,
+    pull_id: g.pull_id ?? null,
     revoked_at: iso(g.revoked_at),
     state: giftState(g),
   };

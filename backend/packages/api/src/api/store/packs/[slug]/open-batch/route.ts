@@ -12,6 +12,7 @@ import { FREE_WELCOME_CATEGORY } from '../../../../../modules/packs/free-pack';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import { toMoney } from '../../../../../modules/packs/money';
 import { bonusShareMyr } from '../../../../../modules/packs/bonus-credit';
+import { STALE_GIFT_MESSAGE } from '../../../../../modules/packs/pack-gifts';
 import {
   FLAT_PERCENT,
   UNQUOTED_BUYBACK,
@@ -86,9 +87,22 @@ export async function POST(
     );
   }
 
-  const { result } = await openBatchWorkflow(req.scope).run({
-    input: { pack_id: slug, customer_id: customerId, count, gifts },
-  });
+  // A stale gift count is a 409 the storefront acts on (re-read the gifts).
+  // Answered here: Medusa's error handler replaces every CONFLICT message with
+  // a generic idempotency text the customer would see instead.
+  const run = await openBatchWorkflow(req.scope)
+    .run({ input: { pack_id: slug, customer_id: customerId, count, gifts } })
+    .catch((err: unknown) => {
+      if ((err as { message?: unknown })?.message === STALE_GIFT_MESSAGE) {
+        return null;
+      }
+      throw err;
+    });
+  if (run === null) {
+    res.status(409).json({ type: 'conflict', message: STALE_GIFT_MESSAGE });
+    return;
+  }
+  const { result } = run;
 
   // ⚠ EVERYTHING BELOW IS POST-COMMIT — the workflow has ALREADY debited the
   // customer and written the pull rows, and nothing here can roll that back.
