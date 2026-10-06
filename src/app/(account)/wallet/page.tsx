@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { unstable_rethrow } from 'next/navigation';
 import { Check, Lock } from 'lucide-react';
 import { AccountHeader, Panel, StatCards } from '@/components/account/ui';
 import { PlaythroughProgress } from '@/components/account/PlaythroughProgress';
@@ -14,7 +15,11 @@ export default async function WalletPage() {
   // withdraw form makes; any failure keeps the defaults.
   const [res, limits] = await Promise.all([
     getWallet(),
-    getPaymentLimits().catch(() => DEFAULT_PAYMENT_LIMITS),
+    getPaymentLimits().catch((err: unknown) => {
+      // Let Next's own render signals (dynamic usage, redirects) through.
+      unstable_rethrow(err);
+      return DEFAULT_PAYMENT_LIMITS;
+    }),
   ]);
 
   if (!res.ok) {
