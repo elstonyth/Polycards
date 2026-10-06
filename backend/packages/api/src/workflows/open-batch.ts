@@ -10,11 +10,21 @@ import { chargePackBatchStep } from "./steps/charge-pack-batch";
 import { recordPullsBatchStep } from "./steps/record-pulls-batch";
 import { decrementCardStockBatchStep } from "./steps/decrement-card-stock-batch";
 import { settleVipStep } from "./steps/settle-vip";
+import { claimPackGiftsStep } from "./steps/claim-pack-gifts";
+import { stampPackGiftsStep } from "./steps/stamp-pack-gifts";
+import {
+  BONUS_BP_FULL,
+  bonusBpFor,
+  pullSourceFor,
+} from "../modules/packs/bonus-credit";
 
 export type OpenBatchInput = {
   pack_id: string;     // = Pack.slug
   customer_id: string; // from the authenticated token — NEVER the request body
   count: number;       // 1–N packs to open in one atomic operation
+  // Rows covered by the customer's gifted packs of this pack (0..count; spec
+  // 2026-10-07 §5). Exactly this many are claimed, or the open is refused.
+  gifts?: number;
 };
 
 // open-batch — the multi-reel "open N packs" business process.
@@ -49,8 +59,20 @@ export const openBatchWorkflow = createWorkflow(
       pack_id: d.input.pack_id,
       customer_id: d.input.customer_id,
       count: d.input.count,
+      gifts: d.input.gifts ?? 0,
       open_id: randomUUID(),
     }));
+
+    // Gifted packs first (spec 2026-10-07 §5): claim exactly `gifts` before
+    // the charge, which then bills only the rest. Compensated (released).
+    const claimed = claimPackGiftsStep(
+      transform({ charged }, (d) => ({
+        customer_id: d.charged.customer_id,
+        pack_id: d.charged.pack_id,
+        gifts: d.charged.gifts,
+        open_id: d.charged.open_id,
+      })),
+    );
 
     // ── PAYMENT SEAM ──────────────────────────────────────────────────────────
     // Debit count×price atomically from the credit ledger BEFORE pulls are
@@ -63,17 +85,42 @@ export const openBatchWorkflow = createWorkflow(
     // 2. Build recordPullsBatchStep's input: customer_id + pack_id from the
     //    workflow input, per-card handle + draw-time value snapshot from the
     //    rolled cards.
-    const recordInput = transform({ input, cards, charged }, (d) => ({
+    // The first `gifts` rows are the gifted ones; each paid row carries its
+    // own share of the bonus the charge spent (spec 2026-10-07 §4.2).
+    const recordInput = transform({ input, cards, charged, charge }, (d) => ({
       customer_id: d.input.customer_id,
       pack_id: d.input.pack_id,
       open_id: d.charged.open_id,
-      cards: d.cards.map((c) => ({
-        card_id: c.handle,
-        recorded_value_usd: c.recorded_value_usd,
-      })),
+      cards: d.cards.map((c, i) => {
+        const gift = i < d.charged.gifts;
+        const bonusSen = gift
+          ? 0
+          : (d.charge.bonus_cents_by_row[i - d.charged.gifts] ?? 0);
+        return {
+          card_id: c.handle,
+          recorded_value_usd: c.recorded_value_usd,
+          source: pullSourceFor({ gift, bonusSen }),
+          bonus_bp: gift
+            ? BONUS_BP_FULL
+            : bonusBpFor(bonusSen, Math.round(d.charge.price * 100)),
+        };
+      }),
+      price: d.charge.total,
+      bonus: d.charge.bonus_cents / 100,
+      gifts: d.charged.gifts,
     }));
-    const pulls = recordPullsBatchStep(
-      transform({ recordInput, charge }, (d) => ({ ...d.recordInput, price: d.charge.total })),
+    const pulls = recordPullsBatchStep(recordInput);
+
+    // Each claimed gift learns the pull it became — its own step, so a
+    // failure here rolls the pulls, charge and claim back (stamp-pack-gifts).
+    stampPackGiftsStep(
+      transform({ claimed, pulls, charged }, (d) => ({
+        open_id: d.charged.open_id,
+        pairs: d.claimed.gift_ids.map((giftId, i) => ({
+          giftId,
+          pullId: d.pulls[i].id,
+        })),
+      })),
     );
 
     // 2b. Earmark one physical unit per winning pull (best-effort — a 0-stock
@@ -119,12 +166,13 @@ export const openBatchWorkflow = createWorkflow(
     });
 
     // 4. Shape the result: arrayized twin of open-pack's result shape.
-    const result = transform({ cards, pulls, charge }, (d) => ({
+    const result = transform({ cards, pulls, charge, charged }, (d) => ({
       rolls: d.cards,
       pulls: d.pulls,
       price: d.charge.price,
       total: d.charge.total,
       balance: d.charge.balance,
+      gifts_used: d.charged.gifts,
     }));
     return new WorkflowResponse(result);
   },

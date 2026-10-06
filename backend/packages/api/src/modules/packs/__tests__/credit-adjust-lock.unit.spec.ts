@@ -83,7 +83,7 @@ const grant = (amount: number) => ({
 describe('PacksModuleService.adminAdjustCredit — mint-window lock', () => {
   it('replays a committed request even after the mint limit is exhausted', async () => {
     const f = fakeService(1_000_000_00);
-    const list = jest.fn(async () => [{ id: 'ctx_existing', amount: 5, reference: 'test' }]);
+    const list = jest.fn(async () => [{ id: 'ctx_existing', amount: 5, reference: 'test', reason: 'adjustment' }]);
     Object.assign(f.svc, {
       listCreditTransactions: list,
       creditSummary: jest.fn(async () => ({ balance: 12 })),
@@ -100,7 +100,7 @@ describe('PacksModuleService.adminAdjustCredit — mint-window lock', () => {
   it('refuses changing the amount or note of a committed request', async () => {
     const f = fakeService();
     Object.assign(f.svc, {
-      listCreditTransactions: jest.fn(async () => [{ id: 'ctx_existing', amount: 5, reference: 'test' }]),
+      listCreditTransactions: jest.fn(async () => [{ id: 'ctx_existing', amount: 5, reference: 'test', reason: 'adjustment' }]),
     });
     for (const input of [{ ...grant(6) }, { ...grant(5), note: 'different' }]) {
       await expect(f.svc.adminAdjustCredit({ ...input, idempotencyKey: 'batch:cus_1' }, f.ctx))
@@ -112,7 +112,7 @@ describe('PacksModuleService.adminAdjustCredit — mint-window lock', () => {
   it('compares replay amounts in cents, matching the accepted money precision', async () => {
     const f = fakeService();
     Object.assign(f.svc, {
-      listCreditTransactions: jest.fn(async () => [{ id: 'ctx_existing', amount: 0.3, reference: 'test' }]),
+      listCreditTransactions: jest.fn(async () => [{ id: 'ctx_existing', amount: 0.3, reference: 'test', reason: 'adjustment' }]),
       creditSummary: jest.fn(async () => ({ balance: 0.3 })),
     });
     const result = await f.svc.adminAdjustCredit({ ...grant(0.1 + 0.2), idempotencyKey: 'batch:cus_1' }, f.ctx);
@@ -148,7 +148,9 @@ describe('PacksModuleService.adminAdjustCredit — mint-window lock', () => {
     await f.svc.adminAdjustCredit(grant(5), f.ctx);
 
     const [sql] = f.em.execute.mock.calls[1];
-    expect(sql).toContain("reason = 'adjustment'");
+    // Credit grants, bonus grants and gifted packs share the ceiling.
+    expect(sql).toContain("reason IN ('adjustment', 'bonus_grant')");
+    expect(sql).toContain('FROM pack_gift');
     expect(sql).toContain('amount > 0'); // clawbacks never count
     expect(sql).toContain("created_at > now() - interval '24 hours'");
     expect(sql).toContain('deleted_at IS NULL'); // a compensated row must not count

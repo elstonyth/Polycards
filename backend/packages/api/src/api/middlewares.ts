@@ -600,6 +600,12 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
+      // The customer's unopened gifted packs (GET /store/pack-gifts, spec
+      // 2026-10-07): the vault Packs row and "Vault xN". Read budget.
+      matcher: '/store/pack-gifts',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       // Vault unread-dot signal (GET /store/vault/latest). A separate entry
       // because the matcher above is EXACT — the same reason
       // '/store/vault/buyback-batch' needed its own. Shares the read budget
@@ -1188,6 +1194,18 @@ export default defineMiddlewares({
     },
     {
       matcher: '/admin/customers/*/credits',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Gift packs to a customer / revoke one (spec 2026-10-07) — they mint
+      // value like a credit grant, so they share the money-mutation budget.
+      matcher: '/admin/customers/*/pack-gifts',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/pack-gifts/*/revoke',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

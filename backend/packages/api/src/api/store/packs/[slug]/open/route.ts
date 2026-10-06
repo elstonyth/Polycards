@@ -1,3 +1,4 @@
+import { bonusShareMyr } from '../../../../../modules/packs/bonus-credit';
 import {
   AuthenticatedMedusaRequest,
   MedusaResponse,
@@ -124,8 +125,16 @@ export async function POST(
         marketPriceMyr,
       );
 
+      // A bonus-funded pull sells back partly as bonus credit (spec
+      // 2026-10-07 §4.5).
+      const bonusBp = Number(result.pull.bonus_bp ?? 0);
       buyback = {
         ...quoted,
+        bonus: bonusShareMyr(quoted.amount, bonusBp),
+        vault_bonus: bonusShareMyr(
+          buybackAmount(marketPriceMyr, FLAT_PERCENT),
+          bonusBp,
+        ),
         // false when the MYR amounts were computed on the display FX fallback:
         // the sell would be refused ("Exchange rate unavailable"), so the UI
         // must not present this quote as a firm offer (sim finding P1-1).

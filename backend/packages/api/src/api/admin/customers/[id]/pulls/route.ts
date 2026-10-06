@@ -32,7 +32,7 @@ import {
 // PULL lifecycle enum — NOT the delivery-order enum: a 'shipped' here is as
 // invalid as gibberish.
 const PULL_STATUSES = ['vaulted', 'bought_back', 'delivering', 'delivered'];
-const PULL_SOURCES = ['pack', 'reward', 'free'];
+const PULL_SOURCES = ['pack', 'reward', 'free', 'gift', 'bonus'];
 
 export async function GET(
   req: MedusaRequest,

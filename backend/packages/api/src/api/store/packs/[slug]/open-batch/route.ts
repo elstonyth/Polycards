@@ -11,6 +11,7 @@ import { PACKS_MODULE } from '../../../../../modules/packs';
 import { FREE_WELCOME_CATEGORY } from '../../../../../modules/packs/free-pack';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import { toMoney } from '../../../../../modules/packs/money';
+import { bonusShareMyr } from '../../../../../modules/packs/bonus-credit';
 import {
   FLAT_PERCENT,
   UNQUOTED_BUYBACK,
@@ -54,6 +55,22 @@ export async function POST(
     );
   }
 
+  // Rows the screen showed as "Vault" (gifted packs, spec 2026-10-07 §5).
+  // Exactly this many are claimed or the open is refused (409) — never billed.
+  const rawGifts = (req.body as { gifts?: unknown } | undefined)?.gifts;
+  const gifts =
+    rawGifts === undefined
+      ? 0
+      : typeof rawGifts === 'number'
+        ? rawGifts
+        : Number(rawGifts);
+  if (!Number.isInteger(gifts) || gifts < 0 || gifts > count) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `'gifts' must be an integer between 0 and 'count'.`,
+    );
+  }
+
   const packsService = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
 
   // The free welcome pack is a ONE-TIME single open — never a batch (the claim
@@ -70,7 +87,7 @@ export async function POST(
   }
 
   const { result } = await openBatchWorkflow(req.scope).run({
-    input: { pack_id: slug, customer_id: customerId, count },
+    input: { pack_id: slug, customer_id: customerId, count, gifts },
   });
 
   // ⚠ EVERYTHING BELOW IS POST-COMMIT — the workflow has ALREADY debited the
@@ -142,11 +159,16 @@ export async function POST(
           },
           marketPriceMyr,
         );
+        // Gift and bonus rows sell back (partly) as bonus credit.
+        const bonusBp = Number(pull.bonus_bp ?? 0);
+        const vaultAmount = buybackAmount(marketPriceMyr, FLAT_PERCENT);
         return {
           pull,
           card: { ...card, marketPriceMyr },
           buyback: {
             ...buyback,
+            bonus: bonusShareMyr(buyback.amount, bonusBp),
+            vault_bonus: bonusShareMyr(vaultAmount, bonusBp),
             // Mirrors the single-open route: false when the amounts were computed
             // on the display FX fallback — the sell would refuse, so don't
             // present the quote as firm (sim finding P1-1).
@@ -180,5 +202,6 @@ export async function POST(
     price: result.price,
     total_charged: result.total,
     balance: result.balance,
+    gifts_used: result.gifts_used,
   });
 }

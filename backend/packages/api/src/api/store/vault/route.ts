@@ -1,3 +1,4 @@
+import { bonusShareMyr } from '../../../modules/packs/bonus-credit';
 import {
   AuthenticatedMedusaRequest,
   MedusaResponse,
@@ -182,6 +183,9 @@ export async function GET(
         // the sell/deliver lock must be keyed off `locked`, NEVER off `source`.
         source: p.source ?? 'pack',
         locked,
+        // Share of a sell-back paid as spend-only bonus credit (spec
+        // 2026-10-07): 10000 on a gift, the bonus share on a bonus open.
+        bonus_bp: Number(p.bonus_bp ?? 0),
         // Can this row be SOLD? Now exactly `!locked` — a reward card sells
         // like any other (and still ships via the reward path). Kept as its
         // own field: the storefront's Sell affordance keys off it.
@@ -207,6 +211,11 @@ export async function GET(
           : {
               percent,
               amount: buybackAmount(marketPriceMyr, percent),
+              // The part of that amount paid as bonus credit.
+              bonus: bonusShareMyr(
+                buybackAmount(marketPriceMyr, percent),
+                Number(p.bonus_bp ?? 0),
+              ),
               rate_type,
               // false when amount was computed on the display FX fallback — the
               // sell would refuse, so the UI must not present it as a firm offer

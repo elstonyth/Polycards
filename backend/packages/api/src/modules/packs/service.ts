@@ -141,6 +141,15 @@ import {
   ADJUST_DAILY_MINT_MAX_RM_DEFAULT,
 } from './credit-adjust';
 import {
+  STALE_GIFT_MESSAGE,
+  UNOPENED_GIFT_SQL,
+  giftNoteError,
+  giftQuantityError,
+  giftState,
+  giftablePackError,
+  type GiftState,
+} from './pack-gifts';
+import {
   resolveBuybackRate,
   buybackAmount,
   instantDeadlineMs,
@@ -149,6 +158,7 @@ import {
 import { consumeExternalSen } from './external-funded';
 import {
   BONUS_NOT_SPENDABLE_MESSAGE,
+  bonusShareSen,
   consumeBonusSen,
 } from './bonus-credit';
 import { recomputeExternalStamps } from './external-backfill';
@@ -559,6 +569,55 @@ export type AdminAuditRow = Pick<
   | 'after'
   | 'reason'
 >;
+
+/** One gift as the admin customer page and its API show it. */
+export type PackGiftView = {
+  id: string;
+  pack_id: string;
+  pack_title: string;
+  value_myr: number;
+  note: string;
+  granted_by: string;
+  grant_key: string;
+  created_at: string;
+  opened_at: string | null;
+  pull_id: string | null;
+  revoked_at: string | null;
+  state: GiftState;
+};
+
+function toPackGiftView(
+  g: {
+    id: string;
+    pack_id: string;
+    value_myr: unknown;
+    note: string;
+    granted_by: string;
+    grant_key: string;
+    created_at: Date | string;
+    opened_at: Date | string | null;
+    pull_id: string | null;
+    revoked_at: Date | string | null;
+  },
+  packTitle: string,
+): PackGiftView {
+  const iso = (d: Date | string | null) =>
+    d === null ? null : new Date(d).toISOString();
+  return {
+    id: g.id,
+    pack_id: g.pack_id,
+    pack_title: packTitle,
+    value_myr: Number(g.value_myr),
+    note: g.note,
+    granted_by: g.granted_by,
+    grant_key: g.grant_key,
+    created_at: new Date(g.created_at).toISOString(),
+    opened_at: iso(g.opened_at),
+    pull_id: g.pull_id,
+    revoked_at: iso(g.revoked_at),
+    state: giftState(g),
+  };
+}
 
 class PacksModuleService extends MedusaService({
   Pack,
@@ -2094,9 +2153,11 @@ class PacksModuleService extends MedusaService({
         // shipped a card before claiming (review 2026-08-25 finding 2). This
         // also rides IDX_pull_customer_id_rolled_at instead of scanning for a
         // status that has no index.
+        // Gifted packs and bonus-funded opens count toward nothing (spec
+        // 2026-10-07): their achievements could pay withdrawable credit.
         em.execute<{ n: string }[]>(
           'SELECT COUNT(*)::bigint AS n FROM pull ' +
-            'WHERE customer_id = ? AND deleted_at IS NULL',
+            "WHERE customer_id = ? AND deleted_at IS NULL AND source NOT IN ('gift', 'bonus')",
           [input.customerId],
         ),
         // CARDS, not distinct species ("vault how many Pokémon card"): two
@@ -2112,7 +2173,8 @@ class PacksModuleService extends MedusaService({
         em.execute<
           { pixel_pokemon_id: string; n: string; n_week: string; n_day: string }[]
         >(
-          'SELECT c.pixel_pokemon_id, COUNT(*)::bigint AS n, ' +
+          // Lifetime n leaves out gift and bonus pulls (spec 2026-10-07).
+          "SELECT c.pixel_pokemon_id, COUNT(*) FILTER (WHERE p.source NOT IN ('gift', 'bonus'))::bigint AS n, " +
             "  COUNT(*) FILTER (WHERE p.source = 'pack' " +
             '    AND p.created_at >= ? AND p.created_at < ?)::bigint AS n_week, ' +
             "  COUNT(*) FILTER (WHERE p.source = 'pack' " +
@@ -3139,11 +3201,17 @@ class PacksModuleService extends MedusaService({
   ): Promise<number> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
+    // Bonus credit grants and gifted packs (spec 2026-10-07) mint value the
+    // same way — a gifted pack's card can be shipped — so they share the one
+    // ceiling: positive adjustment + positive bonus_grant + gift value.
     const rows = await em.execute<{ sum_cents: string | null }[]>(
-      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS sum_cents ' +
-        'FROM credit_transaction ' +
-        "WHERE reason = 'adjustment' AND amount > 0 AND deleted_at IS NULL " +
-        "AND created_at > now() - interval '24 hours'",
+      'SELECT (' +
+        '  (SELECT COALESCE(SUM(ROUND(amount * 100)), 0) FROM credit_transaction ' +
+        "    WHERE reason IN ('adjustment', 'bonus_grant') AND amount > 0 AND deleted_at IS NULL " +
+        "    AND created_at > now() - interval '24 hours') + " +
+        '  (SELECT COALESCE(SUM(ROUND(value_myr * 100)), 0) FROM pack_gift ' +
+        "    WHERE deleted_at IS NULL AND created_at > now() - interval '24 hours')" +
+        ')::bigint AS sum_cents',
     );
     return Number(rows[0]?.sum_cents ?? 0);
   }
@@ -5897,6 +5965,10 @@ class PacksModuleService extends MedusaService({
          * always single-pull (batch rejects free_welcome), hence one scalar.
          */
         vaultValueUsd?: number | null;
+        /** Bonus credit this open spent (MYR) — SP payload, spec 2026-10-07. */
+        bonus?: number;
+        /** Rows covered by gifted packs — SP payload, spec 2026-10-07. */
+        gifts?: number;
       };
     },
     @MedusaContext() sharedContext: Context = {},
@@ -5934,6 +6006,8 @@ class PacksModuleService extends MedusaService({
           // every real caller (record-pull.ts / record-pulls-batch.ts)
           // always supplies a concrete Card.handle string.
           prize_skus: input.pulls.map((p) => String(p.card_id)),
+          ...(input.ledger.bonus ? { bonus: input.ledger.bonus } : {}),
+          ...(input.ledger.gifts ? { gifts: input.ledger.gifts } : {}),
         },
       },
       sharedContext,
@@ -7924,6 +7998,8 @@ class PacksModuleService extends MedusaService({
       note: string;
       adminId: string;
       idempotencyKey?: string;
+      /** Spend-only bonus credit (泥码, spec 2026-10-07): reason 'bonus_grant'. */
+      bonus?: boolean;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
@@ -7932,16 +8008,17 @@ class PacksModuleService extends MedusaService({
     balance: number;
     replayed?: boolean;
   }> {
+    const reason = input.bonus ? 'bonus_grant' : 'adjustment';
     // Serialize retries BEFORE the mint-window and customer locks. Replays
     // must still succeed after a grant exhausts today's mint allowance.
     const requestReference = input.idempotencyKey
       ? `adjust-idem:${createHash('sha256')
           .update(
-            JSON.stringify([
-              input.adminId,
-              input.customerId,
-              input.idempotencyKey,
-            ]),
+            JSON.stringify(
+              input.bonus
+                ? [input.adminId, input.customerId, input.idempotencyKey, 'bonus']
+                : [input.adminId, input.customerId, input.idempotencyKey],
+            ),
           )
           .digest('hex')}`
       : undefined;
@@ -7961,6 +8038,7 @@ class PacksModuleService extends MedusaService({
       );
       if (existing) {
         if (
+          existing.reason !== reason ||
           Math.round(Number(existing.amount) * 100) !==
             Math.round(input.amount * 100) ||
           existing.reference !== input.note
@@ -7997,10 +8075,12 @@ class PacksModuleService extends MedusaService({
     // so the order is always global -> customer.
     //
     // Deadlock-free by construction, not by convention: 'credit-adjust:mint-
-    // window' is requested at this ONE site and nowhere else in the codebase,
-    // so no transaction can ever hold `credit:` while waiting for it, and no
-    // cycle can form. adminAdjustCredit's only production caller is the
-    // adjust-credits workflow step, which holds no lock when it calls in.
+    // window' is requested here and in grantPackGifts (spec 2026-10-07), both
+    // times FIRST, before any `credit:` lock, and grantPackGifts takes no
+    // `credit:` lock at all — so no transaction can hold `credit:` while
+    // waiting for it, and no cycle can form. adminAdjustCredit's only
+    // production caller is the adjust-credits workflow step, which holds no
+    // lock when it calls in.
     //
     // DEPENDS ON READ COMMITTED (the default; @InjectTransactionManager
     // forwards `isolationLevel` from the caller's context and this path passes
@@ -8056,14 +8136,20 @@ class PacksModuleService extends MedusaService({
     // same fix as Task 4's topUpCreditsWithLedger. The audit "before" calc
     // and the return value below intentionally keep input.amount — untouched,
     // out of this fix's scope.
+    // The bonus balance before the write, for the audit row (informational:
+    // read on this transaction, ahead of mutateCreditAtomic's lock).
+    const bonusBefore = input.bonus
+      ? (await this.creditSummary(input.customerId, sharedContext)).bonusBalance
+      : null;
     const { id, balance, amount } = await this.mutateCreditAtomic(
       {
         customerId: input.customerId,
         amount: input.amount,
-        reason: 'adjustment',
+        reason,
         reference: input.note,
         floor: 0,
         sourceTransactionId: requestReference,
+        bonusCents: input.bonus ? Math.round(input.amount * 100) : undefined,
       },
       sharedContext,
     );
@@ -8072,9 +8158,21 @@ class PacksModuleService extends MedusaService({
         admin_id: input.adminId,
         entity_type: 'credit',
         entity_id: id,
-        action: 'adjust_credit',
-        before: { balance: Number((balance - input.amount).toFixed(2)) },
-        after: { balance },
+        action: input.bonus ? 'grant_bonus_credit' : 'adjust_credit',
+        before:
+          bonusBefore === null
+            ? { balance: Number((balance - input.amount).toFixed(2)) }
+            : {
+                balance: Number((balance - input.amount).toFixed(2)),
+                bonus: bonusBefore,
+              },
+        after:
+          bonusBefore === null
+            ? { balance }
+            : {
+                balance,
+                bonus: Number((bonusBefore + input.amount).toFixed(2)),
+              },
         reason: input.note,
       },
       sharedContext,
@@ -8090,13 +8188,332 @@ class PacksModuleService extends MedusaService({
           type: 'AD',
           admin_id: input.adminId,
           reason: input.note,
-          detail: null,
+          // 'bonus' marks spend-only credit (spec 2026-10-07 §4.10).
+          detail: input.bonus ? 'bonus' : null,
           card_handle: null,
         },
       },
       sharedContext,
     );
     return { id, amount: input.amount, balance };
+  }
+
+  // ── Pack gifts (spec 2026-10-07 §3.1, §5, §7) ───────────────────────────────
+  // An admin-granted unopened pack, one row per pack. Claimed by an Open before
+  // its charge (claimPackGifts), stamped with the pull it became
+  // (stampPackGiftPulls); a rolled-back open releases it (releasePackGifts).
+
+  /** Grant N gifts of one pack. Idempotent on the request key; counts its
+   *  value toward the shared daily mint ceiling (ADJUST_DAILY_MINT_MAX_RM). */
+  @InjectTransactionManager()
+  async grantPackGifts(
+    input: {
+      customerId: string;
+      packSlug: string;
+      quantity: unknown;
+      note: unknown;
+      adminId: string;
+      idempotencyKey: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ gifts: PackGiftView[]; replayed: boolean; packTitle: string }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const invalid =
+      giftQuantityError(input.quantity) ?? giftNoteError(input.note);
+    if (invalid) throw new MedusaError(MedusaError.Types.INVALID_DATA, invalid);
+    const quantity = input.quantity as number;
+    const note = (input.note as string).trim();
+
+    const [pack] = await this.listPacks(
+      { slug: input.packSlug },
+      { take: 1 },
+      sharedContext,
+    );
+    const packError = giftablePackError(pack);
+    if (packError)
+      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, packError);
+    const [odds] = await this.listPackOdds(
+      { pack_id: input.packSlug },
+      { take: 1 },
+      sharedContext,
+    );
+    if (!odds) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'That pack has no prizes yet, so it cannot be gifted.',
+      );
+    }
+
+    const grantKey = `gift-idem:${createHash('sha256')
+      .update(
+        JSON.stringify([input.adminId, input.customerId, input.idempotencyKey]),
+      )
+      .digest('hex')}`;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      grantKey,
+    ]);
+    const existing = await this.listPackGifts(
+      { grant_key: grantKey },
+      { take: 100, order: { created_at: 'ASC', id: 'ASC' } },
+      sharedContext,
+    );
+    if (existing.length > 0) {
+      if (
+        existing[0].pack_id !== input.packSlug ||
+        existing.length !== quantity
+      ) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          'This request ID was already used for a different gift.',
+        );
+      }
+      return {
+        gifts: existing.map((g) => toPackGiftView(g, pack!.title)),
+        replayed: true,
+        packTitle: pack!.title,
+      };
+    }
+
+    // The same global ceiling as a credit grant, under the same lock (taken
+    // FIRST — see adminAdjustCredit). A gift is worth its pack price.
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      'credit-adjust:mint-window',
+    ]);
+    const priceCents = Math.round(Number(pack!.price) * 100);
+    const valueCents = priceCents * quantity;
+    const capCents =
+      nonNegativeIntFromEnv(
+        'ADJUST_DAILY_MINT_MAX_RM',
+        ADJUST_DAILY_MINT_MAX_RM_DEFAULT,
+      ) * 100;
+    const windowCents = await this.rollingAdjustmentMintCents(sharedContext);
+    const refusal = adjustDailyMintError(windowCents, valueCents, capCents);
+    if (refusal) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, refusal);
+
+    const created = await this.createPackGifts(
+      Array.from({ length: quantity }, () => ({
+        customer_id: input.customerId,
+        pack_id: input.packSlug,
+        value_myr: priceCents / 100,
+        note,
+        granted_by: input.adminId,
+        grant_key: grantKey,
+      })),
+      sharedContext,
+    );
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'pack_gift',
+        entity_id: created[0].id,
+        action: 'grant_pack_gift',
+        before: null,
+        after: {
+          customer_id: input.customerId,
+          pack_id: input.packSlug,
+          quantity,
+          gift_ids: created.map((g) => g.id),
+        },
+        reason: note,
+      },
+      sharedContext,
+    );
+    await this.recordLedgerEntry(
+      {
+        type: 'AD',
+        customerId: input.customerId,
+        refId: grantKey,
+        walletDelta: null,
+        vaultDelta: null,
+        payload: {
+          type: 'AD',
+          admin_id: input.adminId,
+          reason: note,
+          detail: `pack_gift ${input.packSlug} ×${quantity}`,
+          card_handle: null,
+        },
+      },
+      sharedContext,
+    );
+    return {
+      gifts: created.map((g) => toPackGiftView(g, pack!.title)),
+      replayed: false,
+      packTitle: pack!.title,
+    };
+  }
+
+  /** Revoke one gift that has not been opened (a stuck claim may be revoked).
+   *  Conditional, so it cannot race an open that already claimed the gift. */
+  @InjectTransactionManager()
+  async revokePackGift(
+    input: { giftId: string; adminId: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ revoked: true }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ id: string; customer_id: string; pack_id: string }[]>(
+      'UPDATE pack_gift SET revoked_at = now(), revoked_by = ?, updated_at = now() ' +
+        `WHERE id = ? AND ${UNOPENED_GIFT_SQL} RETURNING id, customer_id, pack_id`,
+      [input.adminId, input.giftId],
+    );
+    if (rows.length === 0) {
+      const [gift] = await this.listPackGifts(
+        { id: input.giftId },
+        { take: 1 },
+        sharedContext,
+      );
+      if (!gift) {
+        throw new MedusaError(MedusaError.Types.NOT_FOUND, 'Gift not found.');
+      }
+      throw new MedusaError(
+        MedusaError.Types.CONFLICT,
+        gift.revoked_at ? 'Already revoked' : 'Already opened',
+      );
+    }
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'pack_gift',
+        entity_id: input.giftId,
+        action: 'revoke_pack_gift',
+        before: { customer_id: rows[0].customer_id, pack_id: rows[0].pack_id },
+        after: { revoked: true },
+        reason: 'revoked from the customer page',
+      },
+      sharedContext,
+    );
+    return { revoked: true };
+  }
+
+  /** Every gift a customer was ever granted, newest first, with its state. */
+  @InjectManager()
+  async listPackGiftsForCustomer(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<PackGiftView[]> {
+    const gifts = await this.listPackGifts(
+      { customer_id: customerId },
+      { take: 500, order: { created_at: 'DESC', id: 'DESC' } },
+      sharedContext,
+    );
+    const slugs = [...new Set(gifts.map((g) => g.pack_id))];
+    const packRows = slugs.length
+      ? await this.listPacks(
+          { slug: slugs },
+          { take: slugs.length, select: ['slug', 'title'] },
+          sharedContext,
+        )
+      : [];
+    const titleOf = new Map(packRows.map((p) => [p.slug, p.title]));
+    return gifts.map((g) => toPackGiftView(g, titleOf.get(g.pack_id) ?? g.pack_id));
+  }
+
+  /** Unopened gifts per pack for one customer (the vault row, "Vault xN"). */
+  @InjectManager()
+  async unopenedPackGiftCounts(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ pack_id: string; count: number }[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ pack_id: string; n: string }[]>(
+      'SELECT pack_id, COUNT(*)::bigint AS n FROM pack_gift ' +
+        `WHERE customer_id = ? AND ${UNOPENED_GIFT_SQL} ` +
+        'GROUP BY pack_id ORDER BY MIN(created_at)',
+      [customerId],
+    );
+    return rows.map((r) => ({ pack_id: r.pack_id, count: Number(r.n) }));
+  }
+
+  /** Claim exactly `count` unopened gifts of one pack for an open, oldest
+   *  first, or refuse with 409 — never a partial claim, never a charge in
+   *  their place. SKIP LOCKED: two opens racing for one gift get one each or
+   *  one refusal, never the same gift. */
+  @InjectTransactionManager()
+  async claimPackGifts(
+    input: {
+      customerId: string;
+      packSlug: string;
+      count: number;
+      openId: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string[]> {
+    if (input.count <= 0) return [];
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    if (await this.isFrozen(input.customerId, sharedContext)) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This account is frozen.',
+      );
+    }
+    const rows = await em.execute<{ id: string }[]>(
+      'UPDATE pack_gift SET opened_at = now(), open_id = ?, updated_at = now() ' +
+        'WHERE id IN (SELECT id FROM pack_gift ' +
+        `  WHERE customer_id = ? AND pack_id = ? AND ${UNOPENED_GIFT_SQL} ` +
+        '  ORDER BY created_at, id LIMIT ? FOR UPDATE SKIP LOCKED) ' +
+        'RETURNING id',
+      [input.openId, input.customerId, input.packSlug, input.count],
+    );
+    if (rows.length < input.count) {
+      // Throwing rolls this transaction back, so the partial claim is undone.
+      throw new MedusaError(MedusaError.Types.CONFLICT, STALE_GIFT_MESSAGE);
+    }
+    return rows.map((r) => r.id);
+  }
+
+  /** Stamp each claimed gift with the pull it became. A gift whose claim was
+   *  taken over (a lapsed lease re-claimed by another open) stamps nothing —
+   *  that is an error, so the open rolls back rather than double-spend. */
+  @InjectTransactionManager()
+  async stampPackGiftPulls(
+    input: { openId: string; pairs: { giftId: string; pullId: string }[] },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    for (const pair of input.pairs) {
+      const rows = await em.execute<{ id: string }[]>(
+        'UPDATE pack_gift SET pull_id = ?, updated_at = now() ' +
+          'WHERE id = ? AND open_id = ? AND pull_id IS NULL AND revoked_at IS NULL ' +
+          'AND deleted_at IS NULL RETURNING id',
+        [pair.pullId, pair.giftId, input.openId],
+      );
+      if (rows.length === 0) {
+        throw new MedusaError(
+          MedusaError.Types.CONFLICT,
+          STALE_GIFT_MESSAGE,
+        );
+      }
+    }
+  }
+
+  /** Undo an open's claim entirely — claim, open id and any stamped pull — so
+   *  a rolled-back open never leaves a gift pointing at a deleted pull. */
+  @InjectTransactionManager()
+  async releasePackGifts(
+    openId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute(
+      'UPDATE pack_gift SET opened_at = NULL, open_id = NULL, pull_id = NULL, ' +
+        'updated_at = now() WHERE open_id = ? AND deleted_at IS NULL',
+      [openId],
+    );
+  }
+
+  /** The stamp step's own undo: clear the pulls, keep the claim (the claim
+   *  step's compensation releases it). */
+  @InjectTransactionManager()
+  async unstampPackGiftPulls(
+    openId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute(
+      'UPDATE pack_gift SET pull_id = NULL, updated_at = now() ' +
+        'WHERE open_id = ? AND deleted_at IS NULL',
+      [openId],
+    );
   }
 
   // Wraps the buyback credit insert with its paired SE ledger row, same
@@ -8122,11 +8539,18 @@ class PacksModuleService extends MedusaService({
       cardHandle: string;
       rate: number;
       openId: string | null;
+      /** The pull's bonus share (pull.bonus_bp): that part of the sell-back is
+       *  paid as spend-only bonus credit (spec 2026-10-07 §4.5). */
+      bonusBp?: number;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
     Awaited<ReturnType<PacksModuleService['createCreditTransactions']>>
   > {
+    const bonusCents = bonusShareSen(
+      Math.round(input.amount * 100),
+      input.bonusBp ?? 0,
+    );
     const rows = await this.createCreditTransactions(
       [
         {
@@ -8134,6 +8558,7 @@ class PacksModuleService extends MedusaService({
           amount: input.amount,
           reason: 'buyback' as const,
           pull_id: input.pullId,
+          bonus_cents: bonusCents,
         },
       ],
       sharedContext,
@@ -8151,6 +8576,7 @@ class PacksModuleService extends MedusaService({
           sp_ref_id: input.openId,
           price: input.valueMyr,
           rate: input.rate,
+          ...(bonusCents ? { bonus: bonusCents / 100 } : {}),
         },
       },
       sharedContext,

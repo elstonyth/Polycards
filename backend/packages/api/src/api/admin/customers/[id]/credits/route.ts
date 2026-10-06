@@ -5,8 +5,15 @@ import type {
 import { Modules } from "@medusajs/framework/utils";
 import type { ICustomerModuleService } from "@medusajs/framework/types";
 import { adjustCreditsWorkflow } from "../../../../../workflows/adjust-credits";
+import { notifyFeedNonfatal } from "../../../../../modules/packs/notify-feed";
 
-type Body = { amount?: unknown; note?: unknown; idempotency_key?: unknown };
+type Body = {
+  amount?: unknown;
+  note?: unknown;
+  idempotency_key?: unknown;
+  // 'credit' (default) or 'bonus': spend-only bonus credit (spec 2026-10-07).
+  kind?: unknown;
+};
 
 // POST /admin/customers/:id/credits — operator credit adjustment (grant /
 // refund / clawback). One signed ledger row, RM 0 balance floor; amount/note
@@ -38,8 +45,19 @@ export async function POST(
       note: body.note,
       admin_id: adminId,
       idempotency_key: body.idempotency_key,
+      kind: body.kind,
     },
   });
+
+  // Post-commit: tell the customer about a bonus grant (never a take-back).
+  if (body.kind === "bonus" && result.amount > 0 && !result.replayed) {
+    await notifyFeedNonfatal(req.scope, "bonus-grant", {
+      receiverId: id,
+      template: "bonus_credit_received",
+      data: { amount: result.amount },
+      idempotencyKey: `bonus-grant:${result.credit_transaction_id}`,
+    });
+  }
 
   res.json({ amount: result.amount, balance: result.balance });
 }
