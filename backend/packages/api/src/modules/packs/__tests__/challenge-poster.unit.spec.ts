@@ -1,4 +1,8 @@
-import { posterHeadline, posterWeekLabel } from '../challenge-poster';
+import {
+  posterHeadline,
+  posterProgress,
+  posterWeekLabel,
+} from '../challenge-poster';
 
 const ladder = [
   { stageNumber: 1, thresholdMyr: 200_000 },
@@ -33,6 +37,28 @@ describe('posterHeadline', () => {
       headline: 'STAGE 1 UNLOCKED',
       featureStage: 1,
     });
+  });
+});
+
+describe('posterProgress', () => {
+  it('runs the bar to stage 1 while nothing is unlocked', () => {
+    expect(posterProgress(ladder, 150_000)).toEqual({
+      pooledMyr: 150_000,
+      nextStage: 1,
+      nextThresholdMyr: 200_000,
+    });
+  });
+
+  it('runs it on to the next stage once one unlocks', () => {
+    expect(posterProgress(ladder, 200_000)).toEqual({
+      pooledMyr: 200_000,
+      nextStage: 2,
+      nextThresholdMyr: 500_000,
+    });
+  });
+
+  it('has no bar once every stage is unlocked', () => {
+    expect(posterProgress(ladder, 1_500_000)).toBeNull();
   });
 });
 
