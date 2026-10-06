@@ -129,6 +129,16 @@ describe('requireReportKey', () => {
     expect(info).toHaveBeenCalledWith(`[reports] store ${ECONOMY}`);
   });
 
+  it('logs a customer search with its email and phone masked', () => {
+    const { info } = run(
+      '/reports/admin/read?path=%2Fadmin%2Fcustomers&q=ace%40example.com&phone=%2B60123456789',
+      { 'x-report-key': STORE },
+    );
+    expect(info).toHaveBeenCalledWith(
+      '[reports] store /reports/admin/read?path=%2Fadmin%2Fcustomers&q=…@…&phone=+#',
+    );
+  });
+
   it('opens them with the developer key, which owns no reports of its own', () => {
     process.env.REPORT_KEY_DEVELOPER = DEVELOPER;
     const { next, info } = run('/reports/store/packs', {

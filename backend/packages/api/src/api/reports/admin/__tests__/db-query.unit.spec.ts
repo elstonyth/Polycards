@@ -109,6 +109,7 @@ describe('sqlRefusal', () => {
       /Passwords stay hidden/,
     ],
     ['SELECT U&"\\0070g_sleep"(1)', /Unicode-escaped/],
+    ['SELECT * FROM pull WHERE customer_id = $2', /Placeholders like \$1/],
   ])('refuses %p', (sql, why) => {
     expect(sqlRefusal(sql)).toMatch(why);
   });
@@ -129,8 +130,11 @@ describe('wrapQuery and dataQuery', () => {
 
   it('has Postgres build the rows as JSON, bounded per row and in all', () => {
     const q = dataQuery('SELECT 1');
-    expect(q).toContain(`FROM (${wrapQuery('SELECT 1')}) AS q`);
-    expect(q).toContain('json_agg(q) FILTER (WHERE pg_column_size(q) <= $2)');
+    expect(q).toContain(`FROM (${wrapQuery('SELECT 1')}) AS desk_bot_row`);
+    // desk_bot_row.*: a column the query names q (or anything) is not the row.
+    expect(q).toContain(
+      'json_agg(desk_bot_row.*) FILTER (WHERE pg_column_size(desk_bot_row.*) <= $2)',
+    );
     expect(q).toContain('CASE WHEN octet_length(t.j) <= $3 THEN t.j END');
   });
 });
@@ -184,7 +188,10 @@ describe('fitAnswer', () => {
       more_rows: boolean;
       note: string;
     };
-    expect(JSON.stringify(answer).length).toBeLessThanOrEqual(10_000);
+    // Measured as Hermes does: the JSON escaped once more as a string.
+    expect(JSON.stringify(JSON.stringify(answer)).length).toBeLessThanOrEqual(
+      10_000,
+    );
     expect(answer.row_count).toBe(500);
     expect(answer.more_rows).toBe(true);
     expect(answer.rows_shown).toBe(answer.rows.length);
@@ -231,6 +238,15 @@ describe('sqlErrorMessage', () => {
     ).toMatch(/Hint: Perhaps you meant .*information_schema\.columns/);
   });
 
+  it('keeps errors the query itself causes with the query', () => {
+    expect(
+      sqlErrorMessage(pgError('08P01', 'bind message supplies 1 parameters')),
+    ).toMatch(/^Postgres: bind message/);
+    expect(
+      sqlErrorMessage(pgError('XX000', 'invalid memory alloc request size')),
+    ).toMatch(/^Postgres: invalid memory alloc/);
+  });
+
   it('leaves the database failing, not the query, to the caller', () => {
     // A socket error's code has a SQLSTATE's shape but no severity.
     expect(sqlErrorMessage({ code: 'EPIPE', message: 'write EPIPE' })).toBe(
@@ -238,7 +254,7 @@ describe('sqlErrorMessage', () => {
     );
     expect(sqlErrorMessage(new Error('connect ECONNREFUSED'))).toBeNull();
     expect(sqlErrorMessage(null)).toBeNull();
-    for (const code of ['57P01', '08006', '53300', '58030', 'XX000']) {
+    for (const code of ['57P01', '08006', '53300', '58030']) {
       expect(
         sqlErrorMessage({ ...pgError(code, 'down'), severity: 'FATAL' }),
       ).toBeNull();
@@ -254,6 +270,23 @@ describe('sqlForLog', () => {
       ),
     ).toBe(
       "SELECT * FROM customer WHERE email = '…' OR phone = '…' OR id = # OR note = '…'",
+    );
+  });
+
+  it('is not thrown off by apostrophes in comments, names or E strings', () => {
+    expect(
+      sqlForLog(
+        "SELECT * FROM customer -- the player's row\nWHERE email = 'ace@example.com'",
+      ),
+    ).toBe("SELECT * FROM customer WHERE email = '…'");
+    expect(
+      sqlForLog(
+        'SELECT 1 AS "o\'brien" /* don\'t */ WHERE note = E\'it\\\'s\' AND email = \'ace@example.com\'',
+      ),
+    ).toBe('SELECT 1 AS "…" WHERE note = E\'…\' AND email = \'…\'');
+    // An unpaired quote still never shows an email or a number.
+    expect(sqlForLog("WHERE a = 'x AND email = ace@example.com AND n = 5550001234")).toBe(
+      "WHERE a = 'x AND email = …@… AND n = #",
     );
   });
 

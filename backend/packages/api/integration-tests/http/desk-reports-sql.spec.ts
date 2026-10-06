@@ -182,6 +182,29 @@ medusaIntegrationTestRunner({
         expect(row.rm).toBe(12345.67);
       });
 
+      it('keeps a column whose name the wrapper uses for the row', async () => {
+        const res = await query(
+          'SELECT g AS id, g * 2 AS q, g * 3 AS desk_bot_row FROM generate_series(1, 2) AS g',
+        );
+        expect(res.data.rows).toEqual([
+          { id: 1, q: 2, desk_bot_row: 3 },
+          { id: 2, q: 4, desk_bot_row: 6 },
+        ]);
+      });
+
+      it('cuts a huge error message instead of sending it all', async () => {
+        const res = await query("SELECT repeat('x', 100000)::int AS n");
+        expect(res.status).toBe(400);
+        expect(res.data.message).toMatch(/invalid input syntax/);
+        expect(res.data.message.length).toBeLessThan(2_200);
+      });
+
+      it('refuses placeholders, which would bind to its own values', async () => {
+        const res = await query('SELECT * FROM pull WHERE customer_id = $2');
+        expect(res.status).toBe(400);
+        expect(res.data.message).toMatch(/Placeholders like \$1/);
+      });
+
       it('refuses two columns with one name instead of losing one', async () => {
         const res = await query(
           'SELECT sum(x), sum(y) FROM (VALUES (1, 2)) AS v(x, y)',

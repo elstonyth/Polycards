@@ -104,19 +104,23 @@ function redactJsonText(text: string): string {
 const MAX_CHARS = 40_000;
 
 export function capBody(data: unknown, max = MAX_CHARS) {
+  // Measured as Hermes measures it: the tool's JSON text, escaped once more
+  // as a string, so every quote and backslash counts again.
+  const size = (value: unknown) =>
+    JSON.stringify(JSON.stringify(value)).length;
+  const whole = { truncated: false, data };
+  if (size(whole) <= max) return whole;
   const text = JSON.stringify(data);
-  if (text.length <= max) return { truncated: false, data };
-  // The preview travels as a JSON string, where every quote and backslash
-  // costs one more character: cut it until the escaped form fits.
-  let preview = text.slice(0, max);
-  while (JSON.stringify(preview).length > max) {
-    preview = preview.slice(0, Math.floor(preview.length * 0.9));
-  }
-  return {
+  const cut = (preview: string) => ({
     truncated: true,
     data_preview: preview,
     note: `The answer is ${text.length.toLocaleString('en-MY')} characters, too long to show whole. Ask again narrower: limit (rows per page), offset (to page on), fields (only the columns you need) or q (a search).`,
-  };
+  });
+  let preview = text.slice(0, max);
+  while (preview && size(cut(preview)) > max) {
+    preview = preview.slice(0, Math.floor(preview.length * 0.9));
+  }
+  return cut(preview);
 }
 
 /** The id of DESK_BOT_ROLE, with its one policy (read on every resource)

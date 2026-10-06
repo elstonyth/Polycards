@@ -1,4 +1,5 @@
 import { createPgConnection } from '@medusajs/framework/utils';
+import { maskForLog } from '../require-report-key';
 import { redact } from './proxy';
 
 // Read-only SQL for the desk bots (POST /reports/admin/sql): the owner's call
@@ -84,6 +85,9 @@ const REFUSED_TABLES =
 const PASSWORDS = /\b\w*(password|partner_credential)\w*\b/i;
 // U&"..." spells a name in escapes the checks above would not recognize.
 const UNICODE_ESCAPES = /\bu&['"]/i;
+// The statements carry their own bound values ($1 to $3): a placeholder in
+// the query would bind to those, or fail as a protocol error.
+const PLACEHOLDERS = /\$\d/;
 const LEADING_COMMENTS = /^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*/;
 const READ_START = /^(?:select|with|values|table|\()/i;
 
@@ -110,6 +114,9 @@ export function sqlRefusal(sql: unknown): string | null {
   if (UNICODE_ESCAPES.test(sql)) {
     return 'Unicode-escaped names (U&"...") are not accepted: write names plainly.';
   }
+  if (PLACEHOLDERS.test(sql)) {
+    return 'Placeholders like $1 are not accepted: write the values into the query.';
+  }
   return null;
 }
 
@@ -121,16 +128,19 @@ export const wrapQuery = (sql: string): string =>
 /** The rows as one JSON text built by Postgres: rows over $2 bytes are
  *  counted instead of sent, and a total over $3 bytes comes back null, so
  *  the web process never holds a big answer. JSON also keeps every value as
- *  Postgres shows it (a timestamp without time zone stays one). */
+ *  Postgres shows it (a timestamp without time zone stays one). The row is
+ *  `desk_bot_row.*`: a bare name would mean a column of that name first. */
 export const dataQuery = (sql: string): string =>
   'SELECT CASE WHEN octet_length(t.j) <= $3 THEN t.j END AS rows, ' +
   'octet_length(t.j) AS bytes, t.n, t.too_big FROM (' +
-  "SELECT coalesce(json_agg(q) FILTER (WHERE pg_column_size(q) <= $2), '[]')::text AS j, " +
-  'count(*)::int AS n, count(*) FILTER (WHERE pg_column_size(q) > $2)::int AS too_big ' +
-  `FROM (${wrapQuery(sql)}) AS q) AS t`;
+  'SELECT coalesce(json_agg(desk_bot_row.*) FILTER (WHERE pg_column_size(desk_bot_row.*) <= $2), ' +
+  "'[]')::text AS j, count(*)::int AS n, " +
+  'count(*) FILTER (WHERE pg_column_size(desk_bot_row.*) > $2)::int AS too_big ' +
+  `FROM (${wrapQuery(sql)}) AS desk_bot_row) AS t`;
 
-// Every partner login password stored where the bots can read (fetched in
-// the query's own transaction, so it is the same snapshot the query sees).
+// Every partner login password stored where the bots can read, fetched in
+// the query's own REPEATABLE READ transaction: the same snapshot the query
+// sees, so a partner account created in between cannot slip past the mask.
 const SECRET_VALUES_SQL =
   "SELECT DISTINCT metadata->'partner_credential'->>'password' AS s FROM customer WHERE metadata ? 'partner_credential'";
 
@@ -157,11 +167,14 @@ export function fitAnswer(
   maxChars = MAX_ANSWER_CHARS,
 ) {
   const head = { columns, row_count: rows.length, more_rows: moreRows, ms };
-  // Room for the rows_shown count and the note.
-  let size = JSON.stringify({ ...head, rows: [] }).length + 300;
+  // Measured as Hermes does: the answer's JSON escaped once more as a
+  // string. Plus room for the rows_shown count and the note.
+  const escaped = (value: unknown) =>
+    JSON.stringify(JSON.stringify(value)).length;
+  let size = escaped({ ...head, rows: [] }) + 400;
   const shown: unknown[] = [];
   for (const row of rows) {
-    size += JSON.stringify(row).length + 1;
+    size += escaped(row) - 1;
     if (size > maxChars) break;
     shown.push(row);
   }
@@ -270,7 +283,8 @@ async function runNow(
     try {
       // One round trip, no caller text, so the simple protocol is fine here.
       await step(
-        'BEGIN TRANSACTION READ ONLY; ' +
+        // One snapshot for the secrets and the answer (see SECRET_VALUES_SQL).
+        'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY; ' +
           `SET LOCAL statement_timeout = ${Math.trunc(timeoutMs)}; ` +
           'SET LOCAL lock_timeout = 2000; ' +
           // Ends the transaction if this server vanishes mid-query.
@@ -326,8 +340,15 @@ async function runNow(
       await db.client.releaseConnection(conn);
     }
   } catch (err) {
-    // Postgres repeats bad input in its errors (a cast's value, say).
-    if (err instanceof Error) err.message = scrubSecrets(err.message, secrets);
+    // Postgres repeats bad input in its errors (a cast's value, which can be
+    // megabytes): mask a start long enough to hold any whole secret near the
+    // cut, then keep what a bot can read.
+    if (err instanceof Error) {
+      err.message = scrubSecrets(err.message.slice(0, 4_000), secrets).slice(
+        0,
+        2_000,
+      );
+    }
     throw err;
   } finally {
     // Closing the connection ends the transaction: nothing is ever committed.
@@ -337,9 +358,10 @@ async function runNow(
 }
 
 // SQLSTATE classes that mean the database, not the query, failed: connection
-// (08), resources (53), operator intervention (57, except 57014, our own
-// timeout), system (58) and internal (XX) errors.
-const UNAVAILABLE = /^(08|53|58|XX|57(?!014))/;
+// (08, except 08P01, a query's own protocol error), resources (53), operator
+// intervention (57, except 57014, our own timeout) and system (58) errors.
+// Internal errors (XX) stay with the query: a huge value causes them.
+const UNAVAILABLE = /^(08(?!P01)|53|58|57(?!014))/;
 
 /** A Postgres error about the query as the sentence the bot gets, or null
  *  for any other failure (the database did not answer). */
@@ -372,13 +394,17 @@ export function sqlErrorMessage(err: unknown): string | null {
   return `Postgres: ${String(e.message)}.${hint}${lookup}`;
 }
 
-/** The query as it is logged: every quoted value and long number masked, so
- *  an email, phone or bank number a bot filtered on never reaches the logs. */
+/** The query as it is logged: comments dropped and every quoted value,
+ *  quoted name, email and long number masked, so an email, phone or bank
+ *  number a bot filtered on never reaches the logs. */
 export const sqlForLog = (sql: string): string =>
-  sql
-    .replace(/\$(\w*)\$[\s\S]*?\$\1\$/g, "'…'")
-    .replace(/'(?:[^']|'')*'/g, "'…'")
-    .replace(/\d{5,}/g, '#')
+  maskForLog(
+    sql
+      .replace(/\$(\w*)\$[\s\S]*?\$\1\$/g, "'…'")
+      .replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/"(?:[^"]|"")*"/g, '"…"')
+      .replace(/'(?:[^'\\]|\\.|'')*'/g, "'…'"),
+  )
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 500);

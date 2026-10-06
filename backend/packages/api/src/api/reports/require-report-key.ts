@@ -88,10 +88,20 @@ export function requireReportKey() {
     callers.set(req, caller);
     req.scope
       .resolve(ContainerRegistrationKeys.LOGGER)
-      .info(`[reports] ${caller} ${req.originalUrl}`);
+      .info(`[reports] ${caller} ${maskForLog(req.originalUrl)}`);
     next();
   };
 }
+
+/** `text` with emails and long numbers (phones, bank accounts) masked, for a
+ *  log line: a bot's customer search travels in the query string, and an
+ *  email arrives %40-encoded. */
+export const maskForLog = (text: string): string =>
+  text
+    .replace(/%40/gi, '@')
+    .replace(/%2B/gi, '+')
+    .replace(/[^\s'"&=?(),;]+@[^\s'"&=?(),;]+/g, '…@…')
+    .replace(/\d{5,}/g, '#');
 
 function sameKey(given: string, expected: string): boolean {
   const a = Buffer.from(given);

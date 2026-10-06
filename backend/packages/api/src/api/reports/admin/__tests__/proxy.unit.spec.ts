@@ -91,8 +91,9 @@ describe('capBody', () => {
     // Text that is all quotes doubles when the MCP result escapes it.
     const quoted = { rows: Array.from({ length: 400 }, () => '"x"') };
     const out = capBody(quoted, 2000) as { data_preview: string };
-    expect(JSON.stringify(out.data_preview).length).toBeLessThanOrEqual(2000);
-    expect(out.data_preview.length).toBeGreaterThan(500);
+    // Hermes escapes the whole tool answer once more: measure that.
+    expect(JSON.stringify(JSON.stringify(out)).length).toBeLessThanOrEqual(2000);
+    expect(out.data_preview.length).toBeGreaterThan(200);
   });
 });
 
