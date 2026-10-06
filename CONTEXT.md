@@ -40,8 +40,11 @@ _Avoid_: buy, purchase, spin, draw
 **Pull**:
 The record of one prize acquisition — a pack Open (`source='pack'`), a product
 win from a Reward Draw (`source='reward'`), or the one-time Free Welcome Pack
-open (`source='free'`). The append-only source of truth for the live-pulls feed,
-the leaderboard, and the Vault.
+open (`source='free'`), an opened Pack Gift (`source='gift'`) or a paid open
+that spent any Bonus Credit (`source='bonus'`). The append-only source of truth
+for the live-pulls feed, the leaderboard, and the Vault. Only `source='pack'`
+counts toward the boards, the challenge, tasks, achievements, VIP and the
+welcome unlock.
 _Avoid_: spin, roll, result
 
 **Free Welcome Pack**:
@@ -57,6 +60,17 @@ _Avoid_: reward (that is the daily VIP draw), demo spin
 A customer's held Pulls — the cards they keep. Not a table: a vault item is a
 Pull whose status is `vaulted`.
 _Avoid_: inventory, collection, wallet
+
+**Pack Gift** (customer-facing: _Vault pack_, "Vault x1"):
+An admin-granted, unopened Pack held for one customer — table `pack_gift`, one
+row per pack (spec 2026-10-07). Shown on the Vault page, but it is **not** a Pull
+and ADR 0001 stands: the vault is still a Pull status; the Vault _page_ renders
+Pulls and Pack Gifts side by side. The pack and spin pages use a held gift first
+("Vault x1", "Bet Vault x1 + RM300.00"); the Open claims exactly the gifts the
+screen showed or is refused (409) — never billed in their place. It writes a
+`source='gift'` Pull whose sell-back pays Bonus Credit.
+_Avoid_: voucher (VIP credit grant), free rip (the task reward, a `task_claim`
+row), reward
 
 **Delivery Order**:
 A customer's request to physically ship one or more vaulted Pulls, with its own
@@ -121,8 +135,20 @@ The portion of a balance or spend backed by real-money top-up, as opposed to
 buyback or promo credit. The basis for VIP spend.
 _Avoid_: real money, deposited
 
+**Bonus Credit** (泥码):
+The spend-only slice of a customer's Credit (spec 2026-10-07, ADR 0010). Spent
+only on pack Opens — and FIRST, before normal credit — never withdrawn, never
+pays a delivery fee. A signed column on the ledger (`credit_transaction.bonus_cents`,
+admin grants use reason `bonus_grant`), not a second wallet. **Bonus Balance** =
+Σ bonus_cents; **Normal Balance** = Balance − Bonus Balance. A card pulled with
+bonus sells back partly as bonus (`pull.bonus_bp`), so the value never washes
+into cash.
+_Avoid_: promo credit (the economy report's bucket for task/voucher credit,
+which IS withdrawable), dead chips, free credit
+
 **Available**:
 The spendable balance. Equal to Balance, except that a frozen account reports 0.
+**Withdrawable** is the Normal part of it only, once playthrough is done.
 (Nothing locks credit any more — the commission lock left with the referral
 programme, ADR 0007.)
 
@@ -283,7 +309,8 @@ the ledger `(type='RF', ref_id)` index.
 
 **VIP Level**:
 A customer's rung 1–100, reached by cumulative pack-open turnover (winnings-funded
-opens count too, #254/ADR 0003 — not external-funded spend). Unlocks a Reward Box
+opens count too, #254/ADR 0003 — not external-funded spend; the Bonus Credit part
+of an open never counts, ADR 0010). Unlocks a Reward Box
 tier and avatar frames. Two readings exist: `current_level` (net — drops after a
 `reverseOpen`, what /me shows) and `highest_level_ever` (the ratchet — what
 level-up grants and the `reach_level` achievements are measured against, so an
