@@ -144,7 +144,8 @@ export default function SlotMachineClient({
   recentPulls: RecentPull[];
   count: number;
   /** Vault packs (gifts) held for THIS pack, read server-side; null = not
-   *  read (a guest, or a failed call) — re-read once a customer is known. */
+   *  read (a guest, or a failed call). First paint only — the machine
+   *  re-reads for the signed-in customer before a paid Spin. */
   giftsHeld?: number | null;
   /** Admin-published PUBLIC odds for the OddsSheet; null = not published. */
   publishedOdds: PublishedOdds | null;
@@ -218,28 +219,49 @@ export default function SlotMachineClient({
 
   // Vault packs (spec 2026-10-07 §1). Use order on every open is gifts →
   // bonus credit → normal credit; gifts cover rows first, and only on the
-  // PAID route — a free rip / welcome pack is already free and wins. null =
-  // unknown: re-read whenever a signed-in customer has no count (a guest who
-  // just logged in, or a stale-gift refusal), and the paid Spin waits for it
-  // so a press can never pay for a row a gift would have covered. An unread
-  // call settles at 0 (giftsHeldFor(null)) — the price the screen shows.
-  const [held, setHeld] = useState<number | null>(giftsHeld);
-  const giftsPending = customer != null && held === null;
+  // PAID route — a free rip / welcome pack is already free and wins. The count
+  // is keyed to the customer + pack it was read for (like PackDetailClient):
+  // the server's seed (`key: null`) paints the first frame only, and a press
+  // waits for a client read for whoever is signed in NOW — an account switch
+  // without a reload, or a Back-restored page, would otherwise act on a stale
+  // count (stale-low charges full price for a gift-covered row). null = re-read
+  // (mount, a stale-gift refusal, Retry). A failed read settles at 0 —
+  // the price the screen shows, so an outage never blocks a paid spin — and
+  // says so with a Retry.
+  const customerId = customer?.id ?? null;
+  const giftKey = customerId ? `${customerId}:${pack.id}` : null;
+  const [gifts, setGifts] = useState<{
+    key: string | null;
+    count: number;
+    failed?: boolean;
+  } | null>(giftsHeld === null ? null : { key: null, count: giftsHeld });
+  const giftsRead = giftKey !== null && gifts?.key === giftKey;
+  const giftsPending = giftKey !== null && !giftsRead;
+  const giftsFailed = giftsRead && gifts?.failed === true;
+  const held = giftsRead || gifts?.key === null ? (gifts?.count ?? 0) : 0;
   useEffect(() => {
-    if (!giftsPending) return;
+    if (!giftsPending || !giftKey) return;
     let live = true;
+    const failed = { key: giftKey, count: 0, failed: true };
     void getPackGifts()
       .then((g) => {
-        if (live) setHeld(giftsHeldFor(g, pack.id));
+        // getPackGifts reports a failed call as null rather than throwing.
+        if (live) {
+          setGifts(
+            g === null
+              ? failed
+              : { key: giftKey, count: giftsHeldFor(g, pack.id) },
+          );
+        }
       })
       .catch(() => {
-        if (live) setHeld(0);
+        if (live) setGifts(failed);
       });
     return () => {
       live = false;
     };
-  }, [giftsPending, pack.id]);
-  const vaultGifts = mode === 'paid' ? giftsUsed(reels, held ?? 0) : 0;
+  }, [giftsPending, giftKey, pack.id]);
+  const vaultGifts = mode === 'paid' ? giftsUsed(reels, held) : 0;
   // What this press actually charges: the rows no gift covers.
   const paidCost = cost * (reels - vaultGifts);
   // Shrink the cell so multiple reels fit across the viewport. On a roomy
@@ -401,9 +423,11 @@ export default function SlotMachineClient({
   // A free open is always affordable — and must not wait on the balance read,
   // which is null while it loads and would leave a brand-new account (balance
   // RM 0, the exact audience) staring at a disabled Spin button.
+  // A gift-only press (paidCost 0) charges nothing either.
   const canAfford =
     isFreePack ||
     isFreeRip ||
+    paidCost === 0 ||
     (balance !== null && affordable(balance, paidCost));
   // Spin + reel add/remove are locked for the ENTIRE non-idle flow — resolve,
   // spin, the reveal theater (flood/transform), AND the review/sell window
@@ -521,7 +545,7 @@ export default function SlotMachineClient({
       // A press that offered gifts may have spent them (a lost response, a
       // post-charge mapping failure) or found them gone (409): re-read the
       // count rather than trust the one on screen — the Spin waits for it.
-      if (request.gifts > 0) setHeld(null);
+      if (request.gifts > 0) setGifts(null);
       if (res.kind === 'unreachable') {
         // The charge may well have landed (the server executed, the response
         // did not transport back). Telling the player to check their balance
@@ -613,7 +637,9 @@ export default function SlotMachineClient({
     }
     // The gifts this open consumed are gone — same identity guard.
     if (batch.giftsUsed > 0 && batch.forId === customerIdRef.current) {
-      setHeld((h) => (h === null ? h : Math.max(0, h - batch.giftsUsed)));
+      setGifts((g) =>
+        g ? { ...g, count: Math.max(0, g.count - batch.giftsUsed) } : g,
+      );
     }
 
     // The cards are in the vault as of this response — the open workflow writes
@@ -1230,6 +1256,18 @@ export default function SlotMachineClient({
                   </Link>
                 </>
               )}
+            </p>
+          )}
+          {mode === 'paid' && giftsFailed && (
+            <p className="mt-2 text-center text-[12px] text-white/50">
+              Couldn&apos;t check your vault packs —{' '}
+              <button
+                type="button"
+                onClick={() => setGifts(null)}
+                className="font-semibold text-white/70 underline underline-offset-2 hover:text-white"
+              >
+                Retry
+              </button>
             </p>
           )}
         </div>

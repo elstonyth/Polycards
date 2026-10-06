@@ -351,7 +351,7 @@ export function RevealStage({
           type="button"
           onClick={() => setConfirmIndex(i)}
           disabled={!flipped || state.phase === 'selling'}
-          className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-chase/50 bg-chase/10 px-2 text-center text-sm font-bold leading-tight text-chase transition-colors hover:bg-chase/20 disabled:opacity-50"
+          className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-chase/50 bg-chase/10 px-2 py-1 text-center text-sm font-bold leading-tight text-chase transition-colors hover:bg-chase/20 disabled:opacity-50"
         >
           {state.phase === 'selling' && (
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />

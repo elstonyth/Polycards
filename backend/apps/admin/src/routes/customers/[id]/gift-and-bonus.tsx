@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Button,
@@ -22,7 +22,7 @@ import {
   usePacks,
   useRevokePackGift,
 } from '../../../lib/queries';
-import type { PackGift } from '../../../lib/admin-rest';
+import { httpStatus, type PackGift } from '../../../lib/admin-rest';
 import { orderDateTime, rm } from '../../../lib/format';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 
@@ -51,6 +51,25 @@ type Confirm =
   | { kind: 'bonus' }
   | { kind: 'revoke'; gift: PackGift };
 
+// One idempotency key per ATTEMPT, held for the exact values it was sent with
+// (`sig`). A re-press after a lost response (no HTTP status) or a 5xx replays
+// the same key, so a grant that committed is not granted twice. Any change to
+// the values, a success, or a 4xx refusal (nothing committed) starts fresh.
+// Same contract as group-credit-edit.ts's runGroupCreditAdjustment.
+type Attempt = { key: string; sig: string };
+
+function attemptKey(ref: { current: Attempt | null }, sig: string): string {
+  if (ref.current?.sig !== sig) {
+    ref.current = { key: crypto.randomUUID(), sig };
+  }
+  return ref.current.key;
+}
+
+function settleAttempt(ref: { current: Attempt | null }, err?: unknown) {
+  const status = err === undefined ? 200 : httpStatus(err);
+  if (status !== undefined && status < 500) ref.current = null;
+}
+
 export const GiftAndBonusPanels = ({ customerId }: { customerId: string }) => {
   const { t } = useTranslation();
   // Same key as the page header's — a cache read, not a second request.
@@ -70,6 +89,8 @@ export const GiftAndBonusPanels = ({ customerId }: { customerId: string }) => {
   const [bonusAmount, setBonusAmount] = useState('');
   const [bonusNote, setBonusNote] = useState('');
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  const giftAttempt = useRef<Attempt | null>(null);
+  const bonusAttempt = useRef<Attempt | null>(null);
 
   const email = view?.customer.email ?? customerId;
 
@@ -107,41 +128,53 @@ export const GiftAndBonusPanels = ({ customerId }: { customerId: string }) => {
     if (!c) return;
     if (c.kind === 'gift') {
       if (!giftValid || grant.isPending) return;
+      const note = giftNote.trim();
       grant.mutate(
         {
           id: customerId,
           pack_id: packSlug,
           quantity: qty,
-          note: giftNote.trim(),
-          // Fresh per confirmed submit, minted here and not in mutationFn.
-          idempotency_key: crypto.randomUUID(),
+          note,
+          // Minted here, not in mutationFn — see attemptKey.
+          idempotency_key: attemptKey(
+            giftAttempt,
+            JSON.stringify([customerId, packSlug, qty, note]),
+          ),
         },
         {
           onSuccess: () => {
+            settleAttempt(giftAttempt);
             toast.success(
               t('customer360.gift.sent', { quantity: qty, pack: packTitle }),
             );
             setQuantity('1');
             setGiftNote('');
           },
+          onError: (e) => settleAttempt(giftAttempt, e),
         },
       );
     } else if (c.kind === 'bonus') {
       if (!bonusValid || adjust.isPending) return;
+      const note = bonusNote.trim();
       adjust.mutate(
         {
           id: customerId,
           amount: bonusNum,
-          note: bonusNote.trim(),
-          idempotencyKey: crypto.randomUUID(),
+          note,
+          idempotencyKey: attemptKey(
+            bonusAttempt,
+            JSON.stringify([customerId, bonusNum, note]),
+          ),
           kind: 'bonus',
         },
         {
           onSuccess: () => {
+            settleAttempt(bonusAttempt);
             toast.success(t('customer360.bonus.applied'));
             setBonusAmount('');
             setBonusNote('');
           },
+          onError: (e) => settleAttempt(bonusAttempt, e),
         },
       );
     } else {
@@ -350,6 +383,7 @@ export const GiftAndBonusPanels = ({ customerId }: { customerId: string }) => {
                         <Button
                           size="small"
                           variant="secondary"
+                          aria-label={`Revoke ${g.pack_title} gift`}
                           onClick={() => setConfirm({ kind: 'revoke', gift: g })}
                           disabled={revoke.isPending}
                           isLoading={

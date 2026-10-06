@@ -3,12 +3,19 @@ import { Check, Lock } from 'lucide-react';
 import { AccountHeader, Panel, StatCards } from '@/components/account/ui';
 import { PlaythroughProgress } from '@/components/account/PlaythroughProgress';
 import { getWallet } from '@/lib/actions/wallet';
-import { rm } from '@/lib/format';
+import { getPaymentLimits } from '@/lib/actions/vault';
+import { DEFAULT_PAYMENT_LIMITS } from '@/lib/payment-limits';
+import { rm, rm0 } from '@/lib/format';
 
 export const metadata: Metadata = { title: 'Wallet' };
 
 export default async function WalletPage() {
-  const res = await getWallet();
+  // The payout floor belongs to the active gateway — the same read the
+  // withdraw form makes; any failure keeps the defaults.
+  const [res, limits] = await Promise.all([
+    getWallet(),
+    getPaymentLimits().catch(() => DEFAULT_PAYMENT_LIMITS),
+  ]);
 
   if (!res.ok) {
     return (
@@ -37,6 +44,15 @@ export default async function WalletPage() {
   const hasBonus = Math.round(w.bonus * 100) > 0;
   const normal =
     (Math.round(w.balance * 100) - Math.round(w.bonus * 100)) / 100;
+  // The payout floor under Withdrawable. "You need X more" only when nothing
+  // else holds the balance — frozen or gated, withdrawable is 0 for another
+  // reason (the withdraw form's belowMin rule). In sen, like Normal above.
+  const minRm = limits.withdrawal.minRm;
+  const shortSen = Math.round(minRm * 100) - Math.round(w.withdrawable * 100);
+  const minLine =
+    !w.isFrozen && gateOpen && shortSen > 0
+      ? `Minimum withdrawal ${rm0(minRm)} — you need ${rm(shortSen / 100)} more`
+      : `Minimum withdrawal ${rm0(minRm)}`;
 
   return (
     <>
@@ -113,7 +129,11 @@ export default async function WalletPage() {
                   },
                 ]
               : []),
-            { label: 'Withdrawable', value: rm(w.withdrawable) },
+            {
+              label: 'Withdrawable',
+              value: rm(w.withdrawable),
+              sub: minLine,
+            },
           ]}
         />
       </div>

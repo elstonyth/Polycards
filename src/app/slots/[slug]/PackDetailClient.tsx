@@ -269,7 +269,7 @@ export default function PackDetailClient({
   // themselves here, however the player arrived (spec 2026-10-07 §1). Read
   // client-side after mount and only when signed in — the server loader stays
   // customer-free. Keyed on customer + pack so a switch of either never shows
-  // the other's count; anything unread counts as no gifts (the reel then
+  // the other's count; a failed read settles as no gifts (the reel then
   // charges the price shown here). Never on the free welcome pack.
   const customerId = customer?.id ?? null;
   const giftKey =
@@ -287,12 +287,17 @@ export default function PackDetailClient({
           setHeldGifts({ key: giftKey, count: giftsHeldFor(g, active.id) });
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (live) setHeldGifts({ key: giftKey, count: 0 });
+      });
     return () => {
       live = false;
     };
   }, [giftKey, active.id]);
   const held = heldGifts && heldGifts.key === giftKey ? heldGifts.count : 0;
+  // Still reading: the price shown may yet drop to a gift, so no credit
+  // refusal until it lands (the reel re-checks before any charge).
+  const giftsPending = giftKey !== null && heldGifts?.key !== giftKey;
   // Gifts cover rows first; only the rest is paid (gifts → bonus → normal).
   const vaultGifts = giftsUsed(qty, held);
   const paidCost = priceNum * (qty - vaultGifts);
@@ -385,7 +390,7 @@ export default function PackDetailClient({
       router.push(`/slots/${active.id}/spin?count=1`);
       return;
     }
-    if (balance !== null && !affordable(balance, paidCost)) {
+    if (!giftsPending && balance !== null && !affordable(balance, paidCost)) {
       setNeedsTopUp(true);
       setOpenError('Not enough credits to open.');
       return;

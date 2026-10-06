@@ -43,8 +43,9 @@ export default async function SlotSpinPage({
     // Scoped to this pack, same as the detail page above.
     getRecentPulls(slug),
     // Vault packs for the bet line ("Bet Vault x1"). Per-customer and this
-    // route is already per-request; null = a guest or an unread call, which
-    // the machine re-reads once a customer is signed in.
+    // route is already per-request; null = a guest or an unread call. A
+    // first-paint seed only: the machine re-reads on mount for whoever is
+    // signed in and holds the paid Spin until that read lands.
     getPackGifts(),
   ]);
   if (!base) notFound();

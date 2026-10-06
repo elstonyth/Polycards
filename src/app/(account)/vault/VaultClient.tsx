@@ -422,6 +422,7 @@ export default function VaultClient({
                 {g.available ? (
                   <Link
                     href={`/slots/${encodeURIComponent(g.packId)}`}
+                    aria-label={`Open ${g.title}`}
                     className={cn(pillVariants({ size: 'sm' }), 'px-5')}
                   >
                     Open
