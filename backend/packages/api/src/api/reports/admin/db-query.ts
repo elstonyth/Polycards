@@ -83,6 +83,11 @@ const REFUSED_TABLES =
   /\b(provider_identity|api_key|(?:member_)?invite|notification|workflow_execution|auth_(?:verification|mfa|password_reset)\w*)\b/i;
 // Partner logins keep their generated password in customer.metadata.
 const PASSWORDS = /\b\w*(password|partner_credential)\w*\b/i;
+// Real names (spec 2026-10-06): refused by NAME in the query, not only
+// redacted by key in the result — an alias (`real_name AS n`) would walk
+// straight past the key-based redaction. A query that never names the column
+// (a whole row cast to text) is met by the value mask (SECRET_VALUES_SQL).
+const REAL_NAMES = /\breal_name\w*\b/i;
 // U&"..." spells a name in escapes the checks above would not recognize.
 const UNICODE_ESCAPES = /\bu&['"]/i;
 // The statements carry their own bound values ($1 to $3): a placeholder in
@@ -111,6 +116,8 @@ export function sqlRefusal(sql: unknown): string | null {
     return `The ${table} table is not open to the desk bots: it holds passwords, login tokens or reset links.`;
   }
   if (PASSWORDS.test(sql)) return 'Passwords stay hidden from the desk bots.';
+  if (REAL_NAMES.test(sql))
+    return 'Customers’ real names stay hidden from the desk bots.';
   if (UNICODE_ESCAPES.test(sql)) {
     return 'Unicode-escaped names (U&"...") are not accepted: write names plainly.';
   }
@@ -138,11 +145,15 @@ export const dataQuery = (sql: string): string =>
   'count(*) FILTER (WHERE pg_column_size(desk_bot_row.*) > $2)::int AS too_big ' +
   `FROM (${wrapQuery(sql)}) AS desk_bot_row) AS t`;
 
-// Every partner login password stored where the bots can read, fetched in
-// the query's own REPEATABLE READ transaction: the same snapshot the query
-// sees, so a partner account created in between cannot slip past the mask.
+// Every partner login password, and every customer's real name (spec
+// 2026-10-06: real names never reach a Discord report), stored where the bots
+// can read. Fetched in the query's own REPEATABLE READ transaction: the same
+// snapshot the query sees, so one saved in between cannot slip past the mask.
+// A name under 6 characters is left to the name and key checks: masking "Tan"
+// would mangle every "Tanjung".
 const SECRET_VALUES_SQL =
-  "SELECT DISTINCT metadata->'partner_credential'->>'password' AS s FROM customer WHERE metadata ? 'partner_credential'";
+  "SELECT metadata->'partner_credential'->>'password' AS s FROM customer WHERE metadata ? 'partner_credential' " +
+  'UNION SELECT real_name FROM customer_account_state WHERE real_name IS NOT NULL';
 
 /** `text` with every secret value replaced by [hidden], as written and as
  *  JSON escapes it (a value inside JSON text). */

@@ -2,7 +2,6 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { POST } from '../route';
 import { signPhoneProof } from '../../../../../utils/phone-verification';
 import { PACKS_MODULE } from '../../../../../modules/packs';
-import { PHONE_CHANGED_TEMPLATE } from '../../../../../modules/resend/templates';
 
 // The re-auth gate on POST /store/phone-verification/change. Structural pattern
 // from store/credits/deposit/__tests__/route.unit.spec.ts: a fake `req` from a
@@ -70,6 +69,10 @@ const authenticate = jest.fn(async () =>
     : { success: false, error: 'Invalid email or password' },
 );
 const markPhoneVerified = jest.fn(async () => undefined);
+// Phone lock (spec 2026-10-06): an account that already verified a number is
+// refused before anything else runs. Default: not yet verified.
+let phoneVerified = false;
+const isPhoneVerified = jest.fn(async () => phoneVerified);
 // Typed parameter, not `async () => []`: jest infers an empty args tuple from a
 // zero-arg factory, and `createNotifications.mock.calls[0][0]` below then fails
 // to compile (TS2493).
@@ -85,7 +88,7 @@ const scope = {
     if (key === Modules.CUSTOMER)
       return { retrieveCustomer, listCustomers, updateCustomers };
     if (key === Modules.AUTH) return { listAuthIdentities, authenticate };
-    if (key === PACKS_MODULE) return { markPhoneVerified };
+    if (key === PACKS_MODULE) return { markPhoneVerified, isPhoneVerified };
     if (key === Modules.NOTIFICATION) return { createNotifications };
     if (key === 'logger') return { warn };
     throw new Error(`unit scope: unexpected resolve('${key}')`);
@@ -119,6 +122,7 @@ beforeEach(() => {
   customerRow = { id: CUSTOMER_ID, email: EMAIL, phone: OLD_PHONE };
   identities = [linked('emailpass', EMAIL)];
   passwordIsCorrect = true;
+  phoneVerified = false;
   // The route skips the send entirely unless Resend is configured, so the
   // notification cases would assert nothing without these.
   process.env.RESEND_API_KEY = 'test-key';
@@ -133,29 +137,28 @@ afterEach(() => {
   }
 });
 
+// The default fixture is a LEGACY account: a phone on file (OLD_PHONE) that
+// was never verified. Since the phone lock (spec 2026-10-06) such an account
+// may only verify THAT number in place, so the re-auth cases below verify
+// OLD_PHONE; the cases that move to NEW_PHONE start from an account with no
+// phone at all (a first add).
 describe('POST /store/phone-verification/change — emailpass accounts', () => {
-  it('updates the phone and emails the account when the password is correct', async () => {
+  it('verifies the number on file in place when the password is correct', async () => {
     const res = mkRes();
     await POST(
-      mkReq({ phone: NEW_PHONE, token: newPhoneProof(), password: PASSWORD }),
+      mkReq({ phone: OLD_PHONE, token: oldPhoneProof(), password: PASSWORD }),
       res as never,
     );
 
     expect(updateCustomers.mock.calls).toEqual([
-      [CUSTOMER_ID, { phone: NEW_PHONE }],
+      [CUSTOMER_ID, { phone: OLD_PHONE }],
     ]);
     expect(markPhoneVerified.mock.calls.length).toBe(1);
     expect(res.json).toHaveBeenCalledWith({
-      customer: { id: CUSTOMER_ID, phone: NEW_PHONE },
+      customer: { id: CUSTOMER_ID, phone: OLD_PHONE },
     });
-
-    // Goes to the EMAIL, and carries only the last 4 digits of either number.
-    expect(createNotifications.mock.calls[0][0]).toEqual({
-      to: EMAIL,
-      channel: 'email',
-      template: PHONE_CHANGED_TEMPLATE,
-      data: { old_phone_masked: '••••7781', new_phone_masked: '••••7790' },
-    });
+    // Nothing moved, so nothing to warn about.
+    expect(createNotifications.mock.calls.length).toBe(0);
   });
 
   // THE anti-regression case: revert the gate and this one must go red.
@@ -164,8 +167,8 @@ describe('POST /store/phone-verification/change — emailpass accounts', () => {
     const err = await rejection(
       POST(
         mkReq({
-          phone: NEW_PHONE,
-          token: newPhoneProof(),
+          phone: OLD_PHONE,
+          token: oldPhoneProof(),
           password: 'not the password',
         }),
         mkRes() as never,
@@ -186,7 +189,7 @@ describe('POST /store/phone-verification/change — emailpass accounts', () => {
   it('rejects a body with no password at all, without consulting the auth module', async () => {
     const err = await rejection(
       POST(
-        mkReq({ phone: NEW_PHONE, token: newPhoneProof() }),
+        mkReq({ phone: OLD_PHONE, token: oldPhoneProof() }),
         mkRes() as never,
       ),
     );
@@ -253,7 +256,7 @@ describe('POST /store/phone-verification/change — emailpass accounts', () => {
     customerRow = { id: CUSTOMER_ID, email: null, phone: OLD_PHONE };
     const err = await rejection(
       POST(
-        mkReq({ phone: NEW_PHONE, token: newPhoneProof(), password: PASSWORD }),
+        mkReq({ phone: OLD_PHONE, token: oldPhoneProof(), password: PASSWORD }),
         mkRes() as never,
       ),
     );
@@ -293,7 +296,7 @@ describe('POST /store/phone-verification/change — Google-only accounts', () =>
     identities = [linked('google', 'g-123'), orphanEmailpass()];
     const err = await rejection(
       POST(
-        mkReq({ phone: NEW_PHONE, token: newPhoneProof(), password: PASSWORD }),
+        mkReq({ phone: OLD_PHONE, token: oldPhoneProof(), password: PASSWORD }),
         mkRes() as never,
       ),
     );
@@ -304,10 +307,10 @@ describe('POST /store/phone-verification/change — Google-only accounts', () =>
     expect(updateCustomers.mock.calls.length).toBe(0);
   });
 
-  it('rejects a phone move with no proof for the CURRENT number', async () => {
+  it('rejects an in-place verify with no separate proof for the CURRENT number', async () => {
     const err = await rejection(
       POST(
-        mkReq({ phone: NEW_PHONE, token: newPhoneProof() }),
+        mkReq({ phone: OLD_PHONE, token: oldPhoneProof() }),
         mkRes() as never,
       ),
     );
@@ -321,10 +324,9 @@ describe('POST /store/phone-verification/change — Google-only accounts', () =>
     const err = await rejection(
       POST(
         mkReq({
-          phone: NEW_PHONE,
-          token: newPhoneProof(),
-          // A proof for the number they are moving TO is not a proof of the
-          // number they are moving FROM — replaying the first token must fail.
+          phone: OLD_PHONE,
+          token: oldPhoneProof(),
+          // A proof for some OTHER number is not a proof of the one on file.
           old_phone_token: newPhoneProof(),
         }),
         mkRes() as never,
@@ -339,15 +341,15 @@ describe('POST /store/phone-verification/change — Google-only accounts', () =>
     const res = mkRes();
     await POST(
       mkReq({
-        phone: NEW_PHONE,
-        token: newPhoneProof(),
+        phone: OLD_PHONE,
+        token: oldPhoneProof(),
         old_phone_token: oldPhoneProof(),
       }),
       res as never,
     );
 
     expect(updateCustomers.mock.calls).toEqual([
-      [CUSTOMER_ID, { phone: NEW_PHONE }],
+      [CUSTOMER_ID, { phone: OLD_PHONE }],
     ]);
     expect(res.json).toHaveBeenCalled();
     // No password branch was taken.
@@ -373,35 +375,52 @@ describe('POST /store/phone-verification/change — Google-only accounts', () =>
   });
 });
 
-describe('POST /store/phone-verification/change — notification is best-effort', () => {
-  it('still answers 200 when the email send fails', async () => {
-    // The recipient is IN the provider's error text on purpose — that is what
-    // real ones do ("failed to deliver to <address>"). A message without it
-    // would make the `not.toContain(EMAIL)` assertion below pass vacuously,
-    // which is exactly how the interpolated `e.message` survived review once.
-    createNotifications.mockRejectedValueOnce(
-      new Error(`resend is down: failed to deliver to ${EMAIL}`),
+describe('POST /store/phone-verification/change — phone lock (spec 2026-10-06)', () => {
+  it('refuses an account that already verified a phone, before anything else', async () => {
+    phoneVerified = true;
+    const err = await rejection(
+      POST(
+        mkReq({ phone: NEW_PHONE, token: newPhoneProof(), password: PASSWORD }),
+        mkRes() as never,
+      ),
     );
-    const res = mkRes();
+    expect(err.type).toBe(MedusaError.Types.NOT_ALLOWED);
+    expect(err.message).toMatch(/contact customer service/i);
+    expect(isPhoneVerified).toHaveBeenCalledWith(CUSTOMER_ID);
+    // Nothing past the lock ran: no password check, no write, no stamp.
+    // `.mock.calls.length` — see the secret hygiene note at the top.
+    expect(authenticate.mock.calls.length).toBe(0);
+    expect(updateCustomers.mock.calls.length).toBe(0);
+    expect(markPhoneVerified.mock.calls.length).toBe(0);
+  });
 
+  // "Old customers cannot change their phone either": a legacy unverified
+  // number may be verified in place, never swapped — even with the password
+  // and a valid proof for the new number. Refused before the re-auth gate.
+  it('refuses swapping an unverified number on file for a different one', async () => {
+    const err = await rejection(
+      POST(
+        mkReq({ phone: NEW_PHONE, token: newPhoneProof(), password: PASSWORD }),
+        mkRes() as never,
+      ),
+    );
+    expect(err.type).toBe(MedusaError.Types.NOT_ALLOWED);
+    expect(err.message).toMatch(/only verify the number already on your account/i);
+    expect(authenticate.mock.calls.length).toBe(0);
+    expect(updateCustomers.mock.calls.length).toBe(0);
+  });
+
+  it('still lets a never-verified account with no number set its first one', async () => {
+    phoneVerified = false;
+    customerRow = { id: CUSTOMER_ID, email: EMAIL, phone: null };
+    const res = mkRes();
     await POST(
       mkReq({ phone: NEW_PHONE, token: newPhoneProof(), password: PASSWORD }),
       res as never,
     );
-
-    // The phone write already committed — a dropped notice must not undo it or
-    // report failure for something that succeeded.
-    expect(updateCustomers.mock.calls.length).toBe(1);
-    expect(res.json).toHaveBeenCalledWith({
-      customer: { id: CUSTOMER_ID, phone: NEW_PHONE },
+    expect(updateCustomers).toHaveBeenCalledWith(CUSTOMER_ID, {
+      phone: NEW_PHONE,
     });
-    expect(warn.mock.calls.length).toBe(1);
-    // PRIVACY: the warn names the customer id and must not carry the numbers or
-    // the email address.
-    const logged = String(warn.mock.calls[0][0]);
-    expect(logged).toContain(CUSTOMER_ID);
-    expect(logged).not.toContain(OLD_PHONE);
-    expect(logged).not.toContain(NEW_PHONE);
-    expect(logged).not.toContain(EMAIL);
+    expect(markPhoneVerified).toHaveBeenCalledWith(CUSTOMER_ID);
   });
 });

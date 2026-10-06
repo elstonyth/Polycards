@@ -2093,7 +2093,12 @@ class PacksModuleService extends MedusaService({
         // never feed a task; the lifetime achievement count keeps every
         // source.
         em.execute<
-          { pixel_pokemon_id: string; n: string; n_week: string; n_day: string }[]
+          {
+            pixel_pokemon_id: string;
+            n: string;
+            n_week: string;
+            n_day: string;
+          }[]
         >(
           'SELECT c.pixel_pokemon_id, COUNT(*)::bigint AS n, ' +
             "  COUNT(*) FILTER (WHERE p.source = 'pack' " +
@@ -2138,13 +2143,29 @@ class PacksModuleService extends MedusaService({
     return {
       day: period(
         checkins.filter((c) => c.checkin_date === input.day.dayIso).length,
-        tally(ripRows, (r) => r.pack_id, (r) => r.n_day),
-        tally(pixelRows, (r) => r.pixel_pokemon_id, (r) => r.n_day),
+        tally(
+          ripRows,
+          (r) => r.pack_id,
+          (r) => r.n_day,
+        ),
+        tally(
+          pixelRows,
+          (r) => r.pixel_pokemon_id,
+          (r) => r.n_day,
+        ),
       ),
       week: period(
         checkins.length,
-        tally(ripRows, (r) => r.pack_id, (r) => r.n),
-        tally(pixelRows, (r) => r.pixel_pokemon_id, (r) => r.n_week),
+        tally(
+          ripRows,
+          (r) => r.pack_id,
+          (r) => r.n,
+        ),
+        tally(
+          pixelRows,
+          (r) => r.pixel_pokemon_id,
+          (r) => r.n_week,
+        ),
       ),
       vipLevel: stateRow ? Number(stateRow.highest_level_ever) : 1,
       vaultCount: Number(vaultRows[0]?.n ?? 0),
@@ -4846,6 +4867,141 @@ class PacksModuleService extends MedusaService({
     }
   }
 
+  // The two facts the welcome-pack gate needs (spec 2026-10-06), in one read:
+  // has the account ever verified a phone, and what real name it holds.
+  @InjectManager()
+  async getVerificationState(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ phoneVerified: boolean; realName: string | null }> {
+    const [state] = await this.listCustomerAccountStates(
+      { customer_id: customerId },
+      { select: ['phone_verified_at', 'real_name'], take: 1 },
+      sharedContext,
+    );
+    return {
+      phoneVerified: Boolean(state?.phone_verified_at),
+      realName: state?.real_name ?? null,
+    };
+  }
+
+  // The customer's own, ONE-TIME real-name write (spec 2026-10-06). `true`
+  // means this call set it; `false` means a name was already on file and
+  // nothing changed — the customer cannot change it, only customer service can
+  // (adminSetRealName). Under the same `credit:` advisory key as every other
+  // account-state upsert, so two concurrent first writes serialize: the second
+  // reads the first's name and is refused rather than overwriting it.
+  // `realName` must already be normalizeRealName's output — the route validates.
+  @InjectTransactionManager()
+  async setRealName(
+    customerId: string,
+    realName: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${customerId}`,
+    ]);
+    const [existing] = await this.listCustomerAccountStates(
+      { customer_id: customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    if (existing?.real_name) return false;
+    const data = { real_name: realName, real_name_set_at: new Date() };
+    if (existing) {
+      await this.updateCustomerAccountStates(
+        { selector: { id: existing.id }, data },
+        sharedContext,
+      );
+    } else {
+      await this.createCustomerAccountStates(
+        [{ customer_id: customerId, ...data }],
+        sharedContext,
+      );
+    }
+    return true;
+  }
+
+  // Customer service correcting a real name (spec 2026-10-06). Overwrites
+  // whatever is on file; state + audit share one transaction, like
+  // setAccountDisabled — an unaudited identity change is not an acceptable
+  // partial failure.
+  @InjectTransactionManager()
+  async adminSetRealName(
+    input: {
+      customerId: string;
+      adminId: string;
+      realName: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${input.customerId}`,
+    ]);
+    const [existing] = await this.listCustomerAccountStates(
+      { customer_id: input.customerId },
+      { take: 1 },
+      sharedContext,
+    );
+    const data = { real_name: input.realName, real_name_set_at: new Date() };
+    if (existing) {
+      await this.updateCustomerAccountStates(
+        { selector: { id: existing.id }, data },
+        sharedContext,
+      );
+    } else {
+      await this.createCustomerAccountStates(
+        [{ customer_id: input.customerId, ...data }],
+        sharedContext,
+      );
+    }
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: 'set_real_name',
+        before: { real_name: existing?.real_name ?? null },
+        after: { real_name: input.realName },
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+  }
+
+  // Customer service is moving a player's phone (spec 2026-10-06): the audit
+  // row, written by the route BEFORE the number moves (the number lives on the
+  // customer module's row, out of this transaction's reach — see
+  // api/admin/customers/[id]/phone/route.ts for why that order). The route
+  // stamps the account verified after the write lands.
+  @InjectTransactionManager()
+  async recordAdminPhoneChange(
+    input: {
+      customerId: string;
+      adminId: string;
+      before: string | null;
+      after: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'customer',
+        entity_id: input.customerId,
+        action: 'set_phone',
+        before: { phone: input.before },
+        after: { phone: input.after },
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+  }
+
   // Stamp the account as eligible for the one free welcome pack (spec
   // docs/superpowers/specs/2026-08-14-free-welcome-pack-design.md). Called from
   // the customer.created subscriber, which is why only accounts registered
@@ -6175,10 +6331,15 @@ class PacksModuleService extends MedusaService({
     // guard 403s this customer's own bearer. Finishing a half-done purge is a
     // manual job; see the purgeAndDeleteAccount header
     // (api/utils/account-deletion.ts) for exactly how narrow that is.
+    // The real name (spec 2026-10-06) is personal data with no bookkeeping
+    // purpose once the account is gone, so the tombstone clears it — the row
+    // survives as a login block, not as a record of who the person was.
     const tombstone = {
       disabled: true,
       disabled_reason: 'Account deleted by an operator.',
       disabled_at: new Date(),
+      real_name: null,
+      real_name_set_at: null,
     };
     const [state] = await this.listCustomerAccountStates(
       { customer_id: customerId },
@@ -7291,6 +7452,9 @@ class PacksModuleService extends MedusaService({
         frozen: boolean;
         disabled: boolean;
         phoneVerified: boolean;
+        // Real name (spec 2026-10-06) — staff match it against a Touch 'n Go
+        // lookup of the phone. Admin-only surface.
+        realName: string | null;
         // The MANUAL partner flag only; the group-sourced one is resolved by
         // the route from the memberships it already loads.
         partnerBp: number | null;
@@ -7343,9 +7507,10 @@ class PacksModuleService extends MedusaService({
         disabled: boolean;
         phone_verified_at: string | null;
         partner_referral_bp: number | null;
+        real_name: string | null;
       }[]
     >(
-      `SELECT customer_id, frozen, disabled, phone_verified_at, partner_referral_bp FROM customer_account_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
+      `SELECT customer_id, frozen, disabled, phone_verified_at, partner_referral_bp, real_name FROM customer_account_state WHERE customer_id IN (${ph}) AND deleted_at IS NULL`,
       ids,
     );
 
@@ -7364,6 +7529,7 @@ class PacksModuleService extends MedusaService({
         frozen: Boolean(r.frozen),
         disabled: Boolean(r.disabled),
         phoneVerified: r.phone_verified_at !== null,
+        realName: r.real_name,
         partnerBp:
           r.partner_referral_bp === null ? null : Number(r.partner_referral_bp),
       });

@@ -520,7 +520,7 @@ medusaIntegrationTestRunner({
         });
 
         // This route's whole reason to exist is being the escape hatch
-        // blockUnverifiedPhoneWrite's doc comment points at once
+        // blockCustomerPhoneWrite's doc comment points at once
         // PHONE_VERIFICATION_REQUIRED is on (the direct /me write is closed
         // in that mode - see the "gated signup" describe below). Prove it
         // actually still works under enforcement, not just with it off.
@@ -575,7 +575,7 @@ medusaIntegrationTestRunner({
       // WITH this route, not a gap in coverage.
       describe("POST /store/phone-verification/password-reset", () => {
         // The exchange refuses unless PHONE_VERIFICATION_REQUIRED is on: while
-        // it is off, blockUnverifiedPhoneWrite no-ops and any live session can
+        // it is off, blockCustomerPhoneWrite no-ops and any live session can
         // write an unproven number straight to /store/customers/me, so the
         // phone on the row proves nothing and must not mint a reset token (see
         // the route's own gate comment). Armed per CALL rather than in a
@@ -1108,7 +1108,7 @@ medusaIntegrationTestRunner({
             ),
           );
           expect(res.status).toBe(400);
-          // Pin the rejection source to blockUnverifiedPhoneWrite, not
+          // Pin the rejection source to blockCustomerPhoneWrite, not
           // rejectCustomerMetadata or core validation (same reasoning as the
           // signup-gate assertion above).
           expect(res.data).toMatchObject({

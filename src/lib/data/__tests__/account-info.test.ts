@@ -16,7 +16,7 @@ vi.mock('@/lib/store', () => ({ store: storeShim }));
 // customer.ts holds the SDK for its sdk.store.customer.* calls; none run here.
 vi.mock('@/lib/medusa', () => ({ sdk: { store: { customer: {} } } }));
 
-import { getAccountInfo } from '@/lib/data/customer';
+import { getAccountInfo, getRealName } from '@/lib/data/customer';
 
 const ACCOUNT = 'GET /store/customers/me/account';
 
@@ -97,5 +97,28 @@ describe('getAccountInfo', () => {
       hasPassword: true,
       policy: NO_POLICY,
     });
+  });
+});
+
+// The account layout's real-name gate (spec 2026-10-06) raises ONLY on `null`
+// — a positive "none on file". Anything unreadable is `undefined`, which must
+// not trap the customer behind a modal the backend never asked for.
+describe('getRealName', () => {
+  const REAL_NAME = 'GET /store/customers/me/real-name';
+
+  it('passes the stored name, or null, through', async () => {
+    backend({ [REAL_NAME]: { body: { real_name: 'Tan Ah Kow' } } });
+    expect(await getRealName()).toBe('Tan Ah Kow');
+    backend({ [REAL_NAME]: { body: { real_name: null } } });
+    expect(await getRealName()).toBeNull();
+  });
+
+  it('is undefined on a failure, a malformed body, or no session', async () => {
+    backend({ [REAL_NAME]: { status: 500, body: {} } });
+    expect(await getRealName()).toBeUndefined();
+    backend({ [REAL_NAME]: { body: {} } });
+    expect(await getRealName()).toBeUndefined();
+    backend({ [REAL_NAME]: { body: { real_name: null } } }, { token: null });
+    expect(await getRealName()).toBeUndefined();
   });
 });

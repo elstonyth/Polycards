@@ -50,6 +50,10 @@ import {
   type CardSeed,
 } from '@/components/cards/CardDetailOverlay';
 import { usePackDetailPoll } from '@/lib/use-pack-detail-poll';
+import {
+  freePackVerifyMessage,
+  type FreePackRequirement,
+} from '@/lib/packs-data';
 
 /**
  * Shown where the gift offer would be, when this visitor cannot claim it.
@@ -178,6 +182,7 @@ export default function PackDetailClient({
   recentPulls,
   initialQty = 1,
   freePackEligible = true,
+  freePackMissing = [],
 }: {
   pack: ResolvedPack;
   siblings: Pack[];
@@ -200,6 +205,13 @@ export default function PackDetailClient({
    * shows and `handleGoToReel` prompts login.
    */
   freePackEligible?: boolean;
+  /**
+   * Free pack ONLY (spec 2026-10-06): what the account must still do before
+   * the backend lets it open — verify a phone, add a real name. Non-empty
+   * turns the open into a prompt with a Settings link, instead of a trip to
+   * the reel that ends in a refusal.
+   */
+  freePackMissing?: FreePackRequirement[];
 }) {
   const { customer } = useAuth();
   const { balance, openTopUp } = useTopUp();
@@ -229,8 +241,18 @@ export default function PackDetailClient({
   // `openError` surfaces a friendly failure inline (`needsTopUp` adds the
   // top-up entry for credit shortfalls). Real opens happen on the reel, so
   // there is no in-place async open state here.
-  const [openError, setOpenError] = useState<string | null>(null);
+  // A free pack still waiting on verification (spec 2026-10-06) renders with
+  // the prompt already showing, so the customer reads what is left BEFORE
+  // tapping a CTA that cannot succeed yet. The tap answers with it again.
+  const verifyPrompt =
+    pack.categoryId === FREE_WELCOME_CATEGORY && freePackMissing.length > 0
+      ? freePackVerifyMessage(freePackMissing)
+      : null;
+  const [openError, setOpenError] = useState<string | null>(verifyPrompt);
   const [needsTopUp, setNeedsTopUp] = useState(false);
+  // The free pack's verification prompt: adds the Settings link under the
+  // message.
+  const [needsVerify, setNeedsVerify] = useState(verifyPrompt !== null);
   // One request refreshes every grid price (60s, visibility-gated), seeded
   // with this route's server snapshot.
   const liveDetail = usePackDetailPoll(active.id, detail);
@@ -339,8 +361,14 @@ export default function PackDetailClient({
     // A free open costs nothing and is always singular — skip the credit gate
     // (a brand-new account has a zero balance by definition) and pin count=1.
     if (isFreePack) {
-      setOpenError(null);
       setNeedsTopUp(false);
+      if (verifyPrompt) {
+        setOpenError(verifyPrompt);
+        setNeedsVerify(true);
+        return;
+      }
+      setOpenError(null);
+      setNeedsVerify(false);
       router.push(`/slots/${active.id}/spin?count=1`);
       return;
     }
@@ -645,6 +673,17 @@ export default function PackDetailClient({
                   className="mt-2 text-center text-[11px] text-red-300"
                 >
                   {openError}
+                  {needsVerify && (
+                    <>
+                      {' '}
+                      <Link
+                        href="/settings"
+                        className="font-bold text-white underline underline-offset-2"
+                      >
+                        Go to Settings →
+                      </Link>
+                    </>
+                  )}
                   {needsTopUp && (
                     <>
                       {' '}
@@ -862,6 +901,17 @@ export default function PackDetailClient({
         {openError && (
           <p role="alert" className="mt-2 text-center text-[11px] text-red-300">
             {openError}
+            {needsVerify && (
+              <>
+                {' '}
+                <Link
+                  href="/settings"
+                  className="font-bold text-white underline underline-offset-2"
+                >
+                  Go to Settings →
+                </Link>
+              </>
+            )}
             {needsTopUp && (
               <>
                 {' '}

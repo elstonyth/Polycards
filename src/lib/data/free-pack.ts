@@ -16,10 +16,15 @@
 import { store } from '@/lib/store';
 import { getAuthToken } from '@/lib/data/customer';
 import { FreePackSchema } from '@/lib/data/schemas';
+import type { FreePackRequirement } from '@/lib/packs-data';
 
-/** Badge state for /slots — the union the page passes to the catalog. */
+/** Badge state for /slots — the union the page passes to the catalog.
+ *  `missing` (claim only, present only when non-empty): the pack is the
+ *  customer's, but it opens once they verify their phone / add a real name. */
 export type FreePackState =
-  { mode: 'claim'; slug: string } | { mode: 'signup' } | { mode: 'hidden' };
+  | { mode: 'claim'; slug: string; missing?: FreePackRequirement[] }
+  | { mode: 'signup' }
+  | { mode: 'hidden' };
 
 const HIDDEN: FreePackState = { mode: 'hidden' };
 
@@ -31,13 +36,34 @@ const HIDDEN: FreePackState = { mode: 'hidden' };
  */
 export function mapFreePackState(
   hasToken: boolean,
-  parsed: { eligible: boolean; slug: string | null; promo?: boolean } | null,
+  parsed: {
+    eligible: boolean;
+    slug: string | null;
+    promo?: boolean;
+    missing?: FreePackRequirement[];
+  } | null,
 ): FreePackState {
   if (!parsed) return HIDDEN;
   if (!hasToken) return parsed.promo ? { mode: 'signup' } : HIDDEN;
-  return parsed.eligible && parsed.slug
-    ? { mode: 'claim', slug: parsed.slug }
-    : HIDDEN;
+  if (!parsed.eligible || !parsed.slug) return HIDDEN;
+  const missing = parsed.missing ?? [];
+  return missing.length > 0
+    ? { mode: 'claim', slug: parsed.slug, missing }
+    : { mode: 'claim', slug: parsed.slug };
+}
+
+/**
+ * What still stands between this visitor and opening `slug` — empty when
+ * nothing does (or when they are not on the claim path at all). Pure, like
+ * canClaimFreePack, so the detail page's verify prompt has a test net.
+ */
+export function freePackMissing(
+  state: FreePackState,
+  slug: string,
+): FreePackRequirement[] {
+  return state.mode === 'claim' && state.slug === slug
+    ? (state.missing ?? [])
+    : [];
 }
 
 /**

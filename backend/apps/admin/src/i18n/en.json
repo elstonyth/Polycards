@@ -735,6 +735,7 @@
     "name": "Name",
     "email": "Email",
     "phone": "Phone",
+    "realName": "Real name",
     "verified": "Phone verified",
     "verifiedYes": "Verified",
     "verifiedNo": "Not verified",

@@ -108,6 +108,12 @@ describe('sqlRefusal', () => {
       "SELECT metadata#>>'{partner_credential,password}' FROM customer",
       /Passwords stay hidden/,
     ],
+    // Spec 2026-10-06: real names never reach a Discord report — refused by
+    // name, so an alias cannot walk past the key-based redaction.
+    [
+      'SELECT real_name AS n FROM customer_account_state',
+      /real names stay hidden/,
+    ],
     ['SELECT U&"\\0070g_sleep"(1)', /Unicode-escaped/],
     ['SELECT * FROM pull WHERE customer_id = $2', /Placeholders like \$1/],
   ])('refuses %p', (sql, why) => {

@@ -188,6 +188,7 @@ const PlayersPage = () => {
                   {sortHeader('name', t('players.name'))}
                   {sortHeader('email', t('players.email'))}
                   <Table.HeaderCell>{t('players.phone')}</Table.HeaderCell>
+                  <Table.HeaderCell>{t('players.realName')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('players.verified')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('players.group')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('players.lvl')}</Table.HeaderCell>
@@ -239,6 +240,11 @@ const PlayersPage = () => {
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
                       {p.phone ?? '—'}
+                    </Table.Cell>
+                    {/* Spec 2026-10-06: what staff check against a Touch 'n Go
+                        lookup of the phone before paying out a big hit. */}
+                    <Table.Cell className="text-ui-fg-subtle break-words">
+                      {p.real_name ?? '—'}
                     </Table.Cell>
                     {/* With the phone gate live, "why can't this player top up
                         or request delivery?" is a question this list has to be

@@ -70,10 +70,13 @@ export function blockedReason(path: string): string | null {
 // passwords (partner_credential): any password, secret, token, credential or
 // API key field is hidden, also inside a string that holds JSON (a jsonb
 // column a query cast to text). Bank account numbers come back whole
-// (2026-10-06). Field names alone cannot catch a value a query renamed or
-// cut out of its JSON: the SQL route masks the partner passwords themselves
-// (db-query.ts).
-const HIDDEN = /password|secret|token|credential|api_?key/i;
+// (2026-10-06). Real names (spec 2026-10-06) are hidden too: they are private
+// to staff checks in the admin panel and never reach a Discord report — that
+// covers the Players list's real_name, account_state, and the audit
+// before/after. Field names alone cannot catch a value a query renamed or cut
+// out of its JSON: the SQL route masks the partner passwords and real names
+// themselves (db-query.ts).
+const HIDDEN = /password|secret|token|credential|api_?key|real_?name/i;
 
 export function redact(value: unknown): unknown {
   if (typeof value === 'string') return redactJsonText(value);

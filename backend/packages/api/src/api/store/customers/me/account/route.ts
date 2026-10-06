@@ -29,15 +29,17 @@ export async function GET(
     throw new MedusaError(MedusaError.Types.UNAUTHORIZED, 'Unauthorized');
   }
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const [passwordLogin, groupPolicy, partnerBp] = await Promise.all([
-    // The same definition the phone-change and phone password-reset routes act
-    // on, so this answer and theirs cannot disagree (see linkedEmailpassLogin).
-    linkedEmailpassLogin(req.scope, customerId),
-    resolveGroupPolicyForCustomer(req.scope, customerId),
-    packs
-      .partnerBpForCustomers([customerId])
-      .then((m) => m.get(customerId) ?? null),
-  ]);
+  const [passwordLogin, groupPolicy, partnerBp, verification] =
+    await Promise.all([
+      // The same definition the phone-change and phone password-reset routes act
+      // on, so this answer and theirs cannot disagree (see linkedEmailpassLogin).
+      linkedEmailpassLogin(req.scope, customerId),
+      resolveGroupPolicyForCustomer(req.scope, customerId),
+      packs
+        .partnerBpForCustomers([customerId])
+        .then((m) => m.get(customerId) ?? null),
+      packs.getVerificationState(customerId),
+    ]);
   const hasPassword = passwordLogin !== null;
   // Partner groups (spec 2026-09-09): what the account tree needs to skip the
   // phone modal and to replace the withdrawal form with a notice. Both are UX
@@ -46,6 +48,14 @@ export async function GET(
   const policy = groupPolicy?.policy;
   res.json({
     hasPassword,
+    // Real name + phone lock (spec 2026-10-06). `realName` is the caller's OWN
+    // name (this route is bearer-authed to the account it describes): the
+    // account layout raises the real-name gate when it is null, and Settings
+    // shows it read-only once set. `phoneVerified` decides whether Settings
+    // still offers the add/verify flow — a verified phone is locked, and the
+    // change route refuses it (store/phone-verification/change).
+    realName: verification.realName,
+    phoneVerified: verification.phoneVerified,
     policy: {
       partner: partnerBp !== null,
       withdrawals_blocked: policy?.withdrawals_blocked === true,

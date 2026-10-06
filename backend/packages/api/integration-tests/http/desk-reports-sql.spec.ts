@@ -1,5 +1,6 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
+import { PACKS_MODULE } from '../../src/modules/packs';
 import { unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -16,6 +17,7 @@ process.env.DESK_REPORTS_RATE_LIMIT = '6000';
 process.env.DESK_SQL_TIMEOUT_MS = '1500';
 
 const PASSWORD = 'Sup3r-secret-pw';
+const REAL_NAME = 'Tan Ah Kow bin Ali';
 const SLOW =
   'SELECT count(*) FROM generate_series(1, 100000) a, generate_series(1, 100000) b';
 
@@ -169,6 +171,34 @@ medusaIntegrationTestRunner({
         expect(echoed.data.message).toMatch(/invalid input syntax/);
         expect(echoed.data.message).toContain('[hidden]');
         expect(echoed.data.message).not.toContain(PASSWORD);
+      });
+
+      it('never lets a real name out either, even in a whole row cast to text', async () => {
+        const customer = await customers().createCustomers({
+          email: 'named@test.dev',
+        });
+        const packs = getContainer().resolve(PACKS_MODULE) as unknown as {
+          createCustomerAccountStates(
+            data: { customer_id: string; real_name: string }[],
+          ): Promise<unknown>;
+        };
+        await packs.createCustomerAccountStates([
+          { customer_id: customer.id, real_name: REAL_NAME },
+        ]);
+        const where = `WHERE s.customer_id = '${customer.id}'`;
+        for (const sql of [
+          `SELECT s.* FROM customer_account_state s ${where}`,
+          `SELECT s::text AS row FROM customer_account_state s ${where}`,
+          `SELECT key, value FROM customer_account_state s, jsonb_each_text(to_jsonb(s)) ${where}`,
+        ]) {
+          const res = await query(sql);
+          expect(res.status).toBe(200);
+          expect(JSON.stringify(res.data)).not.toContain(REAL_NAME);
+        }
+        expect(
+          (await query(`SELECT real_name AS n FROM customer_account_state`))
+            .data.message,
+        ).toMatch(/real names stay hidden/);
       });
 
       it('keeps values as Postgres shows them: a Malaysia time stays one', async () => {

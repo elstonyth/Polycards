@@ -126,6 +126,8 @@ export async function GET(
         // No state row at all = never verified, which is the default for every
         // account that predates the gate.
         phone_verified: s?.phoneVerified ?? false,
+        // Spec 2026-10-06: what staff check against Touch 'n Go.
+        real_name: s?.realName ?? null,
         partner,
         // Named so the list can say WHICH group — groups[0] is whichever
         // membership Medusa returned first, not the effective one.

@@ -43,6 +43,16 @@ export const CustomerAccountState = model
     // one free open is consumed; cleared by workflow compensation on failure.
     free_pack_available_at: model.dateTime().nullable(),
     free_pack_claimed_at: model.dateTime().nullable(),
+    // Real name (spec 2026-10-06): the name the account's phone number is
+    // registered to in Touch 'n Go eWallet, so staff can check a suspicious
+    // big hit by searching the number there. Server-written only — the
+    // customer sets it ONCE (setRealName refuses a second write); after that
+    // only an admin can correct it (adminSetRealName, audited). Not
+    // customer.last_name (client-writable via /store/customers/me, and Google
+    // fills it with family_name). PII: never on a public profile, log line or
+    // report.
+    real_name: model.text().nullable(),
+    real_name_set_at: model.dateTime().nullable(),
   })
   .indexes([
     {

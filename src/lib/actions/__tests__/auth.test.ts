@@ -119,6 +119,8 @@ import { GET as googleCallbackGET } from '@/app/auth/google/callback/route';
 const TOKENS: MemoryRoutes = {
   'POST /auth/customer/emailpass/register': { body: { token: 'reg-tok' } },
   'POST /auth/customer/emailpass': { body: { token: 'sess-tok' } },
+  // Spec 2026-10-06: the real name's one-time save, after the login.
+  'POST /store/customers/me/real-name': { body: { real_name: 'Tan Ah Kow' } },
 };
 
 /** One route refusing with `message` — how a backend refusal reaches
@@ -149,18 +151,27 @@ describe('signup — password presence (#3)', () => {
     const r = await signup({
       email: 'new@polycards.app',
       password: undefined as unknown as string,
+      real_name: 'Tan Ah Kow',
     });
     expect(r).toEqual({ ok: false, error: 'Please enter your password.' });
     expect(mem.requests).toEqual([]);
   });
 
   it('returns a friendly error for an empty password', async () => {
-    const r = await signup({ email: 'new@polycards.app', password: '' });
+    const r = await signup({
+      email: 'new@polycards.app',
+      password: '',
+      real_name: 'Tan Ah Kow',
+    });
     expect(r).toEqual({ ok: false, error: 'Please enter your password.' });
   });
 
   it('keeps the length message for a short (but present) password', async () => {
-    const r = await signup({ email: 'new@polycards.app', password: 'abc' });
+    const r = await signup({
+      email: 'new@polycards.app',
+      password: 'abc',
+      real_name: 'Tan Ah Kow',
+    });
     expect(r).toEqual({
       ok: false,
       error: 'Password must be at least 8 characters.',
@@ -175,6 +186,7 @@ describe('signup — required phone', () => {
     const r = await signup({
       email: 'new@polycards.app',
       password: 'PolycardsTest123!',
+      real_name: 'Tan Ah Kow',
     });
     expect(r).toEqual({
       ok: false,
@@ -187,6 +199,7 @@ describe('signup — required phone', () => {
     const r = await signup({
       email: 'new@polycards.app',
       password: 'PolycardsTest123!',
+      real_name: 'Tan Ah Kow',
       phone: '12345',
     });
     expect(r.ok).toBe(false);
@@ -209,6 +222,7 @@ describe('signup — required phone', () => {
     const r = await signup({
       email: 'new@polycards.app',
       password: 'PolycardsTest123!',
+      real_name: 'Tan Ah Kow',
       first_name: 'Nova',
       phone: '010-766 7787',
     });
@@ -219,6 +233,55 @@ describe('signup — required phone', () => {
     // No proof to forward: the register call goes out bare.
     expect(mem.requests[0]!.path).toBe('/auth/customer/emailpass/register');
     expect(mem.requests[0]!.headers).toEqual({});
+    // Spec 2026-10-06: the real name is saved on the new session.
+    const save = mem.requests.find(
+      (q) => q.path === '/store/customers/me/real-name',
+    );
+    expect(save).toBeTruthy();
+    expect(JSON.stringify(save)).toContain('Tan Ah Kow');
+  });
+});
+
+// Spec 2026-10-06: a real name is REQUIRED at registration, and validated
+// before anything is created (no login, no customer, no OTP proof spent).
+describe('signup — required real name', () => {
+  it.each([[''], ['ab'], ['Tan 123']])(
+    'rejects %j before any backend call',
+    async (real_name) => {
+      const r = await signup({
+        email: 'new@polycards.app',
+        password: 'PolycardsTest123!',
+        phone: '010-766 7787',
+        real_name,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toMatch(/exactly as it appears/);
+      expect(mem.requests).toEqual([]);
+    },
+  );
+
+  it('still reports the signup as done when only the real-name save fails', async () => {
+    backend({
+      ...TOKENS,
+      'POST /store/customers/me/real-name': {
+        status: 500,
+        body: { message: 'boom' },
+      },
+    });
+    mocks.customerCreate.mockResolvedValueOnce({ customer: { id: 'c1' } });
+    mocks.customerRetrieve.mockResolvedValueOnce({
+      customer: { id: 'c1', email: 'new@polycards.app', first_name: null },
+    });
+    mocks.fetchProfileHandle.mockResolvedValueOnce(null);
+
+    const r = await signup({
+      email: 'new@polycards.app',
+      password: 'PolycardsTest123!',
+      real_name: 'Tan Ah Kow',
+      phone: '010-766 7787',
+    });
+    // The account exists; the real-name gate asks again on the next visit.
+    expect(r.ok).toBe(true);
   });
 });
 
@@ -234,6 +297,7 @@ describe('signup — phone verification enforcement (PHONE_VERIFICATION_REQUIRED
     const r = await signup({
       email: 'new@polycards.app',
       password: 'PolycardsTest123!',
+      real_name: 'Tan Ah Kow',
       phone: '010-766 7787',
     });
     expect(r).toEqual({
@@ -260,6 +324,7 @@ describe('signup — phone verification enforcement (PHONE_VERIFICATION_REQUIRED
     const r = await signup({
       email: 'new@polycards.app',
       password: 'PolycardsTest123!',
+      real_name: 'Tan Ah Kow',
       first_name: 'Nova',
       phone: '010-766 7787',
       phone_verification_token: 'proof-tok',
@@ -288,6 +353,7 @@ describe('signup — phone verification enforcement (PHONE_VERIFICATION_REQUIRED
     const r = await signup({
       email: 'new@polycards.app',
       password: 'PolycardsTest123!',
+      real_name: 'Tan Ah Kow',
       phone: '010-766 7787',
       phone_verification_token: 'expired-proof',
     });
@@ -315,6 +381,7 @@ describe('signup — phone verification enforcement (PHONE_VERIFICATION_REQUIRED
     const r = await signup({
       email: 'new@polycards.app',
       password: 'PolycardsTest123!',
+      real_name: 'Tan Ah Kow',
       phone: '010-766 7787',
       phone_verification_token: 'proof-tok',
     });
@@ -338,6 +405,7 @@ describe('signup — phone verification enforcement (PHONE_VERIFICATION_REQUIRED
     const r = await signup({
       email: 'new@polycards.app',
       password: 'PolycardsTest123!',
+      real_name: 'Tan Ah Kow',
       phone: '010-766 7787',
       phone_verification_token: 'proof-tok',
     });
@@ -363,6 +431,7 @@ describe('signup — phone verification enforcement (PHONE_VERIFICATION_REQUIRED
     const r = await signup({
       email: 'taken@polycards.app',
       password: 'PolycardsTest123!',
+      real_name: 'Tan Ah Kow',
       first_name: 'Nova',
       phone: '010-766 7787',
       phone_verification_token: 'proof-tok',
@@ -1123,6 +1192,7 @@ describe('signup — referral attribution precedence', () => {
   const form = {
     email: 'new@polycards.app',
     password: 'PolycardsTest123!',
+    real_name: 'Tan Ah Kow',
     phone: '010-766 7787',
   };
 

@@ -107,6 +107,22 @@ moduleIntegrationTestRunner<PacksModuleService>({
     // The open saga touches modules this feature has nothing to do with: the
     // real packs service, inert fakes for the rest (vip-settle-step.unit
     // .spec.ts's container, minus its fake packs service).
+    // The claim step reads the customer's phone and refuses one shared by two
+    // real accounts (spec 2026-10-06). Every test customer gets its own number
+    // unless a test puts two on the same one through `phoneOf`.
+    const phoneOf = new Map<string, string>();
+    const fakeCustomers = {
+      listCustomerGroups: async () => [],
+      retrieveCustomer: async (id: string) => ({
+        id,
+        phone: phoneOf.get(id) ?? `+6011${[...id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 1e8, 7)}`,
+      }),
+      listCustomers: async (filter: { phone?: string }) =>
+        [...phoneOf.entries()]
+          .filter(([, p]) => p === filter.phone)
+          .map(([id]) => ({ id })),
+    };
+
     const buildContainer = (packs: unknown = service) => {
       const container = createMedusaContainer();
       container.register({
@@ -119,7 +135,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         [Modules.NOTIFICATION]: asValue({
           createNotifications: async (n: Record<string, unknown>) => [n],
         }),
-        [Modules.CUSTOMER]: asValue({ listCustomerGroups: async () => [] }),
+        [Modules.CUSTOMER]: asValue(fakeCustomers),
         logger: asValue({
           info: () => undefined,
           warn: () => undefined,
@@ -169,6 +185,15 @@ moduleIntegrationTestRunner<PacksModuleService>({
         { take: 1, order: { rolled_at: 'DESC' } },
       );
       return pull!;
+    };
+
+    // Everything the claim needs (spec 2026-10-06): the registration stamp,
+    // a verified phone and a real name. Tests that probe one missing piece
+    // stamp the others by hand.
+    const stampEligible = async (customerId: string) => {
+      await service.markFreePackAvailable(customerId);
+      await service.markPhoneVerified(customerId);
+      await service.setRealName(customerId, 'Tan Ah Kow');
     };
 
     const claimState = async (customerId: string) => {
@@ -282,7 +307,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       const strangerId = 'cus_fp_stranger';
 
       it('free open: claims once, writes source=free with null recorded value, charges nothing', async () => {
-        await service.markFreePackAvailable(customerId);
+        await stampEligible(customerId);
         // Funded, so a debit COULD happen — proving the free open skips it.
         await fund(customerId, 100);
         const before = await service.creditBalance(customerId);
@@ -305,7 +330,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // recorded_value_usd derives) would drift cumulative liability down
       // forever. The pull row stays NULL — boards clean, ledger honest.
       it('free open books the real vault_delta while the pull records no value', async () => {
-        await service.markFreePackAvailable(customerId);
+        await stampEligible(customerId);
         await open(FREE_SLUG, customerId);
 
         const pull = await latestPull(customerId, FREE_SLUG);
@@ -338,7 +363,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       it.each(['manual', 'auto'] as const)(
         'a %s-frozen account cannot open the free pack, and the claim survives',
         async (cause) => {
-          await service.markFreePackAvailable(customerId);
+          await stampEligible(customerId);
           await freeze(customerId, cause);
 
           expect(await openFails(FREE_SLUG, customerId)).toMatch(/frozen/i);
@@ -361,8 +386,58 @@ moduleIntegrationTestRunner<PacksModuleService>({
         },
       );
 
+      // Anti-farm gate (spec 2026-10-06): a verified phone AND a real name, both
+      // checked BEFORE the claim so a refused open leaves the pack waiting.
+      it.each([
+        ['an unverified phone', 'phone'],
+        ['no real name', 'real_name'],
+      ] as const)(
+        'an account with %s cannot open the free pack, and the claim survives',
+        async (_label, missing) => {
+          await service.markFreePackAvailable(customerId);
+          if (missing !== 'phone') await service.markPhoneVerified(customerId);
+          if (missing !== 'real_name')
+            await service.setRealName(customerId, 'Tan Ah Kow');
+
+          expect(await openFails(FREE_SLUG, customerId)).toMatch(
+            /verify your phone number and add your real name/i,
+          );
+          const state = (await claimState(customerId))!;
+          expect(state.free_pack_claimed_at).toBeNull();
+          expect(
+            await service.listPulls({ customer_id: customerId }),
+          ).toHaveLength(0);
+
+          // Finishing verification unlocks the same, unspent claim.
+          if (missing === 'phone') await service.markPhoneVerified(customerId);
+          else await service.setRealName(customerId, 'Tan Ah Kow');
+          const { result } = await open(FREE_SLUG, customerId);
+          expect(result.price).toBe(0);
+          expect((await latestPull(customerId, FREE_SLUG)).source).toBe('free');
+        },
+      );
+
+      // The HIGH from the 2026-10-06 review: one OTP proof replayed across many
+      // fresh accounts can land one number, verified, on all of them. One
+      // phone, one welcome pack — refused before the claim is spent.
+      it('refuses an account whose phone is also on another account, and the claim survives', async () => {
+        await stampEligible(customerId);
+        phoneOf.set(customerId, '+60111110000');
+        phoneOf.set(strangerId, '+60111110000');
+        try {
+          expect(await openFails(FREE_SLUG, customerId)).toMatch(
+            /linked to more than one account/i,
+          );
+          expect(
+            (await claimState(customerId))!.free_pack_claimed_at,
+          ).toBeNull();
+        } finally {
+          phoneOf.clear();
+        }
+      });
+
       it('second free open is refused (claim consumed)', async () => {
-        await service.markFreePackAvailable(customerId);
+        await stampEligible(customerId);
         await open(FREE_SLUG, customerId);
 
         expect(await openFails(FREE_SLUG, customerId)).toMatch(
@@ -375,6 +450,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
 
       it('unstamped account cannot open the free pack', async () => {
+        // Verified and named, so the refusal below is the registration stamp's.
+        await service.markPhoneVerified(strangerId);
+        await service.setRealName(strangerId, 'Lee Mei Ling');
         expect(await openFails(FREE_SLUG, strangerId)).toMatch(
           /not available/i,
         );
@@ -402,7 +480,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // the claim was won must hand the free pack back, and only an in-saga
       // step compensates.
       it('a failure after the claim rolls it back (compensation)', async () => {
-        await service.markFreePackAvailable(customerId);
+        await stampEligible(customerId);
         const brokenRecord = buildContainer(
           packsWith({
             recordPullsWithLedger: async () => {
@@ -426,7 +504,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // compensate payload, so a failed PAID open must not hand back a free
       // pack the customer already spent.
       it('a failed PAID open does not resurrect a spent claim', async () => {
-        await service.markFreePackAvailable(customerId);
+        await stampEligible(customerId);
         await open(FREE_SLUG, customerId); // spend the claim for real
         const claimedAt = (await claimState(customerId))!.free_pack_claimed_at;
         expect(claimedAt).toBeTruthy();

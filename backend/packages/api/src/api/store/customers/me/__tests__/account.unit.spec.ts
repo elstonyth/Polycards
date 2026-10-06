@@ -19,10 +19,18 @@ const listCustomerGroups = jest.fn(
 const partnerBpForCustomers = jest.fn(
   async (): Promise<Map<string, number | null>> => new Map(),
 );
+// Real name + phone lock (spec 2026-10-06). Default: nothing verified yet.
+const getVerificationState = jest.fn(
+  async (): Promise<{ phoneVerified: boolean; realName: string | null }> => ({
+    phoneVerified: false,
+    realName: null,
+  }),
+);
 
 const scope = {
   resolve: jest.fn((key: string) => {
-    if (key === 'packs') return { partnerBpForCustomers };
+    if (key === 'packs')
+      return { partnerBpForCustomers, getVerificationState };
     if (key === 'auth') return { listAuthIdentities };
     if (key === 'logger')
       return { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
@@ -59,6 +67,9 @@ describe('GET /store/customers/me/account', () => {
     listAuthIdentities.mockReset();
     listCustomerGroups.mockReset().mockResolvedValue([]);
     partnerBpForCustomers.mockReset().mockResolvedValue(new Map());
+    getVerificationState
+      .mockReset()
+      .mockResolvedValue({ phoneVerified: false, realName: null });
   });
 
   it('reports hasPassword true for an emailpass account', async () => {
@@ -67,6 +78,8 @@ describe('GET /store/customers/me/account', () => {
     await accountGET(mkReq(), res);
     expect((res as { json: jest.Mock }).json).toHaveBeenCalledWith({
       hasPassword: true,
+      realName: null,
+      phoneVerified: false,
       policy: NO_POLICY,
     });
   });
@@ -79,6 +92,8 @@ describe('GET /store/customers/me/account', () => {
     await accountGET(mkReq(), res);
     expect((res as { json: jest.Mock }).json).toHaveBeenCalledWith({
       hasPassword: false,
+      realName: null,
+      phoneVerified: false,
       policy: NO_POLICY,
     });
   });
@@ -103,6 +118,8 @@ describe('GET /store/customers/me/account', () => {
     await accountGET(mkReq(), res);
     expect((res as { json: jest.Mock }).json).toHaveBeenCalledWith({
       hasPassword: true,
+      realName: null,
+      phoneVerified: false,
       policy: {
         partner: true,
         withdrawals_blocked: true,
@@ -119,7 +136,26 @@ describe('GET /store/customers/me/account', () => {
     await accountGET(mkReq(), res);
     expect((res as { json: jest.Mock }).json).toHaveBeenCalledWith({
       hasPassword: true,
+      realName: null,
+      phoneVerified: false,
       policy: { ...NO_POLICY, partner: true },
+    });
+  });
+
+  it("reports the account's own real name and phone verification", async () => {
+    withEmailpass();
+    getVerificationState.mockResolvedValue({
+      phoneVerified: true,
+      realName: 'Tan Ah Kow',
+    });
+    const res = mkRes();
+    await accountGET(mkReq(), res);
+    expect(getVerificationState).toHaveBeenCalledWith('cus_1');
+    expect((res as { json: jest.Mock }).json).toHaveBeenCalledWith({
+      hasPassword: true,
+      realName: 'Tan Ah Kow',
+      phoneVerified: true,
+      policy: NO_POLICY,
     });
   });
 });
