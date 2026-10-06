@@ -135,7 +135,10 @@ panels beside the existing credit adjust:
 
 - **Gift packs** — pack select, quantity 1–10, required note → Send. Below: this
   customer's gifts — Unopened / Opened (with the opened date; the admin has no
-  pull page to link to) / Revoked / Stuck; **Revoke** on unopened and stuck rows.
+  pull page to link to) / Revoked / Stuck; **Revoke** on unopened rows. A stuck
+  gift (claimed by an open that crashed after writing its card) is left for an
+  operator: it is never reclaimed or revoked automatically, so it can never
+  become a second card.
 - **Bonus credit** — shows the Bonus Balance; amount (+ give / − take back, cannot go
   below 0) and required note.
 

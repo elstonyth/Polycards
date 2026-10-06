@@ -186,6 +186,22 @@ medusaIntegrationTestRunner({
               reason: 'pack_open',
               external_funded_cents: 3000,
             }, // reversal mirror
+            // Bonus credit (spec 2026-10-07): a grant, then an open that spent
+            // RM 40 of it — the VIP basis must leave that part out.
+            {
+              customer_id: CUS,
+              amount: 50,
+              reason: 'bonus_grant',
+              external_funded_cents: 0,
+              bonus_cents: 5000,
+            },
+            {
+              customer_id: CUS,
+              amount: -45,
+              reason: 'pack_open',
+              external_funded_cents: -500,
+              bonus_cents: -4000,
+            },
           ]);
           const sql = await packs.creditSummary(CUS);
           const rows = await packs.listCreditTransactions(
@@ -205,6 +221,9 @@ medusaIntegrationTestRunner({
                   .external_funded_cents;
                 return v == null ? null : Number(v);
               })(),
+              bonusCents: Number(
+                (t as { bonus_cents?: number | null }).bonus_cents ?? 0,
+              ),
             });
           }
           expect(sql).toEqual(totalsToUsd(acc));
