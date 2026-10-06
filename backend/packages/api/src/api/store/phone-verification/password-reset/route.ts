@@ -92,7 +92,7 @@ export async function POST(req: MedusaRequest<Body>, res: MedusaResponse): Promi
   // ── THE PHONE IS ONLY A FACTOR WHILE PHONE WRITES ARE GATED ────────────────
   // A phone can serve as an authentication factor only while the system claims
   // phones are verified. With PHONE_VERIFICATION_REQUIRED off,
-  // blockUnverifiedPhoneWrite (api/utils/phone-verification-guard.ts) no-ops
+  // blockCustomerPhoneWrite (api/utils/phone-verification-guard.ts) no-ops
   // and any live customer session can write an arbitrary, unproven number
   // straight to POST /store/customers/me — so the phone on the row proves
   // nothing about who holds the account, and must not mint a password-reset

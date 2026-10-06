@@ -30,6 +30,8 @@ import { sdk } from '@/lib/medusa';
 import { store } from '@/lib/store';
 import { UncheckedSchema } from '@/lib/data/schemas';
 import { logger } from '@/lib/logger';
+import { normalizeRealName, REAL_NAME_INVALID } from '@/lib/real-name';
+import { saveRealName } from '@/lib/actions/customer';
 import {
   setAuthToken,
   clearAuthToken,
@@ -267,6 +269,9 @@ export async function signup(input: {
   email: string;
   password: string;
   first_name?: string;
+  /** Required (spec 2026-10-06): the name on the phone's Touch 'n Go account,
+   *  confirmed by the customer before this call. */
+  real_name: string;
   phone?: string;
   phone_verification_token?: string;
   /** Optional code typed into the form; the /r/<code> cookie is the fallback. */
@@ -293,6 +298,10 @@ export async function signup(input: {
       ok: false,
       error: 'Please enter a valid phone number for the selected country.',
     };
+  // Real name is REQUIRED at registration (spec 2026-10-06) — checked before
+  // anything is created, so a bad one costs no account and no OTP proof.
+  const realName = normalizeRealName(input.real_name);
+  if (!realName) return { ok: false, error: REAL_NAME_INVALID };
   // The username seeds the profile handle, so it is validated by the same rule
   // updateProfile applies — a name accepted at signup can never be refused
   // later on the settings page. Left optional: an account created without one
@@ -339,6 +348,15 @@ export async function signup(input: {
     // The register token isn't a session token — log in to get the real one.
     const result = await login({ email, password: input.password });
     if (result.ok) {
+      // The real name rides its own one-time route (core's POST
+      // /store/customers takes no such field), on the session the login just
+      // set. A failure here must not fail a signup that already exists: the
+      // account layout's real-name gate asks again on the next account page,
+      // and the welcome-pack claim refuses until a name is on file.
+      const saved = await saveRealName({ real_name: realName }).catch(
+        () => null,
+      );
+      if (!saved?.ok) logger.error('[auth] real name after signup failed');
       // One-shot referral attribution: the code from the form, else the
       // /r/<code> cookie. Swallows every failure internally — a referral
       // hiccup must never fail a signup.

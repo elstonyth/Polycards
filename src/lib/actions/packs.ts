@@ -99,6 +99,13 @@ const PACKS_RULES: ErrorRule[] = [
   ],
   [UNAUTHORIZED, LOGIN_TO_OPEN],
   [/not enough credits/i, 'Not enough credits to open this pack.'],
+  // The welcome pack's verification gate (spec 2026-10-06, backend
+  // FREE_PACK_VERIFICATION_MESSAGE). Named, not genericized: "try again" can
+  // never succeed here — only finishing verification in Settings can.
+  [
+    /add your real name/i,
+    'To claim your welcome pack, verify your phone number and add your real name in Settings.',
+  ],
   // A pack whose prize pool is empty/zero-weight (mid-setup in admin). Must
   // precede the generic not-found rule: the backend throws it as NOT_FOUND.
   [

@@ -1,6 +1,6 @@
 import {
   requireSignupPhoneProof,
-  blockUnverifiedPhoneWrite,
+  blockCustomerPhoneWrite,
   requirePhoneVerified,
   rejectAdminPhoneWrite,
   requireRegisterPhoneProof,
@@ -402,7 +402,7 @@ describe('requireSignupPhoneProof', () => {
   });
 });
 
-describe('blockUnverifiedPhoneWrite', () => {
+describe('blockCustomerPhoneWrite', () => {
   // Same capture/restore as requireSignupPhoneProof above — see its comment.
   const ORIGINAL_PHONE_VERIFICATION_REQUIRED =
     process.env.PHONE_VERIFICATION_REQUIRED;
@@ -417,28 +417,25 @@ describe('blockUnverifiedPhoneWrite', () => {
 
   const run = (req: never) =>
     new Promise<unknown>((resolve) =>
-      blockUnverifiedPhoneWrite(req, {} as never, resolve),
+      blockCustomerPhoneWrite(req, {} as never, resolve),
     );
 
-  it.each([
-    ['a number', { phone: PHONE }],
-    ['null', { phone: null }],
-    ['an empty string', { phone: '' }],
-    ['no phone key', { first_name: 'A' }],
-  ])('passes %s when enforcement is off', async (_label, body) => {
-    delete process.env.PHONE_VERIFICATION_REQUIRED;
-    expect(await run(makeReq(body))).toBeUndefined();
-  });
-  describe('enforcement on', () => {
+  // Unconditional since the phone lock (spec 2026-10-06): the signup flag is
+  // not a lever for customer phone edits. Presence, not type: clearing the
+  // number here would keep the account's phone_verified_at stamp and free the
+  // number for another signup.
+  describe.each([
+    ['off', undefined],
+    ['on', 'true'],
+  ])('enforcement %s', (_mode, flag) => {
     beforeEach(() => {
-      process.env.PHONE_VERIFICATION_REQUIRED = 'true';
+      if (flag === undefined) delete process.env.PHONE_VERIFICATION_REQUIRED;
+      else process.env.PHONE_VERIFICATION_REQUIRED = flag;
     });
     afterEach(() => {
       delete process.env.PHONE_VERIFICATION_REQUIRED;
     });
 
-    // Presence, not type: clearing the number here would keep the account's
-    // phone_verified_at stamp and free the number for another signup.
     it.each([
       ['a number', PHONE],
       ['null', null],
@@ -612,7 +609,7 @@ describe('requirePhoneVerified', () => {
 });
 
 describe('rejectAdminPhoneWrite', () => {
-  // Unconditional — unlike blockUnverifiedPhoneWrite above, this guard is not
+  // Unconditional — unlike blockCustomerPhoneWrite above, this guard is not
   // gated on PHONE_VERIFICATION_REQUIRED (the admin route never had a
   // verification path to roll back to; the field is refused outright).
   const run = (req: never) =>

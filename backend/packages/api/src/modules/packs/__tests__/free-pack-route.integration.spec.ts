@@ -180,6 +180,14 @@ moduleIntegrationTestRunner<PacksModuleService>({
       return captured.body;
     };
 
+    // Everything the claim step needs (spec 2026-10-06): the registration
+    // stamp, a verified phone and a real name.
+    const stampEligible = async (who = customerId) => {
+      await service.markFreePackAvailable(who);
+      await service.markPhoneVerified(who);
+      await service.setRealName(who, 'Tan Ah Kow');
+    };
+
     const seedPull = async (source: 'free' | 'pack') => {
       const [pull] = await service.createPulls([
         {
@@ -260,6 +268,24 @@ moduleIntegrationTestRunner<PacksModuleService>({
           eligible: true,
           slug: FREE_SLUG,
           image: FREE_IMAGE,
+          missing: ['phone', 'real_name'],
+        });
+      });
+
+      // Spec 2026-10-06: `missing` names what the claim step would still
+      // refuse for, so the storefront can send the customer to finish it.
+      it('lists only what is still missing once verification is partly done', async () => {
+        await service.markFreePackAvailable(customerId);
+        await service.markPhoneVerified(customerId);
+
+        expect((await eligibility()).missing).toEqual(['real_name']);
+
+        await service.setRealName(customerId, 'Tan Ah Kow');
+        expect(await eligibility()).toEqual({
+          eligible: true,
+          slug: FREE_SLUG,
+          image: FREE_IMAGE,
+          missing: [],
         });
       });
 
@@ -271,6 +297,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           eligible: false,
           slug: null,
           image: null,
+          missing: ['phone', 'real_name'],
         });
       });
 
@@ -285,6 +312,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           eligible: false,
           slug: null,
           image: null,
+          missing: ['phone', 'real_name'],
         });
       });
 
@@ -293,6 +321,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           eligible: false,
           slug: null,
           image: null,
+          missing: ['phone', 'real_name'],
         });
       });
     });
@@ -342,11 +371,16 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // `== null` guard's empty-actor_id fall-through does for that
       // fabricated/future state (real only if this route ever gains
       // { allowUnregistered: true }): customer_id '' matches no row, so it
-      // still degrades to the plain 3-key ineligible answer, never a promo
+      // still degrades to the plain ineligible answer, never a promo
       // leak.
       it("defense-in-depth: a present-but-empty auth_context (unreachable under this route's current config) still gets the plain ineligible answer, not promo", async () => {
         const body = await eligibility('');
-        expect(body).toEqual({ eligible: false, slug: null, image: null });
+        expect(body).toEqual({
+          eligible: false,
+          slug: null,
+          image: null,
+          missing: ['phone', 'real_name'],
+        });
         expect(body).not.toHaveProperty('promo');
       });
     });
@@ -397,7 +431,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // can't silently depend on a hand-written pull row (the carried Task 8
       // review gap: nothing exercised the first PAID open flipping `locked`).
       it('free open → locked; the first PAID open through the route unlocks it', async () => {
-        await service.markFreePackAvailable(customerId);
+        await stampEligible();
         await fund(100);
 
         expect((await openPack(FREE_SLUG)).free).toBe(true);
@@ -427,7 +461,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
     describe('POST /store/packs/:slug/open', () => {
       it('a free open answers free:true + locked:true with no sellable quote, keeping the card value', async () => {
-        await service.markFreePackAvailable(customerId);
+        await stampEligible();
 
         const body = await openPack(FREE_SLUG);
 
@@ -445,7 +479,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // reveal must NOT suppress its sell UI. `free` alone cannot express that;
       // `locked` is the signal (CodeRabbit).
       it('a free open AFTER a paid open is free:true but locked:false, with a real quote', async () => {
-        await service.markFreePackAvailable(customerId);
+        await stampEligible();
         await fund(100);
         await openPack(PAID_SLUG); // the first PAID open — the unlock
 

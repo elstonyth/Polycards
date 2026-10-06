@@ -2,7 +2,10 @@ import { createStep, StepResponse } from '@medusajs/framework/workflows-sdk';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
-import { FREE_WELCOME_CATEGORY } from '../../modules/packs/free-pack';
+import {
+  FREE_PACK_VERIFICATION_MESSAGE,
+  FREE_WELCOME_CATEGORY,
+} from '../../modules/packs/free-pack';
 
 export type ClaimFreePackInput = { pack_id: string; customer_id: string };
 export type ClaimFreePackResult = { free: boolean };
@@ -39,6 +42,21 @@ export const claimFreePackStep = createStep(
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         'This account is frozen.',
+      );
+    }
+    // Anti-farm gate (spec 2026-10-06): a verified phone AND a real name on
+    // file, so one welcome pack maps to one person staff can check against
+    // Touch 'n Go. Unconditional — no PHONE_* flag, no partner exemption: it is
+    // a business rule like one-phone-one-account, not part of the OTP rollback
+    // lever. Also BEFORE the claim, so a refusal leaves the pack waiting for
+    // them once they finish verifying.
+    const { phoneVerified, realName } = await packs.getVerificationState(
+      input.customer_id,
+    );
+    if (!phoneVerified || !realName) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        FREE_PACK_VERIFICATION_MESSAGE,
       );
     }
     const claimed = await packs.claimFreePack(input.customer_id);

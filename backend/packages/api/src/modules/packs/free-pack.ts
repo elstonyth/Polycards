@@ -4,6 +4,11 @@
 // editor. One active free_welcome pack at a time (admin validation).
 export const FREE_WELCOME_CATEGORY = 'free_welcome';
 
+/** Refusal when the account has not finished verifying (spec 2026-10-06):
+ *  the welcome pack needs a verified phone AND a real name on file. */
+export const FREE_PACK_VERIFICATION_MESSAGE =
+  'Verify your phone number and add your real name in Settings to claim the welcome pack.';
+
 /** User-facing reason shown whenever a locked free pull is refused. */
 export const FREE_PULL_LOCKED_MESSAGE =
   'Purchase & open any pack to unlock selling & delivery.';

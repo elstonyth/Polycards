@@ -2,7 +2,14 @@
 
 import { useRef, useState, type FormEvent } from 'react';
 import { useRouter, unstable_isUnrecognizedActionError } from 'next/navigation';
-import { Mail, Lock, Ticket, User as UserIcon, Loader2 } from 'lucide-react';
+import {
+  IdCard,
+  Mail,
+  Lock,
+  Ticket,
+  User as UserIcon,
+  Loader2,
+} from 'lucide-react';
 import {
   login,
   signup,
@@ -28,6 +35,12 @@ import {
   type PhoneOtpChannel,
 } from '@/lib/phone-verification';
 import { usePhoneOtpSender } from '@/lib/use-phone-otp-sender';
+import {
+  normalizeRealName,
+  REAL_NAME_HINT,
+  REAL_NAME_INVALID,
+  REAL_NAME_MAX,
+} from '@/lib/real-name';
 
 // The Field inputs below carry a pl-9 for their leading icon; PhoneField has
 // no icon, so it gets the same chrome with plain px-3.
@@ -45,7 +58,7 @@ const PHONE_INPUT_CLASS =
 // optional referral code.
 type Note = {
   text: string;
-  field?: 'password' | 'phone' | 'referral' | 'username';
+  field?: 'password' | 'phone' | 'referral' | 'username' | 'realName';
 };
 
 // Copy for a server action call that threw instead of returning an error. A
@@ -66,6 +79,8 @@ type SignupFields = {
   email: string;
   password: string;
   first_name: string;
+  /** Spec 2026-10-06: required, normalized, confirmed via the checkbox. */
+  real_name: string;
   referral_code: string;
 };
 
@@ -303,6 +318,22 @@ export default function AuthForm({
         return;
       }
     }
+    // Real name (spec 2026-10-06): required, and checked BEFORE any OTP is
+    // sent — the same "fail before the paid SMS" rule as the username above.
+    // The confirm checkbox is the customer's double check: the name can never
+    // be changed by them afterwards, only by customer service.
+    const real_name = normalizeRealName(String(form.get('realName') ?? ''));
+    if (!real_name) {
+      setNote({ text: REAL_NAME_INVALID, field: 'realName' });
+      return;
+    }
+    if (form.get('realNameConfirm') !== 'on') {
+      setNote({
+        text: 'Please confirm your real name before continuing.',
+        field: 'realName',
+      });
+      return;
+    }
     const referral_code = String(form.get('referralCode') ?? '').trim();
 
     if (referral_code) {
@@ -336,6 +367,7 @@ export default function AuthForm({
             email,
             password,
             first_name,
+            real_name,
             phone,
             referral_code,
             phone_verification_token: signupDraft.proofToken,
@@ -347,6 +379,7 @@ export default function AuthForm({
               email,
               password,
               first_name,
+              real_name,
               phone,
               referral_code,
               proofToken: signupDraft.proofToken,
@@ -370,12 +403,13 @@ export default function AuthForm({
         // comment).
         setOtp({
           phone,
-          pending: { email, password, first_name, referral_code },
+          pending: { email, password, first_name, real_name, referral_code },
         });
         setSignupDraft({
           email,
           password,
           first_name,
+          real_name,
           phone,
           referral_code,
           proofToken: null,
@@ -394,6 +428,7 @@ export default function AuthForm({
         email,
         password,
         first_name,
+        real_name,
         phone,
         referral_code,
       });
@@ -664,6 +699,20 @@ export default function AuthForm({
         <h2 className="font-heading text-2xl font-bold tracking-tight text-white sm:text-3xl">
           Verify your phone
         </h2>
+        {/* The real name's double confirm (spec 2026-10-06): read back on
+            the step before the account exists, so a typo is caught while
+            Back can still fix it — after signup only customer service can. */}
+        <div className="mt-4 rounded-xl border border-white/15 bg-white/[0.05] px-3 py-2.5">
+          <p className="text-[11px] font-medium text-white/55">
+            Real name on your account
+          </p>
+          <p className="mt-0.5 text-sm font-semibold break-words text-white">
+            {otp.pending.real_name}
+          </p>
+          <p className="mt-1 text-[11px] text-white/55">
+            {REAL_NAME_HINT} Wrong? Go back and fix it now.
+          </p>
+        </div>
         <PhoneOtpStep
           phone={otp.phone}
           channel={otpChannel}
@@ -741,6 +790,47 @@ export default function AuthForm({
               note?.field === 'username' ? 'auth-form-error' : undefined
             }
           />
+        )}
+        {isSignup && (
+          // Spec 2026-10-06: the name staff check against the phone's Touch 'n
+          // Go account when a big hit looks farmed. Not shown publicly — the
+          // username above is the public name.
+          <div className="flex flex-col gap-1.5">
+            <Field
+              icon={IdCard}
+              name="realName"
+              type="text"
+              placeholder="Full name (as on IC / TNG eWallet)"
+              autoComplete="name"
+              maxLength={REAL_NAME_MAX}
+              required
+              defaultValue={signupDraft?.real_name}
+              aria-invalid={note?.field === 'realName' || undefined}
+              aria-describedby={
+                note?.field === 'realName'
+                  ? 'auth-form-error'
+                  : 'auth-real-name-hint'
+              }
+            />
+            <p id="auth-real-name-hint" className="text-[11px] text-white/50">
+              {REAL_NAME_HINT}
+            </p>
+            <label className="flex items-start gap-2 text-[12px] text-white/70">
+              <input
+                type="checkbox"
+                name="realNameConfirm"
+                required
+                // Re-checked on a remount from the OTP step: the name it
+                // confirmed comes back with it.
+                defaultChecked={Boolean(signupDraft?.real_name)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-white"
+              />
+              <span>
+                I confirm this is my real full name. I understand it can&apos;t
+                be changed later.
+              </span>
+            </label>
+          </div>
         )}
         <Field
           icon={Mail}

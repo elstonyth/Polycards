@@ -42,6 +42,9 @@ async function submitSignup(
     .first()
     .click();
   await page.fill('input[name="username"]', username);
+  // Spec 2026-10-06: a real name and its confirm checkbox are required.
+  await page.fill('input[name="realName"]', 'Playwright Tester');
+  await page.check('input[name="realNameConfirm"]');
   await page.fill('input[name="email"]', email);
   await page.fill('input[name="password"]', password);
   await page.fill('input[name="confirmPassword"]', password);

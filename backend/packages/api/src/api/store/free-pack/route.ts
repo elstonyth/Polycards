@@ -53,7 +53,7 @@ export async function GET(
   // { allowUnregistered: true } (or a request otherwise arrived with that
   // shape). In that case customer_id '' still matches no row in
   // listCustomerAccountStates, so it degrades safely to the same plain
-  // 3-key ineligible answer rather than crashing or leaking.
+  // ineligible answer rather than crashing or leaking.
   if (req.auth_context == null) {
     const active = await packs.getActiveFreePack();
     res.json({
@@ -75,9 +75,19 @@ export async function GET(
       ? await packs.getActiveFreePack()
       : null;
 
+  // What the claim step (workflows/steps/claim-free-pack.ts) will still refuse
+  // for (spec 2026-10-06), so the storefront can send the customer to finish
+  // verifying instead of letting them hit the refusal at the reel. `eligible`
+  // keeps its meaning (stamped, unclaimed, a pack is live) — the pack is still
+  // theirs, it just waits. Read off the row already fetched: no extra query.
+  const missing: ('phone' | 'real_name')[] = [];
+  if (!state?.phone_verified_at) missing.push('phone');
+  if (!state?.real_name) missing.push('real_name');
+
   res.json({
     eligible: active != null,
     slug: active?.slug ?? null,
     image: active?.image ?? null,
+    missing,
   });
 }

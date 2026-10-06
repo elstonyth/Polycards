@@ -110,6 +110,18 @@ const PHONE_CHECK_RULES: ErrorRule[] = [
 ];
 
 const PHONE_CHANGE_RULES: ErrorRule[] = [
+  // The phone lock (spec 2026-10-06): a verified number is customer service's
+  // to move. Reaching this means the page was stale (verified in another tab).
+  [
+    /verified and can.t be changed/i,
+    'Your phone number is already verified. To change it, contact customer service.',
+  ],
+  // …and its second half: a legacy number on file may be verified as-is,
+  // never swapped for another.
+  [
+    /only verify the number already on your account/i,
+    'You can only verify the number already on your account. To use a different number, contact customer service.',
+  ],
   // Same refusal as PHONE_CHECK_RULES, from the change route's own gate — the
   // caller's OTP was fine, the number just belongs to someone else.
   [

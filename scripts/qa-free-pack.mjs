@@ -297,7 +297,7 @@ try {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password: PASSWORD }),
   }).then(json);
-  await fetch(`${API}/store/customers`, {
+  const created = await fetch(`${API}/store/customers`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -307,6 +307,29 @@ try {
     body: JSON.stringify({ email }),
   }).then(json);
   ok(`registered ${email}`);
+
+  // The claim needs a verified phone AND a real name (spec 2026-10-06). The
+  // customer-service routes set both without an OTP round trip; a random
+  // number keeps one-phone-one-account happy across reruns.
+  const customerId = created.customer?.id;
+  if (!customerId) throw new Error('signup returned no customer id');
+  const qaPhone = `+6011${String(Date.now()).slice(-8)}`;
+  for (const [path, body] of [
+    ['phone', { new_phone: qaPhone, reason: 'qa-free-pack gate' }],
+    ['real-name', { real_name: 'Qa Free Pack', reason: 'qa-free-pack gate' }],
+  ]) {
+    const res = await fetch(`${API}/admin/customers/${customerId}/${path}`, {
+      method: 'POST',
+      headers: AH,
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      throw new Error(
+        `could not set the QA customer's ${path} — ${res.status}`,
+      );
+    }
+  }
+  ok('verified phone + real name on file');
 
   browser = await chromium.launch({ headless: true });
 
