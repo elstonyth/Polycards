@@ -11,7 +11,9 @@ import {
   E164_RE,
   verifyPhoneProof,
 } from '../../../../utils/phone-verification';
+import { createHash } from 'node:crypto';
 import { assertPhoneUnclaimed } from '../../../utils/phone-claim';
+import { warmSignupProofClaims } from '../../../utils/rate-limit';
 import { linkedEmailpassLogin } from '../../../utils/linked-login';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
@@ -196,17 +198,67 @@ export async function POST(
   // its FIRST phone does not qualify and takes the password branch above.
   // ── END RE-AUTH GATE ───────────────────────────────────────────────────────
 
-  // One phone = one account — shared with the two signup sites (see
-  // api/utils/phone-claim.ts for why it is a check and not a constraint).
-  await assertPhoneUnclaimed(req.scope, phone, customerId);
+  // ONE PROOF, ONE ACCOUNT. The proof is stateless and not bound to an
+  // account, and assertPhoneUnclaimed below is a read: without a claim, N
+  // phoneless accounts firing at once with ONE code would all see the number
+  // free and all land it, each stamped verified (the farming route the
+  // 2026-10-06 review found — the welcome-pack claim also refuses a shared
+  // number, but the number should not get there). Same SET NX claim, same
+  // store and the same fail-closed rule as the signup proof
+  // (requireSignupPhoneProof in api/utils/phone-verification-guard.ts), keyed
+  // on a hash so the store never holds a live proof, and kept for the proof's
+  // remaining lifetime (at least 1 ms: Redis rejects a zero expiry).
+  //
+  // Taken LAST — after the lock, the pin and the re-auth gate — so a request
+  // refused above never spends the proof. In particular the Google-only
+  // branch's first attempt, refused for the missing old-number proof, leaves
+  // this proof good for the retry that carries both.
+  const claims = warmSignupProofClaims();
+  const claimKey = `phone-proof:phone-change:${createHash('sha256')
+    .update(token as string)
+    .digest('hex')}`;
+  let claimed: boolean;
+  try {
+    claimed = await claims.claim(claimKey, Math.max(1, proof.exp - Date.now()));
+  } catch (e) {
+    req.scope
+      .resolve('logger')
+      .warn(
+        `[phone-otp] phone-change proof claim failed (${e instanceof Error ? e.message : String(e)})`,
+      );
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'Could not verify your phone right now. Try again shortly.',
+    );
+  }
+  // Same refusal as a missing or expired proof: a caller cannot tell a spent
+  // proof from a bad one.
+  if (!claimed)
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Phone verification required.',
+    );
 
-  await customerService.updateCustomers(customerId, { phone });
-  // Persist the FACT of verification — the proof token above expires in 10
-  // minutes, so the topup/delivery gates (requirePhoneVerified) need a stored
-  // stamp. After the write: a stamp on an account whose phone never landed
-  // would be a lie. Idempotent + first-write-wins in the service. From here
-  // the number is locked (the PHONE LOCK check at the top of this handler).
-  await packs.markPhoneVerified(customerId);
+  try {
+    // One phone = one account — shared with the two signup sites (see
+    // api/utils/phone-claim.ts for why it is a check and not a constraint).
+    await assertPhoneUnclaimed(req.scope, phone, customerId);
+
+    await customerService.updateCustomers(customerId, { phone });
+    // Persist the FACT of verification — the proof token above expires in 10
+    // minutes, so the topup/delivery gates (requirePhoneVerified) need a
+    // stored stamp. After the write: a stamp on an account whose phone never
+    // landed would be a lie. Idempotent + first-write-wins in the service.
+    // From here the number is locked (the PHONE LOCK check at the top).
+    await packs.markPhoneVerified(customerId);
+  } catch (e) {
+    // Give the proof back so the customer's retry (a different number after
+    // "already in use", or after a transient failure) needs no second code. A
+    // plain DEL can only drop this request's own claim: the key lives exactly
+    // as long as the proof, and an expired proof is refused before any claim.
+    await claims.release(claimKey).catch(() => undefined);
+    throw e;
+  }
 
   // No change notice: with the phone lock (spec 2026-10-06) this route only
   // ever ADDS a first number or verifies the one already on file — it never

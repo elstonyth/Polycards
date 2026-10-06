@@ -295,6 +295,34 @@ medusaIntegrationTestRunner({
           expect(me.data.customer.phone).toBeNull();
         });
 
+        // One proof, one account (2026-10-07). Before the claim, two phoneless
+        // accounts firing ONE code at once both saw the number free (the
+        // unclaimed check is a read) and both landed it, verified — the
+        // welcome-pack farming route the 2026-10-06 review found.
+        it("lets exactly one of two accounts spend one proof, even fired together", async () => {
+          const [a, b] = await Promise.all([
+            createLoggedInCustomer("change-race-a@test.dev"),
+            createLoggedInCustomer("change-race-b@test.dev"),
+          ]);
+          const phone = "+60107660881";
+          await start({ phone, purpose: "phone-change" });
+          const checked = await check({
+            phone,
+            purpose: "phone-change",
+            code: "000000",
+          });
+          expect(checked.status).toBe(200);
+          const body = { phone, token: checked.data.token, password: PASSWORD };
+
+          const results = await Promise.all([change(body, a), change(body, b)]);
+          const statuses = results.map((r) => r.status).sort();
+          expect(statuses).toEqual([200, 400]);
+          const refused = results.find((r) => r.status === 400);
+          expect(refused?.data).toMatchObject({
+            message: "Phone verification required.",
+          });
+        });
+
         it("200s a valid phone-change proof, reflected on GET /store/customers/me", async () => {
           const authHeaders = await createLoggedInCustomer(
             "change-valid@test.dev",

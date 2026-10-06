@@ -341,7 +341,7 @@ Phone number confirmation via SMS-delivered OTP (one-time password). When enable
 _Avoid_: token (that's the proof token below), password (this is a numeric code)
 
 **Proof Token**:
-Stateless HMAC-signed token — NOT a JWT: a custom 2-segment `base64url(payload).base64url(hmac)` format, domain-separated from the app's own HS256 JWTs (which share the same `jwtSecret`) via a fixed prefix in the HMAC input. 10-minute TTL, issued after successful OTP check. Single-purpose: proves one phone number for one flow (`signup` | `phone-change` | `password-reset`). Replay within TTL on the same phone is accepted for `phone-change` and `password-reset` (OTP resend cost is negligible). A `signup` proof creates one account: `requireSignupPhoneProof` claims it in Redis (SET NX, keyed on a hash of the token) and gives it back if the create fails; the claim fails closed when Redis is unreachable. Different phones produce cryptographically distinct tokens.
+Stateless HMAC-signed token — NOT a JWT: a custom 2-segment `base64url(payload).base64url(hmac)` format, domain-separated from the app's own HS256 JWTs (which share the same `jwtSecret`) via a fixed prefix in the HMAC input. 10-minute TTL, issued after successful OTP check. Single-purpose: proves one phone number for one flow (`signup` | `phone-change` | `password-reset`). Replay within TTL on the same phone is accepted for `password-reset` (OTP resend cost is negligible). A `signup` proof creates one account: `requireSignupPhoneProof` claims it in Redis (SET NX, keyed on a hash of the token) and gives it back if the create fails; the claim fails closed when Redis is unreachable. A `phone-change` proof is single-use the same way since 2026-10-07 (same store, key prefix `phone-proof:phone-change:`): the change route claims it after the phone lock and the re-auth gate, and gives it back if the write is refused. Before that, one code fired at once from many phoneless accounts landed the same verified number on all of them (the 2026-10-06 welcome-pack farming finding). Different phones produce cryptographically distinct tokens.
 
 **Feature Flags** — two backend env vars, deliberately separate because they have very different blast radii:
 
@@ -409,7 +409,7 @@ Tunable via env vars — per-phone: `PHONE_OTP_START_PHONE_RATE_BURST_LIMIT`, `P
 
 **Accepted Ceilings** (scope boundaries):
 
-- Phone-change and password-reset proof replay within 10m TTL on the same phone number (acceptable). Signup proofs are single-use.
+- Password-reset proof replay within 10m TTL on the same phone number (acceptable). Signup and phone-change proofs are single-use.
 - Legacy non-E.164 phones cannot initiate password reset (only E.164-normalized phones from signup flow work).
 - Phoneless direct-API signup unaffected (unchanged pre-existing behavior).
 - OTP codes are per-phone, not per-purpose: Twilio re-triggers the SAME code for a number within the 10-minute window regardless of which flow requested it, and POST /store/phone-verification/start is public — so a code phished from a user for one purpose could be checked and exchanged for a proof token under a different purpose. The proof TOKEN itself remains purpose-bound (verifyPhoneProof rejects a mismatched purpose), and every password-reset proof mint still emails the account owner before anything usable comes back. True separation would need one Twilio Verify Service per purpose (three SIDs instead of one) — noted as a hardening option, deliberately not shipped.
