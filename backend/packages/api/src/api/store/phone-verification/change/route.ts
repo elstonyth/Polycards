@@ -6,7 +6,6 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type {
   IAuthModuleService,
   ICustomerModuleService,
-  INotificationModuleService,
 } from '@medusajs/framework/types';
 import {
   E164_RE,
@@ -16,8 +15,6 @@ import { assertPhoneUnclaimed } from '../../../utils/phone-claim';
 import { linkedEmailpassLogin } from '../../../utils/linked-login';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
-import { isResendConfigured } from '../../../../modules/resend/options';
-import { PHONE_CHANGED_TEMPLATE } from '../../../../modules/resend/templates';
 
 // The ONLY way to set a new phone once enforcement is on (the /me gate in
 // api/utils/phone-verification-guard.ts closes the core route). Actor comes
@@ -32,18 +29,11 @@ type Body = {
   old_phone_token?: unknown;
 };
 
-// Last 4 digits only. The masked pair rides an email body and a persisted
-// notification row (GET /admin/notifications exposes `data` to any admin —
-// the same surface subscribers/password-reset.ts documents as accepted risk),
-// so the full number must never appear there.
-//
-// The NEW number passed E164_RE this request (>= 7 digits after the '+'), so
-// slice(-4) always drops something. The OLD one is whatever the DB holds and
-// was NOT validated here — the duplicate-check comment below notes legacy rows
-// predating verification — so a stored value of 4 characters or fewer masks to
-// itself. That is the pre-existing value being echoed back to its own owner's
-// inbox, not a new disclosure, but do not read this as a length guarantee.
-const mask = (phone: string): string => `••••${phone.slice(-4)}`;
+// The phone lock's refusal (spec 2026-10-06) — the storefront matches its text.
+const PHONE_LOCKED_MESSAGE =
+  'Your phone number is verified and can’t be changed here. Contact customer service to change it.';
+const PHONE_PINNED_MESSAGE =
+  'You can only verify the number already on your account. To use a different number, contact customer service.';
 
 export async function POST(
   req: AuthenticatedMedusaRequest<Body>,
@@ -56,6 +46,21 @@ export async function POST(
   const customerId = req.auth_context.actor_id;
   if (!customerId) {
     throw new MedusaError(MedusaError.Types.UNAUTHORIZED, 'Unauthorized');
+  }
+
+  // PHONE LOCK (spec 2026-10-06): once an account has verified a number, the
+  // customer can never move it — the number is how staff tie the account to
+  // one person (Touch 'n Go name check), and a movable number would let one
+  // person recycle it across farmed accounts. Customer service moves it
+  // instead (POST /admin/customers/:id/phone, audited). An account that has
+  // never verified — a Google signup adding its first number, a legacy
+  // pre-enforcement phone — still comes through here exactly once. Checked
+  // first: a locked account has nothing to prove, so nothing below runs.
+  // Unconditional, like the re-auth gate below: not part of the
+  // PHONE_VERIFICATION_REQUIRED rollback lever.
+  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  if (await packs.isPhoneVerified(customerId)) {
+    throw new MedusaError(MedusaError.Types.NOT_ALLOWED, PHONE_LOCKED_MESSAGE);
   }
 
   const { phone, token } = req.body ?? {};
@@ -113,6 +118,19 @@ export async function POST(
   const current = await customerService.retrieveCustomer(customerId, {
     select: ['id', 'email', 'phone'],
   });
+
+  // PHONE LOCK, second half (spec 2026-10-06): an account that already holds a
+  // number it never verified (written before verification was enforced) may
+  // verify THAT number, not swap it for another — "old customers cannot change
+  // their phone either". A number they no longer own is customer service's to
+  // replace. Only an account with no number at all picks a new one here.
+  if (
+    typeof current.phone === 'string' &&
+    current.phone !== '' &&
+    current.phone !== phone
+  ) {
+    throw new MedusaError(MedusaError.Types.NOT_ALLOWED, PHONE_PINNED_MESSAGE);
+  }
 
   // No readable email = nowhere to send the change notice below, and a row in
   // a state this route was never designed for. Refuse rather than fall through
@@ -186,60 +204,15 @@ export async function POST(
   // Persist the FACT of verification — the proof token above expires in 10
   // minutes, so the topup/delivery gates (requirePhoneVerified) need a stored
   // stamp. After the write: a stamp on an account whose phone never landed
-  // would be a lie. Idempotent + first-write-wins in the service.
-  const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  // would be a lie. Idempotent + first-write-wins in the service. From here
+  // the number is locked (the PHONE LOCK check at the top of this handler).
   await packs.markPhoneVerified(customerId);
 
-  // Tell the account its recovery phone moved. Sent to the EMAIL, never to
-  // either number: email is the one channel an attacker who has just taken the
-  // phone has not taken, so it is the only place this warning can still land
-  // with the real owner. Skipped when `current.phone` was empty — a first-time
-  // add is not a change and there is nothing to warn about.
-  //
-  // Deliberately a direct send rather than an event + subscriber: this repo has
-  // no event-bus emit anywhere in src/ (nothing to pattern-match on), and the
-  // failure requirement below is only expressible in-process — through a bus,
-  // a delivery failure is invisible to this handler.
-  //
-  // Best-effort, after the write commits, and it NEVER throws: the phone change
-  // is already persisted, so failing the request here would report failure for
-  // something that succeeded and invite a confused retry.
-  if (typeof current.phone === 'string' && current.phone !== '') {
-    try {
-      // Same predicate medusa-config.ts registers the provider on. Without it,
-      // no provider is bound to the `email` channel and createNotifications
-      // throws NOT_FOUND on every local phone change — caught below, but the
-      // warn would be pure noise in dev.
-      if (isResendConfigured(process.env)) {
-        const notifications = req.scope.resolve<INotificationModuleService>(
-          Modules.NOTIFICATION,
-        );
-        await notifications.createNotifications({
-          to: email,
-          channel: 'email',
-          template: PHONE_CHANGED_TEMPLATE,
-          // Masked — see `mask` above for why the full numbers cannot ride here.
-          data: {
-            old_phone_masked: mask(current.phone),
-            new_phone_masked: mask(phone),
-          },
-        });
-      }
-    } catch (e) {
-      // PRIVACY: customer id only. The phone numbers and the email address are
-      // PII and prod logs (DO runtime, a SIEM/Sentry sink) are a wider audience
-      // than this warn needs — same rule as scripts/reset-customer-password.ts.
-      // The provider's own error text is NOT interpolated: a notification
-      // provider names the failed recipient in it ("... to alice@example.com"),
-      // which would put the email address in the logs through the back door and
-      // undo the rule this comment states.
-      req.scope
-        .resolve('logger')
-        .warn(
-          `[phone-change] could not email the change notice for customer ${customerId} — phone already updated`,
-        );
-    }
-  }
+  // No change notice: with the phone lock (spec 2026-10-06) this route only
+  // ever ADDS a first number or verifies the one already on file — it never
+  // moves a number away from anyone, so there is nothing to warn about. The
+  // one remaining move, customer service's, emails the account
+  // (admin/customers/[id]/phone, api/utils/phone-changed-notice.ts).
 
   res.json({ customer: { id: customerId, phone } });
 }

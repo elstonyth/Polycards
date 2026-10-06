@@ -135,6 +135,8 @@ import {
   type AdminAnnouncement,
   setCustomerReferrer,
   setPartnerRate,
+  setCustomerRealName,
+  setCustomerPhone,
   voidReferralSettlement,
   type CustomerReferralCard,
   type ReferralSettings,
@@ -1543,6 +1545,32 @@ export const useCustomerReferral = (
     queryKey: qk.customerReferral(customerId),
     queryFn: () => getCustomerReferral(customerId),
   });
+
+// Spec 2026-10-06: the two customer-service corrections. Both write an audit
+// row (History tab), and the real name / phone read off the audit and detail
+// queries.
+export const useSetCustomerRealName = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { customerId: string; realName: string; reason: string }) =>
+      setCustomerRealName(vars.customerId, vars.realName, vars.reason),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.customerId) });
+    },
+  });
+};
+
+export const useSetCustomerPhone = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { customerId: string; phone: string; reason: string }) =>
+      setCustomerPhone(vars.customerId, vars.phone, vars.reason),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: qk.customerDetail(vars.customerId) });
+      qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.customerId) });
+    },
+  });
+};
 
 export const useSetPartnerRate = () => {
   const qc = useQueryClient();

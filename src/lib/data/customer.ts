@@ -14,7 +14,7 @@ import { cookies } from 'next/headers';
 import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
 import { store } from '@/lib/store';
-import { AccountInfoSchema } from '@/lib/data/schemas';
+import { AccountInfoSchema, RealNameReadSchema } from '@/lib/data/schemas';
 import { httpStatus } from '@/lib/errors';
 // The cookie name lives with the port that reads it (src/lib/store.ts); this
 // module only sets and clears it.
@@ -187,7 +187,20 @@ export type AccountPolicy = {
   withdrawalsBlocked: boolean;
   verificationExempt: boolean;
 };
-export type AccountInfo = { hasPassword: boolean; policy: AccountPolicy };
+export type AccountInfo = {
+  hasPassword: boolean;
+  /** The account's own real name (spec 2026-10-06): a string once set, `null`
+   *  when the account has none yet, `undefined` when it could not be read.
+   *  Only `null` raises the real-name gate — an unreadable answer must not
+   *  trap the customer behind a modal (the backend claim gate enforces). */
+  realName?: string | null;
+  /** `true` once the account verified a phone — Settings then shows it
+   *  locked. `undefined` = unknown, which Settings also treats as locked: the
+   *  change route refuses a verified account anyway, so offering the flow on
+   *  a guess would only spend an OTP to be refused. */
+  phoneVerified?: boolean;
+  policy: AccountPolicy;
+};
 
 /** The pre-feature shape: nothing exempt, nothing blocked. Also the answer on
  *  any failed read — both flags are UX only (the backend gates enforce), and
@@ -213,6 +226,29 @@ const ACCOUNT_INFO_FALLBACK: AccountInfo = {
  *
  * Request-scoped cache: the layout's two gate thunks share one read.
  */
+/**
+ * The account's own real name for the layout's real-name gate (spec
+ * 2026-10-06): a string once set, `null` when none is on file, `undefined`
+ * when it could not be read — which raises no gate (fail-open, like the phone
+ * gate; the welcome-pack claim refuses at the backend). Its own one-row read
+ * rather than getAccountInfo, whose four reads every account page would
+ * otherwise pay for. Request-scoped cache.
+ */
+export const getRealName = cache(
+  async (): Promise<string | null | undefined> => {
+    try {
+      const r = await store.get(
+        '/store/customers/me/real-name',
+        RealNameReadSchema,
+        { auth: 'required' },
+      );
+      return r.ok ? r.data.real_name : undefined;
+    } catch {
+      return undefined;
+    }
+  },
+);
+
 export const getAccountInfo = cache(async (): Promise<AccountInfo> => {
   // The port reports backend refusals as `{ ok: false }`, but the call itself
   // can still reject (the cookie-jar token lookup runs before the request).
@@ -229,6 +265,8 @@ export const getAccountInfo = cache(async (): Promise<AccountInfo> => {
     const p = r.data.policy;
     return {
       hasPassword: r.data.hasPassword,
+      realName: r.data.realName,
+      phoneVerified: r.data.phoneVerified,
       policy: p
         ? {
             partner: p.partner,

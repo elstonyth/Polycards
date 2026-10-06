@@ -28,11 +28,16 @@ export const metadata: Metadata = {
 // Updated 2026-10-04: verification codes can only be requested from Malaysia,
 // judged from the visitor's IP (src/lib/visitor-country.ts). The MaxMind
 // GeoLite2 credit is required by that data's licence.
+//
+// Updated 2026-10-06: every account now gives its real name (spec
+// docs/superpowers/specs/2026-10-06-real-name-and-phone-lock-design.md), used
+// only by staff to match winners against the phone's Touch 'n Go account. A
+// verified number can no longer be changed by the customer — only by support.
 
 const SECTIONS: { title: string; body: string }[] = [
   {
     title: 'What we collect',
-    body: 'Your account details (email, mobile phone number, display handle), your pack, vault, and transaction history, and the technical basics every web service receives — IP address and browser information. A mobile number is required to open and keep an account: we verify it by SMS at signup, and again if you change it or reset your password. If you sign in with Google, we receive your name and email from Google. To stop abuse, verification codes can only be requested from Malaysia, which we judge from your IP address. This product includes GeoLite2 data created by MaxMind, available from https://www.maxmind.com.',
+    body: 'Your account details (email, mobile phone number, real name, display handle), your pack, vault, and transaction history, and the technical basics every web service receives — IP address and browser information. A mobile number is required to open and keep an account: we verify it by SMS at signup or when you add it, and again if you reset your password. Once verified, your number can only be changed by contacting support. Your real name must match the name on your Touch ’n Go eWallet account; our staff use it only to confirm that prize winners and welcome-pack claims belong to real, separate people, and it is never shown publicly. To correct it, contact support. If you sign in with Google, we receive your name and email from Google. To stop abuse, verification codes can only be requested from Malaysia, which we judge from your IP address. This product includes GeoLite2 data created by MaxMind, available from https://www.maxmind.com.',
   },
   {
     title: 'Cookies',
@@ -48,7 +53,7 @@ const SECTIONS: { title: string; body: string }[] = [
   },
   {
     title: 'Public activity',
-    body: 'Polycards is partly a public product. Your display name is shown on public surfaces — the leaderboard, the weekly challenge, the recent-pulls feed on the home and pack pages, and your public profile page, whose web address contains your handle. Notable pulls are also announced automatically to our public Telegram channel, with your display name and a link to that profile. This is on by default for every account. We never publish your email address, your mobile number, or your account balance.',
+    body: 'Polycards is partly a public product. Your display name is shown on public surfaces — the leaderboard, the weekly challenge, the recent-pulls feed on the home and pack pages, and your public profile page, whose web address contains your handle. Notable pulls are also announced automatically to our public Telegram channel, with your display name and a link to that profile. This is on by default for every account. We never publish your real name, your email address, your mobile number, or your account balance.',
   },
   {
     title: 'Where your data lives',

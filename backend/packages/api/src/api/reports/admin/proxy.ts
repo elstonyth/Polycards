@@ -67,7 +67,10 @@ export function blockedReason(path: string): string | null {
 // Core screens return customer.metadata whole, and it holds partner account
 // passwords (partner_credential): any password, secret, token, credential or
 // API key field is hidden. Bank account numbers come back whole (2026-10-06).
-const HIDDEN = /password|secret|token|credential|api_?key/i;
+// Real names (spec 2026-10-06) are hidden too: they are private to staff
+// checks in the admin panel and never reach a Discord report — that covers
+// the Players list's real_name, account_state, and the audit before/after.
+const HIDDEN = /password|secret|token|credential|api_?key|real_?name/i;
 
 export function redact(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redact);

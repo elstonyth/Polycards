@@ -61,9 +61,22 @@ async function login() {
 
 console.log('login:', await login());
 
+// Spec 2026-10-06: an account with no real name meets a non-dismissable gate
+// on every account page. The dev login may predate it, so answer the gate once
+// if it shows (the name is set ONCE — later runs never see the modal).
+async function passRealNameGate() {
+  const gate = page.getByRole('dialog', { name: 'Add your real name' });
+  if (!(await gate.isVisible().catch(() => false))) return;
+  await gate.locator('input[name="real_name"]').fill('Qa Test Customer');
+  await gate.getByRole('button', { name: 'Continue' }).click();
+  await gate.getByRole('button', { name: 'Confirm real name' }).click();
+  await gate.waitFor({ state: 'detached', timeout: 20000 });
+}
+
 // ── /orders — the cards cell opens the full order ─────────────────────────
 await page.goto(`${STORE}/orders`, { waitUntil: 'domcontentloaded' });
 await page.waitForLoadState('networkidle').catch(() => {});
+await passRealNameGate();
 await page.waitForTimeout(1200);
 const openers = page.getByRole('button', { name: /^View order #/ });
 console.log('orders with a detail affordance:', await openers.count());

@@ -2,7 +2,11 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getPackBySlug, getPackDetail, getRecentPulls } from '@/lib/data/packs';
-import { canClaimFreePack, getFreePackState } from '@/lib/data/free-pack';
+import {
+  canClaimFreePack,
+  freePackMissing,
+  getFreePackState,
+} from '@/lib/data/free-pack';
 import { FREE_WELCOME_CATEGORY } from '@/lib/packs-data';
 import PackDetailClient from './PackDetailClient';
 
@@ -56,10 +60,16 @@ export default async function SlotsPackDetailPage({
   // guest reliably lands on `signup` here rather than `hidden`. The state →
   // eligibility mapping, including that guest case, is unit-tested in
   // src/lib/data/__tests__/free-pack.test.ts.
-  const freePackEligible =
+  const freeState =
     base.pack.categoryId === FREE_WELCOME_CATEGORY
-      ? canClaimFreePack(await getFreePackState(), slug)
-      : undefined;
+      ? await getFreePackState()
+      : null;
+  const freePackEligible = freeState
+    ? canClaimFreePack(freeState, slug)
+    : undefined;
+  // Spec 2026-10-06: the pack is theirs but waits on verification — the page
+  // sends them to Settings instead of letting the reel refuse the open.
+  const missing = freeState ? freePackMissing(freeState, slug) : [];
 
   return (
     <PackDetailClient
@@ -69,6 +79,7 @@ export default async function SlotsPackDetailPage({
       recentPulls={recentPulls}
       initialQty={count}
       freePackEligible={freePackEligible}
+      freePackMissing={missing}
     />
   );
 }

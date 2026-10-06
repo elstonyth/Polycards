@@ -21,11 +21,13 @@ import {
 } from '@/lib/errors';
 import {
   NAME_MAX,
-  normalizePhone,
   usernameError,
   USERNAME_TAKEN,
 } from '@/lib/profile-validation';
-import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
+import { store } from '@/lib/store';
+import { friendlyFailure } from '@/lib/errors';
+import { RealNameSchema } from '@/lib/data/schemas';
+import { normalizeRealName, REAL_NAME_INVALID } from '@/lib/real-name';
 
 export type ProfileCustomer = {
   id: string;
@@ -77,7 +79,6 @@ const PROFILE_RULES: ErrorRule[] = [
 export async function updateProfile(input: {
   first_name?: string;
   last_name?: string;
-  phone?: string;
 }): Promise<ProfileResult> {
   // Reject (don't silently truncate) an over-long name — the form caps input
   // at NAME_MAX too, so this only fires for API callers bypassing the UI.
@@ -96,31 +97,14 @@ export async function updateProfile(input: {
     const bad = usernameError(input.first_name);
     if (bad) return { ok: false, error: bad };
   }
+  // Never `phone`: the backend refuses any phone key on this route, whatever
+  // the verification flag says (blockCustomerPhoneWrite), and would 400 the
+  // WHOLE save. A phone is set only through `changePhone` (OTP-proven), and
+  // once verified only customer service moves it (spec 2026-10-06).
   const body: HttpTypes.StoreUpdateCustomer = {
     first_name: clean(input.first_name),
     last_name: clean(input.last_name),
   };
-
-  // Under phone-verification enforcement, phone writes go through
-  // `changePhone` (proven via OTP) instead — the backend gate (Task 3) 400s
-  // the WHOLE save if a string `phone` rides along here, so omit the key
-  // entirely rather than validate/send it. Names still save normally.
-  if (!PHONE_VERIFICATION_REQUIRED) {
-    // Phone stays optional here (existing accounts may not have one yet), but
-    // a non-empty value must be a valid number — stored normalized to E.164.
-    let phone = clean(input.phone);
-    if (typeof phone === 'string') {
-      const normalized = normalizePhone(phone);
-      if (!normalized) {
-        return {
-          ok: false,
-          error: 'Please enter a valid phone number for the selected country.',
-        };
-      }
-      phone = normalized;
-    }
-    body.phone = phone;
-  }
 
   try {
     const customer = await updateCustomerProfile(body);
@@ -144,4 +128,41 @@ export async function updateProfile(input: {
       error: 'Could not save your changes. Please try again.',
     };
   }
+}
+
+export type RealNameResult =
+  { ok: true; realName: string } | { ok: false; error: string };
+
+const REAL_NAME_RULES: ErrorRule[] = [
+  [UNAUTHORIZED, 'Your session has expired. Please log in again.'],
+  // POST /store/customers/me/real-name's refusal once a name is on file.
+  [
+    /already on file/i,
+    'Your real name is already saved. Contact customer service to correct it.',
+  ],
+  [/exactly as it appears/i, REAL_NAME_INVALID],
+];
+
+/**
+ * The account's ONE-TIME real-name write (spec 2026-10-06). Called after the
+ * customer confirmed the name (signup, the real-name gate, Settings); the
+ * backend refuses a second write, so there is no edit path here at all.
+ */
+export async function saveRealName(input: {
+  real_name: string;
+}): Promise<RealNameResult> {
+  const realName = normalizeRealName(input.real_name);
+  if (!realName) return { ok: false, error: REAL_NAME_INVALID };
+  const r = await store.post('/store/customers/me/real-name', RealNameSchema, {
+    real_name: realName,
+  });
+  if (r.ok) return { ok: true, realName: r.data.real_name };
+  return {
+    ok: false,
+    error: friendlyFailure(
+      r,
+      REAL_NAME_RULES,
+      'Could not save your real name. Please try again.',
+    ),
+  };
 }

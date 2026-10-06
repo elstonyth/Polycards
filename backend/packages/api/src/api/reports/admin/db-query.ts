@@ -69,6 +69,10 @@ const REFUSED_TABLES =
   /\b(provider_identity|api_key|(?:member_)?invite|notification|workflow_execution|auth_(?:verification|mfa_\w+|password_reset_token))\b/i;
 // Partner logins keep their generated password in customer.metadata.
 const PASSWORDS = /\b\w*(password|partner_credential)\w*\b/i;
+// Real names (spec 2026-10-06): refused by NAME in the query, not only
+// redacted by key in the result — an alias (`real_name AS n`) would walk
+// straight past the key-based redaction.
+const REAL_NAMES = /\breal_name\w*\b/i;
 const ROW_LOCKS = /\bfor\s+(?:no\s+key\s+update|key\s+share|update|share)\b/i;
 // U&"..." spells a name in escapes the checks above would not recognize.
 const UNICODE_ESCAPES = /\bu&['"]/i;
@@ -95,6 +99,8 @@ export function sqlRefusal(sql: unknown): string | null {
     return `The ${table} table is not open to the desk bots: it holds passwords, login tokens or reset links.`;
   }
   if (PASSWORDS.test(sql)) return 'Passwords stay hidden from the desk bots.';
+  if (REAL_NAMES.test(sql))
+    return 'Customers’ real names stay hidden from the desk bots.';
   if (ROW_LOCKS.test(sql)) {
     return 'Row locks (FOR UPDATE, FOR SHARE) are not available: the query only reads.';
   }
@@ -148,10 +154,7 @@ export function runReadOnlyQuery(
   const run = queue.then(() =>
     // Postgres stops the query itself; this only keeps a dead connection
     // from holding up every later query.
-    withDeadline(
-      runNow(shared as Knexish, sql, timeoutMs),
-      timeoutMs + 15_000,
-    ),
+    withDeadline(runNow(shared as Knexish, sql, timeoutMs), timeoutMs + 15_000),
   );
   queue = run.catch(() => undefined);
   return run;

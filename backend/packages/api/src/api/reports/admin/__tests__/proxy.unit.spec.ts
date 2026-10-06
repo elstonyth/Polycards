@@ -127,6 +127,24 @@ describe('redact', () => {
     });
   });
 
+  // Spec 2026-10-06: the Players list, account_state and the set_real_name
+  // audit before/after all carry the real name; none of it reaches Discord.
+  it('hides real names wherever they ride', () => {
+    expect(
+      redact({
+        players: [{ id: 'cus_1', real_name: 'Tan Ah Kow' }],
+        account_state: { real_name: 'Tan Ah Kow', real_name_set_at: 'x' },
+        actions: [{ before: { real_name: 'A' }, after: { real_name: 'B' } }],
+      }),
+    ).toEqual({
+      players: [{ id: 'cus_1', real_name: '[hidden]' }],
+      account_state: { real_name: '[hidden]', real_name_set_at: '[hidden]' },
+      actions: [
+        { before: { real_name: '[hidden]' }, after: { real_name: '[hidden]' } },
+      ],
+    });
+  });
+
   it('shows bank account numbers whole (open since 2026-10-06)', () => {
     const banks = {
       metadata: {

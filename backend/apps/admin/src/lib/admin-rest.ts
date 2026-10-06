@@ -287,6 +287,12 @@ export interface AccountState {
   disabled_reason: string | null;
   disabled_by: string | null;
   disabled_at: string | null;
+  /** Real name (spec 2026-10-06) — what staff match against a Touch 'n Go
+   *  lookup of the phone. Null until the customer enters one. */
+  real_name?: string | null;
+  /** Set once the account verified a phone; the customer can no longer
+   *  change it themselves. */
+  phone_verified_at?: string | null;
 }
 
 export interface CustomerAudit {
@@ -1375,6 +1381,8 @@ export interface PlayerRow {
    *  above: an unverified account can log in and browse, it just cannot top up
    *  or request delivery while the phone gate is on. */
   phone_verified: boolean;
+  /** Real name (spec 2026-10-06), null until entered. */
+  real_name: string | null;
   /** Partner account (spec 2026-09-09): 'group' when their player group is a
    *  partner group (its rate pays them), 'manual' for the per-customer flag,
    *  null for an ordinary account. */
@@ -1993,6 +2001,31 @@ export async function getCustomerReferral(
 ): Promise<CustomerReferralCard> {
   return getJson(`/admin/customers/${customerId}/referral`);
 }
+
+// Customer-service corrections (spec 2026-10-06): the customer can set a real
+// name once and can never change a verified phone, so these two are the way
+// either one moves. Both require an audited reason.
+export const setCustomerRealName = (
+  customerId: string,
+  realName: string,
+  reason: string,
+) =>
+  postJson<{ real_name: string }>(
+    `/admin/customers/${encodeURIComponent(customerId)}/real-name`,
+    { real_name: realName, reason },
+  );
+
+// `new_phone`, not `phone`: the generic admin customer guard refuses a `phone`
+// key on every /admin/customers/* POST (rejectAdminPhoneWrite).
+export const setCustomerPhone = (
+  customerId: string,
+  phone: string,
+  reason: string,
+) =>
+  postJson<{ customer: { id: string; phone: string } }>(
+    `/admin/customers/${encodeURIComponent(customerId)}/phone`,
+    { new_phone: phone, reason },
+  );
 
 export async function setPartnerRate(
   customerId: string,
