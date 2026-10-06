@@ -17,7 +17,7 @@ export const REAL_NAME_MAX = 100;
 const REAL_NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M} .'@/,-]*$/u;
 
 export const REAL_NAME_INVALID =
-  'Enter your full name exactly as it appears on your IC / Touch ’n Go eWallet (letters only, 3–100 characters).';
+  'Enter your full name exactly as it appears on your IC (letters only, 3–100 characters).';
 
 /**
  * Trim, collapse inner whitespace, and validate. Returns the stored form, or

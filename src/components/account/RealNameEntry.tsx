@@ -102,7 +102,7 @@ export function RealNameEntry({
     <form onSubmit={onReview} className="flex flex-col gap-3">
       <label className="block">
         <span className="mb-1.5 block text-[12px] font-medium text-white/55">
-          Full name (as on IC / Touch ’n Go eWallet)
+          Full name (as on your IC)
         </span>
         <input
           type="text"
