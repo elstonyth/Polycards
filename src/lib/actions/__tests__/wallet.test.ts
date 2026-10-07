@@ -30,6 +30,8 @@ describe('getWallet', () => {
         isFrozen: false,
         withdrawable: 40,
         playthrough: { deposited: 200, used: 160, remaining: 40 },
+        // Absent on the wire = no bonus credit.
+        bonus: 0,
       },
     });
     expect(mem.requests).toEqual([
@@ -52,6 +54,14 @@ describe('getWallet', () => {
       used: 0,
       remaining: 0,
     });
+  });
+
+  it('reads the bonus credit inside the balance', async () => {
+    backend({
+      'GET /store/credits': { body: { wallet: { ...WALLET, bonus: 27 } } },
+    });
+    const r = await getWallet();
+    expect(r.ok && r.wallet.bonus).toBe(27);
   });
 
   it('logged out: asks for a login without calling the backend', async () => {

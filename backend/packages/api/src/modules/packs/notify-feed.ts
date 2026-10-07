@@ -10,7 +10,10 @@ export type FeedTemplate =
   | 'withdrawal_refunded'
   | 'bank_account_added'
   | 'bank_account_removed'
-  | 'challenge_payout';
+  | 'challenge_payout'
+  // Pack gifts and bonus credit (spec 2026-10-07).
+  | 'pack_gift_received'
+  | 'bonus_credit_received';
 
 // The channel our CUSTOMER in-app feed lives on. Deliberately NOT 'feed':
 // that channel is the Medusa admin dashboard's own notification drawer, which

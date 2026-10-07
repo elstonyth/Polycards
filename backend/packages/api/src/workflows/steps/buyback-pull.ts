@@ -172,6 +172,8 @@ export const buybackPullStep = createStep(
           cardHandle: pull.card_id,
           rate: percent / 100,
           openId: pull.open_id ?? null,
+          // Gift and bonus pulls sell back (partly) as bonus credit.
+          bonusBp: Number(pull.bonus_bp ?? 0),
         }),
       probeDuplicate: async () => {
         const [existing] = await packs.listCreditTransactions(

@@ -355,6 +355,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
             balance: s.balance,
             depositedCents: Math.round(s.depositedPlaythroughTotal * 100),
             usedCents: Math.round(s.externalFundedSpendTotal * 100),
+            bonusCents: Math.round(s.bonusBalance * 100),
           });
 
           // The two paths must return an identical wallet summary — proving the

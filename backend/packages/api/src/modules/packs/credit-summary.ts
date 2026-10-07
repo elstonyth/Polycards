@@ -29,6 +29,9 @@ export interface LedgerTotals {
   // (external_funded_cents IS NOT NULL), grandfathering pre-1b NULL-basis deposits
   // OUT. NOT topupCents (which counts every positive topup regardless of basis).
   depositedPlaythroughCents: number;
+  // Bonus Balance (spec 2026-10-07): Σ bonus_cents — spend-only credit inside
+  // balanceCents. vipSpendCents above counts only the normal part of opens.
+  bonusBalanceCents: number;
 }
 
 // Frozen: this is the shared fold SEED. foldLedgerRow is non-mutating today, but
@@ -42,6 +45,7 @@ export const EMPTY_TOTALS: Readonly<LedgerTotals> = Object.freeze({
   externalFundedSpendCents: 0,
   vipSpendCents: 0,
   depositedPlaythroughCents: 0,
+  bonusBalanceCents: 0,
 });
 
 export function foldLedgerRow(
@@ -50,10 +54,16 @@ export function foldLedgerRow(
   // apart from a real 0 — the deposited-playthrough basis counts only NON-null
   // topups (SQL: external_funded_cents IS NOT NULL). Callers must pass the raw
   // column, NOT null-coerced-to-0, or the grandfathering distinction is lost.
-  row: { amount: number; reason: string; externalFundedCents: number | null },
+  row: {
+    amount: number;
+    reason: string;
+    externalFundedCents: number | null;
+    bonusCents?: number | null;
+  },
 ): LedgerTotals {
   const cents = Math.round(row.amount * 100);
   const ext = Math.round(row.externalFundedCents ?? 0);
+  const bonus = Math.round(row.bonusCents ?? 0);
   // A pack_open row stores the consumed external as NEGATIVE sen; a reversal
   // stores it back as POSITIVE. Count BOTH signs (flip), so a reversed open
   // subtracts exactly what the open added — the VIP basis nets to zero. Other
@@ -66,7 +76,8 @@ export function foldLedgerRow(
     spendCents: acc.spendCents + (cents < 0 ? -cents : 0),
     externalBalanceCents: acc.externalBalanceCents + ext,
     externalFundedSpendCents: acc.externalFundedSpendCents + externalConsumed,
-    vipSpendCents: acc.vipSpendCents + (row.reason === "pack_open" ? -cents : 0),
+    vipSpendCents:
+      acc.vipSpendCents + (row.reason === "pack_open" ? -cents + bonus : 0),
     // Mirrors SQL DEPOSITED_PT_FILTER: reason='topup' AND amount>0 AND
     // external_funded_cents IS NOT NULL. A NULL-basis (pre-1b) topup is
     // grandfathered OUT — gate on `!= null`, not `> 0`.
@@ -77,6 +88,7 @@ export function foldLedgerRow(
       row.externalFundedCents != null
         ? cents
         : 0),
+    bonusBalanceCents: acc.bonusBalanceCents + bonus,
   };
 }
 
@@ -87,6 +99,7 @@ export function totalsToUsd(t: LedgerTotals): {
   externalFundedSpendTotal: number;
   vipSpendTotal: number;
   depositedPlaythroughTotal: number;
+  bonusBalance: number;
 } {
   return {
     balance: t.balanceCents / 100,
@@ -95,5 +108,6 @@ export function totalsToUsd(t: LedgerTotals): {
     externalFundedSpendTotal: t.externalFundedSpendCents / 100,
     vipSpendTotal: t.vipSpendCents / 100,
     depositedPlaythroughTotal: t.depositedPlaythroughCents / 100,
+    bonusBalance: t.bonusBalanceCents / 100,
   };
 }

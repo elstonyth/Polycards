@@ -2,6 +2,8 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getPackBySlug, getPackDetail, getRecentPulls } from '@/lib/data/packs';
+import { getPackGifts } from '@/lib/actions/pack-gifts';
+import { giftsHeldFor } from '@/lib/vault-packs';
 import SlotMachineClient from '../SlotMachineClient';
 
 // The slot-machine reel — reached from the pack detail (/slots/[slug]) "Open Pack"
@@ -35,11 +37,16 @@ export default async function SlotSpinPage({
   const { count: countRaw, demo, freeRip } = await searchParams;
   const parsed = Number(countRaw);
   const count = Number.isInteger(parsed) ? Math.min(3, Math.max(1, parsed)) : 1;
-  const [base, detail, recentPulls] = await Promise.all([
+  const [base, detail, recentPulls, gifts] = await Promise.all([
     getPackBySlug(slug),
     getPackDetail(slug),
     // Scoped to this pack, same as the detail page above.
     getRecentPulls(slug),
+    // Vault packs for the bet line ("Bet Vault x1"). Per-customer and this
+    // route is already per-request; null = a guest or an unread call. A
+    // first-paint seed only: the machine re-reads on mount for whoever is
+    // signed in and holds the paid Spin until that read lands.
+    getPackGifts(),
   ]);
   if (!base) notFound();
 
@@ -48,6 +55,7 @@ export default async function SlotSpinPage({
       pack={base.pack}
       recentPulls={recentPulls.pulls}
       count={count}
+      giftsHeld={gifts === null ? null : giftsHeldFor(gifts, base.pack.id)}
       publishedOdds={detail?.publishedOdds ?? null}
       // The reel flickers ONLY these cards' Pokémon (decoys tied to a reward),
       // never arbitrary species. Available for real spins too, not just demo.

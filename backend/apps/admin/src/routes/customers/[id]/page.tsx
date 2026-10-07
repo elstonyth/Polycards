@@ -56,6 +56,7 @@ import {
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { Pager } from '../../../components/Pager';
 import { PullsTable } from '../../../components/PullsTable';
+import { GiftAndBonusPanels } from './gift-and-bonus';
 
 // ponytail: no config export — keeps route out of sidebar nav (mirrors packs/[slug]/page.tsx)
 
@@ -1691,6 +1692,11 @@ const Customer360Page = () => {
           </div>
         )}
       </Container>
+
+      {/* Gift packs + Bonus credit, beside the credit adjust above. key={id}:
+          the route doesn't remount on a customer change, so an unsent note
+          must not carry over to the next player. */}
+      {customerId && <GiftAndBonusPanels key={id} customerId={customerId} />}
 
       {/* ── Prompt modal — single instance, content varies by modal kind ─── */}
       <Prompt

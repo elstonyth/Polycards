@@ -15,7 +15,13 @@ type RecordPullInput = {
   // card still enters the vault, so the liability the later sell/delivery
   // subtracts has to go IN somewhere (see recordPullsWithLedger).
   vault_value_usd: number | null;
-  source: "pack" | "free"; // 'free' = the one-time free welcome open
+  // 'free' = the one-time free welcome open; 'bonus' = the open spent bonus
+  // credit (spec 2026-10-07).
+  source: "pack" | "free" | "bonus";
+  /** Basis points of a sell-back paid as bonus (0 unless 'bonus'). */
+  bonus_bp: number;
+  /** Bonus credit spent (MYR) — the SP ledger payload. */
+  bonus: number;
   // The open_id (uuid) the charge row stored in source_transaction_id — the
   // money<->card audit link stamped on the pull.
   open_id: string;
@@ -49,6 +55,7 @@ export const recordPullStep = createStep(
           rolled_at: new Date(),
           recorded_value_usd: input.recorded_value_usd,
           source: input.source,
+          bonus_bp: input.bonus_bp,
           open_id: input.open_id,
         },
       ],
@@ -60,6 +67,7 @@ export const recordPullStep = createStep(
         channel: "single",
         fx,
         vaultValueUsd: input.vault_value_usd,
+        bonus: input.bonus,
       },
     });
     return new StepResponse(pull, { id: pull.id, open_id: input.open_id });

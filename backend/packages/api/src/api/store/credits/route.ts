@@ -51,6 +51,7 @@ export async function GET(
     balance: summary.balance,
     depositedCents: Math.round(summary.depositedPlaythroughTotal * 100),
     usedCents: Math.round(summary.externalFundedSpendTotal * 100),
+    bonusCents: Math.round(summary.bonusBalance * 100),
   });
 
   // Gateway facts for the money rows on this page: which channel, and what
@@ -107,6 +108,9 @@ export async function GET(
         reference,
         gateway: reference ? (gatewayByRef.get(reference) ?? null) : null,
         pull_id: t.pull_id,
+        // The row's spend-only bonus part (MYR, spec 2026-10-07): a grant, a
+        // bonus-funded open, or the bonus share of a sell-back.
+        bonus: Number(t.bonus_cents ?? 0) / 100,
         created_at: t.created_at,
       };
     }),
@@ -119,6 +123,9 @@ export async function GET(
       // pack opens before balance can be withdrawn. withdrawable = 0 while
       // playthrough.remaining > 0; spending on packs is never restricted.
       withdrawable: wallet.withdrawable,
+      // Spend-only bonus credit inside balance (spec 2026-10-07) — never
+      // withdrawable; the wallet page shows it apart.
+      bonus: wallet.bonus,
       playthrough: {
         deposited: wallet.playthrough.deposited,
         used: wallet.playthrough.used,

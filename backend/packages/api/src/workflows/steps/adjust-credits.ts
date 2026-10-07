@@ -15,6 +15,8 @@ export type AdjustCreditsInput = {
   /** Server-derived actor id from req.auth_context.actor_id — never from body. */
   admin_id: string;
   idempotency_key?: unknown;
+  /** 'credit' (default) or 'bonus' — spend-only bonus credit (spec 2026-10-07). */
+  kind?: unknown;
 };
 
 export type AdjustCreditsResult = {
@@ -22,6 +24,9 @@ export type AdjustCreditsResult = {
   amount: number;
   /** The customer's new credit balance (Σ ledger). */
   balance: number;
+  /** The ledger row written (or replayed). */
+  credit_transaction_id: string;
+  replayed: boolean;
 };
 
 // adjust-credits — operator grant/refund/clawback from the support view: one
@@ -54,6 +59,17 @@ export const adjustCreditsStep = createStep(
       );
     }
 
+    if (
+      input.kind !== undefined &&
+      input.kind !== 'credit' &&
+      input.kind !== 'bonus'
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "kind must be 'credit' or 'bonus'.",
+      );
+    }
+
     const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
 
     // NOTE: the rolling-24h GLOBAL mint ceiling (ADJUST_DAILY_MINT_MAX_RM) is
@@ -74,9 +90,15 @@ export const adjustCreditsStep = createStep(
       note,
       adminId: input.admin_id,
       idempotencyKey: (input.idempotency_key as string | undefined)?.trim(),
+      bonus: input.kind === 'bonus',
     });
 
-    const result: AdjustCreditsResult = { amount, balance };
+    const result: AdjustCreditsResult = {
+      amount,
+      balance,
+      credit_transaction_id: id,
+      replayed: replayed === true,
+    };
     return new StepResponse(result, replayed ? undefined : { creditTransactionId: id });
   },
   async (data: { creditTransactionId: string } | undefined, { container }) => {

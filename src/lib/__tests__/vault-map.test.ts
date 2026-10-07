@@ -23,7 +23,13 @@ describe('mapVaultItem buyback firmness', () => {
   // firm (pre-firmness behavior), never to a falsy "sells disabled" state.
   it('defaults a missing firm flag to true (older backend)', () => {
     const item = mapVaultItem(raw({ percent: 90, amount: 405 }));
-    expect(item.buyback).toEqual({ percent: 90, amount: 405, firm: true });
+    // `bonus` absent = all normal credit (pre-bonus backend).
+    expect(item.buyback).toEqual({
+      percent: 90,
+      amount: 405,
+      firm: true,
+      bonus: 0,
+    });
   });
 
   it('passes firm:false through so sell CTAs can disable', () => {

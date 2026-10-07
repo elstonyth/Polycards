@@ -185,6 +185,8 @@ export interface SupportPull {
 export interface CustomerGacha {
   customer: SupportCustomer;
   balance: number;
+  /** Spend-only bonus credit (MYR) inside `balance` — never withdrawable. */
+  bonus_balance: number;
   transactions: SupportTransaction[];
   pulls: SupportPull[];
   /** market_value = raw FMV owed; display_value = FMV × the card's own markup,
@@ -331,12 +333,14 @@ export const unfreezeCustomer = (id: string, reason: string) =>
   );
 
 // Operator credit adjustment: signed amount, required audit note. The backend
-// enforces the $0 balance floor and returns the fresh balance.
+// enforces the $0 balance floor and returns the fresh balance. kind 'bonus'
+// moves the spend-only bonus balance instead (ledger reason bonus_grant).
 export async function adjustCustomerCredits(
   id: string,
   amount: number,
   note: string,
   idempotencyKey?: string,
+  kind?: 'bonus',
 ): Promise<{ amount: number; balance: number }> {
   const res = await fetch(
     `${__BACKEND_URL__}/admin/customers/${encodeURIComponent(id)}/credits`,
@@ -344,7 +348,12 @@ export async function adjustCustomerCredits(
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount, note, idempotency_key: idempotencyKey }),
+      body: JSON.stringify({
+        amount,
+        note,
+        idempotency_key: idempotencyKey,
+        kind,
+      }),
     },
   );
   if (!res.ok) {
@@ -352,6 +361,48 @@ export async function adjustCustomerCredits(
   }
   return (await res.json()) as { amount: number; balance: number };
 }
+
+// ── Pack gifts (vault packs) ─────────────────────────────────────────────────
+
+export interface PackGift {
+  id: string;
+  /** Pack slug. */
+  pack_id: string;
+  pack_title: string;
+  value_myr: number;
+  note: string;
+  granted_by: string;
+  created_at: string;
+  opened_at: string | null;
+  pull_id: string | null;
+  revoked_at: string | null;
+  state: 'unopened' | 'opened' | 'revoked' | 'stuck';
+}
+
+export const getCustomerPackGifts = (id: string) =>
+  getJson<{ gifts: PackGift[] }>(
+    `/admin/customers/${encodeURIComponent(id)}/pack-gifts`,
+  );
+
+export const grantPackGifts = (
+  id: string,
+  body: {
+    pack_id: string;
+    quantity: number;
+    note: string;
+    idempotency_key: string;
+  },
+) =>
+  postJson<{ gifts: PackGift[] }>(
+    `/admin/customers/${encodeURIComponent(id)}/pack-gifts`,
+    body,
+  );
+
+export const revokePackGift = (giftId: string) =>
+  postJson<{ revoked: true }>(
+    `/admin/pack-gifts/${encodeURIComponent(giftId)}/revoke`,
+    {},
+  );
 
 // ── Economy report ───────────────────────────────────────────────────────────
 

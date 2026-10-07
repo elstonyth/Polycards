@@ -44,7 +44,7 @@ describe('chargePackBatchInvoke', () => {
         .mockResolvedValue([
           { slug: 'test-pack', price: 149.9, category: 'pokemon' },
         ]),
-      settleOpen: jest.fn().mockResolvedValue({ balance: 50.3 }),
+      settleOpen: jest.fn().mockResolvedValue({ balance: 50.3, bonusCents: 0 }),
       creditBalance: jest.fn(),
     };
     const res = (await chargePackBatchInvoke(
@@ -57,7 +57,13 @@ describe('chargePackBatchInvoke', () => {
       amount: -449.7,
       sourceTransactionId: 'open_1',
     });
-    expect(res.output).toEqual({ price: 149.9, total: 449.7, balance: 50.3 });
+    expect(res.output).toEqual({
+      price: 149.9,
+      total: 449.7,
+      balance: 50.3,
+      bonus_cents: 0,
+      bonus_cents_by_row: [0, 0, 0],
+    });
     expect(res.compensateInput).toEqual({ open_id: 'open_1' });
   });
 

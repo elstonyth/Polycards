@@ -149,6 +149,14 @@ describe('VaultItemSchema — source/locked (free welcome pack)', () => {
     });
     expect(out).toMatchObject({ source: 'reward', locked: false });
   });
+
+  it("keeps a vault pack's source='gift' and a bonus-paid source='bonus'", () => {
+    for (const source of ['gift', 'bonus'] as const) {
+      expect(parseOne(VaultItemSchema, { ...base, source })).toMatchObject({
+        source,
+      });
+    }
+  });
 });
 
 describe('FreePackSchema — GET /store/free-pack', () => {
@@ -307,6 +315,7 @@ const BACKEND_CREDIT_REASONS = [
   'cashout',
   'voucher_claim',
   'reward_credit',
+  'bonus_grant',
 ] as const;
 
 describe('credit-reason enum drift guard (plans/005)', () => {

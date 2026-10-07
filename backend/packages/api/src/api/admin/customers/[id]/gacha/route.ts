@@ -146,6 +146,8 @@ export async function GET(
       created_at: customer.created_at,
     },
     balance,
+    // Spend-only bonus credit inside balance (spec 2026-10-07).
+    bonus_balance: summary.bonusBalance,
     transactions: transactions.map((t) => ({
       id: t.id,
       amount: Number(t.amount),

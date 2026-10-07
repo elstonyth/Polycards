@@ -14,6 +14,8 @@ export type ChargePackOpenResult = {
   price: number;
   /** The customer's balance AFTER the charge (Σ ledger). */
   balance: number;
+  /** Bonus credit the open spent, in sen (spec 2026-10-07; spent first). */
+  bonus_cents: number;
 };
 
 // open_id is the authoritative key for compensation: reverseOpen(open_id) cascades
@@ -62,7 +64,7 @@ export const chargePackOpenStep = createStep(
     if (price === 0) {
       const balance = await packs.creditBalance(input.customer_id);
       return new StepResponse(
-        { price, balance } satisfies ChargePackOpenResult,
+        { price, balance, bonus_cents: 0 } satisfies ChargePackOpenResult,
         undefined as CompensateData,
       );
     }
@@ -70,14 +72,14 @@ export const chargePackOpenStep = createStep(
     // Serialized debit through settleOpen — the single locked transaction that
     // (Phase 2a) also pays commission. Behaviorally identical to the old
     // mutateCreditAtomic debit for a no-referral customer.
-    const { balance } = await packs.settleOpen({
+    const { balance, bonusCents } = await packs.settleOpen({
       customerId: input.customer_id,
       amount: -price,
       sourceTransactionId: input.open_id,
     });
 
     return new StepResponse(
-      { price, balance } satisfies ChargePackOpenResult,
+      { price, balance, bonus_cents: bonusCents } satisfies ChargePackOpenResult,
       { open_id: input.open_id } satisfies CompensateData,
     );
   },

@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { X, Loader2 } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
 import { rm } from '@/lib/format';
+import { sellLabel } from '@/lib/vault-packs';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
@@ -24,6 +25,7 @@ export default function SellConfirmModal({
   netCredit,
   secondsLeft,
   count,
+  bonus = 0,
   busy = false,
   onConfirm,
   onCancel,
@@ -39,6 +41,9 @@ export default function SellConfirmModal({
   secondsLeft?: number;
   // Bulk sell-back: when set, fmv/netCredit are totals and the copy pluralizes.
   count?: number;
+  /** Part of netCredit paid back as bonus credit (gift / bonus-funded pulls).
+   *  Above 0 the split is shown and named on the confirm button. */
+  bonus?: number;
   busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -48,6 +53,8 @@ export default function SellConfirmModal({
   // pluralize off the count rather than off `bulk`.
   const plural = count !== 1;
   const panelRef = useRef<HTMLDivElement>(null);
+  // null for an ordinary sale — the copy below is then exactly as before.
+  const bonusLabel = sellLabel(netCredit, bonus);
 
   // Liquid-glass rim on the panel (frosted fallback on Safari/Firefox).
   useLiquidGlass(panelRef, open, GLASS_SUBTLE);
@@ -142,6 +149,14 @@ export default function SellConfirmModal({
             <dt className="font-semibold text-white">You receive</dt>
             <dd className="font-bold text-buyback-fg">{rm(netCredit)}</dd>
           </div>
+          {bonusLabel && (
+            <div className="flex justify-between">
+              <dt className="text-white/55">As bonus credit</dt>
+              <dd className="text-white/85">
+                {rm(Math.min(bonus, netCredit))}
+              </dd>
+            </div>
+          )}
         </dl>
 
         <p className="mt-3 text-[12px] text-white/50">
@@ -151,6 +166,8 @@ export default function SellConfirmModal({
           Selling is permanent: the{' '}
           {bulk && plural ? 'cards leave' : 'card leaves'} your vault and the
           amount is credited to your site balance.
+          {bonusLabel &&
+            ' Bonus credit can be spent on packs but not withdrawn.'}
         </p>
 
         <div className="mt-5 flex gap-2">
@@ -166,10 +183,10 @@ export default function SellConfirmModal({
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-buyback text-sm font-bold text-white transition-colors hover:bg-buyback/90 disabled:opacity-60"
+            className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-buyback px-3 py-1 text-center text-sm font-bold leading-tight text-white transition-colors hover:bg-buyback/90 disabled:opacity-60"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-            {busy ? 'Selling…' : `Sell for ${rm(netCredit)}`}
+            {busy ? 'Selling…' : (bonusLabel ?? `Sell for ${rm(netCredit)}`)}
           </button>
         </div>
       </div>

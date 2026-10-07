@@ -16,6 +16,7 @@ import AdminActionAudit from '../models/admin-action-audit';
 import VipMemberState from '../models/vip-member-state';
 import LedgerEntry from '../models/ledger-entry';
 import LedgerSequence from '../models/ledger-sequence';
+import PackGift from '../models/pack-gift';
 
 jest.setTimeout(300 * 1000);
 
@@ -30,6 +31,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
     // reaches any recordLedgerEntry call site must list these two models.
     // Canonical example: ledger-service.integration.spec.ts.
     LedgerEntry, LedgerSequence,
+    // adminAdjustCredit's mint ceiling also sums pack_gift value.
+    PackGift,
   ],
   testSuite: ({ service }) => {
     describe('auditForCustomer', () => {

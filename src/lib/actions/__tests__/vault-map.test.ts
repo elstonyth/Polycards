@@ -42,6 +42,18 @@ describe('mapVaultItem — source/locked', () => {
     expect(out.locked).toBe(false);
   });
 
+  it('carries the bonus part of a gift pull, and reads its absence as 0', () => {
+    const gift = mapVaultItem(
+      row({
+        source: 'gift',
+        buyback: { percent: 90, amount: 36, firm: true, bonus: 36 },
+      }),
+    );
+    expect(gift.source).toBe('gift');
+    expect(gift.buyback.bonus).toBe(36);
+    expect(mapVaultItem(row()).buyback.bonus).toBe(0);
+  });
+
   it("leaves a challenge prize (source 'reward') unlocked and sellable", () => {
     const out = mapVaultItem(row({ source: 'reward', locked: false }));
     expect(out.locked).toBe(false);

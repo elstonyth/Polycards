@@ -20,6 +20,10 @@ export type BuybackOffer = {
   instantDeadlineMs: number | null;
   /** false = quoted on the FX display fallback (sell would be refused). */
   firm: boolean;
+  /** MYR part of `amount` paid back as bonus credit (a gift or bonus-funded
+   *  pull); 0 when an older backend omits it. Display only — the backend
+   *  decides the split it pays. */
+  bonus: number;
 };
 
 /**
@@ -38,6 +42,7 @@ export function toBuybackOffer(raw: unknown): BuybackOffer | null {
         vaultAmount: offer.vault_amount ?? null,
         instantDeadlineMs: offer.instant_deadline_ms ?? null,
         firm: offer.firm ?? true,
+        bonus: offer.bonus ?? 0,
       }
     : null;
 }

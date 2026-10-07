@@ -1,5 +1,10 @@
 import type { Metadata } from 'next';
-import { AccountHeader, Pager, StatCards } from '@/components/account/ui';
+import {
+  AccountHeader,
+  Badge,
+  Pager,
+  StatCards,
+} from '@/components/account/ui';
 import { rm } from '@/lib/format';
 import { getPendingDeposits, getTransactions } from '@/lib/actions/vault';
 import {
@@ -134,6 +139,13 @@ export default async function TransactionsPage({
                     </td>
                     <td className="px-4 py-3 text-white/90">
                       {reasonLabel(t.reason)}
+                      {/* Any row that moved spend-only bonus credit — a grant,
+                          a bonus-funded open, a bonus sell-back — says so. */}
+                      {Math.round(t.bonus * 100) !== 0 && (
+                        <span className="ml-2 align-middle">
+                          <Badge>bonus</Badge>
+                        </span>
+                      )}
                     </td>
                     {/* The gateway id support asks for — same value the
                         receipt email and the admin pages show. Internal rows

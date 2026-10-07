@@ -65,6 +65,8 @@ export type OpenPackResult =
         /** false = quoted on the FX display fallback; selling would be
          *  refused, so the reveal must not present this as a firm offer. */
         firm: boolean;
+        /** MYR part of `amount` paid back as bonus credit; 0 when none. */
+        bonus: number;
       } | null;
       /** Credit balance AFTER the charge (opens debit the pack price — A2);
        *  null only if the backend response shape regresses. */
@@ -233,27 +235,56 @@ export type OpenBatchResult =
       total: number | null;
       /** Credit balance AFTER the batch debit. Null on response regression. */
       balance: number | null;
+      /** Vault packs (gifts) this open consumed — the caller decrements what
+       *  it holds by this. 0 when the backend omits it. */
+      giftsUsed: number;
     }
-  | { ok: false; error: string; needsAuth?: boolean; needsTopUp?: boolean };
+  | {
+      ok: false;
+      error: string;
+      needsAuth?: boolean;
+      needsTopUp?: boolean;
+      /** The screen offered gifts the backend no longer has (opened in
+       *  another tab, revoked). NOTHING was charged; re-read the gifts. */
+      staleGifts?: boolean;
+    };
+
+// The backend's own sentence for a stale gift count (HTTP 409) — kept here
+// rather than read off the failure text, which is the SDK's error message.
+const STALE_GIFTS = 'Your vault pack is no longer available — refresh.';
 
 export async function openBatch(
   slug: string,
   count: number,
+  gifts: number = 0,
 ): Promise<OpenBatchResult> {
   // Boundary validation.
   if (typeof slug !== 'string' || slug.trim() === '') {
     return { ok: false, error: 'Invalid pack.' };
   }
 
-  // Clamp count to int in [1, 3].
+  // Clamp count to int in [1, 3], and gifts to int in [0, count] — a public
+  // endpoint, so NaN / a negative / more gifts than rows never reach the wire.
   const clampedCount = clampCount(count);
+  const clampedGifts = Number.isFinite(gifts)
+    ? Math.min(clampedCount, Math.max(0, Math.trunc(gifts)))
+    : 0;
 
+  // `gifts` is sent every time, 0 included: the backend never infers gift
+  // use, it only spends what the screen offered.
   const r = await store.post(
     `/store/packs/${encodeURIComponent(slug)}/open-batch`,
     UncheckedSchema,
-    { count: clampedCount },
+    { count: clampedCount, gifts: clampedGifts },
   );
-  if (!r.ok) return openFailure(r);
+  if (!r.ok) {
+    // 409 = the gifts this screen offered are gone. Refused before any
+    // charge, so it is safe to say "refresh" — unlike every post-2xx failure.
+    if (r.status === 409 && clampedGifts > 0) {
+      return { ok: false, error: STALE_GIFTS, staleGifts: true };
+    }
+    return openFailure(r);
+  }
 
   // JSON parsing accepts null and malformed nested objects; preserve the
   // pre-port projection fallback without changing the Store contract.
@@ -263,11 +294,13 @@ export async function openBatch(
       balance,
       price,
       total_charged,
+      gifts_used,
     } = r.data as {
       rolls: RawBatchRollItem[];
       balance?: unknown;
       price?: unknown;
       total_charged?: unknown;
+      gifts_used?: unknown;
     };
 
     // The envelope is unchecked (see the header), so `rolls` might not be an
@@ -321,6 +354,10 @@ export async function openBatch(
         typeof total_charged === 'number' && Number.isFinite(total_charged)
           ? total_charged
           : null,
+      giftsUsed:
+        typeof gifts_used === 'number' && Number.isFinite(gifts_used)
+          ? gifts_used
+          : 0,
     };
   } catch (error) {
     logger.error('[packs] response projection failed:', error);
