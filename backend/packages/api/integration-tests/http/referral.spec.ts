@@ -267,6 +267,22 @@ medusaIntegrationTestRunner({
           }),
         );
         expect(detail.data.lines.length).toBeGreaterThanOrEqual(1);
+        // The line names who it pays and whose spend makes up its basis.
+        const line = detail.data.lines.find(
+          (l: { customer_id: string }) =>
+            l.customer_id === attribution.referrer_id,
+        );
+        expect(line.customer.id).toBe(attribution.referrer_id);
+        expect(line.customer.email).toBe('referrer@test.dev');
+        expect(line.downline).toEqual([
+          {
+            customer: expect.objectContaining({
+              id: attribution.customer_id,
+              email: 'recruit@test.dev',
+            }),
+            spend_cents: 100_000,
+          },
+        ]);
 
         // Approve, then pay.
         const approve = await unwrapResponse(
