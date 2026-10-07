@@ -65,6 +65,9 @@ export const VAULT_RULES: ErrorRule[] = [
   // without this rule it fell through to "Something went wrong. Please try
   // again." — the retry loop this message exists to stop.
   [/withdrawals are temporarily unavailable/i, (text) => text],
+  // The timed pause (GATEWAY_WITHDRAWALS_PAUSED_UNTIL) names when to come
+  // back — pass it through rather than flatten it to "not open yet".
+  [/withdrawals are paused/i, (text) => text],
   // Every other withdrawal refusal. Each already names its cause AND its fix
   // (spend RM X on packs, contact support, the RM figure you may take out,
   // which bank account and why), so they pass through verbatim. Before this
