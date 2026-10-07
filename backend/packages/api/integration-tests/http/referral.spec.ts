@@ -273,12 +273,12 @@ medusaIntegrationTestRunner({
             l.customer_id === attribution.referrer_id,
         );
         expect(line.customer.id).toBe(attribution.referrer_id);
-        expect(line.customer.email).toEqual(expect.any(String));
+        expect(line.customer.email).toBe('referrer@test.dev');
         expect(line.downline).toEqual([
           {
             customer: expect.objectContaining({
               id: attribution.customer_id,
-              email: expect.any(String),
+              email: 'recruit@test.dev',
             }),
             spend_cents: 100_000,
           },

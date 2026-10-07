@@ -283,7 +283,7 @@ function Downline({ line }: { line: ReferralSettlementLine }) {
       {total !== line.basis_cents && (
         <Text size="xsmall" className="text-ui-fg-muted mt-2">
           These add up to {fromCents(total)}, not the{' '}
-          {fromCents(line.basis_cents)} basis: a referral was re-attributed
+          {fromCents(line.basis_cents)} basis: a referral or a purchase changed
           after the week closed. The basis is what pays.
         </Text>
       )}
