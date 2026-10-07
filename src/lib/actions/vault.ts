@@ -201,6 +201,7 @@ export async function getPaymentLimits(): Promise<PaymentLimits> {
     // Absent (older backend) reads as open — see the schema's comment.
     depositsEnabled: r.data.deposits_enabled ?? true,
     withdrawalsEnabled: r.data.withdrawals_enabled ?? true,
+    withdrawalsPausedUntil: r.data.withdrawals_paused_until ?? null,
   };
 }
 
