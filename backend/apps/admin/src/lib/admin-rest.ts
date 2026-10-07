@@ -1919,15 +1919,29 @@ export interface ReferralSettlement {
   total_commission_cents: number;
 }
 
+/** Who a settlement line is about; every field but id is null for a
+ *  customer whose record is gone. */
+export interface ReferralPerson {
+  id: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+}
+
 export interface ReferralSettlementLine {
   id: string;
   customer_id: string;
+  /** The referrer this line pays — the wallet the commission lands in. */
+  customer: ReferralPerson;
   basis_cents: number;
   rate_bp: number;
   amount_cents: number;
   status: 'pending' | 'voided' | 'paid';
   void_reason: string | null;
   paid_transaction_id: string | null;
+  /** Downline spend that week, biggest first. Read with live attribution,
+   *  so it can differ from basis_cents after an admin re-attribution. */
+  downline: { customer: ReferralPerson; spend_cents: number }[];
 }
 
 export async function listReferralSettlements(): Promise<ReferralSettlement[]> {
