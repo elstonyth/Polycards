@@ -4,7 +4,10 @@ import {
   resolveActiveGateway,
 } from '../../../../modules/packs/gateway';
 import { gatewayEnabled } from '../../../../modules/packs/gateway-deposit';
-import { withdrawalsEnabled } from '../../../../modules/packs/gateway-withdrawal';
+import {
+  withdrawalsEnabled,
+  withdrawalsPausedUntil,
+} from '../../../../modules/packs/gateway-withdrawal';
 
 // GET /store/payments/config — what the storefront needs to render the top-up
 // sheet and the withdrawal form for the ACTIVE gateway: its money bands and
@@ -16,11 +19,17 @@ export async function GET(
 ): Promise<void> {
   const gateway = await resolveActiveGateway(req.scope);
   const { limits } = GATEWAYS[gateway];
+  const pausedUntil = withdrawalsPausedUntil();
   res.setHeader('Cache-Control', 'no-store');
   res.json({
     gateway,
     deposits_enabled: gatewayEnabled(),
     withdrawals_enabled: withdrawalsEnabled(),
+    // The timed pause's end, so the withdrawal form can say when to come back.
+    withdrawals_paused_until:
+      pausedUntil !== null && Number.isFinite(pausedUntil)
+        ? new Date(pausedUntil).toISOString()
+        : null,
     deposit: { min_rm: limits.depositMin, max_rm: limits.depositMax },
     withdrawal: { min_rm: limits.withdrawalMin, max_rm: limits.withdrawalMax },
   });

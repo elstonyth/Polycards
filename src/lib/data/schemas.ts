@@ -584,6 +584,8 @@ export const PaymentConfigSchema = z.looseObject({
   // reads as open so an older backend keeps today's behaviour.
   deposits_enabled: z.boolean().optional(),
   withdrawals_enabled: z.boolean().optional(),
+  // ISO instant a timed withdrawal pause ends (null/absent = no timed pause).
+  withdrawals_paused_until: z.string().nullable().optional(),
 });
 
 /** GET /store/credits transaction row. `amount` is signed (credit +, spend −).

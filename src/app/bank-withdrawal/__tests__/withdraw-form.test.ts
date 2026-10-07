@@ -239,6 +239,22 @@ describe('WithdrawForm', () => {
     expect(startWithdrawal).not.toHaveBeenCalled();
   });
 
+  it('says when to come back during a timed pause', async () => {
+    getPaymentLimits.mockResolvedValue({
+      gateway: 'tgpay',
+      deposit: { minRm: 30, maxRm: 10000 },
+      withdrawal: { minRm: 50, maxRm: 50000 },
+      depositsEnabled: true,
+      withdrawalsEnabled: false,
+      withdrawalsPausedUntil: '2026-10-07T22:00:00.000Z',
+    });
+    await render();
+    expect(container.textContent).toContain(
+      'Withdrawals are paused until 6:00 AM. Your balance is safe — please try again after 6:00 AM.',
+    );
+    expect(submitButton().disabled).toBe(true);
+  });
+
   it.each(['49', '50001'])(
     'rejects RM %s in the form without touching the backend',
     async (amount) => {

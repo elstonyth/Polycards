@@ -112,13 +112,49 @@ export const GATEWAY_WD_APPROVAL_ABOVE_RM_DEFAULT = 1000;
 export function withdrawalsEnabled(
   env: Partial<NodeJS.ProcessEnv> = process.env,
   gateway: PaymentGateway = paymentGateway(env),
+  now: number = Date.now(),
 ): boolean {
   const configured = GATEWAYS[gateway].configured(env);
   return (
     gatewayEnv('GATEWAY_ENABLED', env) === 'true' &&
     gatewayEnv('GATEWAY_WITHDRAWALS_ENABLED', env) === 'true' &&
-    configured
+    configured &&
+    withdrawalsPausedUntil(env, now) === null
   );
+}
+
+/**
+ * A timed pause for a provider outage with a known end, so nobody has to be
+ * awake to reopen: GATEWAY_WITHDRAWALS_PAUSED_UNTIL is an ISO instant WITH its
+ * offset (e.g. 2026-10-08T06:00:00+08:00). Before it, withdrawalsEnabled() is
+ * false everywhere it gates (submit, held approval, the reconcile sweep, the
+ * bank list, the storefront config); from it on, the variable is inert and
+ * withdrawals reopen by themselves. Read per call, never latched.
+ *
+ * Returns the resume instant (ms) while paused, else null. An unparseable
+ * value fails closed with no known end (Infinity), like the switches above.
+ */
+export function withdrawalsPausedUntil(
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+  now: number = Date.now(),
+): number | null {
+  const raw = env.GATEWAY_WITHDRAWALS_PAUSED_UNTIL?.trim();
+  if (!raw) return null;
+  const until = Date.parse(raw);
+  if (Number.isNaN(until)) return Infinity;
+  return now < until ? until : null;
+}
+
+/** "Withdrawals are paused until 6:00 AM…" — Malaysia time, the only market. */
+export function withdrawalsPausedMessage(until: number): string {
+  if (!Number.isFinite(until))
+    return 'Withdrawals are paused. Please try again later.';
+  const at = new Date(until).toLocaleTimeString('en-US', {
+    timeZone: 'Asia/Kuala_Lumpur',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  return `Withdrawals are paused until ${at}. Please try again after ${at}.`;
 }
 
 /**
@@ -324,6 +360,13 @@ export async function startWithdrawal(
   verifyUrl: string,
 ): Promise<StartWithdrawalResult> {
   const gateway = input.gateway ?? paymentGateway();
+  const pausedUntil = withdrawalsPausedUntil();
+  if (pausedUntil !== null) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      withdrawalsPausedMessage(pausedUntil),
+    );
+  }
   if (!withdrawalsEnabled(process.env, gateway)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,

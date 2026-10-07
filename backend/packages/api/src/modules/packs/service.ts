@@ -1282,6 +1282,47 @@ class PacksModuleService extends MedusaService({
     return new Map(rows.map((r) => [r.customer_id, Number(r.turnover_cents)]));
   }
 
+  // Each referrer's direct downline for the settlement week containing
+  // `weekStart`, with that member's net pack turnover (cents, > 0 only),
+  // biggest spender first. THE basis rule: closeReferralWeek sums it into a
+  // line's basis_cents and the admin review screen lists it, so the two can't
+  // drift. Attribution is read live — after an admin re-attribution the
+  // listing can differ from a basis frozen at close.
+  @InjectManager()
+  async referralDownlineForWeek(
+    input: { weekStart: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, { customer_id: string; spend_cents: number }[]>> {
+    const week = referralWeekFor(input.weekStart);
+    const turnoverByCustomer = await this.packTurnoverCentsByCustomer(
+      { startUtc: week.startUtc, endUtcExcl: week.endUtcExcl },
+      sharedContext,
+    );
+    const spenderIds = [...turnoverByCustomer.keys()];
+    const attributions = spenderIds.length
+      ? await this.listReferralAttributions(
+          { customer_id: spenderIds },
+          { take: spenderIds.length },
+          sharedContext,
+        )
+      : [];
+    const byReferrer = new Map<
+      string,
+      { customer_id: string; spend_cents: number }[]
+    >();
+    for (const a of attributions) {
+      const t = turnoverByCustomer.get(a.customer_id) ?? 0;
+      if (t <= 0) continue;
+      const members = byReferrer.get(a.referrer_id) ?? [];
+      members.push({ customer_id: a.customer_id, spend_cents: t });
+      byReferrer.set(a.referrer_id, members);
+    }
+    for (const members of byReferrer.values()) {
+      members.sort((x, y) => y.spend_cents - x.spend_cents);
+    }
+    return byReferrer;
+  }
+
   // The Tuesday close ("TUES CHECK"): compute the just-ended week's referral
   // commissions into a DRAFT settlement run. No money moves here —
   // payWeeklySettlement (after the admin approve gate) does that.
@@ -1332,32 +1373,19 @@ class PacksModuleService extends MedusaService({
       return { settlementId: existing.id, created: false, lines: 0 };
     }
 
-    // Per-spender pack turnover inside the window, in cents.
-    const turnoverByCustomer = await this.packTurnoverCentsByCustomer(
-      { startUtc: week.startUtc, endUtcExcl: week.endUtcExcl },
+    // Commission: roll each spender's turnover up to their direct referrer.
+    const downline = await this.referralDownlineForWeek(
+      { weekStart: week.startUtc },
       sharedContext,
+    );
+    const downlineByReferrer = new Map<string, number>(
+      [...downline].map(([referrerId, members]) => [
+        referrerId,
+        members.reduce((sum, m) => sum + m.spend_cents, 0),
+      ]),
     );
 
     const settings = await this.getReferralSettings(sharedContext);
-
-    // Commission: roll each spender's turnover up to their direct referrer.
-    const spenderIds = [...turnoverByCustomer.keys()];
-    const attributions = spenderIds.length
-      ? await this.listReferralAttributions(
-          { customer_id: spenderIds },
-          { take: spenderIds.length },
-          sharedContext,
-        )
-      : [];
-    const downlineByReferrer = new Map<string, number>();
-    for (const a of attributions) {
-      const t = turnoverByCustomer.get(a.customer_id) ?? 0;
-      if (t <= 0) continue;
-      downlineByReferrer.set(
-        a.referrer_id,
-        (downlineByReferrer.get(a.referrer_id) ?? 0) + t,
-      );
-    }
     const referrerIds = [...downlineByReferrer.keys()];
     // Group rate first, manual rate second — see partnerBpForCustomers.
     const partnerBpByCustomer = await this.partnerBpForCustomers(

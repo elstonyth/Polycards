@@ -38,6 +38,7 @@ type Body = {
   gateway: string;
   deposits_enabled: boolean;
   withdrawals_enabled: boolean;
+  withdrawals_paused_until: string | null;
   deposit: { min_rm: number; max_rm: number };
   withdrawal: { min_rm: number; max_rm: number };
 };
@@ -69,5 +70,18 @@ describe('GET /store/payments/config — the active gateway money bands', () => 
     const h = harness(null);
     await GET(h.req as never, h.res as never);
     expect((h.res.body as Body).withdrawals_enabled).toBe(false);
+  });
+
+  it('reports withdrawals closed with the resume instant during a timed pause', async () => {
+    process.env.GATEWAY_WITHDRAWALS_PAUSED_UNTIL = '2999-01-01T06:00:00+08:00';
+    try {
+      const h = harness(null);
+      await GET(h.req as never, h.res as never);
+      const body = h.res.body as Body;
+      expect(body.withdrawals_enabled).toBe(false);
+      expect(body.withdrawals_paused_until).toBe('2998-12-31T22:00:00.000Z');
+    } finally {
+      delete process.env.GATEWAY_WITHDRAWALS_PAUSED_UNTIL;
+    }
   });
 });
