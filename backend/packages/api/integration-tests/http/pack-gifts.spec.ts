@@ -291,7 +291,7 @@ medusaIntegrationTestRunner({
       expect(res.status).toBe(200);
       const [first, second] = res.data.rolls;
       expect(first.pull).toMatchObject({ source: 'bonus', bonus_bp: 10000 });
-      expect(second.pull).toMatchObject({ source: 'bonus', bonus_bp: 3334 });
+      expect(second.pull).toMatchObject({ source: 'pack', bonus_bp: 3334 });
 
       const [debit] = await openRows();
       expect(debit.bonus_cents).toBe(-40000);
@@ -432,6 +432,67 @@ medusaIntegrationTestRunner({
         pull_id: null,
       });
       expect((await storeGifts())[0].count).toBe(1);
+    });
+
+    it('keeps a real-money open counting when a little bonus is left over', async () => {
+      await grantBonus(5, 'bonus-leftover');
+      await deposit(PRICE);
+      const res = await openBatch(1, 0);
+      expect(res.status).toBe(200);
+      // RM 5 of a RM 300 open is under half: a real-money open, which also
+      // unlocks the welcome card. The RM 5 still sells back as bonus.
+      expect(res.data.rolls[0].pull).toMatchObject({
+        source: 'pack',
+        bonus_bp: 167,
+      });
+      expect(await packs().hasPaidOpen(customerId)).toBe(true);
+    });
+
+    it('weights pulled value on the boards by the real-money share', async () => {
+      await grantBonus(PRICE / 2, 'bonus-half');
+      await deposit(PRICE / 2);
+      const res = await openBatch(1, 0);
+      const pull = res.data.rolls[0].pull;
+      expect(pull).toMatchObject({ source: 'bonus', bonus_bp: 5000 });
+
+      const [row] = (
+        await packs().leaderboardTop({ sinceMs: null, limit: 50 })
+      ).filter((r) => r.customer_id === customerId);
+      // Half real money: half the spend and half the card's value count.
+      expect(row.points).toBe((PRICE / 2) * 100);
+      expect(row.volume).toBeCloseTo(
+        (Number(pull.recorded_value_usd) * FX) / 2,
+        1,
+      );
+    });
+
+    it('audits a bonus grant with the balance read under the credit lock', async () => {
+      await grantBonus(20, 'audit-1');
+      await grantBonus(30, 'audit-2');
+      const rows = await packs().listAdminActionAudits({
+        action: 'grant_bonus_credit',
+      });
+      const second = rows.find(
+        (r) => (r.after as { bonus?: number } | null)?.bonus === 50,
+      );
+      expect(second?.before).toMatchObject({ bonus: 20 });
+    });
+
+    it('names leftover bonus on a deletion block, and revokes gifts on purge', async () => {
+      await grantBonus(5, 'bonus-delete');
+      const blocked = await packs().deleteAccountPreflight(customerId);
+      expect(blocked).toMatchObject({ ok: false, reason: 'BALANCE_NOT_ZERO' });
+      expect((blocked as { detail: string }).detail).toMatch(
+        /RM 5\.00 of it is bonus credit/,
+      );
+
+      // The operator's way out; then the purge takes the unopened gift along.
+      expect((await grantBonus(-5, 'bonus-delete-back')).status).toBe(200);
+      await giftPacks(1, 'delete');
+      await packs().purgeAccountPacksData(customerId);
+      const [gift] = await packs().listPackGifts({ customer_id: customerId });
+      expect(gift.revoked_by).toBe('account-deletion');
+      expect(gift.revoked_at).not.toBeNull();
     });
 
     it('rejects a bad kind on the credits route', async () => {

@@ -17,7 +17,7 @@ import { seedOf } from '../../../../utils/profile-handle';
 // one indexed aggregate over one customer's pulls, not a board-wide scan.
 //
 // Reads the SAME figure the weekly board ranks by (challengeWeekVolumeFor
-// shares the week anchor, the pulled-value expression and the source = 'pack'
+// shares the week anchor, the pulled-value expression and the real-money
 // filter with challengeWeekTop), so the gap the storefront renders can never
 // disagree with the row it is measured against.
 export async function GET(

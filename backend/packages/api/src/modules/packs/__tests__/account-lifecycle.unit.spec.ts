@@ -73,6 +73,7 @@ type PreflightSvc = PacksModuleService & {
   listGatewayDeposits: jest.Mock;
   listPulls: jest.Mock;
   listDeliveryOrders: jest.Mock;
+  creditSummary: jest.Mock;
 };
 
 const mkPreflight = (): PreflightSvc => {
@@ -84,6 +85,7 @@ const mkPreflight = (): PreflightSvc => {
   svc.listGatewayDeposits = jest.fn().mockResolvedValue([]);
   svc.listPulls = jest.fn().mockResolvedValue([]);
   svc.listDeliveryOrders = jest.fn().mockResolvedValue([]);
+  svc.creditSummary = jest.fn().mockResolvedValue({ bonusBalance: 0 });
   return svc;
 };
 
@@ -127,7 +129,24 @@ describe('deleteAccountPreflight', () => {
     const svc = mkPreflight();
     svc.rawLedgerBalanceCents.mockResolvedValue(1250);
     const r = await svc.deleteAccountPreflight('cus_1', CTX);
+    expect(r).toMatchObject({
+      ok: false,
+      reason: 'BALANCE_NOT_ZERO',
+      detail: 'Wallet balance is RM 12.50.',
+    });
+  });
+
+  // Bonus credit can never be withdrawn, so the block names it and the
+  // operator's way out (spec 2026-10-07).
+  it('names bonus credit inside a positive balance', async () => {
+    const svc = mkPreflight();
+    svc.rawLedgerBalanceCents.mockResolvedValue(1250);
+    svc.creditSummary.mockResolvedValue({ bonusBalance: 3.4 });
+    const r = await svc.deleteAccountPreflight('cus_1', CTX);
     expect(r).toMatchObject({ ok: false, reason: 'BALANCE_NOT_ZERO' });
+    expect((r as { detail: string }).detail).toBe(
+      'Wallet balance is RM 12.50. RM 3.40 of it is bonus credit, which cannot be withdrawn — take it back with a negative bonus grant first.',
+    );
   });
 
   // The debt case. A clawback-negative account owes us money, and `> 0` would

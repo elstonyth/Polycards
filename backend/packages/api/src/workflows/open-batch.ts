@@ -15,7 +15,7 @@ import { stampPackGiftsStep } from "./steps/stamp-pack-gifts";
 import {
   BONUS_BP_FULL,
   bonusBpFor,
-  pullSourceFor,
+  paidPullSource,
 } from "../modules/packs/bonus-credit";
 
 export type OpenBatchInput = {
@@ -93,16 +93,17 @@ export const openBatchWorkflow = createWorkflow(
       open_id: d.charged.open_id,
       cards: d.cards.map((c, i) => {
         const gift = i < d.charged.gifts;
-        const bonusSen = gift
-          ? 0
-          : (d.charge.bonus_cents_by_row[i - d.charged.gifts] ?? 0);
+        const bonusBp = gift
+          ? BONUS_BP_FULL
+          : bonusBpFor(
+              d.charge.bonus_cents_by_row[i - d.charged.gifts] ?? 0,
+              Math.round(d.charge.price * 100),
+            );
         return {
           card_id: c.handle,
           recorded_value_usd: c.recorded_value_usd,
-          source: pullSourceFor({ gift, bonusSen }),
-          bonus_bp: gift
-            ? BONUS_BP_FULL
-            : bonusBpFor(bonusSen, Math.round(d.charge.price * 100)),
+          source: gift ? ("gift" as const) : paidPullSource(bonusBp),
+          bonus_bp: bonusBp,
         };
       }),
       price: d.charge.total,
