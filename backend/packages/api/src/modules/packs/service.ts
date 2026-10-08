@@ -7698,8 +7698,9 @@ class PacksModuleService extends MedusaService({
       string,
       {
         balanceCents: number;
-        // VIP-basis net pack_open spend — the same expression creditSummary
-        // calls vip_spend_cents (NOT its differently-defined spend_cents).
+        // Net pack_open spend — creditSummary's vip_spend_cents expression
+        // (NOT its spend_cents) but WITHOUT the VIP reset cutoff: the Players
+        // list shows it as lifetime Turnover, which a VIP reset must not hide.
         vipSpendCents: number;
         lastSpendAt: string | null;
       }
@@ -7738,11 +7739,11 @@ class PacksModuleService extends MedusaService({
         last_spend_at: string | null;
       }[]
     >(
-      'SELECT ct.customer_id, ' +
-        '  COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS balance_cents, ' +
-        `  GREATEST(COALESCE(SUM(CASE WHEN ct.reason = 'pack_open' AND ${AFTER_VIP_RESET} THEN -${normalSenSql('ct.')} ELSE 0 END), 0), 0)::bigint AS vip_spend_cents, ` +
-        "  MAX(ct.created_at) FILTER (WHERE ct.reason = 'pack_open') AS last_spend_at " +
-        `FROM credit_transaction ct ${VIP_RESET_JOIN} WHERE ct.customer_id IN (${ph}) AND ct.deleted_at IS NULL GROUP BY ct.customer_id`,
+      'SELECT customer_id, ' +
+        '  COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
+        `  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -${normalSenSql()} ELSE 0 END), 0)::bigint AS vip_spend_cents, ` +
+        "  MAX(created_at) FILTER (WHERE reason = 'pack_open') AS last_spend_at " +
+        `FROM credit_transaction WHERE customer_id IN (${ph}) AND deleted_at IS NULL GROUP BY customer_id`,
       ids,
     );
     const vaults = await em.execute<
@@ -9206,6 +9207,10 @@ class PacksModuleService extends MedusaService({
   // Frames unlock off highest_level_ever, so they lock again; the caller
   // clears customer.metadata.equipped_frame_level (mutateCustomerMetadata
   // must not run inside a credit-locked transaction).
+  // ponytail: an open settling at the same instant can read its inputs before
+  // this commits and write the old peak back through the GREATEST ratchet.
+  // Ops resets idle accounts and re-reads the state after; guard the upsert
+  // on vip_reset_at if resets ever run on active players.
   @InjectTransactionManager()
   async resetVipLevel(
     customerId: string,

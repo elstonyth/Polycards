@@ -215,10 +215,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(Number(after.lifetime_external_spend_sen)).toBe(300);
         expect(after.highest_level_ever).toBe(2);
         expect((await service.creditSummary(customerId)).vipSpendTotal).toBe(3);
+        // The Players list Turnover is lifetime: a VIP reset does not hide it.
         const overview = await service.playersOverview([customerId], 1);
         expect(overview.wallet.get(customerId)).toMatchObject({
           balanceCents: 100,
-          vipSpendCents: 300,
+          vipSpendCents: 2900,
         });
 
         // Reversing the pre-reset open writes a post-reset +26 row: the net
