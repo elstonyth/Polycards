@@ -250,6 +250,22 @@ describe('shipVaultCards', () => {
     ]);
   });
 
+  // The courier needs the phone: these optional lines must survive the schema
+  // parse (zod drops undeclared keys) on their way to the reward route.
+  it('forwards the optional phone, second line and state', async () => {
+    const mem = backend({
+      'POST /store/rewards/withdraw': { body: { status: 'requested' } },
+    });
+    const full = {
+      ...ADDRESS,
+      address2: 'Jalan Awan Besar',
+      province: 'Kuala Lumpur',
+      phone: '+60123456789',
+    };
+    await shipVaultCards([], ['pull_1'], 'addr_1', full);
+    expect(mem.requests[0]?.body).toEqual({ pull_id: 'pull_1', address: full });
+  });
+
   it('routes ordinary and reward pulls to their own backends', async () => {
     const mem = backend({
       'POST /store/delivery-orders': { body: { order_id: 'do_1' } },
@@ -288,6 +304,61 @@ describe('shipVaultCards', () => {
         },
       ],
     });
+  });
+
+  // The cap is per customer per day: once it bites, the rest of the
+  // selection is refused the same way without a request each.
+  it('stops asking once the daily cap is reached', async () => {
+    let n = 0;
+    const mem = backend({
+      'POST /store/rewards/withdraw': () => ({
+        body: { status: n++ === 0 ? 'requested' : 'capped' },
+      }),
+    });
+    const capped = "You've hit today's reward shipping limit — try tomorrow.";
+    expect(
+      await shipVaultCards(
+        [],
+        ['pull_1', 'pull_2', 'pull_3'],
+        'addr_1',
+        ADDRESS,
+      ),
+    ).toEqual({
+      ok: true,
+      shippedIds: ['pull_1'],
+      skipped: [
+        { pullId: 'pull_2', reason: capped },
+        { pullId: 'pull_3', reason: capped },
+      ],
+    });
+    expect(mem.requests).toHaveLength(2);
+  });
+
+  it('stops asking once the phone gate refuses', async () => {
+    const mem = backend({
+      'POST /store/rewards/withdraw': {
+        status: 400,
+        body: { message: 'Verify your phone number before continuing.' },
+      },
+    });
+    const r = await shipVaultCards([], ['pull_1', 'pull_2'], 'addr_1', ADDRESS);
+    expect(r).toEqual({
+      ok: true,
+      shippedIds: [],
+      skipped: [
+        {
+          pullId: 'pull_1',
+          reason:
+            'Verify your phone number in Account settings before requesting delivery.',
+        },
+        {
+          pullId: 'pull_2',
+          reason:
+            'Verify your phone number in Account settings before requesting delivery.',
+        },
+      ],
+    });
+    expect(mem.requests).toHaveLength(1);
   });
 
   it('a per-card refusal becomes that card’s reason, not the whole submit’s', async () => {

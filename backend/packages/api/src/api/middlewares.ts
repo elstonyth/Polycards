@@ -1025,6 +1025,17 @@ export default defineMiddlewares({
       ],
     },
     {
+      // POST /store/rewards/withdraw ships a physical card — the same goods
+      // path as POST /store/delivery-orders, so it carries the same phone gate.
+      // Gate only: authenticate() and the rate limit come from the
+      // '/store/rewards/*' wildcard above, which Medusa's RoutesSorter
+      // registers BEFORE static matchers, so actor_id is set by the time this
+      // runs (pinned by integration-tests/http/phone-verification.spec.ts).
+      matcher: '/store/rewards/withdraw',
+      method: 'POST',
+      middlewares: [requirePhoneVerified],
+    },
+    {
       // Consolidated daily-rewards state (GET /store/daily) — the /daily
       // surface fetches it on load.
       matcher: '/store/daily',

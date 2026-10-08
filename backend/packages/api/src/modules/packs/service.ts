@@ -4608,14 +4608,9 @@ class PacksModuleService extends MedusaService({
     address: Partial<HttpTypes.StoreCustomerAddress>,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ status: 'requested' | 'capped' | 'invalid' }> {
-    // Defense-in-depth (spec §13): the route 403s when the global gate is off,
-    // but fail closed here too so every present/future caller stays dark until
-    // redemption launches. A withdrawal ships a prize that should not exist while
-    // the economy is dormant, so it is gated alongside claim + draw.
-    if (!rewardsRedemptionEnabled()) {
-      return { status: 'invalid' };
-    }
-
+    // Deliberately NOT behind rewardsRedemptionEnabled (2026-10-08): /task
+    // claims, free rips and challenge prizes mint live source='reward' pulls,
+    // and shipping one mints no value. See the withdraw route's header.
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
 
     // 0) Serialize against any concurrent credit/withdrawal mutation for THIS
@@ -4669,12 +4664,13 @@ class PacksModuleService extends MedusaService({
     //    is the DB session TZ). (created_at AT TIME ZONE 'UTC')::date compares the
     //    stored timestamptz in UTC against that JS-computed UTC day string, so the
     //    draw cap and the withdrawal cap roll over at the same instant. The lock
-    //    makes COUNT-then-INSERT atomic per customer.
+    //    makes COUNT-then-INSERT atomic per customer. A canceled order shipped
+    //    nothing, so it does not use up the day's allowance.
     const utcDay = new Date().toISOString().slice(0, 10);
     const { withdrawals_per_day } = await this.rewardsSettings(sharedContext);
     const countRows = await em.execute<{ n: string | null }[]>(
       `SELECT COUNT(*) AS n FROM delivery_order
-         WHERE customer_id = ? AND is_reward = TRUE
+         WHERE customer_id = ? AND is_reward = TRUE AND status <> 'canceled'
            AND (created_at AT TIME ZONE 'UTC')::date = ?::date AND deleted_at IS NULL`,
       [customerId, utcDay],
     );
