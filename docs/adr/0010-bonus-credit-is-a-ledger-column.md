@@ -26,10 +26,12 @@ never becomes withdrawable money.**
 - Each pull records `bonus_bp`, the share of its price that was bonus (10000 for
   a gifted pack). A sell-back pays that share back as bonus, so a card pulled
   with bonus cannot be washed into cash.
-- Gift and bonus pulls carry `source = 'gift' | 'bonus'`, so every positive
-  `source = 'pack'` count (boards, challenge, tasks, profile, welcome unlock)
-  excludes them; VIP and referral turnover and the economy's cash lines count
-  only the normal part of each row (`−amount·100 + bonus_cents`).
+- Gift pulls carry `source = 'gift'`, and a paid pull bonus paid at least half
+  of carries `source = 'bonus'`, so every positive `source = 'pack'` count
+  (tasks, profile, feed, welcome unlock) excludes them; VIP and referral
+  turnover and the economy's cash lines count only the normal part of each row
+  (`−amount·100 + bonus_cents`), and the boards' and challenge's value sums
+  weight each pull by its normal share (`bonus_bp`).
 - Reversals restore `bonus_cents`; the down migration refuses while any bonus
   row exists, because dropping the column would silently make bonus withdrawable.
 - See spec `docs/superpowers/specs/2026-10-07-vault-packs-bonus-credit-design.md`.

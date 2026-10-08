@@ -7,7 +7,7 @@ import type { Pack, PackCard, ResolvedPack } from '@/lib/packs-data';
 // Vault packs on the spin page (spec 2026-10-07 §1): the press sends
 // gifts = min(reels, held) on the paid route only, the count drops by what the
 // open consumed, and a refusal re-reads it. The count is keyed to the signed-in
-// customer — the server seed paints the first frame, never a press.
+// customer and read on the client only, so a press never uses a stale count.
 // The real machine renders here; only its theater (reel, reveal, sound,
 // motion) is stubbed. The real roll-batch seam runs, spied for the request.
 
@@ -183,7 +183,6 @@ afterEach(() => {
 async function render(
   props: {
     count?: number;
-    giftsHeld?: number | null;
     freeRipClaimId?: string;
   } = {},
 ) {
@@ -195,7 +194,6 @@ async function render(
         count: props.count ?? 1,
         publishedOdds: null,
         pool: POOL,
-        giftsHeld: props.giftsHeld ?? null,
         freeRipClaimId: props.freeRipClaimId ?? null,
       }),
     );
@@ -211,14 +209,15 @@ const spinButton = () =>
 const press = () => act(async () => spinButton().click());
 
 describe('SlotMachineClient — vault packs', () => {
-  test('the server seed paints, but Spin waits for the client read', async () => {
+  test('Spin waits for the one client read of the gifts', async () => {
     let resolve: (v: unknown) => void = () => {};
     mocks.getPackGifts.mockReturnValue(new Promise((r) => (resolve = r)));
-    await render({ giftsHeld: 1 });
-    expect(cost()).toBe('Bet Vault x1');
+    await render();
     expect(spinButton().disabled).toBe(true);
     await act(async () => resolve([gift(1)]));
+    expect(cost()).toBe('Bet Vault x1');
     expect(spinButton().disabled).toBe(false);
+    expect(mocks.getPackGifts).toHaveBeenCalledTimes(1);
   });
 
   test('a paid press sends gifts = min(reels, held); the count drops by what it used', async () => {
@@ -281,7 +280,7 @@ describe('SlotMachineClient — vault packs', () => {
     mocks.getPackGifts
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce([gift(1)]);
-    await render({ giftsHeld: 1 });
+    await render();
     // Paid spins are not blocked by an outage: full price, Spin enabled.
     expect(cost()).toBe('Bet RM300.00');
     expect(spinButton().disabled).toBe(false);

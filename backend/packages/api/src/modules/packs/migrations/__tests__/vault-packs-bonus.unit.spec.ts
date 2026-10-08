@@ -1,4 +1,6 @@
 import { Migration20261007120000 } from '../Migration20261007120000';
+import { Migration20261008100000 } from '../Migration20261008100000';
+import { BONUS_SOURCE_MIN_BP } from '../../bonus-credit';
 
 // The CHECKs on credit_transaction.reason and pull.source only change with a
 // migration. A value the model allows but the CHECK refuses fails every write
@@ -58,5 +60,20 @@ describe('Migration20261007120000 (pack gifts + bonus credit)', () => {
     );
     expect(sql).toMatch(/create table if not exists "pack_gift"/);
     expect(sql).toMatch(/"raw_value_myr" jsonb not null/);
+  });
+});
+
+describe('Migration20261008100000 (relabel old-rule bonus pulls)', () => {
+  it('relabels exactly the rows the half rule calls pack', async () => {
+    const sql: string[] = [];
+    const m = Object.create(Migration20261008100000.prototype) as {
+      addSql: (s: string) => void;
+      up: () => Promise<void>;
+    };
+    m.addSql = (s) => sql.push(s);
+    await m.up();
+    expect(sql).toEqual([
+      `update "pull" set "source" = 'pack' where "source" = 'bonus' and "bonus_bp" < ${BONUS_SOURCE_MIN_BP};`,
+    ]);
   });
 });

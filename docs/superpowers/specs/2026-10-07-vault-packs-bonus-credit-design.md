@@ -206,8 +206,13 @@ DB CHECK `credit_transaction_reason_check` (migration), and the storefront mirro
 
 - `source`: `pack | reward | free | gift | bonus` (model-owned CHECK — migration).
   - `gift` — a row covered by a Pack Gift.
-  - `bonus` — a paid row whose price was at least partly bonus-funded.
-  - `pack` — a paid row funded entirely by normal credit (unchanged).
+  - `bonus` — a paid row bonus credit paid at least half of
+    (`bonus_bp ≥ 5000`).
+  - `pack` — any other paid row (unchanged). As built (review 2026-10-08):
+    the first cut called a row `bonus` for ANY bonus, so a few ringgit of
+    leftover bonus made a real-money open count toward nothing, and kept a
+    paying player's welcome card locked. The half rule fixes the counts; the
+    value sums below never depended on the label.
 - `bonus_bp` integer 0–10000, default 0: the share of a future sell-back paid as
   bonus. `gift` = 10000; `bonus` = round(bonus sen of the row ÷ price sen × 10000);
   everything else 0.
@@ -411,6 +416,25 @@ Unit: the allocation math and the buyback split as pure functions, beside
 Storefront: vitest for the label builder (`Vault xG + RM …`); Playwright screenshots
 against the mock backend for the vault Packs row, pack page (qty 1/2), spin bet line
 (1 row, + row, 2 gifts), reveal sell label, wallet breakdown.
+
+As built (review 2026-10-08):
+
+- Value-based boards weight each pull by its normal share,
+  `(10000 − bonus_bp) / 10000`, over pulls real money paid part of
+  (`source IN ('pack','bonus') AND bonus_bp < 10000`): the leaderboard's
+  volume (matching its spend, which is each open's normal part), the challenge
+  pool, the challenge top and one player's challenge figure. A part-bonus open
+  neither drops its card nor counts its bonus part.
+- One spelling of "the normal part" for SQL: `normalSenSql` /
+  `reasonCashSenSql` in `bonus-credit.ts`.
+- Finance pack sales count `pack` + `bonus` opens beside a revenue that
+  includes both opens' normal part.
+- Account deletion: the balance block names any bonus inside it and the way
+  out (a negative bonus grant); the purge revokes unopened gifts
+  (`revoked_by = 'account-deletion'`).
+- A bonus grant's audit row reads the bonus balance from the write's own
+  locked read (`mutateCreditAtomic` returns it).
+- The spin page reads gifts on the client only (one call, not two).
 
 ## 11. Rollout
 

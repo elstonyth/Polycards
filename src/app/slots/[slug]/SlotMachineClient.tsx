@@ -138,15 +138,10 @@ export default function SlotMachineClient({
   demoPool = null,
   demoOdds = null,
   freeRipClaimId = null,
-  giftsHeld = null,
 }: {
   pack: ResolvedPack & Pack;
   recentPulls: RecentPull[];
   count: number;
-  /** Vault packs (gifts) held for THIS pack, read server-side; null = not
-   *  read (a guest, or a failed call). First paint only — the machine
-   *  re-reads for the signed-in customer before a paid Spin. */
-  giftsHeld?: number | null;
   /** Admin-published PUBLIC odds for the OddsSheet; null = not published. */
   publishedOdds: PublishedOdds | null;
   /** Odds SET 3's real tier split (backend-aggregated) — the demo draw's
@@ -220,9 +215,9 @@ export default function SlotMachineClient({
   // Vault packs (spec 2026-10-07 §1). Use order on every open is gifts →
   // bonus credit → normal credit; gifts cover rows first, and only on the
   // PAID route — a free rip / welcome pack is already free and wins. The count
-  // is keyed to the customer + pack it was read for (like PackDetailClient):
-  // the server's seed (`key: null`) paints the first frame only, and a press
-  // waits for a client read for whoever is signed in NOW — an account switch
+  // is keyed to the customer + pack it was read for (like PackDetailClient),
+  // read on the client only, and a press waits for that read for whoever is
+  // signed in NOW — a server seed would be a second call, and an account switch
   // without a reload, or a Back-restored page, would otherwise act on a stale
   // count (stale-low charges full price for a gift-covered row). null = re-read
   // (mount, a stale-gift refusal, Retry). A failed read settles at 0 —
@@ -231,14 +226,14 @@ export default function SlotMachineClient({
   const customerId = customer?.id ?? null;
   const giftKey = customerId ? `${customerId}:${pack.id}` : null;
   const [gifts, setGifts] = useState<{
-    key: string | null;
+    key: string;
     count: number;
     failed?: boolean;
-  } | null>(giftsHeld === null ? null : { key: null, count: giftsHeld });
+  } | null>(null);
   const giftsRead = giftKey !== null && gifts?.key === giftKey;
   const giftsPending = giftKey !== null && !giftsRead;
   const giftsFailed = giftsRead && gifts?.failed === true;
-  const held = giftsRead || gifts?.key === null ? (gifts?.count ?? 0) : 0;
+  const held = giftsRead ? (gifts?.count ?? 0) : 0;
   useEffect(() => {
     if (!giftsPending || !giftKey) return;
     let live = true;

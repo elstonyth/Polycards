@@ -5,7 +5,9 @@ import {
   bonusShareMyr,
   bonusShareSen,
   consumeBonusSen,
-  pullSourceFor,
+  normalSenSql,
+  paidPullSource,
+  reasonCashSenSql,
 } from '../bonus-credit';
 
 describe('bonus credit math', () => {
@@ -44,9 +46,21 @@ describe('bonus credit math', () => {
     expect(bonusShareMyr(0.07, 5000)).toBe(0.04);
   });
 
-  it('labels a row by how it was paid', () => {
-    expect(pullSourceFor({ gift: true, bonusSen: 0 })).toBe('gift');
-    expect(pullSourceFor({ gift: false, bonusSen: 1 })).toBe('bonus');
-    expect(pullSourceFor({ gift: false, bonusSen: 0 })).toBe('pack');
+  it('calls a paid row a bonus open only when bonus paid at least half', () => {
+    // RM 5 of leftover bonus on a RM 300 open: still a real-money open.
+    expect(paidPullSource(bonusBpFor(500, 30000))).toBe('pack');
+    expect(paidPullSource(4999)).toBe('pack');
+    expect(paidPullSource(5000)).toBe('bonus');
+    expect(paidPullSource(BONUS_BP_FULL)).toBe('bonus');
+    expect(paidPullSource(0)).toBe('pack');
+  });
+
+  it('spells the normal part of a ledger row one way', () => {
+    expect(normalSenSql()).toBe('(ROUND(amount * 100) - COALESCE(bonus_cents, 0))');
+    expect(normalSenSql('ct.')).toBe(
+      '(ROUND(ct.amount * 100) - COALESCE(ct.bonus_cents, 0))',
+    );
+    // A bonus grant is all bonus: its own bucket keeps the whole amount.
+    expect(reasonCashSenSql()).toContain("WHEN reason = 'bonus_grant' THEN ROUND(amount * 100)");
   });
 });

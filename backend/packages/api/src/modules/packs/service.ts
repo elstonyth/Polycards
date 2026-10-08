@@ -158,8 +158,12 @@ import {
 import { consumeExternalSen } from './external-funded';
 import {
   BONUS_NOT_SPENDABLE_MESSAGE,
+  NORMAL_SHARE_SQL,
+  REAL_MONEY_PULL_SQL,
   bonusShareSen,
   consumeBonusSen,
+  normalSenSql,
+  reasonCashSenSql,
 } from './bonus-credit';
 import { recomputeExternalStamps } from './external-backfill';
 import { levelForSpend } from './vip-ladder';
@@ -1271,7 +1275,7 @@ class PacksModuleService extends MedusaService({
     >(
       // Normal part only — bonus-funded opens pay no commission (spec
       // 2026-10-07); bonus_cents is ≤ 0 on an open, ≥ 0 on its reversal.
-      'SELECT customer_id, COALESCE(SUM(ROUND(-amount * 100) + COALESCE(bonus_cents, 0)), 0)::bigint AS turnover_cents ' +
+      `SELECT customer_id, COALESCE(SUM(-${normalSenSql()}), 0)::bigint AS turnover_cents ` +
         'FROM credit_transaction ' +
         "WHERE reason = 'pack_open' AND deleted_at IS NULL " +
         filter +
@@ -2003,7 +2007,7 @@ class PacksModuleService extends MedusaService({
         'FROM ( ' +
         '  SELECT ra.customer_id, ' +
         '    COALESCE(SUM(CASE WHEN ct.created_at >= ? AND ct.created_at < ? ' +
-        '      THEN ROUND(-ct.amount * 100) + COALESCE(ct.bonus_cents, 0) ELSE 0 END), 0)::bigint AS per_customer ' +
+        `      THEN -${normalSenSql('ct.')} ELSE 0 END), 0)::bigint AS per_customer ` +
         '  FROM referral_attribution ra ' +
         '  LEFT JOIN credit_transaction ct ON ct.customer_id = ra.customer_id ' +
         "    AND ct.reason = 'pack_open' AND ct.deleted_at IS NULL " +
@@ -3175,7 +3179,7 @@ class PacksModuleService extends MedusaService({
         "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -external_funded_cents ELSE 0 END), 0)::bigint AS ext_spend_cents, " +
         // VIP basis = the NORMAL part of opens: bonus-funded play counts
         // toward nothing (spec 2026-10-07); bonus_cents is ≤ 0 on an open.
-        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN ROUND(-amount * 100) + COALESCE(bonus_cents, 0) ELSE 0 END), 0)::bigint AS vip_spend_cents, " +
+        `  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -${normalSenSql()} ELSE 0 END), 0)::bigint AS vip_spend_cents, ` +
         `  COALESCE(SUM(CASE WHEN ${DEPOSITED_PT_FILTER} THEN ROUND(amount * 100) ELSE 0 END), 0)::bigint AS deposited_pt_cents, ` +
         '  COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
         'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
@@ -3294,6 +3298,9 @@ class PacksModuleService extends MedusaService({
      * ORIGINAL charge reference, so callers can echo it instead of a fresh
      * one that would read as a second successful charge (sim P2-4). */
     reference: string | null;
+    /** Bonus balance after the write (MYR), read under the lock. Absent on a
+     *  replay, which wrote nothing. */
+    bonusBalance?: number;
   }> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
 
@@ -3499,6 +3506,7 @@ class PacksModuleService extends MedusaService({
       amount: deltaCents / 100,
       replayed: false,
       reference: input.reference ?? null,
+      bonusBalance: (bonusBeforeCents + bonusDeltaCents) / 100,
     };
   }
 
@@ -6309,6 +6317,16 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     if (balanceCents !== 0) {
+      // Bonus credit (spec 2026-10-07) can never be withdrawn, so a balance
+      // holding some needs the operator's way out named: take it back with a
+      // negative bonus grant, then delete.
+      const bonusCents =
+        balanceCents > 0
+          ? Math.round(
+              (await this.creditSummary(customerId, sharedContext))
+                .bonusBalance * 100,
+            )
+          : 0;
       return {
         ok: false,
         reason: 'BALANCE_NOT_ZERO',
@@ -6316,7 +6334,10 @@ class PacksModuleService extends MedusaService({
         // refused; the copy just has to be honest about which one it is.
         detail:
           balanceCents > 0
-            ? `Wallet balance is RM ${(balanceCents / 100).toFixed(2)}.`
+            ? `Wallet balance is RM ${(balanceCents / 100).toFixed(2)}.` +
+              (bonusCents > 0
+                ? ` RM ${(bonusCents / 100).toFixed(2)} of it is bonus credit, which cannot be withdrawn — take it back with a negative bonus grant first.`
+                : '')
             : `Account owes RM ${(Math.abs(balanceCents) / 100).toFixed(2)}.`,
       };
     }
@@ -6514,6 +6535,13 @@ class PacksModuleService extends MedusaService({
       `delete from "notification_read" where "customer_id" = ?`,
       [customerId],
     );
+    // Unopened vault packs (spec 2026-10-07) go with the account: revoked, so
+    // none outlives it as "unopened". The rows stay as the record of the grant.
+    await em.execute(
+      `UPDATE pack_gift SET revoked_at = now(), revoked_by = 'account-deletion', ` +
+        `updated_at = now() WHERE customer_id = ? AND ${UNOPENED_GIFT_SQL}`,
+      [customerId],
+    );
 
     // The account-state row is the TOMBSTONE, not garbage. Soft-deleting it is
     // what would re-open the account: isAccountDisabled reads through
@@ -6707,9 +6735,10 @@ class PacksModuleService extends MedusaService({
   // draw-time USD value (recorded_value_usd, stamped by the open workflows so a
   // mid-week price sync can't rewrite history), falling back to live
   // market_value(USD) × the card's multiplier for pre-backfill rows — × the
-  // live FX rate. Only source='pack' pulls count: reward-box prizes and free
-  // welcome pulls are not played packs (positive filter, so a future fourth
-  // source can never leak onto the board by default).
+  // live FX rate. Only pulls real money paid for count (REAL_MONEY_PULL_SQL:
+  // 'pack' and part-bonus 'bonus' rows), each in its normal share: reward-box
+  // prizes, free welcome pulls and gifts are not played packs (positive
+  // filter, so a future source can never leak onto the board by default).
   //
   // sinceMs = null → all-time; a timestamp → weekly window.
   @InjectManager()
@@ -6749,21 +6778,28 @@ class PacksModuleService extends MedusaService({
       'WITH spend AS ( ' +
         // Normal part only: bonus-funded opens count toward nothing (spec
         // 2026-10-07); bonus_cents is ≤ 0 on an open, ≥ 0 on its reversal.
-        '  SELECT customer_id, SUM(ROUND(-amount * 100) + COALESCE(bonus_cents, 0))::bigint AS spend_cents ' +
+        `  SELECT customer_id, SUM(-${normalSenSql()})::bigint AS spend_cents ` +
         '    FROM credit_transaction ' +
         "   WHERE reason = 'pack_open' " +
         '     AND deleted_at IS NULL AND customer_id IS NOT NULL ' +
         (since === null ? '' : '     AND created_at >= ?::timestamptz ') +
         '   GROUP BY customer_id ' +
-        '   HAVING SUM(ROUND(-amount * 100) + COALESCE(bonus_cents, 0)) > 0 ' +
+        `   HAVING SUM(-${normalSenSql()}) > 0 ` +
         '), wins AS ( ' +
+        // Each pull's value counts in its NORMAL share only (bonus_bp), the
+        // same split as the spend above, so a part-bonus open neither drops
+        // its card nor counts its bonus part.
         '  SELECT pu.customer_id, COUNT(*) AS pulls, ' +
-        '         SUM(' +
+        '         SUM((' +
         PULLED_VALUE_USD_SQL +
+        ') * ' +
+        NORMAL_SHARE_SQL +
         ') AS volume_usd ' +
         '    FROM pull pu ' +
         '    LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
-        "   WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source = 'pack' " +
+        '   WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND ' +
+        REAL_MONEY_PULL_SQL +
+        ' ' +
         (since === null ? '' : '     AND pu.rolled_at >= ?::timestamptz ') +
         '   GROUP BY pu.customer_id ' +
         ') ' +
@@ -7179,7 +7215,7 @@ class PacksModuleService extends MedusaService({
     let sql =
       // The NORMAL part of every row (spec 2026-10-07): bonus spent on opens
       // and paid back on sells is not cash; bonus_grant is its own bucket.
-      "SELECT reason, COALESCE(SUM(ROUND(amount * 100) - CASE WHEN reason = 'bonus_grant' THEN 0 ELSE COALESCE(bonus_cents, 0) END), 0)::bigint AS cents " +
+      `SELECT reason, COALESCE(SUM(${reasonCashSenSql()}), 0)::bigint AS cents ` +
       'FROM credit_transaction WHERE deleted_at IS NULL';
     if (from) {
       sql += ' AND created_at >= ?::timestamptz';
@@ -7694,7 +7730,7 @@ class PacksModuleService extends MedusaService({
     >(
       'SELECT customer_id, ' +
         '  COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
-        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN ROUND(-amount * 100) + COALESCE(bonus_cents, 0) ELSE 0 END), 0)::bigint AS vip_spend_cents, " +
+        `  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -${normalSenSql()} ELSE 0 END), 0)::bigint AS vip_spend_cents, ` +
         "  MAX(created_at) FILTER (WHERE reason = 'pack_open') AS last_spend_at " +
         `FROM credit_transaction WHERE customer_id IN (${ph}) AND deleted_at IS NULL GROUP BY customer_id`,
       ids,
@@ -8337,12 +8373,7 @@ class PacksModuleService extends MedusaService({
     // same fix as Task 4's topUpCreditsWithLedger. The audit "before" calc
     // and the return value below intentionally keep input.amount — untouched,
     // out of this fix's scope.
-    // The bonus balance before the write, for the audit row (informational:
-    // read on this transaction, ahead of mutateCreditAtomic's lock).
-    const bonusBefore = input.bonus
-      ? (await this.creditSummary(input.customerId, sharedContext)).bonusBalance
-      : null;
-    const { id, balance, amount } = await this.mutateCreditAtomic(
+    const { id, balance, amount, bonusBalance } = await this.mutateCreditAtomic(
       {
         customerId: input.customerId,
         amount: input.amount,
@@ -8360,20 +8391,19 @@ class PacksModuleService extends MedusaService({
         entity_type: 'credit',
         entity_id: id,
         action: input.bonus ? 'grant_bonus_credit' : 'adjust_credit',
+        // A bonus grant also records the bonus balance, as read under the
+        // credit lock that wrote it.
         before:
-          bonusBefore === null
-            ? { balance: Number((balance - input.amount).toFixed(2)) }
-            : {
+          input.bonus && bonusBalance !== undefined
+            ? {
                 balance: Number((balance - input.amount).toFixed(2)),
-                bonus: bonusBefore,
-              },
+                bonus: Number((bonusBalance - input.amount).toFixed(2)),
+              }
+            : { balance: Number((balance - input.amount).toFixed(2)) },
         after:
-          bonusBefore === null
-            ? { balance }
-            : {
-                balance,
-                bonus: Number((bonusBefore + input.amount).toFixed(2)),
-              },
+          input.bonus && bonusBalance !== undefined
+            ? { balance, bonus: bonusBalance }
+            : { balance },
         reason: input.note,
       },
       sharedContext,
@@ -9094,7 +9124,7 @@ class PacksModuleService extends MedusaService({
       // far as changing it. WON'T-FIX — ADR 0003, "Reversal exclusion".
       // The NORMAL part only: bonus-funded play counts toward nothing (spec
       // 2026-10-07); bonus_cents is ≤ 0 on an open debit.
-      `SELECT COALESCE(SUM(ROUND(-amount * 100) + COALESCE(bonus_cents, 0)), 0)::bigint AS sen
+      `SELECT COALESCE(SUM(-${normalSenSql()}), 0)::bigint AS sen
          FROM credit_transaction
         WHERE customer_id = ? AND reason = 'pack_open' AND amount < 0 AND deleted_at IS NULL`,
       [customerId],
@@ -10142,7 +10172,7 @@ class PacksModuleService extends MedusaService({
   // customers (recorded draw-time USD value, live FMV × multiplier fallback
   // for pre-backfill rows, × FX → MYR) since the week anchor (shared
   // CHALLENGE_WEEK_ANCHOR_CTE). Mirrors leaderboardTop's wins CTE
-  // (source = 'pack' — reward and free pulls excluded); read-only, so the
+  // (real-money pulls in their normal share); read-only, so the
   // pool is REAL ledger data even while the reward settlement engine is inert.
   @InjectManager()
   async challengeWeekPool(
@@ -10155,12 +10185,16 @@ class PacksModuleService extends MedusaService({
     const [row] = await em.execute<{ pooled_myr: string | null }[]>(
       CHALLENGE_WEEK_ANCHOR_CTE +
         'SELECT ' +
-        '  ROUND(COALESCE(SUM(' +
+        '  ROUND(COALESCE(SUM((' +
         PULLED_VALUE_USD_SQL +
+        ') * ' +
+        NORMAL_SHARE_SQL +
         '), 0) * ? * 100) / 100 AS pooled_myr ' +
         '  FROM pull pu ' +
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
-        " WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source = 'pack' " +
+        ' WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND ' +
+        REAL_MONEY_PULL_SQL +
+        ' ' +
         '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
         '   AND pu.rolled_at <  (SELECT end_utc FROM anchor)',
       [...challengeWeekAnchorParams(opts), DEFAULT_MARKET_MULTIPLIER, fxRate],
@@ -10186,12 +10220,16 @@ class PacksModuleService extends MedusaService({
     >(
       CHALLENGE_WEEK_ANCHOR_CTE +
         'SELECT pu.customer_id, COUNT(*) AS pulls, ' +
-        '       ROUND(SUM(' +
+        '       ROUND(SUM((' +
         PULLED_VALUE_USD_SQL +
+        ') * ' +
+        NORMAL_SHARE_SQL +
         ') * ? * 100) / 100 AS volume_myr ' +
         '  FROM pull pu ' +
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
-        " WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source = 'pack' " +
+        ' WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND ' +
+        REAL_MONEY_PULL_SQL +
+        ' ' +
         '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
         '   AND pu.rolled_at <  (SELECT end_utc FROM anchor) ' +
         ' GROUP BY pu.customer_id ' +
@@ -10214,7 +10252,7 @@ class PacksModuleService extends MedusaService({
   // The SAME weekly pulled-value figure as challengeWeekTop, for ONE customer.
   // Exists because the board is a top-10 SLICE: a player below it has no row
   // there, so nothing can say how far off they are. Shares the anchor CTE, the
-  // pulled-value expression and the source = 'pack' filter with the board and
+  // pulled-value expression and the real-money filter with the board and
   // the pool, so the gap the storefront renders can never disagree with the
   // row it is measured against.
   //
@@ -10235,12 +10273,16 @@ class PacksModuleService extends MedusaService({
     >(
       CHALLENGE_WEEK_ANCHOR_CTE +
         'SELECT COUNT(*) AS pulls, ' +
-        '       ROUND(COALESCE(SUM(' +
+        '       ROUND(COALESCE(SUM((' +
         PULLED_VALUE_USD_SQL +
+        ') * ' +
+        NORMAL_SHARE_SQL +
         '), 0) * ? * 100) / 100 AS volume_myr ' +
         '  FROM pull pu ' +
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
-        " WHERE pu.deleted_at IS NULL AND pu.source = 'pack' " +
+        ' WHERE pu.deleted_at IS NULL AND ' +
+        REAL_MONEY_PULL_SQL +
+        ' ' +
         '   AND pu.customer_id = ? ' +
         '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
         '   AND pu.rolled_at <  (SELECT end_utc FROM anchor)',

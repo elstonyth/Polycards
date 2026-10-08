@@ -61,12 +61,36 @@ export function bonusShareMyr(amount: number, bp: number): number {
   return bonusShareSen(Math.round(amount * 100), bp) / 100;
 }
 
-/** A pull's source from how its row was paid: a gift, any bonus, or neither.
- *  Only 'pack' counts toward the boards, tasks, VIP and the welcome unlock. */
-export function pullSourceFor(row: {
-  gift: boolean;
-  bonusSen: number;
-}): 'gift' | 'bonus' | 'pack' {
-  if (row.gift) return 'gift';
-  return row.bonusSen > 0 ? 'bonus' : 'pack';
+/** A paid row is a bonus open when bonus credit paid at least half its price.
+ *  Below that it stays 'pack': a few ringgit of leftover bonus must not
+ *  disqualify a real-money open from the counts (tasks, achievements, the
+ *  welcome unlock, the feed). Value sums never depend on this — they weight
+ *  every row by its normal share (NORMAL_SHARE_SQL). */
+export const BONUS_SOURCE_MIN_BP = 5_000;
+
+/** The source of a PAID (not gifted, not free) pull from its bonus share. */
+export function paidPullSource(bonusBp: number): 'bonus' | 'pack' {
+  return bonusBp >= BONUS_SOURCE_MIN_BP ? 'bonus' : 'pack';
 }
+
+// ── SQL fragments ────────────────────────────────────────────────────────────
+// One spelling of "the part that is not bonus", so no query that sums money
+// can quietly count bonus as cash. Pass the table alias with its dot ('ct.').
+
+/** A credit_transaction row's NORMAL sen, signed like the row. Negate it for
+ *  spend: an open's normal spend is `-(normalSenSql())`. */
+export const normalSenSql = (t = ''): string =>
+  `(ROUND(${t}amount * 100) - COALESCE(${t}bonus_cents, 0))`;
+
+/** Per-reason cash totals: every row's normal part, except a bonus_grant,
+ *  which IS the bonus (its own bucket, never cash). */
+export const reasonCashSenSql = (t = ''): string =>
+  `CASE WHEN ${t}reason = 'bonus_grant' THEN ROUND(${t}amount * 100) ELSE ${normalSenSql(t)} END`;
+
+/** A pull (alias `pu`) that real money paid for, in whole or in part. */
+export const REAL_MONEY_PULL_SQL =
+  "pu.source IN ('pack', 'bonus') AND pu.bonus_bp < 10000";
+
+/** The normal-money share of a pull (alias `pu`), 0..1: value sums on the
+ *  boards and the challenge multiply each pull's value by it. */
+export const NORMAL_SHARE_SQL = '((10000 - pu.bonus_bp) / 10000.0)';

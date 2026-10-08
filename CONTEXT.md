@@ -41,10 +41,12 @@ _Avoid_: buy, purchase, spin, draw
 The record of one prize acquisition — a pack Open (`source='pack'`), a product
 win from a Reward Draw (`source='reward'`), or the one-time Free Welcome Pack
 open (`source='free'`), an opened Pack Gift (`source='gift'`) or a paid open
-that spent any Bonus Credit (`source='bonus'`). The append-only source of truth
-for the live-pulls feed, the leaderboard, and the Vault. Only `source='pack'`
-counts toward the boards, the challenge, tasks, achievements, VIP and the
-welcome unlock.
+that Bonus Credit paid at least half of (`source='bonus'`). The append-only
+source of truth for the live-pulls feed, the leaderboard, and the Vault. Only
+`source='pack'` counts toward tasks, achievements, the feed and the welcome
+unlock. Money and value never depend on the source: VIP, referral and board
+spend take each open's normal part, and board and challenge value take each
+pull's normal share (`bonus_bp`).
 _Avoid_: spin, roll, result
 
 **Free Welcome Pack**:
