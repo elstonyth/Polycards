@@ -183,7 +183,15 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
         const { req, res, captured } = makeReqRes({
           customerId,
-          body: { pull_id: pull.id, address: ADDRESS },
+          body: {
+            pull_id: pull.id,
+            address: {
+              ...ADDRESS,
+              address2: 'Jalan Awan Besar',
+              province: 'Kuala Lumpur',
+              phone: '+60123456789',
+            },
+          },
         });
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await withdrawPOST(req as any, res as any);
@@ -191,6 +199,15 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect((captured.body as { status: string }).status).toBe('requested');
         const [after] = await service.listPulls({ id: pull.id }, { take: 1 });
         expect(after.status).toBe('delivering');
+        // The optional lines reach the order, as they do on a paid shipment —
+        // ops needs the phone to hand the parcel to a courier.
+        const [order] = await service.listDeliveryOrders(
+          { customer_id: customerId },
+          { take: 1 },
+        );
+        expect(order.ship_address_2).toBe('Jalan Awan Besar');
+        expect(order.ship_province).toBe('Kuala Lumpur');
+        expect(order.ship_phone).toBe('+60123456789');
       });
     });
 

@@ -250,6 +250,22 @@ describe('shipVaultCards', () => {
     ]);
   });
 
+  // The courier needs the phone: these optional lines must survive the schema
+  // parse (zod drops undeclared keys) on their way to the reward route.
+  it('forwards the optional phone, second line and state', async () => {
+    const mem = backend({
+      'POST /store/rewards/withdraw': { body: { status: 'requested' } },
+    });
+    const full = {
+      ...ADDRESS,
+      address2: 'Jalan Awan Besar',
+      province: 'Kuala Lumpur',
+      phone: '+60123456789',
+    };
+    await shipVaultCards([], ['pull_1'], 'addr_1', full);
+    expect(mem.requests[0]?.body).toEqual({ pull_id: 'pull_1', address: full });
+  });
+
   it('routes ordinary and reward pulls to their own backends', async () => {
     const mem = backend({
       'POST /store/delivery-orders': { body: { order_id: 'do_1' } },

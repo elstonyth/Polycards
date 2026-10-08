@@ -42,6 +42,9 @@ type WithdrawAddressBody = {
   city?: unknown;
   postalCode?: unknown;
   countryCode?: unknown;
+  address2?: unknown;
+  province?: unknown;
+  phone?: unknown;
 };
 
 export async function POST(
@@ -91,18 +94,25 @@ export async function POST(
     throw new MedusaError(MedusaError.Types.INVALID_DATA, MY_ONLY_MESSAGE);
   }
 
+  // Optional lines of the saved address. The paid path snapshots them from the
+  // address book; without them a reward shipment reached ops with no phone for
+  // the courier and no second address line.
+  const optional = (v: unknown): string | undefined =>
+    typeof v === 'string' && v.trim() !== '' ? v : undefined;
+
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const result = await packs.recordRewardWithdrawal(
-    customerId,
-    pullId,
-    fields as {
+  const result = await packs.recordRewardWithdrawal(customerId, pullId, {
+    ...(fields as {
       first_name: string;
       last_name: string;
       address_1: string;
       city: string;
       postal_code: string;
       country_code: string;
-    },
-  );
+    }),
+    address_2: optional(addr?.address2),
+    province: optional(addr?.province),
+    phone: optional(addr?.phone),
+  });
   res.json(result);
 }

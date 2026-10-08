@@ -9,8 +9,10 @@ import type { AddressView } from '@/lib/actions/delivery';
 // fee. The preview used to price the whole selection, so a task-reward card
 // alone showed "Total — deducted from balance RM 15.00" (2026-10-08 report).
 
+const mocks = vi.hoisted(() => ({ shipVaultCards: vi.fn() }));
+
 vi.mock('@/lib/actions/delivery', () => ({
-  shipVaultCards: vi.fn(),
+  shipVaultCards: mocks.shipVaultCards,
   addAddress: vi.fn(),
 }));
 vi.mock('@/components/SlabImage', () => ({
@@ -33,12 +35,12 @@ const ADDRESS: AddressView = {
   firstName: 'Tan',
   lastName: 'Kah Meng',
   line1: 'S-11-3A Waltz Residence',
-  line2: null,
+  line2: 'Jalan Awan Besar',
   city: 'Kuala Lumpur',
   province: 'Kuala Lumpur',
   postalCode: '58200',
   countryCode: 'MY',
-  phone: null,
+  phone: '+60123456789',
 } as AddressView;
 
 const item = (pullId: string, source: string, priceMyr: number) =>
@@ -88,5 +90,30 @@ describe('RequestDeliveryModal fee preview', () => {
     expect(text).toContain('Total — deducted from balance');
     expect(text).toContain('RM 15.00');
     expect(text).not.toContain('Insurance');
+  });
+});
+
+describe('RequestDeliveryModal reward shipping address', () => {
+  test('sends the saved phone, second line and state', async () => {
+    mocks.shipVaultCards.mockResolvedValue({
+      ok: true,
+      shippedIds: ['pull_r'],
+      skipped: [],
+    });
+    render([item('pull_r', 'reward', 12)]);
+    const submit = [...host.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Request delivery',
+    )!;
+    await act(async () => submit.click());
+    expect(mocks.shipVaultCards).toHaveBeenCalledWith(
+      [],
+      ['pull_r'],
+      'addr_1',
+      expect.objectContaining({
+        address2: 'Jalan Awan Besar',
+        province: 'Kuala Lumpur',
+        phone: '+60123456789',
+      }),
+    );
   });
 });

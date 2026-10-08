@@ -154,6 +154,9 @@ export default function RequestDeliveryModal({
         city: addr.city,
         postalCode: addr.postalCode,
         countryCode: addr.countryCode,
+        address2: addr.line2,
+        province: addr.province,
+        phone: addr.phone,
       });
       if (!res.ok) {
         setError(res.error);
