@@ -795,7 +795,7 @@
     "registered": "Registered",
     "lastSpend": "Last turnover",
     "status": "Status",
-    "searchPlaceholder": "Search name, email or phone",
+    "searchPlaceholder": "Search name, email, phone or @handle",
     "disableTitle": "Disable this player?",
     "disableDesc": "They will be signed out and blocked from logging in. Their credits and vault are untouched.",
     "enableTitle": "Enable this player?",

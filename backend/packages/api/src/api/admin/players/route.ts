@@ -73,10 +73,21 @@ export async function GET(
       ? { first_name: sortDir, last_name: sortDir, id: sortDir }
       : { [sortKey]: sortDir, id: sortDir };
 
+  // Medusa's `q` only searches the customer's own columns (email, name, phone),
+  // so the profile handle — metadata.handle, the "@Collector…" a player copies
+  // from their profile and sends to support — matched nobody. An exact handle
+  // (leading "@" allowed) returns that one player.
+  const handle = q?.replace(/^@/, '');
+  const byHandle =
+    handle && isValidUsername(handle)
+      ? await packs.findCustomerIdByHandle(handle)
+      : null;
+
   // ponytail: to-many `groups` join under skip/take — Medusa paginates on the
   // customer, and players-list.spec.ts pages limit=1 with a grouped customer in
   // the set, so this holds; revisit only if a page ever short-counts.
-  const [page, total] = await customers.listAndCountCustomers(q ? { q } : {}, {
+  const filters = byHandle ? { id: byHandle } : q ? { q } : {};
+  const [page, total] = await customers.listAndCountCustomers(filters, {
     skip: offset,
     take: limit,
     order,
