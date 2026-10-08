@@ -34,6 +34,8 @@ import CustomerAccountState from '../models/customer-account-state';
 import LedgerEntry from '../models/ledger-entry';
 import LedgerSequence from '../models/ledger-sequence';
 import AdminActionAudit from '../models/admin-action-audit';
+// creditSummary joins vip_member_state for the VIP reset cutoff.
+import VipMemberState from '../models/vip-member-state';
 import {
   denyHeldWithdrawal,
   submitHeldWithdrawal,
@@ -70,6 +72,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     LedgerEntry,
     LedgerSequence,
     AdminActionAudit,
+    VipMemberState,
   ],
   testSuite: ({ service, MikroOrmWrapper }) => {
     let sent: { channel: string; key: string }[] = [];
