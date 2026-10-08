@@ -97,14 +97,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
     };
 
     describe('recordRewardWithdrawal', () => {
-      // recordRewardWithdrawal fails closed (returns 'invalid') when the global
-      // redemption gate is off — so these tests need it ON. Previously this suite
-      // set NOTHING and silently relied on another suite leaking the flag; that
-      // surfaced when payout-freeze-guard.spec.ts (correctly) restored the env.
+      // Run with the global redemption gate OFF — prod's setting. Withdrawal is
+      // not behind it (2026-10-08): /task claims mint live reward pulls, and
+      // while recordRewardWithdrawal failed closed every one was unshippable.
       // Own the flag here and restore it, so the suite is order-independent.
       const prevGate = process.env.REWARDS_REDEMPTION_ENABLED;
       beforeAll(() => {
-        process.env.REWARDS_REDEMPTION_ENABLED = 'true';
+        delete process.env.REWARDS_REDEMPTION_ENABLED;
       });
       afterAll(() => {
         if (prevGate === undefined)

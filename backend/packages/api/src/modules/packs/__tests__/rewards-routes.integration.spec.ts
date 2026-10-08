@@ -174,7 +174,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(after.status).toBe('granted');
       });
 
-      it('POST /rewards/withdraw → 403 and the Pull stays vaulted (no ship)', async () => {
+      // Withdraw is NOT gated (2026-10-08): /task claims mint live reward
+      // pulls, and while this route 403'd every one of them was stuck in the
+      // vault behind a "Something went wrong" on Request delivery.
+      it('POST /rewards/withdraw still ships a vaulted reward Pull', async () => {
         const customerId = 'cus_d1_wd';
         const pull = await seedRewardPull(customerId);
 
@@ -182,18 +185,12 @@ moduleIntegrationTestRunner<PacksModuleService>({
           customerId,
           body: { pull_id: pull.id, address: ADDRESS },
         });
-        let threw = false;
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await withdrawPOST(req as any, res as any);
-        } catch {
-          threw = true;
-        }
-        // Withdraw is now gated alongside claim: a 403 (thrown NOT_ALLOWED)
-        // before any write — the prize is never shipped while redemption is dark.
-        expect(threw || captured.status === 403).toBe(true);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await withdrawPOST(req as any, res as any);
+
+        expect((captured.body as { status: string }).status).toBe('requested');
         const [after] = await service.listPulls({ id: pull.id }, { take: 1 });
-        expect(after.status).toBe('vaulted');
+        expect(after.status).toBe('delivering');
       });
     });
 

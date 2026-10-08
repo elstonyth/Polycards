@@ -4608,14 +4608,9 @@ class PacksModuleService extends MedusaService({
     address: Partial<HttpTypes.StoreCustomerAddress>,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ status: 'requested' | 'capped' | 'invalid' }> {
-    // Defense-in-depth (spec §13): the route 403s when the global gate is off,
-    // but fail closed here too so every present/future caller stays dark until
-    // redemption launches. A withdrawal ships a prize that should not exist while
-    // the economy is dormant, so it is gated alongside claim + draw.
-    if (!rewardsRedemptionEnabled()) {
-      return { status: 'invalid' };
-    }
-
+    // Deliberately NOT behind rewardsRedemptionEnabled (2026-10-08): /task
+    // claims, free rips and challenge prizes mint live source='reward' pulls,
+    // and shipping one mints no value. See the withdraw route's header.
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
 
     // 0) Serialize against any concurrent credit/withdrawal mutation for THIS
