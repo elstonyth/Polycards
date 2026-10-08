@@ -161,3 +161,27 @@ it('honors saved mute before loading music and cancels a reveal that finishes lo
   await act(async () => finish(new ArrayBuffer(0)));
   expect(audio.sources).toHaveLength(before);
 });
+
+it('ticks on control clicks, except opted-out, disabled or muted ones', async () => {
+  await render();
+  document.body.innerHTML = `
+    <button id="plain"><span id="inner">Go</span></button>
+    <button id="own" data-sound="off">Spin</button>
+    <button id="off" disabled>Nope</button>
+    <p id="text">Just text</p>`;
+  const click = (id: string) =>
+    document
+      .getElementById(id)!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  click('inner');
+  expect(audio.sfx).toHaveBeenLastCalledWith('uiClick');
+  audio.sfx.mockClear();
+  click('own');
+  click('off');
+  click('text');
+  expect(audio.sfx).not.toHaveBeenCalled();
+  await act(async () => sound.toggleMuted());
+  click('plain');
+  expect(audio.sfx).not.toHaveBeenCalled();
+  document.body.innerHTML = '';
+});
