@@ -98,7 +98,7 @@ export async function POST(
   // address book; without them a reward shipment reached ops with no phone for
   // the courier and no second address line.
   const optional = (v: unknown): string | undefined =>
-    typeof v === 'string' && v.trim() !== '' ? v : undefined;
+    typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const result = await packs.recordRewardWithdrawal(customerId, pullId, {

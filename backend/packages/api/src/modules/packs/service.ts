@@ -4664,12 +4664,13 @@ class PacksModuleService extends MedusaService({
     //    is the DB session TZ). (created_at AT TIME ZONE 'UTC')::date compares the
     //    stored timestamptz in UTC against that JS-computed UTC day string, so the
     //    draw cap and the withdrawal cap roll over at the same instant. The lock
-    //    makes COUNT-then-INSERT atomic per customer.
+    //    makes COUNT-then-INSERT atomic per customer. A canceled order shipped
+    //    nothing, so it does not use up the day's allowance.
     const utcDay = new Date().toISOString().slice(0, 10);
     const { withdrawals_per_day } = await this.rewardsSettings(sharedContext);
     const countRows = await em.execute<{ n: string | null }[]>(
       `SELECT COUNT(*) AS n FROM delivery_order
-         WHERE customer_id = ? AND is_reward = TRUE
+         WHERE customer_id = ? AND is_reward = TRUE AND status <> 'canceled'
            AND (created_at AT TIME ZONE 'UTC')::date = ?::date AND deleted_at IS NULL`,
       [customerId, utcDay],
     );

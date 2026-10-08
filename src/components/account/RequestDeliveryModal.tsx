@@ -136,9 +136,7 @@ export default function RequestDeliveryModal({
       // Reward cards take a different backend — POST /store/rewards/withdraw,
       // which stamps is_reward and enforces a per-day cap — so the selection
       // is split here rather than sent to a route that would refuse half of it.
-      const normalIds = items
-        .filter((i) => i.source !== 'reward')
-        .map((i) => i.pullId);
+      const normalIds = paidItems.map((i) => i.pullId);
       const rewardIds = items
         .filter((i) => i.source === 'reward')
         .map((i) => i.pullId);

@@ -15,6 +15,7 @@
  *    exists; the Pull is flipped to 'delivering'; a DeliveryOrderItem joins them.
  *  - A second same-day withdrawal (default withdrawals_per_day=1) → 'capped',
  *    with the second Pull left untouched (still 'vaulted') and no second order.
+ *  - A canceled reward order does not count toward that cap.
  *  - Withdrawing a source='pack' Pull via this path → 'invalid' (no order, Pull
  *    untouched).
  *
@@ -167,6 +168,33 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(orders).toHaveLength(1);
         const [pull2] = await service.listPulls({ id: second }, { take: 1 });
         expect(pull2.status).toBe('vaulted');
+      });
+
+      it('a canceled reward order does not use up the daily cap', async () => {
+        const customerId = 'cus_wd_cancel';
+        const first = await seedPull({ customerId, source: 'reward' });
+        const second = await seedPull({ customerId, source: 'reward' });
+
+        const r1 = await service.recordRewardWithdrawal(
+          customerId,
+          first,
+          ADDRESS,
+        );
+        expect(r1.status).toBe('requested');
+        const [order] = await service.listDeliveryOrders(
+          { customer_id: customerId },
+          { take: 1 },
+        );
+        await service.updateDeliveryOrders([
+          { id: order.id, status: 'canceled' as const },
+        ]);
+
+        const r2 = await service.recordRewardWithdrawal(
+          customerId,
+          second,
+          ADDRESS,
+        );
+        expect(r2.status).toBe('requested');
       });
 
       it('rejects a source=pack Pull as invalid (no order, Pull untouched)', async () => {
