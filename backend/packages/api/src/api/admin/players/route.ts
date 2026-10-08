@@ -76,17 +76,30 @@ export async function GET(
   // Medusa's `q` only searches the customer's own columns (email, name, phone),
   // so the profile handle — metadata.handle, the "@Collector…" a player copies
   // from their profile and sends to support — matched nobody. An exact handle
-  // (leading "@" allowed) returns that one player.
+  // (leading "@" allowed) ADDS that player to what `q` matches, never replaces
+  // it: handles were frozen from display names (Migration20260930140000), so
+  // many are plain words, and "lee" must still list every Lee.
+  // ponytail: the union takes at most 1000 text matches; page it in SQL if an
+  // exact-handle search ever matches more players than that.
   const handle = q?.replace(/^@/, '');
   const byHandle =
     handle && isValidUsername(handle)
       ? await packs.findCustomerIdByHandle(handle)
       : null;
+  const textIds = byHandle
+    ? (
+        await customers.listCustomers({ q }, { select: ['id'], take: 1000 })
+      ).map((c) => c.id)
+    : [];
 
   // ponytail: to-many `groups` join under skip/take — Medusa paginates on the
   // customer, and players-list.spec.ts pages limit=1 with a grouped customer in
   // the set, so this holds; revisit only if a page ever short-counts.
-  const filters = byHandle ? { id: byHandle } : q ? { q } : {};
+  const filters = byHandle
+    ? { id: [...new Set([byHandle, ...textIds])] }
+    : q
+      ? { q }
+      : {};
   const [page, total] = await customers.listAndCountCustomers(filters, {
     skip: offset,
     take: limit,

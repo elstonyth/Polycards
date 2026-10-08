@@ -19,6 +19,9 @@ const A_EMAIL = 'alphaplayer-zzq@test.dev';
 const B_EMAIL = 'bravoplayer-yyr@test.dev';
 // A's permanent profile handle (metadata.handle) — not an email/name column.
 const A_HANDLE = 'Collector31729999';
+// B's handle is a substring of A's email: a handle search must ADD B to the
+// text matches, not replace them.
+const B_HANDLE = 'alphaplayer';
 const CARD_HANDLE = 'players-list-card';
 const CARD_USD = 12.34;
 const PACK_SLUG = 'players-list-pack';
@@ -73,7 +76,10 @@ medusaIntegrationTestRunner({
           metadata: { handle: A_HANDLE },
         });
         aId = a.id;
-        const b = await customers.createCustomers({ email: B_EMAIL });
+        const b = await customers.createCustomers({
+          email: B_EMAIL,
+          metadata: { handle: B_HANDLE },
+        });
         bId = b.id;
 
         // A carries a real customer group so the `groups` column is proven
@@ -250,6 +256,16 @@ medusaIntegrationTestRunner({
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           expect(res.data.players.map((p: any) => p.id)).toEqual([aId]);
         }
+      });
+
+      it('?q= equal to one handle still lists every other text match', async () => {
+        const res = await list(`?q=${B_HANDLE}`);
+        expect(res.status).toBe(200);
+        expect(res.data.total).toBe(2);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        expect(res.data.players.map((p: any) => p.id).sort()).toEqual(
+          [aId, bId].sort(),
+        );
       });
 
       it('pages with limit/offset and rejects limit > 200', async () => {
