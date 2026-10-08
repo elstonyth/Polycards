@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { AccountHeader, Panel } from '@/components/account/ui';
 import SettingsForm from '@/components/account/SettingsForm';
 import CookieSettings from './CookieSettings';
-import { getCustomer } from '@/lib/data/customer';
+import { getAccountInfo, getCustomer } from '@/lib/data/customer';
 import { getOwnProfileHandle } from '@/lib/data/profiles';
 
 export const metadata: Metadata = { title: 'Settings' };
@@ -12,10 +12,12 @@ export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
   // getCustomer() is cache()-wrapped and already resolved by the layout's auth
-  // gate, so the only real round-trip here is the handle read.
-  const [customer, handle] = await Promise.all([
+  // gate; the handle read and the account facts (real name + phone lock) are
+  // this page's own round trips.
+  const [customer, handle, account] = await Promise.all([
     getCustomer(),
     getOwnProfileHandle(),
+    getAccountInfo(),
   ]);
   // The account layout gate redirects unauthenticated visitors, so this is a
   // defensive guard for the nullable type rather than a reachable state.
@@ -38,6 +40,8 @@ export default async function SettingsPage() {
               phone: customer.phone ?? null,
             }}
             handle={handle}
+            realName={account.realName}
+            phoneVerified={account.phoneVerified}
           />
         </Panel>
         <Panel>

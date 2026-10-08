@@ -185,6 +185,8 @@ export interface SupportPull {
 export interface CustomerGacha {
   customer: SupportCustomer;
   balance: number;
+  /** Spend-only bonus credit (MYR) inside `balance` — never withdrawable. */
+  bonus_balance: number;
   transactions: SupportTransaction[];
   pulls: SupportPull[];
   /** market_value = raw FMV owed; display_value = FMV × the card's own markup,
@@ -287,6 +289,12 @@ export interface AccountState {
   disabled_reason: string | null;
   disabled_by: string | null;
   disabled_at: string | null;
+  /** Real name (spec 2026-10-06) — what staff match against a Touch 'n Go
+   *  lookup of the phone. Null until the customer enters one. */
+  real_name?: string | null;
+  /** Set once the account verified a phone; the customer can no longer
+   *  change it themselves. */
+  phone_verified_at?: string | null;
 }
 
 export interface CustomerAudit {
@@ -325,12 +333,14 @@ export const unfreezeCustomer = (id: string, reason: string) =>
   );
 
 // Operator credit adjustment: signed amount, required audit note. The backend
-// enforces the $0 balance floor and returns the fresh balance.
+// enforces the $0 balance floor and returns the fresh balance. kind 'bonus'
+// moves the spend-only bonus balance instead (ledger reason bonus_grant).
 export async function adjustCustomerCredits(
   id: string,
   amount: number,
   note: string,
   idempotencyKey?: string,
+  kind?: 'bonus',
 ): Promise<{ amount: number; balance: number }> {
   const res = await fetch(
     `${__BACKEND_URL__}/admin/customers/${encodeURIComponent(id)}/credits`,
@@ -338,7 +348,12 @@ export async function adjustCustomerCredits(
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount, note, idempotency_key: idempotencyKey }),
+      body: JSON.stringify({
+        amount,
+        note,
+        idempotency_key: idempotencyKey,
+        kind,
+      }),
     },
   );
   if (!res.ok) {
@@ -346,6 +361,48 @@ export async function adjustCustomerCredits(
   }
   return (await res.json()) as { amount: number; balance: number };
 }
+
+// ── Pack gifts (vault packs) ─────────────────────────────────────────────────
+
+export interface PackGift {
+  id: string;
+  /** Pack slug. */
+  pack_id: string;
+  pack_title: string;
+  value_myr: number;
+  note: string;
+  granted_by: string;
+  created_at: string;
+  opened_at: string | null;
+  pull_id: string | null;
+  revoked_at: string | null;
+  state: 'unopened' | 'opened' | 'revoked' | 'stuck';
+}
+
+export const getCustomerPackGifts = (id: string) =>
+  getJson<{ gifts: PackGift[] }>(
+    `/admin/customers/${encodeURIComponent(id)}/pack-gifts`,
+  );
+
+export const grantPackGifts = (
+  id: string,
+  body: {
+    pack_id: string;
+    quantity: number;
+    note: string;
+    idempotency_key: string;
+  },
+) =>
+  postJson<{ gifts: PackGift[] }>(
+    `/admin/customers/${encodeURIComponent(id)}/pack-gifts`,
+    body,
+  );
+
+export const revokePackGift = (giftId: string) =>
+  postJson<{ revoked: true }>(
+    `/admin/pack-gifts/${encodeURIComponent(giftId)}/revoke`,
+    {},
+  );
 
 // ── Economy report ───────────────────────────────────────────────────────────
 
@@ -1375,6 +1432,8 @@ export interface PlayerRow {
    *  above: an unverified account can log in and browse, it just cannot top up
    *  or request delivery while the phone gate is on. */
   phone_verified: boolean;
+  /** Real name (spec 2026-10-06), null until entered. */
+  real_name: string | null;
   /** Partner account (spec 2026-09-09): 'group' when their player group is a
    *  partner group (its rate pays them), 'manual' for the per-customer flag,
    *  null for an ordinary account. */
@@ -1911,15 +1970,29 @@ export interface ReferralSettlement {
   total_commission_cents: number;
 }
 
+/** Who a settlement line is about; every field but id is null for a
+ *  customer whose record is gone. */
+export interface ReferralPerson {
+  id: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+}
+
 export interface ReferralSettlementLine {
   id: string;
   customer_id: string;
+  /** The referrer this line pays — the wallet the commission lands in. */
+  customer: ReferralPerson;
   basis_cents: number;
   rate_bp: number;
   amount_cents: number;
   status: 'pending' | 'voided' | 'paid';
   void_reason: string | null;
   paid_transaction_id: string | null;
+  /** Downline spend that week, biggest first. Read with live attribution,
+   *  so it can differ from basis_cents after an admin re-attribution. */
+  downline: { customer: ReferralPerson; spend_cents: number }[];
 }
 
 export async function listReferralSettlements(): Promise<ReferralSettlement[]> {
@@ -1993,6 +2066,31 @@ export async function getCustomerReferral(
 ): Promise<CustomerReferralCard> {
   return getJson(`/admin/customers/${customerId}/referral`);
 }
+
+// Customer-service corrections (spec 2026-10-06): the customer can set a real
+// name once and can never change a verified phone, so these two are the way
+// either one moves. Both require an audited reason.
+export const setCustomerRealName = (
+  customerId: string,
+  realName: string,
+  reason: string,
+) =>
+  postJson<{ real_name: string }>(
+    `/admin/customers/${encodeURIComponent(customerId)}/real-name`,
+    { real_name: realName, reason },
+  );
+
+// `new_phone`, not `phone`: the generic admin customer guard refuses a `phone`
+// key on every /admin/customers/* POST (rejectAdminPhoneWrite).
+export const setCustomerPhone = (
+  customerId: string,
+  phone: string,
+  reason: string,
+) =>
+  postJson<{ customer: { id: string; phone: string } }>(
+    `/admin/customers/${encodeURIComponent(customerId)}/phone`,
+    { new_phone: phone, reason },
+  );
 
 export async function setPartnerRate(
   customerId: string,

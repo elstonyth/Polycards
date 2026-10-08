@@ -35,6 +35,8 @@ export default async function SlotSpinPage({
   const { count: countRaw, demo, freeRip } = await searchParams;
   const parsed = Number(countRaw);
   const count = Number.isInteger(parsed) ? Math.min(3, Math.max(1, parsed)) : 1;
+  // Vault packs ("Bet Vault x1") are read by the machine itself, on the
+  // client, for whoever is signed in — no server seed to read twice.
   const [base, detail, recentPulls] = await Promise.all([
     getPackBySlug(slug),
     getPackDetail(slug),

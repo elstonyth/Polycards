@@ -48,6 +48,12 @@ describe('qk', () => {
       'cus_1',
       'gacha',
     ]);
+    expect(qk.customerPackGifts('cus_1')).toEqual([
+      'admin',
+      'customer',
+      'cus_1',
+      'pack-gifts',
+    ]);
   });
 
   // ── Epic 2 (Players) ──────────────────────────────────────────────────────

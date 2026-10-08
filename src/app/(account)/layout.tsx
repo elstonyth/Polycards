@@ -1,9 +1,10 @@
 import { type ReactNode } from 'react';
 import { redirect } from 'next/navigation';
-import { getAccountInfo, getCustomer } from '@/lib/data/customer';
+import { getAccountInfo, getCustomer, getRealName } from '@/lib/data/customer';
 import { PHONE_VERIFICATION_REQUIRED } from '@/lib/phone-verification';
 import { shouldGatePhone } from '@/lib/phone-gate';
 import { PhoneOnboardingModal } from '@/components/account/PhoneOnboardingModal';
+import { RealNameModal } from '@/components/account/RealNameModal';
 
 // Shared shell for the account/wallet pages (URLs stay top-level via the route group).
 // Gated: unauthenticated visitors are bounced home with ?auth=login, which the
@@ -24,9 +25,8 @@ export default async function AccountLayout({
   // next visit here. Only the password-less cohort: the change route asks a
   // password account for its password before it will add a phone, and the
   // gate has no field for it — those (legacy, pre-enforcement) rows keep the
-  // Settings flow and the /me tile highlight. Same flag as SettingsForm's OTP
-  // flow: enforcement off means a plain phone field there and nothing to
-  // verify.
+  // Settings flow and the /me tile highlight. Enforcement off means no phone
+  // gate here (signups may then carry unproven numbers).
   //
   // Scope: the ACCOUNT tree. A gated player can still browse /, /slots and
   // /task and open the top-up sheet; the money and goods paths refuse them at
@@ -43,10 +43,24 @@ export default async function AccountLayout({
     exempt: async () => (await getAccountInfo()).policy.verificationExempt,
   });
 
+  // Real-name gate (spec 2026-10-06): EVERY account without a real name on
+  // file, old ones included — not just a cohort. Only after the phone gate,
+  // never stacked on it: two non-dismissable dialogs would fight over focus,
+  // and the phone comes first. `realName === null` is a positive "none on
+  // file"; an unreadable answer is `undefined` and raises nothing (fail-open,
+  // like the phone gate — the welcome-pack claim refuses at the backend).
+  // Partner groups with `verification_exempt` skip it, as they skip the phone.
+  // The name is a one-row read (getRealName); the four-read account facts are
+  // fetched only for the rare account that has none, to check the exemption.
+  const realName = gatePhone ? undefined : await getRealName();
+  const gateRealName =
+    realName === null && !(await getAccountInfo()).policy.verificationExempt;
+
   return (
     <div className="mx-auto w-full max-w-2xl px-fluid py-6 lg:max-w-4xl">
       {children}
       {gatePhone && <PhoneOnboardingModal />}
+      {gateRealName && <RealNameModal />}
     </div>
   );
 }

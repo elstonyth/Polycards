@@ -3,6 +3,7 @@ import {
   ledgerTotals,
   type LedgerTotals,
 } from '../../../modules/packs/economy';
+import { reasonCashSenSql } from '../../../modules/packs/bonus-credit';
 import { EFFECTIVE_GROUP_SQL, type ReportDb, type SqlPart } from '../sql';
 
 export type ReasonCents = { reason: string; cents: string };
@@ -33,7 +34,8 @@ export async function ledgerTotalsWhere(
   filter: SqlPart,
 ): Promise<LedgerTotals> {
   const { rows } = await db.raw<ReasonCents>(
-    'SELECT ct.reason, COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS cents ' +
+    // Normal part of each row: bonus credit (spec 2026-10-07) is not cash.
+    `SELECT ct.reason, COALESCE(SUM(${reasonCashSenSql('ct.')}), 0)::bigint AS cents ` +
       'FROM credit_transaction ct WHERE ct.deleted_at IS NULL' +
       filter.sql +
       ' GROUP BY ct.reason',
@@ -50,7 +52,7 @@ export async function ledgerTotalsByDay(
 ): Promise<Array<{ day: string; totals: LedgerTotals }>> {
   const { rows } = await db.raw<ReasonCents & { day: string }>(
     "SELECT to_char(ct.created_at AT TIME ZONE 'Asia/Kuala_Lumpur', 'YYYY-MM-DD') AS day, " +
-      'ct.reason, COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS cents ' +
+      `ct.reason, COALESCE(SUM(${reasonCashSenSql('ct.')}), 0)::bigint AS cents ` +
       'FROM credit_transaction ct WHERE ct.deleted_at IS NULL' +
       filter.sql +
       ' GROUP BY 1, 2 ORDER BY 1',
@@ -137,7 +139,7 @@ export async function packSales(
   unattributedCents: number;
 }> {
   const revenue = await db.raw<{ pack_id: string | null; cents: string }>(
-    'SELECT op.pack_id, COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS cents ' +
+    `SELECT op.pack_id, COALESCE(SUM(${reasonCashSenSql('ct.')}), 0)::bigint AS cents ` +
       'FROM credit_transaction ct ' +
       'LEFT JOIN (SELECT DISTINCT open_id, pack_id FROM pull ' +
       'WHERE open_id IS NOT NULL AND deleted_at IS NULL) op ' +
@@ -147,7 +149,9 @@ export async function packSales(
       ' GROUP BY op.pack_id',
     ledger.params,
   );
-  const opened = await packOpens(db, pulls);
+  // Every open that took money counts beside the money it took: a bonus
+  // open's normal part is in the revenue above, so it is in the count too.
+  const opened = await packOpens(db, pulls, ['pack', 'bonus']);
   const bySlug = new Map<string, { opened: number; cents: number }>();
   let unattributedCents = 0;
   for (const r of revenue.rows) {
@@ -164,14 +168,16 @@ export async function packSales(
 }
 
 /** Paid packs opened per pack (one pull = one pack; source 'pack'). Shared
- *  by Finance pack-sales and the Growth packs report, so both count alike. */
+ *  by Finance pack-sales and the Growth packs report, so both count alike.
+ *  Finance also counts bonus opens, to match its revenue (spec 2026-10-07). */
 export async function packOpens(
   db: ReportDb,
   pulls: SqlPart,
+  sources: readonly ('pack' | 'bonus')[] = ['pack'],
 ): Promise<Map<string, number>> {
   const { rows } = await db.raw<{ pack_id: string; n: string }>(
     'SELECT p.pack_id, COUNT(*)::bigint AS n FROM pull p ' +
-      "WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
+      `WHERE p.deleted_at IS NULL AND p.source IN (${sources.map((s) => `'${s}'`).join(', ')})` +
       pulls.sql +
       ' GROUP BY p.pack_id',
     pulls.params,

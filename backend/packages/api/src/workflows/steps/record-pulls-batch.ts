@@ -9,9 +9,18 @@ export type RecordPullsBatchInput = {
   // The batch's open_id (uuid) — the SAME id the count×price charge row stores
   // in source_transaction_id, stamped on every pull so money↔card links.
   open_id: string;
-  // One entry per won card: Card.handle + the draw-time USD value snapshot.
-  cards: { card_id: string; recorded_value_usd: number }[];
-  price: number; // price × count, the whole batch's debit
+  // One entry per won card: Card.handle + the draw-time USD value snapshot,
+  // and how its row was paid (spec 2026-10-07): 'gift' / 'bonus' / 'pack'
+  // with the bonus share of a later sell-back.
+  cards: {
+    card_id: string;
+    recorded_value_usd: number;
+    source: 'pack' | 'gift' | 'bonus';
+    bonus_bp: number;
+  }[];
+  price: number; // the batch's debit (paid rows × price)
+  bonus: number; // bonus credit the batch spent (MYR) — SP payload
+  gifts: number; // rows covered by gifted packs — SP payload
 };
 
 // Compensation data: the IDs of every pull row inserted, so we can delete
@@ -35,6 +44,8 @@ type PullRecord = {
   buyback_amount: number | null;
   buyback_at: Date | null;
   showcased: boolean;
+  source: 'pack' | 'reward' | 'free' | 'gift' | 'bonus';
+  bonus_bp: number;
 };
 
 // record-pulls-batch — insert N Pull rows in one shot (one per card_id), then
@@ -60,6 +71,8 @@ export const recordPullsBatchStep = createStep<
         order_id: null,
         rolled_at: new Date(),
         recorded_value_usd: c.recorded_value_usd,
+        source: c.source,
+        bonus_bp: c.bonus_bp,
         open_id: input.open_id,
       })),
       ledger: {
@@ -69,6 +82,8 @@ export const recordPullsBatchStep = createStep<
         packId: input.pack_id,
         channel: 'batch',
         fx,
+        bonus: input.bonus,
+        gifts: input.gifts,
       },
     })) as PullRecord[];
 

@@ -66,6 +66,7 @@ describe('openPack', () => {
         vaultAmount: null,
         instantDeadlineMs: null,
         firm: true,
+        bonus: 0,
       },
       balance: 940,
       price: 60,
@@ -193,9 +194,70 @@ describe('openBatch', () => {
         path: '/store/packs/bronze/open-batch',
         headers: { Authorization: 'Bearer test-token' },
         cache: 'no-store',
-        body: { count: 2 },
+        // `gifts` rides every open, 0 included — the backend never infers it.
+        body: { count: 2, gifts: 0 },
       },
     ]);
+  });
+
+  it('sends the gifts the screen offered and reports how many were used', async () => {
+    const mem = backend({
+      'POST /store/packs/:slug/open-batch': {
+        body: { rolls: [roll('pull_1'), roll('pull_2')], gifts_used: 1 },
+      },
+    });
+    const r = await openBatch('bronze', 2, 1);
+    expect(mem.requests[0]?.body).toEqual({ count: 2, gifts: 1 });
+    expect(r).toMatchObject({ ok: true, giftsUsed: 1 });
+  });
+
+  it('reads an absent gifts_used as none used', async () => {
+    backend({
+      'POST /store/packs/:slug/open-batch': { body: { rolls: [roll('p')] } },
+    });
+    expect(await openBatch('bronze', 1)).toMatchObject({ giftsUsed: 0 });
+  });
+
+  // Gifts can never exceed the rows (nor be negative / NaN) on the wire.
+  it.each([
+    [2, 5, 2],
+    [2, -1, 0],
+    [2, Number.NaN, 0],
+    [3, 1.9, 1],
+  ])('clamps %p rows with %p gifts to %p gifts', async (count, gifts, sent) => {
+    const mem = backend({
+      'POST /store/packs/:slug/open-batch': { body: { rolls: [] } },
+    });
+    await openBatch('bronze', count, gifts);
+    expect(mem.requests[0]?.body).toEqual({ count, gifts: sent });
+  });
+
+  // A stale "Vault x1" screen is refused before any charge — the one failure
+  // here where "refresh" is safe to say.
+  it('maps a 409 over offered gifts to the stale-gift refusal', async () => {
+    backend({
+      'POST /store/packs/:slug/open-batch': {
+        status: 409,
+        body: { message: 'Your vault pack is no longer available — refresh.' },
+      },
+    });
+    expect(await openBatch('bronze', 1, 1)).toEqual({
+      ok: false,
+      error: 'Your vault pack is no longer available — refresh.',
+      staleGifts: true,
+    });
+  });
+
+  it('a 409 with no gifts offered is an ordinary failure', async () => {
+    backend({
+      'POST /store/packs/:slug/open-batch': {
+        status: 409,
+        body: { message: 'Conflict.' },
+      },
+    });
+    const r = await openBatch('bronze', 1, 0);
+    expect(r.ok).toBe(false);
+    expect(r).not.toHaveProperty('staleGifts');
   });
 
   // The count decides the CHARGE, so the clamp has to reach the wire — a
@@ -210,7 +272,7 @@ describe('openBatch', () => {
       'POST /store/packs/:slug/open-batch': { body: { rolls: [] } },
     });
     await openBatch('bronze', asked);
-    expect(mem.requests[0]?.body).toEqual({ count: sent });
+    expect(mem.requests[0]?.body).toEqual({ count: sent, gifts: 0 });
   });
 
   it('drops a roll it cannot map and keeps the rest', async () => {

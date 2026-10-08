@@ -206,25 +206,30 @@ export const requirePhoneVerified = async (
 };
 
 /**
- * POST /store/customers/me — while verification is enforced, `phone` is not
- * writable here at all: the number changes only through the verified route
- * (store/phone-verification/change).
+ * POST /store/customers/me — `phone` is not writable here at all. A number
+ * changes only through the verified route (store/phone-verification/change),
+ * and only until it is verified; after that, only customer service can move it
+ * (spec 2026-10-06, POST /admin/customers/:id/phone).
+ *
+ * UNCONDITIONAL since that spec. It used to step aside when
+ * PHONE_VERIFICATION_REQUIRED was off, which made the Settings phone field a
+ * free edit in that mode. The flag is the rollback lever for proving a SIGNUP
+ * phone (requireSignupPhoneProof), and turning it off must not reopen
+ * customer phone edits.
  *
  * Refuses on PRESENCE of the key, like rejectAdminPhoneWrite below —
  * `phone: null` and `phone: ''` too. Clearing the number would leave the
  * account's phone_verified_at stamp in place (markPhoneVerified is
  * first-write-wins and nothing unstamps it), while assertPhoneUnclaimed would
  * stop counting the account and let the next signup take the number: one
- * verified number behind two verified accounts. The storefront omits `phone`
- * from this route under enforcement (src/lib/actions/customer.ts
- * updateProfile).
+ * verified number behind two verified accounts. The storefront never sends
+ * `phone` to this route (src/lib/actions/customer.ts updateProfile).
  */
-export const blockUnverifiedPhoneWrite = (
+export const blockCustomerPhoneWrite = (
   req: MedusaRequest<{ phone?: unknown }>,
   _res: MedusaResponse,
   next: MedusaNextFunction,
 ): void => {
-  if (!isPhoneVerificationRequired(process.env)) return next();
   const body = req.body as Record<string, unknown> | null | undefined;
   if (body && typeof body === 'object' && 'phone' in body) {
     return next(
@@ -238,7 +243,7 @@ export const blockUnverifiedPhoneWrite = (
 };
 
 /**
- * Admin-side counterpart to blockUnverifiedPhoneWrite above: the generic
+ * Admin-side counterpart to blockCustomerPhoneWrite above: the generic
  * admin customer routes (POST /admin/customers create, POST
  * /admin/customers/:id update) may NOT write `phone` at all — unlike the
  * store-side signup gate, this does not route the value through

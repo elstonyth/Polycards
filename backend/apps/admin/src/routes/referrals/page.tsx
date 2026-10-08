@@ -1,4 +1,5 @@
 import { Fragment, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Badge,
   Button,
@@ -23,7 +24,9 @@ import {
   useVoidReferralSettlement,
   type ReferralSettings,
   type ReferralSettlement,
+  type ReferralSettlementLine,
 } from '../../lib/queries';
+import type { ReferralPerson } from '../../lib/admin-rest';
 import {
   tierRowsToPayload,
   validateTierRows,
@@ -230,10 +233,69 @@ function SettingsEditor({ initial }: { initial: ReferralSettings }) {
   );
 }
 
+// Name first (what the operator recognises), then how to reach them; the
+// cus_ id is only the fallback for a customer whose record is gone. Opens the
+// customer page, where the wallet the commission lands in lives.
+function Person({ person }: { person: ReferralPerson }) {
+  const navigate = useNavigate();
+  const contact = [person.name ? person.email : null, person.phone]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <div className="flex flex-col items-start">
+      <button
+        type="button"
+        className="text-ui-fg-interactive text-left hover:underline"
+        onClick={() => navigate(`/customers/${person.id}`)}
+      >
+        {person.name ?? person.email ?? person.id}
+      </button>
+      {contact && (
+        <Text size="xsmall" className="text-ui-fg-muted">
+          {contact}
+        </Text>
+      )}
+    </div>
+  );
+}
+
+// Whose spend makes up a line's basis. Attribution is read live, so after a
+// re-attribution the members can add up to something other than the frozen
+// basis — said out loud rather than left as a silent mismatch.
+function Downline({ line }: { line: ReferralSettlementLine }) {
+  const total = line.downline.reduce((sum, m) => sum + m.spend_cents, 0);
+  return (
+    <div className="max-w-xl py-2 pl-4">
+      <Text size="small" className="text-ui-fg-subtle">
+        Referred players who spent this week
+      </Text>
+      <ul className="mt-2 flex flex-col gap-2">
+        {line.downline.map((m) => (
+          <li
+            key={m.customer.id}
+            className="flex items-start justify-between gap-4"
+          >
+            <Person person={m.customer} />
+            <Text size="small">{fromCents(m.spend_cents)}</Text>
+          </li>
+        ))}
+      </ul>
+      {total !== line.basis_cents && (
+        <Text size="xsmall" className="text-ui-fg-muted mt-2">
+          These add up to {fromCents(total)}, not the{' '}
+          {fromCents(line.basis_cents)} basis: a referral or a purchase changed
+          after the week closed. The basis is what pays.
+        </Text>
+      )}
+    </div>
+  );
+}
+
 function LineTable({ settlementId }: { settlementId: string }) {
   const { data, isLoading } = useReferralSettlement(settlementId);
   const voidLine = useVoidReferralLine();
   const prompt = usePrompt();
+  const [openLineId, setOpenLineId] = useState<string | null>(null);
 
   if (isLoading || !data) return <LoadingSkeleton rows={3} />;
 
@@ -263,7 +325,8 @@ function LineTable({ settlementId }: { settlementId: string }) {
     <Table>
       <Table.Header>
         <Table.Row>
-          <Table.HeaderCell>Customer</Table.HeaderCell>
+          <Table.HeaderCell>Referrer (paid to)</Table.HeaderCell>
+          <Table.HeaderCell>Downline</Table.HeaderCell>
           <Table.HeaderCell className="text-right">Basis</Table.HeaderCell>
           <Table.HeaderCell className="text-right">Rate</Table.HeaderCell>
           <Table.HeaderCell className="text-right">Payout</Table.HeaderCell>
@@ -273,50 +336,72 @@ function LineTable({ settlementId }: { settlementId: string }) {
       </Table.Header>
       <Table.Body>
         {data.lines.map((l) => (
-          <Table.Row key={l.id}>
-            <Table.Cell className="font-mono text-xs">
-              {l.customer_id}
-            </Table.Cell>
-            <Table.Cell className="text-right">
-              {fromCents(l.basis_cents)}
-            </Table.Cell>
-            <Table.Cell className="text-right">
-              {pctLabel(l.rate_bp)}
-            </Table.Cell>
-            <Table.Cell className="text-right">
-              {fromCents(l.amount_cents)}
-            </Table.Cell>
-            <Table.Cell>
-              <Badge
-                size="2xsmall"
-                color={
-                  l.status === 'paid'
-                    ? 'green'
-                    : l.status === 'voided'
-                      ? 'red'
-                      : 'orange'
-                }
-              >
-                {l.status}
-              </Badge>
-              {l.void_reason && (
-                <Text size="xsmall" className="text-ui-fg-muted">
-                  {l.void_reason}
-                </Text>
-              )}
-            </Table.Cell>
-            <Table.Cell>
-              {payable && l.status === 'pending' && (
+          <Fragment key={l.id}>
+            <Table.Row>
+              <Table.Cell>
+                <Person person={l.customer} />
+              </Table.Cell>
+              <Table.Cell>
                 <Button
                   size="small"
                   variant="transparent"
-                  onClick={() => void onVoid(l.id)}
+                  onClick={() =>
+                    setOpenLineId(openLineId === l.id ? null : l.id)
+                  }
                 >
-                  Void
+                  {openLineId === l.id
+                    ? 'Hide'
+                    : `${l.downline.length} player${l.downline.length === 1 ? '' : 's'}`}
                 </Button>
-              )}
-            </Table.Cell>
-          </Table.Row>
+              </Table.Cell>
+              <Table.Cell className="text-right">
+                {fromCents(l.basis_cents)}
+              </Table.Cell>
+              <Table.Cell className="text-right">
+                {pctLabel(l.rate_bp)}
+              </Table.Cell>
+              <Table.Cell className="text-right">
+                {fromCents(l.amount_cents)}
+              </Table.Cell>
+              <Table.Cell>
+                <Badge
+                  size="2xsmall"
+                  color={
+                    l.status === 'paid'
+                      ? 'green'
+                      : l.status === 'voided'
+                        ? 'red'
+                        : 'orange'
+                  }
+                >
+                  {l.status}
+                </Badge>
+                {l.void_reason && (
+                  <Text size="xsmall" className="text-ui-fg-muted">
+                    {l.void_reason}
+                  </Text>
+                )}
+              </Table.Cell>
+              <Table.Cell>
+                {payable && l.status === 'pending' && (
+                  <Button
+                    size="small"
+                    variant="transparent"
+                    onClick={() => void onVoid(l.id)}
+                  >
+                    Void
+                  </Button>
+                )}
+              </Table.Cell>
+            </Table.Row>
+            {openLineId === l.id && (
+              <Table.Row>
+                <Table.Cell {...{ colSpan: 7 }}>
+                  <Downline line={l} />
+                </Table.Cell>
+              </Table.Row>
+            )}
+          </Fragment>
         ))}
       </Table.Body>
     </Table>
@@ -386,7 +471,8 @@ function RunsCard() {
       <Text size="small" className="text-ui-fg-subtle">
         Tuesday's close lands here as a draft. Review the lines, void anything
         suspicious, then Approve — Wednesday's cron (or Pay now) moves the
-        money.
+        money. Paying credits each referrer's Polycards wallet automatically;
+        nothing is transferred by hand.
       </Text>
       {data.length === 0 ? (
         <Text size="small" className="text-ui-fg-muted mt-4">

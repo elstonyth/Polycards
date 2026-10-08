@@ -34,6 +34,8 @@ vi.mock('@/components/app-shell/TopUpProvider', () => ({
   useTopUp: () => ({ balance: 0, openTopUp: vi.fn() }),
 }));
 vi.mock('@/components/AuthButton', () => ({ openAuth: vi.fn() }));
+// A 'use server' action — the page reads vault packs after mount. None here.
+vi.mock('@/lib/actions/pack-gifts', () => ({ getPackGifts: async () => null }));
 // Scroll-reveal + polling are ambient behavior this branch does not touch:
 // render children immediately and hold the server snapshot still.
 vi.mock('@/components/Reveal', () => ({

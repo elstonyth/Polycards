@@ -439,6 +439,11 @@ export const ProfileHandleSchema = z.looseObject({ handle: z.string() });
  *  flag to false (no exemption, no block), which is the pre-feature behaviour. */
 export const AccountInfoSchema = z.looseObject({
   hasPassword: z.boolean(),
+  // Real name + phone lock (spec 2026-10-06). OPTIONAL for deploy skew: an
+  // absent field reads as "unknown", which raises no gate and offers no
+  // phone edit (see getAccountInfo).
+  realName: z.string().nullable().optional(),
+  phoneVerified: z.boolean().optional(),
   policy: z
     .looseObject({
       partner: z.boolean(),
@@ -446,6 +451,14 @@ export const AccountInfoSchema = z.looseObject({
       verification_exempt: z.boolean(),
     })
     .optional(),
+});
+
+/** POST /store/customers/me/real-name — the stored (normalized) name. */
+export const RealNameSchema = z.looseObject({ real_name: z.string() });
+
+/** GET /store/customers/me/real-name — the name on file, or null. */
+export const RealNameReadSchema = z.looseObject({
+  real_name: z.string().nullable(),
 });
 
 // --- actions/vault.ts -------------------------------------------------------
@@ -464,8 +477,9 @@ export const VaultItemSchema = z.looseObject({
   // vault. `locked` defaults FALSE for the same reason (a stuck lock is worse
   // than a late one; the backend refuses the sell either way).
   // ⚠ Lock UI keys off `locked` ONLY, never `source`: a weekly-challenge prize
-  // is source='reward' with a live, sellable quote.
-  source: z.enum(['pack', 'reward', 'free']).catch('pack'),
+  // is source='reward' with a live, sellable quote. 'gift' (a vault pack) and
+  // 'bonus' (paid with bonus credit) since 2026-10-07.
+  source: z.enum(['pack', 'reward', 'free', 'gift', 'bonus']).catch('pack'),
   locked: z.boolean().catch(false),
   // The backend's "can this row be SOLD" answer (since 2026-09-03 it equals
   // `!locked` — reward cards sell like any other — but the backend decides).
@@ -480,6 +494,9 @@ export const VaultItemSchema = z.looseObject({
     amount: finite,
     percent: finite,
     firm: z.boolean().optional(),
+    // MYR part of `amount` paid back as bonus credit (gift / bonus-funded
+    // pulls). Optional: an older backend omits it (all normal credit).
+    bonus: finite.optional(),
   }),
 });
 
@@ -499,6 +516,10 @@ export const VaultPageSchema = z.looseObject({
 export const FreePackSchema = z.looseObject({
   eligible: z.boolean(),
   slug: z.string().nullable(),
+  /** Authed answers only (spec 2026-10-06): what the claim would still be
+   *  refused for. Optional for deploy skew — absent reads as nothing missing,
+   *  and the backend claim step stays the enforcement. */
+  missing: z.array(z.enum(['phone', 'real_name'])).optional(),
   /** Anonymous answers only: "an active free pack exists" (the signup hook). */
   promo: z.boolean().optional(),
 });
@@ -549,6 +570,8 @@ export const CREDIT_REASONS = [
   // Referral rebuild (spec 2026-08-24): the Wednesday settlement payout.
   'referral_commission',
   'delivery_fee',
+  // Bonus credit (spec 2026-10-07): an admin grant (+) or take-back (−).
+  'bonus_grant',
 ] as const;
 export type CreditReason = (typeof CREDIT_REASONS)[number];
 
@@ -561,6 +584,8 @@ export const PaymentConfigSchema = z.looseObject({
   // reads as open so an older backend keeps today's behaviour.
   deposits_enabled: z.boolean().optional(),
   withdrawals_enabled: z.boolean().optional(),
+  // ISO instant a timed withdrawal pause ends (null/absent = no timed pause).
+  withdrawals_paused_until: z.string().nullable().optional(),
 });
 
 /** GET /store/credits transaction row. `amount` is signed (credit +, spend −).
@@ -582,6 +607,9 @@ export const CreditTransactionSchema = z.looseObject({
     .object({ method: z.string(), status: z.string() })
     .nullable()
     .optional(),
+  // Signed bonus-credit part of `amount` (MYR). Optional for the same
+  // older-backend reason; absent = no bonus part.
+  bonus: finite.optional(),
 });
 
 /** GET /store/credits as the Transactions page reads it. The totals are SOFT:
@@ -771,6 +799,8 @@ export const OpenBuybackSchema = z.looseObject({
   vault_amount: finite.optional(),
   instant_deadline_ms: finite.optional(),
   firm: z.boolean().optional(),
+  // MYR part of `amount` paid back as bonus credit (spec 2026-10-07).
+  bonus: finite.optional(),
 });
 
 // --- actions/wallet.ts ------------------------------------------------------
@@ -796,10 +826,31 @@ export const WalletSchema = z.looseObject({
       remaining: finite,
     })
     .optional(),
+  // Bonus credit inside `balance` (MYR, spend only). Optional: an older
+  // backend has none, which reads as 0.
+  bonus: finite.optional(),
 });
 
 /** GET /store/credits as getWallet() reads it — only the `wallet` block. */
 export const WalletEnvelopeSchema = z.looseObject({ wallet: WalletSchema });
+
+// --- actions/pack-gifts.ts --------------------------------------------------
+
+/** GET /store/pack-gifts — the packs gifted into the customer's vault. A bad
+ *  row drops on its own; a malformed body reads as no gifts (the open then
+ *  charges the price the screen showed — never a silent gift). */
+export const PackGiftsSchema = z.looseObject({
+  gifts: listOf(
+    z.looseObject({
+      pack_id: z.string(),
+      count: finite,
+      title: z.string(),
+      image: z.string().nullable().catch(null),
+      price: finite,
+      available: z.boolean(),
+    }),
+  ),
+});
 
 // --- actions/vip.ts ---------------------------------------------------------
 

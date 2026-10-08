@@ -35,6 +35,8 @@ export type ChallengePosterInput = {
   podium: { rank: 1 | 2 | 3; name: string | null; credits: number }[];
   /** Empty = no leaders block. */
   leaders: { rank: number; name: string }[];
+  /** The pool's bar toward the next locked stage; null = no bar. */
+  progress?: PosterProgress | null;
   /** Bare footer address, e.g. 'polycards.gg/leaderboard'. */
   siteHost: string;
 };
@@ -85,6 +87,10 @@ const credits = (n: number): string =>
     minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
     maximumFractionDigits: 2,
   })}`;
+
+// A pool figure in whole ringgit, rounded down (RM 12,340).
+const wholeRm = (n: number): string =>
+  `RM ${Math.floor(n).toLocaleString('en-MY')}`;
 
 /** The largest size from `from` down to `floor` at which every line fits. */
 export async function sizeToFit(
@@ -251,8 +257,36 @@ export async function composeChallengePoster(
     x += c.w + gap;
   }
 
+  // ---- the pool's bar toward the next locked stage -------------------------
+  let panelY = y + chipH / 2 + 48;
+  if (input.progress) {
+    const { pooledMyr, nextStage, nextThresholdMyr } = input.progress;
+    const barY = y + chipH / 2 + 44;
+    const barH = 18;
+    const share = Math.max(0, Math.min(1, pooledMyr / nextThresholdMyr));
+    const fillW = Math.round(TEXT_W * share);
+    const labelY = baseline(barY + barH + 34, 26);
+    svg.push(
+      `<rect x="${PAD + 1}" y="${barY}" width="${TEXT_W - 2}" height="${barH}" rx="${barH / 2}" ` +
+        `fill="${GRAPHITE}" stroke="${HAIRLINE}" stroke-width="2"/>`,
+      // A sliver still reads as a start, never as nothing.
+      fillW > 0
+        ? `<rect x="${PAD}" y="${barY}" width="${Math.max(fillW, barH)}" height="${barH}" rx="${barH / 2}" fill="${CHASE}"/>`
+        : '',
+      textEl(`${wholeRm(pooledMyr)} POOLED`, PAD, labelY, body(26, 2), WHITE),
+      textEl(
+        `${wholeRm(Math.ceil(nextThresholdMyr - pooledMyr))} TO STAGE ${nextStage}`,
+        W - PAD,
+        labelY,
+        body(26, 2),
+        CHASE,
+        'end',
+      ),
+    );
+    panelY = barY + barH + 34 + 13 + 44;
+  }
+
   // ---- the featured stage's podium, in one charcoal panel ----------------
-  const panelY = y + chipH / 2 + 48;
   const nameFont = body(26);
   const slots = [
     { rank: 2, x: PAD + 44, top: panelY + 220, ...SIDE },
@@ -504,6 +538,28 @@ export function posterHeadline(
         : `ALL ${stages.length} STAGES UNLOCKED`,
     featureStage: top,
   };
+}
+
+export type PosterProgress = {
+  pooledMyr: number;
+  nextStage: number;
+  nextThresholdMyr: number;
+};
+
+/** The pool's progress toward the first stage it has not unlocked (the
+ *  "stage 1 unlocked, on to stage 2" bar), or null once every stage is. */
+export function posterProgress(
+  stages: { stageNumber: number; thresholdMyr: number }[],
+  poolMyr: number,
+): PosterProgress | null {
+  const next = stages.find((s) => poolMyr < s.thresholdMyr);
+  return next
+    ? {
+        pooledMyr: poolMyr,
+        nextStage: next.stageNumber,
+        nextThresholdMyr: next.thresholdMyr,
+      }
+    : null;
 }
 
 /** '28 SEPT – 4 OCT': the challenge week's first and last day in the

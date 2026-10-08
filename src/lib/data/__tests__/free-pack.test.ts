@@ -16,9 +16,11 @@ vi.mock('@/lib/data/customer', () => ({ getAuthToken: mocks.getAuthToken }));
 
 import {
   canClaimFreePack,
+  freePackMissing,
   mapFreePackState,
   getFreePackState,
 } from '../free-pack';
+import { freePackVerifyMessage } from '@/lib/packs-data';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -143,5 +145,77 @@ describe('getFreePackState — the wire and the two branches', () => {
     expect(await getFreePackState()).toEqual({ mode: 'hidden' });
     backend({ [FREE_PACK]: { body: { eligible: 'yes' } } });
     expect(await getFreePackState()).toEqual({ mode: 'hidden' });
+  });
+});
+
+// Spec 2026-10-06: the claim waits on a verified phone + a real name, and the
+// detail page prompts for them instead of letting the reel refuse the open.
+describe('free pack verification requirements', () => {
+  const FREE_PACK = 'GET /store/free-pack';
+
+  it('carries `missing` on a claim only when something is missing', () => {
+    expect(
+      mapFreePackState(true, {
+        eligible: true,
+        slug: 'free-welcome',
+        missing: ['phone', 'real_name'],
+      }),
+    ).toEqual({
+      mode: 'claim',
+      slug: 'free-welcome',
+      missing: ['phone', 'real_name'],
+    });
+    expect(
+      mapFreePackState(true, {
+        eligible: true,
+        slug: 'free-welcome',
+        missing: [],
+      }),
+    ).toEqual({ mode: 'claim', slug: 'free-welcome' });
+  });
+
+  it('freePackMissing answers only for the claim on THIS pack', () => {
+    const state = {
+      mode: 'claim' as const,
+      slug: 'welcome-pack',
+      missing: ['real_name' as const],
+    };
+    expect(freePackMissing(state, 'welcome-pack')).toEqual(['real_name']);
+    expect(freePackMissing(state, 'other-pack')).toEqual([]);
+    expect(freePackMissing({ mode: 'signup' }, 'welcome-pack')).toEqual([]);
+    expect(
+      freePackMissing({ mode: 'claim', slug: 'welcome-pack' }, 'welcome-pack'),
+    ).toEqual([]);
+  });
+
+  it('names exactly what is left to do', () => {
+    expect(freePackVerifyMessage(['phone', 'real_name'])).toMatch(
+      /verify your phone number and add your real name/,
+    );
+    expect(freePackVerifyMessage(['phone'])).toMatch(
+      /verify your phone number in Settings/,
+    );
+    expect(freePackVerifyMessage(['real_name'])).toMatch(
+      /add your real name in Settings/,
+    );
+  });
+
+  it('reads `missing` off the authed backend answer', async () => {
+    mocks.getAuthToken.mockResolvedValue('jwt');
+    backend({
+      [FREE_PACK]: {
+        body: {
+          eligible: true,
+          slug: 'free-welcome',
+          image: null,
+          missing: ['phone'],
+        },
+      },
+    });
+    expect(await getFreePackState()).toEqual({
+      mode: 'claim',
+      slug: 'free-welcome',
+      missing: ['phone'],
+    });
   });
 });

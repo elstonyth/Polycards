@@ -188,9 +188,67 @@ test('admin_read reads one admin screen, its filters passed on', () => {
   });
 });
 
+test('db_query posts one query to the sql route, with a minute to answer', async () => {
+  const query = TOOLS.admin.find((t) => t.name === 'db_query');
+  assert.deepEqual(query.request({ sql: 'SELECT 1' }), {
+    path: 'sql',
+    post: { sql: 'SELECT 1' },
+    timeoutMs: 60_000,
+  });
+  let seen;
+  const out = await runTool(
+    ALL_TOOLS.find((t) => t.name === 'db_query'),
+    { sql: 'SELECT 1' },
+    {
+      ...config,
+      fetchImpl: async (url, init) => {
+        seen = { url: String(url), init };
+        return new Response('{"rows":[{"n":1}]}');
+      },
+    },
+  );
+  assert.ok(!out.isError);
+  assert.equal(seen.url, 'https://backend.test/reports/admin/sql');
+  assert.equal(seen.init.method, 'POST');
+  assert.deepEqual(JSON.parse(seen.init.body), { sql: 'SELECT 1' });
+});
+
+test('the code tools answer on this PC, without the backend', async () => {
+  assert.deepEqual(
+    TOOLS.code.map((t) => t.name),
+    ['code_files', 'code_search', 'code_read'],
+  );
+  const local = {
+    name: 'code_read',
+    local: async (args) => `read ${args.path}`,
+  };
+  const out = await runTool(
+    local,
+    { path: 'CONTEXT.md' },
+    {
+      ...config,
+      fetchImpl: async () => assert.fail('must not call the backend'),
+    },
+  );
+  assert.deepEqual(out, {
+    content: [{ type: 'text', text: 'read CONTEXT.md' }],
+  });
+  const failed = await runTool(
+    {
+      local: async () => {
+        throw new Error('No file nope.ts on master.');
+      },
+    },
+    {},
+    config,
+  );
+  assert.equal(failed.isError, true);
+  assert.equal(failed.content[0].text, 'No file nope.ts on master.');
+});
+
 test('every desk gets every tool once, each bound to its own desk', () => {
-  assert.equal(ALL_TOOLS.length, 26);
-  assert.equal(new Set(ALL_TOOLS.map((t) => t.name)).size, 26);
+  assert.equal(ALL_TOOLS.length, 30);
+  assert.equal(new Set(ALL_TOOLS.map((t) => t.name)).size, 30);
   for (const [desk, tools] of Object.entries(TOOLS)) {
     for (const tool of tools) {
       assert.equal(ALL_TOOLS.find((t) => t.name === tool.name).desk, desk);

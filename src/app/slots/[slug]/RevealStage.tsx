@@ -12,6 +12,7 @@ import type { WonCard } from '@/lib/actions/packs';
 import type { SellBackOffer, SellBackFn, RevealFn } from './useSellWindow';
 import SellConfirmModal from '@/components/SellConfirmModal';
 import { rm } from '@/lib/format';
+import { sellLabel } from '@/lib/vault-packs';
 import { FREE_PULL_LOCKED_MESSAGE } from '@/lib/packs-data';
 import { rarityRgb, isTopRarity } from '@/lib/rarity';
 import type { SoundName } from '@/lib/use-sound';
@@ -350,14 +351,17 @@ export function RevealStage({
           type="button"
           onClick={() => setConfirmIndex(i)}
           disabled={!flipped || state.phase === 'selling'}
-          className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-chase/50 bg-chase/10 text-sm font-bold text-chase transition-colors hover:bg-chase/20 disabled:opacity-50"
+          className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-chase/50 bg-chase/10 px-2 py-1 text-center text-sm font-bold leading-tight text-chase transition-colors hover:bg-chase/20 disabled:opacity-50"
         >
           {state.phase === 'selling' && (
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
           )}
           {state.phase === 'selling'
             ? 'Selling…'
-            : `Sell for ${rm(offer.amount)} (${offer.percent}%)`}
+            : // A gift / bonus-funded card names what comes back (spec
+              // 2026-10-07 §1); every other card keeps its usual label.
+              (sellLabel(offer.amount, offer.bonus) ??
+              `Sell for ${rm(offer.amount)} (${offer.percent}%)`)}
         </button>
         <button
           type="button"
@@ -497,6 +501,7 @@ export function RevealStage({
           rateType="instant"
           percent={offers[confirmIndex]!.percent}
           netCredit={offers[confirmIndex]!.amount}
+          bonus={offers[confirmIndex]!.bonus}
           secondsLeft={secondsLeft}
           busy={states[confirmIndex]?.phase === 'selling'}
           onConfirm={() => {

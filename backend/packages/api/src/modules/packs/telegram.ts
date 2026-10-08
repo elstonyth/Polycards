@@ -39,7 +39,8 @@ const TELEGRAM_API = 'https://api.telegram.org';
  *  prize (same stance as /store/pulls/recent). 'free' — the welcome pack — IS
  *  posted on purpose: it is the signup hook the channel markets, and a big
  *  free-pack hit is the best ad for it. Move 'free' in here to suppress those. */
-const EXCLUDED_SOURCES: readonly string[] = ['reward'];
+// Gift and bonus pulls (spec 2026-10-07) are never announced either.
+const EXCLUDED_SOURCES: readonly string[] = ['reward', 'gift', 'bonus'];
 
 const DEFAULT_MIN_RARITY: Rarity = 'Legendary';
 

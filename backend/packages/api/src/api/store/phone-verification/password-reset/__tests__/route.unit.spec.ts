@@ -191,7 +191,7 @@ describe('POST /store/phone-verification/password-reset — phone gate on', () =
 describe('POST /store/phone-verification/password-reset — phone gate off', () => {
   // The anti-regression pair for the case above. Delete the flag check and both
   // of these go green on a minted token, which IS the takeover chain: with
-  // PHONE_VERIFICATION_REQUIRED off, blockUnverifiedPhoneWrite no-ops, so a
+  // PHONE_VERIFICATION_REQUIRED off, blockCustomerPhoneWrite no-ops, so a
   // stolen session writes any number to /store/customers/me, OTPs it, and
   // exchanges it here for a real emailpass reset token.
   it.each([

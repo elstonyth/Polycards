@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Eye, Lock, Search, Star } from 'lucide-react';
+import Image from 'next/image';
+import { Eye, Lock, Package, Search, Star } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
 import { rm, rm0 } from '@/lib/format';
 import {
@@ -13,6 +14,8 @@ import {
   type VaultResult,
 } from '@/lib/actions/vault';
 import { type AddressView } from '@/lib/actions/delivery';
+import { getPackGifts } from '@/lib/actions/pack-gifts';
+import type { PackGift } from '@/lib/vault-packs';
 import RequestDeliveryModal from '@/components/account/RequestDeliveryModal';
 import { SuccessToast } from '@/components/ui/SuccessToast';
 import {
@@ -39,10 +42,14 @@ import { useConsent } from '@/lib/use-consent';
 export default function VaultClient({
   initial,
   addresses,
+  initialGifts,
 }: {
   initial: VaultResult;
   addresses: AddressView[];
+  /** Packs gifted into this vault, unopened — the Packs row above the cards. */
+  initialGifts: PackGift[];
 }) {
+  const [gifts, setGifts] = useState<PackGift[]>(initialGifts);
   const [items, setItems] = useState<VaultItem[]>(
     initial.ok ? initial.items : [],
   );
@@ -122,6 +129,12 @@ export default function VaultClient({
     (s, i) => s + i.buyback.amount,
     0,
   );
+  // The part of that sale paid back as bonus credit (gift / bonus-funded
+  // pulls) — the confirm names the split instead of one undifferentiated sum.
+  const selectedBonus = sellableSelected.reduce(
+    (s, i) => s + i.buyback.bonus,
+    0,
+  );
   // The vault buyback is a flat rate, uniform across all vaulted items (see the
   // footer copy + actions/vault.ts), so the first item's percent represents the
   // whole batch. The confirm's "You receive" total is the exact sum of per-item
@@ -198,6 +211,13 @@ export default function VaultClient({
         if (!live || !r.ok) return;
         setItems(r.items);
         setBalance(r.balance);
+      })
+      .catch(() => {});
+    // Same staleness for the Packs row: Back can restore a gift already
+    // opened. null (unreadable) keeps the server seed.
+    void getPackGifts()
+      .then((g) => {
+        if (live && g) setGifts(g);
       })
       .catch(() => {});
     return () => {
@@ -357,6 +377,67 @@ export default function VaultClient({
         ))}
       </div>
 
+      {/* Packs gifted into the vault, unopened (spec 2026-10-07 §1). Open
+          goes to the pack page, where the gift applies itself as Vault x1. */}
+      {gifts.length > 0 && (
+        <section aria-labelledby="vault-packs" className="mt-4">
+          <h2
+            id="vault-packs"
+            className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400"
+          >
+            Packs
+          </h2>
+          <ul className="mt-2 flex flex-col gap-2">
+            {gifts.map((g) => (
+              <li
+                key={g.packId}
+                className="flex items-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 p-3"
+              >
+                {g.image ? (
+                  <Image
+                    src={g.image}
+                    alt=""
+                    aria-hidden
+                    width={205}
+                    height={360}
+                    unoptimized
+                    className="h-14 w-auto shrink-0 object-contain"
+                  />
+                ) : (
+                  <span
+                    aria-hidden
+                    className="flex h-14 w-8 shrink-0 items-center justify-center text-neutral-400"
+                  >
+                    <Package className="h-5 w-5" />
+                  </span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-white">
+                    {g.title} ×{g.count}
+                  </p>
+                  <p className="mt-0.5 text-[12px] text-neutral-400">
+                    Gift from Polycards
+                  </p>
+                </div>
+                {g.available ? (
+                  <Link
+                    href={`/slots/${encodeURIComponent(g.packId)}`}
+                    aria-label={`Open ${g.title}`}
+                    className={cn(pillVariants({ size: 'sm' }), 'px-5')}
+                  >
+                    Open
+                  </Link>
+                ) : (
+                  <Pill variant="secondary" size="sm" disabled>
+                    Unavailable
+                  </Pill>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {/* Search + rarity filter */}
       {items.length > 0 && (
         <div className="mt-4 flex flex-col gap-2.5">
@@ -443,7 +524,8 @@ export default function VaultClient({
       {items.length === 0 ? (
         <div className="mt-5 rounded-2xl border border-white/10 bg-neutral-900 px-6 py-12 text-center">
           <p className="text-sm font-semibold text-white">
-            Your vault is empty.
+            {/* Not "empty" under a Packs row that holds something. */}
+            {gifts.length > 0 ? 'No cards yet.' : 'Your vault is empty.'}
           </p>
           <p className="mt-1 text-[13px] text-neutral-400">
             Rip a pack and the card you pull lands here.
@@ -755,6 +837,7 @@ export default function VaultClient({
           rateType="flat"
           percent={selectedPercent}
           netCredit={selectedBuyback}
+          bonus={selectedBonus}
           busy={bulkSelling}
           onConfirm={bulkSell}
           onCancel={() => !bulkSelling && setConfirmBulkSell(false)}

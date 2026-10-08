@@ -187,6 +187,7 @@ medusaIntegrationTestRunner({
           // outside revenue/net); nothing seeded here, so both read 0.
           deliveryFees: 0,
           referralCommission: 0,
+          bonusPromo: 0,
           net: 38.39,
         });
 

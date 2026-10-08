@@ -7,11 +7,14 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import { FREE_WELCOME_CATEGORY } from '../../modules/packs/free-pack';
+import { allocateBonusSen } from '../../modules/packs/bonus-credit';
 
 export type ChargePackBatchInput = {
   pack_id: string;
   customer_id: string;
   count: number;
+  /** Rows covered by gifted packs (spec 2026-10-07) — charged nothing. */
+  gifts?: number;
   open_id: string; // one per batch — the single charge row's open id
 };
 
@@ -22,6 +25,10 @@ export type ChargePackBatchResult = {
   total: number;
   /** Customer balance AFTER the charge. */
   balance: number;
+  /** Bonus credit the batch spent, in sen (spent first). */
+  bonus_cents: number;
+  /** That bonus split over the PAID rows in order (length count − gifts). */
+  bonus_cents_by_row: number[];
 };
 
 // open_id is the authoritative key for compensation: reverseOpen(open_id) cascades
@@ -60,21 +67,39 @@ export const chargePackBatchInvoke: InvokeFn<
   }
   // Cent-round: price × count in binary floats (149.9 × 3) would book an
   // un-rounded wallet_delta and echo it as total_charged.
-  const total = Math.round(price * input.count * 100) / 100;
+  // Gifted rows are paid for by the gift claimed before this step.
+  const paidRows = input.count - (input.gifts ?? 0);
+  const total = Math.round(price * paidRows * 100) / 100;
   if (total === 0) {
     const balance = await packs.creditBalance(input.customer_id);
     return new StepResponse(
-      { price, total, balance } satisfies ChargePackBatchResult,
+      {
+        price,
+        total,
+        balance,
+        bonus_cents: 0,
+        bonus_cents_by_row: Array.from({ length: paidRows }, () => 0),
+      } satisfies ChargePackBatchResult,
       undefined as CompensateData,
     );
   }
-  const { balance } = await packs.settleOpen({
+  const { balance, bonusCents } = await packs.settleOpen({
     customerId: input.customer_id,
     amount: -total,
     sourceTransactionId: input.open_id,
   });
   return new StepResponse(
-    { price, total, balance } satisfies ChargePackBatchResult,
+    {
+      price,
+      total,
+      balance,
+      bonus_cents: bonusCents,
+      bonus_cents_by_row: allocateBonusSen(
+        Math.round(price * 100),
+        paidRows,
+        bonusCents,
+      ),
+    } satisfies ChargePackBatchResult,
     { open_id: input.open_id } satisfies CompensateData,
   );
 };

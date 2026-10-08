@@ -614,7 +614,54 @@
       "freeze": "Freeze account",
       "unfreeze": "Unfreeze account",
       "adjust_credit": "Adjust credits",
-      "set_player_group": "Moved to another player group"
+      "set_player_group": "Moved to another player group",
+      "grant_pack_gift": "Gifted packs",
+      "revoke_pack_gift": "Revoked a pack gift",
+      "grant_bonus_credit": "Bonus credit"
+    },
+    "gift": {
+      "title": "Gift packs",
+      "subtitle": "Unopened packs in this player's vault. They open them as Vault x1 on the pack page.",
+      "pack": "Pack",
+      "packPlaceholder": "Choose a pack",
+      "packsLoading": "Loading packs…",
+      "packsError": "Failed to load packs.",
+      "quantity": "Quantity (1–10)",
+      "note": "Note (required, never shown to the player)",
+      "send": "Send",
+      "confirmTitle": "Send {{quantity}}× {{pack}} to {{email}}?",
+      "confirmDesc": "The packs land in the player's vault unopened. Their price counts toward the daily mint cap.",
+      "sent": "Sent {{quantity}}× {{pack}}",
+      "loadError": "Failed to load gifts.",
+      "empty": "No gifted packs yet.",
+      "colPack": "Pack",
+      "colState": "State",
+      "colGranted": "Granted",
+      "colNote": "Note",
+      "colOpened": "Opened",
+      "state": {
+        "unopened": "Unopened",
+        "opened": "Opened",
+        "revoked": "Revoked",
+        "stuck": "Stuck"
+      },
+      "revoke": "Revoke",
+      "revokeTitle": "Revoke this {{pack}} gift?",
+      "revokeDesc": "It leaves the player's vault. A gift that has already been opened can't be revoked.",
+      "revoked": "Gift revoked"
+    },
+    "bonus": {
+      "title": "Bonus credit",
+      "subtitle": "Spend-only credit for pack opens. Never withdrawable.",
+      "balance": "Bonus balance",
+      "amount": "Amount (e.g. 50 to give, -50 to take back)",
+      "note": "Note (required, audit trail)",
+      "apply": "Apply",
+      "invalid": "Amount must be non-zero, at most 2 decimals and within RM 1,000,000.",
+      "confirmGive": "Give {{amount}} bonus credit to {{email}}?",
+      "confirmTake": "Take back {{amount}} bonus credit from {{email}}?",
+      "confirmDesc": "The note is recorded in the ledger and the audit trail.",
+      "applied": "Bonus credit applied"
     }
   },
   "economy": {
@@ -735,6 +782,7 @@
     "name": "Name",
     "email": "Email",
     "phone": "Phone",
+    "realName": "Real name",
     "verified": "Phone verified",
     "verifiedYes": "Verified",
     "verifiedNo": "Not verified",

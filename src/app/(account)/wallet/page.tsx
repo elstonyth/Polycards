@@ -1,14 +1,26 @@
 import type { Metadata } from 'next';
+import { unstable_rethrow } from 'next/navigation';
 import { Check, Lock } from 'lucide-react';
 import { AccountHeader, Panel, StatCards } from '@/components/account/ui';
 import { PlaythroughProgress } from '@/components/account/PlaythroughProgress';
 import { getWallet } from '@/lib/actions/wallet';
-import { rm } from '@/lib/format';
+import { getPaymentLimits } from '@/lib/actions/vault';
+import { DEFAULT_PAYMENT_LIMITS } from '@/lib/payment-limits';
+import { rm, rm0 } from '@/lib/format';
 
 export const metadata: Metadata = { title: 'Wallet' };
 
 export default async function WalletPage() {
-  const res = await getWallet();
+  // The payout floor belongs to the active gateway — the same read the
+  // withdraw form makes; any failure keeps the defaults.
+  const [res, limits] = await Promise.all([
+    getWallet(),
+    getPaymentLimits().catch((err: unknown) => {
+      // Let Next's own render signals (dynamic usage, redirects) through.
+      unstable_rethrow(err);
+      return DEFAULT_PAYMENT_LIMITS;
+    }),
+  ]);
 
   if (!res.ok) {
     return (
@@ -31,6 +43,21 @@ export default async function WalletPage() {
   // bar.
   const { deposited, remaining } = w.playthrough;
   const gateOpen = remaining <= 0;
+  // Bonus credit is inside the balance but spend only. The Normal line is the
+  // part that can ever be withdrawn — computed in sen so float noise never
+  // prints. Hidden while there is no bonus: a zero row would only confuse.
+  const hasBonus = Math.round(w.bonus * 100) > 0;
+  const normal =
+    (Math.round(w.balance * 100) - Math.round(w.bonus * 100)) / 100;
+  // The payout floor under Withdrawable. "You need X more" only when nothing
+  // else holds the balance — frozen or gated, withdrawable is 0 for another
+  // reason (the withdraw form's belowMin rule). In sen, like Normal above.
+  const minRm = limits.withdrawal.minRm;
+  const shortSen = Math.round(minRm * 100) - Math.round(w.withdrawable * 100);
+  const minLine =
+    !w.isFrozen && gateOpen && shortSen > 0
+      ? `Minimum withdrawal ${rm0(minRm)} — you need ${rm(shortSen / 100)} more`
+      : `Minimum withdrawal ${rm0(minRm)}`;
 
   return (
     <>
@@ -97,7 +124,21 @@ export default async function WalletPage() {
         <StatCards
           items={[
             { label: 'Total balance', value: rm(w.balance) },
-            { label: 'Withdrawable', value: rm(w.withdrawable) },
+            ...(hasBonus
+              ? [
+                  { label: 'Normal', value: rm(normal) },
+                  {
+                    label: 'Bonus',
+                    value: rm(w.bonus),
+                    sub: 'spend only · can’t withdraw',
+                  },
+                ]
+              : []),
+            {
+              label: 'Withdrawable',
+              value: rm(w.withdrawable),
+              sub: minLine,
+            },
           ]}
         />
       </div>
@@ -120,7 +161,7 @@ export default async function WalletPage() {
             },
             {
               title: 'Then the whole balance unlocks',
-              body: 'Once you are fully played through, your entire available balance is withdrawable — winnings included, not just your deposit back. Nothing expires and there is no waiting period.',
+              body: 'Once you are fully played through, your entire available balance is withdrawable — winnings included, not just your deposit back. Bonus credit is the one exception: it can only be spent on packs. Nothing expires and there is no waiting period.',
             },
           ].map((s, i) => (
             <li key={s.title} className="flex gap-3">

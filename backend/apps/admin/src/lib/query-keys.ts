@@ -48,6 +48,8 @@ export const qk = {
     ['admin', 'customer', id, 'referral'] as const,
   eligibleProducts: ['admin', 'eligible-products'] as const,
   customerGacha: (id: string) => ['admin', 'customer', id, 'gacha'] as const,
+  customerPackGifts: (id: string) =>
+    ['admin', 'customer', id, 'pack-gifts'] as const,
   customerAudit: (id: string, page: number) =>
     ['admin', 'customer', id, 'audit', page] as const,
   customerTransactions: (id: string, page: number) =>

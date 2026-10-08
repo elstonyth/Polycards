@@ -29,23 +29,18 @@ describe('adminPathError', () => {
 
 describe('blockedReason', () => {
   it.each([
-    ['/admin/users', /staff logins/],
-    ['/admin/users/me', /staff logins/],
-    ['/admin/invites', /staff logins/],
+    ['/admin/invites', /staff invites/],
+    ['/admin/invites/inv_1', /staff invites/],
     ['/admin/api-keys', /API keys/],
     ['/admin/workflows-executions', /workflow/],
     ['/admin/notifications', /notification/],
     ['/admin/uploads', /uploads/],
-    ['/admin/payments/withdrawals/wd_1/account', /full bank number/],
-    ['/admin/customers/cus_1/payout-details', /full bank number/],
     ['/admin/pricecharting/search', /PriceCharting/],
     ['/admin/inventory/export.xlsx', /file exports/],
     ['/admin/players/export', /file exports/],
     // Medusa matches routes case-insensitively: /admin/USERS runs /admin/users.
-    ['/admin/USERS', /staff logins/],
+    ['/admin/INVITES', /staff invites/],
     ['/admin/Api-Keys', /API keys/],
-    ['/admin/payments/withdrawals/wd_1/ACCOUNT', /full bank number/],
-    ['/admin/customers/cus_1/Payout-Details', /full bank number/],
     ['/admin/inventory/EXPORT.XLSX', /file exports/],
   ])('blocks %s', (path, why) => {
     expect(blockedReason(path)).toMatch(why);
@@ -57,6 +52,11 @@ describe('blockedReason', () => {
     '/admin/challenge/schedule',
     '/admin/userscore',
     '/admin/players',
+    // Open since 2026-10-06: the staff list and full bank numbers.
+    '/admin/users',
+    '/admin/users/user_1',
+    '/admin/payments/withdrawals/wd_1/account',
+    '/admin/customers/cus_1/payout-details',
   ])('allows %s', (path) => {
     expect(blockedReason(path)).toBeNull();
   });
@@ -85,6 +85,15 @@ describe('capBody', () => {
     expect(out.truncated).toBe(true);
     expect(out.data_preview.length).toBeLessThanOrEqual(2000);
     expect(out.note).toMatch(/limit/);
+  });
+
+  it('cuts the preview so it still fits once escaped as a JSON string', () => {
+    // Text that is all quotes doubles when the MCP result escapes it.
+    const quoted = { rows: Array.from({ length: 400 }, () => '"x"') };
+    const out = capBody(quoted, 2000) as { data_preview: string };
+    // Hermes escapes the whole tool answer once more: measure that.
+    expect(JSON.stringify(JSON.stringify(out)).length).toBeLessThanOrEqual(2000);
+    expect(out.data_preview.length).toBeGreaterThan(200);
   });
 });
 
@@ -120,26 +129,56 @@ describe('redact', () => {
     });
   });
 
-  it('keeps only the last 4 digits of a bank account number', () => {
+  it('hides them inside a string that holds JSON too (a jsonb cast to text)', () => {
+    const asText = JSON.stringify({
+      handle: 'ace',
+      partner_credential: { password: 'pw', issued_at: '2026-09-09' },
+      real_name: 'Tan Ah Kow',
+    });
+    const hidden =
+      '{"handle":"ace","partner_credential":"[hidden]","real_name":"[hidden]"}';
+    expect(redact({ metadata: asText, rows: [asText] })).toEqual({
+      metadata: hidden,
+      rows: [hidden],
+    });
+    // Strings that only look like JSON stay as they are.
+    expect(redact(['[not json', '{oops}', '[]', 'x'])).toEqual([
+      '[not json',
+      '{oops}',
+      '[]',
+      'x',
+    ]);
+  });
+
+  // Spec 2026-10-06: the Players list, account_state and the set_real_name
+  // audit before/after all carry the real name; none of it reaches Discord.
+  it('hides real names wherever they ride', () => {
     expect(
       redact({
-        metadata: {
-          bank_accounts: [
-            { bankName: 'Maybank', accountNumber: '1234 5678 9012' },
-          ],
-        },
-        account_number: '****9012',
-        bank_account_number: '5550001234',
-        none: { account_number: null },
+        players: [{ id: 'cus_1', real_name: 'Tan Ah Kow' }],
+        account_state: { real_name: 'Tan Ah Kow', real_name_set_at: 'x' },
+        actions: [{ before: { real_name: 'A' }, after: { real_name: 'B' } }],
       }),
     ).toEqual({
-      metadata: {
-        bank_accounts: [{ bankName: 'Maybank', accountNumber: '••••9012' }],
-      },
-      account_number: '••••9012',
-      bank_account_number: '••••1234',
-      none: { account_number: null },
+      players: [{ id: 'cus_1', real_name: '[hidden]' }],
+      account_state: { real_name: '[hidden]', real_name_set_at: '[hidden]' },
+      actions: [
+        { before: { real_name: '[hidden]' }, after: { real_name: '[hidden]' } },
+      ],
     });
+  });
+
+  it('shows bank account numbers whole (open since 2026-10-06)', () => {
+    const banks = {
+      metadata: {
+        bank_accounts: [
+          { bankName: 'Maybank', accountNumber: '1234 5678 9012' },
+        ],
+      },
+      account_number: '1234 5678 9012',
+      bank_account_number: '5550001234',
+    };
+    expect(redact(banks)).toEqual(banks);
   });
 
   it('leaves everything else as it is', () => {

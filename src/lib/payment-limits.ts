@@ -9,6 +9,8 @@ export type PaymentLimits = {
   withdrawal: { minRm: number; maxRm: number };
   depositsEnabled: boolean;
   withdrawalsEnabled: boolean;
+  /** ISO instant a timed withdrawal pause ends; absent when there is none. */
+  withdrawalsPausedUntil?: string | null;
 };
 
 /**

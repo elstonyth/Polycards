@@ -14,6 +14,9 @@ export type BackfillLedgerRow = {
   /** Signed 2dp MYR. */
   amount: number;
   external_funded_cents: number | null;
+  /** Bonus credit the row spent (≤ 0 on an open; spec 2026-10-07). Bonus is
+   *  spent FIRST, so only the rest of an open draws on deposits. */
+  bonus_cents?: number | null;
   /** Reversal rows carry `reversal:<originalRowId>`. */
   reference: string | null;
 };
@@ -39,7 +42,7 @@ export function recomputeExternalStamps(
       balanceSen += ext;
     } else if (row.reason === 'pack_open' && row.amount < 0) {
       const consumed = consumeExternalSen(
-        Math.round(-row.amount * 100),
+        Math.round(-row.amount * 100) + Math.round(row.bonus_cents ?? 0),
         balanceSen,
       );
       ext = consumed > 0 ? -consumed : 0; // avoid JS -0

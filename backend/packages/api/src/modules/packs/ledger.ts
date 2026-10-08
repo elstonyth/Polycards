@@ -21,6 +21,10 @@ export type LedgerPayload =
       channel: 'single' | 'batch';
       pack_id: string;
       prize_skus: string[];
+      // Spec 2026-10-07 §4.10 — present only when non-zero: the bonus credit
+      // this open spent (MYR) and how many rows were gifted packs.
+      bonus?: number;
+      gifts?: number;
     }
   | {
       type: 'SE';
@@ -28,6 +32,8 @@ export type LedgerPayload =
       sp_ref_id: string | null;
       price: number;
       rate: number;
+      // The part of this sell-back paid as bonus credit (MYR), when non-zero.
+      bonus?: number;
     }
   // shipping_fee/insurance_fee: the wallet charge breakdown (2026-08-25) —
   // absent on pre-fee rows and on the cancel reversal row.

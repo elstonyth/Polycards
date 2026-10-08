@@ -2,6 +2,8 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import {
   GATEWAY_WD_MIN_RM,
   withdrawalsEnabled,
+  withdrawalsPausedMessage,
+  withdrawalsPausedUntil,
   resetPayoutFloatBreaker,
   startWithdrawal,
   submitHeldWithdrawal,
@@ -170,6 +172,42 @@ describe('withdrawalsEnabled', () => {
         TGPAY_SECRET_KEY: 'sk',
       }),
     ).toBe(true);
+  });
+});
+
+describe('GATEWAY_WITHDRAWALS_PAUSED_UNTIL — a timed pause that reopens by itself', () => {
+  const OPEN = {
+    GATEWAY_ENABLED: 'true',
+    GATEWAY_WITHDRAWALS_ENABLED: 'true',
+    TGPAY_SECRET_KEY: 'sk',
+  };
+  const env = {
+    ...OPEN,
+    GATEWAY_WITHDRAWALS_PAUSED_UNTIL: '2026-10-08T06:00:00+08:00',
+  };
+  const resume = Date.parse('2026-10-07T22:00:00Z');
+
+  it('closes withdrawals before the instant and reopens them at it', () => {
+    expect(withdrawalsEnabled(env, 'tgpay', resume - 1)).toBe(false);
+    expect(withdrawalsPausedUntil(env, resume - 1)).toBe(resume);
+    expect(withdrawalsEnabled(env, 'tgpay', resume)).toBe(true);
+    expect(withdrawalsPausedUntil(env, resume)).toBeNull();
+    expect(withdrawalsEnabled(OPEN, 'tgpay', resume - 1)).toBe(true);
+  });
+
+  it('fails closed with no known end on an unparseable value', () => {
+    const bad = { ...OPEN, GATEWAY_WITHDRAWALS_PAUSED_UNTIL: '6am' };
+    expect(withdrawalsPausedUntil(bad)).toBe(Infinity);
+    expect(withdrawalsEnabled(bad, 'tgpay')).toBe(false);
+    expect(withdrawalsPausedMessage(Infinity)).toBe(
+      'Withdrawals are paused. Please try again later.',
+    );
+  });
+
+  it('tells the customer when to come back, in Malaysia time', () => {
+    expect(withdrawalsPausedMessage(resume)).toBe(
+      'Withdrawals are paused until 6:00 AM. Please try again after 6:00 AM.',
+    );
   });
 });
 

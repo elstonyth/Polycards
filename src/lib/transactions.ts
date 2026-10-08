@@ -18,6 +18,7 @@ const REASON_LABEL: Record<CreditReason, string> = {
   daily_reward: 'Daily reward',
   referral_commission: 'Referral commission',
   delivery_fee: 'Delivery fee',
+  bonus_grant: 'Bonus credit',
 };
 
 /** Customer-facing wording for the gateway row's settlement outcome. */

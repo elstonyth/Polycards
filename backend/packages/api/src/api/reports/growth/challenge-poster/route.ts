@@ -4,6 +4,7 @@ import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import {
   posterHeadline,
+  posterProgress,
   posterWeekLabel,
   renderChallengePoster,
 } from '../../../../modules/packs/challenge-poster';
@@ -16,7 +17,8 @@ import { nextQueuedChallenge } from '../challenge/queued';
 // post as a draft. Built from the same view as the public Ranks page, with
 // each podium prize's official image (modules/packs/challenge-poster.ts).
 // stage defaults to the highest unlocked stage; leaders adds the current top 3
-// shown names. ?week=next draws the next challenge waiting in the admin queue
+// shown names. While a stage is still locked, a bar shows the pool's way to
+// the next one (x-poster-note gives the figures). ?week=next draws the next challenge waiting in the admin queue
 // instead (queuedPoster). x-poster-missing-art names podium ranks whose prize
 // card shows as a placeholder tile (art that could not be fetched or decoded).
 export async function GET(
@@ -59,6 +61,7 @@ export async function GET(
   }
   const pool = body.progress.pooledMyr;
   const { headline, featureStage } = posterHeadline(body.stages, pool);
+  const progress = posterProgress(body.stages, pool);
   const feature = body.stages.find(
     (s) =>
       s.stageNumber === (stage === undefined ? featureStage : Number(stage)),
@@ -106,11 +109,19 @@ export async function GET(
           ? body.top.slice(0, 3).map((t) => ({ rank: t.rank, name: t.name }))
           : [],
       siteHost: 'polycards.gg/leaderboard',
+      progress,
     },
     new Map(podium.map((p) => [p.rank, p.image])),
   );
   res.setHeader('Content-Type', 'image/jpeg');
   if (missing.length) res.setHeader('x-poster-missing-art', missing.join(','));
+  if (progress) {
+    const rm = (n: number) => `RM ${n.toLocaleString('en-MY')}`;
+    res.setHeader(
+      'x-poster-note',
+      `The bar shows this week's pool, ${rm(Math.floor(progress.pooledMyr))} of the ${rm(progress.nextThresholdMyr)} that unlocks stage ${progress.nextStage} (${rm(Math.ceil(progress.nextThresholdMyr - progress.pooledMyr))} to go), live as of now.`,
+    );
+  }
   // Drawn taller than the feed; posted at 1080x1350.
   res.status(200).send(await fitToFeed(jpeg));
 }

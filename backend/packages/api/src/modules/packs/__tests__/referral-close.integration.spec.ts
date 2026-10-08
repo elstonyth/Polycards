@@ -119,6 +119,44 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(run.total_commission_cents).toBe(75 + 320);
     });
 
+    it('lists the downline behind each line, summing to its basis', async () => {
+      await seed();
+      // E (referred by R) opened a pack, then a refund took them net
+      // negative for the week — dropped from the listing exactly as the
+      // close drops them from R's basis.
+      await service.createReferralAttributions([
+        { customer_id: 'cus_e', referrer_id: 'cus_r' },
+      ]);
+      await service.createCreditTransactions([
+        { customer_id: 'cus_e', amount: -10, reason: 'pack_open' },
+        { customer_id: 'cus_e', amount: 15, reason: 'pack_open' },
+      ]);
+      const r = await service.closeReferralWeek({
+        weekStartIso: week.weekStartIso,
+      });
+      const [run] = await service.listWeeklySettlements({ id: r.settlementId });
+      const downline = await service.referralDownlineForWeek({
+        weekStart: new Date(run.week_start),
+      });
+
+      // Biggest spender first; last week's RM999 and C (unreferred) absent.
+      expect(downline.get('cus_r')).toEqual([
+        { customer_id: 'cus_a', spend_cents: 10_000 },
+        { customer_id: 'cus_b', spend_cents: 5_000 },
+      ]);
+      const lines = await service.listWeeklySettlementLines({
+        settlement_id: r.settlementId,
+      });
+      expect(lines).toHaveLength(2);
+      for (const l of lines) {
+        const sum = (downline.get(l.customer_id) ?? []).reduce(
+          (s, m) => s + m.spend_cents,
+          0,
+        );
+        expect(sum).toBe(l.basis_cents);
+      }
+    });
+
     it('is idempotent — a re-run creates nothing new', async () => {
       await seed();
       const first = await service.closeReferralWeek({

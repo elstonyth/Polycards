@@ -50,6 +50,17 @@ import {
   type CardSeed,
 } from '@/components/cards/CardDetailOverlay';
 import { usePackDetailPoll } from '@/lib/use-pack-detail-poll';
+import { getPackGifts } from '@/lib/actions/pack-gifts';
+import {
+  giftsHeldFor,
+  giftsUsed,
+  vaultButtonLabel,
+  vaultCostLabel,
+} from '@/lib/vault-packs';
+import {
+  freePackVerifyMessage,
+  type FreePackRequirement,
+} from '@/lib/packs-data';
 
 /**
  * Shown where the gift offer would be, when this visitor cannot claim it.
@@ -178,6 +189,7 @@ export default function PackDetailClient({
   recentPulls,
   initialQty = 1,
   freePackEligible = true,
+  freePackMissing = [],
 }: {
   pack: ResolvedPack;
   siblings: Pack[];
@@ -200,6 +212,13 @@ export default function PackDetailClient({
    * shows and `handleGoToReel` prompts login.
    */
   freePackEligible?: boolean;
+  /**
+   * Free pack ONLY (spec 2026-10-06): what the account must still do before
+   * the backend lets it open — verify a phone, add a real name. Non-empty
+   * turns the open into a prompt with a Settings link, instead of a trip to
+   * the reel that ends in a refusal.
+   */
+  freePackMissing?: FreePackRequirement[];
 }) {
   const { customer } = useAuth();
   const { balance, openTopUp } = useTopUp();
@@ -229,8 +248,18 @@ export default function PackDetailClient({
   // `openError` surfaces a friendly failure inline (`needsTopUp` adds the
   // top-up entry for credit shortfalls). Real opens happen on the reel, so
   // there is no in-place async open state here.
-  const [openError, setOpenError] = useState<string | null>(null);
+  // A free pack still waiting on verification (spec 2026-10-06) renders with
+  // the prompt already showing, so the customer reads what is left BEFORE
+  // tapping a CTA that cannot succeed yet. The tap answers with it again.
+  const verifyPrompt =
+    pack.categoryId === FREE_WELCOME_CATEGORY && freePackMissing.length > 0
+      ? freePackVerifyMessage(freePackMissing)
+      : null;
+  const [openError, setOpenError] = useState<string | null>(verifyPrompt);
   const [needsTopUp, setNeedsTopUp] = useState(false);
+  // The free pack's verification prompt: adds the Settings link under the
+  // message.
+  const [needsVerify, setNeedsVerify] = useState(verifyPrompt !== null);
   // One request refreshes every grid price (60s, visibility-gated), seeded
   // with this route's server snapshot.
   const liveDetail = usePackDetailPoll(active.id, detail);
@@ -257,6 +286,45 @@ export default function PackDetailClient({
 
   // Real backend price, never re-parsed from the rounded display string.
   const priceNum = active.priceMyr;
+
+  // Vault packs: packs an admin gifted into this customer's vault apply
+  // themselves here, however the player arrived (spec 2026-10-07 §1). Read
+  // client-side after mount and only when signed in — the server loader stays
+  // customer-free. Keyed on customer + pack so a switch of either never shows
+  // the other's count; a failed read settles as no gifts (the reel then
+  // charges the price shown here). Never on the free welcome pack.
+  const customerId = customer?.id ?? null;
+  const giftKey =
+    customerId && !isFreePack ? `${customerId}:${active.id}` : null;
+  const [heldGifts, setHeldGifts] = useState<{
+    key: string;
+    count: number;
+  } | null>(null);
+  useEffect(() => {
+    if (!giftKey) return;
+    let live = true;
+    void getPackGifts()
+      .then((g) => {
+        if (live) {
+          setHeldGifts({ key: giftKey, count: giftsHeldFor(g, active.id) });
+        }
+      })
+      .catch(() => {
+        if (live) setHeldGifts({ key: giftKey, count: 0 });
+      });
+    return () => {
+      live = false;
+    };
+  }, [giftKey, active.id]);
+  const held = heldGifts && heldGifts.key === giftKey ? heldGifts.count : 0;
+  // Still reading: the price shown may yet drop to a gift, so no credit
+  // refusal until it lands (the reel re-checks before any charge).
+  const giftsPending = giftKey !== null && heldGifts?.key !== giftKey;
+  // Gifts cover rows first; only the rest is paid (gifts → bonus → normal).
+  const vaultGifts = giftsUsed(qty, held);
+  const paidCost = priceNum * (qty - vaultGifts);
+  const vaultCost = vaultCostLabel(qty, vaultGifts, priceNum);
+  const openLabel = vaultButtonLabel(qty, vaultGifts) ?? 'Open Pack';
   // Baked Polycards tiers animate their factory stage (still poster otherwise).
   const heroVideo = factoryVideo(active.displayImage);
 
@@ -339,12 +407,18 @@ export default function PackDetailClient({
     // A free open costs nothing and is always singular — skip the credit gate
     // (a brand-new account has a zero balance by definition) and pin count=1.
     if (isFreePack) {
-      setOpenError(null);
       setNeedsTopUp(false);
+      if (verifyPrompt) {
+        setOpenError(verifyPrompt);
+        setNeedsVerify(true);
+        return;
+      }
+      setOpenError(null);
+      setNeedsVerify(false);
       router.push(`/slots/${active.id}/spin?count=1`);
       return;
     }
-    if (balance !== null && !affordable(balance, priceNum * qty)) {
+    if (!giftsPending && balance !== null && !affordable(balance, paidCost)) {
       setNeedsTopUp(true);
       setOpenError('Not enough credits to open.');
       return;
@@ -631,10 +705,10 @@ export default function PackDetailClient({
                   {customer
                     ? isFreePack
                       ? 'Open Free Pack'
-                      : 'Open Pack'
+                      : openLabel
                     : 'Log in to open'}
                   <span className="flex items-center gap-1.5 font-heading text-base tracking-tight tabular-nums">
-                    {!isFreePack && rm(priceNum * qty)}
+                    {!isFreePack && (vaultCost ?? rm(priceNum * qty))}
                     <ArrowRight className="h-4 w-4" aria-hidden />
                   </span>
                 </Pill>
@@ -645,11 +719,22 @@ export default function PackDetailClient({
                   className="mt-2 text-center text-[11px] text-red-300"
                 >
                   {openError}
+                  {needsVerify && (
+                    <>
+                      {' '}
+                      <Link
+                        href="/settings"
+                        className="font-bold text-white underline underline-offset-2"
+                      >
+                        Go to Settings →
+                      </Link>
+                    </>
+                  )}
                   {needsTopUp && (
                     <>
                       {' '}
-                      {balance !== null && priceNum * qty - balance > 0 && (
-                        <>You&apos;re {rm(priceNum * qty - balance)} short. </>
+                      {balance !== null && paidCost - balance > 0 && (
+                        <>You&apos;re {rm(paidCost - balance)} short. </>
                       )}
                       <button
                         type="button"
@@ -806,14 +891,23 @@ export default function PackDetailClient({
                 ? 'Unavailable'
                 : isFreePack
                   ? 'Free'
-                  : rm(priceNum * qty)}
+                  : // A vault pack: the long "Vault x1 + RM 300.00" line
+                    // would truncate here, so the gifts take the big line
+                    // and the paid rows the small one below.
+                    vaultGifts > 0
+                    ? `Vault x${vaultGifts}`
+                    : rm(priceNum * qty)}
             </p>
             <p className="mt-1 text-[11px] leading-none text-white/60">
               {freeClaimUnavailable
                 ? 'Not available on this account'
                 : isFreePack
                   ? 'Your welcome pack'
-                  : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% during reveal`}
+                  : vaultGifts > 0
+                    ? qty > vaultGifts
+                      ? `+ ${rm(paidCost)}`
+                      : 'Gift from Polycards'
+                    : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% during reveal`}
             </p>
           </div>
           <div
@@ -854,7 +948,7 @@ export default function PackDetailClient({
               {customer
                 ? isFreePack
                   ? 'Open Free Pack'
-                  : 'Open Pack'
+                  : openLabel
                 : 'Log in'}
             </Pill>
           )}
@@ -862,11 +956,22 @@ export default function PackDetailClient({
         {openError && (
           <p role="alert" className="mt-2 text-center text-[11px] text-red-300">
             {openError}
+            {needsVerify && (
+              <>
+                {' '}
+                <Link
+                  href="/settings"
+                  className="font-bold text-white underline underline-offset-2"
+                >
+                  Go to Settings →
+                </Link>
+              </>
+            )}
             {needsTopUp && (
               <>
                 {' '}
-                {balance !== null && priceNum * qty - balance > 0 && (
-                  <>You&apos;re {rm(priceNum * qty - balance)} short. </>
+                {balance !== null && paidCost - balance > 0 && (
+                  <>You&apos;re {rm(paidCost - balance)} short. </>
                 )}
                 <button
                   type="button"

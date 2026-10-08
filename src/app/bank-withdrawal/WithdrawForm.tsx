@@ -171,6 +171,14 @@ export default function WithdrawForm({
   // The channel itself, not the band — the admin can close withdrawals
   // outright while a gateway stays configured (getPaymentLimits, plan 135).
   const withdrawalsClosed = !limits.withdrawalsEnabled;
+  // A timed pause (provider outage) names when to come back, in Malaysia time.
+  const resumeAt = limits.withdrawalsPausedUntil
+    ? new Date(limits.withdrawalsPausedUntil).toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Kuala_Lumpur',
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    : null;
   // Gate open but less than the payout floor: no amount can pass the band, and
   // nextAmountText would snap every attempt down below it — say so instead.
   const belowMin =
@@ -473,7 +481,9 @@ export default function WithdrawForm({
           id="withdraw-amount-guidance"
           className="mt-2 text-[12px] leading-relaxed text-neutral-400"
         >
-          Withdrawals are paused. Your balance is safe — try again later.
+          {resumeAt
+            ? `Withdrawals are paused until ${resumeAt}. Your balance is safe — please try again after ${resumeAt}.`
+            : 'Withdrawals are paused. Your balance is safe — try again later.'}
         </p>
       )}
 

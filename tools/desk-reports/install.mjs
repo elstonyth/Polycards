@@ -1,7 +1,7 @@
 // Copies the desk-reports MCP server to the Hermes ops folder and installs its
 // two dependencies there, so the desk bots never run code from a git checkout
 // whose branch can change under them. Usage: node tools/desk-reports/install.mjs
-import { cpSync, mkdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +15,7 @@ for (const file of [
   'tools.mjs',
   'http.mjs',
   'periods.mjs',
+  'code.mjs',
 ]) {
   cpSync(join(here, file), join(target, file));
 }
@@ -40,6 +41,30 @@ const growthScripts = join(
 mkdirSync(growthScripts, { recursive: true });
 for (const script of ['daily_hits.py', 'daily_excel.py', 'weekly_posts.py']) {
   cpSync(join(here, 'cron', script), join(growthScripts, script));
+}
+// The source code the code_* tools read: a shallow bare clone of master
+// beside the server, which code.mjs fetches fresh at most every 10 minutes.
+const src = join(process.env.LOCALAPPDATA, 'hermes', 'ops', 'polycards-src');
+if (!existsSync(src)) {
+  const origin = execFileSync('git', ['remote', 'get-url', 'origin'], {
+    cwd: here,
+    encoding: 'utf8',
+  }).trim();
+  execFileSync(
+    'git',
+    [
+      'clone',
+      '--bare',
+      '--depth',
+      '1',
+      '--single-branch',
+      '--branch',
+      'master',
+      origin,
+      src,
+    ],
+    { stdio: 'inherit' },
+  );
 }
 // npm is npm.cmd on Windows, which needs a shell to start.
 execFileSync('npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], {

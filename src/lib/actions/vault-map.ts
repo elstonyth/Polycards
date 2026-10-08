@@ -17,8 +17,9 @@ export type VaultItem = {
    *  was won there, not pulled from a pack. */
   challengePrize: boolean;
   showcased: boolean;
-  /** How the pull was acquired. Display/telemetry only — see `locked`. */
-  source: 'pack' | 'reward' | 'free';
+  /** How the pull was acquired. Display/telemetry only — see `locked`.
+   *  'gift' = opened from a vault pack, 'bonus' = paid with bonus credit. */
+  source: 'pack' | 'reward' | 'free' | 'gift' | 'bonus';
   /** Sell + delivery are refused server-side (the free welcome pull, until the
    *  account's first PAID open). EVERY lock affordance must key off THIS, never
    *  `source`: a weekly-challenge prize is source='reward' and fully sellable. */
@@ -37,6 +38,9 @@ export type VaultItem = {
     /** false = quoted on the FX display fallback; the sell would be refused,
      *  so CTAs must not present the amount as a firm offer. */
     firm: boolean;
+    /** MYR part of `amount` paid back as bonus credit (gift / bonus-funded
+     *  pull); 0 = all normal credit. */
+    bonus: number;
   };
 };
 
@@ -74,7 +78,7 @@ export interface BackendVaultItem {
    *  mapper reads it directly instead of casting past its own input type. */
   showcased?: boolean;
   /** Absent on an older backend → 'pack' / false (see VaultItemSchema). */
-  source?: 'pack' | 'reward' | 'free';
+  source?: 'pack' | 'reward' | 'free' | 'gift' | 'bonus';
   locked?: boolean;
   sellable?: boolean;
   /** The wire card — read by `toCardView`, which defaults every field. Only
@@ -89,7 +93,7 @@ export interface BackendVaultItem {
     market_value: number;
     marketPriceMyr?: number;
   };
-  buyback: { percent: number; amount: number; firm?: boolean };
+  buyback: { percent: number; amount: number; firm?: boolean; bonus?: number };
 }
 
 export function mapVaultItem(i: BackendVaultItem): VaultItem {
@@ -110,6 +114,8 @@ export function mapVaultItem(i: BackendVaultItem): VaultItem {
       amount: i.buyback.amount,
       // Absent on an older backend = firm (pre-firmness behavior).
       firm: i.buyback.firm ?? true,
+      // Absent on an older backend = no bonus part.
+      bonus: i.buyback.bonus ?? 0,
     },
   };
 }

@@ -35,6 +35,8 @@ import {
   useReferralSettings,
   useSetCustomerReferrer,
   useSetPartnerRate,
+  useSetCustomerRealName,
+  useSetCustomerPhone,
   useSetPlayerGroup,
   useSpendReport,
   useUnfreezeCustomer,
@@ -54,6 +56,7 @@ import {
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { Pager } from '../../../components/Pager';
 import { PullsTable } from '../../../components/PullsTable';
+import { GiftAndBonusPanels } from './gift-and-bonus';
 
 // ponytail: no config export — keeps route out of sidebar nav (mirrors packs/[slug]/page.tsx)
 
@@ -538,6 +541,92 @@ const ReferralCardBody = ({
   );
 };
 
+/**
+ * Real name + phone, the two identity facts the customer can no longer change
+ * themselves (spec 2026-10-06) — staff match the real name against a Touch 'n
+ * Go lookup of the phone, and these buttons are customer service's way to
+ * correct either. window.prompt for the value and the audited reason, like
+ * the partner-rate and referrer controls.
+ */
+const IdentityActions = ({
+  customerId,
+  phone,
+}: {
+  customerId: string;
+  phone: string | null;
+}) => {
+  const { data: audit } = useCustomerAudit(customerId, 0);
+  const setName = useSetCustomerRealName();
+  const setPhone = useSetCustomerPhone();
+  const state = audit?.account_state ?? null;
+  const realName = state?.real_name ?? null;
+
+  const editName = () => {
+    const next = window.prompt(
+      'Real name (exactly as on their Touch ’n Go eWallet):',
+      realName ?? '',
+    )?.trim();
+    if (!next) return;
+    const reason = window.prompt('Reason (audited):')?.trim();
+    if (!reason) return;
+    setName.mutate(
+      { customerId, realName: next, reason },
+      {
+        onSuccess: () => toast.success('Real name updated.'),
+        onError: (e) => toast.error(e.message),
+      },
+    );
+  };
+
+  const changePhone = () => {
+    const next = window.prompt(
+      'New phone number in international format (e.g. +60123456789). The customer is emailed about the change.',
+      phone ?? '',
+    )?.trim();
+    if (!next) return;
+    const reason = window.prompt(
+      'Reason (audited) — how was the customer’s identity checked?',
+    )?.trim();
+    if (!reason) return;
+    setPhone.mutate(
+      { customerId, phone: next, reason },
+      {
+        onSuccess: () => toast.success('Phone updated.'),
+        onError: (e) => toast.error(e.message),
+      },
+    );
+  };
+
+  return (
+    <>
+      <dt className="text-ui-fg-subtle">Real name</dt>
+      <dd className="flex flex-wrap items-center gap-2">
+        <span>{realName ?? '— (not entered yet)'}</span>
+        <Button
+          size="small"
+          variant="secondary"
+          disabled={setName.isPending}
+          onClick={editName}
+        >
+          {realName ? 'Correct' : 'Set'}
+        </Button>
+      </dd>
+      <dt className="text-ui-fg-subtle">Phone verified</dt>
+      <dd className="flex flex-wrap items-center gap-2">
+        <span>{state?.phone_verified_at ? 'Yes (locked)' : 'No'}</span>
+        <Button
+          size="small"
+          variant="secondary"
+          disabled={setPhone.isPending}
+          onClick={changePhone}
+        >
+          Change phone
+        </Button>
+      </dd>
+    </>
+  );
+};
+
 const ProfileTab = ({ customerId }: { customerId: string | null }) => {
   const { t } = useTranslation();
   const { data, isError } = useCustomerDetail(customerId);
@@ -577,6 +666,12 @@ const ProfileTab = ({ customerId }: { customerId: string | null }) => {
             <dd>{customer.email}</dd>
             <dt className="text-ui-fg-subtle">{t('players.phone')}</dt>
             <dd>{customer.phone ?? '—'}</dd>
+            {customerId && (
+              <IdentityActions
+                customerId={customerId}
+                phone={customer.phone ?? null}
+              />
+            )}
             <dt className="text-ui-fg-subtle">{t('players.handle')}</dt>
             <dd>{handleLabel}</dd>
             <dt className="text-ui-fg-subtle">{t('players.registered')}</dt>
@@ -1597,6 +1692,11 @@ const Customer360Page = () => {
           </div>
         )}
       </Container>
+
+      {/* Gift packs + Bonus credit, beside the credit adjust above. key={id}:
+          the route doesn't remount on a customer change, so an unsent note
+          must not carry over to the next player. */}
+      {customerId && <GiftAndBonusPanels key={id} customerId={customerId} />}
 
       {/* ── Prompt modal — single instance, content varies by modal kind ─── */}
       <Prompt

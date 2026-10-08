@@ -97,6 +97,13 @@ export interface RollRequest {
    * and a free rip spends one entitlement. Only `paid` spends it.
    */
   reels: number;
+  /**
+   * Vault packs (gifts) the screen offered for this press —
+   * `giftsUsed(reels, held)`. Only `paid` sends it; every other mode ignores
+   * it (a free rip / welcome pack is already free). The backend refuses a
+   * stale count with 409 rather than charging the price instead.
+   */
+  gifts: number;
   freeRipClaimId: string | null;
   /** The public pool a demo Spin samples. Empty for every other mode. */
   demoPool: PackCard[];
@@ -132,6 +139,9 @@ export interface RolledBatch {
   /** The account this result belongs to; null for a demo. The settle guard
    *  compares it against the account signed in NOW. */
   forId: string | null;
+  /** Vault packs the open consumed (paid route only; 0 elsewhere) — the
+   *  caller decrements the gifts it holds by this. */
+  giftsUsed: number;
 }
 
 export type RollResult =
@@ -148,11 +158,17 @@ export type RollResult =
       error: string;
       needsAuth?: boolean;
       needsTopUp?: boolean;
+      /** The offered gifts were gone — nothing charged; re-read the gifts. */
+      staleGifts?: boolean;
     };
 
 /** The seams this module refuses to import. See the header. */
 export interface RollDeps {
-  openBatch: (slug: string, count: number) => Promise<OpenBatchResult>;
+  openBatch: (
+    slug: string,
+    count: number,
+    gifts: number,
+  ) => Promise<OpenBatchResult>;
   openPack: (slug: string) => Promise<OpenPackResult>;
   spinTaskReward: (claimId: string) => Promise<SpinTaskRewardResult>;
   /** Injected so `spinAt` is assertable; the caller passes `Date.now`. */
@@ -216,6 +232,8 @@ function buildOffer(
     instantDeadlineMs:
       roll.buyback?.instantDeadlineMs ?? spinAt + SELL_COUNTDOWN_SECS * 1000,
     firm: roll.buyback?.firm ?? true,
+    // The flat-rate fallback has no split to show: all normal credit.
+    bonus: roll.buyback?.bonus ?? 0,
   };
 }
 
@@ -225,6 +243,7 @@ function batchOf(
   spinAt: number,
   balance: number | null,
   locked: boolean,
+  giftsUsed = 0,
 ): RolledBatch {
   return {
     mode: req.mode,
@@ -239,6 +258,7 @@ function batchOf(
     // here means the settle guard's `forId !== null` test cannot be defeated by
     // a hand-built request, and the two facts can never drift apart.
     forId: req.mode === 'demo' ? null : req.forId,
+    giftsUsed,
   };
 }
 
@@ -354,7 +374,7 @@ async function openRolls(
       };
     }
 
-    const res = await deps.openBatch(req.packId, req.reels);
+    const res = await deps.openBatch(req.packId, req.reels, req.gifts);
     if (!res.ok) {
       return {
         ok: false,
@@ -362,6 +382,8 @@ async function openRolls(
         error: res.error,
         needsAuth: res.needsAuth,
         needsTopUp: res.needsTopUp,
+        // Only the stale-gift refusal carries it — never invented here.
+        ...(res.staleGifts ? { staleGifts: true } : {}),
       };
     }
     // A 200 with no rolls (a stock race, a rule that filtered every roll) is
@@ -372,7 +394,14 @@ async function openRolls(
     }
     return {
       ok: true,
-      batch: batchOf(req, res.rolls, deps.now(), res.balance, false),
+      batch: batchOf(
+        req,
+        res.rolls,
+        deps.now(),
+        res.balance,
+        false,
+        res.giftsUsed,
+      ),
     };
   } catch (err) {
     // The three actions handle BACKEND failures themselves ({ok:false}); what

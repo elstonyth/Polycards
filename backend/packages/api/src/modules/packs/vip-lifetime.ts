@@ -4,13 +4,14 @@
 // withdrawal playthrough gate still use the external-funded basis. Reversals
 // are amount>0 → excluded, so a refund never lowers the counter (spec §3).
 // Mirrors the service raw SQL (lifetimeTurnoverSenFor).
+// The NORMAL part only (spec 2026-10-07): bonusCents is ≤ 0 on an open.
 export function lifetimeTurnoverSen(
-  rows: { amount: number; reason: string }[],
+  rows: { amount: number; reason: string; bonusCents?: number | null }[],
 ): number {
   let sen = 0;
   for (const r of rows) {
     if (r.reason === 'pack_open' && r.amount < 0)
-      sen += Math.round(-r.amount * 100);
+      sen += Math.round(-r.amount * 100) + Math.round(r.bonusCents ?? 0);
   }
   return sen;
 }

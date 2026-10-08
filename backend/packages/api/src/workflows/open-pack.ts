@@ -1,3 +1,4 @@
+import { bonusBpFor, paidPullSource } from "../modules/packs/bonus-credit";
 import { randomUUID } from "node:crypto";
 import {
   createWorkflow,
@@ -73,8 +74,25 @@ export const openPackWorkflow = createWorkflow(
       open_id: d.charged.open_id,
       source: d.claim.free ? ("free" as const) : ("pack" as const),
     }));
+    // Bonus credit (spec 2026-10-07): an open bonus paid at least half of is a
+    // 'bonus' pull (counts toward nothing); any bonus share sells back as bonus.
     const pull = recordPullStep(
-      transform({ recordInput, charge }, (d) => ({ ...d.recordInput, price: d.charge.price })),
+      transform({ recordInput, charge }, (d) => {
+        const bonusBp = bonusBpFor(
+          d.charge.bonus_cents,
+          Math.round(d.charge.price * 100),
+        );
+        return {
+          ...d.recordInput,
+          price: d.charge.price,
+          source:
+            d.recordInput.source === "free"
+              ? ("free" as const)
+              : paidPullSource(bonusBp),
+          bonus_bp: bonusBp,
+          bonus: d.charge.bonus_cents / 100,
+        };
+      }),
     );
 
     // 2b. Earmark one physical unit for the win (stock is a fulfillment
