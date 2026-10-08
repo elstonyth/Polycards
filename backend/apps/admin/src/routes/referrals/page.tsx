@@ -421,7 +421,7 @@ function RunsCard() {
   const onApprove = async (run: ReferralSettlement) => {
     const confirmed = await prompt({
       title: `Approve week ${run.week_start}?`,
-      description: `${fromCents(run.total_commission_cents)} in commission will pay out on the next Wednesday run (or via Pay now).`,
+      description: `${fromCents(run.total_commission_cents)} in commission will pay out at the top of the next hour (or right away via Pay now).`,
       confirmText: 'Approve',
     });
     if (!confirmed) return;
@@ -454,7 +454,7 @@ function RunsCard() {
     const confirmed = await prompt({
       title: `Pay week ${run.week_start} now?`,
       description:
-        'Every pending line is credited immediately. The Wednesday cron would do the same — this just does it now.',
+        'Every pending line is credited immediately. The hourly payout job would do the same within the hour — this just does it now.',
       confirmText: 'Pay now',
     });
     if (!confirmed) return;
@@ -470,9 +470,9 @@ function RunsCard() {
       <Heading level="h2">Weekly settlements</Heading>
       <Text size="small" className="text-ui-fg-subtle">
         Tuesday's close lands here as a draft. Review the lines, void anything
-        suspicious, then Approve — Wednesday's cron (or Pay now) moves the
-        money. Paying credits each referrer's Polycards wallet automatically;
-        nothing is transferred by hand.
+        suspicious, then Approve — the hourly payout job moves the money within
+        the hour (or Pay now does it at once). Paying credits each referrer's
+        Polycards wallet automatically; nothing is transferred by hand.
       </Text>
       {data.length === 0 ? (
         <Text size="small" className="text-ui-fg-muted mt-4">

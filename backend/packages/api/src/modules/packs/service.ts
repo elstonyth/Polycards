@@ -132,6 +132,7 @@ import Announcement from './models/announcement';
 import PackGift from './models/pack-gift';
 import { pickLiveAnnouncements, validateAnnouncement } from './announcements';
 import { pageAll } from '../../api/utils/page-all';
+import { scopeFilter } from '../../api/reports/sql';
 import {
   positiveIntFromEnv,
   nonNegativeIntFromEnv,
@@ -6824,9 +6825,21 @@ class PacksModuleService extends MedusaService({
   // PULLED_VALUE_USD_SQL x live FX, rounded once, as leaderboardTop does), and
   // only source='pack' pulls count, the boards' positive filter. Ties go to
   // the earlier pull, then the id, so the order is stable.
+  //
+  // Two optional narrowings, both in SQL so they apply BEFORE the LIMIT (a
+  // Legendary pull ranked below the top N by value must still be found):
+  // `tiers` keeps pulls whose card sits at one of those tiers in the pack it
+  // came from (PULL_TIER_SQL's pack-level join), and `defaultGroupOnly` keeps
+  // players whose effective player group is DEFAULT (the reports' rule).
   @InjectManager()
   async topPullsInWindow(
-    opts: { from: Date; to: Date; limit: number },
+    opts: {
+      from: Date;
+      to: Date;
+      limit: number;
+      tiers?: readonly Rarity[];
+      defaultGroupOnly?: boolean;
+    },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
     {
@@ -6841,6 +6854,15 @@ class PacksModuleService extends MedusaService({
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const fxRate = await resolveFxRate(this);
+    const tiers = opts.tiers ?? [];
+    const tierSql = tiers.length
+      ? ' AND EXISTS (SELECT 1 FROM pack_odds o WHERE o.pack_id = pu.pack_id ' +
+        '   AND o.card_id = pu.card_id AND o.deleted_at IS NULL ' +
+        `   AND o.rarity IN (${tiers.map(() => '?').join(', ')}))`
+      : '';
+    const groupSql = opts.defaultGroupOnly
+      ? scopeFilter({ kind: 'default' }, 'pu.customer_id').sql
+      : '';
     const rows = await em.execute<
       {
         id: string;
@@ -6859,6 +6881,8 @@ class PacksModuleService extends MedusaService({
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
         " WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source = 'pack' " +
         '   AND pu.rolled_at >= ?::timestamptz AND pu.rolled_at < ?::timestamptz ' +
+        tierSql +
+        groupSql +
         ' ORDER BY value_myr DESC NULLS LAST, pu.rolled_at ASC, pu.id ASC ' +
         ' LIMIT ?',
       [
@@ -6866,6 +6890,7 @@ class PacksModuleService extends MedusaService({
         fxRate,
         opts.from.toISOString(),
         opts.to.toISOString(),
+        ...tiers,
         opts.limit,
       ],
     );

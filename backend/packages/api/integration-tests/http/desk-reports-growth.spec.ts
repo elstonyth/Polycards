@@ -10,6 +10,7 @@ import { assetOrigin } from '../../src/api/utils/image-fetch';
 import { unzipSync, strFromU8 } from 'fflate';
 import { DEFAULT_USD_MYR } from '../../src/modules/packs/pricing';
 import { findBank } from '../../src/modules/packs/banks';
+import { ensureDefaultPlayerGroup } from '../../src/modules/packs/player-groups';
 import { myrDisplay as MYR, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -1498,6 +1499,69 @@ medusaIntegrationTestRunner({
       });
 
       it('puts the full customer details in the Excel, for the Growth key only', async () => {
+        // The pulls sheet keeps Legendary and Immortal pulls by DEFAULT-group
+        // players only: a partner's Legendary and a Mythical hit stay out, a
+        // player filed in DEFAULT itself stays in.
+        await packs().createCards([
+          {
+            handle: 'dh-m',
+            name: 'DH Mythic',
+            set: 'DH Set',
+            grader: 'PSA',
+            grade: '10',
+            market_value: 300,
+            image: '/x.webp',
+          },
+        ]);
+        await packs().createPackOdds([
+          {
+            pack_id: 'dh-pack',
+            card_id: 'dh-m',
+            weight: 100,
+            locked: false,
+            rarity: 'Mythical',
+          },
+        ]);
+        const [member, partner] = await customers().createCustomers([
+          {
+            email: 'member@test.dev',
+            first_name: 'Member',
+            phone: '+60144444444',
+            has_account: true,
+          },
+          {
+            email: 'partner@test.dev',
+            first_name: 'Partner',
+            phone: '+60155555555',
+            has_account: true,
+          },
+        ]);
+        const partners = await customers().createCustomerGroups({
+          name: 'Partners',
+        });
+        await customers().addCustomerToGroup([
+          {
+            customer_id: member.id,
+            customer_group_id: (await ensureDefaultPlayerGroup(getContainer()))
+              .id,
+          },
+          { customer_id: partner.id, customer_group_id: partners.id },
+        ]);
+        await packs().createPulls(
+          [
+            [member.id, 'dh-d', 500],
+            [partner.id, 'dh-a', 100],
+            [ids.ace, 'dh-m', 300],
+          ].map(([customer_id, card_id, usd]) => ({
+            customer_id: customer_id as string,
+            pack_id: 'dh-pack',
+            card_id: card_id as string,
+            rolled_at: inDay(8),
+            source: 'pack' as const,
+            recorded_value_usd: usd as number,
+          })),
+        );
+
         const res = await unwrapResponse(
           api.get(`/reports/growth/daily-report?day=${DAY}`, {
             headers: { 'x-report-key': GROWTH_KEY },
@@ -1514,22 +1578,35 @@ medusaIntegrationTestRunner({
         const files = unzipSync(new Uint8Array(Buffer.from(res.data)));
         const strings = strFromU8(files['xl/sharedStrings.xml']);
         const workbook = strFromU8(files['xl/workbook.xml']);
-        expect(workbook).toContain('name="Top pulls"');
+        expect(workbook).toContain('name="Legendary &amp; Immortal"');
         expect(workbook).toContain('name="Withdrawals"');
         for (const detail of [
           'Ace_Puller',
           '+60111111111',
           'ace@test.dev',
           'Latias &amp; Latios GX #105',
+          'DH D',
+          'member@test.dev',
           '556677881',
           'Holder 1',
           findBank('MBBEMYKL')!.name,
         ]) {
           expect(strings).toContain(detail);
         }
-        // Other days' withdrawals and the hidden player's pull stay out.
-        expect(strings).not.toContain('556677883');
-        expect(strings).not.toContain('+60133333333');
+        for (const absent of [
+          // Below Legendary: Rare, Common and Mythical pulls.
+          'DH B',
+          'DH C',
+          'DH Mythic',
+          // A partner-group player, though their pull is Legendary.
+          'partner@test.dev',
+          '+60155555555',
+          // Other days' withdrawals and the hidden player's pull.
+          '556677883',
+          '+60133333333',
+        ]) {
+          expect(strings).not.toContain(absent);
+        }
 
         expect(
           (await report(`daily-report?day=${DAY}`, FINANCE_KEY)).status,

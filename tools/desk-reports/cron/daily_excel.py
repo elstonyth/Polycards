@@ -2,12 +2,12 @@
 
 Spec: docs/superpowers/specs/2026-10-04-growth-daily-hits-design.md.
 
-Posts yesterday's staff Excel (full customer details for the top 10 pulls
-and every withdrawal) to the Growth desk five minutes after the AI-written
-Daily Top Hits post. It runs with --no-agent, so Hermes delivers this
-script's stdout verbatim: the file always arrives, and no model decides
-whether customers' bank details may be attached (on 2026-10-04 one chose
-not to). The fetching lives in daily_hits.py, beside it in scripts/.
+Posts yesterday's staff Excel (full customer details for every Legendary
+and Immortal pull by DEFAULT-group players, and every withdrawal) to the
+Growth desk five minutes after the AI-written Daily Top Hits post. It runs
+with --no-agent, so Hermes delivers this script's stdout verbatim: the file
+always arrives, and no model decides whether customers' bank details may be
+attached (on 2026-10-04 one chose not to). The fetching lives in daily_hits.py, beside it in scripts/.
 """
 
 import sys

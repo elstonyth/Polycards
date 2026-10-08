@@ -4,6 +4,7 @@ import {
   cardByHandle,
   makeRarityOf,
 } from '../../../../modules/packs/card-view';
+import type { Rarity } from '../../../../modules/packs/rarity';
 import { stripAutolinks } from '../../../../modules/packs/telegram';
 import { loadPullerProfiles } from '../../../store/pulls/pullers';
 
@@ -34,14 +35,20 @@ export type TopPull = {
 /** A day's top paid pulls with what a post needs about each: the card, its
  *  tier in that pack, the pack and the player's public name. Disabled players
  *  are left out, as on every public surface (the over-fetch keeps the list
- *  full when one is). */
+ *  full when one is). `only` narrows the pulls before the limit applies (see
+ *  topPullsInWindow); without it, every paid pull competes. */
 export async function loadTopPulls(
   req: MedusaRequest,
   packs: PacksModuleService,
   window: { from: Date; to: Date },
   limit: number,
+  only: { tiers?: readonly Rarity[]; defaultGroupOnly?: boolean } = {},
 ): Promise<TopPull[]> {
-  const rows = await packs.topPullsInWindow({ ...window, limit: limit + 20 });
+  const rows = await packs.topPullsInWindow({
+    ...window,
+    ...only,
+    limit: limit + 20,
+  });
   const pullers = await loadPullerProfiles(
     req,
     packs,
@@ -57,7 +64,12 @@ export async function loadTopPulls(
       ? packs.listCards({ handle: handles }, { take: handles.length })
       : Promise.resolve([]),
     handles.length
-      ? packs.listPackOdds({ card_id: handles }, { take: 1000 })
+      ? // One live row per (pack, card), so this take is exact: a short read
+        // would fall back to 'Common' and mislabel the pull.
+        packs.listPackOdds(
+          { card_id: handles, pack_id: slugs },
+          { take: handles.length * slugs.length },
+        )
       : Promise.resolve([]),
     slugs.length
       ? packs.listPacks({ slug: slugs }, { take: slugs.length })

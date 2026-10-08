@@ -17,11 +17,17 @@ import { customerFilter, reportDb } from '../../sql';
 import { malaysiaDay } from '../top-pulls/day';
 import { loadTopPulls } from '../top-pulls/hits';
 
+// ponytail: a ceiling, not a top N. A day has a handful of these pulls; raise
+// it if the sheet ever comes back exactly this long.
+const MAX_PULL_ROWS = 200;
+
 // GET /reports/growth/daily-report?day: the staff Excel of the Growth desk's
-// 12 a.m. drop (spec 2026-10-04-growth-daily-hits-design.md). Sheet "Top
-// pulls": the day's top 10 paid pulls (the top-pulls report's list) with each
-// player's full details. Sheet "Withdrawals": every withdrawal requested that
-// day, any status, with the bank details and the player's details.
+// 12 a.m. drop (spec 2026-10-04-growth-daily-hits-design.md). Sheet
+// "Legendary & Immortal": every paid pull of a Legendary or Immortal card that
+// day by a DEFAULT-group player (partner and other groups left out; the
+// operator's call, 2026-10-09), most valuable first, with each player's full
+// details. Sheet "Withdrawals": every withdrawal requested that day, any
+// status, with the bank details and the player's details.
 //
 // It carries phone numbers, emails and full bank account numbers, by the
 // operator's choice. So it answers the Growth key only (the 12 a.m. cron's
@@ -155,7 +161,10 @@ export async function GET(
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const db = reportDb(req);
   const [pulls, { rows: withdrawals }] = await Promise.all([
-    loadTopPulls(req, packs, window, 10),
+    loadTopPulls(req, packs, window, MAX_PULL_ROWS, {
+      tiers: ['Immortal', 'Legendary'],
+      defaultGroupOnly: true,
+    }),
     db.raw<{
       customer_id: string;
       created_at: string;
@@ -229,7 +238,7 @@ export async function GET(
   const workbook = await writeXlsxFile([
     {
       data: getSheetData(pullRows, PULL_COLUMNS),
-      sheet: 'Top pulls',
+      sheet: 'Legendary & Immortal',
       columns: widths(PULL_COLUMNS),
       stickyRowsCount: 1,
     },
@@ -252,7 +261,7 @@ export async function GET(
 }
 
 /** Each player's contact details and account summary, keyed by customer id.
- *  Bounded by the day's top 10 and its withdrawals. */
+ *  Bounded by the day's Legendary and Immortal pulls and its withdrawals. */
 async function customerDetails(
   req: MedusaRequest,
   packs: PacksModuleService,
