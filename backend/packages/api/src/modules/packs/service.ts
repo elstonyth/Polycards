@@ -214,6 +214,14 @@ import type { MedusaContainer } from '@medusajs/framework/types';
 const DEPOSITED_PT_FILTER =
   "reason = 'topup' AND amount > 0 AND external_funded_cents IS NOT NULL";
 
+// Operator VIP reset (resetVipLevel): the VIP basis counts only opens after
+// vip_member_state.vip_reset_at. Joined as `vr` onto credit_transaction `ct`;
+// at most one live state row per customer, so the join never fans out.
+const VIP_RESET_JOIN =
+  'LEFT JOIN vip_member_state vr ON vr.customer_id = ct.customer_id AND vr.deleted_at IS NULL';
+const AFTER_VIP_RESET =
+  '(vr.vip_reset_at IS NULL OR ct.created_at > vr.vip_reset_at)';
+
 // Default rolling-24h cashout ceiling, in RM. The per-transaction payout band
 // (RM 50 – RM 50,000, gateway-withdrawal.ts) bounds ONE payout; before this
 // cap nothing summed prior withdrawals over any window, so a compromised
@@ -3179,10 +3187,12 @@ class PacksModuleService extends MedusaService({
         "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -external_funded_cents ELSE 0 END), 0)::bigint AS ext_spend_cents, " +
         // VIP basis = the NORMAL part of opens: bonus-funded play counts
         // toward nothing (spec 2026-10-07); bonus_cents is ≤ 0 on an open.
-        `  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -${normalSenSql()} ELSE 0 END), 0)::bigint AS vip_spend_cents, ` +
+        // Only opens after a VIP reset; floored at 0 because a pre-reset open
+        // reversed after the reset would otherwise net it negative.
+        `  GREATEST(COALESCE(SUM(CASE WHEN reason = 'pack_open' AND ${AFTER_VIP_RESET} THEN -${normalSenSql()} ELSE 0 END), 0), 0)::bigint AS vip_spend_cents, ` +
         `  COALESCE(SUM(CASE WHEN ${DEPOSITED_PT_FILTER} THEN ROUND(amount * 100) ELSE 0 END), 0)::bigint AS deposited_pt_cents, ` +
         '  COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
-        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
+        `FROM credit_transaction ct ${VIP_RESET_JOIN} WHERE ct.customer_id = ? AND ct.deleted_at IS NULL`,
       [customerId],
     );
     const r = rows[0];
@@ -7728,11 +7738,11 @@ class PacksModuleService extends MedusaService({
         last_spend_at: string | null;
       }[]
     >(
-      'SELECT customer_id, ' +
-        '  COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
-        `  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -${normalSenSql()} ELSE 0 END), 0)::bigint AS vip_spend_cents, ` +
-        "  MAX(created_at) FILTER (WHERE reason = 'pack_open') AS last_spend_at " +
-        `FROM credit_transaction WHERE customer_id IN (${ph}) AND deleted_at IS NULL GROUP BY customer_id`,
+      'SELECT ct.customer_id, ' +
+        '  COALESCE(SUM(ROUND(ct.amount * 100)), 0)::bigint AS balance_cents, ' +
+        `  GREATEST(COALESCE(SUM(CASE WHEN ct.reason = 'pack_open' AND ${AFTER_VIP_RESET} THEN -${normalSenSql('ct.')} ELSE 0 END), 0), 0)::bigint AS vip_spend_cents, ` +
+        "  MAX(ct.created_at) FILTER (WHERE ct.reason = 'pack_open') AS last_spend_at " +
+        `FROM credit_transaction ct ${VIP_RESET_JOIN} WHERE ct.customer_id IN (${ph}) AND ct.deleted_at IS NULL GROUP BY ct.customer_id`,
       ids,
     );
     const vaults = await em.execute<
@@ -9124,9 +9134,11 @@ class PacksModuleService extends MedusaService({
       // far as changing it. WON'T-FIX — ADR 0003, "Reversal exclusion".
       // The NORMAL part only: bonus-funded play counts toward nothing (spec
       // 2026-10-07); bonus_cents is ≤ 0 on an open debit.
-      `SELECT COALESCE(SUM(-${normalSenSql()}), 0)::bigint AS sen
-         FROM credit_transaction
-        WHERE customer_id = ? AND reason = 'pack_open' AND amount < 0 AND deleted_at IS NULL`,
+      // Only opens after a VIP reset (resetVipLevel).
+      `SELECT COALESCE(SUM(-${normalSenSql('ct.')}), 0)::bigint AS sen
+         FROM credit_transaction ct ${VIP_RESET_JOIN}
+        WHERE ct.customer_id = ? AND ct.reason = 'pack_open' AND ct.amount < 0 AND ct.deleted_at IS NULL
+          AND ${AFTER_VIP_RESET}`,
       [customerId],
     );
     return Number(rows[0]?.sen ?? 0);
@@ -9182,6 +9194,38 @@ class PacksModuleService extends MedusaService({
         input.highestLevelEver,
         input.currentLevel,
       ],
+    );
+  }
+
+  // Operator VIP reset: restart a customer at L1 with zero VIP spend. Stamps
+  // vip_reset_at, after which the VIP basis counts only later opens, and lowers
+  // the projection directly, because upsertVipMemberState's GREATEST ratchet
+  // never lowers highest_level_ever. Under the credit lock, so no charge lands
+  // mid-reset; clock_timestamp() is taken after the lock is held. Ladder
+  // grants already given stay, so re-crossing a rung grants nothing again.
+  // Frames unlock off highest_level_ever, so they lock again; the caller
+  // clears customer.metadata.equipped_frame_level (mutateCustomerMetadata
+  // must not run inside a credit-locked transaction).
+  @InjectTransactionManager()
+  async resetVipLevel(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${customerId}`,
+    ]);
+    await em.execute(
+      `INSERT INTO vip_member_state
+         (id, customer_id, lifetime_external_spend_sen, highest_level_ever, current_level, vip_reset_at, created_at, updated_at)
+       VALUES (?, ?, 0, 1, 1, clock_timestamp(), now(), now())
+       ON CONFLICT (customer_id) WHERE deleted_at IS NULL DO UPDATE SET
+         lifetime_external_spend_sen = 0,
+         highest_level_ever = 1,
+         current_level = 1,
+         vip_reset_at = clock_timestamp(),
+         updated_at = now()`,
+      [`vms_${customerId}`, customerId],
     );
   }
 

@@ -11,6 +11,9 @@ export const VipMemberState = model.define('vip_member_state', {
   lifetime_external_spend_sen: model.bigNumber().default(0), // SEN, monotonic
   highest_level_ever: model.number().default(1), // L1 entry-tier floor
   current_level: model.number().default(1),
+  // Operator VIP reset (resetVipLevel): the VIP basis counts only opens
+  // after this instant, so the customer restarts at L1. NULL = never reset.
+  vip_reset_at: model.dateTime().nullable(),
 });
 
 export default VipMemberState;

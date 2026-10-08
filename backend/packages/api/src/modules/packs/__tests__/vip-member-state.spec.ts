@@ -164,6 +164,69 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // Strict inequality: current_level < highest_level_ever
         expect(rowAfter.current_level).toBeLessThan(rowAfter.highest_level_ever);
       });
+
+      it('resetVipLevel: back to L1 with zero VIP spend; only later opens count; wallet untouched', async () => {
+        await seedLadder();
+        const customerId = 'cust_vms_reset';
+
+        await service.mutateCreditAtomic({
+          customerId,
+          amount: 30,
+          reason: 'topup',
+        });
+        await service.settleOpen({
+          customerId,
+          amount: -26,
+          sourceTransactionId: 'open_vms_reset_1',
+        });
+        await service.rebuildVipMemberState(customerId);
+        const [before] = await service.listVipMemberStates(
+          { customer_id: customerId },
+          { take: 1 },
+        );
+        expect(before.highest_level_ever).toBe(3); // 26 MYR ≥ L3 (25)
+
+        await service.resetVipLevel(customerId);
+        // A rebuild must not restore the old level (GREATEST ratchet).
+        await service.rebuildVipMemberState(customerId);
+        const [reset] = await service.listVipMemberStates(
+          { customer_id: customerId },
+          { take: 1 },
+        );
+        expect(reset.vip_reset_at).not.toBeNull();
+        expect(reset.highest_level_ever).toBe(1);
+        expect(reset.current_level).toBe(1);
+        expect(Number(reset.lifetime_external_spend_sen)).toBe(0);
+        const summary = await service.creditSummary(customerId);
+        expect(summary.vipSpendTotal).toBe(0);
+        expect(summary.balance).toBe(4); // the join must not touch the wallet
+
+        // An open after the reset counts: 3 MYR = L2.
+        await service.settleOpen({
+          customerId,
+          amount: -3,
+          sourceTransactionId: 'open_vms_reset_2',
+        });
+        await service.rebuildVipMemberState(customerId);
+        const [after] = await service.listVipMemberStates(
+          { customer_id: customerId },
+          { take: 1 },
+        );
+        expect(Number(after.lifetime_external_spend_sen)).toBe(300);
+        expect(after.highest_level_ever).toBe(2);
+        expect((await service.creditSummary(customerId)).vipSpendTotal).toBe(3);
+        const overview = await service.playersOverview([customerId], 1);
+        expect(overview.wallet.get(customerId)).toMatchObject({
+          balanceCents: 100,
+          vipSpendCents: 300,
+        });
+
+        // Reversing the pre-reset open writes a post-reset +26 row: the net
+        // basis floors at 0 instead of going negative; lifetime is unchanged.
+        await service.reverseOpen('open_vms_reset_1');
+        expect((await service.creditSummary(customerId)).vipSpendTotal).toBe(0);
+        expect(await service.lifetimeTurnoverSenFor(customerId)).toBe(300);
+      });
     });
   },
 });

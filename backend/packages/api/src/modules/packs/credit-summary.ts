@@ -13,6 +13,8 @@
 // This file stays as the unit-tested oracle; the integration test
 // "creditSummary — SQL matches the unit-tested fold" in
 // pull-status-transitions.spec.ts proves the SQL and this fold agree.
+// The fold assumes a customer never VIP-reset: the SQL VIP basis also drops
+// opens before vip_member_state.vip_reset_at and floors at 0.
 
 export interface LedgerTotals {
   balanceCents: number;
