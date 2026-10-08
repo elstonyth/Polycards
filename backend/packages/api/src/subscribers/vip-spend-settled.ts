@@ -2,6 +2,7 @@ import { SubscriberArgs, type SubscriberConfig } from '@medusajs/framework';
 import { PACKS_MODULE } from '../modules/packs';
 import { notifyFeedNonfatal } from '../modules/packs/notify-feed';
 import type PacksModuleService from '../modules/packs/service';
+import { vipLevelUpKey } from '../modules/packs/vip-ladder';
 
 // Post-commit subscriber for the vip.spend_settled event (emitted by
 // open-pack and open-batch workflows after every settled open). Calls
@@ -23,7 +24,7 @@ export default async function vipSpendSettledHandler({
 }: SubscriberArgs<{ customer_id: string; open_id: string }>) {
   const packs = container.resolve(PACKS_MODULE) as PacksModuleService;
 
-  const { gained } = await packs.grantLevelUpRewards(
+  const { gained, resetAt } = await packs.grantLevelUpRewards(
     data.customer_id,
     data.open_id,
   );
@@ -38,7 +39,7 @@ export default async function vipSpendSettledHandler({
     receiverId: data.customer_id,
     template: 'vip_level_up',
     data: { levels: gained },
-    idempotencyKey: `vip:${data.customer_id}:L${Math.max(...gained)}`,
+    idempotencyKey: vipLevelUpKey(data.customer_id, gained, resetAt),
   });
 }
 

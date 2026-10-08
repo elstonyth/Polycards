@@ -214,13 +214,12 @@ import type { MedusaContainer } from '@medusajs/framework/types';
 const DEPOSITED_PT_FILTER =
   "reason = 'topup' AND amount > 0 AND external_funded_cents IS NOT NULL";
 
-// Operator VIP reset (resetVipLevel): the VIP basis counts only opens after
-// vip_member_state.vip_reset_at. Joined as `vr` onto credit_transaction `ct`;
-// at most one live state row per customer, so the join never fans out.
-const VIP_RESET_JOIN =
-  'LEFT JOIN vip_member_state vr ON vr.customer_id = ct.customer_id AND vr.deleted_at IS NULL';
-const AFTER_VIP_RESET =
-  '(vr.vip_reset_at IS NULL OR ct.created_at > vr.vip_reset_at)';
+// The VIP basis: a credit_transaction row counts only if it is newer than the
+// customer's operator VIP reset (vip_member_state.vip_reset_at, resetVipLevel).
+// Uncorrelated, so it runs once per query; binds the customer id. Every
+// VIP-basis query (vipSpendBasis, lifetimeTurnoverSenFor) goes through it.
+const VIP_AFTER_RESET_SQL =
+  "created_at > COALESCE((SELECT vip_reset_at FROM vip_member_state WHERE customer_id = ? AND deleted_at IS NULL), '-infinity')";
 
 // Default rolling-24h cashout ceiling, in RM. The per-transaction payout band
 // (RM 50 – RM 50,000, gateway-withdrawal.ts) bounds ONE payout; before this
@@ -3156,6 +3155,8 @@ class PacksModuleService extends MedusaService({
     externalFundedSpendTotal: number;
     // VIP turnover basis (MYR): net pack_open spend regardless of funding
     // source — winnings-funded opens count (2026-07-22). Reversals net it down.
+    // Lifetime: ignores an operator VIP reset. VIP level and the VIP spend
+    // shown to players and staff read vipSpendBasis, which honours it.
     vipSpendTotal: number;
     // Playthrough-basis deposited total (MYR): topups that carry a basis column
     // (external_funded_cents IS NOT NULL), grandfathering pre-1b deposits out —
@@ -3187,12 +3188,10 @@ class PacksModuleService extends MedusaService({
         "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -external_funded_cents ELSE 0 END), 0)::bigint AS ext_spend_cents, " +
         // VIP basis = the NORMAL part of opens: bonus-funded play counts
         // toward nothing (spec 2026-10-07); bonus_cents is ≤ 0 on an open.
-        // Only opens after a VIP reset; floored at 0 because a pre-reset open
-        // reversed after the reset would otherwise net it negative.
-        `  GREATEST(COALESCE(SUM(CASE WHEN reason = 'pack_open' AND ${AFTER_VIP_RESET} THEN -${normalSenSql()} ELSE 0 END), 0), 0)::bigint AS vip_spend_cents, ` +
+        `  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -${normalSenSql()} ELSE 0 END), 0)::bigint AS vip_spend_cents, ` +
         `  COALESCE(SUM(CASE WHEN ${DEPOSITED_PT_FILTER} THEN ROUND(amount * 100) ELSE 0 END), 0)::bigint AS deposited_pt_cents, ` +
         '  COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
-        `FROM credit_transaction ct ${VIP_RESET_JOIN} WHERE ct.customer_id = ? AND ct.deleted_at IS NULL`,
+        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
       [customerId],
     );
     const r = rows[0];
@@ -7698,9 +7697,8 @@ class PacksModuleService extends MedusaService({
       string,
       {
         balanceCents: number;
-        // Net pack_open spend — creditSummary's vip_spend_cents expression
-        // (NOT its spend_cents) but WITHOUT the VIP reset cutoff: the Players
-        // list shows it as lifetime Turnover, which a VIP reset must not hide.
+        // VIP-basis net pack_open spend — the same expression creditSummary
+        // calls vip_spend_cents (NOT its differently-defined spend_cents).
         vipSpendCents: number;
         lastSpendAt: string | null;
       }
@@ -9136,13 +9134,44 @@ class PacksModuleService extends MedusaService({
       // The NORMAL part only: bonus-funded play counts toward nothing (spec
       // 2026-10-07); bonus_cents is ≤ 0 on an open debit.
       // Only opens after a VIP reset (resetVipLevel).
-      `SELECT COALESCE(SUM(-${normalSenSql('ct.')}), 0)::bigint AS sen
-         FROM credit_transaction ct ${VIP_RESET_JOIN}
-        WHERE ct.customer_id = ? AND ct.reason = 'pack_open' AND ct.amount < 0 AND ct.deleted_at IS NULL
-          AND ${AFTER_VIP_RESET}`,
-      [customerId],
+      `SELECT COALESCE(SUM(-${normalSenSql()}), 0)::bigint AS sen
+         FROM credit_transaction
+        WHERE customer_id = ? AND reason = 'pack_open' AND amount < 0 AND deleted_at IS NULL
+          AND ${VIP_AFTER_RESET_SQL}`,
+      [customerId, customerId],
     );
     return Number(rows[0]?.sen ?? 0);
+  }
+
+  // The VIP spend basis (MYR) the level and the VIP pages read: net pack_open
+  // spend, NORMAL part only (bonus play counts toward nothing), after the
+  // customer's VIP reset if any, floored at 0 (a pre-reset open reversed after
+  // the reset would otherwise drive it negative). creditSummary().vipSpendTotal
+  // is the same sum without the cutoff. resetAt is read in the SAME statement,
+  // so the upsert guard in upsertVipMemberState compares against exactly the
+  // cutoff these numbers were computed under.
+  @InjectManager()
+  async vipSpendBasis(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ netMyr: number; resetAt: Date | null }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<
+      { net_sen: string | null; reset_at: Date | string | null }[]
+    >(
+      `SELECT GREATEST(COALESCE(SUM(-${normalSenSql()}), 0), 0)::bigint AS net_sen,
+              (SELECT vip_reset_at FROM vip_member_state WHERE customer_id = ? AND deleted_at IS NULL) AS reset_at
+         FROM credit_transaction
+        WHERE customer_id = ? AND reason = 'pack_open' AND deleted_at IS NULL
+          AND ${VIP_AFTER_RESET_SQL}`,
+      [customerId, customerId, customerId],
+    );
+    const resetAt = rows[0]?.reset_at;
+    return {
+      netMyr: Number(rows[0]?.net_sen ?? 0) / 100,
+      resetAt: resetAt ? new Date(resetAt) : null,
+    };
   }
 
   // Outstanding voucher liability: sum of amount_myr across all GRANTED,
@@ -9167,6 +9196,9 @@ class PacksModuleService extends MedusaService({
   // INSERT … ON CONFLICT(customer_id) DO UPDATE so concurrent rebuilds for the
   // same customer always converge. GREATEST ensures highest_level_ever is truly
   // monotonic (never regressed by a concurrent rebuild off a different snapshot).
+  // resetAt is the vip_reset_at the inputs were read under (vipSpendBasis): the
+  // update is skipped if a resetVipLevel committed since, so stale inputs can
+  // never write the pre-reset level back through the ratchet.
   @InjectManager()
   async upsertVipMemberState(
     input: {
@@ -9174,6 +9206,7 @@ class PacksModuleService extends MedusaService({
       lifetimeSen: number;
       highestLevelEver: number;
       currentLevel: number;
+      resetAt: Date | null;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
@@ -9187,32 +9220,47 @@ class PacksModuleService extends MedusaService({
          lifetime_external_spend_sen = EXCLUDED.lifetime_external_spend_sen,
          highest_level_ever = GREATEST(vip_member_state.highest_level_ever, EXCLUDED.highest_level_ever),
          current_level = EXCLUDED.current_level,
-         updated_at = now()`,
+         updated_at = now()
+       WHERE vip_member_state.vip_reset_at IS NOT DISTINCT FROM ?::timestamptz`,
       [
         `vms_${input.customerId}`,
         input.customerId,
         input.lifetimeSen,
         input.highestLevelEver,
         input.currentLevel,
+        input.resetAt,
       ],
     );
   }
 
-  // Operator VIP reset: restart a customer at L1 with zero VIP spend. Stamps
-  // vip_reset_at, after which the VIP basis counts only later opens, and lowers
-  // the projection directly, because upsertVipMemberState's GREATEST ratchet
-  // never lowers highest_level_ever. Under the credit lock, so no charge lands
-  // mid-reset; clock_timestamp() is taken after the lock is held. Ladder
-  // grants already given stay, so re-crossing a rung grants nothing again.
-  // Frames unlock off highest_level_ever, so they lock again; the caller
-  // clears customer.metadata.equipped_frame_level (mutateCustomerMetadata
-  // must not run inside a credit-locked transaction).
-  // ponytail: an open settling at the same instant can read its inputs before
-  // this commits and write the old peak back through the GREATEST ratchet.
-  // Ops resets idle accounts and re-reads the state after; guard the upsert
-  // on vip_reset_at if resets ever run on active players.
+  // Operator VIP reset: restart a customer at L1 with zero VIP spend, then
+  // unequip their frame — frames unlock off highest_level_ever, and the
+  // leaderboard, profile and pullers readers do not re-check it. Two
+  // transactions on purpose, so this takes no sharedContext:
+  // mutateCustomerMetadata must never run inside a credit-locked one. Ladder
+  // grants already given stay; re-crossing a rung grants nothing again, so a
+  // reset is not a reward farm.
+  async resetVipLevel(customerId: string): Promise<void> {
+    await this.resetVipState(customerId);
+    await this.mutateCustomerMetadata({
+      customerId,
+      mutate: (m) =>
+        typeof m.equipped_frame_level === 'number'
+          ? { ...m, equipped_frame_level: null }
+          : null,
+    });
+  }
+
+  // The state half of resetVipLevel. Stamps vip_reset_at, after which the VIP
+  // basis counts only later opens, and lowers the projection directly, because
+  // upsertVipMemberState's GREATEST ratchet never lowers highest_level_ever.
+  // Under the credit lock every pre-reset ledger row is committed, so the
+  // cutoff is the customer's newest row rounded UP to the millisecond, not a
+  // clock reading: created_at comes from the app clock (ORM onCreate) and a
+  // reset may run elsewhere, so comparing clocks could misplace an open.
+  // Millisecond-exact, so the upsert guard's Date round trip matches it.
   @InjectTransactionManager()
-  async resetVipLevel(
+  async resetVipState(
     customerId: string,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
@@ -9223,14 +9271,19 @@ class PacksModuleService extends MedusaService({
     await em.execute(
       `INSERT INTO vip_member_state
          (id, customer_id, lifetime_external_spend_sen, highest_level_ever, current_level, vip_reset_at, created_at, updated_at)
-       VALUES (?, ?, 0, 1, 1, clock_timestamp(), now(), now())
+       VALUES (?, ?, 0, 1, 1, (
+         SELECT COALESCE(
+           date_trunc('milliseconds', MAX(created_at) + interval '999 microseconds'),
+           date_trunc('milliseconds', clock_timestamp()))
+           FROM credit_transaction WHERE customer_id = ?
+       ), now(), now())
        ON CONFLICT (customer_id) WHERE deleted_at IS NULL DO UPDATE SET
          lifetime_external_spend_sen = 0,
          highest_level_ever = 1,
          current_level = 1,
-         vip_reset_at = clock_timestamp(),
+         vip_reset_at = EXCLUDED.vip_reset_at,
          updated_at = now()`,
-      [`vms_${customerId}`, customerId],
+      [`vms_${customerId}`, customerId, customerId],
     );
   }
 
@@ -9245,11 +9298,14 @@ class PacksModuleService extends MedusaService({
     customerId: string,
     sharedContext: Context = {},
   ) {
+    // vipSpendBasis FIRST: its resetAt guards the upsert, so it must be read
+    // no later than any other ledger input.
+    const { netMyr: netBasisMyr, resetAt } =
+      await this.vipSpendBasis(customerId);
     const lifetimeSen = await this.lifetimeTurnoverSenFor(
       customerId,
       sharedContext,
     );
-    const netBasisMyr = (await this.creditSummary(customerId)).vipSpendTotal;
     const ladderRows = await this.listVipLevels(
       {},
       {
@@ -9261,7 +9317,7 @@ class PacksModuleService extends MedusaService({
       level: r.level,
       spend_threshold: Number(r.spend_threshold),
     }));
-    return { lifetimeSen, netBasisMyr, ladderRows, thresholdRows };
+    return { lifetimeSen, netBasisMyr, resetAt, ladderRows, thresholdRows };
   }
 
   // Rebuild the vip_member_state projection for a single customer from the
@@ -9272,7 +9328,7 @@ class PacksModuleService extends MedusaService({
     customerId: string,
     sharedContext: Context = {},
   ): Promise<void> {
-    const { lifetimeSen, netBasisMyr, thresholdRows } =
+    const { lifetimeSen, netBasisMyr, resetAt, thresholdRows } =
       await this.loadVipStateInputs(customerId, sharedContext);
     await this.upsertVipMemberState(
       {
@@ -9280,6 +9336,7 @@ class PacksModuleService extends MedusaService({
         lifetimeSen,
         highestLevelEver: levelForSpend(fromSen(lifetimeSen), thresholdRows), // fromSen: SEN→MYR unit conversion (UNIT TRAP)
         currentLevel: levelForSpend(netBasisMyr, thresholdRows),
+        resetAt,
       },
       sharedContext,
     );
@@ -9441,7 +9498,7 @@ class PacksModuleService extends MedusaService({
     customerId: string,
     openId: string,
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<{ gained: number[] }> {
+  ): Promise<{ gained: number[]; resetAt: Date | null }> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
 
@@ -9449,7 +9506,7 @@ class PacksModuleService extends MedusaService({
     //       lifetime, net basis, full ladder) — the same source
     //       rebuildVipMemberState uses, so redelivery stays idempotent and the
     //       two paths cannot drift in what they read.
-    const { lifetimeSen, netBasisMyr, ladderRows, thresholdRows } =
+    const { lifetimeSen, netBasisMyr, resetAt, ladderRows, thresholdRows } =
       await this.loadVipStateInputs(customerId, sharedContext);
     // UNIT TRAP: lifetimeSen is integer sen, levelForSpend expects MYR. Convert.
     const lifetimeMyr = fromSen(lifetimeSen);
@@ -9514,11 +9571,13 @@ class PacksModuleService extends MedusaService({
         lifetimeSen,
         highestLevelEver: newHighest,
         currentLevel,
+        resetAt,
       },
       sharedContext,
     );
 
-    return { gained };
+    // resetAt keys the level-up notification (vipLevelUpKey).
+    return { gained, resetAt };
   }
 
   // The logged-in customer's VIP voucher/frame grant state. Was the /daily
