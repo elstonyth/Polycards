@@ -59,14 +59,14 @@ export async function loadTopPulls(
     .slice(0, limit);
   const handles = [...new Set(shown.map((r) => r.card_id))];
   const slugs = [...new Set(shown.map((r) => r.pack_id))];
+  // Odds: one live row per (pack, card), so the take is exact. A short read
+  // would fall back to 'Common' and mislabel the pull.
   const [cards, odds, packRows] = await Promise.all([
     handles.length
       ? packs.listCards({ handle: handles }, { take: handles.length })
       : Promise.resolve([]),
     handles.length
-      ? // One live row per (pack, card), so this take is exact: a short read
-        // would fall back to 'Common' and mislabel the pull.
-        packs.listPackOdds(
+      ? packs.listPackOdds(
           { card_id: handles, pack_id: slugs },
           { take: handles.length * slugs.length },
         )

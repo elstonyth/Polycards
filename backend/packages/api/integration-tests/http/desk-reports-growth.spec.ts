@@ -1536,15 +1536,12 @@ medusaIntegrationTestRunner({
             has_account: true,
           },
         ]);
+        const def = await ensureDefaultPlayerGroup(getContainer());
         const partners = await customers().createCustomerGroups({
           name: 'Partners',
         });
         await customers().addCustomerToGroup([
-          {
-            customer_id: member.id,
-            customer_group_id: (await ensureDefaultPlayerGroup(getContainer()))
-              .id,
-          },
+          { customer_id: member.id, customer_group_id: def.id },
           { customer_id: partner.id, customer_group_id: partners.id },
         ]);
         await packs().createPulls(
