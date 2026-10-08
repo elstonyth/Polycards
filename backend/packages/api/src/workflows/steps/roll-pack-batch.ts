@@ -4,7 +4,12 @@ import type { MedusaContainer } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import { resolveOddsSetForCustomer } from '../../modules/packs/odds-sets';
-import { fetchPackData, drawFromData, type RolledCard } from './roll-pack';
+import {
+  assertInStock,
+  fetchPackData,
+  drawFromData,
+  type RolledCard,
+} from './roll-pack';
 
 export type RollPackBatchInput = {
   pack_id: string;
@@ -12,6 +17,9 @@ export type RollPackBatchInput = {
   // Same role as on the single-open input: resolves the customer's ODDS SET
   // server-side (§2.5). Optional — an absent id draws on set 1.
   customer_id?: string;
+  // Rows covered by gifted packs (open-batch passes its whole input). A batch
+  // made only of gifts may open a sold-out pack: the gifts were already given.
+  gifts?: number;
 };
 
 // rollBatch — the batch step's body, exported so it can be driven directly in a
@@ -45,6 +53,7 @@ export async function rollBatch(
 
   // Fix 1 — hoist pack/odds fetch: one DB round-trip for the entire batch
   const data = await fetchPackData(packs, input.pack_id, set);
+  if ((input.gifts ?? 0) < input.count) assertInStock(data.pack);
 
   // Each drawFromData call is independent (fresh CSPRNG draw per call).
   // listCards stays inside drawFromData — it varies per winning card.

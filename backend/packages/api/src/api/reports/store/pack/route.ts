@@ -122,6 +122,6 @@ export async function GET(
         display_price: card.get(o.card_id)!.price,
         on_hand: stock.get(o.card_id) ?? null,
       })),
-    note: "Prices are display prices at today's rate. on_hand null = untracked stock; at 0 or below a card can still be drawn and buyback covers it. ev and rtp_pct are odds set 1 (what the DEFAULT group plays); the sold-out badge is display only.",
+    note: "Prices are display prices at today's rate. on_hand null = untracked stock; at 0 or below a card can still be drawn and buyback covers it. ev and rtp_pct are odds set 1 (what the DEFAULT group plays); a sold-out pack stays listed but paid opens are refused; vault gifts and free rips already given still open.",
   });
 }

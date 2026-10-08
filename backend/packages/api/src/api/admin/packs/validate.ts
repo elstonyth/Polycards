@@ -207,6 +207,12 @@ export function coercePackBody(raw: unknown, slug: string): PackWriteInput {
   // an accidentally-active pack with an empty pool breaks every spin.
   const status = b.status === 'active' ? 'active' : 'draft';
 
+  // Sold out (false) is an active pack customers see but cannot open.
+  // Omitted = keep the stored value.
+  if (b.in_stock !== undefined && typeof b.in_stock !== 'boolean') {
+    bad(`'in_stock' must be true or false.`);
+  }
+
   // Buyback %: the INSTANT (on-the-spot) rate. Omitted → the flat rate (90).
   // A set rate may never undercut the flat rate — vault/inventory sells always
   // pay flat, so an instant rate below it would invert the keep/sell incentive.
@@ -245,6 +251,11 @@ export function coercePackBody(raw: unknown, slug: string): PackWriteInput {
     if (price !== 0) {
       bad(`A '${FREE_WELCOME_CATEGORY}' pack must have a price of 0.`);
     }
+    // A sold-out free pack would stay "the" active free pack, so new accounts
+    // would keep being offered a claim the open then refuses.
+    if (b.in_stock === false) {
+      bad(`The free pack cannot be sold out. Set it to draft instead.`);
+    }
   } else if (price === 0 && category !== 'reward_box') {
     bad('Only the free welcome pack may have a price of 0.');
   }
@@ -260,6 +271,7 @@ export function coercePackBody(raw: unknown, slug: string): PackWriteInput {
     boost: b.boost === true,
     rank: Math.trunc(num(b, 'rank', 0)),
     status,
+    in_stock: b.in_stock as boolean | undefined,
     published_odds: coercePublishedOdds(b.published_odds),
     tier_ranges: coerceTierRanges(b.tier_ranges),
   };
