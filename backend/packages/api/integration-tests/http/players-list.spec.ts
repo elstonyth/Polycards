@@ -249,7 +249,11 @@ medusaIntegrationTestRunner({
       });
 
       it('?q= finds a player by profile handle, as copied from the profile (@, any case)', async () => {
-        for (const q of [A_HANDLE, `@${A_HANDLE.toLowerCase()}`]) {
+        for (const q of [
+          A_HANDLE,
+          `@${A_HANDLE.toLowerCase()}`,
+          `@ ${A_HANDLE}`,
+        ]) {
           const res = await list(`?q=${encodeURIComponent(q)}`);
           expect(res.status).toBe(200);
           expect(res.data.total).toBe(1);

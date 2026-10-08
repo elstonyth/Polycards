@@ -81,7 +81,7 @@ export async function GET(
   // many are plain words, and "lee" must still list every Lee.
   // ponytail: the union takes at most 1000 text matches; page it in SQL if an
   // exact-handle search ever matches more players than that.
-  const handle = q?.replace(/^@/, '');
+  const handle = q?.replace(/^@/, '').trim();
   const byHandle =
     handle && isValidUsername(handle)
       ? await packs.findCustomerIdByHandle(handle)
