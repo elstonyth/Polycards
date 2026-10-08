@@ -461,7 +461,9 @@ medusaIntegrationTestRunner({
       // Half real money: half the spend and half the card's value count.
       expect(row.points).toBe((PRICE / 2) * 100);
       expect(row.volume).toBeCloseTo(
-        (Number(pull.recorded_value_usd) * FX) / 2,
+        // A bigNumber may come back as a number or as its raw { value } form.
+        (Number(pull.recorded_value_usd?.value ?? pull.recorded_value_usd) * FX) /
+          2,
         1,
       );
     });
