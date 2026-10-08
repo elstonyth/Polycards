@@ -17,6 +17,11 @@ const ADMIN_EMAIL = 'players-list-admin@test.dev';
 // A's local part is unique enough that ?q= can't also match B or the admin.
 const A_EMAIL = 'alphaplayer-zzq@test.dev';
 const B_EMAIL = 'bravoplayer-yyr@test.dev';
+// A's permanent profile handle (metadata.handle) — not an email/name column.
+const A_HANDLE = 'Collector31729999';
+// B's handle is a substring of A's email: a handle search must ADD B to the
+// text matches, not replace them.
+const B_HANDLE = 'alphaplayer';
 const CARD_HANDLE = 'players-list-card';
 const CARD_USD = 12.34;
 const PACK_SLUG = 'players-list-pack';
@@ -68,9 +73,13 @@ medusaIntegrationTestRunner({
           first_name: 'Alpha',
           last_name: 'Player',
           phone: '+60123456789',
+          metadata: { handle: A_HANDLE },
         });
         aId = a.id;
-        const b = await customers.createCustomers({ email: B_EMAIL });
+        const b = await customers.createCustomers({
+          email: B_EMAIL,
+          metadata: { handle: B_HANDLE },
+        });
         bId = b.id;
 
         // A carries a real customer group so the `groups` column is proven
@@ -237,6 +246,30 @@ medusaIntegrationTestRunner({
         expect(res.data.total).toBe(1);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         expect(res.data.players.map((p: any) => p.id)).toEqual([aId]);
+      });
+
+      it('?q= finds a player by profile handle, as copied from the profile (@, any case)', async () => {
+        for (const q of [
+          A_HANDLE,
+          `@${A_HANDLE.toLowerCase()}`,
+          `@ ${A_HANDLE}`,
+        ]) {
+          const res = await list(`?q=${encodeURIComponent(q)}`);
+          expect(res.status).toBe(200);
+          expect(res.data.total).toBe(1);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          expect(res.data.players.map((p: any) => p.id)).toEqual([aId]);
+        }
+      });
+
+      it('?q= equal to one handle still lists every other text match', async () => {
+        const res = await list(`?q=${B_HANDLE}`);
+        expect(res.status).toBe(200);
+        expect(res.data.total).toBe(2);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        expect(res.data.players.map((p: any) => p.id).sort()).toEqual(
+          [aId, bId].sort(),
+        );
       });
 
       it('pages with limit/offset and rejects limit > 200', async () => {
