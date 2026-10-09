@@ -1,8 +1,8 @@
 import sharp, { type OverlayOptions } from 'sharp';
 import { ensureBundledFonts } from '../../api/admin/media/label-font';
 import { fetchBytes, MAX_DECODE_PIXELS } from '../../api/utils/image-fetch';
-import { capH, POSTER_H, POSTER_W } from './brand-poster';
-import { sizeToFit, twoLines } from './challenge-poster';
+import { capH, icon, POSTER_H, POSTER_W } from './brand-poster';
+import { ICON_LOCK, sizeToFit, twoLines } from './challenge-poster';
 import { BRAND_LOGO_B64 } from './pull-card-assets';
 import {
   baseline,
@@ -36,13 +36,21 @@ export type ResultsPodiumEntry = {
   /** Every card won, most valuable first, once per pull minted (two
    *  stages can award one card twice); empty = credits only. */
   cards: string[];
+  /** What the next stage, still locked, would add (the live leaders
+   *  poster): its cards drawn after the won ones, dimmed under a lock, and
+   *  its value on a line of its own. Never part of prizeMyr. */
+  locked?: LockedReward & { cards: string[] };
 };
+
+/** A still-locked stage's reward for one rank. */
+export type LockedReward = { stage: number; prizeMyr: number };
 
 export type ResultsListEntry = {
   rank: number;
   name: string;
   pulledMyr: number | null;
   prizeMyr: number;
+  locked?: LockedReward;
 };
 
 export type ResultsPosterInput = {
@@ -56,6 +64,12 @@ export type ResultsPosterInput = {
   list: ResultsListEntry[];
   /** Bare footer address, e.g. 'polycards.gg/leaderboard'. */
   siteHost: string;
+  /** The running week's leaders reuse this look with their own words:
+   *  default 'WEEKLY CHALLENGE RESULTS', 'WON' and 'CONGRATULATIONS TO THE
+   *  TOP 10'. */
+  title?: string;
+  wonLabel?: string;
+  footer?: string;
 };
 
 /** Which of a week's two result images: the top 3, or ranks 4-10. */
@@ -170,14 +184,85 @@ const placeholderPng = (w: number, h: number): Promise<Buffer> =>
     .png()
     .toBuffer();
 
+/** A locked stage's card: its art dimmed, a lock and its stage on top. The
+ *  card is one bitmap laid over the SVG, so the lock goes into it. */
+export async function lockedCardPng(
+  card: Buffer,
+  w: number,
+  h: number,
+  stage: number,
+): Promise<Buffer> {
+  const r = Math.min(30, Math.round(w * 0.3));
+  const size = Math.max(12, Math.min(18, Math.round(w * 0.13)));
+  const font = body(size, 2);
+  const label = `STAGE ${stage}`;
+  const pillW = Math.min(w - 8, Math.round((await measure(label, font)) + 20));
+  const pillH = size + 14;
+  const cy = h / 2 - pillH / 2;
+  const pillY = cy + r + 8;
+  const badge =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">` +
+    `<circle cx="${w / 2}" cy="${cy}" r="${r}" fill="${INK}" fill-opacity="0.85" stroke="${CHASE}" stroke-width="2"/>` +
+    icon(ICON_LOCK, w / 2 - r / 2, cy, r, CHASE) +
+    `<rect x="${(w - pillW) / 2}" y="${pillY}" width="${pillW}" height="${pillH}" rx="${pillH / 2}" fill="${INK}" fill-opacity="0.85"/>` +
+    textEl(
+      label,
+      w / 2,
+      baseline(pillY + pillH / 2, size),
+      font,
+      WHITE,
+      'middle',
+    ) +
+    '</svg>';
+  return sharp(card)
+    .modulate({ brightness: 0.45, saturation: 0.3 })
+    .composite([{ input: Buffer.from(badge) }])
+    .png()
+    .toBuffer();
+}
+
+/** "(lock) STAGE 4 +RM 76,102": what a locked stage would add. */
+async function lockedLine(
+  locked: LockedReward,
+  x: number,
+  mid: number,
+  size: number,
+  max: number,
+  anchor: 'start' | 'end' = 'start',
+): Promise<string> {
+  const font = body(size, 2);
+  const iconSize = Math.round(size * 1.1);
+  const text = await fit(
+    `STAGE ${locked.stage} +${rmWhole(locked.prizeMyr)}`,
+    font,
+    max - iconSize - 8,
+  );
+  const iconX =
+    anchor === 'start' ? x : x - (await measure(text, font)) - 8 - iconSize;
+  const textX = anchor === 'start' ? x + iconSize + 8 : x;
+  return (
+    icon(ICON_LOCK, iconX, mid, iconSize, SILVER) +
+    textEl(text, textX, baseline(mid, size), font, SILVER, anchor)
+  );
+}
+
 type Canvas = {
   svg: string[];
   layers: OverlayOptions[];
   placeholders: number[];
 };
 
+/** The cards a winner's row draws: the won ones, then the locked stage's,
+ *  which keep their place when the won ones overflow the row. */
+const rowCards = (winner: ResultsPodiumEntry) => {
+  const locked = (winner.locked?.cards ?? []).slice(0, MAX_ROW_CARDS);
+  const won = winner.cards.slice(0, MAX_ROW_CARDS - locked.length);
+  return { won, locked, n: won.length + locked.length };
+};
+
 /** One winner's cards side by side, centred in [x, x + room), tops at `top`,
- *  each named under its slab; or their credits as a plain tile. */
+ *  each named under its slab; or their credits as a plain tile. `pics` are
+ *  in the order of `cards`, then `locked.cards`. */
 async function drawPrizes(
   c: Canvas,
   winner: ResultsPodiumEntry,
@@ -188,7 +273,7 @@ async function drawPrizes(
   cardW: number,
   gap: number,
 ): Promise<void> {
-  const n = Math.min(winner.cards.length, MAX_ROW_CARDS);
+  const { won, locked, n } = rowCards(winner);
   if (!n) {
     const tileW = Math.min(300, room);
     const tileH = 160;
@@ -226,28 +311,34 @@ async function drawPrizes(
   const cardH = Math.round(cardW / SLAB);
   const total = n * cardW + (n - 1) * gap;
   const x0 = x + (room - total) / 2;
-  for (let i = 0; i < n; i++) {
+  const slots = [
+    ...won.map((name, i) => ({ name, pic: pics[i], stage: undefined })),
+    ...locked.map((name, i) => ({
+      name,
+      pic: pics[winner.cards.length + i],
+      stage: winner.locked?.stage,
+    })),
+  ];
+  for (const [i, slot] of slots.entries()) {
     const cx = Math.round(x0 + i * (cardW + gap));
-    let card = await cardPng(pics[i] ?? null, cardW, cardH);
+    let card = await cardPng(slot.pic ?? null, cardW, cardH);
     if (!card) {
       if (!c.placeholders.includes(winner.rank))
         c.placeholders.push(winner.rank);
       card = await placeholderPng(cardW, cardH);
     }
+    if (slot.stage !== undefined)
+      card = await lockedCardPng(card, cardW, cardH, slot.stage);
     c.layers.push({ input: card, left: cx, top: Math.round(top) });
     let ny = top + cardH + 14 + capH(18) / 2;
-    for (const line of await twoLines(
-      winner.cards[i],
-      body(18),
-      cardW + gap - 4,
-    )) {
+    for (const line of await twoLines(slot.name, body(18), cardW + gap - 4)) {
       c.svg.push(
         textEl(
           line,
           cx + cardW / 2,
           baseline(ny, 18),
           body(18),
-          SOFT,
+          slot.stage === undefined ? SOFT : SILVER,
           'middle',
         ),
       );
@@ -259,14 +350,15 @@ async function drawPrizes(
 /** The height of a winner's prizes: the cards and their names, or the
  *  credits tile. */
 const prizesH = (winner: ResultsPodiumEntry, cardW: number): number =>
-  winner.cards.length ? Math.round(cardW / SLAB) + NAMES_H : 160;
+  rowCards(winner).n ? Math.round(cardW / SLAB) + NAMES_H : 160;
 
 const extraCards = (winner: ResultsPodiumEntry): number =>
-  Math.max(0, winner.cards.length - MAX_ROW_CARDS);
+  winner.cards.length - rowCards(winner).won.length;
 
 /**
  * Compose one of a week's two result images, 1080x1350. `art` maps a podium
- * rank to its cards' bytes, in the order of its `cards` (null or missing = a
+ * rank to its cards' bytes, in the order of its `cards` then its
+ * `locked.cards` (null or missing = a
  * placeholder tile, never a failed poster). `placeholders` lists the ranks
  * with a card not shown as its art.
  */
@@ -302,7 +394,8 @@ export async function composeResultsPoster(
   const panels: string[] = [];
 
   // ---- the title and the gold line ------------------------------------------
-  const title = 'WEEKLY CHALLENGE RESULTS';
+  const title = input.title ?? 'WEEKLY CHALLENGE RESULTS';
+  const wonLabel = input.wonLabel ?? 'WON';
   const titleSize = await sizeToFit([title], (s) => display(s), 72, 40, TEXT_W);
   let y = PAD + LOGO_H + 44 + titleSize / 2;
   c.svg.push(
@@ -343,15 +436,14 @@ export async function composeResultsPoster(
     const podium = [...input.podium].sort((a, b) => a.rank - b.rank);
     const first = podium.find((w) => w.rank === 1);
     const others = podium.filter((w) => w.rank !== 1);
-    const n1 = first ? Math.min(first.cards.length, MAX_ROW_CARDS) : 0;
-    const nMax = Math.max(
-      0,
-      ...others.map((w) => Math.min(w.cards.length, MAX_ROW_CARDS)),
-    );
+    const n1 = first ? rowCards(first).n : 0;
+    const nMax = Math.max(0, ...others.map((w) => rowCards(w).n));
     let w1 = cardWidth(n1, ROW_ROOM, 170, 16);
     let w2 = cardWidth(nMax, HALF_ROOM, 140, 12);
     const infoH1 = 150;
-    const infoH2 = 76;
+    // A third line (the locked stage, or cards past the row) pushes the
+    // cards down.
+    const infoH2 = others.some((w) => w.locked || extraCards(w)) ? 110 : 76;
     const rowH1 = () =>
       first ? Math.max(infoH1, prizesH(first, w1)) + 2 * ROW_PAD : 0;
     const rowH2 = () =>
@@ -379,7 +471,7 @@ export async function composeResultsPoster(
       spotY = ry + h / 2;
       // Who: the rank, the name, what they pulled, what they won.
       const infoX = PAD + 40;
-      const won = `WON ${rmWhole(first.prizeMyr)}`;
+      const won = `${wonLabel} ${rmWhole(first.prizeMyr)}`;
       const wonSize = await sizeToFit([won], (s) => display(s), 34, 20, INFO_W);
       const blocks: [number, number, (m: number) => Promise<string>][] = [
         [
@@ -427,9 +519,16 @@ export async function composeResultsPoster(
             textEl(won, infoX, baseline(m, wonSize), display(wonSize), CHASE),
         ],
       ];
-      if (extraCards(first)) {
-        blocks[blocks.length - 1][1] = 16;
-        blocks.push([
+      const tail: typeof blocks = [];
+      const locked = first.locked;
+      if (locked)
+        tail.push([
+          capH(20),
+          0,
+          (m) => lockedLine(locked, infoX, m, 20, INFO_W),
+        ]);
+      if (extraCards(first))
+        tail.push([
           capH(20),
           0,
           async (m) =>
@@ -441,6 +540,9 @@ export async function composeResultsPoster(
               CHASE,
             ),
         ]);
+      for (const block of tail) {
+        blocks[blocks.length - 1][1] = 16;
+        blocks.push(block);
       }
       const blockH = blocks.reduce((s, [bh, gap]) => s + bh + gap, 0);
       let ly = ry + (h - blockH) / 2;
@@ -503,9 +605,11 @@ export async function composeResultsPoster(
       const won = rmWhole(winner.prizeMyr);
       const wonFont = display(26);
       const wonW = await measure(won, wonFont);
+      // The amount follows its label, however long the label is.
+      const labelW = await measure(wonLabel, body(20, 2));
       c.svg.push(
-        textEl('WON', ix, baseline(line2, 20), body(20, 2), SILVER),
-        textEl(won, ix + 62, baseline(line2, 26), wonFont, CHASE),
+        textEl(wonLabel, ix, baseline(line2, 20), body(20, 2), SILVER),
+        textEl(won, ix + labelW + 14, baseline(line2, 26), wonFont, CHASE),
       );
       if (winner.pulledMyr !== null) {
         c.svg.push(
@@ -513,7 +617,7 @@ export async function composeResultsPoster(
             await fit(
               `PULLED ${rmWhole(winner.pulledMyr)}`,
               body(18, 1),
-              HALF_ROOM - 62 - wonW - 24,
+              HALF_ROOM - labelW - 14 - wonW - 24,
             ),
             px + HALF_W - HALF_PAD,
             baseline(line2, 18),
@@ -523,14 +627,26 @@ export async function composeResultsPoster(
           ),
         );
       }
-      if (extraCards(winner)) {
+      // The third line: the locked stage left, cards past the row right.
+      const line3 = line2 + 34;
+      const extra = extraCards(winner)
+        ? `+${extraCards(winner)} MORE CARDS`
+        : '';
+      if (winner.locked) {
+        const extraW = extra ? (await measure(extra, body(18, 2))) + 16 : 0;
+        c.svg.push(
+          await lockedLine(winner.locked, ix, line3, 18, HALF_ROOM - extraW),
+        );
+      }
+      if (extra) {
         c.svg.push(
           textEl(
-            `+${extraCards(winner)} MORE CARDS`,
-            ix,
-            baseline(line2 + 34, 18),
+            extra,
+            winner.locked ? px + HALF_W - HALF_PAD : ix,
+            baseline(line3, 18),
             body(18, 2),
             CHASE,
+            winner.locked ? 'end' : 'start',
           ),
         );
       }
@@ -562,8 +678,10 @@ export async function composeResultsPoster(
       );
       const headY = listY + 40;
       const nameX = PAD + 140;
-      const pulledX = PAD + 700;
+      // A locked stage's line under what they win needs the wider column.
+      const pulledX = PAD + (input.list.some((r) => r.locked) ? 640 : 700);
       const wonX = W - PAD - 40;
+      const lockedSize = 16;
       c.svg.push(
         textEl(
           'PULLED',
@@ -573,7 +691,7 @@ export async function composeResultsPoster(
           SILVER,
           'end',
         ),
-        textEl('WON', wonX, baseline(headY, 20), body(20, 3), SILVER, 'end'),
+        textEl(wonLabel, wonX, baseline(headY, 20), body(20, 3), SILVER, 'end'),
       );
       let ry = listY + headH;
       for (const [i, row] of input.list.entries()) {
@@ -606,21 +724,41 @@ export async function composeResultsPoster(
             SILVER,
             'end',
           ),
+        );
+        // What they win, and under it what the locked stage would add.
+        const wonMid = row.locked ? cy - (10 + capH(lockedSize)) / 2 : cy;
+        c.svg.push(
           textEl(
             rmWhole(row.prizeMyr),
             wonX,
-            baseline(cy, 34),
+            baseline(wonMid, 34),
             display(34),
             CHASE,
             'end',
           ),
         );
+        if (row.locked) {
+          c.svg.push(
+            await lockedLine(
+              row.locked,
+              wonX,
+              wonMid + capH(34) / 2 + 10 + capH(lockedSize) / 2,
+              lockedSize,
+              wonX - pulledX - 24,
+              'end',
+            ),
+          );
+        }
         ry += rowH;
       }
     }
     c.svg.push(
       textEl(
-        'CONGRATULATIONS TO THE TOP 10',
+        await fit(
+          input.footer ?? 'CONGRATULATIONS TO THE TOP 10',
+          body(26, 2),
+          TEXT_W,
+        ),
         mid,
         baseline(PILL_Y - 52, 26),
         body(26, 2),

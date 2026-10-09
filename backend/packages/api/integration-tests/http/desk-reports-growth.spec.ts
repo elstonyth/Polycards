@@ -306,6 +306,50 @@ medusaIntegrationTestRunner({
         expect((await report('challenge-poster')).status).toBe(404);
       });
 
+      it('draws who is leading as two feed-size posters, prizes as if the week ended now', async () => {
+        const get = (query: string) =>
+          unwrapResponse(
+            api.get(`/reports/growth/challenge-standings-poster${query}`, {
+              headers: { 'x-report-key': GROWTH_KEY },
+              responseType: 'arraybuffer',
+            }),
+          );
+        const top = await get('');
+        expect(top.status).toBe(200);
+        expect(top.headers['content-type']).toMatch(/^image\/jpeg/);
+        expect(top.headers['x-poster-part']).toBe('top');
+        expect(top.headers['x-poster-note']).toMatch(/if the week ended now/);
+        expect(top.headers['x-poster-note']).toMatch(/more unlocks stage 2\./);
+        // Stage 2's Y card shows locked beside the X card rank 1 wins.
+        expect(top.headers['x-poster-note']).toMatch(/Stage 2 is still locked/);
+        // Rank 1 wins stage 1's X card (stage 2 is locked); its seeded art is
+        // a path nobody serves here.
+        expect(top.headers['x-poster-missing-art']).toBe('1');
+        const meta = await sharp(Buffer.from(top.data)).metadata();
+        expect([meta.format, meta.width, meta.height]).toEqual([
+          'jpeg',
+          1080,
+          1350,
+        ]);
+        const rest = await get('?part=rest');
+        expect(rest.status).toBe(200);
+        expect(rest.headers['x-poster-part']).toBe('rest');
+        const restMeta = await sharp(Buffer.from(rest.data)).metadata();
+        expect([restMeta.width, restMeta.height]).toEqual([1080, 1350]);
+        expect(
+          (await report('challenge-standings-poster?part=all')).status,
+        ).toBe(400);
+      });
+
+      it('has no leaders poster without stages', async () => {
+        await packs().saveChallengeStages({
+          stages: [],
+          adminId: 'growth-challenge-test',
+          reason: 'clear',
+        });
+        expect((await report('challenge-standings-poster')).status).toBe(404);
+      });
+
       // An ended week recomputed live could announce prizes nobody was paid,
       // so only the running week is served.
       it('serves the running week only', async () => {

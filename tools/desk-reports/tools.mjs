@@ -214,6 +214,25 @@ TOOLS.growth = [
     }),
   },
   {
+    name: 'challenge_standings_poster',
+    description:
+      "Who is leading the RUNNING Weekly Pulled Value Challenge, as two finished posting images, each 1080x1350 (the 4:5 size Facebook and Instagram feeds show whole), in the results posters' look: part top (default), the current top 3 with every prize card they would win if the week ended now, what they pulled and what they win; part rest, ranks 4 to 10. The gold line gives the pool and what the next stage still needs. Use it for the Friday who-is-leading post and any post about the current standings: post both together (a carousel: top first). It is live, so call them leaders, never winners. It is a draft; a human reviews it before it is published.",
+    inputSchema: {
+      part: z
+        .enum(['top', 'rest'])
+        .optional()
+        .describe(
+          'top (default): the top 3 and the cards they would win. rest: ranks 4-10.',
+        ),
+    },
+    request: (args) => ({
+      path: 'challenge-standings-poster',
+      params: args.part ? { part: args.part } : {},
+      as: 'image',
+      artOf: 'podium rank',
+    }),
+  },
+  {
     name: 'challenge_stages_poster',
     description:
       "A finished poster of every stage of the Weekly Pulled Value Challenge on one image (1080x1350, the 4:5 feed size): each stage's unlock threshold, its #1 to #3 prizes as the official card art, and what ranks 4 to 10 win, under the line that every reward stacks. week current (default): the running week, with its unlocked stages marked; week next: the next challenge waiting in the admin queue. Use it for posts about the new week's prizes or all the stages at once (challenge_poster features one stage with a big podium). It is a draft; a human reviews it before it is published.",
