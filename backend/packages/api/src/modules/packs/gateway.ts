@@ -1,5 +1,10 @@
 import * as tgpay from './tgpay-client';
-import type { TgpayConfig } from './tgpay-client';
+import {
+  TGPAY_FAMILY,
+  tgpayEnvName,
+  type TgpayConfig,
+  type TgpayKind,
+} from './tgpay-client';
 import { fakeGateway, type FakeConfig } from './fake-gateway';
 import { gatewayEnv } from './gateway-env';
 import { PACKS_MODULE } from './index';
@@ -59,7 +64,7 @@ export type {
 // testOnly() below, which gates isPaymentGateway (and therefore
 // gatewayConfigFor, resolveActiveGateway and the admin switch), plus the
 // registry entry's own `configured` / `configFromEnv`.
-export type PaymentGateway = 'tgpay' | 'fake';
+export type PaymentGateway = 'tgpay' | 'the7pay' | 'fake';
 
 export type GatewayDefinition = {
   id: PaymentGateway;
@@ -106,6 +111,31 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
       depositMin: 50,
       depositMax: 10000,
       withdrawalMin: 50,
+      withdrawalMax: 30000,
+    },
+  },
+
+  // The backup gateway: a white-label of TGPay's platform (docs/payments/
+  // the7pay-api.md), so it shares TGPay's client and adapter with its own
+  // keys (THE7PAY_*), host and callback paths.
+  the7pay: {
+    id: 'the7pay',
+    label: 'The 7 Pay',
+    configured: (env) => Boolean(env.THE7PAY_SECRET_KEY),
+    configFromEnv: (env) => tgpay.tgpayFamilyConfigFromEnv('the7pay', env),
+    needsCustomerContact: true,
+    hooks: {
+      deposit: '/hooks/the7pay/deposit',
+      withdrawal: '/hooks/the7pay/withdrawal',
+    },
+    // Production tenant settings read 2026-10-09: payout RM 100 – 30,000 per
+    // request. Its pay-in min/max are blank ("platform defaults", not shown);
+    // the deposit band assumes the platform default TGPay's production tenant
+    // shows (RM 50 – 30,000) under our own TOPUP_MAX_RM — confirm with 7Pay.
+    limits: {
+      depositMin: 50,
+      depositMax: 10000,
+      withdrawalMin: 100,
       withdrawalMax: 30000,
     },
   },
@@ -240,7 +270,10 @@ export async function resolveActiveGateway(
   return paymentGateway();
 }
 
-export type GatewayConfig = TgpayConfig | FakeConfig;
+export type GatewayConfig =
+  | TgpayConfig<'tgpay'>
+  | TgpayConfig<'the7pay'>
+  | FakeConfig;
 
 /** Config for a SPECIFIC gateway, from env. Throws when it is not configured. */
 export function gatewayConfigFor(
@@ -321,15 +354,16 @@ export function gatewayUrls(
  * Where TGPay's hosted checkout lives when create-payment hands back a
  * relative link ("/checkout?order=…"). Their hosts pair the API with a
  * checkout site — `sandbox-api.` ↔ `sandbox-checkout.`, `api.` ↔ `checkout.`
- * (both verified 2026-09-05/06) — so the fallback swaps that label; any
- * other layout needs TGPAY_CHECKOUT_BASE.
+ * (both verified 2026-09-05/06; The 7 Pay documents the same pairing) — so
+ * the fallback swaps that label; any other layout needs
+ * <PREFIX>_CHECKOUT_BASE (TGPAY_CHECKOUT_BASE, THE7PAY_CHECKOUT_BASE).
  */
 export function tgpayCheckoutBase(
-  config: Pick<TgpayConfig, 'baseUrl'>,
-  env: { TGPAY_CHECKOUT_BASE?: string } = process.env,
+  config: Pick<TgpayConfig, 'baseUrl'> & { kind?: TgpayKind },
+  env: Partial<Record<string, string>> = process.env,
 ): string {
-  if (env.TGPAY_CHECKOUT_BASE)
-    return env.TGPAY_CHECKOUT_BASE.replace(/\/+$/, '');
+  const override = env[tgpayEnvName(config.kind ?? 'tgpay', 'CHECKOUT_BASE')];
+  if (override) return override.replace(/\/+$/, '');
   const { protocol, host } = new URL(config.baseUrl);
   const checkoutHost = host.replace(
     /^(?:([a-z0-9-]+)-)?api\./i,
@@ -383,12 +417,15 @@ const TGPAY_METHOD: Record<string, 'FPX' | 'EWALLET' | undefined> = {
   BQR: 'EWALLET',
 };
 
+// One adapter for the whole TGPay platform family: `config.kind` picks the
+// label, the bank-code column and the env prefix; the wire format is shared.
 const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
   async submitDeposit(input, config) {
+    const label = TGPAY_FAMILY[config.kind].label;
     const paymentMethod = TGPAY_METHOD[input.paymentMethodCode];
     if (!paymentMethod) {
       throw new tgpay.TgpayError(
-        `TGPay: no hosted-checkout rail for method ${input.paymentMethodCode}`,
+        `${label}: no hosted-checkout rail for method ${input.paymentMethodCode}`,
         ['TGPAY_UNSUPPORTED_METHOD'],
         400,
         true,
@@ -396,7 +433,7 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
     }
     if (!input.customer) {
       throw new tgpay.TgpayError(
-        'TGPay: create-payment needs the customer contact (name/email/phone)',
+        `${label}: create-payment needs the customer contact (name/email/phone)`,
         ['TGPAY_CUSTOMER_REQUIRED'],
         400,
         true,
@@ -442,17 +479,18 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
   },
 
   async submitWithdrawal(input, config) {
+    const label = TGPAY_FAMILY[config.kind].label;
     // Canonical id (or any legacy alias) → TGPay's SWIFT code + the exact
     // name TGPay pairs with it. The sandbox dummy bank exists only there.
     const known = findBank(input.destinationBankCode);
     const bank =
       known &&
       (known.id !== TGPAY_SANDBOX_BANK.id || tgpay.tgpayIsSandbox(config))
-        ? gatewayBankCode(input.destinationBankCode, 'tgpay')
+        ? gatewayBankCode(input.destinationBankCode, config.kind)
         : null;
     if (!bank) {
       throw new tgpay.TgpayError(
-        `TGPay: cannot pay to bank ${input.destinationBankCode} — not in its SWIFT table`,
+        `${label}: cannot pay to bank ${input.destinationBankCode} — not in its SWIFT table`,
         ['TGPAY_UNKNOWN_BANK'],
         400,
         true,
@@ -460,7 +498,7 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
     }
     if (!input.email) {
       throw new tgpay.TgpayError(
-        'TGPay: payout needs the customer email',
+        `${label}: payout needs the customer email`,
         ['TGPAY_CUSTOMER_REQUIRED'],
         400,
         true,
@@ -508,7 +546,7 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
   },
 
   async getSupportedBanks(config) {
-    return banksFor('tgpay', { sandbox: tgpay.tgpayIsSandbox(config) });
+    return banksFor(config.kind, { sandbox: tgpay.tgpayIsSandbox(config) });
   },
 
   /**
@@ -519,14 +557,14 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
   async checkBalance(config) {
     const b = await tgpay.balances(config);
     return {
-      merchantCode: 'tgpay',
+      merchantCode: config.kind,
       currencyCode: b.currencyCode,
       currentBalance: b.payin,
       availableBalance: b.payout,
       t1Balance: 0,
       notes: b.missing.map(
         (w) =>
-          `TGPay has no ${w === 'payin' ? 'pay-in' : 'payout'} wallet for ${b.currencyCode} — shown as 0, actually unknown`,
+          `${TGPAY_FAMILY[config.kind].label} has no ${w === 'payin' ? 'pay-in' : 'payout'} wallet for ${b.currencyCode} — shown as 0, actually unknown`,
       ),
     };
   },
@@ -539,7 +577,7 @@ const ADAPTERS: {
   [K in GatewayConfig['kind']]: GatewayAdapter<
     Extract<GatewayConfig, { kind: K }>
   >;
-} = { tgpay: tgpayAdapter, fake: fakeGateway };
+} = { tgpay: tgpayAdapter, the7pay: tgpayAdapter, fake: fakeGateway };
 
 /**
  * Pick the adapter for a config by its `kind`. The cast re-widens what the

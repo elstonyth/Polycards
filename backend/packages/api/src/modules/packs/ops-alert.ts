@@ -92,7 +92,8 @@ function postOpsAlert(
 }
 
 /**
- * Tell ops that TGPay refused a payout because OUR payout wallet is short
+ * Tell ops that a TGPay-platform gateway (TGPay, The 7 Pay) refused a payout
+ * because OUR payout wallet there is short
  * (TGPAY_PAYOUT_FLOAT_EMPTY). On 2026-09-06 and 2026-09-29 that went unnoticed
  * until a customer complained, after 8 and 9 refused attempts.
  *
@@ -103,15 +104,18 @@ function postOpsAlert(
  */
 export function alertPayoutFloatEmpty(
   scope: Scope,
-  detail: { amount: number; ref: string; via: string },
+  detail: { amount: number; ref: string; via: string; gateway?: string },
 ): Promise<void> {
+  const name = detail.gateway ?? 'TGPay';
   return alertOps(
     scope,
-    'payout-float-empty',
-    `TGPay payout wallet is short: payouts are being refused with ` +
+    // Muted per gateway: TGPay's alert must not silence The 7 Pay's when the
+    // operator switches to it and its (likely unfunded) wallet refuses too.
+    detail.gateway ? `payout-float-empty:${detail.gateway}` : 'payout-float-empty',
+    `${name} payout wallet is short: payouts are being refused with ` +
       `"Insufficient payout credit balance". Latest: RM ${detail.amount} ` +
       `(${detail.ref}, ${detail.via}), refunded to the customer. Every payout ` +
-      `fails until the TGPay payout wallet is topped up. Repeats muted for ` +
+      `fails until the ${name} payout wallet is topped up. Repeats muted for ` +
       `${PAYOUT_FLOAT_ALERT_EVERY_MS / 60_000} min.`,
     { muteMs: PAYOUT_FLOAT_ALERT_EVERY_MS },
   );

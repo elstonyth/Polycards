@@ -151,9 +151,13 @@ export const ALL_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 // (the admin-only shape again — e.g. `/admin/customer-groups*` has a
 // 6-line comment between `method: 'POST',` and `middlewares:`). CGAP is that
 // same optional-comment-run allowed at every field boundary.
+//
+// An optional flat `bodyParser: { … },` may sit between `method` and
+// `middlewares` (the /hooks/the7pay/* entry preserves the raw body for its
+// HMAC check). Without it in the pattern that entry would silently drop.
 const CGAP = '\\s*(?:\\/\\/[^\\n]*\\n\\s*)*';
 const ENTRY_RE = new RegExp(
-  `\\{${CGAP}matcher:\\s*'([^']+)',${CGAP}(?:method:\\s*(\\[[^\\]]*\\]|'[^']*'),${CGAP})?middlewares:\\s*\\[((?:[^[\\]]|\\[[^[\\]]*\\])*)\\],?${CGAP}\\}`,
+  `\\{${CGAP}matcher:\\s*'([^']+)',${CGAP}(?:method:\\s*(\\[[^\\]]*\\]|'[^']*'),${CGAP})?(?:bodyParser:\\s*\\{[^{}]*\\},${CGAP})?middlewares:\\s*\\[((?:[^[\\]]|\\[[^[\\]]*\\])*)\\],?${CGAP}\\}`,
   'g',
 );
 

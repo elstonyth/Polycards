@@ -194,9 +194,9 @@ export function savedBankAccountViews(
 export function bankSupportedBy(
   bankCode: string,
   gateway: PaymentGateway,
-  env: { TGPAY_API_BASE?: string } = process.env,
+  env: Partial<Record<string, string>> = process.env,
 ): boolean {
-  if (sandboxOnlyBank(bankCode, env)) return false;
+  if (sandboxOnlyBank(bankCode, env, gateway)) return false;
   return Boolean(gatewayBankCode(bankCode, gateway));
 }
 

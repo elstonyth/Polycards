@@ -72,12 +72,14 @@ export const GATEWAY_WD_MIN_RM = 50;
 export const PAYOUT_FLOAT_COOLDOWN_MS = 5 * 60_000;
 // ponytail: per process, and the web service runs 2 instances, so each can
 // still let one refused submit through per window. A shared Valkey key with a
-// TTL is the upgrade if that ever matters.
-let payoutFloatEmptyUntil = 0;
+// TTL is the upgrade if that ever matters. Keyed by gateway: TGPay's empty
+// wallet must not hold back The 7 Pay, the gateway an operator switches to
+// precisely because TGPay's wallet is empty.
+const payoutFloatEmptyUntil = new Map<PaymentGateway, number>();
 
 /** Test seam: module state outlives a test (one jest process, one module). */
 export function resetPayoutFloatBreaker(): void {
-  payoutFloatEmptyUntil = 0;
+  payoutFloatEmptyUntil.clear();
 }
 
 /**
@@ -454,7 +456,7 @@ export async function startWithdrawal(
   // Our payout wallet was short moments ago (see PAYOUT_FLOAT_COOLDOWN_MS).
   // After the replay, so the retry of an in-flight withdrawal still reports
   // it; before any row or debit, so nothing is written for a certain refusal.
-  if (Date.now() < payoutFloatEmptyUntil) {
+  if (Date.now() < (payoutFloatEmptyUntil.get(gateway) ?? 0)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'Withdrawals are temporarily unavailable on our side — nothing was taken from your balance. Please try again in a few minutes.',
@@ -773,11 +775,15 @@ export async function startWithdrawal(
       // below sent one customer through nine attempts and three bank accounts
       // or name spellings. Not awaited: the answer must not wait on Telegram.
       if (error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) {
-        payoutFloatEmptyUntil = Date.now() + PAYOUT_FLOAT_COOLDOWN_MS;
+        payoutFloatEmptyUntil.set(
+          gateway,
+          Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
+        );
         void alertPayoutFloatEmpty(scope, {
           amount,
           ref: merchantTransactionId,
           via: 'customer withdrawal',
+          gateway: GATEWAYS[gateway].label,
         });
         throw new MedusaError(
           MedusaError.Types.NOT_ALLOWED,
@@ -1461,15 +1467,20 @@ export async function submitHeldWithdrawal(
       // Same cause and same handling as startWithdrawal's branch: the refund
       // above is untouched, only the words and the ops alert differ.
       if (error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) {
-        payoutFloatEmptyUntil = Date.now() + PAYOUT_FLOAT_COOLDOWN_MS;
+        payoutFloatEmptyUntil.set(
+          gatewayId,
+          Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
+        );
+        const label = GATEWAYS[gatewayId].label;
         void alertPayoutFloatEmpty(scope, {
           amount,
           ref: row.merchant_transaction_id,
           via: 'admin approve',
+          gateway: label,
         });
         throw new MedusaError(
           MedusaError.Types.INVALID_DATA,
-          'TGPay refused this payout because our TGPay payout wallet is short ("Insufficient payout credit balance"). The debit has been refunded and the withdrawal closed. Top up the payout wallet, then ask the customer to request the withdrawal again.',
+          `${label} refused this payout because our ${label} payout wallet is short ("Insufficient payout credit balance"). The debit has been refunded and the withdrawal closed. Top up the payout wallet, then ask the customer to request the withdrawal again.`,
         );
       }
       throw new MedusaError(
