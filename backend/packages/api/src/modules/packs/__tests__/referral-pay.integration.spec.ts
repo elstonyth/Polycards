@@ -12,7 +12,12 @@ import CustomerAccountState from '../models/customer-account-state';
 import AdminActionAudit from '../models/admin-action-audit';
 import LedgerEntry from '../models/ledger-entry';
 import LedgerSequence from '../models/ledger-sequence';
-import { referralWeekFor } from '../referral';
+import {
+  REFERRAL_AUTO_APPROVE_AFTER_MS,
+  REFERRAL_AUTO_APPROVE_MAX_LINE_MYR,
+  REFERRAL_AUTO_APPROVER,
+  referralWeekFor,
+} from '../referral';
 
 jest.setTimeout(300 * 1000);
 
@@ -427,6 +432,96 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
       [row] = await service.listReferralAttributions({ customer_id: 'cus_x' });
       expect(row).toBeUndefined();
+    });
+
+    // Auto-approval (operator's call, 2026-10-09): a draft approves itself
+    // once the review window has passed, recorded as the system actor.
+    describe('autoApproveDueSettlements', () => {
+      const HOUR = 60 * 60 * 1000;
+      const createdAt = async (id: string) =>
+        new Date(
+          (await service.listWeeklySettlements({ id }))[0].created_at,
+        ).getTime();
+
+      it('waits out the review window, then approves as the system and audits', async () => {
+        const id = await seedClosedWeek();
+        const t0 = await createdAt(id);
+
+        const early = await service.autoApproveDueSettlements({
+          now: new Date(t0 + REFERRAL_AUTO_APPROVE_AFTER_MS - HOUR),
+        });
+        expect(early).toEqual({ approved: [], held: [] });
+        expect((await service.listWeeklySettlements({ id }))[0].status).toBe(
+          'draft',
+        );
+
+        const due = await service.autoApproveDueSettlements({
+          now: new Date(t0 + REFERRAL_AUTO_APPROVE_AFTER_MS + 1000),
+        });
+        expect(due).toEqual({ approved: [id], held: [] });
+        const [run] = await service.listWeeklySettlements({ id });
+        expect(run.status).toBe('approved');
+        expect(run.approved_by).toBe(REFERRAL_AUTO_APPROVER);
+        const audits = await service.listAdminActionAudits({
+          action: 'approve_settlement',
+          entity_id: id,
+        });
+        expect(audits).toHaveLength(1);
+        expect(audits[0].admin_id).toBe(REFERRAL_AUTO_APPROVER);
+        expect(audits[0].reason).toMatch(/auto-approved/);
+
+        // Then the ordinary pay step pays it.
+        const paid = await service.payWeeklySettlement({ settlementId: id });
+        expect(paid.paid).toBe(2);
+      });
+
+      it('holds a run with a line over the limit for a human, ignoring voided lines', async () => {
+        const id = await seedClosedWeek();
+        const t0 = await createdAt(id);
+        const lines = await service.listWeeklySettlementLines({
+          settlement_id: id,
+        });
+        const big = lines.find((l) => l.customer_id === 'cus_r2')!;
+        await service.updateWeeklySettlementLines({
+          selector: { id: big.id },
+          data: { amount_cents: REFERRAL_AUTO_APPROVE_MAX_LINE_MYR * 100 + 1 },
+        });
+        const later = new Date(t0 + REFERRAL_AUTO_APPROVE_AFTER_MS + 1000);
+
+        expect(await service.autoApproveDueSettlements({ now: later })).toEqual(
+          { approved: [], held: [id] },
+        );
+        expect((await service.listWeeklySettlements({ id }))[0].status).toBe(
+          'draft',
+        );
+
+        // Once the admin voids the big line, the rest approves itself.
+        await service.voidSettlementLine({
+          lineId: big.id,
+          adminId: 'admin_1',
+          reason: 'too big to auto-pay',
+        });
+        expect(await service.autoApproveDueSettlements({ now: later })).toEqual(
+          { approved: [id], held: [] },
+        );
+      });
+
+      it('leaves runs an admin already approved or voided alone', async () => {
+        const id = await seedClosedWeek();
+        const t0 = await createdAt(id);
+        await service.approveWeeklySettlement({
+          settlementId: id,
+          adminId: 'admin_1',
+        });
+        expect(
+          await service.autoApproveDueSettlements({
+            now: new Date(t0 + REFERRAL_AUTO_APPROVE_AFTER_MS + 1000),
+          }),
+        ).toEqual({ approved: [], held: [] });
+        expect((await service.listWeeklySettlements({ id }))[0].approved_by).toBe(
+          'admin_1',
+        );
+      });
     });
   },
 });

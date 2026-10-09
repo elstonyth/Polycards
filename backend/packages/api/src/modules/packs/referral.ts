@@ -52,6 +52,17 @@ export const MAX_SETTLEMENT_LINE_MYR = 50_000;
 // it in that hour.
 export const REFERRAL_CLOSE_GRACE_MS = 5 * 60 * 1000;
 
+// Auto-approval (operator's call, 2026-10-09: no weekly admin click). A draft
+// approves itself once it has sat for the review window, so Tuesday's 01:00
+// draft is approved at Wednesday 01:00 and paid on the next hourly tick: the
+// "TUES CHECK, WED OUT" rhythm, with a day in which an admin can still void a
+// suspicious line or the whole run. A run with any pending line above the
+// hold limit is never auto-approved: a human has to look at it.
+export const REFERRAL_AUTO_APPROVE_AFTER_MS = 24 * 60 * 60 * 1000;
+export const REFERRAL_AUTO_APPROVE_MAX_LINE_MYR = 1_000;
+/** The actor recorded on an auto-approved run and its audit row. */
+export const REFERRAL_AUTO_APPROVER = 'system:auto-approve';
+
 // bindReferral's signup window. Attribution binds AT SIGNUP (spec) and the
 // storefront fires the bind the moment the account is created, so a customer
 // row older than this is not a signup whatever its spend says — the pack_open
