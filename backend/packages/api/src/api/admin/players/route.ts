@@ -142,6 +142,12 @@ export async function GET(
         vault_value: (v?.cents ?? 0) / 100,
         vault_count: v?.count ?? 0,
         total_spend: (w?.vipSpendCents ?? 0) / 100,
+        // Lifetime top-ups, withdrawals, and what the player has put in net of
+        // what they took out (top-ups minus withdrawals).
+        total_topup: (w?.topupCents ?? 0) / 100,
+        total_withdrawn: (w?.withdrawnCents ?? 0) / 100,
+        total_contribution:
+          ((w?.topupCents ?? 0) - (w?.withdrawnCents ?? 0)) / 100,
         total_pulls: agg.pullCount.get(c.id) ?? 0,
         registered_at: c.created_at,
         last_spend_at: w?.lastSpendAt ?? null,

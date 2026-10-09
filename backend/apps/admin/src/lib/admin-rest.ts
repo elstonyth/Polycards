@@ -1422,6 +1422,12 @@ export interface PlayerRow {
   vault_value: number;
   vault_count: number;
   total_spend: number;
+  /** Lifetime top-ups (Σ topup ledger rows). */
+  total_topup: number;
+  /** Lifetime withdrawals (Σ cashout rows, positive; refunds net out). */
+  total_withdrawn: number;
+  /** total_topup − total_withdrawn: cash the player has put in, net. */
+  total_contribution: number;
   total_pulls: number;
   registered_at: string;
   last_spend_at: string | null;
