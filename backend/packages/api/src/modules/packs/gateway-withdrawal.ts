@@ -5,6 +5,7 @@ import {
   bankSupportedBy,
   resolveWithdrawalDestination,
 } from './saved-accounts';
+import { bankPayoutMinRm, findBank } from './banks';
 import {
   GATEWAYS,
   gatewayConfigFor,
@@ -493,6 +494,17 @@ export async function startWithdrawal(
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'This bank account is not available with the current payout provider. Pick another saved account, or try again later.',
+    );
+  }
+  // A destination with its own payout floor (Touch 'n Go: RM 100) is held to
+  // it here, before any row or debit — the gateway refuses below it as a
+  // definite error, which would cost a row, a debit and a refund per tap. The
+  // wording keeps the band phrase the storefront passes through verbatim.
+  const destinationMin = bankPayoutMinRm(precheckDestination.bankCode);
+  if (destinationMin !== null && amount < destinationMin) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `Withdrawals must be between RM ${destinationMin} and RM ${withdrawalMax.toLocaleString('en-US')} for ${findBank(precheckDestination.bankCode)?.name ?? 'this account'}.`,
     );
   }
   // Same rule for the recipient email a TGPay payout needs: the adapter

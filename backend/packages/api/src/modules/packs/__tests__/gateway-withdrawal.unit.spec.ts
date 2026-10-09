@@ -382,6 +382,37 @@ describe('startWithdrawal — money ordering', () => {
     expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
   });
 
+  // TGPay refused every Touch 'n Go payout under ~RM 70 with "No payout
+  // provider is available for this order" (2026-10-09); TNG carries its own
+  // RM 100 floor, enforced before any row or debit.
+  it("refuses a Touch 'n Go withdrawal under RM 100 before any row or debit, and lets RM 100 through", async () => {
+    const tng = {
+      ...SAVED_ACCOUNT,
+      id: savedBankAccountId('TNGMY', '123456789012'),
+      bankCode: 'TNGMY',
+      bankName: "Touch 'n Go eWallet",
+      accountNumber: '123456789012',
+    };
+    const h = harness([tng]);
+    await expect(
+      start(h, { gateway: 'tgpay', accountId: tng.id, amount: 56 }),
+    ).rejects.toThrow(
+      "Withdrawals must be between RM 100 and RM 30,000 for Touch 'n Go eWallet.",
+    );
+    expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+
+    // A bank account keeps the gateway's own floor (RM 50 here).
+    const h2 = harness([SAVED_ACCOUNT]);
+    await expect(start(h2, { gateway: 'tgpay', amount: 56 })).resolves.toBeTruthy();
+
+    const h3 = harness([tng]);
+    await expect(
+      start(h3, { gateway: 'tgpay', accountId: tng.id, amount: 100 }),
+    ).resolves.toBeTruthy();
+  });
+
   // Test-plan case 3.
   it("refuses a bank the active gateway cannot pay to BEFORE any debit, in the customer's words", async () => {
     // A wallet the registry knows but TGPay has no payout code for.
