@@ -78,16 +78,19 @@ export function foldLedgerRow(
     externalFundedSpendCents: acc.externalFundedSpendCents + externalConsumed,
     vipSpendCents:
       acc.vipSpendCents + (row.reason === "pack_open" ? -cents + bonus : 0),
-    // Mirrors SQL DEPOSITED_PT_FILTER: reason='topup' AND amount>0 AND
-    // external_funded_cents IS NOT NULL. A NULL-basis (pre-1b) topup is
-    // grandfathered OUT — gate on `!= null`, not `> 0`.
+    // Mirrors SQL DEPOSITED_PT_SEN_SQL: a topup with amount>0 AND
+    // external_funded_cents IS NOT NULL (a NULL-basis pre-1b topup is
+    // grandfathered OUT — gate on `!= null`, not `> 0`), plus a buyback's
+    // stamped share from bonus or gift play (2026-10-09).
     depositedPlaythroughCents:
       acc.depositedPlaythroughCents +
       (cents > 0 &&
       row.reason === "topup" &&
       row.externalFundedCents != null
         ? cents
-        : 0),
+        : row.reason === "buyback"
+          ? ext
+          : 0),
     bonusBalanceCents: acc.bonusBalanceCents + bonus,
   };
 }

@@ -494,8 +494,9 @@ export const VaultItemSchema = z.looseObject({
     amount: finite,
     percent: finite,
     firm: z.boolean().optional(),
-    // MYR part of `amount` paid back as bonus credit (gift / bonus-funded
-    // pulls). Optional: an older backend omits it (all normal credit).
+    // MYR part of `amount` that came from bonus or gift play: paid as normal
+    // credit that must be played through once before it can be withdrawn.
+    // Optional: an older backend omits it.
     bonus: finite.optional(),
   }),
 });
@@ -799,7 +800,7 @@ export const OpenBuybackSchema = z.looseObject({
   vault_amount: finite.optional(),
   instant_deadline_ms: finite.optional(),
   firm: z.boolean().optional(),
-  // MYR part of `amount` paid back as bonus credit (spec 2026-10-07).
+  // MYR part of `amount` that came from bonus or gift play: paid as normal credit that must be played through once before it can be withdrawn (2026-10-09).
   bonus: finite.optional(),
 });
 

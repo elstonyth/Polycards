@@ -38,8 +38,8 @@ export type VaultItem = {
     /** false = quoted on the FX display fallback; the sell would be refused,
      *  so CTAs must not present the amount as a firm offer. */
     firm: boolean;
-    /** MYR part of `amount` paid back as bonus credit (gift / bonus-funded
-     *  pull); 0 = all normal credit. */
+    /** MYR part of `amount` that came from bonus or gift play — to be
+     *  played through before it can be withdrawn; 0 = none. */
     bonus: number;
   };
 };

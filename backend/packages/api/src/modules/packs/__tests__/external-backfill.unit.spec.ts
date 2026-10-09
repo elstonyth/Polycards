@@ -47,6 +47,25 @@ it('buyback/commission income never refills the external balance', () => {
   expect(diff.has('b1')).toBe(false); // non-topup/non-open rows untouched
 });
 
+it('a sale from bonus play refills the pool by its stamp, read not rewritten', () => {
+  // 2026-10-09: a gifted card's sale is normal credit that must be played
+  // through, stamped on the buyback row. Live stamps replay to an empty diff.
+  const diff = recomputeExternalStamps([
+    topup('t1', 10, 1000),
+    open('o1', -10, -1000),
+    {
+      id: 'b1',
+      reason: 'buyback',
+      amount: 270,
+      external_funded_cents: 27000,
+      reference: null,
+    },
+    open('o2', -300, -27000), // consumes the sale's share
+    open('o3', -10, 0), // pool empty again
+  ]);
+  expect(diff.size).toBe(0);
+});
+
 it('a reversal mirrors its original stamp and restores the balance', () => {
   const diff = recomputeExternalStamps([
     topup('t1', 50), // +5000

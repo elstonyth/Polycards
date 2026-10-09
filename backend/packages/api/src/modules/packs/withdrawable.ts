@@ -16,7 +16,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 // route through this function before writing a 'cashout' ledger row.
 export interface PlaythroughInput {
   /** Σ positive `topup` rows **with a non-NULL external basis** (post-1b era),
-   *  in cents. Pre-1b deposits are grandfathered: they predate
+   *  plus each buyback's share from bonus or gift play (2026-10-09), in cents. Pre-1b deposits are grandfathered: they predate
    *  `external_funded_cents` and never require playthrough (their opens' basis
    *  is equally invisible to `usedCents`, so counting them would lock them
    *  forever). */

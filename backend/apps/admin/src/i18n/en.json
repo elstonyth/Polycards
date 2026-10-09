@@ -621,7 +621,7 @@
     },
     "gift": {
       "title": "Gift packs",
-      "subtitle": "Unopened packs in this player's vault. They open them as Vault x1 on the pack page.",
+      "subtitle": "Unopened packs in this player's vault. They open them as Vault x1 on the pack page. A card from a gifted pack sells back as normal credit that must be spent on packs once before it can be withdrawn.",
       "pack": "Pack",
       "packPlaceholder": "Choose a pack",
       "packsLoading": "Loading packs…",
@@ -652,7 +652,7 @@
     },
     "bonus": {
       "title": "Bonus credit",
-      "subtitle": "Spend-only credit for pack opens. Never withdrawable.",
+      "subtitle": "Spend-only credit for pack opens; it can't be withdrawn itself. A card opened with it sells back as normal credit that must be spent on packs once before it can be withdrawn.",
       "balance": "Bonus balance",
       "amount": "Amount (e.g. 50 to give, -50 to take back)",
       "note": "Note (required, audit trail)",

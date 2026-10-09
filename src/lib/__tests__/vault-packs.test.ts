@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   giftsHeldFor,
   giftsUsed,
-  sellLabel,
   spinBetLabel,
   vaultButtonLabel,
   vaultCostLabel,
@@ -89,27 +88,5 @@ describe('vaultButtonLabel — the pack page button', () => {
   it('is null otherwise, so the usual "Open Pack" stays', () => {
     expect(vaultButtonLabel(2, 1)).toBeNull();
     expect(vaultButtonLabel(1, 0)).toBeNull();
-  });
-});
-
-describe('sellLabel — what a sell-back pays', () => {
-  it('a gift card pays all bonus', () => {
-    expect(sellLabel(270, 270)).toBe('Sell for RM 270.00 bonus');
-  });
-
-  it('a mixed card names both parts', () => {
-    expect(sellLabel(270, 243)).toBe('Sell for RM 243.00 bonus + RM 27.00');
-  });
-
-  it('splits in sen, so float noise never shows', () => {
-    // 0.3 - 0.1 = 0.19999999999999998 in floats.
-    expect(sellLabel(0.3, 0.1)).toBe('Sell for RM 0.10 bonus + RM 0.20');
-    // A bonus a hair over the amount (rounding upstream) is still all bonus.
-    expect(sellLabel(27, 27.000000001)).toBe('Sell for RM 27.00 bonus');
-  });
-
-  it('is null for a normal card, so its label stays unchanged', () => {
-    expect(sellLabel(270, 0)).toBeNull();
-    expect(sellLabel(270, 0.001)).toBeNull();
   });
 });

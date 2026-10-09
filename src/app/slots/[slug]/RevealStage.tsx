@@ -12,7 +12,6 @@ import type { WonCard } from '@/lib/actions/packs';
 import type { SellBackOffer, SellBackFn, RevealFn } from './useSellWindow';
 import SellConfirmModal from '@/components/SellConfirmModal';
 import { rm } from '@/lib/format';
-import { sellLabel } from '@/lib/vault-packs';
 import { FREE_PULL_LOCKED_MESSAGE } from '@/lib/packs-data';
 import { rarityRgb, isTopRarity } from '@/lib/rarity';
 import type { SoundName } from '@/lib/use-sound';
@@ -358,10 +357,7 @@ export function RevealStage({
           )}
           {state.phase === 'selling'
             ? 'Selling…'
-            : // A gift / bonus-funded card names what comes back (spec
-              // 2026-10-07 §1); every other card keeps its usual label.
-              (sellLabel(offer.amount, offer.bonus) ??
-              `Sell for ${rm(offer.amount)} (${offer.percent}%)`)}
+            : `Sell for ${rm(offer.amount)} (${offer.percent}%)`}
         </button>
         <button
           type="button"

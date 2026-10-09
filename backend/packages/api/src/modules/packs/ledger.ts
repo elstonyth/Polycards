@@ -32,8 +32,12 @@ export type LedgerPayload =
       sp_ref_id: string | null;
       price: number;
       rate: number;
-      // The part of this sell-back paid as bonus credit (MYR), when non-zero.
+      // The part of this sell-back paid as bonus credit (MYR), when non-zero —
+      // sales from 2026-10-07 until the 2026-10-09 rule below.
       bonus?: number;
+      // The part of this sell-back (MYR) that came from bonus or gift play: paid
+      // as normal credit that must be played through once (2026-10-09).
+      playthrough?: number;
     }
   // shipping_fee/insurance_fee: the wallet charge breakdown (2026-08-25) —
   // absent on pre-fee rows and on the cancel reversal row.

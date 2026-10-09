@@ -5,8 +5,10 @@
 // The ledger stamps every row's bonus part in credit_transaction.bonus_cents
 // (signed: + adds to the bonus balance, − spends it). An open spends bonus
 // FIRST; each pull remembers the share of its price that was bonus
-// (pull.bonus_bp), and a sell-back pays that same share back as bonus, so the
-// value of a bonus grant or a gifted pack never becomes withdrawable.
+// (pull.bonus_bp). A sell-back pays NORMAL credit, but that same share of it
+// must be played through once before it can be withdrawn (operator rule
+// 2026-10-09; recordBuybackCreditTransaction), so a bonus grant or a gifted
+// pack only reaches cash after real play.
 
 /** The refusal when a debit other than a pack open would need bonus credit
  *  (delivery fee, withdrawal, admin deduction): the balance covers it, the
@@ -14,7 +16,7 @@
 export const BONUS_NOT_SPENDABLE_MESSAGE =
   "Bonus credit can only be spent on packs — it can't pay for this.";
 
-/** A gifted pack's pull sells back entirely as bonus. */
+/** A gifted pack's pull: its whole sell-back must be played through. */
 export const BONUS_BP_FULL = 10_000;
 
 /** Bonus spent by an open of `totalSen`: bonus first, capped both ways. */
@@ -41,7 +43,7 @@ export function allocateBonusSen(
 }
 
 // Integer ceiling division: rounding always lands on the BONUS side, so a
-// rounding error can only keep value spend-only, never make it withdrawable.
+// rounding error can only keep value locked, never make it withdrawable.
 const ceilDiv = (a: number, b: number) => Math.floor((a + b - 1) / b);
 
 /** Share of a row's price paid in bonus, in basis points (rounded up). */
@@ -50,7 +52,8 @@ export function bonusBpFor(bonusSen: number, priceSen: number): number {
   return Math.min(BONUS_BP_FULL, ceilDiv(bonusSen * BONUS_BP_FULL, priceSen));
 }
 
-/** The bonus part of a sell-back of `amountSen` (rounded up). */
+/** The part of a sell-back of `amountSen` that came from bonus or gift
+ *  play — the part to play through (rounded up). */
 export function bonusShareSen(amountSen: number, bp: number): number {
   const clamped = Math.max(0, Math.min(BONUS_BP_FULL, bp));
   if (amountSen <= 0 || clamped === 0) return 0;

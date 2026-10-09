@@ -67,9 +67,10 @@ export const Pull = model
     source: model
       .enum(['pack', 'reward', 'free', 'gift', 'bonus'])
       .default('pack'),
-    // Basis points (0–10000) of a sell-back of this pull paid as bonus credit:
-    // 10000 on a gift, the bonus share of the row's price on a bonus row, 0
-    // otherwise (modules/packs/bonus-credit.ts).
+    // Basis points (0–10000) of this pull's price paid by bonus or a gift:
+    // 10000 on a gift, the bonus share of the row's price on a bonus-funded
+    // row, 0 otherwise. That share of a sell-back must be played through
+    // before it can be withdrawn (modules/packs/bonus-credit.ts).
     bonus_bp: model.number().default(0),
     // The open's stable id (same uuid the pack_open charge row stores in
     // credit_transaction.source_transaction_id) — the money↔card audit link.

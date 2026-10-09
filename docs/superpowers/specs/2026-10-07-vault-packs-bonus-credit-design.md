@@ -436,6 +436,16 @@ As built (review 2026-10-08):
   locked read (`mutateCreditAtomic` returns it).
 - The spin page reads gifts on the client only (one call, not two).
 
+As changed (operator, 2026-10-09) — **sell-back pays normal credit, played
+through once.** A card opened with bonus or from a gift no longer sells back as
+bonus. The sale is normal credit; its bonus share (`bonus_share(amount,
+bonus_bp)`, rounded up) is stamped on the buyback row as `external_funded_cents`
+and added to the playthrough basis (`DEPOSITED_PT_SEN_SQL`), so later opens
+consume it like deposit money. The gate is the existing all-or-nothing one: the
+whole balance is unwithdrawable until `deposited − used` reaches 0. Bonus
+credit itself still never leaves. Sales made under the first rule stay bonus.
+The SE payload carries `playthrough` (MYR) instead of `bonus`.
+
 ## 11. Rollout
 
 One PR (backend + admin + storefront). The new reason and source values reach the
