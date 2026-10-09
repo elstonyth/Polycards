@@ -404,9 +404,10 @@ The 7 Pay is the gateway id `the7pay`, a second entry in the gateway registry
 - `api/middlewares.ts` — `/hooks/the7pay/*` gets the shared hook rate limiter,
   its own `THE7PAY_CALLBACK_IPS` allowlist, and `preserveRawBody` for the HMAC.
 - `modules/packs/banks.ts` — The 7 Pay pays to the same SWIFT pairs as TGPay.
-  Its table also lists GX Bank (`GXBKMYKL`), Ryt Bank (`RYTBKMYKL`) and Touch 'n
-  Go (`TNGDRMYKL`), which are not mapped yet. Saved accounts at those banks stay
-  "not available with the current payout provider".
+  That includes Touch 'n Go eWallet (`TNGDRMYKL`, live for TGPay since #713).
+  Both tables also list GX Bank (`GXBKMYKL`) and Ryt Bank (`RYTBKMYKL`), which
+  are not mapped yet; saved accounts at those stay "not available with the
+  current payout provider".
 - The payout-wallet-empty breaker is per gateway, so TGPay's empty wallet does
   not block withdrawals after a switch to The 7 Pay.
 
@@ -423,6 +424,8 @@ Env (backend; names in `.env.template`): `THE7PAY_API_BASE`,
    env, prove them with
    `./node_modules/.bin/medusa exec src/scripts/check-tgpay.ts the7pay`, then run
    one deposit and one payout (dummy bank) end to end through a tunnel.
+   `medusa exec src/scripts/tgpay-payout-probe.ts the7pay` sends one payout
+   at the floor to the dummy bank outside our ledger.
 2. Production keys: Platform → Settings → API keys (reveal needs 2FA). Choose
    callback **Method 2**. Generate an RSA pair, keep the private key in the
    deploy secrets as `THE7PAY_RSA_PRIVATE_KEY`, and paste the public PEM into
@@ -431,10 +434,17 @@ Env (backend; names in `.env.template`): `THE7PAY_API_BASE`,
 3. Ask 7Pay for their callback IPs (`THE7PAY_CALLBACK_IPS`) and give them our DO
    egress IPs (`188.166.181.61`, `188.166.181.204`) in case the API is
    IP-allowlisted per tenant like TGPay's.
-4. Add the `THE7PAY_*` variables to `.do/backend.app.yaml` and the deploy
-   secrets file. Edit the spec by script and check the diff — a formatting
-   editor re-quotes the existing TGPay secret placeholders. Deploy and run the
-   preflight from inside DO.
+4. Deploy wiring, in ONE change and only once the production keys exist:
+   put `THE7PAY_PUBLIC_KEY`, `THE7PAY_SECRET_KEY` and `THE7PAY_RSA_PRIVATE_KEY`
+   (PEM on one line, `\n` between lines) in `deploy/.env.deploy`; add
+   `__SECRET__THE7PAY_…__` placeholders (type SECRET) plus `THE7PAY_API_BASE`
+   and `THE7PAY_CALLBACK_IPS` to `.do/backend.app.yaml`; and add the three
+   secret names to `$secretKeys.backend` in `scripts/do-apply.ps1`. That list
+   is mandatory on every apply, so adding a name before its value exists blocks
+   every backend deploy. Edit the spec by script and check the diff — a
+   formatting editor re-quotes the existing TGPay secret placeholders. Apply
+   with `pwsh scripts/do-apply.ps1 backend -Validate` first, then for real, and
+   run the preflight from inside DO.
 5. Fund The 7 Pay's payout wallet before switching withdrawals to it — the
    preflight prints both wallet balances. TGPay's production payout wallet was
    0.00 at its cutover, and every payout fails until it is topped up.
