@@ -735,6 +735,9 @@ export const SavedBankAccountsSchema = z.looseObject({
       // Can the active payout provider pay to this bank? Optional so an
       // older backend still parses; absent reads as supported.
       supported: z.boolean().optional(),
+      // The bank's own payout floor (RM), e.g. Touch 'n Go 100; null/absent =
+      // only the gateway's floor applies.
+      minRm: z.number().nullish(),
     }),
   ),
 });

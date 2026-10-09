@@ -231,13 +231,21 @@ export default function WithdrawForm({
   const amountValid = Number.isFinite(amount) && amount > 0;
   const selected = usableAccounts.find((a) => a.id === accountId);
   const formValid = amountValid && selected !== undefined;
+  // A destination can carry its own floor above the gateway's (Touch 'n Go:
+  // RM 100 — smaller TNG payouts are refused by the gateway). The backend
+  // enforces the same figure; this states it before the customer taps.
+  const accountMin =
+    selected?.minRm != null && selected.minRm > limits.withdrawal.minRm
+      ? selected.minRm
+      : null;
+  const minRm = accountMin ?? limits.withdrawal.minRm;
 
   async function submit() {
     if (submitting || !formValid || withdrawalsClosed || blocked) return;
     setError(null);
-    if (amount < limits.withdrawal.minRm || amount > limits.withdrawal.maxRm) {
+    if (amount < minRm || amount > limits.withdrawal.maxRm) {
       setError(
-        `Withdrawals must be between ${rm0(limits.withdrawal.minRm)} and ${rm0(limits.withdrawal.maxRm)}.`,
+        `Withdrawals must be between ${rm0(minRm)} and ${rm0(limits.withdrawal.maxRm)}${accountMin !== null ? ` for ${selected?.bankName}` : ''}.`,
       );
       return;
     }
@@ -476,6 +484,11 @@ export default function WithdrawForm({
           />
         </span>
       </label>
+      {accountMin !== null && !withdrawalsClosed && !blocked && (
+        <p className="mt-2 text-[12px] leading-relaxed text-neutral-400">
+          Minimum withdrawal to {selected?.bankName} is {rm0(accountMin)}.
+        </p>
+      )}
       {withdrawalsClosed && (
         <p
           id="withdraw-amount-guidance"

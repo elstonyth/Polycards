@@ -1,6 +1,7 @@
 import {
   MY_BANKS,
   TGPAY_SANDBOX_BANK,
+  bankPayoutMinRm,
   banksFor,
   canonicalBankCode,
   findBank,
@@ -64,6 +65,12 @@ describe('bank registry', () => {
       name: "Touch 'n Go",
     });
     expect(findBank('TNGDRMYKL')?.id).toBe('TNGMY');
+    // Touch 'n Go carries its own RM 100 payout floor (TGPay refused smaller
+    // TNG payouts on 2026-10-09); banks have none of their own.
+    expect(bankPayoutMinRm('TNGMY')).toBe(100);
+    expect(bankPayoutMinRm('MYTNGO')).toBe(100);
+    expect(bankPayoutMinRm('MBBEMYKL')).toBeNull();
+    expect(bankPayoutMinRm('NOPE')).toBeNull();
   });
 
   it('picker lists carry canonical ids and neutral names; the dummy bank only on the TGPay sandbox', () => {

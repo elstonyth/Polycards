@@ -31,6 +31,13 @@ export type Bank = {
   codes: Partial<Record<PaymentGateway, GatewayBankCode>>;
   /** Codes of retired gateways that older rows may still carry. */
   legacyAliases: readonly string[];
+  /**
+   * This destination's own payout floor, RM, on top of the gateway's band.
+   * Touch 'n Go: TGPay refused every TNG payout under ~RM 70 on 2026-10-09
+   * ("No payout provider is available for this order") while paying RM 313,
+   * so the floor is RM 100 until TGPay states the real limit.
+   */
+  payoutMinRm?: number;
 };
 
 const bank = (
@@ -71,7 +78,7 @@ export const MY_BANKS: readonly Bank[] = [
   // Touch 'n Go eWallet keeps its slug id (saved accounts already carry it);
   // TGPay added a payout code for it after this table was first copied
   // (their payout-bank page, checked 2026-10-09).
-  bank('TNGMY', "Touch 'n Go eWallet", { code: 'MYTNGO', name: 'Touch N Go' }, { code: 'TNGDRMYKL', name: "Touch 'n Go" }),
+  { ...bank('TNGMY', "Touch 'n Go eWallet", { code: 'MYTNGO', name: 'Touch N Go' }, { code: 'TNGDRMYKL', name: "Touch 'n Go" }), payoutMinRm: 100 },
   bank('UOVBMYKL', 'UOB', { code: 'MYUOBB', name: 'United Overseas Bank' }, { code: 'UOVBMYKL', name: 'United Overseas Bank (Malaysia) Berhad' }),
   // No TGPay payout code today (e-wallets, digital and foreign banks): kept so
   // a saved account under one still resolves and reads as "not available with
@@ -125,6 +132,11 @@ for (const b of [...MY_BANKS, TGPAY_SANDBOX_BANK]) {
 export function findBank(alias: string | null | undefined): Bank | null {
   if (typeof alias !== 'string') return null;
   return byAlias.get(alias.trim().toUpperCase()) ?? null;
+}
+
+/** The bank's own payout floor (RM), or null when only the gateway's applies. */
+export function bankPayoutMinRm(alias: string | null | undefined): number | null {
+  return findBank(alias)?.payoutMinRm ?? null;
 }
 
 /** Canonical id for any alias, or null if the bank is unknown. */

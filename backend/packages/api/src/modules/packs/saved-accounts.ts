@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto';
 import { MedusaError } from '@medusajs/framework/utils';
-import { findBank, gatewayBankCode, sandboxOnlyBank } from './banks';
+import {
+  bankPayoutMinRm,
+  findBank,
+  gatewayBankCode,
+  sandboxOnlyBank,
+} from './banks';
 // Type-only: a value import of gateway.ts from here would cycle through the
 // module index into the service, which imports this file.
 import type { PaymentGateway } from './gateway';
@@ -45,6 +50,9 @@ export type SavedBankAccountView = SavedBankAccount & {
    *  a gateway switch; one the new gateway cannot reach is kept, shown, and
    *  refused until a gateway that serves the bank is active again. */
   supported: boolean;
+  /** The bank's own payout floor (RM) when it has one (Touch 'n Go: 100), so
+   *  the form can state and check it; null = the gateway's floor applies. */
+  minRm: number | null;
 };
 
 /**
@@ -173,6 +181,7 @@ export function savedBankAccountViews(
       ...account,
       usableFrom: usableAt ? usableAt.toISOString() : null,
       supported: bankSupportedBy(account.bankCode, gateway),
+      minRm: bankPayoutMinRm(account.bankCode),
     };
   });
 }
