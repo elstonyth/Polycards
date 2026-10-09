@@ -256,6 +256,10 @@ medusaIntegrationTestRunner({
         expect(a.total_topup).toBe(100);
         expect(a.total_withdrawn).toBe(40);
         expect(a.total_contribution).toBe(60);
+        // Top up matches the profile's creditSummary figure.
+        expect(a.total_topup).toBe(
+          (await packsService().creditSummary(aId)).topupTotal,
+        );
       });
 
       // Taken out more than put in (a big win cashed out): the contribution goes
