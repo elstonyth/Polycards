@@ -464,6 +464,9 @@ export interface SignupTopupStats {
   first_topup_count: number;
   /** MYR. */
   first_topup_amount: number;
+  withdrawal_count: number;
+  /** MYR. */
+  withdrawal_amount: number;
 }
 
 export interface StatsReport {

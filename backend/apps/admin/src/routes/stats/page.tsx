@@ -34,6 +34,8 @@ const CARDS: { key: keyof SignupTopupStats; money?: boolean }[] = [
   { key: "topup_amount", money: true },
   { key: "first_topup_count" },
   { key: "first_topup_amount", money: true },
+  { key: "withdrawal_count" },
+  { key: "withdrawal_amount", money: true },
 ];
 
 // The backend's windows are MYT (fixed UTC+8). Shift, then read the UTC
@@ -122,7 +124,7 @@ const StatsPage = () => {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-px border-t bg-ui-border-base md:grid-cols-3">
+        <div className="grid grid-cols-2 gap-px border-t bg-ui-border-base lg:grid-cols-4">
           {CARDS.map(({ key, money }) => {
             const cur = data.current.stats[key];
             const prev = data.previous.stats[key];

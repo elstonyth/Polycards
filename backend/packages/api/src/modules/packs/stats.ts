@@ -37,6 +37,10 @@ export type SignupTopupStats = {
   first_topup_count: number;
   /** MYR, the sum of those first deposits. */
   first_topup_amount: number;
+  /** Settled gateway payouts. */
+  withdrawal_count: number;
+  /** MYR, Σ amount (the debit), like the Settlement report. */
+  withdrawal_amount: number;
 };
 
 const MYT_OFFSET_MS = 8 * 60 * 60 * 1000;
