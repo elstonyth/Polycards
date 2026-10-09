@@ -1,6 +1,10 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
-import { MedusaError, Modules } from '@medusajs/framework/utils';
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+  Modules,
+} from '@medusajs/framework/utils';
 // write-excel-file 4 is ESM-only to TypeScript: the type comes in with
 // resolution-mode 'import' and the value through await import() in GET (the
 // full story is in admin/inventory/export.xlsx/route.ts).
@@ -11,15 +15,14 @@ import { PACKS_MODULE } from '../../../../modules/packs';
 import { findBank } from '../../../../modules/packs/banks';
 import { resolveFxRate } from '../../../../modules/packs/pricing';
 import type PacksModuleService from '../../../../modules/packs/service';
-import { ledgerTotalsWhere } from '../../finance/queries';
 import { reportCallerOf } from '../../require-report-key';
-import { customerFilter, reportDb, scopeFilter } from '../../sql';
+import { reportDb, scopeFilter } from '../../sql';
 import { malaysiaDay } from '../top-pulls/day';
 import { loadTopPulls } from '../top-pulls/hits';
 
-// ponytail: a ceiling, not a top N. A day has a handful of these pulls; raise
-// it if the sheet ever comes back exactly this long.
-const MAX_PULL_ROWS = 200;
+// A ceiling, not a top N: 2026-10-08 had 64 such pulls by DEFAULT players.
+// Reaching it logs a warning, because the sheet would then be incomplete.
+const MAX_PULL_ROWS = 1000;
 
 // GET /reports/growth/daily-report?day: the staff Excel of the Growth desk's
 // 12 a.m. drop (spec 2026-10-04-growth-daily-hits-design.md). DEFAULT-group
@@ -188,6 +191,14 @@ export async function GET(
     ),
   ]);
 
+  if (pulls.length >= MAX_PULL_ROWS) {
+    req.scope
+      .resolve(ContainerRegistrationKeys.LOGGER)
+      .warn(
+        `[daily-report] ${window.day}: the pulls sheet hit its ${MAX_PULL_ROWS}-row ceiling; later pulls are not listed.`,
+      );
+  }
+
   const ids = [
     ...new Set([
       ...pulls.map((p) => p.customer_id),
@@ -290,14 +301,12 @@ async function customerDetails(
     ),
     packs.playersOverview(ids, await resolveFxRate(packs)),
   ]);
-  const db = reportDb(req);
   const out = new Map<string, Customer>();
   for (const c of rows) {
-    // Lifetime ledger, exactly as the Finance player report counts it.
-    const lifetime = await ledgerTotalsWhere(
-      db,
-      customerFilter(c.id, 'ct.customer_id'),
-    );
+    // Lifetime top-ups and withdrawals from the same batched query as the
+    // admin Players list (the Finance player report's topup and cashout
+    // buckets), not one ledger query per player.
+    const wallet = overview.wallet.get(c.id);
     out.set(c.id, {
       username: c.first_name ?? '',
       last_name: c.last_name ?? '',
@@ -305,10 +314,9 @@ async function customerDetails(
       email: c.email ?? '',
       joined: myt(c.created_at),
       vip_level: overview.vipLevel.get(c.id) ?? null,
-      balance_myr: (overview.wallet.get(c.id)?.balanceCents ?? 0) / 100,
-      deposited_myr: lifetime.topups,
-      // cashout is a signed ledger sum: negative = paid out.
-      withdrawn_myr: Math.round(-lifetime.cashout * 100) / 100,
+      balance_myr: (wallet?.balanceCents ?? 0) / 100,
+      deposited_myr: (wallet?.topupCents ?? 0) / 100,
+      withdrawn_myr: (wallet?.withdrawnCents ?? 0) / 100,
     });
   }
   return out;

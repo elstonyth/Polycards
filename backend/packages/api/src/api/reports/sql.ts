@@ -1,5 +1,6 @@
 import type { MedusaRequest } from '@medusajs/framework/http';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
+import { EFFECTIVE_GROUP_SQL } from '../../modules/packs/odds-sets';
 import type { GroupScope, ReportWindow } from './params';
 
 /** The slice of knex the reports use. Every value goes in as a binding. */
@@ -18,19 +19,8 @@ export const reportDb = (req: MedusaRequest): ReportDb =>
 /** A WHERE fragment (starting with " AND", or empty) and its bindings. */
 export type SqlPart = { sql: string; params: unknown[] };
 
-// Every customer's EFFECTIVE player group: the SQL twin of
-// effectivePlayerGroup + isDefaultPlayerGroup (modules/packs/odds-sets.ts).
-// The oldest live membership (group created_at, then id) in a live group that
-// is neither named DEFAULT nor flagged is_default. A customer with no row
-// here is in DEFAULT. Same joins as PacksModuleService.partnerGroupOfCustomers.
-export const EFFECTIVE_GROUP_SQL =
-  'SELECT DISTINCT ON (cgc.customer_id) cgc.customer_id, cg.id AS group_id ' +
-  'FROM customer_group_customer cgc ' +
-  'JOIN customer_group cg ON cg.id = cgc.customer_group_id AND cg.deleted_at IS NULL ' +
-  'WHERE cgc.deleted_at IS NULL ' +
-  "AND cg.name IS DISTINCT FROM 'DEFAULT' " +
-  "AND cg.metadata->'is_default' IS DISTINCT FROM 'true'::jsonb " +
-  'ORDER BY cgc.customer_id, cg.created_at ASC, cg.id ASC';
+// Defined beside the JS rule it mirrors; re-exported for the reports.
+export { EFFECTIVE_GROUP_SQL };
 
 /** Restricts `column` (a non-null customer id column) to the scope's players. */
 export function scopeFilter(scope: GroupScope, column: string): SqlPart {

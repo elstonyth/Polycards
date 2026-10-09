@@ -107,7 +107,7 @@ import {
 } from './referral';
 import { asPixelPokemonCrud } from './pixel-pokemon-service';
 import { groupPolicyOf, partnerGroupLockMessage } from './group-policy';
-import { isDefaultPlayerGroup } from './odds-sets';
+import { EFFECTIVE_GROUP_SQL, isDefaultPlayerGroup } from './odds-sets';
 import {
   taskIsLive,
   taskPeriodKey,
@@ -132,7 +132,6 @@ import Announcement from './models/announcement';
 import PackGift from './models/pack-gift';
 import { pickLiveAnnouncements, validateAnnouncement } from './announcements';
 import { pageAll } from '../../api/utils/page-all';
-import { scopeFilter } from '../../api/reports/sql';
 import {
   positiveIntFromEnv,
   nonNegativeIntFromEnv,
@@ -6861,7 +6860,7 @@ class PacksModuleService extends MedusaService({
         `   AND o.rarity IN (${tiers.map(() => '?').join(', ')}))`
       : '';
     const groupSql = opts.defaultGroupOnly
-      ? scopeFilter({ kind: 'default' }, 'pu.customer_id').sql
+      ? ` AND pu.customer_id NOT IN (SELECT customer_id FROM (${EFFECTIVE_GROUP_SQL}) eff)`
       : '';
     const rows = await em.execute<
       {
