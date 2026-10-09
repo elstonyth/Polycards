@@ -199,6 +199,18 @@ const PlayersPage = () => {
                     {t('players.vault')}
                   </Table.HeaderCell>
                   <Table.HeaderCell className="text-right">
+                    {t('players.topup')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    {t('players.withdrawn')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell
+                    className="text-right"
+                    title={t('players.contributionHint')}
+                  >
+                    {t('players.contribution')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
                     {t('players.spend')}
                   </Table.HeaderCell>
                   <Table.HeaderCell className="text-right">
@@ -279,6 +291,21 @@ const PlayersPage = () => {
                       <span className="text-ui-fg-muted text-xs">
                         ({p.vault_count})
                       </span>
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums whitespace-nowrap">
+                      {rm(p.total_topup)}
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums whitespace-nowrap">
+                      {rm(p.total_withdrawn)}
+                    </Table.Cell>
+                    {/* Negative = the player has taken out more than they put
+                        in (wins cashed out), so it reads red. */}
+                    <Table.Cell
+                      className={`text-right tabular-nums whitespace-nowrap ${
+                        p.total_contribution < 0 ? 'text-ui-fg-error' : ''
+                      }`}
+                    >
+                      {rm(p.total_contribution)}
                     </Table.Cell>
                     <Table.Cell className="text-right tabular-nums whitespace-nowrap">
                       {rm(p.total_spend)}
