@@ -15,7 +15,8 @@ export type SfxName =
   | 'clockTick'
   | 'swell'
   | 'heartbeat'
-  | 'tensionRise';
+  | 'tensionRise'
+  | 'uiClick';
 
 let ctx: AudioContext | null = null;
 let effectsGain: GainNode | null = null;
@@ -116,6 +117,11 @@ const CUES: Record<SfxName, () => void> = {
   },
   tensionRise: () =>
     blip(180, 900, { type: 'sawtooth', gain: 0.05, slideTo: 520 }),
+  // Site-wide button/link press (operator ask 2026-10-08): a soft, short "tok"
+  // — triangle body sliding down so it reads as a press, not a beep. Pitch sits
+  // in the 1–1.4 kHz band phone speakers reproduce; lower "thud" variants
+  // vanish on mobile. `gain` is the loudness knob (0.07 was inaudible).
+  uiClick: () => blip(1400, 40, { type: 'triangle', gain: 0.25, slideTo: 900 }),
 };
 
 export function playSfx(name: SfxName): void {
