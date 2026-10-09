@@ -1,40 +1,109 @@
-import { timingSafeEqual } from 'node:crypto';
+import {
+  createHmac,
+  createPrivateKey,
+  sign,
+  timingSafeEqual,
+} from 'node:crypto';
 import { GatewayError } from './gateway-types';
 
 // TGPay HTTP client (sandbox docs read 2026-09-05, sandbox.tgpay365.com/docs/api).
 // Plain JSON over HTTPS: two static key headers and a unix `epoch` that must
-// be within ±5 minutes of their clock. No AES, no RSA (the retired gateway's
-// signing stack went with it).
+// be within ±5 minutes of their clock. No AES.
+//
+// The 7 Pay (docs/payments/the7pay-api.md, read 2026-10-09) is a white-label
+// of the same platform — same paths, fields, callbacks and bank table — so it
+// runs through this client with its own config (`kind: 'the7pay'`, env prefix
+// THE7PAY_). It adds two optional extras this client supports for both kinds:
+// RSA request signing (`rsaPrivateKey`) and an HMAC callback signature.
 //
 // Every function takes config explicitly so it stays unit-testable without a
 // container; the env reader is the only thing that touches process.env.
 
-export type TgpayConfig = {
-  kind: 'tgpay';
+/** The gateways that speak this platform's wire format. */
+export type TgpayKind = 'tgpay' | 'the7pay';
+
+export const TGPAY_FAMILY: Record<
+  TgpayKind,
+  { label: string; envPrefix: string }
+> = {
+  tgpay: { label: 'TGPay', envPrefix: 'TGPAY' },
+  // Not "7PAY_": an environment variable name cannot start with a digit.
+  the7pay: { label: 'The 7 Pay', envPrefix: 'THE7PAY' },
+};
+
+export type TgpayConfig<K extends TgpayKind = TgpayKind> = {
+  kind: K;
   /** e.g. https://sandbox-api.tgpay365.com/api/v2 — no trailing slash. */
   baseUrl: string;
   publicKey: string;
   secretKey: string;
   currencyCode: string;
+  /**
+   * PEM private key. When set, every call carries `x-rsa-signature`; the
+   * gateway demands it once our public key is saved on their API keys page.
+   */
+  rsaPrivateKey?: string;
 };
+
+export function isTgpayKind(value: unknown): value is TgpayKind {
+  return (
+    typeof value === 'string' &&
+    Object.prototype.hasOwnProperty.call(TGPAY_FAMILY, value)
+  );
+}
+
+/** `<PREFIX>_<name>` for a family member, e.g. THE7PAY_API_BASE. */
+export function tgpayEnvName(kind: TgpayKind, name: string): string {
+  return `${TGPAY_FAMILY[kind].envPrefix}_${name}`;
+}
+
+export function tgpayFamilyConfigFromEnv<K extends TgpayKind>(
+  kind: K,
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): TgpayConfig<K> {
+  const read = (name: string) => env[tgpayEnvName(kind, name)];
+  const required = (name: string): string => {
+    const value = read(name);
+    if (!value)
+      throw new Error(
+        `${TGPAY_FAMILY[kind].label}: missing required env var ${tgpayEnvName(kind, name)}.`,
+      );
+    return value;
+  };
+  // A PEM in a single-line env value arrives with literal "\n" sequences.
+  const rsaPrivateKey = read('RSA_PRIVATE_KEY')?.replace(/\\n/g, '\n');
+  // Parsed here, not at the first call: a key that cannot sign must make the
+  // gateway "not configured" (refused before any row or debit), not throw
+  // mid-request where the money paths would read it as ambiguous.
+  if (rsaPrivateKey) {
+    try {
+      createPrivateKey(rsaPrivateKey);
+    } catch {
+      throw new Error(
+        `${TGPAY_FAMILY[kind].label}: ${tgpayEnvName(kind, 'RSA_PRIVATE_KEY')} is not a readable PEM private key.`,
+      );
+    }
+  }
+  return {
+    kind,
+    // Required, not defaulted: a
+    // default would let a production deploy silently talk to the sandbox.
+    baseUrl: required('API_BASE').replace(/\/+$/, ''),
+    publicKey: required('PUBLIC_KEY'),
+    secretKey: required('SECRET_KEY'),
+    currencyCode: read('CURRENCY') ?? 'MYR',
+    ...(rsaPrivateKey ? { rsaPrivateKey } : {}),
+  };
+}
 
 export function tgpayConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env,
-): TgpayConfig {
-  const required = (name: string): string => {
-    const value = env[name];
-    if (!value) throw new Error(`TGPay: missing required env var ${name}.`);
-    return value;
-  };
-  return {
-    kind: 'tgpay',
-    // Required, not defaulted: a
-    // default would let a production deploy silently talk to the sandbox.
-    baseUrl: required('TGPAY_API_BASE').replace(/\/+$/, ''),
-    publicKey: required('TGPAY_PUBLIC_KEY'),
-    secretKey: required('TGPAY_SECRET_KEY'),
-    currencyCode: env.TGPAY_CURRENCY ?? 'MYR',
-  };
+): TgpayConfig<'tgpay'> {
+  return tgpayFamilyConfigFromEnv('tgpay', env);
+}
+
+function labelOf(config: Pick<TgpayConfig, 'kind'>): string {
+  return TGPAY_FAMILY[config.kind].label;
 }
 
 /** The sandbox accepts only its dummy bank for payouts; production only SWIFT. */
@@ -78,6 +147,25 @@ export function epochNow(): number {
 }
 
 /**
+ * `x-rsa-signature`: base64 RSA-SHA256 (PKCS#1 v1.5) over METHOD, the full
+ * request path INCLUDING the API prefix (/api/v1/…), and the raw body,
+ * newline-separated with no trailing newline (the7pay-api.md "RSA request
+ * signing"). Every call here is a POST.
+ */
+function rsaSignature(
+  path: string,
+  raw: string,
+  config: Pick<TgpayConfig, 'baseUrl' | 'rsaPrivateKey'>,
+): string {
+  const fullPath = `${new URL(config.baseUrl).pathname.replace(/\/+$/, '')}${path}`;
+  return sign(
+    'RSA-SHA256',
+    Buffer.from(`POST\n${fullPath}\n${raw}`, 'utf8'),
+    config.rsaPrivateKey as string,
+  ).toString('base64');
+}
+
+/**
  * POST one JSON body with the key headers. A parseable 4xx is `definite`
  * (their API answered and refused, nothing was created); anything else —
  * timeout, reset, WAF page, 5xx — is ambiguous and must not be refunded on.
@@ -88,24 +176,31 @@ async function post<T>(
   config: TgpayConfig,
   timeoutMs = 20_000,
 ): Promise<T> {
+  // Serialised once: the RSA signature covers these exact bytes, so the body
+  // sent must be the same string, never a second JSON.stringify.
+  const raw = JSON.stringify({ epoch: epochNow(), ...body });
   const response = await fetch(`${config.baseUrl}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-public-key': config.publicKey,
       'x-secret-key': config.secretKey,
+      ...(config.rsaPrivateKey
+        ? { 'x-rsa-signature': rsaSignature(path, raw, config) }
+        : {}),
     },
-    body: JSON.stringify({ epoch: epochNow(), ...body }),
+    body: raw,
     signal: AbortSignal.timeout(timeoutMs),
   });
 
+  const label = labelOf(config);
   const text = await response.text();
   let parsed: TgpayResponse<T> & TgpayErrorBody;
   try {
     parsed = JSON.parse(text) as TgpayResponse<T> & TgpayErrorBody;
   } catch {
     throw new TgpayError(
-      `TGPay ${path}: non-JSON response (HTTP ${response.status}): ${text.slice(0, 200)}`,
+      `${label} ${path}: non-JSON response (HTTP ${response.status}): ${text.slice(0, 200)}`,
       [],
       response.status,
     );
@@ -143,7 +238,7 @@ async function post<T>(
       codes.push(TGPAY_PAYOUT_FLOAT_EMPTY);
     }
     throw new TgpayError(
-      `TGPay ${path} failed (HTTP ${response.status}): ${detail}`,
+      `${label} ${path} failed (HTTP ${response.status}): ${detail}`,
       codes,
       response.status,
       // 4xx with a JSON body = they parsed us and said no. 5xx and 2xx-without-
@@ -215,7 +310,7 @@ export async function createPayment(
   );
   if (!data.checkoutLink) {
     throw new TgpayError(
-      'TGPay create-payment: response carried no checkoutLink',
+      `${labelOf(config)} create-payment: response carried no checkoutLink`,
       [],
       200,
     );
@@ -388,14 +483,33 @@ function sameSecret(given: unknown, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/**
+ * Either proof is accepted, because the merchant picks one on the gateway's
+ * API keys page: Method 1 sends the two key headers; Method 2 sends only
+ * `x-signature`, the hex HMAC-SHA256 of the RAW body keyed publicKey +
+ * secretKey (the7pay-api.md "Payment callback"). Method 2 needs the exact
+ * bytes received — a re-serialised req.body would not match — so a hook
+ * without `rawBody` can only pass Method 1.
+ */
 export function tgpayCallbackAuthorized(
   headers: Record<string, unknown>,
   config: Pick<TgpayConfig, 'publicKey' | 'secretKey'>,
+  rawBody?: string,
 ): boolean {
-  return (
+  if (
     sameSecret(headers['x-public-key'], config.publicKey) &&
     sameSecret(headers['x-secret-key'], config.secretKey)
-  );
+  )
+    return true;
+  if (rawBody === undefined || typeof headers['x-signature'] !== 'string')
+    return false;
+  const expected = createHmac(
+    'sha256',
+    `${config.publicKey}${config.secretKey}`,
+  )
+    .update(rawBody, 'utf8')
+    .digest('hex');
+  return sameSecret(headers['x-signature'].toLowerCase(), expected);
 }
 
 // ---------------------------------------------------------------------------
@@ -473,11 +587,14 @@ export type CallbackIpVerdict =
  */
 export function tgpayCallbackIpVerdict(
   ip: string,
-  env: { TGPAY_CALLBACK_IPS?: string; TGPAY_API_BASE?: string } = process.env,
+  env: Partial<Record<string, string>> = process.env,
+  kind: TgpayKind = 'tgpay',
 ): CallbackIpVerdict {
-  const raw = env.TGPAY_CALLBACK_IPS?.trim() ?? '';
+  const raw = env[tgpayEnvName(kind, 'CALLBACK_IPS')]?.trim() ?? '';
   if (raw === '') {
-    return tgpayIsSandbox({ baseUrl: env.TGPAY_API_BASE ?? '' })
+    return tgpayIsSandbox({
+      baseUrl: env[tgpayEnvName(kind, 'API_BASE')] ?? '',
+    })
       ? { allowed: true, reason: 'sandbox-no-list' }
       : { allowed: false, reason: 'unset-in-production' };
   }

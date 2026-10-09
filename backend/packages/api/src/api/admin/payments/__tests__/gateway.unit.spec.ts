@@ -9,6 +9,7 @@ const ORIGINAL = { ...process.env };
 beforeEach(() => {
   delete process.env.PAYMENT_GATEWAY;
   process.env.TGPAY_SECRET_KEY = 'sk-test';
+  delete process.env.THE7PAY_SECRET_KEY;
   process.env.PAYMENT_CALLBACK_BASE = 'https://api.example';
   setActiveGateway(null);
 });
@@ -55,8 +56,10 @@ describe('GET /admin/payments/gateway', () => {
     };
     expect(body.active).toBe('tgpay');
     expect(body.setting).toBe('tgpay');
+    // The 7 Pay is listed but not choosable until THE7PAY_SECRET_KEY is set.
     expect(body.gateways).toEqual([
       { id: 'tgpay', label: 'TGPay', configured: true },
+      { id: 'the7pay', label: 'The 7 Pay', configured: false },
     ]);
     expect(h.res.headers['Cache-Control']).toBe('no-store');
   });

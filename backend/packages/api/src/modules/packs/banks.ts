@@ -1,4 +1,5 @@
 import type { PaymentGateway } from './gateway';
+import { isTgpayKind, tgpayEnvName } from './tgpay-client';
 
 // Gateway-neutral bank registry (plan 130 §bank preservation).
 //
@@ -48,10 +49,12 @@ const bank = (
 ): Bank => ({
   id,
   name,
-  // The test-only 'fake' gateway (fake-gateway.ts) pays to exactly what TGPay
-  // pays to, so a spec that selects it takes the SAME supported/unsupported
-  // branches as production instead of finding every saved account unpayable.
-  codes: tgpay ? { tgpay, fake: tgpay } : {},
+  // The 7 Pay is a white-label of TGPay's platform and publishes the same
+  // SWIFT table (docs/payments/the7pay-api.md). The test-only 'fake' gateway
+  // (fake-gateway.ts) pays to exactly what TGPay pays to, so a spec that
+  // selects it takes the SAME supported/unsupported branches as production
+  // instead of finding every saved account unpayable.
+  codes: tgpay ? { tgpay, the7pay: tgpay, fake: tgpay } : {},
   legacyAliases: legacy ? [legacy.code] : [],
 });
 
@@ -97,7 +100,8 @@ export const MY_BANKS: readonly Bank[] = [
   bank('RYTMY', 'Ryt Bank', { code: 'SCCH', name: 'Ryt Bank' }, null),
 ];
 
-/** TGPay's sandbox accepts only this pair; it is a bank nowhere else. */
+/** The TGPay platform's sandbox (TGPay, The 7 Pay) accepts only this pair; it
+ *  is a bank nowhere else. */
 export const TGPAY_SANDBOX_BANK: Bank = bank(
   'DUMMYBANKVERIFIED',
   'Dummy Bank Verified (sandbox)',
@@ -106,18 +110,21 @@ export const TGPAY_SANDBOX_BANK: Bank = bank(
 );
 
 /**
- * The dummy bank is a payable destination only while TGPay's SANDBOX is the
- * configured base — on production it is a name nothing can pay to, so the
+ * The dummy bank is a payable destination only while `gateway`'s SANDBOX is
+ * its configured base — on production it is a name nothing can pay to, so the
  * picker, the saved-account writer and the withdrawal precheck all refuse it
- * there (the adapter refuses it too, but that is after the debit).
+ * there (the adapter refuses it too, but that is after the debit). A gateway
+ * outside the TGPay family (the test-only fake) is judged by TGPay's base.
  */
 export function sandboxOnlyBank(
   alias: string,
-  env: { TGPAY_API_BASE?: string } = process.env,
+  env: Partial<Record<string, string>> = process.env,
+  gateway: PaymentGateway = 'tgpay',
 ): boolean {
+  const base = env[tgpayEnvName(isTgpayKind(gateway) ? gateway : 'tgpay', 'API_BASE')];
   return (
     findBank(alias)?.id === TGPAY_SANDBOX_BANK.id &&
-    !/sandbox/i.test(env.TGPAY_API_BASE ?? '')
+    !/sandbox/i.test(base ?? '')
   );
 }
 
@@ -165,7 +172,7 @@ export function banksFor(
     bankCode: b.id,
     bankName: b.name,
   }));
-  if (gateway === 'tgpay' && options.sandbox) {
+  if (isTgpayKind(gateway) && options.sandbox) {
     list.unshift({
       bankCode: TGPAY_SANDBOX_BANK.id,
       bankName: TGPAY_SANDBOX_BANK.name,

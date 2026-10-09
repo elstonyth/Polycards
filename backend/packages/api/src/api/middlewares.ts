@@ -116,8 +116,10 @@ const adminActionRateLimit = rateLimit('admin-action');
 // One instance for every gateway callback route: one abuse ceiling, one
 // budget, one Redis connection (see the gateway-hook spec for sizing).
 const gatewayHookRateLimit = rateLimit('gateway-hook');
-// TGPay's source allowlist (src/api/utils/payer-ip.ts) — after the limiter.
-const tgpayCallbackAllowlist = createTgpayCallbackAllowlist();
+// Each gateway's source allowlist (src/api/utils/payer-ip.ts) — after the
+// limiter.
+const tgpayCallbackAllowlist = createTgpayCallbackAllowlist('tgpay');
+const the7payCallbackAllowlist = createTgpayCallbackAllowlist('the7pay');
 // Open the phone-OTP send budget's Redis connection at boot, like the
 // limiters above, not on the first code request: that store fails CLOSED in
 // production, so a connection still opening refused every fresh instance's
@@ -334,6 +336,16 @@ export default defineMiddlewares({
       matcher: '/hooks/tgpay/*',
       method: 'POST',
       middlewares: [gatewayHookRateLimit, tgpayCallbackAllowlist],
+    },
+    {
+      // The 7 Pay's callbacks (src/api/hooks/the7pay/*) — same platform, same
+      // limiter budget, its own allowlist. preserveRawBody: its Method 2
+      // callback is an HMAC over the exact bytes sent (req.rawBody), which a
+      // re-serialised req.body would not reproduce.
+      matcher: '/hooks/the7pay/*',
+      method: 'POST',
+      bodyParser: { preserveRawBody: true },
+      middlewares: [gatewayHookRateLimit, the7payCallbackAllowlist],
     },
     {
       // Desk reports (spec 2026-09-29-desk-reports-design.md): read-only

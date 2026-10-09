@@ -552,7 +552,7 @@ export async function getGatewayBalance(): Promise<GatewayBalance> {
 // ── Payment gateways (plan 130) ─────────────────────────────────────────────
 
 /** Mirrors the backend's PaymentGateway union — the gateways the switch can pick. */
-export type PaymentGatewayId = 'tgpay';
+export type PaymentGatewayId = 'tgpay' | 'the7pay';
 /** A gateway a ROW may name: a live one, or a retired one ('globepay') whose
  *  settled rows are still history on the audit panel. */
 export type HistoricalGatewayId = PaymentGatewayId | (string & {});
