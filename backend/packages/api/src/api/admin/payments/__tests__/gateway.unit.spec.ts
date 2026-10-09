@@ -9,6 +9,8 @@ const ORIGINAL = { ...process.env };
 beforeEach(() => {
   delete process.env.PAYMENT_GATEWAY;
   process.env.TGPAY_SECRET_KEY = 'sk-test';
+  process.env.TGPAY_PUBLIC_KEY = 'pk-test';
+  process.env.TGPAY_API_BASE = 'https://sandbox-api.example/api/v2';
   delete process.env.THE7PAY_SECRET_KEY;
   process.env.PAYMENT_CALLBACK_BASE = 'https://api.example';
   setActiveGateway(null);
@@ -92,6 +94,16 @@ describe('POST /admin/payments/gateway', () => {
     );
     expect(h.packs.editPaymentGateway).not.toHaveBeenCalled();
     delete process.env.GATEWAY_NOTIFY_URL;
+  });
+
+  it('refuses a gateway whose config is incomplete (one key set, no base URL)', async () => {
+    process.env.THE7PAY_SECRET_KEY = 'sk-7';
+    const h = harness(null);
+    h.req.body = { gateway: 'the7pay', reason: 'tgpay down' };
+    await expect(POST(h.req as never, h.res as never)).rejects.toThrow(
+      /The 7 Pay is not fully configured .*THE7PAY_API_BASE/,
+    );
+    expect(h.packs.editPaymentGateway).not.toHaveBeenCalled();
   });
 
   it('refuses a gateway with no callback URL in this environment', async () => {

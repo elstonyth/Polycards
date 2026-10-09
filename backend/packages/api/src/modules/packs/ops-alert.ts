@@ -109,7 +109,9 @@ export function alertPayoutFloatEmpty(
   const name = detail.gateway ?? 'TGPay';
   return alertOps(
     scope,
-    'payout-float-empty',
+    // Muted per gateway: TGPay's alert must not silence The 7 Pay's when the
+    // operator switches to it and its (likely unfunded) wallet refuses too.
+    detail.gateway ? `payout-float-empty:${detail.gateway}` : 'payout-float-empty',
     `${name} payout wallet is short: payouts are being refused with ` +
       `"Insufficient payout credit balance". Latest: RM ${detail.amount} ` +
       `(${detail.ref}, ${detail.via}), refunded to the customer. Every payout ` +

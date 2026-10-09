@@ -435,8 +435,13 @@ Env (backend; names in `.env.template`): `THE7PAY_API_BASE`,
    secrets file. Edit the spec by script and check the diff — a formatting
    editor re-quotes the existing TGPay secret placeholders. Deploy and run the
    preflight from inside DO.
-5. Switching: Settlement page → Payment gateway → The 7 Pay. Rows already in
-   flight finish on the gateway they started on.
+5. Fund The 7 Pay's payout wallet before switching withdrawals to it — the
+   preflight prints both wallet balances. TGPay's production payout wallet was
+   0.00 at its cutover, and every payout fails until it is topped up.
+6. Switching: Settlement page → Payment gateway → The 7 Pay. The switch refuses
+   a gateway whose config is incomplete (missing base URL / public key /
+   unreadable RSA key). Rows already in flight finish on the gateway they
+   started on.
 
 ## Open questions for 7Pay
 
