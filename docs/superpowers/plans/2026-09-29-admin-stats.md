@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Superseded in part (2026-10-09):** the endpoint and page now also carry `withdrawal_count` and `withdrawal_amount`, from a separate `withdrawalStats` method. The design spec (`docs/superpowers/specs/2026-09-29-admin-stats-design.md`) is the current contract; this plan records the original build.
+
 **Goal:** Add a "Stats" page to the admin dashboard. It shows sign-ups and top-ups for a preset or custom MYT window, with each figure compared against the previous window.
 
 **Architecture:**

@@ -209,7 +209,7 @@ import {
   type RankPayout,
 } from './challenge-settle';
 import { weightedAverageCost } from './inventory-cost';
-import type { SignupTopupStats } from './stats';
+import type { SignupTopupStats, WithdrawalStats } from './stats';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
 // plan-033 playthrough basis: the "post-1b deposited" ledger predicate. Shared
@@ -7321,8 +7321,8 @@ class PacksModuleService extends MedusaService({
     }));
   }
 
-  // Sign-up, top-up and withdrawal figures for GET /admin/stats over one
-  // half-open [from, to) window, in one statement.
+  // Sign-up and top-up figures for GET /admin/stats over one half-open
+  // [from, to) window, in one statement.
   //
   // Sign-ups count has_account customers, deleted rows included, so a past
   // period never shrinks. Operator-minted partner accounts are left out: they
@@ -7338,12 +7338,6 @@ class PacksModuleService extends MedusaService({
   // A first top-up is ranked over the customer's WHOLE deposit history before
   // the window filter, so a returning customer's top-up in the window is not a
   // first. Money is summed as integer cents, like ledgerReasonTotals.
-  //
-  // Withdrawals are settled gateway_withdrawal rows by settled_at, summed on
-  // `amount` (the debit), the same basis as the Settlement report:
-  // amount_settled is NULL on every payout settled before it shipped. Pending
-  // and held payouts have left the wallet but not the gateway; they count
-  // once settled.
   @InjectManager()
   async signupTopupStats(
     from: Date,
@@ -7361,8 +7355,6 @@ class PacksModuleService extends MedusaService({
         topup_cents: string;
         first_topup_count: number;
         first_topup_cents: string;
-        withdrawal_count: number;
-        withdrawal_cents: string;
       }[]
     >(
       `WITH topups AS (
@@ -7373,13 +7365,6 @@ class PacksModuleService extends MedusaService({
          FROM gateway_deposit
          WHERE status = 'settled' AND deleted_at IS NULL
            AND settled_at IS NOT NULL AND amount_settled > 0
-       ),
-       withdrawals AS (
-         SELECT count(*)::int AS n,
-                COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS cents
-         FROM gateway_withdrawal
-         WHERE status = 'settled' AND deleted_at IS NULL
-           AND settled_at >= ?::timestamptz AND settled_at < ?::timestamptz
        )
        SELECT
          (SELECT count(*) FROM customer
@@ -7392,13 +7377,10 @@ class PacksModuleService extends MedusaService({
          COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS topup_cents,
          (count(*) FILTER (WHERE nth = 1))::int AS first_topup_count,
          COALESCE(SUM(ROUND(amount * 100)) FILTER (WHERE nth = 1), 0)::bigint
-           AS first_topup_cents,
-         (SELECT n FROM withdrawals) AS withdrawal_count,
-         (SELECT cents FROM withdrawals) AS withdrawal_cents
+           AS first_topup_cents
        FROM topups
        WHERE settled_at >= ?::timestamptz AND settled_at < ?::timestamptz`,
-      // Every placeholder pair is the same window.
-      [...bounds, ...bounds, ...bounds],
+      [...bounds, ...bounds],
     );
     return {
       signups: row.signups,
@@ -7407,6 +7389,35 @@ class PacksModuleService extends MedusaService({
       topup_amount: Number(row.topup_cents) / 100,
       first_topup_count: row.first_topup_count,
       first_topup_amount: Number(row.first_topup_cents) / 100,
+    };
+  }
+
+  // Withdrawal figures for GET /admin/stats over one half-open [from, to)
+  // window: settled gateway_withdrawal rows by settled_at, summed on `amount`
+  // (the debit), the same basis as the Settlement report, because
+  // amount_settled is NULL on every payout settled before it shipped. Pending
+  // and held payouts have left the wallet but not the gateway; they count
+  // once settled. Kept apart from signupTopupStats so that method's
+  // sign-up-only callers (the growth reports) never pay for this scan.
+  @InjectManager()
+  async withdrawalStats(
+    from: Date,
+    to: Date,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<WithdrawalStats> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [row] = await em.execute<
+      { withdrawal_count: number; withdrawal_cents: string }[]
+    >(
+      `SELECT count(*)::int AS withdrawal_count,
+              COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS withdrawal_cents
+       FROM gateway_withdrawal
+       WHERE status = 'settled' AND deleted_at IS NULL
+         AND settled_at >= ?::timestamptz AND settled_at < ?::timestamptz`,
+      [from.toISOString(), to.toISOString()],
+    );
+    return {
       withdrawal_count: row.withdrawal_count,
       withdrawal_amount: Number(row.withdrawal_cents) / 100,
     };
