@@ -261,6 +261,8 @@ medusaIntegrationTestRunner({
         expect(list.status).toBe(200);
         expect(list.data.settlements).toHaveLength(1);
         expect(list.data.settlements[0].status).toBe('draft');
+        // A small week is not held: the hourly auto-approval will take it.
+        expect(list.data.settlements[0].held_for_review).toBe(false);
         const detail = await unwrapResponse(
           api.get(`/admin/referrals/settlements/${closed.settlementId}`, {
             headers: adminHeaders(),

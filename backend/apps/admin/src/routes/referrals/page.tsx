@@ -469,10 +469,12 @@ function RunsCard() {
     <Container>
       <Heading level="h2">Weekly settlements</Heading>
       <Text size="small" className="text-ui-fg-subtle">
-        Tuesday's close lands here as a draft. Review the lines, void anything
-        suspicious, then Approve — the hourly payout job moves the money within
-        the hour (or Pay now does it at once). Paying credits each referrer's
-        Polycards wallet automatically; nothing is transferred by hand.
+        Tuesday's close lands here as a draft and approves itself 24 hours
+        later, then pays within the hour, so no weekly click is needed. Until
+        then you can review the lines and void anything suspicious. A run with
+        any line over RM 1,000 is held for you to approve. Approve or Pay now
+        skips the wait. Paying credits each referrer's Polycards wallet
+        automatically; nothing is transferred by hand.
       </Text>
       {data.length === 0 ? (
         <Text size="small" className="text-ui-fg-muted mt-4">
@@ -503,6 +505,22 @@ function RunsCard() {
                     <Badge size="2xsmall" color={STATUS_COLOR[run.status]}>
                       {run.status}
                     </Badge>
+                    {run.approved_by === 'system:auto-approve' && (
+                      <Text
+                        size="xsmall"
+                        className="text-ui-fg-muted ml-2 inline"
+                      >
+                        auto-approved
+                      </Text>
+                    )}
+                    {run.held_for_review && (
+                      <Text
+                        size="xsmall"
+                        className="text-ui-fg-error ml-2 inline"
+                      >
+                        held: a line is over RM 1,000, approve it yourself
+                      </Text>
+                    )}
                   </Table.Cell>
                   <Table.Cell className="text-right">
                     {fromCents(run.total_commission_cents)}

@@ -5,9 +5,10 @@ import type PacksModuleService from '../modules/packs/service';
 
 /**
  * The pay half of "WED OUT" — pays every APPROVED weekly settlement's
- * pending lines as straight site credit. A run the admin never approved
- * simply waits: the human gate IS the spec, so this job never touches
- * drafts. Runs hourly every day (not just Wednesdays — review 2026-08-25):
+ * pending lines as straight site credit. Since 2026-10-09 it first
+ * auto-approves drafts past their 24 h review window
+ * (autoApproveDueSettlements); a draft with a line over the hold limit still
+ * waits for an admin. Runs hourly every day (not just Wednesdays — review 2026-08-25):
  * an approval that lands on a Thursday pays within the hour instead of
  * silently waiting six days, and pay is idempotent per line either way.
  *
@@ -30,6 +31,29 @@ export default async function payReferralWeekJob(container: MedusaContainer) {
       // logger unavailable in test containers — ignore
     }
   };
+
+  // Auto-approval first (2026-10-09): a draft past its 24 h review window is
+  // approved here, so this same tick pays it. A failure only delays it to the
+  // next tick; it must never stop the payouts below.
+  try {
+    const auto = await packs.autoApproveDueSettlements();
+    for (const id of auto.approved) {
+      say('info', `[pay-referral-week] settlement ${id} auto-approved`);
+    }
+    for (const id of auto.held) {
+      say(
+        'error',
+        `[pay-referral-week] settlement ${id} NOT auto-approved: a line is over the auto-approve limit; an admin must review and approve it.`,
+      );
+    }
+  } catch (e: unknown) {
+    say(
+      'error',
+      `[pay-referral-week] auto-approve failed, will retry next tick: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+  }
 
   const approved = await packs.listWeeklySettlements(
     { status: 'approved' },

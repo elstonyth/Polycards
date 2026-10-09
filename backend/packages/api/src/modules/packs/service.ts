@@ -97,6 +97,9 @@ import {
   MAX_SETTLEMENT_LINE_MYR,
   payoutCents,
   REFERRAL_BIND_WINDOW_MS,
+  REFERRAL_AUTO_APPROVE_AFTER_MS,
+  REFERRAL_AUTO_APPROVE_MAX_LINE_MYR,
+  REFERRAL_AUTO_APPROVER,
   REFERRAL_CLOSE_GRACE_MS,
   referralWeekFor,
   taskDayFor,
@@ -1490,10 +1493,53 @@ class PacksModuleService extends MedusaService({
     return { settlementId, created: true, lines: lines.length };
   }
 
-  // The admin gate between Tuesday's draft and Wednesday's money.
+  // Auto-approval: every draft that has sat out the review window is approved
+  // as REFERRAL_AUTO_APPROVER, through the same claim and audit as an admin's
+  // click, unless one of its pending lines is over the hold limit (then it
+  // waits for a human). Runs an admin already approved or voided are no
+  // longer drafts and are left alone. Each run is approved in its own
+  // transaction, so one failure cannot block the others.
+  async autoApproveDueSettlements(
+    input: { now?: Date } = {},
+  ): Promise<{ approved: string[]; held: string[] }> {
+    const now = (input.now ?? new Date()).getTime();
+    const due = (
+      await this.listWeeklySettlements({ status: 'draft' }, { take: 100 })
+    ).filter(
+      (r) =>
+        new Date(r.created_at).getTime() + REFERRAL_AUTO_APPROVE_AFTER_MS <=
+        now,
+    );
+    const approved: string[] = [];
+    const held: string[] = [];
+    for (const run of due) {
+      const pending = await this.listWeeklySettlementLines(
+        { settlement_id: run.id, status: 'pending' },
+        { take: 100_000 },
+      );
+      if (
+        pending.some(
+          (l) => l.amount_cents > REFERRAL_AUTO_APPROVE_MAX_LINE_MYR * 100,
+        )
+      ) {
+        held.push(run.id);
+        continue;
+      }
+      await this.approveWeeklySettlement({
+        settlementId: run.id,
+        adminId: REFERRAL_AUTO_APPROVER,
+        reason: `auto-approved ${REFERRAL_AUTO_APPROVE_AFTER_MS / 3_600_000} h after close; no line over RM ${REFERRAL_AUTO_APPROVE_MAX_LINE_MYR}`,
+      });
+      approved.push(run.id);
+    }
+    return { approved, held };
+  }
+
+  // The admin gate between Tuesday's draft and the money (or the auto-approval
+  // above, which passes its own audit reason).
   @InjectTransactionManager()
   async approveWeeklySettlement(
-    input: { settlementId: string; adminId: string },
+    input: { settlementId: string; adminId: string; reason?: string },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
     const [run] = await this.listWeeklySettlements(
@@ -1543,7 +1589,9 @@ class PacksModuleService extends MedusaService({
         action: 'approve_settlement',
         before: { status: 'draft' },
         after: { status: 'approved' },
-        reason: `week ${new Date(run.week_start).toISOString().slice(0, 10)}`,
+        reason:
+          `week ${new Date(run.week_start).toISOString().slice(0, 10)}` +
+          (input.reason ? `: ${input.reason}` : ''),
       },
       sharedContext,
     );

@@ -1974,6 +1974,9 @@ export interface ReferralSettlement {
   approved_at: string | null;
   paid_at: string | null;
   total_commission_cents: number;
+  /** A draft the hourly auto-approval skips: a pending line is over its limit,
+   *  so an admin must approve it. */
+  held_for_review: boolean;
 }
 
 /** Who a settlement line is about; every field but id is null for a
