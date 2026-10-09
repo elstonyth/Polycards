@@ -1499,9 +1499,10 @@ medusaIntegrationTestRunner({
       });
 
       it('puts the full customer details in the Excel, for the Growth key only', async () => {
-        // The pulls sheet keeps Legendary and Immortal pulls by DEFAULT-group
-        // players only: a partner's Legendary and a Mythical hit stay out, a
-        // player filed in DEFAULT itself stays in.
+        // Both sheets keep DEFAULT-group players only, and the pulls sheet only
+        // Immortal, Legendary and Mythical pulls: a partner's Legendary pull and
+        // withdrawal stay out, a Mythical hit and a player filed in DEFAULT
+        // itself stay in.
         await packs().createCards([
           {
             handle: 'dh-m',
@@ -1558,6 +1559,21 @@ medusaIntegrationTestRunner({
             recorded_value_usd: usd as number,
           })),
         );
+        const [partnerWd] = await packs().createGatewayWithdrawals([
+          {
+            merchant_transaction_id: 'dh-wd-9',
+            customer_id: partner.id,
+            amount: 90,
+            bank_code: 'MBBEMYKL',
+            account_number: '556677889',
+            account_holder_name: 'Holder 9',
+            status: 'settled',
+          },
+        ]);
+        await pg().raw(
+          'UPDATE gateway_withdrawal SET created_at = ? WHERE id = ?',
+          [inDay(9), partnerWd.id],
+        );
 
         const res = await unwrapResponse(
           api.get(`/reports/growth/daily-report?day=${DAY}`, {
@@ -1575,7 +1591,7 @@ medusaIntegrationTestRunner({
         const files = unzipSync(new Uint8Array(Buffer.from(res.data)));
         const strings = strFromU8(files['xl/sharedStrings.xml']);
         const workbook = strFromU8(files['xl/workbook.xml']);
-        expect(workbook).toContain('name="Legendary &amp; Immortal"');
+        expect(workbook).toContain('name="Immortal, Legendary, Mythical"');
         expect(workbook).toContain('name="Withdrawals"');
         for (const detail of [
           'Ace_Puller',
@@ -1583,6 +1599,7 @@ medusaIntegrationTestRunner({
           'ace@test.dev',
           'Latias &amp; Latios GX #105',
           'DH D',
+          'DH Mythic',
           'member@test.dev',
           '556677881',
           'Holder 1',
@@ -1591,13 +1608,14 @@ medusaIntegrationTestRunner({
           expect(strings).toContain(detail);
         }
         for (const absent of [
-          // Below Legendary: Rare, Common and Mythical pulls.
+          // Below Mythical: Rare and Common pulls.
           'DH B',
           'DH C',
-          'DH Mythic',
-          // A partner-group player, though their pull is Legendary.
+          // A partner-group player's Legendary pull and their withdrawal.
           'partner@test.dev',
           '+60155555555',
+          '556677889',
+          'Holder 9',
           // Other days' withdrawals and the hidden player's pull.
           '556677883',
           '+60133333333',

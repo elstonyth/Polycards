@@ -181,8 +181,9 @@ def excel_message(day, path):
     """What the no-AI Excel job posts: a short staff-only note and the file."""
     return (
         f"**Staff Excel · Daily Top Hits {day_label(day)}**\n"
-        "Full customer details for every Legendary and Immortal pull by "
-        "DEFAULT-group players, and every withdrawal (phone, email, bank). "
+        "DEFAULT-group players only: full customer details for every "
+        "Immortal, Legendary and Mythical pull, and every withdrawal "
+        "(phone, email, bank). "
         "Staff only: never post this file or its contents publicly.\n"
         f"MEDIA:{path}"
     )
@@ -202,7 +203,7 @@ def _self_test():
     assert day_label("2026-10-03") == "3 Oct 2026"
     assert excel_message("2026-10-03", "C:\\x.xlsx").endswith("\nMEDIA:C:\\x.xlsx")
     assert "Staff only" in excel_message("2026-10-03", "C:\\x.xlsx")
-    assert "Legendary and Immortal" in excel_message("2026-10-03", "C:\\x.xlsx")
+    assert "Immortal, Legendary and Mythical" in excel_message("2026-10-03", "C:\\x.xlsx")
     assert yesterday_myt(datetime.datetime(2026, 10, 4, 16, 30, tzinfo=utc)) == "2026-10-04"
     assert yesterday_myt(datetime.datetime(2026, 10, 4, 15, 59, tzinfo=utc)) == "2026-10-03"
     assert day_window("2026-10-03") == ("2026-10-02T16:00:00.000Z", "2026-10-03T16:00:00.000Z")

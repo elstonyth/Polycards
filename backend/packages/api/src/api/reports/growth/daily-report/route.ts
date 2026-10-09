@@ -13,7 +13,7 @@ import { resolveFxRate } from '../../../../modules/packs/pricing';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { ledgerTotalsWhere } from '../../finance/queries';
 import { reportCallerOf } from '../../require-report-key';
-import { customerFilter, reportDb } from '../../sql';
+import { customerFilter, reportDb, scopeFilter } from '../../sql';
 import { malaysiaDay } from '../top-pulls/day';
 import { loadTopPulls } from '../top-pulls/hits';
 
@@ -22,12 +22,13 @@ import { loadTopPulls } from '../top-pulls/hits';
 const MAX_PULL_ROWS = 200;
 
 // GET /reports/growth/daily-report?day: the staff Excel of the Growth desk's
-// 12 a.m. drop (spec 2026-10-04-growth-daily-hits-design.md). Sheet
-// "Legendary & Immortal": every paid pull of a Legendary or Immortal card that
-// day by a DEFAULT-group player (partner and other groups left out; the
-// operator's call, 2026-10-09), most valuable first, with each player's full
-// details. Sheet "Withdrawals": every withdrawal requested that day, any
-// status, with the bank details and the player's details.
+// 12 a.m. drop (spec 2026-10-04-growth-daily-hits-design.md). DEFAULT-group
+// players only, on both sheets (partner and other groups left out; the
+// operator's call, 2026-10-09). Sheet "Immortal, Legendary, Mythical": every
+// paid pull of a card at one of those tiers that day, most valuable first,
+// with each player's full details. Sheet "Withdrawals": every withdrawal
+// requested that day, any status, with the bank details and the player's
+// details.
 //
 // It carries phone numbers, emails and full bank account numbers, by the
 // operator's choice. So it answers the Growth key only (the 12 a.m. cron's
@@ -162,7 +163,7 @@ export async function GET(
   const db = reportDb(req);
   const [pulls, { rows: withdrawals }] = await Promise.all([
     loadTopPulls(req, packs, window, MAX_PULL_ROWS, {
-      tiers: ['Immortal', 'Legendary'],
+      tiers: ['Immortal', 'Legendary', 'Mythical'],
       defaultGroupOnly: true,
     }),
     db.raw<{
@@ -179,9 +180,10 @@ export async function GET(
     }>(
       'SELECT customer_id, created_at, settled_at, status, amount, net_amount, ' +
         '       bank_code, account_number, account_holder_name, failure_reason ' +
-        '  FROM gateway_withdrawal ' +
-        ' WHERE deleted_at IS NULL AND created_at >= ? AND created_at < ? ' +
-        ' ORDER BY created_at ASC, id ASC',
+        '  FROM gateway_withdrawal g ' +
+        ' WHERE g.deleted_at IS NULL AND g.created_at >= ? AND g.created_at < ? ' +
+        scopeFilter({ kind: 'default' }, 'g.customer_id').sql +
+        ' ORDER BY g.created_at ASC, g.id ASC',
       [window.from.toISOString(), window.to.toISOString()],
     ),
   ]);
@@ -238,7 +240,7 @@ export async function GET(
   const workbook = await writeXlsxFile([
     {
       data: getSheetData(pullRows, PULL_COLUMNS),
-      sheet: 'Legendary & Immortal',
+      sheet: 'Immortal, Legendary, Mythical',
       columns: widths(PULL_COLUMNS),
       stickyRowsCount: 1,
     },
@@ -261,7 +263,8 @@ export async function GET(
 }
 
 /** Each player's contact details and account summary, keyed by customer id.
- *  Bounded by the day's Legendary and Immortal pulls and its withdrawals. */
+ *  Bounded by the day's Immortal, Legendary and Mythical pulls and its
+ *  withdrawals. */
 async function customerDetails(
   req: MedusaRequest,
   packs: PacksModuleService,
