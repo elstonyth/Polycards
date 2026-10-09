@@ -17,7 +17,7 @@ import type { PaymentGateway } from './gateway';
 // customer never re-enters a bank because the gateway changed.
 //
 // Sources: TGPay "Malaysia bank SWIFT codes (payout)" (sandbox docs,
-// 2026-09-05); the GlobePay365 GetSupportedBanks list as fetched 2026-09-05
+// 2026-09-05; Touch 'n Go added from the production docs 2026-10-09); the GlobePay365 GetSupportedBanks list as fetched 2026-09-05
 // (aliases only).
 
 export type GatewayBankCode = { code: string; name: string };
@@ -68,6 +68,10 @@ export const MY_BANKS: readonly Bank[] = [
   bank('PBBEMYKL', 'Public Bank', { code: 'MYPUBB', name: 'Public Bank Berhad' }, { code: 'PBBEMYKL', name: 'Public Bank Berhad' }),
   bank('RHBBMYKL', 'RHB Bank', { code: 'MYRHBB', name: 'RHB Bank Berhad' }, { code: 'RHBBMYKL', name: 'RHB Bank Berhad' }),
   bank('SCBLMYKX', 'Standard Chartered', { code: 'MYSTCB', name: 'Standard Chartered Bank' }, { code: 'SCBLMYKX', name: 'Standard Chartered Bank (Malaysia) Berhad' }),
+  // Touch 'n Go eWallet keeps its slug id (saved accounts already carry it);
+  // TGPay added a payout code for it after this table was first copied
+  // (their payout-bank page, checked 2026-10-09).
+  bank('TNGMY', "Touch 'n Go eWallet", { code: 'MYTNGO', name: 'Touch N Go' }, { code: 'TNGDRMYKL', name: "Touch 'n Go" }),
   bank('UOVBMYKL', 'UOB', { code: 'MYUOBB', name: 'United Overseas Bank' }, { code: 'UOVBMYKL', name: 'United Overseas Bank (Malaysia) Berhad' }),
   // No TGPay payout code today (e-wallets, digital and foreign banks): kept so
   // a saved account under one still resolves and reads as "not available with
@@ -83,7 +87,6 @@ export const MY_BANKS: readonly Bank[] = [
   bank('JPMMY', 'JP Morgan', { code: 'MYCHAS', name: 'JP Morgan' }, null),
   bank('GXBANKMY', 'GX Bank', { code: 'MYGXSP', name: 'GX Bank Berhad' }, null),
   bank('MTRADEMY', 'Merchant Trade', { code: 'MYMSSH', name: 'Merchant Trade' }, null),
-  bank('TNGMY', "Touch 'n Go eWallet", { code: 'MYTNGO', name: 'Touch N Go' }, null),
   bank('RYTMY', 'Ryt Bank', { code: 'SCCH', name: 'Ryt Bank' }, null),
 ];
 
