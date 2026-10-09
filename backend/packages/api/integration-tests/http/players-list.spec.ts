@@ -258,6 +258,21 @@ medusaIntegrationTestRunner({
         expect(a.total_contribution).toBe(60);
       });
 
+      // Taken out more than put in (a big win cashed out): the contribution goes
+      // negative, which the list colours red.
+      it('a player who withdrew more than they topped up reads negative', async () => {
+        await packsService().createCreditTransactions([
+          { customer_id: bId, amount: 50, reason: 'topup' },
+          { customer_id: bId, amount: 400, reason: 'buyback' },
+          { customer_id: bId, amount: -230, reason: 'cashout' },
+        ]);
+
+        const b = rowFor(await list(), bId);
+        expect(b.total_topup).toBe(50);
+        expect(b.total_withdrawn).toBe(230);
+        expect(b.total_contribution).toBe(-180);
+      });
+
       it('?q= narrows to the matching customer', async () => {
         const res = await list('?q=alphaplayer-zzq');
         expect(res.status).toBe(200);

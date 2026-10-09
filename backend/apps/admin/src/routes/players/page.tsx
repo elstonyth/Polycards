@@ -198,10 +198,16 @@ const PlayersPage = () => {
                   <Table.HeaderCell className="text-right">
                     {t('players.vault')}
                   </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
+                  <Table.HeaderCell
+                    className="text-right"
+                    title={t('players.topupHint')}
+                  >
                     {t('players.topup')}
                   </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
+                  <Table.HeaderCell
+                    className="text-right"
+                    title={t('players.withdrawnHint')}
+                  >
                     {t('players.withdrawn')}
                   </Table.HeaderCell>
                   <Table.HeaderCell
