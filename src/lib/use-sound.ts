@@ -38,6 +38,11 @@ const FILES = {
   Immortal: '/sounds/reveal-immortal.mp3',
 } as const;
 
+// Labels are left out on purpose: a label click re-dispatches a click on its
+// input, which would tick twice.
+const CLICKABLE =
+  'button, a[href], summary, input[type="radio"], input[type="checkbox"], [role="button"], [role="tab"], [role="switch"], [role="menuitem"], [role="option"]';
+
 export type SoundName = keyof typeof FILES;
 export type { SfxName } from '@/lib/slot-sfx';
 
@@ -267,6 +272,25 @@ function useSoundPlayer() {
     },
     [play],
   );
+
+  useEffect(() => {
+    // One delegated listener gives every control a press sound. `click`, not
+    // pointerdown: a touch that starts a scroll stays silent and keyboard
+    // presses still tick. On document, not window: sheets stopPropagation on
+    // their panel, and React's own document listener (attached at hydration)
+    // still runs first, so the header mute toggle has flipped by now — muting
+    // is silent, unmuting ticks. Controls with their own cue opt out with
+    // data-sound="off".
+    const uiClick = (event: MouseEvent) => {
+      if (!(event.target instanceof Element)) return;
+      const control = event.target.closest(CLICKABLE);
+      if (!control || control.closest('[data-sound="off"]')) return;
+      if (control.matches(':disabled, [aria-disabled="true"]')) return;
+      sfx('uiClick');
+    };
+    document.addEventListener('click', uiClick);
+    return () => document.removeEventListener('click', uiClick);
+  }, [sfx]);
 
   return { muted, toggleMuted, play, playReveal, vibrate, sfx };
 }

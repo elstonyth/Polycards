@@ -50,6 +50,8 @@ export function SlotControls({
         {onRemoveReel && (
           <button
             type="button"
+            // Plays its own cue; skip the global click tick.
+            data-sound="off"
             onClick={onRemoveReel}
             disabled={removeDisabled}
             aria-label="Remove a reel"
@@ -61,6 +63,8 @@ export function SlotControls({
 
         <button
           type="button"
+          // Plays its own cue; skip the global click tick.
+          data-sound="off"
           onClick={onSpin}
           disabled={disabled}
           className="inline-flex h-14 flex-1 items-center justify-center gap-2 rounded-2xl bg-chase text-base font-bold text-neutral-950 transition-colors hover:bg-chase/90 disabled:opacity-50"
@@ -72,6 +76,8 @@ export function SlotControls({
         {onAddReel && (
           <button
             type="button"
+            // Plays its own cue; skip the global click tick.
+            data-sound="off"
             onClick={onAddReel}
             disabled={addDisabled}
             aria-label="Add a reel"
