@@ -7,9 +7,9 @@ import { mintSuperAdmin, unwrapResponse } from './utils';
 jest.setTimeout(240 * 1000);
 
 // GET /admin/stats: sign-ups, top-ups and withdrawals for a window and the
-// window before it. Rows are seeded, then aged with a raw UPDATE, because created_at is
-// ORM-managed on insert. The custom range pins both windows to fixed past
-// days, so the expectations do not depend on when the suite runs.
+// window before it. Rows are seeded, then aged with a raw UPDATE, because
+// created_at is ORM-managed on insert. The custom range pins both windows to
+// fixed past days, so the expectations do not depend on when the suite runs.
 //
 // Custom 2026-09-10..2026-09-11 (MYT) gives:
 //   current  [2026-09-09T16:00Z, 2026-09-11T16:00Z)
