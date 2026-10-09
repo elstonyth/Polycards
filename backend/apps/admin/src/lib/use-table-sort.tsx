@@ -28,12 +28,19 @@ export function useTableSort<K extends string>(
     opts.onChange?.();
   };
 
-  // `align` right-aligns the label over right-aligned (numeric) cells.
-  const sortHeader = (key: K, label: string, align = false) => {
+  // `align` right-aligns the label over right-aligned (numeric) cells;
+  // `title` is the header's hover note.
+  const sortHeader = (
+    key: K,
+    label: string,
+    align = false,
+    title?: string,
+  ) => {
     const active = sort?.key === key;
     const dir = sort?.dir;
     return (
       <Table.HeaderCell
+        title={title}
         aria-sort={
           active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'
         }

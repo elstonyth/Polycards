@@ -381,6 +381,41 @@ medusaIntegrationTestRunner({
         expect(desc.data.players[0].name).toBeNull();
       });
 
+      // The money columns sort SERVER-side over every player (operator
+      // request, 2026-10-09), not just the page in hand. A: wallet 70, turnover
+      // 30, top up 100; B: no ledger rows (all zero).
+      it('?sort= orders the money columns across all players, then pages', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ids = (res: any): string[] => res.data.players.map((p: any) => p.id);
+        for (const key of ['wallet', 'topup', 'contribution', 'spend']) {
+          const desc = await list(`?sort=${key}:desc`);
+          expect(desc.status).toBe(200);
+          expect(desc.data.total).toBe(2);
+          expect(ids(desc)).toEqual([aId, bId]);
+          expect(ids(await list(`?sort=${key}:asc`))).toEqual([bId, aId]);
+        }
+
+        // A cashes out more than they put in: contribution 100 - 150 = -50,
+        // so A drops below B, and withdrawn puts A first.
+        await packsService().createCreditTransactions([
+          { customer_id: aId, amount: -150, reason: 'cashout' },
+        ]);
+        const byContribution = await list('?sort=contribution:desc');
+        expect(ids(byContribution)).toEqual([bId, aId]);
+        expect(rowFor(byContribution, aId).total_contribution).toBe(-50);
+        expect(ids(await list('?sort=withdrawn:desc'))).toEqual([aId, bId]);
+
+        // Paging slices the sorted whole, and the total counts every player.
+        const second = await list('?sort=withdrawn:desc&limit=1&offset=1');
+        expect(second.data.total).toBe(2);
+        expect(ids(second)).toEqual([bId]);
+
+        // A search still narrows the set being sorted.
+        const narrowed = await list('?q=alphaplayer-zzq&sort=withdrawn:asc');
+        expect(narrowed.data.total).toBe(1);
+        expect(ids(narrowed)).toEqual([aId]);
+      });
+
       it('disabled (Task 1) flows through to the row', async () => {
         const disable = await unwrapResponse(
           api.post(
