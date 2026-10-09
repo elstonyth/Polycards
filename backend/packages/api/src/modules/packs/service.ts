@@ -395,6 +395,23 @@ const LIVE_VALUE_USD_SQL = 'c.market_value * COALESCE(c.market_multiplier, ?)';
 // a stamped pull KEEPS its value even if the card row is later deleted (the
 // snapshot outlives the LEFT JOIN); an un-stamped one drops to NULL — the
 // pre-snapshot behavior.
+// Per-player ledger sums in sen over credit_transaction rows (no alias), one
+// spelling for both the admin Players list's values (playersOverview) and its
+// server-side sort (playerIdsByLedger), so a sorted column always reads in
+// the order it is sorted.
+const PLAYER_LEDGER_SUMS = {
+  wallet: 'SUM(ROUND(amount * 100))',
+  // VIP-basis net pack_open spend (creditSummary's vip_spend_cents).
+  spend: `SUM(CASE WHEN reason = 'pack_open' THEN -${normalSenSql()} ELSE 0 END)`,
+  // Positive rows only, as creditSummary's topupTotal counts them.
+  topup: `SUM(CASE WHEN reason = 'topup' AND amount > 0 THEN ${normalSenSql()} ELSE 0 END)`,
+  // Cashout debits negated; a refunded withdrawal (+cashout) nets back out.
+  withdrawn: `SUM(CASE WHEN reason = 'cashout' THEN -${normalSenSql()} ELSE 0 END)`,
+} as const;
+
+/** The Players list's server-side sort keys over the ledger. */
+export type PlayerLedgerSort = keyof typeof PLAYER_LEDGER_SUMS | 'contribution';
+
 const PULLED_VALUE_USD_SQL =
   'COALESCE(pu.recorded_value_usd, ' + LIVE_VALUE_USD_SQL + ')';
 
@@ -7756,11 +7773,10 @@ class PacksModuleService extends MedusaService({
       }[]
     >(
       'SELECT customer_id, ' +
-        '  COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
-        `  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -${normalSenSql()} ELSE 0 END), 0)::bigint AS vip_spend_cents, ` +
-        // Positive rows only, as creditSummary's topupTotal counts them.
-        `  COALESCE(SUM(CASE WHEN reason = 'topup' AND amount > 0 THEN ${normalSenSql()} ELSE 0 END), 0)::bigint AS topup_cents, ` +
-        `  COALESCE(SUM(CASE WHEN reason = 'cashout' THEN -${normalSenSql()} ELSE 0 END), 0)::bigint AS withdrawn_cents, ` +
+        `  COALESCE(${PLAYER_LEDGER_SUMS.wallet}, 0)::bigint AS balance_cents, ` +
+        `  COALESCE(${PLAYER_LEDGER_SUMS.spend}, 0)::bigint AS vip_spend_cents, ` +
+        `  COALESCE(${PLAYER_LEDGER_SUMS.topup}, 0)::bigint AS topup_cents, ` +
+        `  COALESCE(${PLAYER_LEDGER_SUMS.withdrawn}, 0)::bigint AS withdrawn_cents, ` +
         "  MAX(created_at) FILTER (WHERE reason = 'pack_open') AS last_spend_at " +
         `FROM credit_transaction WHERE customer_id IN (${ph}) AND deleted_at IS NULL GROUP BY customer_id`,
       ids,
@@ -7820,6 +7836,60 @@ class PacksModuleService extends MedusaService({
           r.partner_referral_bp === null ? null : Number(r.partner_referral_bp),
       });
     return { wallet, vault, pullCount, vipLevel, state };
+  }
+
+  // One page of the admin Players list ordered by a ledger sum over EVERY
+  // player (or over `ids`, the route's search matches), not just the page in
+  // hand: the ids in order, plus how many players the sort covered. A player
+  // with no ledger rows sums to 0; ties go to the customer id.
+  // ponytail: aggregates the whole ledger per request; precompute per-player
+  // totals if the Players page ever gets slow.
+  @InjectManager()
+  async playerIdsByLedger(
+    input: {
+      key: PlayerLedgerSort;
+      dir: 'ASC' | 'DESC';
+      ids: string[] | null;
+      limit: number;
+      offset: number;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ ids: string[]; total: number }> {
+    // The key is spliced into the SQL: only the known sums get through.
+    if (input.key !== 'contribution' && !Object.hasOwn(PLAYER_LEDGER_SUMS, input.key)) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Unknown ledger sort '${String(input.key)}'.`,
+      );
+    }
+    if (input.ids?.length === 0) return { ids: [], total: 0 };
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const sums = Object.entries(PLAYER_LEDGER_SUMS)
+      .map(([k, sql]) => `${sql} AS ${k}`)
+      .join(', ');
+    const value =
+      input.key === 'contribution'
+        ? 'COALESCE(t.topup, 0) - COALESCE(t.withdrawn, 0)'
+        : `COALESCE(t.${input.key}, 0)`;
+    const dir = input.dir === 'ASC' ? 'ASC' : 'DESC';
+    const scope = input.ids
+      ? ` AND c.id IN (${input.ids.map(() => '?').join(',')})`
+      : '';
+    const scopeParams = input.ids ?? [];
+    const rows = await em.execute<{ id: string }[]>(
+      'SELECT c.id FROM customer c ' +
+        `LEFT JOIN (SELECT customer_id, ${sums} FROM credit_transaction ` +
+        '  WHERE deleted_at IS NULL GROUP BY customer_id) t ON t.customer_id = c.id ' +
+        `WHERE c.deleted_at IS NULL${scope} ` +
+        `ORDER BY ${value} ${dir}, c.id ${dir} LIMIT ? OFFSET ?`,
+      [...scopeParams, input.limit, input.offset],
+    );
+    const [count] = await em.execute<{ n: string }[]>(
+      `SELECT COUNT(*)::bigint AS n FROM customer c WHERE c.deleted_at IS NULL${scope}`,
+      scopeParams,
+    );
+    return { ids: rows.map((r) => r.id), total: Number(count?.n ?? 0) };
   }
 
   // Delete-guard: the credit ledger is append-only — money rows are never
