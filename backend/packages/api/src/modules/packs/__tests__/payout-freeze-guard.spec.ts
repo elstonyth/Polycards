@@ -92,7 +92,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     });
 
     describe('payout methods block a MANUALLY frozen account', () => {
-      // These payouts are themselves gated by REWARDS_REDEMPTION_ENABLED (which
+      // claimReward is itself gated by REWARDS_REDEMPTION_ENABLED (which
       // short-circuits BEFORE the freeze check), so the gate must be ON to reach
       // the guard. Restored afterwards so test order can't leak the flag.
       const prevGate = process.env.REWARDS_REDEMPTION_ENABLED;

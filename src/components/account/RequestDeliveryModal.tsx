@@ -70,20 +70,26 @@ export default function RequestDeliveryModal({
   // Fee preview — mirrors the backend's authoritative charge (delivery-fee.ts).
   // Recomputed per render from the selected address; cheap (two lookups).
   const selectedAddress = addrList.find((a) => a.id === selectedAddr);
+  // Reward cards ship fee-free (POST /store/rewards/withdraw charges nothing),
+  // so only the ordinary cards are priced. Pricing the whole selection showed
+  // "RM 15.00 deducted" on a reward-only request that is never charged.
+  const paidItems = items.filter((i) => i.source !== 'reward');
   // Rounded to cents like the backend's vaultValueForPulls sum, so a float
   // artifact can't show an insurance line at exactly RM200 that the
   // authoritative charge never applies.
   const orderValue =
-    Math.round(items.reduce((s, i) => s + (i.card.priceMyr ?? 0), 0) * 100) /
-    100;
-  const fee = selectedAddress
-    ? computeDeliveryFee(
-        selectedAddress.postalCode,
-        orderValue,
-        selectedAddress.province,
-        selectedAddress.city,
-      )
-    : null;
+    Math.round(
+      paidItems.reduce((s, i) => s + (i.card.priceMyr ?? 0), 0) * 100,
+    ) / 100;
+  const fee =
+    selectedAddress && paidItems.length > 0
+      ? computeDeliveryFee(
+          selectedAddress.postalCode,
+          orderValue,
+          selectedAddress.province,
+          selectedAddress.city,
+        )
+      : null;
   const nonMalaysian =
     !!selectedAddress &&
     selectedAddress.countryCode.trim().toUpperCase() !== 'MY';
@@ -130,9 +136,7 @@ export default function RequestDeliveryModal({
       // Reward cards take a different backend — POST /store/rewards/withdraw,
       // which stamps is_reward and enforces a per-day cap — so the selection
       // is split here rather than sent to a route that would refuse half of it.
-      const normalIds = items
-        .filter((i) => i.source !== 'reward')
-        .map((i) => i.pullId);
+      const normalIds = paidItems.map((i) => i.pullId);
       const rewardIds = items
         .filter((i) => i.source === 'reward')
         .map((i) => i.pullId);
@@ -148,6 +152,9 @@ export default function RequestDeliveryModal({
         city: addr.city,
         postalCode: addr.postalCode,
         countryCode: addr.countryCode,
+        address2: addr.line2,
+        province: addr.province,
+        phone: addr.phone,
       });
       if (!res.ok) {
         setError(res.error);
@@ -186,7 +193,10 @@ export default function RequestDeliveryModal({
         </h2>
         <p className="mt-1 text-[13px] text-white/55">
           Ship {items.length} card{items.length === 1 ? '' : 's'} to your
-          address. The shipping fee is deducted from your credit balance.
+          address.{' '}
+          {paidItems.length > 0
+            ? 'The shipping fee is deducted from your credit balance.'
+            : 'Reward cards ship free.'}
         </p>
 
         {/* Selected cards. overflow-x-auto clips the halo on all four sides
