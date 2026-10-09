@@ -217,6 +217,9 @@ medusaIntegrationTestRunner({
         expect(b.groups).toEqual([]); // the empty side of A's populated groups
         expect(b.wallet_balance).toBe(0);
         expect(b.total_spend).toBe(0);
+        expect(b.total_topup).toBe(0);
+        expect(b.total_withdrawn).toBe(0);
+        expect(b.total_contribution).toBe(0);
         expect(b.total_pulls).toBe(0);
         expect(b.vault_count).toBe(0);
         expect(b.vault_value).toBe(0);
@@ -238,6 +241,36 @@ medusaIntegrationTestRunner({
         expect(b.wallet_balance).toBe(25);
         expect(b.total_spend).toBe(0);
         expect(b.last_spend_at).toBeNull();
+      });
+
+      // Contribution = top-ups − withdrawals. A refunded withdrawal is a +cashout
+      // row (gateway-withdrawal.ts), so it nets back out of the withdrawn total.
+      it('totals top-ups and withdrawals, and their difference', async () => {
+        await packsService().createCreditTransactions([
+          { customer_id: aId, amount: -40, reason: 'cashout' },
+          { customer_id: aId, amount: -15, reason: 'cashout' },
+          { customer_id: aId, amount: 15, reason: 'cashout' },
+        ]);
+
+        const a = rowFor(await list(), aId);
+        expect(a.total_topup).toBe(100);
+        expect(a.total_withdrawn).toBe(40);
+        expect(a.total_contribution).toBe(60);
+      });
+
+      // Taken out more than put in (a big win cashed out): the contribution goes
+      // negative, which the list colours red.
+      it('a player who withdrew more than they topped up reads negative', async () => {
+        await packsService().createCreditTransactions([
+          { customer_id: bId, amount: 50, reason: 'topup' },
+          { customer_id: bId, amount: 400, reason: 'buyback' },
+          { customer_id: bId, amount: -230, reason: 'cashout' },
+        ]);
+
+        const b = rowFor(await list(), bId);
+        expect(b.total_topup).toBe(50);
+        expect(b.total_withdrawn).toBe(230);
+        expect(b.total_contribution).toBe(-180);
       });
 
       it('?q= narrows to the matching customer', async () => {

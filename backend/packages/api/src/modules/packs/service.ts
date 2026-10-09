@@ -7713,6 +7713,11 @@ class PacksModuleService extends MedusaService({
         // calls vip_spend_cents (NOT its differently-defined spend_cents).
         vipSpendCents: number;
         lastSpendAt: string | null;
+        // Lifetime cash in and out, the Finance player report's buckets
+        // (ledgerTotals' topups and cashout): Σ topup, and Σ cashout negated
+        // so a withdrawal reads positive (a refunded one nets back out).
+        topupCents: number;
+        withdrawnCents: number;
       }
     >();
     const vault = new Map<string, { count: number; cents: number }>();
@@ -7747,11 +7752,15 @@ class PacksModuleService extends MedusaService({
         balance_cents: string;
         vip_spend_cents: string;
         last_spend_at: string | null;
+        topup_cents: string;
+        withdrawn_cents: string;
       }[]
     >(
       'SELECT customer_id, ' +
         '  COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
         `  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -${normalSenSql()} ELSE 0 END), 0)::bigint AS vip_spend_cents, ` +
+        `  COALESCE(SUM(CASE WHEN reason = 'topup' THEN ${normalSenSql()} ELSE 0 END), 0)::bigint AS topup_cents, ` +
+        `  COALESCE(SUM(CASE WHEN reason = 'cashout' THEN -${normalSenSql()} ELSE 0 END), 0)::bigint AS withdrawn_cents, ` +
         "  MAX(created_at) FILTER (WHERE reason = 'pack_open') AS last_spend_at " +
         `FROM credit_transaction WHERE customer_id IN (${ph}) AND deleted_at IS NULL GROUP BY customer_id`,
       ids,
@@ -7794,6 +7803,8 @@ class PacksModuleService extends MedusaService({
         balanceCents: Number(r.balance_cents),
         vipSpendCents: Number(r.vip_spend_cents),
         lastSpendAt: r.last_spend_at,
+        topupCents: Number(r.topup_cents),
+        withdrawnCents: Number(r.withdrawn_cents),
       });
     for (const r of vaults)
       vault.set(r.customer_id, { count: Number(r.n), cents: Number(r.cents) });
