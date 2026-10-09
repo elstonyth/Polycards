@@ -7734,7 +7734,8 @@ class PacksModuleService extends MedusaService({
       'SELECT customer_id, ' +
         '  COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
         `  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -${normalSenSql()} ELSE 0 END), 0)::bigint AS vip_spend_cents, ` +
-        `  COALESCE(SUM(CASE WHEN reason = 'topup' THEN ${normalSenSql()} ELSE 0 END), 0)::bigint AS topup_cents, ` +
+        // Positive rows only, as creditSummary's topupTotal counts them.
+        `  COALESCE(SUM(CASE WHEN reason = 'topup' AND amount > 0 THEN ${normalSenSql()} ELSE 0 END), 0)::bigint AS topup_cents, ` +
         `  COALESCE(SUM(CASE WHEN reason = 'cashout' THEN -${normalSenSql()} ELSE 0 END), 0)::bigint AS withdrawn_cents, ` +
         "  MAX(created_at) FILTER (WHERE reason = 'pack_open') AS last_spend_at " +
         `FROM credit_transaction WHERE customer_id IN (${ph}) AND deleted_at IS NULL GROUP BY customer_id`,
