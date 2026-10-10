@@ -211,7 +211,8 @@ export async function computePackListBody(req: MedusaRequest) {
         display_image: p.display_image ?? null,
         buyback_percent: p.buyback_percent,
         boost: p.boost,
-        // The storefront sold-out badge (display only: opening is not blocked).
+        // false = sold out: still listed on the storefront, paid opens refused
+        // (vault gifts and free rips already given still open).
         in_stock: p.in_stock,
         // Normalized (see above) — the editor seeds inputs with
         // String(tiers[r]), so a raw storage null would render as "null".

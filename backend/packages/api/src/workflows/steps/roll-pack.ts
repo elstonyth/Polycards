@@ -178,9 +178,21 @@ export async function drawFromData(
   };
 }
 
-// rollOne — convenience wrapper: fetch pack data + draw once.
-// Single-open (rollPackStep) uses this so its behavior stays byte-identical to
-// before the refactor — same validations, same draw algorithm, same errors.
+// Sold out (in_stock=false): the pack stays listed but PAID opens are refused.
+// Checked by the paid-open steps only, not by fetchPackData/rollOne, so what a
+// customer already holds still opens: a task free rip (rollOne) and a batch
+// made only of vault gifts (rollBatch). Runs before the charge step, so a
+// refusal has nothing to compensate.
+export function assertInStock(pack: PackData['pack']): void {
+  if (pack.in_stock === false)
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      `Pack '${pack.slug}' is sold out.`,
+    );
+}
+
+// rollOne — convenience wrapper: fetch pack data + draw once. Used by the task
+// free-rip claims (no sold-out check — see assertInStock).
 // Batch callers should call fetchPackData once, then drawFromData N times.
 export async function rollOne(
   packs: PacksModuleService,
@@ -202,7 +214,9 @@ export const rollPackStep = createStep(
     // Odds set comes from the customer's group, resolved server-side — never
     // from the request. Anonymous/ungrouped → set 1 (handled by the resolver).
     const set = await resolveOddsSetForCustomer(container, input.customer_id);
-    return new StepResponse(await rollOne(packs, input.pack_id, set));
+    const d = await fetchPackData(packs, input.pack_id, set);
+    assertInStock(d.pack);
+    return new StepResponse(await drawFromData(packs, d.odds, d.totalWeight));
   },
 );
 

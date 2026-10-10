@@ -34,6 +34,7 @@ type PackSnapshot = {
   boost: boolean;
   rank: number;
   status: 'active' | 'draft';
+  in_stock: boolean;
   // STORAGE shapes (full-key, null = unset), not the public sparse shapes:
   // compensation writes these back through the same json-merging update, so a
   // sparse snapshot could fail to revert keys the failed write had set.
@@ -84,6 +85,7 @@ export const updatePackInvoke = async (
     boost: pack.boost,
     rank: pack.rank,
     status: pack.status,
+    in_stock: pack.in_stock,
     // Normalize → fill: pre-fix rows may hold SPARSE maps, and replaying a
     // sparse snapshot through the merging update could leave keys from the
     // write being rolled back. Null (inherit / not set) passes through.
@@ -115,6 +117,7 @@ export const updatePackInvoke = async (
     boost: input.boost,
     rank: input.rank,
     status: input.status,
+    ...(input.in_stock !== undefined ? { in_stock: input.in_stock } : {}),
     // undefined = the writer didn't send the field — keep the stored value
     // (the list-page edit modal doesn't know about published odds; an older
     // admin bundle doesn't know about display_image).

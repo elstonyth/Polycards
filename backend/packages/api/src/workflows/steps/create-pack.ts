@@ -81,6 +81,10 @@ export type PackWriteInput = {
   boost: boolean;
   rank: number;
   status: 'active' | 'draft';
+  // false = SOLD OUT: an active pack stays listed (greyed "Sold out" tile) but
+  // paid opens are refused (roll-pack). The admin shows it as a third status.
+  // undefined = leave as-is, so an older admin bundle can't flip it.
+  in_stock?: boolean;
   // undefined = leave as-is (writers that don't send the field, e.g. the
   // list-page edit modal, must not clear it); null = explicit clear.
   published_odds?: PublishedOdds | null;
@@ -136,6 +140,7 @@ export const createPackInvoke = async (
       boost: input.boost,
       rank: input.rank,
       status: input.status,
+      ...(input.in_stock !== undefined ? { in_stock: input.in_stock } : {}),
       // Full-key shapes from birth (see fillPublishedTiers/fillTierRanges):
       // an insert has no merge hazard itself, but a sparse stored map makes
       // every LATER update/rollback merge-prone — store only null or the
