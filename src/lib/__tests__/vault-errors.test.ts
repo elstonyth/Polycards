@@ -22,7 +22,7 @@ describe('VAULT_RULES backend-message contract', () => {
     const refusal =
       'We could not start your top-up. Please try a different amount or payment method.';
     expect(map(refusal)).toBe(
-      'The payment gateway could not start this top-up. Please try again in a moment.',
+      'The payment gateway could not start this top-up, and nothing was charged. Please try a different amount, or try again later.',
     );
     // The precise regression: it must NOT fall through to the amount rule,
     // which is what a re-sort of the table would reintroduce.

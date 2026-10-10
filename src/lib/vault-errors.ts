@@ -118,9 +118,13 @@ export const VAULT_RULES: ErrorRule[] = [
   // tiles are sitting directly above this error anyway. Generic wording also
   // keeps it correct for the mock top-up path, whose own "could not start your
   // top-up" message reaches the same table with no picker at all.
+  //
+  // "nothing was charged" because a refused create takes no money, and the
+  // customer's first worry is a double charge. No "in a moment": a method the
+  // gateway has not enabled refuses every retry (The 7 Pay, 2026-10-10).
   [
     /could not start your top-up/i,
-    'The payment gateway could not start this top-up. Please try again in a moment.',
+    'The payment gateway could not start this top-up, and nothing was charged. Please try a different amount, or try again later.',
   ],
   [/amount/i, 'Enter a valid amount (up to RM 10,000, whole cents).'],
   [/already sold/i, 'This card was already sold back.'],

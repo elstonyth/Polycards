@@ -15,11 +15,12 @@ import {
   rowGateway,
   submitWithdrawal,
   GatewayError,
+  TGPAY_PAYOUT_DISABLED,
   TGPAY_PAYOUT_FLOAT_EMPTY,
   type GatewayConfig,
   type PaymentGateway,
 } from './gateway';
-import { alertPayoutFloatEmpty } from './ops-alert';
+import { alertPayoutDisabled, alertPayoutFloatEmpty } from './ops-alert';
 import { contactIfNeeded } from '../../api/utils/customer-contact';
 import { newMerchantTransactionId } from './gateway-deposit';
 import { gatewayEnv, gatewayEnvName } from './gateway-env';
@@ -774,17 +775,24 @@ export async function startWithdrawal(
       // and retrying cannot help until ops tops it up. On 2026-09-29 the copy
       // below sent one customer through nine attempts and three bank accounts
       // or name spellings. Not awaited: the answer must not wait on Telegram.
-      if (error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) {
+      // Payouts switched off at the gateway (TGPAY_PAYOUT_DISABLED) is the
+      // same situation for the customer, so it shares the breaker and copy;
+      // only the ops alert names the different fix.
+      const payoutDisabled = error.has(TGPAY_PAYOUT_DISABLED);
+      if (payoutDisabled || error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) {
         payoutFloatEmptyUntil.set(
           gateway,
           Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
         );
-        void alertPayoutFloatEmpty(scope, {
-          amount,
-          ref: merchantTransactionId,
-          via: 'customer withdrawal',
-          gateway: GATEWAYS[gateway].label,
-        });
+        void (payoutDisabled ? alertPayoutDisabled : alertPayoutFloatEmpty)(
+          scope,
+          {
+            amount,
+            ref: merchantTransactionId,
+            via: 'customer withdrawal',
+            gateway: GATEWAYS[gateway].label,
+          },
+        );
         throw new MedusaError(
           MedusaError.Types.NOT_ALLOWED,
           'Withdrawals are temporarily unavailable on our side and your balance has been returned. Your bank details are fine — there is no need to change them. Please try again later.',
@@ -1481,6 +1489,23 @@ export async function submitHeldWithdrawal(
       }
       // Same cause and same handling as startWithdrawal's branch: the refund
       // above is untouched, only the words and the ops alert differ.
+      if (error.has(TGPAY_PAYOUT_DISABLED)) {
+        payoutFloatEmptyUntil.set(
+          gatewayId,
+          Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
+        );
+        const label = GATEWAYS[gatewayId].label;
+        void alertPayoutDisabled(scope, {
+          amount,
+          ref: row.merchant_transaction_id,
+          via: 'admin approve',
+          gateway: label,
+        });
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `${label} refused this payout because payouts are not enabled on our ${label} account ("Payout not available"). The debit has been refunded and the withdrawal closed. Ask ${label} to enable payouts, or switch back to a gateway that pays out, then ask the customer to request the withdrawal again.`,
+        );
+      }
       if (error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) {
         payoutFloatEmptyUntil.set(
           gatewayId,

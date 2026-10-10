@@ -122,6 +122,29 @@ export function alertPayoutFloatEmpty(
 }
 
 /**
+ * Tell ops that a TGPay-platform gateway refused a payout because payouts are
+ * not switched on for our account there (TGPAY_PAYOUT_DISABLED, The 7 Pay's
+ * 501 "Payout not available in production yet"). Same contract as
+ * alertPayoutFloatEmpty: never throws, our reference and amount only.
+ */
+export function alertPayoutDisabled(
+  scope: Scope,
+  detail: { amount: number; ref: string; via: string; gateway: string },
+): Promise<void> {
+  return alertOps(
+    scope,
+    `payout-disabled:${detail.gateway}`,
+    `${detail.gateway} payouts are not enabled on our account: payouts are ` +
+      `being refused with "Payout not available". Latest: RM ${detail.amount} ` +
+      `(${detail.ref}, ${detail.via}), refunded to the customer. Every payout ` +
+      `fails until ${detail.gateway} enables payouts, or until the active ` +
+      `gateway is switched back. Repeats muted for ` +
+      `${PAYOUT_FLOAT_ALERT_EVERY_MS / 60_000} min.`,
+    { muteMs: PAYOUT_FLOAT_ALERT_EVERY_MS },
+  );
+}
+
+/**
  * Post an operator alert under `tag`. With `muteMs`, at most one per tag per
  * window (for conditions that repeat per request); without it, every call
  * sends (for rare, must-see events such as TGPay paying a payout we already
