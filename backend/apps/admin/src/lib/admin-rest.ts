@@ -15,13 +15,20 @@ declare const __BACKEND_URL__: string;
 // are indistinguishable, and the operator reads a 500 as a deleted record.
 async function httpError(res: Response): Promise<Error> {
   let message: string;
+  let data: unknown;
   try {
-    const data = await res.json();
-    message = (data && data.message) || `Request failed (${res.status}).`;
+    data = await res.json();
+    const text = (data as { message?: unknown } | null)?.message;
+    message =
+      typeof text === 'string' && text
+        ? text
+        : `Request failed (${res.status}).`;
   } catch {
     message = `Request failed (${res.status}).`;
   }
-  return Object.assign(new Error(message), { status: res.status });
+  // `data` rides along for routes whose refusal carries more than a message
+  // (the gateway switch's live-check problems and its can_force flag).
+  return Object.assign(new Error(message), { status: res.status, data });
 }
 
 /** The HTTP status a rejected admin-rest call failed with, or undefined when
@@ -622,7 +629,31 @@ export interface PaymentGatewaySetting {
   setting: string | null;
   env_default: PaymentGatewayId;
   gateways: { id: PaymentGatewayId; label: string; configured: boolean }[];
+  /** After a switch: non-blocking findings from the live check (e.g. an
+   *  empty payout wallet). */
+  warnings?: string[];
 }
+
+/** The switch was refused by the live check; `problems` say why, and the
+ *  operator may resend with `force: true` ("Switch anyway"). */
+export type GatewayPreflightRefusal = {
+  type: 'gateway_preflight_failed';
+  problems: string[];
+  warnings: string[];
+  can_force: true;
+};
+
+export const gatewayPreflightRefusal = (
+  err: unknown,
+): GatewayPreflightRefusal | null => {
+  const data = (err as { data?: unknown } | null)?.data as
+    | Partial<GatewayPreflightRefusal>
+    | undefined;
+  return data?.type === 'gateway_preflight_failed' &&
+    Array.isArray(data.problems)
+    ? (data as GatewayPreflightRefusal)
+    : null;
+};
 
 export async function getPaymentGateway(): Promise<PaymentGatewaySetting> {
   return getJson<PaymentGatewaySetting>('/admin/payments/gateway');
@@ -631,6 +662,8 @@ export async function getPaymentGateway(): Promise<PaymentGatewaySetting> {
 export async function savePaymentGateway(input: {
   gateway: PaymentGatewayId;
   reason: string;
+  /** Switch even though the live check found problems. */
+  force?: boolean;
 }): Promise<PaymentGatewaySetting> {
   return postJson<PaymentGatewaySetting>('/admin/payments/gateway', input);
 }
