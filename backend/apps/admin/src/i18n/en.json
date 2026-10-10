@@ -688,7 +688,7 @@
   },
   "statsBoard": {
     "title": "Stats",
-    "subtitle": "Sign-ups and top-ups · {{current}} MYT · vs {{previous}}",
+    "subtitle": "Sign-ups, top-ups and withdrawals · {{current}} MYT · vs {{previous}}",
     "ranges": {
       "today": "Today",
       "yesterday": "Yesterday",
@@ -707,6 +707,8 @@
     "topup_amount": "Top-up amount",
     "first_topup_count": "First-time top-ups",
     "first_topup_amount": "First top-up amount",
+    "withdrawal_count": "Withdrawals",
+    "withdrawal_amount": "Withdrawal amount",
     "vsPrevious": "vs previous",
     "previous": "Previous: {{value}}",
     "loadError": "Could not load the stats."

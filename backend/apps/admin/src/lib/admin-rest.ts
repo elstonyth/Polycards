@@ -455,7 +455,7 @@ export type StatsRange =
   | 'last_month'
   | 'custom';
 
-export interface SignupTopupStats {
+export interface StatsFigures {
   signups: number;
   topup_count: number;
   topup_customers: number;
@@ -464,13 +464,16 @@ export interface SignupTopupStats {
   first_topup_count: number;
   /** MYR. */
   first_topup_amount: number;
+  withdrawal_count: number;
+  /** MYR. */
+  withdrawal_amount: number;
 }
 
 export interface StatsReport {
   as_of: string;
   /** ISO instants; windows are half-open [from, to). */
-  current: { from: string; to: string; stats: SignupTopupStats };
-  previous: { from: string; to: string; stats: SignupTopupStats };
+  current: { from: string; to: string; stats: StatsFigures };
+  previous: { from: string; to: string; stats: StatsFigures };
 }
 
 // `from`/`to` are inclusive MYT days (YYYY-MM-DD), sent only for 'custom'.
@@ -552,7 +555,7 @@ export async function getGatewayBalance(): Promise<GatewayBalance> {
 // ── Payment gateways (plan 130) ─────────────────────────────────────────────
 
 /** Mirrors the backend's PaymentGateway union — the gateways the switch can pick. */
-export type PaymentGatewayId = 'tgpay';
+export type PaymentGatewayId = 'tgpay' | 'the7pay';
 /** A gateway a ROW may name: a live one, or a retired one ('globepay') whose
  *  settled rows are still history on the audit panel. */
 export type HistoricalGatewayId = PaymentGatewayId | (string & {});

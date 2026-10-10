@@ -4,7 +4,7 @@ import { Button, Container, Heading, Input, Text } from "@medusajs/ui";
 import { ChartBar } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import { useStats } from "../../lib/queries";
-import type { SignupTopupStats, StatsRange } from "../../lib/admin-rest";
+import type { StatsFigures, StatsRange } from "../../lib/admin-rest";
 import { rm } from "../../lib/format";
 import { LoadingSkeleton } from "../../components/LoadingSkeleton";
 
@@ -26,14 +26,21 @@ const RANGES: StatsRange[] = [
   "custom",
 ];
 
-// Card order. Money cards read RM; the rest are counts.
-const CARDS: { key: keyof SignupTopupStats; money?: boolean }[] = [
+// Card order. Money cards read RM; the rest are counts. Outflow cards are
+// money leaving, so a rise is coloured as the bad direction.
+const CARDS: {
+  key: keyof StatsFigures;
+  money?: boolean;
+  outflow?: boolean;
+}[] = [
   { key: "signups" },
   { key: "topup_customers" },
   { key: "topup_count" },
   { key: "topup_amount", money: true },
   { key: "first_topup_count" },
   { key: "first_topup_amount", money: true },
+  { key: "withdrawal_count", outflow: true },
+  { key: "withdrawal_amount", money: true, outflow: true },
 ];
 
 // The backend's windows are MYT (fixed UTC+8). Shift, then read the UTC
@@ -122,8 +129,8 @@ const StatsPage = () => {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-px border-t bg-ui-border-base md:grid-cols-3">
-          {CARDS.map(({ key, money }) => {
+        <div className="grid grid-cols-2 gap-px border-t bg-ui-border-base md:grid-cols-4">
+          {CARDS.map(({ key, money, outflow }) => {
             const cur = data.current.stats[key];
             const prev = data.previous.stats[key];
             const fmt = (n: number) =>
@@ -133,7 +140,7 @@ const StatsPage = () => {
             const tone =
               pct === null || pct === 0
                 ? "text-ui-fg-subtle"
-                : pct > 0
+                : (outflow ? pct < 0 : pct > 0)
                   ? "text-ui-tag-green-text"
                   : "text-ui-fg-error";
             const arrow =

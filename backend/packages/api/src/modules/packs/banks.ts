@@ -1,4 +1,5 @@
 import type { PaymentGateway } from './gateway';
+import { isTgpayKind, tgpayEnvName } from './tgpay-client';
 
 // Gateway-neutral bank registry (plan 130 §bank preservation).
 //
@@ -17,7 +18,7 @@ import type { PaymentGateway } from './gateway';
 // customer never re-enters a bank because the gateway changed.
 //
 // Sources: TGPay "Malaysia bank SWIFT codes (payout)" (sandbox docs,
-// 2026-09-05); the GlobePay365 GetSupportedBanks list as fetched 2026-09-05
+// 2026-09-05; Touch 'n Go added from the production docs 2026-10-09); the GlobePay365 GetSupportedBanks list as fetched 2026-09-05
 // (aliases only).
 
 export type GatewayBankCode = { code: string; name: string };
@@ -31,6 +32,13 @@ export type Bank = {
   codes: Partial<Record<PaymentGateway, GatewayBankCode>>;
   /** Codes of retired gateways that older rows may still carry. */
   legacyAliases: readonly string[];
+  /**
+   * This destination's own payout floor, RM, on top of the gateway's band.
+   * Touch 'n Go: TGPay refused every TNG payout under ~RM 70 on 2026-10-09
+   * ("No payout provider is available for this order") while paying RM 313,
+   * so the floor is RM 100 until TGPay states the real limit.
+   */
+  payoutMinRm?: number;
 };
 
 const bank = (
@@ -41,10 +49,12 @@ const bank = (
 ): Bank => ({
   id,
   name,
-  // The test-only 'fake' gateway (fake-gateway.ts) pays to exactly what TGPay
-  // pays to, so a spec that selects it takes the SAME supported/unsupported
-  // branches as production instead of finding every saved account unpayable.
-  codes: tgpay ? { tgpay, fake: tgpay } : {},
+  // The 7 Pay is a white-label of TGPay's platform and publishes the same
+  // SWIFT table (docs/payments/the7pay-api.md). The test-only 'fake' gateway
+  // (fake-gateway.ts) pays to exactly what TGPay pays to, so a spec that
+  // selects it takes the SAME supported/unsupported branches as production
+  // instead of finding every saved account unpayable.
+  codes: tgpay ? { tgpay, the7pay: tgpay, fake: tgpay } : {},
   legacyAliases: legacy ? [legacy.code] : [],
 });
 
@@ -68,6 +78,10 @@ export const MY_BANKS: readonly Bank[] = [
   bank('PBBEMYKL', 'Public Bank', { code: 'MYPUBB', name: 'Public Bank Berhad' }, { code: 'PBBEMYKL', name: 'Public Bank Berhad' }),
   bank('RHBBMYKL', 'RHB Bank', { code: 'MYRHBB', name: 'RHB Bank Berhad' }, { code: 'RHBBMYKL', name: 'RHB Bank Berhad' }),
   bank('SCBLMYKX', 'Standard Chartered', { code: 'MYSTCB', name: 'Standard Chartered Bank' }, { code: 'SCBLMYKX', name: 'Standard Chartered Bank (Malaysia) Berhad' }),
+  // Touch 'n Go eWallet keeps its slug id (saved accounts already carry it);
+  // TGPay added a payout code for it after this table was first copied
+  // (their payout-bank page, checked 2026-10-09).
+  { ...bank('TNGMY', "Touch 'n Go eWallet", { code: 'MYTNGO', name: 'Touch N Go' }, { code: 'TNGDRMYKL', name: "Touch 'n Go" }), payoutMinRm: 100 },
   bank('UOVBMYKL', 'UOB', { code: 'MYUOBB', name: 'United Overseas Bank' }, { code: 'UOVBMYKL', name: 'United Overseas Bank (Malaysia) Berhad' }),
   // No TGPay payout code today (e-wallets, digital and foreign banks): kept so
   // a saved account under one still resolves and reads as "not available with
@@ -83,11 +97,11 @@ export const MY_BANKS: readonly Bank[] = [
   bank('JPMMY', 'JP Morgan', { code: 'MYCHAS', name: 'JP Morgan' }, null),
   bank('GXBANKMY', 'GX Bank', { code: 'MYGXSP', name: 'GX Bank Berhad' }, null),
   bank('MTRADEMY', 'Merchant Trade', { code: 'MYMSSH', name: 'Merchant Trade' }, null),
-  bank('TNGMY', "Touch 'n Go eWallet", { code: 'MYTNGO', name: 'Touch N Go' }, null),
   bank('RYTMY', 'Ryt Bank', { code: 'SCCH', name: 'Ryt Bank' }, null),
 ];
 
-/** TGPay's sandbox accepts only this pair; it is a bank nowhere else. */
+/** The TGPay platform's sandbox (TGPay, The 7 Pay) accepts only this pair; it
+ *  is a bank nowhere else. */
 export const TGPAY_SANDBOX_BANK: Bank = bank(
   'DUMMYBANKVERIFIED',
   'Dummy Bank Verified (sandbox)',
@@ -96,18 +110,21 @@ export const TGPAY_SANDBOX_BANK: Bank = bank(
 );
 
 /**
- * The dummy bank is a payable destination only while TGPay's SANDBOX is the
- * configured base — on production it is a name nothing can pay to, so the
+ * The dummy bank is a payable destination only while `gateway`'s SANDBOX is
+ * its configured base — on production it is a name nothing can pay to, so the
  * picker, the saved-account writer and the withdrawal precheck all refuse it
- * there (the adapter refuses it too, but that is after the debit).
+ * there (the adapter refuses it too, but that is after the debit). A gateway
+ * outside the TGPay family (the test-only fake) is judged by TGPay's base.
  */
 export function sandboxOnlyBank(
   alias: string,
-  env: { TGPAY_API_BASE?: string } = process.env,
+  env: Partial<Record<string, string>> = process.env,
+  gateway: PaymentGateway = 'tgpay',
 ): boolean {
+  const base = env[tgpayEnvName(isTgpayKind(gateway) ? gateway : 'tgpay', 'API_BASE')];
   return (
     findBank(alias)?.id === TGPAY_SANDBOX_BANK.id &&
-    !/sandbox/i.test(env.TGPAY_API_BASE ?? '')
+    !/sandbox/i.test(base ?? '')
   );
 }
 
@@ -122,6 +139,11 @@ for (const b of [...MY_BANKS, TGPAY_SANDBOX_BANK]) {
 export function findBank(alias: string | null | undefined): Bank | null {
   if (typeof alias !== 'string') return null;
   return byAlias.get(alias.trim().toUpperCase()) ?? null;
+}
+
+/** The bank's own payout floor (RM), or null when only the gateway's applies. */
+export function bankPayoutMinRm(alias: string | null | undefined): number | null {
+  return findBank(alias)?.payoutMinRm ?? null;
 }
 
 /** Canonical id for any alias, or null if the bank is unknown. */
@@ -150,7 +172,7 @@ export function banksFor(
     bankCode: b.id,
     bankName: b.name,
   }));
-  if (gateway === 'tgpay' && options.sandbox) {
+  if (isTgpayKind(gateway) && options.sandbox) {
     list.unshift({
       bankCode: TGPAY_SANDBOX_BANK.id,
       bankName: TGPAY_SANDBOX_BANK.name,

@@ -1,4 +1,8 @@
-import { tgpayCallbackIpVerdict } from '../../modules/packs/tgpay-client';
+import {
+  tgpayCallbackIpVerdict,
+  tgpayEnvName,
+  type TgpayKind,
+} from '../../modules/packs/tgpay-client';
 // The IP a money route reports to the gateway as the payer IP.
 //
 // THEIR requirement is the paying customer's IP, not ours. req.ip FIRST:
@@ -76,15 +80,18 @@ export function callbackSourceIp(req: {
 }
 
 /**
- * Express middleware for `/hooks/tgpay/*`: TGPay's source allowlist, applied
- * once for every TGPay callback route so the two hooks cannot drift. Runs
+ * Express middleware for `/hooks/<gateway>/*` on TGPay's platform: that
+ * gateway's source allowlist (<PREFIX>_CALLBACK_IPS), applied once for every
+ * callback route of that gateway so its two hooks cannot drift. Runs
  * after the hook rate limiter (keyed on the same source address, so a flood
  * from a foreign address is throttled before it is even judged) and before
  * any handler work. A
  * refusal is a constant 403 body plus one log line naming the address and
  * the reason — never a header or a key.
  */
-export function createTgpayCallbackAllowlist(): (
+export function createTgpayCallbackAllowlist(
+  kind: TgpayKind = 'tgpay',
+): (
   req: {
     ip?: string;
     headers?: Record<string, string | string[] | undefined>;
@@ -94,26 +101,27 @@ export function createTgpayCallbackAllowlist(): (
   res: { status: (code: number) => { send: (body: string) => unknown } },
   next: () => void,
 ) => void {
+  const listName = tgpayEnvName(kind, 'CALLBACK_IPS');
   return (req, res, next) => {
     const sourceIp = callbackSourceIp(req);
-    const verdict = tgpayCallbackIpVerdict(sourceIp);
+    const verdict = tgpayCallbackIpVerdict(sourceIp, process.env, kind);
     if (verdict.allowed) {
       // One line per accepted callback: this is how the first production
       // callback proves which address the ingress really reports.
       req.scope
         .resolve<{ info: (m: string) => void }>('logger')
-        .info(`[tgpay] callback from ${sourceIp || 'unknown'} accepted`);
+        .info(`[${kind}] callback from ${sourceIp || 'unknown'} accepted`);
       next();
       return;
     }
     req.scope
       .resolve<{ warn: (m: string) => void }>('logger')
       .warn(
-        `[tgpay] rejected callback from ${sourceIp || 'unknown'}: ${verdict.reason}` +
+        `[${kind}] rejected callback from ${sourceIp || 'unknown'}: ${verdict.reason}` +
           (verdict.reason === 'unset-in-production'
-            ? ' — TGPAY_CALLBACK_IPS is not set; refusing outside the sandbox'
+            ? ` — ${listName} is not set; refusing outside the sandbox`
             : verdict.reason === 'unparseable'
-              ? ' — TGPAY_CALLBACK_IPS has no valid entries'
+              ? ` — ${listName} has no valid entries`
               : ''),
       );
     res.status(403).send('rejected');

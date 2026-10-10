@@ -2,14 +2,19 @@ import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
-import { STATS_RANGES, statsWindows } from '../../../modules/packs/stats';
+import {
+  STATS_RANGES,
+  statsWindows,
+  type StatsWindow,
+} from '../../../modules/packs/stats';
 
 const str = (v: unknown): string | undefined =>
   typeof v === 'string' ? v : undefined;
 
-// GET /admin/stats: sign-ups and top-ups for one MYT window, next to the same
-// figures for the window before it (the Stats page's "vs previous"). Reads
-// only. The window math is pure and unit-tested in modules/packs/stats.ts.
+// GET /admin/stats: sign-ups, top-ups and withdrawals for one MYT window, next
+// to the same figures for the window before it (the Stats page's "vs
+// previous"). Reads only. The window math is pure and unit-tested in
+// modules/packs/stats.ts.
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
@@ -29,9 +34,14 @@ export async function GET(
   }
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  const figures = ({ from, to }: StatsWindow) =>
+    Promise.all([
+      packs.signupTopupStats(from, to),
+      packs.withdrawalStats(from, to),
+    ]).then(([inflow, outflow]) => ({ ...inflow, ...outflow }));
   const [current, previous] = await Promise.all([
-    packs.signupTopupStats(windows.current.from, windows.current.to),
-    packs.signupTopupStats(windows.previous.from, windows.previous.to),
+    figures(windows.current),
+    figures(windows.previous),
   ]);
   // Dates serialize to ISO strings.
   res.json({
