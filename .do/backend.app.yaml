@@ -471,10 +471,13 @@ envs:
   # The 7 Pay — the BACKUP gateway (docs/payments/the7pay-api.md), a
   # white-label of TGPay's platform. STANDBY: configured so the Settlement
   # page can switch to it, while PAYMENT_GATEWAY and the admin setting stay
-  # tgpay. Do not switch until (1) check-tgpay.ts the7pay passes from inside
-  # DO — their API is IP-allowlisted per tenant, and 7Pay must whitelist our
-  # egress 188.166.181.61 / 188.166.181.204 — and (2) THE7PAY_CALLBACK_IPS is
-  # set: outside the sandbox the 7Pay hooks refuse every callback without it.
+  # tgpay. Do not switch until check-tgpay.ts the7pay passes from inside DO —
+  # their API is IP-allowlisted per tenant; 7Pay reported our egress
+  # 188.166.181.61 / 188.166.181.204 whitelisted on 2026-10-10, but the
+  # preflight has not run yet. THE7PAY_CALLBACK_IPS is the callback source
+  # 7Pay gave on 2026-10-10 (the same host is in TGPAY_CALLBACK_IPS — shared
+  # platform). Outside the sandbox the 7Pay hooks refuse every callback
+  # without it.
   # Keys from admin.the7pay.com → Platform → Settings → API keys (2FA).
   - key: THE7PAY_API_BASE
     scope: RUN_TIME
@@ -487,6 +490,9 @@ envs:
     scope: RUN_TIME
     type: SECRET
     value: "__SECRET__THE7PAY_SECRET_KEY__"
+  - key: THE7PAY_CALLBACK_IPS
+    scope: RUN_TIME
+    value: 54.251.58.7
 
 # Dedicated outbound IPs. DO assigns one per component (the service makes the
 # customer-facing calls, the worker runs the reconciliation sweeps) and
