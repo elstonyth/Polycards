@@ -112,6 +112,8 @@
       "category": "Category",
       "statusField": "Status",
       "active": "Active",
+      "soldOut": "Sold out",
+      "soldOutHint": "Customers still see the pack on the storefront, marked Sold out, but cannot buy it. Vault gifts and free rips already given for it still open.",
       "draft": "Draft",
       "price": "Price (RM)",
       "rank": "Rank (sort order)",

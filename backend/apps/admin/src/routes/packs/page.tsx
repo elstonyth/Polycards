@@ -29,6 +29,13 @@ import {
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { type AdminPack, type AdminPackWrite } from '../../lib/packs-api';
 import {
+  PACK_STATUS_COLOR,
+  PACK_STATUS_LABEL,
+  packStatusOf,
+  packStatusWrite,
+  type PackStatus,
+} from '../../lib/pack-status';
+import {
   useCreatePack,
   useDeletePack,
   usePacks,
@@ -56,7 +63,7 @@ const packSortValue = (p: AdminPack, key: PackSortKey): number | string => {
     case 'category':
       return p.category;
     case 'status':
-      return p.status;
+      return packStatusOf(p);
     case 'group':
       return p.group ?? '';
     case 'rtp':
@@ -120,7 +127,7 @@ type FormState = {
   buybackPercent: string;
   boost: boolean;
   rank: string;
-  status: 'active' | 'draft';
+  status: PackStatus;
 };
 
 const EMPTY_FORM: FormState = {
@@ -149,7 +156,7 @@ const formFromPack = (p: AdminPack): FormState => ({
   buybackPercent: String(p.buyback_percent),
   boost: p.boost,
   rank: String(p.rank),
-  status: p.status,
+  status: packStatusOf(p),
 });
 
 const PacksListPage = () => {
@@ -169,9 +176,7 @@ const PacksListPage = () => {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [deleteTarget, setDeleteTarget] = useState<AdminPack | null>(null);
   const [q, setQ] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'active'>(
-    'all',
-  );
+  const [statusFilter, setStatusFilter] = useState<'all' | PackStatus>('all');
   // Slugs whose per-set EV/RTP detail row is open (see the chevron in the
   // EV / RTP cell). Filtering a row out leaves its entry here — harmless, and
   // it keeps the row open if the operator clears the filter again.
@@ -292,7 +297,7 @@ const PacksListPage = () => {
       buyback_percent: Math.trunc(buybackValue),
       boost: form.boost,
       rank: form.rank.trim() === '' ? 0 : Math.trunc(rankValue),
-      status: form.status,
+      ...packStatusWrite(form.status),
     };
     try {
       if (mode === 'create') {
@@ -345,7 +350,8 @@ const PacksListPage = () => {
 
   const visibleRows = useMemo(() => {
     const filtered = rows.filter((p) => {
-      if (statusFilter !== 'all' && p.status !== statusFilter) return false;
+      if (statusFilter !== 'all' && packStatusOf(p) !== statusFilter)
+        return false;
       const needle = q.trim().toLowerCase();
       return !needle || p.title.toLowerCase().includes(needle);
     });
@@ -502,10 +508,8 @@ const PacksListPage = () => {
                         {p.category}
                       </Table.Cell>
                       <Table.Cell>
-                        <StatusBadge
-                          color={p.status === 'active' ? 'green' : 'grey'}
-                        >
-                          {p.status}
+                        <StatusBadge color={PACK_STATUS_COLOR[packStatusOf(p)]}>
+                          {t(PACK_STATUS_LABEL[packStatusOf(p)])}
                         </StatusBadge>
                       </Table.Cell>
                       <Table.Cell>
@@ -649,7 +653,9 @@ const PacksListPage = () => {
           <Select
             value={statusFilter}
             onValueChange={(v) =>
-              setStatusFilter(v === 'draft' || v === 'active' ? v : 'all')
+              setStatusFilter(
+                v === 'draft' || v === 'active' || v === 'sold_out' ? v : 'all',
+              )
             }
           >
             <Select.Trigger className="w-44" aria-label="Filter by status">
@@ -657,8 +663,13 @@ const PacksListPage = () => {
             </Select.Trigger>
             <Select.Content>
               <Select.Item value="all">All statuses</Select.Item>
-              <Select.Item value="draft">draft</Select.Item>
-              <Select.Item value="active">active</Select.Item>
+              <Select.Item value="draft">{t(PACK_STATUS_LABEL.draft)}</Select.Item>
+              <Select.Item value="active">
+                {t(PACK_STATUS_LABEL.active)}
+              </Select.Item>
+              <Select.Item value="sold_out">
+                {t(PACK_STATUS_LABEL.sold_out)}
+              </Select.Item>
             </Select.Content>
           </Select>
           <Button size="small" variant="primary" onClick={openCreate}>
@@ -930,24 +941,41 @@ const PacksListPage = () => {
                       </Text>
                     </>
                   ) : (
-                    <Select
-                      value={form.status}
-                      onValueChange={(v) =>
-                        patch({ status: v === 'draft' ? 'draft' : 'active' })
-                      }
-                    >
-                      <Select.Trigger id="pack-status">
-                        <Select.Value />
-                      </Select.Trigger>
-                      <Select.Content>
-                        <Select.Item value="active">
-                          {t('packs.form.active')}
-                        </Select.Item>
-                        <Select.Item value="draft">
-                          {t('packs.form.draft')}
-                        </Select.Item>
-                      </Select.Content>
-                    </Select>
+                    <>
+                      <Select
+                        value={form.status}
+                        onValueChange={(v) =>
+                          patch({
+                            status:
+                              v === 'draft' || v === 'sold_out' ? v : 'active',
+                          })
+                        }
+                      >
+                        <Select.Trigger id="pack-status">
+                          <Select.Value />
+                        </Select.Trigger>
+                        <Select.Content>
+                          <Select.Item value="active">
+                            {t('packs.form.active')}
+                          </Select.Item>
+                          {/* The free pack can't be sold out (the server
+                              refuses it): set it to draft instead. */}
+                          {form.category !== FREE_WELCOME_CATEGORY && (
+                            <Select.Item value="sold_out">
+                              {t('packs.form.soldOut')}
+                            </Select.Item>
+                          )}
+                          <Select.Item value="draft">
+                            {t('packs.form.draft')}
+                          </Select.Item>
+                        </Select.Content>
+                      </Select>
+                      {form.status === 'sold_out' && (
+                        <Text className="text-ui-fg-subtle text-xs">
+                          {t('packs.form.soldOutHint')}
+                        </Text>
+                      )}
+                    </>
                   )}
                 </div>
                 <div className="flex flex-col gap-y-2">

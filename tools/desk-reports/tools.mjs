@@ -397,7 +397,7 @@ TOOLS.store = [
   {
     name: 'packs',
     description:
-      "Every pack with the numbers the admin pack list shows: title, category, status, whether it is listed publicly, the sold-out badge (display only: a pack showing it can still be opened), price, buyback %, pool mix (RAW, GRADED or MIX), the published tier odds with their EV and RTP, and the real EV and RTP of odds set 1 (what the DEFAULT group plays) at today's card prices. Amounts in RM (MYR).",
+      "Every pack with the numbers the admin pack list shows: title, category, status, whether it is listed publicly, whether it is sold out (still listed, but paid opens are refused; vault gifts and free rips already given still open), price, buyback %, pool mix (RAW, GRADED or MIX), the published tier odds with their EV and RTP, and the real EV and RTP of odds set 1 (what the DEFAULT group plays) at today's card prices. Amounts in RM (MYR).",
     inputSchema: {},
     request: () => ({ path: 'packs', params: {} }),
   },
@@ -413,7 +413,7 @@ TOOLS.store = [
   {
     name: 'low_stock',
     description:
-      'Cards whose tracked stock on hand is at or below max (default 0; below 0 = units owed to winners): matching_cards and owed (cards and units) count all of them, and cards lists the lowest ones first (limit, default 50), with the active packs that can still draw them, plus the packs showing the sold-out badge. Give the counts, not the length of the list. A card at 0 can still be drawn (buyback covers it). Cards with untracked stock are not listed. Amounts in RM (MYR).',
+      'Cards whose tracked stock on hand is at or below max (default 0; below 0 = units owed to winners): matching_cards and owed (cards and units) count all of them, and cards lists the lowest ones first (limit, default 50), with the active packs that can still draw them, plus the sold-out packs (listed, but paid opens are refused). Give the counts, not the length of the list. A card at 0 can still be drawn (buyback covers it). Cards with untracked stock are not listed. Amounts in RM (MYR).',
     inputSchema: {
       max: z
         .number()

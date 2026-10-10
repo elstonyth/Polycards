@@ -62,6 +62,7 @@ export type PackConfig = {
   title: string;
   category: string;
   status: string;
+  in_stock: boolean;
   price: number;
   buyback_percent: number;
   target_rtp_bps: number;
@@ -78,6 +79,7 @@ type PackLike = {
   title: string;
   category: string;
   status: string;
+  in_stock?: boolean | null;
   price: unknown;
   buyback_percent: number;
   target_rtp_bps?: number | null;
@@ -97,6 +99,7 @@ export function packConfig(p: PackLike): PackConfig {
     title: p.title,
     category: p.category,
     status: p.status,
+    in_stock: p.in_stock ?? true,
     // bigNumber columns can come back as strings.
     price: Number(p.price),
     buyback_percent: p.buyback_percent,

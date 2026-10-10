@@ -115,6 +115,8 @@ const PACKS_RULES: ErrorRule[] = [
     /no odds|invalid odds|prize pool/i,
     "This pack isn't ready yet — check back soon.",
   ],
+  // backend roll-pack assertInStock — refused before any charge.
+  [/sold out/i, 'This pack is sold out.'],
   [/not available|not found|404/i, "This pack isn't available right now."],
 ];
 const PACKS_FALLBACK = 'Could not open the pack. Please try again.';

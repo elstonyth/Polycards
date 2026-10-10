@@ -32,6 +32,6 @@ export async function GET(
       ev: p.ev.s1,
       rtp_pct: p.rtp.s1,
     })),
-    note: "ev and rtp_pct are odds set 1 (what the DEFAULT group plays) at today's card prices; published_ev and published_rtp_pct use the published tier odds. sold_out_badge is a display badge only: a pack showing it can still be opened. pool is the card mix (RAW, GRADED or MIX).",
+    note: "ev and rtp_pct are odds set 1 (what the DEFAULT group plays) at today's card prices; published_ev and published_rtp_pct use the published tier odds. sold_out_badge = sold out: the pack stays listed but paid opens are refused; vault gifts and free rips already given still open. pool is the card mix (RAW, GRADED or MIX).",
   });
 }

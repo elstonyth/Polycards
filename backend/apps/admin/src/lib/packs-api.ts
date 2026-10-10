@@ -28,6 +28,8 @@ export interface AdminPack {
   title: string;
   category: string;
   status: 'active' | 'draft';
+  /** false = sold out (see lib/pack-status.ts). */
+  in_stock: boolean;
   rank: number;
   price: number;
   image: string;
@@ -78,6 +80,8 @@ export interface AdminPackWrite {
   boost: boolean;
   rank: number;
   status: 'active' | 'draft';
+  /** OMITTED = keep the stored value. */
+  in_stock?: boolean;
   published_odds?: PublishedOdds | null;
   /** OMITTED = keep the stored value; null = clear (inherit the global Tier
    *  Defaults); map = pack-specific ranges. */

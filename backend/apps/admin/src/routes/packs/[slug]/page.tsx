@@ -28,6 +28,12 @@ import type {
   PublishedOdds,
 } from '../../../lib/packs-api';
 import {
+  PACK_STATUS_COLOR,
+  PACK_STATUS_LABEL,
+  packStatusOf,
+  packStatusWrite,
+} from '../../../lib/pack-status';
+import {
   DEFAULT_TIER_PCT,
   MIN_PCT,
   RARITIES,
@@ -189,7 +195,9 @@ const PackOddsEditorPage = () => {
     if (!fullPack || updatePack.isPending) return;
     const next = packStatus === 'active' ? 'draft' : 'active';
     try {
-      await updatePack.mutateAsync({ ...fullPack, status: next });
+      // packStatusWrite resets in_stock: a sold-out pack set to draft and
+      // activated again comes back in stock.
+      await updatePack.mutateAsync({ ...fullPack, ...packStatusWrite(next) });
       toast.success(
         next === 'active'
           ? t('packs.editor.activated')
@@ -826,10 +834,16 @@ const PackOddsEditorPage = () => {
           </button>
           <div className="flex items-center gap-2">
             <Heading level="h2">{packTitle || slug}</Heading>
-            {packStatus && (
-              <StatusBadge color={packStatus === 'active' ? 'green' : 'grey'}>
-                {packStatus}
+            {fullPack ? (
+              <StatusBadge color={PACK_STATUS_COLOR[packStatusOf(fullPack)]}>
+                {t(PACK_STATUS_LABEL[packStatusOf(fullPack)])}
               </StatusBadge>
+            ) : (
+              packStatus && (
+                <StatusBadge color={packStatus === 'active' ? 'green' : 'grey'}>
+                  {packStatus}
+                </StatusBadge>
+              )
             )}
           </div>
           <Text className="text-ui-fg-subtle mt-1 max-w-2xl" size="small">
