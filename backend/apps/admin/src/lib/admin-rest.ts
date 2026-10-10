@@ -18,9 +18,11 @@ async function httpError(res: Response): Promise<Error> {
   let data: unknown;
   try {
     data = await res.json();
+    const text = (data as { message?: unknown } | null)?.message;
     message =
-      (data && (data as { message?: string }).message) ||
-      `Request failed (${res.status}).`;
+      typeof text === 'string' && text
+        ? text
+        : `Request failed (${res.status}).`;
   } catch {
     message = `Request failed (${res.status}).`;
   }
