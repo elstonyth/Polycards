@@ -82,6 +82,14 @@ describe('VAULT_RULES backend-message contract', () => {
     expect(map(floatEmpty)).not.toMatch(/check your bank details/i);
   });
 
+  it("passes the Touch 'n Go no-provider refusal through so it can name the bank fallback", () => {
+    // packs/gateway-withdrawal.ts: TGPay refused every TNG payout from
+    // 2026-10-09 17:12 with "No payout provider is available for this order".
+    const tngDown =
+      "Touch 'n Go withdrawals are temporarily unavailable from our payment provider. Your balance has been returned. Please withdraw to a bank account for now.";
+    expect(map(tngDown)).toBe(tngDown);
+  });
+
   it('points an unverified customer at the screen that clears the gate', () => {
     // Action-neutral copy: the same guard fires on topup AND withdrawal
     // (2026-08-05), so the message must not name either one.
