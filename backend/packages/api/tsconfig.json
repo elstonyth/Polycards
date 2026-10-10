@@ -31,6 +31,13 @@
     "node_modules",
     ".medusa/server",
     ".medusa/admin",
-    ".cache"
+    ".cache",
+    // Medusa's policy codegen (@medusajs/utils policy-to-types, still in
+    // 2.21.2) writes resource keys unquoted, so the `*` resource of
+    // src/policies/desk-bots.ts comes out as `readonly *: "*"`, which does
+    // not parse. Nothing here uses these generated types. Both files go:
+    // policy-bindings pulls policy-types in through a /// reference.
+    ".medusa/types/policy-types.d.ts",
+    ".medusa/types/policy-bindings.d.ts"
   ]
 }
