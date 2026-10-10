@@ -769,7 +769,10 @@
     "gatewayReasonPlaceholder": "Required — audit note for this switch",
     "gatewaySave": "Switch gateway",
     "gatewayConfirm": "Switch the active payment gateway to {{label}}? New top-ups and withdrawals will go through it right away.",
-    "gatewayLoadError": "Could not load the payment gateway setting."
+    "gatewayLoadError": "Could not load the payment gateway setting.",
+    "gatewayPreflightTitle": "{{label}} failed the live check",
+    "gatewayPreflightForceHint": "Switching anyway may make top-ups or withdrawals fail until this is fixed. Use it only in an emergency.",
+    "gatewayPreflightForce": "Switch anyway"
   },
   "pipeline": {
     "label": "Inventory pipeline",
