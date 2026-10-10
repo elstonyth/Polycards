@@ -46,7 +46,7 @@
     "@medusajs/medusa": "2.19.0",
     "@mercurjs/cli": "2.3.3",
     "@mercurjs/core": "2.3.3",
-    "@mercurjs/types": "2.3.3",
+    "@mercurjs/types": "2.3.6",
     "express": "4.22.2",
     "http-proxy-middleware": "^3.0.7",
     "ioredis": "^5.4.1",
