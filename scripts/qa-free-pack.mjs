@@ -44,6 +44,12 @@ const fail = (m) => {
   process.exitCode = 1;
 };
 const ok = (m) => console.log(`✓ ${m}`);
+// No navigation here waits for 'networkidle'. Next's segment-cache router sends
+// duplicate RSC prefetches for linked routes and leaves some open (headers
+// received, body never completed), so on a page that has already navigated a
+// few times 'networkidle' can never fire. That timed the nightly out on
+// /slots/qa-free-welcome every run from 2026-09-18. Each step navigates on
+// 'load' and then waits for the element it actually uses.
 const shot = (page, name) =>
   page.screenshot({ path: `docs/research/qa-free-pack-${name}.png` });
 
@@ -341,7 +347,7 @@ try {
       viewport: { width: 430, height: 932 }, // mobile-first: the badge docks above the tab bar
     });
     const gp = await guest.newPage();
-    await gp.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
+    await gp.goto(`${BASE}/slots`, { waitUntil: 'load' });
     // Cookie banner docks on the badge rail; the badge holds until answered.
     await gp
       .getByRole('button', { name: /^reject$/i })
@@ -400,7 +406,7 @@ try {
     }
     // Site-wide mount: the same guest also sees the badge OFF /slots (layout's
     // GlobalFreePackBadge). Home is the representative "any other page".
-    await gp.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+    await gp.goto(`${BASE}/`, { waitUntil: 'load' });
     let homeBadgeVisible = true;
     try {
       await gp
@@ -451,7 +457,7 @@ try {
   } else {
     fail(`claim badge href is ${badgeHref}, want /slots/${SLUG}/spin`);
   }
-  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/`, { waitUntil: 'load' });
   let memberHomeBadge = true;
   try {
     await page
@@ -625,7 +631,7 @@ try {
   await badge.click();
   await page.waitForURL(new RegExp(`/slots/${SLUG}/spin`), { timeout: 20000 });
   ok('badge tap lands on the spin page');
-  await page.goto(`${BASE}/slots/${SLUG}`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/slots/${SLUG}`, { waitUntil: 'load' });
   const openCta = page.getByRole('button', { name: /open free pack/i }).first();
   await openCta.waitFor({ timeout: 20000 });
   ok('detail CTA reads "Open Free Pack"');
@@ -652,11 +658,15 @@ try {
       [1440, 900, 'desktop'],
     ]) {
       await page.setViewportSize({ width: w, height: h });
-      await page.goto(`${BASE}/slots/${slug}`, { waitUntil: 'networkidle' });
+      await page.goto(`${BASE}/slots/${slug}`, { waitUntil: 'load' });
       const cta = page
         .getByRole('button', { name: /open (free )?pack/i })
         .filter({ visible: true })
         .first();
+      // The CTA and its quantity row render together, so once it is visible
+      // the stepper count below is settled too. A miss falls through to the
+      // explicit "no open CTA" failure.
+      await cta.waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
       if (!(await cta.count())) {
         fail(`${kind}/${label}: no open CTA on /slots/${slug}`);
         continue;
@@ -685,7 +695,7 @@ try {
     }
   }
   await page.setViewportSize({ width: 430, height: 932 });
-  await page.goto(`${BASE}/slots/${SLUG}`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/slots/${SLUG}`, { waitUntil: 'load' });
 
   // 3 ── open it: the reveal offers no sell, only the unlock note
   await openCta.click();
@@ -717,7 +727,7 @@ try {
   await page.waitForTimeout(2500);
 
   // 4 ── the vault shows the locked overlay and refuses selection
-  await page.goto(`${BASE}/vault`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/vault`, { waitUntil: 'load' });
   const overlay = page.getByText(/shipping & selling locked/i).first();
   await overlay.waitFor({ timeout: 20000 });
   ok('vault renders the locked overlay');
@@ -763,7 +773,14 @@ try {
   await shot(page, 'vault-selection');
 
   // 5 ── the badge is gone once the claim is spent
-  await page.goto(`${BASE}/slots`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/slots`, { waitUntil: 'load' });
+  // The catalog renders its badge from server props in the same pass, so the
+  // absence check is meaningful once the hydrated catalog is on screen.
+  await page
+    .getByTestId('catalog-root')
+    .filter({ visible: true })
+    .first()
+    .waitFor({ state: 'visible', timeout: 20000 });
   await page.waitForTimeout(1500);
   if (await page.getByTestId('free-pack-badge').count()) {
     fail('badge still visible after the claim was spent');
