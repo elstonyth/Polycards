@@ -82,6 +82,16 @@ jobs:
       # is un-suspended (ADR 0004, review-by 2026-10-01). They exercise nothing
       # today. Prod default stays OFF (dormant economy) regardless.
       REWARDS_REDEMPTION_ENABLED: 'true'
+      # The store-read tier (rate-limit.ts STORE_READ_DEFAULTS, 120/10s +
+      # 480/60s per customer) is sized for a human. The QA gates drive ONE
+      # customer through page after page at machine speed, and every page plus
+      # Next's tab prefetches fans out ~10 reads (balance, vault, profile, free
+      # pack...). The free-pack gate tripped it on 2026-10-10: a 429 on
+      # /store/free-pack fails closed, so the free pack rendered without its
+      # CTA. Nothing here tests that limiter, so give the job room. Prod keeps
+      # the defaults.
+      STORE_READ_RATE_BURST_LIMIT: '2000'
+      STORE_READ_RATE_LIMIT: '8000'
       # CORS: locally these live in the gitignored backend .env; in CI they're
       # unset, so the browser's auth preflight comes back without
       # allow-origin and the login POST never fires (observed: only OPTIONS
