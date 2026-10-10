@@ -98,6 +98,11 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Next skips src/instrumentation.ts without a word if it moves to the
+      # wrong place, which kept server/edge Sentry dead for four months.
+      - name: Instrumentation hook bundled
+        run: test -f .next/server/instrumentation.js
+
   # Backend gate: lint + typecheck + the same turbo build the DO App Platform
   # Docker image runs (medusa build + admin/vendor vite). Without this, a
   # backend TS error passes CI and fails 5-10 min later inside the prod deploy.
