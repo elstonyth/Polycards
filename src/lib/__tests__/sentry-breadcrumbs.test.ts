@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { scrubBreadcrumbUrls } from '../sentry-breadcrumbs';
+import { sentryDataCollection } from '../sentry-data-collection';
 
 // Sentry breadcrumbs record every navigation and request URL. An emailed reset
 // link carries its single-use token in the query string (and the Google return
@@ -67,6 +68,29 @@ describe('scrubBreadcrumbUrls', () => {
     });
   });
 
+  // @sentry/node 11 files them under the OTel url.* names instead.
+  it('drops the url.query and url.fragment of the 11.x server shape', () => {
+    expect(
+      scrubBreadcrumbUrls({
+        category: 'http',
+        data: {
+          url: 'http://backend/auth/customer/google/callback',
+          'http.request.method': 'GET',
+          'url.query': 'code=c0de&state=s',
+          'url.fragment': 'x',
+          status_code: 200,
+        },
+      }),
+    ).toEqual({
+      category: 'http',
+      data: {
+        url: 'http://backend/auth/customer/google/callback',
+        'http.request.method': 'GET',
+        status_code: 200,
+      },
+    });
+  });
+
   it('leaves every other breadcrumb untouched', () => {
     const click = {
       category: 'ui.click',
@@ -79,13 +103,14 @@ describe('scrubBreadcrumbUrls', () => {
   });
 });
 
-// Each runtime's Sentry.init must carry the scrubber, or one runtime leaks.
+// Each runtime's Sentry.init must carry the scrubber and the data-collection
+// switches, or one runtime leaks.
 describe.each([
   ['browser', () => import('../../../instrumentation-client')],
   ['server', () => import('../../../sentry.server.config')],
   ['edge', () => import('../../../sentry.edge.config')],
 ])('the %s Sentry config', (_runtime, load) => {
-  it('scrubs breadcrumb URLs', async () => {
+  it('scrubs breadcrumb URLs and keeps personal data off', async () => {
     vi.resetModules();
     const init = vi.fn();
     vi.doMock('@sentry/nextjs', () => ({
@@ -93,7 +118,8 @@ describe.each([
       captureRouterTransitionStart: vi.fn(),
     }));
     await load();
-    const [{ beforeBreadcrumb }] = init.mock.calls[0]!;
+    const [{ beforeBreadcrumb, dataCollection }] = init.mock.calls[0]!;
+    expect(dataCollection).toEqual(sentryDataCollection);
     expect(
       beforeBreadcrumb({
         category: 'navigation',
