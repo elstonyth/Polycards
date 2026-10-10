@@ -47,7 +47,7 @@
     "@mercurjs/cli": "2.3.3",
     "@mercurjs/core": "2.3.3",
     "@mercurjs/types": "2.3.3",
-    "express": "4.22.2",
+    "express": "5.2.1",
     "http-proxy-middleware": "^3.0.7",
     "ioredis": "^5.4.1",
     "multer": "^2.4.0",
