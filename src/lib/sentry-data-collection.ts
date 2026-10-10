@@ -12,15 +12,21 @@ type SentryInitOptions = NonNullable<Parameters<typeof Sentry.init>[0]>;
  * send (with `sendDefaultPii` unset) is switched back off here.
  *
  * Request headers stay, as they did on 10.x; Sentry masks any header whose
- * name contains auth/token/session/cookie/key. The query string goes, for the
- * same reason `scrubBreadcrumbUrls` strips it from breadcrumbs: an emailed
- * reset link carries its single-use token there, and the Google return leg its
- * code and state.
+ * name contains auth/token/session/cookie/key, and the deny terms below also
+ * mask the client-IP headers (X-Forwarded-For, CF-Connecting-IP, ...), which
+ * server spans would otherwise copy verbatim. The x-forwarded-host/proto/port
+ * proxy headers get masked with them, since the terms match by substring.
+ * The query string goes, for the same reason `scrubBreadcrumbUrls` strips it
+ * from breadcrumbs: an emailed reset link carries its single-use token there,
+ * and the Google return leg its code and state.
  */
 export const sentryDataCollection: SentryInitOptions['dataCollection'] = {
   userInfo: false,
   cookies: false,
-  httpHeaders: { request: true, response: false },
+  httpHeaders: {
+    request: { deny: ['forwarded', 'client-ip', 'real-ip', 'connecting-ip'] },
+    response: false,
+  },
   httpBodies: [],
   urlQueryParams: false,
   stackFrameVariables: false,
