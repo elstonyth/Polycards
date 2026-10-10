@@ -129,8 +129,8 @@ export default function VaultClient({
     (s, i) => s + i.buyback.amount,
     0,
   );
-  // The part of that sale paid back as bonus credit (gift / bonus-funded
-  // pulls) — the confirm names the split instead of one undifferentiated sum.
+  // The part of that sale from bonus or gift play — the confirm says it must
+  // be played through before it can be withdrawn.
   const selectedBonus = sellableSelected.reduce(
     (s, i) => s + i.buyback.bonus,
     0,

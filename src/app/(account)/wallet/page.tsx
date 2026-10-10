@@ -153,7 +153,7 @@ export default async function WalletPage() {
           {[
             {
               title: 'Play through what you deposit',
-              body: 'Every RM you top up has to be spent opening packs before it can leave your account. Deposit RM100, open RM100 of packs — gate unlocked.',
+              body: 'Every RM you top up has to be spent opening packs before it can leave your account. Deposit RM100, open RM100 of packs — gate unlocked. The same goes for what you get from selling a card you opened with bonus credit or a vault pack.',
             },
             {
               title: 'Opening packs is what counts — not topping up',
@@ -161,7 +161,7 @@ export default async function WalletPage() {
             },
             {
               title: 'Then the whole balance unlocks',
-              body: 'Once you are fully played through, your entire available balance is withdrawable — winnings included, not just your deposit back. Bonus credit is the one exception: it can only be spent on packs. Nothing expires and there is no waiting period.',
+              body: 'Once you are fully played through, your entire available balance is withdrawable — winnings included, not just your deposit back. Bonus credit itself is the one exception: it can only be spent on packs. Nothing expires and there is no waiting period.',
             },
           ].map((s, i) => (
             <li key={s.title} className="flex gap-3">

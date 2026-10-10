@@ -172,7 +172,7 @@ export const buybackPullStep = createStep(
           cardHandle: pull.card_id,
           rate: percent / 100,
           openId: pull.open_id ?? null,
-          // Gift and bonus pulls sell back (partly) as bonus credit.
+          // Gift and bonus pulls: that share of the sale must be played through.
           bonusBp: Number(pull.bonus_bp ?? 0),
         }),
       probeDuplicate: async () => {

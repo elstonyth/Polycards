@@ -65,7 +65,8 @@ export type OpenPackResult =
         /** false = quoted on the FX display fallback; selling would be
          *  refused, so the reveal must not present this as a firm offer. */
         firm: boolean;
-        /** MYR part of `amount` paid back as bonus credit; 0 when none. */
+        /** MYR part of `amount` from bonus or gift play, to be played
+         *  through before it can be withdrawn; 0 when none. */
         bonus: number;
       } | null;
       /** Credit balance AFTER the charge (opens debit the pack price — A2);

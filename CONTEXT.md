@@ -160,8 +160,9 @@ only on pack Opens — and FIRST, before normal credit — never withdrawn, neve
 pays a delivery fee. A signed column on the ledger (`credit_transaction.bonus_cents`,
 admin grants use reason `bonus_grant`), not a second wallet. **Bonus Balance** =
 Σ bonus_cents; **Normal Balance** = Balance − Bonus Balance. A card pulled with
-bonus sells back partly as bonus (`pull.bonus_bp`), so the value never washes
-into cash.
+bonus or from a Pack Gift sells back as normal credit, but its bonus share
+(`pull.bonus_bp`) must be played through once before it can be withdrawn
+(operator rule 2026-10-09), like a deposit.
 _Avoid_: promo credit (the economy report's bucket for task/voucher credit,
 which IS withdrawable), dead chips, free credit
 

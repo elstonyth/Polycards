@@ -212,10 +212,15 @@ import { weightedAverageCost } from './inventory-cost';
 import type { SignupTopupStats, WithdrawalStats } from './stats';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
-// plan-033 playthrough basis: the "post-1b deposited" ledger predicate. Shared
-// between creditSummary and walletSummary so the two SQL scans can't drift.
-const DEPOSITED_PT_FILTER =
-  "reason = 'topup' AND amount > 0 AND external_funded_cents IS NOT NULL";
+// plan-033 playthrough basis, per ledger row in sen: a post-1b deposit's
+// amount, plus the part of a card sale that came from bonus or gift play
+// (operator rule 2026-10-09), which the buyback row stamps as
+// external_funded_cents — it pays NORMAL credit that must be played through
+// once, like a deposit. Shared between creditSummary and walletSummary (and
+// mirrored by credit-summary.ts's fold) so the scans can't drift.
+const DEPOSITED_PT_SEN_SQL =
+  "CASE WHEN reason = 'topup' AND amount > 0 AND external_funded_cents IS NOT NULL THEN ROUND(amount * 100) " +
+  "WHEN reason = 'buyback' THEN COALESCE(external_funded_cents, 0) ELSE 0 END";
 
 // Default rolling-24h cashout ceiling, in RM. The per-transaction payout band
 // (RM 50 – RM 50,000, gateway-withdrawal.ts) bounds ONE payout; before this
@@ -3245,7 +3250,7 @@ class PacksModuleService extends MedusaService({
         // VIP basis = the NORMAL part of opens: bonus-funded play counts
         // toward nothing (spec 2026-10-07); bonus_cents is ≤ 0 on an open.
         `  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -${normalSenSql()} ELSE 0 END), 0)::bigint AS vip_spend_cents, ` +
-        `  COALESCE(SUM(CASE WHEN ${DEPOSITED_PT_FILTER} THEN ROUND(amount * 100) ELSE 0 END), 0)::bigint AS deposited_pt_cents, ` +
+        `  COALESCE(SUM(${DEPOSITED_PT_SEN_SQL}), 0)::bigint AS deposited_pt_cents, ` +
         '  COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
         'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
       [customerId],
@@ -6742,7 +6747,7 @@ class PacksModuleService extends MedusaService({
         }[]
       >(
         'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
-          `COALESCE(SUM(ROUND(amount * 100)) FILTER (WHERE ${DEPOSITED_PT_FILTER}), 0)::bigint AS deposited_cents, ` +
+          `COALESCE(SUM(${DEPOSITED_PT_SEN_SQL}), 0)::bigint AS deposited_cents, ` +
           "COALESCE(SUM(-external_funded_cents) FILTER (WHERE reason = 'pack_open'), 0)::bigint AS used_cents, " +
           'COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
           'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
@@ -7299,7 +7304,8 @@ class PacksModuleService extends MedusaService({
     const params: unknown[] = [];
     let sql =
       // The NORMAL part of every row (spec 2026-10-07): bonus spent on opens
-      // and paid back on sells is not cash; bonus_grant is its own bucket.
+      // (and paid back on sells before 2026-10-09) is not cash; bonus_grant is
+      // its own bucket.
       `SELECT reason, COALESCE(SUM(${reasonCashSenSql()}), 0)::bigint AS cents ` +
       'FROM credit_transaction WHERE deleted_at IS NULL';
     if (from) {
@@ -8951,15 +8957,20 @@ class PacksModuleService extends MedusaService({
       cardHandle: string;
       rate: number;
       openId: string | null;
-      /** The pull's bonus share (pull.bonus_bp): that part of the sell-back is
-       *  paid as spend-only bonus credit (spec 2026-10-07 §4.5). */
+      /** The pull's bonus share (pull.bonus_bp): that part of the sell-back
+       *  must be played through before it can be withdrawn. */
       bonusBp?: number;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
     Awaited<ReturnType<PacksModuleService['createCreditTransactions']>>
   > {
-    const bonusCents = bonusShareSen(
+    // A card opened with bonus credit or a gifted pack sells back as NORMAL
+    // credit (operator rule 2026-10-09), but its bonus share must be played
+    // through once before it can be withdrawn: stamped as external money in,
+    // like a deposit, so opens consume it and the playthrough gate counts it
+    // (DEPOSITED_PT_SEN_SQL). Rounded up, toward the locked side.
+    const playthroughCents = bonusShareSen(
       Math.round(input.amount * 100),
       input.bonusBp ?? 0,
     );
@@ -8970,7 +8981,9 @@ class PacksModuleService extends MedusaService({
           amount: input.amount,
           reason: 'buyback' as const,
           pull_id: input.pullId,
-          bonus_cents: bonusCents,
+          ...(playthroughCents
+            ? { external_funded_cents: playthroughCents }
+            : {}),
         },
       ],
       sharedContext,
@@ -8988,7 +9001,9 @@ class PacksModuleService extends MedusaService({
           sp_ref_id: input.openId,
           price: input.valueMyr,
           rate: input.rate,
-          ...(bonusCents ? { bonus: bonusCents / 100 } : {}),
+          ...(playthroughCents
+            ? { playthrough: playthroughCents / 100 }
+            : {}),
         },
       },
       sharedContext,

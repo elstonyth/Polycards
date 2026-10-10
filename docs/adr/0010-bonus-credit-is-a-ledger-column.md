@@ -13,8 +13,11 @@ same insert, under the same lock, so the two can never disagree. A second wallet
 would need its own locks, its own reversals and a cross-wallet spend order
 written twice.
 
-The rule that makes it hold: **the value of bonus credit, or of a gifted pack,
-never becomes withdrawable money.**
+The rule that makes it hold: **bonus credit itself is never withdrawable, and
+the value of bonus credit or a gifted pack reaches withdrawable money only after
+real play.** (As first built, a card's bonus share sold back as bonus and could
+never leave; on 2026-10-09 the operator chose to pay it as normal credit that
+must be played through once, like a deposit.)
 
 ## Consequences
 
@@ -24,8 +27,10 @@ never becomes withdrawable money.**
   the Normal Balance inside `mutateCreditAtomic`.
 - Withdrawable = `max(0, available − bonus)` once playthrough is done.
 - Each pull records `bonus_bp`, the share of its price that was bonus (10000 for
-  a gifted pack). A sell-back pays that share back as bonus, so a card pulled
-  with bonus cannot be washed into cash.
+  a gifted pack). A sell-back pays normal credit and stamps that share on the
+  buyback row as `external_funded_cents`, which joins the playthrough basis like
+  a deposit: the whole balance stays unwithdrawable until that much has been
+  spent on packs. Sales before 2026-10-09 were paid as bonus and stay bonus.
 - Gift pulls carry `source = 'gift'`, and a paid pull bonus paid at least half
   of carries `source = 'bonus'`, so every positive `source = 'pack'` count
   (tasks, profile, feed, welcome unlock) excludes them; VIP and referral

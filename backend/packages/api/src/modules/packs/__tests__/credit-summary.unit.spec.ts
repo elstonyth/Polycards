@@ -30,6 +30,18 @@ describe("foldLedgerRow — bonus credit (spec 2026-10-07)", () => {
     expect(totalsToUsd(t).bonusBalance).toBe(225);
   });
 
+  it("adds a sale from bonus play to the playthrough basis (2026-10-09)", () => {
+    const t = fold([
+      // A gifted card sells for RM 270: normal credit, all of it to play through.
+      { amount: 270, reason: "buyback", externalFundedCents: 27000 },
+      { amount: -100, reason: "pack_open", externalFundedCents: -10000 },
+    ]);
+    expect(t.bonusBalanceCents).toBe(0);
+    expect(t.depositedPlaythroughCents).toBe(27000);
+    expect(t.externalFundedSpendCents).toBe(10000);
+    expect(t.externalBalanceCents).toBe(17000);
+  });
+
   it("nets a reversed bonus open back out of both", () => {
     const t = fold([
       { amount: 300, reason: "bonus_grant", externalFundedCents: 0, bonusCents: 30000 },

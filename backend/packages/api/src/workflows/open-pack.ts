@@ -75,7 +75,8 @@ export const openPackWorkflow = createWorkflow(
       source: d.claim.free ? ("free" as const) : ("pack" as const),
     }));
     // Bonus credit (spec 2026-10-07): an open bonus paid at least half of is a
-    // 'bonus' pull (counts toward nothing); any bonus share sells back as bonus.
+    // 'bonus' pull (counts toward nothing); any bonus share of its sell-back
+    // must be played through before it can be withdrawn.
     const pull = recordPullStep(
       transform({ recordInput, charge }, (d) => {
         const bonusBp = bonusBpFor(
