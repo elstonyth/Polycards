@@ -413,6 +413,49 @@ describe('startWithdrawal — money ordering', () => {
     ).resolves.toBeTruthy();
   });
 
+  // From 2026-10-09 17:12 TGPay refused every Touch 'n Go payout, at any
+  // amount, with "No payout provider is available for this order". Customers
+  // retried 10+ times because the generic copy told them to check details.
+  it("sends a Touch 'n Go customer to a bank account when TGPay has no TNG payout provider", async () => {
+    const tng = {
+      ...SAVED_ACCOUNT,
+      id: savedBankAccountId('TNGMY', '123456789012'),
+      bankCode: 'TNGMY',
+      bankName: "Touch 'n Go eWallet",
+      accountNumber: '123456789012',
+    };
+    const noProvider = new GatewayError(
+      'TGPay /transaction/payout/withdraw failed (HTTP 400): No payout provider is available for this order',
+      [],
+      400,
+      true,
+    );
+    const h = harness([tng]);
+    h.packs.withdrawForCashout.mockResolvedValue({
+      id: 'ct_1',
+      balance: 50,
+      amount: -100,
+      replayed: false,
+      reference: null,
+      destination: tng,
+    });
+    fakeGateway.script({ submitWithdrawal: noProvider });
+    const error = (await start(h, { accountId: tng.id, amount: 100 }).catch(
+      (e: unknown) => e,
+    )) as Error;
+    expect(error.message).toBe(
+      "Touch 'n Go withdrawals are temporarily unavailable from our payment provider. Your balance has been returned. Please withdraw to a bank account for now.",
+    );
+    // Still refunded: the refund is the only ledger write on this path.
+    expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+
+    // The same refusal on a bank account keeps the generic copy.
+    fakeGateway.script({ submitWithdrawal: noProvider });
+    await expect(start(harness())).rejects.toThrow(
+      /refused by the payment provider/i,
+    );
+  });
+
   // Test-plan case 3.
   it("refuses a bank the active gateway cannot pay to BEFORE any debit, in the customer's words", async () => {
     // A wallet the registry knows but TGPay has no payout code for.
