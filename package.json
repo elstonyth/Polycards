@@ -48,7 +48,7 @@
   "dependencies": {
     "@medusajs/js-sdk": "^2.21.1",
     "@medusajs/types": "^2.21.1",
-    "@sentry/nextjs": "^10.75.0",
+    "@sentry/nextjs": "^11.4.0",
     "clsx": "^2.1.1",
     "geoip-country": "5.0.202610030217",
     "libphonenumber-js": "^1.13.14",
