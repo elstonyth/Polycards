@@ -40,6 +40,22 @@ export const isDefaultPlayerGroup = (g: PlayerGroupLike): boolean =>
   g.name === DEFAULT_PLAYER_GROUP_NAME;
 
 /**
+ * Every customer's EFFECTIVE player group, in SQL: the twin of
+ * effectivePlayerGroup + isDefaultPlayerGroup below. The oldest live
+ * membership (group created_at, then id) in a live group that is neither named
+ * DEFAULT nor flagged is_default. A customer with no row here is in DEFAULT.
+ * Same joins as PacksModuleService.partnerGroupOfCustomers.
+ */
+export const EFFECTIVE_GROUP_SQL =
+  'SELECT DISTINCT ON (cgc.customer_id) cgc.customer_id, cg.id AS group_id ' +
+  'FROM customer_group_customer cgc ' +
+  'JOIN customer_group cg ON cg.id = cgc.customer_group_id AND cg.deleted_at IS NULL ' +
+  'WHERE cgc.deleted_at IS NULL ' +
+  `AND cg.name IS DISTINCT FROM '${DEFAULT_PLAYER_GROUP_NAME}' ` +
+  `AND cg.metadata->'${DEFAULT_PLAYER_GROUP_FLAG}' IS DISTINCT FROM 'true'::jsonb ` +
+  'ORDER BY cgc.customer_id, cg.created_at ASC, cg.id ASC';
+
+/**
  * THE rule for "which of a customer's groups is their player group": the
  * oldest non-DEFAULT membership (created_at ASC, id as the tiebreak), or null.
  * One function so the odds set, the group policy and the admin Players list

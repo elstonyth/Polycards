@@ -47,11 +47,19 @@ export const config: RouteConfig = {
 // is handed the negation. The two conventions sit one line apart — don't merge.
 type Target = { id: string; email: string; disabled: boolean };
 
-// EXACTLY the backend's SORTABLE allow-list (api/admin/players/route.ts) —
-// real `customer` columns only. Every other column (wallet, vault, spend,
-// pulls, VIP level, group, status) is a JS-side aggregate over the already-
-// paged ids, so the server cannot order by it; those headers stay plain.
-type SortKey = 'created_at' | 'email' | 'name';
+// EXACTLY the backend's SORTABLE allow-list (api/admin/players/route.ts): the
+// real `customer` columns plus the ledger money totals, which the server
+// orders over every player. Vault, pulls, VIP level, group and status are not
+// sortable; those headers stay plain.
+type SortKey =
+  | 'created_at'
+  | 'email'
+  | 'name'
+  | 'wallet'
+  | 'topup'
+  | 'withdrawn'
+  | 'contribution'
+  | 'spend';
 
 const PlayersPage = () => {
   const { t } = useTranslation();
@@ -192,15 +200,29 @@ const PlayersPage = () => {
                   <Table.HeaderCell>{t('players.verified')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('players.group')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('players.lvl')}</Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('players.wallet')}
-                  </Table.HeaderCell>
+                  {sortHeader('wallet', t('players.wallet'), true)}
                   <Table.HeaderCell className="text-right">
                     {t('players.vault')}
                   </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('players.spend')}
-                  </Table.HeaderCell>
+                  {sortHeader(
+                    'topup',
+                    t('players.topup'),
+                    true,
+                    t('players.topupHint'),
+                  )}
+                  {sortHeader(
+                    'withdrawn',
+                    t('players.withdrawn'),
+                    true,
+                    t('players.withdrawnHint'),
+                  )}
+                  {sortHeader(
+                    'contribution',
+                    t('players.contribution'),
+                    true,
+                    t('players.contributionHint'),
+                  )}
+                  {sortHeader('spend', t('players.spend'), true)}
                   <Table.HeaderCell className="text-right">
                     {t('players.pulls')}
                   </Table.HeaderCell>
@@ -279,6 +301,21 @@ const PlayersPage = () => {
                       <span className="text-ui-fg-muted text-xs">
                         ({p.vault_count})
                       </span>
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums whitespace-nowrap">
+                      {rm(p.total_topup)}
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums whitespace-nowrap">
+                      {rm(p.total_withdrawn)}
+                    </Table.Cell>
+                    {/* Negative = the player has taken out more than they put
+                        in (wins cashed out), so it reads red. */}
+                    <Table.Cell
+                      className={`text-right tabular-nums whitespace-nowrap ${
+                        p.total_contribution < 0 ? 'text-ui-fg-error' : ''
+                      }`}
+                    >
+                      {rm(p.total_contribution)}
                     </Table.Cell>
                     <Table.Cell className="text-right tabular-nums whitespace-nowrap">
                       {rm(p.total_spend)}

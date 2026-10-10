@@ -1,6 +1,10 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
-import { MedusaError, Modules } from '@medusajs/framework/utils';
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+  Modules,
+} from '@medusajs/framework/utils';
 // write-excel-file 4 is ESM-only to TypeScript: the type comes in with
 // resolution-mode 'import' and the value through await import() in GET (the
 // full story is in admin/inventory/export.xlsx/route.ts).
@@ -11,17 +15,23 @@ import { PACKS_MODULE } from '../../../../modules/packs';
 import { findBank } from '../../../../modules/packs/banks';
 import { resolveFxRate } from '../../../../modules/packs/pricing';
 import type PacksModuleService from '../../../../modules/packs/service';
-import { ledgerTotalsWhere } from '../../finance/queries';
 import { reportCallerOf } from '../../require-report-key';
-import { customerFilter, reportDb } from '../../sql';
+import { reportDb, scopeFilter } from '../../sql';
 import { malaysiaDay } from '../top-pulls/day';
 import { loadTopPulls } from '../top-pulls/hits';
 
+// A ceiling, not a top N: 2026-10-08 had 64 such pulls by DEFAULT players.
+// Reaching it logs a warning, because the sheet would then be incomplete.
+const MAX_PULL_ROWS = 1000;
+
 // GET /reports/growth/daily-report?day: the staff Excel of the Growth desk's
-// 12 a.m. drop (spec 2026-10-04-growth-daily-hits-design.md). Sheet "Top
-// pulls": the day's top 10 paid pulls (the top-pulls report's list) with each
-// player's full details. Sheet "Withdrawals": every withdrawal requested that
-// day, any status, with the bank details and the player's details.
+// 12 a.m. drop (spec 2026-10-04-growth-daily-hits-design.md). DEFAULT-group
+// players only, on both sheets (partner and other groups left out; the
+// operator's call, 2026-10-09). Sheet "Immortal, Legendary, Mythical": every
+// paid pull of a card at one of those tiers that day, most valuable first,
+// with each player's full details. Sheet "Withdrawals": every withdrawal
+// requested that day, any status, with the bank details and the player's
+// details.
 //
 // It carries phone numbers, emails and full bank account numbers, by the
 // operator's choice. So it answers the Growth key only (the 12 a.m. cron's
@@ -155,7 +165,10 @@ export async function GET(
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const db = reportDb(req);
   const [pulls, { rows: withdrawals }] = await Promise.all([
-    loadTopPulls(req, packs, window, 10),
+    loadTopPulls(req, packs, window, MAX_PULL_ROWS, {
+      tiers: ['Immortal', 'Legendary', 'Mythical'],
+      defaultGroupOnly: true,
+    }),
     db.raw<{
       customer_id: string;
       created_at: string;
@@ -170,12 +183,21 @@ export async function GET(
     }>(
       'SELECT customer_id, created_at, settled_at, status, amount, net_amount, ' +
         '       bank_code, account_number, account_holder_name, failure_reason ' +
-        '  FROM gateway_withdrawal ' +
-        ' WHERE deleted_at IS NULL AND created_at >= ? AND created_at < ? ' +
-        ' ORDER BY created_at ASC, id ASC',
+        '  FROM gateway_withdrawal g ' +
+        ' WHERE g.deleted_at IS NULL AND g.created_at >= ? AND g.created_at < ? ' +
+        scopeFilter({ kind: 'default' }, 'g.customer_id').sql +
+        ' ORDER BY g.created_at ASC, g.id ASC',
       [window.from.toISOString(), window.to.toISOString()],
     ),
   ]);
+
+  if (pulls.length >= MAX_PULL_ROWS) {
+    req.scope
+      .resolve(ContainerRegistrationKeys.LOGGER)
+      .warn(
+        `[daily-report] ${window.day}: the pulls sheet hit its ${MAX_PULL_ROWS}-row ceiling; later pulls are not listed.`,
+      );
+  }
 
   const ids = [
     ...new Set([
@@ -229,7 +251,7 @@ export async function GET(
   const workbook = await writeXlsxFile([
     {
       data: getSheetData(pullRows, PULL_COLUMNS),
-      sheet: 'Top pulls',
+      sheet: 'Immortal, Legendary, Mythical',
       columns: widths(PULL_COLUMNS),
       stickyRowsCount: 1,
     },
@@ -252,7 +274,8 @@ export async function GET(
 }
 
 /** Each player's contact details and account summary, keyed by customer id.
- *  Bounded by the day's top 10 and its withdrawals. */
+ *  Bounded by the day's Immortal, Legendary and Mythical pulls and its
+ *  withdrawals. */
 async function customerDetails(
   req: MedusaRequest,
   packs: PacksModuleService,
@@ -278,14 +301,12 @@ async function customerDetails(
     ),
     packs.playersOverview(ids, await resolveFxRate(packs)),
   ]);
-  const db = reportDb(req);
   const out = new Map<string, Customer>();
   for (const c of rows) {
-    // Lifetime ledger, exactly as the Finance player report counts it.
-    const lifetime = await ledgerTotalsWhere(
-      db,
-      customerFilter(c.id, 'ct.customer_id'),
-    );
+    // Lifetime top-ups and withdrawals from the same batched query as the
+    // admin Players list (the Finance player report's topup and cashout
+    // buckets), not one ledger query per player.
+    const wallet = overview.wallet.get(c.id);
     out.set(c.id, {
       username: c.first_name ?? '',
       last_name: c.last_name ?? '',
@@ -293,10 +314,9 @@ async function customerDetails(
       email: c.email ?? '',
       joined: myt(c.created_at),
       vip_level: overview.vipLevel.get(c.id) ?? null,
-      balance_myr: (overview.wallet.get(c.id)?.balanceCents ?? 0) / 100,
-      deposited_myr: lifetime.topups,
-      // cashout is a signed ledger sum: negative = paid out.
-      withdrawn_myr: Math.round(-lifetime.cashout * 100) / 100,
+      balance_myr: (wallet?.balanceCents ?? 0) / 100,
+      deposited_myr: (wallet?.topupCents ?? 0) / 100,
+      withdrawn_myr: (wallet?.withdrawnCents ?? 0) / 100,
     });
   }
   return out;

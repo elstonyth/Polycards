@@ -5,7 +5,6 @@ import type {
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
-import { rewardsRedemptionEnabled } from '../../../../modules/packs/rewards-gate';
 import {
   isMalaysianAddress,
   MY_ONLY_MESSAGE,
@@ -17,11 +16,15 @@ import {
 // shipment (not a saved-address id). This is the simpler, correct UX: the prize
 // is already theirs, so the address is just where they want it sent.
 //
-// ENV-GATED (spec §13): like claim + draw, withdraw 403s while the global
-// REWARDS_REDEMPTION_ENABLED flag is off. The economy is dormant until Phase P,
-// and no legitimate prize can exist to ship before launch, so shipping stays
-// dark too. recordRewardWithdrawal re-checks the gate (defense-in-depth); the
-// per-customer withdrawals_per_day cap still applies once redemption is live.
+// NOT ENV-GATED (2026-10-08). This route used to 403 while
+// REWARDS_REDEMPTION_ENABLED was off, on the premise that no legitimate prize
+// could exist before the VIP economy launched. That stopped being true when
+// /task claims, free rips and weekly-challenge prizes began minting
+// source='reward' pulls (#490 onward): every one of those cards was stuck in
+// the vault, and customers saw "Something went wrong" on Request delivery.
+// Shipping mints no value — it only moves a card the customer already owns —
+// so the gate stays on claim (which does mint) and comes off here. The
+// per-customer withdrawals_per_day cap in recordRewardWithdrawal still applies.
 //
 // OWNERSHIP / SECURITY: the address is the customer's chosen destination for
 // their own prize, so it carries no ownership decision. The real security
@@ -39,6 +42,9 @@ type WithdrawAddressBody = {
   city?: unknown;
   postalCode?: unknown;
   countryCode?: unknown;
+  address2?: unknown;
+  province?: unknown;
+  phone?: unknown;
 };
 
 export async function POST(
@@ -48,14 +54,6 @@ export async function POST(
   const customerId = req.auth_context?.actor_id;
   if (!customerId) {
     throw new MedusaError(MedusaError.Types.UNAUTHORIZED, 'Unauthorized');
-  }
-
-  // Global redemption gate — fail closed while the economy is dormant.
-  if (!rewardsRedemptionEnabled()) {
-    throw new MedusaError(
-      MedusaError.Types.NOT_ALLOWED,
-      'Reward redemption is not enabled yet.',
-    );
   }
 
   const body = req.body as
@@ -96,18 +94,25 @@ export async function POST(
     throw new MedusaError(MedusaError.Types.INVALID_DATA, MY_ONLY_MESSAGE);
   }
 
+  // Optional lines of the saved address. The paid path snapshots them from the
+  // address book; without them a reward shipment reached ops with no phone for
+  // the courier and no second address line.
+  const optional = (v: unknown): string | undefined =>
+    typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
+
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const result = await packs.recordRewardWithdrawal(
-    customerId,
-    pullId,
-    fields as {
+  const result = await packs.recordRewardWithdrawal(customerId, pullId, {
+    ...(fields as {
       first_name: string;
       last_name: string;
       address_1: string;
       city: string;
       postal_code: string;
       country_code: string;
-    },
-  );
+    }),
+    address_2: optional(addr?.address2),
+    province: optional(addr?.province),
+    phone: optional(addr?.phone),
+  });
   res.json(result);
 }

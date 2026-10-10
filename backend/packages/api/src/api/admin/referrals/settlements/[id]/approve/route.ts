@@ -6,7 +6,8 @@ import { PACKS_MODULE } from '../../../../../../modules/packs';
 import type PacksModuleService from '../../../../../../modules/packs/service';
 
 // POST /admin/referrals/settlements/:id/approve — the human gate between
-// Tuesday's draft and Wednesday's money. Audited in the service.
+// Tuesday's draft and the money: the hourly pay-referral-week job pays an
+// approved run on its next tick, any day. Audited in the service.
 export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,

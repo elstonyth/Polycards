@@ -1,36 +1,45 @@
-import { gatewayUrls } from '../modules/packs/gateway';
+import { GATEWAYS, gatewayUrls } from '../modules/packs/gateway';
 import { ExecArgs } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import {
   createPayout,
+  isTgpayKind,
   queryPayout,
-  tgpayConfigFromEnv,
+  tgpayEnvName,
+  tgpayFamilyConfigFromEnv,
   tgpayIsSandbox,
   TgpayError,
 } from '../modules/packs/tgpay-client';
 import { TGPAY_SANDBOX_BANK } from '../modules/packs/banks';
 
 /**
- * SANDBOX-ONLY payout probe: submits one RM 50 payout to TGPay's dummy bank
- * outside our ledger (no gateway_withdrawal row — the callback will log
- * "UNKNOWN payout" and change nothing). Proves the wire format, the payout
- * wallet funding, and the callback delivery. Refuses to run against any
- * non-sandbox base URL.
+ * SANDBOX-ONLY payout probe: submits one payout at the gateway's floor to the
+ * platform's dummy bank outside our ledger (no gateway_withdrawal row — the
+ * callback will log "UNKNOWN payout" and change nothing). Proves the wire
+ * format, the RSA signature when one is configured, the payout wallet funding,
+ * and the callback delivery. Refuses to run against any non-sandbox base URL.
  *
- *   ./node_modules/.bin/medusa exec src/scripts/tgpay-payout-probe.ts
+ *   ./node_modules/.bin/medusa exec src/scripts/tgpay-payout-probe.ts            (TGPay)
+ *   ./node_modules/.bin/medusa exec src/scripts/tgpay-payout-probe.ts the7pay    (The 7 Pay)
  */
-export default async function tgpayPayoutProbe({ container }: ExecArgs) {
+export default async function tgpayPayoutProbe({ container, args }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
-  const config = tgpayConfigFromEnv();
+  const kind = args?.[0] ?? 'tgpay';
+  if (!isTgpayKind(kind)) {
+    logger.error(`[tgpay-probe] unknown gateway "${kind}" — use tgpay or the7pay`);
+    return;
+  }
+  const tag = `[${kind}-probe]`;
+  const config = tgpayFamilyConfigFromEnv(kind);
   if (!tgpayIsSandbox(config)) {
     logger.error(
-      '[tgpay-probe] refusing: TGPAY_API_BASE is not a sandbox host',
+      `${tag} refusing: ${tgpayEnvName(kind, 'API_BASE')} is not a sandbox host`,
     );
     return;
   }
-  const notifyUrl = gatewayUrls('tgpay').withdrawNotifyUrl;
+  const notifyUrl = gatewayUrls(kind).withdrawNotifyUrl;
   if (!notifyUrl) {
-    logger.error('[tgpay-probe] PAYMENT_CALLBACK_BASE unset — no notify URL');
+    logger.error(`${tag} PAYMENT_CALLBACK_BASE unset — no notify URL`);
     return;
   }
   const merchantRefNum = `PROBE-${Date.now()}`;
@@ -38,7 +47,7 @@ export default async function tgpayPayoutProbe({ container }: ExecArgs) {
     const r = await createPayout(
       {
         merchantRefNum,
-        amount: 50,
+        amount: GATEWAYS[kind].limits.withdrawalMin,
         email: 'probe@polycards.test',
         userName: 'Michael Yap',
         bankAccNumber: '543478924652',
@@ -49,14 +58,14 @@ export default async function tgpayPayoutProbe({ container }: ExecArgs) {
       config,
     );
     logger.info(
-      `[tgpay-probe] payout ACCEPTED ref=${merchantRefNum} transactionRefNum=${r.transactionRefNum}`,
+      `${tag} payout ACCEPTED ref=${merchantRefNum} transactionRefNum=${r.transactionRefNum}`,
     );
     const q = await queryPayout(merchantRefNum, config);
-    logger.info(`[tgpay-probe] query: ${JSON.stringify(q)}`);
+    logger.info(`${tag} query: ${JSON.stringify(q)}`);
   } catch (error) {
     if (error instanceof TgpayError) {
       logger.error(
-        `[tgpay-probe] REFUSED httpStatus=${error.httpStatus} definite=${error.definite} msg=${error.message}`,
+        `${tag} REFUSED httpStatus=${error.httpStatus} definite=${error.definite} msg=${error.message}`,
       );
       return;
     }

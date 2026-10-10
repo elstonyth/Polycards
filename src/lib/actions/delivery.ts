@@ -47,6 +47,7 @@ import {
   DELIVERY_LOGIN,
 } from '@/lib/delivery-errors';
 import { normalizePhone } from '@/lib/profile-validation';
+import { isPhoneGateError } from '@/lib/phone-gate';
 import { toCardView, type CardView } from '@/lib/card-view';
 
 export type DeliveryOrderItemView = {
@@ -581,7 +582,15 @@ export async function shipVaultCards(
       }
       return { ok: true, shippedIds, skipped };
     }
-    for (const pullId of rewardPullIds) {
+    // The daily cap and the phone gate refuse the CUSTOMER, not one card, so
+    // every card after the first such refusal would get the same answer. Say
+    // so for the rest without spending a locked, rate-limited request on each.
+    const skipRest = (from: number, reason: string) => {
+      for (const pullId of rewardPullIds.slice(from)) {
+        skipped.push({ pullId, reason });
+      }
+    };
+    for (const [i, pullId] of rewardPullIds.entries()) {
       const r = await store.post(
         '/store/rewards/withdraw',
         WithdrawPrizeSchema,
@@ -597,22 +606,22 @@ export async function shipVaultCards(
         if (r.kind === 'unauthenticated' && r.status === undefined) {
           return { ok: false, error: LOGIN_FIRST, needsAuth: true };
         }
-        skipped.push({
-          pullId,
-          reason:
-            r.kind === 'invalid_shape'
-              ? 'This reward card could not be shipped right now.'
-              : friendlyFailure(r, DELIVERY_RULES, DELIVERY_FALLBACK),
-        });
+        const reason =
+          r.kind === 'invalid_shape'
+            ? 'This reward card could not be shipped right now.'
+            : friendlyFailure(r, DELIVERY_RULES, DELIVERY_FALLBACK);
+        if (isPhoneGateError(reason)) {
+          skipRest(i, reason);
+          break;
+        }
+        skipped.push({ pullId, reason });
         continue;
       }
       if (r.data.status === 'requested') {
         shippedIds.push(pullId);
       } else if (r.data.status === 'capped') {
-        skipped.push({
-          pullId,
-          reason: "You've hit today's reward shipping limit — try tomorrow.",
-        });
+        skipRest(i, "You've hit today's reward shipping limit — try tomorrow.");
+        break;
       } else {
         skipped.push({
           pullId,

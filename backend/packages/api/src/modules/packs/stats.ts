@@ -39,6 +39,13 @@ export type SignupTopupStats = {
   first_topup_amount: number;
 };
 
+export type WithdrawalStats = {
+  /** Settled gateway payouts. */
+  withdrawal_count: number;
+  /** MYR, Σ amount (the debit), like the Settlement report. */
+  withdrawal_amount: number;
+};
+
 const MYT_OFFSET_MS = 8 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;

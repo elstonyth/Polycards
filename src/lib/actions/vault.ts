@@ -314,6 +314,9 @@ export type SavedBankAccount = {
    * stays listed but disabled, with the reason, until it can be paid again.
    */
   supported?: boolean;
+  /** This destination's own payout floor (RM) when above the provider's —
+   *  Touch 'n Go: 100. Null/absent = the provider's floor applies. */
+  minRm?: number | null;
 };
 
 export type SavedBankAccountsResult =

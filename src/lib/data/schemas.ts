@@ -735,6 +735,9 @@ export const SavedBankAccountsSchema = z.looseObject({
       // Can the active payout provider pay to this bank? Optional so an
       // older backend still parses; absent reads as supported.
       supported: z.boolean().optional(),
+      // The bank's own payout floor (RM), e.g. Touch 'n Go 100; null/absent =
+      // only the gateway's floor applies.
+      minRm: z.number().nullish(),
     }),
   ),
 });
@@ -999,6 +1002,11 @@ export const WithdrawAddressSchema = z.object({
   city: z.string().min(1),
   postalCode: z.string().min(1),
   countryCode: z.string().min(2).max(2),
+  // Optional, but the courier needs the phone: the vault sends them from the
+  // saved address so a reward shipment carries what a paid one does.
+  address2: z.string().nullish(),
+  province: z.string().nullish(),
+  phone: z.string().nullish(),
 });
 export type WithdrawAddressInput = z.infer<typeof WithdrawAddressSchema>;
 

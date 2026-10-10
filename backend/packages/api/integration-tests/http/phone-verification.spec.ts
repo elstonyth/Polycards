@@ -1208,6 +1208,31 @@ medusaIntegrationTestRunner({
             expect(delivery.data).toMatchObject({
               message: "Verify your phone number before continuing.",
             });
+
+            // Reward cards ship through their own route, which is a goods path
+            // too. Its gate sits on a static matcher behind the
+            // '/store/rewards/*' wildcard that authenticates — a wrong order
+            // would refuse everyone as Unauthorized, not with this message.
+            const reward = await unwrapResponse(
+              api.post(
+                "/store/rewards/withdraw",
+                {
+                  pull_id: "pull_nope",
+                  address: {
+                    firstName: "Ada",
+                    lastName: "Lovelace",
+                    address1: "1 Jalan Test",
+                    city: "Kuala Lumpur",
+                    postalCode: "50000",
+                    countryCode: "MY",
+                  },
+                },
+                { headers: h },
+              ),
+            );
+            expect(reward.data).toMatchObject({
+              message: "Verify your phone number before continuing.",
+            });
           });
 
           it("lets the account through once it verifies its phone", async () => {

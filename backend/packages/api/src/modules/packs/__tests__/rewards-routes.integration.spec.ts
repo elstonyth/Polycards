@@ -174,26 +174,40 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(after.status).toBe('granted');
       });
 
-      it('POST /rewards/withdraw → 403 and the Pull stays vaulted (no ship)', async () => {
+      // Withdraw is NOT gated (2026-10-08): /task claims mint live reward
+      // pulls, and while this route 403'd every one of them was stuck in the
+      // vault behind a "Something went wrong" on Request delivery.
+      it('POST /rewards/withdraw still ships a vaulted reward Pull', async () => {
         const customerId = 'cus_d1_wd';
         const pull = await seedRewardPull(customerId);
 
         const { req, res, captured } = makeReqRes({
           customerId,
-          body: { pull_id: pull.id, address: ADDRESS },
+          body: {
+            pull_id: pull.id,
+            address: {
+              ...ADDRESS,
+              address2: 'Jalan Awan Besar',
+              province: 'Kuala Lumpur',
+              phone: '+60123456789',
+            },
+          },
         });
-        let threw = false;
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await withdrawPOST(req as any, res as any);
-        } catch {
-          threw = true;
-        }
-        // Withdraw is now gated alongside claim: a 403 (thrown NOT_ALLOWED)
-        // before any write — the prize is never shipped while redemption is dark.
-        expect(threw || captured.status === 403).toBe(true);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await withdrawPOST(req as any, res as any);
+
+        expect((captured.body as { status: string }).status).toBe('requested');
         const [after] = await service.listPulls({ id: pull.id }, { take: 1 });
-        expect(after.status).toBe('vaulted');
+        expect(after.status).toBe('delivering');
+        // The optional lines reach the order, as they do on a paid shipment —
+        // ops needs the phone to hand the parcel to a courier.
+        const [order] = await service.listDeliveryOrders(
+          { customer_id: customerId },
+          { take: 1 },
+        );
+        expect(order.ship_address_2).toBe('Jalan Awan Besar');
+        expect(order.ship_province).toBe('Kuala Lumpur');
+        expect(order.ship_phone).toBe('+60123456789');
       });
     });
 

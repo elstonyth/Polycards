@@ -97,6 +97,9 @@ import {
   MAX_SETTLEMENT_LINE_MYR,
   payoutCents,
   REFERRAL_BIND_WINDOW_MS,
+  REFERRAL_AUTO_APPROVE_AFTER_MS,
+  REFERRAL_AUTO_APPROVE_MAX_LINE_MYR,
+  REFERRAL_AUTO_APPROVER,
   REFERRAL_CLOSE_GRACE_MS,
   referralWeekFor,
   taskDayFor,
@@ -107,7 +110,7 @@ import {
 } from './referral';
 import { asPixelPokemonCrud } from './pixel-pokemon-service';
 import { groupPolicyOf, partnerGroupLockMessage } from './group-policy';
-import { isDefaultPlayerGroup } from './odds-sets';
+import { EFFECTIVE_GROUP_SQL, isDefaultPlayerGroup } from './odds-sets';
 import {
   taskIsLive,
   taskPeriodKey,
@@ -206,7 +209,7 @@ import {
   type RankPayout,
 } from './challenge-settle';
 import { weightedAverageCost } from './inventory-cost';
-import type { SignupTopupStats } from './stats';
+import type { SignupTopupStats, WithdrawalStats } from './stats';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
 // plan-033 playthrough basis: the "post-1b deposited" ledger predicate. Shared
@@ -395,6 +398,23 @@ const LIVE_VALUE_USD_SQL = 'c.market_value * COALESCE(c.market_multiplier, ?)';
 // a stamped pull KEEPS its value even if the card row is later deleted (the
 // snapshot outlives the LEFT JOIN); an un-stamped one drops to NULL — the
 // pre-snapshot behavior.
+// Per-player ledger sums in sen over credit_transaction rows (no alias), one
+// spelling for both the admin Players list's values (playersOverview) and its
+// server-side sort (playerIdsByLedger), so a sorted column always reads in
+// the order it is sorted.
+const PLAYER_LEDGER_SUMS = {
+  wallet: 'SUM(ROUND(amount * 100))',
+  // VIP-basis net pack_open spend (creditSummary's vip_spend_cents).
+  spend: `SUM(CASE WHEN reason = 'pack_open' THEN -${normalSenSql()} ELSE 0 END)`,
+  // Positive rows only, as creditSummary's topupTotal counts them.
+  topup: `SUM(CASE WHEN reason = 'topup' AND amount > 0 THEN ${normalSenSql()} ELSE 0 END)`,
+  // Cashout debits negated; a refunded withdrawal (+cashout) nets back out.
+  withdrawn: `SUM(CASE WHEN reason = 'cashout' THEN -${normalSenSql()} ELSE 0 END)`,
+} as const;
+
+/** The Players list's server-side sort keys over the ledger. */
+export type PlayerLedgerSort = keyof typeof PLAYER_LEDGER_SUMS | 'contribution';
+
 const PULLED_VALUE_USD_SQL =
   'COALESCE(pu.recorded_value_usd, ' + LIVE_VALUE_USD_SQL + ')';
 
@@ -1490,10 +1510,53 @@ class PacksModuleService extends MedusaService({
     return { settlementId, created: true, lines: lines.length };
   }
 
-  // The admin gate between Tuesday's draft and Wednesday's money.
+  // Auto-approval: every draft that has sat out the review window is approved
+  // as REFERRAL_AUTO_APPROVER, through the same claim and audit as an admin's
+  // click, unless one of its pending lines is over the hold limit (then it
+  // waits for a human). Runs an admin already approved or voided are no
+  // longer drafts and are left alone. Each run is approved in its own
+  // transaction, so one failure cannot block the others.
+  async autoApproveDueSettlements(
+    input: { now?: Date } = {},
+  ): Promise<{ approved: string[]; held: string[] }> {
+    const now = (input.now ?? new Date()).getTime();
+    const due = (
+      await this.listWeeklySettlements({ status: 'draft' }, { take: 100 })
+    ).filter(
+      (r) =>
+        new Date(r.created_at).getTime() + REFERRAL_AUTO_APPROVE_AFTER_MS <=
+        now,
+    );
+    const approved: string[] = [];
+    const held: string[] = [];
+    for (const run of due) {
+      const pending = await this.listWeeklySettlementLines(
+        { settlement_id: run.id, status: 'pending' },
+        { take: 100_000 },
+      );
+      if (
+        pending.some(
+          (l) => l.amount_cents > REFERRAL_AUTO_APPROVE_MAX_LINE_MYR * 100,
+        )
+      ) {
+        held.push(run.id);
+        continue;
+      }
+      await this.approveWeeklySettlement({
+        settlementId: run.id,
+        adminId: REFERRAL_AUTO_APPROVER,
+        reason: `auto-approved ${REFERRAL_AUTO_APPROVE_AFTER_MS / 3_600_000} h after close; no line over RM ${REFERRAL_AUTO_APPROVE_MAX_LINE_MYR}`,
+      });
+      approved.push(run.id);
+    }
+    return { approved, held };
+  }
+
+  // The admin gate between Tuesday's draft and the money (or the auto-approval
+  // above, which passes its own audit reason).
   @InjectTransactionManager()
   async approveWeeklySettlement(
-    input: { settlementId: string; adminId: string },
+    input: { settlementId: string; adminId: string; reason?: string },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<void> {
     const [run] = await this.listWeeklySettlements(
@@ -1543,7 +1606,9 @@ class PacksModuleService extends MedusaService({
         action: 'approve_settlement',
         before: { status: 'draft' },
         after: { status: 'approved' },
-        reason: `week ${new Date(run.week_start).toISOString().slice(0, 10)}`,
+        reason:
+          `week ${new Date(run.week_start).toISOString().slice(0, 10)}` +
+          (input.reason ? `: ${input.reason}` : ''),
       },
       sharedContext,
     );
@@ -4608,14 +4673,9 @@ class PacksModuleService extends MedusaService({
     address: Partial<HttpTypes.StoreCustomerAddress>,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ status: 'requested' | 'capped' | 'invalid' }> {
-    // Defense-in-depth (spec §13): the route 403s when the global gate is off,
-    // but fail closed here too so every present/future caller stays dark until
-    // redemption launches. A withdrawal ships a prize that should not exist while
-    // the economy is dormant, so it is gated alongside claim + draw.
-    if (!rewardsRedemptionEnabled()) {
-      return { status: 'invalid' };
-    }
-
+    // Deliberately NOT behind rewardsRedemptionEnabled (2026-10-08): /task
+    // claims, free rips and challenge prizes mint live source='reward' pulls,
+    // and shipping one mints no value. See the withdraw route's header.
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
 
     // 0) Serialize against any concurrent credit/withdrawal mutation for THIS
@@ -4669,12 +4729,13 @@ class PacksModuleService extends MedusaService({
     //    is the DB session TZ). (created_at AT TIME ZONE 'UTC')::date compares the
     //    stored timestamptz in UTC against that JS-computed UTC day string, so the
     //    draw cap and the withdrawal cap roll over at the same instant. The lock
-    //    makes COUNT-then-INSERT atomic per customer.
+    //    makes COUNT-then-INSERT atomic per customer. A canceled order shipped
+    //    nothing, so it does not use up the day's allowance.
     const utcDay = new Date().toISOString().slice(0, 10);
     const { withdrawals_per_day } = await this.rewardsSettings(sharedContext);
     const countRows = await em.execute<{ n: string | null }[]>(
       `SELECT COUNT(*) AS n FROM delivery_order
-         WHERE customer_id = ? AND is_reward = TRUE
+         WHERE customer_id = ? AND is_reward = TRUE AND status <> 'canceled'
            AND (created_at AT TIME ZONE 'UTC')::date = ?::date AND deleted_at IS NULL`,
       [customerId, utcDay],
     );
@@ -6828,9 +6889,21 @@ class PacksModuleService extends MedusaService({
   // PULLED_VALUE_USD_SQL x live FX, rounded once, as leaderboardTop does), and
   // only source='pack' pulls count, the boards' positive filter. Ties go to
   // the earlier pull, then the id, so the order is stable.
+  //
+  // Two optional narrowings, both in SQL so they apply BEFORE the LIMIT (a
+  // Legendary pull ranked below the top N by value must still be found):
+  // `tiers` keeps pulls whose card sits at one of those tiers in the pack it
+  // came from (PULL_TIER_SQL's pack-level join), and `defaultGroupOnly` keeps
+  // players whose effective player group is DEFAULT (the reports' rule).
   @InjectManager()
   async topPullsInWindow(
-    opts: { from: Date; to: Date; limit: number },
+    opts: {
+      from: Date;
+      to: Date;
+      limit: number;
+      tiers?: readonly Rarity[];
+      defaultGroupOnly?: boolean;
+    },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
     {
@@ -6845,6 +6918,15 @@ class PacksModuleService extends MedusaService({
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const fxRate = await resolveFxRate(this);
+    const tiers = opts.tiers ?? [];
+    const tierSql = tiers.length
+      ? ' AND EXISTS (SELECT 1 FROM pack_odds o WHERE o.pack_id = pu.pack_id ' +
+        '   AND o.card_id = pu.card_id AND o.deleted_at IS NULL ' +
+        `   AND o.rarity IN (${tiers.map(() => '?').join(', ')}))`
+      : '';
+    const groupSql = opts.defaultGroupOnly
+      ? ` AND pu.customer_id NOT IN (SELECT customer_id FROM (${EFFECTIVE_GROUP_SQL}) eff)`
+      : '';
     const rows = await em.execute<
       {
         id: string;
@@ -6863,6 +6945,8 @@ class PacksModuleService extends MedusaService({
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
         " WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND pu.source = 'pack' " +
         '   AND pu.rolled_at >= ?::timestamptz AND pu.rolled_at < ?::timestamptz ' +
+        tierSql +
+        groupSql +
         ' ORDER BY value_myr DESC NULLS LAST, pu.rolled_at ASC, pu.id ASC ' +
         ' LIMIT ?',
       [
@@ -6870,6 +6954,7 @@ class PacksModuleService extends MedusaService({
         fxRate,
         opts.from.toISOString(),
         opts.to.toISOString(),
+        ...tiers,
         opts.limit,
       ],
     );
@@ -7307,6 +7392,37 @@ class PacksModuleService extends MedusaService({
     };
   }
 
+  // Withdrawal figures for GET /admin/stats over one half-open [from, to)
+  // window: settled gateway_withdrawal rows by settled_at, summed on `amount`
+  // (the debit), the same basis as the Settlement report, because
+  // amount_settled is NULL on every payout settled before it shipped. Pending
+  // and held payouts have left the wallet but not the gateway; they count
+  // once settled. Kept apart from signupTopupStats so that method's
+  // sign-up-only callers (the growth reports) never pay for this scan.
+  @InjectManager()
+  async withdrawalStats(
+    from: Date,
+    to: Date,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<WithdrawalStats> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [row] = await em.execute<
+      { withdrawal_count: number; withdrawal_cents: string }[]
+    >(
+      `SELECT count(*)::int AS withdrawal_count,
+              COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS withdrawal_cents
+       FROM gateway_withdrawal
+       WHERE status = 'settled' AND deleted_at IS NULL
+         AND settled_at >= ?::timestamptz AND settled_at < ?::timestamptz`,
+      [from.toISOString(), to.toISOString()],
+    );
+    return {
+      withdrawal_count: row.withdrawal_count,
+      withdrawal_amount: Number(row.withdrawal_cents) / 100,
+    };
+  }
+
   // Count-then-insert for a gateway deposit, serialized per customer.
   //
   // GATEWAY_MAX_RECENT_PENDING_PER_CUSTOMER used to be enforced by counting
@@ -7692,6 +7808,11 @@ class PacksModuleService extends MedusaService({
         // calls vip_spend_cents (NOT its differently-defined spend_cents).
         vipSpendCents: number;
         lastSpendAt: string | null;
+        // Lifetime cash in and out, the Finance player report's buckets
+        // (ledgerTotals' topups and cashout): Σ topup, and Σ cashout negated
+        // so a withdrawal reads positive (a refunded one nets back out).
+        topupCents: number;
+        withdrawnCents: number;
       }
     >();
     const vault = new Map<string, { count: number; cents: number }>();
@@ -7726,11 +7847,15 @@ class PacksModuleService extends MedusaService({
         balance_cents: string;
         vip_spend_cents: string;
         last_spend_at: string | null;
+        topup_cents: string;
+        withdrawn_cents: string;
       }[]
     >(
       'SELECT customer_id, ' +
-        '  COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
-        `  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -${normalSenSql()} ELSE 0 END), 0)::bigint AS vip_spend_cents, ` +
+        `  COALESCE(${PLAYER_LEDGER_SUMS.wallet}, 0)::bigint AS balance_cents, ` +
+        `  COALESCE(${PLAYER_LEDGER_SUMS.spend}, 0)::bigint AS vip_spend_cents, ` +
+        `  COALESCE(${PLAYER_LEDGER_SUMS.topup}, 0)::bigint AS topup_cents, ` +
+        `  COALESCE(${PLAYER_LEDGER_SUMS.withdrawn}, 0)::bigint AS withdrawn_cents, ` +
         "  MAX(created_at) FILTER (WHERE reason = 'pack_open') AS last_spend_at " +
         `FROM credit_transaction WHERE customer_id IN (${ph}) AND deleted_at IS NULL GROUP BY customer_id`,
       ids,
@@ -7773,6 +7898,8 @@ class PacksModuleService extends MedusaService({
         balanceCents: Number(r.balance_cents),
         vipSpendCents: Number(r.vip_spend_cents),
         lastSpendAt: r.last_spend_at,
+        topupCents: Number(r.topup_cents),
+        withdrawnCents: Number(r.withdrawn_cents),
       });
     for (const r of vaults)
       vault.set(r.customer_id, { count: Number(r.n), cents: Number(r.cents) });
@@ -7788,6 +7915,60 @@ class PacksModuleService extends MedusaService({
           r.partner_referral_bp === null ? null : Number(r.partner_referral_bp),
       });
     return { wallet, vault, pullCount, vipLevel, state };
+  }
+
+  // One page of the admin Players list ordered by a ledger sum over EVERY
+  // player (or over `ids`, the route's search matches), not just the page in
+  // hand: the ids in order, plus how many players the sort covered. A player
+  // with no ledger rows sums to 0; ties go to the customer id.
+  // ponytail: aggregates the whole ledger per request; precompute per-player
+  // totals if the Players page ever gets slow.
+  @InjectManager()
+  async playerIdsByLedger(
+    input: {
+      key: PlayerLedgerSort;
+      dir: 'ASC' | 'DESC';
+      ids: string[] | null;
+      limit: number;
+      offset: number;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ ids: string[]; total: number }> {
+    // The key is spliced into the SQL: only the known sums get through.
+    if (input.key !== 'contribution' && !Object.hasOwn(PLAYER_LEDGER_SUMS, input.key)) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Unknown ledger sort '${String(input.key)}'.`,
+      );
+    }
+    if (input.ids?.length === 0) return { ids: [], total: 0 };
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const sums = Object.entries(PLAYER_LEDGER_SUMS)
+      .map(([k, sql]) => `${sql} AS ${k}`)
+      .join(', ');
+    const value =
+      input.key === 'contribution'
+        ? 'COALESCE(t.topup, 0) - COALESCE(t.withdrawn, 0)'
+        : `COALESCE(t.${input.key}, 0)`;
+    const dir = input.dir === 'ASC' ? 'ASC' : 'DESC';
+    const scope = input.ids
+      ? ` AND c.id IN (${input.ids.map(() => '?').join(',')})`
+      : '';
+    const scopeParams = input.ids ?? [];
+    const rows = await em.execute<{ id: string }[]>(
+      'SELECT c.id FROM customer c ' +
+        `LEFT JOIN (SELECT customer_id, ${sums} FROM credit_transaction ` +
+        '  WHERE deleted_at IS NULL GROUP BY customer_id) t ON t.customer_id = c.id ' +
+        `WHERE c.deleted_at IS NULL${scope} ` +
+        `ORDER BY ${value} ${dir}, c.id ${dir} LIMIT ? OFFSET ?`,
+      [...scopeParams, input.limit, input.offset],
+    );
+    const [count] = await em.execute<{ n: string }[]>(
+      `SELECT COUNT(*)::bigint AS n FROM customer c WHERE c.deleted_at IS NULL${scope}`,
+      scopeParams,
+    );
+    return { ids: rows.map((r) => r.id), total: Number(count?.n ?? 0) };
   }
 
   // Delete-guard: the credit ledger is append-only — money rows are never

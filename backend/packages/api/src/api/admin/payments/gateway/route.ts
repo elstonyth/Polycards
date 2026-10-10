@@ -12,6 +12,7 @@ import type PacksModuleService from '../../../../modules/packs/service';
 import {
   GATEWAYS,
   GATEWAY_IDS,
+  gatewayConfigFor,
   gatewayUrls,
   isPaymentGateway,
   paymentGateway,
@@ -69,6 +70,17 @@ export async function POST(
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       `${GATEWAYS[wanted].label} is not configured in this environment — set its credentials first.`,
+    );
+  }
+  // configured() reads one key. The switch needs the whole config — base URL,
+  // public key, a readable RSA key — or every top-up after the click fails.
+  // The message names the missing variable, never a value.
+  try {
+    gatewayConfigFor(wanted);
+  } catch (error) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      `${GATEWAYS[wanted].label} is not fully configured in this environment — ${(error as Error).message}`,
     );
   }
   // Credentials alone are not enough: the gateway must be able to call us

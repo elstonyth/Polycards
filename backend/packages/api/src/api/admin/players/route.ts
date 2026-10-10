@@ -7,6 +7,7 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
+import type { PlayerLedgerSort } from '../../../modules/packs/service';
 import { resolveFxRate } from '../../../modules/packs/pricing';
 import { isPartnerGroup } from '../../../modules/packs/group-policy';
 import { effectivePlayerGroup } from '../../../modules/packs/odds-sets';
@@ -21,13 +22,24 @@ import {
   parseSortParam,
 } from '../../../utils/pagination';
 
-// Sortable columns are an allowlist, not a passthrough — `order` goes straight
-// into the customer query builder. Only real `customer` columns qualify:
-// everything else on a player row (wallet, vault, spend, pulls, VIP level) is a
-// JS-side aggregate over the ALREADY-PAGED ids, so ordering on it server-side
-// would need a different query shape entirely, not an option change. `name` is
-// the JS join of first_name + last_name, expressed as the two columns in order.
-const SORTABLE = new Set(['created_at', 'email', 'name']);
+// Sortable columns are an allowlist, not a passthrough. Two query shapes:
+// CUSTOMER_SORTS are real `customer` columns that go straight into the
+// customer query builder (`name` = first_name + last_name, in that order).
+// LEDGER_SORTS are money totals over the credit ledger, ordered in SQL over
+// every matching player by playerIdsByLedger (operator request, 2026-10-09).
+// Vault, pulls and VIP level stay unsortable.
+const LEDGER_SORTS: ReadonlySet<string> = new Set<PlayerLedgerSort>([
+  'wallet',
+  'spend',
+  'topup',
+  'withdrawn',
+  'contribution',
+]);
+const SORTABLE = new Set(['created_at', 'email', 'name', ...LEDGER_SORTS]);
+
+// ponytail: a search sorted by a money column orders at most this many
+// matches; page the search in SQL if a search ever matches more players.
+const MAX_SORTED_MATCHES = 5000;
 
 // GET /admin/players — the All Players list (POLYCARD-BACK §4.2). Page of
 // Medusa customers + batched per-player aggregates (playersOverview): one
@@ -73,15 +85,74 @@ export async function GET(
       ? { first_name: sortDir, last_name: sortDir, id: sortDir }
       : { [sortKey]: sortDir, id: sortDir };
 
+  // Medusa's `q` only searches the customer's own columns (email, name, phone),
+  // so the profile handle — metadata.handle, the "@Collector…" a player copies
+  // from their profile and sends to support — matched nobody. An exact handle
+  // (leading "@" allowed) ADDS that player to what `q` matches, never replaces
+  // it: handles were frozen from display names (Migration20260930140000), so
+  // many are plain words, and "lee" must still list every Lee.
+  // ponytail: the union takes at most 1000 text matches; page it in SQL if an
+  // exact-handle search ever matches more players than that.
+  const handle = q?.replace(/^@/, '').trim();
+  const byHandle =
+    handle && isValidUsername(handle)
+      ? await packs.findCustomerIdByHandle(handle)
+      : null;
+  const textIds = byHandle
+    ? (
+        await customers.listCustomers({ q }, { select: ['id'], take: 1000 })
+      ).map((c) => c.id)
+    : [];
+
   // ponytail: to-many `groups` join under skip/take — Medusa paginates on the
   // customer, and players-list.spec.ts pages limit=1 with a grouped customer in
   // the set, so this holds; revisit only if a page ever short-counts.
-  const [page, total] = await customers.listAndCountCustomers(q ? { q } : {}, {
-    skip: offset,
-    take: limit,
-    order,
-    relations: ['groups'],
-  });
+  const filters = byHandle
+    ? { id: [...new Set([byHandle, ...textIds])] }
+    : q
+      ? { q }
+      : {};
+  const [page, total] = LEDGER_SORTS.has(sortKey)
+    ? await ledgerSortedPage()
+    : await customers.listAndCountCustomers(filters, {
+        skip: offset,
+        take: limit,
+        order,
+        relations: ['groups'],
+      });
+
+  // The same filters, ordered by a ledger total: the sorted ids come from
+  // SQL, then the customers are loaded and put back in that order.
+  async function ledgerSortedPage() {
+    const scope =
+      filters.id ??
+      (q
+        ? (
+            await customers.listCustomers(
+              { q },
+              { select: ['id'], take: MAX_SORTED_MATCHES },
+            )
+          ).map((c) => c.id)
+        : null);
+    const sorted = await packs.playerIdsByLedger({
+      key: sortKey as PlayerLedgerSort,
+      dir: sortDir,
+      ids: scope,
+      limit,
+      offset,
+    });
+    const rows = sorted.ids.length
+      ? await customers.listCustomers(
+          { id: sorted.ids },
+          { take: sorted.ids.length, relations: ['groups'] },
+        )
+      : [];
+    const byId = new Map(rows.map((c) => [c.id, c]));
+    return [
+      sorted.ids.flatMap((id) => byId.get(id) ?? []),
+      sorted.total,
+    ] as const;
+  }
   const ids = page.map((c) => c.id);
   const fx = await resolveFxRate(packs);
   const agg = await packs.playersOverview(ids, fx);
@@ -118,6 +189,12 @@ export async function GET(
         vault_value: (v?.cents ?? 0) / 100,
         vault_count: v?.count ?? 0,
         total_spend: (w?.vipSpendCents ?? 0) / 100,
+        // Lifetime top-ups, withdrawals, and what the player has put in net of
+        // what they took out (top-ups minus withdrawals).
+        total_topup: (w?.topupCents ?? 0) / 100,
+        total_withdrawn: (w?.withdrawnCents ?? 0) / 100,
+        total_contribution:
+          ((w?.topupCents ?? 0) - (w?.withdrawnCents ?? 0)) / 100,
         total_pulls: agg.pullCount.get(c.id) ?? 0,
         registered_at: c.created_at,
         last_spend_at: w?.lastSpendAt ?? null,

@@ -17,6 +17,11 @@ const ADMIN_EMAIL = 'players-list-admin@test.dev';
 // A's local part is unique enough that ?q= can't also match B or the admin.
 const A_EMAIL = 'alphaplayer-zzq@test.dev';
 const B_EMAIL = 'bravoplayer-yyr@test.dev';
+// A's permanent profile handle (metadata.handle) — not an email/name column.
+const A_HANDLE = 'Collector31729999';
+// B's handle is a substring of A's email: a handle search must ADD B to the
+// text matches, not replace them.
+const B_HANDLE = 'alphaplayer';
 const CARD_HANDLE = 'players-list-card';
 const CARD_USD = 12.34;
 const PACK_SLUG = 'players-list-pack';
@@ -68,9 +73,13 @@ medusaIntegrationTestRunner({
           first_name: 'Alpha',
           last_name: 'Player',
           phone: '+60123456789',
+          metadata: { handle: A_HANDLE },
         });
         aId = a.id;
-        const b = await customers.createCustomers({ email: B_EMAIL });
+        const b = await customers.createCustomers({
+          email: B_EMAIL,
+          metadata: { handle: B_HANDLE },
+        });
         bId = b.id;
 
         // A carries a real customer group so the `groups` column is proven
@@ -208,6 +217,9 @@ medusaIntegrationTestRunner({
         expect(b.groups).toEqual([]); // the empty side of A's populated groups
         expect(b.wallet_balance).toBe(0);
         expect(b.total_spend).toBe(0);
+        expect(b.total_topup).toBe(0);
+        expect(b.total_withdrawn).toBe(0);
+        expect(b.total_contribution).toBe(0);
         expect(b.total_pulls).toBe(0);
         expect(b.vault_count).toBe(0);
         expect(b.vault_value).toBe(0);
@@ -231,12 +243,70 @@ medusaIntegrationTestRunner({
         expect(b.last_spend_at).toBeNull();
       });
 
+      // Contribution = top-ups − withdrawals. A refunded withdrawal is a +cashout
+      // row (gateway-withdrawal.ts), so it nets back out of the withdrawn total.
+      it('totals top-ups and withdrawals, and their difference', async () => {
+        await packsService().createCreditTransactions([
+          { customer_id: aId, amount: -40, reason: 'cashout' },
+          { customer_id: aId, amount: -15, reason: 'cashout' },
+          { customer_id: aId, amount: 15, reason: 'cashout' },
+        ]);
+
+        const a = rowFor(await list(), aId);
+        expect(a.total_topup).toBe(100);
+        expect(a.total_withdrawn).toBe(40);
+        expect(a.total_contribution).toBe(60);
+        // Top up matches the profile's creditSummary figure.
+        expect(a.total_topup).toBe(
+          (await packsService().creditSummary(aId)).topupTotal,
+        );
+      });
+
+      // Taken out more than put in (a big win cashed out): the contribution goes
+      // negative, which the list colours red.
+      it('a player who withdrew more than they topped up reads negative', async () => {
+        await packsService().createCreditTransactions([
+          { customer_id: bId, amount: 50, reason: 'topup' },
+          { customer_id: bId, amount: 400, reason: 'buyback' },
+          { customer_id: bId, amount: -230, reason: 'cashout' },
+        ]);
+
+        const b = rowFor(await list(), bId);
+        expect(b.total_topup).toBe(50);
+        expect(b.total_withdrawn).toBe(230);
+        expect(b.total_contribution).toBe(-180);
+      });
+
       it('?q= narrows to the matching customer', async () => {
         const res = await list('?q=alphaplayer-zzq');
         expect(res.status).toBe(200);
         expect(res.data.total).toBe(1);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         expect(res.data.players.map((p: any) => p.id)).toEqual([aId]);
+      });
+
+      it('?q= finds a player by profile handle, as copied from the profile (@, any case)', async () => {
+        for (const q of [
+          A_HANDLE,
+          `@${A_HANDLE.toLowerCase()}`,
+          `@ ${A_HANDLE}`,
+        ]) {
+          const res = await list(`?q=${encodeURIComponent(q)}`);
+          expect(res.status).toBe(200);
+          expect(res.data.total).toBe(1);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          expect(res.data.players.map((p: any) => p.id)).toEqual([aId]);
+        }
+      });
+
+      it('?q= equal to one handle still lists every other text match', async () => {
+        const res = await list(`?q=${B_HANDLE}`);
+        expect(res.status).toBe(200);
+        expect(res.data.total).toBe(2);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        expect(res.data.players.map((p: any) => p.id).sort()).toEqual(
+          [aId, bId].sort(),
+        );
       });
 
       it('pages with limit/offset and rejects limit > 200', async () => {
@@ -309,6 +379,41 @@ medusaIntegrationTestRunner({
         const desc = await list('?sort=name:desc');
         expect(desc.data.players[0].id).toBe(bId);
         expect(desc.data.players[0].name).toBeNull();
+      });
+
+      // The money columns sort SERVER-side over every player (operator
+      // request, 2026-10-09), not just the page in hand. A: wallet 70, turnover
+      // 30, top up 100; B: no ledger rows (all zero).
+      it('?sort= orders the money columns across all players, then pages', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ids = (res: any): string[] => res.data.players.map((p: any) => p.id);
+        for (const key of ['wallet', 'topup', 'contribution', 'spend']) {
+          const desc = await list(`?sort=${key}:desc`);
+          expect(desc.status).toBe(200);
+          expect(desc.data.total).toBe(2);
+          expect(ids(desc)).toEqual([aId, bId]);
+          expect(ids(await list(`?sort=${key}:asc`))).toEqual([bId, aId]);
+        }
+
+        // A cashes out more than they put in: contribution 100 - 150 = -50,
+        // so A drops below B, and withdrawn puts A first.
+        await packsService().createCreditTransactions([
+          { customer_id: aId, amount: -150, reason: 'cashout' },
+        ]);
+        const byContribution = await list('?sort=contribution:desc');
+        expect(ids(byContribution)).toEqual([bId, aId]);
+        expect(rowFor(byContribution, aId).total_contribution).toBe(-50);
+        expect(ids(await list('?sort=withdrawn:desc'))).toEqual([aId, bId]);
+
+        // Paging slices the sorted whole, and the total counts every player.
+        const second = await list('?sort=withdrawn:desc&limit=1&offset=1');
+        expect(second.data.total).toBe(2);
+        expect(ids(second)).toEqual([bId]);
+
+        // A search still narrows the set being sorted.
+        const narrowed = await list('?q=alphaplayer-zzq&sort=withdrawn:asc');
+        expect(narrowed.data.total).toBe(1);
+        expect(ids(narrowed)).toEqual([aId]);
       });
 
       it('disabled (Task 1) flows through to the row', async () => {

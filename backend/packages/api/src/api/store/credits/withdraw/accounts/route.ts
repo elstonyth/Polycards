@@ -176,7 +176,10 @@ export async function POST(
   // depends on which gateway was active when it was saved. An unknown bank
   // is refused: nothing could ever pay to it.
   const bank = findBank(body.bank_code as string);
-  if (!bank || sandboxOnlyBank(bank.id)) {
+  if (
+    !bank ||
+    sandboxOnlyBank(bank.id, process.env, await resolveActiveGateway(req.scope))
+  ) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
       'Pick a bank from the list.',
