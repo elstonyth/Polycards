@@ -69,7 +69,7 @@ const SIDE = { w: 244, h: Math.round(244 / SLAB) };
 
 // Lucide `check` and `lock` (24-unit viewBox).
 const ICON_CHECK = '<polyline points="20 6 9 17 4 12"/>';
-const ICON_LOCK =
+export const ICON_LOCK =
   '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>';
 const icon = (
   paths: string,

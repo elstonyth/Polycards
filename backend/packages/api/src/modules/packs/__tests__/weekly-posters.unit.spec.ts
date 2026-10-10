@@ -4,6 +4,7 @@ import {
   cardWidth,
   composeResultsPoster,
   MAX_ROW_CARDS,
+  type ResultsPosterInput,
   resultsHeadline,
   rmWhole,
 } from '../challenge-results-poster';
@@ -174,6 +175,71 @@ describe('results poster', () => {
       height: POSTER_H,
     });
     expect(placeholders).toEqual([]);
+  });
+
+  it('draws a locked stage card dimmed in the row, and its credits in the ledger', async () => {
+    const slab = await sharp({
+      create: { width: 160, height: 259, channels: 4, background: '#3366ff' },
+    })
+      .png()
+      .toBuffer();
+    const poster = (podium: ResultsPosterInput['podium']) =>
+      composeResultsPoster(
+        {
+          weekLabel: '5 OCT – 11 OCT',
+          headline: 'RM 1 POOLED · STAGE 2 NEEDS RM 9',
+          podium,
+          list: [],
+          siteHost: 'polycards.gg/leaderboard',
+        },
+        new Map([[1, [slab, slab]]]),
+      );
+    const entry = { rank: 1, name: 'A', pulledMyr: 1, credits: 0 };
+    const won = await poster([{ ...entry, prizeMyr: 2, cards: ['X', 'Y'] }]);
+    const locked = await poster([
+      {
+        ...entry,
+        prizeMyr: 1,
+        cards: ['X'],
+        locked: { stage: 2, prizeMyr: 1, cards: ['Y'] },
+      },
+    ]);
+    // Two cards either way, so the same places: the second one sits right of
+    // the card room's middle (x 692), and is darker when locked.
+    const mean = async (jpeg: Buffer) => {
+      const data = await sharp(jpeg)
+        .extract({ left: 692, top: 0, width: 292, height: POSTER_H })
+        .greyscale()
+        .raw()
+        .toBuffer();
+      return data.reduce((sum, v) => sum + v, 0) / data.length;
+    };
+    expect(await mean(locked.jpeg)).toBeLessThan((await mean(won.jpeg)) - 3);
+    expect(locked.placeholders).toEqual([]);
+    const rest = await composeResultsPoster(
+      {
+        weekLabel: '5 OCT – 11 OCT',
+        headline: 'RM 1 POOLED · STAGE 2 NEEDS RM 9',
+        podium: [],
+        list: [
+          {
+            rank: 4,
+            name: 'D',
+            pulledMyr: 1,
+            prizeMyr: 10,
+            locked: { stage: 2, prizeMyr: 20 },
+          },
+        ],
+        siteHost: 'polycards.gg/leaderboard',
+      },
+      new Map(),
+      'rest',
+    );
+    expect(await jpegSize(rest.jpeg)).toEqual({
+      format: 'jpeg',
+      width: POSTER_W,
+      height: POSTER_H,
+    });
   });
 });
 
