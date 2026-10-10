@@ -67,8 +67,16 @@ updates:
         update-types:
           - version-update:semver-minor
           - version-update:semver-major
+      # @mercurjs/* also blocks PATCH bumps, unlike @medusajs/* above: a solo
+      # patch still splits this family. #619 moved @mercurjs/dashboard-sdk to
+      # 2.3.6 while @mercurjs/cli@2.3.3 pins it at exactly 2.3.3, so the lock held
+      # two copies. #622 moved @mercurjs/types to 2.3.6, which pulled
+      # @medusajs/types@2.21.2 in beside the pinned 2.19.0 framework.
+      # @mercurjs/core also carries a yarn patch cut against 2.3.3
+      # (backend/.yarn/patches), which has to be re-cut for any new version.
       - dependency-name: '@mercurjs/*'
         update-types:
+          - version-update:semver-patch
           - version-update:semver-minor
           - version-update:semver-major
       # PR #279 bumped react-dom to 19.x alone, leaving react pinned at 18 —
@@ -132,6 +140,14 @@ updates:
       # green (exactly how the mikro-orm 6.6 bump behaved). Moves with the
       # @medusajs/* family, gated on the integration suites.
       - dependency-name: 'ioredis'
+        update-types:
+          - version-update:semver-major
+      # #621 bumped express 4.22.2 -> 5.2.1 in backend/packages/api. That pin
+      # exists to dedupe with the express Medusa actually serves requests on:
+      # @medusajs/framework and @mercurjs/core's peer both want ^4.21.0. A solo
+      # major gives our route code express 5 types while the running app is
+      # still express 4. Express moves with the @medusajs/* family.
+      - dependency-name: 'express'
         update-types:
           - version-update:semver-major
 
