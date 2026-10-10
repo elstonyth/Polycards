@@ -77,6 +77,13 @@ updates:
         update-types:
           - version-update:semver-minor
           - version-update:semver-major
+      # @medusajs/ui is versioned apart from the framework (4.x), but
+      # @medusajs/dashboard pins it exactly (2.19.0 -> 4.2.1). #741 moved our
+      # copy to 4.2.6 alone, which leaves the admin bundle with two UI libraries
+      # and two sets of React contexts. It moves with the dashboard.
+      - dependency-name: '@medusajs/ui'
+        update-types:
+          - version-update:semver-patch
       # @mercurjs/* also blocks PATCH bumps, unlike @medusajs/* above: a solo
       # patch still splits this family. #619 moved @mercurjs/dashboard-sdk to
       # 2.3.6 while @mercurjs/cli@2.3.3 pins it at exactly 2.3.3, so the lock held
