@@ -13,9 +13,10 @@ const pathOnly = (url: unknown): unknown =>
  * belongs in an error tracker. The path is kept, which is what makes a
  * breadcrumb useful.
  *
- * Shapes (@sentry/* 10.x): browser `navigation` has `from`/`to`; browser and
- * edge `fetch`/`xhr` have the full `url`; the server's `http` already strips
- * `url` and files the rest under `http.query` / `http.fragment`.
+ * Shapes: browser `navigation` has `from`/`to`; browser and edge
+ * `fetch`/`xhr` have the full `url`; the server's `http` already strips `url`
+ * and files the rest beside it, under `http.query` / `http.fragment` on
+ * @sentry/* 10.x and `url.query` / `url.fragment` on 11.x.
  */
 export function scrubBreadcrumbUrls(breadcrumb: Breadcrumb): Breadcrumb {
   const { category, data } = breadcrumb;
@@ -30,8 +31,13 @@ export function scrubBreadcrumbUrls(breadcrumb: Breadcrumb): Breadcrumb {
       ...data,
       url: pathOnly(data.url),
     };
-    delete scrubbed['http.query'];
-    delete scrubbed['http.fragment'];
+    for (const key of [
+      'http.query',
+      'http.fragment',
+      'url.query',
+      'url.fragment',
+    ])
+      delete scrubbed[key];
     return { ...breadcrumb, data: scrubbed };
   }
   return breadcrumb;
