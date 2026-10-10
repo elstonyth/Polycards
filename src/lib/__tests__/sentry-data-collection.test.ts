@@ -20,4 +20,31 @@ describe('sentryDataCollection', () => {
       genAI: { inputs: false, outputs: false },
     });
   });
+
+  // Error events drop client-IP headers on their own, but server spans copy
+  // every request header into http.request.header.* attributes. Behind
+  // Cloudflare these carry the real visitor IP. The deny terms match by
+  // substring, and must cover every header Sentry itself treats as an IP
+  // source (@sentry/core vendor/getIpAddress.js, 11.4).
+  it.each([
+    'X-Client-IP',
+    'X-Forwarded-For',
+    'Fly-Client-IP',
+    'CF-Connecting-IP',
+    'Fastly-Client-Ip',
+    'True-Client-Ip',
+    'X-Real-IP',
+    'X-Cluster-Client-IP',
+    'X-Forwarded',
+    'Forwarded-For',
+    'Forwarded',
+    'X-Vercel-Forwarded-For',
+  ])('filters the %s request header', (header) => {
+    const request = (
+      sentryDataCollection?.httpHeaders as { request: { deny: string[] } }
+    ).request;
+    expect(
+      request.deny.some((term) => header.toLowerCase().includes(term)),
+    ).toBe(true);
+  });
 });
