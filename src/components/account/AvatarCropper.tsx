@@ -60,6 +60,9 @@ export function AvatarCropper({
   useEffect(() => {
     const objectUrl = URL.createObjectURL(file);
     let live = true;
+    // The object URL is an external resource created and revoked by this
+    // effect; its state has to follow the effect's lifecycle.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- object URL lifecycle
     setUrl(objectUrl);
     setError(null);
     setReady(false);

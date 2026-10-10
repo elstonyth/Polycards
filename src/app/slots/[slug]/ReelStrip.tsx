@@ -148,6 +148,9 @@ export function ReelStrip({
 
   useEffect(() => {
     settled.current = false;
+    // The spin engine: `done` resets in the same step as `settled` at the start
+    // of every spin/idle run, then the rAF loop below sets it on landing.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reel engine reset per spin
     setDone(false);
     const stripEl = stripRef.current;
     if (!stripEl) return;

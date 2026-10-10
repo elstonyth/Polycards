@@ -33,16 +33,6 @@ updates:
       - dependency-name: 'react-dom'
         update-types:
           - version-update:semver-major
-      # eslint-config-next 16.4 requires eslint-plugin-react-hooks ^7.1, and
-      # 7.1's compiler rules (set-state-in-effect, refs, purity) report 19
-      # errors in existing slot-machine, top-up and auth components. #732
-      # failed `quality` on exactly that. It stays on 16.3.x (lint presets only,
-      # `next` itself moves on its own) until those findings are fixed; then
-      # drop this entry.
-      - dependency-name: 'eslint-config-next'
-        update-types:
-          - version-update:semver-minor
-          - version-update:semver-major
 
   - package-ecosystem: npm
     directory: /backend
