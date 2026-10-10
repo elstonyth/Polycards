@@ -133,6 +133,10 @@ export const TGPAY_NOT_FOUND = 'TGPAY_NOT_FOUND';
  *  details: on 2026-09-06 and 2026-09-29 customers retried against this
  *  (8 and 9 attempts) while nobody on our side knew the wallet was empty. */
 export const TGPAY_PAYOUT_FLOAT_EMPTY = 'TGPAY_PAYOUT_FLOAT_EMPTY';
+/** Payouts are not switched on for our tenant: The 7 Pay documents a 501
+ *  "Payout not available in production yet (contact The 7 Pay)". Like the
+ *  empty wallet, nothing the customer does can fix it. */
+export const TGPAY_PAYOUT_DISABLED = 'TGPAY_PAYOUT_DISABLED';
 
 type TgpayResponse<T> = { status?: number; msg?: string; data?: T };
 type TgpayErrorBody = {
@@ -237,13 +241,23 @@ async function post<T>(
     ) {
       codes.push(TGPAY_PAYOUT_FLOAT_EMPTY);
     }
+    // The one 5xx that is a refusal, not a lost response: the payout feature
+    // is off, so nothing was created. Exact path + status + text, so a real
+    // 5xx (which may mean the payout exists) can never be refunded on the spot.
+    const payoutDisabled =
+      path === '/transaction/payout/withdraw' &&
+      response.status === 501 &&
+      /payout not available/i.test(
+        [parsed.errors, parsed.message, parsed.msg].filter(Boolean).join(' '),
+      );
+    if (payoutDisabled) codes.push(TGPAY_PAYOUT_DISABLED);
     throw new TgpayError(
       `${label} ${path} failed (HTTP ${response.status}): ${detail}`,
       codes,
       response.status,
       // 4xx with a JSON body = they parsed us and said no. 5xx and 2xx-without-
       // data are ambiguous: the request may have been accepted.
-      response.status >= 400 && response.status < 500,
+      (response.status >= 400 && response.status < 500) || payoutDisabled,
     );
   }
   return parsed.data;

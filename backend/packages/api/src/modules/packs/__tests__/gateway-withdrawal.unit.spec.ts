@@ -11,7 +11,10 @@ import {
   withdrawalIdempotencyReference,
   withdrawalRefundReference,
 } from '../gateway-withdrawal';
-import { TGPAY_PAYOUT_FLOAT_EMPTY } from '../tgpay-client';
+import {
+  TGPAY_PAYOUT_DISABLED,
+  TGPAY_PAYOUT_FLOAT_EMPTY,
+} from '../tgpay-client';
 import { resetOpsAlerts } from '../ops-alert';
 import {
   unknownWithdrawalAction,
@@ -989,6 +992,13 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       400,
       true,
     );
+  const payoutDisabled = () =>
+    new GatewayError(
+      'The 7 Pay /transaction/payout/withdraw failed (HTTP 501): Payout not available in production yet (contact The 7 Pay)',
+      [TGPAY_PAYOUT_DISABLED],
+      501,
+      true,
+    );
   const originalFetch = global.fetch;
   let sent: { chat_id: string; text: string }[];
 
@@ -1076,6 +1086,36 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
       expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
       expect(fakeGateway.calls.withdrawals).toHaveLength(1);
+    });
+
+    // Same machinery, second cause: The 7 Pay answers 501 "Payout not
+    // available in production yet" while payouts are off on our tenant. The
+    // customer can do nothing about it either, so it gets the same handling.
+    it('payouts switched off at the gateway: refunds at once, says it is our side, alerts ops, turns the next tap away', async () => {
+      fakeGateway.script({ submitWithdrawal: payoutDisabled() });
+      const h = harness();
+      const error = (await start(h).catch((e: unknown) => e)) as Error;
+      expect(error.message).toMatch(
+        /withdrawals are temporarily unavailable on our side/i,
+      );
+      expect(error.message).not.toMatch(/check your bank details/i);
+      // Refunded now, not left pending for the sweep.
+      expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+      expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
+        id: 'gpw_1',
+        status: 'failed',
+        failure_reason: expect.stringContaining(TGPAY_PAYOUT_DISABLED),
+      });
+      expect(sent).toHaveLength(1);
+      expect(sent[0].chat_id).toBe('-100ops');
+      expect(sent[0].text).toMatch(/payouts are not enabled/i);
+      expect(sent[0].text).not.toMatch(/1234567890|AHMAD BIN ALI/i);
+
+      const h2 = harness();
+      const next = (await start(h2).catch((e: unknown) => e)) as Error;
+      expect(next.message).toMatch(/nothing was taken/i);
+      expect(h2.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+      expect(h2.packs.withdrawForCashout).not.toHaveBeenCalled();
     });
 
     it('any other definite refusal keeps the generic copy and alerts nobody', async () => {
@@ -1176,6 +1216,17 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
 
       expect(sent).toHaveLength(1);
       expect(sent[0].chat_id).toBe('-100ops');
+      expect(sent[0].text).toMatch(/admin approve/);
+    });
+
+    it('payouts switched off at the gateway: refunds and tells the admin payouts are not enabled', async () => {
+      fakeGateway.script({ submitWithdrawal: payoutDisabled() });
+      const h = approveHarness();
+      const error = (await h.approve().catch((e: unknown) => e)) as Error;
+      expect(error.message).toMatch(/payouts are not enabled/i);
+      expect(error.message).toMatch(/refunded/i);
+      expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+      expect(sent).toHaveLength(1);
       expect(sent[0].text).toMatch(/admin approve/);
     });
 

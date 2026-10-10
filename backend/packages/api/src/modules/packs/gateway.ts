@@ -630,5 +630,6 @@ export function checkBalance(config: GatewayConfig): Promise<MerchantBalance> {
 export {
   TgpayError,
   TGPAY_NOT_FOUND,
+  TGPAY_PAYOUT_DISABLED,
   TGPAY_PAYOUT_FLOAT_EMPTY,
 } from './tgpay-client';

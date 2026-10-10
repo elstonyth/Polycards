@@ -14,6 +14,7 @@ import {
   queryPayout,
   TgpayError,
   TGPAY_NOT_FOUND,
+  TGPAY_PAYOUT_DISABLED,
   TGPAY_PAYOUT_FLOAT_EMPTY,
   type TgpayConfig,
 } from '../tgpay-client';
@@ -257,6 +258,48 @@ describe('createPayout / balances', () => {
     )) as TgpayError;
     expect(ambiguous.has(TGPAY_PAYOUT_FLOAT_EMPTY)).toBe(false);
     expect(ambiguous.definite).toBe(false);
+  });
+
+  // The 7 Pay documents a 501 "Payout not available in production yet
+  // (contact The 7 Pay)" for a tenant whose payouts are not switched on. It
+  // is a refusal, not a lost response: nothing was created, so it is the one
+  // 5xx made DEFINITE, which lets the withdrawal refund at once instead of
+  // waiting out the sweep. Matched on path + status + text, nothing wider.
+  it('a 501 "Payout not available" on the payout path is tagged TGPAY_PAYOUT_DISABLED and made definite', async () => {
+    stubFetch(
+      {
+        statusCode: 501,
+        message: 'Payout not available in production yet (contact The 7 Pay)',
+      },
+      501,
+    );
+    const err = (await createPayout(payout, config).catch(
+      (e: unknown) => e,
+    )) as TgpayError;
+    expect(err.has(TGPAY_PAYOUT_DISABLED)).toBe(true);
+    expect(err.definite).toBe(true);
+    expect(err.httpStatus).toBe(501);
+  });
+
+  it('any other 5xx on the payout path stays ambiguous and untagged', async () => {
+    // A 501 with other text, and a 500 with the same text: either may mean
+    // the payout exists, so neither may be refunded on the spot.
+    stubFetch({ statusCode: 501, message: 'Not Implemented' }, 501);
+    const other501 = (await createPayout(payout, config).catch(
+      (e: unknown) => e,
+    )) as TgpayError;
+    expect(other501.has(TGPAY_PAYOUT_DISABLED)).toBe(false);
+    expect(other501.definite).toBe(false);
+
+    stubFetch(
+      { statusCode: 500, message: 'Payout not available in production yet' },
+      500,
+    );
+    const is500 = (await createPayout(payout, config).catch(
+      (e: unknown) => e,
+    )) as TgpayError;
+    expect(is500.has(TGPAY_PAYOUT_DISABLED)).toBe(false);
+    expect(is500.definite).toBe(false);
   });
 
   it('a different payout refusal is not tagged', async () => {
