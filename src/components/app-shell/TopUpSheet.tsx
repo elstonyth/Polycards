@@ -113,6 +113,9 @@ export default function TopUpSheet({
   // re-running then would wipe a selection the customer had already made.
   useEffect(() => {
     if (open) {
+      // Deposit sheet: every open starts a fresh attempt, together with the
+      // idempotency-key reset just below.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- per-open reset of the deposit attempt
       setError(null);
       setDone(null);
       setSubmitting(false);
@@ -149,6 +152,7 @@ export default function TopUpSheet({
     // gateways since the last one, and a band (or a closed channel) the
     // previous gateway answered with must not judge this open before the
     // fresh answer lands.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- safe defaults until this open's fetch answers
     setLimits(DEFAULT_PAYMENT_LIMITS);
     getPaymentLimits()
       .then((l) => {
@@ -172,6 +176,7 @@ export default function TopUpSheet({
   // A retract that lands while the sheet is open must not leave a now-invalid
   // code armed on the Pay button.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- disarm a channel the server just retracted
     if (!methods.some((option) => option.code === method)) setMethod(preferred);
   }, [methods, method, preferred]);
 

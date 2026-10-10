@@ -1,7 +1,14 @@
 // src/app/slots/[slug]/SlotMachineClient.tsx
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { preload } from 'react-dom';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
@@ -168,11 +175,15 @@ export default function SlotMachineClient({
   // STALE closure — the reel prop, the watchdog, or handleRoll's own mapping
   // catch captured at press time — so reading `customer` from a closure could
   // compare against the account that rolled rather than the one signed in NOW.
-  // A ref mirrored every render always holds the current id, closing that
+  // A ref mirrored every commit always holds the current id, closing that
   // bypass. (What it compares against is the ROLL's own forId, and it steps
-  // aside entirely for a demo — see handleSettled.)
+  // aside entirely for a demo — see handleSettled.) Mirrored in a layout effect
+  // rather than during render: it lands in the commit, before any passive
+  // effect, rAF or timer that could invoke handleSettled can run.
   const customerIdRef = useRef<string | null>(customer?.id ?? null);
-  customerIdRef.current = customer?.id ?? null;
+  useLayoutEffect(() => {
+    customerIdRef.current = customer?.id ?? null;
+  }, [customer?.id]);
   const { muted, toggleMuted, play, playReveal, vibrate, sfx } = useSound();
 
   // The one-time free welcome pack. It is opened SINGLY through the single-open
@@ -336,9 +347,10 @@ export default function SlotMachineClient({
   // Commit the stage scale only while idle: cellSize is a ReelStrip engine
   // dependency (pitch/travel/target), so resizing the window mid-spin would
   // restart the rAF timeline under the player's eyes.
-  const cellRef = useRef(idealCell);
-  if (phase === 'idle') cellRef.current = idealCell;
-  const cellSize = cellRef.current;
+  // Adjusted while rendering, so React re-renders with the new size before
+  // anything commits — same frame the old render-time ref write produced.
+  const [cellSize, setCellSize] = useState(idealCell);
+  if (phase === 'idle' && cellSize !== idealCell) setCellSize(idealCell);
   // Reshuffle every reel's decoy pool each time the machine goes idle: on
   // mount (post-hydration) and on every return-to-idle after a spin — the
   // same transition where ReelStrip snaps its position back to base, a cut
@@ -351,6 +363,9 @@ export default function SlotMachineClient({
   // reel via the DECOY_DEXES fallback.
   useEffect(() => {
     if (phase !== 'idle') return;
+    // buildIdlePool shuffles (Math.random), so it cannot run during render;
+    // the reshuffle belongs to the idle transition, not to a derived value.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- impure reshuffle on entering idle
     setDecoyPools(Array.from({ length: reels }, () => buildIdlePool(basePool)));
   }, [phase, reels, basePool]);
   // A just-added reel must show pack cards in the SAME render (the reshuffle
@@ -721,6 +736,10 @@ export default function SlotMachineClient({
     // off the ROLL, not the machine: a login mid-flight flips the live isDemo
     // and would push theater cards into the live ticker.
     if (held.mode !== 'demo') {
+      // handleSettled never runs during render: its callers are the reel's rAF
+      // settle (onAllSettled), the watchdog timeout and handleRoll's catch. The
+      // compiler can't see that through the onAllSettled prop.
+      // eslint-disable-next-line react-hooks/purity -- event-time timestamp, not render
       const now = Date.now();
       const justPulled: RecentPull[] = held.cards.map((won, i) => ({
         // The won card IS the feed row's card (one view); the rest is the
@@ -1129,6 +1148,10 @@ export default function SlotMachineClient({
                   phase={phase}
                   cards={spin.cards}
                   offers={offers}
+                  // Each ReelStrip reports its winner rect BEFORE it calls
+                  // onAllSettled, and this overlay only mounts after that
+                  // settle's phase change, so the array is complete here.
+                  // eslint-disable-next-line react-hooks/refs -- filled before the settle re-render reads it
                   winnerRects={winnerRects.current}
                   spriteSrcs={spriteSrcs}
                   reduced={reduced}

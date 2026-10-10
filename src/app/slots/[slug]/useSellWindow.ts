@@ -89,6 +89,9 @@ export function useSellWindow({
   const batchKey = offers.find((o) => o !== null)?.pullId ?? null;
   useEffect(() => {
     pinged.current = false;
+    // Money path: the whole window (states, deadline, countdown, reveal ping)
+    // restarts together when a new batch arrives, keyed on its first pullId.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- per-batch reset of the sell window
     setStates(offers.map(() => ({ phase: 'idle' })));
     setDeadlineMs(sharedDeadlineMs(offers.map((o) => o?.instantDeadlineMs)));
     setSecondsLeft(SELL_COUNTDOWN_SECS);
@@ -146,6 +149,9 @@ export function useSellWindow({
     // Wrapped, not point-free: React hands an updater exactly one argument, so
     // a second parameter added to expirySweep later would silently bind to
     // React's own value instead of failing to compile.
+    // Persists the sweep `resolved` already shows, so the sell/keep guards
+    // (which read `prev`) refuse a sale after the deadline.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- commit the expiry sweep for the re-entry guards
     setStates((prev) => expirySweep(prev));
   }, [expired]);
 

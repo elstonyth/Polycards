@@ -121,7 +121,7 @@ export default function SettingsForm({
   const newPhoneWrapRef = useRef<HTMLDivElement>(null);
   // Both sends below (new number, then possibly the old one) share one
   // Turnstile slot, rendered under whichever phone step is showing.
-  const sender = usePhoneOtpSender();
+  const { challengeRef, send: sendOtp } = usePhoneOtpSender();
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -222,7 +222,7 @@ export default function SettingsForm({
       setNote({ ok: false, text: 'Please refresh the page and try again.' });
       return;
     }
-    const sent = await sender.send({ phone, purpose: 'phone-change' });
+    const sent = await sendOtp({ phone, purpose: 'phone-change' });
     if (!sent.ok) {
       setPhoneChange('entry');
       setNote({ ok: false, text: sent.error });
@@ -253,7 +253,7 @@ export default function SettingsForm({
 
     setBusy(true);
     try {
-      const result = await sender.send({
+      const result = await sendOtp({
         phone: normalized,
         purpose: 'phone-change',
       });
@@ -485,7 +485,7 @@ export default function SettingsForm({
         )}
         {/* Turnstile slot — empty unless Cloudflare wants a click. */}
         <div
-          ref={sender.challengeRef}
+          ref={challengeRef}
           className="mt-3 isolate flex justify-center empty:hidden"
         />
         {phoneChange === 'closed' && (

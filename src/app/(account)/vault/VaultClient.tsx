@@ -174,10 +174,14 @@ export default function VaultClient({
   // on the FULL filtered set (`visible`), only rendering is windowed.
   const PAGE_STEP = 30;
   const [shownCount, setShownCount] = useState(PAGE_STEP);
-  useEffect(() => {
-    // New search/filter → back to the first window.
+  // New search/filter → back to the first window. Reset while rendering (React's
+  // "adjust state when an input changes" pattern), so the grid never paints one
+  // frame of the old window against the new filter.
+  const [pagedFor, setPagedFor] = useState({ query, rarityFilter });
+  if (pagedFor.query !== query || pagedFor.rarityFilter !== rarityFilter) {
+    setPagedFor({ query, rarityFilter });
     setShownCount(PAGE_STEP);
-  }, [query, rarityFilter]);
+  }
   const shown = visible.slice(0, shownCount);
 
   // Opening the vault marks everything seen. Keyed on `latestAt` rather than

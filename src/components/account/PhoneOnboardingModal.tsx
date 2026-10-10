@@ -58,7 +58,7 @@ export function PhoneOnboardingModal() {
   // Set after a successful save: hides the gate for the beat between the
   // write landing and router.refresh() re-rendering the layout without it.
   const [done, setDone] = useState(false);
-  const sender = usePhoneOtpSender();
+  const { challengeRef, send: sendOtp } = usePhoneOtpSender();
 
   useModalA11y(panelRef, !done, noop);
 
@@ -87,7 +87,7 @@ export function PhoneOnboardingModal() {
     setBusy(true);
     setCooldown(PHONE_OTP_COOLDOWN_SECONDS);
     try {
-      const result = await sender.send({
+      const result = await sendOtp({
         phone: normalized,
         purpose: 'phone-change',
         ...(via ? { channel: via } : {}),
@@ -231,7 +231,7 @@ export function PhoneOnboardingModal() {
             </p>
             {/* Turnstile slot — empty unless Cloudflare wants a click. */}
             <div
-              ref={sender.challengeRef}
+              ref={challengeRef}
               className="isolate flex justify-center empty:hidden"
             />
             <Pill
