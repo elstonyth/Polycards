@@ -106,10 +106,11 @@ const visitHomeAfterClaim = async (page, email) => {
     sessionReady,
     badgeReady,
   ]);
+  // The home hero's id, not its copy: the "RIP A PACK" board this used to
+  // wait for went with the 2026-09-20 home redesign (#594), unnoticed while
+  // an earlier step kept timing out.
   await page
-    .getByRole('heading', { name: 'RIP A PACK', exact: true })
-    .filter({ visible: true })
-    .first()
+    .locator('#hero-heading')
     .waitFor({ state: 'visible', timeout: 20000 });
   if (!session?.customer?.id || session.customer.email !== email) {
     throw new Error('home customer session did not match the QA customer');
