@@ -164,6 +164,92 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // Strict inequality: current_level < highest_level_ever
         expect(rowAfter.current_level).toBeLessThan(rowAfter.highest_level_ever);
       });
+
+      it('resetVipState: back to L1 with zero VIP spend; only later opens count; wallet untouched', async () => {
+        await seedLadder();
+        const customerId = 'cust_vms_reset';
+
+        await service.mutateCreditAtomic({
+          customerId,
+          amount: 30,
+          reason: 'topup',
+        });
+        await service.settleOpen({
+          customerId,
+          amount: -26,
+          sourceTransactionId: 'open_vms_reset_1',
+        });
+        await service.rebuildVipMemberState(customerId);
+        const [before] = await service.listVipMemberStates(
+          { customer_id: customerId },
+          { take: 1 },
+        );
+        expect(before.highest_level_ever).toBe(3); // 26 MYR ≥ L3 (25)
+
+        // resetVipLevel minus its frame unequip: a module test DB has no
+        // customer table for mutateCustomerMetadata.
+        await service.resetVipState(customerId);
+        // A rebuild must not restore the old level (GREATEST ratchet).
+        await service.rebuildVipMemberState(customerId);
+        const [reset] = await service.listVipMemberStates(
+          { customer_id: customerId },
+          { take: 1 },
+        );
+        expect(reset.vip_reset_at).not.toBeNull();
+        expect(reset.highest_level_ever).toBe(1);
+        expect(reset.current_level).toBe(1);
+        expect(Number(reset.lifetime_external_spend_sen)).toBe(0);
+        expect((await service.vipSpendBasis(customerId)).netMyr).toBe(0);
+        // creditSummary is the lifetime ledger: the reset leaves it alone.
+        expect(await service.creditSummary(customerId)).toMatchObject({
+          balance: 4,
+          vipSpendTotal: 26,
+        });
+
+        // A settle that read its inputs before the reset (resetAt null) must
+        // not write the old level back through the GREATEST ratchet.
+        await service.upsertVipMemberState({
+          customerId,
+          lifetimeSen: 2600,
+          highestLevelEver: 3,
+          currentLevel: 3,
+          resetAt: null,
+        });
+        const [stale] = await service.listVipMemberStates(
+          { customer_id: customerId },
+          { take: 1 },
+        );
+        expect(stale.highest_level_ever).toBe(1);
+        expect(Number(stale.lifetime_external_spend_sen)).toBe(0);
+
+        // An open after the reset counts: 3 MYR = L2. The rebuild only lands
+        // if the guard's resetAt round trip matches the stored cutoff exactly.
+        await service.settleOpen({
+          customerId,
+          amount: -3,
+          sourceTransactionId: 'open_vms_reset_2',
+        });
+        await service.rebuildVipMemberState(customerId);
+        const [after] = await service.listVipMemberStates(
+          { customer_id: customerId },
+          { take: 1 },
+        );
+        expect(Number(after.lifetime_external_spend_sen)).toBe(300);
+        expect(after.highest_level_ever).toBe(2);
+        expect((await service.vipSpendBasis(customerId)).netMyr).toBe(3);
+        // The Players list Turnover is lifetime: a VIP reset does not hide it.
+        const overview = await service.playersOverview([customerId], 1);
+        expect(overview.wallet.get(customerId)).toMatchObject({
+          balanceCents: 100,
+          vipSpendCents: 2900,
+        });
+
+        // Reversing the pre-reset open writes a post-reset +26 row: the net
+        // basis floors at 0 instead of going negative; lifetime is unchanged.
+        await service.reverseOpen('open_vms_reset_1');
+        expect((await service.vipSpendBasis(customerId)).netMyr).toBe(0);
+        expect(await service.lifetimeTurnoverSenFor(customerId)).toBe(300);
+      });
     });
   },
 });

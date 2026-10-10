@@ -3,6 +3,7 @@ import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import { notifyFeedNonfatal } from '../../modules/packs/notify-feed';
+import { vipLevelUpKey } from '../../modules/packs/vip-ladder';
 
 export type SettleVipInput = {
   customer_id: string;
@@ -30,7 +31,7 @@ export const settleVipStep = createStep(
   async (input: SettleVipInput, { container }) => {
     try {
       const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-      const { gained } = await packs.grantLevelUpRewards(
+      const { gained, resetAt } = await packs.grantLevelUpRewards(
         input.customer_id,
         input.open_id,
       );
@@ -42,15 +43,16 @@ export const settleVipStep = createStep(
         // settling concurrently (open-batch, two tabs) both read the same
         // highest_level_ever and both gain the rung — the grant insert dedupes
         // at the DB, and this key dedupes the feed row (review 2026-09). A
-        // rung is gained once per customer, ever (GREATEST ratchet), so the
-        // key can never suppress a real level-up. notifyFeedNonfatal never
+        // rung is gained once per customer per VIP reset (GREATEST ratchet;
+        // vipLevelUpKey adds the reset), so the key can never suppress a real
+        // level-up. notifyFeedNonfatal never
         // throws, so the surrounding try/catch here exists to guard the GRANT
         // call, not this.
         await notifyFeedNonfatal(container, 'settle-vip', {
           receiverId: input.customer_id,
           template: 'vip_level_up',
           data: { levels: gained },
-          idempotencyKey: `vip:${input.customer_id}:L${Math.max(...gained)}`,
+          idempotencyKey: vipLevelUpKey(input.customer_id, gained, resetAt),
         });
       }
     } catch (error) {

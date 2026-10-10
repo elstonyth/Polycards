@@ -6022,6 +6022,16 @@
           "default": "1",
           "mappedType": "integer"
         },
+        "vip_reset_at": {
+          "name": "vip_reset_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        },
         "raw_lifetime_external_spend_sen": {
           "name": "raw_lifetime_external_spend_sen",
           "type": "jsonb",

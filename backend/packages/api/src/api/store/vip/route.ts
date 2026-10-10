@@ -24,8 +24,8 @@ export async function GET(
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
 
-  const [summary, ladderRows, stateRow] = await Promise.all([
-    packs.creditSummary(customerId),
+  const [basis, ladderRows, stateRow] = await Promise.all([
+    packs.vipSpendBasis(customerId),
     packs.listVipLevels(
       {},
       {
@@ -52,7 +52,7 @@ export async function GET(
     }))
     .sort((a, b) => a.level - b.level);
 
-  const spend = summary.vipSpendTotal;
+  const spend = basis.netMyr;
 
   // Prefer vip_member_state row (maintained by the settle-open saga) when
   // present; fall back to live levelForSpend when no row exists (e.g. customer
