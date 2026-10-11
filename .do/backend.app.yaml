@@ -424,6 +424,16 @@ envs:
     scope: RUN_TIME
     value: "0"
 
+  # Rolling-24h GLOBAL ceiling on admin-minted credit (credit adjustments,
+  # bonus grants and gifted packs, across every admin and every customer) —
+  # see modules/packs/credit-adjust.ts. The code default is 1,000,000; raised
+  # 2026-10-11 because routine group grants can fill that in one run and block
+  # every other grant for the day. Set 0 to refuse every grant (incident stop
+  # lever).
+  - key: ADJUST_DAILY_MINT_MAX_RM
+    scope: RUN_TIME
+    value: "2000000"
+
   # ── TGPay (plan 130) — the payment gateway since the 2026-09-06 cutover.
   # The key pair comes from the production back office (admin.tgpay365.com →
   # Settings → General → API keys, 2FA-gated) and is injected by
