@@ -252,7 +252,7 @@ export default function LeaderboardClient({
                         ))}
                         {prize.creditsLabel && (
                           <span className="text-chase text-xs font-semibold whitespace-nowrap">
-                            {prize.creditsLabel}
+                            {prize.creditsLabel} bonus
                           </span>
                         )}
                       </span>

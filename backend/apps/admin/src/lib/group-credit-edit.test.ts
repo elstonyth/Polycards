@@ -135,6 +135,7 @@ describe('group credit editing', () => {
       amount: -12.5,
       note: 'Partner adjustment',
       idempotency_key: `${batch.id}:cus_3`,
+      notify: false,
     });
     await runGroupCreditAdjustment(batch, retried, progress);
     expect(fetcher).toHaveBeenCalledTimes(3);
@@ -161,6 +162,7 @@ describe('group credit editing', () => {
       note: 'Giveaway',
       idempotency_key: `${batch.id}:cus_1`,
       kind: 'bonus',
+      notify: false,
     });
   });
 });

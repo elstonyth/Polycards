@@ -160,6 +160,7 @@ import {
 } from './buyback-rate';
 import { consumeExternalSen } from './external-funded';
 import {
+  BONUS_BP_FULL,
   BONUS_NOT_SPENDABLE_MESSAGE,
   NORMAL_SHARE_SQL,
   REAL_MONEY_PULL_SQL,
@@ -304,7 +305,9 @@ export type CreditMutationInput = {
   /**
    * Bonus credit (spec 2026-10-07): the signed sen of this row that is
    * spend-only bonus. Only a 'bonus_grant' row may carry it, and it must equal
-   * the row's amount in sen. Pack opens compute theirs in settleOpen.
+   * the row's amount in sen. A 'reward_credit' row (task / challenge prize) is
+   * stamped whole-row bonus by mutateCreditAtomic itself (2026-10-11). Pack
+   * opens compute theirs in settleOpen.
    */
   bonusCents?: number;
 };
@@ -2259,7 +2262,7 @@ class PacksModuleService extends MedusaService({
         // also rides IDX_pull_customer_id_rolled_at instead of scanning for a
         // status that has no index.
         // Gifted packs and bonus-funded opens count toward nothing (spec
-        // 2026-10-07): their achievements could pay withdrawable credit.
+        // 2026-10-07): bonus play must not farm achievements and their prizes.
         em.execute<{ n: string }[]>(
           'SELECT COUNT(*)::bigint AS n FROM pull ' +
             "WHERE customer_id = ? AND deleted_at IS NULL AND source NOT IN ('gift', 'bonus')",
@@ -2782,6 +2785,9 @@ class PacksModuleService extends MedusaService({
             order_id: null,
             rolled_at: new Date(),
             source: 'reward' as const,
+            // A prize is promo value (operator rule 2026-10-11): its whole
+            // sell-back must be played through once, like a gifted pack.
+            bonus_bp: BONUS_BP_FULL,
           },
         ],
         sharedContext,
@@ -3491,6 +3497,14 @@ class PacksModuleService extends MedusaService({
       // reward_credit, not bonus_grant: bonus_grant rows count against the
       // admin 24h mint ceiling (rollingAdjustmentMintCents), and task claims
       // must neither eat that allowance nor be blocked by it.
+      if (bonusBeforeCents + deltaCents < 0) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          `Bonus credit cannot go below RM 0 (bonus balance RM ${(
+            bonusBeforeCents / 100
+          ).toFixed(2)}).`,
+        );
+      }
       bonusDeltaCents = deltaCents;
     }
 
@@ -3524,7 +3538,9 @@ class PacksModuleService extends MedusaService({
     //    Only a pack open may spend bonus credit; every other debit is floored
     //    against the NORMAL balance (a bonus take-back was bounded above).
     const spendableCents =
-      input.reason === 'pack_open' || input.reason === 'bonus_grant'
+      input.reason === 'pack_open' ||
+      input.reason === 'bonus_grant' ||
+      input.reason === 'reward_credit'
         ? beforeCents
         : beforeCents - bonusBeforeCents;
     if (deltaCents < 0 && spendableCents + deltaCents < floorCents) {
@@ -9815,6 +9831,7 @@ class PacksModuleService extends MedusaService({
           order_id: null,
           rolled_at: new Date(),
           source: 'reward' as const,
+          bonus_bp: BONUS_BP_FULL, // promo prize: sell-back played through once
           stock_earmarked: taken,
         },
       ],
@@ -10891,6 +10908,7 @@ class PacksModuleService extends MedusaService({
             order_id: null,
             rolled_at: new Date(),
             source: 'reward' as const,
+            bonus_bp: BONUS_BP_FULL, // promo prize: sell-back played through once
             // Minted UNRESERVED; flipped only once a unit is really taken.
             // Buyback restores flagged pulls only, so false is the safe
             // default — giving back a unit that was never taken would mint a
@@ -11175,6 +11193,7 @@ class PacksModuleService extends MedusaService({
         order_id: null,
         rolled_at: new Date(),
         source: 'reward' as const,
+        bonus_bp: BONUS_BP_FULL, // promo prize: sell-back played through once
         stock_earmarked: false, // flipped only if a unit is really taken
       })),
       sharedContext,

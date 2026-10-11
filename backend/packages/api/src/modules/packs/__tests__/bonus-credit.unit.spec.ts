@@ -6,6 +6,7 @@ import {
   bonusShareSen,
   consumeBonusSen,
   normalSenSql,
+  openBonusBp,
   paidPullSource,
   reasonCashSenSql,
 } from '../bonus-credit';
@@ -53,6 +54,12 @@ describe('bonus credit math', () => {
     expect(paidPullSource(5000)).toBe('bonus');
     expect(paidPullSource(BONUS_BP_FULL)).toBe('bonus');
     expect(paidPullSource(0)).toBe('pack');
+  });
+
+  it('gives the free welcome pull a full bonus share, a paid open its own', () => {
+    expect(openBonusBp(true, 0, 0)).toBe(BONUS_BP_FULL);
+    expect(openBonusBp(false, 0, 3000)).toBe(0);
+    expect(openBonusBp(false, 1500, 3000)).toBe(5000);
   });
 
   it('spells the normal part of a ledger row one way', () => {

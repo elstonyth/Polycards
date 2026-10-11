@@ -237,6 +237,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
         );
         expect(rewardPulls).toHaveLength(1);
         expect(rewardPulls[0]!.card_id).toBe(card.handle); // HANDLE, not id
+        // A prize is promo value: its whole sell-back is played through once.
+        expect(rewardPulls[0]!.bonus_bp).toBe(10000);
 
         const second = await service.settleChallengeWeek({});
         expect(second.settled).toBe(false);

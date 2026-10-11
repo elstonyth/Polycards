@@ -20,6 +20,7 @@ import {
 } from '@medusajs/ui';
 import { rm } from '../lib/format';
 import { BonusCreditToggle } from '../components/BonusCreditToggle';
+import { isBonusGrant } from '../lib/credit-kind';
 import { qk } from '../lib/query-keys';
 import type { GroupCreditCustomer } from '../lib/admin-rest';
 import {
@@ -46,8 +47,10 @@ function GroupCreditEditor({ data: group }: Props) {
   const [search, setSearch] = useState('');
   const [amountText, setAmountText] = useState('');
   const [note, setNote] = useState('');
-  // Spend-only bonus by default (operator rule 2026-10-11).
-  const [bonus, setBonus] = useState(true);
+  // Grants default to spend-only bonus, deductions to withdrawable credit
+  // (operator rule 2026-10-11); null = box untouched.
+  const [bonusChoice, setBonusChoice] = useState<boolean | null>(null);
+  const bonus = isBonusGrant(bonusChoice, amountText);
   const [busy, setBusy] = useState(false);
   const [batch, setBatch] = useState<GroupCreditAdjustment | null>(null);
   const [results, setResults] = useState<GroupCreditResults>({});
@@ -255,7 +258,7 @@ function GroupCreditEditor({ data: group }: Props) {
     setSelected(new Set());
     setAmountText('');
     setNote('');
-    setBonus(true);
+    setBonusChoice(null);
     setSearch('');
   };
 
@@ -433,7 +436,7 @@ function GroupCreditEditor({ data: group }: Props) {
                   </div>
                   <BonusCreditToggle
                     checked={bonus}
-                    onChange={setBonus}
+                    onChange={setBonusChoice}
                     disabled={busy}
                   />
                   {members.isFetching ? (

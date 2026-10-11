@@ -60,7 +60,7 @@ describe('SellConfirmModal — sale from bonus play', () => {
     expect(text).not.toContain('bonus +');
     expect(text).toContain('To play through');
     expect(text).toContain(
-      'RM 270.00 of it came from bonus credit or a vault pack',
+      'RM 270.00 of it came from bonus credit, a vault pack or a prize',
     );
   });
 

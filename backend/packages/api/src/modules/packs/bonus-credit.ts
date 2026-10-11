@@ -52,6 +52,16 @@ export function bonusBpFor(bonusSen: number, priceSen: number): number {
   return Math.min(BONUS_BP_FULL, ceilDiv(bonusSen * BONUS_BP_FULL, priceSen));
 }
 
+/** One open's bonus share. The free welcome pull is promo value: its whole
+ *  sell-back must be played through once (2026-10-11), like a gifted pack. */
+export function openBonusBp(
+  free: boolean,
+  bonusSen: number,
+  priceSen: number,
+): number {
+  return free ? BONUS_BP_FULL : bonusBpFor(bonusSen, priceSen);
+}
+
 /** The part of a sell-back of `amountSen` that came from bonus or gift
  *  play — the part to play through (rounded up). */
 export function bonusShareSen(amountSen: number, bp: number): number {

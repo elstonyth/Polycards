@@ -92,6 +92,7 @@ export async function runGroupCreditAdjustment(
         batch.note,
         `${batch.id}:${customer.id}`,
         batch.bonus ? 'bonus' : undefined,
+        true, // silent: a group edit never messages every member
       );
       results[customer.id] = { status: 'succeeded', balance: result.balance };
     } catch (error) {

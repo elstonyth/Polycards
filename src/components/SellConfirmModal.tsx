@@ -169,7 +169,7 @@ export default function SellConfirmModal({
           {bulk && plural ? 'cards leave' : 'card leaves'} your vault and the
           amount is credited to your site balance.
           {lockedSen > 0 &&
-            ` ${rm(lockedSen / 100)} of it came from bonus credit or a vault pack: spend that on packs once before you can withdraw it.`}
+            ` ${rm(lockedSen / 100)} of it came from bonus credit, a vault pack or a prize: spend that on packs once before you can withdraw it.`}
         </p>
 
         <div className="mt-5 flex gap-2">

@@ -27,6 +27,7 @@ import { resolveImageUrl } from "../../lib/image-url";
 import { rm } from "../../lib/format";
 import { Pager } from "../../components/Pager";
 import { BonusCreditToggle } from "../../components/BonusCreditToggle";
+import { adjustCreditVars, isBonusGrant } from "../../lib/credit-kind";
 
 export const config: RouteConfig = {
   label: "Customer Support",
@@ -61,8 +62,10 @@ const SupportPage = () => {
   // the money rules; surfacing its message keeps the two in lockstep).
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
-  // Spend-only bonus by default (operator rule 2026-10-11).
-  const [bonus, setBonus] = useState(true);
+  // Grants default to spend-only bonus, deductions to withdrawable credit
+  // (operator rule 2026-10-11); null = box untouched.
+  const [bonusChoice, setBonusChoice] = useState<boolean | null>(null);
+  const bonus = isBonusGrant(bonusChoice, amount);
   const adjusting = adjustCredits.isPending;
   // Money mutation behind an explicit confirm — a mistyped sign on a support
   // ticket must not apply on a single click.
@@ -89,7 +92,7 @@ const SupportPage = () => {
     setSelectedId(id);
     setAmount("");
     setNote("");
-    setBonus(true);
+    setBonusChoice(null);
   };
 
   // Validate, then ask for confirmation — the actual mutation runs in
@@ -111,12 +114,9 @@ const SupportPage = () => {
     const value = Number(amount);
     setConfirmOpen(false);
     try {
-      const res = await adjustCredits.mutateAsync({
-        id: view.customer.id,
-        amount: value,
-        note,
-        kind: bonus ? "bonus" : undefined,
-      });
+      const res = await adjustCredits.mutateAsync(
+        adjustCreditVars(view.customer.id, value, note, bonus),
+      );
       toast.success(
         t("support.adjusted", {
           amount: rm(res.amount),
@@ -126,7 +126,7 @@ const SupportPage = () => {
       // Invalidation (in the hook) refetches the customer view → fresh ledger row.
       setAmount("");
       setNote("");
-      setBonus(true);
+      setBonusChoice(null);
     } catch {
       // onError in useAdjustCredits already toasts; suppress double toast here.
     }
@@ -281,7 +281,7 @@ const SupportPage = () => {
                   />
                   <BonusCreditToggle
                     checked={bonus}
-                    onChange={setBonus}
+                    onChange={setBonusChoice}
                     disabled={adjusting}
                   />
                   <Button
