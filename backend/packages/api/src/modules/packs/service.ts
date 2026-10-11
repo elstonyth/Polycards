@@ -309,8 +309,8 @@ export type CreditMutationInput = {
   /**
    * Bonus credit (spec 2026-10-07): the signed sen of this row that is
    * spend-only bonus. Only a 'bonus_grant' row may carry it, and it must equal
-   * the row's amount in sen. A 'reward_credit' row (task / challenge prize) is
-   * stamped whole-row bonus by mutateCreditAtomic itself (2026-10-11). Pack
+   * the row's amount in sen. A 'reward_credit' row (task / challenge prize) or
+   * a 'voucher_claim' row (VIP voucher) is stamped whole-row bonus by mutateCreditAtomic itself (2026-10-11). Pack
    * opens compute theirs in settleOpen.
    */
   bonusCents?: number;
@@ -3493,12 +3493,15 @@ class PacksModuleService extends MedusaService({
         MedusaError.Types.INVALID_DATA,
         'Only a bonus_grant row may carry bonusCents.',
       );
-    } else if (input.reason === 'reward_credit') {
-      // Task and weekly-challenge prizes are spend-only bonus credit too
-      // (operator rule 2026-10-11). Stamped HERE, the one place both writers
-      // (claimTask, settleChallengeWinner) route through, so neither can pay
-      // withdrawable credit by forgetting a flag. The reason stays
-      // reward_credit, not bonus_grant: bonus_grant rows count against the
+    } else if (
+      input.reason === 'reward_credit' ||
+      input.reason === 'voucher_claim'
+    ) {
+      // Task and weekly-challenge prizes and VIP level-up vouchers are
+      // spend-only bonus credit too (operator rule 2026-10-11). Stamped HERE,
+      // the one place their writers (claimTask, settleChallengeWinner,
+      // claimReward) route through, so none can pay withdrawable credit by
+      // forgetting a flag. The reasons stay their own, not bonus_grant: bonus_grant rows count against the
       // admin 24h mint ceiling (rollingAdjustmentMintCents), and task claims
       // must neither eat that allowance nor be blocked by it.
       if (bonusBeforeCents + deltaCents < 0) {
@@ -3544,7 +3547,8 @@ class PacksModuleService extends MedusaService({
     const spendableCents =
       input.reason === 'pack_open' ||
       input.reason === 'bonus_grant' ||
-      input.reason === 'reward_credit'
+      input.reason === 'reward_credit' ||
+      input.reason === 'voucher_claim'
         ? beforeCents
         : beforeCents - bonusBeforeCents;
     if (deltaCents < 0 && spendableCents + deltaCents < floorCents) {
