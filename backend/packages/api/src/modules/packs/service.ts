@@ -33,7 +33,11 @@ import {
   type DeliveryStatus,
 } from './delivery';
 import { rewardsRedemptionEnabled } from './rewards-gate';
-import { playthroughState, withdrawalGateError } from './withdrawable';
+import {
+  NO_TOPUP_MESSAGE,
+  playthroughState,
+  withdrawalGateError,
+} from './withdrawable';
 import {
   loadSavedBankAccounts,
   resolveWithdrawalDestination,
@@ -4717,6 +4721,11 @@ class PacksModuleService extends MedusaService({
     // Frozen accounts cannot draw value out (Batch A item 5) — block shipping a
     // prize under the same lock as the cap COUNT + writes below.
     await this.assertNotFrozen(customerId, sharedContext);
+    // No top-up ever = no shipped prize (2026-10-11): a brand-new account
+    // claimed a check-in card and shipped it within minutes of signup.
+    if (!(await this.hasTopUp(customerId, sharedContext))) {
+      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
+    }
 
     // 1) Re-read the Pull UNDER the lock and validate it via the same pure helper
     //    the lockless delivery path uses. 'reward_source' = owned + vaulted +
@@ -5390,6 +5399,25 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return pulls.length > 0;
+  }
+
+  // At least one positive top-up ever (any era, any amount). Withdrawals and
+  // both delivery paths stay locked until then (2026-10-11): promo credit and
+  // prizes must not leave an account that never deposited. Promo-funded
+  // opens make hasPaidOpen true, so it cannot answer this.
+  @InjectManager()
+  async hasTopUp(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ one: number }[]>(
+      "SELECT 1 AS one FROM credit_transaction WHERE customer_id = ? AND reason = 'topup' " +
+        'AND amount > 0 AND deleted_at IS NULL LIMIT 1',
+      [customerId],
+    );
+    return rows.length > 0;
   }
 
   // The live free welcome pack, or null when the operator has not published
@@ -6729,12 +6757,17 @@ class PacksModuleService extends MedusaService({
       depositedCents: number;
       usedCents: number;
       bonusCents: number;
+      /** Any positive top-up row ever (creditSummary.topupTotal > 0). */
+      hasTopup: boolean;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
     balance: number;
     available: number;
     isFrozen: boolean;
+    /** At least one top-up ever: withdrawals and deliveries stay locked until
+     *  then (2026-10-11). */
+    hasTopup: boolean;
     withdrawable: number;
     /** Spend-only bonus credit inside `balance` (MYR) — never withdrawable. */
     bonus: number;
@@ -6757,11 +6790,13 @@ class PacksModuleService extends MedusaService({
     let depositedCents: number;
     let usedCents: number;
     let bonusCents: number;
+    let hasTopup: boolean;
     if (precomputed) {
       balance = precomputed.balance;
       depositedCents = precomputed.depositedCents;
       usedCents = precomputed.usedCents;
       bonusCents = precomputed.bonusCents;
+      hasTopup = precomputed.hasTopup;
     } else {
       const balRows = await em.execute<
         {
@@ -6769,9 +6804,11 @@ class PacksModuleService extends MedusaService({
           deposited_cents: string | null;
           used_cents: string | null;
           bonus_cents: string | null;
+          topup_cents: string | null;
         }[]
       >(
         'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
+          "COALESCE(SUM(CASE WHEN reason = 'topup' AND amount > 0 THEN ROUND(amount * 100) ELSE 0 END), 0)::bigint AS topup_cents, " +
           `COALESCE(SUM(${DEPOSITED_PT_SEN_SQL}), 0)::bigint AS deposited_cents, ` +
           "COALESCE(SUM(-external_funded_cents) FILTER (WHERE reason = 'pack_open'), 0)::bigint AS used_cents, " +
           'COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
@@ -6782,6 +6819,7 @@ class PacksModuleService extends MedusaService({
       depositedCents = Number(balRows[0]?.deposited_cents ?? 0);
       usedCents = Number(balRows[0]?.used_cents ?? 0);
       bonusCents = Math.max(0, Number(balRows[0]?.bonus_cents ?? 0));
+      hasTopup = Number(balRows[0]?.topup_cents ?? 0) > 0;
     }
 
     const frozen = await this.isFrozen(customerId, sharedContext);
@@ -6795,14 +6833,18 @@ class PacksModuleService extends MedusaService({
     const gate = playthroughState({ depositedCents, usedCents });
     // Bonus credit is spend-only (spec 2026-10-07): it sits inside the
     // balance but never inside what may leave.
-    const withdrawable = gate.withdrawable
-      ? Math.max(0, Math.round(available * 100) - bonusCents) / 100
-      : 0;
+    // No top-up ever = nothing may leave (2026-10-11): promo credit and prize
+    // sell-backs are not cash for an account that never deposited.
+    const withdrawable =
+      gate.withdrawable && hasTopup
+        ? Math.max(0, Math.round(available * 100) - bonusCents) / 100
+        : 0;
 
     return {
       balance,
       available,
       isFrozen: frozen,
+      hasTopup,
       withdrawable,
       bonus: bonusCents / 100,
       playthrough: {

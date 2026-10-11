@@ -129,6 +129,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
     };
 
     const seedRewardPull = async (customerId: string) => {
+      // Shipping needs one top-up ever (2026-10-11); idempotent per customer.
+      await service.mutateCreditAtomic({
+        customerId,
+        amount: 50,
+        reason: 'topup',
+        idempotencyReference: `seed-topup:${customerId}`,
+      });
       const [pull] = await service.createPulls([
         {
           customer_id: customerId,

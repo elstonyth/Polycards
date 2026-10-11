@@ -92,6 +92,7 @@ function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
       available: 1000,
       locked: 0,
       isFrozen: false,
+      hasTopup: true,
       nextUnlock: null,
       withdrawable: 1000,
       playthrough: { deposited: 0, used: 0, remaining: 0 },
@@ -722,6 +723,7 @@ describe('startWithdrawal — money ordering', () => {
       available: 0,
       locked: 0,
       isFrozen: true,
+      hasTopup: true,
       nextUnlock: null,
       withdrawable: 0,
       playthrough: { deposited: 0, used: 0, remaining: 0 },
@@ -740,6 +742,7 @@ describe('startWithdrawal — money ordering', () => {
       available: 1000,
       locked: 0,
       isFrozen: false,
+      hasTopup: true,
       nextUnlock: null,
       withdrawable: 0,
       playthrough: { deposited: 100, used: 40, remaining: 60 },
@@ -748,6 +751,25 @@ describe('startWithdrawal — money ordering', () => {
       /RM 60\.00 of your deposits must be spent on packs/,
     );
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+  });
+
+  // No top-up ever (2026-10-11): promo credit and prize sell-backs must not
+  // leave as cash from an account that never deposited.
+  it('a never-topped-up account is refused BEFORE any row is written', async () => {
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue({
+      balance: 1000,
+      available: 1000,
+      locked: 0,
+      isFrozen: false,
+      hasTopup: false,
+      nextUnlock: null,
+      withdrawable: 0,
+      playthrough: { deposited: 0, used: 0, remaining: 0 },
+    });
+    await expect(start(h)).rejects.toThrow(/Top up at least once/);
+    expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
   });
 
   // The RACE path, and the reason the precheck is not a control: the wallet was
@@ -863,6 +885,7 @@ describe('startWithdrawal — approval threshold (held)', () => {
     available: 5000,
     locked: 0,
     isFrozen: false,
+    hasTopup: true,
     nextUnlock: null,
     withdrawable: 5000,
     playthrough: { deposited: 0, used: 0, remaining: 0 },
@@ -955,6 +978,7 @@ describe('startWithdrawal — approval threshold (held)', () => {
       ...roomyWallet,
       available: 0,
       isFrozen: true,
+      hasTopup: true,
       withdrawable: 0,
     });
     await expect(start(h, { amount: 2000 })).rejects.toThrow(/under review/i);
@@ -1265,6 +1289,7 @@ const fakeWallet = (over: Record<string, unknown> = {}) => ({
   available: 1000,
   locked: 0,
   isFrozen: false,
+  hasTopup: true,
   nextUnlock: null,
   withdrawable: 1000,
   playthrough: { deposited: 0, used: 0, remaining: 0 },

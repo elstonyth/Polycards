@@ -42,7 +42,8 @@ export default async function WalletPage() {
   // gate is open with nothing to show — render the unlocked state, not a 0/0
   // bar.
   const { deposited, remaining } = w.playthrough;
-  const gateOpen = remaining <= 0;
+  // No top-up ever keeps the gate shut whatever the playthrough says.
+  const gateOpen = remaining <= 0 && w.hasTopup;
   // Bonus credit is inside the balance but spend only. The Normal line is the
   // part that can ever be withdrawn — computed in sen so float noise never
   // prints. Hidden while there is no bonus: a zero row would only confuse.
@@ -54,8 +55,9 @@ export default async function WalletPage() {
   // reason (the withdraw form's belowMin rule). In sen, like Normal above.
   const minRm = limits.withdrawal.minRm;
   const shortSen = Math.round(minRm * 100) - Math.round(w.withdrawable * 100);
-  const minLine =
-    !w.isFrozen && gateOpen && shortSen > 0
+  const minLine = !w.hasTopup
+    ? 'Top up at least once to unlock withdrawals'
+    : !w.isFrozen && gateOpen && shortSen > 0
       ? `Minimum withdrawal ${rm0(minRm)} — you need ${rm(shortSen / 100)} more`
       : `Minimum withdrawal ${rm0(minRm)}`;
 
@@ -111,6 +113,8 @@ export default async function WalletPage() {
           <PlaythroughProgress {...w.playthrough} />
         ) : (
           <p className="mt-4 text-sm text-white/70">
+            {!w.hasTopup &&
+              'Top up at least once to unlock withdrawals and card deliveries. '}
             No deposits to play through. Withdrawals require a saved bank
             account and must fit your withdrawable balance and the limits on the
             withdrawal page.

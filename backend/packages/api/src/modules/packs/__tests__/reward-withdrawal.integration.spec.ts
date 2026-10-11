@@ -83,7 +83,17 @@ moduleIntegrationTestRunner<PacksModuleService>({
     const seedPull = async (opts: {
       customerId: string;
       source: 'pack' | 'reward';
+      /** Deliveries need one top-up ever (2026-10-11); idempotent per customer. */
+      topup?: boolean;
     }) => {
+      if (opts.topup !== false) {
+        await service.mutateCreditAtomic({
+          customerId: opts.customerId,
+          amount: 50,
+          reason: 'topup',
+          idempotencyReference: `seed-topup:${opts.customerId}`,
+        });
+      }
       const [pull] = await service.createPulls([
         {
           customer_id: opts.customerId,
@@ -195,6 +205,19 @@ moduleIntegrationTestRunner<PacksModuleService>({
           ADDRESS,
         );
         expect(r2.status).toBe('requested');
+      });
+
+      it('refuses an account that never topped up (no order, Pull untouched)', async () => {
+        const customerId = 'cus_wd_notopup';
+        const pullId = await seedPull({ customerId, source: 'reward', topup: false });
+        await expect(
+          service.recordRewardWithdrawal(customerId, pullId, ADDRESS),
+        ).rejects.toThrow(/Top up at least once/);
+        expect(
+          await service.listDeliveryOrders({ customer_id: customerId }),
+        ).toHaveLength(0);
+        const [pull] = await service.listPulls({ id: pullId });
+        expect(pull.status).toBe('vaulted');
       });
 
       it('rejects a source=pack Pull as invalid (no order, Pull untouched)', async () => {
