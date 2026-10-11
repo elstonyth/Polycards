@@ -9,6 +9,7 @@ import {
   labelsOf,
   requirementLabel,
   scheduleOk,
+  taskStatus,
   toIso,
   windowLabel,
   type Draft,
@@ -240,4 +241,38 @@ test('a hidden, stale count box never blocks a daily check-in save', () => {
       rewardValue: '1',
     })!.requirement,
   ).toEqual({ type: 'checkin_days', days: 1 });
+});
+
+describe('taskStatus', () => {
+  const now = Date.parse('2026-10-11T12:00:00Z');
+  test('switched off is retired, whatever the window', () => {
+    expect(taskStatus(task({ active: false }), now)).toBe('retired');
+  });
+  test('no window is live', () => {
+    expect(taskStatus(task(), now)).toBe('live');
+  });
+  test('inside the window is live', () => {
+    expect(
+      taskStatus(
+        task({
+          starts_at: '2026-10-05T00:00:00Z',
+          ends_at: '2026-10-12T00:00:00Z',
+        }),
+        now,
+      ),
+    ).toBe('live');
+  });
+  test('a future start is upcoming', () => {
+    expect(
+      taskStatus(task({ starts_at: '2026-10-12T00:00:00Z' }), now),
+    ).toBe('upcoming');
+  });
+  test('an end at or before now is ended (matches the backend <=)', () => {
+    expect(taskStatus(task({ ends_at: '2026-10-04T15:59:00Z' }), now)).toBe(
+      'ended',
+    );
+    expect(taskStatus(task({ ends_at: '2026-10-11T12:00:00Z' }), now)).toBe(
+      'ended',
+    );
+  });
 });

@@ -241,3 +241,19 @@ export const windowLabel = (t: AdminTaskDefinition): string =>
   t.starts_at || t.ends_at
     ? `${dateLabel(t.starts_at)} → ${dateLabel(t.ends_at)}`
     : 'Always on';
+
+export type TaskStatus = 'live' | 'upcoming' | 'ended' | 'retired';
+
+/**
+ * Where a task stands for players at `now`. Same bounds as the backend's
+ * taskIsLive (modules/packs/tasks.ts): a start in the future hides it, an end
+ * at or before now hides it. `ended` is a task still switched on whose window
+ * has closed — players can neither see nor claim it, so the list badges it as
+ * such instead of the old "active".
+ */
+export const taskStatus = (t: AdminTaskDefinition, now: number): TaskStatus => {
+  if (!t.active) return 'retired';
+  if (t.starts_at && new Date(t.starts_at).getTime() > now) return 'upcoming';
+  if (t.ends_at && new Date(t.ends_at).getTime() <= now) return 'ended';
+  return 'live';
+};
