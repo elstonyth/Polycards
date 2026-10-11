@@ -65,7 +65,8 @@ export type OpenPackResult =
         /** false = quoted on the FX display fallback; selling would be
          *  refused, so the reveal must not present this as a firm offer. */
         firm: boolean;
-        /** MYR part of `amount` paid back as bonus credit; 0 when none. */
+        /** MYR part of `amount` from bonus or gift play, to be played
+         *  through before it can be withdrawn; 0 when none. */
         bonus: number;
       } | null;
       /** Credit balance AFTER the charge (opens debit the pack price — A2);
@@ -114,6 +115,8 @@ const PACKS_RULES: ErrorRule[] = [
     /no odds|invalid odds|prize pool/i,
     "This pack isn't ready yet — check back soon.",
   ],
+  // backend roll-pack assertInStock — refused before any charge.
+  [/sold out/i, 'This pack is sold out.'],
   [/not available|not found|404/i, "This pack isn't available right now."],
 ];
 const PACKS_FALLBACK = 'Could not open the pack. Please try again.';

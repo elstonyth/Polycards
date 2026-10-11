@@ -98,6 +98,13 @@ test('the growth desk tools', () => {
     artOf: 'prize',
   });
   assert.deepEqual(growth.tasks.request({}), { path: 'tasks', params: {} });
+  // Next week's tasks, drawn the Sunday before they start.
+  assert.deepEqual(growth.tasks.request({ week: 'next' }).params, {
+    week: 'next',
+  });
+  assert.deepEqual(growth.tasks_poster.request({ week: 'next' }).params, {
+    week: 'next',
+  });
   assert.deepEqual(growth.top_pulls.request({ day: '2026-10-03', limit: 5 }), {
     path: 'top-pulls',
     params: { day: '2026-10-03', limit: 5 },

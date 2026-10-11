@@ -94,8 +94,8 @@ describe('resolveTaskLabels', () => {
       row('a', { type: 'checkin_days', days: 1 }, { type: 'credit', amount_myr: 5 }),
       row('b', { type: 'checkin_days', days: 1 }, { type: 'credit', amount_myr: 12.5 }),
     ]);
-    expect(out.get('a')!.reward).toBe('RM 5.00');
-    expect(out.get('b')!.reward).toBe('RM 12.50');
+    expect(out.get('a')!.reward).toBe('RM 5.00 bonus credit');
+    expect(out.get('b')!.reward).toBe('RM 12.50 bonus credit');
   });
 
   it('batches one lookup per catalog no matter how many tasks reference it', async () => {

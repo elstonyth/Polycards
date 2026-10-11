@@ -42,7 +42,8 @@ export default async function WalletPage() {
   // gate is open with nothing to show — render the unlocked state, not a 0/0
   // bar.
   const { deposited, remaining } = w.playthrough;
-  const gateOpen = remaining <= 0;
+  // No top-up ever keeps the gate shut whatever the playthrough says.
+  const gateOpen = remaining <= 0 && w.hasTopup;
   // Bonus credit is inside the balance but spend only. The Normal line is the
   // part that can ever be withdrawn — computed in sen so float noise never
   // prints. Hidden while there is no bonus: a zero row would only confuse.
@@ -54,8 +55,9 @@ export default async function WalletPage() {
   // reason (the withdraw form's belowMin rule). In sen, like Normal above.
   const minRm = limits.withdrawal.minRm;
   const shortSen = Math.round(minRm * 100) - Math.round(w.withdrawable * 100);
-  const minLine =
-    !w.isFrozen && gateOpen && shortSen > 0
+  const minLine = !w.hasTopup
+    ? 'Top up at least once to unlock withdrawals'
+    : !w.isFrozen && gateOpen && shortSen > 0
       ? `Minimum withdrawal ${rm0(minRm)} — you need ${rm(shortSen / 100)} more`
       : `Minimum withdrawal ${rm0(minRm)}`;
 
@@ -111,6 +113,8 @@ export default async function WalletPage() {
           <PlaythroughProgress {...w.playthrough} />
         ) : (
           <p className="mt-4 text-sm text-white/70">
+            {!w.hasTopup &&
+              'Top up at least once to unlock withdrawals and card deliveries. '}
             No deposits to play through. Withdrawals require a saved bank
             account and must fit your withdrawable balance and the limits on the
             withdrawal page.
@@ -153,7 +157,7 @@ export default async function WalletPage() {
           {[
             {
               title: 'Play through what you deposit',
-              body: 'Every RM you top up has to be spent opening packs before it can leave your account. Deposit RM100, open RM100 of packs — gate unlocked.',
+              body: 'Every RM you top up has to be spent opening packs before it can leave your account. Deposit RM100, open RM100 of packs — gate unlocked. The same goes for what you get from selling a card you opened with bonus credit or a vault pack, or won as a prize.',
             },
             {
               title: 'Opening packs is what counts — not topping up',
@@ -161,7 +165,7 @@ export default async function WalletPage() {
             },
             {
               title: 'Then the whole balance unlocks',
-              body: 'Once you are fully played through, your entire available balance is withdrawable — winnings included, not just your deposit back. Bonus credit is the one exception: it can only be spent on packs. Nothing expires and there is no waiting period.',
+              body: 'Once you are fully played through, your entire available balance is withdrawable — winnings included, not just your deposit back. Bonus credit itself is the one exception: it can only be spent on packs, and it is spent first. Task, check-in and challenge rewards pay bonus credit. The bonus part of a pack does not count toward VIP level or the leaderboard, and a pack opened mostly with bonus credit does not count toward tasks. Nothing expires and there is no waiting period.',
             },
           ].map((s, i) => (
             <li key={s.title} className="flex gap-3">

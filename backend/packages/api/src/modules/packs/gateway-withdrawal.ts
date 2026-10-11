@@ -5,6 +5,7 @@ import {
   bankSupportedBy,
   resolveWithdrawalDestination,
 } from './saved-accounts';
+import { bankPayoutMinRm, findBank } from './banks';
 import {
   GATEWAYS,
   gatewayConfigFor,
@@ -14,11 +15,12 @@ import {
   rowGateway,
   submitWithdrawal,
   GatewayError,
+  TGPAY_PAYOUT_DISABLED,
   TGPAY_PAYOUT_FLOAT_EMPTY,
   type GatewayConfig,
   type PaymentGateway,
 } from './gateway';
-import { alertPayoutFloatEmpty } from './ops-alert';
+import { alertPayoutDisabled, alertPayoutFloatEmpty } from './ops-alert';
 import { contactIfNeeded } from '../../api/utils/customer-contact';
 import { newMerchantTransactionId } from './gateway-deposit';
 import { gatewayEnv, gatewayEnvName } from './gateway-env';
@@ -71,12 +73,14 @@ export const GATEWAY_WD_MIN_RM = 50;
 export const PAYOUT_FLOAT_COOLDOWN_MS = 5 * 60_000;
 // ponytail: per process, and the web service runs 2 instances, so each can
 // still let one refused submit through per window. A shared Valkey key with a
-// TTL is the upgrade if that ever matters.
-let payoutFloatEmptyUntil = 0;
+// TTL is the upgrade if that ever matters. Keyed by gateway: TGPay's empty
+// wallet must not hold back The 7 Pay, the gateway an operator switches to
+// precisely because TGPay's wallet is empty.
+const payoutFloatEmptyUntil = new Map<PaymentGateway, number>();
 
 /** Test seam: module state outlives a test (one jest process, one module). */
 export function resetPayoutFloatBreaker(): void {
-  payoutFloatEmptyUntil = 0;
+  payoutFloatEmptyUntil.clear();
 }
 
 /**
@@ -453,7 +457,7 @@ export async function startWithdrawal(
   // Our payout wallet was short moments ago (see PAYOUT_FLOAT_COOLDOWN_MS).
   // After the replay, so the retry of an in-flight withdrawal still reports
   // it; before any row or debit, so nothing is written for a certain refusal.
-  if (Date.now() < payoutFloatEmptyUntil) {
+  if (Date.now() < (payoutFloatEmptyUntil.get(gateway) ?? 0)) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'Withdrawals are temporarily unavailable on our side — nothing was taken from your balance. Please try again in a few minutes.',
@@ -493,6 +497,17 @@ export async function startWithdrawal(
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'This bank account is not available with the current payout provider. Pick another saved account, or try again later.',
+    );
+  }
+  // A destination with its own payout floor (Touch 'n Go: RM 100) is held to
+  // it here, before any row or debit — the gateway refuses below it as a
+  // definite error, which would cost a row, a debit and a refund per tap. The
+  // wording keeps the band phrase the storefront passes through verbatim.
+  const destinationMin = bankPayoutMinRm(precheckDestination.bankCode);
+  if (destinationMin !== null && amount < destinationMin) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `Withdrawals must be between RM ${destinationMin} and RM ${withdrawalMax.toLocaleString('en-US')} for ${findBank(precheckDestination.bankCode)?.name ?? 'this account'}.`,
     );
   }
   // Same rule for the recipient email a TGPay payout needs: the adapter
@@ -760,16 +775,42 @@ export async function startWithdrawal(
       // and retrying cannot help until ops tops it up. On 2026-09-29 the copy
       // below sent one customer through nine attempts and three bank accounts
       // or name spellings. Not awaited: the answer must not wait on Telegram.
-      if (error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) {
-        payoutFloatEmptyUntil = Date.now() + PAYOUT_FLOAT_COOLDOWN_MS;
-        void alertPayoutFloatEmpty(scope, {
-          amount,
-          ref: merchantTransactionId,
-          via: 'customer withdrawal',
-        });
+      // Payouts switched off at the gateway (TGPAY_PAYOUT_DISABLED) is the
+      // same situation for the customer, so it shares the breaker and copy;
+      // only the ops alert names the different fix.
+      const payoutDisabled = error.has(TGPAY_PAYOUT_DISABLED);
+      if (payoutDisabled || error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) {
+        payoutFloatEmptyUntil.set(
+          gateway,
+          Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
+        );
+        void (payoutDisabled ? alertPayoutDisabled : alertPayoutFloatEmpty)(
+          scope,
+          {
+            amount,
+            ref: merchantTransactionId,
+            via: 'customer withdrawal',
+            gateway: GATEWAYS[gateway].label,
+          },
+        );
         throw new MedusaError(
           MedusaError.Types.NOT_ALLOWED,
           'Withdrawals are temporarily unavailable on our side and your balance has been returned. Your bank details are fine — there is no need to change them. Please try again later.',
+        );
+      }
+      // TGPay's Touch 'n Go route has refused every payout since 2026-10-09
+      // 17:12, at any amount, with "No payout provider is available for this
+      // order": their routing, not the customer's wallet. Under the generic
+      // copy below, customers retried 10+ times each "checking" correct
+      // details. Banks still pay, so point them there. Storefront passes it
+      // through on /withdrawals are temporarily unavailable/ (vault-errors.ts).
+      if (
+        findBank(bankCode)?.id === 'TNGMY' &&
+        /no payout provider is available/i.test(error.message)
+      ) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          "Touch 'n Go withdrawals are temporarily unavailable from our payment provider. Your balance has been returned. Please withdraw to a bank account for now.",
         );
       }
       // Says who refused, and does not instruct the customer to fix something
@@ -1448,16 +1489,38 @@ export async function submitHeldWithdrawal(
       }
       // Same cause and same handling as startWithdrawal's branch: the refund
       // above is untouched, only the words and the ops alert differ.
+      if (error.has(TGPAY_PAYOUT_DISABLED)) {
+        payoutFloatEmptyUntil.set(
+          gatewayId,
+          Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
+        );
+        const label = GATEWAYS[gatewayId].label;
+        void alertPayoutDisabled(scope, {
+          amount,
+          ref: row.merchant_transaction_id,
+          via: 'admin approve',
+          gateway: label,
+        });
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `${label} refused this payout because payouts are not enabled on our ${label} account ("Payout not available"). The debit has been refunded and the withdrawal closed. Ask ${label} to enable payouts, or switch back to a gateway that pays out, then ask the customer to request the withdrawal again.`,
+        );
+      }
       if (error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) {
-        payoutFloatEmptyUntil = Date.now() + PAYOUT_FLOAT_COOLDOWN_MS;
+        payoutFloatEmptyUntil.set(
+          gatewayId,
+          Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
+        );
+        const label = GATEWAYS[gatewayId].label;
         void alertPayoutFloatEmpty(scope, {
           amount,
           ref: row.merchant_transaction_id,
           via: 'admin approve',
+          gateway: label,
         });
         throw new MedusaError(
           MedusaError.Types.INVALID_DATA,
-          'TGPay refused this payout because our TGPay payout wallet is short ("Insufficient payout credit balance"). The debit has been refunded and the withdrawal closed. Top up the payout wallet, then ask the customer to request the withdrawal again.',
+          `${label} refused this payout because our ${label} payout wallet is short ("Insufficient payout credit balance"). The debit has been refunded and the withdrawal closed. Top up the payout wallet, then ask the customer to request the withdrawal again.`,
         );
       }
       throw new MedusaError(

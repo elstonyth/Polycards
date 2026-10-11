@@ -607,6 +607,41 @@ medusaIntegrationTestRunner({
         expect(await packs.creditBalance(pull.customer_id)).toBe(20);
       });
 
+      // No top-up ever = nothing ships (2026-10-11): an account funded only by
+      // promo credit opened a pack and shipped the card without depositing.
+      it('refuses delivery for an account that never topped up, leaving the pull vaulted', async () => {
+        const token = await registerCustomer('del-notopup@test.dev');
+        const me = await api.get('/store/customers/me', { headers: authed(token) });
+        const customerId = me.data.customer.id as string;
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.mutateCreditAtomic({
+          customerId,
+          amount: 50,
+          reason: 'adjustment',
+        });
+        const open = await reqApi(
+          'post',
+          `/store/packs/${PACK_SLUG}/open`,
+          authed(token),
+        );
+        expect(open.status).toBe(200);
+        const pullId = open.data.pull.id as string;
+        const addressId = await addAddress(token);
+        const refused = await reqApi(
+          'post',
+          '/store/delivery-orders',
+          authed(token),
+          { pull_ids: [pullId], address_id: addressId },
+        );
+        expect(refused.status).toBe(400);
+        expect(JSON.stringify(refused.data)).toMatch(/Top up at least once/);
+        const [pull] = await packs.listPulls({ id: pullId }, { take: 1 });
+        expect(pull.status).toBe('vaulted');
+        expect(
+          await packs.listDeliveryOrders({ customer_id: customerId }, { take: 10 }),
+        ).toHaveLength(0);
+      });
+
       it('adds mandatory 5% insurance when the order value exceeds RM200', async () => {
         const token = await registerCustomer('del-fee-i@test.dev');
         const pullId = await openOne(token, 'delivery-fee-topup-i');

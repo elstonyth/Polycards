@@ -494,8 +494,9 @@ export const VaultItemSchema = z.looseObject({
     amount: finite,
     percent: finite,
     firm: z.boolean().optional(),
-    // MYR part of `amount` paid back as bonus credit (gift / bonus-funded
-    // pulls). Optional: an older backend omits it (all normal credit).
+    // MYR part of `amount` that came from bonus or gift play: paid as normal
+    // credit that must be played through once before it can be withdrawn.
+    // Optional: an older backend omits it.
     bonus: finite.optional(),
   }),
 });
@@ -735,6 +736,9 @@ export const SavedBankAccountsSchema = z.looseObject({
       // Can the active payout provider pay to this bank? Optional so an
       // older backend still parses; absent reads as supported.
       supported: z.boolean().optional(),
+      // The bank's own payout floor (RM), e.g. Touch 'n Go 100; null/absent =
+      // only the gateway's floor applies.
+      minRm: z.number().nullish(),
     }),
   ),
 });
@@ -799,7 +803,7 @@ export const OpenBuybackSchema = z.looseObject({
   vault_amount: finite.optional(),
   instant_deadline_ms: finite.optional(),
   firm: z.boolean().optional(),
-  // MYR part of `amount` paid back as bonus credit (spec 2026-10-07).
+  // MYR part of `amount` that came from bonus or gift play: paid as normal credit that must be played through once before it can be withdrawn (2026-10-09).
   bonus: finite.optional(),
 });
 
@@ -829,6 +833,9 @@ export const WalletSchema = z.looseObject({
   // Bonus credit inside `balance` (MYR, spend only). Optional: an older
   // backend has none, which reads as 0.
   bonus: finite.optional(),
+  // At least one top-up ever: withdrawals and deliveries stay locked until
+  // then (2026-10-11). Optional: an older backend has no such gate.
+  has_topup: z.boolean().optional(),
 });
 
 /** GET /store/credits as getWallet() reads it — only the `wallet` block. */

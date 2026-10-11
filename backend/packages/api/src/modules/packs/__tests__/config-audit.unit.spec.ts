@@ -84,6 +84,7 @@ describe('packConfig', () => {
       title: 'Bronze Pack',
       category: 'pokemon',
       status: 'active',
+      in_stock: true,
       price: 300,
       buyback_percent: 100,
       target_rtp_bps: 7000,

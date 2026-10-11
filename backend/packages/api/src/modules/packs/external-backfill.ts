@@ -25,8 +25,9 @@ export type BackfillLedgerRow = {
  * Rows MUST be one customer's ledger in chronological order (created_at, id).
  * Returns id → recomputed external_funded_cents for every topup/pack_open row
  * whose stored value differs (NULL counts as differing — the grandfather flip
- * is the point). Other reasons are never touched: buyback /
- * adjustment / voucher income is internal by design and carries no basis.
+ * is the point). Other reasons are never touched: adjustment / voucher income
+ * is internal by design and carries no basis, and a buyback's stamp (a sale
+ * from bonus or gift play) is read, not recomputed.
  */
 export function recomputeExternalStamps(
   rows: BackfillLedgerRow[],
@@ -47,6 +48,13 @@ export function recomputeExternalStamps(
       );
       ext = consumed > 0 ? -consumed : 0; // avoid JS -0
       balanceSen -= consumed;
+    } else if (row.reason === 'buyback') {
+      // A sale from bonus or gift play (2026-10-09) adds its stamped share to
+      // the pool later opens consume. The stamp comes from the pull's
+      // bonus_bp, which this replay cannot see, so it is authoritative: count
+      // it, never rewrite it.
+      balanceSen += row.external_funded_cents ?? 0;
+      continue;
     } else if (row.reason === 'pack_open' && row.amount > 0) {
       // Reversal: mirror the original's (recomputed) stamp, restoring balance.
       const originalId = row.reference?.startsWith('reversal:')

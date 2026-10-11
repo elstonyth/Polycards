@@ -104,7 +104,7 @@ export default function AuthForm({
   const [note, setNote] = useState<Note | null>(null);
   // First code for signup and for forgot-by-phone. Only one of those two forms
   // renders at a time, so one Turnstile slot ref serves both.
-  const sender = usePhoneOtpSender();
+  const { challengeRef, send: sendOtp } = usePhoneOtpSender();
   // Forgot-password lives inside the login mode as a sub-view (the live site
   // keeps everything in the one modal): "form" collects the email, "sent" is
   // the always-the-same confirmation (no account enumeration — the backend
@@ -204,7 +204,7 @@ export default function AuthForm({
 
     setBusy(true);
     try {
-      const result = await sender.send({ phone, purpose: 'password-reset' });
+      const result = await sendOtp({ phone, purpose: 'password-reset' });
       if (!result.ok) {
         setNote({ text: result.error });
         return;
@@ -391,7 +391,7 @@ export default function AuthForm({
           // and fall through to a fresh OTP.
           setSignupDraft({ ...signupDraft, proofToken: null });
         }
-        const otpResult = await sender.send({ phone, purpose: 'signup' });
+        const otpResult = await sendOtp({ phone, purpose: 'signup' });
         if (!otpResult.ok) {
           setNote({ text: otpResult.error });
           return;
@@ -556,7 +556,7 @@ export default function AuthForm({
               </p>
               {/* Turnstile slot — empty unless Cloudflare wants a click. */}
               <div
-                ref={sender.challengeRef}
+                ref={challengeRef}
                 className="isolate flex justify-center empty:hidden"
               />
               <button
@@ -920,7 +920,7 @@ export default function AuthForm({
         {isSignup && (
           // Turnstile slot — empty unless Cloudflare wants a click.
           <div
-            ref={sender.challengeRef}
+            ref={challengeRef}
             className="isolate flex justify-center empty:hidden"
           />
         )}

@@ -192,3 +192,36 @@ describe('coercePackBody — display_image (optional hero)', () => {
     ).toThrow(/display_image/);
   });
 });
+
+describe('coercePackBody — in_stock (sold out)', () => {
+  it('omitted → undefined (keep stored value)', () => {
+    expect(coercePackBody(base, 'test-pack').in_stock).toBeUndefined();
+  });
+
+  it('passes a boolean through', () => {
+    expect(
+      coercePackBody({ ...base, in_stock: false }, 'test-pack').in_stock,
+    ).toBe(false);
+  });
+
+  it('refuses a non-boolean', () => {
+    expect(() =>
+      coercePackBody({ ...base, in_stock: 'false' }, 'test-pack'),
+    ).toThrow(/in_stock/);
+  });
+
+  it('refuses a sold-out free welcome pack', () => {
+    expect(() =>
+      coercePackBody(
+        { ...base, category: 'free_welcome', price: 0, in_stock: false },
+        'test-pack',
+      ),
+    ).toThrow(/cannot be sold out/);
+    expect(
+      coercePackBody(
+        { ...base, category: 'free_welcome', price: 0, in_stock: true },
+        'test-pack',
+      ).in_stock,
+    ).toBe(true);
+  });
+});

@@ -62,18 +62,3 @@ export function spinBetLabel(
  *  (keep "Open Pack"). */
 export const vaultButtonLabel = (qty: number, gifts: number): string | null =>
   gifts > 0 && gifts === qty ? `Open Vault x${gifts}` : null;
-
-const sen = (n: number) => Math.round(n * 100);
-
-/** Sell button for a pull bought (partly) with bonus credit or a gift:
- *  "Sell for RM 270.00 bonus" / "Sell for RM 243.00 bonus + RM 27.00"; null
- *  when nothing comes back as bonus (keep the usual label). Split in sen so
- *  float noise never prints. */
-export function sellLabel(amount: number, bonus: number): string | null {
-  const bonusSen = sen(bonus);
-  if (bonusSen <= 0) return null;
-  const normalSen = sen(amount) - bonusSen;
-  return normalSen > 0
-    ? `Sell for ${rm(bonusSen / 100)} bonus + ${rm(normalSen / 100)}`
-    : `Sell for ${rm(amount)} bonus`;
-}

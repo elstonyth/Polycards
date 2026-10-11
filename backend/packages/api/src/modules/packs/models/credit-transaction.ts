@@ -52,7 +52,9 @@ export const CreditTransaction = model
     // never back-filled.
     source_transaction_id: model.text().nullable(),
     // Bonus credit (spec 2026-10-07 §3.2) — the signed sen of this row that is
-    // spend-only bonus: + on a bonus_grant or the bonus share of a buyback,
+    // spend-only bonus: + on a bonus_grant, on a reward_credit (task / challenge
+    // prize) or voucher_claim (VIP voucher) — whole row, since 2026-10-11 — or
+    // the bonus share of a buyback,
     // − on the bonus a pack_open spent (bonus is spent first), restored by a
     // reversal. Bonus Balance = Σ this; Normal Balance = Balance − Bonus.
     // NULL on rows written before it existed (read as 0, forward-only).

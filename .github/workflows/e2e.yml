@@ -82,6 +82,16 @@ jobs:
       # is un-suspended (ADR 0004, review-by 2026-10-01). They exercise nothing
       # today. Prod default stays OFF (dormant economy) regardless.
       REWARDS_REDEMPTION_ENABLED: 'true'
+      # The store-read tier (rate-limit.ts STORE_READ_DEFAULTS, 120/10s +
+      # 480/60s per customer) is sized for a human. The QA gates drive ONE
+      # customer through page after page at machine speed, and every page plus
+      # Next's tab prefetches fans out ~10 reads (balance, vault, profile, free
+      # pack...). The free-pack gate tripped it on 2026-10-10: a 429 on
+      # /store/free-pack fails closed, so the free pack rendered without its
+      # CTA. Nothing here tests that limiter, so give the job room. Prod keeps
+      # the defaults.
+      STORE_READ_RATE_BURST_LIMIT: '2000'
+      STORE_READ_RATE_LIMIT: '8000'
       # CORS: locally these live in the gitignored backend .env; in CI they're
       # unset, so the browser's auth preflight comes back without
       # allow-origin and the login POST never fires (observed: only OPTIONS
@@ -111,7 +121,7 @@ jobs:
       # pins 22-slim; Medusa 2.13 targets 20/22). The storefront steps switch
       # to Node 24 further down (root engines: >=24).
       - name: Setup Node.js 22 (backend)
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
           node-version: 22
 
@@ -169,7 +179,7 @@ jobs:
 
       # --- Storefront on Node 24 (root engines) ---
       - name: Setup Node.js 24 (storefront)
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
           node-version: 24
           cache: npm
@@ -280,7 +290,7 @@ jobs:
 
       - name: Upload report + service logs
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: playwright-report
           path: |

@@ -128,7 +128,10 @@ describe('wiring — every gateway hook path carries the limiter AND the allowli
         // so the "which path" context comes from the thrown message instead.
         if (!hit) throw new Error(`${hookPath} has no POST middleware entry`);
         expect(hit.middlewares).toMatch(/\bgatewayHookRateLimit\b/);
-        expect(hit.middlewares).toMatch(/\btgpayCallbackAllowlist\b/);
+        // Each gateway's OWN list (createTgpayCallbackAllowlist(id)).
+        expect(hit.middlewares).toMatch(
+          new RegExp(`\\b${id}CallbackAllowlist\\b`),
+        );
       }
     }
   });

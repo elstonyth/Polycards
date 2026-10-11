@@ -17,7 +17,8 @@ the value, the % change against the previous period, and the previous value.
    accounts, no invite step and no new auth code.
 2. **Metrics: the requested set only.** Six cards: 注册人数, 充值笔数, 充值金额,
    充值人数, 首充人数, 首充金额. The reference's withdrawals, active players and
-   pack-money figures are out of scope.
+   pack-money figures are out of scope. (Withdrawals were added on
+   2026-10-09; see Metric definitions.)
 3. **Count everyone.** No exclusions for disabled, deleted, test or staff
    accounts. An account deleted later still counts in the period it signed up.
 4. **Chinese labels through i18n.** The page's strings get `en.json` keys plus
@@ -46,6 +47,18 @@ accounts) and any ledger `topup` without a deposit behind it. The first
 release read the ledger's `topup` rows. In prod those matched the settled
 deposits one to one (24 of 24, amounts equal), so switching sources changed no
 historical number.
+
+**Withdrawals (added 2026-10-09, operator request).** Two more cards, from a
+separate `withdrawalStats(from, to)` method so the sign-up-only growth reports
+that call `signupTopupStats` do not pay for it:
+
+| Card | Definition |
+| --- | --- |
+| 提现笔数 withdrawal_count | Settled payouts: `gateway_withdrawal` rows with `status = 'settled'` and `deleted_at IS NULL`, whose `settled_at` is in the window. Pending and held payouts count once they settle. |
+| 提现金额 withdrawal_amount | Σ `amount` (the ledger debit) of those payouts, in MYR, summed in integer cents. This is the Settlement report's basis: `amount_settled` is NULL on payouts settled before it shipped. |
+
+A rise in either withdrawal card is coloured red and a fall green, because it
+is money leaving.
 
 ## Windows (MYT, fixed UTC+8)
 

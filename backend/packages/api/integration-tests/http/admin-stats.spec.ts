@@ -6,10 +6,10 @@ import { mintSuperAdmin, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
-// GET /admin/stats: sign-ups and top-ups for a window and the window before
-// it. Rows are seeded, then aged with a raw UPDATE, because created_at is
-// ORM-managed on insert. The custom range pins both windows to fixed past
-// days, so the expectations do not depend on when the suite runs.
+// GET /admin/stats: sign-ups, top-ups and withdrawals for a window and the
+// window before it. Rows are seeded, then aged with a raw UPDATE, because
+// created_at is ORM-managed on insert. The custom range pins both windows to
+// fixed past days, so the expectations do not depend on when the suite runs.
 //
 // Custom 2026-09-10..2026-09-11 (MYT) gives:
 //   current  [2026-09-09T16:00Z, 2026-09-11T16:00Z)
@@ -175,6 +175,41 @@ medusaIntegrationTestRunner({
           await setCreatedAt('credit_transaction', row.id, IN_CURRENT);
         }
 
+        // Withdrawals are settled payouts, by settled_at, summed on `amount`
+        // (the debit), like the Settlement report. S1 settled at 195 for a 200
+        // debit, so 200 is what counts. S2 sits on the inclusive start, S3 on
+        // the exclusive end, S4 in the previous window. Pending, held and
+        // failed payouts never count, nor does a deleted one.
+        const payouts: [
+          number,
+          'settled' | 'pending' | 'held' | 'failed',
+          string,
+          number | null,
+        ][] = [
+          [200, 'settled', IN_CURRENT, 195],
+          [50, 'settled', FROM_EDGE, 50],
+          [70, 'settled', TO_EDGE, 70],
+          [30, 'settled', IN_PREVIOUS, 30],
+          [11, 'pending', IN_CURRENT, null],
+          [12, 'held', IN_CURRENT, null],
+          [13, 'failed', IN_CURRENT, null],
+          [999, 'settled', IN_CURRENT, 999],
+        ];
+        const wds = await packs.createGatewayWithdrawals(
+          payouts.map(([amount, status, at, settled], i) => ({
+            merchant_transaction_id: `stats-wd-${i}`,
+            customer_id: 'cus_x',
+            amount,
+            amount_settled: settled,
+            bank_code: 'MBB',
+            account_number: '000000000000',
+            account_holder_name: 'Stats Test',
+            status,
+            settled_at: new Date(at),
+          })),
+        );
+        await packs.softDeleteGatewayWithdrawals([wds[wds.length - 1].id]);
+
         const res = await stats('?range=custom&from=2026-09-10&to=2026-09-11');
         expect(res.status).toBe(200);
         expect(res.data.current).toEqual({
@@ -187,6 +222,8 @@ medusaIntegrationTestRunner({
             topup_amount: 195,
             first_topup_count: 2, // Y100, W40
             first_topup_amount: 140,
+            withdrawal_count: 2, // S1, S2
+            withdrawal_amount: 250,
           },
         });
         expect(res.data.previous).toEqual({
@@ -199,6 +236,8 @@ medusaIntegrationTestRunner({
             topup_amount: 50,
             first_topup_count: 1,
             first_topup_amount: 50,
+            withdrawal_count: 1, // S4
+            withdrawal_amount: 30,
           },
         });
       });

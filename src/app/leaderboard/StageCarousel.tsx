@@ -158,7 +158,7 @@ function StageCard({
             className="mx-auto mt-2 h-20 object-contain"
           />
           <p className="mt-2 text-[10px] leading-tight font-semibold tracking-wide text-neutral-300 uppercase">
-            {rest.length > 0 ? `${rest.length} more prizes` : 'Credits'}
+            {rest.length > 0 ? `${rest.length} more prizes` : 'Bonus credits'}
             {/* stage.reward is the SUM across ranks 4-10, not one winner's
                 prize — ranks can now be configured individually, so a single
                 figure cannot mean "what you get". Labelled as a total. */}

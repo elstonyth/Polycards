@@ -129,22 +129,30 @@ test('card lifecycle: register from inventory → adjust FMV → reflects on sto
     });
 
     await test.step('the card + its new FMV render on the storefront pack page', async () => {
-      await page.goto(`${BASE}/slots/${POOL_PACK}`, {
-        waitUntil: 'domcontentloaded',
-      });
-      // The pool section heads "Top Hits" whenever the pack holds any
-      // top-tier card — always true here (the shared fixture pool carries a
-      // Mythical, plus the test card was promoted above).
-      await expect(
-        page.getByRole('heading', { name: 'Top Hits' }),
-      ).toBeVisible();
-      // A card tile is ONE button named after the card; its slab <img> alt is
-      // empty by design.
-      await expect(
-        page
-          .getByRole('button', { name: `View details for ${PRODUCT_TITLE}` })
-          .first(),
-      ).toBeVisible({ timeout: 15_000 });
+      // The storefront memoises each pack's detail read for 15s per process
+      // (PACK_DETAIL_TTL_MS, d5c91149) on top of the backend's own 30s, so an
+      // admin edit reaches the page within ~45s by design. A first visit can
+      // still serve the pool from before the card joined, which made this
+      // step fail its first attempt every night from 2026-09-30. Reload until
+      // the card shows, bounded by that window.
+      await expect(async () => {
+        await page.goto(`${BASE}/slots/${POOL_PACK}`, {
+          waitUntil: 'domcontentloaded',
+        });
+        // The pool section heads "Top Hits" whenever the pack holds any
+        // top-tier card — always true here (the shared fixture pool carries a
+        // Mythical, plus the test card was promoted above).
+        await expect(
+          page.getByRole('heading', { name: 'Top Hits' }),
+        ).toBeVisible();
+        // A card tile is ONE button named after the card; its slab <img> alt
+        // is empty by design.
+        await expect(
+          page
+            .getByRole('button', { name: `View details for ${PRODUCT_TITLE}` })
+            .first(),
+        ).toBeVisible({ timeout: 5_000 });
+      }).toPass({ timeout: 60_000, intervals: [2_000, 5_000] });
       const rmDisplay = `RM ${displayMyr.toLocaleString('en-US', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,

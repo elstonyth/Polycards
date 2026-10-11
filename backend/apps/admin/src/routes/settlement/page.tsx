@@ -21,6 +21,7 @@ import {
   useSavePaymentGateway,
   useSettlementReport,
 } from '../../lib/queries';
+import { gatewayPreflightRefusal } from '../../lib/admin-rest';
 import type {
   PaymentGatewayId,
   SettlementGranularity,
@@ -107,15 +108,35 @@ const SettlementPage = () => {
       confirmText: t('settlement.gatewaySave'),
     });
     if (!confirmed) return;
-    saveGateway.mutate(
-      { gateway: wantedGateway, reason: gatewayReason.trim() },
-      {
-        onSuccess: () => {
-          setChosen(null);
-          setGatewayReason('');
-        },
+    const done = () => {
+      setChosen(null);
+      setGatewayReason('');
+    };
+    const input = { gateway: wantedGateway, reason: gatewayReason.trim() };
+    saveGateway.mutate(input, {
+      onSuccess: done,
+      // The backend tests the gateway live before switching. When it will not
+      // serve us (keys, IP whitelist, callback allowlist), show why and let
+      // the operator switch anyway — never get stuck in an emergency.
+      onError: async (error) => {
+        const refusal = gatewayPreflightRefusal(error);
+        if (!refusal) return;
+        const force = await prompt({
+          title: t('settlement.gatewayPreflightTitle', { label }),
+          description: [
+            // The dialog renders plain text (no line breaks), so each problem
+            // gets its own full stop before the warning.
+            ...refusal.problems.map((p) => (/[.!?]$/.test(p) ? p : `${p}.`)),
+            t('settlement.gatewayPreflightForceHint'),
+          ].join(' '),
+          confirmText: t('settlement.gatewayPreflightForce'),
+          variant: 'danger',
+        });
+        if (force) {
+          saveGateway.mutate({ ...input, force: true }, { onSuccess: done });
+        }
       },
-    );
+    });
   };
 
   const missingNetTotal = (data?.periods ?? []).reduce(

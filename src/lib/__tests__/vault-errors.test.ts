@@ -22,7 +22,7 @@ describe('VAULT_RULES backend-message contract', () => {
     const refusal =
       'We could not start your top-up. Please try a different amount or payment method.';
     expect(map(refusal)).toBe(
-      'The payment gateway could not start this top-up. Please try again in a moment.',
+      'The payment gateway could not start this top-up, and nothing was charged. Please try a different amount, or try again later.',
     );
     // The precise regression: it must NOT fall through to the amount rule,
     // which is what a re-sort of the table would reintroduce.
@@ -82,6 +82,14 @@ describe('VAULT_RULES backend-message contract', () => {
     expect(map(floatEmpty)).not.toMatch(/check your bank details/i);
   });
 
+  it("passes the Touch 'n Go no-provider refusal through so it can name the bank fallback", () => {
+    // packs/gateway-withdrawal.ts: TGPay refused every TNG payout from
+    // 2026-10-09 17:12 with "No payout provider is available for this order".
+    const tngDown =
+      "Touch 'n Go withdrawals are temporarily unavailable from our payment provider. Your balance has been returned. Please withdraw to a bank account for now.";
+    expect(map(tngDown)).toBe(tngDown);
+  });
+
   it('points an unverified customer at the screen that clears the gate', () => {
     // Action-neutral copy: the same guard fires on topup AND withdrawal
     // (2026-08-05), so the message must not name either one.
@@ -127,7 +135,8 @@ describe('VAULT_RULES backend-message contract', () => {
     // The literal backend strings. Before 2026-10-03 every one of these fell
     // to VAULT_FALLBACK, so a customer short of playthrough was told to retry.
     const literals = [
-      // withdrawable.ts withdrawalGateError — freeze, playthrough, cap
+      // withdrawable.ts withdrawalGateError — freeze, no top-up, playthrough, cap
+      'Top up at least once to unlock withdrawals and deliveries.',
       'Withdrawals are unavailable while your account is under review. Contact support.',
       'RM 5.00 of your deposits must be spent on packs before you can withdraw.',
       'You can withdraw up to RM 12.34 right now.',

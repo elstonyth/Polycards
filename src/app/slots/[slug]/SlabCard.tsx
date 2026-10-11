@@ -89,7 +89,6 @@ export function SlabCard({
     if (!to || to.width === 0) return;
     // One-time pre-paint layout measurement (not a sync-with-external-store
     // loop) — this IS the useLayoutEffect measure-then-setState pattern.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDelta({
       x: fromRect.left + fromRect.width / 2 - (to.left + to.width / 2),
       y: fromRect.top + fromRect.height / 2 - (to.top + to.height / 2),

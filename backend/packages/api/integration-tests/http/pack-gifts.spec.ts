@@ -9,8 +9,9 @@ jest.setTimeout(240 * 1000);
 
 // Pack gifts and bonus credit end to end (spec 2026-10-07): an admin gifts
 // packs and bonus credit; the customer opens "Vault x1 + RM300"; a stale screen
-// is refused, never billed; gift and bonus cards sell back as bonus and count
-// toward nothing; a rolled-back open hands the gift back.
+// is refused, never billed; gift and bonus cards sell back as normal credit
+// that must be played through once (2026-10-09), and count toward nothing; a
+// rolled-back open hands the gift back.
 
 const PASSWORD = 'pack-gifts-password-1';
 const ADMIN_EMAIL = 'pack-gifts-admin@test.dev';
@@ -258,6 +259,55 @@ medusaIntegrationTestRunner({
       expect((await wallet()).balance).toBe(0);
     });
 
+    // Sold out (in_stock=false, set from the admin): the pack stays listed but a
+    // paid open is refused before any debit; a gift already given still opens.
+    it('sold out: refuses paid opens without a debit; a gift alone still opens', async () => {
+      const soldOut = await unwrapResponse(
+        api.post(
+          `/admin/packs/${PACK}`,
+          {
+            title: 'Bronze Pack',
+            category: 'pokemon',
+            price: PRICE,
+            image: '/cdn/bronze.webp',
+            buyback_percent: 90,
+            rank: 0,
+            status: 'active',
+            in_stock: false,
+          },
+          { headers: admin() },
+        ),
+      );
+      expect(soldOut.status).toBe(200);
+      const [stored] = await packs().listPacks({ slug: PACK });
+      expect(stored).toMatchObject({ status: 'active', in_stock: false });
+
+      // Still listed for customers.
+      const listed = await unwrapResponse(
+        api.get(`/store/packs/${PACK}`, { headers: storeHeaders }),
+      );
+      expect(listed.status).toBe(200);
+
+      await giftPacks(1, 'sold-out');
+      await deposit(2 * PRICE);
+
+      const batch = await openBatch(2, 1);
+      expect(batch.status).toBe(400);
+      expect(batch.data.message).toMatch(/sold out/);
+      const single = await unwrapResponse(
+        api.post(`/store/packs/${PACK}/open`, {}, { headers: authed() }),
+      );
+      expect(single.status).toBe(400);
+      expect(await openRows()).toHaveLength(0);
+      expect((await wallet()).balance).toBe(2 * PRICE);
+      expect((await storeGifts())[0].count).toBe(1);
+
+      const gift = await openBatch(1, 1);
+      expect(gift.status).toBe(200);
+      expect(gift.data.total_charged).toBe(0);
+      expect((await wallet()).balance).toBe(2 * PRICE);
+    });
+
     it('refuses a stale "Vault x2" and charges nothing', async () => {
       await giftPacks(1, 'stale');
       await deposit(2 * PRICE);
@@ -308,7 +358,7 @@ medusaIntegrationTestRunner({
       expect(summary.data.bonus_balance).toBe(0);
     });
 
-    it('sells a gifted card back as bonus credit, never withdrawable', async () => {
+    it('sells a gifted card back as normal credit, withdrawable once played through', async () => {
       await giftPacks(1, 'sell');
       const opened = await openBatch(1, 1);
       const pullId = opened.data.rolls[0].pull.id;
@@ -320,10 +370,20 @@ medusaIntegrationTestRunner({
       const [credit] = await packs().listCreditTransactions({
         pull_id: pullId,
       });
-      expect(credit.bonus_cents).toBe(Math.round(Number(credit.amount) * 100));
-      const w = await wallet();
-      expect(w.bonus).toBe(Number(credit.amount));
-      expect(w.withdrawable).toBe(0);
+      const sale = Number(credit.amount);
+      // Normal credit, the whole sale stamped for playthrough (2026-10-09).
+      expect(credit.bonus_cents ?? 0).toBe(0);
+      expect(credit.external_funded_cents).toBe(Math.round(sale * 100));
+      const locked = await wallet();
+      expect(locked).toMatchObject({ bonus: 0, withdrawable: 0 });
+      expect(locked.playthrough.remaining).toBeCloseTo(sale, 2);
+
+      // One RM 300 open plays it through; what is left can then be withdrawn.
+      await deposit(PRICE);
+      expect((await openBatch(1, 0)).status).toBe(200);
+      const unlocked = await wallet();
+      expect(unlocked.playthrough.remaining).toBe(0);
+      expect(unlocked.withdrawable).toBeCloseTo(sale, 2);
     });
 
     it('counts gift and bonus pulls toward nothing', async () => {

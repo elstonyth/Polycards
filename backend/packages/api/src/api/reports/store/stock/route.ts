@@ -84,6 +84,6 @@ export async function GET(
     sold_out_badge_packs: active
       .filter((p) => !p.in_stock)
       .map((p) => ({ slug: p.slug, title: p.title })),
-    note: 'matching_cards and owed count every card at or below max; cards lists only the lowest ones (cards_not_shown are left out), so give the counts, not the length of the list. on_hand below 0 means units owed to winners. A card at 0 can still be drawn; buyback covers the pull. Cards with untracked inventory are not listed. The sold-out badge is display only: those packs can still be opened. in_vaults and delivery_requested are separate counts, never to be added together.',
+    note: 'matching_cards and owed count every card at or below max; cards lists only the lowest ones (cards_not_shown are left out), so give the counts, not the length of the list. on_hand below 0 means units owed to winners. A card at 0 can still be drawn; buyback covers the pull. Cards with untracked inventory are not listed. Sold-out packs stay listed but paid opens are refused; vault gifts and free rips already given still open. in_vaults and delivery_requested are separate counts, never to be added together.',
   });
 }

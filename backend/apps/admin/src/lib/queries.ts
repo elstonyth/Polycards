@@ -49,6 +49,7 @@ import {
   getGatewayAudit,
   getPaymentGateway,
   savePaymentGateway,
+  gatewayPreflightRefusal,
   type SettlementGranularity,
   type SettlementReport,
   type GatewayBalance,
@@ -290,13 +291,19 @@ export const useSavePaymentGateway = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: savePaymentGateway,
-    onSuccess: () => {
+    onSuccess: (data) => {
       toast.success('Payment gateway switched');
+      for (const warning of data.warnings ?? []) toast.warning(warning);
       qc.invalidateQueries({ queryKey: qk.paymentGateway });
       qc.invalidateQueries({ queryKey: qk.gatewayBalance });
       qc.invalidateQueries({ queryKey: qk.gatewayAudit });
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+    onError: (e) => {
+      // A live-check refusal is answered by the page's "Switch anyway"
+      // dialog, which lists the problems — no toast on top of it.
+      if (gatewayPreflightRefusal(e)) return;
+      toast.error(e instanceof Error ? e.message : String(e));
+    },
   });
 };
 

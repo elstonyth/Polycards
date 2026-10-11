@@ -52,6 +52,7 @@ export async function GET(
     depositedCents: Math.round(summary.depositedPlaythroughTotal * 100),
     usedCents: Math.round(summary.externalFundedSpendTotal * 100),
     bonusCents: Math.round(summary.bonusBalance * 100),
+    hasTopup: summary.topupTotal > 0,
   });
 
   // Gateway facts for the money rows on this page: which channel, and what
@@ -119,6 +120,8 @@ export async function GET(
       balance: wallet.balance,
       available: wallet.available,
       is_frozen: wallet.isFrozen,
+      // No top-up ever = withdrawals and deliveries locked (2026-10-11).
+      has_topup: wallet.hasTopup,
       // Playthrough gate (withdrawable.ts): deposits must be fully spent on
       // pack opens before balance can be withdrawn. withdrawable = 0 while
       // playthrough.remaining > 0; spending on packs is never restricted.

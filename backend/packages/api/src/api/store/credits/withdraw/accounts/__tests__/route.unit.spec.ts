@@ -113,6 +113,8 @@ const viewOf = (account: Record<string, unknown>) => ({
   ...account,
   // Maybank is payable on every gateway, so the view marks it supported.
   supported: true,
+  // Banks carry no floor of their own (only Touch 'n Go does).
+  minRm: null,
   usableFrom:
     typeof account.savedAt === 'string'
       ? new Date(
@@ -186,6 +188,7 @@ describe('POST /store/credits/withdraw/accounts', () => {
           savedAt: expect.any(String),
           usableFrom: expect.any(String),
           supported: true,
+          minRm: null,
         }),
       ],
     });

@@ -64,6 +64,14 @@ it('posts to the private ops chat once per window, however many refusals land in
   expect(h.sent).toHaveLength(2);
 });
 
+it('mutes per gateway: TGPay going quiet does not silence The 7 Pay', async () => {
+  const h = harness();
+  await alertPayoutFloatEmpty(h.scope, { ...detail, gateway: 'TGPay' });
+  await alertPayoutFloatEmpty(h.scope, { ...detail, gateway: 'TGPay' });
+  await alertPayoutFloatEmpty(h.scope, { ...detail, gateway: 'The 7 Pay' });
+  expect(h.sent).toHaveLength(2);
+});
+
 it('logs a greppable line and sends nothing when no ops chat is configured', async () => {
   delete process.env.TELEGRAM_OPS_CHAT_ID;
   const h = harness();

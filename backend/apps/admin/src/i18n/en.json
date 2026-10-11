@@ -1,4 +1,11 @@
 {
+  "creditKind": {
+    "bonus": "Bonus credit (spend-only, cannot be withdrawn)",
+    "bonusHint": "Default for giveaways and compensation. Untick only to correct a real-money error, such as a paid deposit that never arrived.",
+    "normalHint": "Withdrawable credit the player can cash out. Deductions default here; grant it only to correct a real-money error.",
+    "bonusAmount": "{{amount}} bonus credit",
+    "normalAmount": "{{amount}} withdrawable credit"
+  },
   "groupCredits": {
     "title": "Credits",
     "description": "Add or deduct credits for selected players or everyone in this customer group.",
@@ -112,6 +119,8 @@
       "category": "Category",
       "statusField": "Status",
       "active": "Active",
+      "soldOut": "Sold out",
+      "soldOutHint": "Customers still see the pack on the storefront, marked Sold out, but cannot buy it. Vault gifts and free rips already given for it still open.",
       "draft": "Draft",
       "price": "Price (RM)",
       "rank": "Rank (sort order)",
@@ -601,15 +610,15 @@
     "accountStateSince": "Since {{date}}",
     "btnFreeze": "Freeze",
     "btnUnfreeze": "Unfreeze",
-    "btnAdjustCredits": "Adjust credits",
+    "btnAdjustCredits": "Adjust withdrawable credit",
     "modalReasonLabel": "Reason",
     "modalReasonPlaceholder": "Required — recorded in the audit trail",
     "modalFreezeTitle": "Freeze account?",
     "modalFreezeDesc": "The customer will be locked out. Enter a reason for the audit trail.",
     "modalUnfreezeTitle": "Unfreeze account?",
     "modalUnfreezeDesc": "The customer will regain access. Enter a reason for the audit trail.",
-    "modalCreditsTitle": "Adjust credits",
-    "modalCreditsDesc": "Apply a credit adjustment to this customer's balance. Amount and note are required.",
+    "modalCreditsTitle": "Adjust withdrawable credit",
+    "modalCreditsDesc": "Withdrawable credit the player can cash out: use it only for real-money corrections. Giveaways and compensation go in Bonus credit below. Amount and note are required.",
     "action": {
       "freeze": "Freeze account",
       "unfreeze": "Unfreeze account",
@@ -621,7 +630,7 @@
     },
     "gift": {
       "title": "Gift packs",
-      "subtitle": "Unopened packs in this player's vault. They open them as Vault x1 on the pack page.",
+      "subtitle": "Unopened packs in this player's vault. They open them as Vault x1 on the pack page. A card from a gifted pack sells back as normal credit that must be spent on packs once before it can be withdrawn.",
       "pack": "Pack",
       "packPlaceholder": "Choose a pack",
       "packsLoading": "Loading packs…",
@@ -652,7 +661,7 @@
     },
     "bonus": {
       "title": "Bonus credit",
-      "subtitle": "Spend-only credit for pack opens. Never withdrawable.",
+      "subtitle": "Spend-only credit for pack opens; it can't be withdrawn itself. A card opened with it sells back as normal credit that must be spent on packs once before it can be withdrawn.",
       "balance": "Bonus balance",
       "amount": "Amount (e.g. 50 to give, -50 to take back)",
       "note": "Note (required, audit trail)",
@@ -688,7 +697,7 @@
   },
   "statsBoard": {
     "title": "Stats",
-    "subtitle": "Sign-ups and top-ups · {{current}} MYT · vs {{previous}}",
+    "subtitle": "Sign-ups, top-ups and withdrawals · {{current}} MYT · vs {{previous}}",
     "ranges": {
       "today": "Today",
       "yesterday": "Yesterday",
@@ -707,6 +716,8 @@
     "topup_amount": "Top-up amount",
     "first_topup_count": "First-time top-ups",
     "first_topup_amount": "First top-up amount",
+    "withdrawal_count": "Withdrawals",
+    "withdrawal_amount": "Withdrawal amount",
     "vsPrevious": "vs previous",
     "previous": "Previous: {{value}}",
     "loadError": "Could not load the stats."
@@ -765,7 +776,10 @@
     "gatewayReasonPlaceholder": "Required — audit note for this switch",
     "gatewaySave": "Switch gateway",
     "gatewayConfirm": "Switch the active payment gateway to {{label}}? New top-ups and withdrawals will go through it right away.",
-    "gatewayLoadError": "Could not load the payment gateway setting."
+    "gatewayLoadError": "Could not load the payment gateway setting.",
+    "gatewayPreflightTitle": "{{label}} failed the live check",
+    "gatewayPreflightForceHint": "Switching anyway may make top-ups or withdrawals fail until this is fixed. Use it only in an emergency.",
+    "gatewayPreflightForce": "Switch anyway"
   },
   "pipeline": {
     "label": "Inventory pipeline",

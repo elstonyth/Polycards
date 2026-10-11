@@ -382,3 +382,34 @@ describe('secureRoll', () => {
     }
   });
 });
+
+// Sold out (in_stock=false): the paid batch is refused before any draw, while
+// rollOne (the task free-rip path) still draws on the same pack.
+describe('sold-out pack', () => {
+  it('refuses a paid batch before drawing; a free rip still rolls', async () => {
+    const { container, listPacks, listCards } = buildContainer();
+    listPacks.mockResolvedValue([{ ...PACK, in_stock: false }]);
+    await expect(
+      rollBatch(container, { pack_id: 'test-pack', count: 2 }),
+    ).rejects.toMatchObject({ type: MedusaError.Types.NOT_ALLOWED });
+    expect(listCards).not.toHaveBeenCalled();
+
+    const packs = buildPacks({
+      listPacks: jest.fn().mockResolvedValue([{ ...PACK, in_stock: false }]),
+    });
+    await expect(rollOne(packs, 'test-pack')).resolves.toMatchObject({
+      handle: 'pikachu',
+    });
+  });
+
+  it('lets a batch made only of vault gifts open it', async () => {
+    const { container, listPacks } = buildContainer();
+    listPacks.mockResolvedValue([{ ...PACK, in_stock: false }]);
+    await expect(
+      rollBatch(container, { pack_id: 'test-pack', count: 2, gifts: 2 }),
+    ).resolves.toHaveLength(2);
+    await expect(
+      rollBatch(container, { pack_id: 'test-pack', count: 2, gifts: 1 }),
+    ).rejects.toMatchObject({ type: MedusaError.Types.NOT_ALLOWED });
+  });
+});

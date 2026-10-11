@@ -20,9 +20,9 @@ export type BuybackOffer = {
   instantDeadlineMs: number | null;
   /** false = quoted on the FX display fallback (sell would be refused). */
   firm: boolean;
-  /** MYR part of `amount` paid back as bonus credit (a gift or bonus-funded
-   *  pull); 0 when an older backend omits it. Display only — the backend
-   *  decides the split it pays. */
+  /** MYR part of `amount` from bonus or gift play, to be played through
+   *  before it can be withdrawn; 0 when an older backend omits it. Display
+   *  only — the backend decides what it locks. */
   bonus: number;
 };
 

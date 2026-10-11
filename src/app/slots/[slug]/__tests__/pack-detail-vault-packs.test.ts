@@ -110,12 +110,15 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
-async function render(qty: number): Promise<{ dock: string; panel: string }> {
+async function render(
+  qty: number,
+  pack: ResolvedPack = BRONZE,
+): Promise<{ dock: string; panel: string }> {
   window.history.replaceState(null, '', `/slots/bronze?count=${qty}`);
   await act(async () => {
     root.render(
       createElement(PackDetailClient, {
-        pack: BRONZE,
+        pack,
         siblings: [],
         detail: null,
         recentPulls: { pulls: [], drought: {} },
@@ -195,5 +198,50 @@ describe('PackDetailClient — vault packs', () => {
     await act(async () => open!.click());
     expect(mocks.push).toHaveBeenCalledWith('/slots/bronze/spin?count=1');
     expect(container.textContent).not.toContain('Not enough credits');
+  });
+});
+
+// Sold out (admin): listed, but the backend refuses a paid open — so both CTAs
+// turn into an inert "Sold out". A vault gift still opens it.
+describe('PackDetailClient — sold out', () => {
+  const SOLD_OUT: ResolvedPack = { ...BRONZE, inStock: false };
+  const ctas = () =>
+    [...container.querySelectorAll('button')].filter((b) =>
+      /Open|Sold out/.test(b.textContent ?? ''),
+    );
+
+  test('no gift: both zones show a disabled "Sold out", no open', async () => {
+    mocks.getPackGifts.mockResolvedValue([]);
+    await render(1, SOLD_OUT);
+    const buttons = ctas();
+    expect(buttons.map((b) => b.textContent)).toEqual(['Sold out', 'Sold out']);
+    expect(buttons.every((b) => b.disabled)).toBe(true);
+    // No buy controls (both steppers hidden at every width) or purchase copy.
+    const steppers = [
+      ...container.querySelectorAll('[aria-label="Increase quantity"]'),
+    ].map((b) => b.parentElement?.className ?? '');
+    expect(steppers).toHaveLength(2);
+    for (const c of steppers) {
+      expect(c).toMatch(/\bhidden\b/);
+      expect(c).not.toContain('lg:flex');
+    }
+    expect(container.textContent).not.toContain('during reveal');
+    expect(container.textContent).toContain('This pack is sold out right now.');
+  });
+
+  test('a ?count=2 link with one gift is capped to the gift it holds', async () => {
+    mocks.getPackGifts.mockResolvedValue([gift()]);
+    const { dock, panel } = await render(2, SOLD_OUT);
+    expect(dock).toContain('Open Vault x1');
+    expect(panel).toContain('Open Vault x1');
+    expect(container.textContent).not.toContain('Sold out');
+  });
+
+  test('a gift covering the open still offers it', async () => {
+    mocks.getPackGifts.mockResolvedValue([gift()]);
+    const { dock, panel } = await render(1, SOLD_OUT);
+    expect(dock).toContain('Open Vault x1');
+    expect(panel).toContain('Open Vault x1');
+    expect(container.textContent).not.toContain('Sold out');
   });
 });

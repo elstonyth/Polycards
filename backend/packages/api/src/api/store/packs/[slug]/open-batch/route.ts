@@ -173,7 +173,7 @@ export async function POST(
           },
           marketPriceMyr,
         );
-        // Gift and bonus rows sell back (partly) as bonus credit.
+        // Gift and bonus rows: that share of a sale must be played through.
         const bonusBp = Number(pull.bonus_bp ?? 0);
         const vaultAmount = buybackAmount(marketPriceMyr, FLAT_PERCENT);
         return {

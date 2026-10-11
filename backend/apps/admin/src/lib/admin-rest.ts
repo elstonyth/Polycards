@@ -15,13 +15,20 @@ declare const __BACKEND_URL__: string;
 // are indistinguishable, and the operator reads a 500 as a deleted record.
 async function httpError(res: Response): Promise<Error> {
   let message: string;
+  let data: unknown;
   try {
-    const data = await res.json();
-    message = (data && data.message) || `Request failed (${res.status}).`;
+    data = await res.json();
+    const text = (data as { message?: unknown } | null)?.message;
+    message =
+      typeof text === 'string' && text
+        ? text
+        : `Request failed (${res.status}).`;
   } catch {
     message = `Request failed (${res.status}).`;
   }
-  return Object.assign(new Error(message), { status: res.status });
+  // `data` rides along for routes whose refusal carries more than a message
+  // (the gateway switch's live-check problems and its can_force flag).
+  return Object.assign(new Error(message), { status: res.status, data });
 }
 
 /** The HTTP status a rejected admin-rest call failed with, or undefined when
@@ -341,6 +348,8 @@ export async function adjustCustomerCredits(
   note: string,
   idempotencyKey?: string,
   kind?: 'bonus',
+  // true = no customer notification (bulk group edit).
+  silent?: boolean,
 ): Promise<{ amount: number; balance: number }> {
   const res = await fetch(
     `${__BACKEND_URL__}/admin/customers/${encodeURIComponent(id)}/credits`,
@@ -353,6 +362,7 @@ export async function adjustCustomerCredits(
         note,
         idempotency_key: idempotencyKey,
         kind,
+        notify: silent ? false : undefined,
       }),
     },
   );
@@ -455,7 +465,7 @@ export type StatsRange =
   | 'last_month'
   | 'custom';
 
-export interface SignupTopupStats {
+export interface StatsFigures {
   signups: number;
   topup_count: number;
   topup_customers: number;
@@ -464,13 +474,16 @@ export interface SignupTopupStats {
   first_topup_count: number;
   /** MYR. */
   first_topup_amount: number;
+  withdrawal_count: number;
+  /** MYR. */
+  withdrawal_amount: number;
 }
 
 export interface StatsReport {
   as_of: string;
   /** ISO instants; windows are half-open [from, to). */
-  current: { from: string; to: string; stats: SignupTopupStats };
-  previous: { from: string; to: string; stats: SignupTopupStats };
+  current: { from: string; to: string; stats: StatsFigures };
+  previous: { from: string; to: string; stats: StatsFigures };
 }
 
 // `from`/`to` are inclusive MYT days (YYYY-MM-DD), sent only for 'custom'.
@@ -552,7 +565,7 @@ export async function getGatewayBalance(): Promise<GatewayBalance> {
 // ── Payment gateways (plan 130) ─────────────────────────────────────────────
 
 /** Mirrors the backend's PaymentGateway union — the gateways the switch can pick. */
-export type PaymentGatewayId = 'tgpay';
+export type PaymentGatewayId = 'tgpay' | 'the7pay';
 /** A gateway a ROW may name: a live one, or a retired one ('globepay') whose
  *  settled rows are still history on the audit panel. */
 export type HistoricalGatewayId = PaymentGatewayId | (string & {});
@@ -619,7 +632,31 @@ export interface PaymentGatewaySetting {
   setting: string | null;
   env_default: PaymentGatewayId;
   gateways: { id: PaymentGatewayId; label: string; configured: boolean }[];
+  /** After a switch: non-blocking findings from the live check (e.g. an
+   *  empty payout wallet). */
+  warnings?: string[];
 }
+
+/** The switch was refused by the live check; `problems` say why, and the
+ *  operator may resend with `force: true` ("Switch anyway"). */
+export type GatewayPreflightRefusal = {
+  type: 'gateway_preflight_failed';
+  problems: string[];
+  warnings: string[];
+  can_force: true;
+};
+
+export const gatewayPreflightRefusal = (
+  err: unknown,
+): GatewayPreflightRefusal | null => {
+  const data = (err as { data?: unknown } | null)?.data as
+    | Partial<GatewayPreflightRefusal>
+    | undefined;
+  return data?.type === 'gateway_preflight_failed' &&
+    Array.isArray(data.problems)
+    ? (data as GatewayPreflightRefusal)
+    : null;
+};
 
 export async function getPaymentGateway(): Promise<PaymentGatewaySetting> {
   return getJson<PaymentGatewaySetting>('/admin/payments/gateway');
@@ -628,6 +665,8 @@ export async function getPaymentGateway(): Promise<PaymentGatewaySetting> {
 export async function savePaymentGateway(input: {
   gateway: PaymentGatewayId;
   reason: string;
+  /** Switch even though the live check found problems. */
+  force?: boolean;
 }): Promise<PaymentGatewaySetting> {
   return postJson<PaymentGatewaySetting>('/admin/payments/gateway', input);
 }

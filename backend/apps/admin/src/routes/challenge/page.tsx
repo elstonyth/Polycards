@@ -417,7 +417,7 @@ const StageListEditor = ({
                       <Table.HeaderCell className="w-16">Rank</Table.HeaderCell>
                       <Table.HeaderCell>Prize card</Table.HeaderCell>
                       <Table.HeaderCell className="w-40">
-                        Credits (RM)
+                        Bonus credits (RM)
                       </Table.HeaderCell>
                     </Table.Row>
                   </Table.Header>

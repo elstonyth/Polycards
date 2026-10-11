@@ -241,10 +241,6 @@ export default function PackDetailClient({
   // the live URL owns quantity as well as pack selection.
   const searchParams = useSearchParams();
   const count = Number(searchParams.get('count') ?? initialQty);
-  const maxQty = 3; // The reel (openBatch) caps a single open at 3 packs.
-  const qty = Number.isInteger(count)
-    ? Math.min(maxQty, Math.max(1, count))
-    : 1;
   // `openError` surfaces a friendly failure inline (`needsTopUp` adds the
   // top-up entry for credit shortfalls). Real opens happen on the reel, so
   // there is no in-place async open state here.
@@ -320,11 +316,21 @@ export default function PackDetailClient({
   // Still reading: the price shown may yet drop to a gift, so no credit
   // refusal until it lands (the reel re-checks before any charge).
   const giftsPending = giftKey !== null && heldGifts?.key !== giftKey;
+  // Sold out (admin): still listed, but the backend refuses a paid open. Only
+  // vault gifts may still open it, so quantity is capped at the gifts held.
+  const soldOutPack = active.inStock === false;
+  // The reel (openBatch) caps a single open at 3 packs.
+  const maxQty = soldOutPack ? Math.min(3, Math.max(1, held)) : 3;
+  const qty = Number.isInteger(count)
+    ? Math.min(maxQty, Math.max(1, count))
+    : 1;
   // Gifts cover rows first; only the rest is paid (gifts → bonus → normal).
   const vaultGifts = giftsUsed(qty, held);
   const paidCost = priceNum * (qty - vaultGifts);
   const vaultCost = vaultCostLabel(qty, vaultGifts, priceNum);
   const openLabel = vaultButtonLabel(qty, vaultGifts) ?? 'Open Pack';
+  // Nothing this customer holds covers the open: no buy controls at all.
+  const soldOut = soldOutPack && vaultGifts < qty;
   // Baked Polycards tiers animate their factory stage (still poster otherwise).
   const heroVideo = factoryVideo(active.displayImage);
 
@@ -564,7 +570,7 @@ export default function PackDetailClient({
                   account opens real packs). Routes to the slot reel in demo
                   mode: no login, no charge, nothing real won. Neutral ghost
                   styling — buyback green is reserved for money-in actions. */}
-              {!customer && pool.length > 0 && (
+              {!customer && pool.length > 0 && !soldOut && (
                 <Link
                   href={`/slots/${active.id}/spin?demo=1`}
                   className="group flex h-12 items-center justify-between rounded-xl border border-white/15 bg-white/5 px-4 text-sm font-semibold text-white transition-colors hover:bg-white/10"
@@ -655,7 +661,7 @@ export default function PackDetailClient({
               <div
                 className={cn(
                   'hidden items-center gap-2',
-                  !isFreePack && 'lg:flex',
+                  !isFreePack && !soldOut && 'lg:flex',
                 )}
               >
                 <button
@@ -695,23 +701,29 @@ export default function PackDetailClient({
                   is a money-IN signal and never a spend CTA. Money in Nekst.
                   Absent when the claim is unavailable: the open would 4xx, so a
                   primary CTA here is an invitation to a refusal. */}
-              {!freeClaimUnavailable && (
-                <Pill
-                  variant="primary"
-                  size="lg"
-                  onClick={handleGoToReel}
-                  className="w-full justify-between px-5"
-                >
-                  {customer
-                    ? isFreePack
-                      ? 'Open Free Pack'
-                      : openLabel
-                    : 'Log in to open'}
-                  <span className="flex items-center gap-1.5 font-heading text-base tracking-tight tabular-nums">
-                    {!isFreePack && (vaultCost ?? rm(priceNum * qty))}
-                    <ArrowRight className="h-4 w-4" aria-hidden />
-                  </span>
+              {soldOut ? (
+                <Pill variant="secondary" size="lg" disabled className="w-full">
+                  Sold out
                 </Pill>
+              ) : (
+                !freeClaimUnavailable && (
+                  <Pill
+                    variant="primary"
+                    size="lg"
+                    onClick={handleGoToReel}
+                    className="w-full justify-between px-5"
+                  >
+                    {customer
+                      ? isFreePack
+                        ? 'Open Free Pack'
+                        : openLabel
+                      : 'Log in to open'}
+                    <span className="flex items-center gap-1.5 font-heading text-base tracking-tight tabular-nums">
+                      {!isFreePack && (vaultCost ?? rm(priceNum * qty))}
+                      <ArrowRight className="h-4 w-4" aria-hidden />
+                    </span>
+                  </Pill>
+                )
               )}
               {openError && (
                 <p
@@ -764,6 +776,8 @@ export default function PackDetailClient({
                     Your one-time welcome pack — nothing charged. The card lands
                     in your vault. {FREE_PULL_LOCKED_MESSAGE}
                   </>
+                ) : soldOut ? (
+                  <>This pack is sold out right now.</>
                 ) : customer && balance !== null ? (
                   <>
                     Each open costs {rm(priceNum)} in site credits — your
@@ -903,17 +917,19 @@ export default function PackDetailClient({
                 ? 'Not available on this account'
                 : isFreePack
                   ? 'Your welcome pack'
-                  : vaultGifts > 0
-                    ? qty > vaultGifts
-                      ? `+ ${rm(paidCost)}`
-                      : 'Gift from Polycards'
-                    : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% during reveal`}
+                  : soldOut
+                    ? 'Not available right now'
+                    : vaultGifts > 0
+                      ? qty > vaultGifts
+                        ? `+ ${rm(paidCost)}`
+                        : 'Gift from Polycards'
+                      : `${active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% during reveal`}
             </p>
           </div>
           <div
             className={cn(
               'h-11 shrink-0 items-center rounded-full bg-white/5',
-              isFreePack ? 'hidden' : 'flex',
+              isFreePack || soldOut ? 'hidden' : 'flex',
             )}
           >
             <button
@@ -938,19 +954,25 @@ export default function PackDetailClient({
               <Plus className="h-4 w-4" aria-hidden />
             </button>
           </div>
-          {!freeClaimUnavailable && (
-            <Pill
-              variant="primary"
-              size="md"
-              onClick={handleGoToReel}
-              className="shrink-0 px-5"
-            >
-              {customer
-                ? isFreePack
-                  ? 'Open Free Pack'
-                  : openLabel
-                : 'Log in'}
+          {soldOut ? (
+            <Pill variant="secondary" size="md" disabled className="px-5">
+              Sold out
             </Pill>
+          ) : (
+            !freeClaimUnavailable && (
+              <Pill
+                variant="primary"
+                size="md"
+                onClick={handleGoToReel}
+                className="shrink-0 px-5"
+              >
+                {customer
+                  ? isFreePack
+                    ? 'Open Free Pack'
+                    : openLabel
+                  : 'Log in'}
+              </Pill>
+            )
           )}
         </div>
         {openError && (

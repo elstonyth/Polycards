@@ -129,8 +129,8 @@ export default function VaultClient({
     (s, i) => s + i.buyback.amount,
     0,
   );
-  // The part of that sale paid back as bonus credit (gift / bonus-funded
-  // pulls) — the confirm names the split instead of one undifferentiated sum.
+  // The part of that sale from bonus or gift play — the confirm says it must
+  // be played through before it can be withdrawn.
   const selectedBonus = sellableSelected.reduce(
     (s, i) => s + i.buyback.bonus,
     0,
@@ -174,10 +174,14 @@ export default function VaultClient({
   // on the FULL filtered set (`visible`), only rendering is windowed.
   const PAGE_STEP = 30;
   const [shownCount, setShownCount] = useState(PAGE_STEP);
-  useEffect(() => {
-    // New search/filter → back to the first window.
+  // New search/filter → back to the first window. Reset while rendering (React's
+  // "adjust state when an input changes" pattern), so the grid never paints one
+  // frame of the old window against the new filter.
+  const [pagedFor, setPagedFor] = useState({ query, rarityFilter });
+  if (pagedFor.query !== query || pagedFor.rarityFilter !== rarityFilter) {
+    setPagedFor({ query, rarityFilter });
     setShownCount(PAGE_STEP);
-  }, [query, rarityFilter]);
+  }
   const shown = visible.slice(0, shownCount);
 
   // Opening the vault marks everything seen. Keyed on `latestAt` rather than

@@ -11,7 +11,10 @@ import {
   withdrawalIdempotencyReference,
   withdrawalRefundReference,
 } from '../gateway-withdrawal';
-import { TGPAY_PAYOUT_FLOAT_EMPTY } from '../tgpay-client';
+import {
+  TGPAY_PAYOUT_DISABLED,
+  TGPAY_PAYOUT_FLOAT_EMPTY,
+} from '../tgpay-client';
 import { resetOpsAlerts } from '../ops-alert';
 import {
   unknownWithdrawalAction,
@@ -89,6 +92,7 @@ function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
       available: 1000,
       locked: 0,
       isFrozen: false,
+      hasTopup: true,
       nextUnlock: null,
       withdrawable: 1000,
       playthrough: { deposited: 0, used: 0, remaining: 0 },
@@ -382,6 +386,80 @@ describe('startWithdrawal — money ordering', () => {
     expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
   });
 
+  // TGPay refused every Touch 'n Go payout under ~RM 70 with "No payout
+  // provider is available for this order" (2026-10-09); TNG carries its own
+  // RM 100 floor, enforced before any row or debit.
+  it("refuses a Touch 'n Go withdrawal under RM 100 before any row or debit, and lets RM 100 through", async () => {
+    const tng = {
+      ...SAVED_ACCOUNT,
+      id: savedBankAccountId('TNGMY', '123456789012'),
+      bankCode: 'TNGMY',
+      bankName: "Touch 'n Go eWallet",
+      accountNumber: '123456789012',
+    };
+    const h = harness([tng]);
+    await expect(
+      start(h, { gateway: 'tgpay', accountId: tng.id, amount: 56 }),
+    ).rejects.toThrow(
+      "Withdrawals must be between RM 100 and RM 30,000 for Touch 'n Go eWallet.",
+    );
+    expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+
+    // A bank account keeps the gateway's own floor (RM 50 here).
+    const h2 = harness([SAVED_ACCOUNT]);
+    await expect(start(h2, { gateway: 'tgpay', amount: 56 })).resolves.toBeTruthy();
+
+    const h3 = harness([tng]);
+    await expect(
+      start(h3, { gateway: 'tgpay', accountId: tng.id, amount: 100 }),
+    ).resolves.toBeTruthy();
+  });
+
+  // From 2026-10-09 17:12 TGPay refused every Touch 'n Go payout, at any
+  // amount, with "No payout provider is available for this order". Customers
+  // retried 10+ times because the generic copy told them to check details.
+  it("sends a Touch 'n Go customer to a bank account when TGPay has no TNG payout provider", async () => {
+    const tng = {
+      ...SAVED_ACCOUNT,
+      id: savedBankAccountId('TNGMY', '123456789012'),
+      bankCode: 'TNGMY',
+      bankName: "Touch 'n Go eWallet",
+      accountNumber: '123456789012',
+    };
+    const noProvider = new GatewayError(
+      'TGPay /transaction/payout/withdraw failed (HTTP 400): No payout provider is available for this order',
+      [],
+      400,
+      true,
+    );
+    const h = harness([tng]);
+    h.packs.withdrawForCashout.mockResolvedValue({
+      id: 'ct_1',
+      balance: 50,
+      amount: -100,
+      replayed: false,
+      reference: null,
+      destination: tng,
+    });
+    fakeGateway.script({ submitWithdrawal: noProvider });
+    const error = (await start(h, { accountId: tng.id, amount: 100 }).catch(
+      (e: unknown) => e,
+    )) as Error;
+    expect(error.message).toBe(
+      "Touch 'n Go withdrawals are temporarily unavailable from our payment provider. Your balance has been returned. Please withdraw to a bank account for now.",
+    );
+    // Still refunded: the refund is the only ledger write on this path.
+    expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+
+    // The same refusal on a bank account keeps the generic copy.
+    fakeGateway.script({ submitWithdrawal: noProvider });
+    await expect(start(harness())).rejects.toThrow(
+      /refused by the payment provider/i,
+    );
+  });
+
   // Test-plan case 3.
   it("refuses a bank the active gateway cannot pay to BEFORE any debit, in the customer's words", async () => {
     // A wallet the registry knows but TGPay has no payout code for.
@@ -645,6 +723,7 @@ describe('startWithdrawal — money ordering', () => {
       available: 0,
       locked: 0,
       isFrozen: true,
+      hasTopup: true,
       nextUnlock: null,
       withdrawable: 0,
       playthrough: { deposited: 0, used: 0, remaining: 0 },
@@ -663,6 +742,7 @@ describe('startWithdrawal — money ordering', () => {
       available: 1000,
       locked: 0,
       isFrozen: false,
+      hasTopup: true,
       nextUnlock: null,
       withdrawable: 0,
       playthrough: { deposited: 100, used: 40, remaining: 60 },
@@ -671,6 +751,25 @@ describe('startWithdrawal — money ordering', () => {
       /RM 60\.00 of your deposits must be spent on packs/,
     );
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+  });
+
+  // No top-up ever (2026-10-11): promo credit and prize sell-backs must not
+  // leave as cash from an account that never deposited.
+  it('a never-topped-up account is refused BEFORE any row is written', async () => {
+    const h = harness();
+    h.packs.walletSummary.mockResolvedValue({
+      balance: 1000,
+      available: 1000,
+      locked: 0,
+      isFrozen: false,
+      hasTopup: false,
+      nextUnlock: null,
+      withdrawable: 0,
+      playthrough: { deposited: 0, used: 0, remaining: 0 },
+    });
+    await expect(start(h)).rejects.toThrow(/Top up at least once/);
+    expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+    expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
   });
 
   // The RACE path, and the reason the precheck is not a control: the wallet was
@@ -786,6 +885,7 @@ describe('startWithdrawal — approval threshold (held)', () => {
     available: 5000,
     locked: 0,
     isFrozen: false,
+    hasTopup: true,
     nextUnlock: null,
     withdrawable: 5000,
     playthrough: { deposited: 0, used: 0, remaining: 0 },
@@ -878,6 +978,7 @@ describe('startWithdrawal — approval threshold (held)', () => {
       ...roomyWallet,
       available: 0,
       isFrozen: true,
+      hasTopup: true,
       withdrawable: 0,
     });
     await expect(start(h, { amount: 2000 })).rejects.toThrow(/under review/i);
@@ -913,6 +1014,13 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       'TGPay /transaction/payout/withdraw failed (HTTP 400): Insufficient payout credit balance',
       [TGPAY_PAYOUT_FLOAT_EMPTY],
       400,
+      true,
+    );
+  const payoutDisabled = () =>
+    new GatewayError(
+      'The 7 Pay /transaction/payout/withdraw failed (HTTP 501): Payout not available in production yet (contact The 7 Pay)',
+      [TGPAY_PAYOUT_DISABLED],
+      501,
       true,
     );
   const originalFetch = global.fetch;
@@ -1002,6 +1110,36 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
       expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
       expect(fakeGateway.calls.withdrawals).toHaveLength(1);
+    });
+
+    // Same machinery, second cause: The 7 Pay answers 501 "Payout not
+    // available in production yet" while payouts are off on our tenant. The
+    // customer can do nothing about it either, so it gets the same handling.
+    it('payouts switched off at the gateway: refunds at once, says it is our side, alerts ops, turns the next tap away', async () => {
+      fakeGateway.script({ submitWithdrawal: payoutDisabled() });
+      const h = harness();
+      const error = (await start(h).catch((e: unknown) => e)) as Error;
+      expect(error.message).toMatch(
+        /withdrawals are temporarily unavailable on our side/i,
+      );
+      expect(error.message).not.toMatch(/check your bank details/i);
+      // Refunded now, not left pending for the sweep.
+      expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+      expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
+        id: 'gpw_1',
+        status: 'failed',
+        failure_reason: expect.stringContaining(TGPAY_PAYOUT_DISABLED),
+      });
+      expect(sent).toHaveLength(1);
+      expect(sent[0].chat_id).toBe('-100ops');
+      expect(sent[0].text).toMatch(/payouts are not enabled/i);
+      expect(sent[0].text).not.toMatch(/1234567890|AHMAD BIN ALI/i);
+
+      const h2 = harness();
+      const next = (await start(h2).catch((e: unknown) => e)) as Error;
+      expect(next.message).toMatch(/nothing was taken/i);
+      expect(h2.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+      expect(h2.packs.withdrawForCashout).not.toHaveBeenCalled();
     });
 
     it('any other definite refusal keeps the generic copy and alerts nobody', async () => {
@@ -1105,6 +1243,17 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       expect(sent[0].text).toMatch(/admin approve/);
     });
 
+    it('payouts switched off at the gateway: refunds and tells the admin payouts are not enabled', async () => {
+      fakeGateway.script({ submitWithdrawal: payoutDisabled() });
+      const h = approveHarness();
+      const error = (await h.approve().catch((e: unknown) => e)) as Error;
+      expect(error.message).toMatch(/payouts are not enabled/i);
+      expect(error.message).toMatch(/refunded/i);
+      expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+      expect(sent).toHaveLength(1);
+      expect(sent[0].text).toMatch(/admin approve/);
+    });
+
     it('any other definite refusal keeps the generic admin message and alerts nobody', async () => {
       fakeGateway.script({
         submitWithdrawal: new GatewayError('nope', ['PMT10013'], 400, true),
@@ -1140,6 +1289,7 @@ const fakeWallet = (over: Record<string, unknown> = {}) => ({
   available: 1000,
   locked: 0,
   isFrozen: false,
+  hasTopup: true,
   nextUnlock: null,
   withdrawable: 1000,
   playthrough: { deposited: 0, used: 0, remaining: 0 },

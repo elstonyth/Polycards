@@ -16,7 +16,7 @@ import { MedusaError } from '@medusajs/framework/utils';
 // route through this function before writing a 'cashout' ledger row.
 export interface PlaythroughInput {
   /** Σ positive `topup` rows **with a non-NULL external basis** (post-1b era),
-   *  in cents. Pre-1b deposits are grandfathered: they predate
+   *  plus each buyback's share from bonus or gift play (2026-10-09), in cents. Pre-1b deposits are grandfathered: they predate
    *  `external_funded_cents` and never require playthrough (their opens' basis
    *  is equally invisible to `usedCents`, so counting them would lock them
    *  forever). */
@@ -42,14 +42,24 @@ export function playthroughState(t: PlaythroughInput): PlaythroughState {
 
 /** The wallet fields the gate branches on (a structural subset of
  *  walletSummary's return, so either caller can pass its result straight in). */
+/** Refusal for an account that never topped up (2026-10-11): promo credit
+ *  and prizes must not leave as cash or as a shipped card from an account
+ *  that never deposited. Shared by the withdrawal gate and both delivery
+ *  paths; the storefront passes it through by phrase ("Top up at least once",
+ *  src/lib/vault-errors.ts). */
+export const NO_TOPUP_MESSAGE =
+  'Top up at least once to unlock withdrawals and deliveries.';
+
 export interface WithdrawalGateWallet {
   withdrawable: number;
   isFrozen: boolean;
+  /** At least one positive top-up row ever (any era, any amount). */
+  hasTopup: boolean;
   playthrough: { remaining: number };
 }
 
 /**
- * The three customer-facing refusals of the withdrawal gate, in one place.
+ * The customer-facing refusals of the withdrawal gate, in one place.
  * Returns the error to throw, or null when the amount is allowed.
  *
  * Defined HERE, and not at either call site, because the messages have exactly
@@ -68,9 +78,9 @@ export interface WithdrawalGateWallet {
  * customer's refusal back into "Something went wrong" (as it was until
  * 2026-10-03). Update all of them together.
  *
- * Order matters: freeze outranks playthrough, which outranks the plain
- * "you can withdraw up to X" cap — a frozen account must never be told it is
- * merely short of playthrough.
+ * Order matters: freeze outranks no-top-up, which outranks playthrough, which
+ * outranks the plain "you can withdraw up to X" cap — a frozen account must
+ * never be told it is merely short of playthrough.
  */
 export function withdrawalGateError(
   wallet: WithdrawalGateWallet,
@@ -82,6 +92,9 @@ export function withdrawalGateError(
       MedusaError.Types.NOT_ALLOWED,
       'Withdrawals are unavailable while your account is under review. Contact support.',
     );
+  }
+  if (!wallet.hasTopup) {
+    return new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
   }
   if (wallet.playthrough.remaining > 0) {
     return new MedusaError(

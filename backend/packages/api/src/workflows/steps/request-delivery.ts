@@ -10,6 +10,7 @@ import {
   MY_ONLY_MESSAGE,
 } from '../../modules/packs/delivery';
 import { FREE_PULL_LOCKED_MESSAGE } from '../../modules/packs/free-pack';
+import { NO_TOPUP_MESSAGE } from '../../modules/packs/withdrawable';
 import { resolveFxRateStrict } from '../../modules/packs/pricing';
 
 export type RequestDeliveryInput = {
@@ -117,6 +118,10 @@ export const requestDeliveryStep = createStep(
     // Frozen accounts cannot draw value out — physical delivery extracts value
     // exactly like buyback, so it gets the same gate (audit 2026-07-07 #2).
     await packs.assertNotFrozen(input.customer_id);
+    // No top-up ever = nothing ships (2026-10-11), same rule as withdrawals.
+    if (!(await packs.hasTopUp(input.customer_id))) {
+      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
+    }
 
     // 2. Resolve + verify the address belongs to the caller, then snapshot it.
     const [address] = await customerModule.listCustomerAddresses(

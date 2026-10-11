@@ -33,7 +33,11 @@ import {
   type DeliveryStatus,
 } from './delivery';
 import { rewardsRedemptionEnabled } from './rewards-gate';
-import { playthroughState, withdrawalGateError } from './withdrawable';
+import {
+  NO_TOPUP_MESSAGE,
+  playthroughState,
+  withdrawalGateError,
+} from './withdrawable';
 import {
   loadSavedBankAccounts,
   resolveWithdrawalDestination,
@@ -160,6 +164,7 @@ import {
 } from './buyback-rate';
 import { consumeExternalSen } from './external-funded';
 import {
+  BONUS_BP_FULL,
   BONUS_NOT_SPENDABLE_MESSAGE,
   NORMAL_SHARE_SQL,
   REAL_MONEY_PULL_SQL,
@@ -209,13 +214,18 @@ import {
   type RankPayout,
 } from './challenge-settle';
 import { weightedAverageCost } from './inventory-cost';
-import type { SignupTopupStats } from './stats';
+import type { SignupTopupStats, WithdrawalStats } from './stats';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
-// plan-033 playthrough basis: the "post-1b deposited" ledger predicate. Shared
-// between creditSummary and walletSummary so the two SQL scans can't drift.
-const DEPOSITED_PT_FILTER =
-  "reason = 'topup' AND amount > 0 AND external_funded_cents IS NOT NULL";
+// plan-033 playthrough basis, per ledger row in sen: a post-1b deposit's
+// amount, plus the part of a card sale that came from bonus or gift play
+// (operator rule 2026-10-09), which the buyback row stamps as
+// external_funded_cents — it pays NORMAL credit that must be played through
+// once, like a deposit. Shared between creditSummary and walletSummary (and
+// mirrored by credit-summary.ts's fold) so the scans can't drift.
+const DEPOSITED_PT_SEN_SQL =
+  "CASE WHEN reason = 'topup' AND amount > 0 AND external_funded_cents IS NOT NULL THEN ROUND(amount * 100) " +
+  "WHEN reason = 'buyback' THEN COALESCE(external_funded_cents, 0) ELSE 0 END";
 
 // Default rolling-24h cashout ceiling, in RM. The per-transaction payout band
 // (RM 50 – RM 50,000, gateway-withdrawal.ts) bounds ONE payout; before this
@@ -299,7 +309,9 @@ export type CreditMutationInput = {
   /**
    * Bonus credit (spec 2026-10-07): the signed sen of this row that is
    * spend-only bonus. Only a 'bonus_grant' row may carry it, and it must equal
-   * the row's amount in sen. Pack opens compute theirs in settleOpen.
+   * the row's amount in sen. A 'reward_credit' row (task / challenge prize) or
+   * a 'voucher_claim' row (VIP voucher) is stamped whole-row bonus by mutateCreditAtomic itself (2026-10-11). Pack
+   * opens compute theirs in settleOpen.
    */
   bonusCents?: number;
 };
@@ -2254,7 +2266,7 @@ class PacksModuleService extends MedusaService({
         // also rides IDX_pull_customer_id_rolled_at instead of scanning for a
         // status that has no index.
         // Gifted packs and bonus-funded opens count toward nothing (spec
-        // 2026-10-07): their achievements could pay withdrawable credit.
+        // 2026-10-07): bonus play must not farm achievements and their prizes.
         em.execute<{ n: string }[]>(
           'SELECT COUNT(*)::bigint AS n FROM pull ' +
             "WHERE customer_id = ? AND deleted_at IS NULL AND source NOT IN ('gift', 'bonus')",
@@ -2777,6 +2789,9 @@ class PacksModuleService extends MedusaService({
             order_id: null,
             rolled_at: new Date(),
             source: 'reward' as const,
+            // A prize is promo value (operator rule 2026-10-11): its whole
+            // sell-back must be played through once, like a gifted pack.
+            bonus_bp: BONUS_BP_FULL,
           },
         ],
         sharedContext,
@@ -3245,7 +3260,7 @@ class PacksModuleService extends MedusaService({
         // VIP basis = the NORMAL part of opens: bonus-funded play counts
         // toward nothing (spec 2026-10-07); bonus_cents is ≤ 0 on an open.
         `  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -${normalSenSql()} ELSE 0 END), 0)::bigint AS vip_spend_cents, ` +
-        `  COALESCE(SUM(CASE WHEN ${DEPOSITED_PT_FILTER} THEN ROUND(amount * 100) ELSE 0 END), 0)::bigint AS deposited_pt_cents, ` +
+        `  COALESCE(SUM(${DEPOSITED_PT_SEN_SQL}), 0)::bigint AS deposited_pt_cents, ` +
         '  COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
         'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
       [customerId],
@@ -3478,6 +3493,26 @@ class PacksModuleService extends MedusaService({
         MedusaError.Types.INVALID_DATA,
         'Only a bonus_grant row may carry bonusCents.',
       );
+    } else if (
+      input.reason === 'reward_credit' ||
+      input.reason === 'voucher_claim'
+    ) {
+      // Task and weekly-challenge prizes and VIP level-up vouchers are
+      // spend-only bonus credit too (operator rule 2026-10-11). Stamped HERE,
+      // the one place their writers (claimTask, settleChallengeWinner,
+      // claimReward) route through, so none can pay withdrawable credit by
+      // forgetting a flag. The reasons stay their own, not bonus_grant: bonus_grant rows count against the
+      // admin 24h mint ceiling (rollingAdjustmentMintCents), and task claims
+      // must neither eat that allowance nor be blocked by it.
+      if (bonusBeforeCents + deltaCents < 0) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          `Bonus credit cannot go below RM 0 (bonus balance RM ${(
+            bonusBeforeCents / 100
+          ).toFixed(2)}).`,
+        );
+      }
+      bonusDeltaCents = deltaCents;
     }
 
     // 2b) External-funded snapshot (Phase 1b) — uses the external balance from
@@ -3510,7 +3545,10 @@ class PacksModuleService extends MedusaService({
     //    Only a pack open may spend bonus credit; every other debit is floored
     //    against the NORMAL balance (a bonus take-back was bounded above).
     const spendableCents =
-      input.reason === 'pack_open' || input.reason === 'bonus_grant'
+      input.reason === 'pack_open' ||
+      input.reason === 'bonus_grant' ||
+      input.reason === 'reward_credit' ||
+      input.reason === 'voucher_claim'
         ? beforeCents
         : beforeCents - bonusBeforeCents;
     if (deltaCents < 0 && spendableCents + deltaCents < floorCents) {
@@ -4687,6 +4725,11 @@ class PacksModuleService extends MedusaService({
     // Frozen accounts cannot draw value out (Batch A item 5) — block shipping a
     // prize under the same lock as the cap COUNT + writes below.
     await this.assertNotFrozen(customerId, sharedContext);
+    // No top-up ever = no shipped prize (2026-10-11): a brand-new account
+    // claimed a check-in card and shipped it within minutes of signup.
+    if (!(await this.hasTopUp(customerId, sharedContext))) {
+      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
+    }
 
     // 1) Re-read the Pull UNDER the lock and validate it via the same pure helper
     //    the lockless delivery path uses. 'reward_source' = owned + vaulted +
@@ -5360,6 +5403,25 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return pulls.length > 0;
+  }
+
+  // At least one positive top-up ever (any era, any amount). Withdrawals and
+  // both delivery paths stay locked until then (2026-10-11): promo credit and
+  // prizes must not leave an account that never deposited. Promo-funded
+  // opens make hasPaidOpen true, so it cannot answer this.
+  @InjectManager()
+  async hasTopUp(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ one: number }[]>(
+      "SELECT 1 AS one FROM credit_transaction WHERE customer_id = ? AND reason = 'topup' " +
+        'AND amount > 0 AND deleted_at IS NULL LIMIT 1',
+      [customerId],
+    );
+    return rows.length > 0;
   }
 
   // The live free welcome pack, or null when the operator has not published
@@ -6699,12 +6761,17 @@ class PacksModuleService extends MedusaService({
       depositedCents: number;
       usedCents: number;
       bonusCents: number;
+      /** Any positive top-up row ever (creditSummary.topupTotal > 0). */
+      hasTopup: boolean;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
     balance: number;
     available: number;
     isFrozen: boolean;
+    /** At least one top-up ever: withdrawals and deliveries stay locked until
+     *  then (2026-10-11). */
+    hasTopup: boolean;
     withdrawable: number;
     /** Spend-only bonus credit inside `balance` (MYR) — never withdrawable. */
     bonus: number;
@@ -6727,11 +6794,13 @@ class PacksModuleService extends MedusaService({
     let depositedCents: number;
     let usedCents: number;
     let bonusCents: number;
+    let hasTopup: boolean;
     if (precomputed) {
       balance = precomputed.balance;
       depositedCents = precomputed.depositedCents;
       usedCents = precomputed.usedCents;
       bonusCents = precomputed.bonusCents;
+      hasTopup = precomputed.hasTopup;
     } else {
       const balRows = await em.execute<
         {
@@ -6739,10 +6808,12 @@ class PacksModuleService extends MedusaService({
           deposited_cents: string | null;
           used_cents: string | null;
           bonus_cents: string | null;
+          topup_cents: string | null;
         }[]
       >(
         'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS balance_cents, ' +
-          `COALESCE(SUM(ROUND(amount * 100)) FILTER (WHERE ${DEPOSITED_PT_FILTER}), 0)::bigint AS deposited_cents, ` +
+          "COALESCE(SUM(CASE WHEN reason = 'topup' AND amount > 0 THEN ROUND(amount * 100) ELSE 0 END), 0)::bigint AS topup_cents, " +
+          `COALESCE(SUM(${DEPOSITED_PT_SEN_SQL}), 0)::bigint AS deposited_cents, ` +
           "COALESCE(SUM(-external_funded_cents) FILTER (WHERE reason = 'pack_open'), 0)::bigint AS used_cents, " +
           'COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
           'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
@@ -6752,6 +6823,7 @@ class PacksModuleService extends MedusaService({
       depositedCents = Number(balRows[0]?.deposited_cents ?? 0);
       usedCents = Number(balRows[0]?.used_cents ?? 0);
       bonusCents = Math.max(0, Number(balRows[0]?.bonus_cents ?? 0));
+      hasTopup = Number(balRows[0]?.topup_cents ?? 0) > 0;
     }
 
     const frozen = await this.isFrozen(customerId, sharedContext);
@@ -6765,14 +6837,18 @@ class PacksModuleService extends MedusaService({
     const gate = playthroughState({ depositedCents, usedCents });
     // Bonus credit is spend-only (spec 2026-10-07): it sits inside the
     // balance but never inside what may leave.
-    const withdrawable = gate.withdrawable
-      ? Math.max(0, Math.round(available * 100) - bonusCents) / 100
-      : 0;
+    // No top-up ever = nothing may leave (2026-10-11): promo credit and prize
+    // sell-backs are not cash for an account that never deposited.
+    const withdrawable =
+      gate.withdrawable && hasTopup
+        ? Math.max(0, Math.round(available * 100) - bonusCents) / 100
+        : 0;
 
     return {
       balance,
       available,
       isFrozen: frozen,
+      hasTopup,
       withdrawable,
       bonus: bonusCents / 100,
       playthrough: {
@@ -7299,7 +7375,8 @@ class PacksModuleService extends MedusaService({
     const params: unknown[] = [];
     let sql =
       // The NORMAL part of every row (spec 2026-10-07): bonus spent on opens
-      // and paid back on sells is not cash; bonus_grant is its own bucket.
+      // (and paid back on sells before 2026-10-09) is not cash; bonus_grant is
+      // its own bucket.
       `SELECT reason, COALESCE(SUM(${reasonCashSenSql()}), 0)::bigint AS cents ` +
       'FROM credit_transaction WHERE deleted_at IS NULL';
     if (from) {
@@ -7389,6 +7466,37 @@ class PacksModuleService extends MedusaService({
       topup_amount: Number(row.topup_cents) / 100,
       first_topup_count: row.first_topup_count,
       first_topup_amount: Number(row.first_topup_cents) / 100,
+    };
+  }
+
+  // Withdrawal figures for GET /admin/stats over one half-open [from, to)
+  // window: settled gateway_withdrawal rows by settled_at, summed on `amount`
+  // (the debit), the same basis as the Settlement report, because
+  // amount_settled is NULL on every payout settled before it shipped. Pending
+  // and held payouts have left the wallet but not the gateway; they count
+  // once settled. Kept apart from signupTopupStats so that method's
+  // sign-up-only callers (the growth reports) never pay for this scan.
+  @InjectManager()
+  async withdrawalStats(
+    from: Date,
+    to: Date,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<WithdrawalStats> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [row] = await em.execute<
+      { withdrawal_count: number; withdrawal_cents: string }[]
+    >(
+      `SELECT count(*)::int AS withdrawal_count,
+              COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS withdrawal_cents
+       FROM gateway_withdrawal
+       WHERE status = 'settled' AND deleted_at IS NULL
+         AND settled_at >= ?::timestamptz AND settled_at < ?::timestamptz`,
+      [from.toISOString(), to.toISOString()],
+    );
+    return {
+      withdrawal_count: row.withdrawal_count,
+      withdrawal_amount: Number(row.withdrawal_cents) / 100,
     };
   }
 
@@ -8920,15 +9028,20 @@ class PacksModuleService extends MedusaService({
       cardHandle: string;
       rate: number;
       openId: string | null;
-      /** The pull's bonus share (pull.bonus_bp): that part of the sell-back is
-       *  paid as spend-only bonus credit (spec 2026-10-07 §4.5). */
+      /** The pull's bonus share (pull.bonus_bp): that part of the sell-back
+       *  must be played through before it can be withdrawn. */
       bonusBp?: number;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
     Awaited<ReturnType<PacksModuleService['createCreditTransactions']>>
   > {
-    const bonusCents = bonusShareSen(
+    // A card opened with bonus credit or a gifted pack sells back as NORMAL
+    // credit (operator rule 2026-10-09), but its bonus share must be played
+    // through once before it can be withdrawn: stamped as external money in,
+    // like a deposit, so opens consume it and the playthrough gate counts it
+    // (DEPOSITED_PT_SEN_SQL). Rounded up, toward the locked side.
+    const playthroughCents = bonusShareSen(
       Math.round(input.amount * 100),
       input.bonusBp ?? 0,
     );
@@ -8939,7 +9052,9 @@ class PacksModuleService extends MedusaService({
           amount: input.amount,
           reason: 'buyback' as const,
           pull_id: input.pullId,
-          bonus_cents: bonusCents,
+          ...(playthroughCents
+            ? { external_funded_cents: playthroughCents }
+            : {}),
         },
       ],
       sharedContext,
@@ -8957,7 +9072,9 @@ class PacksModuleService extends MedusaService({
           sp_ref_id: input.openId,
           price: input.valueMyr,
           rate: input.rate,
-          ...(bonusCents ? { bonus: bonusCents / 100 } : {}),
+          ...(playthroughCents
+            ? { playthrough: playthroughCents / 100 }
+            : {}),
         },
       },
       sharedContext,
@@ -9760,6 +9877,7 @@ class PacksModuleService extends MedusaService({
           order_id: null,
           rolled_at: new Date(),
           source: 'reward' as const,
+          bonus_bp: BONUS_BP_FULL, // promo prize: sell-back played through once
           stock_earmarked: taken,
         },
       ],
@@ -10836,6 +10954,7 @@ class PacksModuleService extends MedusaService({
             order_id: null,
             rolled_at: new Date(),
             source: 'reward' as const,
+            bonus_bp: BONUS_BP_FULL, // promo prize: sell-back played through once
             // Minted UNRESERVED; flipped only once a unit is really taken.
             // Buyback restores flagged pulls only, so false is the safe
             // default — giving back a unit that was never taken would mint a
@@ -11120,6 +11239,7 @@ class PacksModuleService extends MedusaService({
         order_id: null,
         rolled_at: new Date(),
         source: 'reward' as const,
+        bonus_bp: BONUS_BP_FULL, // promo prize: sell-back played through once
         stock_earmarked: false, // flipped only if a unit is really taken
       })),
       sharedContext,

@@ -144,7 +144,7 @@ Every image the Growth bot generates with `image_gen` gets the official wordmark
   - The response states this rule.
 - **Growth: the week's tasks.** Claims per task, check-ins per day, and unspun free rips.
 - **Store:**
-  - Packs: price, `in_stock` (a display flag only; a pack shown as sold out can still be opened), set-1 EV/RTP and published EV/RTP.
+  - Packs: price, `in_stock` (false = sold out: the pack stays listed but paid opens are refused; vault gifts and free rips already given still open), set-1 EV/RTP and published EV/RTP.
   - One pack: a pool summary per rarity.
   - Low stock: `on_hand ≤ 0` by default, with untracked cards left out.
   - Never sent: per-card weights, odds sets 2 and 3, `target_rtp_bps` or `cost`.

@@ -211,7 +211,8 @@ export async function GET(
           : {
               percent,
               amount: buybackAmount(marketPriceMyr, percent),
-              // The part of that amount paid as bonus credit.
+              // The part of that amount from bonus or gift play, which
+              // must be played through before it can be withdrawn.
               bonus: bonusShareMyr(
                 buybackAmount(marketPriceMyr, percent),
                 Number(p.bonus_bp ?? 0),

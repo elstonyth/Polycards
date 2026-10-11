@@ -356,6 +356,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
             depositedCents: Math.round(s.depositedPlaythroughTotal * 100),
             usedCents: Math.round(s.externalFundedSpendTotal * 100),
             bonusCents: Math.round(s.bonusBalance * 100),
+            hasTopup: s.topupTotal > 0,
           });
 
           // The two paths must return an identical wallet summary — proving the
@@ -366,6 +367,43 @@ moduleIntegrationTestRunner<PacksModuleService>({
           // Sanity: the shared basis is actually non-trivial here.
           expect(scanned.playthrough.deposited).toBeCloseTo(120, 2);
           expect(scanned.playthrough.used).toBeCloseTo(50, 2);
+        },
+      );
+
+      it(
+        'walletSummary: nothing is withdrawable until the first top-up',
+        async () => {
+          const cust = 'cus_ws_notopup';
+          // Promo credit only (a task prize, 2026-10-11 rule): no deposit ever.
+          await service.mutateCreditAtomic({
+            customerId: cust,
+            amount: 40,
+            reason: 'adjustment',
+          });
+          let w = await service.walletSummary(cust);
+          expect(w.hasTopup).toBe(false);
+          expect(w.available).toBeCloseTo(40, 2);
+          expect(w.withdrawable).toBe(0);
+
+          await service.mutateCreditAtomic({
+            customerId: cust,
+            amount: 10,
+            reason: 'topup',
+            reference: 'notopup_first',
+          });
+          await service.createCreditTransactions([
+            {
+              customer_id: cust,
+              amount: -10,
+              reason: 'pack_open' as const,
+              pull_id: null,
+              reference: null,
+              external_funded_cents: -1000,
+            } as Record<string, unknown>,
+          ]);
+          w = await service.walletSummary(cust);
+          expect(w.hasTopup).toBe(true);
+          expect(w.withdrawable).toBeCloseTo(40, 2);
         },
       );
     });

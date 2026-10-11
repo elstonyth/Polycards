@@ -305,13 +305,15 @@ export async function composeTasksPoster(
   }
 
   // ---- one tile per other task ------------------------------------------------
-  // As many tiles as fit at the smallest readable height; the rest are
+  // One wide tile per row while they fit at the smallest readable height;
+  // more than that go two to a row as half tiles. Any still left over are
   // reported back as dropped, never drawn over the pill.
-  const fits = Math.max(0, Math.floor((bottom - y + 16) / (MIN_TILE_H + 16)));
-  const shown = input.tasks.slice(0, fits);
+  const rows = Math.max(0, Math.floor((bottom - y + 16) / (MIN_TILE_H + 16)));
+  const cols = input.tasks.length > rows ? 2 : 1;
+  const shown = input.tasks.slice(0, rows * cols);
   const dropped = input.tasks.length - shown.length;
   if (shown.length) {
-    const n = shown.length;
+    const n = Math.ceil(shown.length / cols);
     const th = Math.max(
       MIN_TILE_H,
       Math.min(200, Math.floor((bottom - y - (n - 1) * 16) / n)),
@@ -319,15 +321,19 @@ export async function composeTasksPoster(
     const top = Math.round(
       y + Math.max(0, (bottom - y - (n * th + (n - 1) * 16)) / 2),
     );
+    const tw = cols === 1 ? TEXT_W : (TEXT_W - 16) / 2;
     for (const [i, task] of shown.entries()) {
-      const ty = top + i * (th + 16);
+      // A lone half tile on the last row is centred.
+      const lone = cols === 2 && i === shown.length - 1 && i % 2 === 0;
+      const tx = lone ? PAD + (TEXT_W - tw) / 2 : PAD + (i % cols) * (tw + 16);
+      const ty = top + Math.floor(i / cols) * (th + 16);
       svg.push(
-        `<rect x="${PAD + 1}" y="${ty + 1}" width="${TEXT_W - 2}" height="${th - 2}" rx="24" ` +
+        `<rect x="${(tx + 1).toFixed(1)}" y="${ty + 1}" width="${(tw - 2).toFixed(1)}" height="${th - 2}" rx="24" ` +
           `fill="${CHARCOAL}" stroke="${HAIRLINE}" stroke-width="2"/>`,
       );
       const ah = th - 24;
       const aw = Math.round(ah * 0.8);
-      const ax = PAD + 16;
+      const ax = tx + 16;
       if (
         await prizeArt(
           task.kind,
@@ -342,9 +348,61 @@ export async function composeTasksPoster(
       ) {
         placeholders.push(`task:${i}`);
       }
-      const right = W - PAD - 36;
       const worth = task.valueMyr !== null && task.valueMyr > 0;
       const value = worth ? rmWhole(task.valueMyr as number) : '';
+      if (cols === 2) {
+        // Half tile: what to do, the prize, then what it is worth, stacked.
+        const textX = ax + aw + 24;
+        const textW = tx + tw - 24 - textX;
+        const reqSize = await sizeToFit(
+          [task.requirement],
+          (s) => body(s),
+          30,
+          22,
+          textW,
+        );
+        const req = await fit(task.requirement, body(reqSize), textW);
+        const prize = await fit(task.prize, body(20), textW);
+        const blockH =
+          capH(reqSize) + 14 + capH(20) + (worth ? 18 + capH(30) : 0);
+        let ly = ty + (th - blockH) / 2;
+        svg.push(
+          textEl(
+            req,
+            textX,
+            baseline(ly + capH(reqSize) / 2, reqSize),
+            body(reqSize),
+            WHITE,
+          ),
+        );
+        ly += capH(reqSize) + 14;
+        svg.push(
+          textEl(prize, textX, baseline(ly + capH(20) / 2, 20), body(20), SOFT),
+        );
+        ly += capH(20) + 18;
+        if (worth) {
+          const label = 'WORTH';
+          const labelW = await measure(label, body(18, 4));
+          svg.push(
+            textEl(
+              label,
+              textX,
+              baseline(ly + capH(30) / 2, 18),
+              body(18, 4),
+              SILVER,
+            ),
+            textEl(
+              value,
+              textX + labelW + 12,
+              baseline(ly + capH(30) / 2, 30),
+              display(30, -1),
+              CHASE,
+            ),
+          );
+        }
+        continue;
+      }
+      const right = W - PAD - 36;
       const valueFont = display(44, -1);
       const valueW = worth ? await measure(value, valueFont) : 0;
       const textX = ax + aw + 32;

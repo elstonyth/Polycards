@@ -202,6 +202,14 @@ medusaIntegrationTestRunner({
               external_funded_cents: -500,
               bonus_cents: -4000,
             },
+            // A card sale from bonus play (2026-10-09): normal credit whose
+            // share is stamped for playthrough — the basis must count it.
+            {
+              customer_id: CUS,
+              amount: 27,
+              reason: 'buyback',
+              external_funded_cents: 2700,
+            },
           ]);
           const sql = await packs.creditSummary(CUS);
           const rows = await packs.listCreditTransactions(

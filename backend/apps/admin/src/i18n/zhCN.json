@@ -1,7 +1,7 @@
 {
   "statsBoard": {
     "title": "数据看板",
-    "subtitle": "注册与充值 · {{current}}（马来西亚时间）· 对比 {{previous}}",
+    "subtitle": "注册、充值与提现 · {{current}}（马来西亚时间）· 对比 {{previous}}",
     "ranges": {
       "today": "今天",
       "yesterday": "昨天",
@@ -20,6 +20,8 @@
     "topup_amount": "充值金额",
     "first_topup_count": "首充人数",
     "first_topup_amount": "首充金额",
+    "withdrawal_count": "提现笔数",
+    "withdrawal_amount": "提现金额",
     "vsPrevious": "vs 上一段",
     "previous": "上一段 {{value}}",
     "loadError": "无法加载数据。"

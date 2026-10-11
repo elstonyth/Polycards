@@ -57,7 +57,9 @@ found by the `transactionRefNum` stored at create time. Both are at-least-once.
   deposit/withdrawal orchestration, reconcile sweeps and admin routes did not
   change. Storefront method codes map `OB`/`FPX` → hosted FPX, `BQR` → hosted
   E-wallet; `DN` is refused (DuitNow QR needs custom checkout).
-- `api/hooks/tgpay/deposit` and `api/hooks/tgpay/withdrawal` — the callbacks.
+- `api/hooks/tgpay/deposit` and `api/hooks/tgpay/withdrawal` — the callbacks
+  (handlers in `api/utils/tgpay-family-hooks.ts`, shared with The 7 Pay — a
+  white-label of the same platform, see `docs/payments/the7pay-api.md`).
 - `scripts/check-tgpay.ts` — balance preflight; `scripts/tgpay-payout-probe.ts`
   — sandbox-only RM 50 payout to the dummy bank, outside our ledger;
   `scripts/run-gateway-audit.ts` — run the audit sweep once.

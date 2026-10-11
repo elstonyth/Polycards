@@ -50,6 +50,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Hydrate an existing session on mount. The httpOnly cookie means the header
   // shows logged-out until this resolves (a brief, unavoidable first-load flash).
   useEffect(() => {
+    // refresh() only sets state after awaiting /api/me; the compiler can't see
+    // the await boundary through the callback.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async session fetch on mount
     void refresh();
   }, [refresh]);
 

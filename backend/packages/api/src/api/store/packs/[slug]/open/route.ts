@@ -125,8 +125,8 @@ export async function POST(
         marketPriceMyr,
       );
 
-      // A bonus-funded pull sells back partly as bonus credit (spec
-      // 2026-10-07 §4.5).
+      // A bonus-funded pull: that share of its sale must be played through
+      // before it can be withdrawn (2026-10-09).
       const bonusBp = Number(result.pull.bonus_bp ?? 0);
       buyback = {
         ...quoted,
