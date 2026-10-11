@@ -10,6 +10,7 @@ import {
   Select,
   Switch,
   Table,
+  Tabs,
   Text,
   Tooltip,
   toast,
@@ -39,10 +40,12 @@ import {
   labelsOf,
   requirementLabel,
   scheduleOk,
+  taskStatus,
   toIso,
   windowLabel,
   type Draft,
   type TaskKind,
+  type TaskStatus,
 } from "./task-draft";
 import { LoadingSkeleton } from "../../components/LoadingSkeleton";
 import { RowActions } from "../../components/RowActions";
@@ -637,12 +640,29 @@ function TaskEditor({
   );
 }
 
+const STATUS_COLOR: Record<TaskStatus, "green" | "blue" | "orange" | "grey"> =
+  {
+    live: "green",
+    upcoming: "blue",
+    ended: "orange",
+    retired: "grey",
+  };
+
+// The list filter. "Retired" also takes `ended` — a task still switched on
+// whose window has closed is as gone for players as a retired one.
+type StatusFilter = "all" | "live" | "upcoming" | "retired";
+
+const matchesFilter = (s: TaskStatus, f: StatusFilter): boolean =>
+  f === "all" || s === f || (f === "retired" && s === "ended");
+
 const TaskTable = ({
   rows,
+  now,
   onEdit,
   onToggleActive,
 }: {
   rows: AdminTaskDefinition[];
+  now: number;
   onEdit: (t: AdminTaskDefinition) => void;
   onToggleActive: (t: AdminTaskDefinition) => void;
 }) => (
@@ -678,8 +698,8 @@ const TaskTable = ({
             {windowLabel(t)}
           </Table.Cell>
           <Table.Cell>
-            <Badge size="2xsmall" color={t.active ? "green" : "grey"}>
-              {t.active ? "active" : "retired"}
+            <Badge size="2xsmall" color={STATUS_COLOR[taskStatus(t, now)]}>
+              {taskStatus(t, now)}
             </Badge>
           </Table.Cell>
           <Table.Cell className="text-right">
@@ -701,16 +721,20 @@ const TaskTable = ({
   </Table>
 );
 
-const EmptyRow = ({ what }: { what: string }) => (
+const EmptyRow = ({ what, filter }: { what: string; filter: StatusFilter }) => (
   <Text size="small" className="text-ui-fg-muted px-6 py-4">
-    No {what} yet.
+    {filter === "all" ? `No ${what} yet.` : `No ${filter} ${what}.`}
   </Text>
 );
 
 const TasksPage = () => {
-  const { data, isLoading } = useTaskDefinitions();
+  // Status is "as of the last fetch" — dataUpdatedAt, not a Date.now() in
+  // render (impure; the React compiler lint refuses it). The list refetches
+  // after every save, so a task scheduled a minute ago is badged correctly.
+  const { data, isLoading, dataUpdatedAt: now } = useTaskDefinitions();
   const save = useSaveTaskDefinition();
   const [editing, setEditing] = useState<Draft | null>(null);
+  const [filter, setFilter] = useState<StatusFilter>("all");
 
   // Retire / reactivate is the Active switch, applied straight from the row so
   // the common case never needs the form. Same audited POST as a save.
@@ -742,9 +766,12 @@ const TasksPage = () => {
     );
   };
 
-  const daily = (data ?? []).filter((t) => t.kind === "daily");
-  const weekly = (data ?? []).filter((t) => t.kind === "weekly");
-  const achievements = (data ?? []).filter((t) => t.kind === "achievement");
+  const shown = (data ?? []).filter((t) =>
+    matchesFilter(taskStatus(t, now), filter),
+  );
+  const daily = shown.filter((t) => t.kind === "daily");
+  const weekly = shown.filter((t) => t.kind === "weekly");
+  const achievements = shown.filter((t) => t.kind === "achievement");
 
   return (
     <Container className="p-0">
@@ -776,6 +803,20 @@ const TasksPage = () => {
         </div>
       ) : (
         <>
+          <div className="border-ui-border-base border-t px-6 py-3">
+            <Tabs
+              value={filter}
+              onValueChange={(v) => setFilter(v as StatusFilter)}
+            >
+              <Tabs.List aria-label="Task status">
+                <Tabs.Trigger value="all">All</Tabs.Trigger>
+                <Tabs.Trigger value="live">Live</Tabs.Trigger>
+                <Tabs.Trigger value="upcoming">Upcoming</Tabs.Trigger>
+                <Tabs.Trigger value="retired">Retired</Tabs.Trigger>
+              </Tabs.List>
+            </Tabs>
+          </div>
+
           <div className="border-ui-border-base flex items-center gap-x-2 border-t px-6 py-3">
             <Text weight="plus">Daily tasks</Text>
             <Tooltip content="Progress and claims reset every day at 00:00 MYT. Anything finished but unclaimed at midnight is lost.">
@@ -783,10 +824,11 @@ const TasksPage = () => {
             </Tooltip>
           </div>
           {daily.length === 0 ? (
-            <EmptyRow what="daily tasks" />
+            <EmptyRow what="daily tasks" filter={filter} />
           ) : (
             <TaskTable
               rows={daily}
+              now={now}
               onEdit={(t) => setEditing(draftFrom(t))}
               onToggleActive={toggleActive}
             />
@@ -799,10 +841,11 @@ const TasksPage = () => {
             </Tooltip>
           </div>
           {weekly.length === 0 ? (
-            <EmptyRow what="weekly tasks" />
+            <EmptyRow what="weekly tasks" filter={filter} />
           ) : (
             <TaskTable
               rows={weekly}
+              now={now}
               onEdit={(t) => setEditing(draftFrom(t))}
               onToggleActive={toggleActive}
             />
@@ -815,10 +858,11 @@ const TasksPage = () => {
             </Tooltip>
           </div>
           {achievements.length === 0 ? (
-            <EmptyRow what="achievements" />
+            <EmptyRow what="achievements" filter={filter} />
           ) : (
             <TaskTable
               rows={achievements}
+              now={now}
               onEdit={(t) => setEditing(draftFrom(t))}
               onToggleActive={toggleActive}
             />
