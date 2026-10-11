@@ -574,6 +574,22 @@ medusaIntegrationTestRunner({
           expect(body).not.toContain(secret);
         }
 
+        // The ladder the week ran on (promoted from the queue at its start):
+        // stage 3 was not unlocked, so the poster shows it locked.
+        await packs().createChallengeSchedules([
+          {
+            starts_at: last.startUtc,
+            applied_at: last.startUtc,
+            stages: [1, 2, 3].map((n) => ({
+              stage_number: n,
+              threshold_myr: n * 1000,
+              rank_rewards: [
+                { rank: 1, card_id: n === 3 ? cyId : cxId, credits: 0 },
+                { rank: 4, card_id: null, credits: n * 100 },
+              ],
+            })) as unknown as Record<string, unknown>,
+          },
+        ]);
         const poster = await unwrapResponse(
           api.get('/reports/growth/challenge-results-poster', {
             headers: { 'x-report-key': GROWTH_KEY },
@@ -581,6 +597,9 @@ medusaIntegrationTestRunner({
           }),
         );
         expect(poster.status).toBe(200);
+        expect(poster.headers['x-poster-note']).toMatch(
+          /Stage 3 was not unlocked that week/,
+        );
         expect(poster.headers['content-type']).toMatch(/^image\/jpeg/);
         const meta = await sharp(Buffer.from(poster.data)).metadata();
         // The 4:5 size Facebook and Instagram feeds show whole.

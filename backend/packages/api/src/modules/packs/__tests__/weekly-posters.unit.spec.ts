@@ -10,6 +10,7 @@ import {
 } from '../challenge-results-poster';
 import { fitToFeed } from '../feed-size';
 import {
+  artKey,
   composeStagesPoster,
   restLine,
   stageBlock,
@@ -288,17 +289,63 @@ describe('stages poster', () => {
   };
 
   it('splits a stage into its podium and what ranks 4-10 win', () => {
-    expect(stageBlock(stage, cards, false)).toEqual({
+    expect(
+      stageBlock(stage, cards, false, new Map([['mewtwo', 7476.5]]), true),
+    ).toEqual({
       stage: 1,
       thresholdMyr: 300000,
       unlocked: false,
+      dim: true,
       podium: [
-        { rank: 1, name: 'Mewtwo #3', credits: 0 },
-        { rank: 2, name: 'Sylveon VMAX #93', credits: 0 },
-        { rank: 3, name: null, credits: 600 },
+        { rank: 1, name: 'Mewtwo #3', credits: 0, valueMyr: 7476.5 },
+        // A card with no price yet shows no value, never RM 0.
+        { rank: 2, name: 'Sylveon VMAX #93', credits: 0, valueMyr: null },
+        { rank: 3, name: null, credits: 600, valueMyr: null },
       ],
       rest: { from: 4, to: 10, minCredits: 80, maxCredits: 1800, cards: 0 },
     });
+  });
+
+  it("dims a locked stage's cards under a lock, the unlocked ones stay bright", async () => {
+    const slab = await sharp({
+      create: { width: 160, height: 259, channels: 4, background: '#3366ff' },
+    })
+      .png()
+      .toBuffer();
+    const art = new Map(
+      [1, 2].flatMap((s) => [1, 2].map((r) => [artKey(s, r), slab] as const)),
+    );
+    const poster = (dim: boolean) =>
+      composeStagesPoster(
+        {
+          weekLabel: '5 OCT – 11 OCT',
+          headline: 'RM 1 POOLED · STAGE 2 NEEDS RM 9',
+          stages: [
+            stageBlock(stage, cards, true),
+            stageBlock(
+              { ...stage, stageNumber: 2 },
+              cards,
+              false,
+              undefined,
+              dim,
+            ),
+          ],
+          siteHost: 'polycards.gg/leaderboard',
+        },
+        art,
+      );
+    // Stage 2 is the right-hand panel: darker when dimmed.
+    const mean = async (jpeg: Buffer) => {
+      const data = await sharp(jpeg)
+        .extract({ left: 556, top: 300, width: 460, height: 500 })
+        .greyscale()
+        .raw()
+        .toBuffer();
+      return data.reduce((sum, v) => sum + v, 0) / data.length;
+    };
+    const bright = await poster(false);
+    const dimmed = await poster(true);
+    expect(await mean(dimmed.jpeg)).toBeLessThan((await mean(bright.jpeg)) - 3);
   });
 
   it('words the rest line', () => {
