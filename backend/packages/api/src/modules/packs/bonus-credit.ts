@@ -85,10 +85,11 @@ export function paidPullSource(bonusBp: number): 'bonus' | 'pack' {
 export const normalSenSql = (t = ''): string =>
   `(ROUND(${t}amount * 100) - COALESCE(${t}bonus_cents, 0))`;
 
-/** Per-reason cash totals: every row's normal part, except a bonus_grant,
- *  which IS the bonus (its own bucket, never cash). */
+/** Per-reason cash totals: every row's normal part, except a bonus_grant or a
+ *  reward_credit (task / challenge prize, bonus since 2026-10-11), which IS
+ *  promo credit with its own bucket — counted whole, never as cash. */
 export const reasonCashSenSql = (t = ''): string =>
-  `CASE WHEN ${t}reason = 'bonus_grant' THEN ROUND(${t}amount * 100) ELSE ${normalSenSql(t)} END`;
+  `CASE WHEN ${t}reason IN ('bonus_grant', 'reward_credit') THEN ROUND(${t}amount * 100) ELSE ${normalSenSql(t)} END`;
 
 /** A pull (alias `pu`) that real money paid for, in whole or in part. */
 export const REAL_MONEY_PULL_SQL =

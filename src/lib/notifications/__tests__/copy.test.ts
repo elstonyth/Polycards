@@ -222,13 +222,13 @@ describe('body rendering', () => {
   it('challenge_payout composes credits and cards naturally', () => {
     const body = copyFor('challenge_payout').body;
     expect(body({ rank: 1, credits: 150, card_count: 0 })).toBe(
-      'You finished #1 — RM 150.00 in credit added to your account.',
+      'You finished #1 — RM 150.00 in bonus credit added to your account.',
     );
     expect(body({ rank: 3, credits: 0, card_count: 2 })).toBe(
       'You finished #3 — 2 featured cards added to your account.',
     );
     expect(body({ rank: 2, credits: 50, card_count: 1 })).toBe(
-      'You finished #2 — RM 50.00 in credit and a featured card added to your account.',
+      'You finished #2 — RM 50.00 in bonus credit and a featured card added to your account.',
     );
     // Nothing granted (all cards skipped, no credits) → no detail line.
     expect(body({ rank: 4, credits: 0, card_count: 0 })).toBeNull();

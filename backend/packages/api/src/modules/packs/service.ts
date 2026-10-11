@@ -3483,6 +3483,15 @@ class PacksModuleService extends MedusaService({
         MedusaError.Types.INVALID_DATA,
         'Only a bonus_grant row may carry bonusCents.',
       );
+    } else if (input.reason === 'reward_credit') {
+      // Task and weekly-challenge prizes are spend-only bonus credit too
+      // (operator rule 2026-10-11). Stamped HERE, the one place both writers
+      // (claimTask, settleChallengeWinner) route through, so neither can pay
+      // withdrawable credit by forgetting a flag. The reason stays
+      // reward_credit, not bonus_grant: bonus_grant rows count against the
+      // admin 24h mint ceiling (rollingAdjustmentMintCents), and task claims
+      // must neither eat that allowance nor be blocked by it.
+      bonusDeltaCents = deltaCents;
     }
 
     // 2b) External-funded snapshot (Phase 1b) — uses the external balance from

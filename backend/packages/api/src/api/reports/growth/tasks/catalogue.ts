@@ -37,7 +37,7 @@ export function prizeLabel(reward: HubReward): {
 } {
   if (reward.type === 'credit') {
     return {
-      prize: `${posterRm(reward.amount_myr)} credit`,
+      prize: `${posterRm(reward.amount_myr)} bonus credit`,
       value_myr: reward.amount_myr,
     };
   }

@@ -38,6 +38,9 @@ export interface GroupCreditAdjustment {
   customers: GroupCreditCustomer[];
   amount: number;
   note: string;
+  /** Spend-only bonus credit (ledger reason bonus_grant), the default for
+   *  operator grants since 2026-10-11; false = withdrawable credit. */
+  bonus: boolean;
 }
 
 export type GroupCreditResults = Record<
@@ -51,6 +54,7 @@ export function createGroupCreditAdjustment(
   selected: Set<string>,
   amountText: string,
   note: string,
+  bonus: boolean,
 ): GroupCreditAdjustment | null {
   const amount = parseGroupCreditAmount(amountText);
   const targets = customers.filter((customer) => selected.has(customer.id));
@@ -67,6 +71,7 @@ export function createGroupCreditAdjustment(
     customers: targets.map((customer) => ({ ...customer })),
     amount,
     note: note.trim(),
+    bonus,
   };
 }
 
@@ -86,6 +91,7 @@ export async function runGroupCreditAdjustment(
         batch.amount,
         batch.note,
         `${batch.id}:${customer.id}`,
+        batch.bonus ? 'bonus' : undefined,
       );
       results[customer.id] = { status: 'succeeded', balance: result.balance };
     } catch (error) {

@@ -226,6 +226,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
           }),
         ]);
         expect(await service.creditBalance('cus_a')).toBe(50);
+        // Challenge prizes pay spend-only bonus credit (operator rule
+        // 2026-10-11): in the balance, never withdrawable.
+        const wallet = await service.walletSummary('cus_a');
+        expect(wallet.bonus).toBe(50);
+        expect(wallet.withdrawable).toBe(0);
         const rewardPulls = await service.listPulls(
           { customer_id: 'cus_a', source: 'reward' },
           { take: 10 },

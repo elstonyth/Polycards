@@ -55,6 +55,7 @@ import {
 } from '../../../lib/player-groups';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { Pager } from '../../../components/Pager';
+import { BonusCreditToggle } from '../../../components/BonusCreditToggle';
 import { PullsTable } from '../../../components/PullsTable';
 import { GiftAndBonusPanels } from './gift-and-bonus';
 
@@ -1484,11 +1485,14 @@ const Customer360Page = () => {
   // credits-specific fields
   const [creditAmount, setCreditAmount] = useState('');
   const [creditNote, setCreditNote] = useState('');
+  // Spend-only bonus by default (operator rule 2026-10-11).
+  const [creditBonus, setCreditBonus] = useState(true);
 
   function openModal(kind: ModalKind) {
     setReason('');
     setCreditAmount('');
     setCreditNote('');
+    setCreditBonus(true);
     setModal(kind);
   }
   function closeModal() {
@@ -1521,7 +1525,12 @@ const Customer360Page = () => {
     if (!creditNote.trim()) return;
     closeModal();
     adjustCredits.mutate(
-      { id: customerId, amount, note: creditNote },
+      {
+        id: customerId,
+        amount,
+        note: creditNote,
+        kind: creditBonus ? 'bonus' : undefined,
+      },
       { onSuccess: () => toast.success('Credits adjusted') },
     );
   }
@@ -1739,6 +1748,10 @@ const Customer360Page = () => {
                     onChange={(e) => setCreditNote(e.target.value)}
                   />
                 </div>
+                <BonusCreditToggle
+                  checked={creditBonus}
+                  onChange={setCreditBonus}
+                />
               </>
             ) : (
               <div>

@@ -1,4 +1,11 @@
 {
+  "creditKind": {
+    "bonus": "Bonus credit (spend-only, cannot be withdrawn)",
+    "bonusHint": "Default for giveaways and compensation. Untick only to correct a real-money error, such as a paid deposit that never arrived.",
+    "normalHint": "Withdrawable credit: the player can cash this out. Use only for real-money corrections.",
+    "bonusAmount": "{{amount}} bonus credit",
+    "normalAmount": "{{amount}} withdrawable credit"
+  },
   "groupCredits": {
     "title": "Credits",
     "description": "Add or deduct credits for selected players or everyone in this customer group.",

@@ -79,10 +79,10 @@ describe('group credit editing', () => {
     }
     const customers = [customer(1)];
     expect(
-      createGroupCreditAdjustment(customers, new Set(), '5', 'Audit'),
+      createGroupCreditAdjustment(customers, new Set(), '5', 'Audit', true),
     ).toBeNull();
     expect(
-      createGroupCreditAdjustment(customers, new Set(['cus_1']), '5', '  '),
+      createGroupCreditAdjustment(customers, new Set(['cus_1']), '5', '  ', true),
     ).toBeNull();
     expect(
       createGroupCreditAdjustment(
@@ -90,6 +90,7 @@ describe('group credit editing', () => {
         new Set(['cus_1']),
         '5',
         'x'.repeat(513),
+        true,
       ),
     ).toBeNull();
   });
@@ -103,6 +104,7 @@ describe('group credit editing', () => {
       selected,
       '-12.50',
       ' Partner adjustment ',
+      false,
     );
     expect(batch).not.toBeNull();
     if (!batch) throw new Error('Expected valid batch');
@@ -137,5 +139,28 @@ describe('group credit editing', () => {
     await runGroupCreditAdjustment(batch, retried, progress);
     expect(fetcher).toHaveBeenCalledTimes(3);
     expect(progress).toHaveBeenCalledTimes(3);
+  });
+
+  it('sends a bonus batch as spend-only bonus credit', async () => {
+    vi.stubGlobal('__BACKEND_URL__', 'http://backend.test');
+    const batch = createGroupCreditAdjustment(
+      [customer(1)],
+      new Set(['cus_1']),
+      '10',
+      'Giveaway',
+      true,
+    );
+    if (!batch) throw new Error('Expected valid batch');
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(json({ amount: 10, balance: 10 }));
+    vi.stubGlobal('fetch', fetcher);
+    await runGroupCreditAdjustment(batch, {}, vi.fn());
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
+      amount: 10,
+      note: 'Giveaway',
+      idempotency_key: `${batch.id}:cus_1`,
+      kind: 'bonus',
+    });
   });
 });

@@ -36,7 +36,7 @@ export function useClaimTask(onDone: (message: string) => void) {
         }
         onDone(
           res.rewardType === 'credit'
-            ? 'Credit added to your wallet.'
+            ? 'Bonus credit added to your wallet.'
             : 'Card added to your vault.',
         );
       } else if (res.ok && !res.claimed) {

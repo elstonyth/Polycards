@@ -12,7 +12,7 @@ export const CREDIT_ART = '/images/task/credits-coins.webp';
 const NBSP = String.fromCharCode(0xa0);
 
 const REWARD_LABEL: Record<string, string> = {
-  credit: 'Credit',
+  credit: 'Bonus credit',
   pack: 'Free rip',
   card: 'Card',
 };
@@ -26,7 +26,7 @@ export function rewardLabel(reward: TaskEntry['reward']): {
 } {
   if (reward.type === 'credit' && typeof reward.amount_myr === 'number') {
     return {
-      name: `${rm(reward.amount_myr)} credit`,
+      name: `${rm(reward.amount_myr)} bonus credit`,
       value: reward.amount_myr,
     };
   }

@@ -61,6 +61,10 @@ describe('bonus credit math', () => {
       '(ROUND(ct.amount * 100) - COALESCE(ct.bonus_cents, 0))',
     );
     // A bonus grant is all bonus: its own bucket keeps the whole amount.
-    expect(reasonCashSenSql()).toContain("WHEN reason = 'bonus_grant' THEN ROUND(amount * 100)");
+    // So is a task / challenge prize (2026-10-11): its reward bucket keeps the
+    // whole amount instead of reading RM 0.
+    expect(reasonCashSenSql()).toContain(
+      "WHEN reason IN ('bonus_grant', 'reward_credit') THEN ROUND(amount * 100)",
+    );
   });
 });

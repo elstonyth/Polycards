@@ -194,7 +194,7 @@ function rewardLabel(
   const r = (raw ?? {}) as Record<string, unknown>;
   switch (r.type) {
     case 'credit':
-      return rm(Number(r.amount_myr ?? 0));
+      return `${rm(Number(r.amount_myr ?? 0))} bonus credit`;
     case 'pack':
       return `Free rip · ${name(packTitle, String(r.pack_id ?? ''))}`;
     case 'card':

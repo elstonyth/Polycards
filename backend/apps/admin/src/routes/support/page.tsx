@@ -26,6 +26,7 @@ import {
 import { resolveImageUrl } from "../../lib/image-url";
 import { rm } from "../../lib/format";
 import { Pager } from "../../components/Pager";
+import { BonusCreditToggle } from "../../components/BonusCreditToggle";
 
 export const config: RouteConfig = {
   label: "Customer Support",
@@ -60,6 +61,8 @@ const SupportPage = () => {
   // the money rules; surfacing its message keeps the two in lockstep).
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  // Spend-only bonus by default (operator rule 2026-10-11).
+  const [bonus, setBonus] = useState(true);
   const adjusting = adjustCredits.isPending;
   // Money mutation behind an explicit confirm — a mistyped sign on a support
   // ticket must not apply on a single click.
@@ -86,6 +89,7 @@ const SupportPage = () => {
     setSelectedId(id);
     setAmount("");
     setNote("");
+    setBonus(true);
   };
 
   // Validate, then ask for confirmation — the actual mutation runs in
@@ -111,6 +115,7 @@ const SupportPage = () => {
         id: view.customer.id,
         amount: value,
         note,
+        kind: bonus ? "bonus" : undefined,
       });
       toast.success(
         t("support.adjusted", {
@@ -121,6 +126,7 @@ const SupportPage = () => {
       // Invalidation (in the hook) refetches the customer view → fresh ledger row.
       setAmount("");
       setNote("");
+      setBonus(true);
     } catch {
       // onError in useAdjustCredits already toasts; suppress double toast here.
     }
@@ -273,6 +279,11 @@ const SupportPage = () => {
                     onChange={(e) => setNote(e.target.value)}
                     aria-label={t("support.adjustNote")}
                   />
+                  <BonusCreditToggle
+                    checked={bonus}
+                    onChange={setBonus}
+                    disabled={adjusting}
+                  />
                   <Button
                     size="small"
                     onClick={requestAdjust}
@@ -297,7 +308,10 @@ const SupportPage = () => {
                 <Prompt.Title>{t("support.adjustConfirmTitle")}</Prompt.Title>
                 <Prompt.Description>
                   {t("support.adjustConfirmDescription", {
-                    amount: rm(Number(amount)),
+                    amount: t(
+                      bonus ? "creditKind.bonusAmount" : "creditKind.normalAmount",
+                      { amount: rm(Number(amount)) },
+                    ),
                     email: view.customer.email,
                   })}
                 </Prompt.Description>

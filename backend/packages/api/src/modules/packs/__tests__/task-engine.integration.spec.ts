@@ -91,6 +91,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
       expect(txns).toHaveLength(1);
       expect(Number(txns[0].amount)).toBe(2.5);
+      // Task credit is spend-only bonus credit (operator rule 2026-10-11):
+      // it sits in the balance but never in what may be withdrawn.
+      expect(Number(txns[0].bonus_cents)).toBe(250);
+      const wallet = await service.walletSummary('cus_t2');
+      expect(wallet.balance).toBe(2.5);
+      expect(wallet.bonus).toBe(2.5);
+      expect(wallet.withdrawable).toBe(0);
       // And its transaction-history row, in the same transaction (2026-09-30:
       // task credits moved balances with no ledger row).
       const ledger = await service.listLedgerEntries({
