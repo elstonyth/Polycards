@@ -11,6 +11,7 @@ import { unzipSync, strFromU8 } from 'fflate';
 import { DEFAULT_USD_MYR } from '../../src/modules/packs/pricing';
 import { findBank } from '../../src/modules/packs/banks';
 import { ensureDefaultPlayerGroup } from '../../src/modules/packs/player-groups';
+import { taskWeekFor } from '../../src/modules/packs/referral';
 import { myrDisplay as MYR, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -1246,6 +1247,38 @@ medusaIntegrationTestRunner({
           /Rip for a gone pack.*admin Tasks console/,
         );
         expect((await report('tasks-poster', null)).status).toBe(401);
+      });
+
+      it("draws next week's tasks before the week starts", async () => {
+        const nextMonday = taskWeekFor(new Date()).endUtcExcl;
+        await packs().createTaskDefinitions([
+          {
+            kind: 'weekly' as const,
+            title: 'Next week only',
+            requirement: { type: 'rip_count', count: 2, pack_id: 'tk-bronze' },
+            reward: { type: 'pack', pack_id: 'tk-bronze' },
+            starts_at: nextMonday,
+            ends_at: new Date(nextMonday.getTime() + 7 * DAY_MS - 60_000),
+          },
+        ]);
+        const titles = (r: { data: { weekly: { title: string }[] } }) =>
+          r.data.weekly.map((t) => t.title);
+        expect(titles(await report('tasks'))).not.toContain('Next week only');
+        const next = await report('tasks?week=next');
+        expect(next.status).toBe(200);
+        expect(titles(next)).toContain('Next week only');
+        expect(next.data.week_start).toBe(taskWeekFor(nextMonday).weekStartIso);
+        const res = await unwrapResponse(
+          api.get('/reports/growth/tasks-poster?week=next', {
+            headers: { 'x-report-key': GROWTH_KEY },
+            responseType: 'arraybuffer',
+          }),
+        );
+        expect(res.status).toBe(200);
+        const meta = await sharp(Buffer.from(res.data)).metadata();
+        expect([meta.width, meta.height]).toEqual([1080, 1350]);
+        expect((await report('tasks?week=last')).status).toBe(400);
+        expect((await report('tasks-poster?week=last')).status).toBe(400);
       });
 
       it('refuses a bad range with a readable reason', async () => {
