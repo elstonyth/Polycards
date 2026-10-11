@@ -152,8 +152,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
         { id: normalPull.id, status: 'vaulted' as const, showcased: true },
       ]);
 
-      // leaderboardTop ranks by real spend (credit_transaction, reason=
-      // 'pack_open'), not by Pull count — in production every Pull is preceded
+      // leaderboardTop only lists customers with real spend (credit_transaction,
+      // reason='pack_open'), whatever their Pulls — in production every Pull is preceded
       // by this charge (the open-pack charge step writes it with pull_id null;
       // pull_id is buyback linkage only). Seed it so the customer surfaces in
       // the spend-anchored CTE the query joins against.

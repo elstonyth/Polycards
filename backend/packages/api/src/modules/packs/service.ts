@@ -6862,11 +6862,13 @@ class PacksModuleService extends MedusaService({
   // Top-N leaderboard computed in the DB (GROUP BY + ORDER BY + LIMIT), so it's
   // correct at any volume.
   //
-  // RANKING = real money spent on pack opens, straight from the credit ledger
-  // (reason 'pack_open', the same rows the charge step writes). It used to be
-  // Σ(current pack price) joined from pulls, which silently rewrote history
-  // whenever a pack was repriced or deleted. points = spend(MYR) × 100 (the
-  // display convention the storefront always used).
+  // RANKING = volume, the pulled value the board displays (operator
+  // 2026-10-12: ranking by spend while showing pulled value read as a broken
+  // board — a lower figure sat above a higher one). Spend still decides who
+  // is ON the board: only players with real money spent on pack opens, from
+  // the credit ledger (reason 'pack_open', the same rows the charge step
+  // writes); it also breaks a tie on the rounded value. points = spend(MYR) ×
+  // 100 (the display convention the storefront always used).
   //
   // volume ("winnings") = Σ won-card VALUE in MYR — the pull's RECORDED
   // draw-time USD value (recorded_value_usd, stamped by the open workflows so a
@@ -6891,8 +6893,8 @@ class PacksModuleService extends MedusaService({
       opts.sinceMs != null ? new Date(opts.sinceMs).toISOString() : null;
     const fxRate = await resolveFxRate(this);
 
-    // Two windowed aggregates joined by customer: spend from the ledger (the
-    // ranking), pulls + winnings from the Pull ledger (display columns). The
+    // Two windowed aggregates joined by customer: spend from the ledger (who
+    // qualifies), pulls + winnings from the Pull ledger (the ranking). The
     // window predicates are plain `col >= ?` (a nullable-param OR would be
     // non-sargable): the pulls window rides IDX_pull_rolled_at, the spend scan
     // rides the partial IDX_credit_transaction_pack_open_created_at
@@ -6944,7 +6946,7 @@ class PacksModuleService extends MedusaService({
         '       ROUND(COALESCE(w.volume_usd, 0) * ? * 100) / 100 AS volume_myr ' +
         '  FROM spend s ' +
         '  LEFT JOIN wins w ON w.customer_id = s.customer_id ' +
-        ' ORDER BY s.spend_cents DESC, w.pulls DESC NULLS LAST, s.customer_id ASC ' +
+        ' ORDER BY volume_myr DESC, s.spend_cents DESC, s.customer_id ASC ' +
         ' LIMIT ?',
       since === null
         ? [DEFAULT_MARKET_MULTIPLIER, fxRate, opts.limit]

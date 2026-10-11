@@ -4,7 +4,8 @@
  * Reads the live leaderboard from the custom Medusa route
  * `GET /store/leaderboard?period=` — weekly ranks by pulled value over the
  * challenge-anchored week (the Weekly Pull Value board the challenge settles on);
- * alltime ranks by REAL pack-open spend — and maps it to the
+ * alltime ranks by lifetime pulled value over players with real pack-open
+ * spend — and maps it to the
  * presentational shape the standings render. Returns [] when the backend is unreachable or
  * the board is empty — the page shows an honest empty state instead of fake
  * rows (the old mock board actively misled operators).
@@ -32,9 +33,8 @@ export interface LeaderboardEntry {
   /** Formatted MYR winnings, e.g. "RM 8,173.26". */
   volume: string;
   /** The same figure UNFORMATTED, because a rank gap is subtraction and
-   *  "RM 8,173.26" is not a number. Weekly only is meaningful: All Time ranks
-   *  by spend while displaying pulled value, so deltas between All Time rows
-   *  can come out negative. See leaderboard-gap.ts. */
+   *  "RM 8,173.26" is not a number. Gaps are weekly only: the caller's own
+   *  figure is a weekly one. See leaderboard-gap.ts. */
   volumeMyr: number;
   pulls: string;
   /** PII-safe avatar seed, also the stable key for "is this row me?". Unlike
