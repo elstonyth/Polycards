@@ -58,7 +58,7 @@ export const COUNT_LABEL: Record<string, string> = {
 export const REWARD_TYPES = ['credit', 'pack', 'card'] as const;
 
 export const REWARD_LABEL: Record<string, string> = {
-  credit: 'Credit (RM)',
+  credit: 'Bonus credit (RM)',
   pack: 'Free rip of a pack',
   card: 'A specific card',
 };
