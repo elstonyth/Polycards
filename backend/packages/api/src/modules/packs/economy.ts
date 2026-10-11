@@ -98,8 +98,8 @@ export type LedgerTotals = {
   /** Σ cashout — customer withdrawals (balance move, not P&L). */
   cashout: number;
   /** Σ voucher_claim + reward_credit + daily_reward — promo credits granted; excluded from net/revenue.
-   *  Since 2026-10-11 every reward_credit (task / challenge prize) is spend-only
-   *  bonus, so total bonus issued = bonusPromo + the post-2026-10-11 part of this. */
+   *  Since 2026-10-11 every reward_credit (task / challenge prize) and
+   *  voucher_claim (VIP voucher) is spend-only bonus, so total bonus issued = bonusPromo + the post-2026-10-11 part of this. */
   rewardPromo: number;
   /** −Σ delivery_fee — shipping + insurance collected from wallets, net of cancel
    *  refunds. A pass-through fee line, not pack revenue; excluded from net. */

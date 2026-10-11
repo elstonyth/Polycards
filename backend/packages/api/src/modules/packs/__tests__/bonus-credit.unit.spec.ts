@@ -71,7 +71,7 @@ describe('bonus credit math', () => {
     // So is a task / challenge prize (2026-10-11): its reward bucket keeps the
     // whole amount instead of reading RM 0.
     expect(reasonCashSenSql()).toContain(
-      "WHEN reason IN ('bonus_grant', 'reward_credit') THEN ROUND(amount * 100)",
+      "WHEN reason IN ('bonus_grant', 'reward_credit', 'voucher_claim') THEN ROUND(amount * 100)",
     );
   });
 });
