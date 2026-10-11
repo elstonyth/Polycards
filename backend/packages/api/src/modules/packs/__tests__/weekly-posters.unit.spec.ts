@@ -377,4 +377,31 @@ describe('tasks poster', () => {
       many.length - dropped,
     );
   });
+
+  it('puts the tasks two to a row rather than drop the ones past the column', async () => {
+    const { checkins, tasks } = splitWeeklyTasks(weekly);
+    // Under a check-in strip one column holds two tiles; four go 2 x 2.
+    const four = [...tasks, ...tasks];
+    const { jpeg, placeholders, dropped } = await composeTasksPoster(
+      {
+        weekLabel: '12 OCT – 18 OCT',
+        checkins,
+        tasks: four,
+        siteHost: 'polycards.gg/task',
+      },
+      { checkins: checkins.map(() => null), tasks: four.map(() => null) },
+    );
+    expect(await jpegSize(jpeg)).toEqual({
+      format: 'jpeg',
+      width: POSTER_W,
+      height: POSTER_H,
+    });
+    expect(dropped).toBe(0);
+    expect(placeholders.filter((p) => p.startsWith('task'))).toEqual([
+      'task:0',
+      'task:1',
+      'task:2',
+      'task:3',
+    ]);
+  });
 });

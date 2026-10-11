@@ -7,20 +7,23 @@ import {
   splitWeeklyTasks,
   taskWeekLabel,
 } from '../../../../modules/packs/tasks-poster';
-import { taskCatalogue } from '../tasks/catalogue';
+import { catalogueAt, taskCatalogue } from '../tasks/catalogue';
 
-// GET /reports/growth/tasks-poster: the week's live tasks as a posting poster
-// (tasks-poster.ts): the check-in tiers as one strip, then a tile per other
-// weekly task, each with its prize and what /task says it is worth. Nothing
-// on it is typed in. x-poster-missing-art names prizes drawn as a plain gift
-// box ('checkin:<days>', 'task:<index>'); x-poster-note says in plain words
-// what was left off.
+// GET /reports/growth/tasks-poster?week=current|next: the week's live tasks
+// (or, with week=next, the ones switched on for next week) as a posting
+// poster (tasks-poster.ts): the check-in tiers as one strip, then a tile per
+// other weekly task, each with its prize and what /task says it is worth.
+// Nothing on it is typed in. x-poster-missing-art names prizes drawn as a
+// plain gift box ('checkin:<days>', 'task:<index>'); x-poster-note says in
+// plain words what was left off.
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
+  const next = req.query.week === 'next';
+  const at = catalogueAt(req.query.week);
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
-  const { week_start, tasks } = await taskCatalogue(packs);
+  const { week_start, tasks } = await taskCatalogue(packs, at);
   const weekly = tasks.filter((t) => t.kind === 'weekly');
   // A free rip or card whose pack or card is gone cannot be claimed, so it
   // never goes on a public poster.
@@ -33,7 +36,9 @@ export async function GET(
       MedusaError.Types.NOT_FOUND,
       gone.length
         ? `Every weekly task has a prize that no longer exists (${gone.map((t) => t.title).join(', ')}): fix them in the admin Tasks console.`
-        : 'No weekly tasks are live on the /task page right now.',
+        : next
+          ? 'No weekly tasks are switched on for next week yet: set them up in the admin Tasks console.'
+          : 'No weekly tasks are live on the /task page right now.',
     );
   }
   const { checkins, tasks: others } = splitWeeklyTasks(live);
