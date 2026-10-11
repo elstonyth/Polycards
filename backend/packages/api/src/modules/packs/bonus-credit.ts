@@ -52,6 +52,16 @@ export function bonusBpFor(bonusSen: number, priceSen: number): number {
   return Math.min(BONUS_BP_FULL, ceilDiv(bonusSen * BONUS_BP_FULL, priceSen));
 }
 
+/** One open's bonus share. The free welcome pull is promo value: its whole
+ *  sell-back must be played through once (2026-10-11), like a gifted pack. */
+export function openBonusBp(
+  free: boolean,
+  bonusSen: number,
+  priceSen: number,
+): number {
+  return free ? BONUS_BP_FULL : bonusBpFor(bonusSen, priceSen);
+}
+
 /** The part of a sell-back of `amountSen` that came from bonus or gift
  *  play — the part to play through (rounded up). */
 export function bonusShareSen(amountSen: number, bp: number): number {
@@ -85,10 +95,11 @@ export function paidPullSource(bonusBp: number): 'bonus' | 'pack' {
 export const normalSenSql = (t = ''): string =>
   `(ROUND(${t}amount * 100) - COALESCE(${t}bonus_cents, 0))`;
 
-/** Per-reason cash totals: every row's normal part, except a bonus_grant,
- *  which IS the bonus (its own bucket, never cash). */
+/** Per-reason cash totals: every row's normal part, except a bonus_grant or a
+ *  reward_credit (task / challenge prize, bonus since 2026-10-11), which IS
+ *  promo credit with its own bucket — counted whole, never as cash. */
 export const reasonCashSenSql = (t = ''): string =>
-  `CASE WHEN ${t}reason = 'bonus_grant' THEN ROUND(${t}amount * 100) ELSE ${normalSenSql(t)} END`;
+  `CASE WHEN ${t}reason IN ('bonus_grant', 'reward_credit') THEN ROUND(${t}amount * 100) ELSE ${normalSenSql(t)} END`;
 
 /** A pull (alias `pu`) that real money paid for, in whole or in part. */
 export const REAL_MONEY_PULL_SQL =

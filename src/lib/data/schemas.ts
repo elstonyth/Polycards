@@ -833,6 +833,9 @@ export const WalletSchema = z.looseObject({
   // Bonus credit inside `balance` (MYR, spend only). Optional: an older
   // backend has none, which reads as 0.
   bonus: finite.optional(),
+  // At least one top-up ever: withdrawals and deliveries stay locked until
+  // then (2026-10-11). Optional: an older backend has no such gate.
+  has_topup: z.boolean().optional(),
 });
 
 /** GET /store/credits as getWallet() reads it — only the `wallet` block. */

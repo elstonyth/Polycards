@@ -83,7 +83,7 @@ export const VAULT_RULES: ErrorRule[] = [
   //
   // Above /amount/i and /not found|404/i, per the ORDER note.
   [
-    /deposits must be spent on packs|under review|you can withdraw up to|daily withdrawal limit|withdrawals are not available on this account|this bank account|select a saved bank account|choose a bank from the list|valid account number|account holder name|add an email address|withdrawal is no longer open/i,
+    /top up at least once|deposits must be spent on packs|under review|you can withdraw up to|daily withdrawal limit|withdrawals are not available on this account|this bank account|select a saved bank account|choose a bank from the list|valid account number|account holder name|add an email address|withdrawal is no longer open/i,
     (text) => text,
   ],
   [/withdrawals are not open/i, 'Withdrawals are not open yet.'],

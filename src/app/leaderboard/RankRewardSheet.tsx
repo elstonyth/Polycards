@@ -67,7 +67,7 @@ export function RankRewardList({
             )}
             {r.creditsLabel && (
               <p className="text-chase text-xs font-semibold">
-                {r.creditsLabel} credits
+                {r.creditsLabel} bonus credits
               </p>
             )}
           </div>

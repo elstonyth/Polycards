@@ -610,7 +610,8 @@ export async function shipVaultCards(
           r.kind === 'invalid_shape'
             ? 'This reward card could not be shipped right now.'
             : friendlyFailure(r, DELIVERY_RULES, DELIVERY_FALLBACK);
-        if (isPhoneGateError(reason)) {
+        // Customer-level refusals: every later card would get the same one.
+        if (isPhoneGateError(reason) || /top up at least once/i.test(reason)) {
           skipRest(i, reason);
           break;
         }

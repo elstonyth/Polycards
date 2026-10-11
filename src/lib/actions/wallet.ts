@@ -29,6 +29,8 @@ export type Wallet = {
   /** Bonus credit inside `balance` — spend only, never withdrawable (the
    *  backend already leaves it out of `withdrawable`). */
   bonus: number;
+  /** At least one top-up ever — withdrawals and deliveries need it. */
+  hasTopup: boolean;
 };
 
 export type WalletResult =
@@ -80,6 +82,8 @@ export async function getWallet(): Promise<WalletResult> {
       playthrough: w.playthrough ?? { deposited: 0, used: 0, remaining: 0 },
       // An older backend has no bonus credit at all.
       bonus: w.bonus ?? 0,
+      // An older backend has no top-up gate.
+      hasTopup: w.has_topup ?? true,
     },
   };
 }

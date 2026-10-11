@@ -230,7 +230,7 @@ export default function LeaderboardClient({
                         aria-label={`Current prize: ${[
                           ...prize.cards.map((c) => c.name),
                           prize.creditsLabel
-                            ? `${prize.creditsLabel} credits`
+                            ? `${prize.creditsLabel} bonus credits`
                             : null,
                         ]
                           .filter(Boolean)
@@ -252,7 +252,7 @@ export default function LeaderboardClient({
                         ))}
                         {prize.creditsLabel && (
                           <span className="text-chase text-xs font-semibold whitespace-nowrap">
-                            {prize.creditsLabel}
+                            {prize.creditsLabel} bonus
                           </span>
                         )}
                       </span>

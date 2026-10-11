@@ -5,7 +5,7 @@ import { prizeLabel } from '../catalogue';
 describe('prizeLabel', () => {
   it('names a credit by its amount', () => {
     expect(prizeLabel({ type: 'credit', amount_myr: 50 })).toEqual({
-      prize: 'RM 50.00 credit',
+      prize: 'RM 50.00 bonus credit',
       value_myr: 50,
     });
   });

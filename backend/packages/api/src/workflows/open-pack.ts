@@ -1,4 +1,4 @@
-import { bonusBpFor, paidPullSource } from "../modules/packs/bonus-credit";
+import { openBonusBp, paidPullSource } from "../modules/packs/bonus-credit";
 import { randomUUID } from "node:crypto";
 import {
   createWorkflow,
@@ -79,7 +79,8 @@ export const openPackWorkflow = createWorkflow(
     // must be played through before it can be withdrawn.
     const pull = recordPullStep(
       transform({ recordInput, charge }, (d) => {
-        const bonusBp = bonusBpFor(
+        const bonusBp = openBonusBp(
+          d.recordInput.source === "free",
           d.charge.bonus_cents,
           Math.round(d.charge.price * 100),
         );

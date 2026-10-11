@@ -1,4 +1,11 @@
 {
+  "creditKind": {
+    "bonus": "Bonus credit (spend-only, cannot be withdrawn)",
+    "bonusHint": "Default for giveaways and compensation. Untick only to correct a real-money error, such as a paid deposit that never arrived.",
+    "normalHint": "Withdrawable credit the player can cash out. Deductions default here; grant it only to correct a real-money error.",
+    "bonusAmount": "{{amount}} bonus credit",
+    "normalAmount": "{{amount}} withdrawable credit"
+  },
   "groupCredits": {
     "title": "Credits",
     "description": "Add or deduct credits for selected players or everyone in this customer group.",
@@ -603,15 +610,15 @@
     "accountStateSince": "Since {{date}}",
     "btnFreeze": "Freeze",
     "btnUnfreeze": "Unfreeze",
-    "btnAdjustCredits": "Adjust credits",
+    "btnAdjustCredits": "Adjust withdrawable credit",
     "modalReasonLabel": "Reason",
     "modalReasonPlaceholder": "Required — recorded in the audit trail",
     "modalFreezeTitle": "Freeze account?",
     "modalFreezeDesc": "The customer will be locked out. Enter a reason for the audit trail.",
     "modalUnfreezeTitle": "Unfreeze account?",
     "modalUnfreezeDesc": "The customer will regain access. Enter a reason for the audit trail.",
-    "modalCreditsTitle": "Adjust credits",
-    "modalCreditsDesc": "Apply a credit adjustment to this customer's balance. Amount and note are required.",
+    "modalCreditsTitle": "Adjust withdrawable credit",
+    "modalCreditsDesc": "Withdrawable credit the player can cash out: use it only for real-money corrections. Giveaways and compensation go in Bonus credit below. Amount and note are required.",
     "action": {
       "freeze": "Freeze account",
       "unfreeze": "Unfreeze account",

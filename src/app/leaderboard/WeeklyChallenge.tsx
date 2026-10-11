@@ -245,7 +245,7 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
                         {summary.credits}
                       </p>
                       <p className="text-sm text-neutral-400">
-                        Total credits across ranks 4–10, stages 1–
+                        Total bonus credits across ranks 4–10, stages 1–
                         {summary.unlockedCount}
                       </p>
                     </div>

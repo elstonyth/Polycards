@@ -284,7 +284,7 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
       const cards = numOf(data, 'card_count');
       if (rank === null) return null;
       const parts: string[] = [];
-      if (credits && credits > 0) parts.push(`${rm(credits)} in credit`);
+      if (credits && credits > 0) parts.push(`${rm(credits)} in bonus credit`);
       if (cards && cards > 0)
         parts.push(cards === 1 ? 'a featured card' : `${cards} featured cards`);
       if (parts.length === 0) return null;

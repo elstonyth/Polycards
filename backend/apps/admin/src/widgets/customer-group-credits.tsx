@@ -19,6 +19,8 @@ import {
   type DataTableColumnDef,
 } from '@medusajs/ui';
 import { rm } from '../lib/format';
+import { BonusCreditToggle } from '../components/BonusCreditToggle';
+import { isBonusGrant } from '../lib/credit-kind';
 import { qk } from '../lib/query-keys';
 import type { GroupCreditCustomer } from '../lib/admin-rest';
 import {
@@ -45,6 +47,10 @@ function GroupCreditEditor({ data: group }: Props) {
   const [search, setSearch] = useState('');
   const [amountText, setAmountText] = useState('');
   const [note, setNote] = useState('');
+  // Grants default to spend-only bonus, deductions to withdrawable credit
+  // (operator rule 2026-10-11); null = box untouched.
+  const [bonusChoice, setBonusChoice] = useState<boolean | null>(null);
+  const bonus = isBonusGrant(bonusChoice, amountText);
   const [busy, setBusy] = useState(false);
   const [batch, setBatch] = useState<GroupCreditAdjustment | null>(null);
   const [results, setResults] = useState<GroupCreditResults>({});
@@ -191,6 +197,7 @@ function GroupCreditEditor({ data: group }: Props) {
       selected,
       amountText,
       note,
+      bonus,
     );
     if (!snapshot) return;
     confirming.current = true;
@@ -202,7 +209,10 @@ function GroupCreditEditor({ data: group }: Props) {
         description: t('groupCredits.confirmDescription', {
           group: group.name,
           count: snapshot.customers.length,
-          amount: rm(snapshot.amount),
+          amount: t(
+            snapshot.bonus ? 'creditKind.bonusAmount' : 'creditKind.normalAmount',
+            { amount: rm(snapshot.amount) },
+          ),
           total: rm(
             (Math.round(snapshot.amount * 100) * snapshot.customers.length) /
               100,
@@ -248,6 +258,7 @@ function GroupCreditEditor({ data: group }: Props) {
     setSelected(new Set());
     setAmountText('');
     setNote('');
+    setBonusChoice(null);
     setSearch('');
   };
 
@@ -343,7 +354,12 @@ function GroupCreditEditor({ data: group }: Props) {
                 <div className="flex flex-col gap-2" aria-live="polite">
                   <Text>
                     {t('groupCredits.batchSummary', {
-                      amount: rm(batch.amount),
+                      amount: t(
+                        batch.bonus
+                          ? 'creditKind.bonusAmount'
+                          : 'creditKind.normalAmount',
+                        { amount: rm(batch.amount) },
+                      ),
                       count: batch.customers.length,
                       total: rm(
                         (Math.round(batch.amount * 100) *
@@ -418,6 +434,11 @@ function GroupCreditEditor({ data: group }: Props) {
                       />
                     </div>
                   </div>
+                  <BonusCreditToggle
+                    checked={bonus}
+                    onChange={setBonusChoice}
+                    disabled={busy}
+                  />
                   {members.isFetching ? (
                     <Text role="status">{t('groupCredits.loading')}</Text>
                   ) : members.isError ? (

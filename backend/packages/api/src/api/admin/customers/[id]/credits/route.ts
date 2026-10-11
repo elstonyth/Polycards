@@ -13,6 +13,9 @@ type Body = {
   idempotency_key?: unknown;
   // 'credit' (default) or 'bonus': spend-only bonus credit (spec 2026-10-07).
   kind?: unknown;
+  // false = no customer notification (the bulk group edit: a quiet balance
+  // fix across a whole group must not message every member).
+  notify?: unknown;
 };
 
 // POST /admin/customers/:id/credits — operator credit adjustment (grant /
@@ -50,7 +53,12 @@ export async function POST(
   });
 
   // Post-commit: tell the customer about a bonus grant (never a take-back).
-  if (body.kind === "bonus" && result.amount > 0 && !result.replayed) {
+  if (
+    body.kind === "bonus" &&
+    body.notify !== false &&
+    result.amount > 0 &&
+    !result.replayed
+  ) {
     await notifyFeedNonfatal(req.scope, "bonus-grant", {
       receiverId: id,
       template: "bonus_credit_received",
