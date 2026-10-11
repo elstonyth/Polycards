@@ -207,7 +207,7 @@ TOOLS.growth = [
   {
     name: 'challenge_results_poster',
     description:
-      "The results of the most recently settled Weekly Challenge week as two finished posting images, each 1080x1350 (the 4:5 size Facebook and Instagram feeds show whole). part top (default): the top 3, with every prize card they won side by side and named (the most valuable first), their public name, what they pulled and what they won. part rest: ranks 4 to 10 with what they pulled and won. Post both together (a carousel: top first). Every figure comes from settlement's own records; nothing is typed in. Use it for any post about last week's winners or results. It is a draft; a human reviews it before it is published.",
+      "The results of the most recently settled Weekly Challenge week as two finished posting images, each 1080x1350 (the 4:5 size Facebook and Instagram feeds show whole). part top (default): the top 3, with every prize card they won side by side and named (the most valuable first), their public name, what they pulled and what they won. part rest: ranks 4 to 10 with what they pulled and won. The first stage the week did not unlock shows too, dimmed under a lock with a 'STAGE N +RM' line: what each rank would have added, which nobody won (the next stage to reach).Post both together (a carousel: top first). Every figure comes from settlement's own records; nothing is typed in. Use it for any post about last week's winners or results. It is a draft; a human reviews it before it is published.",
     inputSchema: {
       part: z
         .enum(['top', 'rest'])
@@ -245,7 +245,7 @@ TOOLS.growth = [
   {
     name: 'challenge_stages_poster',
     description:
-      "A finished poster of every stage of the Weekly Pulled Value Challenge on one image (1080x1350, the 4:5 feed size): each stage's unlock threshold, its #1 to #3 prizes as the official card art, and what ranks 4 to 10 win, under the line that every reward stacks. week current (default): the running week, with its unlocked stages marked; week next: the next challenge waiting in the admin queue. This is THE weekly challenge promo: use it whenever staff ask for the week's or next week's challenge poster or promo image (推广图) or the stages, unless they name one stage (challenge_poster features one stage with a big podium). It is a draft; a human reviews it before it is published.",
+      "A finished poster of every stage of the Weekly Pulled Value Challenge on one image (1080x1350, the 4:5 feed size): each stage's unlock threshold, its #1 to #3 prizes as the official card art with each card's value today, and what ranks 4 to 10 win, under the line that every reward stacks. Once the running week has unlocked a stage, the stages still locked show dimmed under a lock and the headline gives the pool and what the next stage still needs. week current (default): the running week, with its unlocked stages marked; week next: the next challenge waiting in the admin queue. This is THE weekly challenge promo: use it whenever staff ask for the week's or next week's challenge poster or promo image (推广图) or the stages, unless they name one stage (challenge_poster features one stage with a big podium). It is a draft; a human reviews it before it is published.",
     inputSchema: {
       week: z
         .enum(['current', 'next'])

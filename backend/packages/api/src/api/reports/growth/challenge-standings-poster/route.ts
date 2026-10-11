@@ -10,11 +10,9 @@ import {
 import type PacksModuleService from '../../../../modules/packs/service';
 import { buildChallengeView } from '../../../store/challenge/build';
 import {
-  byValue,
-  MISSING_PRIZE_CARD,
-  type PrizeCard,
+  lockedStageRewards,
+  posterPrize,
   prizeCardsById,
-  prizeValue,
 } from '../challenge-results/results';
 import { standingsHeadline, weekEndsLabel } from './standings';
 
@@ -67,40 +65,19 @@ export async function GET(
   const byRank = payoutByRank(
     unlockedStages(body.stages.map(settleStage), pool),
   );
+  const cardById = await prizeCardsById(
+    packs,
+    [...byRank.values()].flatMap((p) => p.cardIds),
+  );
+  // What a rank wins if the week ended now.
+  const prizeOf = (rank: number) => posterPrize(byRank.get(rank), cardById);
   // The next stage, still locked: what it would add, drawn dimmed under a
   // lock (the headline says what it still needs).
   const next = body.stages.find((s) => pool < s.thresholdMyr);
-  const lockedByRank = payoutByRank(next ? [settleStage(next)] : []);
-  const cardById = await prizeCardsById(
-    packs,
-    [...byRank.values(), ...lockedByRank.values()].flatMap((p) => p.cardIds),
-  );
-  // What a rank wins if the week ended now: one card per pull it would mint
-  // (two stages can award one card twice), most valuable first.
-  const prizeOf = (rank: number, payouts = byRank) => {
-    const payout = payouts.get(rank);
-    const qty = new Map<string, number>();
-    for (const id of payout?.cardIds ?? []) qty.set(id, (qty.get(id) ?? 0) + 1);
-    const cards: PrizeCard[] = byValue(
-      [...qty].map(([id, n]) => ({
-        ...(cardById.get(id) ?? MISSING_PRIZE_CARD),
-        qty: n,
-      })),
-    );
-    const credits = payout?.credits ?? 0;
-    const hand = cards.flatMap((c) => Array.from({ length: c.qty }, () => c));
-    return { credits, prizeMyr: prizeValue(credits, cards), hand };
-  };
-  const lockedOf = (rank: number) => {
-    const prize = prizeOf(rank, lockedByRank);
-    return next && (prize.credits > 0 || prize.hand.length)
-      ? {
-          stage: next.stageNumber,
-          prizeMyr: prize.prizeMyr,
-          hand: prize.hand,
-        }
-      : undefined;
-  };
+  const lockedByRank = next
+    ? await lockedStageRewards(packs, next)
+    : new Map<number, never>();
+  const lockedOf = (rank: number) => lockedByRank.get(rank);
   const ends = weekEndsLabel(bounds.endUtc, body.settings.timezone);
   const podium = body.top
     .filter((t) => t.rank <= 3)

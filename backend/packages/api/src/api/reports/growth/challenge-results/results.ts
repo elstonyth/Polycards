@@ -173,6 +173,70 @@ export async function prizeCardsById(
   );
 }
 
+/** A prize as a poster draws it: one card per pull it mints (two stages can
+ *  award one card twice), most valuable first, and the whole at today's
+ *  prices. */
+export type PosterPrize = {
+  credits: number;
+  prizeMyr: number;
+  hand: Omit<PrizeCard, 'qty'>[];
+};
+
+export function posterPrize(
+  payout: { credits: number; cardIds: string[] } | undefined,
+  cardById: Map<string, Omit<PrizeCard, 'qty'>>,
+): PosterPrize {
+  const qty = new Map<string, number>();
+  for (const id of payout?.cardIds ?? []) qty.set(id, (qty.get(id) ?? 0) + 1);
+  const cards = byValue(
+    [...qty].map(([id, n]) => ({
+      ...(cardById.get(id) ?? MISSING_PRIZE_CARD),
+      qty: n,
+    })),
+  );
+  const credits = payout?.credits ?? 0;
+  return {
+    credits,
+    prizeMyr: prizeValue(credits, cards),
+    hand: cards.flatMap((c) => Array.from({ length: c.qty }, () => c)),
+  };
+}
+
+/** What one still-locked stage would add for each rank it pays, priced
+ *  today: the posters draw it dimmed under a lock. */
+export async function lockedStageRewards(
+  packs: PacksModuleService,
+  stage: {
+    stageNumber: number;
+    rankRewards: { rank: number; cardId: string | null; credits: number }[];
+  },
+): Promise<Map<number, PosterPrize & { stage: number }>> {
+  const paid = stage.rankRewards.filter((r) => r.cardId || r.credits > 0);
+  const cardById = await prizeCardsById(
+    packs,
+    paid.flatMap((r) => (r.cardId ? [r.cardId] : [])),
+  );
+  const ranks = [...new Set(paid.map((r) => r.rank))];
+  return new Map(
+    ranks.map((rank) => {
+      const rows = paid.filter((r) => r.rank === rank);
+      return [
+        rank,
+        {
+          stage: stage.stageNumber,
+          ...posterPrize(
+            {
+              credits: rows.reduce((s, r) => s + r.credits, 0),
+              cardIds: rows.flatMap((r) => (r.cardId ? [r.cardId] : [])),
+            },
+            cardById,
+          ),
+        },
+      ];
+    }),
+  );
+}
+
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 // How far back a settled week's pulled values are recomputed: settlement is
 // hourly, so the latest settled week is normally the one just ended.
