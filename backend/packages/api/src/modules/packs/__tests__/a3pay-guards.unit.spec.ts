@@ -268,7 +268,7 @@ describe('a regional payout', () => {
   });
 
   it('is refused before any row or debit while OUR S$ float cannot pay anything, and the next tap is turned away', async () => {
-    balanceSgd = 40; // under A3Pay's S$50 payout minimum; S$100 asked
+    balanceSgd = 20; // under the S$30 payout minimum; S$100 asked
     const packs = withdrawHarness();
     const error = (await start(packs, { quotedRate: 3.3 }).catch(
       (e: unknown) => e,
@@ -341,7 +341,7 @@ describe('the payout-float breaker cannot be tripped by one customer', () => {
     );
 
   it('a request larger than the float is refused alone; a smaller one still goes through', async () => {
-    balanceSgd = 80; // can pay S$50-80, not S$100
+    balanceSgd = 80; // can pay S$30-80, not S$100
     const big = packsFor();
     await expect(go(big, 330)).rejects.toThrow(/on our side/i);
     expect(big.createGatewayWithdrawals).not.toHaveBeenCalled();
@@ -392,7 +392,7 @@ describe('the payout-float breaker cannot be tripped by one customer', () => {
       isSuccess: false,
       errorMessage: 'Insufficient balance',
     });
-    // Enough at the pre-check, under the S$50 minimum by the confirming
+    // Enough at the pre-check, under the S$30 minimum by the confirming
     // re-read (another payout drained it in between).
     balanceReads(10_000, 10);
     const first = packsFor();
@@ -410,7 +410,7 @@ describe('the payout-float breaker cannot be tripped by one customer', () => {
       isSuccess: false,
       errorMessage: 'Insufficient balance',
     });
-    balanceReads(10_000, 80); // S$100 asked; S$50-80 still payable
+    balanceReads(10_000, 80); // S$100 asked; S$30-80 still payable
     const first = packsFor();
     await expect(go(first, 330)).rejects.toThrow(/on our side/i);
 

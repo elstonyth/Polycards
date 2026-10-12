@@ -456,11 +456,11 @@ async function payoutLegs(admin, cust) {
   // ---- 10b. Below A3Pay's S$ floor is refused before any debit
   const tiny = await call('POST', '/store/credits/withdraw', {
     token: cust,
-    body: { amount: 150, account_id: sg?.id },
+    body: { amount: 90, account_id: sg?.id },
   });
   check(
-    'RM 150 (= S$46.72 < S$50 floor) refused before debit',
-    tiny.status === 400 && /SGD 50/.test(tiny.json.message ?? ''),
+    'RM 90 (= S$28.03 < S$30 floor) refused before debit',
+    tiny.status === 400 && /SGD 30/.test(tiny.json.message ?? ''),
     tiny.json.message,
   );
 

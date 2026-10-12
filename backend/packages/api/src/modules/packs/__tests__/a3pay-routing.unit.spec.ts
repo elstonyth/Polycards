@@ -66,9 +66,10 @@ describe('routing to the regional rail', () => {
   it('A3Pay carries an SGD band and RM fences', () => {
     expect(GATEWAYS.a3pay.currency).toBe('SGD');
     expect(GATEWAYS.a3pay.currencyLimits?.depositMax).toBeGreaterThan(0);
-    // Our top-up floor (above A3Pay's S$10); payouts at A3Pay's own S$50.
+    // S$30 both ways: our top-up floor (A3Pay takes S$10), and the payout
+    // floor A3Pay lowered for us on 2026-10-12.
     expect(GATEWAYS.a3pay.currencyLimits?.depositMin).toBe(30);
-    expect(GATEWAYS.a3pay.currencyLimits?.withdrawalMin).toBe(50);
+    expect(GATEWAYS.a3pay.currencyLimits?.withdrawalMin).toBe(30);
     expect(GATEWAYS.a3pay.limits.depositMax).toBe(
       GATEWAYS.tgpay.limits.depositMax,
     );
