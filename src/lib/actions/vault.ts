@@ -257,10 +257,11 @@ export async function startDeposit(
   amount: number,
   paymentMethodCode: string = DEFAULT_DEPOSIT_METHOD,
   /** A regional top-up (Singapore): `amount` is then in `currency`, and the
-   *  backend quotes the RM credit. `payerName` is the name on the PAYING
-   *  account, which that gateway matches against the transfer; `quotedRate`
-   *  the rate the sheet showed, which the backend refuses once it has moved. */
-  regional?: { currency: unknown; payerName: unknown; quotedRate?: unknown },
+   *  backend quotes the RM credit. `quotedRate` is the rate the sheet
+   *  showed, which the backend refuses once it has moved. The payer name A3Pay
+   *  matches transfers against is filled in by the backend from what the
+   *  customer already gave us (saved bank account, else real name). */
+  regional?: { currency: unknown; quotedRate?: unknown },
 ): Promise<StartDepositResult> {
   // Validate at the boundary — a server action is a public endpoint.
   if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
@@ -278,14 +279,6 @@ export async function startDeposit(
     if (!ui.methods.some((option) => option.code === paymentMethodCode)) {
       return { ok: false, error: 'Pick a payment method.' };
     }
-    const payerName =
-      typeof regional.payerName === 'string' ? regional.payerName.trim() : '';
-    if (ui.needsPayerName && (payerName.length < 2 || payerName.length > 120)) {
-      return {
-        ok: false,
-        error: 'Enter the name on the bank account you are paying from.',
-      };
-    }
     const quotedRate =
       typeof regional.quotedRate === 'number' &&
       Number.isFinite(regional.quotedRate) &&
@@ -296,7 +289,6 @@ export async function startDeposit(
       amount,
       payment_method_code: paymentMethodCode,
       currency,
-      ...(payerName ? { payer_name: payerName } : {}),
       ...(quotedRate !== undefined ? { quoted_rate: quotedRate } : {}),
     });
     if (!r.ok) return vaultFailure(r, LOGIN_FIRST);

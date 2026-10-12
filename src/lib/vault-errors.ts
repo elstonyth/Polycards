@@ -86,6 +86,15 @@ export const VAULT_RULES: ErrorRule[] = [
     /top up at least once|deposits must be spent on packs|under review|you can withdraw up to|daily withdrawal limit|withdrawals are not available on this account|this bank account|select a saved bank account|choose a bank from the list|valid account number|account holder name|add an email address|withdrawal is no longer open/i,
     (text) => text,
   ],
+  // Regional rail (A3Pay, SGD) refusals (gateway-deposit.ts,
+  // gateway-withdrawal.ts, payment-fx.ts, the deposit route): each names its
+  // cause and fix, and one carries the word "amount" ("Check the new
+  // amount…"), which the broad /amount/ rule below rewrote into a wrong
+  // "Enter a valid amount (up to RM 10,000…)". Above it, per the ORDER note.
+  [
+    /exchange rate just changed|must come to between|temporarily unavailable on our side|payments are paused|top-ups are not available|add your real name/i,
+    (text) => text,
+  ],
   [/withdrawals are not open/i, 'Withdrawals are not open yet.'],
   // The band message names the ACTIVE gateway's own floor and ceiling
   // (gateways differ), so it passes through verbatim — a fixed

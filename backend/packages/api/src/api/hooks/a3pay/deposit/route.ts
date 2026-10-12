@@ -7,7 +7,11 @@ import { signatureMismatchAlert } from '../../../utils/a3pay-signature-alert';
 import { openCallback, payinState } from '../../../../modules/packs/a3pay';
 import { a3payConfigFromEnv } from '../../../../modules/packs/a3pay-client';
 import { rowGateway } from '../../../../modules/packs/gateway';
-import { applyDepositOutcome } from '../../../../modules/packs/gateway-deposit';
+import {
+  alertPayinVerifyFail,
+  applyDepositOutcome,
+  isPayinVerifyFail,
+} from '../../../../modules/packs/gateway-deposit';
 import {
   callbackLedgerAmount,
   rowFx,
@@ -124,6 +128,16 @@ export async function POST(
   const gatewayTransactionId =
     deposit.gateway_transaction_id ||
     (typeof body.TransactionId === 'string' ? body.TransactionId : '');
+
+  // Verify Fail: the customer may have paid from an account in another
+  // name. Reported whatever the row says (a late one after the sweep wrote
+  // the row off matters most), unless it was credited after all.
+  if (
+    isPayinVerifyFail('a3pay', data.Status) &&
+    deposit.status !== 'settled'
+  ) {
+    alertPayinVerifyFail(req.scope, deposit);
+  }
 
   if (deposit.status !== 'pending') {
     const recoverable =
