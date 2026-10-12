@@ -7,7 +7,11 @@ import { signatureMismatchAlert } from '../../../utils/a3pay-signature-alert';
 import { openCallback, payinState } from '../../../../modules/packs/a3pay';
 import { a3payConfigFromEnv } from '../../../../modules/packs/a3pay-client';
 import { rowGateway } from '../../../../modules/packs/gateway';
-import { applyDepositOutcome } from '../../../../modules/packs/gateway-deposit';
+import {
+  alertPayinVerifyFail,
+  applyDepositOutcome,
+  isPayinVerifyFail,
+} from '../../../../modules/packs/gateway-deposit';
 import {
   callbackLedgerAmount,
   rowFx,
@@ -147,6 +151,9 @@ export async function POST(
   }
 
   if (state === 'pending') {
+    if (isPayinVerifyFail('a3pay', data.Status)) {
+      alertPayinVerifyFail(req.scope, deposit);
+    }
     res.status(200).send('success');
     return;
   }

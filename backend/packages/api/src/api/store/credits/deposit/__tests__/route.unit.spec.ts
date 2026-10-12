@@ -7,6 +7,8 @@ import { legacyGatewayEnvName } from '../../../../../modules/packs/gateway-env';
 // `trust proxy` 1 unconditionally, so req.ip is that value; a raw
 // X-Forwarded-For header is attacker-controlled and only a fallback.
 jest.mock('../../../../../modules/packs/gateway-deposit', () => ({
+  // The real routing (regionalDepositGateway), a stubbed submit.
+  ...jest.requireActual('../../../../../modules/packs/gateway-deposit'),
   startDeposit: jest.fn(async () => ({ url: 'https://cashier/x' })),
 }));
 
@@ -224,5 +226,133 @@ describe('GET /store/credits/deposit — in-flight deposits', () => {
         },
       ],
     });
+  });
+});
+
+describe('POST /store/credits/deposit — the payer name A3Pay matches', () => {
+  const A3PAY_ENV = {
+    GATEWAY_ENABLED: 'true',
+    A3PAY_ENABLED: 'true',
+    A3PAY_API_BASE: 'https://mapi.example.test',
+    A3PAY_MERCHANT_CODE: 'SGD00001',
+    A3PAY_AES_KEY: 'k',
+    A3PAY_MERCHANT_PRIVATE_KEY: 'priv',
+    A3PAY_PUBLIC_KEY: 'pub',
+  };
+  const saved = (env: typeof A3PAY_ENV) => {
+    const before = Object.fromEntries(
+      Object.keys(env).map((k) => [k, process.env[k]]),
+    );
+    Object.assign(process.env, env);
+    return () => {
+      for (const [k, v] of Object.entries(before)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    };
+  };
+  let restore: () => void;
+  beforeEach(() => {
+    restore = saved(A3PAY_ENV);
+  });
+  afterEach(() => restore());
+
+  const reqWith = (
+    accounts: { bankCode: string; accountHolderName: string }[],
+    realName: string | null,
+    body: Record<string, unknown> = {},
+  ) => {
+    const packs = {
+      savedBankAccountsFor: jest.fn(async () => accounts),
+      getVerificationState: jest.fn(async () => ({
+        phoneVerified: true,
+        realName,
+      })),
+      siteSettings: jest.fn(async () => ({ payment_gateway: null })),
+    };
+    return {
+      packs,
+      req: mkReq({
+        body: {
+          amount: 100,
+          currency: 'SGD',
+          payment_method_code: 'BQR',
+          ...body,
+        },
+        scope: { resolve: () => packs },
+      }),
+    };
+  };
+  const sentPayer = () => startMock.mock.calls[0][1].payerName;
+
+  it('uses the holder of a saved Singapore bank account, exactly as the bank has it', async () => {
+    const { req } = reqWith(
+      [
+        { bankCode: 'MBBEMYKL', accountHolderName: 'AHMAD BIN ALI' },
+        { bankCode: 'DBSSSGSG', accountHolderName: 'TAN AH KOW' },
+      ],
+      'Tan Ah Kow',
+    );
+    await POST(req, res);
+    expect(sentPayer()).toBe('TAN AH KOW');
+  });
+
+  it("prefers the customer's own account among several holders", async () => {
+    const { req } = reqWith(
+      [
+        { bankCode: 'OCBCSGSG', accountHolderName: 'LIM MEI LING' },
+        { bankCode: 'DBSSSGSG', accountHolderName: 'TAN  AH KOW' },
+      ],
+      'Tan Ah Kow',
+    );
+    await POST(req, res);
+    expect(sentPayer()).toBe('TAN  AH KOW');
+  });
+
+  it("several other people's accounts: the real name, not a guess", async () => {
+    const { req } = reqWith(
+      [
+        { bankCode: 'OCBCSGSG', accountHolderName: 'LIM MEI LING' },
+        { bankCode: 'DBSSSGSG', accountHolderName: 'WONG KAR WAI' },
+      ],
+      'Tan Ah Kow',
+    );
+    await POST(req, res);
+    expect(sentPayer()).toBe('Tan Ah Kow');
+  });
+
+  it('one saved Singapore holder is used as the bank spells it', async () => {
+    const { req } = reqWith(
+      [{ bankCode: 'DBSSSGSG', accountHolderName: 'TAN AH KOW' }],
+      '陈亚高',
+    );
+    await POST(req, res);
+    expect(sentPayer()).toBe('TAN AH KOW');
+  });
+
+  it('falls back to the verified real name without a Singapore account', async () => {
+    const { req } = reqWith(
+      [{ bankCode: 'MBBEMYKL', accountHolderName: 'AHMAD BIN ALI' }],
+      'Tan Ah Kow',
+    );
+    await POST(req, res);
+    expect(sentPayer()).toBe('Tan Ah Kow');
+  });
+
+  it('a name the client still sends wins over the one on file', async () => {
+    const { req, packs } = reqWith(
+      [{ bankCode: 'DBSSSGSG', accountHolderName: 'TAN AH KOW' }],
+      'Tan Ah Kow',
+      { payer_name: 'LIM MEI LING' },
+    );
+    await POST(req, res);
+    expect(sentPayer()).toBe('LIM MEI LING');
+    expect(packs.savedBankAccountsFor).not.toHaveBeenCalled();
+  });
+
+  it('nothing on file leaves it unset (startDeposit refuses before any row)', async () => {
+    const { req } = reqWith([], null);
+    await POST(req, res);
+    expect(sentPayer()).toBeUndefined();
   });
 });

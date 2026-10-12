@@ -7,6 +7,10 @@ jest.mock('../../../../modules/packs/topup-receipt', () => ({
 jest.mock('../../../../modules/packs/withdrawal-receipt', () => ({
   sendWithdrawalReceipt: jest.fn().mockResolvedValue(undefined),
 }));
+jest.mock('../../../../modules/packs/ops-alert', () => ({
+  alertOps: jest.fn().mockResolvedValue(undefined),
+}));
+import { alertOps } from '../../../../modules/packs/ops-alert';
 
 import { generateKeyPairSync } from 'node:crypto';
 import { POST as deposit } from '../deposit/route';
@@ -177,12 +181,20 @@ describe('POST /hooks/a3pay/deposit', () => {
     expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
   });
 
-  it('treats payin status 4 (Verify Fail) as NOT final', async () => {
+  it('treats payin status 4 (Verify Fail) as NOT final, and alerts ops', async () => {
+    (alertOps as jest.Mock).mockClear();
     const h = harness([sgdDeposit]);
     const res = await run(deposit, h, message(payin({ Status: 4 })));
     expect(res.body).toBe('success');
     expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
     expect(h.packs.claimDepositStatus).not.toHaveBeenCalled();
+    // The customer may have paid from an account in another name.
+    expect(alertOps).toHaveBeenCalledWith(
+      expect.anything(),
+      'payin-verify-fail:PC-1',
+      expect.stringContaining('Verify Fail'),
+      expect.objectContaining({ muteMs: expect.any(Number) }),
+    );
   });
 
   it('closes the row on status 7 without crediting', async () => {

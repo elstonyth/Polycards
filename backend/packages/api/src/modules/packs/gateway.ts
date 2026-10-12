@@ -176,9 +176,10 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
     configured: (env) =>
       env.A3PAY_ENABLED === 'true' && a3pay.a3payConfigured(env),
     configFromEnv: (env) => a3pay.a3payConfigFromEnv(env),
-    // FromCustomerAccountHolderName is mandatory for SGD; it is collected on
-    // the top-up sheet (the name on the PAYING account), not read from the
-    // profile, so this gateway needs no profile contact.
+    // FromCustomerAccountHolderName is mandatory for SGD. The deposit route
+    // fills it from what the customer already gave us (a saved Singapore
+    // account's holder, else the verified real name) — the sheet does not
+    // ask — so this gateway needs no profile contact.
     needsCustomerContact: false,
     hooks: {
       deposit: '/hooks/a3pay/deposit',

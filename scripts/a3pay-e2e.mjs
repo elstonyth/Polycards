@@ -303,7 +303,7 @@ async function depositLegs(admin, cust) {
   const d3 = await call('POST', '/store/credits/deposit', {
     token: cust,
     body: {
-      amount: 20,
+      amount: 40, // above the S$30 floor
       currency: 'SGD',
       payment_method_code: 'OB',
       payer_name: 'TAN AH KOW',
@@ -318,16 +318,31 @@ async function depositLegs(admin, cust) {
     row('gateway_deposit', d3.json.merchantTransactionId)[0] === 'failed',
   );
 
-  // ---- 8. Guards
+  // ---- 8. The sheet no longer asks for a name: the backend sends the one
+  // on file (a saved Singapore account's holder, else the real name).
   const noName = await call('POST', '/store/credits/deposit', {
     token: cust,
-    body: { amount: 100, currency: 'SGD', payment_method_code: 'OB' },
+    // Its own amount, closed below: an open S$100 here would make the mock
+    // nudge the next run's S$100 to S$100.01.
+    body: { amount: 77, currency: 'SGD', payment_method_code: 'OB' },
   });
+  const noNamePayin = (
+    await (await fetch(`${MOCK}/__control/state`)).json()
+  ).payins.find((p) => p.mtid === noName.json.merchantTransactionId);
   check(
-    'SGD deposit without payer name refused',
-    noName.status === 400,
-    noName.json.message,
+    'SGD deposit without a typed name sends the name on file',
+    noName.status === 200 && Boolean(noNamePayin?.payer?.trim()),
+    JSON.stringify({
+      status: noName.status,
+      payer: noNamePayin?.payer,
+      msg: noName.json.message,
+    }),
   );
+  if (noName.json.merchantTransactionId)
+    await mock(`/__control/payin/${noName.json.merchantTransactionId}`, {
+      status: 7,
+    });
+  // ---- 8b. Guards
   const tooBig = await call('POST', '/store/credits/deposit', {
     token: cust,
     body: {
@@ -520,8 +535,11 @@ async function earningsLeg(admin) {
     token: admin,
     admin: true,
   });
+  // The S$ that really moved: the lock scaled by settled / locked RM (a row
+  // settled at another sum than quoted is valued at what it paid). Each side
+  // rounded on its own, then added — as the admin route does.
   const dbEarn = sql(
-    `select round(coalesce((select sum(gateway_amount*fx_mid - amount_settled) from gateway_deposit where currency='SGD' and status='settled'),0) + coalesce((select sum(amount - gateway_amount*fx_mid) from gateway_withdrawal where currency='SGD' and status='settled'),0), 2)`,
+    `select round(coalesce((select sum(gateway_amount*coalesce(amount_settled,amount_requested)/amount_requested*fx_mid - coalesce(amount_settled,amount_requested)) from gateway_deposit where currency='SGD' and status='settled'),0), 2) + round(coalesce((select sum(amount - gateway_amount*coalesce(amount_settled,amount)/amount*fx_mid) from gateway_withdrawal where currency='SGD' and status='settled'),0), 2)`,
   );
   check(
     'admin "conversion earned" matches the rows',

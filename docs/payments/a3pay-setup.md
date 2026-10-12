@@ -112,7 +112,12 @@ Read from the A3Pay back office (https://backoffice.a3paysg.com, login `polycard
 
 - Whether `SubmitPayout` / `CreatePayin` verify our signature (reads do not).
 - Whether callbacks and requery report the requested amount or the uniqueness-nudged one.
-- **Payer name:** SGD payins require `FromCustomerAccountHolderName`. The sheet asks for "Name on your bank account". Ask how strictly it is matched.
+- **Payer name:** SGD payins require `FromCustomerAccountHolderName`. Since 2026-10-12 the sheet no longer asks for it. The deposit route picks it from what is on file, in this order:
+  1. a saved Singapore account whose holder matches the customer's real name;
+  2. the holder, when only one is saved;
+  3. the verified real name.
+
+  A mismatch comes back as payin status 4 (Verify Fail). The row stays pending, and ops is alerted (`payin-verify-fail:<ref>`, once per deposit per 6 h, from the callback and the sweep) because the customer may have paid. Ask A3Pay how strictly it matches the name.
 - **Bank ids:** canonical ids are SWIFT-style (`DBSSSGSG`, `POSBSG`…). Bare A3Pay codes (`CIMB`, `UOB`…) are deliberately **not** lookup aliases, so a Malaysian account can never be re-homed to Singapore.
 
 ## Local testing (no sandbox exists)

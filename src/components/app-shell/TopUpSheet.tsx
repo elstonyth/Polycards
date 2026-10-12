@@ -116,7 +116,6 @@ export default function TopUpSheet({
   const [currency, setCurrency] = useState<Currency | null>(
     USE_GATEWAY ? null : 'MYR',
   );
-  const [payerName, setPayerName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{
@@ -192,10 +191,7 @@ export default function TopUpSheet({
   // quotes it).
   const credit =
     rail && amountValid ? regionalCredit(amount, rail.rate.deposit) : amount;
-  const payerValid =
-    !rail?.ui.needsPayerName ||
-    (payerName.trim().length >= 2 && payerName.trim().length <= 120);
-  const canPay = amountValid && !depositsClosed && payerValid;
+  const canPay = amountValid && !depositsClosed;
   const shownMethods = rail ? rail.ui.methods : methods;
   const presets = rail ? rail.ui.presets : PRESETS;
 
@@ -293,7 +289,6 @@ export default function TopUpSheet({
         const res = rail
           ? await startDeposit(amount, method, {
               currency: rail.currency,
-              payerName,
               quotedRate: rail.rate.deposit,
             })
           : await startDeposit(amount, method);
@@ -535,27 +530,6 @@ export default function TopUpSheet({
                 : `Enter ${money(minAmount)}–${money(maxAmount)}, with up to 2 decimal places.`}
             </p>
 
-            {/* The name A3Pay matches against the incoming transfer. Asked
-                for here, not read from the profile: it must be the name on
-                the PAYING bank account, which a nickname is not. */}
-            {rail?.ui.needsPayerName && (
-              <label className="mt-3 block">
-                <span className="text-[12px] font-semibold text-neutral-400">
-                  Name on your bank account
-                </span>
-                <input
-                  type="text"
-                  autoComplete="name"
-                  value={payerName}
-                  onChange={(e) => setPayerName(e.target.value)}
-                  maxLength={120}
-                  aria-invalid={payerName.trim().length > 0 && !payerValid}
-                  className="mt-1 w-full rounded-xl bg-neutral-800 px-4 py-3 text-[15px] text-white outline-none placeholder:text-neutral-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/60"
-                  placeholder="As it appears at your bank"
-                />
-              </label>
-            )}
-
             {/* Channel picker. Gateway only: the mock has no channels, and
                 without this the customer always landed on whichever one
                 default rail (QR), with no way to pay by bank.
@@ -688,9 +662,7 @@ export default function TopUpSheet({
                     ? // Nothing is added here — the button leaves the site.
                       `Pay ${money(amount)}`
                     : `Proceed — add ${rm(amount)}`
-                  : amountValid && !payerValid
-                    ? 'Enter the account name'
-                    : 'Enter a valid amount'}
+                  : 'Enter a valid amount'}
             </Pill>
 
             <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">

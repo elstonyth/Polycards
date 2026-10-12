@@ -141,8 +141,8 @@ async function payinCallback(p) {
         CurrencyCode: 'SGD',
         MerchantTransactionId: p.mtid,
         Status: p.status,
-        Amount: p.amount,
-        NetAmount: Math.round(p.amount * 0.985 * 100) / 100,
+        Amount: p.actual, // what the customer paid, nudge included
+        NetAmount: Math.round(p.actual * 0.985 * 100) / 100,
         Remark: p.status === 6 ? 'Success' : 'Fail',
         PaymentMethodCode: p.method,
       },
@@ -268,8 +268,8 @@ const routes = {
       statusId: p.status,
       status:
         { 6: 'Success', 7: 'Fail', 4: 'VerifyFail' }[p.status] ?? 'Processing',
-      payinAmount: p.amount,
-      payinNetAmount: Math.round(p.amount * 0.985 * 100) / 100,
+      payinAmount: p.actual,
+      payinNetAmount: Math.round(p.actual * 0.985 * 100) / 100,
       paymentMethodId: p.method,
     });
   },
