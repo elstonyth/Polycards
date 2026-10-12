@@ -3,6 +3,7 @@ import {
   resolvePacks,
   type GatewayDeposits,
 } from '../../../../modules/packs/facets';
+import { signatureMismatchAlert } from '../../../utils/a3pay-signature-alert';
 import { openCallback, payinState } from '../../../../modules/packs/a3pay';
 import { a3payConfigFromEnv } from '../../../../modules/packs/a3pay-client';
 import { rowGateway } from '../../../../modules/packs/gateway';
@@ -74,6 +75,7 @@ export async function POST(
     logger.warn(
       `[a3pay] rejected deposit callback: ${(error as Error).message}`,
     );
+    signatureMismatchAlert(req.scope, error, 'deposit callback');
     res.status(400).send('rejected');
     return;
   }

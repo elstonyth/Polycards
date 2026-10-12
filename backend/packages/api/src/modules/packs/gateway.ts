@@ -9,6 +9,8 @@ import { fakeGateway, type FakeConfig } from './fake-gateway';
 import * as a3pay from './a3pay-client';
 import type { A3payConfig } from './a3pay-client';
 import { toLedgerAmount, type RowFx } from './payment-fx';
+import { GatewayError } from './gateway-types';
+import { TGPAY_PAYOUT_FLOAT_EMPTY } from './tgpay-client';
 import { gatewayEnv } from './gateway-env';
 import { PACKS_MODULE } from './index';
 import {
@@ -256,6 +258,15 @@ export function isLedgerGateway(id: PaymentGateway): boolean {
  * every RM top-up to an SGD rail.
  */
 export const LEDGER_GATEWAY_IDS = GATEWAY_IDS.filter(isLedgerGateway);
+
+/** Every currency a regional gateway settles in (today: SGD). */
+export const REGIONAL_CURRENCIES = [
+  ...new Set(
+    GATEWAY_IDS.filter((id) => !isLedgerGateway(id)).map(
+      (id) => GATEWAYS[id].currency,
+    ),
+  ),
+];
 
 /** The fake gateway exists for specs; nothing else may ever select it. */
 function testOnly(): boolean {
@@ -833,6 +844,33 @@ export function submitDeposit(
 }
 
 /**
+ * Requery a row in the currency it was CREATED in, not whatever the config
+ * says today. A3Pay answers "Not found" for a CurrCode that does not match
+ * the transaction, and "Not found" now authorises a stale-payout refund — so
+ * a later A3PAY_CURRENCY edit must not turn live payouts into refunds. Rows
+ * from before the column (currency absent) keep the config's currency.
+ */
+export function inRowCurrency(
+  config: GatewayConfig,
+  fx: RowFx,
+): GatewayConfig {
+  const currency = typeof fx.currency === 'string' ? fx.currency : '';
+  return currency &&
+    'currencyCode' in config &&
+    config.currencyCode !== currency
+    ? { ...config, currencyCode: currency }
+    : config;
+}
+
+/** OUR payout float at the gateway is short — either gateway's wording. */
+export function isPayoutFloatEmpty(error: GatewayError): boolean {
+  return (
+    error.has(TGPAY_PAYOUT_FLOAT_EMPTY) ||
+    error.has(a3pay.A3PAY_PAYOUT_FLOAT_EMPTY)
+  );
+}
+
+/**
  * The gateway's record, its amounts converted into RM through the ROW's FX
  * lock. `fx` is REQUIRED, not optional: every caller holds the row, and a call
  * site that forgot it would credit S$ figures as RM. An RM row passes
@@ -843,9 +881,10 @@ export async function getDepositDetail(
   config: GatewayConfig,
   fx: RowFx,
 ): Promise<DepositDetail> {
-  const d = await adapterFor(config).getDepositDetail(
+  const asked = inRowCurrency(config, fx);
+  const d = await adapterFor(asked).getDepositDetail(
     merchantTransactionId,
-    config,
+    asked,
   );
   return {
     ...d,
@@ -867,9 +906,10 @@ export async function getWithdrawalDetail(
   config: GatewayConfig,
   fx: RowFx,
 ): Promise<WithdrawalDetail> {
-  const d = await adapterFor(config).getWithdrawalDetail(
+  const asked = inRowCurrency(config, fx);
+  const d = await adapterFor(asked).getWithdrawalDetail(
     merchantTransactionId,
-    config,
+    asked,
   );
   return {
     ...d,

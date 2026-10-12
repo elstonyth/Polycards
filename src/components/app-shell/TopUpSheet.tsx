@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, CheckCircle2, ChevronRight, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { rm, rm0, sgd, sgd0 } from '@/lib/format';
+import { rm, rm0 } from '@/lib/format';
 import {
   getDepositMethods,
   getPaymentLimits,
@@ -15,6 +15,7 @@ import {
   regionalCredit,
   type PaymentLimits,
 } from '@/lib/payment-limits';
+import { openRails, regionalRailUi } from '@/lib/regional-rails';
 import { leaveFor } from '@/lib/navigation';
 import { markDepositInFlight } from '@/lib/deposit-return';
 import { trackPixel } from '@/lib/pixel';
@@ -57,26 +58,16 @@ const USE_GATEWAY = PROVIDER !== 'mock';
 const PRESETS = USE_GATEWAY ? [300, 600, 1200, 5000] : [10, 25, 50, 100];
 const DEFAULT_AMOUNT = USE_GATEWAY ? '300' : '25';
 
-// Singapore (A3Pay): the customer pays in S$ and is credited RM at the rate
-// the backend quotes (market rate minus our markup). Rungs sized for S$, and
-// the two rails labelled the way a Singapore payer knows them — the codes are
-// the same BQR / OB the backend allow-lists for that gateway.
-const SGD_PRESETS = [50, 100, 300, 1000];
-const SGD_DEFAULT_AMOUNT = '100';
-const SGD_METHODS: readonly {
-  code: DepositMethodCode;
-  label: string;
-  hint: string;
-}[] = [
-  { code: 'BQR', label: 'PayNow QR', hint: 'Scan with any Singapore bank app' },
-  { code: 'OB', label: 'Bank transfer', hint: 'DBS, OCBC, UOB + more' },
-];
-type Currency = 'MYR' | 'SGD';
+// A regional rail (Singapore via A3Pay): the customer pays in that currency
+// and is credited RM at the rate the backend quotes (market rate minus our
+// markup). Its rungs, channels and labels live in lib/regional-rails.ts.
+/** 'MYR', or a regional rail's currency code. */
+type Currency = string;
 
 /**
  * One row of the "Choose a currency" step. The list is built from what the
- * backend reports open (getPaymentLimits), so a new rail (USDT next) is one
- * more entry here plus its own form branch — the step itself does not change.
+ * backend reports open (getPaymentLimits) and what lib/regional-rails.ts
+ * knows how to present, so a new rail (USDT next) needs no change here.
  */
 type CurrencyOption = {
   code: Currency;
@@ -84,6 +75,8 @@ type CurrencyOption = {
   symbol: string;
   name: string;
   hint: string;
+  /** Listed but not choosable (the RM gateway is paused). */
+  disabled?: boolean;
 };
 
 /**
@@ -166,28 +159,25 @@ export default function TopUpSheet({
   // the mock has no channels — and failure keeps the compiled list, since the
   // action re-checks the code anyway and a refused channel shows its own error.
   const [limits, setLimits] = useState<PaymentLimits>(DEFAULT_PAYMENT_LIMITS);
-  // The SGD rail, when the backend has it open AND priced. Gateway path only.
-  const sgdRail = USE_GATEWAY
-    ? limits.regional?.find(
-        (rail) =>
-          rail.currency === 'SGD' && rail.depositsEnabled && rail.rate !== null,
-      )
-    : undefined;
-  const paySgd = currency === 'SGD' && sgdRail !== undefined;
-  const money = paySgd ? sgd : rm;
-  const minAmount = paySgd
-    ? Math.max(0.01, sgdRail.deposit.min ?? 0.01)
+  // The regional rails the backend has open AND priced (gateway path only),
+  // and the one being paid through, if any. Undefined = paying in RM.
+  const rails = USE_GATEWAY ? openRails(limits.regional, 'deposit') : [];
+  const rail = rails.find((option) => option.currency === currency);
+  const money = rail ? rail.ui.money : rm;
+  const money0 = rail ? rail.ui.money0 : rm0;
+  const minAmount = rail
+    ? Math.max(0.01, rail.deposit.min ?? 0.01)
     : USE_GATEWAY
       ? Math.max(0.01, limits.deposit.minRm)
       : 0.01;
-  const maxAmount = paySgd
-    ? (sgdRail.deposit.max ?? 10_000)
+  const maxAmount = rail
+    ? (rail.deposit.max ?? 10_000)
     : USE_GATEWAY
       ? limits.deposit.maxRm
       : 10_000;
   // The channel itself, not the band — the admin can close deposits outright
   // while a gateway stays configured (getPaymentLimits, plan 135).
-  const depositsClosed = USE_GATEWAY && !paySgd && !limits.depositsEnabled;
+  const depositsClosed = USE_GATEWAY && !rail && !limits.depositsEnabled;
   const amount = Number(amountText.trim());
   const amountValid =
     /^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(amountText.trim()) &&
@@ -198,39 +188,41 @@ export default function TopUpSheet({
   // channel into the same "can this actually be submitted" signal the button
   // and its label already key off, rather than adding a second disabled path.
   // What lands on the balance: the amount itself in RM, or the quoted RM
-  // credit for an S$ payment (floored to the cent, as the backend quotes it).
+  // credit for a regional payment (floored to the cent, as the backend
+  // quotes it).
   const credit =
-    paySgd && amountValid && sgdRail.rate
-      ? regionalCredit(amount, sgdRail.rate.deposit)
-      : amount;
+    rail && amountValid ? regionalCredit(amount, rail.rate.deposit) : amount;
   const payerValid =
-    !paySgd || (payerName.trim().length >= 2 && payerName.trim().length <= 120);
+    !rail?.ui.needsPayerName ||
+    (payerName.trim().length >= 2 && payerName.trim().length <= 120);
   const canPay = amountValid && !depositsClosed && payerValid;
-  const shownMethods = paySgd ? SGD_METHODS : methods;
-  const presets = paySgd ? SGD_PRESETS : PRESETS;
+  const shownMethods = rail ? rail.ui.methods : methods;
+  const presets = rail ? rail.ui.presets : PRESETS;
 
-  // Step 1's rows: RM always, then every open regional rail.
+  // Step 1's rows: RM always — marked paused, not hidden, when the admin has
+  // closed RM top-ups, so the customer is told rather than left wondering —
+  // then every open regional rail.
+  const rmPaused = USE_GATEWAY && !limits.depositsEnabled;
   const currencyOptions: CurrencyOption[] = [
     {
       code: 'MYR',
       symbol: 'RM',
       name: 'Malaysian Ringgit',
-      hint: 'Online banking (FPX) · QR / e-wallet',
+      hint: rmPaused
+        ? 'Paused right now — your balance and cards are unaffected'
+        : 'Online banking (FPX) · QR / e-wallet',
+      disabled: rmPaused,
     },
-    ...(sgdRail?.rate
-      ? [
-          {
-            code: 'SGD' as const,
-            symbol: 'S$',
-            name: 'Singapore Dollar',
-            hint: `PayNow QR · bank transfer · S$1 = RM ${sgdRail.rate.deposit.toFixed(4)}`,
-          },
-        ]
-      : []),
+    ...rails.map((option) => ({
+      code: option.currency,
+      symbol: option.ui.symbol,
+      name: option.ui.name,
+      hint: `${option.ui.hint} · ${option.ui.symbol}1 = RM ${option.rate.deposit.toFixed(4)}`,
+    })),
   ];
   // The picker shows until a currency is chosen — and again if the chosen
   // rail closes while the sheet is open (its form would have nothing to pay).
-  const picking = currency === null || (currency === 'SGD' && !sgdRail);
+  const picking = currency === null || (currency !== 'MYR' && !rail);
   const chosen = currencyOptions.find((option) => option.code === currency);
 
   // Choosing resets the amount to that currency's default rung — "300" means
@@ -239,7 +231,7 @@ export default function TopUpSheet({
   const amountRef = useRef<HTMLInputElement>(null);
   const chooseCurrency = (next: Currency) => {
     if (next !== currency) {
-      setAmountText(next === 'SGD' ? SGD_DEFAULT_AMOUNT : DEFAULT_AMOUNT);
+      setAmountText(regionalRailUi(next)?.defaultAmount ?? DEFAULT_AMOUNT);
     }
     setCurrency(next);
     setError(null);
@@ -291,15 +283,29 @@ export default function TopUpSheet({
     // redirect takes the page away.
     trackPixel('InitiateCheckout', {
       value: amount,
-      currency: paySgd ? 'SGD' : 'MYR',
+      currency: rail ? rail.currency : 'MYR',
     });
     try {
       if (USE_GATEWAY) {
-        const res = paySgd
-          ? await startDeposit(amount, method, { currency: 'SGD', payerName })
+        // The rate shown goes with the request: the backend refuses one
+        // that has moved since (an admin edited the markup), rather than
+        // crediting at a rate the customer never saw.
+        const res = rail
+          ? await startDeposit(amount, method, {
+              currency: rail.currency,
+              payerName,
+              quotedRate: rail.rate.deposit,
+            })
           : await startDeposit(amount, method);
         if (!res.ok) {
           setError(res.error);
+          // A regional refusal may be that rate change: re-read the rails so
+          // the sheet shows today's rate before the customer retries.
+          if (rail) {
+            getPaymentLimits()
+              .then(setLimits)
+              .catch(() => {});
+          }
           return;
         }
         // Leave for the cashier page. Deliberately a full navigation, not a new
@@ -420,7 +426,8 @@ export default function TopUpSheet({
                   <button
                     type="button"
                     onClick={() => chooseCurrency(option.code)}
-                    className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3.5 text-left transition-colors hover:border-white/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
+                    disabled={option.disabled}
+                    className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3.5 text-left transition-colors hover:border-white/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-white/10"
                   >
                     <span
                       aria-hidden
@@ -490,7 +497,7 @@ export default function TopUpSheet({
                         : 'bg-neutral-800 text-neutral-400 hover:text-white',
                     )}
                   >
-                    {paySgd ? sgd0(preset) : rm0(preset)}
+                    {money0(preset)}
                   </button>
                 );
               })}
@@ -498,7 +505,7 @@ export default function TopUpSheet({
 
             <label className="mt-3 flex items-center gap-2 rounded-xl bg-neutral-800 px-4 py-3">
               <span className="text-sm font-semibold text-neutral-400">
-                {paySgd ? 'S$' : 'RM'}
+                {rail ? rail.ui.symbol : 'RM'}
               </span>
               <input
                 ref={amountRef}
@@ -507,9 +514,7 @@ export default function TopUpSheet({
                 value={amountText}
                 onChange={(e) => setAmountText(e.target.value)}
                 disabled={depositsClosed}
-                aria-label={
-                  paySgd ? 'Top-up amount in S$' : 'Top-up amount in RM'
-                }
+                aria-label={`Top-up amount in ${rail ? rail.ui.symbol : 'RM'}`}
                 aria-describedby="topup-amount-guidance"
                 aria-invalid={amountText.trim().length > 0 && !amountValid}
                 className="font-heading w-full bg-transparent text-2xl text-white outline-none placeholder:text-neutral-600 disabled:opacity-50"
@@ -533,7 +538,7 @@ export default function TopUpSheet({
             {/* The name A3Pay matches against the incoming transfer. Asked
                 for here, not read from the profile: it must be the name on
                 the PAYING bank account, which a nickname is not. */}
-            {paySgd && (
+            {rail?.ui.needsPayerName && (
               <label className="mt-3 block">
                 <span className="text-[12px] font-semibold text-neutral-400">
                   Name on your bank account
@@ -619,16 +624,16 @@ export default function TopUpSheet({
                   {balance == null ? '—' : rm(balance)}
                 </span>
               </div>
-              {paySgd && (
+              {rail && (
                 <div className="mt-2 flex items-center justify-between text-neutral-400">
                   <span>You pay</span>
                   <span className="font-semibold text-neutral-200">
-                    {amountValid ? sgd(amount) : '—'}
+                    {amountValid ? money(amount) : '—'}
                   </span>
                 </div>
               )}
               <div className="mt-2 flex items-center justify-between text-neutral-400">
-                <span>{paySgd ? 'You get' : 'You top up'}</span>
+                <span>{rail ? 'You get' : 'You top up'}</span>
                 <span
                   className="font-semibold text-buyback-fg"
                   data-testid="topup-credit"
@@ -636,9 +641,9 @@ export default function TopUpSheet({
                   {amountValid ? `+ ${rm(credit)}` : '—'}
                 </span>
               </div>
-              {paySgd && sgdRail.rate && (
+              {rail && (
                 <p className="mt-1 text-right text-[11px] text-neutral-500">
-                  S$1 = RM {sgdRail.rate.deposit.toFixed(4)}
+                  {rail.ui.symbol}1 = RM {rail.rate.deposit.toFixed(4)}
                 </p>
               )}
               <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">

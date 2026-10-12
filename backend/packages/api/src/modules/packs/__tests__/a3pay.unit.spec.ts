@@ -13,7 +13,7 @@ import {
 // Bare base64 SPKI / PKCS#8, the format keys are exchanged in with A3Pay.
 function pair() {
   const { publicKey, privateKey } = generateKeyPairSync('rsa', {
-    modulusLength: 1024,
+    modulusLength: 2048,
     publicKeyEncoding: { type: 'spki', format: 'der' },
     privateKeyEncoding: { type: 'pkcs8', format: 'der' },
   });

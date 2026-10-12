@@ -55,19 +55,19 @@ const browser = await chromium.launch();
     timeout: 30000,
   });
   await page.goto(`${ADMIN}/settlement`);
-  const card = page.getByTestId('sgd-fx-card');
+  const card = page.getByTestId('fx-card-SGD');
   await card.waitFor({ timeout: 30000 });
   await card.scrollIntoViewIfNeeded();
   await page.waitForTimeout(800);
   await card.screenshot({ path: `${OUT}a3pay-admin-card-before.png` });
 
   // Back to the live feed rate, markup 0.05 RM per S$1.
-  const override = card.locator('#sgd-override');
+  const override = card.locator('#fx-sgd-override');
   if ((await override.getAttribute('data-state')) === 'checked')
     await override.click();
-  await card.locator('#sgd-markup').fill('0.05');
-  await card.locator('#sgd-reason').fill('UI QA: feed rate, 0.05 markup');
-  const preview = await card.getByTestId('sgd-fx-preview').innerText();
+  await card.locator('#fx-sgd-markup').fill('0.05');
+  await card.locator('#fx-sgd-reason').fill('UI QA: feed rate, 0.05 markup');
+  const preview = await card.getByTestId('fx-preview-SGD').innerText();
   check(
     'admin preview shows customer rates live',
     /S\$100 top-up → RM \d+\.\d\d credit/.test(preview),
@@ -141,7 +141,7 @@ const dbs = await select
   .getAttribute('value');
 await select.selectOption(dbs);
 await page.getByLabel('Withdrawal amount in RM').fill('100');
-const est = page.getByTestId('withdraw-sgd-estimate');
+const est = page.getByTestId('withdraw-regional-estimate');
 await est.waitFor({ timeout: 5000 });
 check(
   'withdraw form shows the S$ a Singapore bank receives',

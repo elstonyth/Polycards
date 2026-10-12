@@ -27,8 +27,25 @@ export function paymentFxPair(currency: string): string {
   return `${currency}_MYR`;
 }
 
-/** The fx_rate pair that prices SGD gateway traffic. */
-export const SGD_MYR_PAIR = paymentFxPair('SGD');
+/**
+ * Per regional currency: where its mid rate comes from and the sane band an
+ * admin's manual rate must sit in (RM per 1 unit). A currency with no `url`
+ * is priced by an admin manual rate only (e.g. USDT, which the ECB feed does
+ * not carry). Adding a rail = one entry here + its gateway in gateway.ts.
+ */
+export const PAYMENT_FX_FEEDS: Record<
+  string,
+  { url?: string; min: number; max: number; unit: string }
+> = {
+  SGD: {
+    url:
+      process.env.FX_SGD_MYR_URL ??
+      'https://api.frankfurter.dev/v1/latest?from=SGD&to=MYR',
+    min: 1,
+    max: 10,
+    unit: 'S$1',
+  },
+};
 
 /**
  * Today's firm quote for a gateway currency, read fresh (uncached — this is a
@@ -61,10 +78,13 @@ export async function loadPaymentFxQuote(
 
 /**
  * A fetched rate older than this is not quoted (an admin override is exempt —
- * it is a human decision, not a feed). ECB publishes on working days only, so
- * this has to clear a long weekend plus a failed fetch or two.
+ * it is a human decision, not a feed). Age is measured from the ECB
+ * publication DATE (sync-payment-fx.ts), and ECB skips TARGET holidays: over
+ * Easter Thursday's rate is the newest until Tuesday afternoon (~5.6 days),
+ * over Christmas ~4.6. Seven days clears both with a failed fetch to spare;
+ * the admin markup (>= 0.10 recommended, ~3%) is the cushion for the drift.
  */
-export const PAYMENT_FX_MAX_AGE_MS = 4 * 24 * 60 * 60 * 1000;
+export const PAYMENT_FX_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Markup bounds the admin route enforces: 0 <= markup <= mid * this. */
 export const PAYMENT_FX_MAX_MARKUP_SHARE = 0.2;

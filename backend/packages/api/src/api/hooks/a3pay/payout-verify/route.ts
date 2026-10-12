@@ -4,6 +4,7 @@ import {
   resolvePacks,
   type GatewayWithdrawals,
 } from '../../../../modules/packs/facets';
+import { signatureMismatchAlert } from '../../../utils/a3pay-signature-alert';
 import { openCallback } from '../../../../modules/packs/a3pay';
 import { a3payConfigFromEnv } from '../../../../modules/packs/a3pay-client';
 
@@ -99,6 +100,7 @@ export async function POST(
     logger.warn(
       `[a3pay] rejected payout verification: ${(error as Error).message}`,
     );
+    signatureMismatchAlert(req.scope, error, 'payout verification');
     res.status(400).send('rejected');
     return;
   }

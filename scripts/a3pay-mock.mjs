@@ -472,7 +472,8 @@ createServer(async (req, res) => {
     send(res, 404, { error: 'not found' });
   } catch (e) {
     log(`ERROR ${e.stack}`);
-    send(res, 500, { error: String(e) });
+    // The stack stays in the mock's own log; the caller gets a generic body.
+    send(res, 500, { error: 'mock internal error' });
   }
 }).listen(PORT, () => {
   log(`listening on http://localhost:${PORT}; callbacks -> ${BACKEND}`);

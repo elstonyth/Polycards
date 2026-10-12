@@ -813,21 +813,26 @@ export interface FxChange {
 export const getFxHistory = () =>
   getJson<{ changes: FxChange[] }>('/admin/pricing/fx/history');
 
-// ── SGD conversion (A3Pay, payment-fx.ts) ────────────────────────────────────
+// ── Regional conversion (A3Pay: SGD — payment-fx.ts) ─────────────────────────
 
 export interface PaymentFxQuote {
   currency: string;
   mid: number;
   markup: number;
-  /** RM credited per S$1 paid in. */
+  /** RM credited per 1 unit paid in. */
   depositRate: number;
-  /** RM debited per S$1 paid out. */
+  /** RM debited per 1 unit paid out. */
   payoutRate: number;
   source: 'manual' | 'feed';
 }
 
 export interface PaymentFxState {
+  currency: string;
   pair: string;
+  /** "S$1" — how one unit reads in labels. */
+  unit: string;
+  /** Sane band for a manual rate (RM per unit); null = unbounded. */
+  manual_band: { min: number | null; max: number | null };
   feed_rate: number | null;
   source: string | null;
   fetched_at: string | null;
@@ -844,10 +849,13 @@ export interface PaymentFxState {
   };
 }
 
-export const getPaymentFx = () =>
-  getJson<PaymentFxState>('/admin/payments/fx');
+export const getPaymentFx = (currency: string) =>
+  getJson<PaymentFxState>(
+    `/admin/payments/fx?currency=${encodeURIComponent(currency)}`,
+  );
 
 export const setPaymentFx = (body: {
+  currency: string;
   markup: number;
   manual_override: boolean;
   manual_rate: number | null;
@@ -1292,6 +1300,10 @@ export interface GatewayDeposit {
   customer_id: string;
   customer_email: string | null;
   amount_requested: number;
+  /** The currency the customer paid / was paid in ('MYR' unless a regional
+   *  rail such as A3Pay), and that amount. null on RM rows. */
+  currency: string;
+  gateway_amount: number | null;
   amount_settled: number | null;
   /** Settled gross minus the gateway's fee. NULL = settled before the mirror
    *  (unknown fee), never "no fee". */
@@ -1362,6 +1374,10 @@ export interface GatewayWithdrawal {
   customer_id: string;
   customer_email: string | null;
   amount: number;
+  /** The currency the customer paid / was paid in ('MYR' unless a regional
+   *  rail such as A3Pay), and that amount. null on RM rows. */
+  currency: string;
+  gateway_amount: number | null;
   /** What the gateway says it actually paid — durable form of the settled-
    *  amount disagreement that used to be log-only. NULL on pre-mirror rows. */
   amount_settled: number | null;

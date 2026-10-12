@@ -52,6 +52,8 @@ export async function POST(
   const body = (req.body ?? {}) as {
     amount?: unknown;
     account_id?: unknown;
+    /** The regional payout rate the form showed; a mismatch is refused. */
+    quoted_rate?: unknown;
   };
 
   // Money-out parity with POST /store/credits/topup. Optional: existing clients
@@ -74,11 +76,14 @@ export async function POST(
   // falls through to the active gateway, whose own checks refuse it.
   const active = await resolveActiveGateway(req.scope);
   let gateway = active;
+  let savedAccounts:
+    | Awaited<ReturnType<GatewayWithdrawals['savedBankAccountsFor']>>
+    | undefined;
   if (regionalPayoutGateways().length > 0) {
-    const saved = await resolvePacks<GatewayWithdrawals>(
+    savedAccounts = await resolvePacks<GatewayWithdrawals>(
       req.scope,
     ).savedBankAccountsFor(customerId);
-    const account = saved.find((a) => a.id === body.account_id);
+    const account = savedAccounts.find((a) => a.id === body.account_id);
     if (account) gateway = payoutGatewayFor(account.bankCode, active);
   }
   const {
@@ -115,6 +120,8 @@ export async function POST(
       ipAddress,
       email,
       gateway,
+      savedAccounts,
+      quotedRate: quotedRateOf(body.quoted_rate),
       idempotencyKey: trimmedKey !== '' ? trimmedKey : undefined,
     },
     notifyUrl,
@@ -122,4 +129,10 @@ export async function POST(
   );
 
   res.json(result);
+}
+
+/** A client-sent quoted rate: a positive finite number, else ignored. */
+function quotedRateOf(value: unknown): number | undefined {
+  const n = typeof value === 'string' ? Number(value) : value;
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined;
 }

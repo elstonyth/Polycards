@@ -22,12 +22,14 @@ Handbook: <https://api.a3paysg.com/API/a3pay_api_doc.html> (v3.3.5, SGD only). C
   - A top-up credits 3.15 per S$1, so S$100 becomes RM 315.00.
   - A payout pays 3.25 per S$1, so RM 100 becomes S$30.76.
 - Rounding is always down to the cent, in our favour.
-- Set the rate and markup in **Admin → Settlement → "Singapore — SGD conversion (A3Pay)"**:
+- Set the rate and markup in **Admin → Settlement → "SGD conversion"** (one card per regional currency; `GET/POST /admin/payments/fx?currency=SGD`):
   - Every save needs a reason and is audited (`admin_action_audit`, entity `fx`, id `SGD_MYR`).
   - The card previews the customer rates live and shows **Conversion earned**: Σ(S$ × mid − RM credited) over settled top-ups, plus Σ(RM debited − S$ × mid) over settled payouts.
 - **No fallback rate.** SGD top-ups and payouts are refused ("SGD payments are paused") in two cases:
   - No `SGD_MYR` row exists.
-  - The feed is older than 4 days and no manual rate is set.
+  - The feed is older than 7 days (ECB skips holidays) and no manual rate is set.
+- **The customer sees the rate they get.** The top-up sheet and the withdraw form send the rate they showed (`quoted_rate`). If an admin moved the markup in between, the backend refuses before any row or debit ("The exchange rate just changed"), and the form re-reads the rate.
+- **Adding a regional currency (USDT next):** one `GATEWAYS` entry (backend `gateway.ts`), one `PAYMENT_FX_FEEDS` entry (`payment-fx.ts`; no `url` means manual rate only), one `REGIONAL_RAILS` entry (storefront `src/lib/regional-rails.ts`), and one `REGIONAL_CURRENCIES` entry on the admin Settlement page. Payout destinations for a wallet (not a bank) are not built yet.
 - A rate change never affects payments already started. Held payouts are approved at the S$ amount locked when the customer asked.
 
 ## Onboarding with A3Pay (the Telegram checklist)
@@ -72,7 +74,7 @@ Callbacks go to `PAYMENT_CALLBACK_BASE` plus the following paths. Payout verific
 - `/hooks/a3pay/withdrawal`
 - `/hooks/a3pay/payout-verify`
 
-**Deploy order:** run `Migration20261006130000` (it adds `fx_rate.markup` and the FX lock columns) **before** the new code serves traffic. The new inserts name those columns.
+**Deploy order:** run `Migration20261012120000` (it adds `fx_rate.markup` and the FX lock columns) **before** the new code serves traffic. The new inserts name those columns.
 
 **After deploy**, from `packages/api` on the production worker:
 

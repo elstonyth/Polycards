@@ -1,6 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { callbackSourceIp, createTgpayCallbackAllowlist } from '../payer-ip';
+import {
+  callbackSourceIp,
+  createA3payCallbackAllowlist,
+  createTgpayCallbackAllowlist,
+} from '../payer-ip';
 import { GATEWAYS, GATEWAY_IDS } from '../../../modules/packs/gateway';
 import {
   extractLimiterEntries,
@@ -18,7 +22,12 @@ afterEach(() => {
   }
 });
 
-function run(req: Record<string, unknown>) {
+function run(
+  req: Record<string, unknown>,
+  allowlist: ReturnType<
+    typeof createTgpayCallbackAllowlist
+  > = createTgpayCallbackAllowlist(),
+) {
   const logger = { warn: jest.fn(), info: jest.fn() };
   const res = {
     statusCode: 0,
@@ -29,7 +38,7 @@ function run(req: Record<string, unknown>) {
     },
   };
   const next = jest.fn();
-  createTgpayCallbackAllowlist()(
+  allowlist(
     { scope: { resolve: () => logger }, ...req } as never,
     res as never,
     next,
@@ -153,5 +162,35 @@ describe('wiring — every gateway hook path carries the limiter AND the allowli
         (e) => e.methods.includes('POST') && e.re.test('/hooks/tgpay'),
       ),
     ).toBe(false);
+  });
+});
+
+describe('createA3payCallbackAllowlist — same middleware, A3Pay rule', () => {
+  it("passes A3Pay's documented address by default and refuses any other", () => {
+    const ok = run({ ip: '13.192.222.226' }, createA3payCallbackAllowlist({}));
+    expect(ok.next).toHaveBeenCalled();
+    expect(ok.logger.info).toHaveBeenCalledWith(
+      expect.stringContaining('[a3pay] callback from 13.192.222.226 accepted'),
+    );
+    const bad = run({ ip: '9.9.9.9' }, createA3payCallbackAllowlist({}));
+    expect(bad.next).not.toHaveBeenCalled();
+    expect(bad.res.statusCode).toBe(403);
+    expect(bad.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('[a3pay] rejected callback from 9.9.9.9: not-listed'),
+    );
+  });
+
+  it('a set list replaces the default; one with no valid entry refuses everything', () => {
+    const local = createA3payCallbackAllowlist({ A3PAY_CALLBACK_IPS: '127.0.0.1' });
+    expect(run({ ip: '127.0.0.1' }, local).next).toHaveBeenCalled();
+    expect(run({ ip: '13.192.222.226' }, local).res.statusCode).toBe(403);
+    const junk = run(
+      { ip: '13.192.222.226' },
+      createA3payCallbackAllowlist({ A3PAY_CALLBACK_IPS: 'not-an-ip' }),
+    );
+    expect(junk.res.statusCode).toBe(403);
+    expect(junk.logger.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/A3PAY_CALLBACK_IPS has no valid entries/),
+    );
   });
 });

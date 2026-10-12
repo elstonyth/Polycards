@@ -159,6 +159,8 @@ export type StartDepositInput = {
   customer?: TgpayCustomer;
   /** Name on the paying bank account — regional gateways (A3Pay) only. */
   payerName?: string;
+  /** The deposit rate (RM per unit) the customer was shown; regional only. */
+  quotedRate?: number;
   /**
    * The gateway this deposit goes through. The route resolves it ONCE and
    * passes it down so the config, the row stamp and the callback URLs all
@@ -182,10 +184,6 @@ export type StartDepositResult = {
   accountHolderName?: string | null;
   referenceNo?: string | null;
   qrCode?: string | null;
-  /** Regional gateways: the currency paid in, what to pay, and the rate. */
-  currency?: string;
-  payAmount?: number;
-  rate?: number;
 };
 
 /**
@@ -237,6 +235,18 @@ export async function startDeposit(
       );
     }
     const quote = await loadPaymentFxQuote(packs, currency);
+    // The rate the customer was shown, when the client sent one: never credit
+    // at a rate they did not see (an admin may have moved the markup since
+    // the sheet loaded). Before any row.
+    if (
+      input.quotedRate !== undefined &&
+      Math.abs(Number(input.quotedRate) - quote.depositRate) > 1e-9
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'The exchange rate just changed. Check the new amount and try again.',
+      );
+    }
     // Today's S$ band: the gateway's own, narrowed so the converted credit
     // also fits the RM band — refused here in S$, not later in RM.
     const band = currencyLimits
@@ -476,21 +486,8 @@ export async function startDeposit(
     accountHolderName: result.accountHolderName,
     referenceNo: result.referenceNo,
     qrCode: result.qrCode,
-    ...(fx
-      ? {
-          currency: fx.currency,
-          // What the customer transfers — may be nudged a cent above what
-          // they asked (A3Pay keeps same-amount transfers distinguishable).
-          payAmount: Number.isFinite(result.depositActualAmount)
-            ? result.depositActualAmount
-            : fx.gatewayAmount,
-          rate: round6(fx.mid - fx.markup),
-        }
-      : {}),
   };
 }
-
-const round6 = (n: number): number => Math.round(n * 1e6) / 1e6;
 
 // ---------------------------------------------------------------------------
 // The settle half. ONE copy, shared by the callback route and the sweep.

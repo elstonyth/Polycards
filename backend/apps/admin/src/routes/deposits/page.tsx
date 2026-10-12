@@ -179,6 +179,13 @@ const DepositsPage = () => {
                     <Table.Cell>{d.payment_method_code}</Table.Cell>
                     <Table.Cell className="text-right tabular-nums whitespace-nowrap">
                       {rm(d.amount_requested)}
+                      {d.gateway_amount !== null && d.currency !== 'MYR' && (
+                        <div className="text-ui-fg-muted text-xs">
+                          {t('deposits.paidIn', {
+                            amount: `${d.currency} ${d.gateway_amount.toFixed(2)}`,
+                          })}
+                        </div>
+                      )}
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle text-right tabular-nums whitespace-nowrap">
                       {d.amount_settled === null ? '—' : rm(d.amount_settled)}

@@ -53,6 +53,7 @@ import {
   DEFAULT_PAYMENT_LIMITS,
   type PaymentLimits,
 } from '@/lib/payment-limits';
+import { regionalRailUi } from '@/lib/regional-rails';
 export type { VaultItem } from './vault-map';
 
 import type { VaultItem } from './vault-map';
@@ -257,35 +258,46 @@ export async function startDeposit(
   paymentMethodCode: string = DEFAULT_DEPOSIT_METHOD,
   /** A regional top-up (Singapore): `amount` is then in `currency`, and the
    *  backend quotes the RM credit. `payerName` is the name on the PAYING
-   *  account, which that gateway matches against the transfer. */
-  regional?: { currency: unknown; payerName: unknown },
+   *  account, which that gateway matches against the transfer; `quotedRate`
+   *  the rate the sheet showed, which the backend refuses once it has moved. */
+  regional?: { currency: unknown; payerName: unknown; quotedRate?: unknown },
 ): Promise<StartDepositResult> {
   // Validate at the boundary — a server action is a public endpoint.
   if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
     return { ok: false, error: 'Enter a valid amount.' };
   }
   if (regional) {
-    // DEPOSIT_METHODS_ENABLED retracts RM channels; the regional rail has its
-    // own two (QR / bank transfer), allow-listed here and again server-side.
-    if (regional.currency !== 'SGD') {
+    // DEPOSIT_METHODS_ENABLED retracts RM channels; a regional rail has its
+    // own (lib/regional-rails.ts), allow-listed here and again server-side.
+    const currency =
+      typeof regional.currency === 'string' ? regional.currency : null;
+    const ui = regionalRailUi(currency);
+    if (!currency || !ui) {
       return { ok: false, error: 'Pick a currency.' };
     }
-    if (paymentMethodCode !== 'BQR' && paymentMethodCode !== 'OB') {
+    if (!ui.methods.some((option) => option.code === paymentMethodCode)) {
       return { ok: false, error: 'Pick a payment method.' };
     }
     const payerName =
       typeof regional.payerName === 'string' ? regional.payerName.trim() : '';
-    if (payerName.length < 2 || payerName.length > 120) {
+    if (ui.needsPayerName && (payerName.length < 2 || payerName.length > 120)) {
       return {
         ok: false,
         error: 'Enter the name on the bank account you are paying from.',
       };
     }
+    const quotedRate =
+      typeof regional.quotedRate === 'number' &&
+      Number.isFinite(regional.quotedRate) &&
+      regional.quotedRate > 0
+        ? regional.quotedRate
+        : undefined;
     const r = await store.post('/store/credits/deposit', DepositStartSchema, {
       amount,
       payment_method_code: paymentMethodCode,
-      currency: 'SGD',
-      payer_name: payerName,
+      currency,
+      ...(payerName ? { payer_name: payerName } : {}),
+      ...(quotedRate !== undefined ? { quoted_rate: quotedRate } : {}),
     });
     if (!r.ok) return vaultFailure(r, LOGIN_FIRST);
     return { ok: true, url: r.data.url, amount: r.data.amount };
@@ -467,6 +479,9 @@ export async function startWithdrawal(input: {
   amount: number;
   accountId: string;
   idempotencyKey?: string;
+  /** A regional payout: the rate (RM per unit) the form showed. The backend
+   *  refuses — before any debit — once it has moved. */
+  quotedRate?: number;
 }): Promise<StartWithdrawalResult> {
   // Validate at the boundary — a server action is a public endpoint.
   if (
@@ -486,6 +501,11 @@ export async function startWithdrawal(input: {
     {
       amount: input.amount,
       account_id: input.accountId,
+      ...(typeof input.quotedRate === 'number' &&
+      Number.isFinite(input.quotedRate) &&
+      input.quotedRate > 0
+        ? { quoted_rate: input.quotedRate }
+        : {}),
     },
     {
       // See the doc comment above: caller-minted so a retry of the same

@@ -46,6 +46,8 @@ export async function POST(
     payment_method_code?: unknown;
     currency?: unknown;
     payer_name?: unknown;
+    /** The regional rate the sheet showed; a mismatch is refused. */
+    quoted_rate?: unknown;
   };
 
   // Which gateway is active is an admin setting; refresh the cache (TTL'd)
@@ -105,6 +107,7 @@ export async function POST(
       gateway,
       payerName:
         typeof body.payer_name === 'string' ? body.payer_name : undefined,
+      quotedRate: quotedRateOf(body.quoted_rate),
     },
     notifyUrl,
     returnUrl,
@@ -166,10 +169,14 @@ export async function GET(
     deposits: deposits.map((deposit) => ({
       merchant_transaction_id: deposit.merchant_transaction_id,
       amount: deposit.amount_requested,
-      currency: deposit.currency ?? LEDGER_CURRENCY,
-      pay_amount: deposit.gateway_amount ?? null,
       payment_method_code: deposit.payment_method_code,
       created_at: deposit.created_at,
     })),
   });
+}
+
+/** A client-sent quoted rate: a positive finite number, else ignored. */
+function quotedRateOf(value: unknown): number | undefined {
+  const n = typeof value === 'string' ? Number(value) : value;
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined;
 }

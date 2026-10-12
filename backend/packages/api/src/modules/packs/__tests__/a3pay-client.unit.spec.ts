@@ -1,9 +1,17 @@
-import { A3PAY_NOT_FOUND, getPayinDetail, getPayoutDetail, checkAccBalance } from '../a3pay-client';
+import {
+  A3PAY_NOT_FOUND,
+  A3PAY_PAYOUT_FLOAT_EMPTY,
+  getPayinDetail,
+  getPayoutDetail,
+  checkAccBalance,
+  submitPayout,
+} from '../a3pay-client';
+import { inRowCurrency, isPayoutFloatEmpty } from '../gateway';
 import { generateKeyPairSync } from 'node:crypto';
 
 // Response shapes measured live against A3Pay production on 2026-10-12.
 const ours = generateKeyPairSync('rsa', {
-  modulusLength: 1024,
+  modulusLength: 2048,
   publicKeyEncoding: { type: 'spki', format: 'der' },
   privateKeyEncoding: { type: 'pkcs8', format: 'der' },
 });
@@ -68,5 +76,57 @@ describe('A3Pay live response shapes', () => {
       currCode: 'SGD',
       availableBalanceAmount: 0,
     });
+  });
+});
+
+describe('A3Pay refusals that are on OUR side', () => {
+  const payout = {
+    merchantTransactionId: 'PC-w1',
+    customerId: 'cus_1',
+    amount: 60,
+    ipAddress: '1.2.3.4',
+    bankCode: 'DBS',
+    accountNumber: '0123456789',
+    accountHolderName: 'TAN AH KOW',
+    callbackUrl: 'https://api.example.test/hooks/a3pay/withdrawal',
+    verifyUrl: 'https://api.example.test/hooks/a3pay/payout-verify',
+  };
+
+  it('a SubmitPayout refused for balance is our empty float, never the customer', async () => {
+    reply(
+      400,
+      '{"isSuccess":false,"errorCode":null,"errorMessage":"Insufficient balance","data":null}',
+    );
+    const error = await submitPayout(payout, config).catch((e) => e);
+    expect(error.codes).toContain(A3PAY_PAYOUT_FLOAT_EMPTY);
+    expect(isPayoutFloatEmpty(error)).toBe(true);
+  });
+
+  it('any other SubmitPayout refusal is not', async () => {
+    reply(
+      400,
+      '{"isSuccess":false,"errorCode":null,"errorMessage":"Invalid account number","data":null}',
+    );
+    const error = await submitPayout(payout, config).catch((e) => e);
+    expect(error.codes).not.toContain(A3PAY_PAYOUT_FLOAT_EMPTY);
+    expect(isPayoutFloatEmpty(error)).toBe(false);
+  });
+});
+
+describe('inRowCurrency — a requery asks in the currency the row was made in', () => {
+  const fx = (currency?: string) => ({
+    ledgerAmount: 300,
+    gatewayAmount: 100,
+    currency,
+  });
+
+  it('overrides a config whose currency has changed since', () => {
+    const asked = inRowCurrency({ ...config, currencyCode: 'USD' }, fx('SGD'));
+    expect('currencyCode' in asked && asked.currencyCode).toBe('SGD');
+  });
+
+  it('keeps the config for a pre-column row, and when they already agree', () => {
+    expect(inRowCurrency(config, fx())).toBe(config);
+    expect(inRowCurrency(config, fx('SGD'))).toBe(config);
   });
 });

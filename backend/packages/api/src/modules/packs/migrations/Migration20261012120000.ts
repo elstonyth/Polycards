@@ -9,7 +9,7 @@ import { Migration } from '@medusajs/framework/mikro-orm/migrations';
 // bigNumber is TWO physical columns — the numeric one and its raw_<field>
 // jsonb sidecar the ORM reads back (see Migration20260817090000 for what
 // adding only the numeric half does on the first real insert).
-export class Migration20261006130000 extends Migration {
+export class Migration20261012120000 extends Migration {
   override async up(): Promise<void> {
     this.addSql(`alter table if exists "fx_rate"
       add column if not exists "markup" numeric not null default 0,

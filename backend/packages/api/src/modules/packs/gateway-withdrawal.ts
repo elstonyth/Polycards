@@ -19,6 +19,8 @@ import {
   GATEWAY_IDS,
   isLedgerGateway,
   TGPAY_PAYOUT_FLOAT_EMPTY,
+  checkBalance,
+  isPayoutFloatEmpty,
   type GatewayConfig,
   type PaymentGateway,
 } from './gateway';
@@ -153,6 +155,30 @@ export function regionalPayoutGateways(
   return GATEWAY_IDS.filter(
     (id) => !isLedgerGateway(id) && withdrawalsEnabled(env, id),
   );
+}
+
+/** The refusal when a regional quote moved under the customer's form. */
+export const RATE_CHANGED_MESSAGE =
+  'The exchange rate just changed. Check the new amount and try again.';
+
+/**
+ * Is OUR float at a regional gateway short of `gatewayAmount`? A3Pay's
+ * balance read is cheap and read-only; a failed read is NOT short (the submit
+ * still decides), so a balance-endpoint outage never blocks payouts.
+ */
+async function regionalFloatShort(
+  config: GatewayConfig,
+  gatewayAmount: number,
+): Promise<{ available: number; currency: string } | null> {
+  try {
+    const b = await checkBalance(config);
+    const available = Number(b.availableBalance);
+    return Number.isFinite(available) && available < gatewayAmount
+      ? { available, currency: b.currencyCode }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -351,6 +377,16 @@ export type StartWithdrawalInput = {
   email?: string;
   /** Resolved once by the route; see StartDepositInput.gateway. */
   gateway?: PaymentGateway;
+  /**
+   * The customer's saved accounts when the route already read them (it does,
+   * to pick the gateway) — saves a second read. Precheck only: the locked
+   * resolution inside withdrawForCashout always re-reads.
+   */
+  savedAccounts?: Awaited<
+    ReturnType<GatewayWithdrawals['savedBankAccountsFor']>
+  >;
+  /** The payout rate (RM per unit) the customer was shown; regional only. */
+  quotedRate?: number;
 };
 
 export type StartWithdrawalResult = {
@@ -524,7 +560,9 @@ export async function startWithdrawal(
   // same list, and savedBankAccountId is derived from (bankCode, accountNumber),
   // so an id resolves to the same destination in both reads or to nothing.
   const precheckDestination = resolveWithdrawalDestination({
-    accounts: await packs.savedBankAccountsFor(input.customerId),
+    accounts:
+      input.savedAccounts ??
+      (await packs.savedBankAccountsFor(input.customerId)),
     accountId: input.accountId,
   });
 
@@ -592,6 +630,34 @@ export async function startWithdrawal(
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
         `Withdrawals to this bank must come to between ${currency} ${currencyLimits.withdrawalMin} and ${currency} ${currencyLimits.withdrawalMax.toLocaleString('en-US')} (RM ${amount} is ${currency} ${gatewayAmount.toFixed(2)}).`,
+      );
+    }
+    // The price the customer was shown, when the client sent one: refuse a
+    // payout at a rate they never saw (the admin may have moved the markup
+    // since the form loaded). Before any row or debit.
+    if (
+      input.quotedRate !== undefined &&
+      Math.abs(Number(input.quotedRate) - quote.payoutRate) > 1e-9
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        RATE_CHANGED_MESSAGE,
+      );
+    }
+    // OUR float at the gateway must cover it — refused before any row or
+    // debit, so the customer is not refunded for our empty wallet.
+    const short = await regionalFloatShort(config, gatewayAmount);
+    if (short) {
+      payoutFloatEmptyUntil.set(gateway, Date.now() + PAYOUT_FLOAT_COOLDOWN_MS);
+      void alertPayoutFloatEmpty(scope, {
+        amount,
+        ref: 'balance pre-check',
+        via: 'customer withdrawal',
+        gateway: GATEWAYS[gateway].label,
+      });
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'Withdrawals to this bank are temporarily unavailable on our side — nothing was taken from your balance. Your bank details are fine. Please try again later.',
       );
     }
     fx = { currency, gatewayAmount, mid: quote.mid, markup: quote.markup };
@@ -865,7 +931,7 @@ export async function startWithdrawal(
       // same situation for the customer, so it shares the breaker and copy;
       // only the ops alert names the different fix.
       const payoutDisabled = error.has(TGPAY_PAYOUT_DISABLED);
-      if (payoutDisabled || error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) {
+      if (payoutDisabled || isPayoutFloatEmpty(error)) {
         payoutFloatEmptyUntil.set(
           gateway,
           Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
@@ -1329,7 +1395,10 @@ export async function submitHeldWithdrawal(
   // sweep for no reason — the exact state the held branch exists to avoid.
   // (The undebited branch below also throws after claiming, but it claims to
   // 'failed': a closed row, which the sweep never selects.)
-  if (!withdrawalsEnabled()) {
+  // Cheap early exit only: the gate that counts is the ROW's own gateway,
+  // checked below before the claim. Asking the ACTIVE gateway here refused
+  // every held A3Pay payout whenever TGPay payouts were off (review, #755).
+  if (!anyWithdrawalsEnabled()) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'The payout channel is closed — a held withdrawal cannot be approved right now.',
@@ -1424,6 +1493,30 @@ export async function submitHeldWithdrawal(
       MedusaError.Types.NOT_ALLOWED,
       'This customer’s account is frozen. Unfreeze it before approving a payout, or deny the withdrawal.',
     );
+  }
+
+  // OUR regional float (A3Pay's SGD balance) must cover the locked amount.
+  // Checked before the claim, so a short float leaves the row HELD for an
+  // approval after the top-up instead of refunding the customer.
+  if (row.gateway_amount != null && !isLedgerGateway(gatewayId)) {
+    const short = await regionalFloatShort(
+      config,
+      Number(row.gateway_amount),
+    );
+    if (short) {
+      payoutFloatEmptyUntil.set(gatewayId, Date.now() + PAYOUT_FLOAT_COOLDOWN_MS);
+      const label = GATEWAYS[gatewayId].label;
+      void alertPayoutFloatEmpty(scope, {
+        amount,
+        ref: row.merchant_transaction_id,
+        via: 'admin approve (balance pre-check)',
+        gateway: label,
+      });
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Our ${label} balance (${short.currency} ${short.available.toFixed(2)} available) cannot cover this payout (${short.currency} ${Number(row.gateway_amount).toFixed(2)}). The withdrawal stays held — fund the ${label} balance, then approve it again.`,
+      );
+    }
   }
 
   // THE DEBIT CHECK AND THE CLAIM, as ONE locked decision.
@@ -1599,7 +1692,7 @@ export async function submitHeldWithdrawal(
           `${label} refused this payout because payouts are not enabled on our ${label} account ("Payout not available"). The debit has been refunded and the withdrawal closed. Ask ${label} to enable payouts, or switch back to a gateway that pays out, then ask the customer to request the withdrawal again.`,
         );
       }
-      if (error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) {
+      if (isPayoutFloatEmpty(error)) {
         payoutFloatEmptyUntil.set(
           gatewayId,
           Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,

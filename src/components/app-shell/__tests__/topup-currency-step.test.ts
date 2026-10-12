@@ -136,4 +136,27 @@ describe('TopUpSheet — choose a currency first', () => {
     expect(container.textContent).toContain('Choose a currency');
     expect(amountInput()).toBeNull();
   });
+
+  it('pays in S$ with the rate it showed, so the backend can refuse a moved one', async () => {
+    await mount(WITH_SGD);
+    await act(async () => button('Singapore Dollar')!.click());
+    const payer = container.querySelector<HTMLInputElement>(
+      'input[autocomplete="name"]',
+    )!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )!.set!.call(payer, 'Tan Ah Kow');
+      payer.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => button('Pay')!.click());
+    expect(startDeposit).toHaveBeenCalledWith(100, 'BQR', {
+      currency: 'SGD',
+      payerName: 'Tan Ah Kow',
+      quotedRate: 3.1405,
+    });
+    // The refusal re-reads the rails, so a moved rate shows before a retry.
+    expect(getPaymentLimits).toHaveBeenCalledTimes(2);
+  });
 });

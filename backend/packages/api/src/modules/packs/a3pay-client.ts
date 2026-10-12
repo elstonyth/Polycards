@@ -89,6 +89,17 @@ export function a3payConfigured(env: Partial<NodeJS.ProcessEnv>): boolean {
  */
 export const A3PAY_NOT_FOUND = 'A3PAY_NOT_FOUND';
 const PLATFORM_NOT_FOUND_CODE = 'PMT10016';
+
+/**
+ * OUR A3Pay balance cannot cover a payout (SubmitPayout only). A3Pay's exact
+ * wording is unrecorded (our balance was S$0 when this shipped and no payout
+ * had been tried), so any SubmitPayout refusal that talks about balance /
+ * insufficient funds is tagged — the withdrawal paths then share TGPay's
+ * float-empty breaker, alert and customer copy. The pre-submit balance check
+ * in gateway-withdrawal.ts (regionalFloatShort) catches the common case
+ * without depending on this wording at all.
+ */
+export const A3PAY_PAYOUT_FLOAT_EMPTY = 'A3PAY_PAYOUT_FLOAT_EMPTY';
 const DETAIL_PATHS = new Set([
   '/api/Payin/GetPayinDetail',
   '/api/Payout/GetPayoutDetail',
@@ -154,6 +165,13 @@ function failure<T>(
       codes.includes(PLATFORM_NOT_FOUND_CODE))
   ) {
     codes.push(A3PAY_NOT_FOUND);
+  }
+  if (
+    path === '/api/Payout/SubmitPayout' &&
+    parsed.isSuccess === false &&
+    /insufficient|not enough|balance|余额/i.test(detail)
+  ) {
+    codes.push(A3PAY_PAYOUT_FLOAT_EMPTY);
   }
   // `definite` only on an EXPLICIT isSuccess:false — the one shape that
   // proves no transaction exists on their side. isSuccess true with no data
