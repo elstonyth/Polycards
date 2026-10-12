@@ -667,7 +667,7 @@ export async function startWithdrawal(
       );
     }
     // The price the customer was shown, when the client sent one: refuse a
-    // payout at a rate they never saw (the admin may have moved the markup
+    // payout at a rate they never saw (the admin may have changed the fee
     // since the form loaded). Before any row or debit.
     if (
       input.quotedRate !== undefined &&

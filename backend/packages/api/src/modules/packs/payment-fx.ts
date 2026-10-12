@@ -5,10 +5,11 @@ import { MedusaError } from '@medusajs/framework/utils';
 // rule is unit-testable.
 //
 // The model:
-//   - `mid` is the market SGD->MYR rate (frankfurter, or an admin override);
-//   - `markup` is an ABSOLUTE spread in RM per S$1, set by an admin;
-//   - a DEPOSIT credits at `mid - markup` (S$100 at mid 3.30, markup 0.01 ->
-//     RM 329.00), a PAYOUT pays at `mid + markup` (RM 331 -> S$100.00).
+//   - `mid` is the market SGD->MYR rate (the hourly feed, or an admin override);
+//   - the FEE is a percent of the mid per direction, behind an admin on/off
+//     switch (off = the bare mid both ways);
+//   - a DEPOSIT credits at mid x (1 - top-up fee) (mid 3.19 at 0.5% ->
+//     3.17405), a PAYOUT costs mid x (1 + withdrawal fee) (-> 3.20595).
 // We keep the spread both ways. Every rounding is DOWN to the cent, in our
 // favour, so the spread is never eaten by a half-cent.
 //

@@ -26,8 +26,9 @@ import type PacksModuleService from '../../../../modules/packs/service';
 // GET/POST /admin/payments/fx?currency=SGD — the conversion behind a
 // regional gateway (payment-fx.ts), one currency per call (default SGD; any
 // currency in REGIONAL_CURRENCIES). The mid rate comes from the feed or an
-// admin override; the MARKUP is our spread in RM per unit, applied both ways:
-// deposits credit at mid - markup, payouts pay at mid + markup.
+// admin override; our FEE is a percent of the mid per direction, behind an on/off
+// switch: deposits credit at mid x (1 - top-up %), payouts cost mid x
+// (1 + withdrawal %), and switched off both are the mid.
 //
 // GET also reports what the spread has earned: for every settled row in that
 // currency, the RM it would have been at the mid against the RM actually
