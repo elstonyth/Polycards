@@ -40,13 +40,23 @@ export async function fetchPaymentFx(
   const resp = await fetch(feed.url, { signal: AbortSignal.timeout(10_000) });
   if (!resp.ok) throw new Error(`FX feed: HTTP ${resp.status}`);
   const data = (await resp.json()) as {
+    base?: unknown;
     date?: string;
     rates?: { MYR?: unknown };
-    data?: { currency?: string; rates?: { MYR?: unknown } };
+    data?: { currency?: unknown; rates?: { MYR?: unknown } };
   };
-  if (data?.data?.currency && data.data.currency !== currency)
-    throw new Error(`FX feed: answered for ${data.data.currency}`);
-  const rate = Number(data?.data?.rates?.MYR ?? data?.rates?.MYR);
+  // Both shapes name the currency they quote FROM (Coinbase data.currency,
+  // frankfurter base). A missing or different label is a wrong pair, however
+  // plausible its number looks.
+  const quoted = data?.data ? data.data.currency : data?.base;
+  if (quoted !== currency)
+    throw new Error(`FX feed: answered for ${String(quoted)}`);
+  const raw = data?.data ? data.data.rates?.MYR : data?.rates?.MYR;
+  // Only a number or a numeric string is a rate: Number(true) is 1.
+  const rate =
+    typeof raw === 'number' || (typeof raw === 'string' && raw.trim() !== '')
+      ? Number(raw)
+      : NaN;
   // A rate outside the currency's band is a broken feed, not a market move.
   if (!Number.isFinite(rate) || rate < feed.min || rate > feed.max)
     throw new Error(`FX feed: no usable ${currency}->MYR`);
@@ -59,6 +69,15 @@ export async function fetchPaymentFx(
   const source = data?.data ? 'coinbase' : 'frankfurter';
   return { rate: Math.round(rate * 1e6) / 1e6, asOf, source };
 }
+
+/** A feed's host for the log, without letting a malformed URL throw. */
+const feedHost = (url: string): string => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return 'an invalid URL';
+  }
+};
 
 export default async function syncPaymentFxJob(
   container: MedusaContainer,
@@ -76,7 +95,7 @@ export default async function syncPaymentFxJob(
         break;
       } catch (e) {
         logger.warn(
-          `[sync-payment-fx] ${currency} feed ${new URL(url).hostname} failed: ${(e as Error).message}`,
+          `[sync-payment-fx] ${currency} feed ${feedHost(url)} failed: ${(e as Error).message}`,
         );
       }
     }
@@ -89,13 +108,18 @@ export default async function syncPaymentFxJob(
     try {
       const { rate, asOf, source } = got;
       const [row] = await packs.listFxRates({ pair }, { take: 1 });
-      const previous = Number(row?.rate);
+      // Measured against the admin's pinned rate while one is set. After a
+      // real move bigger than the guard (a long feed outage), pinning a
+      // manual rate near the market is how the feed is let back in.
+      const pinned = row?.manual_override ? Number(row.manual_rate) : NaN;
+      const previous =
+        Number.isFinite(pinned) && pinned > 0 ? pinned : Number(row?.rate);
       if (
         Number.isFinite(previous) &&
         previous > 0 &&
         Math.abs(rate / previous - 1) > PAYMENT_FX_MAX_JUMP
       ) {
-        const note = `${currency}->MYR feed (${source}) says ${rate}, ${((rate / previous - 1) * 100).toFixed(1)}% from the stored ${previous} — NOT applied; the last rate stays. If the move is real, pin a manual rate in Admin → Settlement.`;
+        const note = `${currency}->MYR feed (${source}) says ${rate}, ${((rate / previous - 1) * 100).toFixed(1)}% from the stored ${previous} — NOT applied; the last rate stays. If the move is real, pin a manual rate near it in Admin → Settlement (the ${currency} tab): the feed is measured against a pinned rate, so it resumes once within ${PAYMENT_FX_MAX_JUMP * 100}%.`;
         logger.error(`[sync-payment-fx] ${note}`);
         void alertOps(container, `fx-jump:${currency}`, note, {
           muteMs: 6 * 60 * 60 * 1000,

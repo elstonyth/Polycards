@@ -34,11 +34,20 @@ function feeds(
   }) as unknown as typeof fetch;
 }
 
-function container(stored: number | null) {
+function container(stored: number | null, pinned: number | null = null) {
   const packs = {
-    listFxRates: jest
-      .fn()
-      .mockResolvedValue(stored === null ? [] : [{ id: 'fx_1', rate: stored }]),
+    listFxRates: jest.fn().mockResolvedValue(
+      stored === null
+        ? []
+        : [
+            {
+              id: 'fx_1',
+              rate: stored,
+              manual_override: pinned !== null,
+              manual_rate: pinned,
+            },
+          ],
+    ),
     updateFxRates: jest.fn().mockResolvedValue(undefined),
     createFxRates: jest.fn().mockResolvedValue(undefined),
   };
@@ -100,6 +109,43 @@ describe('sync-payment-fx', () => {
         'frankfurter',
       );
     }
+  });
+
+  it('refuses a feed that does not say it quotes SGD, or a rate that is not a number', async () => {
+    const bodies = [
+      // No currency label at all.
+      JSON.stringify({ data: { rates: { MYR: '3.18' } } }),
+      // Number(true) is 1, inside the 1–10 band.
+      JSON.stringify({ data: { currency: 'SGD', rates: { MYR: true } } }),
+    ];
+    for (const body of bodies) {
+      feeds({
+        'api.coinbase.com': { status: 200, body },
+        'api.frankfurter.dev': {
+          status: 200,
+          body: JSON.stringify({
+            base: 'USD',
+            date: '2026-10-12',
+            rates: { MYR: 4.2 },
+          }),
+        },
+      });
+      const { c, packs } = container(3.1905);
+      await syncPaymentFxJob(c);
+      expect(packs.updateFxRates).not.toHaveBeenCalled();
+    }
+  });
+
+  it('measures a jump against a pinned manual rate, so pinning lets a real move back in', async () => {
+    feeds({ 'api.coinbase.com': { status: 200, body: COINBASE('3.40') } });
+    // Stored feed 3.1905 (6.6% away) but the admin pinned 3.38 (0.6% away).
+    const { c, packs } = container(3.1905, 3.38);
+    await syncPaymentFxJob(c);
+    expect(packs.updateFxRates.mock.calls[0][0][0]).toMatchObject({
+      rate: 3.4,
+      source: 'coinbase',
+    });
+    expect(alertOps).not.toHaveBeenCalled();
   });
 
   it('keeps the last rate when every feed fails', async () => {
