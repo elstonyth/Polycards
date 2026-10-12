@@ -645,8 +645,9 @@ export default function WithdrawForm({
                       value={account.id}
                       disabled={!isUsable(account, now)}
                     >
-                      {account.bankName} ···· {account.accountNumber.slice(-4)}{' '}
-                      — {account.accountHolderName}
+                      {account.bankName} ···· {account.accountNumber.slice(-4)}
+                      {/* A wallet has no holder (its network name is stored). */}
+                      {!account.wallet && ` — ${account.accountHolderName}`}
                       {reason ? ` (${reason})` : ''}
                     </option>
                   );
@@ -700,13 +701,13 @@ export default function WithdrawForm({
               data-testid="withdraw-regional-estimate"
             >
               <div className="flex items-center justify-between text-neutral-400">
-                <span>Your bank receives</span>
+                <span>{rail.ui.payee} receives</span>
                 <span className="font-semibold text-white">
                   {rail.ui.money(payoutRegional)}
                 </span>
               </div>
               <p className="mt-1 text-right text-[11px] text-neutral-400">
-                {rail.ui.symbol}1 = RM {rail.rate.payout.toFixed(4)} · rate
+                {rail.ui.unit} = RM {rail.rate.payout.toFixed(4)} · rate
                 locked when you confirm
               </p>
             </div>

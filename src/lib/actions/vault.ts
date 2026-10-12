@@ -284,13 +284,13 @@ export async function getRegionalPayer(
 export async function startDeposit(
   amount: number,
   paymentMethodCode: string = DEFAULT_DEPOSIT_METHOD,
-  /** A regional top-up (Singapore): `amount` is then in `currency`, and the
+  /** A regional top-up (SGD, USDT): `amount` is then in `currency`, and the
    *  backend quotes the RM credit. `quotedRate` is the rate the sheet
    *  showed, which the backend refuses once it has moved. `payerName` is the
    *  name on the PAYING account, which A3Pay matches the transfer against:
-   *  always sent by the sheet (getRegionalPayer: the saved account's holder,
-   *  changeable, or what the customer typed); without it the backend uses the
-   *  saved account's holder. */
+   *  always sent by the sheet for such a rail (getRegionalPayer: the saved
+   *  account's holder, changeable, or what the customer typed); without it
+   *  the backend uses the saved account's holder. */
   regional?: { currency: unknown; quotedRate?: unknown; payerName?: unknown },
 ): Promise<StartDepositResult> {
   // Validate at the boundary — a server action is a public endpoint.
@@ -370,6 +370,9 @@ export type WithdrawBank = {
   accountLengths?: number[];
   accountPattern?: string;
   accountHint?: string;
+  /** A USDT wallet: the "account number" is an address on this chain
+   *  ('tron', 'evm', or one this build does not know yet). */
+  wallet?: string;
 };
 
 export type WithdrawBanksResult =
@@ -414,6 +417,8 @@ export type SavedBankAccount = {
   /** Why it is unavailable (e.g. invalid account details or paused Touch 'n Go);
    *  absent = the provider cannot pay to it. */
   unavailableReason?: string | null;
+  /** A USDT wallet's chain; absent for a bank account. */
+  wallet?: string;
   /** The currency the bank is paid in; absent = RM. */
   currency?: string;
 };

@@ -1,6 +1,5 @@
 import type { FlagCountry } from '@/components/ui/country-flag';
-import type { DepositMethodCode } from '@/lib/deposit-methods';
-import { sgd, sgd0 } from '@/lib/format';
+import { sgd, sgd0, usdt, usdt0 } from '@/lib/format';
 import type { RegionalRail } from '@/lib/payment-limits';
 
 /**
@@ -16,6 +15,8 @@ export type RegionalRailUi = {
   /** The country flag on the picker row, so nobody pays in a currency
    *  their bank cannot send by mistake. */
   flag: FlagCountry;
+  /** One unit, as the rate line reads it ("S$1 = RM 3.09"). */
+  unit: string;
   name: string;
   /** The group its banks sit under in the bank pickers ("Singapore"). */
   country: string;
@@ -24,7 +25,7 @@ export type RegionalRailUi = {
   presets: readonly number[];
   defaultAmount: string;
   /** The gateway channels, in the codes the backend allow-lists for it. */
-  methods: readonly { code: DepositMethodCode; label: string; hint: string }[];
+  methods: readonly { code: string; label: string; hint: string }[];
   /** Does the gateway match the transfer against the payer's account name?
    *  The sheet then asks for it, unless a saved account settles it. */
   needsPayerName: boolean;
@@ -32,6 +33,8 @@ export type RegionalRailUi = {
   money0: (n: number) => string;
   /** Subject of the payout band message ("Singapore payouts"). */
   payoutNoun: string;
+  /** Who the withdraw estimate says is paid ("Your bank"). */
+  payee: string;
 };
 
 export const REGIONAL_RAILS: Readonly<Record<string, RegionalRailUi>> = {
@@ -41,6 +44,7 @@ export const REGIONAL_RAILS: Readonly<Record<string, RegionalRailUi>> = {
   SGD: {
     symbol: 'S$',
     flag: 'SG',
+    unit: 'S$1',
     name: 'Singapore Dollar',
     country: 'Singapore',
     hint: 'PayNow QR · bank transfer',
@@ -58,6 +62,34 @@ export const REGIONAL_RAILS: Readonly<Record<string, RegionalRailUi>> = {
     money: sgd,
     money0: sgd0,
     payoutNoun: 'Singapore payouts',
+    payee: 'Your bank',
+  },
+  // USDT (GlobePay365): the two chains it takes, in the codes the backend
+  // allow-lists for that gateway (UTRC / UERC).
+  USDT: {
+    symbol: 'USDT',
+    // No country: Tether's own mark, so the picker still reads at a glance.
+    flag: 'USDT',
+    unit: '1 USDT',
+    name: 'Tether',
+    country: 'USDT',
+    hint: 'TRC20 · ERC20',
+    presets: [20, 50, 100, 300],
+    defaultAmount: '50',
+    // GlobePay365 does not match USDT transfers against a payer name.
+    needsPayerName: false,
+    methods: [
+      {
+        code: 'UTRC',
+        label: 'USDT · TRC20',
+        hint: 'Tron network — low fees',
+      },
+      { code: 'UERC', label: 'USDT · ERC20', hint: 'Ethereum network' },
+    ],
+    money: usdt,
+    money0: usdt0,
+    payoutNoun: 'USDT payouts',
+    payee: 'Your wallet',
   },
 };
 

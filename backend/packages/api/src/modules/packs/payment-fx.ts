@@ -31,8 +31,8 @@ export function paymentFxPair(currency: string): string {
 /**
  * Per regional currency: where its mid rate comes from and the sane band an
  * admin's manual rate must sit in (RM per 1 unit). A currency with no `url`
- * is priced by an admin manual rate only (e.g. USDT, which the ECB feed does
- * not carry). Adding a rail = one entry here + its gateway in gateway.ts.
+ * is priced by an admin manual rate only. Adding a rail = one entry here +
+ * its gateway in gateway.ts.
  */
 export const PAYMENT_FX_FEEDS: Record<
   string,
@@ -40,6 +40,9 @@ export const PAYMENT_FX_FEEDS: Record<
     url?: string;
     /** Tried when `url` fails or answers outside the band. */
     fallbackUrl?: string;
+    /** The currency the fallback quotes FROM when it prices this one by
+     *  proxy (USDT by USD). The feed must still say so, or it is refused. */
+    fallbackQuotes?: string;
     min: number;
     max: number;
     unit: string;
@@ -55,6 +58,20 @@ export const PAYMENT_FX_FEEDS: Record<
     min: 1,
     max: 10,
     unit: 'S$1',
+  },
+  // Coinbase quotes USDT itself, hourly. When it fails, USD->MYR (ECB) is the
+  // proxy: USDT tracks the dollar, and the admin fee covers the gap. A manual
+  // rate (which never ages out) overrides both if USDT ever trades off its
+  // peg.
+  USDT: {
+    url:
+      process.env.FX_USDT_MYR_URL ??
+      'https://api.coinbase.com/v2/exchange-rates?currency=USDT',
+    fallbackUrl: 'https://api.frankfurter.dev/v1/latest?from=USD&to=MYR',
+    fallbackQuotes: 'USD',
+    min: 2,
+    max: 8,
+    unit: '1 USDT',
   },
 };
 
@@ -337,7 +354,8 @@ export function toLedgerAmount(row: RowFx, reported: number): number {
  * (nudgedDeposit), so the customer is credited for every cent they send. A
  * CALLBACK inside this window settles at exactly the row's locked RM credit
  * (a row the re-lock missed keeps its original credit); anything outside it
- * is left to the amount fence (and the sweep's requery).
+ * is left to the amount fence (and the sweep's requery). A gateway may set
+ * its own window (GATEWAYS[id].payinNudgeCents); this is the default.
  */
 export const PAYIN_NUDGE_CENTS = 10;
 
@@ -349,10 +367,11 @@ export const PAYIN_NUDGE_CENTS = 10;
 export function nudgedDeposit(
   lock: { gatewayAmount: number; mid: number; markup: number },
   actual: number,
+  windowCents: number = PAYIN_NUDGE_CENTS,
 ): { gatewayAmount: number; credit: number } | null {
   if (!Number.isFinite(actual) || actual <= 0) return null;
   const moved = cents(actual) - cents(lock.gatewayAmount);
-  if (moved === 0 || Math.abs(moved) > PAYIN_NUDGE_CENTS) return null;
+  if (moved === 0 || Math.abs(moved) > windowCents) return null;
   const gatewayAmount = cents(actual) / 100;
   return {
     gatewayAmount,
@@ -367,7 +386,11 @@ export function nudgedDeposit(
  * reported payment is the locked amount or a small upward nudge of it, else
  * the proportional conversion (which the callback fence then compares).
  */
-export function callbackLedgerAmount(row: RowFx, reported: number): number {
+export function callbackLedgerAmount(
+  row: RowFx,
+  reported: number,
+  windowCents: number = PAYIN_NUDGE_CENTS,
+): number {
   const gateway = Number(row.gatewayAmount);
   if (
     row.gatewayAmount != null &&
@@ -376,7 +399,7 @@ export function callbackLedgerAmount(row: RowFx, reported: number): number {
     Number.isFinite(reported)
   ) {
     const over = cents(reported) - cents(gateway);
-    if (over >= 0 && over <= PAYIN_NUDGE_CENTS) {
+    if (over >= 0 && over <= windowCents) {
       return cents(Number(row.ledgerAmount)) / 100;
     }
   }

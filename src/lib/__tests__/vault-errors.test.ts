@@ -182,20 +182,25 @@ describe('VAULT_RULES backend-message contract', () => {
     for (const msg of literals) expect(map(msg)).toBe(msg);
   });
 
-  it('passes regional-rail refusals through — never the wrong "amount" copy', () => {
+  it('passes regional-rail and wallet refusals through — never the wrong "amount" copy', () => {
     // The literal backend strings (gateway-deposit.ts, gateway-withdrawal.ts,
     // payment-fx.ts, the deposit route). The first one carries the word
     // "amount", which the broad /amount/ rule would rewrite.
     const literals = [
       'The exchange rate just changed. Check the new amount and try again.',
       'Withdrawals to this bank must come to between SGD 30 and SGD 10,000 (RM 90 is SGD 28.03).',
+      'Withdrawals to this bank must come to between USDT 10 and USDT 5,000 (RM 40 is USDT 8.88).',
       'Withdrawals to this bank are temporarily unavailable on our side — nothing was taken from your balance. Your bank details are fine. Please try again later.',
       'SGD payments are paused right now — please try again shortly.',
+      'USDT payments are paused right now — please try again shortly.',
       'SGD top-ups are not available right now.',
       'Enter the name on the bank account you are paying from.',
       // The pending-cap refusal (gateway-deposit.ts): fell to the generic
       // "Something went wrong" and hid why every retry failed.
       'You have several top-ups still waiting for payment. Finish one, or wait a few minutes before starting another.',
+      'USDT top-ups are not available right now.',
+      'That is not a valid TRC20 (Tron) address. Copy it exactly from your wallet: it starts with T and is 34 characters long.',
+      'That is not a valid ERC20 (Ethereum) address. Copy it exactly from your wallet: it starts with 0x, and capital letters matter.',
     ];
     for (const msg of literals) expect(map(msg)).toBe(msg);
   });

@@ -38,6 +38,9 @@ export const rmNbsp = (n: number) =>
 /** Singapore dollars — what an A3Pay customer pays or receives. */
 export const sgd = (n: number) => money(n, { prefix: 'S$' });
 export const sgd0 = (n: number) => money(n, { prefix: 'S$', decimals: 0 });
+/** Tether — what a GlobePay365 customer pays or receives. */
+export const usdt = (n: number) => money(n, { prefix: 'USDT ' });
+export const usdt0 = (n: number) => money(n, { prefix: 'USDT ', decimals: 0 });
 
 // Affordability compared in integer sen, never raw floats: a fractional pack
 // price times a reel/qty count (e.g. 1.1 * 3 === 3.3000000000000003) can read

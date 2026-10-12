@@ -246,13 +246,23 @@ export async function POST(
     );
   }
   const bankCode = bank.id;
-  const accountNumber = body.account_number as string;
+  // An EVM address is the same wallet in any letter case (the case is only
+  // its checksum, checked above), so it is stored in one case: otherwise the
+  // checksummed and lowercase copies save as two accounts.
+  const accountNumber =
+    bank.wallet === 'evm'
+      ? (body.account_number as string).toLowerCase()
+      : (body.account_number as string);
   const account: SavedBankAccount = {
     id: savedBankAccountId(bankCode, accountNumber),
     bankCode,
     bankName: bank.name,
     accountNumber,
-    accountHolderName: (body.account_holder_name as string).trim(),
+    // A wallet has no holder (withdrawalDetailsError skips it); its network
+    // name stands in, so the saved list and the admin queue still read.
+    accountHolderName: bank.wallet
+      ? bank.name
+      : (body.account_holder_name as string).trim(),
     savedAt: new Date().toISOString(),
   };
 

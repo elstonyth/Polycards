@@ -1,65 +1,99 @@
 import { ExecArgs } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import {
-  a3payConfigFromEnv,
+  A3PAY_FAMILY,
+  A3PAY_NOT_FOUND,
+  A3payError,
+  a3payFamilyConfigFromEnv,
   checkAccBalance,
+  getPayinDetail,
+  getPayoutDetail,
   getSupportedBankList,
   type A3payConfig,
+  type A3payKind,
 } from '../modules/packs/a3pay-client';
 import syncPaymentFxJob from '../jobs/sync-payment-fx';
 
 /**
- * A3Pay (SGD) preflight. Run from packages/api after A3Pay has registered our
- * public key and whitelisted the egress IPs:
+ * Preflight for a tenant of the A3Pay platform — A3Pay (SGD, the default) or
+ * GlobePay365 (USDT). Run from packages/api after the gateway has registered
+ * our public key and whitelisted the egress IPs:
  *
- *   ./node_modules/.bin/medusa exec src/scripts/check-a3pay.ts
+ *   ./node_modules/.bin/medusa exec src/scripts/check-a3pay.ts [a3pay|gp365]
  *
- * 1. Refreshes the SGD->MYR feed rate (the same job that runs hourly), so
- *    SGD payments are not paused waiting for the first tick.
+ * 1. Refreshes the feed rates (the same job that runs hourly), so the rail
+ *    is not paused waiting for the first tick.
  * 2. CheckAccBalance — one read-only call. Success proves the base URL, the
- *    AES key, the MID and the IP whitelist. NOT our private key: A3Pay ignores
- *    the signature on read calls (a3pay-client.ts), so a bad
+ *    AES key, the MID and the IP whitelist. On A3Pay NOT our private key: it
+ *    ignores the signature on read calls (a3pay-client.ts), so a bad
  *    A3PAY_MERCHANT_PRIVATE_KEY only shows on the first SubmitPayout.
+ *    GlobePay365 answered reads 403 until our public key was registered
+ *    (staging, 2026-10-14), so there it does cover the key.
  * 3. GetSupportedBankList — their live payout bank codes, to compare with
- *    SG_BANKS in banks.ts.
+ *    SG_BANKS / USDT_WALLETS in banks.ts.
+ * 4. GetPayinDetail / GetPayoutDetail for a reference that cannot exist: the
+ *    answer must read as not-found (A3PAY_NOT_FOUND), because that answer is
+ *    what lets the sweeps write off a stale deposit or refund a payout.
  *
  * Never prints a key.
  */
-export default async function checkA3pay({ container }: ExecArgs) {
+export default async function checkA3pay({ container, args }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
+  const kind = (args?.[0] ?? 'a3pay') as A3payKind;
+  if (!Object.hasOwn(A3PAY_FAMILY, kind)) {
+    logger.error(`[check-a3pay] unknown gateway "${kind}" (a3pay | gp365)`);
+    return;
+  }
+  const tag = `[check-${kind}]`;
 
   await syncPaymentFxJob(container);
 
   let config: A3payConfig;
   try {
-    config = a3payConfigFromEnv();
+    config = a3payFamilyConfigFromEnv(kind);
   } catch (error) {
-    logger.error(`[check-a3pay] ${(error as Error).message}`);
+    logger.error(`${tag} ${(error as Error).message}`);
     return;
   }
   logger.info(
-    `[check-a3pay] base ${config.baseUrl}, MID ${config.merchantCode}, currency ${config.currencyCode}`,
+    `${tag} base ${config.baseUrl}, MID ${config.merchantCode}, currency ${config.currencyCode}`,
   );
 
   try {
     const b = await checkAccBalance(config);
     logger.info(
-      `[check-a3pay] CheckAccBalance OK — current ${b.currCode} ${b.currentBalanceAmount}, available ${b.availableBalanceAmount}`,
+      `${tag} CheckAccBalance OK — current ${b.currCode} ${b.currentBalanceAmount}, available ${b.availableBalanceAmount}`,
     );
   } catch (error) {
-    logger.error(
-      `[check-a3pay] CheckAccBalance FAILED: ${(error as Error).message}`,
-    );
+    logger.error(`${tag} CheckAccBalance FAILED: ${(error as Error).message}`);
   }
 
   try {
     const banks = await getSupportedBankList(config);
     logger.info(
-      `[check-a3pay] ${banks.length} payout banks: ${banks.map((b) => b.bankCode).join(', ')}`,
+      `${tag} ${banks.length} payout banks: ${banks.map((b) => b.bankCode).join(', ')}`,
     );
   } catch (error) {
     logger.error(
-      `[check-a3pay] GetSupportedBankList FAILED: ${(error as Error).message}`,
+      `${tag} GetSupportedBankList FAILED: ${(error as Error).message}`,
     );
+  }
+
+  const probe = `PROBE-NOTFOUND-${Date.now()}`;
+  for (const [name, read] of [
+    ['GetPayinDetail', getPayinDetail],
+    ['GetPayoutDetail', getPayoutDetail],
+  ] as const) {
+    try {
+      await read(probe, config);
+      logger.error(`${tag} ${name} FOUND ${probe} — investigate`);
+    } catch (error) {
+      const notFound =
+        error instanceof A3payError && error.has(A3PAY_NOT_FOUND);
+      (notFound ? logger.info : logger.error).call(
+        logger,
+        `${tag} ${name} unknown ref: ${notFound ? 'reads as not-found (OK)' : 'does NOT read as not-found'} — ${(error as Error).message}`,
+      );
+    }
   }
 }

@@ -8,7 +8,7 @@ import {
   resolveWithdrawalDestination,
   sharedAccountCheckApplies,
 } from './saved-accounts';
-import { findBank } from './banks';
+import { findBank, walletAddressValid } from './banks';
 import {
   channelStatus,
   destinationMinRm,
@@ -359,7 +359,9 @@ function looksLikeCardNumber(digits: string): boolean {
 }
 
 /** Bank account fields, validated at the boundary. Their API gives no field
- * length errors a customer could act on, so sanity-check here. */
+ * length errors a customer could act on, so sanity-check here. A USDT wallet
+ * (banks.ts `wallet`) is an address in its chain's format and has no holder
+ * name: the gateway is sent the customer id in its place. */
 export function withdrawalDetailsError(input: {
   bankCode?: unknown;
   accountNumber?: unknown;
@@ -376,6 +378,15 @@ export function withdrawalDetailsError(input: {
     return `Withdrawals to ${bank.name} are unavailable. Choose another bank.`;
   }
   const accountNumber = input.accountNumber;
+  const wallet = findBank(bankCode)?.wallet;
+  if (wallet) {
+    return typeof accountNumber === 'string' &&
+      walletAddressValid(wallet, accountNumber)
+      ? null
+      : wallet === 'tron'
+        ? 'That is not a valid TRC20 (Tron) address. Copy it exactly from your wallet: it starts with T and is 34 characters long.'
+        : 'That is not a valid ERC20 (Ethereum) address. Copy it exactly from your wallet: it starts with 0x, and capital letters matter.';
+  }
   if (
     typeof accountNumber !== 'string' ||
     !/^[0-9]{5,34}$/.test(accountNumber)

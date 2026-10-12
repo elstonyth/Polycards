@@ -299,6 +299,18 @@ describe('nudgedDeposit — credit what A3Pay actually asks the customer for', (
     });
   });
 
+  it("a gateway's own wider window re-locks a larger tail (GlobePay365: 1 USDT)", () => {
+    expect(nudgedDeposit(lock, 50.37)).toBeNull();
+    expect(nudgedDeposit(lock, 50.37, 100)).toEqual({
+      gatewayAmount: 50.37,
+      credit: 155.66,
+    });
+    expect(nudgedDeposit(lock, 51.01, 100)).toBeNull();
+    expect(
+      callbackLedgerAmount({ ledgerAmount: 154.52, gatewayAmount: 50 }, 50.37, 100),
+    ).toBe(154.52);
+  });
+
   it('keeps the lock for no change, a non-number, or more than a nudge', () => {
     expect(nudgedDeposit(lock, 50)).toBeNull();
     expect(nudgedDeposit(lock, Number.NaN)).toBeNull();

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { keccak_256 } from '@noble/hashes/sha3';
 import type { PaymentGateway } from './gateway';
 import { isTgpayKind, tgpayEnvName } from './tgpay-client';
 
@@ -54,7 +56,15 @@ export type Bank = {
    * debit. Unset = always on.
    */
   payoutSwitch?: string;
+  /**
+   * A crypto wallet, not a bank: the "account number" is a wallet address in
+   * this chain's format (walletAddressValid), and there is no holder name —
+   * the gateway takes the customer id in its place.
+   */
+  wallet?: WalletChain;
 };
+
+export type WalletChain = 'tron' | 'evm';
 
 const bank = (
   id: string,
@@ -182,6 +192,88 @@ export const SG_BANKS: readonly Bank[] = [
   },
 ];
 
+/**
+ * USDT payout wallets, paid through GlobePay365 (USDT). Their payout codes
+ * from the API doc (2026-10-12): USDTTRC for a TRC20 wallet, USDTERC for an
+ * ERC20 one; the account number is the wallet address. Registered by
+ * canonical id only, like the Singapore banks.
+ */
+const usdtWallet = (
+  id: string,
+  name: string,
+  code: string,
+  gp365Name: string,
+  wallet: WalletChain,
+): Bank => ({
+  id,
+  name,
+  codes: { gp365: { code, name: gp365Name } },
+  legacyAliases: [],
+  wallet,
+  // One fixed address length per chain. The shape here is only the form's
+  // first check; walletAddressValid (checksums) is the real gate.
+  ...(wallet === 'tron'
+    ? {
+        accountLengths: [34],
+        accountPattern: '^T[1-9A-HJ-NP-Za-km-z]{33}$',
+        accountHint: 'Paste your TRC20 (Tron) address: it starts with T and is 34 characters long.',
+      }
+    : {
+        accountLengths: [42],
+        accountPattern: '^0x[0-9a-fA-F]{40}$',
+        accountHint: 'Paste your ERC20 (Ethereum) address: it starts with 0x and is 42 characters long.',
+      }),
+});
+
+export const USDT_WALLETS: readonly Bank[] = [
+  usdtWallet('USDTTRC20', 'USDT · TRC20 (Tron)', 'USDTTRC', 'USDT-TRC20', 'tron'),
+  usdtWallet('USDTERC20', 'USDT · ERC20 (Ethereum)', 'USDTERC', 'USDT-ERC20', 'evm'),
+];
+
+const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+function base58Decode(text: string): Buffer | null {
+  let n = BigInt(0);
+  for (const ch of text) {
+    const digit = BASE58.indexOf(ch);
+    if (digit < 0) return null;
+    n = n * BigInt(58) + BigInt(digit);
+  }
+  const hex = n.toString(16);
+  const body = n === BigInt(0) ? Buffer.alloc(0) : Buffer.from(hex.length % 2 ? `0${hex}` : hex, 'hex');
+  const zeros = /^1*/.exec(text)?.[0].length ?? 0;
+  return Buffer.concat([Buffer.alloc(zeros), body]);
+}
+
+const sha256 = (data: Buffer): Buffer => createHash('sha256').update(data).digest();
+
+/**
+ * Is this a well-formed address on the chain? A payout to a mistyped address
+ * cannot be recalled, so the checksum is verified where the chain has one:
+ *   - Tron: base58check (0x41 + 20 bytes + 4 checksum bytes).
+ *   - EVM: EIP-55 — the case of each letter encodes keccak-256 of the
+ *     lowercase address, so a mixed-case address with a typo fails. An
+ *     address in ONE case carries no checksum (EIP-55 says so; some wallets
+ *     show it that way) and is accepted on shape alone.
+ */
+export function walletAddressValid(chain: WalletChain, address: string): boolean {
+  if (chain === 'evm') {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return false;
+    const hex = address.slice(2);
+    if (hex === hex.toLowerCase() || hex === hex.toUpperCase()) return true;
+    const hash = Buffer.from(keccak_256(hex.toLowerCase())).toString('hex');
+    return [...hex].every(
+      (ch, i) =>
+        /[0-9]/.test(ch) ||
+        (parseInt(hash[i], 16) >= 8) === (ch === ch.toUpperCase()),
+    );
+  }
+  if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(address)) return false;
+  const raw = base58Decode(address);
+  if (!raw || raw.length !== 25 || raw[0] !== 0x41) return false;
+  return sha256(sha256(raw.subarray(0, 21))).subarray(0, 4).equals(raw.subarray(21));
+}
+
 /** The TGPay platform's sandbox (TGPay, The 7 Pay) accepts only this pair; it
  *  is a bank nowhere else. */
 export const TGPAY_SANDBOX_BANK: Bank = bank(
@@ -222,7 +314,7 @@ for (const b of [...MY_BANKS, TGPAY_SANDBOX_BANK]) {
 // hand or by an older client could plausibly carry; registering them as
 // aliases would silently re-home that account to Singapore. The adapter maps
 // id -> A3Pay code through gatewayBankCode, which needs no alias.
-for (const b of SG_BANKS) byAlias.set(b.id.toUpperCase(), b);
+for (const b of [...SG_BANKS, ...USDT_WALLETS]) byAlias.set(b.id.toUpperCase(), b);
 
 /** Resolve a canonical id OR any gateway's code to the bank. Null if unknown. */
 export function findBank(alias: string | null | undefined): Bank | null {
@@ -273,7 +365,7 @@ export function banksFor(
   options: { sandbox?: boolean; env?: Partial<Record<string, string>> } = {},
 ): { bankCode: string; bankName: string }[] {
   const env = options.env ?? process.env;
-  const list = [...MY_BANKS, ...SG_BANKS]
+  const list = [...MY_BANKS, ...SG_BANKS, ...USDT_WALLETS]
     .filter((b) => b.codes[gateway] && !payoutUnavailable(b, env))
     .map((b) => ({ bankCode: b.id, bankName: b.name }));
   if (

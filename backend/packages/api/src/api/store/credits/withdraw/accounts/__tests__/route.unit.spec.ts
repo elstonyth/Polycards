@@ -355,6 +355,45 @@ describe('POST /store/credits/withdraw/accounts', () => {
     expect(updateCustomers).not.toHaveBeenCalled();
   });
 
+  it('saves a USDT wallet with no holder; an ERC20 address in either case is ONE account', async () => {
+    const checksummed = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+    await POST(
+      mkReq({ bank_code: 'USDTERC20', account_number: checksummed }),
+      mkRes(),
+    );
+    const [saved] = updateCustomers.mock.calls[0][1].metadata.bank_accounts;
+    expect(saved).toMatchObject({
+      bankCode: 'USDTERC20',
+      accountNumber: checksummed.toLowerCase(),
+      accountHolderName: 'USDT · ERC20 (Ethereum)',
+    });
+    retrieveCustomer.mockResolvedValue({
+      metadata: { bank_accounts: [saved] },
+    });
+    await POST(
+      mkReq({
+        bank_code: 'USDTERC20',
+        account_number: checksummed.toLowerCase(),
+      }),
+      mkRes(),
+    );
+    expect(
+      updateCustomers.mock.calls[1][1].metadata.bank_accounts,
+    ).toHaveLength(1);
+  });
+
+  it('refuses a mistyped wallet address with the reason', async () => {
+    await expect(
+      POST(
+        mkReq({
+          bank_code: 'USDTERC20',
+          account_number: '0xdAC17F958D2ee523a2206206994597C13D831ec8',
+        }),
+        mkRes(),
+      ),
+    ).rejects.toThrow(/not a valid ERC20/);
+  });
+
   it('re-adding the same bank+number updates in place, no duplicate', async () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [savedShape()] },

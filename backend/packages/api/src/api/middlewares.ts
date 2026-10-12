@@ -126,6 +126,11 @@ const tgpayCallbackAllowlist = createTgpayCallbackAllowlist('tgpay');
 const the7payCallbackAllowlist = createTgpayCallbackAllowlist('the7pay');
 // A3Pay's (SGD) source allowlist — same position, same reasoning.
 const a3payCallbackAllowlist = createA3payCallbackAllowlist();
+// GlobePay365's (USDT) — the same platform as A3Pay, its own address list.
+const gp365CallbackAllowlist = createA3payCallbackAllowlist(
+  process.env,
+  'gp365',
+);
 // Open the phone-OTP send budget's Redis connection at boot, like the
 // limiters above, not on the first code request: that store fails CLOSED in
 // production, so a connection still opening refused every fresh instance's
@@ -362,6 +367,13 @@ export default defineMiddlewares({
       matcher: '/hooks/a3pay/*',
       method: 'POST',
       middlewares: [gatewayHookRateLimit, a3payCallbackAllowlist],
+    },
+    {
+      // GlobePay365 (USDT) callbacks (src/api/hooks/gp365/*): A3Pay's
+      // platform and handlers, so the same exposure and the same reasoning.
+      matcher: '/hooks/gp365/*',
+      method: 'POST',
+      middlewares: [gatewayHookRateLimit, gp365CallbackAllowlist],
     },
     {
       // Desk reports (spec 2026-09-29-desk-reports-design.md): read-only

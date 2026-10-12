@@ -402,7 +402,7 @@ async function depositLegs(admin, cust) {
 
 async function payoutLegs(admin, cust) {
   // ---- 9. Withdrawal to a Singapore bank
-  await setFx(admin, 0.01, 'a3pay e2e: back to base');
+  await setFx(admin, 0.3125, 'a3pay e2e: back to base');
   const acct = await call('POST', '/store/credits/withdraw/accounts', {
     token: cust,
     body: {
@@ -521,7 +521,8 @@ async function payoutLegs(admin, cust) {
   const heldId = sql(
     `select id from gateway_withdrawal where merchant_transaction_id='${w3.json.merchantTransactionId}'`,
   );
-  await setFx(admin, 0.3, 'a3pay e2e: markup raised before approval');
+  // 9.375% of 3.20 is RM 0.30.
+  await setFx(admin, 9.375, 'a3pay e2e: fee raised before approval');
   const approve = await call(
     'POST',
     `/admin/payments/withdrawals/${heldId}/approve`,
@@ -554,7 +555,7 @@ async function payoutLegs(admin, cust) {
       rw3.join('|'),
     );
   }
-  await setFx(admin, 0.01, 'a3pay e2e: back to base');
+  await setFx(admin, 0.3125, 'a3pay e2e: back to base');
 }
 
 async function earningsLeg(admin) {
