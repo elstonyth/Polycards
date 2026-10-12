@@ -124,13 +124,14 @@ describe('TopUpSheet — choose a currency first', () => {
     expect(container.textContent).not.toContain('Choose a currency');
   });
 
-  it('choosing S$ shows only the S$ form, and Change goes back to the list', async () => {
+  it('choosing S$ shows only the S$ form (no name to type), and Change goes back to the list', async () => {
     await mount(WITH_SGD);
     await act(async () => button('Singapore Dollar')!.click());
     expect(amountInput()?.getAttribute('aria-label')).toBe(
       'Top-up amount in S$',
     );
-    expect(container.textContent).toContain('Name on your bank account');
+    // The payer name comes from the account (saved bank, else real name).
+    expect(container.textContent).not.toContain('Name on your bank account');
     expect(container.textContent).toContain('PayNow QR');
     await act(async () => button('Change')!.click());
     expect(container.textContent).toContain('Choose a currency');
@@ -140,20 +141,9 @@ describe('TopUpSheet — choose a currency first', () => {
   it('pays in S$ with the rate it showed, so the backend can refuse a moved one', async () => {
     await mount(WITH_SGD);
     await act(async () => button('Singapore Dollar')!.click());
-    const payer = container.querySelector<HTMLInputElement>(
-      'input[autocomplete="name"]',
-    )!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(
-        HTMLInputElement.prototype,
-        'value',
-      )!.set!.call(payer, 'Tan Ah Kow');
-      payer.dispatchEvent(new Event('input', { bubbles: true }));
-    });
     await act(async () => button('Pay')!.click());
     expect(startDeposit).toHaveBeenCalledWith(100, 'BQR', {
       currency: 'SGD',
-      payerName: 'Tan Ah Kow',
       quotedRate: 3.1405,
     });
     // The refusal re-reads the rails, so a moved rate shows before a retry.

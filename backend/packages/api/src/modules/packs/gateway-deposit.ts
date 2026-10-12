@@ -26,6 +26,40 @@ import { notifyFeed } from './notify-feed';
 import { topupFeedKey } from './feed-events';
 import type { DEPOSIT_STATUSES } from './models/gateway-deposit';
 import { gatewayEnv } from './gateway-env';
+import { alertOps } from './ops-alert';
+import { PAYIN_STATUS } from './a3pay';
+
+/**
+ * An A3Pay payin at status 4 (Verify Fail): A3Pay could not match the payment
+ * to the payer we named (it compares the account name). Not final, so nothing
+ * changes on the row — but the customer may well have paid, so a human must
+ * look. Once per deposit per 6 hours (callback retries and the 1-minute sweep
+ * both report it).
+ */
+export function alertPayinVerifyFail(
+  scope: { resolve: <T>(key: string) => T },
+  deposit: {
+    merchant_transaction_id: string;
+    customer_id: string;
+    gateway?: string | null;
+  },
+): void {
+  const gateway = rowGateway(deposit);
+  void alertOps(
+    scope,
+    `payin-verify-fail:${deposit.merchant_transaction_id}`,
+    `${gateway ? GATEWAYS[gateway].label : 'The gateway'} reports Verify Fail (status 4) on deposit ${deposit.merchant_transaction_id} (customer ${deposit.customer_id}) — the payer name or amount did not match, e.g. paid from an account in another name. Check their back office; if the money arrived, settle it by hand.`,
+    { muteMs: 6 * 60 * 60 * 1000 },
+  );
+}
+
+/** Payin status 4 from A3Pay (TGPay has no such status). */
+export function isPayinVerifyFail(
+  gateway: string | null | undefined,
+  statusId: unknown,
+): boolean {
+  return gateway === 'a3pay' && Number(statusId) === PAYIN_STATUS.VERIFY_FAIL;
+}
 
 /** The gateway_deposit.status domain, from the model. */
 type DepositStatus = (typeof DEPOSIT_STATUSES)[number];
@@ -314,7 +348,7 @@ export async function startDeposit(
   if (regional && (payerName.length < 2 || payerName.length > 120)) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      'Enter the name on the bank account you are paying from.',
+      'Add your real name in Settings (or save your bank account under Bank accounts) before topping up in this currency.',
     );
   }
 

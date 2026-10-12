@@ -19,8 +19,6 @@ export type RegionalRailUi = {
   defaultAmount: string;
   /** The gateway channels, in the codes the backend allow-lists for it. */
   methods: readonly { code: DepositMethodCode; label: string; hint: string }[];
-  /** Does the gateway match the transfer against the payer's account name? */
-  needsPayerName: boolean;
   money: (n: number) => string;
   money0: (n: number) => string;
   /** Subject of the payout band message ("Singapore payouts"). */
@@ -45,7 +43,6 @@ export const REGIONAL_RAILS: Readonly<Record<string, RegionalRailUi>> = {
       },
       { code: 'OB', label: 'Bank transfer', hint: 'DBS, OCBC, UOB + more' },
     ],
-    needsPayerName: true,
     money: sgd,
     money0: sgd0,
     payoutNoun: 'Singapore payouts',

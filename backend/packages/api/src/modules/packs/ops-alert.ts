@@ -166,5 +166,12 @@ export function alertOps(
   // cleared on a failed send, so the next occurrence tries again instead of
   // the window passing in silence.
   lastAlertAt.set(tag, now);
+  // Per-item tags (payin-verify-fail:<ref>) would otherwise grow this map for
+  // the life of the process. A day is longer than any mute window in use.
+  if (lastAlertAt.size > 500) {
+    for (const [key, at] of lastAlertAt) {
+      if (now - at > 24 * 60 * 60 * 1000) lastAlertAt.delete(key);
+    }
+  }
   return postOpsAlert(scope, tag, text, () => lastAlertAt.delete(tag));
 }

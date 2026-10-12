@@ -4,8 +4,10 @@ import { resolvePacks, type GatewayDeposits } from '../modules/packs/facets';
 import { rowFx } from '../modules/packs/payment-fx';
 import {
   GATEWAY_MAX_RM,
+  alertPayinVerifyFail,
   applyDepositOutcome,
   anyGatewayEnabled,
+  isPayinVerifyFail,
 } from '../modules/packs/gateway-deposit';
 import {
   getDepositDetail,
@@ -184,6 +186,9 @@ export default async function depositReconcileJob(container: MedusaContainer) {
           config,
           rowFx(deposit),
         );
+        if (isPayinVerifyFail(deposit.gateway, detail.statusId)) {
+          alertPayinVerifyFail(container, deposit);
+        }
         action = reconcileAction({
           state: detail.state,
           amount: Number(detail.amount),

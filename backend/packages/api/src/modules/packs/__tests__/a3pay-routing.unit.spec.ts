@@ -5,7 +5,10 @@ import {
   paymentGateway,
   setActiveGateway,
 } from '../gateway';
-import { regionalDepositGateway } from '../gateway-deposit';
+import {
+  isPayinVerifyFail,
+  regionalDepositGateway,
+} from '../gateway-deposit';
 import {
   payoutGatewayFor,
   regionalPayoutGateways,
@@ -76,5 +79,15 @@ describe('routing to the regional rail', () => {
     expect(GATEWAYS.a3pay.hooks.payoutVerify).toBe(
       '/hooks/a3pay/payout-verify',
     );
+  });
+});
+
+describe('Verify Fail (payin status 4)', () => {
+  it('is an A3Pay status only, read from a number or a string', () => {
+    expect(isPayinVerifyFail('a3pay', 4)).toBe(true);
+    expect(isPayinVerifyFail('a3pay', '4')).toBe(true);
+    expect(isPayinVerifyFail('a3pay', 6)).toBe(false);
+    expect(isPayinVerifyFail('tgpay', 4)).toBe(false);
+    expect(isPayinVerifyFail(null, 4)).toBe(false);
   });
 });
