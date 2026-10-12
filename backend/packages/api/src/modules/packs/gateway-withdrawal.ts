@@ -185,18 +185,22 @@ async function regionalFloatShort(
  * Does a payout refusal mean OUR float is short? TGPay says so with a platform
  * code. A3Pay only in its message text, which may also carry what the
  * customer typed, so its hint must be confirmed by a balance read before it
- * may trip the gateway-wide breaker: a customer-specific refusal that happens
- * to say "insufficient" must not close payouts for everyone.
+ * may count: a customer-specific refusal that happens to say "insufficient"
+ * must not close payouts for everyone. `trip` follows the pre-checks' rule
+ * (floatCannotPayAnything): short for THIS amount alone refuses this payout
+ * without closing the gateway.
  */
 async function floatEmptyRefusal(
   error: GatewayError,
+  gateway: PaymentGateway,
   config: GatewayConfig,
   gatewayAmount: number | null,
-): Promise<boolean> {
-  if (error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) return true;
+): Promise<{ trip: boolean } | null> {
+  if (error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) return { trip: true };
   if (!error.has(A3PAY_PAYOUT_FLOAT_EMPTY) || gatewayAmount === null)
-    return false;
-  return (await regionalFloatShort(config, gatewayAmount)) !== null;
+    return null;
+  const short = await regionalFloatShort(config, gatewayAmount);
+  return short ? { trip: floatCannotPayAnything(gateway, short) } : null;
 }
 
 /**
@@ -971,14 +975,21 @@ export async function startWithdrawal(
       // same situation for the customer, so it shares the breaker and copy;
       // only the ops alert names the different fix.
       const payoutDisabled = error.has(TGPAY_PAYOUT_DISABLED);
-      if (
-        payoutDisabled ||
-        (await floatEmptyRefusal(error, config, fx?.gatewayAmount ?? null))
-      ) {
-        payoutFloatEmptyUntil.set(
-          gateway,
-          Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
-        );
+      const floatEmpty = payoutDisabled
+        ? null
+        : await floatEmptyRefusal(
+            error,
+            gateway,
+            config,
+            fx?.gatewayAmount ?? null,
+          );
+      if (payoutDisabled || floatEmpty) {
+        if (payoutDisabled || floatEmpty?.trip) {
+          payoutFloatEmptyUntil.set(
+            gateway,
+            Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
+          );
+        }
         void (payoutDisabled ? alertPayoutDisabled : alertPayoutFloatEmpty)(
           scope,
           {
@@ -1740,17 +1751,19 @@ export async function submitHeldWithdrawal(
           `${label} refused this payout because payouts are not enabled on our ${label} account ("Payout not available"). The debit has been refunded and the withdrawal closed. Ask ${label} to enable payouts, or switch back to a gateway that pays out, then ask the customer to request the withdrawal again.`,
         );
       }
-      if (
-        await floatEmptyRefusal(
-          error,
-          config,
-          row.gateway_amount != null ? Number(row.gateway_amount) : null,
-        )
-      ) {
-        payoutFloatEmptyUntil.set(
-          gatewayId,
-          Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
-        );
+      const floatEmpty = await floatEmptyRefusal(
+        error,
+        gatewayId,
+        config,
+        row.gateway_amount != null ? Number(row.gateway_amount) : null,
+      );
+      if (floatEmpty) {
+        if (floatEmpty.trip) {
+          payoutFloatEmptyUntil.set(
+            gatewayId,
+            Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
+          );
+        }
         const label = GATEWAYS[gatewayId].label;
         void alertPayoutFloatEmpty(scope, {
           amount,

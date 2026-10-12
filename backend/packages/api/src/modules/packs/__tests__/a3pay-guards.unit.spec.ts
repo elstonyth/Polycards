@@ -297,31 +297,57 @@ describe('the payout-float breaker cannot be tripped by one customer', () => {
     expect(next.createGatewayWithdrawals).toHaveBeenCalled();
   });
 
-  it('the same refusal with the float really short does trip it', async () => {
-    submitReply = JSON.stringify({
-      isSuccess: false,
-      errorMessage: 'Insufficient balance',
-    });
-    // Enough at the pre-check, gone by the confirming re-read (another
-    // payout drained it in between).
+  /** Balance reads answer `first`, then `afterwards` for every later read.
+   *  Always wraps the test's ORIGINAL fetch mock, never a previous wrapper. */
+  const originals = new WeakMap<jest.Mock, unknown>();
+  function balanceReads(first: number, afterwards: number) {
     let reads = 0;
     const mocked = global.fetch as unknown as jest.Mock;
-    const inner = mocked.getMockImplementation() as (
+    if (!originals.has(mocked))
+      originals.set(mocked, mocked.getMockImplementation());
+    const inner = originals.get(mocked) as (
       url: string,
       init: unknown,
     ) => Promise<unknown>;
     mocked.mockImplementation(async (url: string, init: unknown) => {
       if (String(url).endsWith('CheckAccBalance')) {
-        balanceSgd = reads++ === 0 ? 10_000 : 10;
+        balanceSgd = reads++ === 0 ? first : afterwards;
       }
       return inner(url, init);
     });
+  }
+
+  it('the same refusal with the float really empty trips it for everyone', async () => {
+    submitReply = JSON.stringify({
+      isSuccess: false,
+      errorMessage: 'Insufficient balance',
+    });
+    // Enough at the pre-check, under the S$50 minimum by the confirming
+    // re-read (another payout drained it in between).
+    balanceReads(10_000, 10);
     const first = packsFor();
     await expect(go(first, 330)).rejects.toThrow(/on our side/i);
 
+    // Refilled: the pre-check would pass, so only the breaker refuses.
+    balanceReads(10_000, 10_000);
     const next = packsFor();
     await expect(go(next, 330)).rejects.toThrow(/on our side/i);
     expect(next.createGatewayWithdrawals).not.toHaveBeenCalled();
+  });
+
+  it('short for THIS amount only: refused on our side, the gateway stays open', async () => {
+    submitReply = JSON.stringify({
+      isSuccess: false,
+      errorMessage: 'Insufficient balance',
+    });
+    balanceReads(10_000, 80); // S$100 asked; S$50-80 still payable
+    const first = packsFor();
+    await expect(go(first, 330)).rejects.toThrow(/on our side/i);
+
+    balanceReads(10_000, 10_000);
+    const next = packsFor();
+    await go(next, 330).catch(() => undefined);
+    expect(next.createGatewayWithdrawals).toHaveBeenCalled();
   });
 });
 
