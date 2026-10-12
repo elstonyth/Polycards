@@ -19,6 +19,7 @@ import {
 } from '../../../../modules/packs/payment-fx';
 import { REGIONAL_CURRENCIES } from '../../../../modules/packs/gateway';
 import { reqReason } from '../../rewards-settings/validate';
+import { paymentCurrencyParam } from '../../../utils/payment-currency';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 
@@ -34,17 +35,7 @@ import type PacksModuleService from '../../../../modules/packs/service';
 
 /** The currency a call is about: ?currency= / body.currency, default SGD. */
 function currencyOf(value: unknown): string {
-  const currency =
-    typeof value === 'string' && value.trim()
-      ? value.trim().toUpperCase()
-      : 'SGD';
-  if (!REGIONAL_CURRENCIES.includes(currency)) {
-    throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      `'currency' must be one of ${REGIONAL_CURRENCIES.join(', ')}.`,
-    );
-  }
-  return currency;
+  return paymentCurrencyParam(value, REGIONAL_CURRENCIES) ?? 'SGD';
 }
 
 type Packs = Pick<PacksModuleService, 'listFxRates' | 'editPaymentFx'> &

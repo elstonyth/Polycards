@@ -17,6 +17,7 @@ import {
   gatewayUrls,
   isLedgerGateway,
   isPaymentGateway,
+  PAYMENT_CURRENCIES,
   paymentGateway,
   resolveActiveGateway,
   setActiveGateway,
@@ -44,6 +45,8 @@ function describe() {
       label: GATEWAYS[id].label,
       configured: GATEWAYS[id].configured(env),
     })),
+    // One Settlement tab each: RM, then every regional rail's currency.
+    currencies: PAYMENT_CURRENCIES,
     env_default: isPaymentGateway(env.PAYMENT_GATEWAY)
       ? env.PAYMENT_GATEWAY
       : 'tgpay',

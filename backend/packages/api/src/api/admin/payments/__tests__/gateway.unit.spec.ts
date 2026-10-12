@@ -93,6 +93,8 @@ describe('GET /admin/payments/gateway', () => {
       { id: 'tgpay', label: 'TGPay', configured: true },
       { id: 'the7pay', label: 'The 7 Pay', configured: false },
     ]);
+    // The Settlement page's tabs: RM, then each regional rail.
+    expect(h.res.body).toMatchObject({ currencies: ['MYR', 'SGD'] });
     expect(h.res.headers['Cache-Control']).toBe('no-store');
   });
 });
