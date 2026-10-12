@@ -93,7 +93,7 @@ Read from the A3Pay back office (https://backoffice.a3paysg.com, login `polycard
 - **Keys:** our public key is registered exactly as generated. The AES key matches. A3Pay's public key is RSA-1024.
 - **Back-office flags:** IP Whitelist Check **Active**, Payout Verification **Inactive**, Fund In Verification timeout 10 min. Ask A3Pay to switch Payout Verification on once `/hooks/a3pay/payout-verify` is deployed. It is a free second check on every payout.
 - **Limits and fees (Merchant Transaction Setting):**
-  - Deposit OB and BQR: S$10–5,000, **2.5% fee**.
+  - Deposit OB and BQR: S$10–5,000, **2.5% fee**. Our own top-up floor is **S$30** (an operator decision from 2026-10-12). The payout floor stays at A3Pay's S$50.
   - Payout WD: S$50–10,000, **1.5% fee**.
   - Settlement: S$1,000–10,000, S$10 flat fee.
   - `currencyLimits` uses these. The top-up band is also narrowed so the RM credit fits the RM 10,000 ceiling.
