@@ -2,8 +2,8 @@
 
 A3Pay is a **regional rail**. It runs beside the active RM gateway (TGPay) and never replaces it:
 
-- **Top-ups.** Singapore customers choose **Pay in S$** on the top-up sheet. They pay in SGD by PayNow QR (`BQR`) or bank transfer (`OB`), and are credited **RM** at today's rate minus our markup.
-- **Withdrawals.** A saved Singapore bank account (DBS, POSB, OCBC, UOB, PayNow…) is paid out through A3Pay in SGD. The rate is today's rate plus our markup. Malaysian accounts still go through the active gateway.
+- **Top-ups.** Singapore customers choose **Pay in S$** on the top-up sheet. They pay in SGD by PayNow QR (`BQR`) or bank transfer (`OB`), and are credited **RM** at today's rate minus our top-up fee (a percent).
+- **Withdrawals.** A saved Singapore bank account (DBS, POSB, OCBC, UOB, PayNow…) is paid out through A3Pay in SGD. The rate is today's rate plus our withdrawal fee (a percent). Malaysian accounts still go through the active gateway.
 - **Ledger and fences stay in RM.** The ledger, playthrough, limits and every money fence work in RM. Each SGD row **locks** its quote (`currency`, `gateway_amount`, `fx_mid`, `fx_markup`). Callbacks, the sweep, the audit job and admin approvals all convert through that lock, never through today's rate.
 - **The admin switch never offers A3Pay.** `setActiveGateway` refuses it. This prevents RM top-ups from being routed to an SGD rail.
 
@@ -15,21 +15,25 @@ Handbook: <https://api.a3paysg.com/API/a3pay_api_doc.html> (v3.3.5, SGD only). C
 - `gateway.ts`: the adapter and registry entry.
 - `api/hooks/a3pay/*`: the callback handlers.
 
-## The conversion and the markup
+## The conversion and the fee
 
 - `mid` is the SGD→MYR market rate. The `sync-payment-fx` job fetches it **every hour** (at :05) from Coinbase's public exchange-rate API, which moves through the day. If Coinbase fails or answers outside the band, the job falls back to frankfurter (ECB, once per working day). A move of more than 5% in one run is refused and ops is alerted (`fx-jump:SGD`). An admin can pin a manual rate instead.
-- **`markup` is absolute, in RM per S$1, and is taken both ways.** With mid 3.20 and markup 0.05:
-  - A top-up credits 3.15 per S$1, so S$100 becomes RM 315.00.
-  - A payout pays 3.25 per S$1, so RM 100 becomes S$30.76.
+- **The fee is a percent of the mid, set separately for each direction, behind an on/off switch** (since 2026-10-13; it replaced the absolute RM `markup`). With mid 3.19 and 0.5% each way (the operator's example):
+  - A top-up credits 3.19 × 99.5% = 3.17405 per S$1, so S$100 becomes RM 317.40.
+  - A payout costs 3.19 × 100.5% = 3.20595 per S$1, so RM 100 becomes S$31.19.
+  - **Fee off:** both directions use the bare mid. The percentages are kept, so switching the fee back on restores them.
+  - A rail whose fee was never saved (`fee_enabled` NULL) stays paused.
+  - `Migration20261013090000` backfilled the live row from the old markup (0.10 at mid 3.188752 = 3.136% each way), so prices did not move at deploy. The old `markup` column is no longer read; it stays so a rollback still prices.
+  - Each row still locks an absolute `fx_markup`: mid − top-up rate on a deposit, payout rate − mid on a payout.
 - Rounding is always down to the cent, in our favour.
 - **A3Pay nudges the amount.** It may ask the customer for a cent or so more than we requested, so same-amount transfers can be told apart (S$50 → S$50.01, seen live 2026-10-12). `startDeposit` re-locks the row to that exact amount at the same rate, so the customer is credited for every cent they pay. S$50.01 at 3.0905 credits RM 154.55, not 154.52. A move of more than 10 cents is not treated as a nudge, and the row keeps its original lock.
-- Set the rate and markup in **Admin → Settlement → S$ tab → "Exchange rate (SGD → RM)"** (every regional currency has its own tab; `GET/POST /admin/payments/fx?currency=SGD`). The same tab shows A3Pay's live S$ wallet, the S$ rows' monthly result and their audit (`/admin/payments/balance|settlement|audit?currency=SGD`):
+- Set the fee (on/off, top-up %, withdrawal %) and any manual rate in **Admin → Settlement → S$ tab → "Exchange rate (SGD → RM)"** (every regional currency has its own tab; `GET/POST /admin/payments/fx?currency=SGD`). The same tab shows A3Pay's live S$ wallet, the S$ rows' monthly result and their audit (`/admin/payments/balance|settlement|audit?currency=SGD`):
   - Every save needs a reason and is audited (`admin_action_audit`, entity `fx`, id `SGD_MYR`).
   - The card previews the customer rates live and shows **Conversion earned**: Σ(S$ × mid − RM credited) over settled top-ups, plus Σ(RM debited − S$ × mid) over settled payouts.
 - **No fallback rate.** SGD top-ups and payouts are refused ("SGD payments are paused") in two cases:
   - No `SGD_MYR` row exists.
   - The feed is older than 7 days (ECB skips holidays) and no manual rate is set.
-- **The customer sees the rate they get.** The top-up sheet and the withdraw form send the rate they showed (`quoted_rate`). If an admin moved the markup in between, the backend refuses before any row or debit ("The exchange rate just changed"), and the form re-reads the rate.
+- **The customer sees the rate they get.** The top-up sheet and the withdraw form send the rate they showed (`quoted_rate`). If an admin changed the fee in between, the backend refuses before any row or debit ("The exchange rate just changed"), and the form re-reads the rate.
 - **Adding a regional currency (USDT next):** one `GATEWAYS` entry (backend `gateway.ts`), one `PAYMENT_FX_FEEDS` entry (`payment-fx.ts`; no `url` means manual rate only), and one `REGIONAL_RAILS` entry (storefront `src/lib/regional-rails.ts`). The admin Settlement page gets the currency's tab from the gateway registry by itself; add its tab name (`settlement.rail.<CODE>`) to the admin's `en.json`. Payout destinations for a wallet (not a bank) are not built yet.
 - A rate change never affects payments already started. Held payouts are approved at the S$ amount locked when the customer asked.
 
@@ -97,10 +101,7 @@ Read from the A3Pay back office (https://backoffice.a3paysg.com, login `polycard
   - Payout WD: S$30–10,000, **1.5% fee**. A3Pay lowered the minimum from S$50 at our request on 2026-10-12.
   - Settlement: S$1,000–10,000, S$10 flat fee.
   - `currencyLimits` uses these. The top-up band is also narrowed so the RM credit fits the RM 10,000 ceiling.
-- **The markup must cover the fees.** At mid ≈ 3.19:
-  - A 2.5% deposit fee is ≈ RM 0.080 per S$1.
-  - A 1.5% payout fee is ≈ RM 0.048 per S$1.
-  - A markup below ≈ 0.08 loses money on every top-up. 0.10 or more is the sensible floor.
+- **A3Pay's own fees are 2.5% on deposits and 1.5% on payouts.** A top-up fee below 2.5% (or a withdrawal fee below 1.5%) means each payment costs us the difference. That is the operator's call.
 - **Payout banks (GetSupportedBankList):** 21 codes. `SGANEXT` (ANEXT Bank) is live but missing from the handbook, so it was added. Wise, LiquidPay and Dash are listed but not offered (their payees are not digit account numbers).
 - **Requery not-found:** `GetPayinDetail` and `GetPayoutDetail` answer **HTTP 400 `{"isSuccess":false,"errorCode":null,"errorMessage":"Not found"}`**, not the GlobePay-era `PMT10016`. The client tags this as `A3PAY_NOT_FOUND`. The failure modes it must not be confused with look different:
   - A wrong AES key gives HTTP 400 plain-text `Invalid Request`.

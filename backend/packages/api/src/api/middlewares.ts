@@ -1426,7 +1426,7 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
-      // SGD conversion rate + markup (A3Pay, payment-fx.ts). Reprices every
+      // SGD conversion rate + fees (A3Pay, payment-fx.ts). Reprices every
       // Singapore top-up and payout — same admin budget as the gateway switch.
       matcher: '/admin/payments/fx',
       method: 'POST',

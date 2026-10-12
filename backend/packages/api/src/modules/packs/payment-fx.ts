@@ -5,10 +5,11 @@ import { MedusaError } from '@medusajs/framework/utils';
 // rule is unit-testable.
 //
 // The model:
-//   - `mid` is the market SGD->MYR rate (frankfurter, or an admin override);
-//   - `markup` is an ABSOLUTE spread in RM per S$1, set by an admin;
-//   - a DEPOSIT credits at `mid - markup` (S$100 at mid 3.30, markup 0.01 ->
-//     RM 329.00), a PAYOUT pays at `mid + markup` (RM 331 -> S$100.00).
+//   - `mid` is the market SGD->MYR rate (the hourly feed, or an admin override);
+//   - the FEE is a percent of the mid per direction, behind an admin on/off
+//     switch (off = the bare mid both ways);
+//   - a DEPOSIT credits at mid x (1 - top-up fee) (mid 3.19 at 0.5% ->
+//     3.17405), a PAYOUT costs mid x (1 + withdrawal fee) (-> 3.20595).
 // We keep the spread both ways. Every rounding is DOWN to the cent, in our
 // favour, so the spread is never eaten by a half-cent.
 //
@@ -92,32 +93,50 @@ export async function loadPaymentFxQuote(
  * publication DATE (sync-payment-fx.ts), and ECB skips TARGET holidays: over
  * Easter Thursday's rate is the newest until Tuesday afternoon (~5.6 days),
  * over Christmas ~4.6. Seven days clears both with a failed fetch to spare;
- * the admin markup (>= 0.10 recommended, ~3%) is the cushion for the drift.
+ * the admin fee is the cushion for the drift.
  */
 export const PAYMENT_FX_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** Markup bounds the admin route enforces: 0 <= markup <= mid * this. */
-export const PAYMENT_FX_MAX_MARKUP_SHARE = 0.2;
+/** The highest fee, in percent of the mid, either direction may carry. */
+export const PAYMENT_FX_MAX_FEE_PERCENT = 20;
 
 export type PaymentFxRow = {
   rate: unknown;
   fetched_at?: Date | string | null;
   manual_override?: boolean | null;
   manual_rate?: unknown;
-  markup?: unknown;
+  /** null/undefined = never configured: the rail stays paused. */
+  fee_enabled?: boolean | null;
+  deposit_fee_percent?: unknown;
+  payout_fee_percent?: unknown;
 };
 
 export type PaymentFxQuote = {
   currency: string;
-  /** RM per 1 unit of `currency`, before the spread. */
+  /** RM per 1 unit of `currency`, before the fee. */
   mid: number;
-  /** RM per 1 unit, absolute. */
-  markup: number;
+  /** Is the fee switched on? Off = both rates are the mid. */
+  feeEnabled: boolean;
+  /** The fee each way, in percent of the mid (0 while switched off). */
+  depositFeePercent: number;
+  payoutFeePercent: number;
+  /** RM per 1 unit the fee takes, as locked on each row: mid - depositRate
+   *  on a top-up, payoutRate - mid on a payout. */
+  depositMarkup: number;
+  payoutMarkup: number;
   /** RM credited per unit PAID IN. */
   depositRate: number;
   /** RM debited per unit PAID OUT. */
   payoutRate: number;
   source: 'manual' | 'feed';
+};
+
+/** A fee percentage as stored, or null when it is not a usable one. */
+const feePercent = (value: unknown): number | null => {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) && n >= 0 && n <= PAYMENT_FX_MAX_FEE_PERCENT
+    ? n
+    : null;
 };
 
 const positive = (value: unknown): number | null => {
@@ -145,24 +164,34 @@ export function paymentFxQuote(
       return { error: `The ${currency} exchange rate is out of date.` };
     }
   }
-  const markup = Number(row.markup ?? 0);
-  // A markup of 0 is refused, not quoted. The column defaults to 0, and a
-  // rail that opens before an admin has set a spread trades SGD at the bare
-  // ECB reference rate — which lags the market, so a customer who knows the
-  // live rate can pick the direction it is wrong in. The rail stays paused
-  // until a spread is set.
-  if (!Number.isFinite(markup) || markup <= 0) {
-    return { error: `No ${currency} markup is set.` };
+  // A rail an admin has never configured is refused, not quoted: opening it
+  // at the bare mid by default would trade before anyone decided to. Once
+  // saved, the switch decides — off quotes the mid both ways on purpose.
+  if (row.fee_enabled == null) {
+    return { error: `No ${currency} fee is set.` };
   }
-  if (markup > mid * PAYMENT_FX_MAX_MARKUP_SHARE) {
-    return { error: `The ${currency} markup is out of range.` };
+  const feeEnabled = row.fee_enabled === true;
+  const depositFeePercent = feeEnabled
+    ? feePercent(row.deposit_fee_percent)
+    : 0;
+  const payoutFeePercent = feeEnabled ? feePercent(row.payout_fee_percent) : 0;
+  if (depositFeePercent === null || payoutFeePercent === null) {
+    return { error: `The ${currency} fee is out of range.` };
   }
+  // Operator's rule (2026-10-13): market 3.19 with 0.5% each way credits a
+  // top-up at 3.19 x 99.5% and debits a payout at 3.19 x 100.5%.
+  const depositRate = round6(mid * (1 - depositFeePercent / 100));
+  const payoutRate = round6(mid * (1 + payoutFeePercent / 100));
   return {
     currency,
     mid,
-    markup,
-    depositRate: round6(mid - markup),
-    payoutRate: round6(mid + markup),
+    feeEnabled,
+    depositFeePercent,
+    payoutFeePercent,
+    depositMarkup: round6(mid - depositRate),
+    payoutMarkup: round6(payoutRate - mid),
+    depositRate,
+    payoutRate,
     source: manual ? 'manual' : 'feed',
   };
 }

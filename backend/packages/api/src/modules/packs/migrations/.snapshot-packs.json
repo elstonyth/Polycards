@@ -2365,6 +2365,35 @@
           "default": "0",
           "mappedType": "decimal"
         },
+        "fee_enabled": {
+          "name": "fee_enabled",
+          "type": "boolean",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "boolean"
+        },
+        "deposit_fee_percent": {
+          "name": "deposit_fee_percent",
+          "type": "numeric",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "0",
+          "mappedType": "decimal"
+        },
+        "payout_fee_percent": {
+          "name": "payout_fee_percent",
+          "type": "numeric",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "0",
+          "mappedType": "decimal"
+        },
         "raw_rate": {
           "name": "raw_rate",
           "type": "jsonb",
@@ -2385,6 +2414,26 @@
         },
         "raw_markup": {
           "name": "raw_markup",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "'{\"value\":\"0\",\"precision\":20}'",
+          "mappedType": "json"
+        },
+        "raw_deposit_fee_percent": {
+          "name": "raw_deposit_fee_percent",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "'{\"value\":\"0\",\"precision\":20}'",
+          "mappedType": "json"
+        },
+        "raw_payout_fee_percent": {
+          "name": "raw_payout_fee_percent",
           "type": "jsonb",
           "unsigned": false,
           "autoincrement": false,

@@ -16,7 +16,7 @@ import { alertOps } from '../modules/packs/ops-alert';
 // or answers nonsense. payment-fx.ts tolerates PAYMENT_FX_MAX_AGE_MS of
 // staleness, so a run of failed hours only ages the last good rate.
 //
-// Writes rate / source / fetched_at only. The admin's markup and manual
+// Writes rate / source / fetched_at only. The admin's fee and manual
 // override live on the same row and are never touched here.
 
 /**

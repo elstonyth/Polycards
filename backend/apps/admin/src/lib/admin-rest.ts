@@ -842,7 +842,11 @@ export const getFxHistory = () =>
 export interface PaymentFxQuote {
   currency: string;
   mid: number;
-  markup: number;
+  /** Fee switched on? Off = both rates are the mid. */
+  feeEnabled: boolean;
+  /** Percent of the mid each way (0 while switched off). */
+  depositFeePercent: number;
+  payoutFeePercent: number;
   /** RM credited per 1 unit paid in. */
   depositRate: number;
   /** RM debited per 1 unit paid out. */
@@ -862,8 +866,12 @@ export interface PaymentFxState {
   fetched_at: string | null;
   manual_override: boolean;
   manual_rate: number | null;
-  markup: number;
-  max_markup_share: number;
+  /** null = never configured: the rail stays paused until saved once. */
+  fee_enabled: boolean | null;
+  /** Percent of the mid; kept while the fee is switched off. */
+  deposit_fee_percent: number;
+  payout_fee_percent: number;
+  max_fee_percent: number;
   quote: PaymentFxQuote | null;
   quote_error: string | null;
   earnings: {
@@ -880,7 +888,9 @@ export const getPaymentFx = (currency: string) =>
 
 export const setPaymentFx = (body: {
   currency: string;
-  markup: number;
+  fee_enabled: boolean;
+  deposit_fee_percent: number;
+  payout_fee_percent: number;
   manual_override: boolean;
   manual_rate: number | null;
   reason: string;

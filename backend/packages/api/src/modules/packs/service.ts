@@ -6046,15 +6046,18 @@ class PacksModuleService extends MedusaService({
     return { effective: effectiveRate(fresh ?? null) };
   }
 
-  // Payment-pair FX edit (SGD_MYR — payment-fx.ts): the conversion markup we
-  // earn on regional-gateway traffic, plus an optional manual mid-rate. Same
+  // Payment-pair FX edit (SGD_MYR — payment-fx.ts): the conversion fee we
+  // earn on regional-gateway traffic (a percent each way, behind an on/off
+  // switch), plus an optional manual mid-rate. Same
   // shape as editFxOverride: one transaction, advisory-locked per pair, with
   // the audit row beside the write. Bounds are the route's job.
   @InjectTransactionManager()
   async editPaymentFx(
     input: {
       pair: string;
-      markup: number;
+      feeEnabled: boolean;
+      depositFeePercent: number;
+      payoutFeePercent: number;
       manualOverride: boolean;
       manualRate: number | null;
       adminId: string;
@@ -6073,13 +6076,17 @@ class PacksModuleService extends MedusaService({
     );
     const before = row
       ? {
-          markup: Number(row.markup ?? 0),
+          fee_enabled: row.fee_enabled ?? null,
+          deposit_fee_percent: Number(row.deposit_fee_percent ?? 0),
+          payout_fee_percent: Number(row.payout_fee_percent ?? 0),
           manual_override: row.manual_override,
           manual_rate: row.manual_rate != null ? Number(row.manual_rate) : null,
         }
       : null;
     const after = {
-      markup: input.markup,
+      fee_enabled: input.feeEnabled,
+      deposit_fee_percent: input.depositFeePercent,
+      payout_fee_percent: input.payoutFeePercent,
       manual_override: input.manualOverride,
       manual_rate: input.manualRate,
     };

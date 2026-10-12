@@ -271,7 +271,7 @@ export async function startDeposit(
     }
     const quote = await loadPaymentFxQuote(packs, currency);
     // The rate the customer was shown, when the client sent one: never credit
-    // at a rate they did not see (an admin may have moved the markup since
+    // at a rate they did not see (an admin may have changed the fee since
     // the sheet loaded). Before any row.
     if (
       input.quotedRate !== undefined &&
@@ -298,7 +298,7 @@ export async function startDeposit(
       currency,
       gatewayAmount: paid,
       mid: quote.mid,
-      markup: quote.markup,
+      markup: quote.depositMarkup,
     };
   }
 

@@ -12,7 +12,7 @@ import {
 } from '../../../../modules/packs/facets';
 import {
   PAYMENT_FX_FEEDS,
-  PAYMENT_FX_MAX_MARKUP_SHARE,
+  PAYMENT_FX_MAX_FEE_PERCENT,
   paymentFxPair,
   paymentFxQuote,
   type PaymentFxRow,
@@ -26,8 +26,9 @@ import type PacksModuleService from '../../../../modules/packs/service';
 // GET/POST /admin/payments/fx?currency=SGD — the conversion behind a
 // regional gateway (payment-fx.ts), one currency per call (default SGD; any
 // currency in REGIONAL_CURRENCIES). The mid rate comes from the feed or an
-// admin override; the MARKUP is our spread in RM per unit, applied both ways:
-// deposits credit at mid - markup, payouts pay at mid + markup.
+// admin override; our FEE is a percent of the mid per direction, behind an on/off
+// switch: deposits credit at mid x (1 - top-up %), payouts cost mid x
+// (1 + withdrawal %), and switched off both are the mid.
 //
 // GET also reports what the spread has earned: for every settled row in that
 // currency, the RM it would have been at the mid against the RM actually
@@ -121,8 +122,10 @@ export async function GET(
     fetched_at: row?.fetched_at ?? null,
     manual_override: row?.manual_override ?? false,
     manual_rate: row?.manual_rate != null ? Number(row.manual_rate) : null,
-    markup: Number(row?.markup ?? 0),
-    max_markup_share: PAYMENT_FX_MAX_MARKUP_SHARE,
+    fee_enabled: row?.fee_enabled ?? null,
+    deposit_fee_percent: Number(row?.deposit_fee_percent ?? 0),
+    payout_fee_percent: Number(row?.payout_fee_percent ?? 0),
+    max_fee_percent: PAYMENT_FX_MAX_FEE_PERCENT,
     quote: 'error' in quote ? null : quote,
     quote_error: 'error' in quote ? quote.error : null,
     earnings: await earnings(req.scope, currency),
@@ -149,7 +152,26 @@ export async function POST(
   const pair = paymentFxPair(currency);
   const band = PAYMENT_FX_FEEDS[currency] ?? { min: 0.0001, max: 1000 };
   const reason = reqReason(body);
-  const markup = number(body.markup, 'markup');
+  if (typeof body.fee_enabled !== 'boolean') {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      "'fee_enabled' must be true or false.",
+    );
+  }
+  const feeEnabled = body.fee_enabled;
+  // Kept while the fee is switched off, so switching it back on restores them.
+  const fees = (['deposit_fee_percent', 'payout_fee_percent'] as const).map(
+    (field) => {
+      const pct = number(body[field], field);
+      if (pct < 0 || pct > PAYMENT_FX_MAX_FEE_PERCENT) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `'${field}' must be between 0 and ${PAYMENT_FX_MAX_FEE_PERCENT} (percent).`,
+        );
+      }
+      return pct;
+    },
+  );
   const manualOverride = body.manual_override === true;
   const manualRate =
     body.manual_rate === null ||
@@ -176,23 +198,11 @@ export async function POST(
       "'manual_rate' is required when 'manual_override' is on.",
     );
   }
-  const packs = resolvePacks<Packs>(req.scope);
-  const [row] = (await packs.listFxRates(
-    { pair },
-    { take: 1 },
-  )) as PaymentFxRow[];
-  const mid = manualOverride ? (manualRate as number) : Number(row?.rate ?? 0);
-  const ceiling = mid > 0 ? mid * PAYMENT_FX_MAX_MARKUP_SHARE : 1;
-  if (markup < 0 || markup > ceiling) {
-    throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      `'markup' must be between 0 and ${ceiling.toFixed(4)} RM per 1 ${currency}.`,
-    );
-  }
-
   await req.scope.resolve<PacksModuleService>(PACKS_MODULE).editPaymentFx({
     pair,
-    markup,
+    feeEnabled,
+    depositFeePercent: fees[0],
+    payoutFeePercent: fees[1],
     manualOverride,
     manualRate,
     adminId: req.auth_context.actor_id,

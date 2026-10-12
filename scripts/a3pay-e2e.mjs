@@ -114,11 +114,19 @@ const row = (table, mtid) =>
 const balance = async (token) =>
   (await call('GET', '/store/credits/balance', { token })).json;
 
-async function setFx(admin, markup, reason) {
+// `percent` is the fee each way: 0.3125% of 3.20 is RM 0.01.
+async function setFx(admin, percent, reason) {
   return call('POST', '/admin/payments/fx', {
     token: admin,
     admin: true,
-    body: { markup, manual_override: true, manual_rate: 3.2, reason },
+    body: {
+      fee_enabled: true,
+      deposit_fee_percent: percent,
+      payout_fee_percent: percent,
+      manual_override: true,
+      manual_rate: 3.2,
+      reason,
+    },
   });
 }
 
@@ -126,10 +134,10 @@ async function main() {
   const admin = await login('user', ADMIN_EMAIL, logins.ADMIN_PW);
   const cust = await login('customer', CUST_EMAIL, logins.CUST_PW);
 
-  // ---- 1. Admin sets the SGD rate + markup (audited)
-  const fx = await setFx(admin, 0.01, 'a3pay e2e: base rate');
+  // ---- 1. Admin sets the SGD rate + fee (audited)
+  const fx = await setFx(admin, 0.3125, 'a3pay e2e: base rate');
   check(
-    'admin sets SGD market rate 3.20 + markup 0.01',
+    'admin sets SGD market rate 3.20 + fee 0.3125% each way',
     fx.status === 200 &&
       fx.json.quote?.depositRate === 3.19 &&
       fx.json.quote?.payoutRate === 3.21,
@@ -138,18 +146,20 @@ async function main() {
   const audit = sql(
     "select count(*) from admin_action_audit where entity_type='fx' and entity_id='SGD_MYR' and reason like 'a3pay e2e%'",
   );
-  check('markup edit is audited', Number(audit) >= 1, `${audit} audit rows`);
+  check('fee edit is audited', Number(audit) >= 1, `${audit} audit rows`);
   const bad = await call('POST', '/admin/payments/fx', {
     token: admin,
     admin: true,
     body: {
-      markup: 1,
+      fee_enabled: true,
+      deposit_fee_percent: 50,
+      payout_fee_percent: 50,
       manual_override: true,
       manual_rate: 3.2,
       reason: 'too big',
     },
   });
-  check('absurd markup refused', bad.status === 400, `${bad.status}`);
+  check('absurd fee refused', bad.status === 400, `${bad.status}`);
 
   // ---- 2. Storefront config advertises the SGD rail with today's rates
   const cfg = await call('GET', '/store/payments/config');
@@ -227,7 +237,7 @@ async function depositLegs(admin, cust) {
   );
 
   // Markup changes BEFORE the customer pays — the lock must hold.
-  await setFx(admin, 0.1, 'a3pay e2e: markup raised mid-flight');
+  await setFx(admin, 3.125, 'a3pay e2e: fee raised mid-flight');
   await mock(`/__control/payin/${m1}`, { status: 6 });
   await sleep(500);
   const r1b = row('gateway_deposit', m1);
