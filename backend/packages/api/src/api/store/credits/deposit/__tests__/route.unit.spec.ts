@@ -309,6 +309,18 @@ describe('POST /store/credits/deposit — the payer name A3Pay matches', () => {
     expect(sentPayer()).toBe('TAN  AH KOW');
   });
 
+  it('one holder saved twice with different spacing is still one holder', async () => {
+    const { req } = reqWith(
+      [
+        { bankCode: 'DBSSSGSG', accountHolderName: 'LIM MEI LING' },
+        { bankCode: 'OCBCSGSG', accountHolderName: 'Lim  Mei Ling' },
+      ],
+      'Tan Ah Kow',
+    );
+    await POST(req, res);
+    expect(sentPayer()).toBe('LIM MEI LING');
+  });
+
   it("several other people's accounts: the real name, not a guess", async () => {
     const { req } = reqWith(
       [

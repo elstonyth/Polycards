@@ -24,9 +24,8 @@ import {
 import type PacksModuleService from '../../../../modules/packs/service';
 import { bankSupportedBy } from '../../../../modules/packs/saved-accounts';
 
-const sameName = (a: string, b: string) =>
-  a.replace(/\s+/g, ' ').trim().toUpperCase() ===
-  b.replace(/\s+/g, ' ').trim().toUpperCase();
+/** A name compared the way a person reads it: case and spacing ignored. */
+const nameKey = (name: string) => name.replace(/\s+/g, ' ').trim().toUpperCase();
 
 /**
  * The paying account's holder name for a gateway that matches transfers
@@ -61,9 +60,9 @@ async function payerNameOnFile(
     .map((a) => a.accountHolderName.trim())
     .filter(Boolean);
   const own = realName
-    ? holders.find((holder) => sameName(holder, realName))
+    ? holders.find((holder) => nameKey(holder) === nameKey(realName))
     : undefined;
-  const distinct = new Set(holders.map((h) => h.toUpperCase()));
+  const distinct = new Set(holders.map(nameKey));
   return (
     own ??
     (distinct.size === 1 ? holders[0] : undefined) ??

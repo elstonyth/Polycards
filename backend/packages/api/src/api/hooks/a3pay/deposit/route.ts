@@ -129,6 +129,16 @@ export async function POST(
     deposit.gateway_transaction_id ||
     (typeof body.TransactionId === 'string' ? body.TransactionId : '');
 
+  // Verify Fail: the customer may have paid from an account in another
+  // name. Reported whatever the row says (a late one after the sweep wrote
+  // the row off matters most), unless it was credited after all.
+  if (
+    isPayinVerifyFail('a3pay', data.Status) &&
+    deposit.status !== 'settled'
+  ) {
+    alertPayinVerifyFail(req.scope, deposit);
+  }
+
   if (deposit.status !== 'pending') {
     const recoverable =
       state === 'success' &&
@@ -151,9 +161,6 @@ export async function POST(
   }
 
   if (state === 'pending') {
-    if (isPayinVerifyFail('a3pay', data.Status)) {
-      alertPayinVerifyFail(req.scope, deposit);
-    }
     res.status(200).send('success');
     return;
   }

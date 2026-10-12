@@ -193,8 +193,30 @@ describe('POST /hooks/a3pay/deposit', () => {
       expect.anything(),
       'payin-verify-fail:PC-1',
       expect.stringContaining('Verify Fail'),
-      expect.objectContaining({ muteMs: expect.any(Number) }),
+      { muteMs: 6 * 60 * 60 * 1000 },
     );
+  });
+
+  it('reports a late Verify Fail on a row already written off, not on a credited one', async () => {
+    (alertOps as jest.Mock).mockClear();
+    await run(
+      deposit,
+      harness([{ ...sgdDeposit, status: 'expired' }]),
+      message(payin({ Status: 4 })),
+    );
+    expect(alertOps).toHaveBeenCalledWith(
+      expect.anything(),
+      'payin-verify-fail:PC-1',
+      expect.any(String),
+      { muteMs: 6 * 60 * 60 * 1000 },
+    );
+    (alertOps as jest.Mock).mockClear();
+    await run(
+      deposit,
+      harness([{ ...sgdDeposit, status: 'settled' }]),
+      message(payin({ Status: 4 })),
+    );
+    expect(alertOps).not.toHaveBeenCalled();
   });
 
   it('closes the row on status 7 without crediting', async () => {

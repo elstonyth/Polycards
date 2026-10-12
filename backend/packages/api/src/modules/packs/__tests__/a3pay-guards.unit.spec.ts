@@ -185,6 +185,25 @@ describe('a regional top-up A3Pay nudges by a cent', () => {
       'https://us/return',
     );
 
+  it('without a payer name it refuses before any row or gateway call', async () => {
+    const packs = depositPacks();
+    await expect(
+      startDeposit(
+        scopeFor(packs),
+        {
+          customerId: 'cus_1',
+          amount: 50,
+          ipAddress: '1.2.3.4',
+          gateway: 'a3pay',
+          paymentMethodCode: 'BQR',
+        },
+        'https://us/notify',
+        'https://us/return',
+      ),
+    ).rejects.toThrow(/Add your real name in Settings/);
+    expect(packs.createDepositCapped).not.toHaveBeenCalled();
+  });
+
   it('credits every cent the customer is asked for: S$50.01 at 3.10 is RM 155.03', async () => {
     payinActual = 50.01;
     const packs = depositPacks();
