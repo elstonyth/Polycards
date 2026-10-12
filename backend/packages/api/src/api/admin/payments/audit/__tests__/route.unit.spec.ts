@@ -7,10 +7,8 @@ import type {
 } from '../../../../../modules/packs/facets';
 import type PacksModuleService from '../../../../../modules/packs/service';
 
-// The wallet read runs through the REAL seam: the route resolves the active
-// gateway, asks gatewayConfigFor for its config and calls checkBalance, which
-// dispatches on that config's kind. Selecting the fake gateway is therefore
-// the whole substitution — nothing here replaces a module.
+// The active gateway is resolved through the REAL seam (admin setting, then
+// PAYMENT_GATEWAY); selecting the fake gateway is the whole substitution.
 const ORIGINAL = { ...process.env };
 
 beforeEach(() => {
@@ -20,14 +18,6 @@ beforeEach(() => {
   setActiveGateway(null);
   jest.clearAllMocks();
   fakeGateway.reset();
-  fakeGateway.script({
-    checkBalance: {
-      currentBalance: 300,
-      availableBalance: 249,
-      currencyCode: 'MYR',
-      notes: [],
-    },
-  });
 });
 
 afterAll(() => {
@@ -73,7 +63,7 @@ function totals(gateway: string) {
   };
 }
 
-function harness(setting: string | null) {
+function harness(setting: string | null, query: Record<string, string> = {}) {
   const packs = {
     siteSettings: jest.fn(async () => ({ payment_gateway: setting })),
     gatewayAuditTotals: jest.fn(async (g: string) => totals(g)),
@@ -97,7 +87,7 @@ function harness(setting: string | null) {
   } satisfies FakeFacet<
     GatewayReports & Pick<PacksModuleService, 'siteSettings'>
   >;
-  const req = { scope: { resolve: () => packs } };
+  const req = { scope: { resolve: () => packs }, query };
   const res = {
     body: undefined as unknown,
     headers: {} as Record<string, string>,
@@ -112,9 +102,9 @@ function harness(setting: string | null) {
 }
 
 type Body = {
+  currency: string;
   gateway: string;
-  wallet: { current: number; available: number } | null;
-  wallet_error: string | null;
+  findings_total: number;
   totals: { deposits: { count: number; gross: number; net: number } };
   history: {
     gateway: string;
@@ -124,18 +114,15 @@ type Body = {
 };
 
 describe('GET /admin/payments/audit', () => {
-  it('reads the ACTIVE gateway wallet and totals, and lists the other gateway history', async () => {
+  it('reads the ACTIVE gateway totals, and lists the other RM gateway history', async () => {
     // Active by the ADMIN SETTING alone — PAYMENT_GATEWAY is unset here.
     const h = harness('fake');
     await GET(h.req as never, h.res as never);
     const body = h.res.body as Body;
+    expect(body.currency).toBe('MYR');
     expect(body.gateway).toBe('fake');
-    // The wallet came from the ACTIVE gateway's own config: only that
-    // gateway's adapter was ever asked.
-    expect(fakeGateway.calls.balances).toEqual([{ kind: 'fake' }]);
-    expect(body.wallet).toEqual(
-      expect.objectContaining({ current: 300, available: 249 }),
-    );
+    // The wallet is /balance's job now: no live call from here.
+    expect(fakeGateway.calls.balances).toEqual([]);
     expect(body.totals.deposits.count).toBe(0);
     expect(body.history).toEqual([
       expect.objectContaining({
@@ -159,19 +146,45 @@ describe('GET /admin/payments/audit', () => {
     );
   });
 
-  it('a wallet read failure is reported beside the findings, never instead of them', async () => {
-    fakeGateway.script({
-      checkBalance: new Error('403 not allowed'),
-    });
+  it('falls back to PAYMENT_GATEWAY, and only RM rows are RM findings', async () => {
     // No admin setting: the active gateway falls back to PAYMENT_GATEWAY.
     process.env.PAYMENT_GATEWAY = 'fake';
     const h = harness(null);
     await GET(h.req as never, h.res as never);
     const body = h.res.body as Body;
-    expect(body.wallet).toBeNull();
-    expect(body.wallet_error).toMatch(/403/);
+    expect(body.gateway).toBe('fake');
     expect(body.findings).toHaveLength(1);
-    // The retired gateway's settled history is still listed.
+    // Counted over every RM gateway the list covers (1 each in the fake):
+    // the active one, TGPay, The 7 Pay and the retired globepay.
+    expect(body.findings_total).toBe(4);
+    // The retired gateway's settled history is still listed; A3Pay (SGD) is
+    // not RM history.
     expect(body.history.map((h) => h.gateway)).toEqual(['globepay']);
+    expect(h.packs.listGatewayDeposits).toHaveBeenCalledWith(
+      expect.objectContaining({ currency: 'MYR' }),
+      expect.anything(),
+    );
+  });
+
+  it('?currency=SGD is the A3Pay rail alone: its totals, its findings, no RM history', async () => {
+    const h = harness('fake', { currency: 'sgd' });
+    await GET(h.req as never, h.res as never);
+    const body = h.res.body as Body;
+    expect(body.currency).toBe('SGD');
+    expect(body.gateway).toBe('a3pay');
+    expect(h.packs.gatewayAuditTotals).toHaveBeenCalledWith('a3pay');
+    expect(body.history).toEqual([]);
+    expect(body.findings_total).toBe(1);
+    expect(h.packs.listGatewayWithdrawals).toHaveBeenCalledWith(
+      expect.objectContaining({ currency: 'SGD' }),
+      expect.anything(),
+    );
+  });
+
+  it('refuses a currency no rail settles in', async () => {
+    const h = harness('fake', { currency: 'EUR' });
+    await expect(GET(h.req as never, h.res as never)).rejects.toThrow(
+      /'currency' must be one of MYR, SGD/,
+    );
   });
 });

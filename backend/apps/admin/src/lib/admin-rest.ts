@@ -532,6 +532,9 @@ export interface SettlementPeriod {
 
 export interface SettlementReport {
   granularity: SettlementGranularity;
+  /** The rail the report is scoped to; null = every gateway. Amounts are RM
+   *  either way (a regional payment at the rate it locked). */
+  currency: string | null;
   periods_requested: number;
   since: string;
   periods: SettlementPeriod[];
@@ -540,26 +543,42 @@ export interface SettlementReport {
 export async function getSettlementReport(
   granularity: SettlementGranularity,
   periods: number,
+  currency: string,
 ): Promise<SettlementReport> {
   return getJson<SettlementReport>(
-    `/admin/payments/settlement?granularity=${granularity}&periods=${periods}`,
+    `/admin/payments/settlement?granularity=${granularity}&periods=${periods}&currency=${encodeURIComponent(currency)}`,
   );
 }
 
 export interface GatewayBalance {
+  /** The rail asked for, and the gateway that serves it (for RM: the active
+   *  one). */
+  currency: string;
+  gateway: string;
+  label: string;
   enabled: boolean;
   balance: {
     currency_code: string;
     current: number;
     available: number;
-    t1: number;
+    /** null when the gateway reports no T+1 figure (TGPay family). */
+    t1: number | null;
+    /** TGPay family: `current` is the pay-in wallet and `available` the
+     *  separate payout wallet, not one wallet with part of it locked. */
+    separate_wallets: boolean;
   } | null;
-  /** Set when the gateway could not be reached — the report still renders. */
+  /** The gateway answered but left a wallet out (shown as 0). */
+  warning: string | null;
+  /** The gateway could not be reached; balance is null. */
   error: string | null;
 }
 
-export async function getGatewayBalance(): Promise<GatewayBalance> {
-  return getJson<GatewayBalance>('/admin/payments/balance');
+export async function getGatewayBalance(
+  currency: string,
+): Promise<GatewayBalance> {
+  return getJson<GatewayBalance>(
+    `/admin/payments/balance?currency=${encodeURIComponent(currency)}`,
+  );
 }
 
 // ── Payment gateways (plan 130) ─────────────────────────────────────────────
@@ -601,11 +620,10 @@ export interface GatewayAuditFinding {
 }
 
 export interface GatewayAudit {
-  gateway: PaymentGatewayId;
-  enabled: boolean;
-  /** Live wallet read; null when the gateway is off or unreachable. */
-  wallet: { current: number; available: number; currency_code: string } | null;
-  wallet_error: string | null;
+  currency: string;
+  /** The rail's gateway (for RM: the active one). Its live wallet is
+   *  getGatewayBalance's. */
+  gateway: HistoricalGatewayId;
   last_audited_at: string | null;
   findings_total: number;
   totals: { deposits: GatewayAuditTotals; withdrawals: GatewayAuditTotals };
@@ -619,8 +637,12 @@ export interface GatewayAudit {
   findings: GatewayAuditFinding[];
 }
 
-export async function getGatewayAudit(): Promise<GatewayAudit> {
-  return getJson<GatewayAudit>('/admin/payments/audit');
+export async function getGatewayAudit(
+  currency: string,
+): Promise<GatewayAudit> {
+  return getJson<GatewayAudit>(
+    `/admin/payments/audit?currency=${encodeURIComponent(currency)}`,
+  );
 }
 
 // ── Active payment gateway switch (plan 130 §runtime switch) ────────────────
@@ -632,6 +654,8 @@ export interface PaymentGatewaySetting {
   setting: string | null;
   env_default: PaymentGatewayId;
   gateways: { id: PaymentGatewayId; label: string; configured: boolean }[];
+  /** One Settlement tab each: RM first, then every regional rail. */
+  currencies: string[];
   /** After a switch: non-blocking findings from the live check (e.g. an
    *  empty payout wallet). */
   warnings?: string[];

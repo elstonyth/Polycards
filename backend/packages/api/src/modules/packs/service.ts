@@ -176,7 +176,7 @@ import {
 import { recomputeExternalStamps } from './external-backfill';
 import { levelForSpend } from './vip-ladder';
 import { levelsToGrant, rewardsForLevel } from './vip-rewards';
-import { fromSen, toMoney, toSen } from './money';
+import { fromSen, LEDGER_CURRENCY, toMoney, toSen } from './money';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   resolveFxRate,
@@ -7743,6 +7743,7 @@ class PacksModuleService extends MedusaService({
   async settlementRows(
     granularity: 'week' | 'month',
     since: Date,
+    currency: string | null = null,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
     deposits: GatewayPeriodRow[];
@@ -7756,6 +7757,11 @@ class PacksModuleService extends MedusaService({
       sharedContext.manager) as unknown as LedgerSqlManager;
     const bucket = (column: string) =>
       `to_char(date_trunc('${granularity}', ${column} AT TIME ZONE 'Asia/Kuala_Lumpur'), 'YYYY-MM-DD')`;
+    // One rail's currency (the Settlement page's tabs), or every row.
+    const currencySql = currency ? 'AND currency = ?' : '';
+    const gatewayArgs = currency
+      ? [since.toISOString(), currency]
+      : [since.toISOString()];
 
     type RawGateway = {
       period: string;
@@ -7796,8 +7802,9 @@ class PacksModuleService extends MedusaService({
          FROM gateway_deposit
         WHERE deleted_at IS NULL AND status = 'settled'
           AND settled_at IS NOT NULL AND settled_at >= ?::timestamptz
+          ${currencySql}
         GROUP BY 1`,
-      [since.toISOString()],
+      gatewayArgs,
     );
 
     // Withdrawal GROSS is `amount` (the debit basis — always present), not
@@ -7821,9 +7828,36 @@ class PacksModuleService extends MedusaService({
          FROM gateway_withdrawal
         WHERE deleted_at IS NULL AND status = 'settled'
           AND settled_at IS NOT NULL AND settled_at >= ?::timestamptz
+          ${currencySql}
         GROUP BY 1`,
-      [since.toISOString()],
+      gatewayArgs,
     );
+
+    // The ledger has no currency column, so a currency's ledger rows are
+    // found through the gateway rows' references (a top-up's is the gateway
+    // or merchant id, a cash-out's and its refund's likewise). A regional
+    // rail keeps the rows that point at ITS gateway rows; RM keeps every
+    // other row, so an orphan credit with no gateway row at all still lands
+    // on the RM tab, where the delta exists to catch it. Matched with the
+    // customer too: a gateway id is only unique within one gateway tenant,
+    // and A3Pay and GlobePay365 are two tenants of the same platform.
+    // `match` is '= ?' (this regional currency) or '<> ?' (any but RM).
+    const refs = (match: string) => `SELECT customer_id, ref FROM (
+        SELECT customer_id, unnest(ARRAY[merchant_transaction_id, gateway_transaction_id]) AS ref
+          FROM gateway_deposit WHERE currency ${match}
+        UNION ALL
+        SELECT customer_id, unnest(ARRAY[merchant_transaction_id, gateway_transaction_id])
+          FROM gateway_withdrawal WHERE currency ${match}
+      ) refs WHERE ref IS NOT NULL`;
+    const ledgerSql = !currency
+      ? ''
+      : currency === LEDGER_CURRENCY
+        ? `AND (reference IS NULL OR (customer_id, reference) NOT IN (${refs('<> ?')}))`
+        : `AND (customer_id, reference) IN (${refs('= ?')})`;
+    // Both branches bind the tab's currency once per table.
+    const ledgerArgs = currency
+      ? [since.toISOString(), currency, currency]
+      : [since.toISOString()];
 
     // The ledger's own view of the same two flows, for the cross-check delta.
     // topup rows are created in the same request that stamps settled_at, so
@@ -7839,8 +7873,9 @@ class PacksModuleService extends MedusaService({
          FROM credit_transaction
         WHERE deleted_at IS NULL AND reason IN ('topup', 'cashout')
           AND created_at >= ?::timestamptz
+          ${ledgerSql}
         GROUP BY 1`,
-      [since.toISOString()],
+      ledgerArgs,
     );
 
     return {
