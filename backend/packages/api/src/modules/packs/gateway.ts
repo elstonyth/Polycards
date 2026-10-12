@@ -9,8 +9,6 @@ import { fakeGateway, type FakeConfig } from './fake-gateway';
 import * as a3pay from './a3pay-client';
 import type { A3payConfig } from './a3pay-client';
 import { toLedgerAmount, type RowFx } from './payment-fx';
-import { GatewayError } from './gateway-types';
-import { TGPAY_PAYOUT_FLOAT_EMPTY } from './tgpay-client';
 import { gatewayEnv } from './gateway-env';
 import { PACKS_MODULE } from './index';
 import {
@@ -860,14 +858,6 @@ export function inRowCurrency(
     config.currencyCode !== currency
     ? { ...config, currencyCode: currency }
     : config;
-}
-
-/** OUR payout float at the gateway is short — either gateway's wording. */
-export function isPayoutFloatEmpty(error: GatewayError): boolean {
-  return (
-    error.has(TGPAY_PAYOUT_FLOAT_EMPTY) ||
-    error.has(a3pay.A3PAY_PAYOUT_FLOAT_EMPTY)
-  );
 }
 
 /**

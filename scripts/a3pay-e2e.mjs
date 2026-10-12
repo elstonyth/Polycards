@@ -184,7 +184,8 @@ async function depositLegs(admin, cust) {
   });
   check(
     'SGD deposit starts: S$100 quotes RM 319.00',
-    d1.status === 200 && d1.json.amount === 319 && d1.json.currency === 'SGD',
+    // The currency lives on the row (checked below), not in this response.
+    d1.status === 200 && d1.json.amount === 319,
     JSON.stringify({
       status: d1.status,
       amount: d1.json.amount,
@@ -195,6 +196,22 @@ async function depositLegs(admin, cust) {
   check(
     'cashier URL is the gateway page (https)',
     /^https:\/\/cashier\.a3pay\.mock\/cashier\/D/.test(d1.json.url ?? ''),
+  );
+  const moved = await call('POST', '/store/credits/deposit', {
+    token: cust,
+    body: {
+      amount: 100,
+      currency: 'SGD',
+      payment_method_code: 'OB',
+      payer_name: 'TAN AH KOW',
+      quoted_rate: 3.05, // not today's 3.19
+    },
+  });
+  check(
+    'a deposit quoted at a rate that has since moved is refused',
+    moved.status === 400 &&
+      /exchange rate just changed/i.test(moved.json.message ?? ''),
+    `${moved.status} ${moved.json.message}`,
   );
   const m1 = d1.json.merchantTransactionId;
   const r1 = row('gateway_deposit', m1);
@@ -370,13 +387,13 @@ async function payoutLegs(admin, cust) {
   const wBefore = (await balance(cust)).balance;
   const w1 = await call('POST', '/store/credits/withdraw', {
     token: cust,
-    body: { amount: 100, account_id: sg?.id },
+    body: { amount: 200, account_id: sg?.id },
   });
   check(
-    'withdraw RM 100 to DBS -> S$31.15 (at 3.21)',
+    'withdraw RM 200 to DBS -> S$62.30 (at 3.21)',
     w1.status === 200 &&
       w1.json.currency === 'SGD' &&
-      w1.json.payAmount === 31.15,
+      w1.json.payAmount === 62.3,
     JSON.stringify({ status: w1.status, ...w1.json }),
   );
   const mw1 = w1.json.merchantTransactionId;
@@ -385,8 +402,8 @@ async function payoutLegs(admin, cust) {
     const state = await (await fetch(`${MOCK}/__control/state`)).json();
     const p = state.payouts.find((x) => x.mtid === mw1);
     check(
-      'A3Pay received S$31.15 to bank code SDBS',
-      p?.amount === 31.15 && p?.bank === 'SDBS',
+      'A3Pay received S$62.30 to bank code SDBS',
+      p?.amount === 62.3 && p?.bank === 'SDBS',
       JSON.stringify({ amount: p?.amount, bank: p?.bank }),
     );
     check(
@@ -405,14 +422,14 @@ async function payoutLegs(admin, cust) {
       'payout settled; row in RM with S$ lock',
       rw[0] === 'settled' &&
         rw[1] === 'SGD' &&
-        Number(rw[2]) === 31.15 &&
-        Number(rw[5]) === 100 &&
-        Number(rw[6]) === 100,
+        Number(rw[2]) === 62.3 &&
+        Number(rw[5]) === 200 &&
+        Number(rw[6]) === 200,
       rw.join('|'),
     );
     check(
-      'ledger debited RM 100',
-      Math.round((wBefore - (await balance(cust)).balance) * 100) === 10000,
+      'ledger debited RM 200',
+      Math.round((wBefore - (await balance(cust)).balance) * 100) === 20000,
     );
   }
 
@@ -420,7 +437,7 @@ async function payoutLegs(admin, cust) {
   const w2Before = (await balance(cust)).balance;
   const w2 = await call('POST', '/store/credits/withdraw', {
     token: cust,
-    body: { amount: 80, account_id: sg?.id },
+    body: { amount: 180, account_id: sg?.id },
   });
   if (w2.json.merchantTransactionId) {
     await sleep(1500);
@@ -439,11 +456,11 @@ async function payoutLegs(admin, cust) {
   // ---- 10b. Below A3Pay's S$ floor is refused before any debit
   const tiny = await call('POST', '/store/credits/withdraw', {
     token: cust,
-    body: { amount: 60, account_id: sg?.id },
+    body: { amount: 150, account_id: sg?.id },
   });
   check(
-    'RM 60 (= S$18.69 < S$20 floor) refused before debit',
-    tiny.status === 400 && /SGD 20/.test(tiny.json.message ?? ''),
+    'RM 150 (= S$46.72 < S$50 floor) refused before debit',
+    tiny.status === 400 && /SGD 50/.test(tiny.json.message ?? ''),
     tiny.json.message,
   );
 

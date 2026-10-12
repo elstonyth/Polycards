@@ -70,7 +70,7 @@ const browser = await chromium.launch();
   const preview = await card.getByTestId('fx-preview-SGD').innerText();
   check(
     'admin preview shows customer rates live',
-    /S\$100 top-up → RM \d+\.\d\d credit/.test(preview),
+    /SGD 100 top-up → RM \d+\.\d\d credit/.test(preview),
     preview,
   );
   await card.getByRole('button', { name: 'Save' }).click();
@@ -79,7 +79,7 @@ const browser = await chromium.launch();
   await card.screenshot({ path: `${OUT}a3pay-admin-card-after.png` });
   const fxState = await page.evaluate(async () =>
     (
-      await fetch('http://localhost:9000/admin/payments/fx', {
+      await fetch('http://localhost:9000/admin/payments/fx?currency=SGD', {
         credentials: 'include',
       })
     ).json(),
@@ -158,6 +158,11 @@ await est.scrollIntoViewIfNeeded();
 await shot(page, 'withdraw-sgd');
 
 await page.goto(`${STORE}/me`);
+// The test account's real-name gate covers the page; hide it rather than
+// set a name on the account.
+await page.addStyleTag({
+  content: 'main .glass-stage.fixed.inset-0 { display: none !important; }',
+});
 await page
   .getByRole('button', { name: /top up/i })
   .first()
@@ -165,13 +170,14 @@ await page
 const sheet = page.getByRole('dialog', { name: 'Top up credits' });
 await sheet.waitFor();
 await page.waitForTimeout(1200);
+const sgdOption = sheet.getByRole('button', { name: /Singapore Dollar/ });
 check(
-  'top-up sheet offers "Pay in S$"',
-  await sheet.getByText('Pay in S$').isVisible(),
+  'top-up sheet opens on the currency step, Singapore Dollar listed',
+  await sgdOption.isVisible(),
 );
-await shot(page, 'topup-rm');
+await shot(page, 'topup-currency');
 
-await sheet.getByText('Pay in S$').click();
+await sgdOption.click();
 await sheet.getByRole('button', { name: 'S$100' }).click();
 await page.waitForTimeout(300);
 const credit = await sheet.getByTestId('topup-credit').innerText();

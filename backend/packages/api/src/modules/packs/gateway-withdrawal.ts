@@ -20,11 +20,11 @@ import {
   isLedgerGateway,
   TGPAY_PAYOUT_FLOAT_EMPTY,
   checkBalance,
-  isPayoutFloatEmpty,
   type GatewayConfig,
   type PaymentGateway,
 } from './gateway';
 import { loadPaymentFxQuote, payoutForWithdrawal } from './payment-fx';
+import { A3PAY_PAYOUT_FLOAT_EMPTY } from './a3pay-client';
 import { alertPayoutDisabled, alertPayoutFloatEmpty } from './ops-alert';
 import { contactIfNeeded } from '../../api/utils/customer-contact';
 import { newMerchantTransactionId } from './gateway-deposit';
@@ -179,6 +179,36 @@ async function regionalFloatShort(
   } catch {
     return null;
   }
+}
+
+/**
+ * Does a payout refusal mean OUR float is short? TGPay says so with a platform
+ * code. A3Pay only in its message text, which may also carry what the
+ * customer typed, so its hint must be confirmed by a balance read before it
+ * may trip the gateway-wide breaker: a customer-specific refusal that happens
+ * to say "insufficient" must not close payouts for everyone.
+ */
+async function floatEmptyRefusal(
+  error: GatewayError,
+  config: GatewayConfig,
+  gatewayAmount: number | null,
+): Promise<boolean> {
+  if (error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) return true;
+  if (!error.has(A3PAY_PAYOUT_FLOAT_EMPTY) || gatewayAmount === null)
+    return false;
+  return (await regionalFloatShort(config, gatewayAmount)) !== null;
+}
+
+/**
+ * Trip the gateway-wide breaker only when the float cannot pay ANY payout
+ * (below the gateway's own minimum). One request larger than the float is
+ * refused on its own; it must not close withdrawals for every customer.
+ */
+function floatCannotPayAnything(
+  gateway: PaymentGateway,
+  short: { available: number },
+): boolean {
+  return short.available < (GATEWAYS[gateway].currencyLimits?.withdrawalMin ?? 0);
 }
 
 /**
@@ -644,22 +674,6 @@ export async function startWithdrawal(
         RATE_CHANGED_MESSAGE,
       );
     }
-    // OUR float at the gateway must cover it — refused before any row or
-    // debit, so the customer is not refunded for our empty wallet.
-    const short = await regionalFloatShort(config, gatewayAmount);
-    if (short) {
-      payoutFloatEmptyUntil.set(gateway, Date.now() + PAYOUT_FLOAT_COOLDOWN_MS);
-      void alertPayoutFloatEmpty(scope, {
-        amount,
-        ref: 'balance pre-check',
-        via: 'customer withdrawal',
-        gateway: GATEWAYS[gateway].label,
-      });
-      throw new MedusaError(
-        MedusaError.Types.NOT_ALLOWED,
-        'Withdrawals to this bank are temporarily unavailable on our side — nothing was taken from your balance. Your bank details are fine. Please try again later.',
-      );
-    }
     fx = { currency, gatewayAmount, mid: quote.mid, markup: quote.markup };
   }
 
@@ -686,6 +700,32 @@ export async function startWithdrawal(
     amount,
   );
   if (precheckError) throw precheckError;
+
+  // OUR float at a regional gateway must cover it. After the wallet
+  // precheck, so only an amount this customer could really withdraw is
+  // judged (and alerted on); before any row or debit, so nobody is refunded
+  // for our empty wallet.
+  if (fx) {
+    const short = await regionalFloatShort(config, fx.gatewayAmount);
+    if (short) {
+      if (floatCannotPayAnything(gateway, short)) {
+        payoutFloatEmptyUntil.set(
+          gateway,
+          Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
+        );
+      }
+      void alertPayoutFloatEmpty(scope, {
+        amount,
+        ref: 'balance pre-check',
+        via: 'customer withdrawal',
+        gateway: GATEWAYS[gateway].label,
+      });
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'Withdrawals to this bank are temporarily unavailable on our side — nothing was taken from your balance. Your bank details are fine. Please try again later.',
+      );
+    }
+  }
 
   const merchantTransactionId = newMerchantTransactionId();
 
@@ -931,7 +971,10 @@ export async function startWithdrawal(
       // same situation for the customer, so it shares the breaker and copy;
       // only the ops alert names the different fix.
       const payoutDisabled = error.has(TGPAY_PAYOUT_DISABLED);
-      if (payoutDisabled || isPayoutFloatEmpty(error)) {
+      if (
+        payoutDisabled ||
+        (await floatEmptyRefusal(error, config, fx?.gatewayAmount ?? null))
+      ) {
         payoutFloatEmptyUntil.set(
           gateway,
           Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
@@ -1504,7 +1547,12 @@ export async function submitHeldWithdrawal(
       Number(row.gateway_amount),
     );
     if (short) {
-      payoutFloatEmptyUntil.set(gatewayId, Date.now() + PAYOUT_FLOAT_COOLDOWN_MS);
+      if (floatCannotPayAnything(gatewayId, short)) {
+        payoutFloatEmptyUntil.set(
+          gatewayId,
+          Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
+        );
+      }
       const label = GATEWAYS[gatewayId].label;
       void alertPayoutFloatEmpty(scope, {
         amount,
@@ -1692,7 +1740,13 @@ export async function submitHeldWithdrawal(
           `${label} refused this payout because payouts are not enabled on our ${label} account ("Payout not available"). The debit has been refunded and the withdrawal closed. Ask ${label} to enable payouts, or switch back to a gateway that pays out, then ask the customer to request the withdrawal again.`,
         );
       }
-      if (isPayoutFloatEmpty(error)) {
+      if (
+        await floatEmptyRefusal(
+          error,
+          config,
+          row.gateway_amount != null ? Number(row.gateway_amount) : null,
+        )
+      ) {
         payoutFloatEmptyUntil.set(
           gatewayId,
           Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,

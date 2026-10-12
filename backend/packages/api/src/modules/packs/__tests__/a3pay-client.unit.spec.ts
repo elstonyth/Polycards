@@ -6,7 +6,7 @@ import {
   checkAccBalance,
   submitPayout,
 } from '../a3pay-client';
-import { inRowCurrency, isPayoutFloatEmpty } from '../gateway';
+import { inRowCurrency } from '../gateway';
 import { generateKeyPairSync } from 'node:crypto';
 
 // Response shapes measured live against A3Pay production on 2026-10-12.
@@ -92,24 +92,32 @@ describe('A3Pay refusals that are on OUR side', () => {
     verifyUrl: 'https://api.example.test/hooks/a3pay/payout-verify',
   };
 
-  it('a SubmitPayout refused for balance is our empty float, never the customer', async () => {
+  it('a SubmitPayout refused for funds carries the float-empty HINT (confirmed by a balance read before use)', async () => {
     reply(
       400,
       '{"isSuccess":false,"errorCode":null,"errorMessage":"Insufficient balance","data":null}',
     );
     const error = await submitPayout(payout, config).catch((e) => e);
     expect(error.codes).toContain(A3PAY_PAYOUT_FLOAT_EMPTY);
-    expect(isPayoutFloatEmpty(error)).toBe(true);
   });
 
-  it('any other SubmitPayout refusal is not', async () => {
-    reply(
-      400,
-      '{"isSuccess":false,"errorCode":null,"errorMessage":"Invalid account number","data":null}',
-    );
-    const error = await submitPayout(payout, config).catch((e) => e);
-    expect(error.codes).not.toContain(A3PAY_PAYOUT_FLOAT_EMPTY);
-    expect(isPayoutFloatEmpty(error)).toBe(false);
+  it('any other SubmitPayout refusal does not — a bare "balance" included', async () => {
+    for (const message of [
+      'Invalid account number',
+      'Account holder name does not match the balance account',
+    ]) {
+      reply(
+        400,
+        JSON.stringify({
+          isSuccess: false,
+          errorCode: null,
+          errorMessage: message,
+          data: null,
+        }),
+      );
+      const error = await submitPayout(payout, config).catch((e) => e);
+      expect(error.codes).not.toContain(A3PAY_PAYOUT_FLOAT_EMPTY);
+    }
   });
 });
 

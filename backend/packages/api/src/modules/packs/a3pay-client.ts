@@ -169,7 +169,9 @@ function failure<T>(
   if (
     path === '/api/Payout/SubmitPayout' &&
     parsed.isSuccess === false &&
-    /insufficient|not enough|balance|余额/i.test(detail)
+    // Text only (A3Pay documents no code for it), so it is a HINT: the
+    // caller confirms it against a balance read before acting on it.
+    /insufficient|not enough|余额不足/i.test(detail)
   ) {
     codes.push(A3PAY_PAYOUT_FLOAT_EMPTY);
   }

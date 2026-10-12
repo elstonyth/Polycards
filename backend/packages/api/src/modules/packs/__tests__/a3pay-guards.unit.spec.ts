@@ -44,6 +44,7 @@ const ORIGINAL = { ...process.env };
 const originalFetch = global.fetch;
 let balanceSgd: number;
 let fetchCalls: string[];
+let submitReply: string;
 
 beforeEach(() => {
   process.env = {
@@ -68,6 +69,7 @@ beforeEach(() => {
   resetOpsAlerts();
   balanceSgd = 10_000;
   fetchCalls = [];
+  submitReply = '{"isSuccess":false,"errorMessage":"unset"}';
   global.fetch = jest.fn(async (url: string) => {
     fetchCalls.push(String(url));
     if (String(url).endsWith('/api/Merchant/CheckAccBalance')) {
@@ -80,13 +82,17 @@ beforeEach(() => {
               mid: 'polycards',
               currCode: 'SGD',
               availableBalanceAmount: balanceSgd,
-              currentBalanceAmount: balanceSgd,
-              t1BalanceAmount: 0,
+              // Never what the pre-check reads: only AVAILABLE can pay out.
+              currentBalanceAmount: 999_999,
+              t1BalanceAmount: 999_999,
             },
           }),
       };
     }
-    // Anything else (a submit, an ops alert) is beyond what these cases own.
+    if (String(url).endsWith('/api/Payout/SubmitPayout')) {
+      return { status: 400, text: async () => submitReply };
+    }
+    // Anything else (an ops alert) is beyond what these cases own.
     return {
       status: 500,
       text: async () => 'unexpected',
@@ -191,8 +197,8 @@ describe('a regional payout', () => {
     expect(packs.withdrawForCashout).not.toHaveBeenCalled();
   });
 
-  it('is refused before any row or debit while OUR S$ float cannot cover it, and the next tap is turned away', async () => {
-    balanceSgd = 40; // S$100 asked
+  it('is refused before any row or debit while OUR S$ float cannot pay anything, and the next tap is turned away', async () => {
+    balanceSgd = 40; // under A3Pay's S$50 payout minimum; S$100 asked
     const packs = withdrawHarness();
     const error = (await start(packs, { quotedRate: 3.3 }).catch(
       (e: unknown) => e,
@@ -211,6 +217,111 @@ describe('a regional payout', () => {
     expect(fetchCalls.filter((u) => u.endsWith('CheckAccBalance'))).toEqual(
       reads,
     );
+  });
+});
+
+describe('the payout-float breaker cannot be tripped by one customer', () => {
+  function packsFor() {
+    return {
+      listFxRates: jest.fn().mockResolvedValue([FX_ROW]),
+      savedBankAccountsFor: jest.fn().mockResolvedValue([SG_ACCOUNT]),
+      listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
+      createGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
+      updateGatewayWithdrawals: jest.fn().mockResolvedValue(undefined),
+      withdrawForCashout: jest.fn().mockResolvedValue({
+        id: 'ct_1',
+        balance: 0,
+        amount: -330,
+        replayed: false,
+        reference: null,
+        destination: SG_ACCOUNT,
+      }),
+      withdrawCreditsWithLedger: jest.fn().mockResolvedValue({
+        id: 'ct_2',
+        balance: 330,
+        amount: 330,
+        replayed: false,
+        reference: null,
+      }),
+      creditBalance: jest.fn(),
+      walletSummary: jest.fn().mockResolvedValue({
+        balance: 50_000,
+        available: 50_000,
+        locked: 0,
+        isFrozen: false,
+        hasTopup: true,
+        nextUnlock: null,
+        withdrawable: 50_000,
+        playthrough: { deposited: 0, used: 0, remaining: 0 },
+      }),
+    };
+  }
+  const go = (packs: ReturnType<typeof packsFor>, amount: number) =>
+    startWithdrawal(
+      scopeFor(packs),
+      {
+        customerId: 'cus_1',
+        amount,
+        accountId: SG_ACCOUNT.id,
+        ipAddress: '1.2.3.4',
+        gateway: 'a3pay',
+      },
+      'https://us/notify-wd',
+      'https://us/payout-verify',
+    );
+
+  it('a request larger than the float is refused alone; a smaller one still goes through', async () => {
+    balanceSgd = 80; // can pay S$50-80, not S$100
+    const big = packsFor();
+    await expect(go(big, 330)).rejects.toThrow(/on our side/i);
+    expect(big.createGatewayWithdrawals).not.toHaveBeenCalled();
+
+    const small = packsFor();
+    await go(small, 198).catch(() => undefined); // S$60
+    expect(small.createGatewayWithdrawals).toHaveBeenCalled();
+  });
+
+  it('a refusal merely MENTIONING funds does not trip it while the balance read says the float is fine', async () => {
+    submitReply = JSON.stringify({
+      isSuccess: false,
+      errorMessage: 'Insufficient beneficiary details',
+    });
+    const first = packsFor();
+    const error = (await go(first, 330).catch((e: unknown) => e)) as Error;
+    expect(error.message).not.toMatch(/on our side/i);
+    // Refunded as an ordinary definite refusal.
+    expect(first.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+
+    const next = packsFor();
+    await go(next, 330).catch(() => undefined);
+    expect(next.createGatewayWithdrawals).toHaveBeenCalled();
+  });
+
+  it('the same refusal with the float really short does trip it', async () => {
+    submitReply = JSON.stringify({
+      isSuccess: false,
+      errorMessage: 'Insufficient balance',
+    });
+    // Enough at the pre-check, gone by the confirming re-read (another
+    // payout drained it in between).
+    let reads = 0;
+    const mocked = global.fetch as unknown as jest.Mock;
+    const inner = mocked.getMockImplementation() as (
+      url: string,
+      init: unknown,
+    ) => Promise<unknown>;
+    mocked.mockImplementation(async (url: string, init: unknown) => {
+      if (String(url).endsWith('CheckAccBalance')) {
+        balanceSgd = reads++ === 0 ? 10_000 : 10;
+      }
+      return inner(url, init);
+    });
+    const first = packsFor();
+    await expect(go(first, 330)).rejects.toThrow(/on our side/i);
+
+    const next = packsFor();
+    await expect(go(next, 330)).rejects.toThrow(/on our side/i);
+    expect(next.createGatewayWithdrawals).not.toHaveBeenCalled();
   });
 });
 
