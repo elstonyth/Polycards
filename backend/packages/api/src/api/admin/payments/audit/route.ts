@@ -4,19 +4,24 @@ import {
   type GatewayReports,
 } from '../../../../modules/packs/facets';
 import {
-  checkBalance,
-  GATEWAY_IDS,
-  gatewayConfigFor,
+  gatewaysFor,
+  LEDGER_CURRENCY,
   RETIRED_GATEWAYS,
-  resolveActiveGateway,
   rowGateway,
 } from '../../../../modules/packs/gateway';
-import { gatewayEnabled } from '../../../../modules/packs/gateway-deposit';
 import { toOptionalMoney } from '../../../../modules/packs/money';
+import {
+  paymentCurrencyParam,
+  railGateway,
+} from '../../../utils/payment-currency';
 
 // GET /admin/payments/audit — the gateway-as-source-of-truth view (plan 130):
-// the gateway's live wallet balances beside OUR all-time settled totals, and
-// every row the audit sweep found the gateway disagreeing with. Read-only.
+// OUR all-time settled totals, and every row the audit sweep found the
+// gateway disagreeing with. Read-only. The gateway's live wallet is
+// /admin/payments/balance, shown once at the top of the same page.
+//
+// ?currency= scopes it to one rail (default RM): its gateway's totals, the
+// history of the other gateways in that currency, and its rows' findings.
 
 const FINDINGS_LIMIT = 100;
 
@@ -26,7 +31,8 @@ export async function GET(
 ): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
   const packs = resolvePacks<GatewayReports>(req.scope);
-  const active = await resolveActiveGateway(req.scope);
+  const currency = paymentCurrencyParam(req.query.currency) ?? LEDGER_CURRENCY;
+  const active = await railGateway(req.scope, currency);
 
   // Totals for the ACTIVE gateway sit beside that gateway's wallet; every
   // other gateway that ever settled a row is listed separately, so a switch
@@ -34,7 +40,12 @@ export async function GET(
   // reconciles it.
   const totals = await packs.gatewayAuditTotals(active);
   const history: ({ gateway: string } & ReturnType<typeof moneyTotals>)[] = [];
-  for (const id of [...GATEWAY_IDS, ...RETIRED_GATEWAYS]) {
+  // Retired gateways (globepay) were all RM.
+  const others = [
+    ...gatewaysFor(currency),
+    ...(currency === LEDGER_CURRENCY ? RETIRED_GATEWAYS : []),
+  ];
+  for (const id of others) {
     if (id === active) continue;
     const t = await packs.gatewayAuditTotals(id);
     if (t.deposits.count + t.withdrawals.count > 0) {
@@ -42,35 +53,13 @@ export async function GET(
     }
   }
 
-  // Live wallet read is best-effort: a gateway hiccup must not blank the
-  // findings list, which is the part that can name a real money problem.
-  let wallet: {
-    current: number;
-    available: number;
-    currency_code: string;
-  } | null = null;
-  let walletError: string | null = null;
-  if (gatewayEnabled()) {
-    try {
-      const b = await checkBalance(gatewayConfigFor(active));
-      wallet = {
-        current: b.currentBalance,
-        available: b.availableBalance,
-        currency_code: b.currencyCode,
-      };
-      if (b.notes?.length) walletError = b.notes.join('; ');
-    } catch (error) {
-      walletError = error instanceof Error ? error.message : String(error);
-    }
-  }
-
   const [deposits, withdrawals] = await Promise.all([
     packs.listGatewayDeposits(
-      { audit_note: { $ne: null } },
+      { audit_note: { $ne: null }, currency },
       { take: FINDINGS_LIMIT, order: { audited_at: 'DESC' } },
     ),
     packs.listGatewayWithdrawals(
-      { audit_note: { $ne: null } },
+      { audit_note: { $ne: null }, currency },
       { take: FINDINGS_LIMIT, order: { audited_at: 'DESC' } },
     ),
   ]);
@@ -107,10 +96,8 @@ export async function GET(
   );
 
   res.json({
+    currency,
     gateway: active,
-    enabled: gatewayEnabled(),
-    wallet,
-    wallet_error: walletError,
     last_audited_at: totals.lastAuditedAt,
     findings_total: totals.findings,
     totals: moneyTotals(totals),

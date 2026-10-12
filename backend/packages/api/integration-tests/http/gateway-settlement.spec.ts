@@ -256,6 +256,130 @@ medusaIntegrationTestRunner({
         expect(period!.deposits.missingGross).toBe(1);
       });
 
+      // The Settlement page's currency tabs. The ledger has no currency
+      // column, so its half is matched through the gateway rows' references
+      // — SQL only a real database can vouch for.
+      it('?currency= keeps each rail to its own rows and ledger credits; an orphan credit stays on RM', async () => {
+        await packs().createGatewayDeposits([
+          {
+            merchant_transaction_id: 'PC-cur-myr-1',
+            gateway_transaction_id: 'TG-MYR-1',
+            customer_id: CUSTOMER_ID,
+            amount_requested: 100,
+            amount_settled: 100,
+            payment_method_code: 'BQR',
+            status: 'settled',
+            settled_at: MID_MONTH,
+          },
+          {
+            merchant_transaction_id: 'PC-cur-sgd-1',
+            gateway_transaction_id: 'A3-SGD-1',
+            customer_id: CUSTOMER_ID,
+            amount_requested: 310,
+            amount_settled: 310,
+            payment_method_code: 'BQR',
+            status: 'settled',
+            settled_at: MID_MONTH,
+            gateway: 'a3pay',
+            currency: 'SGD',
+            gateway_amount: 100,
+          },
+          // Another gateway tenant numbering the same way: an RM deposit of
+          // ANOTHER customer that happens to carry the same gateway id.
+          {
+            merchant_transaction_id: 'PC-cur-myr-dup',
+            gateway_transaction_id: 'A3-SGD-1',
+            customer_id: 'cus_gateway_settlement_other',
+            amount_requested: 50,
+            amount_settled: 50,
+            payment_method_code: 'BQR',
+            status: 'settled',
+            settled_at: MID_MONTH,
+          },
+        ]);
+        await packs().createGatewayWithdrawals([
+          {
+            merchant_transaction_id: 'PC-cur-sgd-wd',
+            customer_id: CUSTOMER_ID,
+            amount: 329,
+            bank_code: 'DBSSSGSG',
+            account_number: '1234567890',
+            account_holder_name: 'SETTLEMENT SPEC',
+            status: 'settled',
+            settled_at: MID_MONTH,
+            gateway: 'a3pay',
+            currency: 'SGD',
+            gateway_amount: 100,
+          },
+        ]);
+        await packs().createCreditTransactions([
+          // Top-ups carry the gateway's id, a cash-out our merchant id.
+          {
+            customer_id: CUSTOMER_ID,
+            amount: 100,
+            reason: 'topup' as const,
+            pull_id: null,
+            reference: 'TG-MYR-1',
+          },
+          {
+            customer_id: CUSTOMER_ID,
+            amount: 310,
+            reason: 'topup' as const,
+            pull_id: null,
+            reference: 'A3-SGD-1',
+          },
+          {
+            customer_id: CUSTOMER_ID,
+            amount: -329,
+            reason: 'cashout' as const,
+            pull_id: null,
+            reference: 'PC-cur-sgd-wd',
+          },
+          // A credit with no gateway row behind it at all.
+          {
+            customer_id: CUSTOMER_ID,
+            amount: 7,
+            reason: 'topup' as const,
+            pull_id: null,
+            reference: 'mock-topup-orphan',
+          },
+          {
+            customer_id: 'cus_gateway_settlement_other',
+            amount: 50,
+            reason: 'topup' as const,
+            pull_id: null,
+            reference: 'A3-SGD-1',
+          },
+        ] as Parameters<PacksModuleService['createCreditTransactions']>[0]);
+
+        const month = async (currency: string) =>
+          (
+            await report(`?granularity=month&periods=1&currency=${currency}`)
+          ).periods.find((p) => p.period === CURRENT_KEY)!;
+
+        const sgd = await month('sgd');
+        expect(sgd.deposits.count).toBe(1);
+        expect(sgd.deposits.gross).toBe(310);
+        expect(sgd.withdrawals.gross).toBe(329);
+        expect(sgd.ledger).toEqual({ topupCredited: 310, cashoutNet: 329 });
+        expect(sgd.delta).toEqual({ deposits: 0, withdrawals: 0 });
+
+        const myr = await month('MYR');
+        expect(myr.deposits.count).toBe(2);
+        expect(myr.deposits.gross).toBe(150);
+        expect(myr.withdrawals.count).toBe(0);
+        // The orphan lands here, and the delta says so.
+        expect(myr.ledger).toEqual({ topupCredited: 157, cashoutNet: 0 });
+        expect(myr.delta.deposits).toBe(-7);
+
+        // No currency: every rail, as before.
+        const all = (await report('?granularity=month&periods=1')).periods.find(
+          (p) => p.period === CURRENT_KEY,
+        )!;
+        expect(all.deposits.gross).toBe(460);
+        expect(all.ledger.topupCredited).toBe(467);
+      });
+
       it('falls back to month/12 on garbage params instead of erroring', async () => {
         const data = await report('?granularity=quarterly&periods=-3');
         expect(data.granularity).toBe('month');

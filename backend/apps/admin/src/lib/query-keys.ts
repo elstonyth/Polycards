@@ -32,10 +32,12 @@ export const qk = {
     ['admin', 'stats', range, from, to] as const,
   // (granularity, periods) always render — same always-rendered-segment rule
   // as qk.pulls: week and month views cache independently.
-  settlement: (granularity: string, periods: number) =>
-    ['admin', 'gateway-settlement', granularity, periods] as const,
-  gatewayBalance: ['admin', 'gateway-balance'] as const,
-  gatewayAudit: ['admin', 'gateway-audit'] as const,
+  settlement: (granularity: string, periods: number, currency: string) =>
+    ['admin', 'gateway-settlement', granularity, periods, currency] as const,
+  gatewayBalance: (currency: string) =>
+    ['admin', 'gateway-balance', currency] as const,
+  gatewayAudit: (currency: string) =>
+    ['admin', 'gateway-audit', currency] as const,
   paymentGateway: ['admin', 'payment-gateway'] as const,
   // Referral rebuild (spec 2026-08-24).
   referralSettings: ['admin', 'referral-settings'] as const,

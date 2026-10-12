@@ -223,7 +223,10 @@ export interface GroupCreditCustomer {
   last_name: string | null;
 }
 
-export const listGroupCreditCustomersPage = (groupId: string, offset: number) => {
+export const listGroupCreditCustomersPage = (
+  groupId: string,
+  offset: number,
+) => {
   const params = new URLSearchParams({
     groups: groupId,
     limit: '100',
@@ -457,13 +460,7 @@ export async function getEconomyReport(
 // ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
 
 export type StatsRange =
-  | 'today'
-  | 'yesterday'
-  | '7d'
-  | '30d'
-  | 'month'
-  | 'last_month'
-  | 'custom';
+  'today' | 'yesterday' | '7d' | '30d' | 'month' | 'last_month' | 'custom';
 
 export interface StatsFigures {
   signups: number;
@@ -532,6 +529,9 @@ export interface SettlementPeriod {
 
 export interface SettlementReport {
   granularity: SettlementGranularity;
+  /** The rail the report is scoped to; null = every gateway. Amounts are RM
+   *  either way (a regional payment at the rate it locked). */
+  currency: string | null;
   periods_requested: number;
   since: string;
   periods: SettlementPeriod[];
@@ -540,13 +540,19 @@ export interface SettlementReport {
 export async function getSettlementReport(
   granularity: SettlementGranularity,
   periods: number,
+  currency: string,
 ): Promise<SettlementReport> {
   return getJson<SettlementReport>(
-    `/admin/payments/settlement?granularity=${granularity}&periods=${periods}`,
+    `/admin/payments/settlement?granularity=${granularity}&periods=${periods}&currency=${encodeURIComponent(currency)}`,
   );
 }
 
 export interface GatewayBalance {
+  /** The rail asked for, and the gateway that serves it (for RM: the active
+   *  one). */
+  currency: string;
+  gateway: string;
+  label: string;
   enabled: boolean;
   balance: {
     currency_code: string;
@@ -554,12 +560,17 @@ export interface GatewayBalance {
     available: number;
     t1: number;
   } | null;
-  /** Set when the gateway could not be reached — the report still renders. */
+  /** Set when the gateway could not be reached (balance null), or beside
+   *  the balance when it left a wallet out (shown as 0). */
   error: string | null;
 }
 
-export async function getGatewayBalance(): Promise<GatewayBalance> {
-  return getJson<GatewayBalance>('/admin/payments/balance');
+export async function getGatewayBalance(
+  currency: string,
+): Promise<GatewayBalance> {
+  return getJson<GatewayBalance>(
+    `/admin/payments/balance?currency=${encodeURIComponent(currency)}`,
+  );
 }
 
 // ── Payment gateways (plan 130) ─────────────────────────────────────────────
@@ -601,11 +612,10 @@ export interface GatewayAuditFinding {
 }
 
 export interface GatewayAudit {
-  gateway: PaymentGatewayId;
-  enabled: boolean;
-  /** Live wallet read; null when the gateway is off or unreachable. */
-  wallet: { current: number; available: number; currency_code: string } | null;
-  wallet_error: string | null;
+  currency: string;
+  /** The rail's gateway (for RM: the active one). Its live wallet is
+   *  getGatewayBalance's. */
+  gateway: HistoricalGatewayId;
   last_audited_at: string | null;
   findings_total: number;
   totals: { deposits: GatewayAuditTotals; withdrawals: GatewayAuditTotals };
@@ -619,8 +629,10 @@ export interface GatewayAudit {
   findings: GatewayAuditFinding[];
 }
 
-export async function getGatewayAudit(): Promise<GatewayAudit> {
-  return getJson<GatewayAudit>('/admin/payments/audit');
+export async function getGatewayAudit(currency: string): Promise<GatewayAudit> {
+  return getJson<GatewayAudit>(
+    `/admin/payments/audit?currency=${encodeURIComponent(currency)}`,
+  );
 }
 
 // ── Active payment gateway switch (plan 130 §runtime switch) ────────────────
@@ -632,6 +644,8 @@ export interface PaymentGatewaySetting {
   setting: string | null;
   env_default: PaymentGatewayId;
   gateways: { id: PaymentGatewayId; label: string; configured: boolean }[];
+  /** One Settlement tab each: RM first, then every regional rail. */
+  currencies: string[];
   /** After a switch: non-blocking findings from the live check (e.g. an
    *  empty payout wallet). */
   warnings?: string[];
@@ -650,8 +664,7 @@ export const gatewayPreflightRefusal = (
   err: unknown,
 ): GatewayPreflightRefusal | null => {
   const data = (err as { data?: unknown } | null)?.data as
-    | Partial<GatewayPreflightRefusal>
-    | undefined;
+    Partial<GatewayPreflightRefusal> | undefined;
   return data?.type === 'gateway_preflight_failed' &&
     Array.isArray(data.problems)
     ? (data as GatewayPreflightRefusal)
@@ -1347,9 +1360,7 @@ export function getGatewayDeposits(
   // route's default order is status-dependent (pending = oldest-first work
   // queue) and an always-sent sort would silently flatten that.
   if (sort) params.set('sort', sort);
-  return getJson<GatewayDepositsResponse>(
-    `/admin/payments/deposits?${params}`,
-  );
+  return getJson<GatewayDepositsResponse>(`/admin/payments/deposits?${params}`);
 }
 
 // Gateway withdrawals (GET /admin/payments/withdrawals) — the money-OUT

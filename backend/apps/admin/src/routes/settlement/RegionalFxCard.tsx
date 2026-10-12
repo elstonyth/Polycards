@@ -131,7 +131,12 @@ export const RegionalFxCard = ({ currency }: { currency: string }) => {
           value={fx?.feed_rate != null ? fmt(fx.feed_rate) : '—'}
           hint={
             fx?.fetched_at
-              ? new Date(fx.fetched_at).toLocaleString('en-MY')
+              ? t('settlement.fxSourceHint', {
+                  source: t(`settlement.fxSource.${fx.source}`, {
+                    defaultValue: fx.source ?? '',
+                  }),
+                  when: new Date(fx.fetched_at).toLocaleString('en-MY'),
+                })
               : t('settlement.fxNotFetched')
           }
         />

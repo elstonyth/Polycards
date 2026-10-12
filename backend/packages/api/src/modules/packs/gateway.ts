@@ -269,6 +269,14 @@ export const REGIONAL_CURRENCIES = [
   ),
 ];
 
+/** Every currency the admin Settlement page has a tab for: RM first. */
+export const PAYMENT_CURRENCIES = [LEDGER_CURRENCY, ...REGIONAL_CURRENCIES];
+
+/** The gateways that move `currency`, in registry order. */
+export function gatewaysFor(currency: string): PaymentGateway[] {
+  return GATEWAY_IDS.filter((id) => GATEWAYS[id].currency === currency);
+}
+
 /** The fake gateway exists for specs; nothing else may ever select it. */
 function testOnly(): boolean {
   return process.env.NODE_ENV === 'test';

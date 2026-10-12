@@ -258,28 +258,33 @@ export const useStats = (
 export const useSettlementReport = (
   granularity: SettlementGranularity,
   periods: number,
+  currency: string,
 ): UseQueryResult<SettlementReport> =>
   useQuery({
-    queryKey: qk.settlement(granularity, periods),
-    queryFn: () => getSettlementReport(granularity, periods),
+    queryKey: qk.settlement(granularity, periods, currency),
+    queryFn: () => getSettlementReport(granularity, periods, currency),
     placeholderData: keepPreviousData,
   });
 
 // Live merchant balance at the gateway. A real upstream call (20s worst case),
 // so it refetches on a slow interval rather than every focus — the number
 // moves with settlements, not with tab switches.
-export const useGatewayBalance = (): UseQueryResult<GatewayBalance> =>
+export const useGatewayBalance = (
+  currency: string,
+): UseQueryResult<GatewayBalance> =>
   useQuery({
-    queryKey: qk.gatewayBalance,
-    queryFn: getGatewayBalance,
+    queryKey: qk.gatewayBalance(currency),
+    queryFn: () => getGatewayBalance(currency),
     refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
 
-export const useGatewayAudit = (): UseQueryResult<GatewayAudit> =>
+export const useGatewayAudit = (
+  currency: string,
+): UseQueryResult<GatewayAudit> =>
   useQuery({
-    queryKey: qk.gatewayAudit,
-    queryFn: getGatewayAudit,
+    queryKey: qk.gatewayAudit(currency),
+    queryFn: () => getGatewayAudit(currency),
     refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
@@ -295,8 +300,10 @@ export const useSavePaymentGateway = () => {
       toast.success('Payment gateway switched');
       for (const warning of data.warnings ?? []) toast.warning(warning);
       qc.invalidateQueries({ queryKey: qk.paymentGateway });
-      qc.invalidateQueries({ queryKey: qk.gatewayBalance });
-      qc.invalidateQueries({ queryKey: qk.gatewayAudit });
+      // The switch picks the RM rail's gateway; the regional tabs are not
+      // affected.
+      qc.invalidateQueries({ queryKey: qk.gatewayBalance('MYR') });
+      qc.invalidateQueries({ queryKey: qk.gatewayAudit('MYR') });
     },
     onError: (e) => {
       // A live-check refusal is answered by the page's "Switch anyway"
@@ -726,10 +733,7 @@ export const useBulkUpdateDeliveryOrders = () => {
   });
 };
 
-export type {
-  VoucherLadderDTO,
-  VoucherRangeDTO,
-} from './admin-rest';
+export type { VoucherLadderDTO, VoucherRangeDTO } from './admin-rest';
 
 export const useVoucherLadder = (): UseQueryResult<VoucherLadderDTO> =>
   useQuery({ queryKey: qk.voucherLadder, queryFn: getVoucherLadder });
@@ -1623,8 +1627,11 @@ export const useCustomerReferral = (
 export const useSetCustomerRealName = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { customerId: string; realName: string; reason: string }) =>
-      setCustomerRealName(vars.customerId, vars.realName, vars.reason),
+    mutationFn: (vars: {
+      customerId: string;
+      realName: string;
+      reason: string;
+    }) => setCustomerRealName(vars.customerId, vars.realName, vars.reason),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.customerId) });
     },

@@ -38,6 +38,16 @@ export const rm = (n: number | null): string =>
         maximumFractionDigits: 2,
       })}`;
 
+const CURRENCY_SYMBOL: Record<string, string> = { MYR: 'RM', SGD: 'S$' };
+
+/** An amount in a payment rail's own currency: 'RM 1,234.50', 'S$ 99.00',
+ *  'USDT 50.00' (the code itself when there is no symbol). */
+export const inCurrency = (n: number, currency: string): string =>
+  `${CURRENCY_SYMBOL[currency] ?? currency} ${n.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
 // USD → MYR at the given rate (2dp), mirroring the backend displayMarketPrice at
 // multiplier 1. Card FMV is tracked in USD (PriceCharting-native); the admin
 // shows RM at the live rate, no markup (markup lives on the sale price). Bad

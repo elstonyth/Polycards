@@ -7,6 +7,7 @@ import {
   mergeSettlementPeriods,
   settlementSince,
 } from '../../../../modules/packs/gateway-settlement';
+import { paymentCurrencyParam } from '../../../utils/payment-currency';
 
 // GET /admin/payments/settlement — the gateway's weekly/monthly result, read
 // from OUR database (money-path-accuracy-audit-2026-08-17 B4). Calendar MYT
@@ -20,6 +21,10 @@ import {
 // non-zero). Beside them, the credit ledger's own topup/cashout sums for the
 // same period and the gateway-vs-ledger delta (audit B5) — the first place the
 // two independent records of the same money are compared anywhere in the app.
+//
+// ?currency= scopes it to one rail (the Settlement page's tabs); without it
+// the report covers every gateway. Amounts are RM either way — the ledger's
+// currency, a regional payment converted at the rate it locked.
 //
 // Read-only, like every other /admin/payments/* surface: this reports money,
 // it never moves it. Admin-only (auto-protected /admin/* route).
@@ -55,8 +60,9 @@ export async function GET(
   const granularity = parseGranularity(req.query.granularity);
   const periods = parsePeriods(req.query.periods);
   const since = settlementSince(granularity, periods, new Date());
+  const currency = paymentCurrencyParam(req.query.currency);
 
-  const rows = await packs.settlementRows(granularity, since);
+  const rows = await packs.settlementRows(granularity, since, currency);
   const report = mergeSettlementPeriods(
     rows.deposits,
     rows.withdrawals,
@@ -68,6 +74,7 @@ export async function GET(
   res.setHeader('Cache-Control', 'no-store');
   res.json({
     granularity,
+    currency,
     periods_requested: periods,
     since: since.toISOString(),
     periods: report,
