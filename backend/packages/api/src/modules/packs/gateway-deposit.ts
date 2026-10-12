@@ -16,6 +16,7 @@ import {
 import {
   creditForDeposit,
   loadPaymentFxQuote,
+  nudgedDeposit,
   regionalDepositBand,
 } from './payment-fx';
 import type { TgpayCustomer } from './tgpay-client';
@@ -471,16 +472,36 @@ export async function startDeposit(
     throw error;
   }
 
+  // A3Pay may ask the customer for a few cents more (or less) than we asked
+  // for, to tell same-amount transfers apart (S$50 -> S$50.01). Re-lock the
+  // row to what they will really pay, at the SAME rate, so every cent they
+  // send is credited and the callback fence (settled == requested) still
+  // holds exactly. Skipped when the new credit would cross the gateway's RM
+  // ceiling: the row then keeps its original credit, as before.
+  const nudged =
+    fx !== null ? nudgedDeposit(fx, Number(result.depositActualAmount)) : null;
+  const relock =
+    nudged !== null &&
+    nudged.credit <= GATEWAYS[gateway].limits.depositMax &&
+    topUpAmountError(nudged.credit) === null
+      ? nudged
+      : null;
   await packs.updateGatewayDeposits({
     id: row.id,
     gateway_transaction_id: result.transactionId,
+    ...(relock
+      ? {
+          gateway_amount: relock.gatewayAmount,
+          amount_requested: relock.credit,
+        }
+      : {}),
   });
 
   return {
     url: result.url,
     transactionId: result.transactionId,
     merchantTransactionId,
-    amount,
+    amount: relock?.credit ?? amount,
     bankCode: result.bankCode,
     accountNumber: result.accountNumber,
     accountHolderName: result.accountHolderName,

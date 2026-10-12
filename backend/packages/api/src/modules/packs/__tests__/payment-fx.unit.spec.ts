@@ -1,5 +1,6 @@
 import {
   callbackLedgerAmount,
+  nudgedDeposit,
   regionalDepositBand,
   PAYMENT_FX_MAX_AGE_MS,
   creditForDeposit,
@@ -184,5 +185,42 @@ describe('review fixes (2026-10-06)', () => {
     expect(
       creditForDeposit(band.max, { depositRate: 3.4 }),
     ).toBeLessThanOrEqual(10000);
+  });
+});
+
+describe('nudgedDeposit — credit what A3Pay actually asks the customer for', () => {
+  // mid 3.1905, markup 0.10: 3.0905 RM per S$1.
+  const lock = { gatewayAmount: 50, mid: 3.1905, markup: 0.1 };
+
+  it('S$50 nudged to S$50.01 re-locks at the same rate: RM 154.55, not 154.52', () => {
+    expect(nudgedDeposit(lock, 50.01)).toEqual({
+      gatewayAmount: 50.01,
+      credit: 154.55,
+    });
+  });
+
+  it('a nudge down is re-locked too (they pay less, they get less)', () => {
+    expect(nudgedDeposit(lock, 49.99)).toEqual({
+      gatewayAmount: 49.99,
+      credit: 154.49,
+    });
+  });
+
+  it('keeps the lock for no change, a non-number, or more than a nudge', () => {
+    expect(nudgedDeposit(lock, 50)).toBeNull();
+    expect(nudgedDeposit(lock, Number.NaN)).toBeNull();
+    expect(nudgedDeposit(lock, 0)).toBeNull();
+    expect(nudgedDeposit(lock, 50.11)).toBeNull();
+    expect(nudgedDeposit(lock, 60)).toBeNull();
+  });
+
+  it('a re-locked row settles its callback at exactly the new credit', () => {
+    const relocked = nudgedDeposit(lock, 50.01)!;
+    expect(
+      callbackLedgerAmount(
+        { ledgerAmount: relocked.credit, gatewayAmount: relocked.gatewayAmount },
+        50.01,
+      ),
+    ).toBe(154.55);
   });
 });

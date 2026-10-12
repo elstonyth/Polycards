@@ -45,6 +45,7 @@ const originalFetch = global.fetch;
 let balanceSgd: number;
 let fetchCalls: string[];
 let submitReply: string;
+let payinActual: number;
 
 beforeEach(() => {
   process.env = {
@@ -70,6 +71,7 @@ beforeEach(() => {
   balanceSgd = 10_000;
   fetchCalls = [];
   submitReply = '{"isSuccess":false,"errorMessage":"unset"}';
+  payinActual = 100;
   global.fetch = jest.fn(async (url: string) => {
     fetchCalls.push(String(url));
     if (String(url).endsWith('/api/Merchant/CheckAccBalance')) {
@@ -85,6 +87,20 @@ beforeEach(() => {
               // Never what the pre-check reads: only AVAILABLE can pay out.
               currentBalanceAmount: 999_999,
               t1BalanceAmount: 999_999,
+            },
+          }),
+      };
+    }
+    if (String(url).endsWith('/api/Payin/CreatePayin')) {
+      return {
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            isSuccess: true,
+            data: {
+              paymentOrderId: 'D2026101200009999',
+              paymentURL: 'https://cashier.a3pay.test/D2026101200009999',
+              payinActualAmount: payinActual,
             },
           }),
       };
@@ -143,6 +159,60 @@ describe('a regional top-up at a rate the customer never saw', () => {
     expect(error).toBeInstanceOf(MedusaError);
     expect((error as Error).message).toMatch(/exchange rate just changed/i);
     expect(packs.createDepositCapped).not.toHaveBeenCalled();
+  });
+});
+
+describe('a regional top-up A3Pay nudges by a cent', () => {
+  function depositPacks() {
+    return {
+      listFxRates: jest.fn().mockResolvedValue([FX_ROW]),
+      createDepositCapped: jest.fn().mockResolvedValue({ id: 'gpd_1' }),
+      updateGatewayDeposits: jest.fn().mockResolvedValue(undefined),
+    };
+  }
+  const pay = (packs: ReturnType<typeof depositPacks>) =>
+    startDeposit(
+      scopeFor(packs),
+      {
+        customerId: 'cus_1',
+        amount: 50,
+        ipAddress: '1.2.3.4',
+        gateway: 'a3pay',
+        paymentMethodCode: 'BQR',
+        payerName: 'Tan Ah Kow',
+      },
+      'https://us/notify',
+      'https://us/return',
+    );
+
+  it('credits every cent the customer is asked for: S$50.01 at 3.10 is RM 155.03', async () => {
+    payinActual = 50.01;
+    const packs = depositPacks();
+    const result = await pay(packs);
+    // Locked first at the S$50 asked for…
+    expect(packs.createDepositCapped.mock.calls[0][0].data).toMatchObject({
+      amount_requested: 155,
+      gateway_amount: 50,
+    });
+    // …then re-locked to the S$50.01 A3Pay asks them to pay, same rate.
+    expect(packs.updateGatewayDeposits).toHaveBeenCalledWith({
+      id: 'gpd_1',
+      gateway_transaction_id: 'D2026101200009999',
+      gateway_amount: 50.01,
+      amount_requested: 155.03,
+    });
+    expect(result.amount).toBe(155.03);
+  });
+
+  it('an un-nudged order keeps its lock', async () => {
+    payinActual = 50;
+    const packs = depositPacks();
+    const result = await pay(packs);
+    expect(packs.updateGatewayDeposits).toHaveBeenCalledWith({
+      id: 'gpd_1',
+      gateway_transaction_id: 'D2026101200009999',
+    });
+    expect(result.amount).toBe(155);
   });
 });
 
