@@ -35,12 +35,22 @@ export function paymentFxPair(currency: string): string {
  */
 export const PAYMENT_FX_FEEDS: Record<
   string,
-  { url?: string; min: number; max: number; unit: string }
+  {
+    url?: string;
+    /** Tried when `url` fails or answers outside the band. */
+    fallbackUrl?: string;
+    min: number;
+    max: number;
+    unit: string;
+  }
 > = {
+  // Hourly (sync-payment-fx.ts): Coinbase's public fiat rates move through
+  // the day; ECB (frankfurter) publishes once per working day.
   SGD: {
     url:
       process.env.FX_SGD_MYR_URL ??
-      'https://api.frankfurter.dev/v1/latest?from=SGD&to=MYR',
+      'https://api.coinbase.com/v2/exchange-rates?currency=SGD',
+    fallbackUrl: 'https://api.frankfurter.dev/v1/latest?from=SGD&to=MYR',
     min: 1,
     max: 10,
     unit: 'S$1',

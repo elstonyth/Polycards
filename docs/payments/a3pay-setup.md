@@ -17,7 +17,7 @@ Handbook: <https://api.a3paysg.com/API/a3pay_api_doc.html> (v3.3.5, SGD only). C
 
 ## The conversion and the markup
 
-- `mid` is the SGD→MYR market rate. The `sync-payment-fx` job fetches it from frankfurter (ECB) every 6 h. An admin can pin a manual rate instead.
+- `mid` is the SGD→MYR market rate. The `sync-payment-fx` job fetches it **every hour** (at :05) from Coinbase's public exchange-rate API, which moves through the day. If Coinbase fails or answers outside the band, the job falls back to frankfurter (ECB, once per working day). A move of more than 5% in one run is refused and ops is alerted (`fx-jump:SGD`). An admin can pin a manual rate instead.
 - **`markup` is absolute, in RM per S$1, and is taken both ways.** With mid 3.20 and markup 0.05:
   - A top-up credits 3.15 per S$1, so S$100 becomes RM 315.00.
   - A payout pays 3.25 per S$1, so RM 100 becomes S$30.76.
