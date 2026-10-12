@@ -5,6 +5,9 @@
 // replacement for the ~15 inline `Number(card.market_value)` / `Number(pack.price)`
 // call sites. 2dp money decimals, never cents/sen. (Ledger/pack money is RM;
 // only raw PriceCharting FMV values are USD.)
+/** Our ledger's currency. A gateway in any other one converts per row. */
+export const LEDGER_CURRENCY = 'MYR';
+
 export function toMoney(value: unknown): number {
   return Number(value);
 }

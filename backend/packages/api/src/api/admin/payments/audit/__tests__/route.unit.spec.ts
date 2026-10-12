@@ -18,14 +18,6 @@ beforeEach(() => {
   setActiveGateway(null);
   jest.clearAllMocks();
   fakeGateway.reset();
-  fakeGateway.script({
-    checkBalance: {
-      currentBalance: 300,
-      availableBalance: 249,
-      currencyCode: 'MYR',
-      notes: [],
-    },
-  });
 });
 
 afterAll(() => {
@@ -112,6 +104,7 @@ function harness(setting: string | null, query: Record<string, string> = {}) {
 type Body = {
   currency: string;
   gateway: string;
+  findings_total: number;
   totals: { deposits: { count: number; gross: number; net: number } };
   history: {
     gateway: string;
@@ -161,6 +154,9 @@ describe('GET /admin/payments/audit', () => {
     const body = h.res.body as Body;
     expect(body.gateway).toBe('fake');
     expect(body.findings).toHaveLength(1);
+    // Counted over every RM gateway the list covers (1 each in the fake):
+    // the active one, TGPay, The 7 Pay and the retired globepay.
+    expect(body.findings_total).toBe(4);
     // The retired gateway's settled history is still listed; A3Pay (SGD) is
     // not RM history.
     expect(body.history.map((h) => h.gateway)).toEqual(['globepay']);
@@ -178,6 +174,7 @@ describe('GET /admin/payments/audit', () => {
     expect(body.gateway).toBe('a3pay');
     expect(h.packs.gatewayAuditTotals).toHaveBeenCalledWith('a3pay');
     expect(body.history).toEqual([]);
+    expect(body.findings_total).toBe(1);
     expect(h.packs.listGatewayWithdrawals).toHaveBeenCalledWith(
       expect.objectContaining({ currency: 'SGD' }),
       expect.anything(),

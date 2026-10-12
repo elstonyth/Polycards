@@ -17,7 +17,7 @@ import {
 } from '../../lib/queries';
 import { gatewayPreflightRefusal } from '../../lib/admin-rest';
 import type { PaymentGatewayId } from '../../lib/admin-rest';
-import { inCurrency } from '../../lib/format';
+import { inCurrency, LEDGER_CURRENCY } from '../../lib/format';
 
 // The top of every currency tab: which gateway moves this currency, whether
 // it is open, and its live wallet — the payout float that says whether a
@@ -45,13 +45,26 @@ export const RailCard = ({ currency }: { currency: string }) => {
           : { color: 'green' as const, text: t('settlement.railOpen') };
 
   const walletCurrency = b?.balance?.currency_code ?? currency;
+  // TGPay keeps two wallets (pay-in, payout) and reports no T+1, so its
+  // tiles are named for the wallets; A3Pay has one wallet and a T+1 figure.
+  const tiles: (readonly [string, number | null | undefined])[] = b?.balance
+    ?.separate_wallets
+    ? [
+        ['balancePayoutWallet', b.balance.available],
+        ['balancePayinWallet', b.balance.current],
+      ]
+    : [
+        ['balanceAvailable', b?.balance?.available],
+        ['balanceCurrent', b?.balance?.current],
+        ['balanceT1', b?.balance?.t1],
+      ];
   return (
     <Container className="p-0" data-testid={`rail-card-${currency}`}>
       <div className="flex flex-wrap items-start justify-between gap-3 px-6 py-4">
         <div>
           <Heading level="h2">{b?.label ?? '…'}</Heading>
           <Text className="text-ui-fg-subtle mt-1" size="small">
-            {currency === 'MYR'
+            {currency === LEDGER_CURRENCY
               ? t('settlement.railSubtitleLedger')
               : t('settlement.railSubtitleRegional', { currency })}
           </Text>
@@ -76,20 +89,16 @@ export const RailCard = ({ currency }: { currency: string }) => {
       ) : (
         <>
           {b?.balance !== null ? (
-            <div className="grid grid-cols-1 gap-px border-t bg-ui-border-base sm:grid-cols-3">
-              {(
-                [
-                  ['balanceAvailable', b?.balance?.available],
-                  ['balanceCurrent', b?.balance?.current],
-                  ['balanceT1', b?.balance?.t1],
-                ] as const
-              ).map(([key, value]) => (
+            <div
+              className={`grid grid-cols-1 gap-px border-t bg-ui-border-base ${tiles.length === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}
+            >
+              {tiles.map(([key, value]) => (
                 <div key={key} className="bg-ui-bg-subtle px-6 py-3">
                   <Text size="small" className="text-ui-fg-subtle">
                     {t(`settlement.${key}`)}
                   </Text>
                   <Heading level="h2" className="mt-0.5 tabular-nums">
-                    {value === undefined
+                    {value == null
                       ? '…'
                       : inCurrency(value, walletCurrency)}
                   </Heading>
@@ -105,11 +114,16 @@ export const RailCard = ({ currency }: { currency: string }) => {
               {t('settlement.balanceError', { message: b.error })}
             </Text>
           ) : null}
+          {b?.warning ? (
+            <Text size="small" className="text-ui-fg-subtle border-t px-6 py-3">
+              {t('settlement.balanceWarning', { message: b.warning })}
+            </Text>
+          ) : null}
         </>
       )}
 
       {/* Only RM has a choice of gateway; a regional rail runs beside it. */}
-      {currency === 'MYR' ? <GatewaySwitch /> : null}
+      {currency === LEDGER_CURRENCY ? <GatewaySwitch /> : null}
     </Container>
   );
 };

@@ -176,7 +176,7 @@ import {
 import { recomputeExternalStamps } from './external-backfill';
 import { levelForSpend } from './vip-ladder';
 import { levelsToGrant, rewardsForLevel } from './vip-rewards';
-import { fromSen, toMoney, toSen } from './money';
+import { fromSen, LEDGER_CURRENCY, toMoney, toSen } from './money';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   resolveFxRate,
@@ -7839,23 +7839,25 @@ class PacksModuleService extends MedusaService({
     // rail keeps the rows that point at ITS gateway rows; RM keeps every
     // other row, so an orphan credit with no gateway row at all still lands
     // on the RM tab, where the delta exists to catch it. Matched with the
-    // customer too: gateway ids are only unique per gateway TENANT (A3Pay's
-    // and GlobePay365's run the same D<date><seq> scheme).
-    const regionalRefs = `SELECT customer_id, ref FROM (
-        SELECT currency, customer_id, merchant_transaction_id AS ref FROM gateway_deposit
-        UNION ALL SELECT currency, customer_id, gateway_transaction_id FROM gateway_deposit
-        UNION ALL SELECT currency, customer_id, merchant_transaction_id FROM gateway_withdrawal
-        UNION ALL SELECT currency, customer_id, gateway_transaction_id FROM gateway_withdrawal
-      ) refs WHERE ref IS NOT NULL AND currency <> 'MYR'`;
+    // customer too: a gateway id is only unique within one gateway tenant,
+    // and A3Pay and GlobePay365 are two tenants of the same platform.
+    // `match` is '= ?' (this regional currency) or '<> ?' (any but RM).
+    const refs = (match: string) => `SELECT customer_id, ref FROM (
+        SELECT customer_id, unnest(ARRAY[merchant_transaction_id, gateway_transaction_id]) AS ref
+          FROM gateway_deposit WHERE currency ${match}
+        UNION ALL
+        SELECT customer_id, unnest(ARRAY[merchant_transaction_id, gateway_transaction_id])
+          FROM gateway_withdrawal WHERE currency ${match}
+      ) refs WHERE ref IS NOT NULL`;
     const ledgerSql = !currency
       ? ''
-      : currency === 'MYR'
-        ? `AND (reference IS NULL OR (customer_id, reference) NOT IN (${regionalRefs}))`
-        : `AND (customer_id, reference) IN (${regionalRefs} AND currency = ?)`;
-    const ledgerArgs =
-      currency && currency !== 'MYR'
-        ? [since.toISOString(), currency]
-        : [since.toISOString()];
+      : currency === LEDGER_CURRENCY
+        ? `AND (reference IS NULL OR (customer_id, reference) NOT IN (${refs('<> ?')}))`
+        : `AND (customer_id, reference) IN (${refs('= ?')})`;
+    // Both branches bind the tab's currency once per table.
+    const ledgerArgs = currency
+      ? [since.toISOString(), currency, currency]
+      : [since.toISOString()];
 
     // The ledger's own view of the same two flows, for the cross-check delta.
     // topup rows are created in the same request that stamps settled_at, so

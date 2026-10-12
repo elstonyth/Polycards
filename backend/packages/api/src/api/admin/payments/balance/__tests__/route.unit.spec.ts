@@ -52,7 +52,14 @@ describe('GET /admin/payments/balance', () => {
       gateway: 'fake',
       label: 'Fake gateway (tests)',
       enabled: true,
-      balance: { currency_code: 'MYR', current: 300, available: 249, t1: 0 },
+      balance: {
+        currency_code: 'MYR',
+        current: 300,
+        available: 249,
+        t1: 0,
+        separate_wallets: false,
+      },
+      warning: null,
       error: null,
     });
     expect(fakeGateway.calls.balances).toEqual([{ kind: 'fake' }]);
@@ -68,9 +75,12 @@ describe('GET /admin/payments/balance', () => {
         notes: ['no payout wallet for MYR'],
       },
     });
-    const body: { balance: unknown; error: string } = await run();
+    const body: { balance: unknown; warning: string; error: null } =
+      await run();
     expect(body.balance).not.toBeNull();
-    expect(body.error).toBe('no payout wallet for MYR');
+    // The gateway answered: a warning, never "could not reach".
+    expect(body.warning).toBe('no payout wallet for MYR');
+    expect(body.error).toBeNull();
   });
 
   it('an unreachable gateway is an answer, not a 500', async () => {

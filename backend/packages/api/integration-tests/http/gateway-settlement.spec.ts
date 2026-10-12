@@ -284,6 +284,19 @@ medusaIntegrationTestRunner({
             currency: 'SGD',
             gateway_amount: 100,
           },
+          // Credited under OUR id: the gateway never sent its own.
+          {
+            merchant_transaction_id: 'PC-cur-sgd-2',
+            customer_id: CUSTOMER_ID,
+            amount_requested: 155,
+            amount_settled: 155,
+            payment_method_code: 'BQR',
+            status: 'settled',
+            settled_at: MID_MONTH,
+            gateway: 'a3pay',
+            currency: 'SGD',
+            gateway_amount: 50,
+          },
           // Another gateway tenant numbering the same way: an RM deposit of
           // ANOTHER customer that happens to carry the same gateway id.
           {
@@ -310,6 +323,20 @@ medusaIntegrationTestRunner({
             gateway: 'a3pay',
             currency: 'SGD',
             gateway_amount: 100,
+          },
+          // A failed S$ payout: debited under our id, refunded under theirs.
+          {
+            merchant_transaction_id: 'PC-cur-sgd-wd2',
+            gateway_transaction_id: 'W-SGD-2',
+            customer_id: CUSTOMER_ID,
+            amount: 50,
+            bank_code: 'DBSSSGSG',
+            account_number: '1234567890',
+            account_holder_name: 'SETTLEMENT SPEC',
+            status: 'failed',
+            gateway: 'a3pay',
+            currency: 'SGD',
+            gateway_amount: 15,
           },
         ]);
         await packs().createCreditTransactions([
@@ -344,6 +371,27 @@ medusaIntegrationTestRunner({
             reference: 'mock-topup-orphan',
           },
           {
+            customer_id: CUSTOMER_ID,
+            amount: 155,
+            reason: 'topup' as const,
+            pull_id: null,
+            reference: 'PC-cur-sgd-2',
+          },
+          {
+            customer_id: CUSTOMER_ID,
+            amount: -50,
+            reason: 'cashout' as const,
+            pull_id: null,
+            reference: 'PC-cur-sgd-wd2',
+          },
+          {
+            customer_id: CUSTOMER_ID,
+            amount: 50,
+            reason: 'cashout' as const,
+            pull_id: null,
+            reference: 'W-SGD-2',
+          },
+          {
             customer_id: 'cus_gateway_settlement_other',
             amount: 50,
             reason: 'topup' as const,
@@ -358,10 +406,11 @@ medusaIntegrationTestRunner({
           ).periods.find((p) => p.period === CURRENT_KEY)!;
 
         const sgd = await month('sgd');
-        expect(sgd.deposits.count).toBe(1);
-        expect(sgd.deposits.gross).toBe(310);
+        expect(sgd.deposits.count).toBe(2);
+        expect(sgd.deposits.gross).toBe(465);
         expect(sgd.withdrawals.gross).toBe(329);
-        expect(sgd.ledger).toEqual({ topupCredited: 310, cashoutNet: 329 });
+        // The refund nets the failed payout's debit out ON THIS TAB.
+        expect(sgd.ledger).toEqual({ topupCredited: 465, cashoutNet: 329 });
         expect(sgd.delta).toEqual({ deposits: 0, withdrawals: 0 });
 
         const myr = await month('MYR');
@@ -370,14 +419,15 @@ medusaIntegrationTestRunner({
         expect(myr.withdrawals.count).toBe(0);
         // The orphan lands here, and the delta says so.
         expect(myr.ledger).toEqual({ topupCredited: 157, cashoutNet: 0 });
+        expect(myr.delta.withdrawals).toBe(0);
         expect(myr.delta.deposits).toBe(-7);
 
         // No currency: every rail, as before.
         const all = (await report('?granularity=month&periods=1')).periods.find(
           (p) => p.period === CURRENT_KEY,
         )!;
-        expect(all.deposits.gross).toBe(460);
-        expect(all.ledger.topupCredited).toBe(467);
+        expect(all.deposits.gross).toBe(615);
+        expect(all.ledger.topupCredited).toBe(622);
       });
 
       it('falls back to month/12 on garbage params instead of erroring', async () => {

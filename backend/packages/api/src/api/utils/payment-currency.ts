@@ -6,23 +6,28 @@ import {
   resolveActiveGateway,
   type PaymentGateway,
 } from '../../modules/packs/gateway';
+import { regionalDepositGateway } from '../../modules/packs/gateway-deposit';
 
 // The admin Settlement page has one tab per currency (RM, then each regional
 // rail: SGD). Its reports take ?currency= so each tab shows only its own
 // rail's money.
 
 /**
- * The currency a report is scoped to, upper-cased, or null when none was
- * asked for. Anything outside PAYMENT_CURRENCIES is a 400, so a typo never
+ * The ?currency= (or body.currency) a call is about, upper-cased, or null
+ * when none was given. Anything outside `allowed` is a 400, so a typo never
  * quietly reports another rail.
  */
-export function paymentCurrencyParam(raw: unknown): string | null {
-  if (raw === undefined || raw === null || raw === '') return null;
-  const currency = typeof raw === 'string' ? raw.trim().toUpperCase() : '';
-  if (!PAYMENT_CURRENCIES.includes(currency)) {
+export function paymentCurrencyParam(
+  raw: unknown,
+  allowed: readonly string[] = PAYMENT_CURRENCIES,
+): string | null {
+  if (raw === undefined || raw === null) return null;
+  const currency = typeof raw === 'string' ? raw.trim().toUpperCase() : null;
+  if (currency === '') return null;
+  if (currency === null || !allowed.includes(currency)) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      `'currency' must be one of ${PAYMENT_CURRENCIES.join(', ')}.`,
+      `'currency' must be one of ${allowed.join(', ')}.`,
     );
   }
   return currency;
@@ -30,7 +35,8 @@ export function paymentCurrencyParam(raw: unknown): string | null {
 
 /**
  * The gateway a currency's tab is about: for RM the ACTIVE one (the admin
- * switch picks it), for a regional currency its own rail.
+ * switch picks it), for a regional currency the rail taking its payments
+ * (the same pick as a top-up), else its first.
  */
 export async function railGateway(
   scope: { resolve: <T>(key: string) => T },
@@ -38,5 +44,5 @@ export async function railGateway(
 ): Promise<PaymentGateway> {
   return currency === LEDGER_CURRENCY
     ? resolveActiveGateway(scope)
-    : gatewaysFor(currency)[0];
+    : (regionalDepositGateway(currency) ?? gatewaysFor(currency)[0]);
 }

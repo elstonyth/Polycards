@@ -23,14 +23,14 @@ Handbook: <https://api.a3paysg.com/API/a3pay_api_doc.html> (v3.3.5, SGD only). C
   - A payout pays 3.25 per S$1, so RM 100 becomes S$30.76.
 - Rounding is always down to the cent, in our favour.
 - **A3Pay nudges the amount.** It may ask the customer for a cent or so more than we requested, so same-amount transfers can be told apart (S$50 → S$50.01, seen live 2026-10-12). `startDeposit` re-locks the row to that exact amount at the same rate, so the customer is credited for every cent they pay. S$50.01 at 3.0905 credits RM 154.55, not 154.52. A move of more than 10 cents is not treated as a nudge, and the row keeps its original lock.
-- Set the rate and markup in **Admin → Settlement → "SGD conversion"** (one card per regional currency; `GET/POST /admin/payments/fx?currency=SGD`):
+- Set the rate and markup in **Admin → Settlement → S$ tab → "Exchange rate (SGD → RM)"** (every regional currency has its own tab; `GET/POST /admin/payments/fx?currency=SGD`). The same tab shows A3Pay's live S$ wallet, the S$ rows' monthly result and their audit (`/admin/payments/balance|settlement|audit?currency=SGD`):
   - Every save needs a reason and is audited (`admin_action_audit`, entity `fx`, id `SGD_MYR`).
   - The card previews the customer rates live and shows **Conversion earned**: Σ(S$ × mid − RM credited) over settled top-ups, plus Σ(RM debited − S$ × mid) over settled payouts.
 - **No fallback rate.** SGD top-ups and payouts are refused ("SGD payments are paused") in two cases:
   - No `SGD_MYR` row exists.
   - The feed is older than 7 days (ECB skips holidays) and no manual rate is set.
 - **The customer sees the rate they get.** The top-up sheet and the withdraw form send the rate they showed (`quoted_rate`). If an admin moved the markup in between, the backend refuses before any row or debit ("The exchange rate just changed"), and the form re-reads the rate.
-- **Adding a regional currency (USDT next):** one `GATEWAYS` entry (backend `gateway.ts`), one `PAYMENT_FX_FEEDS` entry (`payment-fx.ts`; no `url` means manual rate only), one `REGIONAL_RAILS` entry (storefront `src/lib/regional-rails.ts`), and one `REGIONAL_CURRENCIES` entry on the admin Settlement page. Payout destinations for a wallet (not a bank) are not built yet.
+- **Adding a regional currency (USDT next):** one `GATEWAYS` entry (backend `gateway.ts`), one `PAYMENT_FX_FEEDS` entry (`payment-fx.ts`; no `url` means manual rate only), and one `REGIONAL_RAILS` entry (storefront `src/lib/regional-rails.ts`). The admin Settlement page gets the currency's tab from the gateway registry by itself; add its tab name (`settlement.rail.<CODE>`) to the admin's `en.json`. Payout destinations for a wallet (not a bank) are not built yet.
 - A rate change never affects payments already started. Held payouts are approved at the S$ amount locked when the customer asked.
 
 ## Onboarding with A3Pay (the Telegram checklist)

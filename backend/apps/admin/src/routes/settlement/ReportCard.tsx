@@ -11,7 +11,7 @@ import {
 } from '@medusajs/ui';
 import { useSettlementReport } from '../../lib/queries';
 import type { SettlementGranularity } from '../../lib/admin-rest';
-import { rm } from '../../lib/format';
+import { LEDGER_CURRENCY, rm } from '../../lib/format';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 // The gateway's calendar weekly/monthly result for one currency, read from
@@ -91,7 +91,7 @@ export const ReportCard = ({ currency }: { currency: string }) => {
         <div>
           <Heading level="h2">{t('settlement.reportTitle')}</Heading>
           <Text className="text-ui-fg-subtle mt-1" size="small">
-            {currency === 'MYR'
+            {currency === LEDGER_CURRENCY
               ? t('settlement.reportSubtitle')
               : t('settlement.reportSubtitleRegional', { currency })}
           </Text>

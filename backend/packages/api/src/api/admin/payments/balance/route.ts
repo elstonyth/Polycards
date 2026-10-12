@@ -6,6 +6,7 @@ import {
   LEDGER_CURRENCY,
 } from '../../../../modules/packs/gateway';
 import { gatewayEnabled } from '../../../../modules/packs/gateway-deposit';
+import { isTgpayKind } from '../../../../modules/packs/tgpay-client';
 import {
   paymentCurrencyParam,
   railGateway,
@@ -41,12 +42,23 @@ export async function GET(
   const rail = { currency, gateway, label: GATEWAYS[gateway].label };
 
   if (!gatewayEnabled(process.env, gateway)) {
-    res.json({ ...rail, enabled: false, balance: null, error: null });
+    res.json({
+      ...rail,
+      enabled: false,
+      balance: null,
+      warning: null,
+      error: null,
+    });
     return;
   }
 
   try {
-    const balance = await checkBalance(gatewayConfigFor(gateway));
+    const config = gatewayConfigFor(gateway);
+    const balance = await checkBalance(config);
+    // TGPay-family gateways keep two wallets: top-ups land in the pay-in
+    // wallet ("current") and payouts leave from the payout wallet
+    // ("available"). They report no T+1 figure at all, so none is shown.
+    const separateWallets = isTgpayKind(config.kind);
     res.json({
       ...rail,
       enabled: true,
@@ -54,10 +66,13 @@ export async function GET(
         currency_code: balance.currencyCode,
         current: balance.currentBalance,
         available: balance.availableBalance,
-        t1: balance.t1Balance,
+        t1: separateWallets ? null : balance.t1Balance,
+        separate_wallets: separateWallets,
       },
-      // A wallet the gateway did not report reads 0 here; say so beside it.
-      error: balance.notes?.length ? balance.notes.join('; ') : null,
+      // A wallet the gateway left out reads 0 above. The gateway DID answer,
+      // so this is a warning beside the balance, not an error.
+      warning: balance.notes?.length ? balance.notes.join('; ') : null,
+      error: null,
     });
   } catch (error) {
     // The message is ours/theirs (GatewayError text) — codes and HTTP status,
@@ -66,6 +81,7 @@ export async function GET(
       ...rail,
       enabled: true,
       balance: null,
+      warning: null,
       error: error instanceof Error ? error.message : String(error),
     });
   }

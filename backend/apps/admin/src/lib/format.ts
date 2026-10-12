@@ -30,13 +30,8 @@ export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
 export const deliveryStatusLabel = (status: string): string =>
   DELIVERY_STATUS_LABEL[status as DeliveryStatus] ?? status;
 
-export const rm = (n: number | null): string =>
-  n === null
-    ? '—'
-    : `RM ${n.toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })}`;
+/** The backend ledger's currency (LEDGER_CURRENCY in packs/money.ts). */
+export const LEDGER_CURRENCY = 'MYR';
 
 const CURRENCY_SYMBOL: Record<string, string> = { MYR: 'RM', SGD: 'S$' };
 
@@ -47,6 +42,9 @@ export const inCurrency = (n: number, currency: string): string =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+
+export const rm = (n: number | null): string =>
+  n === null ? '—' : inCurrency(n, LEDGER_CURRENCY);
 
 // USD → MYR at the given rate (2dp), mirroring the backend displayMarketPrice at
 // multiplier 1. Card FMV is tracked in USD (PriceCharting-native); the admin

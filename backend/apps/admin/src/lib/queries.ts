@@ -152,6 +152,7 @@ import {
 import type { SetEntry } from '@acme/odds-math';
 import type { GroupPolicy } from './player-groups';
 import { qk } from './query-keys';
+import { LEDGER_CURRENCY } from './format';
 import {
   classifyApproveResult,
   classifyDenyResult,
@@ -302,8 +303,8 @@ export const useSavePaymentGateway = () => {
       qc.invalidateQueries({ queryKey: qk.paymentGateway });
       // The switch picks the RM rail's gateway; the regional tabs are not
       // affected.
-      qc.invalidateQueries({ queryKey: qk.gatewayBalance('MYR') });
-      qc.invalidateQueries({ queryKey: qk.gatewayAudit('MYR') });
+      qc.invalidateQueries({ queryKey: qk.gatewayBalance(LEDGER_CURRENCY) });
+      qc.invalidateQueries({ queryKey: qk.gatewayAudit(LEDGER_CURRENCY) });
     },
     onError: (e) => {
       // A live-check refusal is answered by the page's "Switch anyway"
@@ -733,7 +734,10 @@ export const useBulkUpdateDeliveryOrders = () => {
   });
 };
 
-export type { VoucherLadderDTO, VoucherRangeDTO } from './admin-rest';
+export type {
+  VoucherLadderDTO,
+  VoucherRangeDTO,
+} from './admin-rest';
 
 export const useVoucherLadder = (): UseQueryResult<VoucherLadderDTO> =>
   useQuery({ queryKey: qk.voucherLadder, queryFn: getVoucherLadder });
@@ -1627,11 +1631,8 @@ export const useCustomerReferral = (
 export const useSetCustomerRealName = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: {
-      customerId: string;
-      realName: string;
-      reason: string;
-    }) => setCustomerRealName(vars.customerId, vars.realName, vars.reason),
+    mutationFn: (vars: { customerId: string; realName: string; reason: string }) =>
+      setCustomerRealName(vars.customerId, vars.realName, vars.reason),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.customerId) });
     },

@@ -223,10 +223,7 @@ export interface GroupCreditCustomer {
   last_name: string | null;
 }
 
-export const listGroupCreditCustomersPage = (
-  groupId: string,
-  offset: number,
-) => {
+export const listGroupCreditCustomersPage = (groupId: string, offset: number) => {
   const params = new URLSearchParams({
     groups: groupId,
     limit: '100',
@@ -460,7 +457,13 @@ export async function getEconomyReport(
 // ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
 
 export type StatsRange =
-  'today' | 'yesterday' | '7d' | '30d' | 'month' | 'last_month' | 'custom';
+  | 'today'
+  | 'yesterday'
+  | '7d'
+  | '30d'
+  | 'month'
+  | 'last_month'
+  | 'custom';
 
 export interface StatsFigures {
   signups: number;
@@ -558,10 +561,15 @@ export interface GatewayBalance {
     currency_code: string;
     current: number;
     available: number;
-    t1: number;
+    /** null when the gateway reports no T+1 figure (TGPay family). */
+    t1: number | null;
+    /** TGPay family: `current` is the pay-in wallet and `available` the
+     *  separate payout wallet, not one wallet with part of it locked. */
+    separate_wallets: boolean;
   } | null;
-  /** Set when the gateway could not be reached (balance null), or beside
-   *  the balance when it left a wallet out (shown as 0). */
+  /** The gateway answered but left a wallet out (shown as 0). */
+  warning: string | null;
+  /** The gateway could not be reached; balance is null. */
   error: string | null;
 }
 
@@ -629,7 +637,9 @@ export interface GatewayAudit {
   findings: GatewayAuditFinding[];
 }
 
-export async function getGatewayAudit(currency: string): Promise<GatewayAudit> {
+export async function getGatewayAudit(
+  currency: string,
+): Promise<GatewayAudit> {
   return getJson<GatewayAudit>(
     `/admin/payments/audit?currency=${encodeURIComponent(currency)}`,
   );
@@ -664,7 +674,8 @@ export const gatewayPreflightRefusal = (
   err: unknown,
 ): GatewayPreflightRefusal | null => {
   const data = (err as { data?: unknown } | null)?.data as
-    Partial<GatewayPreflightRefusal> | undefined;
+    | Partial<GatewayPreflightRefusal>
+    | undefined;
   return data?.type === 'gateway_preflight_failed' &&
     Array.isArray(data.problems)
     ? (data as GatewayPreflightRefusal)
@@ -1360,7 +1371,9 @@ export function getGatewayDeposits(
   // route's default order is status-dependent (pending = oldest-first work
   // queue) and an always-sent sort would silently flatten that.
   if (sort) params.set('sort', sort);
-  return getJson<GatewayDepositsResponse>(`/admin/payments/deposits?${params}`);
+  return getJson<GatewayDepositsResponse>(
+    `/admin/payments/deposits?${params}`,
+  );
 }
 
 // Gateway withdrawals (GET /admin/payments/withdrawals) — the money-OUT

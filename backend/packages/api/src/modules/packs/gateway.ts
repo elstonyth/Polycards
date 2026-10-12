@@ -17,7 +17,7 @@ import {
   gatewayBankCode,
   TGPAY_SANDBOX_BANK,
 } from './banks';
-import { payoutCost, toOptionalMoney } from './money';
+import { LEDGER_CURRENCY, payoutCost, toOptionalMoney } from './money';
 import type {
   DepositDetail,
   MerchantBalance,
@@ -69,8 +69,7 @@ export type {
 // registry entry's own `configured` / `configFromEnv`.
 export type PaymentGateway = 'tgpay' | 'the7pay' | 'a3pay' | 'fake';
 
-/** Our ledger's currency. A gateway in any other one converts per row. */
-export const LEDGER_CURRENCY = 'MYR';
+export { LEDGER_CURRENCY };
 
 export type GatewayDefinition = {
   id: PaymentGateway;

@@ -34,11 +34,14 @@ export async function GET(
   const currency = paymentCurrencyParam(req.query.currency) ?? LEDGER_CURRENCY;
   const active = await railGateway(req.scope, currency);
 
-  // Totals for the ACTIVE gateway sit beside that gateway's wallet; every
-  // other gateway that ever settled a row is listed separately, so a switch
-  // never makes the old gateway's history vanish from the one page that
-  // reconciles it.
+  // Totals for the rail's gateway (for RM the ACTIVE one); every other
+  // gateway in this currency that ever settled a row is listed separately,
+  // so a switch never makes the old gateway's history vanish from the one
+  // page that reconciles it.
   const totals = await packs.gatewayAuditTotals(active);
+  // The findings list below covers every gateway in this currency, so the
+  // count does too.
+  let findingsTotal = totals.findings;
   const history: ({ gateway: string } & ReturnType<typeof moneyTotals>)[] = [];
   // Retired gateways (globepay) were all RM.
   const others = [
@@ -48,6 +51,7 @@ export async function GET(
   for (const id of others) {
     if (id === active) continue;
     const t = await packs.gatewayAuditTotals(id);
+    findingsTotal += t.findings;
     if (t.deposits.count + t.withdrawals.count > 0) {
       history.push({ gateway: id, ...moneyTotals(t) });
     }
@@ -99,7 +103,7 @@ export async function GET(
     currency,
     gateway: active,
     last_audited_at: totals.lastAuditedAt,
-    findings_total: totals.findings,
+    findings_total: findingsTotal,
     totals: moneyTotals(totals),
     history,
     findings: findings.slice(0, FINDINGS_LIMIT),

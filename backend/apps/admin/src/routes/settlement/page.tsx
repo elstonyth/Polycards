@@ -5,6 +5,7 @@ import { Receipt } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { usePaymentGateway } from '../../lib/queries';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { LEDGER_CURRENCY } from '../../lib/format';
 import { RailCard } from './RailCard';
 import { RegionalFxCard } from './RegionalFxCard';
 import { ReportCard } from './ReportCard';
@@ -28,8 +29,6 @@ export const config: RouteConfig = {
   // nothing owns.
   rank: 34,
 };
-
-const LEDGER_CURRENCY = 'MYR';
 
 const SettlementPage = () => {
   const { t } = useTranslation();
@@ -65,6 +64,13 @@ const SettlementPage = () => {
             </Tabs.List>
           </Tabs>
         </div>
+        {/* Without the registry only RM is known: say so rather than
+            quietly showing RM under a ?currency=SGD link. */}
+        {gateway.isError ? (
+          <Text size="small" className="text-ui-fg-error border-t px-6 py-3">
+            {t('settlement.currenciesLoadError')}
+          </Text>
+        ) : null}
       </Container>
 
       {waiting ? (
