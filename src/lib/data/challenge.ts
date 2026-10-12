@@ -9,8 +9,8 @@
  * aggregate) crosses thresholds; rewards are CUMULATIVE and form the top-10
  * prize pool — each stage carries its own SPARSE per-rank table (ranks 1-10,
  * a card and/or credits per rank; an absent rank pays nothing). The
- * weekly top-10 standings are ranked by pulled value (not spend — that's the
- * main leaderboard). Nothing here is invented: pool, states, summary, and
+ * weekly top-10 standings are ranked by pulled value over the challenge
+ * week. Nothing here is invented: pool, states, summary, and
  * standings all derive from ledger data.
  */
 import { store } from '@/lib/store';

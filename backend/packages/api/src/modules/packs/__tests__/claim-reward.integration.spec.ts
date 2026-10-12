@@ -98,6 +98,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(res).toEqual({ claimed: true, kind: 'voucher', amount_myr: 5, level: 2 });
 
         expect(await service.creditBalance(customerId)).toBe(5);
+        // VIP vouchers pay spend-only bonus credit (operator rule 2026-10-11),
+        // like task and challenge prizes: in the balance, never withdrawable.
+        const wallet = await service.walletSummary(customerId);
+        expect(wallet.bonus).toBe(5);
+        expect(wallet.withdrawable).toBe(0);
 
         const [claimed] = await service.listVipRewardGrants(
           { id: grant.id },

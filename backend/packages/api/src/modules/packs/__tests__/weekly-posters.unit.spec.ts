@@ -4,11 +4,13 @@ import {
   cardWidth,
   composeResultsPoster,
   MAX_ROW_CARDS,
+  type ResultsPosterInput,
   resultsHeadline,
   rmWhole,
 } from '../challenge-results-poster';
 import { fitToFeed } from '../feed-size';
 import {
+  artKey,
   composeStagesPoster,
   restLine,
   stageBlock,
@@ -175,6 +177,71 @@ describe('results poster', () => {
     });
     expect(placeholders).toEqual([]);
   });
+
+  it('draws a locked stage card dimmed in the row, and its credits in the ledger', async () => {
+    const slab = await sharp({
+      create: { width: 160, height: 259, channels: 4, background: '#3366ff' },
+    })
+      .png()
+      .toBuffer();
+    const poster = (podium: ResultsPosterInput['podium']) =>
+      composeResultsPoster(
+        {
+          weekLabel: '5 OCT – 11 OCT',
+          headline: 'RM 1 POOLED · STAGE 2 NEEDS RM 9',
+          podium,
+          list: [],
+          siteHost: 'polycards.gg/leaderboard',
+        },
+        new Map([[1, [slab, slab]]]),
+      );
+    const entry = { rank: 1, name: 'A', pulledMyr: 1, credits: 0 };
+    const won = await poster([{ ...entry, prizeMyr: 2, cards: ['X', 'Y'] }]);
+    const locked = await poster([
+      {
+        ...entry,
+        prizeMyr: 1,
+        cards: ['X'],
+        locked: { stage: 2, prizeMyr: 1, cards: ['Y'] },
+      },
+    ]);
+    // Two cards either way, so the same places: the second one sits right of
+    // the card room's middle (x 692), and is darker when locked.
+    const mean = async (jpeg: Buffer) => {
+      const data = await sharp(jpeg)
+        .extract({ left: 692, top: 0, width: 292, height: POSTER_H })
+        .greyscale()
+        .raw()
+        .toBuffer();
+      return data.reduce((sum, v) => sum + v, 0) / data.length;
+    };
+    expect(await mean(locked.jpeg)).toBeLessThan((await mean(won.jpeg)) - 3);
+    expect(locked.placeholders).toEqual([]);
+    const rest = await composeResultsPoster(
+      {
+        weekLabel: '5 OCT – 11 OCT',
+        headline: 'RM 1 POOLED · STAGE 2 NEEDS RM 9',
+        podium: [],
+        list: [
+          {
+            rank: 4,
+            name: 'D',
+            pulledMyr: 1,
+            prizeMyr: 10,
+            locked: { stage: 2, prizeMyr: 20 },
+          },
+        ],
+        siteHost: 'polycards.gg/leaderboard',
+      },
+      new Map(),
+      'rest',
+    );
+    expect(await jpegSize(rest.jpeg)).toEqual({
+      format: 'jpeg',
+      width: POSTER_W,
+      height: POSTER_H,
+    });
+  });
 });
 
 describe('fitToFeed', () => {
@@ -222,17 +289,63 @@ describe('stages poster', () => {
   };
 
   it('splits a stage into its podium and what ranks 4-10 win', () => {
-    expect(stageBlock(stage, cards, false)).toEqual({
+    expect(
+      stageBlock(stage, cards, false, new Map([['mewtwo', 7476.5]]), true),
+    ).toEqual({
       stage: 1,
       thresholdMyr: 300000,
       unlocked: false,
+      dim: true,
       podium: [
-        { rank: 1, name: 'Mewtwo #3', credits: 0 },
-        { rank: 2, name: 'Sylveon VMAX #93', credits: 0 },
-        { rank: 3, name: null, credits: 600 },
+        { rank: 1, name: 'Mewtwo #3', credits: 0, valueMyr: 7476.5 },
+        // A card with no price yet shows no value, never RM 0.
+        { rank: 2, name: 'Sylveon VMAX #93', credits: 0, valueMyr: null },
+        { rank: 3, name: null, credits: 600, valueMyr: null },
       ],
       rest: { from: 4, to: 10, minCredits: 80, maxCredits: 1800, cards: 0 },
     });
+  });
+
+  it("dims a locked stage's cards under a lock, the unlocked ones stay bright", async () => {
+    const slab = await sharp({
+      create: { width: 160, height: 259, channels: 4, background: '#3366ff' },
+    })
+      .png()
+      .toBuffer();
+    const art = new Map(
+      [1, 2].flatMap((s) => [1, 2].map((r) => [artKey(s, r), slab] as const)),
+    );
+    const poster = (dim: boolean) =>
+      composeStagesPoster(
+        {
+          weekLabel: '5 OCT – 11 OCT',
+          headline: 'RM 1 POOLED · STAGE 2 NEEDS RM 9',
+          stages: [
+            stageBlock(stage, cards, true),
+            stageBlock(
+              { ...stage, stageNumber: 2 },
+              cards,
+              false,
+              undefined,
+              dim,
+            ),
+          ],
+          siteHost: 'polycards.gg/leaderboard',
+        },
+        art,
+      );
+    // Stage 2 is the right-hand panel: darker when dimmed.
+    const mean = async (jpeg: Buffer) => {
+      const data = await sharp(jpeg)
+        .extract({ left: 556, top: 300, width: 460, height: 500 })
+        .greyscale()
+        .raw()
+        .toBuffer();
+      return data.reduce((sum, v) => sum + v, 0) / data.length;
+    };
+    const bright = await poster(false);
+    const dimmed = await poster(true);
+    expect(await mean(dimmed.jpeg)).toBeLessThan((await mean(bright.jpeg)) - 3);
   });
 
   it('words the rest line', () => {
@@ -376,5 +489,32 @@ describe('tasks poster', () => {
     expect(placeholders.filter((p) => p.startsWith('task')).length).toBe(
       many.length - dropped,
     );
+  });
+
+  it('puts the tasks two to a row rather than drop the ones past the column', async () => {
+    const { checkins, tasks } = splitWeeklyTasks(weekly);
+    // Under a check-in strip one column holds two tiles; four go 2 x 2.
+    const four = [...tasks, ...tasks];
+    const { jpeg, placeholders, dropped } = await composeTasksPoster(
+      {
+        weekLabel: '12 OCT – 18 OCT',
+        checkins,
+        tasks: four,
+        siteHost: 'polycards.gg/task',
+      },
+      { checkins: checkins.map(() => null), tasks: four.map(() => null) },
+    );
+    expect(await jpegSize(jpeg)).toEqual({
+      format: 'jpeg',
+      width: POSTER_W,
+      height: POSTER_H,
+    });
+    expect(dropped).toBe(0);
+    expect(placeholders.filter((p) => p.startsWith('task'))).toEqual([
+      'task:0',
+      'task:1',
+      'task:2',
+      'task:3',
+    ]);
   });
 });

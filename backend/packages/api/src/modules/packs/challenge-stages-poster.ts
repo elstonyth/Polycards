@@ -2,7 +2,7 @@ import sharp, { type OverlayOptions } from 'sharp';
 import { ensureBundledFonts } from '../../api/admin/media/label-font';
 import { fetchBytes, MAX_DECODE_PIXELS } from '../../api/utils/image-fetch';
 import { icon, POSTER_H } from './brand-poster';
-import { rmWhole } from './challenge-results-poster';
+import { lockedCardPng, rmWhole } from './challenge-results-poster';
 import { sizeToFit } from './challenge-poster';
 import { BRAND_LOGO_B64 } from './pull-card-assets';
 import { baseline, body, display, fit, measure, textEl } from './pull-card';
@@ -22,12 +22,17 @@ export type StagePrize = {
   rank: 1 | 2 | 3;
   name: string | null;
   credits: number;
+  /** The prize card at today's display price; null for credits only. */
+  valueMyr: number | null;
 };
 
 export type StageBlock = {
   stage: number;
   thresholdMyr: number;
   unlocked: boolean;
+  /** Draw its cards dimmed under a lock: a stage the running week has not
+   *  unlocked yet while an earlier one is. */
+  dim: boolean;
   /** Ranks 1-3, in rank order; a rank the stage does not pay is left out. */
   podium: StagePrize[];
   /** What ranks 4 and below win; null = nothing. */
@@ -51,18 +56,28 @@ export type StagesPosterInput = {
 
 type Reward = { rank: number; cardId: string | null; credits: number };
 
-/** One stage's panel, from its rank rewards and the prize cards' names. */
+/** One stage's panel, from its rank rewards and the prize cards' names and
+ *  values (card id to today's display price). */
 export function stageBlock(
   stage: { stageNumber: number; thresholdMyr: number; rankRewards: Reward[] },
   cards: Record<string, { name: string }>,
   unlocked: boolean,
+  values: Map<string, number | null> = new Map(),
+  dim = false,
 ): StageBlock {
   const prize = (r: Reward) =>
     r.cardId ? (cards[r.cardId]?.name ?? 'A prize card') : null;
   const podium = ([1, 2, 3] as const).flatMap((rank) => {
     const r = stage.rankRewards.find((x) => x.rank === rank);
     return r && (r.cardId || r.credits > 0)
-      ? [{ rank, name: prize(r), credits: r.credits }]
+      ? [
+          {
+            rank,
+            name: prize(r),
+            credits: r.credits,
+            valueMyr: r.cardId ? (values.get(r.cardId) ?? null) : null,
+          },
+        ]
       : [];
   });
   const below = stage.rankRewards.filter(
@@ -73,6 +88,7 @@ export function stageBlock(
     stage: stage.stageNumber,
     thresholdMyr: stage.thresholdMyr,
     unlocked,
+    dim,
     podium,
     rest: below.length
       ? {
@@ -224,9 +240,15 @@ export async function composeStagesPoster(
   const BLOCK_H = Math.floor(
     (gridBottom - gridTop - (rows - 1) * GAP) / Math.max(1, rows),
   );
+  // A line under each card for what it is worth, when any card has a value.
+  const VALUE_H = input.stages.some((b) =>
+    b.podium.some((p) => (p.valueMyr ?? 0) > 0),
+  )
+    ? 30
+    : 0;
   const CARD_W = Math.max(
     40,
-    Math.min(CARD_W_MAX, Math.floor((BLOCK_H - BLOCK_CHROME) * SLAB)),
+    Math.min(CARD_W_MAX, Math.floor((BLOCK_H - BLOCK_CHROME - VALUE_H) * SLAB)),
   );
   const CARD_H = Math.round(CARD_W / SLAB);
   // Cards narrower than the panel stay centred in it.
@@ -290,18 +312,33 @@ export async function composeStagesPoster(
         ),
       );
       const prize = block.podium.find((p) => p.rank === rank);
+      if (prize?.valueMyr) {
+        svg.push(
+          textEl(
+            rmWhole(prize.valueMyr),
+            cx,
+            baseline(cardsTop + CARD_H + 22, 22),
+            display(22),
+            CHASE,
+            'middle',
+          ),
+        );
+      }
       const bytes = art.get(artKey(block.stage, rank)) ?? null;
       let drawn = false;
       if (prize?.name && bytes) {
         try {
+          let card: Buffer = await decode(bytes)
+            .resize(CARD_W, CARD_H, {
+              fit: 'contain',
+              background: { r: 0, g: 0, b: 0, alpha: 0 },
+            })
+            .png()
+            .toBuffer();
+          if (block.dim)
+            card = await lockedCardPng(card, CARD_W, CARD_H, block.stage);
           layers.push({
-            input: await decode(bytes)
-              .resize(CARD_W, CARD_H, {
-                fit: 'contain',
-                background: { r: 0, g: 0, b: 0, alpha: 0 },
-              })
-              .png()
-              .toBuffer(),
+            input: card,
             left: Math.round(cx0),
             top: Math.round(cardsTop),
           });
@@ -363,7 +400,7 @@ export async function composeStagesPoster(
     }
     // Ranks 4 and below.
     if (block.rest) {
-      const ly = cardsTop + CARD_H + 36;
+      const ly = cardsTop + CARD_H + 36 + VALUE_H;
       const line = await fit(
         restLine(block.rest),
         body(20, 1),

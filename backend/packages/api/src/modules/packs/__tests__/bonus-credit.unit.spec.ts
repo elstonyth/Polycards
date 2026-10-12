@@ -6,6 +6,7 @@ import {
   bonusShareSen,
   consumeBonusSen,
   normalSenSql,
+  openBonusBp,
   paidPullSource,
   reasonCashSenSql,
 } from '../bonus-credit';
@@ -55,12 +56,22 @@ describe('bonus credit math', () => {
     expect(paidPullSource(0)).toBe('pack');
   });
 
+  it('gives the free welcome pull a full bonus share, a paid open its own', () => {
+    expect(openBonusBp(true, 0, 0)).toBe(BONUS_BP_FULL);
+    expect(openBonusBp(false, 0, 3000)).toBe(0);
+    expect(openBonusBp(false, 1500, 3000)).toBe(5000);
+  });
+
   it('spells the normal part of a ledger row one way', () => {
     expect(normalSenSql()).toBe('(ROUND(amount * 100) - COALESCE(bonus_cents, 0))');
     expect(normalSenSql('ct.')).toBe(
       '(ROUND(ct.amount * 100) - COALESCE(ct.bonus_cents, 0))',
     );
     // A bonus grant is all bonus: its own bucket keeps the whole amount.
-    expect(reasonCashSenSql()).toContain("WHEN reason = 'bonus_grant' THEN ROUND(amount * 100)");
+    // So is a task / challenge prize (2026-10-11): its reward bucket keeps the
+    // whole amount instead of reading RM 0.
+    expect(reasonCashSenSql()).toContain(
+      "WHEN reason IN ('bonus_grant', 'reward_credit', 'voucher_claim') THEN ROUND(amount * 100)",
+    );
   });
 });

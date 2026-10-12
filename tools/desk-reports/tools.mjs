@@ -125,9 +125,19 @@ TOOLS.growth = [
   {
     name: 'tasks',
     description:
-      "The weekly tasks and achievements exactly as the /task page shows them right now: each task's title, what it asks for in plain English (requirement; level = the VIP level a reach_level achievement needs), its prize as the page words it, what the page says the prize is worth (value_myr: a credit's amount, a free rip's pack price, a card's market price today, which moves with the market), the prize's official picture link (image) and when the task stops showing (ends_at). Achievements are listed by VIP level and each is claimed once per account; weekly tasks reset every Monday 00:00 Malaysia time. Use it for anything about tasks, achievements, level or VIP rewards, check-in rewards and free rips: never ask staff for a screenshot of the /task page. Amounts in RM (MYR).",
-    inputSchema: {},
-    request: () => ({ path: 'tasks', params: {} }),
+      "The weekly tasks and achievements exactly as the /task page shows them right now: each task's title, what it asks for in plain English (requirement; level = the VIP level a reach_level achievement needs), its prize as the page words it, what the page says the prize is worth (value_myr: a credit's amount, a free rip's pack price, a card's market price today, which moves with the market), the prize's official picture link (image) and when the task stops showing (ends_at). Achievements are listed by VIP level and each is claimed once per account; weekly tasks reset every Monday 00:00 Malaysia time. week next: the tasks already switched on for next week (from next Monday 00:00), for preparing next week's posts. Use it for anything about tasks, achievements, level or VIP rewards, check-in rewards and free rips: never ask staff for a screenshot of the /task page. Amounts in RM (MYR).",
+    inputSchema: {
+      week: z
+        .enum(['current', 'next'])
+        .optional()
+        .describe(
+          "current (default): this week's tasks. next: the tasks switched on for next week.",
+        ),
+    },
+    request: (args) => ({
+      path: 'tasks',
+      params: args.week ? { week: args.week } : {},
+    }),
   },
   {
     name: 'top_pulls',
@@ -161,7 +171,7 @@ TOOLS.growth = [
   {
     name: 'challenge_poster',
     description:
-      'A finished Weekly Pulled Value Challenge poster (1080x1350, the 4:5 feed size) rendered from live data with the official card art: the unlock headline, the stage chips, and the podium prizes of one stage (default: the highest unlocked stage), optionally with the current top-3 leaders. While a stage is still locked it also shows a bar of the pool this week on its way to the next stage (RM pooled, RM to go; the result gives the exact figures): for a \"stage 1 unlocked, on to stage 2\" post, feature the next stage with stage 2. week next draws the next challenge waiting in the admin queue instead (its own dates; no stage unlocked yet; stage 1 featured by default; no leaders). Use it instead of drawing cards with image generation: post the image it returns. It is a draft; a human reviews it before it is published.',
+      'A finished Weekly Pulled Value Challenge poster of ONE stage (1080x1350, the 4:5 feed size) rendered from live data with the official card art: the unlock headline, the stage chips, and the podium prizes of one stage (default: the highest unlocked stage), optionally with the current top-3 leaders. While a stage is still locked it also shows a bar of the pool this week on its way to the next stage (RM pooled, RM to go; the result gives the exact figures): for a \"stage 1 unlocked, on to stage 2\" post, feature the next stage with stage 2. week next draws the next challenge waiting in the admin queue instead (its own dates; no stage unlocked yet; stage 1 featured by default; no leaders). A promo of a whole week (\"next week\'s weekly challenge\", \"the 4 stages\", 推广图) is challenge_stages_poster, not this. Use it instead of drawing cards with image generation: post the image it returns. It is a draft; a human reviews it before it is published.',
     inputSchema: {
       week: z
         .enum(['current', 'next'])
@@ -197,7 +207,7 @@ TOOLS.growth = [
   {
     name: 'challenge_results_poster',
     description:
-      "The results of the most recently settled Weekly Challenge week as two finished posting images, each 1080x1350 (the 4:5 size Facebook and Instagram feeds show whole). part top (default): the top 3, with every prize card they won side by side and named (the most valuable first), their public name, what they pulled and what they won. part rest: ranks 4 to 10 with what they pulled and won. Post both together (a carousel: top first). Every figure comes from settlement's own records; nothing is typed in. Use it for any post about last week's winners or results. It is a draft; a human reviews it before it is published.",
+      "The results of the most recently settled Weekly Challenge week as two finished posting images, each 1080x1350 (the 4:5 size Facebook and Instagram feeds show whole). part top (default): the top 3, with every prize card they won side by side and named (the most valuable first), their public name, what they pulled and what they won. part rest: ranks 4 to 10 with what they pulled and won. The first stage the week did not unlock shows too, dimmed under a lock with a 'STAGE N +RM' line: what each rank would have added, which nobody won (the next stage to reach).Post both together (a carousel: top first). Every figure comes from settlement's own records; nothing is typed in. Use it for any post about last week's winners or results. It is a draft; a human reviews it before it is published.",
     inputSchema: {
       part: z
         .enum(['top', 'rest'])
@@ -214,9 +224,28 @@ TOOLS.growth = [
     }),
   },
   {
+    name: 'challenge_standings_poster',
+    description:
+      "Who is leading the RUNNING Weekly Pulled Value Challenge, as two finished posting images, each 1080x1350 (the 4:5 size Facebook and Instagram feeds show whole), in the results posters' look: part top (default), the current top 3 with every prize card they would win if the week ended now, what they pulled and what they win; part rest, ranks 4 to 10. The gold line gives the pool and what the next stage still needs. Use it for the Friday who-is-leading post and any post about the current standings: post both together (a carousel: top first). It is live, so call them leaders, never winners. It is a draft; a human reviews it before it is published.",
+    inputSchema: {
+      part: z
+        .enum(['top', 'rest'])
+        .optional()
+        .describe(
+          'top (default): the top 3 and the cards they would win. rest: ranks 4-10.',
+        ),
+    },
+    request: (args) => ({
+      path: 'challenge-standings-poster',
+      params: args.part ? { part: args.part } : {},
+      as: 'image',
+      artOf: 'podium rank',
+    }),
+  },
+  {
     name: 'challenge_stages_poster',
     description:
-      "A finished poster of every stage of the Weekly Pulled Value Challenge on one image (1080x1350, the 4:5 feed size): each stage's unlock threshold, its #1 to #3 prizes as the official card art, and what ranks 4 to 10 win, under the line that every reward stacks. week current (default): the running week, with its unlocked stages marked; week next: the next challenge waiting in the admin queue. Use it for posts about the new week's prizes or all the stages at once (challenge_poster features one stage with a big podium). It is a draft; a human reviews it before it is published.",
+      "A finished poster of every stage of the Weekly Pulled Value Challenge on one image (1080x1350, the 4:5 feed size): each stage's unlock threshold, its #1 to #3 prizes as the official card art with each card's value today, and what ranks 4 to 10 win, under the line that every reward stacks. Once the running week has unlocked a stage, the stages still locked show dimmed under a lock and the headline gives the pool and what the next stage still needs. week current (default): the running week, with its unlocked stages marked; week next: the next challenge waiting in the admin queue. This is THE weekly challenge promo: use it whenever staff ask for the week's or next week's challenge poster or promo image (推广图) or the stages, unless they name one stage (challenge_poster features one stage with a big podium). It is a draft; a human reviews it before it is published.",
     inputSchema: {
       week: z
         .enum(['current', 'next'])
@@ -333,11 +362,18 @@ TOOLS.growth = [
   {
     name: 'tasks_poster',
     description:
-      "A finished poster of this week's tasks exactly as the /task page shows them right now (1080x1350, the 4:5 feed size): the daily check-in tiers as one strip (each day count with its prize and value), then one tile per other weekly task (like 'Rip 10 × Bronze Pack') with its prize and what /task says it is worth. Nothing on it is typed in. Use it for any post about the week's tasks, check-in rewards or free rips. It is a draft; a human reviews it before it is published.",
-    inputSchema: {},
-    request: () => ({
+      "A finished poster of this week's tasks exactly as the /task page shows them right now (1080x1350, the 4:5 feed size): the daily check-in tiers as one strip (each day count with its prize and value), then one tile per other weekly task (like 'Rip 10 × Bronze Pack') with its prize and what /task says it is worth. Nothing on it is typed in. week next draws the tasks already switched on for next week (from next Monday 00:00 Malaysia time, its own dates on the poster): use it when staff ask for next week's tasks or name dates after this Sunday. Use it for any post about the week's tasks, check-in rewards or free rips. It is a draft; a human reviews it before it is published.",
+    inputSchema: {
+      week: z
+        .enum(['current', 'next'])
+        .optional()
+        .describe(
+          "current (default): this week's tasks. next: the tasks switched on for next week.",
+        ),
+    },
+    request: (args) => ({
       path: 'tasks-poster',
-      params: {},
+      params: args.week ? { week: args.week } : {},
       as: 'image',
       artOf: 'prize',
     }),

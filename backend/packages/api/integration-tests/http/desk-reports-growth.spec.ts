@@ -11,6 +11,7 @@ import { unzipSync, strFromU8 } from 'fflate';
 import { DEFAULT_USD_MYR } from '../../src/modules/packs/pricing';
 import { findBank } from '../../src/modules/packs/banks';
 import { ensureDefaultPlayerGroup } from '../../src/modules/packs/player-groups';
+import { taskWeekFor } from '../../src/modules/packs/referral';
 import { myrDisplay as MYR, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -306,6 +307,50 @@ medusaIntegrationTestRunner({
         expect((await report('challenge-poster')).status).toBe(404);
       });
 
+      it('draws who is leading as two feed-size posters, prizes as if the week ended now', async () => {
+        const get = (query: string) =>
+          unwrapResponse(
+            api.get(`/reports/growth/challenge-standings-poster${query}`, {
+              headers: { 'x-report-key': GROWTH_KEY },
+              responseType: 'arraybuffer',
+            }),
+          );
+        const top = await get('');
+        expect(top.status).toBe(200);
+        expect(top.headers['content-type']).toMatch(/^image\/jpeg/);
+        expect(top.headers['x-poster-part']).toBe('top');
+        expect(top.headers['x-poster-note']).toMatch(/if the week ended now/);
+        expect(top.headers['x-poster-note']).toMatch(/more unlocks stage 2\./);
+        // Stage 2's Y card shows locked beside the X card rank 1 wins.
+        expect(top.headers['x-poster-note']).toMatch(/Stage 2 is still locked/);
+        // Rank 1 wins stage 1's X card (stage 2 is locked); its seeded art is
+        // a path nobody serves here.
+        expect(top.headers['x-poster-missing-art']).toBe('1');
+        const meta = await sharp(Buffer.from(top.data)).metadata();
+        expect([meta.format, meta.width, meta.height]).toEqual([
+          'jpeg',
+          1080,
+          1350,
+        ]);
+        const rest = await get('?part=rest');
+        expect(rest.status).toBe(200);
+        expect(rest.headers['x-poster-part']).toBe('rest');
+        const restMeta = await sharp(Buffer.from(rest.data)).metadata();
+        expect([restMeta.width, restMeta.height]).toEqual([1080, 1350]);
+        expect(
+          (await report('challenge-standings-poster?part=all')).status,
+        ).toBe(400);
+      });
+
+      it('has no leaders poster without stages', async () => {
+        await packs().saveChallengeStages({
+          stages: [],
+          adminId: 'growth-challenge-test',
+          reason: 'clear',
+        });
+        expect((await report('challenge-standings-poster')).status).toBe(404);
+      });
+
       // An ended week recomputed live could announce prizes nobody was paid,
       // so only the running week is served.
       it('serves the running week only', async () => {
@@ -529,6 +574,22 @@ medusaIntegrationTestRunner({
           expect(body).not.toContain(secret);
         }
 
+        // The ladder the week ran on (promoted from the queue at its start):
+        // stage 3 was not unlocked, so the poster shows it locked.
+        await packs().createChallengeSchedules([
+          {
+            starts_at: last.startUtc,
+            applied_at: last.startUtc,
+            stages: [1, 2, 3].map((n) => ({
+              stage_number: n,
+              threshold_myr: n * 1000,
+              rank_rewards: [
+                { rank: 1, card_id: n === 3 ? cyId : cxId, credits: 0 },
+                { rank: 4, card_id: null, credits: n * 100 },
+              ],
+            })) as unknown as Record<string, unknown>,
+          },
+        ]);
         const poster = await unwrapResponse(
           api.get('/reports/growth/challenge-results-poster', {
             headers: { 'x-report-key': GROWTH_KEY },
@@ -536,6 +597,9 @@ medusaIntegrationTestRunner({
           }),
         );
         expect(poster.status).toBe(200);
+        expect(poster.headers['x-poster-note']).toMatch(
+          /Stage 3 was not unlocked that week/,
+        );
         expect(poster.headers['content-type']).toMatch(/^image\/jpeg/);
         const meta = await sharp(Buffer.from(poster.data)).metadata();
         // The 4:5 size Facebook and Instagram feeds show whole.
@@ -1065,7 +1129,7 @@ medusaIntegrationTestRunner({
             requirement: 'Reach VIP level 10',
             level: 10,
             checkin_days: null,
-            prize: 'RM 50.00 credit',
+            prize: 'RM 50.00 bonus credit',
             prize_type: 'credit',
             value_myr: 50,
             image: null,
@@ -1098,7 +1162,7 @@ medusaIntegrationTestRunner({
             requirement: 'Vault 5 cards',
             level: null,
             checkin_days: null,
-            prize: 'RM 5.00 credit',
+            prize: 'RM 5.00 bonus credit',
             prize_type: 'credit',
             value_myr: 5,
             image: null,
@@ -1246,6 +1310,38 @@ medusaIntegrationTestRunner({
           /Rip for a gone pack.*admin Tasks console/,
         );
         expect((await report('tasks-poster', null)).status).toBe(401);
+      });
+
+      it("draws next week's tasks before the week starts", async () => {
+        const nextMonday = taskWeekFor(new Date()).endUtcExcl;
+        await packs().createTaskDefinitions([
+          {
+            kind: 'weekly' as const,
+            title: 'Next week only',
+            requirement: { type: 'rip_count', count: 2, pack_id: 'tk-bronze' },
+            reward: { type: 'pack', pack_id: 'tk-bronze' },
+            starts_at: nextMonday,
+            ends_at: new Date(nextMonday.getTime() + 7 * DAY_MS - 60_000),
+          },
+        ]);
+        const titles = (r: { data: { weekly: { title: string }[] } }) =>
+          r.data.weekly.map((t) => t.title);
+        expect(titles(await report('tasks'))).not.toContain('Next week only');
+        const next = await report('tasks?week=next');
+        expect(next.status).toBe(200);
+        expect(titles(next)).toContain('Next week only');
+        expect(next.data.week_start).toBe(taskWeekFor(nextMonday).weekStartIso);
+        const res = await unwrapResponse(
+          api.get('/reports/growth/tasks-poster?week=next', {
+            headers: { 'x-report-key': GROWTH_KEY },
+            responseType: 'arraybuffer',
+          }),
+        );
+        expect(res.status).toBe(200);
+        const meta = await sharp(Buffer.from(res.data)).metadata();
+        expect([meta.width, meta.height]).toEqual([1080, 1350]);
+        expect((await report('tasks?week=last')).status).toBe(400);
+        expect((await report('tasks-poster?week=last')).status).toBe(400);
       });
 
       it('refuses a bad range with a readable reason', async () => {

@@ -41,6 +41,9 @@ export const DELIVERY_RULES: ErrorRule[] = [
     /verify your phone/i,
     'Verify your phone number in Account settings before requesting delivery.',
   ],
+  // No top-up ever (2026-10-11): the refusal names its own fix. Above the
+  // broad /not allowed|409/ rule, which would misread it as a card problem.
+  [/top up at least once/i, (text) => text],
   // Shipping-fee rules (2026-08-25) — must precede the generic /not allowed/
   // and /invalid|400/ rules, which would flatten them into wrong diagnoses.
   [

@@ -32,6 +32,8 @@ describe('getWallet', () => {
         playthrough: { deposited: 200, used: 160, remaining: 40 },
         // Absent on the wire = no bonus credit.
         bonus: 0,
+        // Absent on the wire = an older backend with no top-up gate.
+        hasTopup: true,
       },
     });
     expect(mem.requests).toEqual([
@@ -54,6 +56,16 @@ describe('getWallet', () => {
       used: 0,
       remaining: 0,
     });
+  });
+
+  it('reads the top-up gate', async () => {
+    backend({
+      'GET /store/credits': {
+        body: { wallet: { ...WALLET, withdrawable: 0, has_topup: false } },
+      },
+    });
+    const r = await getWallet();
+    expect(r.ok && r.wallet.hasTopup).toBe(false);
   });
 
   it('reads the bonus credit inside the balance', async () => {

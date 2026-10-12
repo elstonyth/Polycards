@@ -52,6 +52,12 @@ describe('DELIVERY_RULES backend-message contract', () => {
 
   // The phone gate is a NOT_ALLOWED, same class as "no longer available" —
   // so its rule has to win, or the customer is told to fix the wrong thing.
+  it('passes the no-top-up refusal through instead of blaming the cards', () => {
+    // withdrawable.ts NO_TOPUP_MESSAGE (backend), a NOT_ALLOWED refusal.
+    const msg = 'Top up at least once to unlock withdrawals and deliveries.';
+    expect(map(msg)).toBe(msg);
+  });
+
   it('keeps the phone-verification rule ahead of the broad not-allowed rule', () => {
     expect(map('Verify your phone number before continuing.')).toBe(
       'Verify your phone number in Account settings before requesting delivery.',

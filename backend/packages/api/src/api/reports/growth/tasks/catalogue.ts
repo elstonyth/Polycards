@@ -1,5 +1,7 @@
+import { MedusaError } from '@medusajs/framework/utils';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { posterRm } from '../../../../modules/packs/brand-poster';
+import { taskWeekFor } from '../../../../modules/packs/referral';
 import type {
   HubReward,
   TaskKind,
@@ -37,7 +39,7 @@ export function prizeLabel(reward: HubReward): {
 } {
   if (reward.type === 'credit') {
     return {
-      prize: `${posterRm(reward.amount_myr)} credit`,
+      prize: `${posterRm(reward.amount_myr)} bonus credit`,
       value_myr: reward.amount_myr,
     };
   }
@@ -56,6 +58,19 @@ export function prizeLabel(reward: HubReward): {
       : reward.card_name,
     value_myr: reward.card_value_myr,
   };
+}
+
+/** The instant a report reads the catalogue at: now for `week` current (the
+ *  default), next Monday 00:00 MYT for next, so staff can draw the coming
+ *  week's tasks before it starts (any task switched on whose run window
+ *  covers that instant). */
+export function catalogueAt(week: unknown, now = new Date()): Date {
+  if (week === undefined || week === 'current') return now;
+  if (week === 'next') return taskWeekFor(now).endUtcExcl;
+  throw new MedusaError(
+    MedusaError.Types.INVALID_DATA,
+    "week must be current (this week's tasks) or next (the tasks switched on for next week, from Monday 00:00 Malaysia time).",
+  );
 }
 
 // No customer has this id. Reward resolution in taskHubFor does not depend

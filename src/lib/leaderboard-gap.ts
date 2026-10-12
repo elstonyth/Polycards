@@ -4,11 +4,9 @@
  * Pure: every input is already on the page (the top-10 rows, the caller's
  * identity, and the caller's own weekly figure from GET /store/leaderboard/me).
  *
- * WEEKLY ONLY. On All Time the board ranks by pack-open SPEND while the figure
- * it displays is pulled VALUE, so the difference between two adjacent All Time
- * rows is not the amount that separates them and can even be negative. The
- * number that would be meaningful there is spend, which is deliberately not
- * shown. Callers gate on the period; this module does not guess.
+ * WEEKLY ONLY. The caller's own figure (GET /store/leaderboard/me) is their
+ * weekly pulled value, so an All Time gap would subtract a weekly number from
+ * a lifetime one. Callers gate on the period; this module does not guess.
  */
 import { rm } from '@/lib/format';
 import type { LeaderboardEntry, OwnWeekly } from '@/lib/data/leaderboard';

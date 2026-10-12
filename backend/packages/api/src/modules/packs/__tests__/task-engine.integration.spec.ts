@@ -91,6 +91,24 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
       expect(txns).toHaveLength(1);
       expect(Number(txns[0].amount)).toBe(2.5);
+      // Task credit is spend-only bonus credit (operator rule 2026-10-11):
+      // it sits in the balance but never in what may be withdrawn.
+      expect(Number(txns[0].bonus_cents)).toBe(250);
+      const wallet = await service.walletSummary('cus_t2');
+      expect(wallet.balance).toBe(2.5);
+      expect(wallet.bonus).toBe(2.5);
+      expect(wallet.withdrawable).toBe(0);
+      // The finance reports count the bonus prize whole, not its RM 0 normal part.
+      const totals = await service.ledgerReasonTotals();
+      expect(totals.find((r) => r.reason === 'reward_credit')?.amount).toBe(2.5);
+      // A reward_credit debit is floored against the BONUS balance it spends.
+      await expect(
+        service.mutateCreditAtomic({
+          customerId: 'cus_t2',
+          amount: -3,
+          reason: 'reward_credit',
+        }),
+      ).rejects.toThrow(/Bonus credit cannot go below RM 0/);
       // And its transaction-history row, in the same transaction (2026-09-30:
       // task credits moved balances with no ledger row).
       const ledger = await service.listLedgerEntries({
@@ -184,6 +202,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
       expect(rewardPulls).toHaveLength(1);
       expect(rewardPulls[0].status).toBe('vaulted');
+      // A prize is promo value: its whole sell-back is played through once.
+      expect(rewardPulls[0].bonus_bp).toBe(10000);
       // The minted pull is what the route's post-commit take is keyed off.
       expect(claim.claimed && claim.ref).toBe(rewardPulls[0].id);
       // Achievements are once EVER — a re-claim is refused.
@@ -307,6 +327,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(pulls).toHaveLength(1);
         expect(pulls[0].pack_id).toBe('bronze');
         expect(pulls[0].card_id).toBe('rolled-card');
+        // A prize is promo value: its whole sell-back is played through once.
+        expect(pulls[0].bonus_bp).toBe(10000);
         // The taken unit is earmarked on the pull, so selling the card back
         // restores it (buyback-pull.ts restores earmarked pulls only).
         expect(takes).toBe(1);

@@ -54,6 +54,7 @@ test('stdio round trip: every desk gets every read-only tool, the key on the wir
         'challenge_results',
         'challenge_poster',
         'challenge_results_poster',
+        'challenge_standings_poster',
         'challenge_stages_poster',
         'brand_poster',
         'achievements_poster',

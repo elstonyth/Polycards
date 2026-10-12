@@ -122,6 +122,121 @@ export const prizeValue = (credits: number, cards: PrizeCard[]): number =>
 export const byValue = (cards: PrizeCard[]): PrizeCard[] =>
   [...cards].sort((a, b) => (b.valueMyr ?? -1) - (a.valueMyr ?? -1));
 
+/** A prize card that no longer exists: shown, never valued. */
+export const MISSING_PRIZE_CARD: Omit<PrizeCard, 'qty'> = {
+  name: 'A prize card',
+  title: 'A prize card',
+  image: null,
+  valueMyr: null,
+};
+
+/** Each card as a prize: its name with the grade, the title under its slab,
+ *  the official art and one unit at today's display market price. */
+export async function prizeCardsById(
+  packs: PacksModuleService,
+  cardIds: string[],
+): Promise<Map<string, Omit<PrizeCard, 'qty'>>> {
+  const ids = [...new Set(cardIds)];
+  if (!ids.length) return new Map();
+  const rows = await packs.listCards(
+    { id: ids },
+    {
+      select: [
+        'id',
+        'name',
+        'image',
+        'slab_image',
+        'grader',
+        'grade',
+        'market_value',
+        'market_multiplier',
+      ],
+      take: ids.length,
+    },
+  );
+  const fx = rows.length ? await resolveFxRate(packs) : 0;
+  return new Map(
+    rows.map((c) => [
+      c.id,
+      {
+        name:
+          c.grader && c.grade ? `${c.name} · ${c.grader} ${c.grade}` : c.name,
+        title: c.name,
+        image: c.slab_image ?? c.image ?? null,
+        valueMyr: displayMarketPrice(
+          toMoney(c.market_value),
+          fx,
+          Number(c.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
+        ),
+      },
+    ]),
+  );
+}
+
+/** A prize as a poster draws it: one card per pull it mints (two stages can
+ *  award one card twice), most valuable first, and the whole at today's
+ *  prices. */
+export type PosterPrize = {
+  credits: number;
+  prizeMyr: number;
+  hand: Omit<PrizeCard, 'qty'>[];
+};
+
+export function posterPrize(
+  payout: { credits: number; cardIds: string[] } | undefined,
+  cardById: Map<string, Omit<PrizeCard, 'qty'>>,
+): PosterPrize {
+  const qty = new Map<string, number>();
+  for (const id of payout?.cardIds ?? []) qty.set(id, (qty.get(id) ?? 0) + 1);
+  const cards = byValue(
+    [...qty].map(([id, n]) => ({
+      ...(cardById.get(id) ?? MISSING_PRIZE_CARD),
+      qty: n,
+    })),
+  );
+  const credits = payout?.credits ?? 0;
+  return {
+    credits,
+    prizeMyr: prizeValue(credits, cards),
+    hand: cards.flatMap((c) => Array.from({ length: c.qty }, () => c)),
+  };
+}
+
+/** What one still-locked stage would add for each rank it pays, priced
+ *  today: the posters draw it dimmed under a lock. */
+export async function lockedStageRewards(
+  packs: PacksModuleService,
+  stage: {
+    stageNumber: number;
+    rankRewards: { rank: number; cardId: string | null; credits: number }[];
+  },
+): Promise<Map<number, PosterPrize & { stage: number }>> {
+  const paid = stage.rankRewards.filter((r) => r.cardId || r.credits > 0);
+  const cardById = await prizeCardsById(
+    packs,
+    paid.flatMap((r) => (r.cardId ? [r.cardId] : [])),
+  );
+  const ranks = [...new Set(paid.map((r) => r.rank))];
+  return new Map(
+    ranks.map((rank) => {
+      const rows = paid.filter((r) => r.rank === rank);
+      return [
+        rank,
+        {
+          stage: stage.stageNumber,
+          ...posterPrize(
+            {
+              credits: rows.reduce((s, r) => s + r.credits, 0),
+              cardIds: rows.flatMap((r) => (r.cardId ? [r.cardId] : [])),
+            },
+            cardById,
+          ),
+        },
+      ];
+    }),
+  );
+}
+
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 // How far back a settled week's pulled values are recomputed: settlement is
 // hourly, so the latest settled week is normally the one just ended.
@@ -181,29 +296,10 @@ export async function latestChallengeResults(
     : [];
   const customerById = new Map(customers.map((c) => [c.id, c]));
 
-  const cardIds = [
-    ...new Set(shown.flatMap((w) => w.cards.map((c) => c.cardId))),
-  ];
-  const cardRows = cardIds.length
-    ? await packs.listCards(
-        { id: cardIds },
-        {
-          select: [
-            'id',
-            'name',
-            'image',
-            'slab_image',
-            'grader',
-            'grade',
-            'market_value',
-            'market_multiplier',
-          ],
-          take: cardIds.length,
-        },
-      )
-    : [];
-  const fx = cardRows.length ? await resolveFxRate(packs) : 0;
-  const cardById = new Map(cardRows.map((c) => [c.id, c]));
+  const cardById = await prizeCardsById(
+    packs,
+    shown.flatMap((w) => w.cards.map((c) => c.cardId)),
+  );
 
   const winners: ResultWinner[] = [];
   for (const w of shown) {
@@ -212,29 +308,10 @@ export async function latestChallengeResults(
       seedOf(w.customerId),
     );
     const cards = byValue(
-      w.cards.map(({ cardId, qty }) => {
-        const c = cardById.get(cardId);
-        if (!c)
-          return {
-            name: 'A prize card',
-            title: 'A prize card',
-            image: null,
-            qty,
-            valueMyr: null,
-          };
-        return {
-          name:
-            c.grader && c.grade ? `${c.name} · ${c.grader} ${c.grade}` : c.name,
-          title: c.name,
-          image: c.slab_image ?? c.image ?? null,
-          qty,
-          valueMyr: displayMarketPrice(
-            toMoney(c.market_value),
-            fx,
-            Number(c.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
-          ),
-        };
-      }),
+      w.cards.map(({ cardId, qty }) => ({
+        ...(cardById.get(cardId) ?? MISSING_PRIZE_CARD),
+        qty,
+      })),
     );
     const pulled =
       weeksBack === null

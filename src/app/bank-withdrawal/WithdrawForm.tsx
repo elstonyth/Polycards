@@ -78,6 +78,7 @@ export function nextAmountText(
  *  its own PhoneGateAction. */
 const REMEDIES: [RegExp, string, string][] = [
   [/deposits must be spent on packs/i, '/slots', 'Open packs'],
+  [/top up at least once/i, '/me', 'Top up'],
   [/under review/i, '/contact', 'Contact support'],
   [/add an email address/i, '/settings', 'Add an email address'],
   [

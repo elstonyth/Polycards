@@ -135,7 +135,8 @@ describe('VAULT_RULES backend-message contract', () => {
     // The literal backend strings. Before 2026-10-03 every one of these fell
     // to VAULT_FALLBACK, so a customer short of playthrough was told to retry.
     const literals = [
-      // withdrawable.ts withdrawalGateError — freeze, playthrough, cap
+      // withdrawable.ts withdrawalGateError — freeze, no top-up, playthrough, cap
+      'Top up at least once to unlock withdrawals and deliveries.',
       'Withdrawals are unavailable while your account is under review. Contact support.',
       'RM 5.00 of your deposits must be spent on packs before you can withdraw.',
       'You can withdraw up to RM 12.34 right now.',

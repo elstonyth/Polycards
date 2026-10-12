@@ -29,7 +29,30 @@ export async function nextQueuedChallenge(
       take: 1,
     },
   );
-  if (!row) return null;
+  return row ? fromScheduleRow(packs, row) : null;
+}
+
+/**
+ * The ladder a past week ran on: the queued edition that was promoted at that
+ * week's start. null when the week's stages were set live instead (no such
+ * row), so nothing is guessed. An edit made live mid-week is not in it.
+ */
+export async function appliedChallengeAt(
+  packs: PacksModuleService,
+  weekStart: Date,
+): Promise<QueuedChallenge | null> {
+  const rows = await packs.listChallengeSchedules(
+    { starts_at: weekStart },
+    { select: ['id', 'starts_at', 'label', 'stages', 'applied_at'], take: 5 },
+  );
+  const row = rows.find((r) => r.applied_at);
+  return row ? fromScheduleRow(packs, row) : null;
+}
+
+async function fromScheduleRow(
+  packs: PacksModuleService,
+  row: { starts_at: Date | string; label?: string | null; stages: unknown },
+): Promise<QueuedChallenge> {
   const raw = (row.stages ?? []) as unknown as {
     stage_number: number;
     threshold_myr: number;

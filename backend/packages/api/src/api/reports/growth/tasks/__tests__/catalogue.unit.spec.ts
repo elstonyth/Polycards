@@ -1,11 +1,28 @@
-import { prizeLabel } from '../catalogue';
+import { catalogueAt, prizeLabel } from '../catalogue';
+
+describe('catalogueAt', () => {
+  // Sunday 11 Oct 2026, 21:20 Malaysia time.
+  const now = new Date('2026-10-11T13:20:00.000Z');
+
+  it('reads this week now, and next week at next Monday 00:00 Malaysia time', () => {
+    expect(catalogueAt(undefined, now)).toBe(now);
+    expect(catalogueAt('current', now)).toBe(now);
+    expect(catalogueAt('next', now).toISOString()).toBe(
+      '2026-10-11T16:00:00.000Z',
+    );
+  });
+
+  it('refuses any other week with a readable reason', () => {
+    expect(() => catalogueAt('last', now)).toThrow(/week must be current/);
+  });
+});
 
 // The prize as the /task page words it (TaskHubClient rewardLabel), so a post
 // and the page a player opens from it say the same thing.
 describe('prizeLabel', () => {
   it('names a credit by its amount', () => {
     expect(prizeLabel({ type: 'credit', amount_myr: 50 })).toEqual({
-      prize: 'RM 50.00 credit',
+      prize: 'RM 50.00 bonus credit',
       value_myr: 50,
     });
   });

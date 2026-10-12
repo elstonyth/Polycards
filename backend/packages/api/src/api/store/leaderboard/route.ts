@@ -15,8 +15,9 @@ import { publicProfileFields, seedOf } from '../../../utils/profile-handle';
 // - weekly  = the Weekly Pull Value board: ranked by pulled value over the
 //   challenge-anchored week (challengeWeekTop) — the SAME board /task's top-10
 //   shows, so the challenge payout and the leaderboard can never disagree.
-// - alltime = REAL spend: points = Σ(pack_open ledger debits, RM) × 100 — see
-//   PacksModuleService.leaderboardTop.
+// - alltime = lifetime pulled value (`volume`, the figure the board shows),
+//   over players with real pack-open spend; points = Σ(pack_open ledger
+//   debits, RM) × 100 — see PacksModuleService.leaderboardTop.
 // `volume` = Σ won-card MYR display value; `pulls` = pull count (reward-box
 // draws excluded on both paths).
 const TOP_N = 10;
@@ -59,7 +60,7 @@ export async function GET(
   }
   // Ranked top-N is aggregated in the DB (GROUP BY + ORDER BY + LIMIT) so it's
   // correct at any pull volume. weekly = pulled value over the challenge week;
-  // alltime = spend. Weekly rows mirror `volume` into `points` only because the
+  // alltime = lifetime pulled value. Weekly rows mirror `volume` into `points` only because the
   // wire shape requires a finite points field — the weekly UI renders volume.
   let ranked: {
     customer_id: string;

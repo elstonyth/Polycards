@@ -348,6 +348,8 @@ export async function adjustCustomerCredits(
   note: string,
   idempotencyKey?: string,
   kind?: 'bonus',
+  // true = no customer notification (bulk group edit).
+  silent?: boolean,
 ): Promise<{ amount: number; balance: number }> {
   const res = await fetch(
     `${__BACKEND_URL__}/admin/customers/${encodeURIComponent(id)}/credits`,
@@ -360,6 +362,7 @@ export async function adjustCustomerCredits(
         note,
         idempotency_key: idempotencyKey,
         kind,
+        notify: silent ? false : undefined,
       }),
     },
   );

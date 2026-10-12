@@ -11,6 +11,8 @@ import {
 import type PacksModuleService from '../../../../modules/packs/service';
 import { buildChallengeView } from '../../../store/challenge/build';
 import { nextQueuedChallenge } from '../challenge/queued';
+import { prizeCardsById } from '../challenge-results/results';
+import { standingsHeadline } from '../challenge-standings-poster/standings';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -23,7 +25,8 @@ type Stage = {
 // GET /reports/growth/challenge-stages-poster?week=current|next: every stage
 // of the running Weekly Challenge (or, with week=next, the next one waiting in
 // the admin queue) on one poster, each with its threshold, its #1-#3 prizes as
-// the official card art and what ranks 4-10 win (challenge-stages-poster.ts).
+// the official card art with today's value, and what ranks 4-10 win
+// (challenge-stages-poster.ts).
 // x-poster-missing-art names 'stage:rank' prizes drawn as a placeholder.
 export async function GET(
   req: MedusaRequest,
@@ -41,6 +44,7 @@ export async function GET(
   let stages: Stage[];
   let cards: Record<string, { name: string; image: string | null }>;
   let unlocked: (s: Stage) => boolean;
+  let pool: number | null = null;
   if (which === 'next') {
     const queued = await nextQueuedChallenge(packs);
     if (!queued || !queued.stages.length) {
@@ -74,9 +78,23 @@ export async function GET(
     );
     stages = body.stages;
     cards = body.cards;
-    const pool = body.progress.pooledMyr;
-    unlocked = (s) => pool >= s.thresholdMyr;
+    const pooled = body.progress.pooledMyr;
+    pool = pooled;
+    unlocked = (s) => pooled >= s.thresholdMyr;
   }
+  // Once the running week has unlocked a stage, the poster tracks progress:
+  // the pool and what the next stage still needs, the stages still locked
+  // dimmed under a lock. Before that (and for the queued week) it is the
+  // week's prize list, every stage bright.
+  const progress = pool !== null && stages.some(unlocked);
+  // Each #1-#3 prize card at today's display price, as /task values it.
+  const cardById = await prizeCardsById(
+    packs,
+    stages.flatMap((s) =>
+      s.rankRewards.flatMap((r) => (r.rank <= 3 && r.cardId ? [r.cardId] : [])),
+    ),
+  );
+  const values = new Map([...cardById].map(([id, c]) => [id, c.valueMyr]));
 
   const urls = new Map<string, string | null>();
   for (const s of stages) {
@@ -89,8 +107,13 @@ export async function GET(
   const { jpeg, missing } = await renderStagesPoster(
     {
       weekLabel,
-      headline: stagesHeadline(stages.length),
-      stages: stages.map((s) => stageBlock(s, cards, unlocked(s))),
+      headline:
+        progress && pool !== null
+          ? standingsHeadline(pool, stages)
+          : stagesHeadline(stages.length),
+      stages: stages.map((s) =>
+        stageBlock(s, cards, unlocked(s), values, progress && !unlocked(s)),
+      ),
       siteHost: 'polycards.gg/leaderboard',
     },
     urls,

@@ -16,10 +16,11 @@ jest.setTimeout(240 * 1000);
 //     wire shape needs a finite points field and the weekly UI renders volume.
 //     Independent of pack PRICE and immune to credit reversals (both only move
 //     spend); `volume` is the won cards' MYR display value.
-//   - alltime = REAL spend from the credit ledger's pack_open debits
+//   - alltime = lifetime pulled VALUE (the figure the board shows), over
+//     players with REAL spend from the credit ledger's pack_open debits
 //     (points = spend × 100) — NOT re-joined to the pack's CURRENT price, and a
-//     reversal (positive mirror row) nets it back out.
-// Also pinned: value/points-desc ordering, top-N truncation, and each
+//     reversal (positive mirror row) nets it back out. Spend never orders it.
+// Also pinned: value-desc ordering, top-N truncation, and each
 // aggregate's window. `volume` = market_value × multiplier × FX; reward-box
 // draws excluded on both paths.
 
@@ -238,12 +239,13 @@ medusaIntegrationTestRunner({
         });
       });
 
-      it('all-time spend nets out a reversed open and re-ranks', async () => {
+      it('all-time ranks by pulled value, not spend: a reversal nets the spend but keeps the rank', async () => {
         const container = getContainer();
         const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
-        // all-time ranks by immutable ledger spend. A reversal is a POSITIVE
-        // mirror row with the same 'pack_open' reason, so C1 nets 2000 → 1000
-        // and falls below C2's intact 2000.
+        // A reversal is a POSITIVE mirror row with the same 'pack_open'
+        // reason, so C1 nets 2000 → 1000, below C2's intact 2000. The board
+        // still puts C1 (100 USD pulled) above C2 (30 USD): it ranks by the
+        // pulled value it displays (operator 2026-10-12), never by spend.
         await packs.createCreditTransactions([
           { customer_id: 'cus_lb_1', amount: 10, reason: 'pack_open' },
         ] as Parameters<typeof packs.createCreditTransactions>[0]);
@@ -252,14 +254,16 @@ medusaIntegrationTestRunner({
         clearLeaderboardCache();
 
         const entries = await board('alltime');
-        // C4 (10000) > C3 (6000) > C2 (2000) > C1 (1000, after reversal).
+        // By value: C4 (250 USD) > C3 (150) > C1 (100) > C2 (30). By spend it
+        // would be C4 > C3 > C2 (2000) > C1 (1000).
         expect(entries.map((e) => e.seed)).toEqual([
           seedOf('cus_lb_4'),
           seedOf('cus_lb_3'),
-          seedOf('cus_lb_2'),
           seedOf('cus_lb_1'),
+          seedOf('cus_lb_2'),
         ]);
-        expect(entries[3]).toMatchObject({ points: 1000 });
+        expect(entries[2]).toMatchObject({ points: 1000, volume: MYR(100) });
+        expect(entries[3]).toMatchObject({ points: 2000, volume: MYR(30) });
       });
 
       // GET /store/leaderboard/me — the caller's OWN weekly figure, which the

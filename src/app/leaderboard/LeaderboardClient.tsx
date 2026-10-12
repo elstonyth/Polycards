@@ -74,9 +74,8 @@ export default function LeaderboardClient({
   // viewer is on the board.
   const own = findOwnRow(entries, ownHandle, ownWeekly)?.row ?? null;
 
-  // This Week only. All Time ranks by pack-open spend while displaying pulled
-  // value, so the difference between two adjacent All Time rows is not what
-  // separates them — see leaderboard-gap.ts.
+  // This Week only: the caller's own figure (ownWeekly) is a weekly one, so
+  // there is nothing to measure an All Time gap from — see leaderboard-gap.ts.
   const lockup =
     period === 'This Week'
       ? gapLockup(rankGap(entries, ownHandle, ownWeekly))
@@ -119,7 +118,7 @@ export default function LeaderboardClient({
       <p className="mt-3 text-[12px] text-neutral-400">
         {period === 'This Week'
           ? 'This week ranks by pulled value — every eligible pack draw counts. It is the Weekly Challenge board.'
-          : 'All Time — ranked by lifetime pack-open spend; showing each player’s lifetime pulled value.'}
+          : 'All Time — ranked by lifetime pulled value.'}
       </p>
 
       {/* Standings */}
@@ -230,7 +229,7 @@ export default function LeaderboardClient({
                         aria-label={`Current prize: ${[
                           ...prize.cards.map((c) => c.name),
                           prize.creditsLabel
-                            ? `${prize.creditsLabel} credits`
+                            ? `${prize.creditsLabel} bonus credits`
                             : null,
                         ]
                           .filter(Boolean)
@@ -252,7 +251,7 @@ export default function LeaderboardClient({
                         ))}
                         {prize.creditsLabel && (
                           <span className="text-chase text-xs font-semibold whitespace-nowrap">
-                            {prize.creditsLabel}
+                            {prize.creditsLabel} bonus
                           </span>
                         )}
                       </span>
@@ -261,7 +260,8 @@ export default function LeaderboardClient({
                     ) : null}
                     {/* All Time only: pulled value figure (operator 2026-07-23
                       "写回pulled value" — the old points figure is retired from
-                      the UI; ranking stays backend spend-order). Weekly rows
+                      the UI; the board ranks by this figure since 2026-10-12,
+                      it used to rank by spend). Weekly rows
                       end on the reward — the value lives under the name. */}
                     {period === 'All Time' && (
                       <span className="font-heading shrink-0 text-base tabular-nums text-white">

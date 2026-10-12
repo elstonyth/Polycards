@@ -97,7 +97,9 @@ export type LedgerTotals = {
   net: number;
   /** Σ cashout — customer withdrawals (balance move, not P&L). */
   cashout: number;
-  /** Σ voucher_claim + reward_credit + daily_reward — promo credits granted; excluded from net/revenue. */
+  /** Σ voucher_claim + reward_credit + daily_reward — promo credits granted; excluded from net/revenue.
+   *  Since 2026-10-11 every reward_credit (task / challenge prize) and
+   *  voucher_claim (VIP voucher) is spend-only bonus, so total bonus issued = bonusPromo + the post-2026-10-11 part of this. */
   rewardPromo: number;
   /** −Σ delivery_fee — shipping + insurance collected from wallets, net of cancel
    *  refunds. A pass-through fee line, not pack revenue; excluded from net. */
@@ -105,7 +107,9 @@ export type LedgerTotals = {
   /** Σ referral_commission — the weekly referrer payout; operator promo cost
    *  like rewardPromo, excluded from net/revenue. */
   referralCommission: number;
-  /** Σ bonus_grant — spend-only bonus credit (泥码) granted net of take-backs;
+  /** Σ bonus_grant — spend-only bonus credit (泥码) an ADMIN granted, net of
+   *  take-backs. Not all bonus: task / challenge prizes are bonus too but stay
+   *  in rewardPromo (their own reason);
    *  operator promo cost like rewardPromo, excluded from net/revenue. The
    *  pack_open / buyback lines carry only their NORMAL part (callers subtract
    *  bonus_cents in SQL), so bonus spent and paid back never reads as cash. */
