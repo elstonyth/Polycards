@@ -21,21 +21,55 @@ function quote(row: Parameters<typeof paymentFxQuote>[0]): PaymentFxQuote {
 }
 
 describe('paymentFxQuote', () => {
-  it('spreads the markup both ways around the mid', () => {
-    const q = quote({ rate: 3.3, fetched_at: fresh, markup: 0.01 });
+  const fee = (deposit: unknown, payout: unknown = deposit) => ({
+    fee_enabled: true,
+    deposit_fee_percent: deposit,
+    payout_fee_percent: payout,
+  });
+
+  it("takes each direction's percent of the mid: the operator's 3.19 at 0.5% example", () => {
+    const q = quote({ rate: 3.19, fetched_at: fresh, ...fee(0.5) });
     expect(q).toMatchObject({
-      mid: 3.3,
-      markup: 0.01,
-      depositRate: 3.29,
-      payoutRate: 3.31,
+      mid: 3.19,
+      feeEnabled: true,
+      depositFeePercent: 0.5,
+      payoutFeePercent: 0.5,
+      depositRate: 3.17405, // 3.19 x 99.5%
+      payoutRate: 3.20595, // 3.19 x 100.5%
+      depositMarkup: 0.01595,
+      payoutMarkup: 0.01595,
       source: 'feed',
     });
   });
 
+  it('prices the two directions separately', () => {
+    const q = quote({ rate: 3.2, fetched_at: fresh, ...fee(1, 2) });
+    expect(q.depositRate).toBe(3.168);
+    expect(q.payoutRate).toBe(3.264);
+  });
+
   it('reads bigNumber columns that arrive as strings', () => {
-    const q = quote({ rate: '3.3', fetched_at: fresh, markup: '0.1' });
-    expect(q.depositRate).toBe(3.2);
-    expect(q.payoutRate).toBe(3.4);
+    const q = quote({ rate: '3.2', fetched_at: fresh, ...fee('3.125') });
+    expect(q.depositRate).toBe(3.1);
+    expect(q.payoutRate).toBe(3.3);
+  });
+
+  it('switched off, both directions are the bare mid, and the rail stays open', () => {
+    const q = quote({
+      rate: 3.19,
+      fetched_at: fresh,
+      ...fee(0.5),
+      fee_enabled: false,
+    });
+    expect(q).toMatchObject({
+      feeEnabled: false,
+      depositFeePercent: 0,
+      payoutFeePercent: 0,
+      depositRate: 3.19,
+      payoutRate: 3.19,
+      depositMarkup: 0,
+      payoutMarkup: 0,
+    });
   });
 
   it('prefers an admin override and exempts it from the age limit', () => {
@@ -44,7 +78,7 @@ describe('paymentFxQuote', () => {
       fetched_at: new Date(0),
       manual_override: true,
       manual_rate: 3.25,
-      markup: 0.01,
+      ...fee(0.5),
     });
     expect(q).toMatchObject({ mid: 3.25, source: 'manual' });
   });
@@ -66,17 +100,12 @@ describe('paymentFxQuote', () => {
     ).toHaveProperty('error');
   });
 
-  it('refuses a negative or absurd markup', () => {
-    expect(
-      paymentFxQuote(
-        { rate: 3.3, fetched_at: fresh, markup: -0.01 },
-        'SGD',
-        NOW,
-      ),
-    ).toHaveProperty('error');
-    expect(
-      paymentFxQuote({ rate: 3.3, fetched_at: fresh, markup: 1 }, 'SGD', NOW),
-    ).toHaveProperty('error');
+  it('refuses a negative or absurd fee', () => {
+    for (const pct of [-0.01, 20.01, 'x']) {
+      expect(
+        paymentFxQuote({ rate: 3.3, fetched_at: fresh, ...fee(pct) }, 'SGD', NOW),
+      ).toEqual({ error: 'The SGD fee is out of range.' });
+    }
   });
 });
 
@@ -133,11 +162,11 @@ describe('toLedgerAmount — converts through the row lock', () => {
 });
 
 describe('review fixes (2026-10-06)', () => {
-  it('refuses to quote with no markup — the rail stays paused until one is set', () => {
-    for (const markup of [0, undefined, '0']) {
+  it('refuses to quote a rail whose fee was never configured — it stays paused', () => {
+    for (const fee_enabled of [null, undefined]) {
       expect(
-        paymentFxQuote({ rate: 3.3, fetched_at: fresh, markup }, 'SGD', NOW),
-      ).toEqual({ error: 'No SGD markup is set.' });
+        paymentFxQuote({ rate: 3.3, fetched_at: fresh, fee_enabled }, 'SGD', NOW),
+      ).toEqual({ error: 'No SGD fee is set.' });
     }
   });
 

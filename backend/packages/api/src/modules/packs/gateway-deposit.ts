@@ -298,7 +298,7 @@ export async function startDeposit(
       currency,
       gatewayAmount: paid,
       mid: quote.mid,
-      markup: quote.markup,
+      markup: quote.depositMarkup,
     };
   }
 

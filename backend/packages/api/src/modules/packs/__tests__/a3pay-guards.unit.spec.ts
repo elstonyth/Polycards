@@ -21,11 +21,14 @@ const ours = generateKeyPairSync('rsa', {
   privateKeyEncoding: { type: 'pkcs8', format: 'der' },
 });
 
-// mid 3.20, markup 0.10: top-ups credit RM 3.10 per S$1, payouts cost 3.30.
+// mid 3.20, fee 3.125% each way: top-ups credit RM 3.10 per S$1, payouts
+// cost 3.30.
 const FX_ROW = {
   pair: 'SGD_MYR',
   rate: 3.2,
-  markup: 0.1,
+  fee_enabled: true,
+  deposit_fee_percent: 3.125,
+  payout_fee_percent: 3.125,
   manual_override: false,
   manual_rate: null,
   fetched_at: new Date(),

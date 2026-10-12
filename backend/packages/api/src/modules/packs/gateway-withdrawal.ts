@@ -678,7 +678,12 @@ export async function startWithdrawal(
         RATE_CHANGED_MESSAGE,
       );
     }
-    fx = { currency, gatewayAmount, mid: quote.mid, markup: quote.markup };
+    fx = {
+      currency,
+      gatewayAmount,
+      mid: quote.mid,
+      markup: quote.payoutMarkup,
+    };
   }
 
   // 0b) PRECHECK — NOT the gate. This is an unlocked, read-only fast path whose
