@@ -28,6 +28,7 @@ import type {
 } from '../../lib/admin-rest';
 import { rm } from '../../lib/format';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { SgdFxCard } from './SgdFxCard';
 
 // Settlement — the gateway's calendar weekly/monthly result, read from this
 // database (audit 2026-08-17 B1/B3/B4/B5). This page exists so the operator
@@ -659,6 +660,7 @@ const SettlementPage = () => {
           </>
         )}
       </Container>
+      <SgdFxCard />
     </div>
   );
 };

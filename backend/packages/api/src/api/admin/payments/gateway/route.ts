@@ -11,10 +11,11 @@ import { gatewayEnv } from '../../../../modules/packs/gateway-env';
 import type PacksModuleService from '../../../../modules/packs/service';
 import {
   GATEWAYS,
-  GATEWAY_IDS,
   checkBalance,
   gatewayConfigFor,
+  LEDGER_GATEWAY_IDS,
   gatewayUrls,
+  isLedgerGateway,
   isPaymentGateway,
   paymentGateway,
   resolveActiveGateway,
@@ -38,7 +39,7 @@ function describe() {
   const env = process.env;
   return {
     active: paymentGateway(),
-    gateways: GATEWAY_IDS.map((id) => ({
+    gateways: LEDGER_GATEWAY_IDS.map((id) => ({
       id,
       label: GATEWAYS[id].label,
       configured: GATEWAYS[id].configured(env),
@@ -116,10 +117,10 @@ export async function POST(
   const body = req.body as { gateway?: unknown; force?: unknown } | null;
   const wanted = body?.gateway;
   const force = body?.force === true;
-  if (!isPaymentGateway(wanted)) {
+  if (!isPaymentGateway(wanted) || !isLedgerGateway(wanted)) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      `gateway must be one of ${GATEWAY_IDS.join(', ')}.`,
+      `gateway must be one of ${LEDGER_GATEWAY_IDS.join(', ')}.`,
     );
   }
   if (!GATEWAYS[wanted].configured(process.env)) {

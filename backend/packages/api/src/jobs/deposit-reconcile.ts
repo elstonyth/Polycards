@@ -1,10 +1,11 @@
 import { MedusaContainer } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { resolvePacks, type GatewayDeposits } from '../modules/packs/facets';
+import { rowFx } from '../modules/packs/payment-fx';
 import {
   GATEWAY_MAX_RM,
   applyDepositOutcome,
-  gatewayEnabled,
+  anyGatewayEnabled,
 } from '../modules/packs/gateway-deposit';
 import {
   getDepositDetail,
@@ -72,7 +73,7 @@ export function __resetFullSweepMarkerForTests(): void {
 export default async function depositReconcileJob(container: MedusaContainer) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   await resolveActiveGateway(container);
-  if (!gatewayEnabled()) return;
+  if (!anyGatewayEnabled()) return;
 
   const packs = resolvePacks<GatewayDeposits>(container);
   // Each row is requeried at the gateway it was CREATED under — a switch
@@ -181,6 +182,7 @@ export default async function depositReconcileJob(container: MedusaContainer) {
         detail = await getDepositDetail(
           deposit.merchant_transaction_id,
           config,
+          rowFx(deposit),
         );
         action = reconcileAction({
           state: detail.state,

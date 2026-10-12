@@ -810,6 +810,47 @@ export interface FxChange {
 export const getFxHistory = () =>
   getJson<{ changes: FxChange[] }>('/admin/pricing/fx/history');
 
+// ── SGD conversion (A3Pay, payment-fx.ts) ────────────────────────────────────
+
+export interface PaymentFxQuote {
+  currency: string;
+  mid: number;
+  markup: number;
+  /** RM credited per S$1 paid in. */
+  depositRate: number;
+  /** RM debited per S$1 paid out. */
+  payoutRate: number;
+  source: 'manual' | 'feed';
+}
+
+export interface PaymentFxState {
+  pair: string;
+  feed_rate: number | null;
+  source: string | null;
+  fetched_at: string | null;
+  manual_override: boolean;
+  manual_rate: number | null;
+  markup: number;
+  max_markup_share: number;
+  quote: PaymentFxQuote | null;
+  quote_error: string | null;
+  earnings: {
+    deposits: { count: number; rm: number };
+    payouts: { count: number; rm: number };
+    total_rm: number;
+  };
+}
+
+export const getPaymentFx = () =>
+  getJson<PaymentFxState>('/admin/payments/fx');
+
+export const setPaymentFx = (body: {
+  markup: number;
+  manual_override: boolean;
+  manual_rate: number | null;
+  reason: string;
+}) => postJson<PaymentFxState>('/admin/payments/fx', body);
+
 // ── Delivery orders ──────────────────────────────────────────────────────────
 
 export type DeliveryStatus =

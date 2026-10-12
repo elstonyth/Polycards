@@ -219,6 +219,9 @@ describe('GET /store/credits/deposit — in-flight deposits', () => {
         {
           merchant_transaction_id: 'PC-abc',
           amount: 500,
+          // An RM row: no regional currency, nothing to pay in it.
+          currency: 'MYR',
+          pay_amount: null,
           payment_method_code: 'BQR',
           created_at: createdAt,
         },

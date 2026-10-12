@@ -9,6 +9,7 @@ jest.mock('../tgpay-client', () => {
   };
 });
 
+import { NO_FX } from '../payment-fx';
 import * as tgpay from '../tgpay-client';
 import {
   checkBalance,
@@ -127,7 +128,7 @@ describe('TGPay deposits', () => {
       status: 'APPROVED',
       paymentMethod: 'FPX',
     });
-    const d = await getDepositDetail('PC-1', tgpayConfig);
+    const d = await getDepositDetail('PC-1', tgpayConfig, NO_FX);
     expect(d.state).toBe('success');
     expect(d.amount).toBe(50);
     expect(d.netAmount).toBe(49.4);
@@ -210,7 +211,7 @@ describe('TGPay payouts', () => {
         amountIncludeFee: 51,
       },
     });
-    const d = await getWithdrawalDetail('PC-w1', tgpayConfig);
+    const d = await getWithdrawalDetail('PC-w1', tgpayConfig, NO_FX);
     expect(d.amount).toBe(50);
     expect(d.netAmount).toBe(51);
     expect(d.statusId).toBeNull();
@@ -227,7 +228,7 @@ describe('TGPay payouts', () => {
         fee: 1,
       },
     });
-    expect((await getWithdrawalDetail('PC-w2', tgpayConfig)).netAmount).toBe(
+    expect((await getWithdrawalDetail('PC-w2', tgpayConfig, NO_FX)).netAmount).toBe(
       51,
     );
   });
@@ -238,7 +239,7 @@ describe('TGPay payouts', () => {
       order: { payoutRefNum: 'W3', merchantRefNum: 'PC-w3', amount: 50 },
     });
     expect(
-      Number.isNaN((await getWithdrawalDetail('PC-w3', tgpayConfig)).netAmount),
+      Number.isNaN((await getWithdrawalDetail('PC-w3', tgpayConfig, NO_FX)).netAmount),
     ).toBe(true);
   });
 });

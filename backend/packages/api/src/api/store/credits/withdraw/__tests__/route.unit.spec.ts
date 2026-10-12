@@ -9,6 +9,7 @@ import { POST } from '../route';
 // deposit: whatever geo/velocity/AML checks the PSP runs on a payout would
 // otherwise be evaluated against an address the payee chose.
 jest.mock('../../../../../modules/packs/gateway-withdrawal', () => ({
+  ...jest.requireActual('../../../../../modules/packs/gateway-withdrawal'),
   startWithdrawal: jest.fn(async () => ({ status: 'pending' })),
 }));
 

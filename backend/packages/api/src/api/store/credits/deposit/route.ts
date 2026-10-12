@@ -7,11 +7,15 @@ import {
   resolvePacks,
   type GatewayDeposits,
 } from '../../../../modules/packs/facets';
-import { startDeposit } from '../../../../modules/packs/gateway-deposit';
+import {
+  regionalDepositGateway,
+  startDeposit,
+} from '../../../../modules/packs/gateway-deposit';
 import { GATEWAY_STALE_AFTER_MS } from '../../../../modules/packs/gateway-reconcile';
 import { payerIpOf } from '../../../utils/payer-ip';
 import { contactIfNeeded } from '../../../utils/customer-contact';
 import {
+  LEDGER_CURRENCY,
   gatewayUrls,
   resolveActiveGateway,
 } from '../../../../modules/packs/gateway';
@@ -40,11 +44,28 @@ export async function POST(
   const body = (req.body ?? {}) as {
     amount?: unknown;
     payment_method_code?: unknown;
+    currency?: unknown;
+    payer_name?: unknown;
   };
 
   // Which gateway is active is an admin setting; refresh the cache (TTL'd)
-  // before reading anything derived from it.
-  const gateway = await resolveActiveGateway(req.scope);
+  // before reading anything derived from it. A top-up in another currency
+  // (SGD) goes to that currency's regional gateway instead, and `amount` is
+  // then what the customer PAYS in it — gateway-deposit.ts quotes the credit.
+  const active = await resolveActiveGateway(req.scope);
+  const currency =
+    typeof body.currency === 'string' ? body.currency.trim().toUpperCase() : '';
+  let gateway = active;
+  if (currency && currency !== LEDGER_CURRENCY) {
+    const regional = regionalDepositGateway(currency);
+    if (!regional) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `${currency} top-ups are not available right now.`,
+      );
+    }
+    gateway = regional;
+  }
   const { notifyUrl, returnUrl } = gatewayUrls(gateway);
   if (!notifyUrl || !returnUrl) {
     // Fail closed: without a reachable NotifyUrl the customer could pay and we
@@ -82,6 +103,8 @@ export async function POST(
       paymentMethodCode: method,
       customer,
       gateway,
+      payerName:
+        typeof body.payer_name === 'string' ? body.payer_name : undefined,
     },
     notifyUrl,
     returnUrl,
@@ -143,6 +166,8 @@ export async function GET(
     deposits: deposits.map((deposit) => ({
       merchant_transaction_id: deposit.merchant_transaction_id,
       amount: deposit.amount_requested,
+      currency: deposit.currency ?? LEDGER_CURRENCY,
+      pay_amount: deposit.gateway_amount ?? null,
       payment_method_code: deposit.payment_method_code,
       created_at: deposit.created_at,
     })),

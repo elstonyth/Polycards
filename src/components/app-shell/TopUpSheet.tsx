@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, X } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ChevronRight, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { rm, rm0 } from '@/lib/format';
+import { rm, rm0, sgd, sgd0 } from '@/lib/format';
 import {
   getDepositMethods,
   getPaymentLimits,
@@ -12,6 +12,7 @@ import {
 } from '@/lib/actions/vault';
 import {
   DEFAULT_PAYMENT_LIMITS,
+  regionalCredit,
   type PaymentLimits,
 } from '@/lib/payment-limits';
 import { leaveFor } from '@/lib/navigation';
@@ -56,6 +57,35 @@ const USE_GATEWAY = PROVIDER !== 'mock';
 const PRESETS = USE_GATEWAY ? [300, 600, 1200, 5000] : [10, 25, 50, 100];
 const DEFAULT_AMOUNT = USE_GATEWAY ? '300' : '25';
 
+// Singapore (A3Pay): the customer pays in S$ and is credited RM at the rate
+// the backend quotes (market rate minus our markup). Rungs sized for S$, and
+// the two rails labelled the way a Singapore payer knows them — the codes are
+// the same BQR / OB the backend allow-lists for that gateway.
+const SGD_PRESETS = [50, 100, 300, 1000];
+const SGD_DEFAULT_AMOUNT = '100';
+const SGD_METHODS: readonly {
+  code: DepositMethodCode;
+  label: string;
+  hint: string;
+}[] = [
+  { code: 'BQR', label: 'PayNow QR', hint: 'Scan with any Singapore bank app' },
+  { code: 'OB', label: 'Bank transfer', hint: 'DBS, OCBC, UOB + more' },
+];
+type Currency = 'MYR' | 'SGD';
+
+/**
+ * One row of the "Choose a currency" step. The list is built from what the
+ * backend reports open (getPaymentLimits), so a new rail (USDT next) is one
+ * more entry here plus its own form branch — the step itself does not change.
+ */
+type CurrencyOption = {
+  code: Currency;
+  /** Shown in the badge and in front of amounts. */
+  symbol: string;
+  name: string;
+  hint: string;
+};
+
 /**
  * Global top-up bottom sheet (90scard's profile top-up flow, dark skin).
  * Mobile: slides up from the bottom edge; sm+: centered dialog. The mock
@@ -88,6 +118,12 @@ export default function TopUpSheet({
     methods[0]?.code ??
     DEFAULT_DEPOSIT_METHOD;
   const [method, setMethod] = useState<DepositMethodCode>(preferred);
+  // null = the "Choose a currency" step. Gateway mode always starts there;
+  // the demo (mock) path has RM only and goes straight to the form.
+  const [currency, setCurrency] = useState<Currency | null>(
+    USE_GATEWAY ? null : 'MYR',
+  );
+  const [payerName, setPayerName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{
@@ -120,6 +156,7 @@ export default function TopUpSheet({
       setDone(null);
       setSubmitting(false);
       setMethod(preferred);
+      setCurrency(USE_GATEWAY ? null : 'MYR');
       attemptKey.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -129,11 +166,28 @@ export default function TopUpSheet({
   // the mock has no channels — and failure keeps the compiled list, since the
   // action re-checks the code anyway and a refused channel shows its own error.
   const [limits, setLimits] = useState<PaymentLimits>(DEFAULT_PAYMENT_LIMITS);
-  const minAmount = USE_GATEWAY ? Math.max(0.01, limits.deposit.minRm) : 0.01;
-  const maxAmount = USE_GATEWAY ? limits.deposit.maxRm : 10_000;
+  // The SGD rail, when the backend has it open AND priced. Gateway path only.
+  const sgdRail = USE_GATEWAY
+    ? limits.regional?.find(
+        (rail) =>
+          rail.currency === 'SGD' && rail.depositsEnabled && rail.rate !== null,
+      )
+    : undefined;
+  const paySgd = currency === 'SGD' && sgdRail !== undefined;
+  const money = paySgd ? sgd : rm;
+  const minAmount = paySgd
+    ? Math.max(0.01, sgdRail.deposit.min ?? 0.01)
+    : USE_GATEWAY
+      ? Math.max(0.01, limits.deposit.minRm)
+      : 0.01;
+  const maxAmount = paySgd
+    ? (sgdRail.deposit.max ?? 10_000)
+    : USE_GATEWAY
+      ? limits.deposit.maxRm
+      : 10_000;
   // The channel itself, not the band — the admin can close deposits outright
   // while a gateway stays configured (getPaymentLimits, plan 135).
-  const depositsClosed = USE_GATEWAY && !limits.depositsEnabled;
+  const depositsClosed = USE_GATEWAY && !paySgd && !limits.depositsEnabled;
   const amount = Number(amountText.trim());
   const amountValid =
     /^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(amountText.trim()) &&
@@ -143,7 +197,54 @@ export default function TopUpSheet({
   // A valid amount into a closed channel still cannot be paid — fold the
   // channel into the same "can this actually be submitted" signal the button
   // and its label already key off, rather than adding a second disabled path.
-  const canPay = amountValid && !depositsClosed;
+  // What lands on the balance: the amount itself in RM, or the quoted RM
+  // credit for an S$ payment (floored to the cent, as the backend quotes it).
+  const credit =
+    paySgd && amountValid && sgdRail.rate
+      ? regionalCredit(amount, sgdRail.rate.deposit)
+      : amount;
+  const payerValid =
+    !paySgd || (payerName.trim().length >= 2 && payerName.trim().length <= 120);
+  const canPay = amountValid && !depositsClosed && payerValid;
+  const shownMethods = paySgd ? SGD_METHODS : methods;
+  const presets = paySgd ? SGD_PRESETS : PRESETS;
+
+  // Step 1's rows: RM always, then every open regional rail.
+  const currencyOptions: CurrencyOption[] = [
+    {
+      code: 'MYR',
+      symbol: 'RM',
+      name: 'Malaysian Ringgit',
+      hint: 'Online banking (FPX) · QR / e-wallet',
+    },
+    ...(sgdRail?.rate
+      ? [
+          {
+            code: 'SGD' as const,
+            symbol: 'S$',
+            name: 'Singapore Dollar',
+            hint: `PayNow QR · bank transfer · S$1 = RM ${sgdRail.rate.deposit.toFixed(4)}`,
+          },
+        ]
+      : []),
+  ];
+  // The picker shows until a currency is chosen — and again if the chosen
+  // rail closes while the sheet is open (its form would have nothing to pay).
+  const picking = currency === null || (currency === 'SGD' && !sgdRail);
+  const chosen = currencyOptions.find((option) => option.code === currency);
+
+  // Choosing resets the amount to that currency's default rung — "300" means
+  // something very different in RM and in S$ — and moves focus into the form,
+  // so keyboard and screen-reader users are not left on a removed button.
+  const amountRef = useRef<HTMLInputElement>(null);
+  const chooseCurrency = (next: Currency) => {
+    if (next !== currency) {
+      setAmountText(next === 'SGD' ? SGD_DEFAULT_AMOUNT : DEFAULT_AMOUNT);
+    }
+    setCurrency(next);
+    setError(null);
+    requestAnimationFrame(() => amountRef.current?.focus());
+  };
 
   useEffect(() => {
     if (!open || !USE_GATEWAY) return;
@@ -176,9 +277,10 @@ export default function TopUpSheet({
   // A retract that lands while the sheet is open must not leave a now-invalid
   // code armed on the Pay button.
   useEffect(() => {
+    if (shownMethods.some((option) => option.code === method)) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- disarm a channel the server just retracted
-    if (!methods.some((option) => option.code === method)) setMethod(preferred);
-  }, [methods, method, preferred]);
+    setMethod(shownMethods[0]?.code ?? preferred);
+  }, [shownMethods, method, preferred]);
 
   async function submit() {
     if (submitting || !canPay) return;
@@ -187,10 +289,15 @@ export default function TopUpSheet({
     // Ads funnel (lib/pixel.ts): the customer has started a top-up. Sent
     // before the checkout call so the beacon is out before the cashier
     // redirect takes the page away.
-    trackPixel('InitiateCheckout', { value: amount, currency: 'MYR' });
+    trackPixel('InitiateCheckout', {
+      value: amount,
+      currency: paySgd ? 'SGD' : 'MYR',
+    });
     try {
       if (USE_GATEWAY) {
-        const res = await startDeposit(amount, method);
+        const res = paySgd
+          ? await startDeposit(amount, method, { currency: 'SGD', payerName })
+          : await startDeposit(amount, method);
         if (!res.ok) {
           setError(res.error);
           return;
@@ -300,10 +407,76 @@ export default function TopUpSheet({
               Done
             </Pill>
           </div>
+        ) : picking ? (
+          <div className="mt-4" data-testid="topup-currency">
+            <p className="text-[13px] font-semibold text-neutral-400">
+              Choose a currency
+            </p>
+            {/* Plain buttons, not radios: choosing moves to the next step
+                rather than marking a selection on this one. */}
+            <ul className="mt-3 flex flex-col gap-2">
+              {currencyOptions.map((option) => (
+                <li key={option.code}>
+                  <button
+                    type="button"
+                    onClick={() => chooseCurrency(option.code)}
+                    className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3.5 text-left transition-colors hover:border-white/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
+                  >
+                    <span
+                      aria-hidden
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-neutral-800 font-heading text-[13px] text-white"
+                    >
+                      {option.symbol}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[15px] font-semibold text-white">
+                        {option.name}
+                      </span>
+                      <span className="mt-0.5 block text-[12px] leading-snug text-neutral-400">
+                        {option.hint}
+                      </span>
+                    </span>
+                    <ChevronRight
+                      className="h-4 w-4 shrink-0 text-neutral-500"
+                      aria-hidden
+                    />
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">
+              Your balance is always kept in RM — other currencies are converted
+              when you pay.
+            </p>
+          </div>
         ) : (
           <>
+            {/* The chosen currency, and the way back to the list. Hidden in
+                demo mode, which has RM only and no list to go back to. */}
+            {USE_GATEWAY && chosen && (
+              <div className="mt-4 flex items-center justify-between rounded-xl bg-neutral-800/60 px-3 py-2">
+                <span className="text-[13px] text-neutral-400">
+                  Paying in{' '}
+                  <span className="font-semibold text-white">
+                    {chosen.name} ({chosen.symbol})
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrency(null);
+                    setError(null);
+                  }}
+                  className="inline-flex h-9 items-center gap-1 rounded-full px-3 text-[13px] font-semibold text-neutral-300 transition-colors hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/60"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+                  Change
+                </button>
+              </div>
+            )}
+
             <div className="mt-4 flex flex-wrap gap-2">
-              {PRESETS.map((preset) => {
+              {presets.map((preset) => {
                 const selected = amountText === String(preset);
                 return (
                   <button
@@ -317,21 +490,26 @@ export default function TopUpSheet({
                         : 'bg-neutral-800 text-neutral-400 hover:text-white',
                     )}
                   >
-                    {rm0(preset)}
+                    {paySgd ? sgd0(preset) : rm0(preset)}
                   </button>
                 );
               })}
             </div>
 
             <label className="mt-3 flex items-center gap-2 rounded-xl bg-neutral-800 px-4 py-3">
-              <span className="text-sm font-semibold text-neutral-400">RM</span>
+              <span className="text-sm font-semibold text-neutral-400">
+                {paySgd ? 'S$' : 'RM'}
+              </span>
               <input
+                ref={amountRef}
                 type="text"
                 inputMode="decimal"
                 value={amountText}
                 onChange={(e) => setAmountText(e.target.value)}
                 disabled={depositsClosed}
-                aria-label="Top-up amount in RM"
+                aria-label={
+                  paySgd ? 'Top-up amount in S$' : 'Top-up amount in RM'
+                }
                 aria-describedby="topup-amount-guidance"
                 aria-invalid={amountText.trim().length > 0 && !amountValid}
                 className="font-heading w-full bg-transparent text-2xl text-white outline-none placeholder:text-neutral-600 disabled:opacity-50"
@@ -349,8 +527,29 @@ export default function TopUpSheet({
             >
               {depositsClosed
                 ? 'Top-ups are paused right now. Your balance and cards are unaffected.'
-                : `Enter ${rm(minAmount)}–${rm(maxAmount)}, with up to 2 decimal places.`}
+                : `Enter ${money(minAmount)}–${money(maxAmount)}, with up to 2 decimal places.`}
             </p>
+
+            {/* The name A3Pay matches against the incoming transfer. Asked
+                for here, not read from the profile: it must be the name on
+                the PAYING bank account, which a nickname is not. */}
+            {paySgd && (
+              <label className="mt-3 block">
+                <span className="text-[12px] font-semibold text-neutral-400">
+                  Name on your bank account
+                </span>
+                <input
+                  type="text"
+                  autoComplete="name"
+                  value={payerName}
+                  onChange={(e) => setPayerName(e.target.value)}
+                  maxLength={120}
+                  aria-invalid={payerName.trim().length > 0 && !payerValid}
+                  className="mt-1 w-full rounded-xl bg-neutral-800 px-4 py-3 text-[15px] text-white outline-none placeholder:text-neutral-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/60"
+                  placeholder="As it appears at your bank"
+                />
+              </label>
+            )}
 
             {/* Channel picker. Gateway only: the mock has no channels, and
                 without this the customer always landed on whichever one
@@ -362,10 +561,10 @@ export default function TopUpSheet({
                 role advertises an arrow-key contract that hand-rolled buttons
                 do not honour, and the input gives it for free along with
                 grouped announcement from the fieldset legend. */}
-            {USE_GATEWAY && methods.length > 1 && (
+            {USE_GATEWAY && shownMethods.length > 1 && (
               <fieldset className="mt-3 grid grid-cols-2 gap-2">
                 <legend className="sr-only">Payment method</legend>
-                {methods.map((option) => {
+                {shownMethods.map((option) => {
                   const selected = option.code === method;
                   return (
                     <label
@@ -420,12 +619,28 @@ export default function TopUpSheet({
                   {balance == null ? '—' : rm(balance)}
                 </span>
               </div>
+              {paySgd && (
+                <div className="mt-2 flex items-center justify-between text-neutral-400">
+                  <span>You pay</span>
+                  <span className="font-semibold text-neutral-200">
+                    {amountValid ? sgd(amount) : '—'}
+                  </span>
+                </div>
+              )}
               <div className="mt-2 flex items-center justify-between text-neutral-400">
-                <span>You top up</span>
-                <span className="font-semibold text-buyback-fg">
-                  {amountValid ? `+ ${rm(amount)}` : '—'}
+                <span>{paySgd ? 'You get' : 'You top up'}</span>
+                <span
+                  className="font-semibold text-buyback-fg"
+                  data-testid="topup-credit"
+                >
+                  {amountValid ? `+ ${rm(credit)}` : '—'}
                 </span>
               </div>
+              {paySgd && sgdRail.rate && (
+                <p className="mt-1 text-right text-[11px] text-neutral-500">
+                  S$1 = RM {sgdRail.rate.deposit.toFixed(4)}
+                </p>
+              )}
               <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">
                 {/* On the gateway path the credit is NOT immediate — it lands
                     when the provider confirms the payment. Calling this "New
@@ -434,7 +649,7 @@ export default function TopUpSheet({
                   {USE_GATEWAY ? 'Balance once paid' : 'New balance'}
                 </span>
                 <span className="font-heading text-lg text-white">
-                  {balance != null && amountValid ? rm(balance + amount) : '—'}
+                  {balance != null && amountValid ? rm(balance + credit) : '—'}
                 </span>
               </div>
             </div>
@@ -466,9 +681,11 @@ export default function TopUpSheet({
                 : canPay
                   ? USE_GATEWAY
                     ? // Nothing is added here — the button leaves the site.
-                      `Pay ${rm(amount)}`
+                      `Pay ${money(amount)}`
                     : `Proceed — add ${rm(amount)}`
-                  : 'Enter a valid amount'}
+                  : amountValid && !payerValid
+                    ? 'Enter the account name'
+                    : 'Enter a valid amount'}
             </Pill>
 
             <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">

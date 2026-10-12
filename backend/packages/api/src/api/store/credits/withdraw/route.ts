@@ -3,7 +3,15 @@ import {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
-import { startWithdrawal } from '../../../../modules/packs/gateway-withdrawal';
+import {
+  payoutGatewayFor,
+  regionalPayoutGateways,
+  startWithdrawal,
+} from '../../../../modules/packs/gateway-withdrawal';
+import {
+  resolvePacks,
+  type GatewayWithdrawals,
+} from '../../../../modules/packs/facets';
 import { payerIpOf } from '../../../utils/payer-ip';
 import { contactIfNeeded } from '../../../utils/customer-contact';
 import {
@@ -59,7 +67,20 @@ export async function POST(
     );
   }
 
-  const gateway = await resolveActiveGateway(req.scope);
+  // The ACTIVE gateway pays every bank it can; a bank only a regional gateway
+  // pays (a Singapore bank -> A3Pay) is paid through that one, in its
+  // currency. Decided from the customer's OWN saved account, before the URLs
+  // below, which belong to whichever gateway that is. An unknown account id
+  // falls through to the active gateway, whose own checks refuse it.
+  const active = await resolveActiveGateway(req.scope);
+  let gateway = active;
+  if (regionalPayoutGateways().length > 0) {
+    const saved = await resolvePacks<GatewayWithdrawals>(
+      req.scope,
+    ).savedBankAccountsFor(customerId);
+    const account = saved.find((a) => a.id === body.account_id);
+    if (account) gateway = payoutGatewayFor(account.bankCode, active);
+  }
   const {
     withdrawNotifyUrl: notifyUrl,
     payoutVerifyUrl: verifyUrl,

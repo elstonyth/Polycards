@@ -335,3 +335,31 @@ describe('an ambiguous 400 can never reach a money-moving action', () => {
     });
   });
 });
+
+describe('classifyRequeryError — A3Pay', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { A3payError, A3PAY_NOT_FOUND } = require('../a3pay-client');
+
+  it('only the explicit platform not-found code authorises an action', () => {
+    expect(
+      classifyRequeryError(new A3payError('nf', [A3PAY_NOT_FOUND], 200, true)),
+    ).toEqual({ kind: 'not-found' });
+  });
+
+  it('a bare refusal, another code, or a non-JSON 400 stays ambiguous', () => {
+    expect(
+      classifyRequeryError(new A3payError('x', ['PMT10001'], 400, true)),
+    ).toEqual({ kind: 'ambiguous' });
+    expect(classifyRequeryError(new A3payError('html', [], 400))).toEqual({
+      kind: 'ambiguous',
+    });
+  });
+
+  it('the code from another gateway is not read as A3Pay not-found', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { TgpayError } = require('../tgpay-client');
+    expect(
+      classifyRequeryError(new TgpayError('x', [A3PAY_NOT_FOUND], 400, true)),
+    ).toEqual({ kind: 'ambiguous' });
+  });
+});

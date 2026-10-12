@@ -26,6 +26,9 @@ export function money(
 
 export const rm = (n: number) => money(n, { prefix: 'RM ' });
 export const rm0 = (n: number) => money(n, { prefix: 'RM ', decimals: 0 });
+/** Singapore dollars — what an A3Pay customer pays or receives. */
+export const sgd = (n: number) => money(n, { prefix: 'S$' });
+export const sgd0 = (n: number) => money(n, { prefix: 'S$', decimals: 0 });
 
 // Affordability compared in integer sen, never raw floats: a fractional pack
 // price times a reel/qty count (e.g. 1.1 * 3 === 3.3000000000000003) can read

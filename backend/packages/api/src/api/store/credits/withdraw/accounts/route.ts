@@ -4,8 +4,15 @@ import type {
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { findBank, sandboxOnlyBank } from '../../../../../modules/packs/banks';
-import { resolveActiveGateway } from '../../../../../modules/packs/gateway';
-import { withdrawalDetailsError } from '../../../../../modules/packs/gateway-withdrawal';
+import {
+  GATEWAYS,
+  resolveActiveGateway,
+} from '../../../../../modules/packs/gateway';
+import {
+  regionalPayoutGateways,
+  withdrawalDetailsError,
+  payoutGatewayFor,
+} from '../../../../../modules/packs/gateway-withdrawal';
 import {
   resolvePacks,
   type CustomerWallet,
@@ -137,16 +144,34 @@ function noStore(res: MedusaResponse): MedusaResponse {
   return res;
 }
 
+/**
+ * The store view of a saved list: payable-or-not against the active gateway
+ * AND any open regional one, plus the currency the bank is paid in (SGD for a
+ * Singapore bank via A3Pay), so the withdraw form can show what arrives.
+ */
+async function accountViews(
+  req: AuthenticatedMedusaRequest,
+  accounts: Parameters<typeof savedBankAccountViews>[0],
+) {
+  const active = await resolveActiveGateway(req.scope);
+  return savedBankAccountViews(
+    accounts,
+    active,
+    undefined,
+    regionalPayoutGateways(),
+  ).map((view) => ({
+    ...view,
+    currency: GATEWAYS[payoutGatewayFor(view.bankCode, active)].currency,
+  }));
+}
+
 export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
   const accounts = await loadAccounts(req, req.auth_context.actor_id);
   noStore(res).json({
-    accounts: savedBankAccountViews(
-      accounts,
-      await resolveActiveGateway(req.scope),
-    ),
+    accounts: await accountViews(req, accounts),
   });
 }
 
@@ -242,10 +267,7 @@ export async function POST(
     });
   }
   noStore(res).json({
-    accounts: savedBankAccountViews(
-      saved,
-      await resolveActiveGateway(req.scope),
-    ),
+    accounts: await accountViews(req, saved),
   });
 }
 
@@ -287,9 +309,6 @@ export async function DELETE(
     });
   }
   noStore(res).json({
-    accounts: savedBankAccountViews(
-      saved,
-      await resolveActiveGateway(req.scope),
-    ),
+    accounts: await accountViews(req, saved),
   });
 }

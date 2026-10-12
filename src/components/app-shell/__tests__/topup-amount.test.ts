@@ -71,6 +71,16 @@ async function mount() {
       }),
     );
   });
+  await pickCurrency('Malaysian Ringgit');
+}
+
+/** Step 1 of the gateway sheet: choose the currency. */
+async function pickCurrency(name: string) {
+  const option = [...container.querySelectorAll('button')].find((b) =>
+    b.textContent?.includes(name),
+  );
+  if (!option) throw new Error(`no currency option "${name}"`);
+  await act(async () => option.click());
 }
 
 async function enterAmount(value: string) {

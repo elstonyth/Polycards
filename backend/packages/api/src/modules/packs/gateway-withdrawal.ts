@@ -16,10 +16,13 @@ import {
   submitWithdrawal,
   GatewayError,
   TGPAY_PAYOUT_DISABLED,
+  GATEWAY_IDS,
+  isLedgerGateway,
   TGPAY_PAYOUT_FLOAT_EMPTY,
   type GatewayConfig,
   type PaymentGateway,
 } from './gateway';
+import { loadPaymentFxQuote, payoutForWithdrawal } from './payment-fx';
 import { alertPayoutDisabled, alertPayoutFloatEmpty } from './ops-alert';
 import { contactIfNeeded } from '../../api/utils/customer-contact';
 import { newMerchantTransactionId } from './gateway-deposit';
@@ -124,6 +127,48 @@ export function withdrawalsEnabled(
     gatewayEnv('GATEWAY_WITHDRAWALS_ENABLED', env) === 'true' &&
     configured &&
     withdrawalsPausedUntil(env, now) === null
+  );
+}
+
+/** Is ANY gateway open for payouts? The payout sweep's gate. */
+export function anyWithdrawalsEnabled(
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): boolean {
+  // The active gateway first (in specs that is the test-only fake, which
+  // GATEWAY_IDS deliberately omits), then every registered one.
+  return (
+    withdrawalsEnabled(env) ||
+    GATEWAY_IDS.some((id) => withdrawalsEnabled(env, id))
+  );
+}
+
+/**
+ * The regional gateways (A3Pay, SGD) open for payouts right now. They run
+ * BESIDE the active RM gateway: a saved account at a bank only they can pay
+ * is paid through them, at the converted amount.
+ */
+export function regionalPayoutGateways(
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): PaymentGateway[] {
+  return GATEWAY_IDS.filter(
+    (id) => !isLedgerGateway(id) && withdrawalsEnabled(env, id),
+  );
+}
+
+/**
+ * Which gateway pays a bank: the ACTIVE RM gateway whenever it can, else an
+ * open regional gateway that can, else the active one (whose own checks then
+ * refuse the bank with the usual "not available" message).
+ */
+export function payoutGatewayFor(
+  bankCode: string,
+  active: PaymentGateway,
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): PaymentGateway {
+  if (bankSupportedBy(bankCode, active)) return active;
+  return (
+    regionalPayoutGateways(env).find((id) => bankSupportedBy(bankCode, id)) ??
+    active
   );
 }
 
@@ -329,6 +374,9 @@ export type StartWithdrawalResult = {
    * 'pending' otherwise (submitted, or the submit outcome was ambiguous —
    * the sweep resolves that case, not this status). */
   status: 'pending' | 'held';
+  /** Regional gateways: the payout currency and what the bank receives. */
+  currency?: string;
+  payAmount?: number;
 };
 
 /**
@@ -521,6 +569,34 @@ export async function startWithdrawal(
     );
   }
 
+  // A regional gateway (A3Pay, SGD) pays in its own currency: quote the RM
+  // debit into it NOW and lock the quote on the row, so an admin approving a
+  // held payout later — or the sweep settling it — pays exactly what the
+  // customer was shown, whatever the rate has done since. Before the row,
+  // like every certain refusal.
+  let fx: {
+    currency: string;
+    gatewayAmount: number;
+    mid: number;
+    markup: number;
+  } | null = null;
+  if (!isLedgerGateway(gateway)) {
+    const { currency, currencyLimits } = GATEWAYS[gateway];
+    const quote = await loadPaymentFxQuote(packs, currency);
+    const gatewayAmount = payoutForWithdrawal(amount, quote);
+    if (
+      currencyLimits &&
+      (gatewayAmount < currencyLimits.withdrawalMin ||
+        gatewayAmount > currencyLimits.withdrawalMax)
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Withdrawals to this bank must come to between ${currency} ${currencyLimits.withdrawalMin} and ${currency} ${currencyLimits.withdrawalMax.toLocaleString('en-US')} (RM ${amount} is ${currency} ${gatewayAmount.toFixed(2)}).`,
+      );
+    }
+    fx = { currency, gatewayAmount, mid: quote.mid, markup: quote.markup };
+  }
+
   // 0b) PRECHECK — NOT the gate. This is an unlocked, read-only fast path whose
   // only job is to avoid writing a row for a refusal that is already certain.
   // The authoritative gate is inside packs.withdrawForCashout, under the
@@ -583,6 +659,14 @@ export async function startWithdrawal(
           account_holder_name: precheckDestination.accountHolderName.trim(),
           status: held ? 'held' : 'pending',
           gateway,
+          ...(fx
+            ? {
+                currency: fx.currency,
+                gateway_amount: fx.gatewayAmount,
+                fx_mid: fx.mid,
+                fx_markup: fx.markup,
+              }
+            : {}),
         },
       ])
     )[0];
@@ -654,6 +738,7 @@ export async function startWithdrawal(
       amount,
       balance: debit.balance,
       status: 'held',
+      ...(fx ? { currency: fx.currency, payAmount: fx.gatewayAmount } : {}),
     };
   }
 
@@ -676,6 +761,7 @@ export async function startWithdrawal(
         returnUrl: verifyUrl,
         ipAddress: input.ipAddress,
         email: input.email,
+        ...(fx ? { gatewayAmount: fx.gatewayAmount } : {}),
       },
       config,
     );
@@ -859,6 +945,7 @@ export async function startWithdrawal(
       // Reached only on the non-held branch — a held row already returned
       // above, before this submit was ever attempted.
       status: 'pending',
+      ...(fx ? { currency: fx.currency, payAmount: fx.gatewayAmount } : {}),
     };
   }
 
@@ -880,6 +967,7 @@ export async function startWithdrawal(
     amount,
     balance: debit.balance,
     status: 'pending',
+    ...(fx ? { currency: fx.currency, payAmount: fx.gatewayAmount } : {}),
   };
 }
 
@@ -1275,6 +1363,7 @@ export async function submitHeldWithdrawal(
   if (
     !config ||
     !gatewayId ||
+    !withdrawalsEnabled(process.env, gatewayId) ||
     !notifyUrl ||
     (urls?.hasPayoutVerify && !verifyUrl)
   ) {
@@ -1432,6 +1521,10 @@ export async function submitHeldWithdrawal(
         notifyUrl,
         returnUrl: verifyUrl,
         ipAddress: input.payerIp,
+        // The quote locked when the customer asked, never today's rate.
+        ...(row.gateway_amount != null
+          ? { gatewayAmount: Number(row.gateway_amount) }
+          : {}),
       },
       config,
     );

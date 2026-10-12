@@ -92,6 +92,16 @@ async function mount(codes: string[] = ['BQR', 'OB']) {
       }),
     );
   });
+  await pickCurrency('Malaysian Ringgit');
+}
+
+/** Step 1 of the gateway sheet: choose the currency. */
+async function pickCurrency(name: string) {
+  const option = [...container.querySelectorAll('button')].find((b) =>
+    b.textContent?.includes(name),
+  );
+  if (!option) throw new Error(`no currency option "${name}"`);
+  await act(async () => option.click());
 }
 
 beforeEach(async () => {

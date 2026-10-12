@@ -1,4 +1,6 @@
 import {
+  callbackIpAllowed,
+  parseCallbackAllowlist,
   tgpayCallbackIpVerdict,
   tgpayEnvName,
   type TgpayKind,
@@ -123,6 +125,52 @@ export function createTgpayCallbackAllowlist(
             : verdict.reason === 'unparseable'
               ? ` — ${listName} has no valid entries`
               : ''),
+      );
+    res.status(403).send('rejected');
+  };
+}
+
+/**
+ * A3Pay's documented outbound address ("A3pay Outgoing IP", handbook
+ * v3.3.5). A3PAY_CALLBACK_IPS overrides it (IPv4 / CIDR, comma separated) —
+ * locally that is 127.0.0.1 for scripts/a3pay-mock.mjs.
+ */
+export const A3PAY_DEFAULT_CALLBACK_IPS = '13.192.222.226';
+
+/**
+ * Express middleware for `/hooks/a3pay/*`. Defence in depth only: the RSA
+ * signature over the decrypted payload is the real gate, checked inside each
+ * handler. A list that is set but parses to nothing refuses everything rather
+ * than quietly disabling the check.
+ */
+export function createA3payCallbackAllowlist(
+  env: { A3PAY_CALLBACK_IPS?: string } = process.env,
+): (
+  req: {
+    ip?: string;
+    headers?: Record<string, string | string[] | undefined>;
+    socket?: { remoteAddress?: string };
+    scope: { resolve: <T>(key: string) => T };
+  },
+  res: { status: (code: number) => { send: (body: string) => unknown } },
+  next: () => void,
+) => void {
+  return (req, res, next) => {
+    const sourceIp = callbackSourceIp(req);
+    const entries = parseCallbackAllowlist(
+      env.A3PAY_CALLBACK_IPS?.trim() || A3PAY_DEFAULT_CALLBACK_IPS,
+    );
+    if (entries.length > 0 && callbackIpAllowed(sourceIp, entries)) {
+      next();
+      return;
+    }
+    req.scope
+      .resolve<{ warn: (m: string) => void }>('logger')
+      .warn(
+        `[a3pay] rejected callback from ${sourceIp || 'unknown'}: ` +
+          (entries.length === 0
+            ? 'A3PAY_CALLBACK_IPS has no valid entries'
+            : 'not on the allowlist'),
       );
     res.status(403).send('rejected');
   };

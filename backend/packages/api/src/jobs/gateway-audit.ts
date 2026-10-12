@@ -2,7 +2,7 @@ import { MedusaContainer } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../modules/packs';
 import type PacksModuleService from '../modules/packs/service';
-import { gatewayEnabled } from '../modules/packs/gateway-deposit';
+import { anyGatewayEnabled } from '../modules/packs/gateway-deposit';
 import {
   getDepositDetail,
   getWithdrawalDetail,
@@ -19,6 +19,7 @@ import {
   type GatewayAnswer,
 } from '../modules/packs/gateway-audit';
 import { toOptionalMoney } from '../modules/packs/money';
+import { rowFx } from '../modules/packs/payment-fx';
 
 /**
  * Gateway audit sweep (plan 130). Re-reads FINAL deposit and withdrawal rows
@@ -37,7 +38,7 @@ import { toOptionalMoney } from '../modules/packs/money';
 export default async function gatewayAuditJob(container: MedusaContainer) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   await resolveActiveGateway(container);
-  if (!gatewayEnabled()) return;
+  if (!anyGatewayEnabled()) return;
 
   const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
   const configFor = rowGatewayConfigs();
@@ -77,7 +78,11 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
       continue;
     }
     try {
-      const d = await getDepositDetail(row.merchant_transaction_id, config);
+      const d = await getDepositDetail(
+        row.merchant_transaction_id,
+        config,
+        rowFx(row),
+      );
       answer = { kind: 'detail', state: d.state, amount: Number(d.amount) };
       netAmount = Number.isFinite(Number(d.netAmount))
         ? Number(d.netAmount)
@@ -136,7 +141,11 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
       continue;
     }
     try {
-      const d = await getWithdrawalDetail(row.merchant_transaction_id, config);
+      const d = await getWithdrawalDetail(
+        row.merchant_transaction_id,
+        config,
+        rowFx(row),
+      );
       answer = { kind: 'detail', state: d.state, amount: Number(d.amount) };
       netAmount = Number.isFinite(Number(d.netAmount))
         ? Number(d.netAmount)

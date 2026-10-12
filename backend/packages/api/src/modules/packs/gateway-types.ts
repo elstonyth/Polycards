@@ -58,6 +58,13 @@ export type SubmitDepositInput = {
   paymentMethodCode: string;
   /** Only some gateways need it (bank-transfer rails). */
   sourceClientBankCode?: string;
+  /**
+   * A regional gateway's amount, in ITS currency, from the row's FX lock
+   * (payment-fx.ts). `amount` stays the RM credit; an RM gateway ignores this.
+   */
+  gatewayAmount?: number;
+  /** Name on the PAYING bank account, for gateways that match it (A3Pay). */
+  payerName?: string;
   /** The payer's name/email/phone, for gateways whose checkout needs it. */
   customer?: {
     name: string;
@@ -112,6 +119,8 @@ export type SubmitWithdrawalInput = {
   ipAddress: string;
   /** The recipient's email, for gateways whose payout needs it. */
   email?: string;
+  /** A regional gateway's payout amount, in ITS currency (the row's lock). */
+  gatewayAmount?: number;
 };
 
 export type SubmitWithdrawalResult = {

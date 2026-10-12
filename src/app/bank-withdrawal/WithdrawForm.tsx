@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, Clock, Landmark, Lock } from 'lucide-react';
-import { rm, rm0, timeUntil } from '@/lib/format';
+import { rm, rm0, sgd, timeUntil } from '@/lib/format';
 import {
   fetchSavedBankAccounts,
   getPaymentLimits,
@@ -12,6 +12,7 @@ import {
 } from '@/lib/actions/vault';
 import {
   DEFAULT_PAYMENT_LIMITS,
+  regionalPayout,
   type PaymentLimits,
 } from '@/lib/payment-limits';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
@@ -168,9 +169,21 @@ export default function WithdrawForm({
   const attemptKey = useRef<string | null>(null);
 
   const [limits, setLimits] = useState<PaymentLimits>(DEFAULT_PAYMENT_LIMITS);
+  // Singapore payouts (A3Pay), open and priced. A Singapore account is paid
+  // through it in S$; every other account through the active gateway in RM.
+  const sgdRail = limits.regional?.find(
+    (rail) =>
+      rail.currency === 'SGD' && rail.withdrawalsEnabled && rail.rate !== null,
+  );
+  const selectedAccount = saved?.find((a) => a.id === accountId);
+  const toSgd = selectedAccount?.currency === 'SGD';
   // The channel itself, not the band — the admin can close withdrawals
   // outright while a gateway stays configured (getPaymentLimits, plan 135).
-  const withdrawalsClosed = !limits.withdrawalsEnabled;
+  // Judged against the rail that would pay the chosen account; before one is
+  // chosen, open if either rail is.
+  const withdrawalsClosed = toSgd
+    ? !sgdRail
+    : !limits.withdrawalsEnabled && (selectedAccount !== undefined || !sgdRail);
   // A timed pause (provider outage) names when to come back, in Malaysia time.
   const resumeAt = limits.withdrawalsPausedUntil
     ? new Date(limits.withdrawalsPausedUntil).toLocaleTimeString('en-US', {
@@ -239,6 +252,12 @@ export default function WithdrawForm({
       ? selected.minRm
       : null;
   const minRm = accountMin ?? limits.withdrawal.minRm;
+  // What a Singapore bank receives for this RM amount, at today's payout rate
+  // (floored to the cent, exactly as the backend quotes and locks it).
+  const payoutSgd =
+    toSgd && sgdRail?.rate && amountValid
+      ? regionalPayout(amount, sgdRail.rate.payout)
+      : null;
 
   async function submit() {
     if (submitting || !formValid || withdrawalsClosed || blocked) return;
@@ -246,6 +265,18 @@ export default function WithdrawForm({
     if (amount < minRm || amount > limits.withdrawal.maxRm) {
       setError(
         `Withdrawals must be between ${rm0(minRm)} and ${rm0(limits.withdrawal.maxRm)}${accountMin !== null ? ` for ${selected?.bankName}` : ''}.`,
+      );
+      return;
+    }
+    const sgdBand = toSgd ? sgdRail?.withdrawal : undefined;
+    if (
+      payoutSgd !== null &&
+      sgdBand &&
+      ((sgdBand.min !== null && payoutSgd < sgdBand.min) ||
+        (sgdBand.max !== null && payoutSgd > sgdBand.max))
+    ) {
+      setError(
+        `Singapore payouts must come to between ${sgd(sgdBand.min ?? 0)} and ${sgd(sgdBand.max ?? 0)} (${rm(amount)} is ${sgd(payoutSgd)}).`,
       );
       return;
     }
@@ -489,6 +520,21 @@ export default function WithdrawForm({
           Minimum withdrawal to {selected?.bankName} is {rm0(accountMin)}.
         </p>
       )}
+      {payoutSgd !== null && sgdRail?.rate && (
+        <div
+          className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm"
+          data-testid="withdraw-sgd-estimate"
+        >
+          <div className="flex items-center justify-between text-neutral-400">
+            <span>Your bank receives</span>
+            <span className="font-semibold text-white">{sgd(payoutSgd)}</span>
+          </div>
+          <p className="mt-1 text-right text-[11px] text-neutral-500">
+            S$1 = RM {sgdRail.rate.payout.toFixed(4)} · rate locked when you
+            confirm
+          </p>
+        </div>
+      )}
       {withdrawalsClosed && (
         <p
           id="withdraw-amount-guidance"
@@ -522,7 +568,9 @@ export default function WithdrawForm({
         {submitting
           ? 'Sending…'
           : amountValid
-            ? `Withdraw ${rm(amount)}`
+            ? payoutSgd !== null
+              ? `Withdraw ${rm(amount)} → ${sgd(payoutSgd)}`
+              : `Withdraw ${rm(amount)}`
             : 'Withdraw'}
       </Pill>
 

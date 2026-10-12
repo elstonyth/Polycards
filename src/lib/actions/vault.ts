@@ -202,6 +202,15 @@ export async function getPaymentLimits(): Promise<PaymentLimits> {
     depositsEnabled: r.data.deposits_enabled ?? true,
     withdrawalsEnabled: r.data.withdrawals_enabled ?? true,
     withdrawalsPausedUntil: r.data.withdrawals_paused_until ?? null,
+    regional: (r.data.regional ?? []).map((rail) => ({
+      gateway: rail.gateway,
+      currency: rail.currency,
+      depositsEnabled: rail.deposits_enabled,
+      withdrawalsEnabled: rail.withdrawals_enabled,
+      deposit: rail.deposit,
+      withdrawal: rail.withdrawal,
+      rate: rail.rate,
+    })),
   };
 }
 
@@ -246,10 +255,40 @@ export async function getDepositMethods(): Promise<DepositMethodCode[]> {
 export async function startDeposit(
   amount: number,
   paymentMethodCode: string = DEFAULT_DEPOSIT_METHOD,
+  /** A regional top-up (Singapore): `amount` is then in `currency`, and the
+   *  backend quotes the RM credit. `payerName` is the name on the PAYING
+   *  account, which that gateway matches against the transfer. */
+  regional?: { currency: unknown; payerName: unknown },
 ): Promise<StartDepositResult> {
   // Validate at the boundary — a server action is a public endpoint.
   if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
     return { ok: false, error: 'Enter a valid amount.' };
+  }
+  if (regional) {
+    // DEPOSIT_METHODS_ENABLED retracts RM channels; the regional rail has its
+    // own two (QR / bank transfer), allow-listed here and again server-side.
+    if (regional.currency !== 'SGD') {
+      return { ok: false, error: 'Pick a currency.' };
+    }
+    if (paymentMethodCode !== 'BQR' && paymentMethodCode !== 'OB') {
+      return { ok: false, error: 'Pick a payment method.' };
+    }
+    const payerName =
+      typeof regional.payerName === 'string' ? regional.payerName.trim() : '';
+    if (payerName.length < 2 || payerName.length > 120) {
+      return {
+        ok: false,
+        error: 'Enter the name on the bank account you are paying from.',
+      };
+    }
+    const r = await store.post('/store/credits/deposit', DepositStartSchema, {
+      amount,
+      payment_method_code: paymentMethodCode,
+      currency: 'SGD',
+      payer_name: payerName,
+    });
+    if (!r.ok) return vaultFailure(r, LOGIN_FIRST);
+    return { ok: true, url: r.data.url, amount: r.data.amount };
   }
   // The backend allow-lists this too, but its list is the gateway's whole MYR
   // set (FPX/DN/BQR/OB) — ours is the narrower one this merchant actually has
@@ -276,7 +315,12 @@ export async function startDeposit(
   return { ok: true, url: r.data.url, amount: r.data.amount };
 }
 
-export type WithdrawBank = { bankCode: string; bankName: string };
+export type WithdrawBank = {
+  bankCode: string;
+  bankName: string;
+  /** The currency the bank is paid in; absent = RM. */
+  currency?: string;
+};
 
 export type WithdrawBanksResult =
   | { ok: true; banks: WithdrawBank[] }
@@ -317,6 +361,8 @@ export type SavedBankAccount = {
   /** This destination's own payout floor (RM) when above the provider's —
    *  Touch 'n Go: 100. Null/absent = the provider's floor applies. */
   minRm?: number | null;
+  /** The currency the bank is paid in; absent = RM. */
+  currency?: string;
 };
 
 export type SavedBankAccountsResult =
