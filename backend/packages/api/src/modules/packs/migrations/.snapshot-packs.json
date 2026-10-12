@@ -2355,6 +2355,16 @@
           "nullable": true,
           "mappedType": "decimal"
         },
+        "markup": {
+          "name": "markup",
+          "type": "numeric",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "0",
+          "mappedType": "decimal"
+        },
         "raw_rate": {
           "name": "raw_rate",
           "type": "jsonb",
@@ -2371,6 +2381,16 @@
           "autoincrement": false,
           "primary": false,
           "nullable": true,
+          "mappedType": "json"
+        },
+        "raw_markup": {
+          "name": "raw_markup",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "'{\"value\":\"0\",\"precision\":20}'",
           "mappedType": "json"
         },
         "created_at": {
@@ -2569,6 +2589,43 @@
           "length": 6,
           "mappedType": "datetime"
         },
+        "currency": {
+          "name": "currency",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "'MYR'",
+          "mappedType": "text"
+        },
+        "gateway_amount": {
+          "name": "gateway_amount",
+          "type": "numeric",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "decimal"
+        },
+        "fx_mid": {
+          "name": "fx_mid",
+          "type": "numeric",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "decimal"
+        },
+        "fx_markup": {
+          "name": "fx_markup",
+          "type": "numeric",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "decimal"
+        },
         "raw_amount_requested": {
           "name": "raw_amount_requested",
           "type": "jsonb",
@@ -2589,6 +2646,33 @@
         },
         "raw_net_amount": {
           "name": "raw_net_amount",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "json"
+        },
+        "raw_gateway_amount": {
+          "name": "raw_gateway_amount",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "json"
+        },
+        "raw_fx_mid": {
+          "name": "raw_fx_mid",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "json"
+        },
+        "raw_fx_markup": {
+          "name": "raw_fx_markup",
           "type": "jsonb",
           "unsigned": false,
           "autoincrement": false,
@@ -2855,6 +2939,43 @@
           "nullable": true,
           "mappedType": "text"
         },
+        "currency": {
+          "name": "currency",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "default": "'MYR'",
+          "mappedType": "text"
+        },
+        "gateway_amount": {
+          "name": "gateway_amount",
+          "type": "numeric",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "decimal"
+        },
+        "fx_mid": {
+          "name": "fx_mid",
+          "type": "numeric",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "decimal"
+        },
+        "fx_markup": {
+          "name": "fx_markup",
+          "type": "numeric",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "decimal"
+        },
         "raw_amount": {
           "name": "raw_amount",
           "type": "jsonb",
@@ -2875,6 +2996,33 @@
         },
         "raw_net_amount": {
           "name": "raw_net_amount",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "json"
+        },
+        "raw_gateway_amount": {
+          "name": "raw_gateway_amount",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "json"
+        },
+        "raw_fx_mid": {
+          "name": "raw_fx_mid",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "json"
+        },
+        "raw_fx_markup": {
+          "name": "raw_fx_markup",
           "type": "jsonb",
           "unsigned": false,
           "autoincrement": false,

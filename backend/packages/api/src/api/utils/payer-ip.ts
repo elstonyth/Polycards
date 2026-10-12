@@ -1,4 +1,6 @@
 import {
+  callbackIpAllowed,
+  parseCallbackAllowlist,
   tgpayCallbackIpVerdict,
   tgpayEnvName,
   type TgpayKind,
@@ -80,18 +82,40 @@ export function callbackSourceIp(req: {
 }
 
 /**
- * Express middleware for `/hooks/<gateway>/*` on TGPay's platform: that
- * gateway's source allowlist (<PREFIX>_CALLBACK_IPS), applied once for every
- * callback route of that gateway so its two hooks cannot drift. Runs
- * after the hook rate limiter (keyed on the same source address, so a flood
- * from a foreign address is throttled before it is even judged) and before
- * any handler work. A
- * refusal is a constant 403 body plus one log line naming the address and
- * the reason — never a header or a key.
+ * Express middleware for `/hooks/<gateway>/*`: that gateway's source
+ * allowlist, applied once for every callback route of the gateway so its
+ * hooks cannot drift. Runs after the hook rate limiter (keyed on the same
+ * source address, so a flood from a foreign address is throttled before it is
+ * even judged) and before any handler work. One accepted line per callback —
+ * how the first production callback proves which address the ingress really
+ * reports — and a refusal is a constant 403 body plus one log line naming the
+ * address and the reason, never a header or a key. `judge` is the gateway's
+ * own rule (env name, default list, sandbox leniency).
  */
-export function createTgpayCallbackAllowlist(
-  kind: TgpayKind = 'tgpay',
-): (
+function callbackAllowlist(
+  tag: string,
+  judge: (sourceIp: string) => { allowed: true } | { allowed: false; reason: string },
+): CallbackAllowlist {
+  return (req, res, next) => {
+    const sourceIp = callbackSourceIp(req);
+    const verdict = judge(sourceIp);
+    if (verdict.allowed) {
+      req.scope
+        .resolve<{ info: (m: string) => void }>('logger')
+        .info(`[${tag}] callback from ${sourceIp || 'unknown'} accepted`);
+      next();
+      return;
+    }
+    req.scope
+      .resolve<{ warn: (m: string) => void }>('logger')
+      .warn(
+        `[${tag}] rejected callback from ${sourceIp || 'unknown'}: ${verdict.reason}`,
+      );
+    res.status(403).send('rejected');
+  };
+}
+
+type CallbackAllowlist = (
   req: {
     ip?: string;
     headers?: Record<string, string | string[] | undefined>;
@@ -100,30 +124,57 @@ export function createTgpayCallbackAllowlist(
   },
   res: { status: (code: number) => { send: (body: string) => unknown } },
   next: () => void,
-) => void {
+) => void;
+
+/** TGPay's platform (TGPay, The 7 Pay): <PREFIX>_CALLBACK_IPS, header-only in
+ *  the sandbox, refused in production when unset. */
+export function createTgpayCallbackAllowlist(
+  kind: TgpayKind = 'tgpay',
+): CallbackAllowlist {
   const listName = tgpayEnvName(kind, 'CALLBACK_IPS');
-  return (req, res, next) => {
-    const sourceIp = callbackSourceIp(req);
+  return callbackAllowlist(kind, (sourceIp) => {
     const verdict = tgpayCallbackIpVerdict(sourceIp, process.env, kind);
-    if (verdict.allowed) {
-      // One line per accepted callback: this is how the first production
-      // callback proves which address the ingress really reports.
-      req.scope
-        .resolve<{ info: (m: string) => void }>('logger')
-        .info(`[${kind}] callback from ${sourceIp || 'unknown'} accepted`);
-      next();
-      return;
-    }
-    req.scope
-      .resolve<{ warn: (m: string) => void }>('logger')
-      .warn(
-        `[${kind}] rejected callback from ${sourceIp || 'unknown'}: ${verdict.reason}` +
-          (verdict.reason === 'unset-in-production'
-            ? ` — ${listName} is not set; refusing outside the sandbox`
-            : verdict.reason === 'unparseable'
-              ? ` — ${listName} has no valid entries`
-              : ''),
-      );
-    res.status(403).send('rejected');
-  };
+    if (verdict.allowed) return verdict;
+    return {
+      allowed: false,
+      reason:
+        verdict.reason +
+        (verdict.reason === 'unset-in-production'
+          ? ` — ${listName} is not set; refusing outside the sandbox`
+          : verdict.reason === 'unparseable'
+            ? ` — ${listName} has no valid entries`
+            : ''),
+    };
+  });
+}
+
+/**
+ * A3Pay's documented outbound address ("A3pay Outgoing IP", handbook
+ * v3.3.5). A3PAY_CALLBACK_IPS overrides it (IPv4 / CIDR, comma separated) —
+ * locally that is 127.0.0.1 for scripts/a3pay-mock.mjs.
+ */
+export const A3PAY_DEFAULT_CALLBACK_IPS = '13.192.222.226';
+
+/**
+ * `/hooks/a3pay/*`. Defence in depth only: the RSA signature over the
+ * decrypted payload is the real gate, checked inside each handler. A list
+ * that is set but parses to nothing refuses everything rather than quietly
+ * disabling the check.
+ */
+export function createA3payCallbackAllowlist(
+  env: { A3PAY_CALLBACK_IPS?: string } = process.env,
+): CallbackAllowlist {
+  return callbackAllowlist('a3pay', (sourceIp) => {
+    const entries = parseCallbackAllowlist(
+      env.A3PAY_CALLBACK_IPS?.trim() || A3PAY_DEFAULT_CALLBACK_IPS,
+    );
+    if (entries.length === 0)
+      return {
+        allowed: false,
+        reason: 'unparseable — A3PAY_CALLBACK_IPS has no valid entries',
+      };
+    return callbackIpAllowed(sourceIp, entries)
+      ? { allowed: true }
+      : { allowed: false, reason: 'not-listed' };
+  });
 }

@@ -3,7 +3,15 @@ import {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
-import { startWithdrawal } from '../../../../modules/packs/gateway-withdrawal';
+import {
+  payoutGatewayFor,
+  regionalPayoutGateways,
+  startWithdrawal,
+} from '../../../../modules/packs/gateway-withdrawal';
+import {
+  resolvePacks,
+  type GatewayWithdrawals,
+} from '../../../../modules/packs/facets';
 import { payerIpOf } from '../../../utils/payer-ip';
 import { contactIfNeeded } from '../../../utils/customer-contact';
 import {
@@ -44,6 +52,8 @@ export async function POST(
   const body = (req.body ?? {}) as {
     amount?: unknown;
     account_id?: unknown;
+    /** The regional payout rate the form showed; a mismatch is refused. */
+    quoted_rate?: unknown;
   };
 
   // Money-out parity with POST /store/credits/topup. Optional: existing clients
@@ -59,7 +69,23 @@ export async function POST(
     );
   }
 
-  const gateway = await resolveActiveGateway(req.scope);
+  // The ACTIVE gateway pays every bank it can; a bank only a regional gateway
+  // pays (a Singapore bank -> A3Pay) is paid through that one, in its
+  // currency. Decided from the customer's OWN saved account, before the URLs
+  // below, which belong to whichever gateway that is. An unknown account id
+  // falls through to the active gateway, whose own checks refuse it.
+  const active = await resolveActiveGateway(req.scope);
+  let gateway = active;
+  let savedAccounts:
+    | Awaited<ReturnType<GatewayWithdrawals['savedBankAccountsFor']>>
+    | undefined;
+  if (regionalPayoutGateways().length > 0) {
+    savedAccounts = await resolvePacks<GatewayWithdrawals>(
+      req.scope,
+    ).savedBankAccountsFor(customerId);
+    const account = savedAccounts.find((a) => a.id === body.account_id);
+    if (account) gateway = payoutGatewayFor(account.bankCode, active);
+  }
   const {
     withdrawNotifyUrl: notifyUrl,
     payoutVerifyUrl: verifyUrl,
@@ -94,6 +120,8 @@ export async function POST(
       ipAddress,
       email,
       gateway,
+      savedAccounts,
+      quotedRate: quotedRateOf(body.quoted_rate),
       idempotencyKey: trimmedKey !== '' ? trimmedKey : undefined,
     },
     notifyUrl,
@@ -101,4 +129,10 @@ export async function POST(
   );
 
   res.json(result);
+}
+
+/** A client-sent quoted rate: a positive finite number, else ignored. */
+function quotedRateOf(value: unknown): number | undefined {
+  const n = typeof value === 'string' ? Number(value) : value;
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined;
 }

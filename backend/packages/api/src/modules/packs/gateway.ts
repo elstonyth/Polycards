@@ -6,6 +6,9 @@ import {
   type TgpayKind,
 } from './tgpay-client';
 import { fakeGateway, type FakeConfig } from './fake-gateway';
+import * as a3pay from './a3pay-client';
+import type { A3payConfig } from './a3pay-client';
+import { toLedgerAmount, type RowFx } from './payment-fx';
 import { gatewayEnv } from './gateway-env';
 import { PACKS_MODULE } from './index';
 import {
@@ -64,12 +67,32 @@ export type {
 // testOnly() below, which gates isPaymentGateway (and therefore
 // gatewayConfigFor, resolveActiveGateway and the admin switch), plus the
 // registry entry's own `configured` / `configFromEnv`.
-export type PaymentGateway = 'tgpay' | 'the7pay' | 'fake';
+export type PaymentGateway = 'tgpay' | 'the7pay' | 'a3pay' | 'fake';
+
+/** Our ledger's currency. A gateway in any other one converts per row. */
+export const LEDGER_CURRENCY = 'MYR';
 
 export type GatewayDefinition = {
   id: PaymentGateway;
   /** Operator-facing name for the admin switch. */
   label: string;
+  /**
+   * The currency the gateway moves. LEDGER_CURRENCY (MYR) gateways are the
+   * ones the admin switch chooses between; any other is a REGIONAL rail that
+   * runs beside the active one (A3Pay for Singapore), is chosen by the
+   * customer's currency or payout bank, and converts through payment-fx.ts.
+   */
+  currency: string;
+  /**
+   * A regional gateway's own band, in ITS currency. The RM `limits` below
+   * still apply to the converted amount — they are what the ledger fences.
+   */
+  currencyLimits?: {
+    depositMin: number;
+    depositMax: number;
+    withdrawalMin: number;
+    withdrawalMax: number;
+  };
   /** Are the credentials for this gateway present in the environment? */
   configured: (env: Partial<NodeJS.ProcessEnv>) => boolean;
   /** Its client config from env; throws when `configured` would be false. */
@@ -97,6 +120,7 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
   tgpay: {
     id: 'tgpay',
     label: 'TGPay',
+    currency: LEDGER_CURRENCY,
     configured: (env) => Boolean(env.TGPAY_SECRET_KEY),
     configFromEnv: (env) => tgpay.tgpayConfigFromEnv(env),
     needsCustomerContact: true,
@@ -121,6 +145,7 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
   the7pay: {
     id: 'the7pay',
     label: 'The 7 Pay',
+    currency: LEDGER_CURRENCY,
     configured: (env) => Boolean(env.THE7PAY_SECRET_KEY),
     configFromEnv: (env) => tgpay.tgpayFamilyConfigFromEnv('the7pay', env),
     needsCustomerContact: true,
@@ -140,6 +165,46 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
     },
   },
 
+  // Singapore (SGD), beside the active RM gateway — never instead of it.
+  // `configured` also requires A3PAY_ENABLED=true, so credentials can be
+  // deployed ahead of opening the rail; the sweeps read configFromEnv, not
+  // `configured`, so rows already in flight still settle after a switch-off.
+  a3pay: {
+    id: 'a3pay',
+    label: 'A3Pay (SGD)',
+    currency: 'SGD',
+    configured: (env) =>
+      env.A3PAY_ENABLED === 'true' && a3pay.a3payConfigured(env),
+    configFromEnv: (env) => a3pay.a3payConfigFromEnv(env),
+    // FromCustomerAccountHolderName is mandatory for SGD; it is collected on
+    // the top-up sheet (the name on the PAYING account), not read from the
+    // profile, so this gateway needs no profile contact.
+    needsCustomerContact: false,
+    hooks: {
+      deposit: '/hooks/a3pay/deposit',
+      withdrawal: '/hooks/a3pay/withdrawal',
+      payoutVerify: '/hooks/a3pay/payout-verify',
+    },
+    // RM fences on the CONVERTED amount (the same ceilings as the RM
+    // gateway), plus A3Pay's own SGD band — read from the back office
+    // (Merchant Transaction Setting, 2026-10-12): deposit OB / BQR S$10 –
+    // 5,000 (2.5% fee), payout WD S$50 – 10,000 (1.5% fee). The top-up band
+    // is further narrowed at quote time so the RM credit fits the RM band
+    // (payment-fx.ts regionalDepositBand).
+    limits: {
+      depositMin: 30,
+      depositMax: 10000,
+      withdrawalMin: 50,
+      withdrawalMax: 30000,
+    },
+    currencyLimits: {
+      depositMin: 10,
+      depositMax: 5000,
+      withdrawalMin: 50,
+      withdrawalMax: 10000,
+    },
+  },
+
   // Test-only. Mirrors TGPay's limits and contact requirement field for
   // field, so a spec that selects it exercises the SAME orchestration
   // branches the production gateway takes — only the I/O is replaced. Its
@@ -148,6 +213,7 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
   fake: {
     id: 'fake',
     label: 'Fake gateway (tests)',
+    currency: LEDGER_CURRENCY,
     configured: () => testOnly(),
     configFromEnv: () => {
       if (!testOnly())
@@ -178,6 +244,27 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
 export const GATEWAY_IDS = (Object.keys(GATEWAYS) as PaymentGateway[]).filter(
   (id) => id !== 'fake',
 );
+
+/** Does this gateway move RM (as opposed to a regional currency)? */
+export function isLedgerGateway(id: PaymentGateway): boolean {
+  return GATEWAYS[id].currency === LEDGER_CURRENCY;
+}
+
+/**
+ * The gateways the admin switch may make ACTIVE: RM ones only. A regional
+ * gateway (A3Pay) runs beside the active one; making it active would send
+ * every RM top-up to an SGD rail.
+ */
+export const LEDGER_GATEWAY_IDS = GATEWAY_IDS.filter(isLedgerGateway);
+
+/** Every currency a regional gateway settles in (today: SGD). */
+export const REGIONAL_CURRENCIES = [
+  ...new Set(
+    GATEWAY_IDS.filter((id) => !isLedgerGateway(id)).map(
+      (id) => GATEWAYS[id].currency,
+    ),
+  ),
+];
 
 /** The fake gateway exists for specs; nothing else may ever select it. */
 function testOnly(): boolean {
@@ -236,11 +323,22 @@ export function paymentGateway(
   env: { PAYMENT_GATEWAY?: string } = process.env,
 ): PaymentGateway {
   if (activeSetting) return activeSetting;
-  return isPaymentGateway(env.PAYMENT_GATEWAY) ? env.PAYMENT_GATEWAY : 'tgpay';
+  return isPaymentGateway(env.PAYMENT_GATEWAY) &&
+    isLedgerGateway(env.PAYMENT_GATEWAY)
+    ? env.PAYMENT_GATEWAY
+    : 'tgpay';
 }
 
 /** Set the cached active gateway (admin switch, boot, tests). null = forget. */
 export function setActiveGateway(id: PaymentGateway | null): void {
+  // THE guard for the active slot: only an RM gateway may hold it. A regional
+  // one (A3Pay, SGD) here would route every RM top-up to an SGD rail for up
+  // to a TTL — whoever the caller is.
+  if (id !== null && !isLedgerGateway(id)) {
+    throw new Error(
+      `${id} settles in ${GATEWAYS[id].currency}; only an RM gateway can be the active one.`,
+    );
+  }
   activeSetting = id;
   activeReadAt = id ? Date.now() : 0;
 }
@@ -262,7 +360,10 @@ export async function resolveActiveGateway(
       siteSettings: () => Promise<{ payment_gateway: string | null }>;
     }>(PACKS_MODULE);
     const { payment_gateway } = await packs.siteSettings();
-    activeSetting = isPaymentGateway(payment_gateway) ? payment_gateway : null;
+    activeSetting =
+      isPaymentGateway(payment_gateway) && isLedgerGateway(payment_gateway)
+        ? payment_gateway
+        : null;
     activeReadAt = now;
   } catch {
     // keep whatever we had
@@ -273,6 +374,7 @@ export async function resolveActiveGateway(
 export type GatewayConfig =
   | TgpayConfig<'tgpay'>
   | TgpayConfig<'the7pay'>
+  | A3payConfig
   | FakeConfig;
 
 /** Config for a SPECIFIC gateway, from env. Throws when it is not configured. */
@@ -573,11 +675,154 @@ const tgpayAdapter: GatewayAdapter<TgpayConfig> = {
 // Total over the kinds by construction: a new member of the GatewayConfig
 // union has no entry here until someone writes its adapter, and the compiler
 // says so.
+/** A3Pay's payin rails: the storefront's rail codes are already theirs. */
+export const A3PAY_METHODS = ['OB', 'BQR'] as const;
+
+/** A definite refusal raised before any call — nothing exists on their side. */
+function a3payRefusal(message: string, code: string): a3pay.A3payError {
+  return new a3pay.A3payError(`A3Pay: ${message}`, [code], 400, true);
+}
+
+const a3payAdapter: GatewayAdapter<A3payConfig> = {
+  async submitDeposit(input, config) {
+    if (
+      !(A3PAY_METHODS as readonly string[]).includes(input.paymentMethodCode)
+    ) {
+      throw a3payRefusal(
+        `no rail for method ${input.paymentMethodCode}`,
+        'A3PAY_UNSUPPORTED_METHOD',
+      );
+    }
+    // The SGD amount comes from the row's FX lock. Never fall back to
+    // `amount`: that is RM, and sending it as SGD would charge ~3.3x.
+    if (!(input.gatewayAmount && input.gatewayAmount > 0)) {
+      throw a3payRefusal(
+        'no SGD amount on the deposit',
+        'A3PAY_NO_GATEWAY_AMOUNT',
+      );
+    }
+    if (!input.payerName?.trim()) {
+      throw a3payRefusal(
+        'SGD payins need the paying account holder name',
+        'A3PAY_PAYER_REQUIRED',
+      );
+    }
+    const r = await a3pay.createPayin(
+      {
+        merchantTransactionId: input.merchantTransactionId,
+        customerId: input.merchantClientId,
+        amount: input.gatewayAmount,
+        ipAddress: input.ipAddress,
+        callbackUrl: input.notifyUrl,
+        returnUrl: input.returnUrl,
+        paymentMethodId: input.paymentMethodCode,
+        accountHolderName: input.payerName.trim(),
+      },
+      config,
+    );
+    return {
+      transactionId: r.paymentOrderId ?? '',
+      url: r.paymentURL,
+      bankCode: r.paymentBankCode,
+      accountNumber: r.paymentAccountNumber,
+      accountHolderName: r.paymentAccountHolderName,
+      referenceNo: r.paymentReferenceNo,
+      qrCode: r.paymentQRCode,
+      depositActualAmount: Number(r.payinActualAmount),
+      deepLink: r.paymentDeepLink,
+    };
+  },
+
+  async getDepositDetail(merchantTransactionId, config) {
+    const d = await a3pay.getPayinDetail(merchantTransactionId, config);
+    return {
+      transactionId: d.paymentOrderId,
+      merchantTransactionId,
+      statusId: Number(d.statusId),
+      status: d.status,
+      amount: Number(d.payinAmount),
+      netAmount: Number(d.payinNetAmount),
+      paymentMethodCode: d.paymentMethodId,
+      bankReferenceNo: null,
+      uniqueReferenceNo: null,
+      state: d.state,
+    };
+  },
+
+  async submitWithdrawal(input, config) {
+    if (!(input.gatewayAmount && input.gatewayAmount > 0)) {
+      throw a3payRefusal(
+        'no SGD amount on the payout',
+        'A3PAY_NO_GATEWAY_AMOUNT',
+      );
+    }
+    const bank = gatewayBankCode(input.destinationBankCode, 'a3pay');
+    if (!bank) {
+      throw a3payRefusal(
+        `cannot pay to bank ${input.destinationBankCode}`,
+        'A3PAY_UNKNOWN_BANK',
+      );
+    }
+    const r = await a3pay.submitPayout(
+      {
+        merchantTransactionId: input.merchantTransactionId,
+        customerId: input.merchantClientId,
+        amount: input.gatewayAmount,
+        ipAddress: input.ipAddress,
+        bankCode: bank.code,
+        accountNumber: input.destinationAccountNumber,
+        accountHolderName: input.destinationAccountHolderName,
+        callbackUrl: input.notifyUrl,
+        verifyUrl: input.returnUrl,
+      },
+      config,
+    );
+    return { transactionId: r.paymentOrderId ?? '' };
+  },
+
+  async getWithdrawalDetail(merchantTransactionId, config) {
+    const d = await a3pay.getPayoutDetail(merchantTransactionId, config);
+    return {
+      transactionId: d.paymentOrderId ?? '',
+      merchantTransactionId,
+      statusId: Number(d.statusId),
+      status: d.status,
+      amount: Number(d.payoutAmount),
+      // What the wallet PAID (amount + their fee) — the payout-net rule.
+      netAmount: Number(d.payoutNetAmount),
+      paymentMethodCode: d.paymentMethodId,
+      bankReferenceNo: null,
+      uniqueReferenceNo: null,
+      state: d.state,
+    };
+  },
+
+  async getSupportedBanks() {
+    return banksFor('a3pay');
+  },
+
+  async checkBalance(config) {
+    const b = await a3pay.checkAccBalance(config);
+    return {
+      merchantCode: b.mid ?? b.mID ?? config.merchantCode,
+      currencyCode: b.currCode ?? config.currencyCode,
+      currentBalance: Number(b.currentBalanceAmount),
+      availableBalance: Number(b.availableBalanceAmount),
+      t1Balance: Number(b.t1BalanceAmount ?? 0),
+    };
+  },
+};
+
 const ADAPTERS: {
   [K in GatewayConfig['kind']]: GatewayAdapter<
     Extract<GatewayConfig, { kind: K }>
   >;
-} = { tgpay: tgpayAdapter, the7pay: tgpayAdapter, fake: fakeGateway };
+} = {
+  tgpay: tgpayAdapter,
+  the7pay: tgpayAdapter,
+  a3pay: a3payAdapter,
+  fake: fakeGateway,
+};
 
 /**
  * Pick the adapter for a config by its `kind`. The cast re-widens what the
@@ -596,11 +841,46 @@ export function submitDeposit(
   return adapterFor(config).submitDeposit(input, config);
 }
 
-export function getDepositDetail(
+/**
+ * Requery a row in the currency it was CREATED in, not whatever the config
+ * says today. A3Pay answers "Not found" for a CurrCode that does not match
+ * the transaction, and "Not found" now authorises a stale-payout refund — so
+ * a later A3PAY_CURRENCY edit must not turn live payouts into refunds. Rows
+ * from before the column (currency absent) keep the config's currency.
+ */
+export function inRowCurrency(
+  config: GatewayConfig,
+  fx: RowFx,
+): GatewayConfig {
+  const currency = typeof fx.currency === 'string' ? fx.currency : '';
+  return currency &&
+    'currencyCode' in config &&
+    config.currencyCode !== currency
+    ? { ...config, currencyCode: currency }
+    : config;
+}
+
+/**
+ * The gateway's record, its amounts converted into RM through the ROW's FX
+ * lock. `fx` is REQUIRED, not optional: every caller holds the row, and a call
+ * site that forgot it would credit S$ figures as RM. An RM row passes
+ * rowFx(row) all the same — it carries no gateway_amount and converts 1:1.
+ */
+export async function getDepositDetail(
   merchantTransactionId: string,
   config: GatewayConfig,
+  fx: RowFx,
 ): Promise<DepositDetail> {
-  return adapterFor(config).getDepositDetail(merchantTransactionId, config);
+  const asked = inRowCurrency(config, fx);
+  const d = await adapterFor(asked).getDepositDetail(
+    merchantTransactionId,
+    asked,
+  );
+  return {
+    ...d,
+    amount: toLedgerAmount(fx, d.amount),
+    netAmount: toLedgerAmount(fx, d.netAmount),
+  };
 }
 
 export function submitWithdrawal(
@@ -610,11 +890,22 @@ export function submitWithdrawal(
   return adapterFor(config).submitWithdrawal(input, config);
 }
 
-export function getWithdrawalDetail(
+/** As getDepositDetail: amounts converted into RM through the row's lock. */
+export async function getWithdrawalDetail(
   merchantTransactionId: string,
   config: GatewayConfig,
+  fx: RowFx,
 ): Promise<WithdrawalDetail> {
-  return adapterFor(config).getWithdrawalDetail(merchantTransactionId, config);
+  const asked = inRowCurrency(config, fx);
+  const d = await adapterFor(asked).getWithdrawalDetail(
+    merchantTransactionId,
+    asked,
+  );
+  return {
+    ...d,
+    amount: toLedgerAmount(fx, d.amount),
+    netAmount: toLedgerAmount(fx, d.netAmount),
+  };
 }
 
 export function getSupportedBanks(

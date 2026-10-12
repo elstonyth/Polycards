@@ -3,7 +3,7 @@ import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { resolvePacks, type GatewayWithdrawals } from '../modules/packs/facets';
 import {
   applyWithdrawalOutcome,
-  withdrawalsEnabled,
+  anyWithdrawalsEnabled,
   refundWithdrawal,
   withdrawalIdempotencyReference,
 } from '../modules/packs/gateway-withdrawal';
@@ -13,6 +13,7 @@ import {
   rowGatewayConfigs,
 } from '../modules/packs/gateway';
 import { toOptionalMoney } from '../modules/packs/money';
+import { rowFx } from '../modules/packs/payment-fx';
 import {
   GATEWAY_RECONCILE_BATCH,
   GATEWAY_WD_HELD_STALE_AFTER_MS,
@@ -39,7 +40,7 @@ export default async function withdrawalReconcileJob(
 ) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   await resolveActiveGateway(container);
-  if (!withdrawalsEnabled()) return;
+  if (!anyWithdrawalsEnabled()) return;
 
   const packs = resolvePacks<GatewayWithdrawals>(container);
   // Per-row gateway, same reasoning as the deposit sweep.
@@ -111,6 +112,7 @@ export default async function withdrawalReconcileJob(
         detail = await getWithdrawalDetail(
           withdrawal.merchant_transaction_id,
           config,
+          rowFx(withdrawal),
         );
         gatewayStatus = detail.statusId;
         action = withdrawalReconcileAction(detail.state);

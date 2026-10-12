@@ -475,7 +475,8 @@
     "staleWarning": "{{n}} row(s) on this page are past the reconcile window. Check the deposit in the gateway back office before crediting anyone by hand.",
     "empty": "No deposits in this view.",
     "loadError": "Could not load deposits.",
-    "tableLabel": "Deposits table"
+    "tableLabel": "Deposits table",
+    "paidIn": "paid {{amount}}"
   },
   "withdrawals": {
     "title": "Withdrawals",
@@ -522,7 +523,8 @@
     "confirmApproveTitle": "Approve this payout?",
     "confirmApproveBody": "Send {{amount}} to {{bank}} {{account}} ({{holder}}) via the active payment gateway. This submits the transfer immediately and cannot be recalled from here.",
     "confirmDenyTitle": "Deny this withdrawal?",
-    "confirmDenyBody": "Refuse this {{amount}} withdrawal. Nothing is sent to {{bank}} {{account}} ({{holder}}) — the funds are returned to the customer's in-app balance instead."
+    "confirmDenyBody": "Refuse this {{amount}} withdrawal. Nothing is sent to {{bank}} {{account}} ({{holder}}) — the funds are returned to the customer's in-app balance instead.",
+    "paidOutIn": "bank receives {{amount}}"
   },
   "pulls": {
     "title": "Pull Ledger",
@@ -779,7 +781,32 @@
     "gatewayLoadError": "Could not load the payment gateway setting.",
     "gatewayPreflightTitle": "{{label}} failed the live check",
     "gatewayPreflightForceHint": "Switching anyway may make top-ups or withdrawals fail until this is fixed. Use it only in an emergency.",
-    "gatewayPreflightForce": "Switch anyway"
+    "gatewayPreflightForce": "Switch anyway",
+    "fxTitle": "{{currency}} conversion",
+    "fxSubtitle": "Customers pay and are paid in {{currency}}; credits stay in RM. The markup is in RM per {{unit}} and is taken on both sides.",
+    "fxQuoting": "Quoting",
+    "fxPaused": "Paused",
+    "fxUnavailable": "Unavailable",
+    "fxFeedRate": "Market rate (feed)",
+    "fxNotFetched": "not fetched yet",
+    "fxDepositRate": "Top-up rate ({{unit}} →)",
+    "fxDepositRateHint": "what a customer is credited",
+    "fxPayoutRate": "Payout rate (→ {{unit}})",
+    "fxPayoutRateHint": "what each {{unit}} paid out costs",
+    "fxEarned": "Conversion earned",
+    "fxEarnedHint": "{{deposits}} top-ups · {{payouts}} payouts settled",
+    "fxQuoteError": "{{error}} {{currency}} top-ups and payouts are refused until this is fixed.",
+    "fxMarkup": "Markup (RM per {{unit}})",
+    "fxManual": "Manual market rate",
+    "fxManualRate": "Market rate",
+    "fxReason": "Reason",
+    "fxReasonPlaceholder": "Required — why is this changing?",
+    "fxSave": "Save",
+    "fxSaved": "{{currency}} conversion updated",
+    "fxConfirmTitle": "Save {{currency}} conversion",
+    "fxConfirm": "New {{currency}} top-ups will credit RM {{deposit}} per {{unit}} and payouts will cost RM {{payout}} per {{unit}}. Payments already started keep their rate. Continue?",
+    "fxPreview": "Preview: {{currency}} 100 top-up → RM {{credit}} credit · RM 100 payout → {{currency}} {{payout}} to the bank ({{share}}% each way)",
+    "fxPreviewEmpty": "Enter a markup between 0 and 20% of the market rate to see the customer rates."
   },
   "pipeline": {
     "label": "Inventory pipeline",

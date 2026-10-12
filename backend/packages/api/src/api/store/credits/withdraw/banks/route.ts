@@ -4,7 +4,11 @@ import {
   gatewayConfigFor,
   resolveActiveGateway,
 } from '../../../../../modules/packs/gateway';
-import { withdrawalsEnabled } from '../../../../../modules/packs/gateway-withdrawal';
+import {
+  regionalPayoutGateways,
+  withdrawalsEnabled,
+} from '../../../../../modules/packs/gateway-withdrawal';
+import { GATEWAYS } from '../../../../../modules/packs/gateway';
 
 // GET /store/credits/withdraw/banks — the payout bank picker's source: the
 // banks the ACTIVE gateway can pay to, as canonical ids (banks.ts). Cached
@@ -15,21 +19,38 @@ const CACHE_MS = 10 * 60 * 1000;
 let cache: {
   gateway: string;
   at: number;
-  banks: { bankCode: string; bankName: string }[];
+  banks: { bankCode: string; bankName: string; currency: string }[];
 } | null = null;
 
 export async function GET(
   req: MedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const gateway = await resolveActiveGateway(req.scope);
-  if (!withdrawalsEnabled()) {
+  const active = await resolveActiveGateway(req.scope);
+  // The active gateway's banks, then those of every open regional gateway
+  // (Singapore banks via A3Pay), each tagged with the currency it pays in.
+  // A bank both could pay goes to the active one, matching payoutGatewayFor.
+  const gateways = [
+    ...(withdrawalsEnabled() ? [active] : []),
+    ...regionalPayoutGateways(),
+  ];
+  const key = gateways.join(',');
+  if (gateways.length === 0) {
     res.json({ banks: [] });
     return;
   }
-  if (!cache || cache.gateway !== gateway || Date.now() - cache.at > CACHE_MS) {
-    const banks = await getSupportedBanks(gatewayConfigFor(gateway));
-    cache = { gateway, at: Date.now(), banks };
+  if (!cache || cache.gateway !== key || Date.now() - cache.at > CACHE_MS) {
+    const seen = new Set<string>();
+    const banks: { bankCode: string; bankName: string; currency: string }[] =
+      [];
+    for (const gateway of gateways) {
+      for (const bank of await getSupportedBanks(gatewayConfigFor(gateway))) {
+        if (seen.has(bank.bankCode)) continue;
+        seen.add(bank.bankCode);
+        banks.push({ ...bank, currency: GATEWAYS[gateway].currency });
+      }
+    }
+    cache = { gateway: key, at: Date.now(), banks };
   }
   res.json({ banks: cache.banks });
 }

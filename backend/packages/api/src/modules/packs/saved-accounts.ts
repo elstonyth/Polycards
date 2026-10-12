@@ -174,13 +174,17 @@ export function savedBankAccountViews(
   accounts: SavedBankAccount[],
   gateway: PaymentGateway,
   cooldownHours: number = payoutDestinationCooldownHours(),
+  /** Regional gateways open beside the active one (regionalPayoutGateways). */
+  regional: readonly PaymentGateway[] = [],
 ): SavedBankAccountView[] {
   return accounts.map((account) => {
     const usableAt = destinationUsableAt(account, cooldownHours);
     return {
       ...account,
       usableFrom: usableAt ? usableAt.toISOString() : null,
-      supported: bankSupportedBy(account.bankCode, gateway),
+      supported: [gateway, ...regional].some((g) =>
+        bankSupportedBy(account.bankCode, g),
+      ),
       minRm: bankPayoutMinRm(account.bankCode),
     };
   });

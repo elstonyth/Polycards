@@ -1,3 +1,4 @@
+import { NO_FX } from '../payment-fx';
 import { GatewayError } from '../gateway-types';
 import { fakeGateway, type FakeConfig } from '../fake-gateway';
 import {
@@ -71,13 +72,13 @@ describe('the fake adapter, through the seam', () => {
   });
 
   it('answers a requery with a well-formed settled detail', async () => {
-    const d = await getDepositDetail('PC-1', config);
+    const d = await getDepositDetail('PC-1', config, NO_FX);
     expect(d).toMatchObject({
       merchantTransactionId: 'PC-1',
       state: 'success',
       statusId: null,
     });
-    const w = await getWithdrawalDetail('PW-1', config);
+    const w = await getWithdrawalDetail('PW-1', config, NO_FX);
     expect(w.state).toBe('success');
     expect(fakeGateway.calls.depositDetails).toEqual(['PC-1']);
     expect(fakeGateway.calls.withdrawalDetails).toEqual(['PW-1']);
@@ -95,7 +96,7 @@ describe('the fake adapter, through the seam', () => {
     fakeGateway.script({
       getWithdrawalDetail: { state: 'failed', statusId: 5 },
     });
-    const w = await getWithdrawalDetail('PW-1', config);
+    const w = await getWithdrawalDetail('PW-1', config, NO_FX);
     expect(w.state).toBe('failed');
     expect(w.statusId).toBe(5);
     // NOT filled in from the canonical result: callers branch on a missing

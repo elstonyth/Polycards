@@ -12,6 +12,10 @@ export const FxRate = model.define("fx_rate", {
   fetched_at: model.dateTime().nullable(),
   manual_override: model.boolean().default(false),
   manual_rate: model.bigNumber().nullable(),
+  // Payment pairs only (SGD_MYR, payment-fx.ts): our absolute spread in RM per
+  // unit, applied both ways — deposits credit at rate - markup, payouts pay at
+  // rate + markup. Unused (0) on the display pair USD_MYR.
+  markup: model.bigNumber().default(0),
 });
 
 export default FxRate;

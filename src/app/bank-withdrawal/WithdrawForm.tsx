@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, Clock, Landmark, Lock } from 'lucide-react';
 import { rm, rm0, timeUntil } from '@/lib/format';
+import { openRails } from '@/lib/regional-rails';
 import {
   fetchSavedBankAccounts,
   getPaymentLimits,
@@ -12,6 +13,7 @@ import {
 } from '@/lib/actions/vault';
 import {
   DEFAULT_PAYMENT_LIMITS,
+  regionalPayout,
   type PaymentLimits,
 } from '@/lib/payment-limits';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
@@ -169,9 +171,25 @@ export default function WithdrawForm({
   const attemptKey = useRef<string | null>(null);
 
   const [limits, setLimits] = useState<PaymentLimits>(DEFAULT_PAYMENT_LIMITS);
+  // Regional payout rails (Singapore via A3Pay), open and priced. An account
+  // in a regional currency is paid through its rail in that currency; every
+  // other account through the active gateway in RM.
+  const rails = openRails(limits.regional, 'withdrawal');
+  const selectedAccount = saved?.find((a) => a.id === accountId);
+  const toRegional =
+    selectedAccount?.currency !== undefined &&
+    selectedAccount.currency !== 'MYR';
+  const rail = toRegional
+    ? rails.find((option) => option.currency === selectedAccount.currency)
+    : undefined;
   // The channel itself, not the band — the admin can close withdrawals
   // outright while a gateway stays configured (getPaymentLimits, plan 135).
-  const withdrawalsClosed = !limits.withdrawalsEnabled;
+  // Judged against the rail that would pay the chosen account; before one is
+  // chosen, open if any rail is.
+  const withdrawalsClosed = toRegional
+    ? !rail
+    : !limits.withdrawalsEnabled &&
+      (selectedAccount !== undefined || rails.length === 0);
   // A timed pause (provider outage) names when to come back, in Malaysia time.
   const resumeAt = limits.withdrawalsPausedUntil
     ? new Date(limits.withdrawalsPausedUntil).toLocaleTimeString('en-US', {
@@ -240,6 +258,10 @@ export default function WithdrawForm({
       ? selected.minRm
       : null;
   const minRm = accountMin ?? limits.withdrawal.minRm;
+  // What a regional bank receives for this RM amount, at today's payout rate
+  // (floored to the cent, exactly as the backend quotes and locks it).
+  const payoutRegional =
+    rail && amountValid ? regionalPayout(amount, rail.rate.payout) : null;
 
   async function submit() {
     if (submitting || !formValid || withdrawalsClosed || blocked) return;
@@ -247,6 +269,19 @@ export default function WithdrawForm({
     if (amount < minRm || amount > limits.withdrawal.maxRm) {
       setError(
         `Withdrawals must be between ${rm0(minRm)} and ${rm0(limits.withdrawal.maxRm)}${accountMin !== null ? ` for ${selected?.bankName}` : ''}.`,
+      );
+      return;
+    }
+    const band = rail?.withdrawal;
+    if (
+      rail &&
+      payoutRegional !== null &&
+      band &&
+      ((band.min !== null && payoutRegional < band.min) ||
+        (band.max !== null && payoutRegional > band.max))
+    ) {
+      setError(
+        `${rail.ui.payoutNoun} must come to between ${rail.ui.money(band.min ?? 0)} and ${rail.ui.money(band.max ?? 0)} (${rm(amount)} is ${rail.ui.money(payoutRegional)}).`,
       );
       return;
     }
@@ -263,11 +298,21 @@ export default function WithdrawForm({
         amount,
         accountId,
         idempotencyKey: attemptKey.current,
+        // The rate shown: the backend refuses one that has moved since,
+        // before any debit, instead of paying out at a rate never seen.
+        quotedRate: rail?.rate.payout,
       });
       if (!res.ok) {
         // Key stays armed on purpose — a retry of THIS attempt must replay,
         // not double-debit and double-transfer.
         setError(res.error);
+        // A regional refusal may be that rate change: re-read the rails so
+        // the estimate shows today's rate before the customer retries.
+        if (rail) {
+          getPaymentLimits()
+            .then(setLimits)
+            .catch(() => {});
+        }
         return;
       }
       attemptKey.current = null;
@@ -490,6 +535,23 @@ export default function WithdrawForm({
           Minimum withdrawal to {selected?.bankName} is {rm0(accountMin)}.
         </p>
       )}
+      {rail && payoutRegional !== null && (
+        <div
+          className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm"
+          data-testid="withdraw-regional-estimate"
+        >
+          <div className="flex items-center justify-between text-neutral-400">
+            <span>Your bank receives</span>
+            <span className="font-semibold text-white">
+              {rail.ui.money(payoutRegional)}
+            </span>
+          </div>
+          <p className="mt-1 text-right text-[11px] text-neutral-500">
+            {rail.ui.symbol}1 = RM {rail.rate.payout.toFixed(4)} · rate locked
+            when you confirm
+          </p>
+        </div>
+      )}
       {withdrawalsClosed && (
         <p
           id="withdraw-amount-guidance"
@@ -523,7 +585,9 @@ export default function WithdrawForm({
         {submitting
           ? 'Sending…'
           : amountValid
-            ? `Withdraw ${rm(amount)}`
+            ? rail && payoutRegional !== null
+              ? `Withdraw ${rm(amount)} → ${rail.ui.money(payoutRegional)}`
+              : `Withdraw ${rm(amount)}`
             : 'Withdraw'}
       </Pill>
 

@@ -587,6 +587,28 @@ export const PaymentConfigSchema = z.looseObject({
   withdrawals_enabled: z.boolean().optional(),
   // ISO instant a timed withdrawal pause ends (null/absent = no timed pause).
   withdrawals_paused_until: z.string().nullable().optional(),
+  // Regional rails beside the active gateway (A3Pay: SGD). Optional — an
+  // older backend has none, and a malformed list must not fail the bands.
+  regional: z
+    .array(
+      z.looseObject({
+        gateway: z.string(),
+        currency: z.string(),
+        deposits_enabled: z.boolean(),
+        withdrawals_enabled: z.boolean(),
+        deposit: z.looseObject({
+          min: finite.nullable(),
+          max: finite.nullable(),
+        }),
+        withdrawal: z.looseObject({
+          min: finite.nullable(),
+          max: finite.nullable(),
+        }),
+        rate: z.looseObject({ deposit: finite, payout: finite }).nullable(),
+      }),
+    )
+    .optional()
+    .catch(undefined),
 });
 
 /** GET /store/credits transaction row. `amount` is signed (credit +, spend −).
@@ -712,7 +734,15 @@ export const WithdrawStartSchema = z.looseObject({
 
 /** GET /store/credits/withdraw/banks response — the payout bank picker. */
 export const WithdrawBanksSchema = z.looseObject({
-  banks: z.array(z.looseObject({ bankCode: z.string(), bankName: z.string() })),
+  banks: z.array(
+    z.looseObject({
+      bankCode: z.string(),
+      bankName: z.string(),
+      // The currency that bank is paid in (SGD for Singapore banks via
+      // A3Pay). Optional: an older backend sends none, meaning RM.
+      currency: z.string().optional(),
+    }),
+  ),
 });
 
 /** /store/credits/withdraw/accounts responses (GET/POST/DELETE all return the
@@ -733,6 +763,9 @@ export const SavedBankAccountsSchema = z.looseObject({
       accountNumber: z.string(),
       accountHolderName: z.string(),
       usableFrom: z.string().nullish(),
+      // The currency the bank is paid in (SGD = a Singapore bank, paid via
+      // A3Pay at a converted amount). Optional: absent reads as RM.
+      currency: z.string().optional(),
       // Can the active payout provider pay to this bank? Optional so an
       // older backend still parses; absent reads as supported.
       supported: z.boolean().optional(),

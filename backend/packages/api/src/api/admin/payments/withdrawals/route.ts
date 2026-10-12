@@ -214,6 +214,13 @@ export async function GET(
         : Number(r.net_amount),
     bank_reference_no: r.bank_reference_no ?? null,
     unique_reference_no: r.unique_reference_no ?? null,
+    // A regional rail's row (A3Pay: SGD): the currency the customer actually
+    // paid / was paid in, and how much. Every RM figure above is the ledger's.
+    currency: r.currency ?? 'MYR',
+    gateway_amount:
+      r.gateway_amount === null || r.gateway_amount === undefined
+        ? null
+        : Number(r.gateway_amount),
     bank_code: r.bank_code,
     // Masked in bulk, full value via ./[id]/account. The field name is kept so
     // the SPA does not break on a rename.

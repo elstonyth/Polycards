@@ -28,6 +28,11 @@ import type {
 } from '../../lib/admin-rest';
 import { rm } from '../../lib/format';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { RegionalFxCard } from './RegionalFxCard';
+
+// One conversion card per regional rail (backend gateway.ts
+// REGIONAL_CURRENCIES). Adding a rail (USDT) = one entry here.
+const REGIONAL_CURRENCIES = ['SGD'] as const;
 
 // Settlement — the gateway's calendar weekly/monthly result, read from this
 // database (audit 2026-08-17 B1/B3/B4/B5). This page exists so the operator
@@ -659,6 +664,9 @@ const SettlementPage = () => {
           </>
         )}
       </Container>
+      {REGIONAL_CURRENCIES.map((currency) => (
+        <RegionalFxCard key={currency} currency={currency} />
+      ))}
     </div>
   );
 };

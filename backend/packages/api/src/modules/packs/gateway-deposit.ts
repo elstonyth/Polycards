@@ -8,8 +8,16 @@ import {
   rowGateway,
   submitDeposit,
   GatewayError,
+  A3PAY_METHODS,
+  GATEWAY_IDS,
+  isLedgerGateway,
   type PaymentGateway,
 } from './gateway';
+import {
+  creditForDeposit,
+  loadPaymentFxQuote,
+  regionalDepositBand,
+} from './payment-fx';
 import type { TgpayCustomer } from './tgpay-client';
 import { topUpAmountError, topupIdempotencyReference } from './topup';
 import { sendTopupReceipt } from './topup-receipt';
@@ -99,6 +107,36 @@ export function gatewayEnabled(
   );
 }
 
+/** Is ANY gateway open for deposits? The sweeps' gate: rows of every open
+ *  gateway keep settling, whichever one is active. */
+export function anyGatewayEnabled(
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): boolean {
+  // The active gateway first (in specs that is the test-only fake, which
+  // GATEWAY_IDS deliberately omits), then every registered one.
+  return (
+    gatewayEnabled(env) || GATEWAY_IDS.some((id) => gatewayEnabled(env, id))
+  );
+}
+
+/**
+ * The open regional gateway for a customer-chosen currency (SGD -> A3Pay), or
+ * null. A top-up in RM always goes to the ACTIVE gateway instead.
+ */
+export function regionalDepositGateway(
+  currency: string,
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): PaymentGateway | null {
+  return (
+    GATEWAY_IDS.find(
+      (id) =>
+        !isLedgerGateway(id) &&
+        GATEWAYS[id].currency === currency.toUpperCase() &&
+        gatewayEnabled(env, id),
+    ) ?? null
+  );
+}
+
 /**
  * Our reference, sent as MerchantTransactionId. Deliberately opaque: it shows
  * up in the gateway's back office, so it must NOT carry a customer id (the
@@ -119,6 +157,10 @@ export type StartDepositInput = {
   paymentMethodCode?: string;
   /** Name/email/phone — TGPay requires it on create-payment (needsCustomerContact). */
   customer?: TgpayCustomer;
+  /** Name on the paying bank account — regional gateways (A3Pay) only. */
+  payerName?: string;
+  /** The deposit rate (RM per unit) the customer was shown; regional only. */
+  quotedRate?: number;
   /**
    * The gateway this deposit goes through. The route resolves it ONCE and
    * passes it down so the config, the row stamp and the callback URLs all
@@ -164,11 +206,72 @@ export async function startDeposit(
     );
   }
 
-  const invalid = topUpAmountError(input.amount);
+  const packs = resolvePacks<GatewayDeposits>(scope);
+
+  // A regional gateway (A3Pay, SGD): the customer names what they PAY, in
+  // that currency, and the RM credit is quoted from it now and locked on the
+  // row. Everything below the quote runs on the RM credit exactly as for an
+  // RM gateway — the same site ceiling, the same RM band, the same fences.
+  const regional = !isLedgerGateway(gateway);
+  let fx: {
+    currency: string;
+    gatewayAmount: number;
+    mid: number;
+    markup: number;
+  } | null = null;
+  let creditAmount: unknown = input.amount;
+  if (regional) {
+    const { currency, currencyLimits } = GATEWAYS[gateway];
+    const paid = input.amount;
+    if (
+      typeof paid !== 'number' ||
+      !Number.isFinite(paid) ||
+      paid <= 0 ||
+      Math.abs(paid * 100 - Math.round(paid * 100)) > 1e-6
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'Enter a valid amount.',
+      );
+    }
+    const quote = await loadPaymentFxQuote(packs, currency);
+    // The rate the customer was shown, when the client sent one: never credit
+    // at a rate they did not see (an admin may have moved the markup since
+    // the sheet loaded). Before any row.
+    if (
+      input.quotedRate !== undefined &&
+      Math.abs(Number(input.quotedRate) - quote.depositRate) > 1e-9
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        'The exchange rate just changed. Check the new amount and try again.',
+      );
+    }
+    // Today's S$ band: the gateway's own, narrowed so the converted credit
+    // also fits the RM band — refused here in S$, not later in RM.
+    const band = currencyLimits
+      ? regionalDepositBand(quote, currencyLimits, GATEWAYS[gateway].limits)
+      : null;
+    if (band && (paid < band.min || paid > band.max)) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Top-ups must be between ${currency} ${band.min.toFixed(2)} and ${currency} ${band.max.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`,
+      );
+    }
+    creditAmount = creditForDeposit(paid, quote);
+    fx = {
+      currency,
+      gatewayAmount: paid,
+      mid: quote.mid,
+      markup: quote.markup,
+    };
+  }
+
+  const invalid = topUpAmountError(creditAmount);
   if (invalid) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, invalid);
   }
-  const amount = input.amount as number;
+  const amount = creditAmount as number;
 
   // The gateway's own band, said in numbers because their refusal is a bare
   // "Invalid Transaction Amount". Since 2026-07-29 the production ceiling
@@ -192,15 +295,29 @@ export async function startDeposit(
   // closed on OUR side rather than reaching the gateway; each adapter then
   // maps the rail code onto its own channels (or refuses it as definite).
   const paymentMethodCode = input.paymentMethodCode ?? GATEWAY_DEFAULT_METHOD;
-  if (!(GATEWAY_MYR_METHODS as readonly string[]).includes(paymentMethodCode)) {
+  const methods: readonly string[] = regional
+    ? A3PAY_METHODS
+    : GATEWAY_MYR_METHODS;
+  if (!methods.includes(paymentMethodCode)) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
       'Unsupported payment method.',
     );
   }
 
+  // The name on the PAYING account (A3Pay matches it against the transfer).
+  // Refused here, before any row, rather than as the adapter's definite
+  // refusal after one.
+  const payerName =
+    typeof input.payerName === 'string' ? input.payerName.trim() : '';
+  if (regional && (payerName.length < 2 || payerName.length > 120)) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Enter the name on the bank account you are paying from.',
+    );
+  }
+
   const config = gatewayConfigFor(gateway);
-  const packs = resolvePacks<GatewayDeposits>(scope);
 
   const merchantTransactionId = newMerchantTransactionId();
 
@@ -222,6 +339,14 @@ export async function startDeposit(
       payment_method_code: paymentMethodCode,
       status: 'pending',
       gateway,
+      ...(fx
+        ? {
+            currency: fx.currency,
+            gateway_amount: fx.gatewayAmount,
+            fx_mid: fx.mid,
+            fx_markup: fx.markup,
+          }
+        : {}),
     },
     maxRecentPending: GATEWAY_MAX_RECENT_PENDING_PER_CUSTOMER,
     windowMs: GATEWAY_PENDING_WINDOW_MS,
@@ -247,6 +372,7 @@ export async function startDeposit(
         ipAddress: input.ipAddress,
         paymentMethodCode,
         customer: input.customer,
+        ...(fx ? { gatewayAmount: fx.gatewayAmount, payerName } : {}),
       },
       config,
     );

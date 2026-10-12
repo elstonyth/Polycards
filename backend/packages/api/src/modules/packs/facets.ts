@@ -21,6 +21,7 @@ export type GatewayDeposits = Pick<
   PacksModuleService,
   | 'claimDepositStatus'
   | 'createDepositCapped'
+  | 'listFxRates'
   | 'listGatewayDeposits'
   | 'updateGatewayDeposits'
   | 'topUpCreditsWithLedger'
@@ -35,6 +36,7 @@ export type GatewayWithdrawals = Pick<
   | 'creditBalance'
   | 'listCreditTransactions'
   | 'listCustomerAccountStates'
+  | 'listFxRates'
   | 'listGatewayWithdrawals'
   | 'savedBankAccountsFor'
   | 'updateGatewayWithdrawals'

@@ -16,10 +16,15 @@ import {
   submitWithdrawal,
   GatewayError,
   TGPAY_PAYOUT_DISABLED,
+  GATEWAY_IDS,
+  isLedgerGateway,
   TGPAY_PAYOUT_FLOAT_EMPTY,
+  checkBalance,
   type GatewayConfig,
   type PaymentGateway,
 } from './gateway';
+import { loadPaymentFxQuote, payoutForWithdrawal } from './payment-fx';
+import { A3PAY_PAYOUT_FLOAT_EMPTY } from './a3pay-client';
 import { alertPayoutDisabled, alertPayoutFloatEmpty } from './ops-alert';
 import { contactIfNeeded } from '../../api/utils/customer-contact';
 import { newMerchantTransactionId } from './gateway-deposit';
@@ -124,6 +129,106 @@ export function withdrawalsEnabled(
     gatewayEnv('GATEWAY_WITHDRAWALS_ENABLED', env) === 'true' &&
     configured &&
     withdrawalsPausedUntil(env, now) === null
+  );
+}
+
+/** Is ANY gateway open for payouts? The payout sweep's gate. */
+export function anyWithdrawalsEnabled(
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): boolean {
+  // The active gateway first (in specs that is the test-only fake, which
+  // GATEWAY_IDS deliberately omits), then every registered one.
+  return (
+    withdrawalsEnabled(env) ||
+    GATEWAY_IDS.some((id) => withdrawalsEnabled(env, id))
+  );
+}
+
+/**
+ * The regional gateways (A3Pay, SGD) open for payouts right now. They run
+ * BESIDE the active RM gateway: a saved account at a bank only they can pay
+ * is paid through them, at the converted amount.
+ */
+export function regionalPayoutGateways(
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): PaymentGateway[] {
+  return GATEWAY_IDS.filter(
+    (id) => !isLedgerGateway(id) && withdrawalsEnabled(env, id),
+  );
+}
+
+/** The refusal when a regional quote moved under the customer's form. */
+export const RATE_CHANGED_MESSAGE =
+  'The exchange rate just changed. Check the new amount and try again.';
+
+/**
+ * Is OUR float at a regional gateway short of `gatewayAmount`? A3Pay's
+ * balance read is cheap and read-only; a failed read is NOT short (the submit
+ * still decides), so a balance-endpoint outage never blocks payouts.
+ */
+async function regionalFloatShort(
+  config: GatewayConfig,
+  gatewayAmount: number,
+): Promise<{ available: number; currency: string } | null> {
+  try {
+    const b = await checkBalance(config);
+    const available = Number(b.availableBalance);
+    return Number.isFinite(available) && available < gatewayAmount
+      ? { available, currency: b.currencyCode }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Does a payout refusal mean OUR float is short? TGPay says so with a platform
+ * code. A3Pay only in its message text, which may also carry what the
+ * customer typed, so its hint must be confirmed by a balance read before it
+ * may count: a customer-specific refusal that happens to say "insufficient"
+ * must not close payouts for everyone. `trip` follows the pre-checks' rule
+ * (floatCannotPayAnything): short for THIS amount alone refuses this payout
+ * without closing the gateway.
+ */
+async function floatEmptyRefusal(
+  error: GatewayError,
+  gateway: PaymentGateway,
+  config: GatewayConfig,
+  gatewayAmount: number | null,
+): Promise<{ trip: boolean } | null> {
+  if (error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) return { trip: true };
+  if (!error.has(A3PAY_PAYOUT_FLOAT_EMPTY) || gatewayAmount === null)
+    return null;
+  const short = await regionalFloatShort(config, gatewayAmount);
+  return short ? { trip: floatCannotPayAnything(gateway, short) } : null;
+}
+
+/**
+ * Trip the gateway-wide breaker only when the float cannot pay ANY payout
+ * (below the gateway's own minimum). One request larger than the float is
+ * refused on its own; it must not close withdrawals for every customer.
+ */
+function floatCannotPayAnything(
+  gateway: PaymentGateway,
+  short: { available: number },
+): boolean {
+  return short.available < (GATEWAYS[gateway].currencyLimits?.withdrawalMin ?? 0);
+}
+
+/**
+ * Which gateway pays a bank: the ACTIVE RM gateway whenever it can, else an
+ * open regional gateway that can, else the active one (whose own checks then
+ * refuse the bank with the usual "not available" message).
+ */
+export function payoutGatewayFor(
+  bankCode: string,
+  active: PaymentGateway,
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): PaymentGateway {
+  if (bankSupportedBy(bankCode, active)) return active;
+  return (
+    regionalPayoutGateways(env).find((id) => bankSupportedBy(bankCode, id)) ??
+    active
   );
 }
 
@@ -306,6 +411,16 @@ export type StartWithdrawalInput = {
   email?: string;
   /** Resolved once by the route; see StartDepositInput.gateway. */
   gateway?: PaymentGateway;
+  /**
+   * The customer's saved accounts when the route already read them (it does,
+   * to pick the gateway) — saves a second read. Precheck only: the locked
+   * resolution inside withdrawForCashout always re-reads.
+   */
+  savedAccounts?: Awaited<
+    ReturnType<GatewayWithdrawals['savedBankAccountsFor']>
+  >;
+  /** The payout rate (RM per unit) the customer was shown; regional only. */
+  quotedRate?: number;
 };
 
 export type StartWithdrawalResult = {
@@ -329,6 +444,9 @@ export type StartWithdrawalResult = {
    * 'pending' otherwise (submitted, or the submit outcome was ambiguous —
    * the sweep resolves that case, not this status). */
   status: 'pending' | 'held';
+  /** Regional gateways: the payout currency and what the bank receives. */
+  currency?: string;
+  payAmount?: number;
 };
 
 /**
@@ -476,7 +594,9 @@ export async function startWithdrawal(
   // same list, and savedBankAccountId is derived from (bankCode, accountNumber),
   // so an id resolves to the same destination in both reads or to nothing.
   const precheckDestination = resolveWithdrawalDestination({
-    accounts: await packs.savedBankAccountsFor(input.customerId),
+    accounts:
+      input.savedAccounts ??
+      (await packs.savedBankAccountsFor(input.customerId)),
     accountId: input.accountId,
   });
 
@@ -521,6 +641,46 @@ export async function startWithdrawal(
     );
   }
 
+  // A regional gateway (A3Pay, SGD) pays in its own currency: quote the RM
+  // debit into it NOW and lock the quote on the row, so an admin approving a
+  // held payout later — or the sweep settling it — pays exactly what the
+  // customer was shown, whatever the rate has done since. Before the row,
+  // like every certain refusal.
+  let fx: {
+    currency: string;
+    gatewayAmount: number;
+    mid: number;
+    markup: number;
+  } | null = null;
+  if (!isLedgerGateway(gateway)) {
+    const { currency, currencyLimits } = GATEWAYS[gateway];
+    const quote = await loadPaymentFxQuote(packs, currency);
+    const gatewayAmount = payoutForWithdrawal(amount, quote);
+    if (
+      currencyLimits &&
+      (gatewayAmount < currencyLimits.withdrawalMin ||
+        gatewayAmount > currencyLimits.withdrawalMax)
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Withdrawals to this bank must come to between ${currency} ${currencyLimits.withdrawalMin} and ${currency} ${currencyLimits.withdrawalMax.toLocaleString('en-US')} (RM ${amount} is ${currency} ${gatewayAmount.toFixed(2)}).`,
+      );
+    }
+    // The price the customer was shown, when the client sent one: refuse a
+    // payout at a rate they never saw (the admin may have moved the markup
+    // since the form loaded). Before any row or debit.
+    if (
+      input.quotedRate !== undefined &&
+      Math.abs(Number(input.quotedRate) - quote.payoutRate) > 1e-9
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        RATE_CHANGED_MESSAGE,
+      );
+    }
+    fx = { currency, gatewayAmount, mid: quote.mid, markup: quote.markup };
+  }
+
   // 0b) PRECHECK — NOT the gate. This is an unlocked, read-only fast path whose
   // only job is to avoid writing a row for a refusal that is already certain.
   // The authoritative gate is inside packs.withdrawForCashout, under the
@@ -544,6 +704,32 @@ export async function startWithdrawal(
     amount,
   );
   if (precheckError) throw precheckError;
+
+  // OUR float at a regional gateway must cover it. After the wallet
+  // precheck, so only an amount this customer could really withdraw is
+  // judged (and alerted on); before any row or debit, so nobody is refunded
+  // for our empty wallet.
+  if (fx) {
+    const short = await regionalFloatShort(config, fx.gatewayAmount);
+    if (short) {
+      if (floatCannotPayAnything(gateway, short)) {
+        payoutFloatEmptyUntil.set(
+          gateway,
+          Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
+        );
+      }
+      void alertPayoutFloatEmpty(scope, {
+        amount,
+        ref: 'balance pre-check',
+        via: 'customer withdrawal',
+        gateway: GATEWAYS[gateway].label,
+      });
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'Withdrawals to this bank are temporarily unavailable on our side — nothing was taken from your balance. Your bank details are fine. Please try again later.',
+      );
+    }
+  }
 
   const merchantTransactionId = newMerchantTransactionId();
 
@@ -583,6 +769,14 @@ export async function startWithdrawal(
           account_holder_name: precheckDestination.accountHolderName.trim(),
           status: held ? 'held' : 'pending',
           gateway,
+          ...(fx
+            ? {
+                currency: fx.currency,
+                gateway_amount: fx.gatewayAmount,
+                fx_mid: fx.mid,
+                fx_markup: fx.markup,
+              }
+            : {}),
         },
       ])
     )[0];
@@ -654,6 +848,7 @@ export async function startWithdrawal(
       amount,
       balance: debit.balance,
       status: 'held',
+      ...(fx ? { currency: fx.currency, payAmount: fx.gatewayAmount } : {}),
     };
   }
 
@@ -676,6 +871,7 @@ export async function startWithdrawal(
         returnUrl: verifyUrl,
         ipAddress: input.ipAddress,
         email: input.email,
+        ...(fx ? { gatewayAmount: fx.gatewayAmount } : {}),
       },
       config,
     );
@@ -779,11 +975,21 @@ export async function startWithdrawal(
       // same situation for the customer, so it shares the breaker and copy;
       // only the ops alert names the different fix.
       const payoutDisabled = error.has(TGPAY_PAYOUT_DISABLED);
-      if (payoutDisabled || error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) {
-        payoutFloatEmptyUntil.set(
-          gateway,
-          Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
-        );
+      const floatEmpty = payoutDisabled
+        ? null
+        : await floatEmptyRefusal(
+            error,
+            gateway,
+            config,
+            fx?.gatewayAmount ?? null,
+          );
+      if (payoutDisabled || floatEmpty) {
+        if (payoutDisabled || floatEmpty?.trip) {
+          payoutFloatEmptyUntil.set(
+            gateway,
+            Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
+          );
+        }
         void (payoutDisabled ? alertPayoutDisabled : alertPayoutFloatEmpty)(
           scope,
           {
@@ -859,6 +1065,7 @@ export async function startWithdrawal(
       // Reached only on the non-held branch — a held row already returned
       // above, before this submit was ever attempted.
       status: 'pending',
+      ...(fx ? { currency: fx.currency, payAmount: fx.gatewayAmount } : {}),
     };
   }
 
@@ -880,6 +1087,7 @@ export async function startWithdrawal(
     amount,
     balance: debit.balance,
     status: 'pending',
+    ...(fx ? { currency: fx.currency, payAmount: fx.gatewayAmount } : {}),
   };
 }
 
@@ -1241,7 +1449,10 @@ export async function submitHeldWithdrawal(
   // sweep for no reason — the exact state the held branch exists to avoid.
   // (The undebited branch below also throws after claiming, but it claims to
   // 'failed': a closed row, which the sweep never selects.)
-  if (!withdrawalsEnabled()) {
+  // Cheap early exit only: the gate that counts is the ROW's own gateway,
+  // checked below before the claim. Asking the ACTIVE gateway here refused
+  // every held A3Pay payout whenever TGPay payouts were off (review, #755).
+  if (!anyWithdrawalsEnabled()) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       'The payout channel is closed — a held withdrawal cannot be approved right now.',
@@ -1275,6 +1486,7 @@ export async function submitHeldWithdrawal(
   if (
     !config ||
     !gatewayId ||
+    !withdrawalsEnabled(process.env, gatewayId) ||
     !notifyUrl ||
     (urls?.hasPayoutVerify && !verifyUrl)
   ) {
@@ -1335,6 +1547,35 @@ export async function submitHeldWithdrawal(
       MedusaError.Types.NOT_ALLOWED,
       'This customer’s account is frozen. Unfreeze it before approving a payout, or deny the withdrawal.',
     );
+  }
+
+  // OUR regional float (A3Pay's SGD balance) must cover the locked amount.
+  // Checked before the claim, so a short float leaves the row HELD for an
+  // approval after the top-up instead of refunding the customer.
+  if (row.gateway_amount != null && !isLedgerGateway(gatewayId)) {
+    const short = await regionalFloatShort(
+      config,
+      Number(row.gateway_amount),
+    );
+    if (short) {
+      if (floatCannotPayAnything(gatewayId, short)) {
+        payoutFloatEmptyUntil.set(
+          gatewayId,
+          Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
+        );
+      }
+      const label = GATEWAYS[gatewayId].label;
+      void alertPayoutFloatEmpty(scope, {
+        amount,
+        ref: row.merchant_transaction_id,
+        via: 'admin approve (balance pre-check)',
+        gateway: label,
+      });
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Our ${label} balance (${short.currency} ${short.available.toFixed(2)} available) cannot cover this payout (${short.currency} ${Number(row.gateway_amount).toFixed(2)}). The withdrawal stays held — fund the ${label} balance, then approve it again.`,
+      );
+    }
   }
 
   // THE DEBIT CHECK AND THE CLAIM, as ONE locked decision.
@@ -1432,6 +1673,10 @@ export async function submitHeldWithdrawal(
         notifyUrl,
         returnUrl: verifyUrl,
         ipAddress: input.payerIp,
+        // The quote locked when the customer asked, never today's rate.
+        ...(row.gateway_amount != null
+          ? { gatewayAmount: Number(row.gateway_amount) }
+          : {}),
       },
       config,
     );
@@ -1506,11 +1751,19 @@ export async function submitHeldWithdrawal(
           `${label} refused this payout because payouts are not enabled on our ${label} account ("Payout not available"). The debit has been refunded and the withdrawal closed. Ask ${label} to enable payouts, or switch back to a gateway that pays out, then ask the customer to request the withdrawal again.`,
         );
       }
-      if (error.has(TGPAY_PAYOUT_FLOAT_EMPTY)) {
-        payoutFloatEmptyUntil.set(
-          gatewayId,
-          Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
-        );
+      const floatEmpty = await floatEmptyRefusal(
+        error,
+        gatewayId,
+        config,
+        row.gateway_amount != null ? Number(row.gateway_amount) : null,
+      );
+      if (floatEmpty) {
+        if (floatEmpty.trip) {
+          payoutFloatEmptyUntil.set(
+            gatewayId,
+            Date.now() + PAYOUT_FLOAT_COOLDOWN_MS,
+          );
+        }
         const label = GATEWAYS[gatewayId].label;
         void alertPayoutFloatEmpty(scope, {
           amount,

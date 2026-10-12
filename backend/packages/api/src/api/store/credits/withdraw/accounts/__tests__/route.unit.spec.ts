@@ -111,10 +111,12 @@ const savedShape = (over: Partial<Record<string, unknown>> = {}) => ({
  *  rather than recomputing the window, so it is part of the response contract. */
 const viewOf = (account: Record<string, unknown>) => ({
   ...account,
-  // Maybank is payable on every gateway, so the view marks it supported.
+  // Maybank is payable on every gateway, so the view marks it supported —
+  // and it is paid in RM (a Singapore bank would read SGD, via A3Pay).
   supported: true,
   // Banks carry no floor of their own (only Touch 'n Go does).
   minRm: null,
+  currency: 'MYR',
   usableFrom:
     typeof account.savedAt === 'string'
       ? new Date(
@@ -189,6 +191,7 @@ describe('POST /store/credits/withdraw/accounts', () => {
           usableFrom: expect.any(String),
           supported: true,
           minRm: null,
+          currency: 'MYR',
         }),
       ],
     });

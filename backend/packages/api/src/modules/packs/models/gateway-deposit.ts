@@ -88,6 +88,19 @@ export const GatewayDeposit = model
     // 2026-09-05 migration) only ever applied to rows that predate it, and a
     // row that somehow lands with a retired gateway is skipped by every sweep.
     gateway: model.text().default('tgpay'),
+    // FX lock (payment-fx.ts), for a gateway that settles in a currency other
+    // than our RM ledger (A3Pay: SGD). `currency` is the GATEWAY's currency;
+    // `gateway_amount` is what the gateway is asked to move, in that currency;
+    // `fx_mid` / `fx_markup` are the market rate and our spread (RM per unit)
+    // at the moment the row was quoted. Every later conversion — callback,
+    // sweep, audit — goes through these, never through today's rate. Both rate
+    // columns are kept (not just their sum) so conversion earnings are
+    // reportable: gateway_amount x mid vs the RM amount on the row. NULL on
+    // every RM row.
+    currency: model.text().default('MYR'),
+    gateway_amount: model.bigNumber().nullable(),
+    fx_mid: model.bigNumber().nullable(),
+    fx_markup: model.bigNumber().nullable(),
     // Gateway audit (plan 130): when the audit sweep last requeried the
     // gateway for this row, and what it disagreed about. NULL note = the
     // gateway agrees with the row. The audit is a second, independent check

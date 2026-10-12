@@ -1,4 +1,7 @@
-import { createTgpayCallbackAllowlist } from './utils/payer-ip';
+import {
+  createA3payCallbackAllowlist,
+  createTgpayCallbackAllowlist,
+} from './utils/payer-ip';
 import {
   defineMiddlewares,
   authenticate,
@@ -120,6 +123,8 @@ const gatewayHookRateLimit = rateLimit('gateway-hook');
 // limiter.
 const tgpayCallbackAllowlist = createTgpayCallbackAllowlist('tgpay');
 const the7payCallbackAllowlist = createTgpayCallbackAllowlist('the7pay');
+// A3Pay's (SGD) source allowlist — same position, same reasoning.
+const a3payCallbackAllowlist = createA3payCallbackAllowlist();
 // Open the phone-OTP send budget's Redis connection at boot, like the
 // limiters above, not on the first code request: that store fails CLOSED in
 // production, so a connection still opening refused every fresh instance's
@@ -346,6 +351,16 @@ export default defineMiddlewares({
       method: 'POST',
       bodyParser: { preserveRawBody: true },
       middlewares: [gatewayHookRateLimit, the7payCallbackAllowlist],
+    },
+    {
+      // A3Pay (SGD) callbacks: deposit, withdrawal and payout-verify
+      // (src/api/hooks/a3pay/*). Same exposure and same matcher form as the
+      // TGPay entry above; authenticated inside each handler by the RSA
+      // signature over the decrypted payload, which must decrypt BEFORE it can
+      // verify — so this limiter is what bounds an anonymous caller's cost.
+      matcher: '/hooks/a3pay/*',
+      method: 'POST',
+      middlewares: [gatewayHookRateLimit, a3payCallbackAllowlist],
     },
     {
       // Desk reports (spec 2026-09-29-desk-reports-design.md): read-only
@@ -1407,6 +1422,13 @@ export default defineMiddlewares({
       // Active payment gateway switch (plan 130). Flips where every customer
       // pays and is paid out — same admin budget as the other settings writes.
       matcher: '/admin/payments/gateway',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // SGD conversion rate + markup (A3Pay, payment-fx.ts). Reprices every
+      // Singapore top-up and payout — same admin budget as the gateway switch.
+      matcher: '/admin/payments/fx',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

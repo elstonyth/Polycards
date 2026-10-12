@@ -153,12 +153,18 @@ const WithdrawalsPage = () => {
   // never `revealed[w.id]` even if the operator already revealed this row —
   // the brief asks for "the masked destination", and the confirm step is the
   // last gate before a real bank payout, not a second reveal surface.
+  // RM debited, plus what the bank receives on a regional rail (A3Pay: SGD).
+  const payoutLabel = (w: GatewayWithdrawal) =>
+    w.gateway_amount !== null && w.currency !== 'MYR'
+      ? `${rm(w.amount)} (${w.currency} ${w.gateway_amount.toFixed(2)})`
+      : rm(w.amount);
+
   const approveHeld = (w: GatewayWithdrawal) =>
     withActing(w.id, async () => {
       const ok = await prompt({
         title: t('withdrawals.confirmApproveTitle'),
         description: t('withdrawals.confirmApproveBody', {
-          amount: rm(w.amount),
+          amount: payoutLabel(w),
           bank: w.bank_code,
           account: w.account_number,
           holder: w.account_holder_name,
@@ -175,7 +181,7 @@ const WithdrawalsPage = () => {
       const ok = await prompt({
         title: t('withdrawals.confirmDenyTitle'),
         description: t('withdrawals.confirmDenyBody', {
-          amount: rm(w.amount),
+          amount: payoutLabel(w),
           bank: w.bank_code,
           account: w.account_number,
           holder: w.account_holder_name,
@@ -354,6 +360,13 @@ const WithdrawalsPage = () => {
                     </Table.Cell>
                     <Table.Cell className="text-right tabular-nums whitespace-nowrap">
                       <div>{rm(w.amount)}</div>
+                      {w.gateway_amount !== null && w.currency !== 'MYR' && (
+                        <div className="text-ui-fg-muted text-xs">
+                          {t('withdrawals.paidOutIn', {
+                            amount: `${w.currency} ${w.gateway_amount.toFixed(2)}`,
+                          })}
+                        </div>
+                      )}
                       {/* Settlement mirror: settled ≠ instructed is the
                           durable form of the disagreement the callback logs;
                           net is what actually left after their fee. NULL =

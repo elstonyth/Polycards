@@ -503,6 +503,41 @@ envs:
   - key: THE7PAY_CALLBACK_IPS
     scope: RUN_TIME
     value: 54.251.58.7
+  # A3Pay — the Singapore (SGD) rail, BESIDE the active RM gateway, never
+  # instead of it (docs/payments/a3pay-setup.md). Keys and MID read from the
+  # A3Pay back office 2026-10-12; live preflight passed from the whitelisted
+  # office IP. A3PAY_ENABLED=true is safe to ship: SGD stays closed to
+  # customers until an admin sets a markup (> 0) on the Settlement page and a
+  # firm SGD_MYR rate exists (sync-payment-fx job, or check-a3pay.ts). Our
+  # egress 188.166.181.61 / .204 is on A3Pay's whitelist. A3PAY_CALLBACK_IPS is
+  # their documented outgoing address. A3PAY_PUBLIC_KEY is THEIR public key
+  # (verifies their callbacks) — public, so not a secret.
+  - key: A3PAY_ENABLED
+    scope: RUN_TIME
+    value: "true"
+  - key: A3PAY_API_BASE
+    scope: RUN_TIME
+    value: https://mapi.a3paysg.com
+  - key: A3PAY_MERCHANT_CODE
+    scope: RUN_TIME
+    value: polycards
+  - key: A3PAY_CURRENCY
+    scope: RUN_TIME
+    value: SGD
+  - key: A3PAY_PUBLIC_KEY
+    scope: RUN_TIME
+    value: "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDO2nXk45wGVF/44Qdzlu5HFWf9SI9VlOmCp1Edv6SMciEpj/+mjPGTQQdV5klmTLU1w0+BH9Wyqqz+kOvRSHVeLk6ERXX3euk6quF1AmWnbmW1FMeuDGBTG/JHtohu/32QACRhMXDqhjrAnhmM/R2fUUut8PPpcHrY8yimvNxK5QIDAQAB"
+  - key: A3PAY_AES_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: "__SECRET__A3PAY_AES_KEY__"
+  - key: A3PAY_MERCHANT_PRIVATE_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: "__SECRET__A3PAY_MERCHANT_PRIVATE_KEY__"
+  - key: A3PAY_CALLBACK_IPS
+    scope: RUN_TIME
+    value: 13.192.222.226
 
 # Dedicated outbound IPs. DO assigns one per component (the service makes the
 # customer-facing calls, the worker runs the reconciliation sweeps) and

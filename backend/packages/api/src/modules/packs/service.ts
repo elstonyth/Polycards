@@ -6046,6 +6046,66 @@ class PacksModuleService extends MedusaService({
     return { effective: effectiveRate(fresh ?? null) };
   }
 
+  // Payment-pair FX edit (SGD_MYR — payment-fx.ts): the conversion markup we
+  // earn on regional-gateway traffic, plus an optional manual mid-rate. Same
+  // shape as editFxOverride: one transaction, advisory-locked per pair, with
+  // the audit row beside the write. Bounds are the route's job.
+  @InjectTransactionManager()
+  async editPaymentFx(
+    input: {
+      pair: string;
+      markup: number;
+      manualOverride: boolean;
+      manualRate: number | null;
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `fx:${input.pair}`,
+    ]);
+    const [row] = await this.listFxRates(
+      { pair: input.pair },
+      { take: 1 },
+      sharedContext,
+    );
+    const before = row
+      ? {
+          markup: Number(row.markup ?? 0),
+          manual_override: row.manual_override,
+          manual_rate: row.manual_rate != null ? Number(row.manual_rate) : null,
+        }
+      : null;
+    const after = {
+      markup: input.markup,
+      manual_override: input.manualOverride,
+      manual_rate: input.manualRate,
+    };
+    if (row) {
+      await this.updateFxRates([{ id: row.id, ...after }], sharedContext);
+    } else {
+      // No feed value yet. rate 0 is "no rate" to payment-fx.ts, so an SGD
+      // payment is refused until the feed or a manual rate supplies one.
+      await this.createFxRates(
+        [{ pair: input.pair, rate: 0, source: 'manual', ...after }],
+        sharedContext,
+      );
+    }
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'fx',
+        entity_id: input.pair,
+        action: 'edit_fx_rate',
+        before,
+        after,
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+  }
   // Admin-initiated MANUAL account unfreeze. Clears the freeze regardless of
   // whether it was AUTO or MANUAL — an admin explicitly deciding to lift the
   // freeze overrides both. Takes the same credit: advisory lock, updates the
@@ -7537,6 +7597,11 @@ class PacksModuleService extends MedusaService({
         status: 'pending';
         /** Which gateway the row is created under; the column default is TGPay. */
         gateway?: string;
+        /** FX lock for a non-RM gateway (payment-fx.ts); absent on RM rows. */
+        currency?: string;
+        gateway_amount?: number;
+        fx_mid?: number;
+        fx_markup?: number;
       };
       maxRecentPending: number;
       windowMs: number;

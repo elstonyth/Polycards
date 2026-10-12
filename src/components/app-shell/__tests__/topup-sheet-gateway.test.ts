@@ -92,6 +92,16 @@ async function mount(codes: string[] = ['BQR', 'OB']) {
       }),
     );
   });
+  await pickCurrency('Malaysian Ringgit');
+}
+
+/** Step 1 of the gateway sheet: choose the currency. */
+async function pickCurrency(name: string) {
+  const option = [...container.querySelectorAll('button')].find((b) =>
+    b.textContent?.includes(name),
+  );
+  if (!option) throw new Error(`no currency option "${name}"`);
+  await act(async () => option.click());
 }
 
 beforeEach(async () => {
@@ -319,7 +329,7 @@ describe('TopUpSheet gateway branch', () => {
     expect(leaveFor).not.toHaveBeenCalled();
   });
 
-  it('disables the amount field and Pay button when deposits are paused, with a guidance line', async () => {
+  it('marks RM paused in the currency step when deposits are paused, and never opens its form', async () => {
     act(() => root.unmount());
     container.remove();
     getPaymentLimits.mockResolvedValue({
@@ -331,16 +341,17 @@ describe('TopUpSheet gateway branch', () => {
     });
     await mount();
 
+    const rmOption = buttons().find((b) =>
+      b.textContent?.includes('Malaysian Ringgit'),
+    );
+    expect(rmOption?.disabled).toBe(true);
+    expect(rmOption?.textContent).toContain('Paused right now');
+    // mount() tried to pick RM: a disabled option leaves the form unopened.
     expect(
-      container.querySelector<HTMLInputElement>(
-        'input[aria-label="Top-up amount in RM"]',
-      )?.disabled,
-    ).toBe(true);
+      container.querySelector('input[aria-label="Top-up amount in RM"]'),
+    ).toBeNull();
     expect(buttons().some((b) => /^Pay RM/.test(b.textContent ?? ''))).toBe(
       false,
-    );
-    expect(container.textContent).toContain(
-      'Top-ups are paused right now. Your balance and cards are unaffected.',
     );
     expect(startDeposit).not.toHaveBeenCalled();
   });

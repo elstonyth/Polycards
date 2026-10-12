@@ -100,6 +100,50 @@ export const MY_BANKS: readonly Bank[] = [
   bank('RYTMY', 'Ryt Bank', { code: 'SCCH', name: 'Ryt Bank' }, null),
 ];
 
+/**
+ * Singapore payout destinations, paid through A3Pay (SGD). Codes and names
+ * from A3Pay's live GetSupportedBankList (read 2026-10-12, 21 entries) —
+ * prefer it over the handbook appendix, which lacks ANEXT. Canonical ids are SWIFT where the bank has a Singapore one, else
+ * a slug ending in SG — never a bare A3Pay code, because several of those
+ * (UOB, OCBC, CIMB, RHB, HLB, BOC) name a bank that ALSO exists in Malaysia,
+ * and a saved Malaysian account must never resolve to its Singapore namesake
+ * — which is also why their codes are NOT lookup aliases (see byAlias). DBS
+ * and POSB are one bank with one SWIFT but two A3Pay codes, so POSB gets its
+ * own slug.
+ */
+const sgBank = (id: string, name: string, code: string, a3payName: string): Bank => ({
+  id,
+  name,
+  codes: { a3pay: { code, name: a3payName } },
+  legacyAliases: [],
+});
+
+export const SG_BANKS: readonly Bank[] = [
+  sgBank('DBSSSGSG', 'DBS Bank', 'SDBS', 'DBS Bank Singapore'),
+  sgBank('POSBSG', 'POSB', 'POSB', 'The Development Bank of Singapore'),
+  sgBank('OCBCSGSG', 'OCBC Bank (SG)', 'OCBC', 'OCBC Bank'),
+  sgBank('UOVBSGSG', 'UOB (SG)', 'UOB', 'United Overseas Bank'),
+  sgBank('SCBLSGSG', 'Standard Chartered (SG)', 'SCBS', 'Standard Chartered Bank Singapore'),
+  sgBank('CITISGSG', 'Citibank (SG)', 'CITIS', 'CitiBank Singapore'),
+  sgBank('HSBCSGSG', 'HSBC (SG)', 'HSBCS', 'HSBC Bank Singapore'),
+  sgBank('MBBESGSG', 'Maybank (SG)', 'MBBS', 'MayBank Singapore'),
+  sgBank('CIBBSGSG', 'CIMB Bank (SG)', 'CIMB', 'CIMB Bank'),
+  sgBank('RHBBSGSG', 'RHB Bank (SG)', 'RHB', 'RHB Bank'),
+  sgBank('HLBBSGSG', 'Hong Leong Bank (SG)', 'HLB', 'HongLeong Bank'),
+  sgBank('BKCHSGSG', 'Bank of China (SG)', 'BOC', 'Bank of China'),
+  sgBank('ALLIANCESG', 'Alliance Bank (SG)', 'ABMB', 'Alliance Bank'),
+  sgBank('TRUSTBANKSG', 'Trust Bank', 'TBL', 'Trust Bank'),
+  sgBank('GXSSG', 'GXS Bank', 'GXS', 'GXS Bank'),
+  sgBank('MARIBANKSG', 'MariBank', 'Maribank', 'Maribank'),
+  // In A3Pay's live GetSupportedBankList (2026-10-12), not the handbook.
+  sgBank('ANEXTSG', 'ANEXT Bank', 'SGANEXT', 'ANEXT Bank'),
+  // PayNow by MOBILE number only: the account field is digits-only
+  // (withdrawalDetailsError), so UEN/NRIC proxies cannot be saved. Wise,
+  // LiquidPay and Dash are not offered — their payee identifiers are not
+  // digit account numbers, so a saved one could never be paid.
+  sgBank('PAYNOWSG', 'PayNow (mobile number)', 'PayNow', 'PayNow'),
+];
+
 /** The TGPay platform's sandbox (TGPay, The 7 Pay) accepts only this pair; it
  *  is a bank nowhere else. */
 export const TGPAY_SANDBOX_BANK: Bank = bank(
@@ -134,6 +178,12 @@ for (const b of [...MY_BANKS, TGPAY_SANDBOX_BANK]) {
   for (const c of Object.values(b.codes)) byAlias.set(c.code.toUpperCase(), b);
   for (const a of b.legacyAliases) byAlias.set(a.toUpperCase(), b);
 }
+// Singapore banks resolve by canonical id ONLY. Their A3Pay codes are bare
+// names (CIMB, UOB, OCBC, RHB, HLB, BOC…) that a Malaysian account written by
+// hand or by an older client could plausibly carry; registering them as
+// aliases would silently re-home that account to Singapore. The adapter maps
+// id -> A3Pay code through gatewayBankCode, which needs no alias.
+for (const b of SG_BANKS) byAlias.set(b.id.toUpperCase(), b);
 
 /** Resolve a canonical id OR any gateway's code to the bank. Null if unknown. */
 export function findBank(alias: string | null | undefined): Bank | null {
@@ -168,10 +218,9 @@ export function banksFor(
   gateway: PaymentGateway,
   options: { sandbox?: boolean } = {},
 ): { bankCode: string; bankName: string }[] {
-  const list = MY_BANKS.filter((b) => b.codes[gateway]).map((b) => ({
-    bankCode: b.id,
-    bankName: b.name,
-  }));
+  const list = [...MY_BANKS, ...SG_BANKS]
+    .filter((b) => b.codes[gateway])
+    .map((b) => ({ bankCode: b.id, bankName: b.name }));
   if (isTgpayKind(gateway) && options.sandbox) {
     list.unshift({
       bankCode: TGPAY_SANDBOX_BANK.id,
