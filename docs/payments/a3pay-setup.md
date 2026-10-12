@@ -22,6 +22,7 @@ Handbook: <https://api.a3paysg.com/API/a3pay_api_doc.html> (v3.3.5, SGD only). C
   - A top-up credits 3.15 per S$1, so S$100 becomes RM 315.00.
   - A payout pays 3.25 per S$1, so RM 100 becomes S$30.76.
 - Rounding is always down to the cent, in our favour.
+- **A3Pay nudges the amount.** It may ask the customer for a cent or so more than we requested, so same-amount transfers can be told apart (S$50 → S$50.01, seen live 2026-10-12). `startDeposit` re-locks the row to that exact amount at the same rate, so the customer is credited for every cent they pay. S$50.01 at 3.0905 credits RM 154.55, not 154.52. A move of more than 10 cents is not treated as a nudge, and the row keeps its original lock.
 - Set the rate and markup in **Admin → Settlement → "SGD conversion"** (one card per regional currency; `GET/POST /admin/payments/fx?currency=SGD`):
   - Every save needs a reason and is audited (`admin_action_audit`, entity `fx`, id `SGD_MYR`).
   - The card previews the customer rates live and shows **Conversion earned**: Σ(S$ × mid − RM credited) over settled top-ups, plus Σ(RM debited − S$ × mid) over settled payouts.
@@ -92,8 +93,8 @@ Read from the A3Pay back office (https://backoffice.a3paysg.com, login `polycard
 - **Keys:** our public key is registered exactly as generated. The AES key matches. A3Pay's public key is RSA-1024.
 - **Back-office flags:** IP Whitelist Check **Active**, Payout Verification **Inactive**, Fund In Verification timeout 10 min. Ask A3Pay to switch Payout Verification on once `/hooks/a3pay/payout-verify` is deployed. It is a free second check on every payout.
 - **Limits and fees (Merchant Transaction Setting):**
-  - Deposit OB and BQR: S$10–5,000, **2.5% fee**.
-  - Payout WD: S$50–10,000, **1.5% fee**.
+  - Deposit OB and BQR: S$10–5,000, **2.5% fee**. Our own top-up floor is **S$30** (an operator decision from 2026-10-12).
+  - Payout WD: S$30–10,000, **1.5% fee**. A3Pay lowered the minimum from S$50 at our request on 2026-10-12.
   - Settlement: S$1,000–10,000, S$10 flat fee.
   - `currencyLimits` uses these. The top-up band is also narrowed so the RM credit fits the RM 10,000 ceiling.
 - **The markup must cover the fees.** At mid ≈ 3.19:

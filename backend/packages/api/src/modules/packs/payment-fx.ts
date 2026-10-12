@@ -239,15 +239,37 @@ export function toLedgerAmount(row: RowFx, reported: number): number {
 }
 
 /**
- * How far above the locked amount a CALLBACK's reported payment may sit and
- * still settle at exactly the locked RM credit, in cents. A3Pay nudges an SGD
- * payin up a cent or so to keep same-amount transfers distinguishable
- * (payinActualAmount: 100 -> 100.01) and the customer pays the nudged sum;
- * that is still THIS deposit, at THIS quote. Never more than the locked RM is
- * credited this way — the nudge stays with us — and anything outside the
- * window is left to the amount fence (and the sweep's requery).
+ * How far A3Pay may move a payin from the amount we asked for, in cents. It
+ * nudges an SGD payin by a cent or so to keep same-amount transfers
+ * distinguishable (payinActualAmount: 50 -> 50.01) and the customer pays the
+ * nudged sum. startDeposit re-locks the row to that sum at the same rate
+ * (nudgedDeposit), so the customer is credited for every cent they send. A
+ * CALLBACK inside this window settles at exactly the row's locked RM credit
+ * (a row the re-lock missed keeps its original credit); anything outside it
+ * is left to the amount fence (and the sweep's requery).
  */
 export const PAYIN_NUDGE_CENTS = 10;
+
+/**
+ * The row's new lock when the gateway asks the customer for `actual` instead
+ * of the locked amount: the same rate, applied to what they will really pay.
+ * Null = keep the lock (no change, not a number, or further off than a nudge).
+ */
+export function nudgedDeposit(
+  lock: { gatewayAmount: number; mid: number; markup: number },
+  actual: number,
+): { gatewayAmount: number; credit: number } | null {
+  if (!Number.isFinite(actual) || actual <= 0) return null;
+  const moved = cents(actual) - cents(lock.gatewayAmount);
+  if (moved === 0 || Math.abs(moved) > PAYIN_NUDGE_CENTS) return null;
+  const gatewayAmount = cents(actual) / 100;
+  return {
+    gatewayAmount,
+    credit: creditForDeposit(gatewayAmount, {
+      depositRate: round6(lock.mid - lock.markup),
+    }),
+  };
+}
 
 /**
  * The RM a deposit CALLBACK may be credited: the locked credit when the

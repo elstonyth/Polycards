@@ -190,7 +190,9 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
     // (Merchant Transaction Setting, 2026-10-12): deposit OB / BQR S$10 –
     // 5,000 (2.5% fee), payout WD S$50 – 10,000 (1.5% fee). The top-up band
     // is further narrowed at quote time so the RM credit fits the RM band
-    // (payment-fx.ts regionalDepositBand).
+    // (payment-fx.ts regionalDepositBand). OUR top-up floor is S$30, above
+    // A3Pay's S$10 (operator decision, 2026-10-12). The payout floor is S$30:
+    // A3Pay lowered its WD minimum from S$50 for us on 2026-10-12.
     limits: {
       depositMin: 30,
       depositMax: 10000,
@@ -198,9 +200,9 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
       withdrawalMax: 30000,
     },
     currencyLimits: {
-      depositMin: 10,
+      depositMin: 30,
       depositMax: 5000,
-      withdrawalMin: 50,
+      withdrawalMin: 30,
       withdrawalMax: 10000,
     },
   },
