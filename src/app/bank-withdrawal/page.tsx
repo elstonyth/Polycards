@@ -28,14 +28,12 @@ export default async function BankWithdrawalPage() {
     : [null, null];
   const wallet = walletResult && walletResult.ok ? walletResult.wallet : null;
   const withdrawable = wallet ? wallet.withdrawable : null;
-  // Why the balance is held, so the form can say what to do instead of a bare
-  // RM 0.00. A freeze outranks playthrough (withdrawable.ts's own order): a
-  // frozen account is never told to spend its way out.
+  // Why the balance may be held, so the form can say what to do instead of a
+  // bare RM 0.00. Passed raw: the form picks the one hold to show, in
+  // withdrawable.ts's order, where its tests pin it.
   const frozen = wallet?.isFrozen === true;
-  const playthrough =
-    wallet && !frozen && wallet.playthrough.remaining > 0
-      ? wallet.playthrough
-      : null;
+  const noTopup = wallet !== null && !wallet.hasTopup;
+  const playthrough = wallet?.playthrough ?? null;
   // Partner groups (spec 2026-09-09): a member of a group that blocks
   // withdrawals gets the notice instead of a form the backend
   // (blockGroupWithdrawals) would refuse on submit. UX only — the refusal
@@ -70,7 +68,9 @@ export default async function BankWithdrawalPage() {
           <WithdrawForm
             withdrawable={withdrawable}
             frozen={frozen}
+            noTopup={noTopup}
             playthrough={playthrough}
+            bonus={wallet?.bonus ?? 0}
           />
         ) : (
           <>
