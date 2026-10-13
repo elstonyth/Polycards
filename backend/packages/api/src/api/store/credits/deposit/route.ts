@@ -107,8 +107,10 @@ export async function POST(
       paymentMethodCode: method,
       customer,
       gateway,
-      // A name the client sent (an older sheet still asks) wins; otherwise
-      // the one on file. Only a regional (A3Pay, SGD) payin needs one.
+      // The name the sheet sent wins: it shows the one on file with
+      // "Change", or asks when none is saved. Otherwise (an API caller, or a
+      // page from before the field) the saved account's holder. Only a
+      // regional (A3Pay, SGD) payin needs one.
       payerName:
         typeof body.payer_name === 'string' && body.payer_name.trim()
           ? body.payer_name

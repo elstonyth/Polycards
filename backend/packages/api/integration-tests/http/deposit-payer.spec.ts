@@ -91,7 +91,7 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(200);
         expect(res.data).toEqual({
           currency: 'SGD',
-          name_on_file: false,
+          saved_name: null,
           real_name: null,
         });
       });

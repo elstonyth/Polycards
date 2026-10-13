@@ -348,7 +348,7 @@ export async function startDeposit(
   if (regional && (payerName.length < 2 || payerName.length > 120)) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      'Enter the name on the bank account you are paying from.',
+      'Enter the name on the bank account you are paying from (reload the page if you see no name field).',
     );
   }
 

@@ -113,10 +113,10 @@ Read from the A3Pay back office (https://backoffice.a3paysg.com, login `polycard
 
 - Whether `SubmitPayout` / `CreatePayin` verify our signature (reads do not).
 - Whether callbacks and requery report the requested amount or the uniqueness-nudged one.
-- **Payer name:** SGD payins require `FromCustomerAccountHolderName`. Since 2026-10-12 the sheet no longer asks for it. The deposit route picks it from what is on file, in this order:
-  1. a saved Singapore account whose holder matches the customer's real name;
-  2. the holder, when only one is saved;
-  3. the verified real name.
+- **Payer name:** SGD payins require `FromCustomerAccountHolderName`, and A3Pay matches it against the paying account. The top-up sheet always sends one (since 2026-10-13, #764 and its follow-up):
+  - **A saved Singapore account** (at a bank A3Pay pays): its holder shows as "Paying from the account of …" with **Change**, because the customer may pay from another account. The holder is the one that matches the real name, or the only one saved.
+  - **None saved:** a "Name on your bank account" field, pre-filled with the real name.
+  - `GET /store/credits/deposit/payer?currency=SGD` gives the sheet `saved_name` and `real_name`. With no name sent, the deposit route uses the saved holder and otherwise refuses. **The real name alone is never sent:** it is free text, and a one-word nickname got a S$100.01 top-up a Verify Fail on 2026-10-13.
 
   A mismatch comes back as payin status 4 (Verify Fail). The row stays pending, and ops is alerted (`payin-verify-fail:<ref>`, once per deposit per 6 h, from the callback and the sweep) because the customer may have paid. Ask A3Pay how strictly it matches the name.
 - **Bank ids:** canonical ids are SWIFT-style (`DBSSSGSG`, `POSBSG`…). Bare A3Pay codes (`CIMB`, `UOB`…) are deliberately **not** lookup aliases, so a Malaysian account can never be re-homed to Singapore.

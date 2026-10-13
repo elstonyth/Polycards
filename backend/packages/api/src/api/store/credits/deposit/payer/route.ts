@@ -3,15 +3,17 @@ import {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
+import { LEDGER_CURRENCY } from '../../../../../modules/packs/gateway';
 import { regionalDepositGateway } from '../../../../../modules/packs/gateway-deposit';
 import { payerNameOnFile } from '../../../../utils/payer-name';
 
-// GET /store/credits/deposit/payer?currency=SGD — does the top-up sheet need
-// to ask for the name on the paying bank account? A3Pay matches every SGD
-// transfer against that name. The answer comes from the same rule the deposit
-// itself uses (api/utils/payer-name.ts): a saved account at a bank the rail
-// pays settles it; otherwise the sheet asks, pre-filled with the real name.
-// The name on file itself is never returned, only whether there is one.
+// GET /store/credits/deposit/payer?currency=SGD — the name the S$ top-up
+// sheet shows for the paying bank account, which A3Pay matches every SGD
+// transfer against. `saved_name` comes from the same rule the deposit itself
+// uses (api/utils/payer-name.ts): the holder of a saved account at a bank the
+// rail pays. The sheet shows it with "Change" (the customer may pay from
+// another account), or, with none saved, asks, pre-filled with `real_name`.
+// Both are the caller's own data.
 //
 // AUTH + RATE LIMIT: src/api/middlewares.ts. The customer id comes ONLY from
 // the verified token.
@@ -21,6 +23,12 @@ export async function GET(
 ): Promise<void> {
   const raw = req.query?.currency;
   const currency = typeof raw === 'string' ? raw.trim().toUpperCase() : '';
+  if (currency === LEDGER_CURRENCY) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `${LEDGER_CURRENCY} top-ups need no payer name.`,
+    );
+  }
   const gateway = currency ? regionalDepositGateway(currency) : null;
   if (!gateway) {
     throw new MedusaError(
@@ -34,5 +42,5 @@ export async function GET(
     gateway,
   );
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ currency, name_on_file: Boolean(onFile), real_name: realName });
+  res.json({ currency, saved_name: onFile ?? null, real_name: realName });
 }

@@ -691,11 +691,12 @@ export const UnreportedDepositsSchema = z.looseObject({
  *  and credit only lands when their signed callback settles the deposit. `url`
  *  is the only field the redirect flow needs; the bank/QR extras ride along on
  *  the loose object for a future in-page renderer. */
-/** GET /store/credits/deposit/payer — must the regional top-up sheet ask
- *  for the paying account's name? (The name on file itself is never sent.) */
+/** GET /store/credits/deposit/payer — the paying account's name the
+ *  regional top-up sheet shows: a saved account's holder, else nothing saved
+ *  and the real name to pre-fill. */
 export const DepositPayerSchema = z.looseObject({
   currency: z.string(),
-  name_on_file: z.boolean(),
+  saved_name: z.string().nullable(),
   real_name: z.string().nullable(),
 });
 
