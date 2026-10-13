@@ -54,7 +54,11 @@ export async function POST(
   // reset followed by signup reveals account existence through cooldown/call
   // quota state. This is a conservative request ceiling, not a billing ledger.
   if (!isDevOrTest(process.env)) {
-    const budget = await consumeOtpSendBudget(phone, channel);
+    // Networks that lose SMS (Maxis) get their first code by call. Asked
+    // before anything account-dependent, so a reset reaches the same budget
+    // decision whether or not an account carries the number.
+    const callFirst = channel === 'sms' && (await isCallFirstNetwork(process.env, logger, phone));
+    const budget = await consumeOtpSendBudget(phone, channel, Date.now(), callFirst);
     if (!budget.allowed) {
       if (budget.sitewide) void alertOps(
         req.scope,
@@ -111,15 +115,6 @@ export async function POST(
       );
     res.json(response);
     return;
-  }
-
-  // Networks that lose SMS (Maxis) get a call instead. Asked BEFORE the
-  // account match so a reset reports the same channel whether or not an
-  // account carries the number. The budget above already counted this as an
-  // SMS, so it does not also draw on the call ceiling.
-  if (via === 'sms' && (await isCallFirstNetwork(process.env, logger, phone))) {
-    via = 'call';
-    response.channel = via;
   }
 
   if (purpose === 'password-reset') {

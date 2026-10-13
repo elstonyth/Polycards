@@ -900,6 +900,37 @@ describe('consumeOtpSendBudget', () => {
     expect((await consumeOtpSendBudget('+60177000001', 'sms', T0 + 50 * 24 * 60 * MINUTE)).allowed).toBe(false);
   });
 
+  // Maxis (isCallFirstNetwork) loses half its SMS, so its first code is a
+  // call. A resend tries one SMS, for people who cannot take a call; anything
+  // after that inside the code lifetime is a call again.
+  it('a call-first number gets a call, then one SMS, then calls', async () => {
+    const t = T0 + 60 * 24 * 60 * MINUTE;
+    const phone = '+60127000001';
+    expect(await consumeOtpSendBudget(phone, 'sms', t, true)).toMatchObject({ allowed: true, channel: 'call' });
+    expect(await consumeOtpSendBudget(phone, 'sms', t + MINUTE, true)).toMatchObject({ allowed: true, channel: 'sms' });
+    expect(await consumeOtpSendBudget(phone, 'sms', t + 2 * MINUTE, true)).toMatchObject({
+      allowed: true,
+      channel: 'call',
+    });
+    // Past the code lifetime it starts over with a call.
+    expect(await consumeOtpSendBudget(phone, 'sms', t + 11 * MINUTE, true)).toMatchObject({
+      allowed: true,
+      channel: 'call',
+    });
+  });
+
+  it('a call-first number gets an SMS rather than a refusal once the call ceiling is spent', async () => {
+    const t = T0 + 70 * 24 * 60 * MINUTE;
+    for (let i = 0; i < 60; i++) {
+      const phone = `+6017800${String(i).padStart(4, '0')}`;
+      expect((await consumeOtpSendBudget(phone, 'call', t + i)).allowed).toBe(true);
+    }
+    expect(await consumeOtpSendBudget('+60127000002', 'sms', t + 61, true)).toMatchObject({
+      allowed: true,
+      channel: 'sms',
+    });
+  });
+
   it('refuses paid sends in production when the shared Redis budget is unavailable', async () => {
     const nodeEnv = process.env.NODE_ENV;
     const redisUrl = process.env.REDIS_URL;

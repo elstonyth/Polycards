@@ -392,7 +392,8 @@ export const otpTemplateSid = (
  * Maxis 502/12, 2026-10-06..13: only 50% of first SMS codes were used, against
  * 86% on CelcomDigi and 88% on XOX, and 162 people whose SMS Twilio reported
  * DELIVERED then verified by call shortly after. A call also costs $0.08
- * against $0.3389 an SMS. Remove the entry once Twilio fixes the Maxis route.
+ * against $0.3389 an SMS, so a fixed Maxis route is a reason to revisit this,
+ * not to drop it on cost.
  */
 const CALL_FIRST_NETWORKS = new Set(['502/12']);
 

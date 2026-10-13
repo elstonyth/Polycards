@@ -293,49 +293,37 @@ describe('POST /store/phone-verification/start — budget-chosen channel', () =>
 });
 
 /**
- * Call-first networks (isCallFirstNetwork, i.e. Maxis): Twilio reports their
- * Verify SMS delivered while half never arrive, so an SMS-bound code goes out
- * as a call instead.
+ * Call-first networks (isCallFirstNetwork, i.e. Maxis): the route asks before
+ * the budget, and the budget picks call or SMS (rate-limit.unit.spec.ts).
  */
 describe('POST /store/phone-verification/start — call-first network', () => {
-  beforeEach(() => isCallFirstNetwork.mockResolvedValue(true));
+  const nodeEnv = process.env.NODE_ENV;
+  beforeEach(() => {
+    process.env.NODE_ENV = 'production';
+    isCallFirstNetwork.mockResolvedValue(true);
+  });
+  afterEach(() => {
+    process.env.NODE_ENV = nodeEnv;
+  });
+  const callFirstArg = () => consumeOtpSendBudget.mock.calls[0][3] as unknown;
 
-  it('calls instead of texting, and tells the storefront it is calling', async () => {
-    const { res, out } = mkRes();
-    await startVerification(mkReq(MY), res);
-    expect(sendCount()).toBe(1);
-    expect(sendPhoneOtp.mock.calls[0][4]).toBe('call');
-    expect(out.body).toEqual({ ok: true, channel: 'call' });
+  it('tells the budget the number is call-first', async () => {
+    await startVerification(mkReq(MY), mkRes().res);
+    expect(callFirstArg()).toBe(true);
   });
 
-  it('spends no lookup when the code already goes out as a call', async () => {
+  it('spends no lookup when the caller asked for a call', async () => {
     await startVerification(mkReq(MY, 'signup', [{ id: 'cus_1' }], 'call'), mkRes().res);
     expect(isCallFirstNetwork.mock.calls.length).toBe(0);
-    expect(sendPhoneOtp.mock.calls[0][4]).toBe('call');
+    expect(callFirstArg()).toBe(false);
   });
 
-  it('spends no lookup on an unserved destination', async () => {
-    const { res, out } = mkRes();
-    await startVerification(mkReq(GB), res);
-    expect(isCallFirstNetwork.mock.calls.length).toBe(0);
-    expect(out.body).toEqual({ ok: true, channel: 'sms' });
-  });
-
-  // Anti-enumeration: a reset on a Maxis number must report the same channel
-  // whether or not an account carries it, so the lookup runs before the
-  // account match decides anything.
-  it('answers a password reset identically with and without an account', async () => {
-    const bodies: unknown[] = [];
-    for (const matches of [[], [{ id: 'cus_1' }]]) {
-      const { res, out } = mkRes();
-      await startVerification(mkReq(MY, 'password-reset', matches), res);
-      bodies.push(out.body);
-    }
-    expect(bodies).toEqual([
-      { ok: true, channel: 'call' },
-      { ok: true, channel: 'call' },
-    ]);
-    expect(sendCount()).toBe(1);
+  // Anti-enumeration: a reset must reach the same budget decision whether or
+  // not an account carries the number, so the lookup cannot depend on it.
+  it('looks up a password-reset number that is on no account', async () => {
+    await startVerification(mkReq(MY, 'password-reset', []), mkRes().res);
+    expect(isCallFirstNetwork.mock.calls.length).toBe(1);
+    expect(callFirstArg()).toBe(true);
   });
 });
 
@@ -388,7 +376,7 @@ describe('POST /store/phone-verification/start — sitewide send budget', () => 
       expect(out.status).toBe(429);
     }
     expect(sendCount()).toBe(0);
-    expect(consumeOtpSendBudget).toHaveBeenCalledWith(MY, 'sms');
+    expect(consumeOtpSendBudget).toHaveBeenCalledWith(MY, 'sms', expect.any(Number), false);
   });
 
   it('reset then signup cannot distinguish account existence via cooldown or call quota', async () => {

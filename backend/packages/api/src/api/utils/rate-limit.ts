@@ -1256,6 +1256,10 @@ const warnSmsBudgetSpent = throttledWarn(60 * 60_000);
  *   Verify SMS, and people pressed Resend six times until Twilio refused with
  *   60203), so the code goes out as a call instead.
  * - A spent SMS budget sends a call rather than refusing the person.
+ * - A call-first network (`callFirst`, from isCallFirstNetwork: Maxis loses
+ *   half its SMS) gets its first code by call. A resend falls through to
+ *   the one SMS below, for people who cannot take a call; anything after
+ *   that is a call. A spent call ceiling falls through to SMS too.
  *
  * A call reaches every handset (no carrier SMS filtering, no Fraud Guard),
  * costs $0.08 a minute against $0.3389 an SMS segment to a Malaysian mobile,
@@ -1267,6 +1271,7 @@ export async function consumeOtpSendBudget(
   phone: string,
   channel: PhoneOtpChannel,
   nowMs: number = Date.now(),
+  callFirst = false,
 ): Promise<
   RateLimitDecision & { sitewide: boolean; channel: PhoneOtpChannel }
 > {
@@ -1276,6 +1281,29 @@ export async function consumeOtpSendBudget(
   // The incident stop lever: 0 stops every paid send, calls included.
   if (hourly === 0 || daily === 0)
     return { allowed: false, retryAfterMs: 60_000, sitewide: true, channel };
+
+  // ~$24 a day at most: a ceiling against a voice run, far above real use.
+  const consumeCall = () =>
+    store.consume(
+      'rl:phone-otp-calls:all',
+      [
+        { limit: 60, windowMs: 60 * 60_000 },
+        { limit: 300, windowMs: 24 * 60 * 60_000 },
+      ],
+      nowMs,
+    );
+
+  if (channel === 'sms' && callFirst) {
+    const first = await store.consume(
+      `rl:phone-otp-call-first:${phone}`,
+      [{ limit: 1, windowMs: OTP_CODE_LIFETIME_MS }],
+      nowMs,
+    );
+    if (first.allowed) {
+      const calls = await consumeCall();
+      if (calls.allowed) return { ...calls, sitewide: true, channel: 'call' };
+    }
+  }
 
   let via = channel;
   if (via === 'sms') {
@@ -1301,15 +1329,7 @@ export async function consumeOtpSendBudget(
     warnSmsBudgetSpent('phone-otp SMS budget spent; codes go out as calls');
     via = 'call';
   }
-  // ~$24 a day at most: a ceiling against a voice run, far above real use.
-  const calls = await store.consume(
-    'rl:phone-otp-calls:all',
-    [
-      { limit: 60, windowMs: 60 * 60_000 },
-      { limit: 300, windowMs: 24 * 60 * 60_000 },
-    ],
-    nowMs,
-  );
+  const calls = await consumeCall();
   return { ...calls, sitewide: true, channel: via };
 }
 
