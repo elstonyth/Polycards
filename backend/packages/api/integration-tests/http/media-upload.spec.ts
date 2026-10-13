@@ -91,8 +91,8 @@ medusaIntegrationTestRunner({
         expect(res.data.url.length).toBeGreaterThan(0);
       });
 
-      it('stores a valid square pack and returns its URL', async () => {
-        const buf = await png(1024, 1024);
+      it('stores a valid portrait pack and returns its URL', async () => {
+        const buf = await png(919, 1666);
         const res = await upload(api, buf, 'pack', auth);
         expect(res.status).toBe(200);
         expect(typeof res.data.url).toBe('string');
