@@ -13,8 +13,8 @@ import type PacksModuleService from '../../../../modules/packs/service';
 // customer.metadata.equipped_frame_level (merged under the
 // `metadata:<customer>` advisory lock — see the avatar route's note on reserved
 // metadata keys and on why an unlocked merge of the shared blob loses data).
-// Levels never decrease (cumulative spend), so an equipped frame can't silently
-// re-lock.
+// Levels only drop through an operator VIP reset (resetVipLevel); the reset
+// procedure clears equipped_frame_level, since readers do not re-check it.
 export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,

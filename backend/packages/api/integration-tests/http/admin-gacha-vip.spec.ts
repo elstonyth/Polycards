@@ -96,6 +96,7 @@ medusaIntegrationTestRunner({
           currentLevel: 3,
           highestLevelEver: 7,
           lifetimeSen: 0,
+          resetAt: null,
         });
 
         const res = await view(customerId);
