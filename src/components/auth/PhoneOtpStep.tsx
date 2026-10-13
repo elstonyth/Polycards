@@ -38,6 +38,11 @@ export function PhoneOtpStep({
   // call instead" exists because some carriers report the SMS delivered while
   // the subscriber never sees it (Digi/016, 2026-09-07).
   const [via, setVia] = useState<PhoneOtpChannel>(channel);
+  // The backend sends one SMS per number per code lifetime and turns later
+  // resends into calls, so "Text me the code instead" is only offered while
+  // that SMS is unused — e.g. after a Maxis number's call-first send.
+  const [smsSent, setSmsSent] = useState(channel === 'sms');
+  const offerText = via === 'call' && !smsSent;
   const inputRef = useRef<HTMLInputElement>(null);
   const { challengeRef, send: sendOtp } = usePhoneOtpSender();
 
@@ -88,8 +93,10 @@ export function PhoneOtpStep({
     setCooldown(RESEND_COOLDOWN_S);
     try {
       const result = await sendOtp({ phone, purpose, channel });
-      if (result.ok) setVia(result.channel);
-      else {
+      if (result.ok) {
+        setVia(result.channel);
+        if (result.channel === 'sms') setSmsSent(true);
+      } else {
         setError(result.error);
         setCooldown(
           Math.min(
@@ -113,6 +120,7 @@ export function PhoneOtpStep({
             We&apos;re calling <span className="text-white">{phone}</span> to
             read you a 6-digit code. Answer the call and follow its
             instructions, then enter the code below.
+            {offerText && ' Missed the call? We can send an SMS.'}
           </>
         ) : (
           <>
@@ -172,7 +180,11 @@ export function PhoneOtpStep({
             disabled={busy || cooldown > 0}
             className="font-semibold text-white disabled:font-normal disabled:text-white/40"
           >
-            {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}
+            {cooldown > 0
+              ? `${offerText ? 'Text me' : 'Resend'} in ${cooldown}s`
+              : offerText
+                ? 'Text me the code instead'
+                : 'Resend code'}
           </button>
         </div>
       </div>
