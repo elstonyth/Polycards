@@ -411,7 +411,7 @@ export async function isCallFirstNetwork(
   logger: Logger,
   phone: string,
 ): Promise<boolean> {
-  if (!phone.startsWith('+60') || isDevOrTest(env) || !isTwilioVerifyConfigured(env))
+  if (!phone.startsWith(SMS_DIAL_PREFIX.MY) || isDevOrTest(env) || !isTwilioVerifyConfigured(env))
     return false;
   try {
     const res = await fetch(
@@ -430,7 +430,7 @@ export async function isCallFirstNetwork(
     }).line_type_intelligence;
     return CALL_FIRST_NETWORKS.has(`${lti?.mobile_country_code}/${lti?.mobile_network_code}`);
   } catch {
-    logger.warn('[phone-otp] carrier lookup request failed (network/timeout)');
+    logger.warn('[phone-otp] carrier lookup failed (network, timeout or unreadable response)');
     return false;
   }
 }

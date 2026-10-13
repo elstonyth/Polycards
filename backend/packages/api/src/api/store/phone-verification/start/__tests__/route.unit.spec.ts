@@ -308,25 +308,21 @@ describe('POST /store/phone-verification/start — call-first network', () => {
   });
   const lookupArg = (i = 0) => consumeOtpSendBudget.mock.calls[i][3] as (() => Promise<boolean>) | undefined;
 
-  it('hands the budget a lookup it runs only when asked', async () => {
-    await startVerification(mkReq(MY), mkRes().res);
+  it.each(['signup', 'phone-change'])('hands %s a lookup it runs only when asked', async (purpose) => {
+    await startVerification(mkReq(MY, purpose), mkRes().res);
     expect(isCallFirstNetwork.mock.calls.length).toBe(0);
     await expect(lookupArg()?.()).resolves.toBe(true);
     expect(isCallFirstNetwork.mock.calls.length).toBe(1);
   });
 
-  it('hands no lookup when the caller asked for a call', async () => {
-    await startVerification(mkReq(MY, 'signup', [{ id: 'cus_1' }], 'call'), mkRes().res);
-    expect(lookupArg()).toBeUndefined();
-  });
-
-  // Anti-enumeration: a reset reaches the same budget decision whether or not
-  // an account carries the number.
-  it('hands a password reset the lookup with or without an account', async () => {
+  // A reset SMS carries the per-purpose template's PASSWORD RESET warning,
+  // which a call cannot. The exemption rides on the caller's purpose, never
+  // on the account match, so it reveals nothing about the number.
+  it('exempts a password reset, with or without an account', async () => {
     await startVerification(mkReq(MY, 'password-reset', []), mkRes().res);
     await startVerification(mkReq(MY, 'password-reset', [{ id: 'cus_1' }]), mkRes().res);
-    expect(typeof lookupArg(0)).toBe('function');
-    expect(typeof lookupArg(1)).toBe('function');
+    expect(lookupArg(0)).toBeUndefined();
+    expect(lookupArg(1)).toBeUndefined();
   });
 });
 
@@ -379,7 +375,7 @@ describe('POST /store/phone-verification/start — sitewide send budget', () => 
       expect(out.status).toBe(429);
     }
     expect(sendCount()).toBe(0);
-    expect(consumeOtpSendBudget).toHaveBeenCalledWith(MY, 'sms', expect.any(Number), expect.any(Function));
+    expect(consumeOtpSendBudget).toHaveBeenCalledWith(MY, 'sms', expect.any(Number), undefined);
   });
 
   it('reset then signup cannot distinguish account existence via cooldown or call quota', async () => {
@@ -389,10 +385,10 @@ describe('POST /store/phone-verification/start — sitewide send budget', () => 
     let now = 1_900_000_000_000;
     const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
     const middleware = real.rateLimit('phone-otp-start-phone');
-    consumeOtpSendBudget.mockImplementation(async (phone: string, channel: 'sms' | 'call') => {
+    consumeOtpSendBudget.mockImplementation(async (phone: string, channel: 'sms' | 'call', _now?: number, isCallFirst?: () => Promise<boolean>) => {
       // Real policy/store, local memory only; the route still runs its production gate.
       process.env.NODE_ENV = 'test';
-      try { return await real.consumeOtpSendBudget(phone, channel, now); }
+      try { return await real.consumeOtpSendBudget(phone, channel, now, isCallFirst); }
       finally { process.env.NODE_ENV = 'production'; }
     });
     process.env.NODE_ENV = 'production';
