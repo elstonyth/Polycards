@@ -13,6 +13,7 @@ describe('factoryVideo', () => {
       'diamond',
       'ascended',
       'celebration',
+      'poncho',
     ]) {
       expect(factoryVideo(`/images/polycards/${tier}-factory.webp`)).toEqual({
         mp4: `/images/polycards/${tier}-factory.mp4`,

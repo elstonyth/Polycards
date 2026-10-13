@@ -188,6 +188,7 @@ const FACTORY_VIDEO_TIERS = new Set([
   // Set packs (not a price tier) — themed factory dioramas.
   'ascended',
   'celebration',
+  'poncho',
 ]);
 
 /** Animated factory-hero sources for a pack, or null when its display image is
