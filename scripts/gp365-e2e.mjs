@@ -125,8 +125,9 @@ const row = (table, mtid) =>
 const balance = async (token) =>
   (await call('GET', '/store/credits/balance', { token })).json;
 
-// USDT priced at 4.40 RM (manual); a fee of 100/44 % each way is RM 0.10, so
-// it quotes 4.30 / 4.50.
+// USDT priced at 4.20 RM (manual) with the operator's 0.5% fee each way: a
+// top-up credits 4.20 x 99.5% = 4.179, a withdrawal debits 4.20 x 100.5% =
+// 4.221. A percent, never an absolute RM markup.
 async function setFx(admin, percent, reason) {
   return call('POST', '/admin/payments/fx', {
     token: admin,
@@ -137,7 +138,7 @@ async function setFx(admin, percent, reason) {
       deposit_fee_percent: percent,
       payout_fee_percent: percent,
       manual_override: true,
-      manual_rate: 4.4,
+      manual_rate: 4.2,
       reason,
     },
   });
@@ -148,12 +149,12 @@ async function main() {
   const cust = await login('customer', CUST_EMAIL, logins.CUST_PW);
 
   // ---- 1. Admin sets the USDT rate + fee (audited)
-  const fx = await setFx(admin, 100 / 44, 'gp365 e2e: base rate');
+  const fx = await setFx(admin, 0.5, 'gp365 e2e: base rate');
   check(
-    'admin sets USDT market rate 4.40 + fee 2.27% each way (RM 0.10)',
+    'admin sets USDT market rate 4.20 + fee 0.5% each way (4.179 / 4.221)',
     fx.status === 200 &&
-      fx.json.quote?.depositRate === 4.3 &&
-      fx.json.quote?.payoutRate === 4.5,
+      fx.json.quote?.depositRate === 4.179 &&
+      fx.json.quote?.payoutRate === 4.221,
     JSON.stringify({
       status: fx.status,
       quote: fx.json.quote,
@@ -163,11 +164,7 @@ async function main() {
   const audit = sql(
     "select count(*) from admin_action_audit where entity_type='fx' and entity_id='USDT_MYR' and reason like 'gp365 e2e%'",
   );
-  check(
-    'USDT fee edit is audited',
-    Number(audit) >= 1,
-    `${audit} audit rows`,
-  );
+  check('USDT fee edit is audited', Number(audit) >= 1, `${audit} audit rows`);
   const sgdUntouched = await call('GET', '/admin/payments/fx?currency=SGD', {
     token: admin,
     admin: true,
@@ -183,7 +180,7 @@ async function main() {
   const rail = cfg.json.regional?.find((r) => r.currency === 'USDT');
   check(
     'payments config lists the open USDT rail',
-    rail?.deposits_enabled === true && rail?.rate?.deposit === 4.3,
+    rail?.deposits_enabled === true && rail?.rate?.deposit === 4.179,
     JSON.stringify(rail),
   );
 
@@ -201,8 +198,8 @@ async function depositLegs(admin, cust) {
     body: { amount: 100, currency: 'USDT', payment_method_code: 'UTRC' },
   });
   check(
-    'USDT deposit starts with no payer name: 100 USDT quotes RM 430.00',
-    d1.status === 200 && d1.json.amount === 430,
+    'USDT deposit starts with no payer name: 100 USDT quotes RM 417.90',
+    d1.status === 200 && d1.json.amount === 417.9,
     JSON.stringify({
       status: d1.status,
       amount: d1.json.amount,
@@ -217,13 +214,13 @@ async function depositLegs(admin, cust) {
   const m1 = d1.json.merchantTransactionId;
   const r1 = row('gateway_deposit', m1);
   check(
-    'deposit row: gp365, USDT, 100, mid 4.4, locked markup 0.1, RM 430',
+    'deposit row: gp365, USDT, 100, mid 4.2, locked markup 0.021, RM 417.90',
     r1[0] === 'pending' &&
       r1[1] === 'USDT' &&
       Number(r1[2]) === 100 &&
-      Number(r1[3]) === 4.4 &&
-      Number(r1[4]) === 0.1 &&
-      Number(r1[5]) === 430 &&
+      Number(r1[3]) === 4.2 &&
+      Number(r1[4]) === 0.021 &&
+      Number(r1[5]) === 417.9 &&
       r1[8] === 'gp365',
     r1.join('|'),
   );
@@ -239,18 +236,18 @@ async function depositLegs(admin, cust) {
   const r1b = row('gateway_deposit', m1);
   const afterD1 = (await balance(cust)).balance;
   check(
-    'callback settles at RM 430.00',
-    r1b[0] === 'settled' && Number(r1b[6]) === 430,
+    'callback settles at RM 417.90',
+    r1b[0] === 'settled' && Number(r1b[6]) === 417.9,
     r1b.join('|'),
   );
   check(
-    'ledger credited exactly RM 430.00',
-    Math.round((afterD1 - before) * 100) === 43000,
+    'ledger credited exactly RM 417.90',
+    Math.round((afterD1 - before) * 100) === 41790,
     `${before} -> ${afterD1}`,
   );
   check(
-    'net stored in RM at the locked rate (98.50 USDT x 4.30)',
-    Number(r1b[7]) === 423.55,
+    'net stored in RM at the locked rate (98.50 USDT x 4.179)',
+    Number(r1b[7]) === 411.63,
     r1b[7],
   );
   await mock(`/__control/payin/${m1}`, { status: 6 });
@@ -266,8 +263,8 @@ async function depositLegs(admin, cust) {
     body: { amount: 20, currency: 'USDT', payment_method_code: 'UERC' },
   });
   check(
-    '20 USDT (ERC20) quotes RM 86.00',
-    d2.json.amount === 86,
+    '20 USDT (ERC20) quotes RM 83.58',
+    d2.json.amount === 83.58,
     `${d2.status} ${d2.json.amount} ${d2.json.message ?? ''}`,
   );
   const m2 = d2.json.merchantTransactionId;
@@ -281,12 +278,12 @@ async function depositLegs(admin, cust) {
   const r2 = row('gateway_deposit', m2);
   check(
     'sweep settles a callback-less USDT deposit via GetPayinDetail',
-    swept && Number(r2[6]) === 86,
+    swept && Number(r2[6]) === 83.58,
     r2.join('|'),
   );
   check(
     'sweep credit is RM, not USDT',
-    Math.round(((await balance(cust)).balance - beforeSweep) * 100) === 8600,
+    Math.round(((await balance(cust)).balance - beforeSweep) * 100) === 8358,
   );
 
   // ---- 5. Guards
@@ -368,17 +365,17 @@ async function payoutLegs(admin, cust) {
     JSON.stringify(banks.json.banks?.filter((b) => b.currency === 'USDT')),
   );
 
-  // ---- 7. Withdraw RM 200 -> 44.44 USDT (200 / 4.50, floored)
+  // ---- 7. Withdraw RM 200 -> 47.38 USDT (200 / 4.221, floored)
   const wBefore = (await balance(cust)).balance;
   const w1 = await call('POST', '/store/credits/withdraw', {
     token: cust,
     body: { amount: 200, account_id: w?.id },
   });
   check(
-    'withdraw RM 200 to the wallet -> USDT 44.44 (at 4.50)',
+    'withdraw RM 200 to the wallet -> USDT 47.38 (at 4.221)',
     w1.status === 200 &&
       w1.json.currency === 'USDT' &&
-      w1.json.payAmount === 44.44,
+      w1.json.payAmount === 47.38,
     JSON.stringify({ status: w1.status, ...w1.json }),
   );
   const mw1 = w1.json.merchantTransactionId;
@@ -387,7 +384,7 @@ async function payoutLegs(admin, cust) {
     const p = (await mockState()).payouts.find((x) => x.mtid === mw1);
     check(
       'GlobePay365 got USDTTRC, the address, and MCustId as the holder',
-      p?.amount === 44.44 &&
+      p?.amount === 47.38 &&
         p?.bank === 'USDTTRC' &&
         p?.account === TRON &&
         p?.holder === customerId,
@@ -411,7 +408,7 @@ async function payoutLegs(admin, cust) {
       'payout settled; row in RM with the USDT lock',
       rw[0] === 'settled' &&
         rw[1] === 'USDT' &&
-        Number(rw[2]) === 44.44 &&
+        Number(rw[2]) === 47.38 &&
         Number(rw[5]) === 200 &&
         rw[8] === 'gp365',
       rw.join('|'),
@@ -450,7 +447,7 @@ async function payoutLegs(admin, cust) {
     body: { amount: 40, account_id: w?.id },
   });
   check(
-    'RM 40 (= USDT 8.88) refused before any debit',
+    'RM 40 (= USDT 9.47) refused before any debit',
     tiny.status === 400 &&
       /USDT 10|RM 50/.test(tiny.json.message ?? '') &&
       (await balance(cust)).balance === tinyBefore,

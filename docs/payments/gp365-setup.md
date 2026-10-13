@@ -13,7 +13,7 @@ GlobePay365 is our **USDT rail**. It is a second **regional rail**, beside the a
   - Tron addresses are checked with their base58 checksum. ERC20 addresses are checked with their EIP-55 checksum (keccak-256 via `@noble/hashes`). An ERC20 address written in one case carries no checksum, so it is accepted on its shape alone. The server is the only judge; the storefront just needs something pasted and shows the server's message.
   - A wallet has no holder name. Per the doc, `ToClientAccountHolderName` is sent as our customer id (`MCustId`).
   - The payout bank code is `USDTTRC` or `USDTERC`.
-- **The rate.** Hourly from Coinbase's USDT→MYR (`currency=USDT`). When Coinbase fails, frankfurter's **USD→MYR** is the proxy (USDT tracks the dollar), and the job accepts its USD label only for that fallback (`fallbackQuotes`). A manual rate overrides both if USDT trades off its peg, and a manual rate never ages out. Set the fee (on/off, top-up %, withdrawal %) in **Admin → Settlement → USDT tab → Exchange rate**. A new `USDT_MYR` row has no fee saved (`fee_enabled` NULL), which keeps the rail **paused** until an admin saves one.
+- **The rate.** Hourly from Coinbase's USDT→MYR (`currency=USDT`). When Coinbase fails, frankfurter's **USD→MYR** is the proxy (USDT tracks the dollar), and the job accepts its USD label only for that fallback (`fallbackQuotes`). A manual rate overrides both if USDT trades off its peg, and a manual rate never ages out. Set the fee (on/off, top-up %, withdrawal %) in **Admin → Settlement → USDT tab → Exchange rate**. A new `USDT_MYR` row has no fee saved (`fee_enabled` NULL), which keeps the rail **paused** until an admin saves one. The fee is a percent of the market rate, the same rule as S$: top-up M × (1 − fee%), withdrawal M × (1 + fee%). The target is **0.5% each way** (M 4.20 → 4.179 in, 4.221 out). Never enter an old absolute RM markup converted into a percent.
 
 ## Onboarding (the GlobePay365 message)
 
@@ -52,7 +52,7 @@ GlobePay365 is our **USDT rail**. It is a second **regional rail**, beside the a
 | `GP365_PUBLIC_KEY`           | GlobePay365's public key (X.509 base64)                                                      |
 | `GP365_CALLBACK_IPS`         | optional; defaults to production's `13.159.14.239`. Staging: `160.250.92.219,13.159.14.239` (the doc names the first, their onboarding message the second; the signature is the real gate). |
 | `GP365_CURRENCY`             | optional; defaults to `USDT`                                                                 |
-| `FX_USDT_MYR_URL`            | optional; the feed, default frankfurter `from=USD&to=MYR`                                    |
+| `FX_USDT_MYR_URL`            | optional; the feed, default Coinbase `currency=USDT` (frankfurter USD→MYR is the fallback)   |
 
 GlobePay365 sends callbacks to `PAYMENT_CALLBACK_BASE` plus these paths:
 
