@@ -189,6 +189,60 @@ describe('PhoneOnboardingModal (required gate)', () => {
     expect(button('Call again')).toBeDefined();
   });
 
+  // Maxis numbers get their first code by call (backend call-first). Someone
+  // who misses it must be told the resend is a text, not another call.
+  test('a code that went out as a call offers to text it instead', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.startPhoneOtp.mockResolvedValueOnce({ ok: true, channel: 'call' });
+      await mount();
+      typeInto(tel()!, '012-345 6789');
+      await submit(container.querySelector('form')!);
+      expect(dialog()?.textContent).toContain("We're calling");
+      expect(dialog()?.textContent).toContain(
+        'Missed the call? We can send an SMS.',
+      );
+      expect(button('Text me in 30s')?.disabled).toBe(true);
+      await act(async () => {
+        vi.advanceTimersByTime(30_000);
+      });
+
+      mocks.startPhoneOtp.mockResolvedValueOnce({ ok: true, channel: 'sms' });
+      await act(async () => button('Text me the code instead')!.click());
+      const sent = mocks.startPhoneOtp.mock.lastCall?.[0];
+      expect(sent).toMatchObject({
+        phone: '+60123456789',
+        purpose: 'phone-change',
+      });
+      expect(sent.channel).toBeUndefined();
+      expect(dialog()?.textContent).toContain('by SMS');
+      expect(dialog()?.textContent).not.toContain('Missed the call?');
+      expect(button('Text me the code instead')).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // One SMS per number per code lifetime: once it has gone out, a resend comes
+  // back as a call, so the step must not promise a text.
+  test('after an SMS has gone out, a call does not promise a text', async () => {
+    vi.useFakeTimers();
+    try {
+      await reachCodeStep();
+      await act(async () => {
+        vi.advanceTimersByTime(30_000);
+      });
+      mocks.startPhoneOtp.mockResolvedValueOnce({ ok: true, channel: 'call' });
+      await act(async () => button('Get a call instead')!.click());
+      expect(dialog()?.textContent).toContain("We're calling");
+      expect(dialog()?.textContent).not.toContain('Missed the call?');
+      expect(button('Text me in 30s')).toBeUndefined();
+      expect(button('Resend in 30s')?.disabled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test('"Get a call instead" still validates the number first', async () => {
     await mount();
     typeInto(tel()!, '123');
