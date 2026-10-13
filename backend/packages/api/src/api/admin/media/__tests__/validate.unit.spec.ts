@@ -17,8 +17,8 @@ const card = (over: Partial<ImageFacts> = {}): ImageFacts => ({
 });
 
 const pack = (over: Partial<ImageFacts> = {}): ImageFacts => ({
-  width: 1024,
-  height: 1024, // square
+  width: 919,
+  height: 1666, // the Gold tier pack art (~0.55)
   bytes: 500_000,
   mimeType: 'image/png',
   detectedFormat: 'png',
@@ -31,8 +31,14 @@ describe('validateImage — accepts valid art', () => {
     expect(validateImage(card(), 'card')).toEqual({ ok: true });
   });
 
-  it('accepts a square pack at/above min resolution', () => {
+  it('accepts a portrait pack at/above min resolution', () => {
     expect(validateImage(pack(), 'pack')).toEqual({ ok: true });
+  });
+
+  it('accepts the 1:2 30th Celebration pack art', () => {
+    expect(validateImage(pack({ width: 737, height: 1474 }), 'pack').ok).toBe(
+      true,
+    );
   });
 
   it('accepts a card within the aspect tolerance band', () => {
@@ -117,13 +123,19 @@ describe('validateImage — card profile', () => {
 
 describe('validateImage — pack profile', () => {
   it('rejects a pack below min resolution', () => {
-    const r = validateImage(pack({ width: 256, height: 256 }), 'pack');
+    const r = validateImage(pack({ width: 300, height: 540 }), 'pack');
     expect(r.ok).toBe(false);
     expect((r as { code: string }).code).toBe('too_small');
   });
 
-  it('rejects a non-square pack (banner-shaped upload)', () => {
+  it('rejects a banner-shaped pack upload', () => {
     const r = validateImage(pack({ width: 1920, height: 1080 }), 'pack');
+    expect(r.ok).toBe(false);
+    expect((r as { code: string }).code).toBe('bad_aspect');
+  });
+
+  it('rejects a square pack canvas (padding shrinks the pack in the card)', () => {
+    const r = validateImage(pack({ width: 1666, height: 1666 }), 'pack');
     expect(r.ok).toBe(false);
     expect((r as { code: string }).code).toBe('bad_aspect');
   });
@@ -221,7 +233,7 @@ describe('validateImage — avatar profile decode-DoS dimension cap', () => {
 
   it('leaves profiles without a per-profile cap on the shared 8000 bound', () => {
     // Regression guard: 'pack' declares no maxDimension → global bound applies.
-    expect(validateImage(pack({ width: 4000, height: 4000 }), 'pack')).toEqual({
+    expect(validateImage(pack({ width: 4000, height: 7200 }), 'pack')).toEqual({
       ok: true,
     });
   });

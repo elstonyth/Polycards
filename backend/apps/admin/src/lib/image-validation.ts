@@ -42,10 +42,10 @@ const PROFILES: Record<
     maxDimension: 5500,
   },
   pack: {
-    minWidth: 512,
-    minHeight: 512,
-    targetRatio: 1,
-    aspectTolerance: 0.05,
+    minWidth: 400,
+    minHeight: 720,
+    targetRatio: 5 / 9,
+    aspectTolerance: 0.12,
   },
   // Pack-page hero scene — wide landscape (36:25 target, 16:9 admitted).
   display: {
@@ -151,7 +151,9 @@ export async function validateImageFile(
       ? 'Card art must be roughly 5:7 (portrait).'
       : kind === 'display'
         ? 'Display art must be landscape (wider than tall, up to ~16:9).'
-        : 'Sprite/pack art must be roughly square (1:1).';
+        : kind === 'pack'
+          ? 'Pack art must be a tall portrait (~5:9) cropped to the pack — no square canvas.'
+          : 'Sprite art must be roughly square (1:1).';
   }
 
   return null;

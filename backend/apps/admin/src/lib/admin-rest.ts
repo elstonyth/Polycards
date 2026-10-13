@@ -42,7 +42,7 @@ export const httpStatus = (err: unknown): number | undefined => {
 // Upload one image to the validated POST /admin/media route (type/resolution/
 // aspect/size gated server-side; stores the original untouched). Returns the
 // served URL to persist on the card/pack. `kind` selects the validation
-// profile (pack ≈ square, card ≈ 5:7).
+// profile (pack ≈ 5:9 portrait, card ≈ 5:7).
 export async function uploadImage(
   file: File,
   kind:

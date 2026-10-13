@@ -64,7 +64,7 @@ const MIME_TO_FORMATS: Record<string, readonly string[]> = {
 export interface ProfileRule {
   minWidth: number;
   minHeight: number;
-  /** Target width/height ratio (card 5:7, pack 1:1). */
+  /** Target width/height ratio (card 5:7, pack 5:9). */
   targetRatio: number;
   /** Allowed relative deviation from targetRatio. */
   aspectTolerance: number;
@@ -93,11 +93,15 @@ export const IMAGE_RULES = {
       // (45.7 MP), which validates fine and then silently fails to bake.
       maxDimension: 5500,
     },
+    // Pack art: the tall foil pack the catalog card renders at a fixed height
+    // (object-contain). Every tier pack is ~0.55 wide/tall; a square canvas
+    // shrinks the pack inside the card (Poncho, 2026-10-14). 5:9 target,
+    // ±12% admits 0.49–0.62 (down to the 1:2 30th Celebration art).
     pack: {
-      minWidth: 512,
-      minHeight: 512,
-      targetRatio: 1,
-      aspectTolerance: 0.05,
+      minWidth: 400,
+      minHeight: 720,
+      targetRatio: 5 / 9,
+      aspectTolerance: 0.12,
     },
     // Pack-page hero ("factory" scene): a wide landscape render shown in the
     // /slots/<slug> stage (aspect-[36/25], object-cover). Target 36:25 ≈ 1.44;
@@ -281,7 +285,7 @@ export function validateImage(
     );
   }
 
-  // 8 — aspect gate (card ~5:7, pack ~1:1).
+  // 8 — aspect gate (card ~5:7, pack ~5:9).
   const ratio = facts.width / facts.height;
   const deviation = Math.abs(ratio - profile.targetRatio) / profile.targetRatio;
   if (deviation > profile.aspectTolerance) {
@@ -295,7 +299,9 @@ export function validateImage(
             ? 'Display art must be landscape (wider than tall, up to ~16:9).'
             : kind === 'avatar'
               ? 'Profile photo must be roughly square — crop it before uploading.'
-              : 'Sprite/pack art must be roughly square (1:1).',
+              : kind === 'pack'
+                ? 'Pack art must be a tall portrait (~5:9) cropped to the pack — no square canvas.'
+                : 'Sprite art must be roughly square (1:1).',
     );
   }
 
