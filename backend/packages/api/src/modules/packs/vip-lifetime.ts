@@ -3,7 +3,8 @@
 // opens count (2026-07-22 turnover-VIP change). Referral commissions and the
 // withdrawal playthrough gate still use the external-funded basis. Reversals
 // are amount>0 → excluded, so a refund never lowers the counter (spec §3).
-// Mirrors the service raw SQL (lifetimeTurnoverSenFor).
+// Mirrors the service raw SQL (lifetimeTurnoverSenFor) for a customer never
+// VIP-reset; the SQL also drops opens before vip_member_state.vip_reset_at.
 // The NORMAL part only (spec 2026-10-07): bonusCents is ≤ 0 on an open.
 export function lifetimeTurnoverSen(
   rows: { amount: number; reason: string; bonusCents?: number | null }[],

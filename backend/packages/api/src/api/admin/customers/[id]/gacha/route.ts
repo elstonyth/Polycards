@@ -89,8 +89,9 @@ export async function GET(
     { fmv: 0, display: 0 },
   );
 
-  const [summary, ladderRows, stateRow] = await Promise.all([
+  const [summary, basis, ladderRows, stateRow] = await Promise.all([
     packs.creditSummary(id),
+    packs.vipSpendBasis(id),
     packs.listVipLevels(
       {},
       { select: ['level', 'spend_threshold'], take: 1000 },
@@ -104,7 +105,7 @@ export async function GET(
     level: r.level,
     spend_threshold: Number(r.spend_threshold),
   }));
-  const spend = summary.vipSpendTotal;
+  const spend = basis.netMyr;
   const liveLevel =
     ladder.length > 0 ? levelForSpend(spend, ladder) : null;
 
