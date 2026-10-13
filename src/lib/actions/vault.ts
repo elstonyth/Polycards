@@ -234,6 +234,24 @@ export async function getDepositMethods(): Promise<DepositMethodCode[]> {
 }
 
 /**
+ * The paying account's name for a regional top-up (A3Pay matches the
+ * transfer against it): `savedName` is the holder of a saved account at a
+ * bank that rail pays, which the sheet shows with "Change"; with none saved
+ * the sheet asks, pre-filled with `realName`. Any failure reads as nothing
+ * saved, so the sheet asks — a name the customer types is never wrong to send.
+ */
+export async function getRegionalPayer(
+  currency: string,
+): Promise<{ savedName: string | null; realName: string | null }> {
+  const r = await store.get(
+    `/store/credits/deposit/payer?currency=${encodeURIComponent(currency)}`,
+    DepositPayerSchema,
+  );
+  if (!r.ok) return { savedName: null, realName: null };
+  return { savedName: r.data.saved_name, realName: r.data.real_name };
+}
+
+/**
  * Start a REAL top-up through the active payment gateway.
  *
  * Unlike `topUpCredits` this credits nothing and returns no balance: it hands
@@ -254,23 +272,6 @@ export async function getDepositMethods(): Promise<DepositMethodCode[]> {
  * has read that way here since the mock-gateway days — hence its own typeof
  * check on the first line.
  */
-/**
- * Must the regional top-up sheet ask for the paying account's name? The
- * backend's rule: a saved account at a bank that rail pays settles it;
- * otherwise ask, pre-filled with the real name. Any failure reads as "ask" —
- * a name the customer typed is never wrong to send.
- */
-export async function getRegionalPayer(
-  currency: string,
-): Promise<{ nameOnFile: boolean; realName: string | null }> {
-  const r = await store.get(
-    `/store/credits/deposit/payer?currency=${encodeURIComponent(currency)}`,
-    DepositPayerSchema,
-  );
-  if (!r.ok) return { nameOnFile: false, realName: null };
-  return { nameOnFile: r.data.name_on_file, realName: r.data.real_name };
-}
-
 export async function startDeposit(
   amount: number,
   paymentMethodCode: string = DEFAULT_DEPOSIT_METHOD,
@@ -278,8 +279,9 @@ export async function startDeposit(
    *  backend quotes the RM credit. `quotedRate` is the rate the sheet
    *  showed, which the backend refuses once it has moved. `payerName` is the
    *  name on the PAYING account, which A3Pay matches the transfer against:
-   *  sent only when the sheet asked for it (getRegionalPayer); otherwise the
-   *  backend uses the saved account's holder. */
+   *  always sent by the sheet (getRegionalPayer: the saved account's holder,
+   *  changeable, or what the customer typed); without it the backend uses the
+   *  saved account's holder. */
   regional?: { currency: unknown; quotedRate?: unknown; payerName?: unknown },
 ): Promise<StartDepositResult> {
   // Validate at the boundary — a server action is a public endpoint.

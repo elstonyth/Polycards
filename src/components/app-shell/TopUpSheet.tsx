@@ -117,7 +117,15 @@ export default function TopUpSheet({
   const [currency, setCurrency] = useState<Currency | null>(
     USE_GATEWAY ? null : 'MYR',
   );
+  // The paying account's name (A3Pay rails): what the sheet will send, the
+  // lookup it was pre-filled from, and whether the customer opened it to edit.
   const [payerName, setPayerName] = useState('');
+  const [payer, setPayer] = useState<{
+    currency: string;
+    savedName: string | null;
+    realName: string | null;
+  } | null>(null);
+  const [editingName, setEditingName] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{
@@ -152,6 +160,8 @@ export default function TopUpSheet({
       setMethod(preferred);
       setCurrency(USE_GATEWAY ? null : 'MYR');
       setPayerName('');
+      setPayer(null);
+      setEditingName(false);
       attemptKey.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -195,37 +205,39 @@ export default function TopUpSheet({
   const credit =
     rail && amountValid ? regionalCredit(amount, rail.rate.deposit) : amount;
   // A rail that matches the transfer against the payer's account name
-  // (A3Pay) asks for it, pre-filled with the real name, unless a saved
-  // account at one of its banks settles it. The pay button waits for that
-  // answer rather than send no name.
+  // (A3Pay) always sends one: a saved account's holder, shown with "Change"
+  // because the customer may pay from another account, or — none saved —
+  // a field pre-filled with the real name. The pay button waits for the
+  // lookup rather than send no name.
   const askFor = rail?.ui.needsPayerName ? rail.currency : null;
-  const [payer, setPayer] = useState<{
-    currency: string;
-    nameOnFile: boolean;
-    realName: string | null;
-  } | null>(null);
   useEffect(() => {
     if (!askFor) return;
     let live = true;
-    void getRegionalPayer(askFor).then((answer) => {
+    const settle = (answer: {
+      savedName: string | null;
+      realName: string | null;
+    }) => {
       if (!live) return;
       setPayer({ currency: askFor, ...answer });
-      setPayerName((typed) => typed || answer.realName || '');
-    });
+      setPayerName(
+        (typed) => typed || answer.savedName || answer.realName || '',
+      );
+    };
+    // A failed lookup reads as nothing saved: the field shows, never a stuck
+    // button.
+    getRegionalPayer(askFor).then(settle, () =>
+      settle({ savedName: null, realName: null }),
+    );
     return () => {
       live = false;
     };
   }, [askFor]);
   const payerInfo = askFor && payer?.currency === askFor ? payer : null;
-  const askName = payerInfo !== null && !payerInfo.nameOnFile;
+  const payerLoading = askFor !== null && payerInfo === null;
+  const nameField = payerInfo !== null && (!payerInfo.savedName || editingName);
   const payerValid =
-    !askName ||
-    (payerName.trim().length >= 2 && payerName.trim().length <= 120);
-  const canPay =
-    amountValid &&
-    !depositsClosed &&
-    (!askFor || payerInfo !== null) &&
-    payerValid;
+    !askFor || (payerName.trim().length >= 2 && payerName.trim().length <= 120);
+  const canPay = amountValid && !depositsClosed && !payerLoading && payerValid;
   const shownMethods = rail ? rail.ui.methods : methods;
   const presets = rail ? rail.ui.presets : PRESETS;
 
@@ -324,7 +336,7 @@ export default function TopUpSheet({
           ? await startDeposit(amount, method, {
               currency: rail.currency,
               quotedRate: rail.rate.deposit,
-              ...(askName ? { payerName } : {}),
+              ...(askFor ? { payerName } : {}),
             })
           : await startDeposit(amount, method);
         if (!res.ok) {
@@ -565,11 +577,32 @@ export default function TopUpSheet({
                 : `Enter ${money(minAmount)}–${money(maxAmount)}, with up to 2 decimal places.`}
             </p>
 
-            {/* The name A3Pay matches against the incoming transfer. Asked
-                only when no saved account at one of its banks settles it,
-                pre-filled with the real name: it must be the name on the
-                PAYING bank account, which a nickname is not. */}
-            {askName && (
+            {/* The name A3Pay matches against the incoming transfer: it
+                must be the name on the PAYING bank account, which a nickname
+                is not. A saved account's holder shows as a line with Change
+                (the customer may pay from another account); with none saved,
+                a field pre-filled with the real name. */}
+            {payerInfo !== null && !nameField && (
+              <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-neutral-800/60 px-4 py-3">
+                <div className="min-w-0">
+                  <span className="block text-[12px] font-semibold text-neutral-400">
+                    Paying from the account of
+                  </span>
+                  <span className="block truncate text-[15px] text-white">
+                    {payerName}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingName(true)}
+                  aria-label="Change the name on the paying account"
+                  className="shrink-0 rounded-lg px-2 py-1 text-[13px] font-semibold text-neutral-300 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/60"
+                >
+                  Change
+                </button>
+              </div>
+            )}
+            {nameField && (
               <label className="mt-3 block">
                 <span className="text-[12px] font-semibold text-neutral-400">
                   Name on your bank account
@@ -586,8 +619,10 @@ export default function TopUpSheet({
                 />
                 <span className="mt-1 block text-[11px] leading-snug text-neutral-500">
                   Exactly as your bank shows it, or the payment can&apos;t be
-                  matched. Save your bank account under Bank accounts to skip
-                  this next time.
+                  matched.
+                  {payerInfo?.savedName
+                    ? null
+                    : ' Save your bank account under Bank accounts to skip this next time.'}
                 </span>
               </label>
             )}
@@ -724,9 +759,11 @@ export default function TopUpSheet({
                     ? // Nothing is added here — the button leaves the site.
                       `Pay ${money(amount)}`
                     : `Proceed — add ${rm(amount)}`
-                  : amountValid && !payerValid
-                    ? 'Enter the account name'
-                    : 'Enter a valid amount'}
+                  : amountValid && payerLoading
+                    ? 'Checking…'
+                    : amountValid && !payerValid
+                      ? 'Enter the account name'
+                      : 'Enter a valid amount'}
             </Pill>
 
             <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">

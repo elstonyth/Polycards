@@ -328,8 +328,21 @@ async function depositLegs(admin, cust) {
     row('gateway_deposit', d3.json.merchantTransactionId)[0] === 'failed',
   );
 
-  // ---- 8. The sheet no longer asks for a name: the backend sends the one
-  // on file (a saved Singapore account's holder, else the real name).
+  // ---- 8. No name sent: the backend uses a saved Singapore account's
+  // holder, and with none saved refuses (the real name alone is never sent —
+  // a nickname failed A3Pay's name check on 2026-10-13). The sheet reads the
+  // same rule from GET /store/credits/deposit/payer.
+  const payerLookup = await call(
+    'GET',
+    '/store/credits/deposit/payer?currency=SGD',
+    { token: cust },
+  );
+  const savedName = payerLookup.json?.saved_name ?? null;
+  check(
+    'payer lookup answers for the customer',
+    payerLookup.status === 200 && 'saved_name' in (payerLookup.json ?? {}),
+    JSON.stringify({ status: payerLookup.status, json: payerLookup.json }),
+  );
   const noName = await call('POST', '/store/credits/deposit', {
     token: cust,
     // Its own amount, closed below: an open S$100 here would make the mock
@@ -340,8 +353,13 @@ async function depositLegs(admin, cust) {
     await (await fetch(`${MOCK}/__control/state`)).json()
   ).payins.find((p) => p.mtid === noName.json.merchantTransactionId);
   check(
-    'SGD deposit without a typed name sends the name on file',
-    noName.status === 200 && Boolean(noNamePayin?.payer?.trim()),
+    savedName
+      ? "SGD deposit without a typed name sends the saved account's holder"
+      : 'SGD deposit without a typed name and nothing saved is refused',
+    savedName
+      ? noName.status === 200 && noNamePayin?.payer === savedName
+      : noName.status === 400 &&
+          /name on the bank account/i.test(noName.json?.message ?? ''),
     JSON.stringify({
       status: noName.status,
       payer: noNamePayin?.payer,

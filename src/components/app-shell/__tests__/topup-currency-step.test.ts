@@ -66,7 +66,7 @@ beforeEach(() => {
   startDeposit.mockResolvedValue({ ok: false, error: 'stopped' });
   // A saved Singapore account settles the name unless a test says otherwise.
   getRegionalPayer.mockResolvedValue({
-    nameOnFile: true,
+    savedName: 'TAN AH KOW',
     realName: 'Tan Ah Kow',
   });
   container = document.createElement('div');
@@ -96,6 +96,17 @@ const button = (text: string) =>
   [...container.querySelectorAll('button')].find((b) =>
     b.textContent?.includes(text),
   );
+const nameInput = () =>
+  container.querySelector<HTMLInputElement>('input[autocomplete="name"]');
+// React listens for the native input event; set the value through the
+// prototype setter so React sees the change.
+const type = (el: HTMLInputElement, value: string) => {
+  Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    'value',
+  )!.set!.call(el, value);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+};
 const amountInput = () =>
   container.querySelector<HTMLInputElement>(
     'input[aria-label^="Top-up amount"]',
@@ -131,15 +142,17 @@ describe('TopUpSheet — choose a currency first', () => {
     expect(container.textContent).not.toContain('Choose a currency');
   });
 
-  it('choosing S$ with a saved Singapore account: no name to type, and Change goes back to the list', async () => {
+  it('choosing S$ with a saved Singapore account: its holder shown, nothing to type, and Change goes back to the list', async () => {
     await mount(WITH_SGD);
     await act(async () => button('Singapore Dollar')!.click());
     expect(amountInput()?.getAttribute('aria-label')).toBe(
       'Top-up amount in S$',
     );
-    // The saved account's holder is the payer name.
+    // The saved account's holder is the payer name, shown, not asked.
     expect(getRegionalPayer).toHaveBeenCalledWith('SGD');
-    expect(container.textContent).not.toContain('Name on your bank account');
+    expect(container.textContent).toContain('Paying from the account of');
+    expect(container.textContent).toContain('TAN AH KOW');
+    expect(nameInput()).toBeNull();
     expect(container.textContent).toContain('PayNow QR');
     await act(async () => button('Change')!.click());
     expect(container.textContent).toContain('Choose a currency');
@@ -153,6 +166,7 @@ describe('TopUpSheet — choose a currency first', () => {
     expect(startDeposit).toHaveBeenCalledWith(100, 'BQR', {
       currency: 'SGD',
       quotedRate: 3.1405,
+      payerName: 'TAN AH KOW',
     });
     // The refusal re-reads the rails, so a moved rate shows before a retry.
     expect(getPaymentLimits).toHaveBeenCalledTimes(2);
@@ -160,16 +174,13 @@ describe('TopUpSheet — choose a currency first', () => {
 
   it('no saved Singapore account: asks for the account name, pre-filled with the real name, and sends it', async () => {
     getRegionalPayer.mockResolvedValue({
-      nameOnFile: false,
+      savedName: null,
       realName: 'Tan Ah Kow',
     });
     await mount(WITH_SGD);
     await act(async () => button('Singapore Dollar')!.click());
     expect(container.textContent).toContain('Name on your bank account');
-    const name = container.querySelector<HTMLInputElement>(
-      'input[autocomplete="name"]',
-    );
-    expect(name?.value).toBe('Tan Ah Kow');
+    expect(nameInput()?.value).toBe('Tan Ah Kow');
     await act(async () => button('Pay')!.click());
     expect(startDeposit).toHaveBeenCalledWith(100, 'BQR', {
       currency: 'SGD',
@@ -179,10 +190,50 @@ describe('TopUpSheet — choose a currency first', () => {
   });
 
   it('an empty account name holds the pay button', async () => {
-    getRegionalPayer.mockResolvedValue({ nameOnFile: false, realName: null });
+    getRegionalPayer.mockResolvedValue({ savedName: null, realName: null });
     await mount(WITH_SGD);
     await act(async () => button('Singapore Dollar')!.click());
     expect(button('Enter the account name')?.disabled).toBe(true);
     expect(button('Pay')).toBeUndefined();
+  });
+
+  it('Change lets a customer paying from another account correct the saved name', async () => {
+    await mount(WITH_SGD);
+    await act(async () => button('Singapore Dollar')!.click());
+    const change = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Change the name on the paying account"]',
+    );
+    await act(async () => change!.click());
+    expect(nameInput()?.value).toBe('TAN AH KOW');
+    await act(async () => type(nameInput()!, 'LIM MEI LING'));
+    await act(async () => button('Pay')!.click());
+    expect(startDeposit).toHaveBeenCalledWith(100, 'BQR', {
+      currency: 'SGD',
+      quotedRate: 3.1405,
+      payerName: 'LIM MEI LING',
+    });
+  });
+
+  it('a failed lookup asks for the name — never a stuck button', async () => {
+    getRegionalPayer.mockRejectedValue(new Error('network'));
+    await mount(WITH_SGD);
+    await act(async () => button('Singapore Dollar')!.click());
+    expect(nameInput()?.value).toBe('');
+    expect(button('Enter the account name')?.disabled).toBe(true);
+    await act(async () => type(nameInput()!, 'Lim Mei Ling'));
+    await act(async () => button('Pay')!.click());
+    expect(startDeposit).toHaveBeenCalledWith(100, 'BQR', {
+      currency: 'SGD',
+      quotedRate: 3.1405,
+      payerName: 'Lim Mei Ling',
+    });
+  });
+
+  it('says it is checking while the lookup is on its way', async () => {
+    getRegionalPayer.mockReturnValue(new Promise(() => {}));
+    await mount(WITH_SGD);
+    await act(async () => button('Singapore Dollar')!.click());
+    expect(button('Checking')?.disabled).toBe(true);
+    expect(button('Enter a valid amount')).toBeUndefined();
   });
 });

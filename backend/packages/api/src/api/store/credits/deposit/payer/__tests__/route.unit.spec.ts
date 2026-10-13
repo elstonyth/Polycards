@@ -1,8 +1,8 @@
 import { GET } from '../route';
 
-// Does the S$ top-up sheet need to ask for the paying account's name? Only
-// when no saved account at a bank A3Pay pays settles it — and the name on
-// file itself never leaves the server.
+// The name the S$ top-up sheet shows for the paying account: a saved
+// account's holder at a bank A3Pay pays (shown with "Change"), else nothing
+// saved and the real name to pre-fill.
 const A3PAY_ENV = {
   GATEWAY_ENABLED: 'true',
   A3PAY_ENABLED: 'true',
@@ -48,40 +48,39 @@ function run(
 }
 
 describe('GET /store/credits/deposit/payer', () => {
-  it('a saved Singapore account settles it: no question, and no name sent back', async () => {
+  it('a saved Singapore account: its holder, as the bank spells it', async () => {
     const { res, packs } = await run(
       [{ bankCode: 'DBSSSGSG', accountHolderName: 'TAN AH KOW' }],
       'Tan Ah Kow',
     );
     expect(res.body).toEqual({
       currency: 'SGD',
-      name_on_file: true,
+      saved_name: 'TAN AH KOW',
       real_name: 'Tan Ah Kow',
     });
-    expect(JSON.stringify(res.body)).not.toContain('TAN AH KOW');
     expect(packs.savedBankAccountsFor).toHaveBeenCalledWith('cus_1');
   });
 
-  it('no Singapore account: ask, pre-filled with the real name', async () => {
+  it('no Singapore account: nothing saved, the real name to pre-fill', async () => {
     const { res } = await run(
       [{ bankCode: 'MBBEMYKL', accountHolderName: 'AHMAD BIN ALI' }],
       'nickname',
     );
-    expect(res.body).toMatchObject({
-      name_on_file: false,
-      real_name: 'nickname',
-    });
+    expect(res.body).toMatchObject({ saved_name: null, real_name: 'nickname' });
   });
 
-  it('nothing at all: ask, with nothing to pre-fill', async () => {
+  it('nothing at all: nothing to pre-fill', async () => {
     const { res } = await run([], null);
-    expect(res.body).toMatchObject({ name_on_file: false, real_name: null });
+    expect(res.body).toMatchObject({ saved_name: null, real_name: null });
   });
 
-  it('refuses a currency with no open rail', async () => {
+  it('refuses a currency with no open rail, and says RM needs no payer name', async () => {
     await expect(run([], null, 'EUR')).rejects.toThrow(
       /EUR top-ups are not available/,
     );
     await expect(run([], null, '')).rejects.toThrow(/not available/);
+    await expect(run([], null, 'MYR')).rejects.toThrow(
+      /MYR top-ups need no payer name/,
+    );
   });
 });
