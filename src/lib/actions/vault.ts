@@ -39,6 +39,7 @@ import {
   BuybackResultSchema,
   BuybackBatchSchema,
   DepositStartSchema,
+  DepositPayerSchema,
   PendingDepositsSchema,
   UnreportedDepositsSchema,
   UncheckedSchema,
@@ -253,15 +254,33 @@ export async function getDepositMethods(): Promise<DepositMethodCode[]> {
  * has read that way here since the mock-gateway days — hence its own typeof
  * check on the first line.
  */
+/**
+ * Must the regional top-up sheet ask for the paying account's name? The
+ * backend's rule: a saved account at a bank that rail pays settles it;
+ * otherwise ask, pre-filled with the real name. Any failure reads as "ask" —
+ * a name the customer typed is never wrong to send.
+ */
+export async function getRegionalPayer(
+  currency: string,
+): Promise<{ nameOnFile: boolean; realName: string | null }> {
+  const r = await store.get(
+    `/store/credits/deposit/payer?currency=${encodeURIComponent(currency)}`,
+    DepositPayerSchema,
+  );
+  if (!r.ok) return { nameOnFile: false, realName: null };
+  return { nameOnFile: r.data.name_on_file, realName: r.data.real_name };
+}
+
 export async function startDeposit(
   amount: number,
   paymentMethodCode: string = DEFAULT_DEPOSIT_METHOD,
   /** A regional top-up (Singapore): `amount` is then in `currency`, and the
    *  backend quotes the RM credit. `quotedRate` is the rate the sheet
-   *  showed, which the backend refuses once it has moved. The payer name A3Pay
-   *  matches transfers against is filled in by the backend from what the
-   *  customer already gave us (saved bank account, else real name). */
-  regional?: { currency: unknown; quotedRate?: unknown },
+   *  showed, which the backend refuses once it has moved. `payerName` is the
+   *  name on the PAYING account, which A3Pay matches the transfer against:
+   *  sent only when the sheet asked for it (getRegionalPayer); otherwise the
+   *  backend uses the saved account's holder. */
+  regional?: { currency: unknown; quotedRate?: unknown; payerName?: unknown },
 ): Promise<StartDepositResult> {
   // Validate at the boundary — a server action is a public endpoint.
   if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
@@ -285,11 +304,23 @@ export async function startDeposit(
       regional.quotedRate > 0
         ? regional.quotedRate
         : undefined;
+    const payerName =
+      typeof regional.payerName === 'string' ? regional.payerName.trim() : '';
+    if (
+      regional.payerName !== undefined &&
+      (payerName.length < 2 || payerName.length > 120)
+    ) {
+      return {
+        ok: false,
+        error: 'Enter the name on the bank account you are paying from.',
+      };
+    }
     const r = await store.post('/store/credits/deposit', DepositStartSchema, {
       amount,
       payment_method_code: paymentMethodCode,
       currency,
       ...(quotedRate !== undefined ? { quoted_rate: quotedRate } : {}),
+      ...(payerName ? { payer_name: payerName } : {}),
     });
     if (!r.ok) return vaultFailure(r, LOGIN_FIRST);
     return { ok: true, url: r.data.url, amount: r.data.amount };

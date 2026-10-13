@@ -949,6 +949,14 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
+      // Does the top-up sheet need to ask for the paying account's name
+      // (GET /store/credits/deposit/payer)? A read on the caller's own data,
+      // so the shared store read budget.
+      matcher: '/store/credits/deposit/payer',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       // ...and the ack once reported (POST, same path). An idempotent flag
       // write on the caller's own rows, on its own small tier.
       matcher: '/store/credits/deposit/unreported',

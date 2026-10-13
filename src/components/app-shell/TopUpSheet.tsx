@@ -7,6 +7,7 @@ import { rm, rm0 } from '@/lib/format';
 import {
   getDepositMethods,
   getPaymentLimits,
+  getRegionalPayer,
   startDeposit,
   topUpCredits,
 } from '@/lib/actions/vault';
@@ -116,6 +117,7 @@ export default function TopUpSheet({
   const [currency, setCurrency] = useState<Currency | null>(
     USE_GATEWAY ? null : 'MYR',
   );
+  const [payerName, setPayerName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{
@@ -149,6 +151,7 @@ export default function TopUpSheet({
       setSubmitting(false);
       setMethod(preferred);
       setCurrency(USE_GATEWAY ? null : 'MYR');
+      setPayerName('');
       attemptKey.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -191,7 +194,38 @@ export default function TopUpSheet({
   // quotes it).
   const credit =
     rail && amountValid ? regionalCredit(amount, rail.rate.deposit) : amount;
-  const canPay = amountValid && !depositsClosed;
+  // A rail that matches the transfer against the payer's account name
+  // (A3Pay) asks for it, pre-filled with the real name, unless a saved
+  // account at one of its banks settles it. The pay button waits for that
+  // answer rather than send no name.
+  const askFor = rail?.ui.needsPayerName ? rail.currency : null;
+  const [payer, setPayer] = useState<{
+    currency: string;
+    nameOnFile: boolean;
+    realName: string | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!askFor) return;
+    let live = true;
+    void getRegionalPayer(askFor).then((answer) => {
+      if (!live) return;
+      setPayer({ currency: askFor, ...answer });
+      setPayerName((typed) => typed || answer.realName || '');
+    });
+    return () => {
+      live = false;
+    };
+  }, [askFor]);
+  const payerInfo = askFor && payer?.currency === askFor ? payer : null;
+  const askName = payerInfo !== null && !payerInfo.nameOnFile;
+  const payerValid =
+    !askName ||
+    (payerName.trim().length >= 2 && payerName.trim().length <= 120);
+  const canPay =
+    amountValid &&
+    !depositsClosed &&
+    (!askFor || payerInfo !== null) &&
+    payerValid;
   const shownMethods = rail ? rail.ui.methods : methods;
   const presets = rail ? rail.ui.presets : PRESETS;
 
@@ -290,6 +324,7 @@ export default function TopUpSheet({
           ? await startDeposit(amount, method, {
               currency: rail.currency,
               quotedRate: rail.rate.deposit,
+              ...(askName ? { payerName } : {}),
             })
           : await startDeposit(amount, method);
         if (!res.ok) {
@@ -530,6 +565,33 @@ export default function TopUpSheet({
                 : `Enter ${money(minAmount)}–${money(maxAmount)}, with up to 2 decimal places.`}
             </p>
 
+            {/* The name A3Pay matches against the incoming transfer. Asked
+                only when no saved account at one of its banks settles it,
+                pre-filled with the real name: it must be the name on the
+                PAYING bank account, which a nickname is not. */}
+            {askName && (
+              <label className="mt-3 block">
+                <span className="text-[12px] font-semibold text-neutral-400">
+                  Name on your bank account
+                </span>
+                <input
+                  type="text"
+                  autoComplete="name"
+                  value={payerName}
+                  onChange={(e) => setPayerName(e.target.value)}
+                  maxLength={120}
+                  aria-invalid={payerName.trim().length > 0 && !payerValid}
+                  className="mt-1 w-full rounded-xl bg-neutral-800 px-4 py-3 text-[15px] text-white outline-none placeholder:text-neutral-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/60"
+                  placeholder="As it appears at your bank"
+                />
+                <span className="mt-1 block text-[11px] leading-snug text-neutral-500">
+                  Exactly as your bank shows it, or the payment can&apos;t be
+                  matched. Save your bank account under Bank accounts to skip
+                  this next time.
+                </span>
+              </label>
+            )}
+
             {/* Channel picker. Gateway only: the mock has no channels, and
                 without this the customer always landed on whichever one
                 default rail (QR), with no way to pay by bank.
@@ -662,7 +724,9 @@ export default function TopUpSheet({
                     ? // Nothing is added here — the button leaves the site.
                       `Pay ${money(amount)}`
                     : `Proceed — add ${rm(amount)}`
-                  : 'Enter a valid amount'}
+                  : amountValid && !payerValid
+                    ? 'Enter the account name'
+                    : 'Enter a valid amount'}
             </Pill>
 
             <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">

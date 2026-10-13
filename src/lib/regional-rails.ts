@@ -19,6 +19,9 @@ export type RegionalRailUi = {
   defaultAmount: string;
   /** The gateway channels, in the codes the backend allow-lists for it. */
   methods: readonly { code: DepositMethodCode; label: string; hint: string }[];
+  /** Does the gateway match the transfer against the payer's account name?
+   *  The sheet then asks for it, unless a saved account settles it. */
+  needsPayerName: boolean;
   money: (n: number) => string;
   money0: (n: number) => string;
   /** Subject of the payout band message ("Singapore payouts"). */
@@ -35,6 +38,7 @@ export const REGIONAL_RAILS: Readonly<Record<string, RegionalRailUi>> = {
     hint: 'PayNow QR · bank transfer',
     presets: [50, 100, 300, 1000],
     defaultAmount: '100',
+    needsPayerName: true,
     methods: [
       {
         code: 'BQR',
