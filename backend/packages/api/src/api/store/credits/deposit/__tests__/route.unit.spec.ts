@@ -321,7 +321,7 @@ describe('POST /store/credits/deposit — the payer name A3Pay matches', () => {
     expect(sentPayer()).toBe('LIM MEI LING');
   });
 
-  it("several other people's accounts: the real name, not a guess", async () => {
+  it("several other people's accounts and none is theirs: nothing on file — the sheet asks", async () => {
     const { req } = reqWith(
       [
         { bankCode: 'OCBCSGSG', accountHolderName: 'LIM MEI LING' },
@@ -330,7 +330,7 @@ describe('POST /store/credits/deposit — the payer name A3Pay matches', () => {
       'Tan Ah Kow',
     );
     await POST(req, res);
-    expect(sentPayer()).toBe('Tan Ah Kow');
+    expect(sentPayer()).toBeUndefined();
   });
 
   it('one saved Singapore holder is used as the bank spells it', async () => {
@@ -342,13 +342,15 @@ describe('POST /store/credits/deposit — the payer name A3Pay matches', () => {
     expect(sentPayer()).toBe('TAN AH KOW');
   });
 
-  it('falls back to the verified real name without a Singapore account', async () => {
+  it('the real name alone is never sent: without a Singapore account the sheet asks', async () => {
+    // A real name is free text: a one-word nickname failed A3Pay's name
+    // check (Verify Fail) on 2026-10-13.
     const { req } = reqWith(
       [{ bankCode: 'MBBEMYKL', accountHolderName: 'AHMAD BIN ALI' }],
       'Tan Ah Kow',
     );
     await POST(req, res);
-    expect(sentPayer()).toBe('Tan Ah Kow');
+    expect(sentPayer()).toBeUndefined();
   });
 
   it('a name the client still sends wins over the one on file', async () => {

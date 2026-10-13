@@ -691,6 +691,14 @@ export const UnreportedDepositsSchema = z.looseObject({
  *  and credit only lands when their signed callback settles the deposit. `url`
  *  is the only field the redirect flow needs; the bank/QR extras ride along on
  *  the loose object for a future in-page renderer. */
+/** GET /store/credits/deposit/payer — must the regional top-up sheet ask
+ *  for the paying account's name? (The name on file itself is never sent.) */
+export const DepositPayerSchema = z.looseObject({
+  currency: z.string(),
+  name_on_file: z.boolean(),
+  real_name: z.string().nullable(),
+});
+
 export const DepositStartSchema = z.looseObject({
   // The cashier URL comes from the GATEWAY's response body, which — unlike
   // their callbacks — carries no signature; TLS is the only thing vouching for

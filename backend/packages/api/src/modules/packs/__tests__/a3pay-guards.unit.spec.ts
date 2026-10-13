@@ -203,7 +203,7 @@ describe('a regional top-up A3Pay nudges by a cent', () => {
         'https://us/notify',
         'https://us/return',
       ),
-    ).rejects.toThrow(/Add your real name in Settings/);
+    ).rejects.toThrow(/Enter the name on the bank account/);
     expect(packs.createDepositCapped).not.toHaveBeenCalled();
   });
 

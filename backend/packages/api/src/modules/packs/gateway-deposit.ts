@@ -348,7 +348,7 @@ export async function startDeposit(
   if (regional && (payerName.length < 2 || payerName.length > 120)) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      'Add your real name in Settings (or save your bank account under Bank accounts) before topping up in this currency.',
+      'Enter the name on the bank account you are paying from.',
     );
   }
 

@@ -11,13 +11,15 @@ import {
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-const { startDeposit, getPaymentLimits } = vi.hoisted(() => ({
+const { startDeposit, getPaymentLimits, getRegionalPayer } = vi.hoisted(() => ({
   startDeposit: vi.fn(),
   getPaymentLimits: vi.fn(),
+  getRegionalPayer: vi.fn(),
 }));
 vi.mock('@/lib/actions/vault', () => ({
   startDeposit,
   getPaymentLimits,
+  getRegionalPayer,
   getDepositMethods: async () => ['BQR', 'OB'],
   topUpCredits: vi.fn(),
 }));
@@ -62,6 +64,11 @@ beforeAll(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   startDeposit.mockResolvedValue({ ok: false, error: 'stopped' });
+  // A saved Singapore account settles the name unless a test says otherwise.
+  getRegionalPayer.mockResolvedValue({
+    nameOnFile: true,
+    realName: 'Tan Ah Kow',
+  });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -124,13 +131,14 @@ describe('TopUpSheet — choose a currency first', () => {
     expect(container.textContent).not.toContain('Choose a currency');
   });
 
-  it('choosing S$ shows only the S$ form (no name to type), and Change goes back to the list', async () => {
+  it('choosing S$ with a saved Singapore account: no name to type, and Change goes back to the list', async () => {
     await mount(WITH_SGD);
     await act(async () => button('Singapore Dollar')!.click());
     expect(amountInput()?.getAttribute('aria-label')).toBe(
       'Top-up amount in S$',
     );
-    // The payer name comes from the account (saved bank, else real name).
+    // The saved account's holder is the payer name.
+    expect(getRegionalPayer).toHaveBeenCalledWith('SGD');
     expect(container.textContent).not.toContain('Name on your bank account');
     expect(container.textContent).toContain('PayNow QR');
     await act(async () => button('Change')!.click());
@@ -148,5 +156,33 @@ describe('TopUpSheet — choose a currency first', () => {
     });
     // The refusal re-reads the rails, so a moved rate shows before a retry.
     expect(getPaymentLimits).toHaveBeenCalledTimes(2);
+  });
+
+  it('no saved Singapore account: asks for the account name, pre-filled with the real name, and sends it', async () => {
+    getRegionalPayer.mockResolvedValue({
+      nameOnFile: false,
+      realName: 'Tan Ah Kow',
+    });
+    await mount(WITH_SGD);
+    await act(async () => button('Singapore Dollar')!.click());
+    expect(container.textContent).toContain('Name on your bank account');
+    const name = container.querySelector<HTMLInputElement>(
+      'input[autocomplete="name"]',
+    );
+    expect(name?.value).toBe('Tan Ah Kow');
+    await act(async () => button('Pay')!.click());
+    expect(startDeposit).toHaveBeenCalledWith(100, 'BQR', {
+      currency: 'SGD',
+      quotedRate: 3.1405,
+      payerName: 'Tan Ah Kow',
+    });
+  });
+
+  it('an empty account name holds the pay button', async () => {
+    getRegionalPayer.mockResolvedValue({ nameOnFile: false, realName: null });
+    await mount(WITH_SGD);
+    await act(async () => button('Singapore Dollar')!.click());
+    expect(button('Enter the account name')?.disabled).toBe(true);
+    expect(button('Pay')).toBeUndefined();
   });
 });

@@ -169,7 +169,7 @@ describe('VAULT_RULES backend-message contract', () => {
       'Withdrawals to this bank are temporarily unavailable on our side — nothing was taken from your balance. Your bank details are fine. Please try again later.',
       'SGD payments are paused right now — please try again shortly.',
       'SGD top-ups are not available right now.',
-      'Add your real name in Settings (or save your bank account under Bank accounts) before topping up in this currency.',
+      'Enter the name on the bank account you are paying from.',
     ];
     for (const msg of literals) expect(map(msg)).toBe(msg);
   });

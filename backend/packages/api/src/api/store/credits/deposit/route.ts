@@ -19,57 +19,8 @@ import {
   gatewayUrls,
   isLedgerGateway,
   resolveActiveGateway,
-  type PaymentGateway,
 } from '../../../../modules/packs/gateway';
-import type PacksModuleService from '../../../../modules/packs/service';
-import { bankSupportedBy } from '../../../../modules/packs/saved-accounts';
-
-/** A name compared the way a person reads it: case and spacing ignored. */
-const nameKey = (name: string) => name.replace(/\s+/g, ' ').trim().toUpperCase();
-
-/**
- * The paying account's holder name for a gateway that matches transfers
- * against it (A3Pay, SGD), from what the customer already gave us — so the
- * top-up sheet does not ask again. In order:
- *   1. a saved account at a bank this gateway pays whose holder IS the
- *      customer (matches the real name) — their own account, in the exact
- *      spelling that bank uses;
- *   2. the only holder among such saved accounts, when there is just one —
- *      most likely their own account, spelled as their bank has it;
- *   3. the verified real name every account sets once (also the pick when
- *      several different holders are saved: we cannot tell whose it is).
- * Undefined when nothing is on file; startDeposit then refuses before any
- * row. A wrong guess is not lost money: the gateway answers Verify Fail and
- * ops is alerted (alertPayinVerifyFail).
- */
-async function payerNameOnFile(
-  scope: AuthenticatedMedusaRequest['scope'],
-  customerId: string,
-  gateway: PaymentGateway,
-): Promise<string | undefined> {
-  const packs =
-    resolvePacks<
-      Pick<PacksModuleService, 'savedBankAccountsFor' | 'getVerificationState'>
-    >(scope);
-  const [saved, { realName }] = await Promise.all([
-    packs.savedBankAccountsFor(customerId),
-    packs.getVerificationState(customerId),
-  ]);
-  const holders = saved
-    .filter((a) => bankSupportedBy(a.bankCode, gateway))
-    .map((a) => a.accountHolderName.trim())
-    .filter(Boolean);
-  const own = realName
-    ? holders.find((holder) => nameKey(holder) === nameKey(realName))
-    : undefined;
-  const distinct = new Set(holders.map(nameKey));
-  return (
-    own ??
-    (distinct.size === 1 ? holders[0] : undefined) ??
-    realName ??
-    undefined
-  );
-}
+import { payerNameOnFile } from '../../../utils/payer-name';
 
 // POST /store/credits/deposit — start a real gateway top-up. Returns a
 // cashier URL; NO credit is issued here. The customer pays on their page, and
@@ -162,7 +113,7 @@ export async function POST(
         typeof body.payer_name === 'string' && body.payer_name.trim()
           ? body.payer_name
           : !isLedgerGateway(gateway)
-            ? await payerNameOnFile(req.scope, customerId, gateway)
+            ? (await payerNameOnFile(req.scope, customerId, gateway)).onFile
             : undefined,
       quotedRate: quotedRateOf(body.quoted_rate),
     },
