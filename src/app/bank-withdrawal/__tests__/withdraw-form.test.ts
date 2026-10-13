@@ -26,8 +26,9 @@ vi.mock('@/lib/actions/vault', () => ({
 // which throws outside its provider. Stubbing the hook keeps these cases about
 // the money guards instead of dragging the whole app-shell provider stack in.
 const applyBalance = vi.fn();
+const openTopUp = vi.fn();
 vi.mock('@/components/app-shell/TopUpProvider', () => ({
-  useTopUp: () => ({ applyBalance }),
+  useTopUp: () => ({ applyBalance, openTopUp }),
 }));
 
 import WithdrawForm, { nextAmountText, withdrawRemedy } from '../WithdrawForm';
@@ -77,7 +78,9 @@ async function render(
   withdrawable: number | null = 100,
   hold: {
     frozen?: boolean;
+    noTopup?: boolean;
     playthrough?: { deposited: number; used: number; remaining: number };
+    bonus?: number;
   } = {},
 ) {
   fetchSavedBankAccounts.mockResolvedValue({ ok: true, accounts });
@@ -456,6 +459,90 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
     expect(submitButton().disabled).toBe(true);
   });
 
+  it('an account that never topped up is told to top up, not "reach RM 50"', async () => {
+    // The 2026-10-13 ticket: RM 80.97 balance, no top-up ever, and the page
+    // said "Reach RM 50 to withdraw" — a goal the customer had already met.
+    await render([READY_ACCOUNT], 0, { noTopup: true });
+    const hold = container.querySelector('#withdraw-hold-reason');
+    expect(hold?.textContent).toContain(
+      'Top up at least once to unlock withdrawals',
+    );
+    expect(hold?.textContent).toContain('spend it on packs');
+    // Bonus is spent first, so "open packs" alone would not unlock anything.
+    expect(hold?.textContent).toContain('Bonus credit is used first');
+    expect(container.textContent).not.toContain('Minimum withdrawal is');
+    const topUp = [...(hold?.querySelectorAll('button') ?? [])].find(
+      (b) => b.textContent === 'Top up',
+    );
+    expect(topUp).toBeTruthy();
+    act(() => {
+      topUp!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(openTopUp).toHaveBeenCalledOnce();
+    expect(amountInput().disabled).toBe(true);
+    expect(amountInput().getAttribute('aria-describedby')).toBe(
+      'withdraw-hold-reason',
+    );
+    expect(submitButton().disabled).toBe(true);
+  });
+
+  it('no top-up outranks playthrough; a freeze outranks both (withdrawable.ts order)', async () => {
+    await render([READY_ACCOUNT], 0, { noTopup: true, playthrough: SHORT });
+    expect(container.textContent).toContain('Top up at least once');
+    expect(container.textContent).not.toContain('Spend RM');
+    act(() => root.unmount());
+    container.remove();
+
+    await render([READY_ACCOUNT], 0, {
+      frozen: true,
+      noTopup: true,
+      playthrough: SHORT,
+    });
+    expect(container.textContent).toContain('under review');
+    expect(container.textContent).not.toContain('Top up at least once');
+  });
+
+  it('a played-through wallet passed as-is raises no hold', async () => {
+    // The page passes the wallet's playthrough raw; remaining 0 is not a hold.
+    await render([READY_ACCOUNT], 100, {
+      playthrough: { deposited: 50, used: 50, remaining: 0 },
+    });
+    expect(container.querySelector('#withdraw-hold-reason')).toBeNull();
+    fillValidForm();
+    expect(submitButton().disabled).toBe(false);
+  });
+
+  it('names the spend-only bonus left out of the withdrawable figure', async () => {
+    await render([READY_ACCOUNT], 0, { bonus: 15 });
+    expect(container.textContent).toContain('Minimum withdrawal is RM 50');
+    expect(container.textContent).toContain('Excludes RM 15.00 bonus credit');
+    act(() => root.unmount());
+    container.remove();
+
+    // Above the floor too: RM 60 withdrawable of a RM 200 balance needs a reason.
+    await render([READY_ACCOUNT], 60, { bonus: 140 });
+    expect(container.querySelector('#withdraw-hold-reason')).toBeNull();
+    expect(container.textContent).toContain('Excludes RM 140.00 bonus credit');
+  });
+
+  it('a "top up at least once" refusal opens the top-up sheet in place', async () => {
+    startWithdrawal.mockResolvedValue({
+      ok: false,
+      error: 'Top up at least once to unlock withdrawals and deliveries.',
+    });
+    await render();
+    fillValidForm();
+    await submit();
+    const button = container
+      .querySelector('[role="alert"]')
+      ?.querySelector('button');
+    expect(button?.textContent).toBe('Top up');
+    act(() => {
+      button!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(openTopUp).toHaveBeenCalledOnce();
+  });
+
   it('puts the fix under a backend refusal', async () => {
     startWithdrawal.mockResolvedValue({
       ok: false,
@@ -476,6 +563,8 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
     await render([READY_ACCOUNT], 30);
     expect(container.textContent).toContain('Minimum withdrawal is RM 50');
     expect(container.textContent).toContain('You have RM 30.00');
+    expect(container.textContent).not.toContain('bonus credit');
+    expect(container.textContent).not.toContain('Top up at least once');
     expect(amountInput().disabled).toBe(true);
     expect(amountInput().getAttribute('aria-describedby')).toBe(
       'withdraw-hold-reason',
@@ -507,6 +596,12 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
     expect(withdrawRemedy('You can withdraw up to RM 12.34 right now.')).toBe(
       null,
     );
+    // null href = open the top-up sheet rather than navigate.
+    expect(
+      withdrawRemedy(
+        'Top up at least once to unlock withdrawals and deliveries.',
+      ),
+    ).toEqual({ href: null, label: 'Top up' });
   });
 });
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, Clock, Landmark, Lock } from 'lucide-react';
 import { rm, rm0, timeUntil } from '@/lib/format';
@@ -77,9 +77,10 @@ export function nextAmountText(
  *  withdrawal pass-through rule. Refusals that already say what to do (the
  *  cap, the daily limit, a paused channel) get no link. The phone gate has
  *  its own PhoneGateAction. */
-const REMEDIES: [RegExp, string, string][] = [
+const REMEDIES: [RegExp, string | null, string][] = [
   [/deposits must be spent on packs/i, '/slots', 'Open packs'],
-  [/top up at least once/i, '/me', 'Top up'],
+  // null = open the top-up sheet in place, like the no-top-up notice does.
+  [/top up at least once/i, null, 'Top up'],
   [/under review/i, '/contact', 'Contact support'],
   [/add an email address/i, '/settings', 'Add an email address'],
   [
@@ -93,26 +94,64 @@ const REMEDIES: [RegExp, string, string][] = [
 
 export function withdrawRemedy(
   error: string,
-): { href: string; label: string } | null {
+): { href: string | null; label: string } | null {
   const hit = REMEDIES.find(([test]) => test.test(error));
   return hit ? { href: hit[1], label: hit[2] } : null;
 }
 
 function WithdrawRemedy({ error }: { error: string }) {
+  const { openTopUp } = useTopUp();
   const remedy = withdrawRemedy(error);
   if (!remedy) return null;
-  return (
-    <Link
-      href={remedy.href}
-      // secondary, for the reason PhoneGateAction gives: it sits right above
-      // the white full-width Withdraw button.
-      className={cn(
-        pillVariants({ variant: 'secondary', size: 'sm' }),
-        'mt-2 w-full',
-      )}
-    >
+  // secondary, for the reason PhoneGateAction gives: it sits right above the
+  // white full-width Withdraw button.
+  const className = cn(
+    pillVariants({ variant: 'secondary', size: 'sm' }),
+    'mt-2 w-full',
+  );
+  return remedy.href === null ? (
+    <button type="button" onClick={openTopUp} className={className}>
+      {remedy.label}
+    </button>
+  ) : (
+    <Link href={remedy.href} className={className}>
       {remedy.label}
     </Link>
+  );
+}
+
+/** The sky "spend to unlock" hold — shared by the no-top-up and playthrough
+ *  notices, which differ only in heading, body and first action. */
+function UnlockHold({
+  title,
+  action,
+  children,
+}: {
+  title: ReactNode;
+  action: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      id="withdraw-hold-reason"
+      role="status"
+      className="mt-4 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3.5"
+    >
+      <p className="flex items-center gap-2 text-sm font-semibold text-white">
+        <Lock className="h-4 w-4 shrink-0 text-sky-400" aria-hidden />
+        {title}
+      </p>
+      {children}
+      <div className="mt-3 flex items-center gap-3">
+        {action}
+        <Link
+          href="/wallet"
+          className="text-[13px] text-white/60 underline-offset-2 hover:text-white hover:underline"
+        >
+          How it works
+        </Link>
+      </div>
+    </div>
   );
 }
 
@@ -133,25 +172,36 @@ function WithdrawRemedy({ error }: { error: string }) {
 export default function WithdrawForm({
   withdrawable,
   frozen = false,
+  noTopup = false,
   playthrough = null,
+  bonus = 0,
 }: {
   /** The server's freeze/locked/playthrough-gated figure — NOT raw balance. */
   withdrawable: number | null;
-  /** The account is frozen for review — outranks playthrough. */
+  /** The account is frozen for review — outranks every other hold. */
   frozen?: boolean;
-  /** Set only while the playthrough gate is what holds the balance (not
-   *  frozen, remaining > 0). The form then says how much more to spend on
-   *  packs instead of a bare RM 0.00 and a generic refusal. */
+  /** The account has never topped up, so nothing may leave (2026-10-11). */
+  noTopup?: boolean;
+  /** The wallet's playthrough state, passed as-is. The form decides whether it
+   *  is the hold to show (withdrawable.ts's order: freeze, then no top-up, then
+   *  playthrough), and then says how much more to spend on packs instead of a
+   *  bare RM 0.00 and a generic refusal. */
   playthrough?: { deposited: number; used: number; remaining: number } | null;
+  /** Spend-only bonus credit inside the balance, already left out of
+   *  `withdrawable` — named so the gap to the balance is not a mystery. */
+  bonus?: number;
 }) {
-  const locked = !frozen && playthrough !== null && playthrough.remaining > 0;
-  // Either hold means no amount can pass the server's gate, so the form says
+  const hasBonus = Math.round(bonus * 100) > 0;
+  const needsTopup = !frozen && noTopup;
+  const locked =
+    !frozen && !needsTopup && playthrough !== null && playthrough.remaining > 0;
+  // Any hold means no amount can pass the server's gate, so the form says
   // why up front and does not invite an attempt that is certain to fail.
-  const onHold = frozen || locked;
+  const onHold = frozen || needsTopup || locked;
   // The payout debits the balance server-side; repaint it here so the header
   // chip is not stale. (This used to light the Me-tab money dot too — that dot
   // was suspended 2026-08-11; see components/account/credit-dot.tsx.)
-  const { applyBalance } = useTopUp();
+  const { applyBalance, openTopUp } = useTopUp();
   const [saved, setSaved] = useState<SavedBankAccount[] | null>(null);
   const [accountId, setAccountId] = useState('');
   const [amountText, setAmountText] = useState('');
@@ -376,35 +426,46 @@ export default function WithdrawForm({
             {withdrawable == null ? '—' : rm(withdrawable)}
           </span>
         </div>
+        {hasBonus && !frozen && (
+          <p className="mt-1 text-[12px] text-neutral-500">
+            Excludes {rm(bonus)} bonus credit — it&apos;s for opening packs and
+            can&apos;t be withdrawn.
+          </p>
+        )}
       </div>
 
-      {locked && (
-        <div
-          id="withdraw-hold-reason"
-          role="status"
-          className="mt-4 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3.5"
+      {needsTopup && (
+        <UnlockHold
+          title="Top up at least once to unlock withdrawals"
+          action={
+            <Pill size="sm" onClick={openTopUp}>
+              Top up
+            </Pill>
+          }
         >
-          <p className="flex items-center gap-2 text-sm font-semibold text-white">
-            <Lock className="h-4 w-4 shrink-0 text-sky-400" aria-hidden />
-            Spend {rm(playthrough.remaining)} more on packs to withdraw
+          <p className="mt-1 text-[13px] text-white/60">
+            After your first top-up, spend it on packs and you can withdraw.
+            Bonus credit is used first and doesn&apos;t count. Your balance
+            stays yours to spend on packs.
           </p>
+        </UnlockHold>
+      )}
+
+      {locked && (
+        <UnlockHold
+          title={`Spend ${rm(playthrough.remaining)} more on packs to withdraw`}
+          action={
+            <Link href="/slots" className={pillVariants({ size: 'sm' })}>
+              Open packs
+            </Link>
+          }
+        >
           <p className="mt-1 text-[13px] text-white/60">
             Your deposit must be spent on packs first. Selling cards back
             doesn&apos;t count.
           </p>
           <PlaythroughProgress {...playthrough} />
-          <div className="mt-3 flex items-center gap-3">
-            <Link href="/slots" className={pillVariants({ size: 'sm' })}>
-              Open packs
-            </Link>
-            <Link
-              href="/wallet"
-              className="text-[13px] text-white/60 underline-offset-2 hover:text-white hover:underline"
-            >
-              How it works
-            </Link>
-          </div>
-        </div>
+        </UnlockHold>
       )}
 
       {frozen && (
