@@ -293,8 +293,9 @@ describe('POST /store/phone-verification/start — budget-chosen channel', () =>
 });
 
 /**
- * Call-first networks (isCallFirstNetwork, i.e. Maxis): the route asks before
- * the budget, and the budget picks call or SMS (rate-limit.unit.spec.ts).
+ * Call-first networks (isCallFirstNetwork, i.e. Maxis): the route hands the
+ * budget a lazy lookup, and the budget decides when it is worth paying for
+ * and picks call or SMS (rate-limit.unit.spec.ts).
  */
 describe('POST /store/phone-verification/start — call-first network', () => {
   const nodeEnv = process.env.NODE_ENV;
@@ -305,25 +306,27 @@ describe('POST /store/phone-verification/start — call-first network', () => {
   afterEach(() => {
     process.env.NODE_ENV = nodeEnv;
   });
-  const callFirstArg = () => consumeOtpSendBudget.mock.calls[0][3] as unknown;
+  const lookupArg = (i = 0) => consumeOtpSendBudget.mock.calls[i][3] as (() => Promise<boolean>) | undefined;
 
-  it('tells the budget the number is call-first', async () => {
+  it('hands the budget a lookup it runs only when asked', async () => {
     await startVerification(mkReq(MY), mkRes().res);
-    expect(callFirstArg()).toBe(true);
-  });
-
-  it('spends no lookup when the caller asked for a call', async () => {
-    await startVerification(mkReq(MY, 'signup', [{ id: 'cus_1' }], 'call'), mkRes().res);
     expect(isCallFirstNetwork.mock.calls.length).toBe(0);
-    expect(callFirstArg()).toBe(false);
+    await expect(lookupArg()?.()).resolves.toBe(true);
+    expect(isCallFirstNetwork.mock.calls.length).toBe(1);
   });
 
-  // Anti-enumeration: a reset must reach the same budget decision whether or
-  // not an account carries the number, so the lookup cannot depend on it.
-  it('looks up a password-reset number that is on no account', async () => {
+  it('hands no lookup when the caller asked for a call', async () => {
+    await startVerification(mkReq(MY, 'signup', [{ id: 'cus_1' }], 'call'), mkRes().res);
+    expect(lookupArg()).toBeUndefined();
+  });
+
+  // Anti-enumeration: a reset reaches the same budget decision whether or not
+  // an account carries the number.
+  it('hands a password reset the lookup with or without an account', async () => {
     await startVerification(mkReq(MY, 'password-reset', []), mkRes().res);
-    expect(isCallFirstNetwork.mock.calls.length).toBe(1);
-    expect(callFirstArg()).toBe(true);
+    await startVerification(mkReq(MY, 'password-reset', [{ id: 'cus_1' }]), mkRes().res);
+    expect(typeof lookupArg(0)).toBe('function');
+    expect(typeof lookupArg(1)).toBe('function');
   });
 });
 
@@ -376,7 +379,7 @@ describe('POST /store/phone-verification/start — sitewide send budget', () => 
       expect(out.status).toBe(429);
     }
     expect(sendCount()).toBe(0);
-    expect(consumeOtpSendBudget).toHaveBeenCalledWith(MY, 'sms', expect.any(Number), false);
+    expect(consumeOtpSendBudget).toHaveBeenCalledWith(MY, 'sms', expect.any(Number), expect.any(Function));
   });
 
   it('reset then signup cannot distinguish account existence via cooldown or call quota', async () => {

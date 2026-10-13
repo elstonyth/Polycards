@@ -906,14 +906,17 @@ describe('consumeOtpSendBudget', () => {
   it('a call-first number gets a call, then one SMS, then calls', async () => {
     const t = T0 + 60 * 24 * 60 * MINUTE;
     const phone = '+60127000001';
-    expect(await consumeOtpSendBudget(phone, 'sms', t, true)).toMatchObject({ allowed: true, channel: 'call' });
-    expect(await consumeOtpSendBudget(phone, 'sms', t + MINUTE, true)).toMatchObject({ allowed: true, channel: 'sms' });
-    expect(await consumeOtpSendBudget(phone, 'sms', t + 2 * MINUTE, true)).toMatchObject({
+    const maxis = jest.fn(async () => true);
+    expect(await consumeOtpSendBudget(phone, 'sms', t, maxis)).toMatchObject({ allowed: true, channel: 'call' });
+    expect(await consumeOtpSendBudget(phone, 'sms', t + MINUTE, maxis)).toMatchObject({ allowed: true, channel: 'sms' });
+    expect(await consumeOtpSendBudget(phone, 'sms', t + 2 * MINUTE, maxis)).toMatchObject({
       allowed: true,
       channel: 'call',
     });
+    // One paid lookup per number per code lifetime, not one per request.
+    expect(maxis.mock.calls.length).toBe(1);
     // Past the code lifetime it starts over with a call.
-    expect(await consumeOtpSendBudget(phone, 'sms', t + 11 * MINUTE, true)).toMatchObject({
+    expect(await consumeOtpSendBudget(phone, 'sms', t + 11 * MINUTE, maxis)).toMatchObject({
       allowed: true,
       channel: 'call',
     });
@@ -925,10 +928,26 @@ describe('consumeOtpSendBudget', () => {
       const phone = `+6017800${String(i).padStart(4, '0')}`;
       expect((await consumeOtpSendBudget(phone, 'call', t + i)).allowed).toBe(true);
     }
-    expect(await consumeOtpSendBudget('+60127000002', 'sms', t + 61, true)).toMatchObject({
+    expect(await consumeOtpSendBudget('+60127000002', 'sms', t + 61, async () => true)).toMatchObject({
       allowed: true,
       channel: 'sms',
     });
+  });
+
+  // Lookups are paid too: the stop switch stops them, and they have a
+  // sitewide ceiling of their own (the SMS limits, on a separate key).
+  it('spends no lookup behind the stop switch or past the lookup ceiling', async () => {
+    const lookup = jest.fn(async () => false);
+    process.env.PHONE_OTP_GLOBAL_DAILY_LIMIT = '0';
+    await consumeOtpSendBudget('+60127000003', 'sms', T0 + 80 * 24 * 60 * MINUTE, lookup);
+    expect(lookup.mock.calls.length).toBe(0);
+
+    process.env.PHONE_OTP_GLOBAL_DAILY_LIMIT = '100';
+    process.env.PHONE_OTP_GLOBAL_HOURLY_LIMIT = '1';
+    const t = T0 + 90 * 24 * 60 * MINUTE;
+    await consumeOtpSendBudget('+60127000004', 'sms', t, lookup);
+    await consumeOtpSendBudget('+60127000005', 'sms', t + 1, lookup);
+    expect(lookup.mock.calls.length).toBe(1);
   });
 
   it('refuses paid sends in production when the shared Redis budget is unavailable', async () => {

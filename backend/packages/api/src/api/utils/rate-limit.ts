@@ -1256,10 +1256,11 @@ const warnSmsBudgetSpent = throttledWarn(60 * 60_000);
  *   Verify SMS, and people pressed Resend six times until Twilio refused with
  *   60203), so the code goes out as a call instead.
  * - A spent SMS budget sends a call rather than refusing the person.
- * - A call-first network (`callFirst`, from isCallFirstNetwork: Maxis loses
- *   half its SMS) gets its first code by call. A resend falls through to
- *   the one SMS below, for people who cannot take a call; anything after
- *   that is a call. A spent call ceiling falls through to SMS too.
+ * - A call-first network (`isCallFirst`, a lazy isCallFirstNetwork lookup:
+ *   Maxis loses half its SMS) gets its first code by call. A resend falls
+ *   through to the one SMS below, for people who cannot take a call;
+ *   anything after that is a call. A spent call ceiling falls through to
+ *   SMS too.
  *
  * A call reaches every handset (no carrier SMS filtering, no Fraud Guard),
  * costs $0.08 a minute against $0.3389 an SMS segment to a Malaysian mobile,
@@ -1271,7 +1272,7 @@ export async function consumeOtpSendBudget(
   phone: string,
   channel: PhoneOtpChannel,
   nowMs: number = Date.now(),
-  callFirst = false,
+  isCallFirst?: () => Promise<boolean>,
 ): Promise<
   RateLimitDecision & { sitewide: boolean; channel: PhoneOtpChannel }
 > {
@@ -1293,13 +1294,28 @@ export async function consumeOtpSendBudget(
       nowMs,
     );
 
-  if (channel === 'sms' && callFirst) {
+  // The lookup is paid too ($0.008), so it runs only past the stop switch
+  // above, at most once per number per code lifetime, and under a sitewide
+  // ceiling of its own (the SMS limits, on a separate key).
+  if (channel === 'sms' && isCallFirst) {
     const first = await store.consume(
       `rl:phone-otp-call-first:${phone}`,
       [{ limit: 1, windowMs: OTP_CODE_LIFETIME_MS }],
       nowMs,
     );
-    if (first.allowed) {
+    const lookup =
+      first.allowed &&
+      (
+        await store.consume(
+          'rl:phone-otp-lookups:all',
+          [
+            { limit: hourly, windowMs: 60 * 60_000 },
+            { limit: daily, windowMs: 24 * 60 * 60_000 },
+          ],
+          nowMs,
+        )
+      ).allowed;
+    if (lookup && (await isCallFirst())) {
       const calls = await consumeCall();
       if (calls.allowed) return { ...calls, sitewide: true, channel: 'call' };
     }
