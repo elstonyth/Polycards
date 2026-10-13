@@ -227,7 +227,8 @@ export const isPhoneOtpPurpose = (v: unknown): v is PhoneOtpPurpose =>
  * reports the SMS delivered while the subscriber never sees it — on 2026-09-07
  * every Digi (016) number in 30 days of Verify logs had "Delivered" receipts
  * and zero successful checks, while the other Malaysian carriers verified
- * normally. Nothing in this stack can tell carriers apart, so the user picks.
+ * normally. The user can pick it, and since 2026-10-13 isCallFirstNetwork
+ * picks it for networks known to lose SMS (Maxis).
  *
  */
 export const PHONE_OTP_CHANNELS = ['sms', 'call'] as const;
@@ -384,6 +385,54 @@ export const otpTemplateSid = (
   env: PhoneVerificationEnv,
   purpose: PhoneOtpPurpose,
 ): string | undefined => env[TEMPLATE_SID_ENV[purpose]] || undefined;
+
+/**
+ * Networks (MCC/MNC) whose numbers get the code by call instead of SMS.
+ *
+ * Maxis 502/12, 2026-10-06..13: only 50% of first SMS codes were used, against
+ * 86% on CelcomDigi and 88% on XOX, and 162 people whose SMS Twilio reported
+ * DELIVERED then verified by call shortly after. A call also costs $0.08
+ * against $0.3389 an SMS. Remove the entry once Twilio fixes the Maxis route.
+ */
+const CALL_FIRST_NETWORKS = new Set(['502/12']);
+
+// A slow lookup must not hold the send; on timeout the SMS goes out as before.
+const LOOKUP_TIMEOUT_MS = 3_000;
+
+/**
+ * True iff this number's network should get its code by call. One Twilio
+ * Lookup (Line Type Intelligence, $0.008); every failure answers false, which
+ * leaves the SMS path exactly as it was. Malaysian numbers only: that is the
+ * only country in CALL_FIRST_NETWORKS, so anything else is a wasted lookup.
+ */
+export async function isCallFirstNetwork(
+  env: PhoneVerificationEnv,
+  logger: Logger,
+  phone: string,
+): Promise<boolean> {
+  if (!phone.startsWith('+60') || isDevOrTest(env) || !isTwilioVerifyConfigured(env))
+    return false;
+  try {
+    const res = await fetch(
+      `https://lookups.twilio.com/v2/PhoneNumbers/${encodeURIComponent(phone)}?Fields=line_type_intelligence`,
+      { headers: twilioHeaders(env), signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS) },
+    );
+    if (!res.ok) {
+      // Status and code only, never the body: it echoes the number.
+      logger.warn(
+        `[phone-otp] carrier lookup failed with ${res.status} (code ${(await twilioErrorCode(res)) ?? 'none'})`,
+      );
+      return false;
+    }
+    const lti = ((await res.json()) as {
+      line_type_intelligence?: { mobile_country_code?: unknown; mobile_network_code?: unknown } | null;
+    }).line_type_intelligence;
+    return CALL_FIRST_NETWORKS.has(`${lti?.mobile_country_code}/${lti?.mobile_network_code}`);
+  } catch {
+    logger.warn('[phone-otp] carrier lookup request failed (network/timeout)');
+    return false;
+  }
+}
 
 /** Sends the OTP. Dev/test: logs the fixed dev code (the log is the SMS
  *  transport). Prod without Twilio: throws — enforcement on + unconfigured

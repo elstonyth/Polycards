@@ -4,6 +4,7 @@ import type { ICustomerModuleService } from '@medusajs/framework/types';
 import {
   E164_RE,
   isAllowedSmsDestination,
+  isCallFirstNetwork,
   isDevOrTest,
   isPhoneOtpChannel,
   isPhoneOtpPurpose,
@@ -110,6 +111,15 @@ export async function POST(
       );
     res.json(response);
     return;
+  }
+
+  // Networks that lose SMS (Maxis) get a call instead. Asked BEFORE the
+  // account match so a reset reports the same channel whether or not an
+  // account carries the number. The budget above already counted this as an
+  // SMS, so it does not also draw on the call ceiling.
+  if (via === 'sms' && (await isCallFirstNetwork(process.env, logger, phone))) {
+    via = 'call';
+    response.channel = via;
   }
 
   if (purpose === 'password-reset') {

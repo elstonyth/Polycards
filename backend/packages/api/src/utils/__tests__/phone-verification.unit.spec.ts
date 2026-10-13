@@ -11,6 +11,7 @@ import {
   verifyPhoneProof,
   sendPhoneOtp,
   checkPhoneOtpCode,
+  isCallFirstNetwork,
 } from '../phone-verification';
 import type { PhoneOtpPurpose } from '../phone-verification';
 
@@ -474,5 +475,71 @@ describe('empty-secret guard', () => {
   it('still signs and verifies with a real secret', () => {
     const token = signPhoneProof(SECRET, PHONE, 'signup');
     expect(verifyPhoneProof(SECRET, token, 'signup')).toMatchObject({ phone: PHONE });
+  });
+});
+
+// Maxis (502/12) reports Verify SMS as DELIVERED while half of them never reach
+// the handset (2026-10-06..13: 50% of first codes used, vs 86% on CelcomDigi),
+// so its numbers get the code by call. One Twilio Lookup decides; any failure
+// must leave the SMS path exactly as it was.
+describe('isCallFirstNetwork', () => {
+  const env = {
+    NODE_ENV: 'production',
+    TWILIO_ACCOUNT_SID: 'AC1',
+    TWILIO_AUTH_TOKEN: 'tok',
+    TWILIO_VERIFY_SERVICE_SID: 'VA1',
+  };
+  afterEach(() => jest.restoreAllMocks());
+
+  const lookup = (lti: unknown) =>
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ line_type_intelligence: lti }), { status: 200 }));
+
+  it('is true for Maxis and asks Lookup for line type intelligence only', async () => {
+    const fetchMock = lookup({ mobile_country_code: '502', mobile_network_code: '12' });
+    await expect(isCallFirstNetwork(env, noopLogger, PHONE)).resolves.toBe(true);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe(
+      `https://lookups.twilio.com/v2/PhoneNumbers/${encodeURIComponent(PHONE)}?Fields=line_type_intelligence`,
+    );
+    expect((init?.headers as Record<string, string>).Authorization).toBe(
+      'Basic ' + Buffer.from('AC1:tok').toString('base64'),
+    );
+  });
+
+  it.each([
+    ['CelcomDigi', { mobile_country_code: '502', mobile_network_code: '16' }],
+    ['U Mobile', { mobile_country_code: '502', mobile_network_code: '18' }],
+    ['no network data', { mobile_country_code: null, mobile_network_code: null }],
+    ['no line_type_intelligence', null],
+  ])('is false for %s', async (_case, lti) => {
+    lookup(lti);
+    await expect(isCallFirstNetwork(env, noopLogger, PHONE)).resolves.toBe(false);
+  });
+
+  it('is false, and logs status and code only, when Lookup refuses', async () => {
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ code: 20003, message: `denied ${PHONE}` }), { status: 401 }),
+    );
+    const logger = { warn: jest.fn() } as never;
+    await expect(isCallFirstNetwork(env, logger, PHONE)).resolves.toBe(false);
+    const line = (logger as { warn: jest.Mock }).warn.mock.calls[0][0] as string;
+    expect(line).toContain('401');
+    expect(line).toContain('20003');
+    expect(line).not.toContain(PHONE.slice(3));
+  });
+
+  it('is false when the request fails or times out', async () => {
+    jest.spyOn(globalThis, 'fetch').mockRejectedValue(new DOMException('The operation was aborted.', 'AbortError'));
+    await expect(isCallFirstNetwork(env, noopLogger, PHONE)).resolves.toBe(false);
+  });
+
+  it('never looks up outside Malaysia, in dev/test, or without Twilio', async () => {
+    const fetchMock = lookup({ mobile_country_code: '502', mobile_network_code: '12' });
+    await expect(isCallFirstNetwork(env, noopLogger, '+6591234567')).resolves.toBe(false);
+    await expect(isCallFirstNetwork({ ...env, NODE_ENV: 'test' }, noopLogger, PHONE)).resolves.toBe(false);
+    await expect(isCallFirstNetwork({ NODE_ENV: 'production' }, noopLogger, PHONE)).resolves.toBe(false);
+    expect(fetchMock.mock.calls.length).toBe(0);
   });
 });
