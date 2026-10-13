@@ -4,6 +4,7 @@ import type { ICustomerModuleService } from '@medusajs/framework/types';
 import {
   E164_RE,
   isAllowedSmsDestination,
+  isCallFirstNetwork,
   isDevOrTest,
   isPhoneOtpChannel,
   isPhoneOtpPurpose,
@@ -53,12 +54,20 @@ export async function POST(
   // reset followed by signup reveals account existence through cooldown/call
   // quota state. This is a conservative request ceiling, not a billing ledger.
   if (!isDevOrTest(process.env)) {
-    const budget = await consumeOtpSendBudget(phone, channel);
+    // Networks that lose SMS (Maxis) get their first code by call. The
+    // budget decides whether to pay for the lookup (at most once per number
+    // per code lifetime), before anything account-dependent. Password reset
+    // is exempt: its SMS carries the per-purpose template's PASSWORD RESET
+    // warning (otpTemplateSid), which a call cannot, and the exemption rides
+    // on the caller's purpose, never on the account match.
+    const isCallFirst =
+      purpose === 'password-reset' ? undefined : () => isCallFirstNetwork(process.env, logger, phone);
+    const budget = await consumeOtpSendBudget(phone, channel, Date.now(), isCallFirst);
     if (!budget.allowed) {
       if (budget.sitewide) void alertOps(
         req.scope,
         'phone-otp-budget',
-        'Phone-OTP sitewide send or call budget exhausted. Check Twilio traffic before raising PHONE_OTP_GLOBAL_HOURLY_LIMIT / _DAILY_LIMIT.',
+        'Phone-OTP sitewide send or call budget exhausted. Check Twilio traffic before raising PHONE_OTP_GLOBAL_HOURLY_LIMIT / _DAILY_LIMIT (SMS) or PHONE_OTP_CALL_HOURLY_LIMIT / _DAILY_LIMIT (calls).',
         { muteMs: 60 * 60_000 },
       );
       const retry = Math.max(1, Math.ceil(budget.retryAfterMs / 1000));
