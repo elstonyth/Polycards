@@ -822,6 +822,8 @@ describe('consumeOtpSendBudget', () => {
   const ENV_KEYS = [
     'PHONE_OTP_GLOBAL_HOURLY_LIMIT',
     'PHONE_OTP_GLOBAL_DAILY_LIMIT',
+    'PHONE_OTP_CALL_HOURLY_LIMIT',
+    'PHONE_OTP_CALL_DAILY_LIMIT',
   ] as const;
   const saved = ENV_KEYS.map((k) => process.env[k]);
   afterEach(() =>
@@ -898,6 +900,81 @@ describe('consumeOtpSendBudget', () => {
   it('zero is a stop switch, not a request to use the default cap', async () => {
     process.env.PHONE_OTP_GLOBAL_DAILY_LIMIT = '0';
     expect((await consumeOtpSendBudget('+60177000001', 'sms', T0 + 50 * 24 * 60 * MINUTE)).allowed).toBe(false);
+  });
+
+  // Days 60+ on purpose: the in-memory store counts events stamped after
+  // `now`, so these must run after the day-40 call-ceiling test above.
+  //
+  // Maxis (isCallFirstNetwork) loses half its SMS, so its first code is a
+  // call. A resend tries one SMS, for people who cannot take a call; anything
+  // after that inside the code lifetime is a call again.
+  it('a call-first number gets a call, then one SMS, then calls', async () => {
+    const t = T0 + 60 * 24 * 60 * MINUTE;
+    const phone = '+60127000001';
+    const maxis = jest.fn(async () => true);
+    expect(await consumeOtpSendBudget(phone, 'sms', t, maxis)).toMatchObject({ allowed: true, channel: 'call' });
+    expect(await consumeOtpSendBudget(phone, 'sms', t + MINUTE, maxis)).toMatchObject({ allowed: true, channel: 'sms' });
+    expect(await consumeOtpSendBudget(phone, 'sms', t + 2 * MINUTE, maxis)).toMatchObject({
+      allowed: true,
+      channel: 'call',
+    });
+    // One paid lookup per number per code lifetime, not one per request.
+    expect(maxis.mock.calls.length).toBe(1);
+    // Past the code lifetime it starts over with a call.
+    expect(await consumeOtpSendBudget(phone, 'sms', t + 11 * MINUTE, maxis)).toMatchObject({
+      allowed: true,
+      channel: 'call',
+    });
+  });
+
+  it('a call-first number gets an SMS rather than a refusal once the call ceiling is spent', async () => {
+    const t = T0 + 70 * 24 * 60 * MINUTE;
+    for (let i = 0; i < 60; i++) {
+      const phone = `+6017800${String(i).padStart(4, '0')}`;
+      expect((await consumeOtpSendBudget(phone, 'call', t + i)).allowed).toBe(true);
+    }
+    expect(await consumeOtpSendBudget('+60127000002', 'sms', t + 61, async () => true)).toMatchObject({
+      allowed: true,
+      channel: 'sms',
+    });
+  });
+
+  // Lookups are paid too: the stop switch stops them, and they have a
+  // sitewide ceiling of their own (twice the SMS limits, on a separate key).
+  it('spends no lookup behind the stop switch or past the lookup ceiling', async () => {
+    const lookup = jest.fn(async () => false);
+    process.env.PHONE_OTP_GLOBAL_DAILY_LIMIT = '0';
+    await consumeOtpSendBudget('+60127000003', 'sms', T0 + 80 * 24 * 60 * MINUTE, lookup);
+    expect(lookup.mock.calls.length).toBe(0);
+
+    process.env.PHONE_OTP_GLOBAL_DAILY_LIMIT = '100';
+    process.env.PHONE_OTP_GLOBAL_HOURLY_LIMIT = '1';
+    const t = T0 + 90 * 24 * 60 * MINUTE;
+    await consumeOtpSendBudget('+60127000004', 'sms', t, lookup);
+    await consumeOtpSendBudget('+60127000005', 'sms', t + 1, lookup);
+    await consumeOtpSendBudget('+60127000006', 'sms', t + 2, lookup);
+    expect(lookup.mock.calls.length).toBe(2);
+  });
+
+  // Someone who tapped "get a call" and missed it presses Resend: that must
+  // be the SMS, not a second call, and an asked-for call needs no lookup.
+  it('a call the person asked for spends the call-first turn, so their resend is the SMS', async () => {
+    const t = T0 + 100 * 24 * 60 * MINUTE;
+    const phone = '+60127000007';
+    const maxis = jest.fn(async () => true);
+    expect(await consumeOtpSendBudget(phone, 'call', t, maxis)).toMatchObject({ allowed: true, channel: 'call' });
+    expect(await consumeOtpSendBudget(phone, 'sms', t + MINUTE, maxis)).toMatchObject({ allowed: true, channel: 'sms' });
+    expect(maxis.mock.calls.length).toBe(0);
+  });
+
+  it('takes the call ceiling from PHONE_OTP_CALL_HOURLY_LIMIT / _DAILY_LIMIT', async () => {
+    process.env.PHONE_OTP_CALL_HOURLY_LIMIT = '1';
+    const t = T0 + 110 * 24 * 60 * MINUTE;
+    expect((await consumeOtpSendBudget('+60127000008', 'call', t)).allowed).toBe(true);
+    expect(await consumeOtpSendBudget('+60127000009', 'call', t + 1)).toMatchObject({
+      allowed: false,
+      sitewide: true,
+    });
   });
 
   it('refuses paid sends in production when the shared Redis budget is unavailable', async () => {
