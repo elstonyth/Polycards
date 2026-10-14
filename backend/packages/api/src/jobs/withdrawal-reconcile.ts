@@ -152,7 +152,7 @@ export default async function withdrawalReconcileJob(
           // a 'pending' row also CLOSES it (the callback route's two branches,
           // this sweep's settle and no-debit closes, the refund helper's
           // terminal update, startWithdrawal's two failure closes),
-          // and the only two writes that leave a row pending both stamp a
+          // and every write that leaves a row pending stamps a
           // gateway_transaction_id — after which the guard above returns
           // 'wait' regardless of any clock. So nothing can push this forward
           // on the rows that reach the branch below, which is exactly the

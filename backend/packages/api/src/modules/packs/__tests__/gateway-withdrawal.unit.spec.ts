@@ -844,12 +844,60 @@ describe('startWithdrawal — money ordering', () => {
       // Asked once, before any refund.
       expect(fakeGateway.calls.withdrawalDetails).toHaveLength(1);
       expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
-      expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+      expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'failed' }),
+      );
       expect(h.logger.error).toHaveBeenCalledWith(
         expect.stringContaining('refusal not confirmed'),
       );
     },
   );
+
+  // Their payout callback finds a row by THEIR id (tgpay-family-hooks), and
+  // the sweep never refunds a row carrying one on a later "not found". A
+  // refused-looking payout the gateway holds must therefore carry it, plus
+  // the refusal on record: run logs last minutes, the row lasts.
+  it('records the id of a refused payout the gateway holds, on the pending row only', async () => {
+    const h = harness();
+    fakeGateway.script({
+      submitWithdrawal: new GatewayError('nope', ['PMT10013'], 400, true),
+      getWithdrawalDetail: {
+        transactionId: 'T-1',
+        merchantTransactionId: 'PC-x',
+        statusId: null,
+        status: 'PENDING',
+        amount: 50,
+        netAmount: Number.NaN,
+        paymentMethodCode: 'WD',
+        bankReferenceNo: null,
+        uniqueReferenceNo: null,
+        state: 'pending' as const,
+      },
+    });
+    await start(h);
+    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledTimes(1);
+    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
+      selector: { id: 'gpw_1', status: 'pending' },
+      data: {
+        gateway_transaction_id: 'T-1',
+        failure_reason: expect.stringMatching(/holds it.*PMT10013/),
+      },
+    });
+    const [{ data }] = h.packs.updateGatewayWithdrawals.mock.calls[0];
+    expect(data.failure_reason).not.toMatch(/1234567890|AHMAD BIN ALI/i);
+  });
+
+  it('writes nothing to a pending row the gateway cannot be asked about', async () => {
+    const h = harness();
+    fakeGateway.script({
+      submitWithdrawal: new GatewayError('nope', ['PMT10013'], 400, true),
+      getWithdrawalDetail: new GatewayError('non-JSON response', [], 502),
+    });
+    await start(h);
+    // The sweep's 1h "never existed" clock reads updated_at: a write here
+    // would restart it on a row with no gateway id to guard it.
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+  });
 
   // The classic double-payout window: the request reached the gateway and
   // only the RESPONSE was lost. Refunding here + the payout executing =
@@ -1336,6 +1384,43 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       );
       expect(sent).toHaveLength(0);
     });
+
+    // #747's 501 is exact (path + status + text) and means nothing was
+    // created. Asking the gateway first (#791) put the refund behind a
+    // lookup The 7 Pay may not answer while payouts are off: the payout
+    // then sat pending, with the customer's money, for good.
+    it('payouts switched off: refunds without asking the gateway', async () => {
+      fakeGateway.script({
+        submitWithdrawal: payoutDisabled(),
+        getWithdrawalDetail: new GatewayError('Payout not available', [], 501),
+      });
+      const h = harness();
+      await expect(start(h)).rejects.toThrow(/temporarily unavailable/i);
+      expect(fakeGateway.calls.withdrawalDetails).toHaveLength(0);
+      expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+    });
+
+    // The wallet is short whether or not this one payout is confirmed:
+    // the next customer would be refused the same way.
+    it('an empty wallet the gateway cannot confirm stays pending, yet trips the breaker and alerts ops', async () => {
+      fakeGateway.script({
+        submitWithdrawal: floatEmpty(),
+        getWithdrawalDetail: new GatewayError('non-JSON response', [], 502),
+      });
+      const h = harness();
+      const result = await start(h);
+      expect(result.status).toBe('pending');
+      expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+      expect(sent).toHaveLength(1);
+      expect(sent[0].text).toMatch(/payout wallet is short/i);
+      expect(sent[0].text).toMatch(/left pending/i);
+      expect(sent[0].text).not.toMatch(/refunded to the customer/i);
+
+      const h2 = harness();
+      const next = (await start(h2).catch((e: unknown) => e)) as Error;
+      expect(next.message).toMatch(/nothing was taken/i);
+      expect(h2.packs.withdrawForCashout).not.toHaveBeenCalled();
+    });
   });
 
   describe('submitHeldWithdrawal (admin approve)', () => {
@@ -1447,6 +1532,60 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
         /The gateway refused this payout/,
       );
       expect(sent).toHaveLength(0);
+    });
+
+    it('payouts switched off: refunds without asking the gateway', async () => {
+      fakeGateway.script({
+        submitWithdrawal: payoutDisabled(),
+        getWithdrawalDetail: new GatewayError('Payout not available', [], 501),
+      });
+      const h = approveHarness();
+      await expect(h.approve()).rejects.toThrow(/payouts are not enabled/i);
+      expect(fakeGateway.calls.withdrawalDetails).toHaveLength(0);
+      expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+    });
+
+    it('an empty wallet the gateway cannot confirm stays pending, yet trips the breaker and alerts ops', async () => {
+      fakeGateway.script({
+        submitWithdrawal: floatEmpty(),
+        getWithdrawalDetail: new GatewayError('non-JSON response', [], 502),
+      });
+      const h = approveHarness();
+      await expect(h.approve()).resolves.toMatchObject({ status: 'pending' });
+      expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+      expect(sent).toHaveLength(1);
+      expect(sent[0].text).toMatch(/admin approve/);
+      expect(sent[0].text).toMatch(/left pending/i);
+      const next = (await start(harness()).catch((e: unknown) => e)) as Error;
+      expect(next.message).toMatch(/nothing was taken/i);
+    });
+
+    it('records the id of a refused payout the gateway holds, on the pending row only', async () => {
+      fakeGateway.script({
+        submitWithdrawal: new GatewayError('nope', ['PMT10013'], 400, true),
+        getWithdrawalDetail: {
+          transactionId: 'T-9',
+          merchantTransactionId: 'PW-HELD-1',
+          statusId: null,
+          status: 'PENDING',
+          amount: 1500,
+          netAmount: Number.NaN,
+          paymentMethodCode: 'WD',
+          bankReferenceNo: null,
+          uniqueReferenceNo: null,
+          state: 'pending' as const,
+        },
+      });
+      const h = approveHarness();
+      await expect(h.approve()).resolves.toMatchObject({ status: 'pending' });
+      expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+      expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
+        selector: { id: 'gpw_h1', status: 'pending' },
+        data: {
+          gateway_transaction_id: 'T-9',
+          failure_reason: expect.stringMatching(/^approve refused.*holds it/),
+        },
+      });
     });
   });
 });
