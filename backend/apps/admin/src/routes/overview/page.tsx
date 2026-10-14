@@ -13,6 +13,8 @@ import { KpiTiles } from './KpiTiles';
 import { ReferralCard } from './ReferralCard';
 import { LatestPaymentsCard } from './LatestPaymentsCard';
 import { SectionError } from './SectionState';
+import { LiveBadge } from './LiveBadge';
+import { useLiveRefresh } from './use-live-refresh';
 
 // The admin's home page (docs/superpowers/specs/2026-10-14-admin-redesign-
 // design.md §7). Login and `/` reach it through the /orders redirect. Every
@@ -33,12 +35,18 @@ const OverviewPage = () => {
   const custom = range === 'custom';
   const stats = useStats(range, custom ? from : '', custom ? to : '');
   const statsHidden = stats.isError && isForbidden(stats.error);
+  const statsFailed = stats.isError && !statsHidden;
+  // Live: refreshes every section every 30s while this tab is visible.
+  useLiveRefresh();
 
   return (
     <div className="pc-dashboard flex flex-col gap-y-3">
       <Container className="pc-settle flex flex-col gap-3">
         <div>
-          <Heading level="h1">{t('dashboard.title')}</Heading>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Heading level="h1">{t('dashboard.title')}</Heading>
+            <LiveBadge updatedAt={stats.dataUpdatedAt} />
+          </div>
           <Text size="small" className="text-ui-fg-subtle mt-1">
             {t('dashboard.subtitle', {
               window: stats.data ? windowText(stats.data.current) : '…',
@@ -53,19 +61,21 @@ const OverviewPage = () => {
           onFrom={setFrom}
           onTo={setTo}
         />
-        {stats.isError && !statsHidden && (
-          <SectionError onRetry={() => void stats.refetch()} />
-        )}
+        {statsFailed && <SectionError onRetry={() => void stats.refetch()} />}
       </Container>
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
         {!statsHidden && (
-          <MoneyFlowCard stats={stats.data} className="xl:col-span-2" />
+          <MoneyFlowCard
+            stats={stats.data}
+            statsFailed={statsFailed}
+            className="xl:col-span-2"
+          />
         )}
         <AttentionCard className={statsHidden ? 'xl:col-span-3' : ''} />
       </div>
 
-      {!statsHidden && <KpiTiles report={stats.data} />}
+      {!statsHidden && <KpiTiles report={stats.data} failed={statsFailed} />}
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
         <ReferralCard className="xl:col-span-5" />

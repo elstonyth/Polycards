@@ -30,7 +30,7 @@ export const RangePicker = ({
       <div
         className="flex flex-wrap gap-1"
         role="group"
-        aria-label={t('dashboard.title')}
+        aria-label={t('dashboard.periodLabel')}
       >
         {RANGES.map((r) => (
           <Button

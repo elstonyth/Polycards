@@ -166,7 +166,7 @@ export const attentionWithdrawals = (
   total: number,
 ) => ({
   count: total,
-  capped: total > rows.length,
+  amountPartial: total > rows.length,
   amount: rows.reduce((sum, r) => sum + r.amount, 0),
   oldest: oldestOf(rows),
 });

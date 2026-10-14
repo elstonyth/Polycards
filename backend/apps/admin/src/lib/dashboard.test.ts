@@ -233,25 +233,25 @@ describe('attentionWithdrawals', () => {
     );
     expect(a).toEqual({
       count: 2,
-      capped: false,
+      amountPartial: false,
       amount: 150.5,
       oldest: '2026-10-14T01:00:00Z',
     });
   });
-  it('flags a total beyond the fetched page', () => {
+  it('keeps the exact count; only the RM sum covers just the fetched page', () => {
     const rows = Array.from({ length: 50 }, (_, i) =>
       wd(String(i), 1, '2026-10-14T00:00:00Z'),
     );
     expect(attentionWithdrawals(rows, 73)).toMatchObject({
       count: 73,
-      capped: true,
+      amountPartial: true,
       amount: 50,
     });
   });
   it('is empty with nothing held', () => {
     expect(attentionWithdrawals([], 0)).toEqual({
       count: 0,
-      capped: false,
+      amountPartial: false,
       amount: 0,
       oldest: null,
     });

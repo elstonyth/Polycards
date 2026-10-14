@@ -1,12 +1,17 @@
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Container, Heading, StatusBadge, Text } from '@medusajs/ui';
-import { useGatewayDeposits, useGatewayWithdrawals } from '../../lib/queries';
+import {
+  useRecentGatewayDeposits,
+  useRecentGatewayWithdrawals,
+} from '../../lib/queries';
 import { rm, timeAgo } from '../../lib/format';
 import { latestPayments, paymentStatus } from '../../lib/dashboard';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { isForbidden } from './helpers';
 import { SectionError } from './SectionState';
+
+const SHOWN = 6;
 
 /** The newest top-ups and withdrawals together; a row opens the player. */
 export const LatestPaymentsCard = ({
@@ -15,17 +20,20 @@ export const LatestPaymentsCard = ({
   className?: string;
 }) => {
   const { t } = useTranslation();
-  // 'all' sorts newest first; same query keys as the Deposits/Withdrawals
-  // pages' "All" view, so the cache is shared.
-  const deposits = useGatewayDeposits(0, 'all');
-  const withdrawals = useGatewayWithdrawals(0, 'all');
+  // The newest few of each; the routes sort the 'all' view newest first.
+  const deposits = useRecentGatewayDeposits(SHOWN);
+  const withdrawals = useRecentGatewayWithdrawals(SHOWN);
   const forbidden =
     (deposits.isError && isForbidden(deposits.error)) ||
     (withdrawals.isError && isForbidden(withdrawals.error));
   if (forbidden) return null;
   const rows =
     deposits.data && withdrawals.data
-      ? latestPayments(deposits.data.deposits, withdrawals.data.withdrawals, 6)
+      ? latestPayments(
+          deposits.data.deposits,
+          withdrawals.data.withdrawals,
+          SHOWN,
+        )
       : undefined;
 
   return (
@@ -38,7 +46,7 @@ export const LatestPaymentsCard = ({
           to="/ledger"
           className="txt-compact-small text-ui-fg-interactive hover:text-ui-fg-interactive-hover"
         >
-          {t('dashboard.viewAll')} →
+          {t('dashboard.viewAll')} <span aria-hidden>→</span>
         </Link>
       </div>
       {deposits.isError || withdrawals.isError ? (
@@ -63,9 +71,12 @@ export const LatestPaymentsCard = ({
               <li key={`${r.kind}-${r.id}`}>
                 <Link
                   to={`/customers/${r.customerId}`}
-                  className="hover:bg-ui-bg-base-hover -mx-2 grid grid-cols-[32px_1fr_auto_auto] items-center gap-3 rounded-md px-2 py-2.5"
+                  className="hover:bg-ui-bg-base-hover -mx-2 grid grid-cols-[32px_minmax(0,1fr)_7.5rem_8.5rem] items-center gap-x-4 rounded-md px-2 py-2.5"
                 >
-                  <span className="bg-ui-bg-component text-ui-fg-subtle txt-compact-xsmall-plus flex size-8 items-center justify-center rounded-full uppercase">
+                  <span
+                    aria-hidden
+                    className="bg-ui-bg-component text-ui-fg-subtle txt-compact-xsmall-plus flex size-8 items-center justify-center rounded-full uppercase"
+                  >
                     {(r.email ?? '?').slice(0, 2)}
                   </span>
                   <span className="min-w-0">
@@ -90,12 +101,15 @@ export const LatestPaymentsCard = ({
                   <Text
                     size="small"
                     weight="plus"
-                    className={`tabular-nums ${deposit ? 'text-ui-tag-green-text' : 'text-ui-fg-base'}`}
+                    className={`text-right tabular-nums ${deposit ? 'text-ui-tag-green-text' : 'text-ui-fg-base'}`}
                   >
                     {deposit ? '+' : '−'}
                     {rm(r.amount)}
                   </Text>
-                  <StatusBadge color={s.color}>{t(s.labelKey)}</StatusBadge>
+                  {/* Fixed-width columns: amounts share one right edge, badges one left edge. */}
+                  <StatusBadge color={s.color} className="justify-self-start">
+                    {t(s.labelKey)}
+                  </StatusBadge>
                 </Link>
               </li>
             );

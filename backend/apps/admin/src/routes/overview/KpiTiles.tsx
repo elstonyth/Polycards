@@ -121,7 +121,14 @@ const CompareBars = ({ cur, prev }: { cur: number; prev: number }) => {
 };
 
 /** The four headline figures for the picked window (GET /admin/stats). */
-export const KpiTiles = ({ report }: { report: StatsReport | undefined }) => {
+export const KpiTiles = ({
+  report,
+  failed = false,
+}: {
+  report: StatsReport | undefined;
+  /** The stats query failed: a dash, not an endless skeleton. */
+  failed?: boolean;
+}) => {
   const { t } = useTranslation();
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -144,7 +151,13 @@ export const KpiTiles = ({ report }: { report: StatsReport | undefined }) => {
             </div>
             {cur === undefined || prev === undefined ? (
               <div className="mt-3">
-                <LoadingSkeleton />
+                {failed ? (
+                  <Text className="text-ui-fg-muted text-[28px] font-semibold">
+                    —
+                  </Text>
+                ) : (
+                  <LoadingSkeleton />
+                )}
               </div>
             ) : (
               <>

@@ -28,3 +28,6 @@ export const isForbidden = (err: unknown): boolean => {
   const status = httpStatus(err);
   return status === 401 || status === 403;
 };
+
+/** How often the Dashboard refreshes itself while its tab is visible. */
+export const LIVE_MS = 30_000;

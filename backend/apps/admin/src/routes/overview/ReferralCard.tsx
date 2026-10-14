@@ -51,6 +51,11 @@ export const ReferralCard = ({ className = '' }: { className?: string }) => {
   if (runs.isError && isForbidden(runs.error)) return null;
   const series = referralSeries(runs.data ?? [], 12);
   const last = series.length - 1;
+  // Only the latest week carries a value label (keyed by position, not value).
+  const data = series.map((p, i) => ({
+    ...p,
+    top: i === last ? rm(p.amount) : '',
+  }));
 
   return (
     <Container
@@ -62,7 +67,7 @@ export const ReferralCard = ({ className = '' }: { className?: string }) => {
           to="/referrals"
           className="txt-compact-small text-ui-fg-interactive hover:text-ui-fg-interactive-hover"
         >
-          {t('dashboard.openReferrals')} →
+          {t('dashboard.openReferrals')} <span aria-hidden>→</span>
         </Link>
       </div>
       <Text size="xsmall" className="text-ui-fg-muted">
@@ -79,49 +84,51 @@ export const ReferralCard = ({ className = '' }: { className?: string }) => {
           )}
         </Text>
       ) : (
-        <div
-          className="h-52 w-full"
-          role="img"
-          aria-label={t('dashboard.refTitle')}
-        >
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={series}
-              margin={{ top: 24, right: 4, bottom: 0, left: 4 }}
-            >
-              <XAxis
-                dataKey="label"
-                tick={{ fill: 'var(--fg-subtle)', fontSize: 11 }}
-                tickLine={false}
-                axisLine={false}
-                interval="preserveStartEnd"
-                minTickGap={24}
-              />
-              <Tooltip
-                cursor={{ fill: 'var(--bg-base-hover)' }}
-                content={<RefTooltip />}
-              />
-              <Bar
-                dataKey="amount"
-                radius={[4, 4, 0, 0]}
-                isAnimationActive={!prefersReducedMotion()}
-                animationDuration={700}
+        <>
+          <ul className="sr-only">
+            {series.map((p) => (
+              <li key={p.key}>
+                {t('dashboard.weekOf', { label: p.label })}: {rm(p.amount)}
+              </li>
+            ))}
+          </ul>
+          <div className="h-52 w-full" aria-hidden>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={data}
+                margin={{ top: 24, right: 4, bottom: 0, left: 4 }}
               >
-                {series.map((p, i) => (
-                  <Cell key={p.key} fill={i === last ? LATEST : REST} />
-                ))}
-                <LabelList
-                  dataKey="amount"
-                  position="top"
-                  className="fill-ui-fg-base text-xs font-medium"
-                  formatter={(v: unknown) =>
-                    v === series[last].amount ? rm(Number(v)) : ''
-                  }
+                <XAxis
+                  dataKey="label"
+                  tick={{ fill: 'var(--fg-subtle)', fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
+                  interval="preserveStartEnd"
+                  minTickGap={24}
                 />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+                <Tooltip
+                  cursor={{ fill: 'var(--bg-base-hover)' }}
+                  content={<RefTooltip />}
+                />
+                <Bar
+                  dataKey="amount"
+                  radius={[4, 4, 0, 0]}
+                  isAnimationActive={!prefersReducedMotion()}
+                  animationDuration={700}
+                >
+                  {series.map((p, i) => (
+                    <Cell key={p.key} fill={i === last ? LATEST : REST} />
+                  ))}
+                  <LabelList
+                    dataKey="top"
+                    position="top"
+                    className="fill-ui-fg-base text-xs font-medium"
+                  />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </>
       )}
     </Container>
   );

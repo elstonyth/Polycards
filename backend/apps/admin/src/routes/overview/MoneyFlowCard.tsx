@@ -87,9 +87,12 @@ const NetChange = ({ cur, prev }: { cur: number; prev: number }) => {
 /** Headline net cash in (picked window) over the 12-period money chart. */
 export const MoneyFlowCard = ({
   stats,
+  statsFailed = false,
   className = '',
 }: {
   stats: StatsReport | undefined;
+  /** The stats query failed: show a dash, not an endless skeleton. */
+  statsFailed?: boolean;
   className?: string;
 }) => {
   const { t } = useTranslation();
@@ -111,7 +114,11 @@ export const MoneyFlowCard = ({
               · {t('dashboard.netCashHint')}
             </span>
           </Text>
-          {net === undefined || prevNet === undefined ? (
+          {statsFailed && !stats ? (
+            <Text className="text-ui-fg-muted mt-1 text-[36px] font-semibold leading-tight">
+              —
+            </Text>
+          ) : net === undefined || prevNet === undefined ? (
             <div className="mt-2 w-40">
               <LoadingSkeleton />
             </div>
@@ -182,67 +189,73 @@ export const MoneyFlowCard = ({
           {t('dashboard.noFlow')}
         </Text>
       ) : (
-        <div
-          className="h-64 w-full"
-          role="img"
-          aria-label={t('dashboard.flowTitle')}
-        >
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart
-              data={series}
-              margin={{ top: 8, right: 8, bottom: 0, left: -8 }}
-            >
-              <defs>
-                <linearGradient id="pc-flow-in" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={IN} stopOpacity={0.28} />
-                  <stop offset="100%" stopColor={IN} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid
-                vertical={false}
-                stroke={GRID}
-                strokeDasharray="3 5"
-              />
-              <XAxis
-                dataKey="label"
-                tick={TICK}
-                tickLine={false}
-                axisLine={false}
-                minTickGap={16}
-              />
-              <YAxis
-                tick={TICK}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={axisRm}
-                width={48}
-              />
-              <Tooltip
-                cursor={{ stroke: GRID, strokeDasharray: '3 4' }}
-                content={<FlowTooltip granularity={granularity} />}
-              />
-              <Area
-                type="monotone"
-                dataKey="moneyIn"
-                stroke={IN}
-                strokeWidth={2}
-                fill="url(#pc-flow-in)"
-                isAnimationActive={animate}
-                animationDuration={900}
-              />
-              <Line
-                type="monotone"
-                dataKey="moneyOut"
-                stroke={OUT}
-                strokeWidth={2}
-                strokeDasharray="5 5"
-                dot={false}
-                isAnimationActive={animate}
-                animationDuration={900}
-              />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
+        <>
+          <ul className="sr-only">
+            {series.map((p) => (
+              <li key={p.key}>
+                {p.label}: {t('dashboard.moneyIn')} {rm(p.moneyIn)},{' '}
+                {t('dashboard.moneyOut')} {rm(p.moneyOut)}
+              </li>
+            ))}
+          </ul>
+          <div className="h-64 w-full" aria-hidden>
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart
+                data={series}
+                margin={{ top: 8, right: 8, bottom: 0, left: -8 }}
+              >
+                <defs>
+                  <linearGradient id="pc-flow-in" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={IN} stopOpacity={0.28} />
+                    <stop offset="100%" stopColor={IN} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid
+                  vertical={false}
+                  stroke={GRID}
+                  strokeDasharray="3 5"
+                />
+                <XAxis
+                  dataKey="label"
+                  tick={TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  minTickGap={16}
+                />
+                <YAxis
+                  tick={TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={axisRm}
+                  width={48}
+                />
+                <Tooltip
+                  cursor={{ stroke: GRID, strokeDasharray: '3 4' }}
+                  content={<FlowTooltip granularity={flow.data.granularity} />}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="moneyIn"
+                  stroke={IN}
+                  strokeWidth={2}
+                  fill="url(#pc-flow-in)"
+                  isAnimationActive={animate}
+                  animationDuration={900}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="moneyOut"
+                  stroke={OUT}
+                  strokeWidth={2}
+                  strokeDasharray="5 5"
+                  dot={false}
+                  isAnimationActive={animate}
+                  animationDuration={900}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </>
       )}
     </Container>
   );

@@ -91,6 +91,15 @@ export const qk = {
   // 2-segment prefix — invalidates ALL delivery-order pages/filters in one call
   deliveryOrdersKey: ['admin', 'delivery-orders'] as const,
   deliveryOrder: (id: string) => ['admin', 'delivery-order', id] as const,
+  // Dashboard (spec §7): a count-only read per status, and the newest few
+  // payments. Under the list prefixes so every invalidation of the full lists
+  // (order updates, withdrawal approve/deny) refreshes these too.
+  deliveryOrderCount: (status: string) =>
+    ['admin', 'delivery-orders', 'count', status] as const,
+  recentGatewayDeposits: (limit: number) =>
+    ['admin', 'gateway-deposits', 'recent', limit] as const,
+  recentGatewayWithdrawals: (limit: number) =>
+    ['admin', 'gateway-withdrawals', 'recent', limit] as const,
   fxRate: ['admin', 'pricing', 'fx'] as const,
   fxHistory: ['admin', 'pricing', 'fx', 'history'] as const,
   voucherLadder: ['admin', 'daily-rewards', 'vouchers'] as const,

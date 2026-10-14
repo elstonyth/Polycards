@@ -192,7 +192,25 @@
   }
 }
 
+/* "Live" marker in the Dashboard header: the data refreshes every 30s. */
+.pc-dashboard .pc-live-dot {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--tag-green-icon);
+}
+.pc-dashboard .pc-live-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+  animation: pc-ping 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .pc-dashboard .pc-live-dot::after,
   .pc-dashboard .pc-settle,
   .pc-dashboard .pc-grow,
   .pc-dashboard .pc-ping::after {

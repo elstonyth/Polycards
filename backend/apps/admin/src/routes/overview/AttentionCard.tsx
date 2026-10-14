@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { Button, Container, Heading, Text } from '@medusajs/ui';
 import { ArrowUpTray, Clock, Gift, TruckFast } from '@medusajs/icons';
 import {
-  useDeliveryOrders,
+  useDeliveryOrderCount,
   useGatewayDeposits,
   useGatewayWithdrawals,
   useReferralSettlements,
@@ -44,7 +44,10 @@ const Row = ({ item }: { item: Item }) => (
       variant={item.urgent ? 'primary' : 'secondary'}
       asChild
     >
-      <Link to={item.to}>{item.action}</Link>
+      {/* Several rows share a verb ("Review"); the label names the queue. */}
+      <Link to={item.to} aria-label={`${item.action}: ${item.title}`}>
+        {item.action}
+      </Link>
     </Button>
   </div>
 );
@@ -54,12 +57,15 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   const { t } = useTranslation();
   const held = useGatewayWithdrawals(0, 'held');
   const pending = useGatewayDeposits(0, 'pending');
-  const requested = useDeliveryOrders('requested');
-  const processed = useDeliveryOrders('processed');
-  const ready = useDeliveryOrders('ready_to_ship');
+  const requested = useDeliveryOrderCount('requested');
+  const processed = useDeliveryOrderCount('processed');
+  const ready = useDeliveryOrderCount('ready_to_ship');
   const runs = useReferralSettlements();
   const queries = [held, pending, requested, processed, ready, runs];
   // A query this role may not read is left out; any other failure shows.
+  // If the role can read none of them, the card hides rather than claim
+  // "all clear" about queues it can't see.
+  if (queries.every((q) => q.isError && isForbidden(q.error))) return null;
   const failed = queries.filter((q) => q.isError && !isForbidden(q.error));
   const loading = queries.some((q) => q.isPending);
 
@@ -67,19 +73,18 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   if (held.data) {
     const w = attentionWithdrawals(held.data.withdrawals, held.data.total);
     if (w.count > 0) {
-      const shown = w.capped ? `${w.count}+` : String(w.count);
       items.push({
         id: 'withdrawals',
         icon: <ArrowUpTray />,
-        title: t('dashboard.withdrawalsToApprove', { count: w.count, shown }),
+        title: t('dashboard.withdrawalsToApprove', {
+          count: w.count,
+          shown: String(w.count),
+        }),
         detail: t(
-          w.capped
+          w.amountPartial
             ? 'dashboard.withdrawalsDetailCapped'
             : 'dashboard.withdrawalsDetail',
-          {
-            amount: rm(w.amount),
-            age: w.oldest ? timeAgo(w.oldest) : '—',
-          },
+          { amount: rm(w.amount), age: w.oldest ? timeAgo(w.oldest) : '—' },
         ),
         to: '/withdrawals',
         action: t('dashboard.review'),
@@ -105,7 +110,7 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
     }
   }
   const toShip = [requested, processed, ready].reduce(
-    (n, q) => n + (q.data?.total ?? 0),
+    (n, q) => n + (q.data ?? 0),
     0,
   );
   if (toShip > 0) {
