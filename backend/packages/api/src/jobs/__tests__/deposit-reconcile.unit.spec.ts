@@ -76,13 +76,14 @@ function harness(deposit: Record<string, unknown> = pendingRow) {
       ),
     ),
     claimDepositStatus: jest.fn().mockResolvedValue(true),
-    topUpCreditsWithLedger: jest.fn().mockResolvedValue({
+    // A fresh credit writes exactly what it was asked for.
+    topUpCreditsWithLedger: jest.fn(async (input: { amount: number }) => ({
       id: 'ct_1',
-      balance: 50,
-      amount: 50,
+      balance: input.amount,
+      amount: input.amount,
       replayed: false,
       reference: null,
-    }),
+    })),
   } satisfies FakeFacet<GatewayDeposits>;
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const container = {

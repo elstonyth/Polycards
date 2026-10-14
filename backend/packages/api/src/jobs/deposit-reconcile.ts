@@ -7,7 +7,7 @@ import {
   alertPayinVerifyFail,
   applyDepositOutcome,
   anyGatewayEnabled,
-  isPayinVerifyFail,
+  sweepAlertsVerifyFail,
 } from '../modules/packs/gateway-deposit';
 import {
   getDepositDetail,
@@ -186,7 +186,7 @@ export default async function depositReconcileJob(container: MedusaContainer) {
           config,
           rowFx(deposit),
         );
-        if (isPayinVerifyFail(deposit.gateway, detail.statusId)) {
+        if (sweepAlertsVerifyFail(deposit, detail.statusId)) {
           alertPayinVerifyFail(container, deposit);
         }
         action = reconcileAction({
