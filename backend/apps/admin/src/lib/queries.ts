@@ -1703,3 +1703,32 @@ export const useDeleteAnnouncement = () => {
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.announcements }),
   });
 };
+
+// ── Dashboard (spec §7) ──────────────────────────────────────────────────────
+// Light reads for the home page: a count per delivery status (limit 1, only
+// `total` is used) and the newest few payments, instead of 50-row pages.
+
+export const useDeliveryOrderCount = (
+  status: DeliveryStatus,
+): UseQueryResult<number> =>
+  useQuery({
+    queryKey: qk.deliveryOrderCount(status),
+    queryFn: () => listDeliveryOrders(status, 0, undefined, 1),
+    select: (page) => page.total,
+  });
+
+export const useRecentGatewayDeposits = (
+  limit: number,
+): UseQueryResult<GatewayDepositsResponse> =>
+  useQuery({
+    queryKey: qk.recentGatewayDeposits(limit),
+    queryFn: () => getGatewayDeposits(0, 'all', limit),
+  });
+
+export const useRecentGatewayWithdrawals = (
+  limit: number,
+): UseQueryResult<GatewayWithdrawalsResponse> =>
+  useQuery({
+    queryKey: qk.recentGatewayWithdrawals(limit),
+    queryFn: () => getGatewayWithdrawals(0, 'all', limit),
+  });

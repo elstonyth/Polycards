@@ -27,8 +27,9 @@ const TOP = [
   'Storefront',
 ];
 const REDIRECTS = [
-  ['/', '/stats'],
-  ['/orders', '/stats'],
+  ['/', '/overview'],
+  ['/orders', '/overview'],
+  ['/stats', '/overview'],
   ['/customers', '/players'],
   ['/reservations', '/inventory/list'],
   ['/products', '/cards'],
@@ -38,7 +39,7 @@ const REDIRECTS = [
   ['/site', '/announcements'],
 ];
 const PAGES = [
-  '/stats',
+  '/overview',
   '/deliveries',
   '/withdrawals',
   '/deposits',
@@ -119,7 +120,7 @@ for (const [from, to] of REDIRECTS) {
   check(here() === to, `${from} → ${to} (got ${here()})`);
 }
 
-await page.goto(`${ADMIN}/stats`);
+await page.goto(`${ADMIN}/overview`);
 await settle();
 const top = await page.$$eval(
   '[data-testid="sidebar-core-routes"] a[data-testid^="sidebar-nav-link-"]',
@@ -173,6 +174,110 @@ for (const id of HIDDEN_SETTINGS) {
     .catch(() => false);
   check(!visible, `settings/${id} hidden`);
 }
+
+// Dashboard: every section renders and none shows its load error.
+await page.goto(`${ADMIN}/overview`);
+await settle();
+await page.waitForTimeout(1500);
+for (const heading of [
+  'Dashboard',
+  'Money in vs money out',
+  'Needs your attention',
+  'Referral commission per week',
+  'Latest payments',
+]) {
+  check(
+    await page.getByText(heading, { exact: true }).first().isVisible(),
+    `dashboard shows "${heading}"`,
+  );
+}
+check(
+  (await page.getByText("Couldn't load this section.").count()) === 0,
+  'no dashboard section failed to load',
+);
+
+// Medusa's bell is in the header (positive control) but hidden.
+const bell = page.locator('[data-testid="notifications-trigger-button"]');
+check((await bell.count()) > 0, 'notification bell still rendered by Medusa');
+check(!(await bell.first().isVisible()), 'notification bell hidden');
+
+// Attention alert: the tab title carries the waiting count, and the Sound
+// switch toggles and remembers its choice.
+const title = await page.title();
+check(/^(\(\d+\) )?Polycards Admin$/.test(title), `tab title "${title}"`);
+const sound = page.getByRole('switch', { name: 'Sound' });
+check(
+  (await sound.getAttribute('aria-checked')) === 'false',
+  'sound starts off',
+);
+await sound.click();
+check(
+  (await sound.getAttribute('aria-checked')) === 'true' &&
+    (await page.evaluate(() => localStorage.getItem('pc-dashboard-sound'))) ===
+      'on',
+  'sound switch turns on and is remembered',
+);
+await sound.click();
+await page.screenshot({ path: `${OUT}/overview-light.png`, fullPage: true });
+
+// The alert itself, without touching data: count the chime's oscillators,
+// then make one queue grow by answering its next read with one more order.
+await page.addInitScript(() => {
+  window.__osc = 0;
+  const Base = window.AudioContext;
+  window.AudioContext = class extends Base {
+    createOscillator() {
+      window.__osc += 1;
+      return super.createOscillator();
+    }
+  };
+});
+await page.goto(`${ADMIN}/overview`);
+await settle();
+await page.waitForTimeout(1500);
+const countIn = (t) => Number(/^\((\d+)\)/.exec(t)?.[1] ?? 0);
+const before = countIn(await page.title());
+await page.getByRole('switch', { name: 'Sound' }).click();
+const preview = await page.evaluate(() => window.__osc);
+check(preview === 2, `turning sound on plays a preview chime (${preview})`);
+await page.route('**/admin/delivery-orders?*', async (route) => {
+  const url = new URL(route.request().url());
+  if (url.searchParams.get('status') !== 'requested') return route.continue();
+  const response = await route.fetch();
+  const body = await response.json();
+  await route.fulfill({ response, json: { ...body, total: body.total + 1 } });
+});
+await page.evaluate(() =>
+  document.dispatchEvent(new Event('visibilitychange')),
+);
+await page.waitForTimeout(2500);
+const after = countIn(await page.title());
+const played = (await page.evaluate(() => window.__osc)) - preview;
+check(
+  after === before + 1,
+  `tab count rises on a new order (${before} → ${after})`,
+);
+check(played === 2, `a new order plays the chime (${played} oscillators)`);
+await page.unroute('**/admin/delivery-orders?*');
+await page.getByRole('switch', { name: 'Sound' }).click();
+
+// The same page in Medusa's dark theme (the operator's own choice).
+const dark = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  colorScheme: 'dark',
+});
+await dark.addInitScript(() =>
+  localStorage.setItem('medusa_admin_theme', 'dark'),
+);
+await dark.request.post(`${BACKEND}/auth/session`, {
+  headers: { authorization: `Bearer ${token}` },
+});
+const darkPage = await dark.newPage();
+await darkPage.goto(`${ADMIN}/overview`);
+await darkPage.waitForSelector('nav', { timeout: 60000 });
+await darkPage.waitForTimeout(3000);
+await darkPage.screenshot({ path: `${OUT}/overview-dark.png`, fullPage: true });
+await dark.close();
 
 check(errors.length === 0, `no page errors (${errors.length})`);
 for (const e of errors) console.log(`  ${e}`);
