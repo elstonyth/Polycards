@@ -27,15 +27,19 @@ const pageFiles = (dir: string): string[] =>
   });
 
 const routePath = (file: string): string =>
-  '/' + relative(ROUTES, file).replace(/\\/g, '/').replace(/\/?page\.tsx$/, '');
+  '/' +
+  relative(ROUTES, file)
+    .replace(/\\/g, '/')
+    .replace(/\/?page\.tsx$/, '');
+
+const configBody = (file: string): string | undefined =>
+  readFileSync(file, 'utf8').match(
+    /export const config(?::\s*RouteConfig)?\s*=\s*\{([\s\S]*?)\n\};/,
+  )?.[1];
 
 const readConfig = (file: string): PageConfig | null => {
-  const src = readFileSync(file, 'utf8');
-  const m = src.match(
-    /export const config(?::\s*RouteConfig)?\s*=\s*\{([\s\S]*?)\n\};/,
-  );
-  if (!m) return null;
-  const body = m[1];
+  const body = configBody(file);
+  if (body === undefined) return null;
   const str = (key: string) =>
     body.match(new RegExp(`\\b${key}:\\s*['"]([^'"]+)['"]`))?.[1];
   const rank = body.match(/\brank:\s*(-?\d+)/)?.[1];
@@ -118,13 +122,35 @@ const GROUPS: Group[] = [
   },
 ];
 
+// Core list pages replaced by a redirect (spec §6.2). Phase 2 repoints
+// /orders (the post-login landing) from /stats to /overview.
+const REDIRECTS: [string, string][] = [
+  ['/orders', '/stats'],
+  ['/customers', '/players'],
+  ['/reservations', '/inventory/list'],
+  ['/products', '/cards'],
+  ['/inventory', '/inventory/list'],
+];
+
 // Label-only group parents: their page just redirects to the first child.
 const STUBS = ['/payments', '/rewards', '/site'];
 
 const CORE_IDS = [
-  'orders', 'products', 'offers', 'collections', 'categories', 'inventory',
-  'reservations', 'customers', 'customer-groups', 'promotions', 'campaigns',
-  'price-lists', 'stores', 'reviews', 'payouts',
+  'orders',
+  'products',
+  'offers',
+  'collections',
+  'categories',
+  'inventory',
+  'reservations',
+  'customers',
+  'customer-groups',
+  'promotions',
+  'campaigns',
+  'price-lists',
+  'stores',
+  'reviews',
+  'payouts',
 ];
 
 const lookup = (key: string): unknown =>
@@ -132,11 +158,16 @@ const lookup = (key: string): unknown =>
     .split('.')
     .reduce<unknown>(
       (o, k) =>
-        o && typeof o === 'object' ? (o as Record<string, unknown>)[k] : undefined,
+        o && typeof o === 'object'
+          ? (o as Record<string, unknown>)[k]
+          : undefined,
       en,
     );
 
-const entry = (c: PageConfig): Entry => ({ path: c.path, label: c.label ?? '' });
+const entry = (c: PageConfig): Entry => ({
+  path: c.path,
+  label: c.label ?? '',
+});
 
 describe('sidebar contract (Vault spec §6)', () => {
   it('shows exactly the 8 top-level entries, in order', () => {
@@ -161,19 +192,60 @@ describe('sidebar contract (Vault spec §6)', () => {
   it('labels every entry through i18n with an English string', () => {
     for (const c of configs) {
       expect(c.translationNs, c.path).toBe('translation');
-      expect(typeof lookup(c.label ?? ''), `${c.path}: ${c.label}`).toBe('string');
+      expect(typeof lookup(c.label ?? ''), `${c.path}: ${c.label}`).toBe(
+        'string',
+      );
     }
   });
 
   it('sends each label-only group to its first page', () => {
     for (const g of GROUPS.filter((x) => STUBS.includes(x.path))) {
-      const src = readFileSync(join(ROUTES, g.path.slice(1), 'page.tsx'), 'utf8');
+      const src = readFileSync(
+        join(ROUTES, g.path.slice(1), 'page.tsx'),
+        'utf8',
+      );
       expect(src).toContain(`<Navigate to="${g.children[0].path}" replace />`);
     }
   });
 
+  it('parses every page that declares a config, with an integer rank', () => {
+    // The SDK reads `export const config` as literals and ignores a rank that
+    // isn't a plain non-negative integer; a page this parser misses would
+    // drop out of every assertion above while still showing in the sidebar.
+    for (const file of pageFiles(ROUTES)) {
+      if (!/\bconst config\b/.test(readFileSync(file, 'utf8'))) continue;
+      expect(readConfig(file), routePath(file)).not.toBeNull();
+      const rank = configBody(file)
+        ?.match(/\brank:\s*([^,\n]+)/)?.[1]
+        .trim();
+      expect(rank, routePath(file)).toMatch(/^\d+$/);
+    }
+  });
+
+  it('gives nested entries no icon (the sidebar never renders one)', () => {
+    for (const file of pageFiles(ROUTES)) {
+      const c = readConfig(file);
+      if (!c?.nested) continue;
+      expect(configBody(file), c.path).not.toMatch(/\bicon:/);
+    }
+  });
+
+  it.each(REDIRECTS)('%s redirects to %s', (from, to) => {
+    const src = readFileSync(join(ROUTES, from.slice(1), 'page.tsx'), 'utf8');
+    expect(src).toContain(`<Navigate to="${to}" replace />`);
+    expect(src).not.toMatch(/export const config/);
+  });
+
+  it('sends a role without order:read to the same landing page', () => {
+    const src = readFileSync(join(ROUTES, 'orders', 'page.tsx'), 'utf8');
+    const landing = REDIRECTS.find(([from]) => from === '/orders')?.[1];
+    expect(src).toContain(`redirectTo: '${landing}'`);
+  });
+
   it('hides exactly the 15 core sidebar items', () => {
-    expect(navigation.items.map((i) => i.id).sort()).toEqual([...CORE_IDS].sort());
+    expect(navigation.items.map((i) => i.id).sort()).toEqual(
+      [...CORE_IDS].sort(),
+    );
     expect(navigation.items.every((i) => i.hidden === true)).toBe(true);
   });
 });

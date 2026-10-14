@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Container, Heading, Input, Table, Text } from '@medusajs/ui';
-import { Plus, Receipt } from '@medusajs/icons';
+import { Plus } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { usePurchaseInvoices } from '../../lib/queries';
 import { orderDateTime, rm } from '../../lib/format';
@@ -12,7 +12,6 @@ import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 export const config: RouteConfig = {
   label: 'pcNav.purchaseInvoices',
   translationNs: 'translation',
-  icon: Receipt,
   rank: 2,
   nested: '/inventory/list',
 };

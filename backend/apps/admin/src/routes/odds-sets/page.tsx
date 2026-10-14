@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Button,
   Container,
@@ -12,7 +12,6 @@ import {
   Table,
   Text,
 } from '@medusajs/ui';
-import { Users } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useCreateCustomerGroup,
@@ -35,7 +34,6 @@ import {
 export const config: RouteConfig = {
   label: 'pcNav.playerGroups',
   translationNs: 'translation',
-  icon: Users,
   rank: 0,
   nested: '/players',
 };
@@ -174,7 +172,19 @@ const GroupRow = ({ group }: { group: AdminCustomerGroup }) => {
 
   return (
     <Table.Row>
-      <Table.Cell>{group.name}</Table.Cell>
+      <Table.Cell>
+        <Text size="small" weight="plus" leading="compact">
+          {group.name}
+        </Text>
+        {/* The core group page is the only home of membership and the bulk
+            group-credit widget, and its sidebar tab is hidden (_navigation.ts). */}
+        <Link
+          to={`/customer-groups/${group.id}`}
+          className="txt-compact-small text-ui-fg-interactive hover:text-ui-fg-interactive-hover"
+        >
+          {t('oddsSets.membersLink')}
+        </Link>
+      </Table.Cell>
       <Table.Cell>
         <Select
           value={String(value)}

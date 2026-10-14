@@ -15,7 +15,7 @@ import {
   Tooltip,
   toast,
 } from "@medusajs/ui";
-import { CheckCircle, InformationCircleSolid } from "@medusajs/icons";
+import { InformationCircleSolid } from '@medusajs/icons';
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import {
   useCards,
@@ -63,7 +63,6 @@ import { RowActions } from "../../components/RowActions";
 export const config: RouteConfig = {
   label: "pcNav.tasks",
   translationNs: "translation",
-  icon: CheckCircle,
   rank: 1,
   nested: "/rewards",
 };

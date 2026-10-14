@@ -12,7 +12,6 @@ import {
   toast,
   usePrompt,
 } from '@medusajs/ui';
-import { ArrowUpTray } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useGatewayWithdrawals,
@@ -32,7 +31,6 @@ import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 export const config: RouteConfig = {
   label: 'pcNav.withdrawals',
   translationNs: 'translation',
-  icon: ArrowUpTray,
   rank: 0,
   nested: '/payments',
 };

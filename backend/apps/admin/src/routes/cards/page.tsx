@@ -17,7 +17,7 @@ import {
   toast,
   usePrompt,
 } from '@medusajs/ui';
-import { Link, Sparkles } from '@medusajs/icons';
+import { Link } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { type AdminCard, type AdminCardUpdate } from '../../lib/packs-api';
 import {
@@ -43,7 +43,6 @@ import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 export const config: RouteConfig = {
   label: 'pcNav.cards',
   translationNs: 'translation',
-  icon: Sparkles,
   rank: 0,
   nested: '/packs',
 };

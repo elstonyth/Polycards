@@ -1,7 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { Container, Heading, Tabs, Text } from '@medusajs/ui';
-import { Receipt } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { usePaymentGateway } from '../../lib/queries';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
@@ -23,7 +22,6 @@ import { AuditCard } from './AuditCard';
 export const config: RouteConfig = {
   label: 'pcNav.reconciliation',
   translationNs: 'translation',
-  icon: Receipt,
   rank: 3,
   nested: '/payments',
 };

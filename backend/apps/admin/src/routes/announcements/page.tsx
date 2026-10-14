@@ -12,7 +12,7 @@ import {
   Text,
   toast,
 } from '@medusajs/ui';
-import { BellAlert, XMark } from '@medusajs/icons';
+import { XMark } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useAnnouncements,
@@ -35,7 +35,6 @@ import { RowActions } from '../../components/RowActions';
 export const config: RouteConfig = {
   label: 'pcNav.announcements',
   translationNs: 'translation',
-  icon: BellAlert,
   rank: 0,
   nested: '/site',
 };

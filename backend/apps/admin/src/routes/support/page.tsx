@@ -14,7 +14,6 @@ import {
   Text,
   toast,
 } from "@medusajs/ui";
-import { Buildings } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import { searchCustomers, type SupportCustomer } from "../../lib/admin-rest";
 import {
@@ -32,7 +31,6 @@ import { adjustCreditVars, isBonusGrant } from "../../lib/credit-kind";
 export const config: RouteConfig = {
   label: "pcNav.customerSupport",
   translationNs: "translation",
-  icon: Buildings,
   rank: 2,
   nested: "/players",
 };

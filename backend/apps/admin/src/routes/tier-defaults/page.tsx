@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Container, Heading, Input, Table, Text } from '@medusajs/ui';
-import { Sparkles } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { RARITIES, type TierRangeMap } from '@acme/odds-math';
 import { useSaveTierSettings, useTierSettings } from '../../lib/queries';
@@ -18,7 +17,6 @@ import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 export const config: RouteConfig = {
   label: 'pcNav.pricing',
   translationNs: 'translation',
-  icon: Sparkles,
   rank: 1,
   nested: '/packs',
 };

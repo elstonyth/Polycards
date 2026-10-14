@@ -983,7 +983,8 @@
     "defaultLocked": "Locked — set 1, no policy",
     "empty": "No customer groups yet. Create one above, or manage them on the Customer Groups page.",
     "goToGroups": "Go to Customer Groups",
-    "loadError": "Could not load customer groups."
+    "loadError": "Could not load customer groups.",
+    "membersLink": "Members & bulk credit →"
   },
   "ledger": {
     "title": "Transactions",

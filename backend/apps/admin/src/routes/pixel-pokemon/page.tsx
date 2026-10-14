@@ -10,7 +10,6 @@ import {
   clx,
   toast,
 } from '@medusajs/ui';
-import { Photo } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   usePixelPokemon,
@@ -25,7 +24,6 @@ import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 export const config: RouteConfig = {
   label: 'pcNav.sprites',
   translationNs: 'translation',
-  icon: Photo,
   rank: 2,
   nested: '/packs',
 };

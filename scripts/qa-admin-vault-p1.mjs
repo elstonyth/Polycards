@@ -31,6 +31,8 @@ const REDIRECTS = [
   ['/orders', '/stats'],
   ['/customers', '/players'],
   ['/reservations', '/inventory/list'],
+  ['/products', '/cards'],
+  ['/inventory', '/inventory/list'],
   ['/payments', '/withdrawals'],
   ['/rewards', '/daily-rewards'],
   ['/site', '/announcements'],

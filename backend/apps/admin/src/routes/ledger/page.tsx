@@ -9,7 +9,7 @@ import {
   Table,
   Text,
 } from '@medusajs/ui';
-import { ChevronDownMini, ChevronRightMini, Receipt } from '@medusajs/icons';
+import { ChevronDownMini, ChevronRightMini } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { useLedger } from '../../lib/queries';
 import type { LedgerType } from '../../lib/admin-rest';
@@ -21,7 +21,6 @@ import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 export const config: RouteConfig = {
   label: 'pcNav.transactions',
   translationNs: 'translation',
-  icon: Receipt,
   rank: 2,
   nested: '/payments',
 };

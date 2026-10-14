@@ -11,7 +11,6 @@ import {
   toast,
   usePrompt,
 } from '@medusajs/ui';
-import { Users } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useApproveReferralSettlement,
@@ -42,7 +41,6 @@ import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 export const config: RouteConfig = {
   label: 'pcNav.referrals',
   translationNs: 'translation',
-  icon: Users,
   rank: 1,
   nested: '/players',
 };

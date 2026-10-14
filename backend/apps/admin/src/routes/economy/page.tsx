@@ -8,7 +8,6 @@ import {
   Table,
   Text,
 } from "@medusajs/ui";
-import { CurrencyDollar } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import { useEconomy } from "../../lib/queries";
 import { rm } from "../../lib/format";
@@ -18,7 +17,6 @@ import { LoadingSkeleton } from "../../components/LoadingSkeleton";
 export const config: RouteConfig = {
   label: "pcNav.profitReport",
   translationNs: "translation",
-  icon: CurrencyDollar,
   rank: 4,
   nested: "/payments",
 };
