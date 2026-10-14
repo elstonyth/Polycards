@@ -5,6 +5,7 @@ import {
   attentionTitle,
   attentionWithdrawals,
   deltaTone,
+  doublePayAcross,
   doublePayRisks,
   latestPayments,
   moneyFlowSeries,
@@ -428,5 +429,19 @@ describe('doublePayRisks', () => {
         }),
       ]),
     ).toEqual({ count: 0, paid: 0, amount: 0 });
+  });
+
+  // One rail's audit failing to load must not hide the other's risks.
+  it('counts whichever rails loaded, and nothing when none did', () => {
+    const rm = { findings: [finding({})] };
+    expect(doublePayAcross([rm, undefined])).toEqual({
+      count: 1,
+      paid: 0,
+      amount: 512.4,
+    });
+    expect(
+      doublePayAcross([rm, { findings: [finding({ id: 'w3', amount: 10 })] }]),
+    ).toEqual({ count: 2, paid: 0, amount: 522.4 });
+    expect(doublePayAcross([undefined, undefined])).toBeUndefined();
   });
 });
