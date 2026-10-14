@@ -983,7 +983,8 @@
     "defaultLocked": "Locked — set 1, no policy",
     "empty": "No customer groups yet. Create one above, or manage them on the Customer Groups page.",
     "goToGroups": "Go to Customer Groups",
-    "loadError": "Could not load customer groups."
+    "loadError": "Could not load customer groups.",
+    "membersLink": "Members & bulk credit →"
   },
   "ledger": {
     "title": "Transactions",
@@ -1069,5 +1070,34 @@
         "adjustment": "Adjustment"
       }
     }
+  },
+  "pcNav": {
+    "dashboard": "Dashboard",
+    "orders": "Orders",
+    "payments": "Payments",
+    "withdrawals": "Withdrawals",
+    "deposits": "Deposits",
+    "transactions": "Transactions",
+    "reconciliation": "Reconciliation",
+    "profitReport": "Profit report",
+    "players": "Players",
+    "playerGroups": "Player groups",
+    "referrals": "Referrals",
+    "customerSupport": "Customer support",
+    "packs": "Packs",
+    "cards": "Cards",
+    "pricing": "Pricing",
+    "sprites": "Pokémon sprites",
+    "stock": "Stock",
+    "addStock": "Add stock",
+    "importCollection": "Import collection",
+    "purchaseInvoices": "Purchase invoices",
+    "rewards": "Rewards",
+    "vipLevels": "VIP levels",
+    "tasks": "Tasks",
+    "weeklyChallenge": "Weekly challenge",
+    "storefront": "Storefront",
+    "announcements": "Announcements",
+    "cardFrame": "Card frame"
   }
 }

@@ -44,10 +44,10 @@ import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 export const config: RouteConfig = {
-  label: 'All Orders',
+  label: 'pcNav.orders',
+  translationNs: 'translation',
   icon: TruckFast,
-  nested: '/orders',
-  rank: 2,
+  rank: 10,
 };
 
 const STATUSES: DeliveryStatus[] = [

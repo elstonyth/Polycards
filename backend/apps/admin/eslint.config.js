@@ -27,7 +27,7 @@ export default defineConfig([
       // page.tsx for nav — it's a required framework export, not a refactor smell.
       'react-refresh/only-export-components': [
         'error',
-        { allowConstantExport: true, allowExportNames: ['config'] },
+        { allowConstantExport: true, allowExportNames: ['config', 'handle'] },
       ],
     },
   },

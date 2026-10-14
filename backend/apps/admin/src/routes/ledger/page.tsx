@@ -9,7 +9,7 @@ import {
   Table,
   Text,
 } from '@medusajs/ui';
-import { ChevronDownMini, ChevronRightMini, Receipt } from '@medusajs/icons';
+import { ChevronDownMini, ChevronRightMini } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { useLedger } from '../../lib/queries';
 import type { LedgerType } from '../../lib/admin-rest';
@@ -18,11 +18,11 @@ import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
-// rank 31 lands between Economy (30) and Weekly Challenge (33), both top-level.
 export const config: RouteConfig = {
-  label: 'Transactions',
-  icon: Receipt,
-  rank: 31,
+  label: 'pcNav.transactions',
+  translationNs: 'translation',
+  rank: 2,
+  nested: '/payments',
 };
 
 // undefined is the "All" tab. WP (challenge settlement) is written by

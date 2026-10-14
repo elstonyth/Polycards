@@ -6,9 +6,9 @@
  * core dashboard routes (orders, products, ...) whose dense tables we do not
  * own and must not reflow.
  *
- * ONE deliberate exception at the bottom of this file: the §2.1 sidebar-nav
- * rule. The sidebar is rendered by the prebuilt @mercurjs/admin bundle, never
- * by our routes, so `.pc-admin` can never reach it — see the comment there.
+ * Deliberate GLOBAL exceptions, all at the bottom of this file: the Geist
+ * font, and rules on the prebuilt Settings sidebar, which our routes never
+ * render, so `.pc-admin` can never reach it.
  *
  * Plain CSS custom properties (Medusa's own design tokens) rather than @apply
  * or forked components, so this survives a @medusajs/ui upgrade.
@@ -91,58 +91,47 @@
   gap: 0.25rem;
 }
 
-/* --- Sidebar nav -------------------------------------------------------- */
-/* POLYCARD-BACK §2.1: hide the core Collections/Categories sidebar entries.
-   Nav lives in the prebuilt @mercurjs/admin bundle (useCoreRoutes) — not
-   patchable from src/routes. CSS-hide only: the pages stay URL-reachable and
-   Medusa data is untouched (spec baked default).
-
-   /payouts joins them for a different reason: it is Mercur's MARKETPLACE
-   SELLER payout list (@mercurjs/admin's own pages/payouts/*, reading
-   sdk.admin.payouts). Polycards has no marketplace sellers, so it is
-   permanently empty — and its label sits three rows above our own Withdrawals
-   page, so operators looked for customer withdrawals there and concluded they
-   were missing. Customer money-out is Orders → Withdrawals
-   (src/routes/withdrawals, GET /admin/payments/withdrawals), which is a
-   different table and a different API.
-
-   Why CSS and not the supported override: mercurDashboardPlugin's
-   `components.MainSidebar` option exists in the SDK's TYPES but nothing
-   consumes it — as of @mercurjs/{admin,dashboard-sdk} 2.1.6 neither bundle
-   references it or the `virtual:mercur/components` module the plugin emits, so
-   passing it is a silent no-op. Re-check on the next Mercur upgrade; a real
-   override is the better home for all three of these. */
-nav a[href$="/collections"],
-nav a[href$="/categories"],
-nav a[href$="/payouts"] {
-  display: none;
+/* --- Font -------------------------------------------------------------- */
+/*
+ * Geist, the storefront's body face, for the whole admin. Every Medusa rule
+ * (the html base and ~25 txt-* typography classes, some !important) names
+ * `Inter` first, and Mercur ships no Inter webfont — operators were really
+ * reading their OS fallback. Declaring the Geist file under the Inter family
+ * switches every one of those rules at once; a document @font-face also beats
+ * a locally installed Inter. `Geist` is the honest name for our own code.
+ */
+@font-face {
+  font-family: 'Geist';
+  src: url('./assets/fonts/geist-latin-wght-normal.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('./assets/fonts/geist-latin-wght-normal.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
 }
 
-/* Hiding only the <a> left a 28px hole for each entry: the vendored markup
-   wraps every nav row in `<li class="flex h-7 items-center">`, and that FIXED
-   height does not collapse just because its child is invisible. Each hidden
-   entry leaves ~28px of dead space (three of them now), which reads as a
-   rendering glitch rather than a deliberate omission. Collapse the row itself.
+/* --- Prebuilt Settings sidebar (spec §6.3) ------------------------------ */
+/*
+ * Selectors are the prebuilt dashboard's own data-testid hooks — markup we
+ * don't own. Re-check them on every Mercur upgrade.
+ */
 
-   `> * >` scopes this to the entry's OWN <li> (the anchor sits exactly one
-   wrapper deep), so an ancestor <li> that merely contains the link somewhere
-   below it can never match and take a whole nav group down with it.
-
-   The anchor rule above is deliberately kept rather than replaced: it is the
-   fallback where `:has()` is unavailable. Worst case the hole comes back --
-   the hidden link does not. */
-nav li:has(> * > a[href$="/collections"]),
-nav li:has(> * > a[href$="/categories"]) {
+/* Medusa leftovers in the Settings sidebar. _navigation.ts cannot reach the
+   Settings sidebar, so CSS is the only option; the pages stay URL-reachable
+   and no data changes. Users, Sales channels, Locations, Publishable API keys,
+   Marketplace and Regions stay — the store needs them. */
+[data-testid='sidebar-nav-item-settings-tax-regions'],
+[data-testid='sidebar-nav-item-settings-return-reasons'],
+[data-testid='sidebar-nav-item-settings-refund-reasons'],
+[data-testid='sidebar-nav-item-settings-product-types'],
+[data-testid='sidebar-nav-item-settings-product-tags'],
+[data-testid='sidebar-nav-item-settings-attributes'],
+[data-testid='sidebar-nav-item-settings-commissions'],
+[data-testid='sidebar-nav-item-settings-secret-api-keys'] {
   display: none;
 }
-
-/* /payouts is deliberately NOT in the rule above. As of @mercurjs/admin 2.1.6
-   the sidebar no longer wraps nav rows in <li> at all — the anchor sits in a
-   plain `div.w-full` inside `nav.flex.flex-col` — so hiding the <a> collapses
-   the row on its own and an `li:has()` clause would be dead code. Verified in
-   the browser: no gap between Stores and Pixel Pokédex.
-
-   By the same token the two rules above are now legacy: this version's core nav
-   has no Collections or Categories entries and no <li> wrappers, so neither
-   matches anything. They are kept as harmless no-ops in case a future upgrade
-   reintroduces either shape; do not treat them as a working example. */

@@ -12,7 +12,6 @@ import {
   toast,
   usePrompt,
 } from '@medusajs/ui';
-import { ArrowUpTray } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useGatewayWithdrawals,
@@ -30,10 +29,10 @@ import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 export const config: RouteConfig = {
-  label: 'Withdrawals',
-  icon: ArrowUpTray,
-  nested: '/orders',
-  rank: 3,
+  label: 'pcNav.withdrawals',
+  translationNs: 'translation',
+  rank: 0,
+  nested: '/payments',
 };
 
 // held FIRST and is the page's default view (Task 6, plan 094) — a held row

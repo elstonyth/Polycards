@@ -44,9 +44,10 @@ import { GachaPipelineHint } from '../../../components/GachaPipelineHint';
 import { GraderGradeSelect } from '../../../components/GraderGradeSelect';
 
 export const config: RouteConfig = {
-  label: 'Add from PC Collection',
-  nested: '/inventory',
-  rank: 3,
+  label: 'pcNav.importCollection',
+  translationNs: 'translation',
+  rank: 1,
+  nested: '/inventory/list',
 };
 
 // Bulk sibling of /products/from-pricecharting: instead of searching PriceCharting

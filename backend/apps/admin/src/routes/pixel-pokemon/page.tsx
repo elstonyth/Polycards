@@ -10,7 +10,6 @@ import {
   clx,
   toast,
 } from '@medusajs/ui';
-import { Photo } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   usePixelPokemon,
@@ -23,9 +22,10 @@ import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 export const config: RouteConfig = {
-  label: 'Pixel Pokédex',
-  icon: Photo,
-  rank: 5,
+  label: 'pcNav.sprites',
+  translationNs: 'translation',
+  rank: 2,
+  nested: '/packs',
 };
 
 const PAGE_SIZE = 60;
@@ -215,7 +215,7 @@ const PixelPokedexPage = () => {
                   <img
                     src={resolveImageUrl(spriteUrl)}
                     alt=""
-                    className="border-ui-border-base h-16 w-16 shrink-0 rounded border bg-white object-contain"
+                    className="border-ui-border-base h-16 w-16 shrink-0 rounded border bg-ui-bg-component object-contain"
                   />
                 ) : (
                   <div className="border-ui-border-base bg-ui-bg-base text-ui-fg-muted flex h-16 w-16 shrink-0 items-center justify-center rounded border text-xs">
@@ -331,7 +331,7 @@ const PixelPokedexPage = () => {
                     src={resolveImageUrl(p.image_url)}
                     alt={p.name}
                     loading="lazy"
-                    className="h-16 w-16 shrink-0 rounded bg-white object-contain"
+                    className="h-16 w-16 shrink-0 rounded bg-ui-bg-component object-contain"
                   />
                 ) : (
                   <div className="border-ui-border-base bg-ui-bg-base text-ui-fg-muted flex h-16 w-16 shrink-0 items-center justify-center rounded border text-xs">

@@ -34,12 +34,11 @@ import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
-// rank 0 puts this above the core Customers list inside the same group.
 export const config: RouteConfig = {
-  label: 'Players',
+  label: 'pcNav.players',
+  translationNs: 'translation',
   icon: Users,
-  nested: '/customers',
-  rank: 0,
+  rank: 30,
 };
 
 // The player the confirm modal is about. `disabled` here is the player's

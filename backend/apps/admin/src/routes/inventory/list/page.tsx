@@ -41,14 +41,14 @@ import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 // `list` matches neither the core index ('') nor its `:id`, so it is pushed as
 // a sibling and every core URL still resolves to core.
 //
-// rank 0 puts this above "Add from PriceCharting" (1) and "Purchase Invoices"
-// (2) in the Inventory sidebar group. `nested` and `label` are independent of
-// the URL, so the sidebar still reads exactly as specced.
+// The "Stock" entry of the Vault sidebar (spec §6.1); Add stock, Import
+// collection and Purchase invoices nest under this path. `nested` and `label`
+// are independent of the URL, so the sidebar reads as specced.
 export const config: RouteConfig = {
-  label: 'Inventory',
+  label: 'pcNav.stock',
+  translationNs: 'translation',
   icon: ArchiveBox,
-  nested: '/inventory',
-  rank: 0,
+  rank: 50,
 };
 
 // The route truncates ?q= at 100 chars. Matching the input's maxLength keeps

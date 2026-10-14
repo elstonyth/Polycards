@@ -336,3 +336,12 @@ Spec: `docs/superpowers/specs/2026-10-06-task-hub-v2-and-announcements-design.md
 - **Don't** put body text below Silver (#a3a3a3) on dark surfaces; muted-gray-on-charcoal is the #1 legibility failure.
 - **Don't** round containers past 16px or add drop shadows to buttons/cards — matte surfaces, hairline edges, earned glow only.
 - **Don't** gate content behind animations; a reveal enhances an already-visible default.
+
+## Admin console
+
+The operator dashboard (`backend/apps/admin`) is a product-register surface built on Medusa UI. Source of truth: `docs/superpowers/specs/2026-10-14-admin-redesign-design.md`.
+
+- **Colours:** Medusa UI's own light and dark themes, chosen per operator in the user menu. The darker "Vault" palette was tried on 2026-10-14 and set aside by the operator in favour of the original colours.
+- **Type:** Geist, the storefront's body face, self-hosted and aliased over Medusa's `Inter` so core pages switch too.
+- **Navigation:** the 8-entry sidebar, with unused core Medusa tabs hidden through `src/_navigation.ts`.
+- **Signal colours** on custom pages follow the storefront's meanings: green for money in, red for alerts, gold for "needs action".

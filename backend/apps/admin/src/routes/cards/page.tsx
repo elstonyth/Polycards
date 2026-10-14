@@ -17,7 +17,7 @@ import {
   toast,
   usePrompt,
 } from '@medusajs/ui';
-import { Link, Sparkles } from '@medusajs/icons';
+import { Link } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { type AdminCard, type AdminCardUpdate } from '../../lib/packs-api';
 import {
@@ -41,10 +41,10 @@ import { GraderGradeSelect } from '../../components/GraderGradeSelect';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 export const config: RouteConfig = {
-  label: 'Gacha Cards',
-  icon: Sparkles,
-  nested: '/products',
-  rank: 2,
+  label: 'pcNav.cards',
+  translationNs: 'translation',
+  rank: 0,
+  nested: '/packs',
 };
 
 // Edit-only form state (inventory-first: NEW cards are registered from an

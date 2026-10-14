@@ -8,7 +8,6 @@ import {
   Table,
   Text,
 } from "@medusajs/ui";
-import { CurrencyDollar } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import { useEconomy } from "../../lib/queries";
 import { rm } from "../../lib/format";
@@ -16,9 +15,10 @@ import { useTableSort } from "../../lib/use-table-sort";
 import { LoadingSkeleton } from "../../components/LoadingSkeleton";
 
 export const config: RouteConfig = {
-  label: "Economy",
-  icon: CurrencyDollar,
-  rank: 30,
+  label: "pcNav.profitReport",
+  translationNs: "translation",
+  rank: 4,
+  nested: "/payments",
 };
 
 // Period presets for the ledger-total filter. `from` is a snapshot at selection

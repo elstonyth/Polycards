@@ -15,7 +15,7 @@ import {
   Tooltip,
   toast,
 } from "@medusajs/ui";
-import { CheckCircle, InformationCircleSolid } from "@medusajs/icons";
+import { InformationCircleSolid } from '@medusajs/icons';
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import {
   useCards,
@@ -61,9 +61,10 @@ import { RowActions } from "../../components/RowActions";
 // cadence, and the rows read as sentences (labels come from the server — see
 // api/admin/tasks/labels.ts).
 export const config: RouteConfig = {
-  label: "Tasks",
-  icon: CheckCircle,
-  rank: 36, // after Referrals (35)
+  label: "pcNav.tasks",
+  translationNs: "translation",
+  rank: 1,
+  nested: "/rewards",
 };
 
 // One labelled field. Every control in the form goes through this — the old
