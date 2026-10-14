@@ -28,7 +28,8 @@ import {
   validateDeliveryStatusTransition,
   snapshotAddress,
   computeDeliveryFee,
-  isMalaysianAddress,
+  isShippableCountry,
+  isShippablePostcode,
   type AddressSnapshot,
   type DeliveryStatus,
 } from './delivery';
@@ -4777,12 +4778,27 @@ class PacksModuleService extends MedusaService({
     // 2) Snapshot the shipping address (denormalized at request time). A missing
     //    required field is a bad request, surfaced here as 'invalid' (the route
     //    has already resolved + ownership-checked the address upstream).
-    //    Non-MY is 'invalid' too — defense-in-depth behind the route's named
-    //    MY_ONLY_MESSAGE refusal, same layering as the redemption gate above.
+    //    A country we do not ship to, or a postcode we cannot zone, is
+    //    'invalid' too — defense-in-depth behind the route's named refusals,
+    //    same layering as the redemption gate above.
     const snapshot = snapshotAddress(address);
-    if (!snapshot || !isMalaysianAddress(snapshot.ship_country_code)) {
+    if (
+      !snapshot ||
+      !isShippableCountry(snapshot.ship_country_code) ||
+      !isShippablePostcode(snapshot.ship_postal_code, snapshot.ship_country_code)
+    ) {
       return { status: 'invalid' };
     }
+    // Every delivery pays its zone's shipping (operator decision 2026-10-14;
+    // prize cards shipped free before). A prize carries no card value here,
+    // so there is no insurance: the fee is the zone's shipping alone.
+    const fee = computeDeliveryFee(
+      snapshot.ship_postal_code,
+      0,
+      snapshot.ship_province,
+      snapshot.ship_city,
+      snapshot.ship_country_code,
+    );
 
     // 3) Daily-cap COUNT under the lock: today's is_reward delivery orders for
     //    this customer. DeliveryOrder has no draw_day column, so we key the day
@@ -4816,6 +4832,8 @@ class PacksModuleService extends MedusaService({
           status: 'requested' as const,
           is_reward: true,
           ...snapshot,
+          shipping_fee: fee.shipping,
+          insurance_fee: fee.insurance,
         },
       ],
       sharedContext,
@@ -4829,6 +4847,37 @@ class PacksModuleService extends MedusaService({
     // that is both credited and in a live shipment.
     await this.transitionPullStatus(
       { ids: [pullId], from: 'vaulted', to: 'delivering' },
+      sharedContext,
+    );
+
+    // Charge the fee in this same locked transaction, exactly as the paid
+    // path does: the floor guard refuses (and rolls the order back) when the
+    // balance cannot cover it. The OD row carries the charge (vault 0: prize
+    // pulls are outside value tracking) so the cancel arm refunds it.
+    await this.mutateCreditAtomic(
+      {
+        customerId,
+        amount: -fee.total,
+        reason: 'delivery_fee',
+        reference: order.id,
+      },
+      sharedContext,
+    );
+    await this.recordLedgerEntry(
+      {
+        type: 'OD',
+        customerId,
+        refId: order.id,
+        walletDelta: -fee.total,
+        vaultDelta: 0,
+        payload: {
+          type: 'OD',
+          handles: countByHandle([pull.card_id]),
+          status: 'requested',
+          shipping_fee: fee.shipping,
+          insurance_fee: fee.insurance,
+        },
+      },
       sharedContext,
     );
 
@@ -4891,6 +4940,7 @@ class PacksModuleService extends MedusaService({
       vaultDelta,
       input.snapshot.ship_province,
       input.snapshot.ship_city,
+      input.snapshot.ship_country_code,
     );
     if (!Number.isFinite(fee.total) || fee.total <= 0) {
       throw new MedusaError(
@@ -8949,9 +8999,10 @@ class PacksModuleService extends MedusaService({
     // vault back for an order that was never debited drifts the ledger's
     // cumulative vault_delta upward forever with no corresponding liability.
     // Two live sources of debit-less orders, both covered by this one check:
-    // (a) B7 reward-prize shipments — recordRewardWithdrawal (this file)
-    // creates those with NO OD debit, since reward pulls are excluded from
-    // ledger/value tracking everywhere (e.g. Pull.recorded_value_usd);
+    // (a) B7 reward-prize shipments created before 2026-10-14 — until then
+    // recordRewardWithdrawal shipped prizes free with NO OD row. Since then it
+    // writes one carrying the shipping fee and a 0 vault delta (reward pulls
+    // stay outside value tracking), so a cancel refunds that fee here;
     // (b) EVERY ordinary order already sitting in requested/processed/
     // ready_to_ship when this ships — D4 is go-forward-only with no backfill,
     // so those carry is_reward=false AND no debit. Runs on the same `em`

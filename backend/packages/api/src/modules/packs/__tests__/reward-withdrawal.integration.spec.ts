@@ -43,6 +43,8 @@ import AdminActionAudit from '../models/admin-action-audit';
 import VipMemberState from '../models/vip-member-state';
 import VipRewardGrant from '../models/vip-reward-grant';
 import NotificationRead from '../models/notification-read';
+import LedgerEntry from '../models/ledger-entry';
+import LedgerSequence from '../models/ledger-sequence';
 
 jest.setTimeout(300 * 1000);
 
@@ -56,6 +58,14 @@ const ADDRESS = {
   city: 'Kuala Lumpur',
   postal_code: '50000',
   country_code: 'my',
+};
+const SG_ADDRESS = {
+  first_name: 'Tan',
+  last_name: 'Ah Kow',
+  address_1: '10 Marina Boulevard',
+  city: 'Singapore',
+  postal_code: '018983',
+  country_code: 'sg',
 };
 
 moduleIntegrationTestRunner<PacksModuleService>({
@@ -76,6 +86,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
     VipMemberState,
     VipRewardGrant,
     NotificationRead,
+    LedgerEntry,
+    LedgerSequence,
   ],
   testSuite: ({ service }) => {
     // Seed one Pull directly (no draw round-trip needed — B7 only cares about the
@@ -149,6 +161,90 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
         const [pull] = await service.listPulls({ id: pullId }, { take: 1 });
         expect(pull.status).toBe('delivering');
+      });
+
+      // Every delivery pays its zone's shipping (2026-10-14): prizes too.
+      it('charges a prize its zone fee: RM15 West, with the OD row a cancel refunds', async () => {
+        const customerId = 'cus_wd_fee_my';
+        const pullId = await seedPull({ customerId, source: 'reward' });
+        expect(await service.creditBalance(customerId)).toBe(50);
+        const res = await service.recordRewardWithdrawal(
+          customerId,
+          pullId,
+          ADDRESS,
+        );
+        expect(res.status).toBe('requested');
+        expect(await service.creditBalance(customerId)).toBe(35);
+        const [order] = await service.listDeliveryOrders(
+          { customer_id: customerId },
+          { take: 1 },
+        );
+        expect(Number(order.shipping_fee)).toBe(15);
+        expect(Number(order.insurance_fee)).toBe(0);
+
+        // The customer cancels: the fee comes back through the OD reversal.
+        await service.transitionDeliveryOrderStatus({
+          orderId: order.id,
+          to: 'canceled',
+          trackingNumber: null,
+          pullIds: [pullId],
+        });
+        expect(await service.creditBalance(customerId)).toBe(50);
+      });
+
+      it('charges a Singapore prize RM50', async () => {
+        const customerId = 'cus_wd_fee_sg';
+        const pullId = await seedPull({ customerId, source: 'reward' });
+        const res = await service.recordRewardWithdrawal(
+          customerId,
+          pullId,
+          SG_ADDRESS,
+        );
+        expect(res.status).toBe('requested');
+        expect(await service.creditBalance(customerId)).toBe(0);
+        const [order] = await service.listDeliveryOrders(
+          { customer_id: customerId },
+          { take: 1 },
+        );
+        expect(Number(order.shipping_fee)).toBe(50);
+      });
+
+      it('refuses a prize the balance cannot ship (no order, Pull untouched)', async () => {
+        const customerId = 'cus_wd_fee_short';
+        const pullId = await seedPull({ customerId, source: 'reward' });
+        // RM50 topped up, RM45 already spent: RM5 cannot cover Singapore's RM50.
+        await service.mutateCreditAtomic({
+          customerId,
+          amount: -45,
+          reason: 'delivery_fee',
+          reference: 'earlier-order',
+        });
+        await expect(
+          service.recordRewardWithdrawal(customerId, pullId, SG_ADDRESS),
+        ).rejects.toThrow(/exceeds the customer's balance/);
+        expect(
+          await service.listDeliveryOrders({ customer_id: customerId }),
+        ).toHaveLength(0);
+        const [pull] = await service.listPulls({ id: pullId });
+        expect(pull.status).toBe('vaulted');
+        expect(await service.creditBalance(customerId)).toBe(5);
+      });
+
+      it('rejects a country we do not ship to, or a Singapore 5-digit postcode', async () => {
+        const customerId = 'cus_wd_fee_bad';
+        const pullId = await seedPull({ customerId, source: 'reward' });
+        for (const address of [
+          { ...ADDRESS, country_code: 'th' },
+          { ...SG_ADDRESS, postal_code: '18983' },
+        ]) {
+          const res = await service.recordRewardWithdrawal(
+            customerId,
+            pullId,
+            address,
+          );
+          expect(res.status).toBe('invalid');
+        }
+        expect(await service.creditBalance(customerId)).toBe(50);
       });
 
       it('caps a second same-day withdrawal (default withdrawals_per_day=1)', async () => {

@@ -6,8 +6,10 @@ import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import {
-  isMalaysianAddress,
+  isShippableCountry,
+  isShippablePostcode,
   MY_ONLY_MESSAGE,
+  postcodeMessage,
 } from '../../../../modules/packs/delivery';
 
 // POST /store/rewards/withdraw — ship a vaulted reward-prize Pull as a physical
@@ -87,11 +89,22 @@ export async function POST(
       '`address` requires firstName, lastName, address1, city, postalCode, and countryCode.',
     );
   }
-  // MY-only shipping (2026-08-25) — same rule as the paid delivery flow.
-  // Reward prizes stay fee-exempt, but the geographic gate is a shipping rule,
-  // not a fee rule, so this path carries it too.
-  if (!isMalaysianAddress(fields.country_code as string)) {
+  // Malaysia and Singapore only, with a postcode we can zone — the same rules
+  // as the paid delivery flow. Since 2026-10-14 a prize pays its zone's
+  // shipping too (recordRewardWithdrawal), so the zone must be priceable.
+  if (!isShippableCountry(fields.country_code as string)) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, MY_ONLY_MESSAGE);
+  }
+  if (
+    !isShippablePostcode(
+      fields.postal_code as string,
+      fields.country_code as string,
+    )
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      postcodeMessage(fields.country_code as string),
+    );
   }
 
   // Optional lines of the saved address. The paid path snapshots them from the

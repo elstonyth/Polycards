@@ -611,7 +611,9 @@ medusaIntegrationTestRunner({
       // promo credit opened a pack and shipped the card without depositing.
       it('refuses delivery for an account that never topped up, leaving the pull vaulted', async () => {
         const token = await registerCustomer('del-notopup@test.dev');
-        const me = await api.get('/store/customers/me', { headers: authed(token) });
+        const me = await api.get('/store/customers/me', {
+          headers: authed(token),
+        });
         const customerId = me.data.customer.id as string;
         const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
         await packs.mutateCreditAtomic({
@@ -638,7 +640,10 @@ medusaIntegrationTestRunner({
         const [pull] = await packs.listPulls({ id: pullId }, { take: 1 });
         expect(pull.status).toBe('vaulted');
         expect(
-          await packs.listDeliveryOrders({ customer_id: customerId }, { take: 10 }),
+          await packs.listDeliveryOrders(
+            { customer_id: customerId },
+            { take: 10 },
+          ),
         ).toHaveLength(0);
       });
 
@@ -702,7 +707,9 @@ medusaIntegrationTestRunner({
           { pull_ids: [pullId], address_id: gbAddress },
         );
         expect(refused.status).toBe(400);
-        expect(JSON.stringify(refused.data)).toMatch(/within Malaysia only/);
+        expect(JSON.stringify(refused.data)).toMatch(
+          /within Malaysia and Singapore only/,
+        );
 
         // Request with a West address, then try to re-point at an East one —
         // the fee zone would change, so the edit is refused; a same-zone edit
@@ -735,6 +742,33 @@ medusaIntegrationTestRunner({
           { address_id: westB },
         );
         expect(sameZone.status).toBe(200);
+
+        // Singapore is its own, dearer zone (RM50) — and an order that paid
+        // no fee (before fees, or a free prize before 2026-10-14) may not be
+        // re-pointed there either, or it would ship to Singapore for nothing.
+        const sgAddr = await addAddress(token, {
+          postal_code: '018983',
+          country_code: 'sg',
+        });
+        const toSingapore = await reqApi(
+          'post',
+          `/store/delivery-orders/${orderId}/address`,
+          authed(token),
+          { address_id: sgAddr },
+        );
+        expect(toSingapore.status).toBe(400);
+        expect(JSON.stringify(toSingapore.data)).toMatch(/zone/);
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.updateDeliveryOrders([
+          { id: orderId, shipping_fee: null, insurance_fee: null },
+        ]);
+        const unpaidToSingapore = await reqApi(
+          'post',
+          `/store/delivery-orders/${orderId}/address`,
+          authed(token),
+          { address_id: sgAddr },
+        );
+        expect(unpaidToSingapore.status).toBe(400);
       });
     });
   },

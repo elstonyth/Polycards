@@ -46,6 +46,8 @@ import AdminActionAudit from '../models/admin-action-audit';
 import VipMemberState from '../models/vip-member-state';
 import VipRewardGrant from '../models/vip-reward-grant';
 import NotificationRead from '../models/notification-read';
+import LedgerEntry from '../models/ledger-entry';
+import LedgerSequence from '../models/ledger-sequence';
 
 import { POST as claimPOST } from '../../../api/store/rewards/claim/[grantId]/route';
 import { POST as withdrawPOST } from '../../../api/store/rewards/withdraw/route';
@@ -84,6 +86,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
     VipMemberState,
     VipRewardGrant,
     NotificationRead,
+    // A prize delivery writes the OD ledger row that carries its fee.
+    LedgerEntry,
+    LedgerSequence,
   ],
   testSuite: ({ service }) => {
     // Build a mock req/res. scope.resolve returns the real packs service for every
@@ -297,7 +302,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(err).toBeDefined();
         expect((err as { type?: string }).type).toBe('invalid_data');
         expect((err as { message?: string }).message).toBe(
-          'We currently ship within Malaysia only.',
+          'We currently ship within Malaysia and Singapore only.',
         );
         expect(captured.body).toBeUndefined();
         const [after] = await service.listPulls({ id: pull.id }, { take: 1 });
