@@ -10,8 +10,10 @@ import {
   sweepAlertsVerifyFail,
 } from '../modules/packs/gateway-deposit';
 import {
+  GATEWAYS,
   getDepositDetail,
   resolveActiveGateway,
+  rowGateway,
   rowGatewayConfigs,
 } from '../modules/packs/gateway';
 import { toOptionalMoney } from '../modules/packs/money';
@@ -71,6 +73,13 @@ let expiredCursor: Date | null = null;
 export function __resetFullSweepMarkerForTests(): void {
   lastFullSweepAt = null;
   expiredCursor = null;
+}
+
+/** The RM ceiling a requeried credit may reach on this row: its gateway's own
+ *  (A3Pay's S$5,000 top-ups pass RM 10,000), else the site-wide one. */
+function depositCeiling(deposit: { gateway?: string | null }): number {
+  const gateway = rowGateway(deposit);
+  return gateway ? GATEWAYS[gateway].limits.depositMax : GATEWAY_MAX_RM;
 }
 
 export default async function depositReconcileJob(container: MedusaContainer) {
@@ -196,6 +205,7 @@ export default async function depositReconcileJob(container: MedusaContainer) {
           createdAt: new Date(deposit.created_at),
           now,
           lock: { fx: rowFx(deposit), reported: Number(detail.reportedAmount) },
+          ceiling: depositCeiling(deposit),
         });
       } catch (error) {
         // A refusal we cannot attribute must never write a row off — a rotated
@@ -266,7 +276,7 @@ export default async function depositReconcileJob(container: MedusaContainer) {
           );
         }
         logger.error(
-          `[deposit-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, ${action.reason === 'off-lock' ? `${detail?.reportedAmount} in the gateway's currency, more than a nudge from the row's locked ${deposit.gateway_amount}` : `above the RM ${GATEWAY_MAX_RM} deposit ceiling`} — not credited, not written off; left ${deposit.status} for manual settlement`,
+          `[deposit-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, ${action.reason === 'off-lock' ? `${detail?.reportedAmount} in the gateway's currency, more than a nudge from the row's locked ${deposit.gateway_amount}` : `above the RM ${depositCeiling(deposit)} deposit ceiling`} — not credited, not written off; left ${deposit.status} for manual settlement`,
         );
         continue;
       }

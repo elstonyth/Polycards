@@ -314,7 +314,12 @@ export async function startDeposit(
     };
   }
 
-  const invalid = topUpAmountError(creditAmount);
+  // A regional top-up is bounded by its own S$ band (above), which credits
+  // past the site-wide RM ceiling at S$5,000; its RM fence is its own.
+  const invalid = topUpAmountError(
+    creditAmount,
+    fx ? GATEWAYS[gateway].limits.depositMax : undefined,
+  );
   if (invalid) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, invalid);
   }
@@ -529,7 +534,8 @@ export async function startDeposit(
   const relock =
     nudged !== null &&
     nudged.credit <= GATEWAYS[gateway].limits.depositMax &&
-    topUpAmountError(nudged.credit) === null
+    topUpAmountError(nudged.credit, GATEWAYS[gateway].limits.depositMax) ===
+      null
       ? nudged
       : null;
   await packs.updateGatewayDeposits({

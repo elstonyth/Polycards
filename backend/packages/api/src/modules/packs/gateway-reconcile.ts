@@ -121,6 +121,9 @@ export type ReconcileInput = {
   now: Date;
   /** The row's FX lock and what the gateway reported in ITS currency. */
   lock?: { fx: RowFx; reported: number };
+  /** The row's gateway's RM deposit ceiling; GATEWAY_MAX_RM when unknown.
+   *  A3Pay's is higher (S$5,000 top-ups credit past RM 10,000). */
+  ceiling?: number;
 };
 
 /**
@@ -149,7 +152,7 @@ export function reconcileAction(input: ReconcileInput): ReconcileAction {
     // top-up. THIS is the sweep's only amount guard, so it is what keeps a
     // wrong requery from minting balance. Over it we quarantine rather than
     // settle or write off, because the customer may genuinely have paid.
-    if (input.amount > GATEWAY_MAX_RM) {
+    if (input.amount > (input.ceiling ?? GATEWAY_MAX_RM)) {
       return { kind: 'quarantine', amount: input.amount, reason: 'ceiling' };
     }
     // Except on a row locked in another currency: A3Pay matches a payin only

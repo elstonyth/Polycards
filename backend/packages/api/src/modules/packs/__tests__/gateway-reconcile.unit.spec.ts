@@ -111,6 +111,27 @@ describe('reconcileAction', () => {
     expect(action.kind).not.toBe('expire');
   });
 
+  it("honours the row gateway's own ceiling: an S$5,000 top-up settles, an RM one still quarantines", () => {
+    expect(
+      reconcileAction({
+        state: 'success',
+        amount: 15850.3,
+        createdAt: minutesAgo(5),
+        now,
+        ceiling: 20000,
+      }),
+    ).toEqual({ kind: 'settle', amount: 15850.3 });
+    expect(
+      reconcileAction({
+        state: 'success',
+        amount: 10000.01,
+        createdAt: minutesAgo(5),
+        now,
+        ceiling: 10000,
+      }),
+    ).toMatchObject({ kind: 'quarantine', reason: 'ceiling' });
+  });
+
   it('settles a success exactly AT the ceiling', () => {
     expect(
       reconcileAction({
