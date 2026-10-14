@@ -1,7 +1,7 @@
 // Phase 1 check for the Vault admin redesign
 // (docs/superpowers/plans/2026-10-14-admin-vault-phase1.md, Task 4).
 // Logs in with a QA token (see qa-stats-shot.mjs), checks the sidebar, the
-// redirects, the pinned dark theme, the Geist font and the Settings clean-up,
+// redirects, the Geist font and the Settings clean-up,
 // and screenshots every custom page plus the kept Settings pages.
 // Requires the backend on :9000 and this branch's admin dev server on :7000.
 //
@@ -94,10 +94,6 @@ const browser = await chromium.launch({
 const ctx = await browser.newContext({
   viewport: { width: 1440, height: 900 },
 });
-// A "light" choice stored before the redesign must not survive the pin.
-await ctx.addInitScript(() =>
-  localStorage.setItem('medusa_admin_theme', 'light'),
-);
 const session = await ctx.request.post(`${BACKEND}/auth/session`, {
   headers: { authorization: `Bearer ${token}` },
 });
@@ -135,18 +131,12 @@ check(
   `sidebar = ${top.join(' · ')}`,
 );
 
-const theme = await page.evaluate(() => ({
-  dark: document.documentElement.classList.contains('dark'),
-  bg: getComputedStyle(document.documentElement)
-    .getPropertyValue('--bg-subtle')
-    .trim(),
-  font: [...document.fonts].some(
+const geistLoaded = await page.evaluate(() =>
+  [...document.fonts].some(
     (f) => f.family.replace(/["']/g, '') === 'Inter' && f.status === 'loaded',
   ),
-}));
-check(theme.dark, 'dark theme pinned over a stored "light"');
-check(theme.bg === '#0a0a0a', `--bg-subtle is Vault ink (got "${theme.bg}")`);
-check(theme.font, 'Geist file loaded under the Inter family');
+);
+check(geistLoaded, 'Geist file loaded under the Inter family');
 
 const firstCustomer = await ctx.request
   .get(`${BACKEND}/admin/customers?limit=1&fields=id`)

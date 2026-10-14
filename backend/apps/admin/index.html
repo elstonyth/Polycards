@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark" style="color-scheme: dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/public/logo.svg" />
@@ -8,14 +8,6 @@
   </head>
   <body>
     <div id="root"></div>
-    <script>
-      // Vault is dark-only (docs/superpowers/specs/2026-10-14-admin-redesign-design.md
-      // §5.1). The dashboard's ThemeProvider reads this key on boot, so pinning it
-      // here also overrides a "light" choice stored before the redesign.
-      try {
-        localStorage.setItem('medusa_admin_theme', 'dark');
-      } catch (e) {}
-    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

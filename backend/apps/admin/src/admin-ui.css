@@ -6,10 +6,9 @@
  * core dashboard routes (orders, products, ...) whose dense tables we do not
  * own and must not reflow.
  *
- * Deliberate GLOBAL exceptions, all at the bottom of this file: the Vault
- * theme (Medusa colour variables + the Geist font), and rules on the prebuilt
- * sidebar and user menu, which our routes never render, so `.pc-admin` can
- * never reach them.
+ * Deliberate GLOBAL exceptions, all at the bottom of this file: the Geist
+ * font, and rules on the prebuilt Settings sidebar, which our routes never
+ * render, so `.pc-admin` can never reach it.
  *
  * Plain CSS custom properties (Medusa's own design tokens) rather than @apply
  * or forked components, so this survives a @medusajs/ui upgrade.
@@ -92,61 +91,7 @@
   gap: 0.25rem;
 }
 
-/* --- Vault theme (Vault spec §5) ---------------------------------------- */
-/*
- * Re-themes the whole dashboard, core pages included, through Medusa UI's own
- * colour variables — never their markup. index.html pins the dark theme and
- * the user-menu theme switch is hidden below, so `.dark` is always the active
- * class; the same values are declared on :root so a stray light class can't
- * produce a half-light page. Anything not listed keeps Medusa's dark default
- * (the blue interactive/focus colour, tags, danger buttons).
- */
-:root,
-.dark {
-  --bg-subtle: #0a0a0a;
-  --bg-subtle-hover: #121212;
-  --bg-subtle-pressed: #171717;
-  --bg-base: #141414;
-  --bg-base-hover: #1a1a1a;
-  --bg-base-pressed: #1f1f1f;
-  --bg-component: #1f1f1f;
-  --bg-component-hover: #262626;
-  --bg-component-pressed: #2e2e2e;
-  --bg-field: #161616;
-  --bg-field-hover: #1c1c1c;
-  --bg-field-component: #1f1f1f;
-  --bg-field-component-hover: #262626;
-  --bg-highlight: rgba(255, 255, 255, 0.05);
-  --bg-highlight-hover: rgba(255, 255, 255, 0.08);
-  --bg-disabled: #1a1a1a;
-  --fg-base: #fafafa;
-  --fg-subtle: #a3a3a3;
-  --fg-muted: #8f8f8f;
-  --fg-disabled: #5c5c5c;
-  --fg-on-inverted: #0a0a0a;
-  --border-base: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.14);
-  --button-inverted: #fafafa;
-  --button-inverted-hover: #e5e5e5;
-  --button-inverted-pressed: #d4d4d4;
-  --button-neutral: #1f1f1f;
-  --button-neutral-hover: #262626;
-  --button-neutral-pressed: #2e2e2e;
-  --button-transparent-hover: rgba(255, 255, 255, 0.06);
-  --button-transparent-pressed: rgba(255, 255, 255, 0.1);
-  --elevation-card-rest: 0 0 0 1px rgba(255, 255, 255, 0.08);
-  --elevation-card-hover: 0 0 0 1px rgba(255, 255, 255, 0.14);
-}
-
-/* Medusa's primary button paints its label with --contrast-fg-primary, a light
-   tone made for its own grey button: on Vault's white primary that is white on
-   white. The token itself can't change — tooltips and other dark "contrast"
-   surfaces share it — so the label colour is set on the button. A disabled
-   button keeps its own, more specific, disabled colour. */
-[class~='bg-ui-button-inverted'] {
-  color: var(--fg-on-inverted);
-}
-
+/* --- Font -------------------------------------------------------------- */
 /*
  * Geist, the storefront's body face, for the whole admin. Every Medusa rule
  * (the html base and ~25 txt-* typography classes, some !important) names
@@ -170,23 +115,11 @@
   font-display: swap;
 }
 
-/* --- Prebuilt sidebar and user menu (Vault spec §5.3, §6.3) ------------- */
+/* --- Prebuilt Settings sidebar (spec §6.3) ------------------------------ */
 /*
- * Selectors are the prebuilt dashboard's own data-testid hooks and its
- * ACTIVE_NAV_LINK_CLASSES token (`bg-ui-bg-base`). Re-check them on every
- * Mercur upgrade: they are markup we don't own.
+ * Selectors are the prebuilt dashboard's own data-testid hooks — markup we
+ * don't own. Re-check them on every Mercur upgrade.
  */
-
-/* The active row sits on the raised graphite step, like the mockup. */
-[data-testid='sidebar'] a[class~='bg-ui-bg-base'] {
-  background-color: var(--bg-component);
-}
-
-/* Vault is dark-only; the Profile → Theme submenu would only offer a broken
-   light mode. */
-[data-testid='sidebar-user-menu-theme-trigger'] {
-  display: none;
-}
 
 /* Medusa leftovers in the Settings sidebar. _navigation.ts cannot reach the
    Settings sidebar, so CSS is the only option; the pages stay URL-reachable

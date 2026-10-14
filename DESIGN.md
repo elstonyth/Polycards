@@ -336,19 +336,12 @@ Spec: `docs/superpowers/specs/2026-10-06-task-hub-v2-and-announcements-design.md
 - **Don't** put body text below Silver (#a3a3a3) on dark surfaces; muted-gray-on-charcoal is the #1 legibility failure.
 - **Don't** round containers past 16px or add drop shadows to buttons/cards — matte surfaces, hairline edges, earned glow only.
 - **Don't** gate content behind animations; a reveal enhances an already-visible default.
-## Admin console (Vault)
 
-The operator dashboard (`backend/apps/admin`) wears the same identity in its product register, named **Vault**. Source of truth: `docs/superpowers/specs/2026-10-14-admin-redesign-design.md` §5.
+## Admin console
 
-- **Dark only.** The dark theme is pinned in `index.html` and the theme switch is hidden.
-- **Colours live on Medusa UI's own variables** in `admin-ui.css`, so core pages inherit them:
-  - surfaces: page `#0a0a0a`, panel `#141414`, control `#1f1f1f`;
-  - text: `#fafafa` / `#a3a3a3` / `#8f8f8f`;
-  - hairline: `rgba(255,255,255,.08)`;
-  - primary action: Paper White on Ink Black.
-- **Signal colours only:**
-  - Buyback Green FG: money in;
-  - Alarm Red: alerts, and a rise in money out;
-  - Chase Gold: "needs action" and the current-period emphasis.
-- **Type:** Geist for UI, self-hosted and aliased over Medusa's `Inter`. Nekst Black only for headline money figures on the Dashboard.
-- **Surfaces and motion:** matte panels, 14px radius, no drop shadows on in-flow surfaces. Motion lives on the Dashboard and is fully off under `prefers-reduced-motion`.
+The operator dashboard (`backend/apps/admin`) is a product-register surface built on Medusa UI. Source of truth: `docs/superpowers/specs/2026-10-14-admin-redesign-design.md`.
+
+- **Colours:** Medusa UI's own light and dark themes, chosen per operator in the user menu. The darker "Vault" palette was tried on 2026-10-14 and set aside by the operator in favour of the original colours.
+- **Type:** Geist, the storefront's body face, self-hosted and aliased over Medusa's `Inter` so core pages switch too.
+- **Navigation:** the 8-entry sidebar, with unused core Medusa tabs hidden through `src/_navigation.ts`.
+- **Signal colours** on custom pages follow the storefront's meanings: green for money in, red for alerts, gold for "needs action".

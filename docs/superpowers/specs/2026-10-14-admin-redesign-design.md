@@ -47,7 +47,7 @@ Non-goals:
 | D3  | Chart library     | Recharts, added to the admin workspace only.                                                                                                            |
 | D4  | Language          | English now. Every custom-page string moves into `en.json`. The existing `statsBoard.*` Chinese keeps working on the Dashboard tiles.                   |
 | D5  | Unused core pages | All 15 core tabs are hidden from the sidebar. The core Orders list, core Customers list and Reservations also redirect. The rest stay reachable by URL. |
-| V   | Visual direction  | "Vault" (§5): matte black, white actions, colour only as a signal, Nekst numbers.                                                                       |
+| V   | Visual direction  | "Vault" (§5): matte black, white actions, colour only as a signal, Nekst numbers. **Colours reverted to Medusa's originals on 2026-10-14; see §5.** |
 
 ## 4. What can be changed, and how (verified in the 2.3.3 bundle)
 
@@ -66,6 +66,8 @@ Non-goals:
   - A custom override of a core path keeps the core handle (handles are merged). So the `/orders` override still requires `order:read`.
 
 ## 5. Visual system: Vault
+
+> **Update 2026-10-14 (operator, after seeing Phase 1 live):** keep Medusa's original colours. The Vault colour layer (§5.1 tokens, the pinned dark theme, the hidden theme switch, the active-row and primary-button rules) was removed from Phase 1. What stays: Geist (§5.2), the Settings clean-up, and the signal-colour meanings on custom pages. The colour sections below are kept as the record of what was tried, and as a starting point if the operator wants them back. The Dashboard look (Phase 2) will be re-confirmed against the original colours before it is built.
 
 Polycards' storefront palette, applied to an operator console. Matte black surfaces, white actions, and colour only when it means something: money in, an alert, or something waiting for the operator. The numbers that matter use Nekst Black. Everything else is quiet.
 
