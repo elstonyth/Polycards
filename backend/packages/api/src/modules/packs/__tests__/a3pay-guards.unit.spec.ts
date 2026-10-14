@@ -174,12 +174,12 @@ describe('a regional top-up A3Pay nudges by a cent', () => {
       updateGatewayDeposits: jest.fn().mockResolvedValue(undefined),
     };
   }
-  const pay = (packs: ReturnType<typeof depositPacks>) =>
+  const pay = (packs: ReturnType<typeof depositPacks>, amount = 50) =>
     startDeposit(
       scopeFor(packs),
       {
         customerId: 'cus_1',
-        amount: 50,
+        amount,
         ipAddress: '1.2.3.4',
         gateway: 'a3pay',
         paymentMethodCode: 'BQR',
@@ -225,6 +225,33 @@ describe('a regional top-up A3Pay nudges by a cent', () => {
       amount_requested: 155.03,
     });
     expect(result.amount).toBe(155.03);
+  });
+
+  // Operator decision 2026-10-14: S$ top-ups go up to A3Pay's own S$5,000,
+  // which credits past the RM 10,000 that caps RM top-ups.
+  it('takes S$5,000 (RM 15,500 at 3.10) and re-locks its nudge', async () => {
+    payinActual = 5000.01;
+    const packs = depositPacks();
+    const result = await pay(packs, 5000);
+    expect(packs.createDepositCapped.mock.calls[0][0].data).toMatchObject({
+      amount_requested: 15500,
+      gateway_amount: 5000,
+    });
+    expect(packs.updateGatewayDeposits).toHaveBeenCalledWith({
+      id: 'gpd_1',
+      gateway_transaction_id: 'D2026101200009999',
+      gateway_amount: 5000.01,
+      amount_requested: 15500.03,
+    });
+    expect(result.amount).toBe(15500.03);
+  });
+
+  it("refuses more than A3Pay's own S$5,000 before any row", async () => {
+    const packs = depositPacks();
+    await expect(pay(packs, 5000.01)).rejects.toThrow(
+      /between SGD 30.00 and SGD 5,000.00/,
+    );
+    expect(packs.createDepositCapped).not.toHaveBeenCalled();
   });
 
   it('an un-nudged order keeps its lock', async () => {

@@ -190,17 +190,20 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
       withdrawal: '/hooks/a3pay/withdrawal',
       payoutVerify: '/hooks/a3pay/payout-verify',
     },
-    // RM fences on the CONVERTED amount (the same ceilings as the RM
-    // gateway), plus A3Pay's own SGD band — read from the back office
+    // RM fences on the CONVERTED amount, plus A3Pay's own SGD band — read from the back office
     // (Merchant Transaction Setting, 2026-10-12): deposit OB / BQR S$10 –
     // 5,000 (2.5% fee), payout WD S$50 – 10,000 (1.5% fee). The top-up band
     // is further narrowed at quote time so the RM credit fits the RM band
     // (payment-fx.ts regionalDepositBand). OUR top-up floor is S$30, above
     // A3Pay's S$10 (operator decision, 2026-10-12). The payout floor is S$30:
     // A3Pay lowered its WD minimum from S$50 for us on 2026-10-12.
+    // The top-up RM ceiling is NOT the RM gateway's 10,000 (operator
+    // decision, 2026-10-14): S$ top-ups go up to A3Pay's own S$5,000, about
+    // RM 15,850 at 3.17. 20,000 admits S$5,000 plus a nudge at any rate under
+    // RM 4 per S$; above that, regionalDepositBand narrows the S$ band.
     limits: {
       depositMin: 30,
-      depositMax: 10000,
+      depositMax: 20000,
       withdrawalMin: 50,
       withdrawalMax: 30000,
     },
