@@ -7,8 +7,8 @@
  * own and must not reflow.
  *
  * Deliberate GLOBAL exceptions, all at the bottom of this file: the Geist
- * font, and rules on the prebuilt Settings sidebar, which our routes never
- * render, so `.pc-admin` can never reach it.
+ * font, and rules on the prebuilt Settings sidebar and header bell, which our
+ * routes never render, so `.pc-admin` can never reach them.
  *
  * Plain CSS custom properties (Medusa's own design tokens) rather than @apply
  * or forked components, so this survives a @medusajs/ui upgrade.
@@ -38,7 +38,7 @@
  * forking the size variants. Inputs are already h-8; small Select triggers and
  * IconButtons go 28 -> 32.
  */
-.pc-admin :is(button, input, textarea, select, [role="combobox"]) {
+.pc-admin :is(button, input, textarea, select, [role='combobox']) {
   min-height: 2rem;
 }
 
@@ -59,17 +59,17 @@
  * weight to a quiet outline and bring the danger colour back on hover/focus.
  * Page- and modal-level destructive buttons keep their full weight.
  */
-.pc-admin :is(td, .pc-row-actions) button[class*="bg-ui-button-danger"] {
+.pc-admin :is(td, .pc-row-actions) button[class*='bg-ui-button-danger'] {
   background: transparent;
   color: var(--fg-error);
   box-shadow: inset 0 0 0 1px var(--border-error);
 }
-.pc-admin :is(td, .pc-row-actions) button[class*="bg-ui-button-danger"]::after {
+.pc-admin :is(td, .pc-row-actions) button[class*='bg-ui-button-danger']::after {
   display: none;
 }
 .pc-admin
   :is(td, .pc-row-actions)
-  button[class*="bg-ui-button-danger"]:is(:hover, :focus-visible) {
+  button[class*='bg-ui-button-danger']:is(:hover, :focus-visible) {
   background: var(--button-danger);
   color: var(--fg-on-color);
 }
@@ -133,5 +133,98 @@
 [data-testid='sidebar-nav-item-settings-attributes'],
 [data-testid='sidebar-nav-item-settings-commissions'],
 [data-testid='sidebar-nav-item-settings-secret-api-keys'] {
+  display: none;
+}
+
+/* --- Dashboard motion (spec §5.4, scoped to /overview) ------------------- */
+/*
+ * Short settle-in for each panel, bars that grow to their value and a soft
+ * ping on items waiting for the operator. Each animation starts from a
+ * keyframe and ends on the element's own styles, so content is complete
+ * whether or not the animation runs; reduced motion turns all of it off.
+ */
+.pc-dashboard .pc-settle {
+  animation: pc-settle 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes pc-settle {
+  from {
+    opacity: 0.001;
+    transform: translateY(8px);
+  }
+}
+
+.pc-dashboard .pc-grow {
+  animation: pc-grow 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes pc-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+.pc-dashboard .pc-ping {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 9999px;
+  background: var(--tag-orange-icon);
+  box-shadow: 0 0 0 2px var(--bg-subtle);
+}
+.pc-dashboard .pc-ping::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+  animation: pc-ping 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+@keyframes pc-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  80%,
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+/* "Live" marker in the Dashboard header: the data refreshes every 30s. */
+.pc-dashboard .pc-live-dot {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--tag-green-icon);
+}
+.pc-dashboard .pc-live-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+  animation: pc-ping 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pc-dashboard .pc-live-dot::after,
+  .pc-dashboard .pc-settle,
+  .pc-dashboard .pc-grow,
+  .pc-dashboard .pc-ping::after {
+    animation: none;
+  }
+}
+
+/* --- Header notification bell ------------------------------------------- */
+/*
+ * Medusa's bell counts every notification row, and on this store those are
+ * customer emails and storefront feed items with no title: it lights up and
+ * opens an empty list. Hidden until it carries operator alerts; the Dashboard's
+ * attention card (with its sound switch) is where waiting work shows.
+ */
+[data-testid='notifications-trigger-button'] {
   display: none;
 }

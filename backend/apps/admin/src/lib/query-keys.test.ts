@@ -443,4 +443,24 @@ describe('qk', () => {
       qk.inventory('charizard').slice(0, qk.inventoryItemKey.length),
     ).not.toEqual([...qk.inventoryItemKey]);
   });
+
+  it('keys the dashboard counts and recent payments under the list prefixes', () => {
+    // Approving a withdrawal or updating an order invalidates these prefixes,
+    // so the Dashboard's light queries refresh with the full lists.
+    const prefix = (key: readonly unknown[], p: readonly unknown[]) =>
+      key.slice(0, p.length);
+    expect(
+      prefix(qk.deliveryOrderCount('requested'), qk.deliveryOrdersKey),
+    ).toEqual([...qk.deliveryOrdersKey]);
+    expect(
+      prefix(qk.recentGatewayWithdrawals(5), qk.gatewayWithdrawalsKey),
+    ).toEqual([...qk.gatewayWithdrawalsKey]);
+    expect(qk.recentGatewayDeposits(5).slice(0, 2)).toEqual([
+      'admin',
+      'gateway-deposits',
+    ]);
+    expect(qk.deliveryOrderCount('requested')).not.toEqual(
+      qk.deliveryOrderCount('processed'),
+    );
+  });
 });
