@@ -16,7 +16,7 @@ import { INPUT_CLASS } from '@/components/account/ui';
 import { PhoneField } from '@/components/PhoneField';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { cn } from '@/lib/utils';
-import { statesFor } from '@/lib/my-states';
+import { stateAfterCountryChange, statesFor } from '@/lib/my-states';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
 const EMPTY_FORM: AddAddressInput = {
@@ -278,9 +278,7 @@ export function AddressesClient({
               return {
                 ...f,
                 countryCode,
-                province: statesFor(countryCode).includes(f.province ?? '')
-                  ? f.province
-                  : '',
+                province: stateAfterCountryChange(countryCode, f.province),
               };
             })
           }

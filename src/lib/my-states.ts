@@ -46,3 +46,17 @@ const SG_STATES: readonly string[] = ['Singapore'];
 export function statesFor(countryCode: string): readonly string[] {
   return countryCode.trim().toUpperCase() === 'SG' ? SG_STATES : MY_STATES;
 }
+
+/**
+ * The state to keep when the country changes: the current one if the new
+ * country lists it, the only option when there is just one (Singapore), else
+ * none — a state from the other country's list is never valid.
+ */
+export function stateAfterCountryChange(
+  countryCode: string,
+  province: string | null | undefined,
+): string {
+  const states = statesFor(countryCode);
+  if (province && states.includes(province)) return province;
+  return states.length === 1 ? states[0]! : '';
+}

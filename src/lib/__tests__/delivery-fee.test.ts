@@ -9,7 +9,7 @@ import {
   isShippableCountry,
   postcodeHint,
 } from '../delivery-fee';
-import { MY_STATES, statesFor } from '@/lib/my-states';
+import { MY_STATES, stateAfterCountryChange, statesFor } from '@/lib/my-states';
 
 // Singapore (2026-10-14): shipped direct, flat RM50 — mirrors the backend.
 describe('Singapore delivery', () => {
@@ -41,6 +41,13 @@ describe('Singapore delivery', () => {
     expect(statesFor('SG')).toEqual(['Singapore']);
     expect(statesFor('MY')).toBe(MY_STATES);
     expect(statesFor('')).toBe(MY_STATES);
+  });
+
+  it('fills in Singapore and clears a state from the other country', () => {
+    expect(stateAfterCountryChange('SG', '')).toBe('Singapore');
+    expect(stateAfterCountryChange('SG', 'Selangor')).toBe('Singapore');
+    expect(stateAfterCountryChange('MY', 'Singapore')).toBe('');
+    expect(stateAfterCountryChange('MY', 'Selangor')).toBe('Selangor');
   });
 });
 

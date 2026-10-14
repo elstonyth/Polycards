@@ -1,16 +1,18 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SlabImage } from '@/components/SlabImage';
 import {
   shipVaultCards,
   addAddress,
+  getPrizeShippingAllowance,
   type AddressView,
   type AddAddressInput,
 } from '@/lib/actions/delivery';
+import { getWallet } from '@/lib/actions/wallet';
 import type { VaultItem } from '@/lib/actions/vault';
 import { addressViewFromInput } from '@/lib/address-view';
-import { statesFor } from '@/lib/my-states';
+import { stateAfterCountryChange, statesFor } from '@/lib/my-states';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { Pill } from '@/components/ui/pill';
 import { INPUT_CLASS } from '@/components/account/ui';
@@ -62,6 +64,38 @@ export default function RequestDeliveryModal({
   // The charge is confirmed in a second step before anything is requested.
   const [confirming, setConfirming] = useState(false);
   const { balance, openTopUp, refreshBalance } = useTopUp();
+  // Read on open: the wallet's bonus part (fees cannot spend it) and today's
+  // prize-shipping allowance. Null until (or unless) each answers.
+  const [wallet, setWallet] = useState<{
+    balance: number;
+    bonus: number;
+  } | null>(null);
+  const hasPrizes = items.some((i) => i.source === 'reward');
+  const [prizeAllowance, setPrizeAllowance] = useState<{
+    perDay: number;
+    remaining: number;
+  } | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    getWallet()
+      .then((r) => {
+        if (!cancelled && r.ok) {
+          setWallet({ balance: r.wallet.balance, bonus: r.wallet.bonus });
+        }
+      })
+      .catch(() => {});
+    if (hasPrizes) {
+      getPrizeShippingAllowance()
+        .then((a) => {
+          if (!cancelled) setPrizeAllowance(a);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [open, hasPrizes]);
   const [form, setForm] = useState<AddAddressInput>({
     firstName: '',
     lastName: '',
@@ -78,12 +112,20 @@ export default function RequestDeliveryModal({
   // Recomputed per render from the selected address; cheap (two lookups).
   const selectedAddress = addrList.find((a) => a.id === selectedAddr);
   const country = selectedAddress?.countryCode ?? '';
-  // Every delivery pays its zone's shipping (2026-10-14): the vault cards go
-  // as ONE order (shipping + insurance on their value), and each prize card
-  // ships through POST /store/rewards/withdraw as its OWN order, paying the
-  // zone's shipping and no insurance (a prize carries no card value there).
+  // Every delivery pays its zone's fee (2026-10-14): the vault cards go as ONE
+  // order, and each prize card ships through POST /store/rewards/withdraw as
+  // its OWN order. Both pay the zone's shipping plus 5% insurance on card
+  // value above RM200 — the prize on its own value.
   const paidItems = items.filter((i) => i.source !== 'reward');
-  const prizeItems = items.filter((i) => i.source === 'reward');
+  const selectedPrizes = items.filter((i) => i.source === 'reward');
+  // Prize cards ship up to a daily limit; only those are priced and sent, and
+  // the rest stay in the vault (said below). Unknown limit = all of them,
+  // with the backend's cap still deciding.
+  const prizeItems =
+    prizeAllowance === null
+      ? selectedPrizes
+      : selectedPrizes.slice(0, prizeAllowance.remaining);
+  const prizesHeldBack = selectedPrizes.length - prizeItems.length;
   // Rounded to cents like the backend's vaultValueForPulls sum, so a float
   // artifact can't show an insurance line at exactly RM200 that the
   // authoritative charge never applies.
@@ -102,10 +144,14 @@ export default function RequestDeliveryModal({
         )
       : null;
   const fee = paidItems.length > 0 ? priced(orderValue) : null;
-  const prizeShipping = prizeItems.length > 0 ? (priced(0)?.shipping ?? 0) : 0;
+  const prizeFees = prizeItems.map((i) => priced(i.card.priceMyr ?? 0));
+  const prizeShipping = prizeFees.reduce((s, f) => s + (f?.shipping ?? 0), 0);
+  const prizeInsurance = prizeFees.reduce((s, f) => s + (f?.insurance ?? 0), 0);
   const totalCharge =
-    Math.round(((fee?.total ?? 0) + prizeShipping * prizeItems.length) * 100) /
-    100;
+    Math.round(
+      ((fee?.total ?? 0) + prizeFees.reduce((s, f) => s + (f?.total ?? 0), 0)) *
+        100,
+    ) / 100;
   const zone = selectedAddress
     ? deliveryZone(
         selectedAddress.postalCode,
@@ -122,11 +168,19 @@ export default function RequestDeliveryModal({
     !unshippableCountry &&
     !isShippablePostcode(selectedAddress.postalCode, country);
   const priceable = !!selectedAddress && !unshippableCountry && !badPostcode;
+  // What actually ships now: the vault cards plus the prizes today's limit lets.
+  const shipCount = paidItems.length + prizeItems.length;
   // Checked before the request (the backend's floor guard still decides):
-  // a balance that cannot cover the charge is sent to top up instead.
+  // a balance that cannot cover the charge is sent to top up instead. Fees
+  // are paid from the NORMAL balance only — bonus credit is spend-only on
+  // packs — so the spendable figure excludes it once the wallet is read.
+  const spendable =
+    wallet !== null
+      ? Math.round((wallet.balance - wallet.bonus) * 100) / 100
+      : balance;
   const shortBy =
-    priceable && balance != null && totalCharge > balance
-      ? Math.round((totalCharge - balance) * 100) / 100
+    priceable && spendable != null && totalCharge > spendable
+      ? Math.round((totalCharge - spendable) * 100) / 100
       : 0;
 
   // Liquid-glass rim on the panel (frosted fallback on Safari/Firefox).
@@ -147,6 +201,8 @@ export default function RequestDeliveryModal({
       setAddrList((p) => [...p, addressViewFromInput(res.addressId, form)]);
       setSelectedAddr(res.addressId);
       setAdding(false);
+      // A new address re-prices: confirm the new charge.
+      setConfirming(false);
     } catch {
       setError('Couldn’t save the address. Please try again.');
     } finally {
@@ -166,9 +222,8 @@ export default function RequestDeliveryModal({
       // which stamps is_reward and enforces a per-day cap — so the selection
       // is split here rather than sent to a route that would refuse half of it.
       const normalIds = paidItems.map((i) => i.pullId);
-      const rewardIds = items
-        .filter((i) => i.source === 'reward')
-        .map((i) => i.pullId);
+      // Only the prizes today's limit lets ship; the rest stay in the vault.
+      const rewardIds = prizeItems.map((i) => i.pullId);
       const addr = addrList.find((a) => a.id === selectedAddr);
       if (!addr) {
         setError('Choose a shipping address.');
@@ -277,7 +332,10 @@ export default function RequestDeliveryModal({
             ))}
             <button
               type="button"
-              onClick={() => setAdding(true)}
+              onClick={() => {
+                setAdding(true);
+                setConfirming(false);
+              }}
               className="text-[12px] font-semibold text-white/80 hover:text-white"
             >
               + Add a new address
@@ -401,9 +459,7 @@ export default function RequestDeliveryModal({
                   setForm((f) => ({
                     ...f,
                     countryCode,
-                    province: statesFor(countryCode).includes(f.province ?? '')
-                      ? f.province
-                      : '',
+                    province: stateAfterCountryChange(countryCode, f.province),
                   }));
                 }}
                 className={INPUT_CLASS}
@@ -457,12 +513,20 @@ export default function RequestDeliveryModal({
                 <span>
                   Prize card shipping ({ZONE_LABEL[zone]}
                   {prizeItems.length > 1
-                    ? `, ${prizeItems.length} parcels × ${rm(prizeShipping)}`
+                    ? `, ${prizeItems.length} parcels × ${rm(prizeShipping / prizeItems.length)}`
                     : ''}
                   )
                 </span>
                 <span className="shrink-0 whitespace-nowrap pl-3">
-                  {rm(prizeShipping * prizeItems.length)}
+                  {rm(prizeShipping)}
+                </span>
+              </div>
+            )}
+            {prizeInsurance > 0 && (
+              <div className="mt-1 flex justify-between text-white/70">
+                <span>Prize insurance (5% of card value)</span>
+                <span className="shrink-0 whitespace-nowrap pl-3">
+                  {rm(prizeInsurance)}
                 </span>
               </div>
             )}
@@ -473,18 +537,32 @@ export default function RequestDeliveryModal({
             {balance != null && (
               <p className="mt-1 text-right text-[12px] text-white/45">
                 Your balance: {rm(balance)}
+                {wallet !== null && wallet.bonus > 0
+                  ? ` (${rm(wallet.bonus)} bonus — pays for packs only)`
+                  : ''}
               </p>
             )}
           </div>
+        )}
+        {/* Prize cards past today's limit stay in the vault, unpriced. */}
+        {!adding && prizesHeldBack > 0 && prizeAllowance !== null && (
+          <p className="mt-3 rounded-xl border border-white/15 bg-white/[0.06] p-3 text-[12px] text-white/75">
+            Prize cards ship {prizeAllowance.perDay} per day. {prizesHeldBack}{' '}
+            prize card{prizesHeldBack === 1 ? '' : 's'} will stay in your vault
+            and can ship on another day — they are not charged now.
+          </p>
         )}
         {/* Checked before anything is requested; the backend's floor guard
             is still the authority. */}
         {!adding && shortBy > 0 && (
           <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
             <p>
-              Not enough credit: this delivery costs {rm(totalCharge)} and your
-              balance is {rm(balance ?? 0)}. Top up {rm(shortBy)} or more to
-              ship it.
+              Not enough credit: this delivery costs {rm(totalCharge)} and you
+              have {rm(spendable ?? 0)} to pay it with
+              {wallet !== null && wallet.bonus > 0
+                ? ' (bonus credit can only pay for packs)'
+                : ''}
+              . Top up {rm(shortBy)} or more to ship it.
             </p>
             <Pill onClick={openTopUp} className="mt-2 px-4">
               Top up
@@ -509,7 +587,7 @@ export default function RequestDeliveryModal({
             className="mt-3 rounded-xl border border-white/15 bg-white/[0.06] p-3 text-[13px] text-white"
           >
             {rm(totalCharge)} will be deducted from your balance to ship{' '}
-            {items.length} card{items.length === 1 ? '' : 's'} to{' '}
+            {shipCount} card{shipCount === 1 ? '' : 's'} to{' '}
             {ZONE_LABEL[zone ?? 'west']}. Confirm to continue.
           </p>
         )}
@@ -537,7 +615,12 @@ export default function RequestDeliveryModal({
           </button>
           <Pill
             disabled={
-              busy || adding || !selectedAddr || !priceable || shortBy > 0
+              busy ||
+              adding ||
+              !selectedAddr ||
+              !priceable ||
+              shortBy > 0 ||
+              shipCount === 0
             }
             onClick={confirming ? submit : () => setConfirming(true)}
           >

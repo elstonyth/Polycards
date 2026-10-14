@@ -30,6 +30,7 @@ import {
   UncheckedSchema,
   WithdrawAddressSchema,
   WithdrawPrizeSchema,
+  PrizeAllowanceSchema,
   type DeliveryOrderStatus,
   type WithdrawAddressInput,
 } from '@/lib/data/schemas';
@@ -403,8 +404,8 @@ const missingRequired = (input: AddAddressInput): boolean =>
   // Scoped to MY deliberately: this gate is shared by addAddress AND
   // updateAddress, so an unconditional requirement would make every
   // pre-existing non-MY address uneditable until a state was invented for it.
-  // Delivery is MY-only at the backend anyway — workflows/steps/
-  // request-delivery.ts refuses other country codes.
+  // Singapore has no states (the forms store "Singapore"), and only MY and
+  // SG ship at all — workflows/steps/request-delivery.ts refuses the rest.
   (input.countryCode?.trim().toUpperCase() === 'MY' && !input.province?.trim());
 
 // The address-book phone is the actual SOURCE of a delivery order's
@@ -547,6 +548,19 @@ export async function deleteAddress(
  * rather than failing the whole submit — the ordinary cards in the same
  * selection have already shipped by then.
  */
+/**
+ * How many prize cards can still ship today (the per-customer daily cap), or
+ * null when it cannot be read — the sheet then prices every selected prize and
+ * the backend's cap still decides.
+ */
+export async function getPrizeShippingAllowance(): Promise<{
+  perDay: number;
+  remaining: number;
+} | null> {
+  const r = await store.get('/store/rewards/withdraw', PrizeAllowanceSchema);
+  return r.ok ? { perDay: r.data.per_day, remaining: r.data.remaining } : null;
+}
+
 export async function shipVaultCards(
   normalPullIds: string[],
   rewardPullIds: string[],
@@ -611,7 +625,12 @@ export async function shipVaultCards(
             ? 'This reward card could not be shipped right now.'
             : friendlyFailure(r, DELIVERY_RULES, DELIVERY_FALLBACK);
         // Customer-level refusals: every later card would get the same one.
-        if (isPhoneGateError(reason) || /top up at least once/i.test(reason)) {
+        // A balance that cannot cover one prize's fee cannot cover the next
+        // (same zone, same fee): stop rather than refuse each in turn.
+        if (
+          isPhoneGateError(reason) ||
+          /top up at least once|not enough credit|bonus credit/i.test(reason)
+        ) {
           skipRest(i, reason);
           break;
         }

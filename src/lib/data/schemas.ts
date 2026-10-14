@@ -1080,6 +1080,13 @@ export const WithdrawPrizeSchema = z.looseObject({
   status: z.enum(['requested', 'capped', 'invalid']),
 });
 
+/** GET /store/rewards/withdraw — today's prize-shipping allowance. */
+export const PrizeAllowanceSchema = z.looseObject({
+  per_day: finite,
+  used_today: finite,
+  remaining: finite,
+});
+
 /** GET /store/daily — the VIP voucher/frame grant state (packs/service.ts
  *  `DailyState`). The box and ship-prize halves went with the daily box
  *  (2026-08-25). */

@@ -62,9 +62,10 @@ export type DeliveryZone = 'west' | 'east' | 'sg';
 export const EAST_PLACE_RE =
   /\b(sabah|sarawak|labuan|kota\s*kinabalu|kuching|sandakan|tawau|miri|sibu|bintulu|lahad\s*datu|keningau)\b/i;
 
-/** An address naming Singapore is billed the Singapore rate, whatever
- *  country code was typed (the dearer reading wins). */
-export const SINGAPORE_PLACE_RE = /\bsingapore\b/i;
+/** An address naming Singapore (or "Singapura") in its state or city is
+ *  billed the Singapore rate, whatever country code was typed (the dearer
+ *  reading wins). */
+export const SINGAPORE_PLACE_RE = /\b(singapore|singapura)\b/i;
 
 /** The MOST EXPENSIVE reading of country, postcode and state/city — all are
  *  customer-typed, so a Sabah address with a KL postcode must still preview

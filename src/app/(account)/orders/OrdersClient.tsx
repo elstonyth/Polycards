@@ -15,7 +15,7 @@ import {
   type AddAddressInput,
 } from '@/lib/actions/delivery';
 import { addressViewFromInput } from '@/lib/address-view';
-import { statesFor } from '@/lib/my-states';
+import { stateAfterCountryChange, statesFor } from '@/lib/my-states';
 import { rm } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -370,9 +370,7 @@ function EditAddressModal({
                   setForm((f) => ({
                     ...f,
                     countryCode,
-                    province: statesFor(countryCode).includes(f.province ?? '')
-                      ? f.province
-                      : '',
+                    province: stateAfterCountryChange(countryCode, f.province),
                   }));
                 }}
                 className={INPUT_CLASS}

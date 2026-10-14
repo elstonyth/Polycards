@@ -50,6 +50,12 @@ export const DELIVERY_RULES: ErrorRule[] = [
     /exceeds the customer's balance/i,
     'Not enough credit to cover the shipping fee — top up and try again.',
   ],
+  // Shipping is paid from the normal balance only: bonus credit is spend-only
+  // on packs (backend BONUS_NOT_SPENDABLE_MESSAGE).
+  [
+    /bonus credit can only be spent on packs/i,
+    "Bonus credit can't pay for shipping — top up your balance and try again.",
+  ],
   [
     /within Malaysia( and Singapore)? only/i,
     'We currently ship within Malaysia and Singapore only — choose an address in one of them.',
