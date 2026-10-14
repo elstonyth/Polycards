@@ -375,6 +375,19 @@ describe('the payout-float breaker cannot be tripped by one customer', () => {
     expect(small.createGatewayWithdrawals).toHaveBeenCalled();
   });
 
+  it("counts A3Pay's own payout fee: S$100 needs S$101.50 in the float", async () => {
+    // The wallet pays the amount PLUS A3Pay's 1.5%, so S$100.50 cannot.
+    balanceSgd = 100.5;
+    const short = packsFor();
+    await expect(go(short, 330)).rejects.toThrow(/on our side/i);
+    expect(short.createGatewayWithdrawals).not.toHaveBeenCalled();
+
+    balanceSgd = 101.5;
+    const enough = packsFor();
+    await go(enough, 330).catch(() => undefined);
+    expect(enough.createGatewayWithdrawals).toHaveBeenCalled();
+  });
+
   it('a refusal merely MENTIONING funds does not trip it while the balance read says the float is fine', async () => {
     submitReply = JSON.stringify({
       isSuccess: false,

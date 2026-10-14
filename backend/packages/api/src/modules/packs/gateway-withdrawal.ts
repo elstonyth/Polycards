@@ -177,10 +177,14 @@ async function regionalFloatShort(
   config: GatewayConfig,
   gatewayAmount: number,
 ): Promise<{ available: number; currency: string } | null> {
+  // The wallet pays the amount PLUS the gateway's own payout fee, rounded up
+  // to the cent: an amount that passed on its own could still be refused.
+  const fee = GATEWAYS[config.kind as PaymentGateway]?.payoutFeePercent ?? 0;
+  const needed = Math.ceil(gatewayAmount * (100 + fee) - 1e-6) / 100;
   try {
     const b = await checkBalance(config);
     const available = Number(b.availableBalance);
-    return Number.isFinite(available) && available < gatewayAmount
+    return Number.isFinite(available) && available < needed
       ? { available, currency: b.currencyCode }
       : null;
   } catch {
@@ -915,7 +919,31 @@ export async function startWithdrawal(
     // 'pending' when it has SEEN the debit (in which case this call did not
     // throw), and nothing has submitted to the gateway yet, so 'settled' is
     // impossible.
-    await packs.updateGatewayWithdrawals({ id: row.id, status: 'failed' });
+    //
+    // Unless the debit DID commit and only its answer was lost (a dropped
+    // connection): a 'failed' row is never refunded, so closing it would
+    // strand the money. Close only once the wd: debit is known to be absent;
+    // otherwise leave it pending, where the sweep's not-found path refunds a
+    // real debit and closes a missing one without minting money.
+    let debited: boolean | null = null;
+    try {
+      const [landed] = await packs.listCreditTransactions(
+        {
+          customer_id: input.customerId,
+          source_transaction_id: withdrawalIdempotencyReference(
+            input.customerId,
+            merchantTransactionId,
+          ),
+        },
+        { take: 1 },
+      );
+      debited = Boolean(landed);
+    } catch {
+      // Cannot tell: pending is the side that cannot lose money.
+    }
+    if (debited === false) {
+      await packs.updateGatewayWithdrawals({ id: row.id, status: 'failed' });
+    }
     throw error;
   }
 

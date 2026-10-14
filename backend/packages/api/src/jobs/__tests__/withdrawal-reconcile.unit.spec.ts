@@ -645,3 +645,22 @@ describe('withdrawal sweep — a held row gets its own staleness watch', () => {
     expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
   });
 });
+
+// In-flight payouts must still resolve while new ones are switched off (a
+// timed pause, or GATEWAY_WITHDRAWALS_ENABLED=false): a lost callback or a
+// stranded debit would otherwise wait until payouts reopen.
+describe('with new payouts switched off', () => {
+  it('still sweeps pending payouts', async () => {
+    process.env.GATEWAY_WITHDRAWALS_ENABLED = 'false';
+    const h = harness();
+    await withdrawalReconcileJob(h.container);
+    expect(h.packs.listGatewayWithdrawals).toHaveBeenCalled();
+  });
+
+  it('does nothing when the gateway integration itself is off', async () => {
+    process.env.GATEWAY_ENABLED = 'false';
+    const h = harness();
+    await withdrawalReconcileJob(h.container);
+    expect(h.packs.listGatewayWithdrawals).not.toHaveBeenCalled();
+  });
+});

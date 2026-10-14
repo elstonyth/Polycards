@@ -92,6 +92,11 @@ export type GatewayDefinition = {
     withdrawalMin: number;
     withdrawalMax: number;
   };
+  /**
+   * A regional gateway's own fee per payout, in percent, taken from OUR float
+   * on top of the amount paid out. The float pre-check must cover both.
+   */
+  payoutFeePercent?: number;
   /** Are the credentials for this gateway present in the environment? */
   configured: (env: Partial<NodeJS.ProcessEnv>) => boolean;
   /** Its client config from env; throws when `configured` would be false. */
@@ -205,6 +210,8 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
       withdrawalMin: 30,
       withdrawalMax: 10000,
     },
+    // WD 1.5% (back office, above): a S$50.79 payout cost S$51.55 live.
+    payoutFeePercent: 1.5,
   },
 
   // Test-only. Mirrors TGPay's limits and contact requirement field for
