@@ -18,6 +18,7 @@ import {
   paymentFxPair,
   paymentFxQuote,
   regionalDepositBand,
+  regionalWithdrawalBand,
 } from '../../../../modules/packs/payment-fx';
 
 // GET /store/payments/config — what the storefront needs to render the top-up
@@ -68,6 +69,10 @@ async function regionalRails(req: MedusaRequest) {
     );
     const quote = paymentFxQuote(row ?? null, currency);
     const priced = !('error' in quote);
+    const payoutBand =
+      priced && currencyLimits
+        ? regionalWithdrawalBand(quote, currencyLimits, rmLimits)
+        : null;
     rails.push({
       gateway: id,
       currency,
@@ -86,6 +91,14 @@ async function regionalRails(req: MedusaRequest) {
         min: currencyLimits?.withdrawalMin ?? null,
         max: currencyLimits?.withdrawalMax ?? null,
       },
+      // The RM the withdrawal form may take for this rail today: its own
+      // RM band narrowed to what pays inside the S$ band. The form enters RM
+      // and otherwise judged it by the ACTIVE gateway's band.
+      ...(payoutBand
+        ? {
+            withdrawal_rm: { min_rm: payoutBand.min, max_rm: payoutBand.max },
+          }
+        : {}),
       // RM per 1 unit of `currency`: credited on a top-up, debited on a payout.
       rate: priced
         ? { deposit: quote.depositRate, payout: quote.payoutRate }

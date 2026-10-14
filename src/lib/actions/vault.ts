@@ -211,6 +211,14 @@ export async function getPaymentLimits(): Promise<PaymentLimits> {
       withdrawalsEnabled: rail.withdrawals_enabled,
       deposit: rail.deposit,
       withdrawal: rail.withdrawal,
+      ...(rail.withdrawal_rm
+        ? {
+            withdrawalRm: {
+              minRm: rail.withdrawal_rm.min_rm,
+              maxRm: rail.withdrawal_rm.max_rm,
+            },
+          }
+        : {}),
       rate: rail.rate,
     })),
   };

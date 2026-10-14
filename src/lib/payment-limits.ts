@@ -16,6 +16,9 @@ export type RegionalRail = {
   withdrawalsEnabled: boolean;
   deposit: { min: number | null; max: number | null };
   withdrawal: { min: number | null; max: number | null };
+  /** The RM a payout through this rail may take today (its RM band narrowed
+   *  to the S$ band at today's rate); absent from an older backend. */
+  withdrawalRm?: { minRm: number; maxRm: number };
   rate: { deposit: number; payout: number } | null;
 };
 
