@@ -61,6 +61,8 @@ function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
     // withdrawForCashout, on that method's own transaction manager — see the
     // service describe below, which runs the real SQL against a fake `em`.
     savedBankAccountsFor: jest.fn().mockResolvedValue(savedAccounts),
+    // Other customers on the same number. None by default.
+    otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
     createGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
     // Idempotency-Key replay lookup. Empty by default — no prior intent.
     listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
@@ -445,6 +447,51 @@ describe('startWithdrawal — money ordering', () => {
     );
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+  });
+
+  // A number another customer has already been PAID to is refused at payout,
+  // before any row or debit, for destinations saved since the check shipped.
+  it('refuses a payout to a number another customer was already paid to', async () => {
+    // A destination saved since the check shipped is still inside its
+    // 24 h cooling-off today; switch the wait off so the check is reached.
+    const prevCooldown = process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS;
+    process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS = '0';
+    try {
+      const fresh = { ...SAVED_ACCOUNT, savedAt: '2026-10-14T00:00:00+08:00' };
+      const h = harness([fresh]);
+      h.packs.otherPayoutAccountHolders.mockResolvedValue([
+        { customer_id: 'cus_2', bank_code: 'MYMB2U', holder_name: null },
+      ]);
+      await expect(start(h, { gateway: 'tgpay', amount: 56 })).rejects.toThrow(
+        /already linked to another Polycards account/,
+      );
+      expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+      expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+
+      // Only saved elsewhere (not paid): the save check already ruled on it.
+      const h2 = harness([fresh]);
+      h2.packs.otherPayoutAccountHolders.mockResolvedValue([
+        { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: 'X' },
+      ]);
+      await expect(
+        start(h2, { gateway: 'tgpay', amount: 56 }),
+      ).resolves.toBeTruthy();
+
+      // Saved before the check shipped: an existing cluster, left alone.
+      const old = { ...SAVED_ACCOUNT, savedAt: '2026-10-13T23:59:59+08:00' };
+      const h3 = harness([old]);
+      h3.packs.otherPayoutAccountHolders.mockResolvedValue([
+        { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: null },
+      ]);
+      await expect(
+        start(h3, { gateway: 'tgpay', amount: 56 }),
+      ).resolves.toBeTruthy();
+      expect(h3.packs.otherPayoutAccountHolders).not.toHaveBeenCalled();
+    } finally {
+      if (prevCooldown === undefined)
+        delete process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS;
+      else process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS = prevCooldown;
+    }
   });
 
   it('holds a destination to its own payout floor before any row or debit', async () => {

@@ -19,7 +19,9 @@ import {
 } from '../../../../../modules/packs/facets';
 import {
   MAX_SAVED_BANK_ACCOUNTS,
+  SHARED_PAYOUT_ACCOUNT_MESSAGE,
   parseSavedBankAccounts,
+  payoutAccountSharingAllowed,
   savedBankAccountId,
   savedBankAccountViews,
   type SavedBankAccount,
@@ -81,36 +83,12 @@ import {
 // the backfill script can share them without importing an API route.
 export {
   MAX_SAVED_BANK_ACCOUNTS,
+  SHARED_PAYOUT_ACCOUNT_MESSAGE,
   parseSavedBankAccounts,
+  payoutAccountSharingAllowed,
   savedBankAccountId,
   type SavedBankAccount,
 };
-
-/**
- * One bank account, one Polycards account: a number another customer already
- * holds is refused (sharing-allowed customers excepted). Existing shared
- * accounts were left alone on purpose (2026-10-14) — only new links are
- * refused, and re-saving an account the customer already has is not a new
- * link.
- */
-export const SHARED_PAYOUT_ACCOUNT_MESSAGE =
-  'This bank account is already linked to another Polycards account. Withdraw to a bank account in your own name, or contact support if this is a mistake.';
-
-/**
- * Support's override for a genuine shared account (a family member's, a joint
- * account): customer ids in PAYOUT_ACCOUNT_SHARING_ALLOWED, comma-separated,
- * read per call.
- * shortcut: the override is an env list, so granting one is a spec change and
- * a redeploy; build an admin toggle if overrides become routine.
- */
-export function payoutAccountSharingAllowed(
-  customerId: string,
-  env: Partial<NodeJS.ProcessEnv> = process.env,
-): boolean {
-  return (env.PAYOUT_ACCOUNT_SHARING_ALLOWED ?? '')
-    .split(',')
-    .some((id) => id.trim() === customerId);
-}
 
 /**
  * Register-phase JWTs pass authenticate('customer') with actor_id '' (the
@@ -256,7 +234,9 @@ export async function POST(
   // A number another customer has only SAVED blocks under the same holder
   // name (one person, several accounts: 10 of the 13 clusters). Otherwise
   // anyone who knew a stranger's number could save it first and lock the real
-  // owner out. A number already PAID OUT to blocks under any name.
+  // owner out. A number already PAID OUT to blocks under any name, and a
+  // different spelling that slips in here is stopped at payout
+  // (startWithdrawal refuses a number someone else was paid to first).
   const sameHolder = (name: string | null) =>
     name == null ||
     name.toLowerCase().replace(/\s+/g, ' ').trim() ===

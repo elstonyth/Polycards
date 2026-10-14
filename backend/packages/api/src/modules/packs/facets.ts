@@ -38,6 +38,7 @@ export type GatewayWithdrawals = Pick<
   | 'listCustomerAccountStates'
   | 'listFxRates'
   | 'listGatewayWithdrawals'
+  | 'otherPayoutAccountHolders'
   | 'savedBankAccountsFor'
   | 'updateGatewayWithdrawals'
   | 'walletSummary'
