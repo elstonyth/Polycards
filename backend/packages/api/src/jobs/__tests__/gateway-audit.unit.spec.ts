@@ -40,8 +40,12 @@ function harness(
 ) {
   const packs = {
     siteSettings: jest.fn(async () => ({ payment_gateway: null })),
-    listGatewayDeposits: jest.fn(async () => deposits),
-    listGatewayWithdrawals: jest.fn(async () => withdrawals),
+    listGatewayDeposits: jest.fn(async (f: { audited_at?: unknown }) =>
+      f.audited_at === null ? deposits : [],
+    ),
+    listGatewayWithdrawals: jest.fn(async (f: { audited_at?: unknown }) =>
+      f.audited_at === null ? withdrawals : [],
+    ),
     updateGatewayDeposits: jest.fn(async () => []),
     updateGatewayWithdrawals: jest.fn(async () => []),
   };
@@ -114,6 +118,54 @@ describe('gateway audit job', () => {
         audit_note: expect.stringMatching(/not configured/),
       }),
     );
+  });
+
+  // 2026-10-14 prod: 1,460 rows in the 7-day window are each re-checked
+  // daily, 50 a run is 1,200 a day, and oldest-first let re-checks use up
+  // every batch, so nothing created after 10-13 13:31 was ever audited (no
+  // TGPay fee backfilled, no disagreement seen).
+  it('checks never-audited rows first; re-checks take what is left, stalest first', async () => {
+    fakeGateway.script({
+      getDepositDetail: { state: 'success', amount: 50, netAmount: 49.4 },
+    });
+    const fresh = [settledDeposit];
+    const stale = [
+      { ...settledDeposit, id: 'gpd_old', audited_at: new Date(0) },
+    ];
+    const h = harness([]);
+    h.packs.listGatewayDeposits.mockImplementation(
+      async (f: { audited_at?: unknown }) =>
+        f.audited_at === null ? fresh : stale,
+    );
+    await gatewayAuditJob(h.container as never);
+    const calls = h.packs.listGatewayDeposits.mock.calls as unknown as [
+      Record<string, unknown>,
+      { take: number; order: Record<string, string> },
+    ][];
+    expect(calls[0][0]).toMatchObject({ audited_at: null });
+    expect(calls[0][1]).toEqual({ take: 50, order: { created_at: 'ASC' } });
+    expect(calls[1][0]).toMatchObject({
+      audited_at: { $lt: expect.any(Date) },
+    });
+    expect(calls[1][1]).toEqual({ take: 49, order: { audited_at: 'ASC' } });
+    const ids = (
+      h.packs.updateGatewayDeposits.mock.calls as unknown as [{ id: string }][]
+    ).map((c) => c[0].id);
+    expect(ids).toEqual(['gpd_1', 'gpd_old']);
+  });
+
+  it('a full batch of new rows leaves no room for re-checks', async () => {
+    const fifty = Array.from({ length: 50 }, (_, i) => ({
+      ...settledDeposit,
+      id: `gpd_${i}`,
+      merchant_transaction_id: `PC-${i}`,
+    }));
+    fakeGateway.script({
+      getDepositDetail: { state: 'success', amount: 50, netAmount: 49.4 },
+    });
+    const h = harness(fifty);
+    await gatewayAuditJob(h.container as never);
+    expect(h.packs.listGatewayDeposits).toHaveBeenCalledTimes(1);
   });
 
   it('does nothing while the real-gateway switch is off', async () => {
