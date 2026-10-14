@@ -5638,7 +5638,8 @@ class PacksModuleService extends MedusaService({
   // gateway's alias); the caller compares canonical ids. Read by the
   // saved-accounts POST route, which refuses a number someone else holds:
   // 13 clusters of 2-3 accounts on one bank account farmed welcome packs and
-  // tasks by 2026-10-14.
+  // tasks by 2026-10-14. Leading zeros are ignored on both sides, so padding
+  // a number with a 0 does not slip past it.
   @InjectManager()
   async otherPayoutAccountHolders(
     customerId: string,
@@ -5652,10 +5653,10 @@ class PacksModuleService extends MedusaService({
         'FROM customer c ' +
         "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
         "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
-        "WHERE c.deleted_at IS NULL AND c.id <> ? AND a->>'accountNumber' = ? " +
+        "WHERE c.deleted_at IS NULL AND c.id <> ? AND ltrim(a->>'accountNumber', '0') = ltrim(?, '0') " +
         'UNION ' +
         'SELECT customer_id, bank_code FROM gateway_withdrawal ' +
-        'WHERE deleted_at IS NULL AND customer_id <> ? AND account_number = ? ' +
+        "WHERE deleted_at IS NULL AND customer_id <> ? AND ltrim(account_number, '0') = ltrim(?, '0') " +
         "AND status IN ('pending', 'held', 'settled')",
       [customerId, accountNumber, customerId, accountNumber],
     );

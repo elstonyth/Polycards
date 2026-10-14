@@ -17,18 +17,18 @@ medusaIntegrationTestRunner({
       it('finds saved and paid holders, and skips self, failed payouts and deleted savers', async () => {
         const customers = getContainer().resolve(Modules.CUSTOMER);
         const packs = getContainer().resolve<PacksModuleService>('packs');
-        const saved = (bankCode: string) => ({
+        const saved = (bankCode: string, pad = '') => ({
           bank_accounts: [
             {
               id: `${bankCode}-${NUMBER}`,
               bankCode,
               bankName: 'Maybank',
-              accountNumber: NUMBER,
+              accountNumber: pad + NUMBER,
               accountHolderName: 'TAN AH KOW',
             },
           ],
         });
-        const [me, saver, legacySaver, gone, payee, failedPayee, odd] =
+        const [me, saver, legacySaver, gone, payee, failedPayee, odd, padded] =
           await customers.createCustomers([
             { email: 'me@shared.test', metadata: saved('MBBEMYKL') },
             { email: 'saver@shared.test', metadata: saved('MBBEMYKL') },
@@ -38,6 +38,8 @@ medusaIntegrationTestRunner({
             { email: 'failed@shared.test' },
             // A non-array bank_accounts must not break the scan.
             { email: 'odd@shared.test', metadata: { bank_accounts: 'x' } },
+            // The same number padded with a leading zero.
+            { email: 'padded@shared.test', metadata: saved('MBBEMYKL', '0') },
           ]);
         await customers.softDeleteCustomers([gone.id]);
         const row = (
@@ -61,7 +63,9 @@ medusaIntegrationTestRunner({
 
         const holders = await packs.otherPayoutAccountHolders(me.id, NUMBER);
         const ids = holders.map((h) => h.customer_id).sort();
-        expect(ids).toEqual([legacySaver.id, payee.id, saver.id].sort());
+        expect(ids).toEqual(
+          [legacySaver.id, padded.id, payee.id, saver.id].sort(),
+        );
         expect(
           holders.find((h) => h.customer_id === legacySaver.id)?.bank_code,
         ).toBe('MYMB2U');

@@ -282,6 +282,13 @@ export async function POST(
       );
     }
     if (heldByAnother) {
+      // The refusal tells the customer the number is linked elsewhere; log
+      // it so repeated probing for linked numbers shows up. Last 4 only.
+      req.scope
+        .resolve('logger')
+        .warn(
+          `[saved-accounts] refused a shared payout account for ${customerId} (${bankCode} …${accountNumber.slice(-4)})`,
+        );
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         SHARED_PAYOUT_ACCOUNT_MESSAGE,

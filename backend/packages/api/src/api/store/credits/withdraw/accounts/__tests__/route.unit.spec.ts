@@ -565,6 +565,12 @@ describe('POST accounts — one bank account, one Polycards account', () => {
     );
     expect(updateCustomers).not.toHaveBeenCalled();
     expect(createNotifications).not.toHaveBeenCalled();
+    // Logged so repeated probing shows up, with the last 4 digits only.
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    const line = logger.warn.mock.calls[0][0] as string;
+    expect(line).toContain('cus_1');
+    expect(line).toContain('9012');
+    expect(line).not.toContain('123456789012');
   });
 
   it("reads another customer's retired-gateway code as the same bank", async () => {
