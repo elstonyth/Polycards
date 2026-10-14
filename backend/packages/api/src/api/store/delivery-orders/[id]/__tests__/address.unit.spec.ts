@@ -22,16 +22,23 @@ const mkRes = () => {
   return { res: { json: (b: any) => (out.body = b) } as any, out };
 };
 
+// Every stored order carries its address snapshot (the ship_* columns are NOT
+// NULL); the zone guard reads it to price the edit.
 const order = (over: Record<string, unknown> = {}) => ({
   id: 'do_1',
   customer_id: 'cus_1',
   status: 'requested',
+  ship_city: 'Kuala Lumpur',
+  ship_province: null,
+  ship_postal_code: '50000',
+  ship_country_code: 'my',
+  shipping_fee: null,
   ...over,
 });
 
 const updateDeliveryOrders = jest.fn();
 
-const mkReq = (orders: any[], customerId = 'cus_1') => ({
+const mkReq = (orders: any[], customerId = 'cus_1', address = ADDRESS) => ({
   auth_context: { actor_id: customerId },
   params: { id: 'do_1' },
   body: { address_id: 'addr_1' },
@@ -43,7 +50,7 @@ const mkReq = (orders: any[], customerId = 'cus_1') => ({
             updateDeliveryOrders,
           }
         : {
-            listCustomerAddresses: jest.fn(async () => [ADDRESS]),
+            listCustomerAddresses: jest.fn(async () => [address]),
             // Profile fallback for ship_phone (addresses saved by the
             // storefront's inline form carry no phone).
             listCustomers: jest.fn(async () => [
@@ -92,6 +99,44 @@ describe('POST /store/delivery-orders/:id/address', () => {
     expect(err.type).toBe(MedusaError.Types.NOT_ALLOWED);
     expect(err.message).toMatch(/already delivered/i);
     expect(err.message).not.toMatch(/completed/i);
+    expect(updateDeliveryOrders).not.toHaveBeenCalled();
+  });
+
+  // The zone guard: an order that paid a fee keeps its zone; one that paid
+  // none (pre-fee orders, prizes before 2026-10-14) may move to the same or a
+  // cheaper zone, never a dearer one.
+  const SG_ADDRESS = {
+    ...ADDRESS,
+    city: 'Singapore',
+    postal_code: '018983',
+    country_code: 'sg',
+  };
+
+  it('lets an unpaid East order move to a cheaper West address', async () => {
+    const east = order({ ship_city: 'Kota Kinabalu', ship_postal_code: '88000' });
+    await editAddress(mkReq([east]) as any, mkRes().res);
+    expect(updateDeliveryOrders).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses to move an unpaid West order to dearer Singapore', async () => {
+    await expect(
+      editAddress(mkReq([order()], 'cus_1', SG_ADDRESS) as any, mkRes().res),
+    ).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+      message: expect.stringMatching(/changes the shipping fee zone/),
+    });
+    expect(updateDeliveryOrders).not.toHaveBeenCalled();
+  });
+
+  it('refuses any zone change on an order that paid a fee', async () => {
+    const paidEast = order({
+      ship_city: 'Kota Kinabalu',
+      ship_postal_code: '88000',
+      shipping_fee: 35,
+    });
+    await expect(
+      editAddress(mkReq([paidEast]) as any, mkRes().res),
+    ).rejects.toMatchObject({ type: MedusaError.Types.NOT_ALLOWED });
     expect(updateDeliveryOrders).not.toHaveBeenCalled();
   });
 

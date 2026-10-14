@@ -19,6 +19,7 @@ import {
   editDeliveryAddress,
   cancelDeliveryOrder,
   shipVaultCards,
+  getPrizeShippingAllowance,
 } from '../delivery';
 
 const ORDER = {
@@ -359,6 +360,49 @@ describe('shipVaultCards', () => {
       ],
     });
     expect(mem.requests).toHaveLength(1);
+  });
+
+  // Prize deliveries pay a fee (2026-10-14): a balance that cannot cover one
+  // prize's fee cannot cover the next, so the rest are skipped unasked.
+  it('stops asking once the balance cannot cover the shipping fee', async () => {
+    const mem = backend({
+      'POST /store/rewards/withdraw': {
+        status: 400,
+        body: {
+          message:
+            "Deduction exceeds the customer's balance (RM 5.00) — the balance cannot go below RM 0.00.",
+        },
+      },
+    });
+    const r = await shipVaultCards(
+      [],
+      ['pull_1', 'pull_2', 'pull_3'],
+      'addr_1',
+      ADDRESS,
+    );
+    expect(r.ok && r.skipped.map((s) => s.pullId)).toEqual([
+      'pull_1',
+      'pull_2',
+      'pull_3',
+    ]);
+    expect(r.ok && r.skipped[0]?.reason).toMatch(/Not enough credit/);
+    expect(mem.requests).toHaveLength(1);
+  });
+
+  it('reads today’s prize-shipping allowance, or null when it cannot', async () => {
+    backend({
+      'GET /store/rewards/withdraw': {
+        body: { per_day: 1, used_today: 1, remaining: 0 },
+      },
+    });
+    expect(await getPrizeShippingAllowance()).toEqual({
+      perDay: 1,
+      remaining: 0,
+    });
+    backend({
+      'GET /store/rewards/withdraw': { status: 500, body: {} },
+    });
+    expect(await getPrizeShippingAllowance()).toBeNull();
   });
 
   it('a per-card refusal becomes that card’s reason, not the whole submit’s', async () => {

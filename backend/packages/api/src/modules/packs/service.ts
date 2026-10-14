@@ -28,7 +28,8 @@ import {
   validateDeliveryStatusTransition,
   snapshotAddress,
   computeDeliveryFee,
-  isMalaysianAddress,
+  isShippableCountry,
+  isShippablePostcode,
   type AddressSnapshot,
   type DeliveryStatus,
 } from './delivery';
@@ -4728,6 +4729,10 @@ class PacksModuleService extends MedusaService({
     customerId: string,
     pullId: string,
     address: Partial<HttpTypes.StoreCustomerAddress>,
+    /** RM per USD, resolved by the caller BEFORE this transaction (as the
+     *  paid path does): values the prize for its mandatory insurance. Absent =
+     *  no card value, so no insurance (older callers, tests). */
+    fx: number | undefined = undefined,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ status: 'requested' | 'capped' | 'invalid' }> {
     // Deliberately NOT behind rewardsRedemptionEnabled (2026-10-08): /task
@@ -4777,12 +4782,31 @@ class PacksModuleService extends MedusaService({
     // 2) Snapshot the shipping address (denormalized at request time). A missing
     //    required field is a bad request, surfaced here as 'invalid' (the route
     //    has already resolved + ownership-checked the address upstream).
-    //    Non-MY is 'invalid' too — defense-in-depth behind the route's named
-    //    MY_ONLY_MESSAGE refusal, same layering as the redemption gate above.
+    //    A country we do not ship to, or a postcode we cannot zone, is
+    //    'invalid' too — defense-in-depth behind the route's named refusals,
+    //    same layering as the redemption gate above.
     const snapshot = snapshotAddress(address);
-    if (!snapshot || !isMalaysianAddress(snapshot.ship_country_code)) {
+    if (
+      !snapshot ||
+      !isShippableCountry(snapshot.ship_country_code) ||
+      !isShippablePostcode(snapshot.ship_postal_code, snapshot.ship_country_code)
+    ) {
       return { status: 'invalid' };
     }
+    // Every delivery pays its zone's fee (operator decision 2026-10-14;
+    // prize cards shipped free before): the zone's shipping, plus the same
+    // mandatory 5% insurance above RM200 of card value a vault card pays.
+    const prizeValue =
+      fx !== undefined && pull
+        ? await this.vaultValueForPulls([pull], fx, sharedContext)
+        : 0;
+    const fee = computeDeliveryFee(
+      snapshot.ship_postal_code,
+      prizeValue,
+      snapshot.ship_province,
+      snapshot.ship_city,
+      snapshot.ship_country_code,
+    );
 
     // 3) Daily-cap COUNT under the lock: today's is_reward delivery orders for
     //    this customer. DeliveryOrder has no draw_day column, so we key the day
@@ -4793,15 +4817,10 @@ class PacksModuleService extends MedusaService({
     //    draw cap and the withdrawal cap roll over at the same instant. The lock
     //    makes COUNT-then-INSERT atomic per customer. A canceled order shipped
     //    nothing, so it does not use up the day's allowance.
-    const utcDay = new Date().toISOString().slice(0, 10);
     const { withdrawals_per_day } = await this.rewardsSettings(sharedContext);
-    const countRows = await em.execute<{ n: string | null }[]>(
-      `SELECT COUNT(*) AS n FROM delivery_order
-         WHERE customer_id = ? AND is_reward = TRUE AND status <> 'canceled'
-           AND (created_at AT TIME ZONE 'UTC')::date = ?::date AND deleted_at IS NULL`,
-      [customerId, utcDay],
-    );
-    if (Number(countRows[0]?.n ?? 0) >= withdrawals_per_day) {
+    if (
+      (await this.rewardShipmentsToday(em, customerId)) >= withdrawals_per_day
+    ) {
       return { status: 'capped' };
     }
 
@@ -4816,6 +4835,8 @@ class PacksModuleService extends MedusaService({
           status: 'requested' as const,
           is_reward: true,
           ...snapshot,
+          shipping_fee: fee.shipping,
+          insurance_fee: fee.insurance,
         },
       ],
       sharedContext,
@@ -4832,7 +4853,72 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
 
+    // Charge the fee in this same locked transaction, exactly as the paid
+    // path does: the floor guard refuses (and rolls the order back) when the
+    // balance cannot cover it. The OD row carries the charge (vault 0: prize
+    // pulls are outside value tracking) so the cancel arm refunds it.
+    await this.mutateCreditAtomic(
+      {
+        customerId,
+        amount: -fee.total,
+        reason: 'delivery_fee',
+        reference: order.id,
+      },
+      sharedContext,
+    );
+    await this.recordLedgerEntry(
+      {
+        type: 'OD',
+        customerId,
+        refId: order.id,
+        walletDelta: -fee.total,
+        vaultDelta: 0,
+        payload: {
+          type: 'OD',
+          handles: countByHandle([pull.card_id]),
+          status: 'requested',
+          shipping_fee: fee.shipping,
+          insurance_fee: fee.insurance,
+        },
+      },
+      sharedContext,
+    );
+
     return { status: 'requested' };
+  }
+
+  // Today's non-canceled prize shipments for a customer, on the SAME UTC day
+  // boundary settleRewardDraw uses (see recordRewardWithdrawal's cap note).
+  private async rewardShipmentsToday(
+    em: LedgerSqlManager,
+    customerId: string,
+  ): Promise<number> {
+    const utcDay = new Date().toISOString().slice(0, 10);
+    const rows = await em.execute<{ n: string | null }[]>(
+      `SELECT COUNT(*) AS n FROM delivery_order
+         WHERE customer_id = ? AND is_reward = TRUE AND status <> 'canceled'
+           AND (created_at AT TIME ZONE 'UTC')::date = ?::date AND deleted_at IS NULL`,
+      [customerId, utcDay],
+    );
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  // How many prize cards the customer can still ship today, so the delivery
+  // sheet prices (and sends) only those. A read: recordRewardWithdrawal's
+  // locked count is still what decides.
+  @InjectTransactionManager()
+  async rewardShippingAllowance(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ perDay: number; usedToday: number; remaining: number }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const { withdrawals_per_day } = await this.rewardsSettings(sharedContext);
+    const usedToday = await this.rewardShipmentsToday(em, customerId);
+    return {
+      perDay: withdrawals_per_day,
+      usedToday,
+      remaining: Math.max(0, withdrawals_per_day - usedToday),
+    };
   }
 
   // Collapses request-delivery's three writes (order, items, pull flip) plus
@@ -4891,6 +4977,7 @@ class PacksModuleService extends MedusaService({
       vaultDelta,
       input.snapshot.ship_province,
       input.snapshot.ship_city,
+      input.snapshot.ship_country_code,
     );
     if (!Number.isFinite(fee.total) || fee.total <= 0) {
       throw new MedusaError(
@@ -8949,9 +9036,10 @@ class PacksModuleService extends MedusaService({
     // vault back for an order that was never debited drifts the ledger's
     // cumulative vault_delta upward forever with no corresponding liability.
     // Two live sources of debit-less orders, both covered by this one check:
-    // (a) B7 reward-prize shipments — recordRewardWithdrawal (this file)
-    // creates those with NO OD debit, since reward pulls are excluded from
-    // ledger/value tracking everywhere (e.g. Pull.recorded_value_usd);
+    // (a) B7 reward-prize shipments created before 2026-10-14 — until then
+    // recordRewardWithdrawal shipped prizes free with NO OD row. Since then it
+    // writes one carrying the shipping fee and a 0 vault delta (reward pulls
+    // stay outside value tracking), so a cancel refunds that fee here;
     // (b) EVERY ordinary order already sitting in requested/processed/
     // ready_to_ship when this ships — D4 is go-forward-only with no backfill,
     // so those carry is_reward=false AND no debit. Runs on the same `em`

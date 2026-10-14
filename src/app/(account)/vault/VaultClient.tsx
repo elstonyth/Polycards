@@ -785,10 +785,11 @@ export default function VaultClient({
 
       <p className="mt-5 text-[12px] text-neutral-400">
         Sell-back credits your site balance instantly at the flat{' '}
-        {FLAT_BUYBACK_PERCENT}% buyback rate. Shipping is RM15 (West Malaysia) /
-        RM35 (East Malaysia), with protection included up to RM200 — orders
-        above that add 5% insurance of card value. Fees are deducted from your
-        credit balance.
+        {FLAT_BUYBACK_PERCENT}% buyback rate. Every delivery, prize cards
+        included, pays shipping: RM15 (West Malaysia), RM35 (East Malaysia) or
+        RM50 (Singapore), with protection included up to RM200 — above that add
+        5% insurance of card value. Prize cards ship as separate parcels. Fees
+        are deducted from your credit balance (not bonus credit).
       </p>
 
       {items.length > 0 && consent !== null && (

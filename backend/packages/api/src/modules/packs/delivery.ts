@@ -156,10 +156,14 @@ export function validateDeliveryStatusTransition(
 // West Malaysia RM15, East Malaysia RM35. Shipment protection is included up
 // to RM200 of order card value; above that, 5% insurance on the FULL order
 // value is MANDATORY (operator decision 2026-08-25 — the English brief said
-// "required", the optional reading was rejected). MY-only: the request step
-// refuses non-MY country codes, so a fee is always computable.
+// "required", the optional reading was rejected). Malaysia and Singapore only
+// (Singapore RM50 since 2026-10-14): the request steps refuse any other
+// country, so a fee is always computable.
 export const WEST_SHIPPING_MYR = 15;
 export const EAST_SHIPPING_MYR = 35;
+// Singapore, shipped direct (operator decision 2026-10-14): flat RM50, and
+// every delivery pays its zone's fee, prize cards included.
+export const SINGAPORE_SHIPPING_MYR = 50;
 export const PROTECTION_INCLUDED_MYR = 200;
 export const INSURANCE_RATE = 0.05;
 
@@ -170,12 +174,18 @@ export type DeliveryFee = {
   total: number;
 };
 
-// ONE copy of the MY-only rule for both write paths (request step + address
-// edit route) so the guard and its customer copy can't drift.
-export const MY_ONLY_MESSAGE = 'We currently ship within Malaysia only.';
-export function isMalaysianAddress(countryCode: string): boolean {
-  return countryCode.trim().toUpperCase() === 'MY';
+// ONE copy of the shipping-country rule for every write path (request step,
+// prize route, address edit route) so the guard and its copy can't drift.
+export const SHIPPING_COUNTRIES_MESSAGE =
+  'We currently ship within Malaysia and Singapore only.';
+/** The countries a delivery can go to: Malaysia and (since 2026-10-14)
+ *  Singapore, each with its own rate below. */
+export function isShippableCountry(countryCode: string): boolean {
+  const cc = countryCode.trim().toUpperCase();
+  return cc === 'MY' || cc === 'SG';
 }
+const isSingapore = (countryCode: string | null | undefined): boolean =>
+  (countryCode ?? '').trim().toUpperCase() === 'SG';
 
 // East Malaysia = Labuan 87xxx, Sabah 88xxx–91xxx, Sarawak 93xxx–98xxx — one
 // contiguous numeric range (92xxx is unassigned in Malaysia's plan).
@@ -190,11 +200,31 @@ export function isEastMalaysiaPostcode(postalCode: string): boolean {
 // zoned, and a zone that can't be derived used to fall through to the CHEAP
 // rate — so an unparseable postcode is refused at the door instead
 // (security review 2026-08-25).
-export function isShippablePostcode(postalCode: string): boolean {
-  return /^\d{5}$/.test(postalCode.trim());
+export function isShippablePostcode(
+  postalCode: string,
+  countryCode: string = 'MY',
+): boolean {
+  // Singapore postcodes are six digits; Malaysian ones five.
+  return (isSingapore(countryCode) ? /^\d{6}$/ : /^\d{5}$/).test(
+    postalCode.trim(),
+  );
 }
 
-export type DeliveryZone = 'west' | 'east';
+/** The refusal for a postcode isShippablePostcode rejects, per country. */
+export function postcodeMessage(countryCode: string): string {
+  return isSingapore(countryCode)
+    ? 'Enter a valid 6-digit Singapore postcode for this address.'
+    : 'Enter a valid 5-digit Malaysian postcode for this address.';
+}
+
+export type DeliveryZone = 'west' | 'east' | 'sg';
+
+// An address that names Singapore (or "Singapura", the Malay spelling) in its
+// state or city. Billed the Singapore rate whatever country code was typed,
+// the same way a Sabah address with a KL postcode is billed East: the dearer
+// reading wins. NOT matched on the street lines: a Malaysian "Jalan Singapura"
+// would be over-billed RM50 with no way to correct it.
+const SINGAPORE_PLACE_RE = /\b(singapore|singapura)\b/i;
 
 // The East Malaysian states + their major localities. Matched on the address's
 // province AND city because the postcode alone is customer-typed: a Sabah
@@ -212,11 +242,20 @@ export function deliveryZone(
   postalCode: string,
   province: string | null | undefined,
   city: string | null | undefined,
+  countryCode?: string | null,
 ): DeliveryZone {
-  if (isEastMalaysiaPostcode(postalCode)) return 'east';
   const place = [province, city].filter(Boolean).join(' ');
+  // Singapore is the dearest zone, so it is checked first.
+  if (isSingapore(countryCode) || SINGAPORE_PLACE_RE.test(place)) return 'sg';
+  if (isEastMalaysiaPostcode(postalCode)) return 'east';
   return EAST_PLACE_RE.test(place) ? 'east' : 'west';
 }
+
+export const ZONE_SHIPPING_MYR: Record<DeliveryZone, number> = {
+  west: WEST_SHIPPING_MYR,
+  east: EAST_SHIPPING_MYR,
+  sg: SINGAPORE_SHIPPING_MYR,
+};
 
 const toCents = (n: number) => Math.round(n * 100) / 100;
 
@@ -229,11 +268,10 @@ export function computeDeliveryFee(
   orderValueMyr: number,
   province?: string | null,
   city?: string | null,
+  countryCode?: string | null,
 ): DeliveryFee {
   const shipping =
-    deliveryZone(postalCode, province, city) === 'east'
-      ? EAST_SHIPPING_MYR
-      : WEST_SHIPPING_MYR;
+    ZONE_SHIPPING_MYR[deliveryZone(postalCode, province, city, countryCode)];
   const insurance =
     orderValueMyr > PROTECTION_INCLUDED_MYR
       ? toCents(orderValueMyr * INSURANCE_RATE)
