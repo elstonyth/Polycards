@@ -44,7 +44,7 @@ medusaIntegrationTestRunner({
           status: 'failed' as const,
           audit_note: note,
         };
-        const [open, recent, retired] = await packs.createGatewayWithdrawals([
+        const [open, recent, retired] = (await packs.createGatewayWithdrawals([
           {
             ...base,
             merchant_transaction_id: 'PC-audit-open',
@@ -65,7 +65,7 @@ medusaIntegrationTestRunner({
               'gateway "globepay" is not configured here — not audited',
             audited_at: hoursAgo(2),
           },
-        ] as never);
+        ] as never)) as unknown as { id: string }[];
         // Old enough to be outside the 7-day window the daily checks use.
         await packs.updateGatewayWithdrawals([
           { id: open.id, created_at: hoursAgo(9 * 24) },

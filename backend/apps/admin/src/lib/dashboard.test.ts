@@ -5,6 +5,7 @@ import {
   attentionTitle,
   attentionWithdrawals,
   deltaTone,
+  doublePayRisks,
   latestPayments,
   moneyFlowSeries,
   netCashIn,
@@ -377,5 +378,55 @@ describe('attentionTitle', () => {
       '(1) Polycards Admin',
     );
     expect(attentionTitle('(3) Polycards Admin', 0)).toBe('Polycards Admin');
+  });
+});
+
+describe('doublePayRisks', () => {
+  const finding = (o: Record<string, unknown>) => ({
+    kind: 'withdrawal' as const,
+    gateway: 'tgpay' as const,
+    id: 'w',
+    merchant_transaction_id: 'PC-1',
+    gateway_transaction_id: null,
+    customer_id: 'c',
+    status: 'failed',
+    amount: 512.4,
+    note: 'gateway still reports pending for a payout we refunded',
+    audited_at: null,
+    ...o,
+  });
+
+  // The audit's two notes for a refunded payout the gateway did not drop:
+  // still holding it, or already paid it (gateway-audit.ts).
+  it('counts refunded payouts the gateway still holds or paid, and their sum', () => {
+    expect(
+      doublePayRisks([
+        finding({}),
+        finding({
+          id: 'w2',
+          amount: 100,
+          note: 'gateway says PAID OUT (100.00) but the row is failed and refunded — DOUBLE PAYMENT risk, investigate now',
+        }),
+      ]),
+    ).toEqual({ count: 2, paid: 1, amount: 612.4 });
+  });
+
+  it('ignores every other finding', () => {
+    expect(
+      doublePayRisks([
+        finding({
+          kind: 'deposit',
+          note: 'gateway paid 154.58, row credited 154.52',
+        }),
+        finding({
+          status: 'settled',
+          note: 'gateway still reports pending for a payout we marked settled',
+        }),
+        finding({
+          gateway: 'globepay',
+          note: 'gateway "globepay" is not configured here — not audited',
+        }),
+      ]),
+    ).toEqual({ count: 0, paid: 0, amount: 0 });
   });
 });
