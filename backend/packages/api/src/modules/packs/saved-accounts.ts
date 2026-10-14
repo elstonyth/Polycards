@@ -201,7 +201,7 @@ export function bankSupportedBy(
   env: Partial<Record<string, string>> = process.env,
 ): boolean {
   if (sandboxOnlyBank(bankCode, env, gateway)) return false;
-  return Boolean(gatewayBankCode(bankCode, gateway));
+  return Boolean(gatewayBankCode(bankCode, gateway, env));
 }
 
 /** "about 3 hours" / "about 20 minutes" — a wait, not a wall-clock time, so the
