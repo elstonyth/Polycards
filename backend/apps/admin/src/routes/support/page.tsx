@@ -30,10 +30,11 @@ import { BonusCreditToggle } from "../../components/BonusCreditToggle";
 import { adjustCreditVars, isBonusGrant } from "../../lib/credit-kind";
 
 export const config: RouteConfig = {
-  label: "Customer Support",
+  label: "pcNav.customerSupport",
+  translationNs: "translation",
   icon: Buildings,
-  nested: "/customers",
-  rank: 1,
+  rank: 2,
+  nested: "/players",
 };
 
 const SupportPage = () => {

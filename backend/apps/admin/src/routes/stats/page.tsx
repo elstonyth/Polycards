@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Container, Heading, Input, Text } from "@medusajs/ui";
-import { ChartBar } from "@medusajs/icons";
+import { House } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import { useStats } from "../../lib/queries";
 import type { StatsFigures, StatsRange } from "../../lib/admin-rest";
@@ -11,8 +11,9 @@ import { LoadingSkeleton } from "../../components/LoadingSkeleton";
 // rank 0 = the top group of the custom nav. The SDK only reads a numeric
 // LITERAL here, so a negative rank (a unary expression) would be ignored.
 export const config: RouteConfig = {
-  label: "Stats",
-  icon: ChartBar,
+  label: "pcNav.dashboard",
+  translationNs: "translation",
+  icon: House,
   rank: 0,
 };
 

@@ -287,7 +287,9 @@ const StorefrontPage = () => {
 export default StorefrontPage;
 
 export const config: RouteConfig = {
-  label: 'Storefront',
+  label: 'pcNav.cardFrame',
+  translationNs: 'translation',
   icon: Photo,
-  rank: 25,
+  rank: 1,
+  nested: '/site',
 };

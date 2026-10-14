@@ -41,10 +41,11 @@ import { GraderGradeSelect } from '../../components/GraderGradeSelect';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 export const config: RouteConfig = {
-  label: 'Gacha Cards',
+  label: 'pcNav.cards',
+  translationNs: 'translation',
   icon: Sparkles,
-  nested: '/products',
-  rank: 2,
+  rank: 0,
+  nested: '/packs',
 };
 
 // Edit-only form state (inventory-first: NEW cards are registered from an

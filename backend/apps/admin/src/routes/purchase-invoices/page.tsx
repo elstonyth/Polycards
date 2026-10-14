@@ -9,12 +9,12 @@ import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
-// rank 2 puts this under Inventory, right after "Add from PriceCharting" (1).
 export const config: RouteConfig = {
-  label: 'Purchase Invoices',
+  label: 'pcNav.purchaseInvoices',
+  translationNs: 'translation',
   icon: Receipt,
-  nested: '/inventory',
   rank: 2,
+  nested: '/inventory/list',
 };
 
 // EXACTLY the backend's SORTABLE allow-list (api/admin/purchase-invoices/
@@ -104,7 +104,9 @@ const PurchaseInvoicesPage = () => {
         ) : data.invoices.length === 0 ? (
           <div className="border-t px-6 py-8">
             <Text className="text-ui-fg-subtle">
-              {q ? 'No invoices match that search.' : 'No purchase invoices yet.'}
+              {q
+                ? 'No invoices match that search.'
+                : 'No purchase invoices yet.'}
             </Text>
           </div>
         ) : (

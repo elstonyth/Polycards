@@ -1385,7 +1385,9 @@ const ChallengePage = () => {
 export default ChallengePage;
 
 export const config: RouteConfig = {
-  label: 'Weekly Challenge',
+  label: 'pcNav.weeklyChallenge',
+  translationNs: 'translation',
   icon: Trophy,
-  rank: 33,
+  rank: 2,
+  nested: '/rewards',
 };

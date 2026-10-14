@@ -73,13 +73,11 @@ const packSortValue = (p: AdminPack, key: PackSortKey): number | string => {
   }
 };
 
-// Sidebar entry. The label is literal (internal single-operator tool); switch to
-// RouteConfig.translationNs if this dashboard is ever localized.
 export const config: RouteConfig = {
-  label: 'Gacha Packs',
+  label: 'pcNav.packs',
+  translationNs: 'translation',
   icon: Gift,
-  nested: '/products',
-  rank: 3,
+  rank: 40,
 };
 
 // Known pack categories — the storefront maps these to labels + icons, so the
@@ -663,7 +661,9 @@ const PacksListPage = () => {
             </Select.Trigger>
             <Select.Content>
               <Select.Item value="all">All statuses</Select.Item>
-              <Select.Item value="draft">{t(PACK_STATUS_LABEL.draft)}</Select.Item>
+              <Select.Item value="draft">
+                {t(PACK_STATUS_LABEL.draft)}
+              </Select.Item>
               <Select.Item value="active">
                 {t(PACK_STATUS_LABEL.active)}
               </Select.Item>

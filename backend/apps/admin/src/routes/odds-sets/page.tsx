@@ -33,10 +33,11 @@ import {
 } from '../../lib/player-groups';
 
 export const config: RouteConfig = {
-  label: 'Player Groups',
+  label: 'pcNav.playerGroups',
+  translationNs: 'translation',
   icon: Users,
-  nested: '/customers',
-  rank: 3,
+  rank: 0,
+  nested: '/players',
 };
 
 type OddsSet = 1 | 2 | 3;

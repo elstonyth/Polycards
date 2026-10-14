@@ -61,9 +61,11 @@ import { RowActions } from "../../components/RowActions";
 // cadence, and the rows read as sentences (labels come from the server — see
 // api/admin/tasks/labels.ts).
 export const config: RouteConfig = {
-  label: "Tasks",
+  label: "pcNav.tasks",
+  translationNs: "translation",
   icon: CheckCircle,
-  rank: 36, // after Referrals (35)
+  rank: 1,
+  nested: "/rewards",
 };
 
 // One labelled field. Every control in the form goes through this — the old

@@ -44,9 +44,10 @@ import { GraderGradeSelect } from '../../../components/GraderGradeSelect';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 
 export const config: RouteConfig = {
-  label: 'Add from PriceCharting',
-  nested: '/inventory',
-  rank: 1,
+  label: 'pcNav.addStock',
+  translationNs: 'translation',
+  rank: 0,
+  nested: '/inventory/list',
 };
 
 // NOTE: usdToMyr is display-only preview math showing the raw FMV in RM; the

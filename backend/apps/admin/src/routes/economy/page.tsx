@@ -16,9 +16,11 @@ import { useTableSort } from "../../lib/use-table-sort";
 import { LoadingSkeleton } from "../../components/LoadingSkeleton";
 
 export const config: RouteConfig = {
-  label: "Economy",
+  label: "pcNav.profitReport",
+  translationNs: "translation",
   icon: CurrencyDollar,
-  rank: 30,
+  rank: 4,
+  nested: "/payments",
 };
 
 // Period presets for the ledger-total filter. `from` is a snapshot at selection

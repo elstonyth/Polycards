@@ -30,10 +30,11 @@ import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 export const config: RouteConfig = {
-  label: 'Withdrawals',
+  label: 'pcNav.withdrawals',
+  translationNs: 'translation',
   icon: ArrowUpTray,
-  nested: '/orders',
-  rank: 3,
+  rank: 0,
+  nested: '/payments',
 };
 
 // held FIRST and is the page's default view (Task 6, plan 094) — a held row

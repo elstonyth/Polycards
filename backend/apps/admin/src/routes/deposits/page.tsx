@@ -22,10 +22,11 @@ import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 export const config: RouteConfig = {
-  label: 'Deposits',
+  label: 'pcNav.deposits',
+  translationNs: 'translation',
   icon: CurrencyDollar,
-  nested: '/orders',
-  rank: 2,
+  rank: 1,
+  nested: '/payments',
 };
 
 const VIEWS: GatewayDepositView[] = [

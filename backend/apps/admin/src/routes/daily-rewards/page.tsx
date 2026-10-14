@@ -360,7 +360,9 @@ const SettingsTab = () => {
 export default DailyRewardsPage;
 
 export const config: RouteConfig = {
-  label: 'VIP',
+  label: 'pcNav.vipLevels',
+  translationNs: 'translation',
   icon: Star,
-  rank: 32,
+  rank: 0,
+  nested: '/rewards',
 };

@@ -18,11 +18,12 @@ import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
-// rank 31 lands between Economy (30) and Weekly Challenge (33), both top-level.
 export const config: RouteConfig = {
-  label: 'Transactions',
+  label: 'pcNav.transactions',
+  translationNs: 'translation',
   icon: Receipt,
-  rank: 31,
+  rank: 2,
+  nested: '/payments',
 };
 
 // undefined is the "All" tab. WP (challenge settlement) is written by

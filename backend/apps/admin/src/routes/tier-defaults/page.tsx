@@ -16,10 +16,11 @@ import { StickySaveBar } from '../../components/StickySaveBar';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 export const config: RouteConfig = {
-  label: 'Tier Defaults',
+  label: 'pcNav.pricing',
+  translationNs: 'translation',
   icon: Sparkles,
-  nested: '/products',
-  rank: 4,
+  rank: 1,
+  nested: '/packs',
 };
 
 // One editable row per rarity: bounds as free-typed strings ('' = open side).

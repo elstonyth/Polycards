@@ -33,9 +33,11 @@ import { RowActions } from '../../components/RowActions';
 // dismissal on ids + updated_at). Writes are audited, so every save carries a
 // reason.
 export const config: RouteConfig = {
-  label: 'Announcements',
+  label: 'pcNav.announcements',
+  translationNs: 'translation',
   icon: BellAlert,
-  rank: 26, // after Storefront (25)
+  rank: 0,
+  nested: '/site',
 };
 
 const TITLE_MAX = 80;

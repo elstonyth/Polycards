@@ -1069,5 +1069,34 @@
         "adjustment": "Adjustment"
       }
     }
+  },
+  "pcNav": {
+    "dashboard": "Dashboard",
+    "orders": "Orders",
+    "payments": "Payments",
+    "withdrawals": "Withdrawals",
+    "deposits": "Deposits",
+    "transactions": "Transactions",
+    "reconciliation": "Reconciliation",
+    "profitReport": "Profit report",
+    "players": "Players",
+    "playerGroups": "Player groups",
+    "referrals": "Referrals",
+    "customerSupport": "Customer support",
+    "packs": "Packs",
+    "cards": "Cards",
+    "pricing": "Pricing",
+    "sprites": "Pokémon sprites",
+    "stock": "Stock",
+    "addStock": "Add stock",
+    "importCollection": "Import collection",
+    "purchaseInvoices": "Purchase invoices",
+    "rewards": "Rewards",
+    "vipLevels": "VIP levels",
+    "tasks": "Tasks",
+    "weeklyChallenge": "Weekly challenge",
+    "storefront": "Storefront",
+    "announcements": "Announcements",
+    "cardFrame": "Card frame"
   }
 }

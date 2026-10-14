@@ -21,13 +21,11 @@ import { AuditCard } from './AuditCard';
 // The tab list comes from the backend's gateway registry, so a new rail gets
 // its tab without a change here.
 export const config: RouteConfig = {
-  label: 'Settlement',
+  label: 'pcNav.reconciliation',
+  translationNs: 'translation',
   icon: Receipt,
-  // After the Economy (30) / Ledger (31) money-reporting cluster. NOT 32 —
-  // Daily rewards already holds that and a collision leaves the order
-  // tie-break-dependent; 34 sits after Weekly Challenge (33) in a slot
-  // nothing owns.
-  rank: 34,
+  rank: 3,
+  nested: '/payments',
 };
 
 const SettlementPage = () => {

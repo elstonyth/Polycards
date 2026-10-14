@@ -23,9 +23,11 @@ import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 export const config: RouteConfig = {
-  label: 'Pixel Pokédex',
+  label: 'pcNav.sprites',
+  translationNs: 'translation',
   icon: Photo,
-  rank: 5,
+  rank: 2,
+  nested: '/packs',
 };
 
 const PAGE_SIZE = 60;

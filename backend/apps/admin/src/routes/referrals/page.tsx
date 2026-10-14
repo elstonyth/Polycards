@@ -40,10 +40,11 @@ import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 // run list ("TUES CHECK" happens here: review, then Approve), and the
 // selected run's line detail with per-line void.
 export const config: RouteConfig = {
-  label: 'Referrals',
+  label: 'pcNav.referrals',
+  translationNs: 'translation',
   icon: Users,
-  // After Settlement (34) — the money-reporting cluster's tail.
-  rank: 35,
+  rank: 1,
+  nested: '/players',
 };
 
 const fromCents = (cents: number): string => rm(cents / 100);
