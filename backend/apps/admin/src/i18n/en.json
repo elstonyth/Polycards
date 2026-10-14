@@ -1356,6 +1356,9 @@
     "colFmv": "FMV",
     "colSellNow": "Sell now",
     "sellLocked": "Can't be sold yet: a free welcome card unlocks after the first paid pack.",
-    "sellsPaused": "Selling is paused: the exchange-rate feed is down, so the player can't sell any card right now. The prices below are indicative."
+    "sellsPaused": "Selling is paused: the exchange-rate feed is down, so the player can't sell any card right now. The prices below are indicative.",
+    "heldBoth": "{{held}} held back: bonus and deposit still to play",
+    "heldBonus": "{{held}} held back: bonus credit",
+    "heldPlay": "{{held}} held back: deposit still to play"
   }
 }
