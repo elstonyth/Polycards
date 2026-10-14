@@ -2,6 +2,7 @@ import {
   callbackLedgerAmount,
   nudgedDeposit,
   regionalDepositBand,
+  regionalWithdrawalBand,
   PAYMENT_FX_MAX_AGE_MS,
   PAYMENT_FX_LIVE_MAX_AGE_MS,
   PAYIN_NUDGE_CENTS,
@@ -248,6 +249,35 @@ describe('review fixes (2026-10-06)', () => {
     expect(
       creditForDeposit(band.max + PAYIN_NUDGE_CENTS / 100, { depositRate: 3.4 }),
     ).toBeLessThanOrEqual(10000);
+  });
+});
+
+describe('regionalWithdrawalBand — the RM a payout to an S$ bank may take today', () => {
+  const rmBand = { withdrawalMin: 50, withdrawalMax: 30000 };
+  const sgdBand = { withdrawalMin: 30, withdrawalMax: 10000 };
+
+  it('lifts the RM floor to what pays the S$ floor, and caps at the RM ceiling', () => {
+    const band = regionalWithdrawalBand({ payoutRate: 3.201662 }, sgdBand, rmBand);
+    // S$30 x 3.201662 = RM 96.04986 -> 96.05; S$10,000 would be RM 32,016.62.
+    expect(band).toEqual({ min: 96.05, max: 30000 });
+    expect(payoutForWithdrawal(band.min, { payoutRate: 3.201662 })).toBeGreaterThanOrEqual(30);
+    expect(payoutForWithdrawal(band.min - 0.01, { payoutRate: 3.201662 })).toBeLessThan(30);
+  });
+
+  it('every RM amount inside the band pays inside the S$ band', () => {
+    for (const payoutRate of [2.9, 3.0, 3.1905, 3.20595, 3.33333, 3.5]) {
+      const band = regionalWithdrawalBand({ payoutRate }, sgdBand, rmBand);
+      expect(payoutForWithdrawal(band.min, { payoutRate })).toBeGreaterThanOrEqual(30);
+      expect(payoutForWithdrawal(band.max, { payoutRate })).toBeLessThanOrEqual(10000);
+    }
+  });
+
+  it('keeps the RM band where it is the tighter one', () => {
+    // At 1.50, S$30 is RM 45 — under the RM 50 floor.
+    expect(regionalWithdrawalBand({ payoutRate: 1.5 }, sgdBand, rmBand)).toEqual({
+      min: 50,
+      max: 15000,
+    });
   });
 });
 

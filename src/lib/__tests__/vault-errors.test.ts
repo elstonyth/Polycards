@@ -175,6 +175,9 @@ describe('VAULT_RULES backend-message contract', () => {
       'SGD payments are paused right now — please try again shortly.',
       'SGD top-ups are not available right now.',
       'Enter the name on the bank account you are paying from.',
+      // The pending-cap refusal (gateway-deposit.ts): fell to the generic
+      // "Something went wrong" and hid why every retry failed.
+      'You have several top-ups still waiting for payment. Finish one, or wait a few minutes before starting another.',
     ];
     for (const msg of literals) expect(map(msg)).toBe(msg);
   });

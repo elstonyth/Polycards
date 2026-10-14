@@ -288,6 +288,45 @@ describe('WithdrawForm', () => {
     expect(startWithdrawal).not.toHaveBeenCalled();
   });
 
+  // The form enters RM. A Singapore account is paid through A3Pay in S$, so
+  // its floor is what pays S$30 at today's rate, not the RM gateway's RM 50.
+  it("judges a Singapore account by the S$ rail's own RM band", async () => {
+    const SG_ACCOUNT = {
+      ...READY_ACCOUNT,
+      id: 'acc_sg',
+      bankCode: 'DBSSSGSG',
+      bankName: 'DBS Bank',
+      currency: 'SGD',
+    };
+    getPaymentLimits.mockResolvedValue({
+      gateway: 'tgpay',
+      deposit: { minRm: 50, maxRm: 10000 },
+      withdrawal: { minRm: 50, maxRm: 30000 },
+      depositsEnabled: true,
+      withdrawalsEnabled: true,
+      regional: [
+        {
+          gateway: 'a3pay',
+          currency: 'SGD',
+          depositsEnabled: true,
+          withdrawalsEnabled: true,
+          deposit: { min: 30, max: 3150 },
+          withdrawal: { min: 30, max: 10000 },
+          withdrawalRm: { minRm: 96.05, maxRm: 30000 },
+          rate: { deposit: 3.169804, payout: 3.201662 },
+        },
+      ],
+    });
+    await render([SG_ACCOUNT], 1000);
+    setValue('select[aria-label="Saved bank account"]', SG_ACCOUNT.id);
+    setValue('input[aria-label="Withdrawal amount in RM"]', '80');
+    await submit();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'Singapore payouts must be between RM 96.05 and RM 30,000 today.',
+    );
+    expect(startWithdrawal).not.toHaveBeenCalled();
+  });
+
   it('caps a typed or pasted amount at the withdrawable figure', async () => {
     await render();
     fillValidForm('200');

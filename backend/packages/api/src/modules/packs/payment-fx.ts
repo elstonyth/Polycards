@@ -264,6 +264,36 @@ export function regionalDepositBand(
 }
 
 /**
+ * The RM band a payout to a regional bank may take TODAY: the RM band,
+ * narrowed so the S$ it converts to (floored to the cent, as
+ * payoutForWithdrawal does) sits inside the gateway's own S$ band. The form
+ * enters RM, so this is the band it can check before the customer taps; at
+ * 3.2017, S$30 needs RM 96.05, not the RM band's RM 50.
+ */
+export function regionalWithdrawalBand(
+  quote: Pick<PaymentFxQuote, 'payoutRate'>,
+  currencyBand: { withdrawalMin: number; withdrawalMax: number },
+  ledgerBand: { withdrawalMin: number; withdrawalMax: number },
+): { min: number; max: number } {
+  let min =
+    Math.ceil(currencyBand.withdrawalMin * quote.payoutRate * 100 - 1e-6) /
+    100;
+  // The payout floors to the cent, so the rounded-up RM can still land a
+  // cent short of the S$ floor; one more cent always clears it.
+  if (payoutForWithdrawal(min, quote) < currencyBand.withdrawalMin) {
+    min = (cents(min) + 1) / 100;
+  }
+  return {
+    min: Math.max(ledgerBand.withdrawalMin, min),
+    max: Math.min(
+      ledgerBand.withdrawalMax,
+      Math.floor(currencyBand.withdrawalMax * quote.payoutRate * 100 + 1e-6) /
+        100,
+    ),
+  };
+}
+
+/**
  * The FX lock a row carries. A row in a non-RM `currency` MUST carry its
  * locked gateway amount; an RM row (or a row from before the lock existed,
  * `currency` absent) converts 1:1.
