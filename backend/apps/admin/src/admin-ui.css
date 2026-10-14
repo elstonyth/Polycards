@@ -138,6 +138,15 @@
   --elevation-card-hover: 0 0 0 1px rgba(255, 255, 255, 0.14);
 }
 
+/* Medusa's primary button paints its label with --contrast-fg-primary, a light
+   tone made for its own grey button: on Vault's white primary that is white on
+   white. The token itself can't change — tooltips and other dark "contrast"
+   surfaces share it — so the label colour is set on the button. A disabled
+   button keeps its own, more specific, disabled colour. */
+[class~='bg-ui-button-inverted'] {
+  color: var(--fg-on-inverted);
+}
+
 /*
  * Geist, the storefront's body face, for the whole admin. Every Medusa rule
  * (the html base and ~25 txt-* typography classes, some !important) names
