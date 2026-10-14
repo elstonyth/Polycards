@@ -15,6 +15,7 @@ import {
   rowGatewayConfigs,
 } from '../modules/packs/gateway';
 import { toOptionalMoney } from '../modules/packs/money';
+import { alertOps } from '../modules/packs/ops-alert';
 import {
   GATEWAY_EXPIRED_RETRY_BATCH,
   GATEWAY_EXPIRED_RETRY_MS,
@@ -254,6 +255,16 @@ export default async function depositReconcileJob(container: MedusaContainer) {
       // ever stops holding, this is the property that has to be revisited.
       if (action.kind === 'quarantine') {
         quarantined += 1;
+        // Off the lock is a slip at the gateway with a customer possibly
+        // owed money: an operator must see it, not only the log.
+        if (action.reason === 'off-lock') {
+          void alertOps(
+            container,
+            `deposit-off-lock:${deposit.merchant_transaction_id}`,
+            `Deposit ${deposit.merchant_transaction_id} (customer ${deposit.customer_id}): the gateway reports ${detail?.reportedAmount} paid, but the order was locked at ${deposit.gateway_amount}. Not credited and left pending. Check the gateway's record; if the customer paid, have the gateway correct the order so its callback credits it. Never credit it by admin adjustment.`,
+            { muteMs: 6 * 60 * 60 * 1000 },
+          );
+        }
         logger.error(
           `[deposit-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, ${action.reason === 'off-lock' ? `${detail?.reportedAmount} in the gateway's currency, more than a nudge from the row's locked ${deposit.gateway_amount}` : `above the RM ${GATEWAY_MAX_RM} deposit ceiling`} — not credited, not written off; left ${deposit.status} for manual settlement`,
         );
