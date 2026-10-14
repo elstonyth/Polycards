@@ -161,7 +161,9 @@ import {
   buybackAmount,
   instantDeadlineMs,
   type BuybackRate,
+  FLAT_PERCENT,
 } from './buyback-rate';
+import type { CashCents, CashSide, OwedCents } from './profit';
 import { consumeExternalSen } from './external-funded';
 import {
   BONUS_BP_FULL,
@@ -7485,6 +7487,7 @@ class PacksModuleService extends MedusaService({
   async ledgerReasonTotals(
     from?: string,
     to?: string,
+    scope: CustomerScope = 'all',
     @MedusaContext() sharedContext: Context = {},
   ): Promise<Array<{ reason: string; amount: number }>> {
     const em = (sharedContext.transactionManager ??
@@ -7504,6 +7507,7 @@ class PacksModuleService extends MedusaService({
       sql += ' AND created_at < ?::timestamptz';
       params.push(to);
     }
+    sql += scopeSql(scope, 'customer_id');
     sql += ' GROUP BY reason';
     const rows = await em.execute<{ reason: string; cents: string }[]>(
       sql,
@@ -7982,6 +7986,142 @@ class PacksModuleService extends MedusaService({
     return {
       count: Number(rows[0]?.n ?? 0),
       liability: Number(rows[0]?.cents ?? 0) / 100,
+    };
+  }
+
+  // The Profit report's cash (GET /admin/profit-report; spec
+  // 2026-10-14-admin-finance-pages §4.2): settled gateway rows only, by
+  // settled_at, the same basis as the Settlement report. A deposit's fee is
+  // gross − net and a payout's is net − gross (a payout's net is what our
+  // wallet paid, fee on top: gateway-settlement.ts DIRECTION RULE), both over
+  // rows whose net is on file; the rest are counted, never treated as free.
+  // null bounds = all time.
+  @InjectManager()
+  async profitCashTotals(
+    from: Date | null,
+    to: Date | null,
+    scope: CustomerScope,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<CashCents> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const win = (t: string) =>
+      from && to
+        ? ` AND ${t}.settled_at >= ?::timestamptz AND ${t}.settled_at < ?::timestamptz`
+        : '';
+    const bounds = from && to ? [from.toISOString(), to.toISOString()] : [];
+    const dep =
+      "FROM gateway_deposit d WHERE d.deleted_at IS NULL AND d.status = 'settled'" +
+      ' AND d.settled_at IS NOT NULL' +
+      win('d') +
+      scopeSql(scope, 'd.customer_id');
+    const wd =
+      "FROM gateway_withdrawal w WHERE w.deleted_at IS NULL AND w.status = 'settled'" +
+      ' AND w.settled_at IS NOT NULL' +
+      win('w') +
+      scopeSql(scope, 'w.customer_id');
+    const [row] = await em.execute<
+      {
+        t_n: number;
+        t_gross: string;
+        t_fee: string;
+        t_missing: number;
+        w_n: number;
+        w_gross: string;
+        w_fee: string;
+        w_missing: number;
+      }[]
+    >(
+      `SELECT
+         (SELECT count(*) ${dep})::int AS t_n,
+         (SELECT COALESCE(SUM(ROUND(d.amount_settled * 100)), 0) ${dep})::bigint AS t_gross,
+         (SELECT COALESCE(SUM(ROUND((d.amount_settled - d.net_amount) * 100)), 0) ${dep}
+            AND d.net_amount IS NOT NULL AND d.amount_settled IS NOT NULL)::bigint AS t_fee,
+         (SELECT count(*) ${dep} AND d.net_amount IS NULL)::int AS t_missing,
+         (SELECT count(*) ${wd})::int AS w_n,
+         (SELECT COALESCE(SUM(ROUND(w.amount * 100)), 0) ${wd})::bigint AS w_gross,
+         (SELECT COALESCE(SUM(ROUND((w.net_amount - COALESCE(w.amount_settled, w.amount)) * 100)), 0) ${wd}
+            AND w.net_amount IS NOT NULL)::bigint AS w_fee,
+         (SELECT count(*) ${wd} AND w.net_amount IS NULL)::int AS w_missing`,
+      [
+        ...bounds,
+        ...bounds,
+        ...bounds,
+        ...bounds,
+        ...bounds,
+        ...bounds,
+        ...bounds,
+        ...bounds,
+      ],
+    );
+    const side = (
+      n: number,
+      gross: string,
+      fee: string,
+      missing: number,
+    ): CashSide => ({
+      count: Number(n),
+      grossCents: Number(gross),
+      feeCents: Number(fee),
+      missingFees: Number(missing),
+    });
+    return {
+      topups: side(row.t_n, row.t_gross, row.t_fee, row.t_missing),
+      withdrawals: side(row.w_n, row.w_gross, row.w_fee, row.w_missing),
+    };
+  }
+
+  // What players could still take out, right now (spec §4.2): each scoped
+  // customer's normal (non-bonus) wallet balance, split by whether they ever
+  // topped up (no top-up = no withdrawal, #748), their bonus balance, and the
+  // cards still owed (vaulted, or in an active delivery) at the vault
+  // sell-back rate. A negative per-customer balance owes nobody anything.
+  @InjectManager()
+  async profitOwed(
+    scope: CustomerScope,
+    fx: number,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<OwedCents> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [wallet] = await em.execute<
+      { cash_cents: string; no_topup_cents: string; bonus_cents: string }[]
+    >(
+      `WITH bal AS (
+         SELECT customer_id,
+                SUM(${normalSenSql()}) AS normal_cents,
+                SUM(COALESCE(bonus_cents, 0)) AS bonus_cents,
+                bool_or(reason = 'topup' AND amount > 0) AS has_topup
+           FROM credit_transaction
+          WHERE deleted_at IS NULL${scopeSql(scope, 'customer_id')}
+          GROUP BY customer_id
+       )
+       SELECT COALESCE(SUM(GREATEST(normal_cents, 0)) FILTER (WHERE has_topup), 0)::bigint AS cash_cents,
+              COALESCE(SUM(GREATEST(normal_cents, 0)) FILTER (WHERE NOT has_topup), 0)::bigint AS no_topup_cents,
+              COALESCE(SUM(GREATEST(bonus_cents, 0)), 0)::bigint AS bonus_cents
+         FROM bal`,
+      [],
+    );
+    const [cards] = await em.execute<
+      { n: string; delivering: string; cents: string }[]
+    >(
+      'SELECT COUNT(*)::bigint AS n, ' +
+        "       (COUNT(*) FILTER (WHERE p.status = 'delivering'))::bigint AS delivering, " +
+        `       COALESCE(SUM(ROUND(${LIVE_VALUE_USD_SQL} * ? * ?)), 0)::bigint AS cents ` +
+        '  FROM pull p ' +
+        '  JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
+        " WHERE p.status IN ('vaulted', 'delivering') AND p.deleted_at IS NULL" +
+        scopeSql(scope, 'p.customer_id'),
+      // Display MYR × percent = sen: (× 100 ÷ 100) cancel.
+      [DEFAULT_MARKET_MULTIPLIER, fx, FLAT_PERCENT],
+    );
+    return {
+      walletCashCents: Number(wallet?.cash_cents ?? 0),
+      walletBonusCents: Number(wallet?.bonus_cents ?? 0),
+      walletNoTopupCents: Number(wallet?.no_topup_cents ?? 0),
+      cardCount: Number(cards?.n ?? 0),
+      deliveringCount: Number(cards?.delivering ?? 0),
+      cardSellbackCents: Number(cards?.cents ?? 0),
     };
   }
 
