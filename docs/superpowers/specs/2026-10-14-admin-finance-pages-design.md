@@ -156,7 +156,7 @@ Wording stays short: one line under each title, and the rest goes in ⓘ tooltip
 
 The header shows "Settlement · Gateway money, one tab per currency." with pill tabs. The `?currency=` URL stays.
 
-**Gateway strip** replaces RailCard's top half. One card with four tiles:
+**Gateway strip** replaces RailCard's top half. One card with four or five tiles (two wallets for TGPay, three for A3Pay; wallet tiles appear once the wallet call answers):
 
 - the gateway's name and status badge, with a **Switch gateway…** link;
 - the wallet tiles (TGPay: payout and pay-in; A3Pay: available and held), each with an ⓘ for the old hint text;
@@ -182,7 +182,7 @@ The header shows "Settlement · Gateway money, one tab per currency." with pill 
 | Net cash     | in − fees − out                                                                             |
 | Ledger check | ✓ matches when the deposit delta is 0; otherwise an amber "RM X gap" with the ⓘ explanation |
 
-- The withdrawal delta is timing-skewed by design, so it moves into the ⓘ instead of a column.
+- The withdrawal delta is timing-skewed by design, so it is never the check: it shows as a quiet "payouts ±X" line under the gap, explained in the ⓘ.
 - Fee-floor and gross-floor notes stay, as one muted footnote line when they apply.
 
 **Gateway audit card** renders only when `findings_total > 0`:
@@ -210,7 +210,7 @@ The old "our settled deposits / payouts" totals are dropped; the results table a
 
 ## 8. Players (`/players`)
 
-- **Columns (9):**
+- **Columns (10):**
   1. Player: initials avatar, name, email beneath;
   2. Phone, with ✓ when verified;
   3. Group chip: Default in grey, others coloured;
@@ -219,14 +219,15 @@ The old "our settled deposits / payouts" totals are dropped; the results table a
   6. Vault;
   7. Net deposit (= today's "Total contribution"), with an ⓘ that shows the top-up and withdraw totals for that row;
   8. Turnover;
-  9. Joined: date, with "Disabled" beneath when disabled.
+  9. Joined: date, with "Disabled" beneath when disabled;
+  10. Status: the enable/disable switch (with its confirm and reason) and the partner badge.
 - **Removed from the list** (still on the player's page): Real name, Pulls, Last turnover, and the separate Total top up and Total withdraw columns.
 - The same sorts are available where the column survives, plus "Net deposit". A **Sort ▾** select also offers the ones with no column: most topped up, most withdrawn, email A–Z.
 - Joined shows "active {ago}" beneath, from the last turnover.
 - **Filter:** a **Group ▾** select next to search, with All groups, Default and each other group. The backend `GET /admin/players` gains `group=<id>|default`:
   - a group id filters to that group's members;
   - `default` excludes members of non-default groups.
-- **Actions:** **Add player** stays primary. **Export logins** and **Generate accounts** move into a ⋯ DropdownMenu, keeping their existing dialogs.
+- **Actions:** **Generate accounts** is the button (there is no separate "Add player" flow); **Export logins** moves into a ⋯ DropdownMenu and toasts when it starts and when the file is ready.
 
 ## 9. Visual rules
 
