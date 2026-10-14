@@ -8,6 +8,7 @@ import {
 import { orderDateTime, rm, timeAgo } from '../../../lib/format';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { Pager } from '../../../components/Pager';
+import { delta } from '../../economy/signs';
 import { StatTile } from './MoneyCards';
 import { WALLET_FILTERS, ledgerKind, type WalletFilter } from './ledger-kind';
 
@@ -200,9 +201,7 @@ export const WalletTab = ({ customerId }: { customerId: string }) => {
                           <div
                             className={`txt-compact-small-plus tabular-nums ${tx.amount > 0 ? 'text-ui-tag-green-text' : ''}`}
                           >
-                            {tx.amount > 0
-                              ? `+ ${rm(tx.amount)}`
-                              : `− ${rm(Math.abs(tx.amount))}`}
+                            {delta(tx.amount)}
                           </div>
                           {bonus !== 0 && (
                             <div className="text-ui-fg-subtle txt-compact-xsmall tabular-nums">

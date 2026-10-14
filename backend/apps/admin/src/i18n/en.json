@@ -1355,6 +1355,7 @@
     },
     "colFmv": "FMV",
     "colSellNow": "Sell now",
-    "sellLocked": "Can't be sold yet: a free welcome card unlocks after the first paid pack."
+    "sellLocked": "Can't be sold yet: a free welcome card unlocks after the first paid pack.",
+    "sellsPaused": "Selling is paused: the exchange-rate feed is down, so the player can't sell any card right now. The prices below are indicative."
   }
 }

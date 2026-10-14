@@ -155,6 +155,7 @@ import {
 import type { SetEntry } from '@acme/odds-math';
 import type { GroupPolicy } from './player-groups';
 import { qk } from './query-keys';
+import { keepPreviousWhenSame } from './keep-previous';
 import { LEDGER_CURRENCY } from './format';
 import {
   classifyApproveResult,
@@ -389,17 +390,21 @@ export const useCustomerTransactions = (
   id: string | null,
   page = 0,
   reasons?: readonly string[] | null,
-): UseQueryResult<{ items: SupportTransaction[]; total: number }> =>
-  useQuery({
-    queryKey: qk.customerTransactions(
-      id ?? '',
-      page,
-      reasons?.length ? reasons.join(',') : 'all',
-    ),
+): UseQueryResult<{ items: SupportTransaction[]; total: number }> => {
+  const queryKey = qk.customerTransactions(
+    id ?? '',
+    page,
+    reasons?.length ? reasons.join(',') : 'all',
+  );
+  return useQuery({
+    queryKey,
     queryFn: () => getCustomerTransactions(id!, page, 25, reasons ?? undefined),
     enabled: !!id,
-    placeholderData: keepPreviousData,
+    // Page turns only: a filter change shows a skeleton, never the old
+    // filter's rows under the new one.
+    placeholderData: keepPreviousWhenSame(queryKey, 5),
   });
+};
 
 // `opts` narrows the history server-side and is part of the cache key, so the
 // Vault tab's vaulted-only view and the support page's full history are
@@ -414,13 +419,16 @@ export const useCustomerPulls = (
   items: SupportPull[];
   total: number;
   fx?: { rate: number; firm: boolean };
-}> =>
-  useQuery({
-    queryKey: qk.customerPulls(id ?? '', page, opts?.status, opts?.sort),
+}> => {
+  const queryKey = qk.customerPulls(id ?? '', page, opts?.status, opts?.sort);
+  return useQuery({
+    queryKey,
     queryFn: () => getCustomerPulls(id!, page, 25, opts),
     enabled: !!id,
-    placeholderData: keepPreviousData,
+    // Page turns only: a status or sort change shows a skeleton instead.
+    placeholderData: keepPreviousWhenSame(queryKey, 5),
   });
+};
 
 // `customerId` scopes the table to one player. listDeliveryOrders takes `limit`
 // BEFORE it (4th arg), so the default 50 is passed explicitly here.
@@ -705,6 +713,8 @@ export const useFreezeCustomer = () => {
       toast.success('Customer frozen');
       qc.invalidateQueries({ queryKey: qk.customerGacha(vars.id) });
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
+      // Frozen = nothing can be withdrawn: the Wallet tab's figure moves.
+      qc.invalidateQueries({ queryKey: qk.customerMoney(vars.id) });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
@@ -719,6 +729,7 @@ export const useUnfreezeCustomer = () => {
       toast.success('Customer unfrozen');
       qc.invalidateQueries({ queryKey: qk.customerGacha(vars.id) });
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.id) });
+      qc.invalidateQueries({ queryKey: qk.customerMoney(vars.id) });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });

@@ -8322,6 +8322,45 @@ class PacksModuleService extends MedusaService({
     };
   }
 
+  // One page of a customer's pulls, most valuable first (the player page's
+  // Vault, ?sort=value): ranked by the card's live storefront value (FMV ×
+  // its multiplier, what a sell-back is priced from), paged in the database.
+  // A pull whose card row is gone sorts last. Newest first, then id, break
+  // ties, so pages never overlap. Returns the ids in order and the total.
+  @InjectManager()
+  async pullIdsByValue(
+    customerId: string,
+    where: { status?: string; source?: string },
+    page: { limit: number; offset: number },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ ids: string[]; total: number }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    let cond = 'p.customer_id = ? AND p.deleted_at IS NULL';
+    const params: unknown[] = [customerId];
+    if (where.status) {
+      cond += ' AND p.status = ?';
+      params.push(where.status);
+    }
+    if (where.source) {
+      cond += ' AND p.source = ?';
+      params.push(where.source);
+    }
+    const [count] = await em.execute<{ n: string }[]>(
+      `SELECT count(*)::bigint AS n FROM pull p WHERE ${cond}`,
+      params,
+    );
+    const rows = await em.execute<{ id: string }[]>(
+      `SELECT p.id FROM pull p
+         LEFT JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL
+        WHERE ${cond}
+        ORDER BY ${LIVE_VALUE_USD_SQL} DESC NULLS LAST, p.rolled_at DESC, p.id DESC
+        LIMIT ? OFFSET ?`,
+      [...params, DEFAULT_MARKET_MULTIPLIER, page.limit, page.offset],
+    );
+    return { ids: rows.map((r) => r.id), total: Number(count?.n ?? 0) };
+  }
+
   /** Phase 4 P4.2 — 2-way audit union for a customer.
    *
    *  Covers both entity_type keys used by admin_action_audit:

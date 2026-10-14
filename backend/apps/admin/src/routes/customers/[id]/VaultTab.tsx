@@ -35,6 +35,9 @@ export const VaultTab = ({ customerId }: { customerId: string }) => {
   });
   const rows = data?.items ?? [];
   const shipping = money?.owed.cards.delivering ?? 0;
+  // The FX feed is on its display fallback: every sell is refused, so the
+  // prices below are indicative only (GET /admin/customers/:id/pulls).
+  const sellsPaused = data?.fx?.firm === false;
 
   return (
     <Container className="p-0">
@@ -114,6 +117,13 @@ export const VaultTab = ({ customerId }: { customerId: string }) => {
         </div>
       ) : (
         <>
+          {sellsPaused && (
+            <div className="bg-ui-tag-orange-bg border-t px-6 py-3">
+              <Text size="small" className="text-ui-tag-orange-text">
+                {t('playerMoney.sellsPaused')}
+              </Text>
+            </div>
+          )}
           <div
             className="overflow-x-auto border-t"
             tabIndex={0}
@@ -169,9 +179,21 @@ export const VaultTab = ({ customerId }: { customerId: string }) => {
                     </Table.Cell>
                     <Table.Cell className="txt-compact-small-plus whitespace-nowrap text-right tabular-nums">
                       {/* No quote: a free welcome card still locked, or a
-                          card row that no longer exists. */}
+                          card row that no longer exists. A quote off the FX
+                          fallback is greyed: that sell would be refused. */}
                       {p.quote ? (
-                        rm(p.quote.amount)
+                        <span
+                          className={
+                            p.quote.firm ? '' : 'text-ui-fg-muted line-through'
+                          }
+                          title={
+                            p.quote.firm
+                              ? undefined
+                              : t('playerMoney.sellsPaused')
+                          }
+                        >
+                          {rm(p.quote.amount)}
+                        </span>
                       ) : (
                         <span
                           className="text-ui-fg-muted"

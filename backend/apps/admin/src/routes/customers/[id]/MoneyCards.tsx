@@ -167,7 +167,8 @@ export const PeriodsCard = ({ money }: { money: CustomerMoney }) => {
     iso ? timeAgo(iso) : t('playerMoney.never');
   const amountCell = (key: string, amount: number, count: number) => (
     <Table.Cell key={key} className="text-right tabular-nums">
-      <div>{rm(amount)}</div>
+      {/* signed: a window holding only a refund nets below zero. */}
+      <div>{signed(amount)}</div>
       <div className="text-ui-fg-subtle txt-compact-xsmall">
         {t('playerMoney.payments', { count })}
       </div>
