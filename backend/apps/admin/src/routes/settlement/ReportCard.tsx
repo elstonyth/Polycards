@@ -15,6 +15,7 @@ import { LEDGER_CURRENCY, rm } from '../../lib/format';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { Hint } from '../../components/Hint';
 import { resultRow } from './settlement-rows';
+import { delta, signed } from '../economy/signs';
 
 // The gateway's calendar weekly/monthly result for one currency, read from
 // this database (audit 2026-08-17 B1/B3/B4/B5), so the operator never has to
@@ -197,7 +198,7 @@ export const ReportCard = ({ currency }: { currency: string }) => {
                             : ''
                       }`}
                     >
-                      {rm(r.net)}
+                      {signed(r.net)}
                     </Table.Cell>
                     <Table.Cell>
                       {r.gap === 0 ? (
@@ -218,7 +219,7 @@ export const ReportCard = ({ currency }: { currency: string }) => {
                           className="tabular-nums"
                         >
                           {t('settlement.gap', {
-                            amount: `${r.gap > 0 ? '+' : ''}${rm(r.gap)}`,
+                            amount: delta(r.gap),
                           })}
                         </Badge>
                       )}
@@ -231,7 +232,7 @@ export const ReportCard = ({ currency }: { currency: string }) => {
                           className="text-ui-fg-subtle block tabular-nums"
                         >
                           {t('settlement.payoutGap', {
-                            amount: `${r.payoutGap > 0 ? '+' : ''}${rm(r.payoutGap)}`,
+                            amount: delta(r.payoutGap),
                           })}
                         </Text>
                       ) : null}

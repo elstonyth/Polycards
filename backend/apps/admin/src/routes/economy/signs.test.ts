@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { flowLine, signed } from './signs';
+import { delta, flowLine, signed } from './signs';
 
 describe('signed', () => {
   it('writes a minus sign in front of the currency, never inside it', () => {
@@ -19,5 +19,13 @@ describe('flowLine', () => {
   it('money in: received reads plain, refunded reads −', () => {
     expect(flowLine(50, false)).toBe('RM 50.00');
     expect(flowLine(-50, false)).toBe('− RM 50.00');
+  });
+});
+
+describe('delta', () => {
+  it('a gap reads with its own sign in front: + RM x, − RM x', () => {
+    expect(delta(-111.81)).toBe('− RM 111.81');
+    expect(delta(12)).toBe('+ RM 12.00');
+    expect(delta(0)).toBe('RM 0.00');
   });
 });

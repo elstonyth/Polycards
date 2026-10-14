@@ -38,6 +38,22 @@ describe('depositAuditNote', () => {
     ).toMatch(/NO record/);
   });
 
+  // 2026-10-14 prod: 418 of 420 findings were this. The customer opened a
+  // top-up and never paid; the gateway never closes the order. Not a
+  // disagreement. If they pay later the gateway says PAID, which the 7-day
+  // re-check reports below.
+  it('an expired top-up the gateway still shows unpaid is no finding', () => {
+    expect(
+      depositAuditNote({ status: 'expired', amount: null }, pending),
+    ).toBeNull();
+  });
+
+  it('a failed top-up the gateway now shows pending is still a finding', () => {
+    expect(
+      depositAuditNote({ status: 'failed', amount: null }, pending),
+    ).toMatch(/pending for a row we marked failed/);
+  });
+
   it('a written-off row the gateway says was PAID is the loudest finding', () => {
     expect(
       depositAuditNote({ status: 'expired', amount: null }, paid(50)),

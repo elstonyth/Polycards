@@ -5,6 +5,9 @@ import { rm } from '../../lib/format';
 export const signed = (n: number): string =>
   n < 0 ? `− ${rm(Math.abs(n))}` : rm(Math.abs(n));
 
+/** A gap or change with its sign in front: '+ RM 12.00', '− RM 111.81'. */
+export const delta = (n: number): string => (n > 0 ? `+ ${rm(n)}` : signed(n));
+
 /**
  * One "where the money moved" line. On a money-OUT line (sell-backs, promo,
  * commission, adjustments) a positive figure was paid out and reads '−'; a
