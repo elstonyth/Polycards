@@ -152,6 +152,7 @@ export const qk = {
     ['admin', 'customer', id, 'payout-details'] as const,
   spendReport: (id: string) =>
     ['admin', 'customer', id, 'spend-report'] as const,
+  customerMoney: (id: string) => ['admin', 'customer', id, 'money'] as const,
   // ── Epic 3 (Odds) ──
   customerGroups: ['admin', 'customer-groups'] as const,
   // SIBLING namespace, not a child of customerGroups: the member count comes

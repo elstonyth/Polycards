@@ -1758,6 +1758,43 @@ export const getSpendReport = (id: string) =>
     `/admin/customers/${encodeURIComponent(id)}/spend-report`,
   );
 
+/** One window of a player's money: top-ups and withdrawal requests (net of
+ *  refunds) from the credit ledger, the Players list's own sums. */
+export interface CustomerMoneyPeriod {
+  topups: { count: number; amount: number };
+  withdrawals: { count: number; amount: number };
+  /** top-ups − withdrawals: the Players list's "Total contribution". */
+  contribution: number;
+}
+
+/** GET /admin/customers/:id/money: the player page's money card. `cash`,
+ *  `owed` and `activity` are the Profit report's, all time, for this
+ *  player alone. */
+export interface CustomerMoney {
+  as_of: string;
+  customer_id: string;
+  windows: Record<'today' | 'd7' | 'month', { from: string; to: string }>;
+  periods: Record<'today' | 'd7' | 'month' | 'all', CustomerMoneyPeriod>;
+  last: {
+    topup_at: string | null;
+    withdrawal_at: string | null;
+    open_at: string | null;
+  };
+  cash: ProfitReport['cash'];
+  owed: ProfitReport['owed'];
+  activity: ProfitReport['activity'];
+  play: {
+    /** Cards real money won, at draw-time value × today's rate, each in its
+     *  normal (non-bonus) share: the leaderboard's basis. */
+    cards_won: { count: number; value: number };
+    /** cards_won as a percent of pack spend; null with no spend. */
+    return_pct: number | null;
+  };
+}
+
+export const getCustomerMoney = (id: string) =>
+  getJson<CustomerMoney>(`/admin/customers/${encodeURIComponent(id)}/money`);
+
 /** Core Medusa customer record (the Profile tab), not the gacha projection. */
 export interface AdminCustomerDetail {
   id: string;

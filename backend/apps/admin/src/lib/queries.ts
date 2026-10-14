@@ -233,6 +233,13 @@ export const invalidateMoneyViews = (qc: QueryClient) =>
     qc.invalidateQueries({ queryKey: qk.profitReportKey }),
     qc.invalidateQueries({ queryKey: ['admin', 'stats'] }),
     qc.invalidateQueries({ queryKey: ['admin', 'gateway-settlement'] }),
+    // Every player's money card (qk.customerMoney), whichever player moved.
+    qc.invalidateQueries({
+      predicate: (q) =>
+        q.queryKey[0] === 'admin' &&
+        q.queryKey[1] === 'customer' &&
+        q.queryKey[3] === 'money',
+    }),
   ]);
 
 // Profit report. keepPreviousData so a period or scope switch swaps the
@@ -1116,6 +1123,8 @@ import {
   getCustomerDetail,
   getPayoutDetails,
   getSpendReport,
+  getCustomerMoney,
+  type CustomerMoney,
   listPlayers,
   savePayoutDetails,
   type AdminCustomerDetail,
@@ -1208,6 +1217,17 @@ export const useSavePayoutDetails = () => {
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
 };
+
+// The player page's money card. Refetched by invalidateMoneyViews, which
+// every money mutation calls.
+export const useCustomerMoney = (
+  id: string | null,
+): UseQueryResult<CustomerMoney> =>
+  useQuery({
+    queryKey: qk.customerMoney(id ?? ''),
+    queryFn: () => getCustomerMoney(id!),
+    enabled: !!id,
+  });
 
 export const useSpendReport = (
   id: string | null,

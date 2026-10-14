@@ -6,7 +6,9 @@ import {
   Badge,
   Button,
   Container,
+  DropdownMenu,
   Heading,
+  IconButton,
   Input,
   Label,
   Prompt,
@@ -17,7 +19,7 @@ import {
   Text,
   toast,
 } from '@medusajs/ui';
-import { ArrowLeft } from '@medusajs/icons';
+import { ArrowLeft, EllipsisHorizontal } from '@medusajs/icons';
 import {
   useAdjustCredits,
   useCustomerAudit,
@@ -25,6 +27,7 @@ import {
   useCustomerGacha,
   useCustomerReferral,
   useCustomerGroupsAdmin,
+  useCustomerMoney,
   useCustomerPulls,
   useCustomerTransactions,
   useDeliveryOrders,
@@ -42,7 +45,12 @@ import {
   useUnfreezeCustomer,
   type CustomerReferralCard,
 } from '../../../lib/queries';
-import { deliveryStatusLabel, orderDateTime, rm } from '../../../lib/format';
+import {
+  deliveryStatusLabel,
+  orderDateTime,
+  rm,
+  timeAgo,
+} from '../../../lib/format';
 import type {
   CustomerAudit,
   DeliveryStatus,
@@ -57,6 +65,12 @@ import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { Pager } from '../../../components/Pager';
 import { PullsTable } from '../../../components/PullsTable';
 import { GiftAndBonusPanels } from './gift-and-bonus';
+import {
+  MoneySummary,
+  PeriodsCard,
+  PlayCard,
+  StandingCard,
+} from './MoneyCards';
 
 // ponytail: no config export — keeps route out of sidebar nav (mirrors packs/[slug]/page.tsx)
 
@@ -94,7 +108,31 @@ const deliveryTone = (
 type ModalKind = 'freeze' | 'unfreeze' | 'credits';
 
 type TabKey =
-  'profile' | 'lvl' | 'wallet' | 'vault' | 'orders' | 'pulls' | 'history';
+  | 'wallet'
+  | 'vault'
+  | 'orders'
+  | 'pulls'
+  | 'gifts'
+  | 'lvl'
+  | 'profile'
+  | 'history';
+
+// Two letters for the avatar: initials of the name, else the email's start
+// (the Players list's rule).
+const initials = (name: string, email: string): string => {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return words[0][0] + words[1][0];
+  return (words[0] ?? email).slice(0, 2);
+};
+
+// '14 Oct 2026', in Malaysia time.
+const joinedDate = (iso: string): string =>
+  new Date(iso).toLocaleDateString('en-MY', {
+    timeZone: 'Asia/Kuala_Lumpur',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
 
 // ── Tab bodies ──────────────────────────────────────────────────────────────
 // One component per tab, following routes/deliveries/page.tsx: an inactive
@@ -1445,7 +1483,7 @@ const Customer360Page = () => {
   const { id = '' } = useParams();
   const customerId = id || null;
 
-  const [tab, setTab] = useState<TabKey>('profile');
+  const [tab, setTab] = useState<TabKey>('wallet');
 
   // Offset page for the audit table (the endpoint serves 50/page).
   const [auditPage, setAuditPage] = useState(0);
@@ -1460,6 +1498,10 @@ const Customer360Page = () => {
   }
 
   const { data: view, isError: viewError } = useCustomerGacha(customerId);
+  // Name for the header; the Profile tab reads the same cached query.
+  const { data: detail } = useCustomerDetail(customerId);
+  const moneyQ = useCustomerMoney(customerId);
+  const money = moneyQ.data;
   const auditQ = useCustomerAudit(customerId, auditPage);
 
   const freeze = useFreezeCustomer();
@@ -1476,6 +1518,9 @@ const Customer360Page = () => {
   // Partner badge in the header (spec 2026-09-09). Shares the ReferralCard's
   // query key, so the card's own fetch answers this for free.
   const referralQ = useCustomerReferral(id ?? '');
+  const playerName = [detail?.customer.first_name, detail?.customer.last_name]
+    .filter(Boolean)
+    .join(' ');
 
   // ── Modal state ─────────────────────────────────────────────────────────────
   const [modal, setModal] = useState<ModalKind | null>(null);
@@ -1558,62 +1603,86 @@ const Customer360Page = () => {
       : !reason.trim();
 
   return (
-    <div className="flex flex-col gap-y-3">
-      {/* ── Header ─────────────────────────────────────────────── */}
-      <Container className="p-0">
-        <div className="flex items-start justify-between gap-4 px-6 py-4">
-          <div>
+    <div className="pc-dashboard flex flex-col gap-y-3">
+      {/* ── Header: who, their account state, the actions, and the four
+          numbers staff check first. ───────────────────────────────── */}
+      <Container className="pc-settle p-0">
+        <div className="flex flex-wrap items-start justify-between gap-4 px-6 py-4">
+          <div className="min-w-0">
             <button
               type="button"
               onClick={() => navigate(-1)}
-              className="text-ui-fg-subtle hover:text-ui-fg-base mb-2 flex items-center gap-1 text-sm"
+              className="text-ui-fg-subtle hover:text-ui-fg-base mb-3 flex items-center gap-1 text-sm"
             >
               <ArrowLeft className="h-4 w-4" />
               {t('customer360.back')}
             </button>
-            <div className="flex items-center gap-2">
-              <Heading level="h2">{view?.customer.email ?? id}</Heading>
-              {view?.vip && (
-                <Badge size="small" color="purple">
-                  {t('customer360.vipLevel', { level: view.vip.level })}
-                </Badge>
-              )}
-              {isFrozen && (
-                <Badge size="small" color="red">
-                  {t('customer360.frozen')}
-                </Badge>
-              )}
-              {isDisabled && (
-                <Badge size="small" color="red">
-                  {t('players.disabled')}
-                </Badge>
-              )}
-              {/* Partner account (spec 2026-09-09) — from the referral card's
-                  query, which the Profile tab also reads; the header shows it
-                  whatever tab is open. Names the group when the group is the
-                  source, since that is where it has to be changed. */}
-              {referralQ.data?.partner_group ? (
-                <Badge size="small" color="purple">
-                  {t('players.partnerViaGroup', {
-                    group: referralQ.data.partner_group.name,
-                  })}
-                </Badge>
-              ) : referralQ.data?.partner_referral_bp !== null &&
-                referralQ.data?.partner_referral_bp !== undefined ? (
-                <Badge size="small" color="purple">
-                  {t('players.partner')}
-                </Badge>
-              ) : null}
+            <div className="flex min-w-0 items-center gap-3">
+              <span
+                aria-hidden
+                className="bg-ui-bg-component text-ui-fg-subtle txt-compact-small-plus flex size-10 shrink-0 items-center justify-center rounded-full uppercase"
+              >
+                {initials(playerName, view?.customer.email ?? id)}
+              </span>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Heading level="h2" className="truncate">
+                    {playerName || view?.customer.email || id}
+                  </Heading>
+                  {view?.vip && (
+                    <Badge size="small" color="purple">
+                      {t('customer360.vipLevel', { level: view.vip.level })}
+                    </Badge>
+                  )}
+                  {isFrozen && (
+                    <Badge size="small" color="red">
+                      {t('customer360.frozen')}
+                    </Badge>
+                  )}
+                  {isDisabled && (
+                    <Badge size="small" color="red">
+                      {t('players.disabled')}
+                    </Badge>
+                  )}
+                  {/* Partner account (spec 2026-09-09) — from the referral card's
+                      query, which the Profile tab also reads; the header shows it
+                      whatever tab is open. Names the group when the group is the
+                      source, since that is where it has to be changed. */}
+                  {referralQ.data?.partner_group ? (
+                    <Badge size="small" color="purple">
+                      {t('players.partnerViaGroup', {
+                        group: referralQ.data.partner_group.name,
+                      })}
+                    </Badge>
+                  ) : referralQ.data?.partner_referral_bp !== null &&
+                    referralQ.data?.partner_referral_bp !== undefined ? (
+                    <Badge size="small" color="purple">
+                      {t('players.partner')}
+                    </Badge>
+                  ) : null}
+                </div>
+                {view && (
+                  <Text
+                    size="small"
+                    className="text-ui-fg-subtle mt-0.5 break-words"
+                  >
+                    {[
+                      playerName ? view.customer.email : null,
+                      t('playerMoney.joined', {
+                        date: joinedDate(view.customer.created_at),
+                      }),
+                      money?.last.open_at
+                        ? t('playerMoney.activeAgo', {
+                            ago: timeAgo(money.last.open_at),
+                          })
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </Text>
+                )}
+              </div>
             </div>
-            {view?.customer.created_at && (
-              <Text className="text-ui-fg-subtle mt-1" size="small">
-                {t('customer360.memberSince', {
-                  date: new Date(view.customer.created_at).toLocaleDateString(
-                    'en-US',
-                  ),
-                })}
-              </Text>
-            )}
             {viewError && (
               <Text size="small" className="text-ui-fg-error mt-1">
                 Failed to load.
@@ -1649,54 +1718,47 @@ const Customer360Page = () => {
               >
                 {t('customer360.btnAdjustCredits')}
               </Button>
+              {/* Gift packs and Bonus credit live in their own tab now; these
+                  jump straight to it. */}
+              <DropdownMenu>
+                <DropdownMenu.Trigger asChild>
+                  <IconButton size="small" aria-label={t('playerMoney.more')}>
+                    <EllipsisHorizontal />
+                  </IconButton>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Content align="end">
+                  <DropdownMenu.Item onClick={() => setTab('gifts')}>
+                    {t('playerMoney.giftPacks')}
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item onClick={() => setTab('gifts')}>
+                    {t('playerMoney.bonusCredit')}
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu>
             </div>
           )}
         </div>
 
-        {view && (
-          <div className="grid grid-cols-1 gap-px border-t bg-ui-border-base md:grid-cols-3">
-            <div className="bg-ui-bg-subtle px-6 py-4">
-              <Text size="small" className="text-ui-fg-subtle">
-                {t('customer360.balance')}
-              </Text>
-              <Heading level="h1" className="mt-1 tabular-nums">
-                {rm(view.balance)}
-              </Heading>
-            </div>
-            <div className="bg-ui-bg-subtle px-6 py-4">
-              <Text size="small" className="text-ui-fg-subtle">
-                {t('customer360.vault')}
-              </Text>
-              <Heading level="h1" className="mt-1 tabular-nums">
-                {view.vault.count}
-              </Heading>
-              <Text size="small" className="text-ui-fg-subtle">
-                {rm(view.vault.market_value)} FMV
-              </Text>
-            </div>
-            {view.vip && (
-              <div className="bg-ui-bg-subtle px-6 py-4">
-                <Text size="small" className="text-ui-fg-subtle">
-                  {t('customer360.vipSpend')}
-                </Text>
-                <Heading level="h1" className="mt-1 tabular-nums">
-                  {rm(view.vip.spend)}
-                </Heading>
-                <Text size="small" className="text-ui-fg-subtle">
-                  {t('customer360.vipPeakLevel', {
-                    level: view.vip.highest_level_ever,
-                  })}
-                </Text>
-              </div>
-            )}
-          </div>
-        )}
+        <MoneySummary money={money} view={view} />
       </Container>
 
-      {/* Gift packs + Bonus credit, beside the credit adjust above. key={id}:
-          the route doesn't remount on a customer change, so an unsent note
-          must not carry over to the next player. */}
-      {customerId && <GiftAndBonusPanels key={id} customerId={customerId} />}
+      {moneyQ.isError ? (
+        <Container>
+          <Text size="small" className="text-ui-fg-error">
+            {t('playerMoney.loadError')}
+          </Text>
+        </Container>
+      ) : !money ? (
+        <Container>
+          <LoadingSkeleton />
+        </Container>
+      ) : (
+        <>
+          <PeriodsCard money={money} />
+          <StandingCard money={money} />
+          <PlayCard money={money} />
+        </>
+      )}
 
       {/* ── Prompt modal — single instance, content varies by modal kind ─── */}
       <Prompt
@@ -1767,13 +1829,12 @@ const Customer360Page = () => {
 
       {/* ── Tabs ───────────────────────────────────────────────── */}
       <Container className="p-0">
-        <div className="px-6 py-3">
+        <div className="overflow-x-auto px-6 py-3">
           <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
-            <Tabs.List aria-label="Player detail sections">
-              <Tabs.Trigger value="profile">
-                {t('players.tabProfile')}
-              </Tabs.Trigger>
-              <Tabs.Trigger value="lvl">{t('players.tabLvl')}</Tabs.Trigger>
+            <Tabs.List
+              aria-label="Player detail sections"
+              className="whitespace-nowrap"
+            >
               <Tabs.Trigger value="wallet">
                 {t('players.tabWallet')}
               </Tabs.Trigger>
@@ -1782,6 +1843,13 @@ const Customer360Page = () => {
                 {t('players.tabOrders')}
               </Tabs.Trigger>
               <Tabs.Trigger value="pulls">{t('players.tabPulls')}</Tabs.Trigger>
+              <Tabs.Trigger value="gifts">
+                {t('playerMoney.tabGifts')}
+              </Tabs.Trigger>
+              <Tabs.Trigger value="lvl">{t('players.tabLvl')}</Tabs.Trigger>
+              <Tabs.Trigger value="profile">
+                {t('players.tabProfile')}
+              </Tabs.Trigger>
               <Tabs.Trigger value="history">
                 {t('players.tabHistory')}
               </Tabs.Trigger>
@@ -1806,6 +1874,10 @@ const Customer360Page = () => {
       )}
       {tab === 'pulls' && customerId && (
         <PullsTab key={id} customerId={customerId} />
+      )}
+      {/* key={id}: an unsent note must not carry over to the next player. */}
+      {tab === 'gifts' && customerId && (
+        <GiftAndBonusPanels key={id} customerId={customerId} />
       )}
       {tab === 'history' && (
         <HistoryTab
