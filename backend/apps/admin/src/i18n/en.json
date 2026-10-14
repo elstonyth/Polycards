@@ -1139,7 +1139,8 @@
     "noCommission": "No commission paid in these weeks.",
     "periodLabel": "Period",
     "liveNow": "Live · updated just now",
-    "liveAgo": "Live · updated {{ago}} ago"
+    "liveAgo": "Live · updated {{ago}} ago",
+    "scopeHint": "The tiles and the money chart follow this switch. Work waiting on you and the latest payments always show everyone."
   },
   "profit": {
     "title": "Profit report",

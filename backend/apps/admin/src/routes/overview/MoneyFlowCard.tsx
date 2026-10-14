@@ -11,7 +11,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import type { SettlementGranularity, StatsReport } from '../../lib/admin-rest';
+import type {
+  CustomerScope,
+  SettlementGranularity,
+  StatsReport,
+} from '../../lib/admin-rest';
 import { useSettlementReport } from '../../lib/queries';
 import { rm } from '../../lib/format';
 import {
@@ -86,10 +90,13 @@ export const NetChange = ({ cur, prev }: { cur: number; prev: number }) => {
 
 /** Headline net cash in (picked window) over the 12-period money chart. */
 export const MoneyFlowCard = ({
+  scope = 'all',
   stats,
   statsFailed = false,
   className = '',
 }: {
+  /** Real customers only, or every account (the Dashboard's switch). */
+  scope?: CustomerScope;
   stats: StatsReport | undefined;
   /** The stats query failed: show a dash, not an endless skeleton. */
   statsFailed?: boolean;
@@ -98,7 +105,7 @@ export const MoneyFlowCard = ({
   const { t } = useTranslation();
   const [granularity, setGranularity] = useState<SettlementGranularity>('week');
   // '' = every rail, in RM (the route's default scope).
-  const flow = useSettlementReport(granularity, 12, '');
+  const flow = useSettlementReport(granularity, 12, '', scope);
   const series = moneyFlowSeries(flow.data);
   const animate = !prefersReducedMotion();
   const net = stats ? netCashIn(stats.current.stats) : undefined;

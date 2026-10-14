@@ -5,6 +5,8 @@ import { House } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import type { StatsRange } from '../../lib/admin-rest';
 import { useStats } from '../../lib/queries';
+import { useScopeParam } from '../../lib/scope-param';
+import { ScopeSwitch } from '../economy/ScopeSwitch';
 import { RangePicker } from './RangePicker';
 import { isForbidden, todayMyt, windowText } from './helpers';
 import { MoneyFlowCard } from './MoneyFlowCard';
@@ -33,7 +35,10 @@ const OverviewPage = () => {
   const [from, setFrom] = useState(todayMyt);
   const [to, setTo] = useState(todayMyt);
   const custom = range === 'custom';
-  const stats = useStats(range, custom ? from : '', custom ? to : '');
+  // Real customers by default (spec 2026-10-14-admin-finance-pages §5): the
+  // tiles and the money chart follow the switch; work queues never do.
+  const [scope, setScope] = useScopeParam();
+  const stats = useStats(range, custom ? from : '', custom ? to : '', scope);
   const statsHidden = stats.isError && isForbidden(stats.error);
   const statsFailed = stats.isError && !statsHidden;
   // Live: refreshes every section every 30s while this tab is visible.
@@ -45,7 +50,14 @@ const OverviewPage = () => {
         <div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Heading level="h1">{t('dashboard.title')}</Heading>
-            <LiveBadge updatedAt={stats.dataUpdatedAt} />
+            <div className="flex flex-wrap items-center gap-4">
+              <ScopeSwitch
+                scope={scope}
+                onScope={setScope}
+                hint={t('dashboard.scopeHint')}
+              />
+              <LiveBadge updatedAt={stats.dataUpdatedAt} />
+            </div>
           </div>
           <Text size="small" className="text-ui-fg-subtle mt-1">
             {t('dashboard.subtitle', {
@@ -67,6 +79,7 @@ const OverviewPage = () => {
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
         {!statsHidden && (
           <MoneyFlowCard
+            scope={scope}
             stats={stats.data}
             statsFailed={statsFailed}
             className="xl:col-span-2"
