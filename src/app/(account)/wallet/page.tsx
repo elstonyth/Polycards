@@ -86,8 +86,9 @@ export default async function WalletPage() {
           </p>
           <p className="mt-1.5 text-sm text-white/70">
             Your {rm(normal)} can&rsquo;t be withdrawn or used for card
-            deliveries until your first top-up — any amount. After that, play
-            your deposits through on packs and it unlocks, winnings included.
+            deliveries until your first top-up (from {rm0(limits.deposit.minRm)}
+            ). After that, play your deposits through on packs and it unlocks,
+            winnings included.
           </p>
           <TopUpButton size="sm" className="mt-3" />
         </div>

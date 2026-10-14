@@ -294,8 +294,8 @@ export default async function MePage() {
                   {/* Right beside the Withdraw button it would otherwise
                       find out from. Bonus alone never withdraws, so no hint. */}
                   {!walletResult.wallet.hasTopup &&
-                    walletResult.wallet.balance - walletResult.wallet.bonus >=
-                      0.01 && (
+                    Math.round(walletResult.wallet.balance * 100) >
+                      Math.round(walletResult.wallet.bonus * 100) && (
                       <p className="mt-0.5 text-[12px] font-semibold text-sky-400">
                         Top up once to unlock withdrawals
                       </p>

@@ -28,7 +28,7 @@ medusaIntegrationTestRunner({
             },
           ],
         });
-        const [me, saver, legacySaver, gone, payee, failedPayee, odd, padded] =
+        const [me, saver, legacySaver, gone, payee, failedPayee, odd, padded, spaced] =
           await customers.createCustomers([
             { email: 'me@shared.test', metadata: saved('MBBEMYKL') },
             { email: 'saver@shared.test', metadata: saved('MBBEMYKL') },
@@ -40,6 +40,11 @@ medusaIntegrationTestRunner({
             { email: 'odd@shared.test', metadata: { bank_accounts: 'x' } },
             // The same number padded with a leading zero.
             { email: 'padded@shared.test', metadata: saved('MBBEMYKL', '0') },
+            // An older entry saved with spaces, before digits-only validation.
+            {
+              email: 'spaced@shared.test',
+              metadata: { bank_accounts: [{ ...saved('MBBEMYKL').bank_accounts[0], accountNumber: '1234 5678 9012' }] },
+            },
           ]);
         await customers.softDeleteCustomers([gone.id]);
         const row = (
@@ -64,7 +69,7 @@ medusaIntegrationTestRunner({
         const holders = await packs.otherPayoutAccountHolders(me.id, NUMBER);
         const ids = holders.map((h) => h.customer_id).sort();
         expect(ids).toEqual(
-          [legacySaver.id, padded.id, payee.id, saver.id].sort(),
+          [legacySaver.id, padded.id, payee.id, saver.id, spaced.id].sort(),
         );
         expect(
           holders.find((h) => h.customer_id === legacySaver.id)?.bank_code,

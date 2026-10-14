@@ -5638,8 +5638,9 @@ class PacksModuleService extends MedusaService({
   // gateway's alias); the caller compares canonical ids. Read by the
   // saved-accounts POST route, which refuses a number someone else holds:
   // 13 clusters of 2-3 accounts on one bank account farmed welcome packs and
-  // tasks by 2026-10-14. Leading zeros are ignored on both sides, so padding
-  // a number with a 0 does not slip past it.
+  // tasks by 2026-10-14. Both sides compare digits only, without leading
+  // zeros: padding with a 0, or an older saved entry with spaces or dashes,
+  // does not slip past it.
   @InjectManager()
   async otherPayoutAccountHolders(
     customerId: string,
@@ -5653,10 +5654,10 @@ class PacksModuleService extends MedusaService({
         'FROM customer c ' +
         "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
         "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
-        "WHERE c.deleted_at IS NULL AND c.id <> ? AND ltrim(a->>'accountNumber', '0') = ltrim(?, '0') " +
+        "WHERE c.deleted_at IS NULL AND c.id <> ? AND ltrim(regexp_replace(a->>'accountNumber', '[^0-9]', '', 'g'), '0') = ltrim(regexp_replace(?, '[^0-9]', '', 'g'), '0') " +
         'UNION ' +
         'SELECT customer_id, bank_code FROM gateway_withdrawal ' +
-        "WHERE deleted_at IS NULL AND customer_id <> ? AND ltrim(account_number, '0') = ltrim(?, '0') " +
+        "WHERE deleted_at IS NULL AND customer_id <> ? AND ltrim(regexp_replace(account_number, '[^0-9]', '', 'g'), '0') = ltrim(regexp_replace(?, '[^0-9]', '', 'g'), '0') " +
         "AND status IN ('pending', 'held', 'settled')",
       [customerId, accountNumber, customerId, accountNumber],
     );
