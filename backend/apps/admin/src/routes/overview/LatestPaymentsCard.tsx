@@ -71,7 +71,7 @@ export const LatestPaymentsCard = ({
               <li key={`${r.kind}-${r.id}`}>
                 <Link
                   to={`/customers/${r.customerId}`}
-                  className="hover:bg-ui-bg-base-hover -mx-2 grid grid-cols-[32px_minmax(0,1fr)_7.5rem_8.5rem] items-center gap-x-4 rounded-md px-2 py-2.5"
+                  className="hover:bg-ui-bg-base-hover -mx-2 grid grid-cols-[32px_minmax(0,1fr)_7.5rem_7.5rem] items-center gap-x-4 rounded-md px-2 py-2.5"
                 >
                   <span
                     aria-hidden
@@ -98,6 +98,11 @@ export const LatestPaymentsCard = ({
                       · {timeAgo(r.at)}
                     </Text>
                   </span>
+                  {/* Table-like columns: badges share one left edge, amounts the
+                      card's right edge, whatever the label or amount width. */}
+                  <span className="justify-self-start">
+                    <StatusBadge color={s.color}>{t(s.labelKey)}</StatusBadge>
+                  </span>
                   <Text
                     size="small"
                     weight="plus"
@@ -106,10 +111,6 @@ export const LatestPaymentsCard = ({
                     {deposit ? '+' : '−'}
                     {rm(r.amount)}
                   </Text>
-                  {/* Fixed-width columns: amounts share one right edge, badges one left edge. */}
-                  <StatusBadge color={s.color} className="justify-self-start">
-                    {t(s.labelKey)}
-                  </StatusBadge>
                 </Link>
               </li>
             );
