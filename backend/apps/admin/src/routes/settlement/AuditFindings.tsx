@@ -5,13 +5,8 @@ import { useGatewayAudit } from '../../lib/queries';
 import { rm } from '../../lib/format';
 import { paymentStatus } from '../../lib/dashboard';
 
-// 'abcdef1234567890' → 'abcdef12…567890': enough to match by eye against the
-// gateway's back office; the full reference is in the title.
 // The first few are enough to act on; the rest are one click away.
 const SHOWN = 10;
-
-const shortRef = (ref: string) =>
-  ref.length > 16 ? `${ref.slice(0, 8)}…${ref.slice(-6)}` : ref;
 
 /**
  * Gateway audit findings (plan 130) for one currency — only when the hourly
@@ -82,10 +77,9 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
                       <Text
                         as="span"
                         size="xsmall"
-                        className="text-ui-fg-muted block font-mono"
-                        title={ref}
+                        className="text-ui-fg-muted block break-all font-mono"
                       >
-                        {shortRef(ref)} · {f.gateway}
+                        {ref} · {f.gateway}
                       </Text>
                     </Table.Cell>
                     <Table.Cell className="font-mono text-xs">
@@ -107,7 +101,11 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
           </Table>
           {!all && a.findings.length > SHOWN ? (
             <div className="border-t px-6 py-2">
-              <Button size="small" variant="transparent" onClick={() => setAll(true)}>
+              <Button
+                size="small"
+                variant="transparent"
+                onClick={() => setAll(true)}
+              >
                 {t('settlement.showAllFindings', { count: a.findings.length })}
               </Button>
             </div>

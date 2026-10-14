@@ -467,6 +467,8 @@ export interface ProfitCashSide {
   gross: number;
   fees: number;
   missing_fees: number;
+  /** Settled rows with no amount on file (settled by hand): gross is a floor. */
+  missing_gross: number;
 }
 
 export interface ProfitReport {
@@ -488,6 +490,8 @@ export interface ProfitReport {
     wallet_cash: number;
     wallet_bonus: number;
     wallet_no_topup: number;
+    /** Payouts requested, not paid yet: already out of the wallets. */
+    payouts_in_flight: number;
     cards: { count: number; delivering: number; sellback: number };
     total: number;
     all_time_kept: number;
@@ -1618,6 +1622,9 @@ export interface PlayerRow {
   phone: string | null;
   /** Customer-group names — the odds-set membership the operator sees. */
   groups: string[];
+  /** The EFFECTIVE player group's name (the odds engine's rule); null = the
+   *  default group. groups[0] is just whichever membership came first. */
+  player_group: string | null;
   vip_level: number;
   wallet_balance: number;
   vault_value: number;

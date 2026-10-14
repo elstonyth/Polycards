@@ -230,6 +230,9 @@ export async function GET(
         name,
         phone: c.phone ?? null,
         groups: (c.groups ?? []).map((g) => g.name),
+        // The EFFECTIVE player group (the odds engine's rule), null = the
+        // default group; groups[0] is just whichever membership came first.
+        player_group: effective?.name ?? null,
         vip_level: agg.vipLevel.get(c.id) ?? 1,
         wallet_balance: (w?.balanceCents ?? 0) / 100,
         vault_value: (v?.cents ?? 0) / 100,

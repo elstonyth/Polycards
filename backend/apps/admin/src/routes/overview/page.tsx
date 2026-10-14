@@ -76,19 +76,27 @@ const OverviewPage = () => {
         {statsFailed && <SectionError onRetry={() => void stats.refetch()} />}
       </Container>
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-        {!statsHidden && (
-          <MoneyFlowCard
-            scope={scope}
-            stats={stats.data}
-            statsFailed={statsFailed}
-            className="xl:col-span-2"
-          />
-        )}
-        <AttentionCard className={statsHidden ? 'xl:col-span-3' : ''} />
-      </div>
+      {/* Dimmed while a new scope or period loads (the old numbers stay). */}
+      <div
+        className={`flex flex-col gap-y-3 transition-opacity ${
+          stats.isPlaceholderData ? 'opacity-50' : ''
+        }`}
+        aria-busy={stats.isPlaceholderData}
+      >
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
+          {!statsHidden && (
+            <MoneyFlowCard
+              scope={scope}
+              stats={stats.data}
+              statsFailed={statsFailed}
+              className="xl:col-span-2"
+            />
+          )}
+          <AttentionCard className={statsHidden ? 'xl:col-span-3' : ''} />
+        </div>
 
-      {!statsHidden && <KpiTiles report={stats.data} failed={statsFailed} />}
+        {!statsHidden && <KpiTiles report={stats.data} failed={statsFailed} />}
+      </div>
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
         <ReferralCard className="xl:col-span-5" />

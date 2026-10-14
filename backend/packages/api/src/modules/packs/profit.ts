@@ -4,19 +4,27 @@
 // every figure is divided by 100 exactly once.
 
 /** One direction of real money through the gateway, in cents. `feeCents`
- *  covers only rows whose net is on file; `missingFees` counts the others,
- *  so the fee is a floor whenever it is non-zero. */
+ *  covers only rows whose net (and gross) is on file; `missingFees` counts
+ *  the others, so the fee is a floor whenever it is non-zero. `missingGross`
+ *  counts settled rows with no amount on file (a deposit settled by hand), so
+ *  the gross is a floor too: NULL is unknown, never zero (the rule in
+ *  gateway-settlement.ts). */
 export type CashSide = {
   count: number;
   grossCents: number;
   feeCents: number;
   missingFees: number;
+  missingGross: number;
 };
 export type CashCents = { topups: CashSide; withdrawals: CashSide };
 
 export type OwedCents = {
   /** Normal (non-bonus) wallet balance of customers with a real top-up. */
   walletCashCents: number;
+  /** Payouts requested but not paid yet (pending or held): the wallet was
+   *  debited when they were asked for, so they appear in neither the wallets
+   *  nor the withdrawals paid, yet they are still owed. */
+  payoutsInFlightCents: number;
   walletBonusCents: number;
   /** Normal balance of customers who never topped up (cannot withdraw). */
   walletNoTopupCents: number;
@@ -38,6 +46,7 @@ const side = (s: CashSide) => ({
   gross: s.grossCents / 100,
   fees: s.feeCents / 100,
   missing_fees: s.missingFees,
+  missing_gross: s.missingGross,
 });
 
 export function profitCash(current: CashCents, previous: CashCents | null) {
@@ -53,12 +62,14 @@ export function profitCash(current: CashCents, previous: CashCents | null) {
 /** What players could still take out, set against ALL-TIME cash kept: a
  *  period's cash minus a lifetime liability would mean nothing. */
 export function profitOwed(owed: OwedCents, allTime: CashCents) {
-  const totalCents = owed.walletCashCents + owed.cardSellbackCents;
+  const totalCents =
+    owed.walletCashCents + owed.payoutsInFlightCents + owed.cardSellbackCents;
   const allKept = keptCents(allTime);
   return {
     wallet_cash: owed.walletCashCents / 100,
     wallet_bonus: owed.walletBonusCents / 100,
     wallet_no_topup: owed.walletNoTopupCents / 100,
+    payouts_in_flight: owed.payoutsInFlightCents / 100,
     cards: {
       count: owed.cardCount,
       delivering: owed.deliveringCount,

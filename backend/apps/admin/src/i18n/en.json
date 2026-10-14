@@ -829,7 +829,8 @@
       "deposit": "Top-up",
       "withdrawal": "Payout"
     },
-    "showAllFindings": "Show all {{count}}"
+    "showAllFindings": "Show all {{count}}",
+    "payoutGap": "payouts {{amount}}"
   },
   "pipeline": {
     "label": "Inventory pipeline",
@@ -1003,7 +1004,8 @@
     "colTime": "Time",
     "colWallet": "Wallet",
     "colVault": "Vault",
-    "allTypes": "All types"
+    "allTypes": "All types",
+    "details": "Details"
   },
   "inventory": {
     "title": "Inventory",
@@ -1169,7 +1171,7 @@
     "scopeAll": "All groups",
     "scopeAllHint": "Count every account, including other groups and generated accounts.",
     "cashKept": "Cash kept",
-    "cashKeptHint": "Top-ups received after gateway fees, minus withdrawals paid (fees included).",
+    "cashKeptHint": "Top-ups received, minus the gateway's fees both ways, minus withdrawals paid.",
     "vsLast": "vs last period",
     "trail": {
       "topups": "Top-ups received",
@@ -1182,12 +1184,12 @@
     "owedTitle": "Still owed to players",
     "owedNow": "right now",
     "owedSubtitle": "What players could still cash out.",
-    "walletCash": "Withdrawable wallets",
+    "walletCash": "Wallets and payouts due",
     "walletNote": "Plus {{bonus}} bonus and {{noTopup}} in never-topped-up accounts, which can't be withdrawn.",
     "cards": "Cards in vaults, at sell-back",
     "cardsNote_one": "{{count}} card, {{delivering}} being shipped",
     "cardsNote_other": "{{count}} cards, {{delivering}} being shipped",
-    "cardsHint": "Valued at the 90% sell-back price. Includes free and promo cards, and cards being shipped.",
+    "cardsHint": "Valued at the 90% sell-back price. Includes free and promo cards, cards being shipped, and cards of players who never topped up.",
     "ifAllCashedOut": "Profit if all cashed out",
     "ifAllHint": "All-time cash kept minus what is still owed. Ignores the period picked above.",
     "ifAllNote": "{{kept}} kept all time − {{owed}} owed",
@@ -1207,6 +1209,10 @@
     "price": "Price",
     "expectedBack": "Expected back",
     "rate": "Payout rate",
-    "empty": "No active packs."
+    "empty": "No active packs.",
+    "grossFloor_one": "{{count}} top-up was settled by hand with no amount on file, so top-ups shown are a minimum.",
+    "grossFloor_other": "{{count}} top-ups were settled by hand with no amount on file, so top-ups shown are a minimum.",
+    "walletHint": "Paid credit in the wallets of players who have topped up (including balances still locked until deposits are played through), plus withdrawals already requested but not paid yet.",
+    "inFlightNote": "incl. {{amount}} requested, not paid yet"
   }
 }

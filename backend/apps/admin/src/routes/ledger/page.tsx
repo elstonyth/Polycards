@@ -195,7 +195,14 @@ const LedgerPage = () => {
                 <Button
                   size="base"
                   variant="secondary"
-                  aria-label={t('ledger.dateFilter')}
+                  aria-label={`${t('ledger.dateFilter')}: ${
+                    dated
+                      ? t('ledger.dateRange', {
+                          from: from || '…',
+                          to: to || '…',
+                        })
+                      : t('ledger.anyDate')
+                  }`}
                 >
                   <Calendar />
                   {dated
@@ -317,15 +324,7 @@ const LedgerPage = () => {
                         <Fragment key={row.id}>
                           <Table.Row
                             className="cursor-pointer"
-                            tabIndex={0}
-                            aria-expanded={open}
                             onClick={() => toggle(row.id)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault();
-                                toggle(row.id);
-                              }
-                            }}
                           >
                             <Table.Cell className="whitespace-nowrap">
                               <Badge
@@ -334,13 +333,23 @@ const LedgerPage = () => {
                               >
                                 {t(typeLabelKey(row.type))}
                               </Badge>
-                              <Text
-                                as="span"
-                                size="xsmall"
-                                className="text-ui-fg-muted mt-0.5 block font-mono"
+                              {/* The ID is the details toggle: a real button,
+                                  so keyboard and screen-reader users get the
+                                  expander the whole row offers by click.
+                                  stopPropagation keeps the row handler from
+                                  toggling it straight back. */}
+                              <button
+                                type="button"
+                                aria-expanded={open}
+                                aria-label={`${t('ledger.details')} — ${row.display_id}`}
+                                className="text-ui-fg-muted hover:text-ui-fg-subtle txt-compact-xsmall mt-0.5 block font-mono"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggle(row.id);
+                                }}
                               >
                                 {row.display_id}
-                              </Text>
+                              </button>
                             </Table.Cell>
                             <Table.Cell className="break-words">
                               {/* Falls back to the EMAIL: `name` is nullable

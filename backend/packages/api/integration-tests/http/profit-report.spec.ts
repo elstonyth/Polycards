@@ -17,6 +17,11 @@ jest.setTimeout(240 * 1000);
 //   grouped   (Profit Partners)     deposit 1000 (net 1000), ledger topup
 //                                    1000, bonus_grant 200 (all bonus)
 //   generated (POST /admin/players) deposit 70 (net 70)
+//   both      (DEFAULT + Profit Partners: the partner group wins, so out)
+//                                    deposit 40 (net 40)
+// real also has a deposit settled by hand (no amount_settled, no net), and
+// payouts of 25 (pending) and 10 (held): debited from the wallet already,
+// not yet paid, so still owed.
 // No FxRate row → the 4.7 default; the $10 card at the 1.2 default
 // multiplier is RM 56.40 display, RM 50.76 at the 90% sell-back.
 
@@ -59,17 +64,25 @@ medusaIntegrationTestRunner({
         const customers = container.resolve(Modules.CUSTOMER);
         const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
 
-        const [real, grouped] = await customers.createCustomers([
+        const [real, grouped, both] = await customers.createCustomers([
           { email: 'profit-real@test.dev', has_account: true },
           { email: 'profit-grouped@test.dev', has_account: true },
+          { email: 'profit-both@test.dev', has_account: true },
         ]);
         const partnerGroup = await customers.createCustomerGroups({
           name: 'Profit Partners',
         });
-        await customers.addCustomerToGroup({
-          customer_id: grouped.id,
-          customer_group_id: partnerGroup.id,
+        const [existingDefault] = await customers.listCustomerGroups({
+          name: 'DEFAULT',
         });
+        const defaultGroup =
+          existingDefault ??
+          (await customers.createCustomerGroups({ name: 'DEFAULT' }));
+        await customers.addCustomerToGroup([
+          { customer_id: grouped.id, customer_group_id: partnerGroup.id },
+          { customer_id: both.id, customer_group_id: defaultGroup.id },
+          { customer_id: both.id, customer_group_id: partnerGroup.id },
+        ]);
         const minted = await unwrapResponse(
           api.post(
             '/admin/players',
@@ -86,6 +99,7 @@ medusaIntegrationTestRunner({
           [real.id, 50, null],
           [grouped.id, 1000, 1000],
           [generated, 70, 70],
+          [both.id, 40, 40],
         ];
         await packs.createGatewayDeposits(
           deposits.map(([customer_id, amount, net], i) => ({
@@ -99,6 +113,20 @@ medusaIntegrationTestRunner({
             settled_at: now,
           })),
         );
+        // Settled by hand: no amount_settled and no net on file. It counts
+        // as a top-up whose amount is unknown, never as RM 0.
+        await packs.createGatewayDeposits([
+          {
+            merchant_transaction_id: 'profit-mt-hand',
+            customer_id: real.id,
+            amount_requested: 300,
+            amount_settled: null,
+            net_amount: null,
+            payment_method_code: 'BQR',
+            status: 'settled' as const,
+            settled_at: now,
+          },
+        ]);
         // A pending top-up never counts.
         await packs.createGatewayDeposits([
           {
@@ -121,6 +149,28 @@ medusaIntegrationTestRunner({
             account_holder_name: 'Profit Test',
             status: 'settled' as const,
             settled_at: now,
+          },
+          ...([
+            ['profit-wd-pending', 25, 'pending'],
+            ['profit-wd-held', 10, 'held'],
+            ['profit-wd-failed', 99, 'failed'],
+          ] as const).map(([merchant_transaction_id, amount, status]) => ({
+            merchant_transaction_id,
+            customer_id: real.id,
+            amount,
+            bank_code: 'MBB',
+            account_number: '000000000000',
+            account_holder_name: 'Profit Test',
+            status,
+          })),
+          {
+            merchant_transaction_id: 'profit-wd-grouped-pending',
+            customer_id: grouped.id,
+            amount: 500,
+            bank_code: 'MBB',
+            account_number: '000000000000',
+            account_holder_name: 'Profit Test',
+            status: 'pending' as const,
           },
         ]);
 
@@ -197,8 +247,20 @@ medusaIntegrationTestRunner({
         expect(realOnly.data.window).toBeNull();
         expect(realOnly.data.previous).toBeNull();
         expect(realOnly.data.cash).toEqual({
-          topups: { count: 2, gross: 150, fees: 2, missing_fees: 1 },
-          withdrawals: { count: 1, gross: 60, fees: 1, missing_fees: 0 },
+          topups: {
+            count: 3,
+            gross: 150,
+            fees: 2,
+            missing_fees: 2, // the no-net deposit and the hand-settled one
+            missing_gross: 1,
+          },
+          withdrawals: {
+            count: 1,
+            gross: 60,
+            fees: 1,
+            missing_fees: 0,
+            missing_gross: 0,
+          },
           kept: 87,
           previous_kept: null,
         });
@@ -206,10 +268,11 @@ medusaIntegrationTestRunner({
           wallet_cash: 100, // 150 − 80 + 30
           wallet_bonus: 0,
           wallet_no_topup: 0,
+          payouts_in_flight: 35, // pending 25 + held 10; failed was refunded
           cards: { count: 1, delivering: 0, sellback: 50.76 },
-          total: 150.76,
+          total: 185.76,
           all_time_kept: 87,
-          if_all_cashed_out: -63.76,
+          if_all_cashed_out: -98.76,
         });
         expect(realOnly.data.activity).toEqual({
           pack_sales: 80,
@@ -225,14 +288,16 @@ medusaIntegrationTestRunner({
         expect(all.status).toBe(200);
         expect(all.data.scope).toBe('all');
         expect(all.data.cash.topups).toEqual({
-          count: 4,
-          gross: 1220,
+          count: 6,
+          gross: 1260,
           fees: 2,
-          missing_fees: 1,
+          missing_fees: 2,
+          missing_gross: 1,
         });
         expect(all.data.owed).toMatchObject({
           wallet_cash: 1100,
           wallet_bonus: 200,
+          payouts_in_flight: 535,
           cards: { count: 2, delivering: 1, sellback: 101.52 },
         });
         expect(all.data.activity.promo_given).toBe(200);

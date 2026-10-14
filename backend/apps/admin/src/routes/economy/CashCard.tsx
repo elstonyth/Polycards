@@ -23,6 +23,8 @@ export const CashCard = ({ data }: { data: ProfitReport }) => {
   const { cash } = data;
   const trail = moneyTrail(cash);
   const missing = cash.topups.missing_fees + cash.withdrawals.missing_fees;
+  // Top-ups settled by hand have no amount on file: the sum is a minimum.
+  const grossFloor = cash.topups.missing_gross > 0;
   const loss = cash.kept < 0;
   return (
     <Container className="pc-settle flex flex-col gap-5 [animation-delay:40ms]">
@@ -80,6 +82,7 @@ export const CashCard = ({ data }: { data: ProfitReport }) => {
                   r.tone === 'loss' ? 'text-ui-fg-error' : ''
                 }`}
               >
+                {r.key === 'topups' && grossFloor ? '≥ ' : ''}
                 {signed(r.amount)}
               </Text>
             </li>
@@ -87,6 +90,11 @@ export const CashCard = ({ data }: { data: ProfitReport }) => {
         })}
       </ul>
 
+      {grossFloor && (
+        <Text size="xsmall" className="text-ui-fg-muted">
+          {t('profit.grossFloor', { count: cash.topups.missing_gross })}
+        </Text>
+      )}
       {missing > 0 && (
         <Text size="xsmall" className="text-ui-fg-muted">
           {t('profit.feeFloor', { count: missing })}

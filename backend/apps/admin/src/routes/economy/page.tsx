@@ -83,12 +83,19 @@ const ProfitReportPage = () => {
           <LoadingSkeleton />
         </Container>
       ) : (
-        <>
+        // The previous numbers stay while a new scope or period loads; dim
+        // them so they never read as the answer under the new pill.
+        <div
+          className={`flex flex-col gap-y-3 transition-opacity ${
+            report.isPlaceholderData ? 'opacity-50' : ''
+          }`}
+          aria-busy={report.isPlaceholderData}
+        >
           <CashCard data={data} />
           <OwedCard data={data} />
           <ActivityCard data={data} />
           <PayoutRateCard data={data} />
-        </>
+        </div>
       )}
     </div>
   );

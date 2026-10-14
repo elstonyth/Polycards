@@ -286,7 +286,7 @@ const PlayersPage = () => {
               </Table.Header>
               <Table.Body>
                 {data.players.map((p) => {
-                  const groupName = p.groups[0] ?? defaultGroupName;
+                  const groupName = p.player_group ?? defaultGroupName;
                   return (
                     <Table.Row
                       key={p.id}
@@ -397,7 +397,12 @@ const PlayersPage = () => {
                             withdrawn: rm(p.total_withdrawn),
                           })}
                         >
-                          <span>{rm(p.total_contribution)}</span>
+                          <span
+                            tabIndex={0}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {rm(p.total_contribution)}
+                          </span>
                         </Tooltip>
                       </Table.Cell>
                       <Table.Cell className="text-right tabular-nums whitespace-nowrap">

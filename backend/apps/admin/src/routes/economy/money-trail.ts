@@ -17,18 +17,19 @@ const pct = (n: number, max: number) =>
 
 /**
  * The Profit report's money trail: top-ups fill the track from the left,
- * gateway fees and then withdrawals (fees included) come off the right of
- * what remains, and cash kept is what is left. Scaled to the larger of
- * top-ups and money out, so a loss still fits the track.
+ * the gateway's fees both ways and then the withdrawals paid come off the
+ * right of what remains, and cash kept is what is left. Scaled to the larger
+ * of top-ups and money out, so a loss still fits the track.
  */
 export function moneyTrail(c: {
   topups: { gross: number; fees: number };
   withdrawals: { gross: number; fees: number };
   kept: number;
 }): { max: number; rows: TrailRow[] } {
-  const paidOut = c.withdrawals.gross + c.withdrawals.fees;
-  const max = Math.max(c.topups.gross, c.topups.fees + paidOut);
-  const afterFees = c.topups.gross - c.topups.fees;
+  const fees = c.topups.fees + c.withdrawals.fees;
+  const paidOut = c.withdrawals.gross;
+  const max = Math.max(c.topups.gross, fees + paidOut);
+  const afterFees = c.topups.gross - fees;
   return {
     max,
     rows: [
@@ -41,9 +42,9 @@ export function moneyTrail(c: {
       },
       {
         key: 'fees',
-        amount: 0 - c.topups.fees,
+        amount: 0 - fees,
         left: pct(Math.max(0, afterFees), max),
-        width: pct(c.topups.fees, max),
+        width: pct(fees, max),
         tone: 'out',
       },
       {

@@ -204,6 +204,19 @@ export const ReportCard = ({ currency }: { currency: string }) => {
                           })}
                         </Badge>
                       )}
+                      {/* Timing-skewed by design, so never the check — but a
+                          payout debited and never paid shows up here. */}
+                      {r.payoutGap !== 0 ? (
+                        <Text
+                          as="span"
+                          size="xsmall"
+                          className="text-ui-fg-muted block tabular-nums"
+                        >
+                          {t('settlement.payoutGap', {
+                            amount: `${r.payoutGap > 0 ? '+' : ''}${rm(r.payoutGap)}`,
+                          })}
+                        </Text>
+                      ) : null}
                     </Table.Cell>
                   </Table.Row>
                 ))}

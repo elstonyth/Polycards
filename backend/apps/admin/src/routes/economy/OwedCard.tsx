@@ -54,11 +54,23 @@ export const OwedCard = ({ data }: { data: ProfitReport }) => {
       <div className="bg-ui-border-base grid grid-cols-1 gap-px border-t md:grid-cols-3">
         <Tile
           label={t('profit.walletCash')}
-          value={rm(owed.wallet_cash)}
-          note={t('profit.walletNote', {
-            bonus: rm(owed.wallet_bonus),
-            noTopup: rm(owed.wallet_no_topup),
-          })}
+          hint={t('profit.walletHint')}
+          value={rm(owed.wallet_cash + owed.payouts_in_flight)}
+          note={
+            <>
+              {owed.payouts_in_flight > 0 && (
+                <span className="block">
+                  {t('profit.inFlightNote', {
+                    amount: rm(owed.payouts_in_flight),
+                  })}
+                </span>
+              )}
+              {t('profit.walletNote', {
+                bonus: rm(owed.wallet_bonus),
+                noTopup: rm(owed.wallet_no_topup),
+              })}
+            </>
+          }
         />
         <Tile
           label={t('profit.cards')}

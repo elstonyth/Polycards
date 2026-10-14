@@ -8005,70 +8005,54 @@ class PacksModuleService extends MedusaService({
   ): Promise<CashCents> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const win = (t: string) =>
+    const win =
       from && to
-        ? ` AND ${t}.settled_at >= ?::timestamptz AND ${t}.settled_at < ?::timestamptz`
+        ? ' AND settled_at >= ?::timestamptz AND settled_at < ?::timestamptz'
         : '';
     const bounds = from && to ? [from.toISOString(), to.toISOString()] : [];
-    const dep =
-      "FROM gateway_deposit d WHERE d.deleted_at IS NULL AND d.status = 'settled'" +
-      ' AND d.settled_at IS NOT NULL' +
-      win('d') +
-      scopeSql(scope, 'd.customer_id');
-    const wd =
-      "FROM gateway_withdrawal w WHERE w.deleted_at IS NULL AND w.status = 'settled'" +
-      ' AND w.settled_at IS NOT NULL' +
-      win('w') +
-      scopeSql(scope, 'w.customer_id');
-    const [row] = await em.execute<
-      {
-        t_n: number;
-        t_gross: string;
-        t_fee: string;
-        t_missing: number;
-        w_n: number;
-        w_gross: string;
-        w_fee: string;
-        w_missing: number;
-      }[]
-    >(
-      `SELECT
-         (SELECT count(*) ${dep})::int AS t_n,
-         (SELECT COALESCE(SUM(ROUND(d.amount_settled * 100)), 0) ${dep})::bigint AS t_gross,
-         (SELECT COALESCE(SUM(ROUND((d.amount_settled - d.net_amount) * 100)), 0) ${dep}
-            AND d.net_amount IS NOT NULL AND d.amount_settled IS NOT NULL)::bigint AS t_fee,
-         (SELECT count(*) ${dep} AND d.net_amount IS NULL)::int AS t_missing,
-         (SELECT count(*) ${wd})::int AS w_n,
-         (SELECT COALESCE(SUM(ROUND(w.amount * 100)), 0) ${wd})::bigint AS w_gross,
-         (SELECT COALESCE(SUM(ROUND((w.net_amount - COALESCE(w.amount_settled, w.amount)) * 100)), 0) ${wd}
-            AND w.net_amount IS NOT NULL)::bigint AS w_fee,
-         (SELECT count(*) ${wd} AND w.net_amount IS NULL)::int AS w_missing`,
-      [
-        ...bounds,
-        ...bounds,
-        ...bounds,
-        ...bounds,
-        ...bounds,
-        ...bounds,
-        ...bounds,
-        ...bounds,
-      ],
-    );
-    const side = (
-      n: number,
-      gross: string,
-      fee: string,
-      missing: number,
-    ): CashSide => ({
-      count: Number(n),
-      grossCents: Number(gross),
-      feeCents: Number(fee),
-      missingFees: Number(missing),
-    });
-    return {
-      topups: side(row.t_n, row.t_gross, row.t_fee, row.t_missing),
-      withdrawals: side(row.w_n, row.w_gross, row.w_fee, row.w_missing),
+    const where =
+      "WHERE deleted_at IS NULL AND status = 'settled' AND settled_at IS NOT NULL" +
+      win +
+      scopeSql(scope, 'customer_id');
+    type Raw = {
+      n: number;
+      gross: string;
+      fee: string;
+      missing: number;
+      missing_gross: number;
     };
+    // One scan per table. A deposit's gross is amount_settled (NULL on a row
+    // settled by hand: counted, never summed as 0) and its fee is gross − net;
+    // a payout's gross is `amount` (never NULL) and its fee is net − what was
+    // actually paid.
+    const [dep] = await em.execute<Raw[]>(
+      `SELECT count(*)::int AS n,
+              COALESCE(SUM(ROUND(amount_settled * 100)), 0)::bigint AS gross,
+              COALESCE(SUM(ROUND((amount_settled - net_amount) * 100))
+                FILTER (WHERE net_amount IS NOT NULL AND amount_settled IS NOT NULL), 0)::bigint AS fee,
+              (count(*) FILTER (WHERE net_amount IS NULL OR amount_settled IS NULL))::int AS missing,
+              (count(*) FILTER (WHERE amount_settled IS NULL))::int AS missing_gross
+         FROM gateway_deposit ${where}`,
+      bounds,
+    );
+    const [wd] = await em.execute<Raw[]>(
+      `SELECT count(*)::int AS n,
+              COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS gross,
+              COALESCE(SUM(ROUND((net_amount - COALESCE(amount_settled, amount)) * 100))
+                FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS fee,
+              (count(*) FILTER (WHERE net_amount IS NULL))::int AS missing,
+              0 AS missing_gross
+         FROM gateway_withdrawal ${where}`,
+      bounds,
+    );
+    const side = (r: Raw | undefined): CashSide => ({
+      count: Number(r?.n ?? 0),
+      grossCents: Number(r?.gross ?? 0),
+      feeCents: Number(r?.fee ?? 0),
+      missingFees: Number(r?.missing ?? 0),
+      missingGross: Number(r?.missing_gross ?? 0),
+    });
+    return { topups: side(dep), withdrawals: side(wd) };
   }
 
   // What players could still take out, right now (spec §4.2): each scoped
@@ -8115,8 +8099,17 @@ class PacksModuleService extends MedusaService({
       // Display MYR × percent = sen: (× 100 ÷ 100) cancel.
       [DEFAULT_MARKET_MULTIPLIER, fx, FLAT_PERCENT],
     );
+    // Requested, not yet paid: the wallet was debited at request time.
+    const [inFlight] = await em.execute<{ cents: string }[]>(
+      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS cents ' +
+        'FROM gateway_withdrawal ' +
+        "WHERE deleted_at IS NULL AND status IN ('pending', 'held')" +
+        scopeSql(scope, 'customer_id'),
+      [],
+    );
     return {
       walletCashCents: Number(wallet?.cash_cents ?? 0),
+      payoutsInFlightCents: Number(inFlight?.cents ?? 0),
       walletBonusCents: Number(wallet?.bonus_cents ?? 0),
       walletNoTopupCents: Number(wallet?.no_topup_cents ?? 0),
       cardCount: Number(cards?.n ?? 0),

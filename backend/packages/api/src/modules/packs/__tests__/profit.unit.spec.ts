@@ -6,11 +6,18 @@ import {
   type CashSide,
 } from '../profit';
 
-const side = (n: number, g: number, f: number, m = 0): CashSide => ({
+const side = (
+  n: number,
+  g: number,
+  f: number,
+  m = 0,
+  mg = 0,
+): CashSide => ({
   count: n,
   grossCents: g,
   feeCents: f,
   missingFees: m,
+  missingGross: mg,
 });
 
 describe('profit fold', () => {
@@ -20,15 +27,16 @@ describe('profit fold', () => {
     expect(profitCash(c, null).previous_kept).toBeNull();
     expect(profitCash(c, c).previous_kept).toBe(-205.5);
     expect(profitCash(c, null)).toMatchObject({
-      topups: { count: 3, gross: 300, fees: 4.5, missing_fees: 0 },
-      withdrawals: { count: 1, gross: 500, fees: 1, missing_fees: 0 },
+      topups: { count: 3, gross: 300, fees: 4.5, missing_fees: 0, missing_gross: 0 },
+      withdrawals: { count: 1, gross: 500, fees: 1, missing_fees: 0, missing_gross: 0 },
       kept: -205.5,
     });
   });
 
-  it('owed = wallet cash + cards at sell-back; if-all-cashed-out uses all-time cash', () => {
+  it('owed = wallet cash + payouts not yet paid + cards at sell-back; if-all-cashed-out uses all-time cash', () => {
     const owed = {
       walletCashCents: 10000,
+      payoutsInFlightCents: 2500,
       walletBonusCents: 500,
       walletNoTopupCents: 700,
       cardCount: 3,
@@ -40,10 +48,11 @@ describe('profit fold', () => {
       wallet_cash: 100,
       wallet_bonus: 5,
       wallet_no_topup: 7,
+      payouts_in_flight: 25,
       cards: { count: 3, delivering: 1, sellback: 90 },
-      total: 190,
+      total: 215,
       all_time_kept: 800,
-      if_all_cashed_out: 610,
+      if_all_cashed_out: 585,
     });
   });
 
@@ -66,6 +75,17 @@ describe('profit fold', () => {
       delivery_fees: 15,
       referral_commission: 2,
       adjustments: -10,
+    });
+  });
+
+  it('reports top-ups with no amount on file as missing gross', () => {
+    const c = { topups: side(2, 5000, 0, 1, 1), withdrawals: side(0, 0, 0) };
+    expect(profitCash(c, null).topups).toEqual({
+      count: 2,
+      gross: 50,
+      fees: 0,
+      missing_fees: 1,
+      missing_gross: 1,
     });
   });
 

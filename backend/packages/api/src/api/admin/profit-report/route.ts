@@ -64,7 +64,10 @@ export async function GET(
           scope,
         )
       : Promise.resolve(null),
-    packs.profitCashTotals(null, null, scope),
+    // range=all: the current window IS all time, so don't count it twice.
+    windows
+      ? packs.profitCashTotals(null, null, scope)
+      : Promise.resolve(null),
     packs.profitOwed(scope, fx),
     packs.ledgerReasonTotals(
       windows?.current.from.toISOString(),
@@ -87,7 +90,7 @@ export async function GET(
       ? { from: windows.previous.from, to: windows.previous.to }
       : null,
     cash: profitCash(current, previous),
-    owed: profitOwed(owed, allTime),
+    owed: profitOwed(owed, allTime ?? current),
     activity: profitActivity(reasons),
     packs: rtp,
   });

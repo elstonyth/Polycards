@@ -182,6 +182,34 @@ medusaIntegrationTestRunner({
         expect((await list('?group=bogus')).status).toBe(400);
       });
 
+      // The list's group chip names the EFFECTIVE player group (the odds
+      // engine's rule), not whichever membership came back first: null means
+      // the default group. B also joins DEFAULT, so a first-membership chip
+      // would be wrong either way round.
+      it('names the effective player group, null for the default', async () => {
+        const customers = getContainer().resolve(Modules.CUSTOMER);
+        const [existingDefault] = await customers.listCustomerGroups({
+          name: 'DEFAULT',
+        });
+        const def =
+          existingDefault ??
+          (await customers.createCustomerGroups({ name: 'DEFAULT' }));
+        await customers.addCustomerToGroup({
+          customer_id: aId,
+          customer_group_id: def.id,
+        });
+        const res = await list();
+        expect(rowFor(res, aId).player_group).toBe(GROUP_NAME);
+        expect(rowFor(res, bId).player_group).toBeNull();
+
+        // Default + search reaches Medusa's filter as { q, id: { $nin } }.
+        const searched = await list(`?group=default&q=${B_EMAIL}`);
+        expect(searched.status).toBe(200);
+        expect(searched.data.players.map((p: { id: string }) => p.id)).toEqual([
+          bId,
+        ]);
+      });
+
       it('200 — lists both customers, newest first, with total', async () => {
         const res = await list();
         expect(res.status).toBe(200);
