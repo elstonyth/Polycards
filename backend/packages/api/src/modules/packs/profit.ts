@@ -135,3 +135,30 @@ export function profitActivity(rows: { reason: string; amount: number }[]) {
     adjustments: cents('adjustment') / 100,
   };
 }
+
+/** One window of a player's top-ups and withdrawals, in ledger sen: the
+ *  Players list's sums (PLAYER_LEDGER_SUMS), so "Total contribution" on the
+ *  player page agrees with that column. Withdrawals are requests net of
+ *  refunds: a refund landing in a later window than its request nets that
+ *  window's amount below zero, while its count is floored at 0. */
+export type PeriodCents = {
+  topupCents: number;
+  topupCount: number;
+  withdrawnCents: number;
+  withdrawnCount: number;
+};
+
+export function customerPeriod(p: PeriodCents) {
+  return {
+    topups: { count: p.topupCount, amount: p.topupCents / 100 },
+    withdrawals: {
+      count: Math.max(0, p.withdrawnCount),
+      amount: p.withdrawnCents / 100,
+    },
+    contribution: (p.topupCents - p.withdrawnCents) / 100,
+  };
+}
+
+/** Cards won as a percent of pack spend, to one decimal; null with no spend. */
+export const playReturn = (spend: number, won: number): number | null =>
+  spend > 0 ? Math.round((won / spend) * 1000) / 10 : null;

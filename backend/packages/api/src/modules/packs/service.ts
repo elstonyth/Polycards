@@ -164,7 +164,7 @@ import {
   type BuybackRate,
   FLAT_PERCENT,
 } from './buyback-rate';
-import type { CashCents, CashSide, OwedCents } from './profit';
+import type { CashCents, CashSide, OwedCents, PeriodCents } from './profit';
 import { consumeExternalSen } from './external-funded';
 import {
   BONUS_BP_FULL,
@@ -218,7 +218,13 @@ import {
 } from './challenge-settle';
 import { weightedAverageCost } from './inventory-cost';
 import type { SignupTopupStats, WithdrawalStats } from './stats';
-import { scopeSql, type CustomerScope } from './real-customers';
+import {
+  filterParams,
+  filterSql,
+  scopeSql,
+  type CustomerScope,
+  type MoneyFilter,
+} from './real-customers';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
 // plan-033 playthrough basis, per ledger row in sen: a post-1b deposit's
@@ -7494,7 +7500,7 @@ class PacksModuleService extends MedusaService({
   async ledgerReasonTotals(
     from?: string,
     to?: string,
-    scope: CustomerScope = 'all',
+    scope: MoneyFilter = 'all',
     @MedusaContext() sharedContext: Context = {},
   ): Promise<Array<{ reason: string; amount: number }>> {
     const em = (sharedContext.transactionManager ??
@@ -7514,7 +7520,8 @@ class PacksModuleService extends MedusaService({
       sql += ' AND created_at < ?::timestamptz';
       params.push(to);
     }
-    sql += scopeSql(scope, 'credit_transaction.customer_id');
+    sql += filterSql(scope, 'credit_transaction.customer_id').sql;
+    params.push(...filterParams(scope));
     sql += ' GROUP BY reason';
     const rows = await em.execute<{ reason: string; cents: string }[]>(
       sql,
@@ -8020,7 +8027,7 @@ class PacksModuleService extends MedusaService({
       current: { from: Date; to: Date };
       previous: { from: Date; to: Date };
     } | null,
-    scope: CustomerScope,
+    scope: MoneyFilter,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
     current: CashCents;
@@ -8044,7 +8051,9 @@ class PacksModuleService extends MedusaService({
       : [];
     const where = (table: string) =>
       "WHERE deleted_at IS NULL AND status = 'settled' AND settled_at IS NOT NULL" +
-      scopeSql(scope, `${table}.customer_id`);
+      filterSql(scope, `${table}.customer_id`).sql;
+    // The window tags' bounds come first in each statement, then the filter's.
+    const params = [...bounds, ...filterParams(scope)];
     const WINDOWS = ['cur', 'prev', 'all'] as const;
     const cond = (w: (typeof WINDOWS)[number]) =>
       w === 'cur' ? 'in_cur' : w === 'prev' ? 'in_prev' : 'TRUE';
@@ -8072,7 +8081,7 @@ class PacksModuleService extends MedusaService({
          fx: "COALESCE(SUM(ROUND((gateway_amount * COALESCE(amount_settled, amount_requested) / NULLIF(amount_requested, 0) * fx_mid - COALESCE(amount_settled, amount_requested)) * 100)) FILTER (WHERE {w} AND currency <> 'MYR' AND gateway_amount IS NOT NULL AND fx_mid IS NOT NULL), 0)::bigint",
        })}
          FROM r`,
-      bounds,
+      params,
     );
     const [wd] = await em.execute<Raw[]>(
       `WITH r AS (SELECT *, ${tags} FROM gateway_withdrawal ${where('gateway_withdrawal')})
@@ -8086,7 +8095,7 @@ class PacksModuleService extends MedusaService({
          fx: "COALESCE(SUM(ROUND((amount - gateway_amount * COALESCE(amount_settled, amount) / NULLIF(amount, 0) * fx_mid) * 100)) FILTER (WHERE {w} AND currency <> 'MYR' AND gateway_amount IS NOT NULL AND fx_mid IS NOT NULL), 0)::bigint",
        })}
          FROM r`,
-      bounds,
+      params,
     );
     const side = (r: Raw | undefined, w: string): CashSide => ({
       count: Number(r?.[`${w}_n`] ?? 0),
@@ -8118,7 +8127,7 @@ class PacksModuleService extends MedusaService({
   // pool connection at a time.
   @InjectManager()
   async profitOwed(
-    scope: CustomerScope,
+    scope: MoneyFilter,
     fx: number,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<OwedCents> {
@@ -8133,22 +8142,22 @@ class PacksModuleService extends MedusaService({
                 SUM(COALESCE(bonus_cents, 0)) AS bonus_cents,
                 bool_or(reason = 'topup' AND amount > 0) AS has_topup
            FROM credit_transaction
-          WHERE deleted_at IS NULL${scopeSql(scope, 'credit_transaction.customer_id')}
+          WHERE deleted_at IS NULL${filterSql(scope, 'credit_transaction.customer_id').sql}
           GROUP BY customer_id
        )
        SELECT COALESCE(SUM(GREATEST(normal_cents, 0)) FILTER (WHERE has_topup), 0)::bigint AS cash_cents,
               COALESCE(SUM(GREATEST(normal_cents, 0)) FILTER (WHERE NOT has_topup), 0)::bigint AS no_topup_cents,
               COALESCE(SUM(GREATEST(bonus_cents, 0)), 0)::bigint AS bonus_cents
          FROM bal`,
-      [],
+      filterParams(scope),
     );
     // Requested, not yet paid: the wallet was debited at request time.
     const [inFlight] = await em.execute<{ cents: string }[]>(
       'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS cents ' +
         'FROM gateway_withdrawal ' +
         "WHERE deleted_at IS NULL AND status IN ('pending', 'held')" +
-        scopeSql(scope, 'gateway_withdrawal.customer_id'),
-      [],
+        filterSql(scope, 'gateway_withdrawal.customer_id').sql,
+      filterParams(scope),
     );
     // A closed week's commission, credited only when its settlement is paid.
     // The open week is worked out when it closes, so it is not counted yet.
@@ -8158,8 +8167,8 @@ class PacksModuleService extends MedusaService({
         'JOIN weekly_settlement s ON s.id = l.settlement_id AND s.deleted_at IS NULL ' +
         "  AND s.status IN ('draft', 'approved') " +
         "WHERE l.deleted_at IS NULL AND l.status = 'pending'" +
-        scopeSql(scope, 'l.customer_id'),
-      [],
+        filterSql(scope, 'l.customer_id').sql,
+      filterParams(scope),
     );
     const [cards] = await em.execute<
       {
@@ -8184,7 +8193,7 @@ class PacksModuleService extends MedusaService({
            FROM pull p
            JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL
           WHERE p.status IN ('vaulted', 'delivering', 'delivered')
-            AND p.deleted_at IS NULL${scopeSql(scope, 'p.customer_id')}
+            AND p.deleted_at IS NULL${filterSql(scope, 'p.customer_id').sql}
        )
        SELECT (count(*) FILTER (WHERE status <> 'delivered' AND has_topup))::bigint AS n,
               (count(*) FILTER (WHERE status = 'delivering' AND has_topup))::bigint AS delivering,
@@ -8194,7 +8203,7 @@ class PacksModuleService extends MedusaService({
               (count(*) FILTER (WHERE status = 'delivered'))::bigint AS shipped,
               COALESCE(SUM(cents) FILTER (WHERE status = 'delivered'), 0)::bigint AS shipped_cents
          FROM t`,
-      [DEFAULT_MARKET_MULTIPLIER, fx, FLAT_PERCENT],
+      [DEFAULT_MARKET_MULTIPLIER, fx, FLAT_PERCENT, ...filterParams(scope)],
     );
     return {
       walletCashCents: Number(wallet?.cash_cents ?? 0),
@@ -8209,6 +8218,107 @@ class PacksModuleService extends MedusaService({
       cardNoTopupCents: Number(cards?.cents_no_topup ?? 0),
       shippedCount: Number(cards?.shipped ?? 0),
       shippedCents: Number(cards?.shipped_cents ?? 0),
+    };
+  }
+
+  // The player page's money card (GET /admin/customers/:id/money) for ONE
+  // customer, one statement per table, one after the other:
+  //   - top-ups and withdrawals per window from the credit ledger, with the
+  //     Players list's own sums (PLAYER_LEDGER_SUMS), so "Total contribution"
+  //     agrees with that column to the sen. Withdrawals are requests net of
+  //     refunds (the wallet is debited at request time); the count is
+  //     requests minus refunds in the window. Plus "all" over every row;
+  //   - when they last topped up, asked for a payout and opened a pack;
+  //   - the value of the cards real money won them, on the leaderboard's
+  //     basis (leaderboardTop): draw-time value × each pull's normal share,
+  //     at today's FX, so it sets against the normal pack spend.
+  // Window keys are SQL column labels: callers pass fixed names only.
+  @InjectManager()
+  async customerMoney(
+    customerId: string,
+    windows: { key: string; from: Date; to: Date }[],
+    fx: number,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    periods: Record<string, PeriodCents>;
+    lastTopupAt: string | null;
+    lastWithdrawalAt: string | null;
+    lastOpenAt: string | null;
+    cardsWon: { count: number; cents: number };
+  }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    for (const w of windows) {
+      if (!/^[a-z][a-z0-9_]*$/.test(w.key) || w.key === 'all') {
+        throw new Error(`customerMoney: bad window key '${w.key}'`);
+      }
+    }
+    const keys = [...windows.map((w) => w.key), 'all'];
+    const cond = (k: string) => (k === 'all' ? 'TRUE' : `in_${k}`);
+    const tags = windows
+      .map(
+        (w) =>
+          `, created_at >= ?::timestamptz AND created_at < ?::timestamptz AS in_${w.key}`,
+      )
+      .join('');
+    const cols = keys
+      .map((k) =>
+        [
+          `COALESCE(${PLAYER_LEDGER_SUMS.topup} FILTER (WHERE ${cond(k)}), 0)::bigint AS ${k}_topup`,
+          `(count(*) FILTER (WHERE ${cond(k)} AND reason = 'topup' AND amount > 0))::int AS ${k}_topup_n`,
+          `COALESCE(${PLAYER_LEDGER_SUMS.withdrawn} FILTER (WHERE ${cond(k)}), 0)::bigint AS ${k}_wd`,
+          `(count(*) FILTER (WHERE ${cond(k)} AND reason = 'cashout' AND amount < 0) - count(*) FILTER (WHERE ${cond(k)} AND reason = 'cashout' AND amount > 0))::int AS ${k}_wd_n`,
+        ].join(', '),
+      )
+      .join(', ');
+    type Raw = Record<string, string | number | null>;
+    const [ledger] = await em.execute<Raw[]>(
+      `WITH r AS (
+         SELECT reason, amount, bonus_cents, created_at${tags}
+           FROM credit_transaction
+          WHERE customer_id = ? AND deleted_at IS NULL
+       )
+       SELECT ${cols},
+              MAX(created_at) FILTER (WHERE reason = 'topup' AND amount > 0) AS last_topup,
+              MAX(created_at) FILTER (WHERE reason = 'cashout' AND amount < 0) AS last_wd,
+              MAX(created_at) FILTER (WHERE reason = 'pack_open' AND amount < 0) AS last_open
+         FROM r`,
+      [
+        ...windows.flatMap((w) => [w.from.toISOString(), w.to.toISOString()]),
+        customerId,
+      ],
+    );
+    const [won] = await em.execute<{ n: string; cents: string }[]>(
+      'SELECT COUNT(*)::bigint AS n, ' +
+        '       ROUND(COALESCE(SUM((' +
+        PULLED_VALUE_USD_SQL +
+        ') * ' +
+        NORMAL_SHARE_SQL +
+        '), 0) * ? * 100)::bigint AS cents ' +
+        '  FROM pull pu ' +
+        '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
+        ' WHERE pu.deleted_at IS NULL AND pu.customer_id = ? AND ' +
+        REAL_MONEY_PULL_SQL,
+      [DEFAULT_MARKET_MULTIPLIER, fx, customerId],
+    );
+    const iso = (v: unknown): string | null =>
+      v == null ? null : new Date(v as string).toISOString();
+    return {
+      periods: Object.fromEntries(
+        keys.map((k) => [
+          k,
+          {
+            topupCents: Number(ledger?.[`${k}_topup`] ?? 0),
+            topupCount: Number(ledger?.[`${k}_topup_n`] ?? 0),
+            withdrawnCents: Number(ledger?.[`${k}_wd`] ?? 0),
+            withdrawnCount: Number(ledger?.[`${k}_wd_n`] ?? 0),
+          },
+        ]),
+      ),
+      lastTopupAt: iso(ledger?.last_topup),
+      lastWithdrawalAt: iso(ledger?.last_wd),
+      lastOpenAt: iso(ledger?.last_open),
+      cardsWon: { count: Number(won?.n ?? 0), cents: Number(won?.cents ?? 0) },
     };
   }
 
@@ -8439,7 +8549,10 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ ids: string[]; total: number }> {
     // The key is spliced into the SQL: only the known sums get through.
-    if (input.key !== 'contribution' && !Object.hasOwn(PLAYER_LEDGER_SUMS, input.key)) {
+    if (
+      input.key !== 'contribution' &&
+      !Object.hasOwn(PLAYER_LEDGER_SUMS, input.key)
+    ) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
         `Unknown ledger sort '${String(input.key)}'.`,
@@ -8943,7 +9056,12 @@ class PacksModuleService extends MedusaService({
           .update(
             JSON.stringify(
               input.bonus
-                ? [input.adminId, input.customerId, input.idempotencyKey, 'bonus']
+                ? [
+                    input.adminId,
+                    input.customerId,
+                    input.idempotencyKey,
+                    'bonus',
+                  ]
                 : [input.adminId, input.customerId, input.idempotencyKey],
             ),
           )
@@ -9271,7 +9389,9 @@ class PacksModuleService extends MedusaService({
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ revoked: true }> {
     const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
-    const rows = await em.execute<{ id: string; customer_id: string; pack_id: string }[]>(
+    const rows = await em.execute<
+      { id: string; customer_id: string; pack_id: string }[]
+    >(
       'UPDATE pack_gift SET revoked_at = now(), revoked_by = ?, updated_at = now() ' +
         `WHERE id = ? AND ${UNOPENED_GIFT_SQL} RETURNING id, customer_id, pack_id`,
       [input.adminId, input.giftId],
@@ -9325,7 +9445,9 @@ class PacksModuleService extends MedusaService({
         )
       : [];
     const titleOf = new Map(packRows.map((p) => [p.slug, p.title]));
-    return gifts.map((g) => toPackGiftView(g, titleOf.get(g.pack_id) ?? g.pack_id));
+    return gifts.map((g) =>
+      toPackGiftView(g, titleOf.get(g.pack_id) ?? g.pack_id),
+    );
   }
 
   /** Unopened gifts per pack for one customer (the vault row, "Vault xN"). */
@@ -9399,10 +9521,7 @@ class PacksModuleService extends MedusaService({
         [pair.pullId, pair.giftId, input.openId],
       );
       if (rows.length === 0) {
-        throw new MedusaError(
-          MedusaError.Types.CONFLICT,
-          STALE_GIFT_MESSAGE,
-        );
+        throw new MedusaError(MedusaError.Types.CONFLICT, STALE_GIFT_MESSAGE);
       }
     }
   }
@@ -9504,9 +9623,7 @@ class PacksModuleService extends MedusaService({
           sp_ref_id: input.openId,
           price: input.valueMyr,
           rate: input.rate,
-          ...(playthroughCents
-            ? { playthrough: playthroughCents / 100 }
-            : {}),
+          ...(playthroughCents ? { playthrough: playthroughCents / 100 } : {}),
         },
       },
       sharedContext,

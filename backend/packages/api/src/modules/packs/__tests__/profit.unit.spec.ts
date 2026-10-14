@@ -1,5 +1,7 @@
 import {
+  customerPeriod,
   keptCents,
+  playReturn,
   profitActivity,
   profitCash,
   profitOwed,
@@ -120,5 +122,45 @@ describe('profit fold', () => {
       referral_commission: 0,
       adjustments: 0,
     });
+  });
+});
+
+describe('player money card folds', () => {
+  it('a period: top-ups and withdrawals in RM, contribution is their difference', () => {
+    expect(
+      customerPeriod({
+        topupCents: 300000,
+        topupCount: 24,
+        withdrawnCents: 185000,
+        withdrawnCount: 6,
+      }),
+    ).toEqual({
+      topups: { count: 24, amount: 3000 },
+      withdrawals: { count: 6, amount: 1850 },
+      contribution: 1150,
+    });
+  });
+
+  // A refund landing in a later window than its request nets that window
+  // below zero: the amount says so honestly, a count never reads negative.
+  it('a refund-only window: negative amount, count floored at 0', () => {
+    expect(
+      customerPeriod({
+        topupCents: 0,
+        topupCount: 0,
+        withdrawnCents: -5000,
+        withdrawnCount: -1,
+      }),
+    ).toEqual({
+      topups: { count: 0, amount: 0 },
+      withdrawals: { count: 0, amount: -50 },
+      contribution: 50,
+    });
+  });
+
+  it('return: cards won per RM spent, null with no spend', () => {
+    expect(playReturn(2960, 2310.4)).toBe(78.1);
+    expect(playReturn(0, 12)).toBeNull();
+    expect(playReturn(-5, 12)).toBeNull();
   });
 });
