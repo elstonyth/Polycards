@@ -220,6 +220,47 @@ check(
 await sound.click();
 await page.screenshot({ path: `${OUT}/overview-light.png`, fullPage: true });
 
+// The alert itself, without touching data: count the chime's oscillators,
+// then make one queue grow by answering its next read with one more order.
+await page.addInitScript(() => {
+  window.__osc = 0;
+  const Base = window.AudioContext;
+  window.AudioContext = class extends Base {
+    createOscillator() {
+      window.__osc += 1;
+      return super.createOscillator();
+    }
+  };
+});
+await page.goto(`${ADMIN}/overview`);
+await settle();
+await page.waitForTimeout(1500);
+const countIn = (t) => Number(/^\((\d+)\)/.exec(t)?.[1] ?? 0);
+const before = countIn(await page.title());
+await page.getByRole('switch', { name: 'Sound' }).click();
+const preview = await page.evaluate(() => window.__osc);
+check(preview === 2, `turning sound on plays a preview chime (${preview})`);
+await page.route('**/admin/delivery-orders?*', async (route) => {
+  const url = new URL(route.request().url());
+  if (url.searchParams.get('status') !== 'requested') return route.continue();
+  const response = await route.fetch();
+  const body = await response.json();
+  await route.fulfill({ response, json: { ...body, total: body.total + 1 } });
+});
+await page.evaluate(() =>
+  document.dispatchEvent(new Event('visibilitychange')),
+);
+await page.waitForTimeout(2500);
+const after = countIn(await page.title());
+const played = (await page.evaluate(() => window.__osc)) - preview;
+check(
+  after === before + 1,
+  `tab count rises on a new order (${before} → ${after})`,
+);
+check(played === 2, `a new order plays the chime (${played} oscillators)`);
+await page.unroute('**/admin/delivery-orders?*');
+await page.getByRole('switch', { name: 'Sound' }).click();
+
 // The same page in Medusa's dark theme (the operator's own choice).
 const dark = await browser.newContext({
   viewport: { width: 1440, height: 900 },
