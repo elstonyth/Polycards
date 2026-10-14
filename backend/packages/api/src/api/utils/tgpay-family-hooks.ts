@@ -19,6 +19,7 @@ import {
   refundWithdrawal,
 } from '../../modules/packs/gateway-withdrawal';
 import { alertOps } from '../../modules/packs/ops-alert';
+import { withdrawalAuditNote } from '../../modules/packs/gateway-audit';
 import { payoutCost, toOptionalMoney } from '../../modules/packs/money';
 
 // The server-notify handlers for every gateway on the TGPay platform (TGPay,
@@ -294,6 +295,32 @@ export function tgpayWithdrawalCallback(kind: TgpayKind): Handler {
               : '.') +
             ` Investigate ${label} ${gatewayTransactionId}.`,
         );
+        // On the row too, in the audit's own words, so the Settlement page and
+        // the Dashboard show it at once instead of at the next audit: the ops
+        // alert alone reaches nobody until its chat is set up (2026-10-15).
+        // Best-effort: the gateway still gets its 200 either way.
+        try {
+          const paid = Number(data.amount);
+          await packs.updateGatewayWithdrawals({
+            id: withdrawal.id,
+            audited_at: new Date(),
+            audit_note: withdrawalAuditNote(
+              {
+                status: withdrawal.status,
+                amount: toOptionalMoney(withdrawal.amount),
+              },
+              {
+                kind: 'detail',
+                state,
+                amount: Number.isFinite(paid) ? paid : Number(withdrawal.amount),
+              },
+            ),
+          });
+        } catch (error) {
+          logger.error(
+            `${tag} could not record the contradiction on ${merchantTransactionId}: ${(error as Error).message}`,
+          );
+        }
       }
       res.status(200).send('success');
       return;

@@ -805,6 +805,52 @@ describe('startWithdrawal — money ordering', () => {
     });
   });
 
+  // Production 2026-10-14 (PC-286fcc20…, RM 512.40): a refusal-shaped answer
+  // to a payout TGPay had in fact created. It was refunded at once, the
+  // customer's retry was paid, and TGPay still held the first one PENDING.
+  // So a refusal is refunded only once the gateway confirms it holds no such
+  // payout; one it holds (or cannot be asked about) stays pending.
+  it.each([
+    [
+      'the gateway holds the payout',
+      {
+        transactionId: 'T-1',
+        merchantTransactionId: 'PC-x',
+        statusId: null,
+        status: 'PENDING',
+        amount: 50,
+        netAmount: Number.NaN,
+        paymentMethodCode: 'WD',
+        bankReferenceNo: null,
+        uniqueReferenceNo: null,
+        state: 'pending' as const,
+      },
+    ],
+    [
+      'the gateway cannot be asked',
+      new GatewayError('non-JSON response', [], 502),
+    ],
+  ])(
+    'does NOT refund a refusal when %s: the row stays pending for the sweep',
+    async (_label, detail) => {
+      const h = harness();
+      fakeGateway.script({
+        submitWithdrawal: new GatewayError('nope', ['PMT10013'], 400, true),
+        getWithdrawalDetail: detail,
+      });
+      const result = await start(h);
+      expect(result.transactionId).toBeNull();
+      expect(result.status).toBe('pending');
+      // Asked once, before any refund.
+      expect(fakeGateway.calls.withdrawalDetails).toHaveLength(1);
+      expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+      expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+      expect(h.logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('refusal not confirmed'),
+      );
+    },
+  );
+
   // The classic double-payout window: the request reached the gateway and
   // only the RESPONSE was lost. Refunding here + the payout executing =
   // customer paid twice. The row must stay pending for the sweep.

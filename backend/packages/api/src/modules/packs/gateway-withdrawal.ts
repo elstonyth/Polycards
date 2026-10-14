@@ -17,6 +17,7 @@ import {
   resolveActiveGateway,
   rowGateway,
   submitWithdrawal,
+  getWithdrawalDetail,
   GatewayError,
   TGPAY_PAYOUT_DISABLED,
   GATEWAY_IDS,
@@ -26,7 +27,13 @@ import {
   type GatewayConfig,
   type PaymentGateway,
 } from './gateway';
-import { loadPaymentFxQuote, payoutForWithdrawal } from './payment-fx';
+import {
+  loadPaymentFxQuote,
+  payoutForWithdrawal,
+  rowFx,
+  type RowFx,
+} from './payment-fx';
+import { classifyRequeryError } from './gateway-reconcile';
 import { A3PAY_PAYOUT_FLOAT_EMPTY } from './a3pay-client';
 import {
   alertOps,
@@ -996,8 +1003,12 @@ export async function startWithdrawal(
       config,
     );
   } catch (error) {
-    if (error instanceof GatewayError && error.definite) {
-      // The gateway PARSEABLY refused, so no payout exists on their side.
+    if (
+      error instanceof GatewayError &&
+      error.definite &&
+      (await refusalConfirmed(merchantTransactionId, config, rowFx(row)))
+    ) {
+      // The gateway PARSEABLY refused and, asked, holds no such payout.
       // Refund the debit (idempotent) and close the row.
       await packs.withdrawCreditsWithLedger({
         customerId: input.customerId,
@@ -1171,7 +1182,7 @@ export async function startWithdrawal(
       scope
         .resolve<{ error: (msg: string) => void }>('logger')
         .error(
-          `[payments] withdrawal ${merchantTransactionId} submit outcome AMBIGUOUS (${(error as Error).message}) — left pending for the sweep`,
+          `[payments] withdrawal ${merchantTransactionId} submit outcome AMBIGUOUS (${unconfirmed(error)}) — left pending for the sweep`,
         );
     } catch {
       // Swallowed deliberately: the logger is the thing that failed. The row
@@ -1210,6 +1221,36 @@ export async function startWithdrawal(
     status: 'pending',
     ...(fx ? { currency: fx.currency, payAmount: fx.gatewayAmount } : {}),
   };
+}
+
+/**
+ * Before a refused payout is refunded, ask the gateway whether it holds it
+ * anyway. Production 2026-10-14 (PC-286fcc20…): TGPay answered a RM 512.40
+ * payout with a refusal-shaped 400 yet had created it. The instant refund let
+ * the customer withdraw again, and both payouts stood at TGPay. Only an
+ * explicit "not found" (classifyRequeryError), or the gateway holding it as
+ * failed, confirms the refusal. A payout it holds, or a lookup that itself
+ * fails, leaves the row pending for the sweep: the side that cannot pay
+ * twice. Measured on TGPay 2026-10-15: a really refused payout answers 404
+ * "Transaction not found", so a genuine refusal still refunds at once.
+ */
+/** The ambiguous log's reason: says when a refusal was not confirmed. */
+const unconfirmed = (error: unknown): string =>
+  error instanceof GatewayError && error.definite
+    ? `refusal not confirmed: the gateway holds this payout or could not be asked — ${error.message}`
+    : (error as Error).message;
+
+export async function refusalConfirmed(
+  merchantTransactionId: string,
+  config: GatewayConfig,
+  fx: RowFx,
+): Promise<boolean> {
+  try {
+    const detail = await getWithdrawalDetail(merchantTransactionId, config, fx);
+    return detail.state === 'failed';
+  } catch (error) {
+    return classifyRequeryError(error).kind === 'not-found';
+  }
 }
 
 /**
@@ -1818,9 +1859,14 @@ export async function submitHeldWithdrawal(
   } catch (error) {
     // Both branches mirror startWithdrawal's post-#425 shape exactly.
     // There is no third path: an outcome that is not a PARSED refusal is
-    // ambiguous, and ambiguity must never refund.
-    if (error instanceof GatewayError && error.definite) {
-      // The gateway parseably refused, so no payout exists on their side.
+    // ambiguous, and ambiguity must never refund. A refusal the gateway does
+    // not confirm (refusalConfirmed) is ambiguous too.
+    if (
+      error instanceof GatewayError &&
+      error.definite &&
+      (await refusalConfirmed(row.merchant_transaction_id, config, rowFx(row)))
+    ) {
+      // The gateway parseably refused and, asked, holds no such payout.
       // Refund (idempotent, on the shared anchor) and close the row. The
       // claim above left it 'pending', which is what the helper's terminal
       // update must be scoped to — its default.
@@ -1939,7 +1985,7 @@ export async function submitHeldWithdrawal(
     // says exactly that with a null transaction_id.
     try {
       logger.error(
-        `[payments] admin ${adminId} approved withdrawal ${row.merchant_transaction_id} but the submit outcome is AMBIGUOUS (${(error as Error).message}) — left pending for the sweep`,
+        `[payments] admin ${adminId} approved withdrawal ${row.merchant_transaction_id} but the submit outcome is AMBIGUOUS (${unconfirmed(error)}) — left pending for the sweep`,
       );
     } catch {
       // Swallowed deliberately: the row stays 'pending', so the sweep still

@@ -13,6 +13,14 @@ import type { SettlementState } from './gateway-types';
 export const GATEWAY_AUDIT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 /** A row is re-audited once this much time has passed since its last audit. */
 export const GATEWAY_AUDIT_REPEAT_MS = 24 * 60 * 60 * 1000;
+/** A row with an open finding is re-audited this often instead, at any age:
+ *  a refunded payout the gateway still holds may yet be paid twice
+ *  (2026-10-14), and the Settlement page should follow within the hour. */
+export const GATEWAY_AUDIT_FINDING_REPEAT_MS = 60 * 60 * 1000;
+/** Of each batch, at most this many go to open findings. Some never clear
+ *  (a rounding gap the gateway will always report), and a batch they could
+ *  fill would starve new rows of their first check again (#776). */
+export const GATEWAY_AUDIT_FINDING_BATCH = 10;
 /** Rows per kind per run — one gateway call each. */
 export const GATEWAY_AUDIT_BATCH = 50;
 

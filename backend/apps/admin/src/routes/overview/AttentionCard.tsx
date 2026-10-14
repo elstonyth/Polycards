@@ -2,15 +2,26 @@ import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Button, Container, Heading, Label, Switch, Text } from '@medusajs/ui';
-import { ArrowUpTray, Clock, Gift, TruckFast } from '@medusajs/icons';
+import {
+  ArrowUpTray,
+  Clock,
+  ExclamationCircle,
+  Gift,
+  TruckFast,
+} from '@medusajs/icons';
 import {
   useDeliveryOrderCount,
+  useGatewayAudit,
   useGatewayDeposits,
   useGatewayWithdrawals,
   useReferralSettlements,
 } from '../../lib/queries';
 import { rm, timeAgo } from '../../lib/format';
-import { attentionWithdrawals, staleDeposits } from '../../lib/dashboard';
+import {
+  attentionWithdrawals,
+  doublePayRisks,
+  staleDeposits,
+} from '../../lib/dashboard';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { isForbidden } from './helpers';
 import { SectionError } from './SectionState';
@@ -62,7 +73,19 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   const processed = useDeliveryOrderCount('processed');
   const ready = useDeliveryOrderCount('ready_to_ship');
   const runs = useReferralSettlements();
-  const queries = [held, pending, requested, processed, ready, runs];
+  // Both rails: a refunded payout either gateway still holds or paid.
+  const auditRm = useGatewayAudit('MYR');
+  const auditSgd = useGatewayAudit('SGD');
+  const queries = [
+    held,
+    pending,
+    requested,
+    processed,
+    ready,
+    runs,
+    auditRm,
+    auditSgd,
+  ];
   const shipping = [requested, processed, ready];
 
   const w = held.data
@@ -75,6 +98,10 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
     ? shipping.reduce((n, q) => n + (q.data ?? 0), 0)
     : undefined;
   const drafts = runs.data?.filter((r) => r.status === 'draft');
+  const twice =
+    auditRm.data && auditSgd.data
+      ? doublePayRisks([...auditRm.data.findings, ...auditSgd.data.findings])
+      : undefined;
 
   // Only queues that loaded are counted, so a failed read is never "zero".
   const counts: Record<string, number> = {};
@@ -82,6 +109,7 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   if (s) counts.deposits = s.count;
   if (toShip !== undefined) counts.orders = toShip;
   if (drafts) counts.referrals = drafts.length;
+  if (twice) counts.doublePay = twice.count;
   const { soundOn, setSound } = useAttentionAlert(counts);
 
   // A query this role may not read is left out; any other failure shows.
@@ -92,6 +120,24 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   const loading = queries.some((q) => q.isPending);
 
   const items: Item[] = [];
+  // First: money that may leave twice outranks every queue below.
+  if (twice && twice.count > 0) {
+    items.push({
+      id: 'double-pay',
+      icon: <ExclamationCircle />,
+      title: t('dashboard.doublePay', {
+        count: twice.count,
+        shown: String(twice.count),
+      }),
+      detail: t(
+        twice.paid > 0 ? 'dashboard.doublePayPaid' : 'dashboard.doublePayHeld',
+        { amount: rm(twice.amount), count: twice.paid },
+      ),
+      to: '/settlement',
+      action: t('dashboard.check'),
+      urgent: true,
+    });
+  }
   if (w && w.count > 0) {
     items.push({
       id: 'withdrawals',
