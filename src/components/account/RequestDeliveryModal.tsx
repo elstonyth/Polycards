@@ -106,7 +106,13 @@ export default function RequestDeliveryModal({
     countryCode: '',
   });
   const panelRef = useRef<HTMLDivElement>(null);
-  useModalA11y(panelRef, open, onClose);
+  // The sheet stays mounted while closed, so a pending confirmation must not
+  // survive a close: the next open (maybe another selection) starts over.
+  const close = () => {
+    setConfirming(false);
+    onClose();
+  };
+  useModalA11y(panelRef, open, close);
 
   // Fee preview — mirrors the backend's authoritative charge (delivery-fee.ts).
   // Recomputed per render from the selected address; cheap (two lookups).
@@ -173,11 +179,13 @@ export default function RequestDeliveryModal({
   // Checked before the request (the backend's floor guard still decides):
   // a balance that cannot cover the charge is sent to top up instead. Fees
   // are paid from the NORMAL balance only — bonus credit is spend-only on
-  // packs — so the spendable figure excludes it once the wallet is read.
+  // packs — so the spendable figure excludes it once the wallet is read. The
+  // LIVE balance, so a top-up made from this sheet clears the shortfall.
+  const liveBalance = balance ?? wallet?.balance ?? null;
   const spendable =
-    wallet !== null
-      ? Math.round((wallet.balance - wallet.bonus) * 100) / 100
-      : balance;
+    liveBalance != null
+      ? Math.round((liveBalance - (wallet?.bonus ?? 0)) * 100) / 100
+      : null;
   const shortBy =
     priceable && spendable != null && totalCharge > spendable
       ? Math.round((totalCharge - spendable) * 100) / 100
@@ -487,7 +495,7 @@ export default function RequestDeliveryModal({
         {/* Fee preview — the backend recomputes and charges authoritatively;
             this mirrors it so the RM total is never a surprise. Hidden while
             the add-address form is open (no priced address selected yet). */}
-        {!adding && priceable && zone && (
+        {!adding && priceable && zone && shipCount > 0 && (
           <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-3 text-[13px]">
             {fee && (
               <>
@@ -601,14 +609,14 @@ export default function RequestDeliveryModal({
             className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2"
           >
             <p className="text-[12px] text-red-300">{error}</p>
-            <PhoneGateAction error={error} onNavigate={onClose} />
+            <PhoneGateAction error={error} onNavigate={close} />
           </div>
         )}
 
         <div className="mt-5 flex justify-end gap-2">
           <button
             type="button"
-            onClick={confirming ? () => setConfirming(false) : onClose}
+            onClick={confirming ? () => setConfirming(false) : close}
             className="rounded-lg px-4 py-2 text-[13px] text-white/60"
           >
             {confirming ? 'Back' : 'Cancel'}

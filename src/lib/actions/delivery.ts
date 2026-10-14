@@ -529,6 +529,19 @@ export async function deleteAddress(
 }
 
 /**
+ * How many prize cards can still ship today (the per-customer daily cap), or
+ * null when it cannot be read — the sheet then prices every selected prize and
+ * the backend's cap still decides.
+ */
+export async function getPrizeShippingAllowance(): Promise<{
+  perDay: number;
+  remaining: number;
+} | null> {
+  const r = await store.get('/store/rewards/withdraw', PrizeAllowanceSchema);
+  return r.ok ? { perDay: r.data.per_day, remaining: r.data.remaining } : null;
+}
+
+/**
  * Ship a vault selection that may mix ordinary cards with REWARD cards.
  *
  * The two take different backends and always have: an ordinary pull goes to
@@ -548,19 +561,6 @@ export async function deleteAddress(
  * rather than failing the whole submit — the ordinary cards in the same
  * selection have already shipped by then.
  */
-/**
- * How many prize cards can still ship today (the per-customer daily cap), or
- * null when it cannot be read — the sheet then prices every selected prize and
- * the backend's cap still decides.
- */
-export async function getPrizeShippingAllowance(): Promise<{
-  perDay: number;
-  remaining: number;
-} | null> {
-  const r = await store.get('/store/rewards/withdraw', PrizeAllowanceSchema);
-  return r.ok ? { perDay: r.data.per_day, remaining: r.data.remaining } : null;
-}
-
 export async function shipVaultCards(
   normalPullIds: string[],
   rewardPullIds: string[],
@@ -625,8 +625,10 @@ export async function shipVaultCards(
             ? 'This reward card could not be shipped right now.'
             : friendlyFailure(r, DELIVERY_RULES, DELIVERY_FALLBACK);
         // Customer-level refusals: every later card would get the same one.
-        // A balance that cannot cover one prize's fee cannot cover the next
-        // (same zone, same fee): stop rather than refuse each in turn.
+        // A short balance stops the rest too. shortcut: a later prize with a
+        // smaller fee (no insurance) might still fit, but the sheet checks the
+        // whole total first and the daily cap ships about one prize anyway;
+        // retry per prize if that cap is ever raised.
         if (
           isPhoneGateError(reason) ||
           /top up at least once|not enough credit|bonus credit/i.test(reason)

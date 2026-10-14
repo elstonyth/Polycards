@@ -98,11 +98,15 @@ afterEach(() => {
 });
 
 // Async so the open-time wallet and allowance reads land inside act().
-const render = (items: VaultItem[], addresses: AddressView[] = [ADDRESS]) =>
+const render = (
+  items: VaultItem[],
+  addresses: AddressView[] = [ADDRESS],
+  open = true,
+) =>
   act(async () =>
     root.render(
       createElement(RequestDeliveryModal, {
-        open: true,
+        open,
         items,
         addresses,
         onClose: () => {},
@@ -243,6 +247,40 @@ describe('RequestDeliveryModal review fixes', () => {
     expect(text).toContain('Prize insurance (5% of card value)');
     // RM15 shipping + RM20 insurance.
     expect(text).toContain('RM 35.00');
+  });
+
+  test('a top-up made while the sheet is open clears the shortfall', async () => {
+    mocks.balance = 20;
+    await render([item('pull_a', 'pack', 100)], [SG_ADDRESS]);
+    expect(button('Request delivery')!.disabled).toBe(true);
+    // The header balance moves (TopUpProvider applies the new figure); the
+    // wallet read from open time is not repeated.
+    mocks.balance = 100;
+    await render([item('pull_a', 'pack', 100)], [SG_ADDRESS]);
+    expect(host.textContent).not.toContain('Not enough credit');
+    expect(button('Request delivery')!.disabled).toBe(false);
+  });
+
+  test('closing the sheet drops a pending confirmation', async () => {
+    await render([item('pull_a', 'pack', 100)]);
+    await act(async () => button('Request delivery')!.click());
+    expect(button(/^Confirm & pay/)).toBeDefined();
+    await act(async () =>
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })),
+    );
+    await render([item('pull_a', 'pack', 100)], [ADDRESS], false);
+    await render([item('pull_a', 'pack', 100)]);
+    expect(button(/^Confirm & pay/)).toBeUndefined();
+    expect(button('Request delivery')).toBeDefined();
+  });
+
+  test('no fee box when no selected prize can ship today', async () => {
+    mocks.allowance = { perDay: 1, remaining: 0 };
+    await render([item('pull_r', 'reward', 10)]);
+    const text = host.textContent ?? '';
+    expect(text).not.toContain('Total — deducted from balance');
+    expect(text).toContain('Prize cards ship 1 per day');
+    expect(button('Request delivery')!.disabled).toBe(true);
   });
 
   test('adding a new address drops a pending confirmation', async () => {

@@ -142,8 +142,9 @@ export async function POST(
 
 // GET /store/rewards/withdraw — how many prize cards the customer can still
 // ship today (withdrawals_per_day less today's prize shipments), so the
-// delivery sheet prices and sends only those. Auth + rate limit come from the
-// '/store/rewards/*' wildcard in api/middlewares.ts.
+// delivery sheet prices and sends only those. Auth + rate limit come from its
+// own GET matcher in api/middlewares.ts (the '/store/rewards/*' wildcard is
+// POST-only).
 export async function GET(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
