@@ -2,8 +2,11 @@ import { createHash } from 'node:crypto';
 import { MedusaError } from '@medusajs/framework/utils';
 import { resolvePacks, type GatewayWithdrawals } from './facets';
 import {
+  SHARED_PAYOUT_ACCOUNT_MESSAGE,
   bankSupportedBy,
+  payoutAccountSharingAllowed,
   resolveWithdrawalDestination,
+  sharedAccountCheckApplies,
 } from './saved-accounts';
 import { bankPayoutMinRm, findBank } from './banks';
 import {
@@ -645,6 +648,29 @@ export async function startWithdrawal(
       MedusaError.Types.NOT_ALLOWED,
       'This bank account is not available with the current payout provider. Pick another saved account, or try again later.',
     );
+  }
+  // One bank account, one Polycards account, at payout too. The save check
+  // trusts a typed holder name for numbers that were only saved, so a second
+  // account can get in under a different spelling before the first is paid.
+  // Here, whoever is paid first keeps the number. Refused before any row or
+  // debit.
+  if (
+    sharedAccountCheckApplies(precheckDestination) &&
+    !payoutAccountSharingAllowed(input.customerId)
+  ) {
+    const bankId = findBank(precheckDestination.bankCode)?.id;
+    const paidElsewhere = (
+      await packs.otherPayoutAccountHolders(
+        input.customerId,
+        precheckDestination.accountNumber,
+      )
+    ).some((h) => h.holder_name == null && findBank(h.bank_code)?.id === bankId);
+    if (paidElsewhere) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        SHARED_PAYOUT_ACCOUNT_MESSAGE,
+      );
+    }
   }
   // A destination with its own payout floor (Touch 'n Go: RM 100) is held to
   // it here, before any row or debit — the gateway refuses below it as a
