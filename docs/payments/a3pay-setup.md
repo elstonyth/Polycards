@@ -100,7 +100,7 @@ Read from the A3Pay back office (https://backoffice.a3paysg.com, login `polycard
   - Deposit OB and BQR: S$10–5,000, **2.5% fee**. Our own top-up floor is **S$30** (an operator decision from 2026-10-12).
   - Payout WD: S$30–10,000, **1.5% fee**. A3Pay lowered the minimum from S$50 at our request on 2026-10-12.
   - Settlement: S$1,000–10,000, S$10 flat fee.
-  - `currencyLimits` uses these. The top-up band is also narrowed so the RM credit fits the RM 10,000 ceiling.
+  - `currencyLimits` uses these. S$ top-ups go up to A3Pay's own **S$5,000** (operator decision, 2026-10-14): A3Pay's RM top-up ceiling is RM 20,000, above the RM gateway's RM 10,000, so S$5,000 (about RM 15,850) fits at any rate under RM 4 per S$. The top-up band is still narrowed to that RM ceiling if the rate ever goes higher.
 - **A3Pay's own fees are 2.5% on deposits and 1.5% on payouts.** A top-up fee below 2.5% (or a withdrawal fee below 1.5%) means each payment costs us the difference. That is the operator's call.
 - **Payout banks (GetSupportedBankList):** 21 codes. `SGANEXT` (ANEXT Bank) is live but missing from the handbook, so it was added. Wise, LiquidPay and Dash are listed but not offered (their payees are not digit account numbers).
 - **Requery not-found:** `GetPayinDetail` and `GetPayoutDetail` answer **HTTP 400 `{"isSuccess":false,"errorCode":null,"errorMessage":"Not found"}`**, not the GlobePay-era `PMT10016`. The client tags this as `A3PAY_NOT_FOUND`. The failure modes it must not be confused with look different:
