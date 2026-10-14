@@ -512,9 +512,52 @@ describe('startWithdrawal — money ordering', () => {
     }
   });
 
-  // TNG is paused in banks.ts (2026-10-14): TGPay refused 97 of 110 TNG
-  // payouts in a week and customers kept retrying. A saved TNG account is
-  // refused before any row or debit, so a tap costs nothing.
+  // TNG is off unless TNG_PAYOUTS_ENABLED=true (banks.ts): TGPay refused 97
+  // of 110 TNG payouts in a week and customers kept retrying. A saved TNG
+  // account is refused before any row or debit, so a tap costs nothing.
+  // Switched on, TGPay still refuses TNG now and then; the customer is sent
+  // to a bank account instead of being told to check correct details.
+  it("sends a Touch 'n Go customer to a bank account when TGPay has no TNG payout provider", async () => {
+    const prev = process.env.TNG_PAYOUTS_ENABLED;
+    process.env.TNG_PAYOUTS_ENABLED = 'true';
+    try {
+      const tng = {
+        ...SAVED_ACCOUNT,
+        id: savedBankAccountId('TNGMY', '123456789012'),
+        bankCode: 'TNGMY',
+        bankName: "Touch 'n Go eWallet",
+        accountNumber: '123456789012',
+      };
+      const noProvider = new GatewayError(
+        'TGPay /transaction/payout/withdraw failed (HTTP 400): No payout provider is available for this order',
+        [],
+        400,
+        true,
+      );
+      const h = harness([tng]);
+      h.packs.withdrawForCashout.mockResolvedValue({
+        id: 'ct_1',
+        balance: 50,
+        amount: -100,
+        replayed: false,
+        reference: null,
+        destination: tng,
+      });
+      fakeGateway.script({ submitWithdrawal: noProvider });
+      const error = (await start(h, { accountId: tng.id, amount: 100 }).catch(
+        (e: unknown) => e,
+      )) as Error;
+      expect(error.message).toBe(
+        "Touch 'n Go withdrawals are temporarily unavailable from our payment provider. Your balance has been returned. Please withdraw to a bank account for now.",
+      );
+      // Still refunded: the refund is the only ledger write on this path.
+      expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+    } finally {
+      if (prev === undefined) delete process.env.TNG_PAYOUTS_ENABLED;
+      else process.env.TNG_PAYOUTS_ENABLED = prev;
+    }
+  });
+
   it("refuses a Touch 'n Go withdrawal before any row or debit while TNG payouts are paused", async () => {
     const tng = {
       ...SAVED_ACCOUNT,
