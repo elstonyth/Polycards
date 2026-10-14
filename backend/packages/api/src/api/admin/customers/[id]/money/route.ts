@@ -56,6 +56,9 @@ export async function GET(
   const cash = await packs.profitCashTotals(null, filter);
   const owed = await packs.profitOwed(filter, fx);
   const reasons = await packs.ledgerReasonTotals(undefined, undefined, filter);
+  // The wallet as the player's withdraw button sees it: the same gate
+  // (freeze, never topped up, bonus, deposits not yet played through).
+  const wallet = await packs.walletSummary(id);
 
   const activity = profitActivity(reasons);
   const cardsWon = money.cardsWon.cents / 100;
@@ -72,6 +75,14 @@ export async function GET(
       topup_at: money.lastTopupAt,
       withdrawal_at: money.lastWithdrawalAt,
       open_at: money.lastOpenAt,
+    },
+    wallet: {
+      balance: wallet.balance,
+      withdrawable: wallet.withdrawable,
+      bonus: wallet.bonus,
+      frozen: wallet.isFrozen,
+      has_topup: wallet.hasTopup,
+      playthrough: wallet.playthrough,
     },
     cash: profitCash(cash.allTime, null),
     owed: profitOwed(owed, cash.allTime),

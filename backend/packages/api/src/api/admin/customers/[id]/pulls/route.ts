@@ -2,6 +2,7 @@ import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import { parsePaginationParams } from '../../../../../utils/pagination';
+import { pageAll } from '../../../../utils/page-all';
 import { toMoney } from '../../../../../modules/packs/money';
 import {
   DEFAULT_MARKET_MULTIPLIER,
@@ -65,6 +66,16 @@ export async function GET(
       .json({ message: `source must be one of ${PULL_SOURCES.join(', ')}` });
     return;
   }
+  // ?sort=value: the most valuable first (the player page's Vault). Default
+  // newest first.
+  const sort =
+    req.query.sort === undefined || req.query.sort === ''
+      ? 'newest'
+      : req.query.sort;
+  if (sort !== 'newest' && sort !== 'value') {
+    res.status(400).json({ message: 'sort must be newest or value' });
+    return;
+  }
   const { limit, offset } = parsePaginationParams(
     { limit: req.query.limit, offset: req.query.offset },
     { defaultLimit: 25, maxLimit: 100 },
@@ -81,11 +92,44 @@ export async function GET(
   // `id` tiebreaker: a batch open stamps every pull in the batch with the
   // same `rolled_at` millisecond, so offset pagination needs a unique
   // secondary sort key. Same rule as inventory/[handle]/route.ts:82.
-  const [rows, total] = await packs.listAndCountPulls(filter, {
-    order: { rolled_at: 'DESC', id: 'DESC' },
-    skip: offset,
-    take: limit,
-  });
+  // By value: every matching pull, ranked by the card's storefront value
+  // (FMV × its multiplier, what its sell-back is priced from), then paged.
+  // One customer's list, so reading it whole is small.
+  const [rows, total] =
+    sort === 'value'
+      ? await (async () => {
+          const all = await pageAll((o) =>
+            packs.listPulls(filter, {
+              ...o,
+              order: { rolled_at: 'DESC', id: 'DESC' },
+            }),
+          );
+          const allHandles = [...new Set(all.map((p: any) => p.card_id))];
+          const allCards = allHandles.length
+            ? await packs.listCards(
+                { handle: allHandles },
+                { take: allHandles.length },
+              )
+            : [];
+          const usd = new Map(
+            allCards.map((c: any) => [
+              c.handle,
+              toMoney(c.market_value) *
+                Number(c.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
+            ]),
+          );
+          // Stable: equal values keep newest-first.
+          const ranked = [...all].sort(
+            (a: any, b: any) =>
+              (usd.get(b.card_id) ?? -1) - (usd.get(a.card_id) ?? -1),
+          );
+          return [ranked.slice(offset, offset + limit), all.length] as const;
+        })()
+      : await packs.listAndCountPulls(filter, {
+          order: { rolled_at: 'DESC', id: 'DESC' },
+          skip: offset,
+          take: limit,
+        });
   const handles = [...new Set(rows.map((p: any) => p.card_id))];
   const cards = handles.length
     ? await packs.listCards({ handle: handles }, { take: handles.length })
@@ -147,6 +191,7 @@ export async function GET(
       return {
         id: p.id,
         pack_id: p.pack_id,
+        pack_title: packBySlug.get(p.pack_id)?.title ?? null,
         rolled_at: p.rolled_at,
         status: p.status,
         buyback_amount:
