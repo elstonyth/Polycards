@@ -54,26 +54,31 @@ const browser = await chromium.launch();
   await page.waitForURL((u) => !u.pathname.includes('login'), {
     timeout: 30000,
   });
-  await page.goto(`${ADMIN}/settlement`);
+  await page.goto(`${ADMIN}/settlement?currency=SGD`);
   const card = page.getByTestId('fx-card-SGD');
   await card.waitFor({ timeout: 30000 });
   await card.scrollIntoViewIfNeeded();
   await page.waitForTimeout(800);
   await card.screenshot({ path: `${OUT}a3pay-admin-card-before.png` });
 
-  // Back to the live feed rate, markup 0.05 RM per S$1.
-  const override = card.locator('#fx-sgd-override');
+  // The rate form lives in the Edit rates side panel. Back to the live feed
+  // rate, 0.5% each way.
+  await card.getByRole('button', { name: 'Edit rates' }).click();
+  const form = page.getByRole('dialog');
+  await form.waitFor({ timeout: 10000 });
+  const override = form.locator('#fx-sgd-override');
   if ((await override.getAttribute('data-state')) === 'checked')
     await override.click();
-  await card.locator('#fx-sgd-markup').fill('0.05');
-  await card.locator('#fx-sgd-reason').fill('UI QA: feed rate, 0.05 markup');
-  const preview = await card.getByTestId('fx-preview-SGD').innerText();
+  await form.locator('#fx-sgd-deposit-fee').fill('0.5');
+  await form.locator('#fx-sgd-payout-fee').fill('0.5');
+  await form.locator('#fx-sgd-reason').fill('UI QA: feed rate, 0.5% each way');
+  const preview = await form.getByTestId('fx-preview-SGD').innerText();
   check(
     'admin preview shows customer rates live',
     /SGD 100 top-up → RM \d+\.\d\d credit/.test(preview),
     preview,
   );
-  await card.getByRole('button', { name: 'Save' }).click();
+  await form.getByRole('button', { name: 'Save' }).click();
   await page.getByRole('button', { name: 'Save' }).last().click(); // confirm prompt
   await page.waitForTimeout(1500);
   await card.screenshot({ path: `${OUT}a3pay-admin-card-after.png` });
