@@ -20,13 +20,52 @@ describe('qk', () => {
     expect(qk.economy).toEqual(['admin', 'economy']);
     // Custom dates always render ('' outside custom): same always-rendered-
     // segment rule as qk.pulls, so no preset key prefixes another.
-    expect(qk.stats('today', '', '')).toEqual(['admin', 'stats', 'today', '', '']);
+    // The scope segment always renders too ('all' by default), so a
+    // real-customers key never shares a cache entry with everyone's.
+    expect(qk.stats('today', '', '')).toEqual([
+      'admin',
+      'stats',
+      'today',
+      '',
+      '',
+      'all',
+    ]);
+    expect(qk.stats('today', '', '', 'default')).toEqual([
+      'admin',
+      'stats',
+      'today',
+      '',
+      '',
+      'default',
+    ]);
     expect(qk.stats('custom', '2026-09-01', '2026-09-10')).toEqual([
       'admin',
       'stats',
       'custom',
       '2026-09-01',
       '2026-09-10',
+      'all',
+    ]);
+    expect(qk.settlement('month', 12, '')).toEqual([
+      'admin',
+      'gateway-settlement',
+      'month',
+      12,
+      '',
+      'all',
+    ]);
+    // Under one prefix, so the Dashboard's live refresh reaches every view.
+    const profit = qk.profitReport('month', '', '', 'default');
+    expect(profit).toEqual([
+      'admin',
+      'profit-report',
+      'month',
+      '',
+      '',
+      'default',
+    ]);
+    expect(profit.slice(0, qk.profitReportKey.length)).toEqual([
+      ...qk.profitReportKey,
     ]);
     expect(qk.eligibleProducts).toEqual(['admin', 'eligible-products']);
   });
@@ -67,13 +106,15 @@ describe('qk', () => {
       0,
       '',
       'created_at:desc',
+      '',
     ]);
-    expect(qk.players(2, 'ada', 'email:asc')).toEqual([
+    expect(qk.players(2, 'ada', 'email:asc', 'default')).toEqual([
       'admin',
       'players',
       2,
       'ada',
       'email:asc',
+      'default',
     ]);
     // playersKey must be a strict prefix of every page key, or a post-disable
     // invalidation would leave the row's status stale on the current page.

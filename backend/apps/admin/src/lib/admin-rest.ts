@@ -454,6 +454,73 @@ export async function getEconomyReport(
   return getJson<EconomyReport>(`/admin/economy${q ? `?${q}` : ''}`);
 }
 
+// ── Profit report (cash view, spec 2026-10-14-admin-finance-pages §4) ────────
+
+/** Real customers only ('default': no non-default group, not a generated
+ *  account) or every account. */
+export type CustomerScope = 'default' | 'all';
+
+/** One direction of real money through the gateway. `fees` covers only rows
+ *  whose net is on file; `missing_fees` counts the rest (fee = a minimum). */
+export interface ProfitCashSide {
+  count: number;
+  gross: number;
+  fees: number;
+  missing_fees: number;
+}
+
+export interface ProfitReport {
+  as_of: string;
+  scope: CustomerScope;
+  range: string;
+  /** ISO instants, half-open; null for all time. */
+  window: { from: string; to: string } | null;
+  previous: { from: string; to: string } | null;
+  cash: {
+    topups: ProfitCashSide;
+    withdrawals: ProfitCashSide;
+    kept: number;
+    /** null when there is no previous window (all time). */
+    previous_kept: number | null;
+  };
+  /** Right now, whatever the window. */
+  owed: {
+    wallet_cash: number;
+    wallet_bonus: number;
+    wallet_no_topup: number;
+    cards: { count: number; delivering: number; sellback: number };
+    total: number;
+    all_time_kept: number;
+    if_all_cashed_out: number;
+  };
+  activity: {
+    pack_sales: number;
+    sellbacks: number;
+    promo_given: number;
+    delivery_fees: number;
+    referral_commission: number;
+    adjustments: number;
+  };
+  packs: EconomyReport['packs'];
+}
+
+export type ProfitRange = StatsRange | 'all';
+
+// `from`/`to` are inclusive MYT days (YYYY-MM-DD), sent only for 'custom'.
+export async function getProfitReport(
+  range: ProfitRange,
+  from: string,
+  to: string,
+  scope: CustomerScope,
+): Promise<ProfitReport> {
+  const qs = new URLSearchParams({ range, scope });
+  if (range === 'custom') {
+    qs.set('from', from);
+    qs.set('to', to);
+  }
+  return getJson<ProfitReport>(`/admin/profit-report?${qs.toString()}`);
+}
+
 // ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
 
 export type StatsRange =
@@ -481,6 +548,7 @@ export interface StatsFigures {
 
 export interface StatsReport {
   as_of: string;
+  scope?: CustomerScope;
   /** ISO instants; windows are half-open [from, to). */
   current: { from: string; to: string; stats: StatsFigures };
   previous: { from: string; to: string; stats: StatsFigures };
@@ -491,8 +559,10 @@ export async function getStatsReport(
   range: StatsRange,
   from: string,
   to: string,
+  scope: CustomerScope = 'all',
 ): Promise<StatsReport> {
   const qs = new URLSearchParams({ range });
+  if (scope !== 'all') qs.set('scope', scope);
   if (range === 'custom') {
     qs.set('from', from);
     qs.set('to', to);
@@ -544,9 +614,10 @@ export async function getSettlementReport(
   granularity: SettlementGranularity,
   periods: number,
   currency: string,
+  scope: CustomerScope = 'all',
 ): Promise<SettlementReport> {
   return getJson<SettlementReport>(
-    `/admin/payments/settlement?granularity=${granularity}&periods=${periods}&currency=${encodeURIComponent(currency)}`,
+    `/admin/payments/settlement?granularity=${granularity}&periods=${periods}&currency=${encodeURIComponent(currency)}${scope === 'all' ? '' : `&scope=${scope}`}`,
   );
 }
 
@@ -1588,14 +1659,16 @@ export interface PlayersPage {
 
 // `sort` is `<column>:<asc|desc>`; the route allowlists the column
 // (created_at | email | name) and falls back to created_at.
+// `group` is 'default' (everyone outside a non-default group) or a group id.
 export const listPlayers = (
   page = 0,
   q?: string,
   limit = 50,
   sort = 'created_at:desc',
+  group?: string,
 ) =>
   getJson<PlayersPage>(
-    `/admin/players?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
+    `/admin/players?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}${group ? `&group=${encodeURIComponent(group)}` : ''}`,
   );
 
 /** One generated partner account — what POST /admin/players answers and what

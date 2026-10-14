@@ -41,6 +41,10 @@ import {
   type PackGift,
   getDeliveryOrder,
   getEconomyReport,
+  getProfitReport,
+  type CustomerScope,
+  type ProfitRange,
+  type ProfitReport,
   getStatsReport,
   type StatsRange,
   type StatsReport,
@@ -225,6 +229,27 @@ export const useCreatePixelPokemon = () => {
 // from/to are ISO strings for the period window (undefined = all time). Appended
 // to the key inline so qk.economy stays a flat prefix (query-keys.test.ts).
 // keepPreviousData avoids a skeleton flash when switching periods.
+// Profit report. keepPreviousData so a period or scope switch swaps the
+// numbers without a skeleton flash; a half-picked custom range never fires.
+export const useProfitReport = (
+  range: ProfitRange,
+  from: string,
+  to: string,
+  scope: CustomerScope,
+): UseQueryResult<ProfitReport> =>
+  useQuery({
+    queryKey: qk.profitReport(
+      range,
+      range === 'custom' ? from : '',
+      range === 'custom' ? to : '',
+      scope,
+    ),
+    queryFn: () => getProfitReport(range, from, to, scope),
+    placeholderData: keepPreviousData,
+    enabled: range !== 'custom' || (from !== '' && to !== '' && from <= to),
+    refetchOnWindowFocus: true,
+  });
+
 export const useEconomy = (
   from?: string,
   to?: string,
@@ -243,10 +268,11 @@ export const useStats = (
   range: StatsRange,
   from: string,
   to: string,
+  scope: CustomerScope = 'all',
 ): UseQueryResult<StatsReport> =>
   useQuery({
-    queryKey: qk.stats(range, from, to),
-    queryFn: () => getStatsReport(range, from, to),
+    queryKey: qk.stats(range, from, to, scope),
+    queryFn: () => getStatsReport(range, from, to, scope),
     placeholderData: keepPreviousData,
     enabled: range !== 'custom' || (from !== '' && to !== '' && from <= to),
     // The dashboard's QueryClient disables focus refetch; "today" is live,
@@ -260,10 +286,11 @@ export const useSettlementReport = (
   granularity: SettlementGranularity,
   periods: number,
   currency: string,
+  scope: CustomerScope = 'all',
 ): UseQueryResult<SettlementReport> =>
   useQuery({
-    queryKey: qk.settlement(granularity, periods, currency),
-    queryFn: () => getSettlementReport(granularity, periods, currency),
+    queryKey: qk.settlement(granularity, periods, currency, scope),
+    queryFn: () => getSettlementReport(granularity, periods, currency, scope),
     placeholderData: keepPreviousData,
   });
 
@@ -1133,10 +1160,11 @@ export const usePlayers = (
   page = 0,
   q?: string,
   sort?: string,
+  group?: string,
 ): UseQueryResult<PlayersPage> =>
   useQuery({
-    queryKey: qk.players(page, q, sort),
-    queryFn: () => listPlayers(page, q, 50, sort),
+    queryKey: qk.players(page, q, sort, group),
+    queryFn: () => listPlayers(page, q, 50, sort, group),
     placeholderData: keepPreviousData,
   });
 
