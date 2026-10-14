@@ -92,7 +92,7 @@ export const VAULT_RULES: ErrorRule[] = [
   // amount…"), which the broad /amount/ rule below rewrote into a wrong
   // "Enter a valid amount (up to RM 10,000…)". Above it, per the ORDER note.
   [
-    /exchange rate just changed|must come to between|temporarily unavailable on our side|payments are paused|top-ups are not available|name on the bank account/i,
+    /exchange rate just changed|must come to between|temporarily unavailable on our side|payments are paused|top-ups are not available|name on the bank account|top-ups still waiting/i,
     (text) => text,
   ],
   [/withdrawals are not open/i, 'Withdrawals are not open yet.'],
