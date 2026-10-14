@@ -241,6 +241,113 @@ medusaIntegrationTestRunner({
           },
         });
       });
+
+      // Real customers (spec 2026-10-14-admin-finance-pages §3): in no
+      // non-default group and not generated. `both` is in DEFAULT AND a
+      // partner group, so the partner group wins and they are out.
+      it('scope=default counts only real customers; all and absent count everyone', async () => {
+        const container = getContainer();
+        const customers = container.resolve(Modules.CUSTOMER);
+        const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+        const [real, grouped, both] = await customers.createCustomers([
+          { email: 'scope-real@test.dev', has_account: true },
+          { email: 'scope-grouped@test.dev', has_account: true },
+          { email: 'scope-both@test.dev', has_account: true },
+        ]);
+        for (const c of [real, grouped, both]) {
+          await setCreatedAt('customer', c.id, IN_CURRENT);
+        }
+        const [existingDefault] = await customers.listCustomerGroups({
+          name: 'DEFAULT',
+        });
+        const def =
+          existingDefault ??
+          (await customers.createCustomerGroups({ name: 'DEFAULT' }));
+        const partner = await customers.createCustomerGroups({
+          name: 'Scope Partners',
+        });
+        await customers.addCustomerToGroup([
+          { customer_id: grouped.id, customer_group_id: partner.id },
+          { customer_id: both.id, customer_group_id: def.id },
+          { customer_id: both.id, customer_group_id: partner.id },
+        ]);
+        const minted = await unwrapResponse(
+          api.post(
+            '/admin/players',
+            { count: 1 },
+            { headers: { authorization: `Bearer ${adminToken}` } },
+          ),
+        );
+        expect(minted.status).toBe(201);
+        const generated = minted.data.players[0].id as string;
+        await setCreatedAt('customer', generated, IN_CURRENT);
+
+        await packs.createGatewayDeposits(
+          [real.id, grouped.id, both.id, generated].map((customer_id, i) => ({
+            merchant_transaction_id: `scope-mt-${i}`,
+            customer_id,
+            amount_requested: 100,
+            amount_settled: 100,
+            payment_method_code: 'BQR',
+            status: 'settled' as const,
+            settled_at: new Date(IN_CURRENT),
+          })),
+        );
+        await packs.createGatewayWithdrawals(
+          [real.id, grouped.id].map((customer_id, i) => ({
+            merchant_transaction_id: `scope-wd-${i}`,
+            customer_id,
+            amount: 40,
+            amount_settled: 40,
+            bank_code: 'MBB',
+            account_number: '000000000000',
+            account_holder_name: 'Scope Test',
+            status: 'settled' as const,
+            settled_at: new Date(IN_CURRENT),
+          })),
+        );
+
+        const q = '?range=custom&from=2026-09-10&to=2026-09-11';
+        const realOnly = await stats(`${q}&scope=default`);
+        expect(realOnly.status).toBe(200);
+        expect(realOnly.data.scope).toBe('default');
+        expect(realOnly.data.current.stats).toMatchObject({
+          signups: 1,
+          topup_count: 1,
+          topup_amount: 100,
+          withdrawal_count: 1,
+          withdrawal_amount: 40,
+        });
+        // Generated accounts were never sign-ups, in either scope.
+        const all = await stats(`${q}&scope=all`);
+        expect(all.data.scope).toBe('all');
+        expect(all.data.current.stats).toMatchObject({
+          signups: 3,
+          topup_count: 4,
+          topup_amount: 400,
+          withdrawal_count: 2,
+          withdrawal_amount: 80,
+        });
+        expect((await stats(q)).data.current.stats.topup_count).toBe(4);
+        expect((await stats(`${q}&scope=partners`)).status).toBe(400);
+
+        const settle = (s: string) =>
+          unwrapResponse(
+            api.get(
+              `/admin/payments/settlement?granularity=month&periods=60${s}`,
+              { headers: { authorization: `Bearer ${adminToken}` } },
+            ),
+          );
+        const sumIn = (r: {
+          data: { periods: { deposits: { gross: number } }[] };
+        }) => r.data.periods.reduce((n, p) => n + p.deposits.gross, 0);
+        const scoped = await settle('&scope=default');
+        expect(scoped.status).toBe(200);
+        expect(scoped.data.scope).toBe('default');
+        expect(sumIn(scoped)).toBe(100);
+        expect(sumIn(await settle(''))).toBe(400);
+        expect((await settle('&scope=nope')).status).toBe(400);
+      });
     });
   },
 });

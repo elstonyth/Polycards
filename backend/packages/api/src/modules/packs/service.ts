@@ -215,6 +215,7 @@ import {
 } from './challenge-settle';
 import { weightedAverageCost } from './inventory-cost';
 import type { SignupTopupStats, WithdrawalStats } from './stats';
+import { scopeSql, type CustomerScope } from './real-customers';
 import type { MedusaContainer } from '@medusajs/framework/types';
 
 // plan-033 playthrough basis, per ledger row in sen: a post-1b deposit's
@@ -7535,6 +7536,7 @@ class PacksModuleService extends MedusaService({
   async signupTopupStats(
     from: Date,
     to: Date,
+    scope: CustomerScope = 'all',
     @MedusaContext() sharedContext: Context = {},
   ): Promise<SignupTopupStats> {
     const em = (sharedContext.transactionManager ??
@@ -7557,12 +7559,12 @@ class PacksModuleService extends MedusaService({
                 ) AS nth
          FROM gateway_deposit
          WHERE status = 'settled' AND deleted_at IS NULL
-           AND settled_at IS NOT NULL AND amount_settled > 0
+           AND settled_at IS NOT NULL AND amount_settled > 0${scopeSql(scope, 'customer_id')}
        )
        SELECT
          (SELECT count(*) FROM customer
             WHERE has_account
-              AND metadata -> 'partner_credential' IS NULL
+              AND metadata -> 'partner_credential' IS NULL${scopeSql(scope, 'id')}
               AND created_at >= ?::timestamptz
               AND created_at < ?::timestamptz)::int AS signups,
          count(*)::int AS topup_count,
@@ -7596,6 +7598,7 @@ class PacksModuleService extends MedusaService({
   async withdrawalStats(
     from: Date,
     to: Date,
+    scope: CustomerScope = 'all',
     @MedusaContext() sharedContext: Context = {},
   ): Promise<WithdrawalStats> {
     const em = (sharedContext.transactionManager ??
@@ -7607,7 +7610,7 @@ class PacksModuleService extends MedusaService({
               COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS withdrawal_cents
        FROM gateway_withdrawal
        WHERE status = 'settled' AND deleted_at IS NULL
-         AND settled_at >= ?::timestamptz AND settled_at < ?::timestamptz`,
+         AND settled_at >= ?::timestamptz AND settled_at < ?::timestamptz${scopeSql(scope, 'customer_id')}`,
       [from.toISOString(), to.toISOString()],
     );
     return {
@@ -7798,6 +7801,7 @@ class PacksModuleService extends MedusaService({
     granularity: 'week' | 'month',
     since: Date,
     currency: string | null = null,
+    scope: CustomerScope = 'all',
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{
     deposits: GatewayPeriodRow[];
@@ -7812,7 +7816,10 @@ class PacksModuleService extends MedusaService({
     const bucket = (column: string) =>
       `to_char(date_trunc('${granularity}', ${column} AT TIME ZONE 'Asia/Kuala_Lumpur'), 'YYYY-MM-DD')`;
     // One rail's currency (the Settlement page's tabs), or every row.
-    const currencySql = currency ? 'AND currency = ?' : '';
+    // Real customers only (the Dashboard's switch), or every account. The
+    // scope clause binds nothing, so the argument lists below are unchanged.
+    const currencySql =
+      (currency ? 'AND currency = ?' : '') + scopeSql(scope, 'customer_id');
     const gatewayArgs = currency
       ? [since.toISOString(), currency]
       : [since.toISOString()];
@@ -7927,7 +7934,7 @@ class PacksModuleService extends MedusaService({
          FROM credit_transaction
         WHERE deleted_at IS NULL AND reason IN ('topup', 'cashout')
           AND created_at >= ?::timestamptz
-          ${ledgerSql}
+          ${ledgerSql}${scopeSql(scope, 'customer_id')}
         GROUP BY 1`,
       ledgerArgs,
     );
