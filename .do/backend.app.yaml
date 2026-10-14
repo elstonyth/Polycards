@@ -434,6 +434,15 @@ envs:
     scope: RUN_TIME
     value: "2000000"
 
+  # Touch 'n Go payouts (modules/packs/banks.ts payoutSwitch). Off unless
+  # "true": TGPay's TNG route refused 97 of 110 payouts in the week to
+  # 2026-10-14. Turned on 2026-10-14 at the operator's request; set "false"
+  # (or delete the key) to take TNG out of the picker again. App-level, so the
+  # backend service and the worker both read it.
+  - key: TNG_PAYOUTS_ENABLED
+    scope: RUN_TIME
+    value: "true"
+
   # ── TGPay (plan 130) — the payment gateway since the 2026-09-06 cutover.
   # The key pair comes from the production back office (admin.tgpay365.com →
   # Settings → General → API keys, 2FA-gated) and is injected by
