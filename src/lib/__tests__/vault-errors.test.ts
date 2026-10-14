@@ -149,11 +149,16 @@ describe('VAULT_RULES backend-message contract', () => {
       'Select a saved bank account.',
       'This bank account was saved before withdrawal checks were added. Remove it and save it again to use it.',
       'This bank account is not available for withdrawals yet — try again in about 3 hours.',
+      // withdraw/accounts route: one bank account, one Polycards account
+      'This bank account is already linked to another Polycards account. Withdraw to a bank account in your own name, or contact support if this is a mistake.',
       // gateway-withdrawal.ts startWithdrawal / withdrawalDetailsError
       'This bank account is not available with the current payout provider. Pick another saved account, or try again later.',
       'Add an email address to your account before withdrawing.',
       'Choose a bank from the list.',
       'Enter a valid account number (digits only).',
+      "That looks like a card number. Enter your bank account number instead — it's in your banking app or on your statement, not on the card.",
+      'Maybank account numbers are 12 digits. Check the number in your banking app.',
+      'CIMB Bank account numbers are 10 or 14 digits. Check the number in your banking app.',
       'Enter the account holder name exactly as the bank has it.',
     ];
     for (const msg of literals) expect(map(msg)).toBe(msg);

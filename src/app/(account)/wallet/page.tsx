@@ -3,6 +3,7 @@ import { unstable_rethrow } from 'next/navigation';
 import { Check, Lock } from 'lucide-react';
 import { AccountHeader, Panel, StatCards } from '@/components/account/ui';
 import { PlaythroughProgress } from '@/components/account/PlaythroughProgress';
+import { TopUpButton } from '@/components/account/TopUpButton';
 import { getWallet } from '@/lib/actions/wallet';
 import { getPaymentLimits } from '@/lib/actions/vault';
 import { DEFAULT_PAYMENT_LIMITS } from '@/lib/payment-limits';
@@ -69,6 +70,27 @@ export default async function WalletPage() {
         <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
           An admin has frozen this account — your balance is held until review.
           Contact support if you think this is a mistake.
+        </div>
+      )}
+
+      {/* 424 never-topped-up accounts held RM 22.4k on 2026-10-14 and found
+          out only on the withdraw page. Say it here, before they try. */}
+      {!w.isFrozen && !w.hasTopup && normal > 0 && (
+        <div
+          role="status"
+          className="mb-4 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3.5"
+        >
+          <p className="flex items-center gap-2 text-sm font-semibold text-white">
+            <Lock className="h-4 w-4 shrink-0 text-sky-400" aria-hidden />
+            Top up once to unlock withdrawals
+          </p>
+          <p className="mt-1.5 text-sm text-white/70">
+            Your {rm(normal)} can&rsquo;t be withdrawn or used for card
+            deliveries until your first top-up (from {rm0(limits.deposit.minRm)}
+            ). After that, play your deposits through on packs and it unlocks,
+            winnings included.
+          </p>
+          <TopUpButton size="sm" className="mt-3" />
         </div>
       )}
 

@@ -324,3 +324,41 @@ export async function loadSavedBankAccounts(
   );
   return parseSavedBankAccounts((rows[0]?.metadata ?? {}).bank_accounts);
 }
+
+/**
+ * One bank account, one Polycards account: a number another customer already
+ * holds is refused (sharing-allowed customers excepted). Existing shared
+ * accounts were left alone on purpose (2026-10-14) — only new links are
+ * refused, and re-saving an account the customer already has is not a new
+ * link. Checked when an account is saved (withdraw/accounts route) and again
+ * at payout (startWithdrawal).
+ */
+export const SHARED_PAYOUT_ACCOUNT_MESSAGE =
+  'This bank account is already linked to another Polycards account. Withdraw to a bank account in your own name, or contact support if this is a mistake.';
+
+/**
+ * Support's override for a genuine shared account (a family member's, a joint
+ * account): customer ids in PAYOUT_ACCOUNT_SHARING_ALLOWED, comma-separated,
+ * read per call.
+ * shortcut: the override is an env list, so granting one is a spec change and
+ * a redeploy; build an admin toggle if overrides become routine.
+ */
+export function payoutAccountSharingAllowed(
+  customerId: string,
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): boolean {
+  return (env.PAYOUT_ACCOUNT_SHARING_ALLOWED ?? '')
+    .split(',')
+    .some((id) => id.trim() === customerId);
+}
+
+/** Destinations saved before the shared-account check shipped are exempt at
+ *  payout: the existing clusters were left alone by decision (2026-10-14). */
+export const SHARED_ACCOUNT_CHECK_SINCE = Date.parse('2026-10-14T00:00:00+08:00');
+
+export function sharedAccountCheckApplies(account: SavedBankAccount): boolean {
+  return (
+    typeof account.savedAt === 'string' &&
+    Date.parse(account.savedAt) >= SHARED_ACCOUNT_CHECK_SINCE
+  );
+}

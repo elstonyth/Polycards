@@ -5,6 +5,8 @@ import {
   parseSavedBankAccounts,
   savedBankAccountId,
   MAX_SAVED_BANK_ACCOUNTS,
+  SHARED_PAYOUT_ACCOUNT_MESSAGE,
+  payoutAccountSharingAllowed,
 } from '../route';
 import type {
   FakeFacet,
@@ -46,13 +48,19 @@ const mutateCustomerMetadata = jest.fn(
   },
 );
 
+// Other customers holding the same account number (none by default).
+const otherPayoutAccountHolders = jest.fn();
+
 const createNotifications = jest.fn();
 const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
 
 const scope = {
   resolve: jest.fn((key: string) => {
     if (key === 'packs')
-      return { mutateCustomerMetadata } satisfies FakeFacet<CustomerWallet>;
+      return {
+        mutateCustomerMetadata,
+        otherPayoutAccountHolders,
+      } satisfies FakeFacet<CustomerWallet>;
     if (key === 'notification') return { createNotifications };
     if (key === 'logger') return logger;
     return { retrieveCustomer, updateCustomers };
@@ -82,7 +90,7 @@ const mkReq = (body: Record<string, unknown> | null = null) =>
 const VALID_BODY = {
   bank_code: 'MBBEMYKL',
   bank_name: 'Maybank',
-  account_number: '1234567890',
+  account_number: '123456789012',
   account_holder_name: 'Tan Ah Kow',
 };
 
@@ -97,10 +105,10 @@ const fullList = () =>
 const SAVED_AT = '2026-01-01T00:00:00.000Z';
 
 const savedShape = (over: Partial<Record<string, unknown>> = {}) => ({
-  id: savedBankAccountId('MBBEMYKL', '1234567890'),
+  id: savedBankAccountId('MBBEMYKL', '123456789012'),
   bankCode: 'MBBEMYKL',
   bankName: 'Maybank',
-  accountNumber: '1234567890',
+  accountNumber: '123456789012',
   accountHolderName: 'Tan Ah Kow',
   savedAt: SAVED_AT,
   ...over,
@@ -130,6 +138,8 @@ beforeEach(() => {
   updateCustomers.mockReset();
   mutateCustomerMetadata.mockClear();
   createNotifications.mockReset();
+  otherPayoutAccountHolders.mockReset();
+  otherPayoutAccountHolders.mockResolvedValue([]);
   logger.warn.mockReset();
   logger.error.mockReset();
   retrieveCustomer.mockResolvedValue({ metadata: {} });
@@ -249,7 +259,7 @@ describe('POST /store/credits/withdraw/accounts', () => {
       metadata: expect.objectContaining({
         bank_accounts: [
           expect.objectContaining({
-            id: savedBankAccountId('MBBEMYKL', '1234567890'),
+            id: savedBankAccountId('MBBEMYKL', '123456789012'),
             bankCode: 'MBBEMYKL',
             bankName: 'Maybank',
           }),
@@ -399,11 +409,11 @@ describe('POST accounts — the new-destination notice', () => {
       template: 'bank-account-added',
       data: expect.objectContaining({
         bank_name: 'Maybank',
-        account_last4: '7890',
+        account_last4: '9012',
       }),
     });
     // The full number must never leave the database on this path.
-    expect(JSON.stringify(emails[0])).not.toContain('1234567890');
+    expect(JSON.stringify(emails[0])).not.toContain('123456789012');
   });
 
   it('also drops an in-app feed row for the same event', async () => {
@@ -418,7 +428,7 @@ describe('POST accounts — the new-destination notice', () => {
     expect(feed).toHaveLength(1);
     expect(feed[0]).toMatchObject({
       receiver_id: 'cus_1',
-      data: expect.objectContaining({ account_last4: '7890' }),
+      data: expect.objectContaining({ account_last4: '9012' }),
     });
   });
 
@@ -529,5 +539,100 @@ describe('GET /store/credits/withdraw/accounts', () => {
     expect(
       (res as { json: jest.Mock }).json.mock.calls[0][0].accounts[0].usableFrom,
     ).toBeNull();
+  });
+});
+
+// 13 clusters of 2-3 customer accounts on one bank account farmed welcome
+// packs and tasks by 2026-10-14. A NEW link to a number someone else holds is
+// refused; the existing clusters were deliberately left as they are.
+describe('POST accounts — one bank account, one Polycards account', () => {
+  const ORIGINAL = process.env.PAYOUT_ACCOUNT_SHARING_ALLOWED;
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env.PAYOUT_ACCOUNT_SHARING_ALLOWED;
+    else process.env.PAYOUT_ACCOUNT_SHARING_ALLOWED = ORIGINAL;
+  });
+
+  it('refuses a number another customer holds at the same bank, and writes nothing', async () => {
+    otherPayoutAccountHolders.mockResolvedValue([
+      { customer_id: 'cus_2', bank_code: 'MBBEMYKL' },
+    ]);
+    await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
+      SHARED_PAYOUT_ACCOUNT_MESSAGE,
+    );
+    expect(otherPayoutAccountHolders).toHaveBeenCalledWith(
+      'cus_1',
+      '123456789012',
+    );
+    expect(updateCustomers).not.toHaveBeenCalled();
+    expect(createNotifications).not.toHaveBeenCalled();
+    // Logged so repeated probing shows up, with the last 4 digits only.
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    const line = logger.warn.mock.calls[0][0] as string;
+    expect(line).toContain('cus_1');
+    expect(line).toContain('9012');
+    expect(line).not.toContain('123456789012');
+  });
+
+  it("reads another customer's retired-gateway code as the same bank", async () => {
+    otherPayoutAccountHolders.mockResolvedValue([
+      { customer_id: 'cus_2', bank_code: 'MYMB2U' },
+    ]);
+    await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
+      SHARED_PAYOUT_ACCOUNT_MESSAGE,
+    );
+  });
+
+  it('a number another customer only saved blocks under the same holder name, not another', async () => {
+    otherPayoutAccountHolders.mockResolvedValue([
+      { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: 'tan  AH kow' },
+    ]);
+    await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
+      SHARED_PAYOUT_ACCOUNT_MESSAGE,
+    );
+
+    // A stranger who saved the number first cannot lock the owner out.
+    otherPayoutAccountHolders.mockResolvedValue([
+      { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: 'Someone Else' },
+    ]);
+    await POST(mkReq(VALID_BODY), mkRes());
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows the same digits at a different bank', async () => {
+    otherPayoutAccountHolders.mockResolvedValue([
+      { customer_id: 'cus_2', bank_code: 'PBBEMYKL' },
+    ]);
+    await POST(mkReq(VALID_BODY), mkRes());
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets a customer on the sharing allowlist save it, without looking', async () => {
+    process.env.PAYOUT_ACCOUNT_SHARING_ALLOWED = 'cus_9, cus_1';
+    otherPayoutAccountHolders.mockResolvedValue([
+      { customer_id: 'cus_2', bank_code: 'MBBEMYKL' },
+    ]);
+    await POST(mkReq(VALID_BODY), mkRes());
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+    expect(otherPayoutAccountHolders).not.toHaveBeenCalled();
+  });
+
+  it('re-saving an account already on the list is not a new link', async () => {
+    retrieveCustomer.mockResolvedValue({
+      metadata: { bank_accounts: [savedShape()] },
+    });
+    otherPayoutAccountHolders.mockResolvedValue([
+      { customer_id: 'cus_2', bank_code: 'MBBEMYKL' },
+    ]);
+    // Decided on the locked read: the account is already theirs, so the
+    // other holder does not block a relabel.
+    await POST(mkReq(VALID_BODY), mkRes());
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+  });
+
+  it('matches allowlist ids exactly', () => {
+    const env = { PAYOUT_ACCOUNT_SHARING_ALLOWED: 'cus_10, cus_2' };
+    expect(payoutAccountSharingAllowed('cus_2', env)).toBe(true);
+    expect(payoutAccountSharingAllowed('cus_1', env)).toBe(false);
+    expect(payoutAccountSharingAllowed('cus_1', {})).toBe(false);
   });
 });
