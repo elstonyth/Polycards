@@ -461,7 +461,9 @@ export default function RequestDeliveryModal({
                     : ''}
                   )
                 </span>
-                <span>{rm(prizeShipping * prizeItems.length)}</span>
+                <span className="shrink-0 whitespace-nowrap pl-3">
+                  {rm(prizeShipping * prizeItems.length)}
+                </span>
               </div>
             )}
             <div className="mt-2 flex justify-between border-t border-white/10 pt-2 font-semibold text-white">
