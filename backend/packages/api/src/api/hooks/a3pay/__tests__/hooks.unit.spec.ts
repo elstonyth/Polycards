@@ -435,6 +435,28 @@ describe('POST /hooks/a3pay/withdrawal', () => {
     );
   });
 
+  // Same as the TGPay hook (#791): the ops alert reaches nobody until its
+  // chat is set up, so the Settlement page and the Dashboard must show a
+  // paid-after-refund payout at once, in the audit's own words and in RM.
+  it('a success on a refunded payout writes the double-payment note, in RM', async () => {
+    const h = harness([{ ...sgdPayout, status: 'failed' }]);
+    const res = await run(withdrawal, h, message(payout({ Status: 4 })));
+    expect(res.body).toBe('success');
+    expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
+      id: 'gpw_1',
+      audited_at: expect.any(Date),
+      audit_note:
+        'gateway says PAID OUT (100.00) but the row is failed and refunded — DOUBLE PAYMENT risk, investigate now',
+    });
+  });
+
+  it('writes no note when a repeated callback agrees with the closed row', async () => {
+    const h = harness([{ ...sgdPayout, status: 'failed' }]);
+    await run(withdrawal, h, message(payout({ Status: 5 })));
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+  });
+
   it('refuses a forged payout callback', async () => {
     const h = harness([sgdPayout]);
     const res = await run(
