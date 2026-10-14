@@ -119,6 +119,26 @@ describe('A3Pay refusals that are on OUR side', () => {
       expect(error.codes).not.toContain(A3PAY_PAYOUT_FLOAT_EMPTY);
     }
   });
+
+  it('an isSuccess:false refusal is definite on a 2xx/4xx but NOT on a 5xx', async () => {
+    const refused =
+      '{"isSuccess":false,"errorCode":null,"errorMessage":"Invalid account number","data":null}';
+    for (const [status, definite] of [
+      [200, true],
+      [400, true],
+      // The payout may already be recorded on their side, and payouts are
+      // posted by hand there: refunding now could pay the customer twice.
+      [500, false],
+      [502, false],
+    ] as const) {
+      reply(status, refused);
+      const error = await submitPayout(payout, config).catch((e) => e);
+      expect({ status, definite: error.definite }).toEqual({
+        status,
+        definite,
+      });
+    }
+  });
 });
 
 describe('inRowCurrency — a requery asks in the currency the row was made in', () => {

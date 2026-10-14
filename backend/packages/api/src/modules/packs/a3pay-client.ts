@@ -180,12 +180,14 @@ function failure<T>(
   // is an ACCEPTED request we could not read, and a body without isSuccess
   // is not their envelope at all: both ambiguous. Refunding an ambiguous
   // payout could pay twice; the sweep can always refund later, nothing can
-  // un-pay. (Same rule the retired gateway's client learned in #425.)
+  // un-pay. (Same rule the retired gateway's client learned in #425.) A 5xx
+  // is ambiguous even in their envelope: their side may have recorded the
+  // payout before failing, and A3Pay posts payouts by hand (TGPay's rule too).
   return new A3payError(
     `A3Pay ${path} failed: ${detail}`,
     codes,
     httpStatus,
-    parsed.isSuccess === false,
+    parsed.isSuccess === false && httpStatus < 500,
   );
 }
 
