@@ -149,6 +149,39 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(401);
       });
 
+      // ?group= (spec 2026-10-14-admin-finance-pages §8): `default` is
+      // everyone outside a non-default group (B, ungrouped); a group id is
+      // that group's members (A, in GROUP_NAME). Both hold on the
+      // ledger-sorted path too, which pages its own ids in SQL.
+      it('?group= filters to Default or to one group, sorted or not', async () => {
+        const customers = getContainer().resolve(Modules.CUSTOMER);
+        const [group] = await customers.listCustomerGroups({
+          name: GROUP_NAME,
+        });
+        const ids = (res: { data: { players: { id: string }[] } }) =>
+          res.data.players.map((p) => p.id);
+
+        const byDefault = await list('?group=default');
+        expect(byDefault.status).toBe(200);
+        expect(ids(byDefault)).toContain(bId);
+        expect(ids(byDefault)).not.toContain(aId);
+
+        const byGroup = await list(`?group=${group.id}`);
+        expect(ids(byGroup)).toEqual([aId]);
+        expect(byGroup.data.total).toBe(1);
+
+        const sorted = await list('?group=default&sort=wallet:desc');
+        expect(ids(sorted)).toContain(bId);
+        expect(ids(sorted)).not.toContain(aId);
+        const sortedGroup = await list(`?group=${group.id}&sort=topup:desc`);
+        expect(ids(sortedGroup)).toEqual([aId]);
+
+        const searched = await list(`?group=${group.id}&q=${B_EMAIL}`);
+        expect(ids(searched)).toEqual([]);
+
+        expect((await list('?group=bogus')).status).toBe(400);
+      });
+
       it('200 — lists both customers, newest first, with total', async () => {
         const res = await list();
         expect(res.status).toBe(200);

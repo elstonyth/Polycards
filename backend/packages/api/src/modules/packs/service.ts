@@ -8297,6 +8297,38 @@ class PacksModuleService extends MedusaService({
     return { wallet, vault, pullCount, vipLevel, state };
   }
 
+  // Customers whose effective player group is NOT the default (the odds
+  // engine's rule, EFFECTIVE_GROUP_SQL): the players list's ?group=default
+  // excludes them. Small by construction — partner and special groups.
+  @InjectManager()
+  async nonDefaultMemberIds(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ customer_id: string }[]>(
+      `SELECT customer_id FROM (${EFFECTIVE_GROUP_SQL}) eff`,
+      [],
+    );
+    return rows.map((r) => r.customer_id);
+  }
+
+  // The members of one customer group (the players list's ?group=<id>).
+  @InjectManager()
+  async groupMemberIds(
+    groupId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ customer_id: string }[]>(
+      'SELECT customer_id FROM customer_group_customer ' +
+        'WHERE customer_group_id = ? AND deleted_at IS NULL',
+      [groupId],
+    );
+    return rows.map((r) => r.customer_id);
+  }
+
   // One page of the admin Players list ordered by a ledger sum over EVERY
   // player (or over `ids`, the route's search matches), not just the page in
   // hand: the ids in order, plus how many players the sort covered. A player
@@ -8309,6 +8341,8 @@ class PacksModuleService extends MedusaService({
       key: PlayerLedgerSort;
       dir: 'ASC' | 'DESC';
       ids: string[] | null;
+      /** Never list these (the players list's ?group=default). */
+      excludeIds?: string[];
       limit: number;
       offset: number;
     },
@@ -8332,10 +8366,15 @@ class PacksModuleService extends MedusaService({
         ? 'COALESCE(t.topup, 0) - COALESCE(t.withdrawn, 0)'
         : `COALESCE(t.${input.key}, 0)`;
     const dir = input.dir === 'ASC' ? 'ASC' : 'DESC';
-    const scope = input.ids
-      ? ` AND c.id IN (${input.ids.map(() => '?').join(',')})`
-      : '';
-    const scopeParams = input.ids ?? [];
+    const exclude = input.excludeIds ?? [];
+    const scope =
+      (input.ids
+        ? ` AND c.id IN (${input.ids.map(() => '?').join(',')})`
+        : '') +
+      (exclude.length
+        ? ` AND c.id NOT IN (${exclude.map(() => '?').join(',')})`
+        : '');
+    const scopeParams = [...(input.ids ?? []), ...exclude];
     const rows = await em.execute<{ id: string }[]>(
       'SELECT c.id FROM customer c ' +
         `LEFT JOIN (SELECT customer_id, ${sums} FROM credit_transaction ` +
