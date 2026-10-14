@@ -40,8 +40,11 @@ export async function GET(
   // page that reconciles it.
   const totals = await packs.gatewayAuditTotals(active);
   // The findings list below covers every gateway in this currency, so the
-  // count does too.
+  // count does too, except a retired gateway's rows: they can never be
+  // checked again ("not configured here"), so they are counted apart and
+  // never hold up the "payments differ" badge.
   let findingsTotal = totals.findings;
+  let retiredTotal = 0;
   const history: ({ gateway: string } & ReturnType<typeof moneyTotals>)[] = [];
   // Retired gateways (globepay) were all RM.
   const others = [
@@ -51,7 +54,8 @@ export async function GET(
   for (const id of others) {
     if (id === active) continue;
     const t = await packs.gatewayAuditTotals(id);
-    findingsTotal += t.findings;
+    if (RETIRED_GATEWAYS.includes(id)) retiredTotal += t.findings;
+    else findingsTotal += t.findings;
     if (t.deposits.count + t.withdrawals.count > 0) {
       history.push({ gateway: id, ...moneyTotals(t) });
     }
@@ -104,6 +108,7 @@ export async function GET(
     gateway: active,
     last_audited_at: totals.lastAuditedAt,
     findings_total: findingsTotal,
+    retired_total: retiredTotal,
     totals: moneyTotals(totals),
     history,
     findings: findings.slice(0, FINDINGS_LIMIT),

@@ -833,7 +833,9 @@
     "feeSplit": "Top-up fees {{topups}} · payout fees {{payouts}}.",
     "checkCadence": "hourly, last 7 days",
     "showFirstFindings": "Show the first {{count}} of {{total}}",
-    "findingsCapped": "The first {{count}} of {{total}} are listed. The rest appear here as these are resolved."
+    "findingsCapped": "The first {{count}} of {{total}} are listed. The rest appear here as these are resolved.",
+    "retiredFindings_one": "{{count, number}} from a retired gateway, which can't be checked",
+    "retiredFindings_other": "{{count, number}} from a retired gateway, which can't be checked"
   },
   "pipeline": {
     "label": "Inventory pipeline",
@@ -941,7 +943,7 @@
     "done": "Done",
     "player": "Player",
     "level": "Level",
-    "netDeposit": "Net deposit",
+    "netDeposit": "Total contribution",
     "netDepositHint": "Top-ups {{topup}} − withdrawals {{withdrawn}}",
     "joined": "Joined",
     "allGroups": "All groups",
@@ -958,7 +960,7 @@
       "created_at_desc": "Newest first",
       "topup_desc": "Most topped up",
       "withdrawn_desc": "Most withdrawn",
-      "contribution_desc": "Highest net deposit",
+      "contribution_desc": "Highest total contribution",
       "spend_desc": "Highest turnover",
       "wallet_desc": "Biggest wallet",
       "email_asc": "Email A–Z"
