@@ -395,6 +395,27 @@ describe('WithdrawForm', () => {
     expect(text).toContain('returns to your balance');
     expect(text).toContain('W2026072200000001');
     expect(text).toContain('RM 50.00');
+    // An RM payout has no second currency to name.
+    expect(text).not.toContain('to your bank');
+  });
+
+  // A Singapore payout leaves the RM balance but lands in S$: the success
+  // screen names what the bank receives, as the form did before the tap.
+  it('names the S$ the bank receives on a Singapore payout', async () => {
+    await render([READY_ACCOUNT], 1000);
+    startWithdrawal.mockResolvedValue({
+      ok: true,
+      amount: 160,
+      balance: 33387.4,
+      reference: 'W2026101400000025',
+      status: 'pending',
+      payout: { currency: 'SGD', amount: 50.14 },
+    });
+    fillValidForm('160');
+    await submit();
+    const text = container.textContent ?? '';
+    expect(text).toContain('RM 160.00 ON ITS WAY');
+    expect(text).toContain('S$50.14 to your bank');
   });
 
   it('shows a held withdrawal as under review — never "paid", never spendable', async () => {

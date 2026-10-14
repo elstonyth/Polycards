@@ -618,6 +618,14 @@ export async function startWithdrawal(
       // Echo the ORIGINAL row's disposition: a replay of a held withdrawal must
       // still tell the client it is awaiting approval, not that it is pending.
       status: prior.status === 'held' ? 'held' : 'pending',
+      // And the amount the bank was ACTUALLY asked to receive, as locked on
+      // the row — never re-quoted at today's rate.
+      ...(prior.gateway_amount != null && prior.currency
+        ? {
+            currency: String(prior.currency),
+            payAmount: Number(prior.gateway_amount),
+          }
+        : {}),
     };
   };
 

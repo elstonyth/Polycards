@@ -68,6 +68,25 @@ describe('startWithdrawal — Idempotency-Key', () => {
       status: 'pending',
     });
   });
+
+  it('carries what a Singapore bank receives, and nothing for an RM payout', async () => {
+    backend({
+      'POST /store/credits/withdraw': {
+        body: { ...WITHDRAW_OK.body, currency: 'SGD', payAmount: 50.14 },
+      },
+    });
+    expect(
+      await startWithdrawal({ amount: 160, accountId: 'acct_1' }),
+    ).toMatchObject({ payout: { currency: 'SGD', amount: 50.14 } });
+    backend({
+      'POST /store/credits/withdraw': {
+        body: { ...WITHDRAW_OK.body, currency: 'MYR', payAmount: 50 },
+      },
+    });
+    expect(
+      await startWithdrawal({ amount: 50, accountId: 'acct_1' }),
+    ).not.toHaveProperty('payout');
+  });
 });
 
 describe('topUpCredits — Idempotency-Key', () => {

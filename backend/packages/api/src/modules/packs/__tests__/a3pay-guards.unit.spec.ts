@@ -10,6 +10,7 @@ import {
 } from '../gateway-withdrawal';
 import { resetOpsAlerts } from '../ops-alert';
 import { savedBankAccountId } from '../saved-accounts';
+import { aesDecrypt } from '../a3pay';
 
 // The money guards PR #755's review added on the A3Pay (SGD) rail, each of
 // which must refuse BEFORE any row or debit (or, on a held approval, before
@@ -279,6 +280,75 @@ describe('a regional payout', () => {
       'https://us/notify-wd',
       'https://us/payout-verify',
     );
+
+  // The S$ the customer is shown ("S$50.14 to your bank") must be the S$ we
+  // ask A3Pay to pay and the S$ locked on the row — one figure, end to end.
+  it('shows, submits and stores the same S$ amount', async () => {
+    const packs = withdrawHarness();
+    packs.withdrawForCashout.mockResolvedValue({
+      id: 'ct_1',
+      balance: 0,
+      amount: -330,
+      replayed: false,
+      reference: null,
+      destination: SG_ACCOUNT,
+    });
+    packs.updateGatewayWithdrawals.mockResolvedValue(undefined);
+    let sent: Record<string, unknown> | null = null;
+    const base = global.fetch;
+    global.fetch = jest.fn(async (url: string, init?: { body?: string }) => {
+      if (String(url).endsWith('/api/Payout/SubmitPayout')) {
+        const envelope = JSON.parse(String(init?.body)) as { Data: string };
+        sent = JSON.parse(aesDecrypt(envelope.Data, 'k'));
+        return {
+          status: 200,
+          text: async () =>
+            '{"isSuccess":true,"data":{"paymentOrderId":"W2026101400000099"}}',
+        };
+      }
+      return (base as unknown as (u: string) => Promise<unknown>)(url);
+    }) as unknown as typeof fetch;
+
+    const result = await start(packs, { amount: 160 });
+    const shown = (result as { payAmount?: number }).payAmount;
+    expect(shown).toBeGreaterThan(0);
+    // What A3Pay is told to pay, to the cent.
+    expect(sent).not.toBeNull();
+    expect(
+      Number((sent as unknown as { PayoutAmount: string }).PayoutAmount),
+    ).toBe(shown);
+    // What the row locks (and a held approval would submit).
+    expect(packs.createGatewayWithdrawals).toHaveBeenCalledWith([
+      expect.objectContaining({ gateway_amount: shown, currency: 'SGD' }),
+    ]);
+  });
+
+  // A retried tap (same Idempotency-Key) replays the original: it must name
+  // the S$ already locked and sent, never a re-quote at today's rate.
+  it("a replay echoes the row's locked S$, not today's", async () => {
+    const packs = withdrawHarness();
+    packs.listGatewayWithdrawals.mockResolvedValue([
+      {
+        merchant_transaction_id: 'PC-1',
+        gateway_transaction_id: 'W2026101400000025',
+        amount: 160,
+        status: 'pending',
+        currency: 'SGD',
+        gateway_amount: 50.14,
+      },
+    ]);
+    packs.creditBalance.mockResolvedValue(33387.4);
+    const result = await start(packs, {
+      amount: 160,
+      idempotencyKey: 'tap-1',
+    });
+    expect(result).toMatchObject({
+      replayed: true,
+      currency: 'SGD',
+      payAmount: 50.14,
+    });
+    expect(packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+  });
 
   it('is refused before any row or debit when the quoted rate has moved', async () => {
     const packs = withdrawHarness();

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, Clock, Landmark, Lock } from 'lucide-react';
 import { rm, rm0, timeUntil } from '@/lib/format';
-import { openRails } from '@/lib/regional-rails';
+import { openRails, regionalRailUi } from '@/lib/regional-rails';
 import {
   fetchSavedBankAccounts,
   getPaymentLimits,
@@ -219,6 +219,7 @@ export default function WithdrawForm({
     balance: number;
     reference: string;
     status: 'pending' | 'held';
+    payout?: { currency: string; amount: number };
   } | null>(null);
   // One idempotency key per withdrawal ATTEMPT: minted lazily on submit,
   // REUSED on error retries (so a debited-but-response-lost attempt replays
@@ -390,6 +391,7 @@ export default function WithdrawForm({
         balance: res.balance,
         reference: res.reference,
         status: res.status,
+        payout: res.payout,
       });
     } catch {
       setError('Something went wrong. Please try again.');
@@ -416,6 +418,15 @@ export default function WithdrawForm({
         <p className="mt-3 font-heading text-2xl text-white">
           {rm(done.amount)} {held ? 'UNDER REVIEW' : 'ON ITS WAY'}
         </p>
+        {/* The balance is RM, but a Singapore bank is paid in S$: name what
+            lands, as the form did before the tap. */}
+        {done.payout && (
+          <p className="mt-1 text-sm font-semibold text-neutral-200">
+            {regionalRailUi(done.payout.currency)?.money(done.payout.amount) ??
+              `${done.payout.currency} ${done.payout.amount.toFixed(2)}`}{' '}
+            to your bank
+          </p>
+        )}
         <p className="mt-2 max-w-sm text-sm text-neutral-400">
           {held
             ? "Withdrawals this size go through a manual review before they're sent to your bank — the amount has already left your balance, and returns automatically if the withdrawal isn't approved. Either way, we'll let you know."

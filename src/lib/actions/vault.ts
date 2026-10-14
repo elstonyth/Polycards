@@ -484,6 +484,9 @@ export type StartWithdrawalResult =
        *  submit outcome was ambiguous; either way the sweep/callback resolves
        *  it from here. Mirrors the backend's StartWithdrawalResult#status. */
       status: 'pending' | 'held';
+      /** What the bank receives when it is paid in another currency (a
+       *  Singapore payout: S$). Absent on an RM payout. */
+      payout?: { currency: string; amount: number };
     }
   | { ok: false; error: string; needsAuth?: boolean };
 
@@ -559,6 +562,11 @@ export async function startWithdrawal(input: {
     // pre-094 backend, which has no held state — 'pending' is the accurate
     // default there, not a guess.
     status: r.data.status ?? 'pending',
+    ...(r.data.currency &&
+    r.data.currency !== 'MYR' &&
+    r.data.payAmount !== undefined
+      ? { payout: { currency: r.data.currency, amount: r.data.payAmount } }
+      : {}),
   };
 }
 
