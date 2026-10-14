@@ -297,10 +297,13 @@ export function withdrawalRefundReference(
   return `wd-refund:${digest}`;
 }
 
-/** A 16-digit Visa/Mastercard number that passes the Luhn check. No Malaysian
- *  bank account number settled here ever matched (prod, to 2026-10-14). */
+/** A 16-digit card number (Visa 4, Mastercard/Maestro 5, Mastercard
+ *  2221-2720) that passes the Luhn check. No Malaysian bank account number
+ *  settled here ever matched (prod, to 2026-10-14). */
 function looksLikeCardNumber(digits: string): boolean {
-  if (!/^[45][0-9]{15}$/.test(digits)) return false;
+  if (!/^[0-9]{16}$/.test(digits)) return false;
+  const bin = Number(digits.slice(0, 4));
+  if (!/^[45]/.test(digits) && !(bin >= 2221 && bin <= 2720)) return false;
   let sum = 0;
   for (let i = 0; i < 16; i++) {
     let d = Number(digits[15 - i]);

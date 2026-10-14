@@ -262,6 +262,8 @@ describe('withdrawalDetailsError', () => {
     ['RHBBMYKL', '123456789012', /^RHB Bank account numbers are 14 digits\./],
     ['MBBEMYKL', VISA_TEST_CARD, /^That looks like a card number\./],
     ['CIBBMYKL', '5555555555554444', /^That looks like a card number\./],
+    // Mastercard's 2-series range (2221-2720).
+    ['BSNAMYK1', '2223003122003222', /^That looks like a card number\./],
     // BSN accounts are 16 digits, so only the card check guards it.
     ['BSNAMYK1', VISA_TEST_CARD, /^That looks like a card number\./],
   ])('refuses %s %s', (bankCode, accountNumber, message) => {
@@ -281,6 +283,8 @@ describe('withdrawalDetailsError', () => {
     // is not a card.
     ['BSNAMYK1', '0410029100012345'],
     ['BSNAMYK1', '4111111111111112'],
+    // 2-series outside 2221-2720 is not a card prefix.
+    ['BSNAMYK1', '2000000000000006'], // Luhn-valid
     // Banks without a length on file are not length-checked.
     ['PHBMMYKL', '123456789'],
     // Singapore banks pay through A3Pay and keep the generic digit rule.

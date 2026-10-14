@@ -5632,8 +5632,9 @@ class PacksModuleService extends MedusaService({
 
   // Other customers already tied to this account number: saved on a live
   // account, or a payout to it that went out or is on its way (failed rows
-  // came back and prove nothing). Payout rows count whoever sent them, deleted
-  // accounts included, so deleting and re-registering does not free a number.
+  // came back and prove nothing). A deleted account frees its numbers: the
+  // deletion scrub cuts its payout rows to the last 4 digits (deleteAccount),
+  // which no 6+ digit number can match, and its saved list is not read.
   // The bank codes come back raw (saved lists may still hold a retired
   // gateway's alias); the caller compares canonical ids. Read by the
   // saved-accounts POST route, which refuses a number someone else holds:
