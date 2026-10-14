@@ -11,6 +11,7 @@ import { Pager } from '../../../components/Pager';
 import { delta } from '../../economy/signs';
 import { StatTile } from './MoneyCards';
 import { WALLET_FILTERS, ledgerKind, type WalletFilter } from './ledger-kind';
+import { withdrawableNote } from './wallet-note';
 
 const FILTERS = Object.keys(WALLET_FILTERS) as WalletFilter[];
 
@@ -40,6 +41,7 @@ export const WalletTab = ({ customerId }: { customerId: string }) => {
   );
   const rows = data?.items ?? [];
   const w = money?.wallet;
+  const note = w ? withdrawableNote(w) : null;
   const pt = w?.playthrough;
   // Share of the deposits already spent on packs, for the bar.
   const ptPct =
@@ -62,13 +64,11 @@ export const WalletTab = ({ customerId }: { customerId: string }) => {
             value={w ? rm(w.withdrawable) : '—'}
             valueClass={w && w.withdrawable > 0 ? 'text-ui-tag-green-text' : ''}
             note={
-              !w
-                ? undefined
-                : w.frozen
-                  ? t('playerMoney.frozenNote')
-                  : !w.has_topup
-                    ? t('playerMoney.noTopupNote')
-                    : t('playerMoney.withdrawableNote')
+              note
+                ? t(`playerMoney.${note.key}`, {
+                    held: 'held' in note ? rm(note.held) : undefined,
+                  })
+                : undefined
             }
           />
           <StatTile
