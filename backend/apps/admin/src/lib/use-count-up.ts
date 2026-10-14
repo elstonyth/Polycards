@@ -12,7 +12,7 @@ export const countUpAt = (
   return from + (to - from) * (1 - Math.pow(2, -10 * t));
 };
 
-const reducedMotion = (): boolean =>
+export const prefersReducedMotion = (): boolean =>
   typeof window !== 'undefined' &&
   window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
 
@@ -23,12 +23,15 @@ const reducedMotion = (): boolean =>
  * left half-counted.
  */
 export const useCountUp = (target: number, durationMs = 900): number => {
-  const [value, setValue] = useState(target);
-  const shown = useRef(target);
+  // First paint counts up from 0; under reduced motion it starts final.
+  const [value, setValue] = useState(() =>
+    prefersReducedMotion() ? target : 0,
+  );
+  const shown = useRef(value);
 
   useEffect(() => {
     const from = shown.current;
-    if (from === target || reducedMotion()) {
+    if (from === target || prefersReducedMotion()) {
       shown.current = target;
       setValue(target);
       return;

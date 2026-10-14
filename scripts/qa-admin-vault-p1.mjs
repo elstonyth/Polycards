@@ -27,8 +27,9 @@ const TOP = [
   'Storefront',
 ];
 const REDIRECTS = [
-  ['/', '/stats'],
-  ['/orders', '/stats'],
+  ['/', '/overview'],
+  ['/orders', '/overview'],
+  ['/stats', '/overview'],
   ['/customers', '/players'],
   ['/reservations', '/inventory/list'],
   ['/products', '/cards'],
@@ -38,7 +39,7 @@ const REDIRECTS = [
   ['/site', '/announcements'],
 ];
 const PAGES = [
-  '/stats',
+  '/overview',
   '/deliveries',
   '/withdrawals',
   '/deposits',
@@ -119,7 +120,7 @@ for (const [from, to] of REDIRECTS) {
   check(here() === to, `${from} → ${to} (got ${here()})`);
 }
 
-await page.goto(`${ADMIN}/stats`);
+await page.goto(`${ADMIN}/overview`);
 await settle();
 const top = await page.$$eval(
   '[data-testid="sidebar-core-routes"] a[data-testid^="sidebar-nav-link-"]',
@@ -173,6 +174,46 @@ for (const id of HIDDEN_SETTINGS) {
     .catch(() => false);
   check(!visible, `settings/${id} hidden`);
 }
+
+// Dashboard: every section renders and none shows its load error.
+await page.goto(`${ADMIN}/overview`);
+await settle();
+await page.waitForTimeout(1500);
+for (const heading of [
+  'Dashboard',
+  'Money in vs money out',
+  'Needs your attention',
+  'Referral commission per week',
+  'Latest payments',
+]) {
+  check(
+    await page.getByText(heading, { exact: true }).first().isVisible(),
+    `dashboard shows "${heading}"`,
+  );
+}
+check(
+  (await page.getByText("Couldn't load this section.").count()) === 0,
+  'no dashboard section failed to load',
+);
+await page.screenshot({ path: `${OUT}/overview-light.png`, fullPage: true });
+
+// The same page in Medusa's dark theme (the operator's own choice).
+const dark = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  colorScheme: 'dark',
+});
+await dark.addInitScript(() =>
+  localStorage.setItem('medusa_admin_theme', 'dark'),
+);
+await dark.request.post(`${BACKEND}/auth/session`, {
+  headers: { authorization: `Bearer ${token}` },
+});
+const darkPage = await dark.newPage();
+await darkPage.goto(`${ADMIN}/overview`);
+await darkPage.waitForSelector('nav', { timeout: 60000 });
+await darkPage.waitForTimeout(3000);
+await darkPage.screenshot({ path: `${OUT}/overview-dark.png`, fullPage: true });
+await dark.close();
 
 check(errors.length === 0, `no page errors (${errors.length})`);
 for (const e of errors) console.log(`  ${e}`);

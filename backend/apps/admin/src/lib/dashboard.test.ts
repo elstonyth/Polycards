@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  amountChange,
   attentionWithdrawals,
   deltaTone,
   latestPayments,
@@ -70,6 +71,22 @@ describe('percentChange / deltaTone', () => {
   it('is flat with no base or no change', () => {
     expect(deltaTone(5, 0)).toBe('flat');
     expect(deltaTone(100, 100)).toBe('flat');
+  });
+});
+
+describe('amountChange', () => {
+  // Net cash can be negative or near zero, where a % change misleads
+  // (RM 100 → RM −6,667.79 reads "−6767.8%"); the RM difference doesn't.
+  it('is the RM difference with its direction', () => {
+    expect(amountChange(-6667.79, 100)).toEqual({
+      diff: -6767.79,
+      tone: 'bad',
+    });
+    expect(amountChange(500, -200)).toEqual({ diff: 700, tone: 'good' });
+  });
+  it('is flat with no change, and counts a change from zero', () => {
+    expect(amountChange(100, 100).tone).toBe('flat');
+    expect(amountChange(50, 0)).toEqual({ diff: 50, tone: 'good' });
   });
 });
 

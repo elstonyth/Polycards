@@ -38,7 +38,7 @@
  * forking the size variants. Inputs are already h-8; small Select triggers and
  * IconButtons go 28 -> 32.
  */
-.pc-admin :is(button, input, textarea, select, [role="combobox"]) {
+.pc-admin :is(button, input, textarea, select, [role='combobox']) {
   min-height: 2rem;
 }
 
@@ -59,17 +59,17 @@
  * weight to a quiet outline and bring the danger colour back on hover/focus.
  * Page- and modal-level destructive buttons keep their full weight.
  */
-.pc-admin :is(td, .pc-row-actions) button[class*="bg-ui-button-danger"] {
+.pc-admin :is(td, .pc-row-actions) button[class*='bg-ui-button-danger'] {
   background: transparent;
   color: var(--fg-error);
   box-shadow: inset 0 0 0 1px var(--border-error);
 }
-.pc-admin :is(td, .pc-row-actions) button[class*="bg-ui-button-danger"]::after {
+.pc-admin :is(td, .pc-row-actions) button[class*='bg-ui-button-danger']::after {
   display: none;
 }
 .pc-admin
   :is(td, .pc-row-actions)
-  button[class*="bg-ui-button-danger"]:is(:hover, :focus-visible) {
+  button[class*='bg-ui-button-danger']:is(:hover, :focus-visible) {
   background: var(--button-danger);
   color: var(--fg-on-color);
 }
@@ -134,4 +134,68 @@
 [data-testid='sidebar-nav-item-settings-commissions'],
 [data-testid='sidebar-nav-item-settings-secret-api-keys'] {
   display: none;
+}
+
+/* --- Dashboard motion (spec §5.4, scoped to /overview) ------------------- */
+/*
+ * Short settle-in for each panel, bars that grow to their value and a soft
+ * ping on items waiting for the operator. Each animation starts from a
+ * keyframe and ends on the element's own styles, so content is complete
+ * whether or not the animation runs; reduced motion turns all of it off.
+ */
+.pc-dashboard .pc-settle {
+  animation: pc-settle 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes pc-settle {
+  from {
+    opacity: 0.001;
+    transform: translateY(8px);
+  }
+}
+
+.pc-dashboard .pc-grow {
+  animation: pc-grow 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes pc-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+.pc-dashboard .pc-ping {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 9999px;
+  background: var(--tag-orange-icon);
+  box-shadow: 0 0 0 2px var(--bg-subtle);
+}
+.pc-dashboard .pc-ping::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+  animation: pc-ping 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+@keyframes pc-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  80%,
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pc-dashboard .pc-settle,
+  .pc-dashboard .pc-grow,
+  .pc-dashboard .pc-ping::after {
+    animation: none;
+  }
 }

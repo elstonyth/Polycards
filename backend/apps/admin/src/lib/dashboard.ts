@@ -27,6 +27,18 @@ export const deltaTone = (
   return pct > 0 !== riseIsBad ? 'good' : 'bad';
 };
 
+/**
+ * RM difference against the previous window. For figures that can be
+ * negative or near zero (net cash), where a % change would mislead.
+ */
+export const amountChange = (
+  cur: number,
+  prev: number,
+): { diff: number; tone: Tone } => {
+  const diff = Math.round((cur - prev) * 100) / 100;
+  return { diff, tone: diff > 0 ? 'good' : diff < 0 ? 'bad' : 'flat' };
+};
+
 /** Money the gateway received minus money paid out, same window. */
 export const netCashIn = (s: StatsFigures): number =>
   s.topup_amount - s.withdrawal_amount;
