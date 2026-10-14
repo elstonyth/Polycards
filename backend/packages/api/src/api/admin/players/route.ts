@@ -13,7 +13,10 @@ import type PacksModuleService from '../../../modules/packs/service';
 import type { PlayerLedgerSort } from '../../../modules/packs/service';
 import { resolveFxRate } from '../../../modules/packs/pricing';
 import { isPartnerGroup } from '../../../modules/packs/group-policy';
-import { effectivePlayerGroup } from '../../../modules/packs/odds-sets';
+import {
+  effectivePlayerGroup,
+  isDefaultPlayerGroup,
+} from '../../../modules/packs/odds-sets';
 import {
   mintPartnerAccount,
   type PartnerAccountRow,
@@ -84,15 +87,32 @@ export async function GET(
     (typeof rawGroup !== 'string' ||
       !(rawGroup === 'default' || /^cusgroup_[A-Za-z0-9]+$/.test(rawGroup)))
   ) {
+    // The input is not echoed back: say what is accepted instead.
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
-      `Invalid \`group\` filter '${String(rawGroup)}'.`,
+      'Invalid `group` filter: use `default` or a customer group id.',
     );
   }
-  const group = typeof rawGroup === 'string' && rawGroup ? rawGroup : null;
+  let group = typeof rawGroup === 'string' && rawGroup ? rawGroup : null;
 
   const customers = req.scope.resolve<ICustomerModuleService>(Modules.CUSTOMER);
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+
+  // The DEFAULT group's own id means `default` (everyone outside a
+  // non-default group, ungrouped included), never "its stored members":
+  // every sign-up joins it, so that list would be every customer. A group
+  // that is gone (or never was) has no members to list.
+  if (group && group !== 'default') {
+    const [found] = await customers.listCustomerGroups(
+      { id: group },
+      { select: ['id', 'name', 'metadata'] },
+    );
+    if (!found) {
+      res.json({ total: 0, offset, limit, players: [] });
+      return;
+    }
+    if (isDefaultPlayerGroup(found)) group = 'default';
+  }
 
   const { key: sortKey, dir: sortDir } = parseSortParam(
     req.query.sort,

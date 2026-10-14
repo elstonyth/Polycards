@@ -16,7 +16,15 @@ export type CashSide = {
   missingFees: number;
   missingGross: number;
 };
-export type CashCents = { topups: CashSide; withdrawals: CashSide };
+/** Real money through the gateways for one window. `fxCents` is what the
+ *  regional rails' spread earned: their amounts are RM at the rate the
+ *  CUSTOMER locked, the house really moved them at the market rate (the same
+ *  sum as Settlement's "Conversion earned"). */
+export type CashCents = {
+  topups: CashSide;
+  withdrawals: CashSide;
+  fxCents: number;
+};
 
 export type OwedCents = {
   /** Normal (non-bonus) wallet balance of customers with a real top-up. */
@@ -25,21 +33,35 @@ export type OwedCents = {
    *  debited when they were asked for, so they appear in neither the wallets
    *  nor the withdrawals paid, yet they are still owed. */
   payoutsInFlightCents: number;
+  /** Referral commission in a closed week, not paid yet (lines still pending
+   *  in a draft or approved settlement): credited, withdrawable, once paid. */
+  commissionUnpaidCents: number;
   walletBonusCents: number;
   /** Normal balance of customers who never topped up (cannot withdraw). */
   walletNoTopupCents: number;
+  /** Cards still owed (vaulted, or in an active delivery) to customers with a
+   *  real top-up, at the vault sell-back rate. */
   cardCount: number;
   deliveringCount: number;
-  /** Cards still owed, at the vault sell-back rate. */
   cardSellbackCents: number;
+  /** The same for customers who never topped up: they can neither withdraw
+   *  nor ship (#748), so these are reported, not owed. */
+  cardNoTopupCount: number;
+  cardNoTopupCents: number;
+  /** Cards already delivered, all time, at the same basis: a real cost the
+   *  house paid out, so completing a delivery never reads as profit. */
+  shippedCount: number;
+  shippedCents: number;
 };
 
-/** Money that stayed: top-ups after their fees, minus withdrawals and theirs. */
+/** Money that stayed: top-ups after their fees, minus withdrawals and theirs,
+ *  plus what the regional rails' spread earned. */
 export const keptCents = (c: CashCents): number =>
   c.topups.grossCents -
   c.topups.feeCents -
   c.withdrawals.grossCents -
-  c.withdrawals.feeCents;
+  c.withdrawals.feeCents +
+  c.fxCents;
 
 const side = (s: CashSide) => ({
   count: s.count,
@@ -53,6 +75,7 @@ export function profitCash(current: CashCents, previous: CashCents | null) {
   return {
     topups: side(current.topups),
     withdrawals: side(current.withdrawals),
+    fx_earned: current.fxCents / 100,
     kept: keptCents(current) / 100,
     // No previous window (all time) is "nothing to compare", never zero.
     previous_kept: previous ? keptCents(previous) / 100 : null,
@@ -60,24 +83,34 @@ export function profitCash(current: CashCents, previous: CashCents | null) {
 }
 
 /** What players could still take out, set against ALL-TIME cash kept: a
- *  period's cash minus a lifetime liability would mean nothing. */
+ *  period's cash minus a lifetime liability would mean nothing. Cards already
+ *  shipped come off too — they left as goods, not cash. */
 export function profitOwed(owed: OwedCents, allTime: CashCents) {
   const totalCents =
-    owed.walletCashCents + owed.payoutsInFlightCents + owed.cardSellbackCents;
+    owed.walletCashCents +
+    owed.payoutsInFlightCents +
+    owed.commissionUnpaidCents +
+    owed.cardSellbackCents;
   const allKept = keptCents(allTime);
   return {
     wallet_cash: owed.walletCashCents / 100,
     wallet_bonus: owed.walletBonusCents / 100,
     wallet_no_topup: owed.walletNoTopupCents / 100,
     payouts_in_flight: owed.payoutsInFlightCents / 100,
+    commission_unpaid: owed.commissionUnpaidCents / 100,
     cards: {
       count: owed.cardCount,
       delivering: owed.deliveringCount,
       sellback: owed.cardSellbackCents / 100,
     },
+    cards_no_topup: {
+      count: owed.cardNoTopupCount,
+      sellback: owed.cardNoTopupCents / 100,
+    },
     total: totalCents / 100,
     all_time_kept: allKept / 100,
-    if_all_cashed_out: (allKept - totalCents) / 100,
+    shipped: { count: owed.shippedCount, value: owed.shippedCents / 100 },
+    if_all_cashed_out: (allKept - totalCents - owed.shippedCents) / 100,
   };
 }
 

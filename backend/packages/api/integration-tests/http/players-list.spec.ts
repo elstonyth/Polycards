@@ -179,6 +179,17 @@ medusaIntegrationTestRunner({
         const searched = await list(`?group=${group.id}&q=${B_EMAIL}`);
         expect(ids(searched)).toEqual([]);
 
+        // A handle search (the byHandle id-list path) narrowed by the group.
+        expect(ids(await list(`?group=${group.id}&q=@${A_HANDLE}`))).toEqual([
+          aId,
+        ]);
+        expect(ids(await list(`?group=default&q=@${A_HANDLE}`))).not.toContain(
+          aId,
+        );
+        expect(ids(await list(`?group=default&q=@${B_HANDLE}`))).toContain(
+          bId,
+        );
+
         expect((await list('?group=bogus')).status).toBe(400);
       });
 
@@ -194,13 +205,36 @@ medusaIntegrationTestRunner({
         const def =
           existingDefault ??
           (await customers.createCustomerGroups({ name: 'DEFAULT' }));
-        await customers.addCustomerToGroup({
-          customer_id: aId,
-          customer_group_id: def.id,
-        });
+        // A: Whales + DEFAULT; B: DEFAULT only. A first-membership chip
+        // would say 'DEFAULT' for B (not null) — this tells the rules apart.
+        await customers.addCustomerToGroup([
+          { customer_id: aId, customer_group_id: def.id },
+          { customer_id: bId, customer_group_id: def.id },
+        ]);
         const res = await list();
         expect(rowFor(res, aId).player_group).toBe(GROUP_NAME);
+        expect(rowFor(res, bId).groups).toEqual(['DEFAULT']);
         expect(rowFor(res, bId).player_group).toBeNull();
+
+        // The DEFAULT group's own id means default (ungrouped included), not
+        // "its stored members".
+        const byDefaultId = await list(`?group=${def.id}`);
+        expect(byDefaultId.status).toBe(200);
+        const defaultIds = byDefaultId.data.players.map(
+          (p: { id: string }) => p.id,
+        );
+        expect(defaultIds).toContain(bId);
+        expect(defaultIds).not.toContain(aId);
+
+        // A group that is gone lists nobody, not its old members.
+        const [whales] = await customers.listCustomerGroups({
+          name: GROUP_NAME,
+        });
+        await customers.softDeleteCustomerGroups([whales.id]);
+        const gone = await list(`?group=${whales.id}`);
+        expect(gone.status).toBe(200);
+        expect(gone.data.players).toEqual([]);
+        expect(gone.data.total).toBe(0);
 
         // Default + search reaches Medusa's filter as { q, id: { $nin } }.
         const searched = await list(`?group=default&q=${B_EMAIL}`);

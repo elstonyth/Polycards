@@ -36,6 +36,14 @@ export async function GET(
       'scope must be default or all.',
     );
   }
+  // A repeated ?range= arrives as an array: refused, never read as "this
+  // month" (a dropped filter would answer a question nobody asked).
+  if (req.query.range !== undefined && typeof req.query.range !== 'string') {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `range must be one of ${RANGES.join(', ')}.`,
+    );
+  }
   const range = str(req.query.range) || 'month';
   const now = new Date();
   const windows =
@@ -50,35 +58,20 @@ export async function GET(
   }
 
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+  // One after the other, not Promise.all: each statement takes a pool
+  // connection, the pool is small and shared with the storefront, and the
+  // heavier ones scan the whole ledger. A report load must never starve
+  // pack opens or gateway callbacks.
   const fx = await resolveFxRate(packs);
-  const [current, previous, allTime, owed, reasons, rtp] = await Promise.all([
-    packs.profitCashTotals(
-      windows?.current.from ?? null,
-      windows?.current.to ?? null,
-      scope,
-    ),
-    windows
-      ? packs.profitCashTotals(
-          windows.previous.from,
-          windows.previous.to,
-          scope,
-        )
-      : Promise.resolve(null),
-    // range=all: the current window IS all time, so don't count it twice.
-    windows
-      ? packs.profitCashTotals(null, null, scope)
-      : Promise.resolve(null),
-    packs.profitOwed(scope, fx),
-    packs.ledgerReasonTotals(
-      windows?.current.from.toISOString(),
-      windows?.current.to.toISOString(),
-      scope,
-    ),
-    packRtpRows(packs, fx),
-  ]);
+  const cash = await packs.profitCashTotals(windows, scope);
+  const owed = await packs.profitOwed(scope, fx);
+  const reasons = await packs.ledgerReasonTotals(
+    windows?.current.from.toISOString(),
+    windows?.current.to.toISOString(),
+    scope,
+  );
+  const rtp = await packRtpRows(packs, fx);
 
-  // Money that varies by nothing but the admin session.
-  res.setHeader('Cache-Control', 'no-store');
   res.json({
     as_of: now,
     scope,
@@ -89,8 +82,8 @@ export async function GET(
     previous: windows
       ? { from: windows.previous.from, to: windows.previous.to }
       : null,
-    cash: profitCash(current, previous),
-    owed: profitOwed(owed, allTime ?? current),
+    cash: profitCash(cash.current, cash.previous),
+    owed: profitOwed(owed, cash.allTime),
     activity: profitActivity(reasons),
     packs: rtp,
   });

@@ -7481,8 +7481,10 @@ class PacksModuleService extends MedusaService({
   // synthetic {reason, amount} rows so economy.ts's unit-tested ledgerTotals
   // fold (incl. its unknown-reason loud throw) keeps shaping the report.
   // Optional half-open [from, to) ISO window scopes the totals to a period
-  // (Daily/Weekly/…); both omitted = all time (the original behavior). Served
-  // by the indexed created_at column.
+  // (Daily/Weekly/…); both omitted = all time (the original behavior).
+  // credit_transaction has no index on created_at alone (only
+  // (customer_id, created_at) and a partial pack_open one), so a windowed
+  // total still scans the ledger. `scope` limits it to real customers.
   @InjectManager()
   async ledgerReasonTotals(
     from?: string,
@@ -7507,7 +7509,7 @@ class PacksModuleService extends MedusaService({
       sql += ' AND created_at < ?::timestamptz';
       params.push(to);
     }
-    sql += scopeSql(scope, 'customer_id');
+    sql += scopeSql(scope, 'credit_transaction.customer_id');
     sql += ' GROUP BY reason';
     const rows = await em.execute<{ reason: string; cents: string }[]>(
       sql,
@@ -7563,12 +7565,12 @@ class PacksModuleService extends MedusaService({
                 ) AS nth
          FROM gateway_deposit
          WHERE status = 'settled' AND deleted_at IS NULL
-           AND settled_at IS NOT NULL AND amount_settled > 0${scopeSql(scope, 'customer_id')}
+           AND settled_at IS NOT NULL AND amount_settled > 0${scopeSql(scope, 'gateway_deposit.customer_id')}
        )
        SELECT
          (SELECT count(*) FROM customer
             WHERE has_account
-              AND metadata -> 'partner_credential' IS NULL${scopeSql(scope, 'id')}
+              AND metadata -> 'partner_credential' IS NULL${scopeSql(scope, 'customer.id')}
               AND created_at >= ?::timestamptz
               AND created_at < ?::timestamptz)::int AS signups,
          count(*)::int AS topup_count,
@@ -7614,7 +7616,7 @@ class PacksModuleService extends MedusaService({
               COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS withdrawal_cents
        FROM gateway_withdrawal
        WHERE status = 'settled' AND deleted_at IS NULL
-         AND settled_at >= ?::timestamptz AND settled_at < ?::timestamptz${scopeSql(scope, 'customer_id')}`,
+         AND settled_at >= ?::timestamptz AND settled_at < ?::timestamptz${scopeSql(scope, 'gateway_withdrawal.customer_id')}`,
       [from.toISOString(), to.toISOString()],
     );
     return {
@@ -7822,8 +7824,9 @@ class PacksModuleService extends MedusaService({
     // One rail's currency (the Settlement page's tabs), or every row.
     // Real customers only (the Dashboard's switch), or every account. The
     // scope clause binds nothing, so the argument lists below are unchanged.
-    const currencySql =
-      (currency ? 'AND currency = ?' : '') + scopeSql(scope, 'customer_id');
+    const currencySql = (table: string) =>
+      (currency ? 'AND currency = ?' : '') +
+      scopeSql(scope, `${table}.customer_id`);
     const gatewayArgs = currency
       ? [since.toISOString(), currency]
       : [since.toISOString()];
@@ -7867,7 +7870,7 @@ class PacksModuleService extends MedusaService({
          FROM gateway_deposit
         WHERE deleted_at IS NULL AND status = 'settled'
           AND settled_at IS NOT NULL AND settled_at >= ?::timestamptz
-          ${currencySql}
+          ${currencySql('gateway_deposit')}
         GROUP BY 1`,
       gatewayArgs,
     );
@@ -7893,7 +7896,7 @@ class PacksModuleService extends MedusaService({
          FROM gateway_withdrawal
         WHERE deleted_at IS NULL AND status = 'settled'
           AND settled_at IS NOT NULL AND settled_at >= ?::timestamptz
-          ${currencySql}
+          ${currencySql('gateway_withdrawal')}
         GROUP BY 1`,
       gatewayArgs,
     );
@@ -7938,7 +7941,7 @@ class PacksModuleService extends MedusaService({
          FROM credit_transaction
         WHERE deleted_at IS NULL AND reason IN ('topup', 'cashout')
           AND created_at >= ?::timestamptz
-          ${ledgerSql}${scopeSql(scope, 'customer_id')}
+          ${ledgerSql}${scopeSql(scope, 'credit_transaction.customer_id')}
         GROUP BY 1`,
       ledgerArgs,
     );
@@ -7990,76 +7993,124 @@ class PacksModuleService extends MedusaService({
   }
 
   // The Profit report's cash (GET /admin/profit-report; spec
-  // 2026-10-14-admin-finance-pages §4.2): settled gateway rows only, by
-  // settled_at, the same basis as the Settlement report. A deposit's fee is
-  // gross − net and a payout's is net − gross (a payout's net is what our
-  // wallet paid, fee on top: gateway-settlement.ts DIRECTION RULE), both over
-  // rows whose net is on file; the rest are counted, never treated as free.
-  // null bounds = all time.
+  // 2026-10-14-admin-finance-pages §4.2) for the current window, the one
+  // before it and all time, in ONE scan per table: settled gateway rows only,
+  // by settled_at, the same basis as the Settlement report. One statement per
+  // table, run one after the other, so a report load holds a single pool
+  // connection at a time.
+  //   - deposit fee = gross − net; payout fee = |net − what was paid|. A
+  //     payout's net is what our wallet paid, fee on top (gateway-settlement.ts
+  //     DIRECTION RULE); TGPay rows settled before 2026-09-10 stored it the
+  //     other way round, and the absolute value reads both right.
+  //   - a fee is summed only where net (and a deposit's gross) is on file; the
+  //     rest are counted, never treated as free. A deposit settled by hand has
+  //     no amount_settled: counted, never summed as RM 0. (The Dashboard's
+  //     sign-up stats leave those rows out of its top-up count instead.)
+  //   - the regional rails' spread (RM credited at the customer's rate vs the
+  //     market rate actually moved): the same sum as Settlement's
+  //     "Conversion earned" (api/admin/payments/fx/route.ts).
   @InjectManager()
   async profitCashTotals(
-    from: Date | null,
-    to: Date | null,
+    windows: {
+      current: { from: Date; to: Date };
+      previous: { from: Date; to: Date };
+    } | null,
     scope: CustomerScope,
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<CashCents> {
+  ): Promise<{
+    current: CashCents;
+    previous: CashCents | null;
+    allTime: CashCents;
+  }> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const win =
-      from && to
-        ? ' AND settled_at >= ?::timestamptz AND settled_at < ?::timestamptz'
-        : '';
-    const bounds = from && to ? [from.toISOString(), to.toISOString()] : [];
-    const where =
+    // Each row is tagged once with the windows it falls in.
+    const tags = windows
+      ? 'settled_at >= ?::timestamptz AND settled_at < ?::timestamptz AS in_cur, ' +
+        'settled_at >= ?::timestamptz AND settled_at < ?::timestamptz AS in_prev'
+      : 'TRUE AS in_cur, FALSE AS in_prev';
+    const bounds = windows
+      ? [
+          windows.current.from.toISOString(),
+          windows.current.to.toISOString(),
+          windows.previous.from.toISOString(),
+          windows.previous.to.toISOString(),
+        ]
+      : [];
+    const where = (table: string) =>
       "WHERE deleted_at IS NULL AND status = 'settled' AND settled_at IS NOT NULL" +
-      win +
-      scopeSql(scope, 'customer_id');
-    type Raw = {
-      n: number;
-      gross: string;
-      fee: string;
-      missing: number;
-      missing_gross: number;
-    };
-    // One scan per table. A deposit's gross is amount_settled (NULL on a row
-    // settled by hand: counted, never summed as 0) and its fee is gross − net;
-    // a payout's gross is `amount` (never NULL) and its fee is net − what was
-    // actually paid.
+      scopeSql(scope, `${table}.customer_id`);
+    const WINDOWS = ['cur', 'prev', 'all'] as const;
+    const cond = (w: (typeof WINDOWS)[number]) =>
+      w === 'cur' ? 'in_cur' : w === 'prev' ? 'in_prev' : 'TRUE';
+    // One select list per window; '{w}' is the window's condition.
+    const select = (fields: Record<string, string>) =>
+      WINDOWS.flatMap((w) =>
+        Object.entries(fields).map(
+          ([name, expr]) =>
+            `${expr.replace(/\{w\}/g, cond(w))} AS ${w}_${name}`,
+        ),
+      ).join(',\n       ');
+    type Raw = Record<string, string | number | null>;
+
     const [dep] = await em.execute<Raw[]>(
-      `SELECT count(*)::int AS n,
-              COALESCE(SUM(ROUND(amount_settled * 100)), 0)::bigint AS gross,
-              COALESCE(SUM(ROUND((amount_settled - net_amount) * 100))
-                FILTER (WHERE net_amount IS NOT NULL AND amount_settled IS NOT NULL), 0)::bigint AS fee,
-              (count(*) FILTER (WHERE net_amount IS NULL OR amount_settled IS NULL))::int AS missing,
-              (count(*) FILTER (WHERE amount_settled IS NULL))::int AS missing_gross
-         FROM gateway_deposit ${where}`,
+      `WITH r AS (SELECT *, ${tags} FROM gateway_deposit ${where('gateway_deposit')})
+       SELECT ${select({
+         n: 'count(*) FILTER (WHERE {w})::int',
+         gross:
+           'COALESCE(SUM(ROUND(amount_settled * 100)) FILTER (WHERE {w}), 0)::bigint',
+         fee: 'COALESCE(SUM(ROUND((amount_settled - net_amount) * 100)) FILTER (WHERE {w} AND net_amount IS NOT NULL AND amount_settled IS NOT NULL), 0)::bigint',
+         missing:
+           'count(*) FILTER (WHERE {w} AND (net_amount IS NULL OR amount_settled IS NULL))::int',
+         missing_gross:
+           'count(*) FILTER (WHERE {w} AND amount_settled IS NULL)::int',
+         fx: "COALESCE(SUM(ROUND((gateway_amount * COALESCE(amount_settled, amount_requested) / NULLIF(amount_requested, 0) * fx_mid - COALESCE(amount_settled, amount_requested)) * 100)) FILTER (WHERE {w} AND currency <> 'MYR' AND gateway_amount IS NOT NULL AND fx_mid IS NOT NULL), 0)::bigint",
+       })}
+         FROM r`,
       bounds,
     );
     const [wd] = await em.execute<Raw[]>(
-      `SELECT count(*)::int AS n,
-              COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS gross,
-              COALESCE(SUM(ROUND((net_amount - COALESCE(amount_settled, amount)) * 100))
-                FILTER (WHERE net_amount IS NOT NULL), 0)::bigint AS fee,
-              (count(*) FILTER (WHERE net_amount IS NULL))::int AS missing,
-              0 AS missing_gross
-         FROM gateway_withdrawal ${where}`,
+      `WITH r AS (SELECT *, ${tags} FROM gateway_withdrawal ${where('gateway_withdrawal')})
+       SELECT ${select({
+         n: 'count(*) FILTER (WHERE {w})::int',
+         gross:
+           'COALESCE(SUM(ROUND(amount * 100)) FILTER (WHERE {w}), 0)::bigint',
+         fee: 'COALESCE(SUM(ROUND(ABS(net_amount - COALESCE(amount_settled, amount)) * 100)) FILTER (WHERE {w} AND net_amount IS NOT NULL), 0)::bigint',
+         missing: 'count(*) FILTER (WHERE {w} AND net_amount IS NULL)::int',
+         missing_gross: '0',
+         fx: "COALESCE(SUM(ROUND((amount - gateway_amount * COALESCE(amount_settled, amount) / NULLIF(amount, 0) * fx_mid) * 100)) FILTER (WHERE {w} AND currency <> 'MYR' AND gateway_amount IS NOT NULL AND fx_mid IS NOT NULL), 0)::bigint",
+       })}
+         FROM r`,
       bounds,
     );
-    const side = (r: Raw | undefined): CashSide => ({
-      count: Number(r?.n ?? 0),
-      grossCents: Number(r?.gross ?? 0),
-      feeCents: Number(r?.fee ?? 0),
-      missingFees: Number(r?.missing ?? 0),
-      missingGross: Number(r?.missing_gross ?? 0),
+    const side = (r: Raw | undefined, w: string): CashSide => ({
+      count: Number(r?.[`${w}_n`] ?? 0),
+      grossCents: Number(r?.[`${w}_gross`] ?? 0),
+      feeCents: Number(r?.[`${w}_fee`] ?? 0),
+      missingFees: Number(r?.[`${w}_missing`] ?? 0),
+      missingGross: Number(r?.[`${w}_missing_gross`] ?? 0),
     });
-    return { topups: side(dep), withdrawals: side(wd) };
+    const window = (w: string): CashCents => ({
+      topups: side(dep, w),
+      withdrawals: side(wd, w),
+      fxCents: Number(dep?.[`${w}_fx`] ?? 0) + Number(wd?.[`${w}_fx`] ?? 0),
+    });
+    return {
+      current: window('cur'),
+      previous: windows ? window('prev') : null,
+      allTime: window('all'),
+    };
   }
 
-  // What players could still take out, right now (spec §4.2): each scoped
-  // customer's normal (non-bonus) wallet balance, split by whether they ever
-  // topped up (no top-up = no withdrawal, #748), their bonus balance, and the
-  // cards still owed (vaulted, or in an active delivery) at the vault
-  // sell-back rate. A negative per-customer balance owes nobody anything.
+  // What players could still take out, right now (spec §4.2), for scoped
+  // customers: their normal (non-bonus) wallet balance, split by whether they
+  // ever topped up (no top-up = no withdrawal or delivery, #748); their bonus;
+  // payouts requested but not paid; referral commission in a closed week not
+  // paid yet; and the cards still owed (vaulted, or in an active delivery) at
+  // the vault sell-back rate, split the same way. Cards already delivered are
+  // valued at the same basis as a cost (they left as goods). A negative
+  // per-customer balance owes nobody anything. Run one after the other: one
+  // pool connection at a time.
   @InjectManager()
   async profitOwed(
     scope: CustomerScope,
@@ -8077,7 +8128,7 @@ class PacksModuleService extends MedusaService({
                 SUM(COALESCE(bonus_cents, 0)) AS bonus_cents,
                 bool_or(reason = 'topup' AND amount > 0) AS has_topup
            FROM credit_transaction
-          WHERE deleted_at IS NULL${scopeSql(scope, 'customer_id')}
+          WHERE deleted_at IS NULL${scopeSql(scope, 'credit_transaction.customer_id')}
           GROUP BY customer_id
        )
        SELECT COALESCE(SUM(GREATEST(normal_cents, 0)) FILTER (WHERE has_topup), 0)::bigint AS cash_cents,
@@ -8086,35 +8137,73 @@ class PacksModuleService extends MedusaService({
          FROM bal`,
       [],
     );
-    const [cards] = await em.execute<
-      { n: string; delivering: string; cents: string }[]
-    >(
-      'SELECT COUNT(*)::bigint AS n, ' +
-        "       (COUNT(*) FILTER (WHERE p.status = 'delivering'))::bigint AS delivering, " +
-        `       COALESCE(SUM(ROUND(${LIVE_VALUE_USD_SQL} * ? * ?)), 0)::bigint AS cents ` +
-        '  FROM pull p ' +
-        '  JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL ' +
-        " WHERE p.status IN ('vaulted', 'delivering') AND p.deleted_at IS NULL" +
-        scopeSql(scope, 'p.customer_id'),
-      // Display MYR × percent = sen: (× 100 ÷ 100) cancel.
-      [DEFAULT_MARKET_MULTIPLIER, fx, FLAT_PERCENT],
-    );
     // Requested, not yet paid: the wallet was debited at request time.
     const [inFlight] = await em.execute<{ cents: string }[]>(
       'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS cents ' +
         'FROM gateway_withdrawal ' +
         "WHERE deleted_at IS NULL AND status IN ('pending', 'held')" +
-        scopeSql(scope, 'customer_id'),
+        scopeSql(scope, 'gateway_withdrawal.customer_id'),
       [],
+    );
+    // A closed week's commission, credited only when its settlement is paid.
+    // The open week is worked out when it closes, so it is not counted yet.
+    const [commission] = await em.execute<{ cents: string }[]>(
+      'SELECT COALESCE(SUM(l.amount_cents), 0)::bigint AS cents ' +
+        'FROM weekly_settlement_line l ' +
+        'JOIN weekly_settlement s ON s.id = l.settlement_id AND s.deleted_at IS NULL ' +
+        "  AND s.status IN ('draft', 'approved') " +
+        "WHERE l.deleted_at IS NULL AND l.status = 'pending'" +
+        scopeSql(scope, 'l.customer_id'),
+      [],
+    );
+    const [cards] = await em.execute<
+      {
+        n: string;
+        delivering: string;
+        cents: string;
+        n_no_topup: string;
+        cents_no_topup: string;
+        shipped: string;
+        shipped_cents: string;
+      }[]
+    >(
+      // Display MYR × percent = sen: (× 100 ÷ 100) cancel.
+      `WITH t AS (
+         SELECT p.status,
+                ROUND(${LIVE_VALUE_USD_SQL} * ? * ?) AS cents,
+                EXISTS (
+                  SELECT 1 FROM credit_transaction ct
+                   WHERE ct.customer_id = p.customer_id AND ct.reason = 'topup'
+                     AND ct.amount > 0 AND ct.deleted_at IS NULL
+                ) AS has_topup
+           FROM pull p
+           JOIN card c ON c.handle = p.card_id AND c.deleted_at IS NULL
+          WHERE p.status IN ('vaulted', 'delivering', 'delivered')
+            AND p.deleted_at IS NULL${scopeSql(scope, 'p.customer_id')}
+       )
+       SELECT (count(*) FILTER (WHERE status <> 'delivered' AND has_topup))::bigint AS n,
+              (count(*) FILTER (WHERE status = 'delivering' AND has_topup))::bigint AS delivering,
+              COALESCE(SUM(cents) FILTER (WHERE status <> 'delivered' AND has_topup), 0)::bigint AS cents,
+              (count(*) FILTER (WHERE status <> 'delivered' AND NOT has_topup))::bigint AS n_no_topup,
+              COALESCE(SUM(cents) FILTER (WHERE status <> 'delivered' AND NOT has_topup), 0)::bigint AS cents_no_topup,
+              (count(*) FILTER (WHERE status = 'delivered'))::bigint AS shipped,
+              COALESCE(SUM(cents) FILTER (WHERE status = 'delivered'), 0)::bigint AS shipped_cents
+         FROM t`,
+      [DEFAULT_MARKET_MULTIPLIER, fx, FLAT_PERCENT],
     );
     return {
       walletCashCents: Number(wallet?.cash_cents ?? 0),
       payoutsInFlightCents: Number(inFlight?.cents ?? 0),
+      commissionUnpaidCents: Number(commission?.cents ?? 0),
       walletBonusCents: Number(wallet?.bonus_cents ?? 0),
       walletNoTopupCents: Number(wallet?.no_topup_cents ?? 0),
       cardCount: Number(cards?.n ?? 0),
       deliveringCount: Number(cards?.delivering ?? 0),
       cardSellbackCents: Number(cards?.cents ?? 0),
+      cardNoTopupCount: Number(cards?.n_no_topup ?? 0),
+      cardNoTopupCents: Number(cards?.cents_no_topup ?? 0),
+      shippedCount: Number(cards?.shipped ?? 0),
+      shippedCents: Number(cards?.shipped_cents ?? 0),
     };
   }
 
@@ -8315,8 +8404,11 @@ class PacksModuleService extends MedusaService({
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const rows = await em.execute<{ customer_id: string }[]>(
-      'SELECT customer_id FROM customer_group_customer ' +
-        'WHERE customer_group_id = ? AND deleted_at IS NULL',
+      // Joined to a live group: Medusa keeps no foreign key here, so a
+      // membership row can outlive a soft-deleted group.
+      'SELECT cgc.customer_id FROM customer_group_customer cgc ' +
+        'JOIN customer_group cg ON cg.id = cgc.customer_group_id AND cg.deleted_at IS NULL ' +
+        'WHERE cgc.customer_group_id = ? AND cgc.deleted_at IS NULL',
       [groupId],
     );
     return rows.map((r) => r.customer_id);

@@ -331,6 +331,20 @@ medusaIntegrationTestRunner({
         expect((await stats(q)).data.current.stats.topup_count).toBe(4);
         expect((await stats(`${q}&scope=partners`)).status).toBe(400);
 
+        // The settlement report's ledger cross-check follows the scope too.
+        const credits = await packs.createCreditTransactions(
+          [real.id, grouped.id].map((customer_id, i) => ({
+            customer_id,
+            amount: 100,
+            reason: 'topup' as const,
+            pull_id: null,
+            reference: `scope-mt-${i}`,
+          })),
+        );
+        for (const row of credits) {
+          await setCreatedAt('credit_transaction', row.id, IN_CURRENT);
+        }
+
         const settle = (s: string) =>
           unwrapResponse(
             api.get(
@@ -345,7 +359,18 @@ medusaIntegrationTestRunner({
         expect(scoped.status).toBe(200);
         expect(scoped.data.scope).toBe('default');
         expect(sumIn(scoped)).toBe(100);
-        expect(sumIn(await settle(''))).toBe(400);
+        const everyone = await settle('');
+        expect(sumIn(everyone)).toBe(400);
+        type P = {
+          withdrawals: { gross: number };
+          ledger: { topupCredited: number };
+        };
+        const sum = (r: { data: { periods: P[] } }, f: (p: P) => number) =>
+          r.data.periods.reduce((n, p) => n + f(p), 0);
+        expect(sum(scoped, (p) => p.withdrawals.gross)).toBe(40);
+        expect(sum(everyone, (p) => p.withdrawals.gross)).toBe(80);
+        expect(sum(scoped, (p) => p.ledger.topupCredited)).toBe(100);
+        expect(sum(everyone, (p) => p.ledger.topupCredited)).toBe(200);
         expect((await settle('&scope=nope')).status).toBe(400);
       });
     });

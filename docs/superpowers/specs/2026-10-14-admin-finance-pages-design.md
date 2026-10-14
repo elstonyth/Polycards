@@ -63,19 +63,24 @@ Response (money in RM, rounded to the sen):
   window: { from: string; to: string } | null;      // null for 'all'
   previous: { from: string; to: string } | null;
   cash: {
-    topups:      { count: number; gross: number; fees: number; missing_fees: number };
-    withdrawals: { count: number; gross: number; fees: number; missing_fees: number };
-    kept: number;                 // topups.gross − topups.fees − withdrawals.gross − withdrawals.fees
+    topups:      { count: number; gross: number; fees: number; missing_fees: number; missing_gross: number };
+    withdrawals: { count: number; gross: number; fees: number; missing_fees: number; missing_gross: number };
+    fx_earned: number;            // the regional rails' spread, as Settlement's "Conversion earned"
+    kept: number;                 // topups.gross − topups.fees − withdrawals.gross − withdrawals.fees + fx_earned
     previous_kept: number | null; // same formula over `previous`
   };
   owed: {                         // a snapshot right now; ignores the window
     wallet_cash: number;          // normal (non-bonus) balance of customers with ≥1 top-up
     wallet_bonus: number;         // bonus balance (shown as a note, never cash)
     wallet_no_topup: number;      // normal balance of customers who never topped up (can't withdraw)
-    cards: { count: number; delivering: number; sellback: number };
-    total: number;                // wallet_cash + cards.sellback
+    payouts_in_flight: number;    // payouts pending or held: debited, not paid
+    commission_unpaid: number;    // closed weeks' referral commission, not paid yet
+    cards: { count: number; delivering: number; sellback: number };  // players with ≥1 top-up
+    cards_no_topup: { count: number; sellback: number };             // reported, not owed
+    total: number;                // wallet_cash + payouts_in_flight + commission_unpaid + cards.sellback
     all_time_kept: number;        // cash.kept over all time, same scope
-    if_all_cashed_out: number;    // all_time_kept − total
+    shipped: { count: number; value: number };  // cards delivered, all time, a cost
+    if_all_cashed_out: number;    // all_time_kept − total − shipped.value
   };
   activity: {                     // inside the site, over the window
     pack_sales: number; sellbacks: number; promo_given: number;
@@ -87,29 +92,35 @@ Response (money in RM, rounded to the sen):
 
 ### 4.2 Formulas
 
+All three windows (current, previous, all time) come from one scan per table, and the route runs its statements one after the other, so a report load holds one pool connection at a time.
+
 - **Top-ups:** settled `gateway_deposit` rows with `settled_at` in the window.
-  - gross = Σ `amount_settled`;
-  - fees = Σ (`amount_settled − net_amount`) over rows whose net is known;
-  - `missing_fees` = how many rows have no net yet, so the fee shown is a floor.
+  - gross = Σ `amount_settled`; a row settled by hand has none and is counted in `missing_gross` (gross is then a floor), never summed as 0;
+  - fees = Σ (`amount_settled − net_amount`) over rows whose net and gross are known;
+  - `missing_fees` = how many rows have no net (or no gross) yet, so the fee shown is a floor.
 - **Withdrawals:** settled `gateway_withdrawal` rows by `settled_at`.
   - gross = Σ `amount`;
-  - fees = Σ (`net_amount − COALESCE(amount_settled, amount)`) over rows whose net is known.
-  - This is the Settlement report's direction rule: a payout's net is what we paid, so net ≥ gross.
-- **Regional rails:** the amounts are already RM in these columns, so a regional payment counts at its locked rate, as on Settlement.
+  - fees = Σ |`net_amount − COALESCE(amount_settled, amount)`| over rows whose net is known. A payout's net is what we paid, so net ≥ gross (the Settlement direction rule); TGPay rows settled before 2026-09-10 stored it the other way round, and the absolute value reads both right.
+- **Regional rails:** the amounts are RM at the customer's locked rate. `fx_earned` adds what the spread earned against the market rate (the same sum as Settlement's "Conversion earned"), so cash kept is real money.
 - **Wallets:** per scoped customer, Σ `normalSenSql` and Σ `bonus_cents` over `credit_transaction`.
   - customers with at least one positive `topup` row go into `wallet_cash`;
-  - the others go into `wallet_no_topup`;
+  - the others go into `wallet_no_topup` (no top-up = no withdrawal or delivery, #748);
   - negative per-customer normal balances count as 0, because nobody is owed a negative amount.
+- **Payouts in flight:** scoped `gateway_withdrawal` rows `pending` or `held`. The wallet was debited when the payout was requested, so it appears in neither the wallets nor the withdrawals paid.
+- **Commission unpaid:** `weekly_settlement_line` rows still `pending` in a `draft` or `approved` settlement. The open week is worked out when it closes, so it is not counted until then.
 - **Cards:** scoped pulls with status `vaulted` or `delivering`. Value = display value (`LIVE_VALUE_USD_SQL` × fx) × `FLAT_PERCENT` (90%), the vault sell-back rate.
   - `delivering` counts at the same basis: a card being shipped is still owed;
+  - cards of customers who never topped up are reported in `cards_no_topup`, not owed: they can neither withdraw nor ship;
   - promo-origin cards are included, which is the conservative choice and is stated in the ⓘ hover.
+- **Shipped:** scoped pulls `delivered`, all time, at the same basis. They left as goods, so they come off "if all cashed out": completing a delivery never reads as profit.
 - **Activity:** `credit_transaction` over the window for scoped customers.
   - pack sales = −Σ normal part of `pack_open`;
-  - sell-backs = Σ `buyback`;
+  - sell-backs = Σ `buyback` (free and prize cards included);
   - promo given = Σ whole rows of `bonus_grant`, `reward_credit` and `voucher_claim`, plus `daily_reward`;
   - delivery fees = −Σ `delivery_fee`;
   - referral commission = Σ `referral_commission`;
-  - adjustments = Σ normal part of `adjustment`.
+  - adjustments = Σ normal part of `adjustment` (signed: a take-back is negative).
+- **Scope caveat:** scope is by the account a row belongs to. In the real-customers view, money moved by other groups' accounts is left out, including referral commission they earned from real customers' play and later withdrew. "All groups" shows it.
 - **Pack RTP:** exactly the current `/admin/economy` math, extracted into a shared helper so both routes use one copy.
 
 ### 4.3 Page (`/economy`, label "Profit report"): mockup A
