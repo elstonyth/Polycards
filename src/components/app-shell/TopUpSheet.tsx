@@ -20,6 +20,7 @@ import { openRails, regionalRailUi } from '@/lib/regional-rails';
 import { leaveFor } from '@/lib/navigation';
 import { markDepositInFlight } from '@/lib/deposit-return';
 import { trackPixel } from '@/lib/pixel';
+import { CountryFlag, type FlagCountry } from '@/components/ui/country-flag';
 import { Pill } from '@/components/ui/pill';
 import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -72,8 +73,10 @@ type Currency = string;
  */
 type CurrencyOption = {
   code: Currency;
-  /** Shown in the badge and in front of amounts. */
+  /** Shown after the name and in front of amounts. */
   symbol: string;
+  /** The badge: which country's banks pay in this currency. */
+  flag: FlagCountry;
   name: string;
   hint: string;
   /** Listed but not choosable (the RM gateway is paused). */
@@ -249,6 +252,7 @@ export default function TopUpSheet({
     {
       code: 'MYR',
       symbol: 'RM',
+      flag: 'MY',
       name: 'Malaysian Ringgit',
       hint: rmPaused
         ? 'Paused right now — your balance and cards are unaffected'
@@ -258,6 +262,7 @@ export default function TopUpSheet({
     ...rails.map((option) => ({
       code: option.currency,
       symbol: option.ui.symbol,
+      flag: option.ui.flag,
       name: option.ui.name,
       hint: `${option.ui.hint} · ${option.ui.symbol}1 = RM ${option.rate.deposit.toFixed(4)}`,
     })),
@@ -471,15 +476,16 @@ export default function TopUpSheet({
                     disabled={option.disabled}
                     className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3.5 text-left transition-colors hover:border-white/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-white/10"
                   >
-                    <span
-                      aria-hidden
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-neutral-800 font-heading text-[13px] text-white"
-                    >
-                      {option.symbol}
-                    </span>
+                    <CountryFlag
+                      country={option.flag}
+                      className="h-[27px] w-10"
+                    />
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] font-semibold text-white">
-                        {option.name}
+                        {option.name}{' '}
+                        <span className="font-normal text-neutral-400">
+                          ({option.symbol})
+                        </span>
                       </span>
                       <span className="mt-0.5 block text-[12px] leading-snug text-neutral-400">
                         {option.hint}
@@ -504,8 +510,9 @@ export default function TopUpSheet({
                 demo mode, which has RM only and no list to go back to. */}
             {USE_GATEWAY && chosen && (
               <div className="mt-4 flex items-center justify-between rounded-xl bg-neutral-800/60 px-3 py-2">
-                <span className="text-[13px] text-neutral-400">
-                  Paying in{' '}
+                <span className="flex items-center gap-1.5 text-[13px] text-neutral-400">
+                  Paying in
+                  <CountryFlag country={chosen.flag} className="h-3 w-[18px]" />
                   <span className="font-semibold text-white">
                     {chosen.name} ({chosen.symbol})
                   </span>

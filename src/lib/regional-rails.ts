@@ -1,3 +1,4 @@
+import type { FlagCountry } from '@/components/ui/country-flag';
 import type { DepositMethodCode } from '@/lib/deposit-methods';
 import { sgd, sgd0 } from '@/lib/format';
 import type { RegionalRail } from '@/lib/payment-limits';
@@ -10,8 +11,11 @@ import type { RegionalRail } from '@/lib/payment-limits';
  * rail the backend reports but this build has no entry for is never shown.
  */
 export type RegionalRailUi = {
-  /** Shown in the currency badge and in front of amounts ("S$"). */
+  /** Shown after the currency name and in front of amounts ("S$"). */
   symbol: string;
+  /** The country flag on the picker row, so nobody pays in a currency
+   *  their bank cannot send by mistake. */
+  flag: FlagCountry;
   name: string;
   /** The picker row's subline, before the rate. */
   hint: string;
@@ -34,6 +38,7 @@ export const REGIONAL_RAILS: Readonly<Record<string, RegionalRailUi>> = {
   // allow-lists for that gateway.
   SGD: {
     symbol: 'S$',
+    flag: 'SG',
     name: 'Singapore Dollar',
     hint: 'PayNow QR · bank transfer',
     presets: [50, 100, 300, 1000],
