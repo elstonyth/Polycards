@@ -157,14 +157,21 @@ export interface SupportCustomer {
 export interface SupportTransaction {
   id: string;
   amount: number;
+  /** The row's spend-only bonus part, signed like it (RM). /transactions
+   *  only; absent on the /gacha slice. */
+  bonus?: number;
   reason: string;
   reference: string | null;
   created_at: string;
+  /** Ledger display id (TP…, SP…) where one exists. /transactions only. */
+  ledger_display_id?: string | null;
 }
 
 export interface SupportPull {
   id: string;
   pack_id: string;
+  /** The pack's title (/pulls only). */
+  pack_title?: string | null;
   rolled_at: string;
   status: 'vaulted' | 'bought_back';
   buyback_amount: number | null;
@@ -242,9 +249,15 @@ export async function getCustomerGacha(id: string): Promise<CustomerGacha> {
   );
 }
 
-export const getCustomerTransactions = (id: string, page = 0, limit = 25) =>
+// `reasons` keeps only those ledger reasons (the Wallet tab's filter).
+export const getCustomerTransactions = (
+  id: string,
+  page = 0,
+  limit = 25,
+  reasons?: readonly string[],
+) =>
   getJson<{ items: SupportTransaction[]; total: number }>(
-    `/admin/customers/${encodeURIComponent(id)}/transactions?limit=${limit}&offset=${page * limit}`,
+    `/admin/customers/${encodeURIComponent(id)}/transactions?limit=${limit}&offset=${page * limit}${reasons?.length ? `&reasons=${reasons.join(',')}` : ''}`,
   );
 
 // `opts` narrows the history server-side (status = vaulted | bought_back |
@@ -254,13 +267,14 @@ export const getCustomerPulls = (
   id: string,
   page = 0,
   limit = 25,
-  opts?: { status?: string; source?: string },
+  opts?: { status?: string; source?: string; sort?: 'newest' | 'value' },
 ) => {
   const params = new URLSearchParams({
     limit: String(limit),
     offset: String(page * limit),
   });
   if (opts?.status) params.set('status', opts.status);
+  if (opts?.sort && opts.sort !== 'newest') params.set('sort', opts.sort);
   if (opts?.source) params.set('source', opts.source);
   return getJson<{
     items: SupportPull[];
@@ -1757,6 +1771,55 @@ export const getSpendReport = (id: string) =>
   getJson<{ periods: { period: string; spend: number }[] }>(
     `/admin/customers/${encodeURIComponent(id)}/spend-report`,
   );
+
+/** One window of a player's money: top-ups and withdrawal requests (net of
+ *  refunds) from the credit ledger, the Players list's own sums. */
+export interface CustomerMoneyPeriod {
+  topups: { count: number; amount: number };
+  withdrawals: { count: number; amount: number };
+  /** top-ups − withdrawals: the Players list's "Total contribution". */
+  contribution: number;
+}
+
+/** GET /admin/customers/:id/money: the player page's money card. `cash`,
+ *  `owed` and `activity` are the Profit report's, all time, for this
+ *  player alone. */
+export interface CustomerMoney {
+  as_of: string;
+  customer_id: string;
+  windows: Record<'today' | 'd7' | 'month', { from: string; to: string }>;
+  periods: Record<'today' | 'd7' | 'month' | 'all', CustomerMoneyPeriod>;
+  last: {
+    topup_at: string | null;
+    withdrawal_at: string | null;
+    open_at: string | null;
+  };
+  /** The wallet as the player's withdraw button sees it (walletSummary). */
+  wallet: {
+    balance: number;
+    withdrawable: number;
+    /** Spend-only bonus inside the balance. */
+    bonus: number;
+    frozen: boolean;
+    /** Never topped up = nothing may be withdrawn or shipped. */
+    has_topup: boolean;
+    /** Deposits must be spent on packs before they can leave. */
+    playthrough: { deposited: number; used: number; remaining: number };
+  };
+  cash: ProfitReport['cash'];
+  owed: ProfitReport['owed'];
+  activity: ProfitReport['activity'];
+  play: {
+    /** Cards real money won, at draw-time value × today's rate, each in its
+     *  normal (non-bonus) share: the leaderboard's basis. */
+    cards_won: { count: number; value: number };
+    /** cards_won as a percent of pack spend; null with no spend. */
+    return_pct: number | null;
+  };
+}
+
+export const getCustomerMoney = (id: string) =>
+  getJson<CustomerMoney>(`/admin/customers/${encodeURIComponent(id)}/money`);
 
 /** Core Medusa customer record (the Profile tab), not the gacha projection. */
 export interface AdminCustomerDetail {

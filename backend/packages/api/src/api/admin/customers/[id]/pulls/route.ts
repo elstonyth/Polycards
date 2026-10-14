@@ -65,6 +65,16 @@ export async function GET(
       .json({ message: `source must be one of ${PULL_SOURCES.join(', ')}` });
     return;
   }
+  // ?sort=value: the most valuable first (the player page's Vault). Default
+  // newest first.
+  const sort =
+    req.query.sort === undefined || req.query.sort === ''
+      ? 'newest'
+      : req.query.sort;
+  if (sort !== 'newest' && sort !== 'value') {
+    res.status(400).json({ message: 'sort must be newest or value' });
+    return;
+  }
   const { limit, offset } = parsePaginationParams(
     { limit: req.query.limit, offset: req.query.offset },
     { defaultLimit: 25, maxLimit: 100 },
@@ -78,14 +88,36 @@ export async function GET(
   const filter: Record<string, unknown> = { customer_id: id };
   if (status) filter.status = status;
   if (source) filter.source = source;
-  // `id` tiebreaker: a batch open stamps every pull in the batch with the
-  // same `rolled_at` millisecond, so offset pagination needs a unique
-  // secondary sort key. Same rule as inventory/[handle]/route.ts:82.
-  const [rows, total] = await packs.listAndCountPulls(filter, {
-    order: { rolled_at: 'DESC', id: 'DESC' },
-    skip: offset,
-    take: limit,
-  });
+  // ?sort=value: ranked and paged in the database (pullIdsByValue), then
+  // the page's rows read back in that order.
+  // Newest: `id` tiebreaker — a batch open stamps every pull in the batch
+  // with the same `rolled_at` millisecond, so offset pagination needs a
+  // unique secondary sort key. Same rule as inventory/[handle]/route.ts:82.
+  const [rows, total] =
+    sort === 'value'
+      ? await (async () => {
+          const ranked = await packs.pullIdsByValue(
+            id,
+            { status, source } as { status?: string; source?: string },
+            { limit, offset },
+          );
+          const found = ranked.ids.length
+            ? await packs.listPulls(
+                { id: ranked.ids },
+                { take: ranked.ids.length },
+              )
+            : [];
+          const byId = new Map(found.map((p: any) => [p.id, p]));
+          return [
+            ranked.ids.map((i) => byId.get(i)).filter(Boolean),
+            ranked.total,
+          ] as const;
+        })()
+      : await packs.listAndCountPulls(filter, {
+          order: { rolled_at: 'DESC', id: 'DESC' },
+          skip: offset,
+          take: limit,
+        });
   const handles = [...new Set(rows.map((p: any) => p.card_id))];
   const cards = handles.length
     ? await packs.listCards({ handle: handles }, { take: handles.length })
@@ -147,6 +179,7 @@ export async function GET(
       return {
         id: p.id,
         pack_id: p.pack_id,
+        pack_title: packBySlug.get(p.pack_id)?.title ?? null,
         rolled_at: p.rolled_at,
         status: p.status,
         buyback_amount:

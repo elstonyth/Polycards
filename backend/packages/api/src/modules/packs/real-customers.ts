@@ -51,3 +51,21 @@ export const realCustomerSql = (column: string): string => {
  *  parameters, so it can go anywhere in a statement. */
 export const scopeSql = (scope: CustomerScope, column: string): string =>
   scope === 'all' ? '' : ` AND ${realCustomerSql(column)}`;
+
+/** Whose money a figure counts: a scope, or one customer (the player page). */
+export type MoneyFilter = CustomerScope | { customerId: string };
+
+/** The parameters filterSql's clause binds, in order. */
+export const filterParams = (filter: MoneyFilter): unknown[] =>
+  typeof filter === 'string' ? [] : [filter.customerId];
+
+/** An `AND …` clause and the parameters it binds. A customer id is always a
+ *  bound parameter, never spliced into the SQL; a scope binds none. Splice
+ *  `sql` where its `params` fall in the statement's `?` order. */
+export const filterSql = (
+  filter: MoneyFilter,
+  column: string,
+): { sql: string; params: unknown[] } =>
+  typeof filter === 'string'
+    ? { sql: scopeSql(filter, column), params: filterParams(filter) }
+    : { sql: ` AND ${column} = ?`, params: filterParams(filter) };

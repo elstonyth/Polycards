@@ -71,16 +71,21 @@ export const qk = {
     ['admin', 'customer', id, 'pack-gifts'] as const,
   customerAudit: (id: string, page: number) =>
     ['admin', 'customer', id, 'audit', page] as const,
-  customerTransactions: (id: string, page: number) =>
-    ['admin', 'customer', id, 'transactions', page] as const,
+  // The filter segment always renders, the customerPulls rule below.
+  customerTransactions: (id: string, page: number, filter = 'all') =>
+    ['admin', 'customer', id, 'transactions', page, filter] as const,
   // The status segment always renders (defaulting to 'all', same shape as
   // qk.pulls' source segment) rather than being appended only when filtered:
   // an appended segment would make the unfiltered key a strict PREFIX of the
   // filtered one, so an exact-key invalidation of the support page's full
   // history would also nuke the Vault tab's vaulted-only cache. Disjoint
   // siblings can't do that.
-  customerPulls: (id: string, page: number, status?: string) =>
-    ['admin', 'customer', id, 'pulls', page, status ?? 'all'] as const,
+  customerPulls: (
+    id: string,
+    page: number,
+    status?: string,
+    sort: 'newest' | 'value' = 'newest',
+  ) => ['admin', 'customer', id, 'pulls', page, status ?? 'all', sort] as const,
   // 4-segment prefix — invalidates ALL pages of a customer's audit in one call
   customerAuditKey: (id: string) => ['admin', 'customer', id, 'audit'] as const,
   // 4-segment prefix — invalidates ALL pages of a customer's transaction ledger in one call
@@ -152,6 +157,7 @@ export const qk = {
     ['admin', 'customer', id, 'payout-details'] as const,
   spendReport: (id: string) =>
     ['admin', 'customer', id, 'spend-report'] as const,
+  customerMoney: (id: string) => ['admin', 'customer', id, 'money'] as const,
   // ── Epic 3 (Odds) ──
   customerGroups: ['admin', 'customer-groups'] as const,
   // SIBLING namespace, not a child of customerGroups: the member count comes

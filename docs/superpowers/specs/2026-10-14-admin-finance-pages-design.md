@@ -259,3 +259,15 @@ The old "our settled deposits / payouts" totals are dropped; the results table a
 - `/admin/economy` and the `/reports` endpoints are unchanged.
 - No card buying costs from purchase invoices in profit (could come later).
 - Production numbers are not changed. Every query is read-only.
+
+## 12. Player page money (added 2026-10-14)
+
+Staff asked to see, on each player's page, their top-ups today, this week, this month and all time, and whether the house is up or down on them.
+
+- **Endpoint:** `GET /admin/customers/:id/money` (404 for no customer). Read-only, one statement after the other.
+  - `periods.{today,d7,month,all}`: top-ups and withdrawals from the credit ledger with the Players list's own sums (`PLAYER_LEDGER_SUMS`), so `contribution` equals that list's "Total contribution". Withdrawals are payout requests net of refunds; a window's count is requests minus refunds, floored at 0. Windows are the Dashboard's `today`, `7d` and `month` presets (MYT, half-open), so "week" is the last 7 days.
+  - `last`: the latest top-up, payout request and pack open.
+  - `cash`, `owed`, `activity`: the Profit report's §4.2 formulas for this player alone, all time. The report's queries take a `MoneyFilter` (a scope, or one customer as a bound parameter), so both share one copy of the maths.
+  - `play`: cards won on the leaderboard's basis (draw-time value × each pull's normal share × today's FX) and `return_pct` = cards won ÷ normal pack spend.
+- **Page:** header with avatar, name, badges, email, joined and last active; four tiles (result if they cashed out now, Total contribution, wallet with its bonus, vault at sell-back); the period table; "Where we stand" (the money trail carried on through what they could still take out, down to the result); Play. Gift packs and Bonus credit move into a "Gifts and bonus" tab, reachable from the ⋯ menu. Wallet is the first tab.
+- **Checked on prod (read-only, 2026-10-14):** for 11 sampled players the card matched independent SQL and the Players list, ledger and gateway agreed (ledger withdrawals = paid + in flight), and the per-player cash kept summed over all 597 players with gateway money equals the Profit report's all-time kept (scope all) to the sen.

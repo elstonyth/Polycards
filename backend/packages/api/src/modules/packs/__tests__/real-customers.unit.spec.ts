@@ -1,4 +1,9 @@
-import { parseScope, realCustomerSql, scopeSql } from '../real-customers';
+import {
+  filterSql,
+  parseScope,
+  realCustomerSql,
+  scopeSql,
+} from '../real-customers';
 
 describe('real-customer scope', () => {
   it('parses default / all, falls back when absent, rejects anything else', () => {
@@ -36,5 +41,21 @@ describe('real-customer scope', () => {
     expect(() => realCustomerSql('customer_id')).toThrow(/qualified/);
     expect(() => scopeSql('default', 'id')).toThrow(/qualified/);
     expect(scopeSql('all', 'id')).toBe('');
+  });
+
+  // One customer (the player page's money card): a bound parameter, never
+  // the id spliced into the SQL; a scope keeps scopeSql's text and binds none.
+  it('filters to one customer with a bound parameter', () => {
+    expect(
+      filterSql({ customerId: "cus_1' OR '1'='1" }, 'gd.customer_id'),
+    ).toEqual({
+      sql: ' AND gd.customer_id = ?',
+      params: ["cus_1' OR '1'='1"],
+    });
+    expect(filterSql('all', 'gd.customer_id')).toEqual({ sql: '', params: [] });
+    expect(filterSql('default', 'gd.customer_id')).toEqual({
+      sql: scopeSql('default', 'gd.customer_id'),
+      params: [],
+    });
   });
 });
