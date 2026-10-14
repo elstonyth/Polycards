@@ -748,6 +748,10 @@ export const WithdrawStartSchema = z.looseObject({
   amount: finite,
   balance: finite,
   status: z.enum(['pending', 'held']).optional(),
+  // A regional payout (Singapore): the currency the bank is paid in and the
+  // amount it receives. Absent on an RM payout and on an older backend.
+  currency: z.string().optional().catch(undefined),
+  payAmount: finite.optional().catch(undefined),
 });
 
 /** GET /store/credits/withdraw/banks response — the payout bank picker. */
