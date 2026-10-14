@@ -36,6 +36,7 @@ import { rewardsRedemptionEnabled } from './rewards-gate';
 import {
   NO_TOPUP_MESSAGE,
   playthroughState,
+  withdrawableCents,
   withdrawalGateError,
 } from './withdrawable';
 import {
@@ -6858,11 +6859,11 @@ class PacksModuleService extends MedusaService({
   }
 
   // Wallet summary: raw balance, available (freeze-aware) and the playthrough
-  // withdrawal gate (withdrawable.ts): deposits must be fully spent on pack
-  // opens before any balance may leave. All amounts in MYR (RM) — the ledger is
+  // withdrawal gate (withdrawable.ts): money not yet played through on packs
+  // stays in the balance until it is. All amounts in MYR (RM) — the ledger is
   // already stored in MYR decimals, never USD.
   // available = isFrozen ? 0 : balance  (matches availableBalance).
-  // withdrawable = gate open ? available : 0.
+  // withdrawable = available − bonus − playthrough.remaining (≥ 0).
   @InjectManager()
   async walletSummary(
     customerId: string,
@@ -6949,17 +6950,21 @@ class PacksModuleService extends MedusaService({
     // (withdrawalGateError compares `amount <= withdrawable`).
     const available = frozen ? 0 : Math.round(balance * 100) / 100;
 
-    // Playthrough gate: all-or-nothing on the available balance. Spending on
-    // packs stays unrestricted either way — the gate only limits cashout.
+    // Playthrough gate: holds only what is still to play (partial unlock,
+    // 2026-10-14, ADR 0011). Spending on packs stays unrestricted either way —
+    // the gate only limits cashout.
     const gate = playthroughState({ depositedCents, usedCents });
     // Bonus credit is spend-only (spec 2026-10-07): it sits inside the
     // balance but never inside what may leave.
     // No top-up ever = nothing may leave (2026-10-11): promo credit and prize
     // sell-backs are not cash for an account that never deposited.
-    const withdrawable =
-      gate.withdrawable && hasTopup
-        ? Math.max(0, Math.round(available * 100) - bonusCents) / 100
-        : 0;
+    const withdrawable = hasTopup
+      ? withdrawableCents({
+          availableCents: Math.round(available * 100),
+          bonusCents,
+          remainingCents: gate.remainingCents,
+        }) / 100
+      : 0;
 
     return {
       balance,

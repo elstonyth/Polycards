@@ -1,15 +1,20 @@
 import { MedusaError } from '@medusajs/framework/utils';
 
-// Playthrough withdrawal gate: a balance is withdrawable only once the
-// customer's lifetime DEPOSIT-FUNDED pack spend covers their lifetime deposits
-// (used >= deposited). "Used" counts only the deposit-funded portion of each
+// Playthrough withdrawal gate: the customer's lifetime DEPOSIT-FUNDED pack
+// spend must cover their lifetime deposits (used >= deposited) before that
+// money may leave. "Used" counts only the deposit-funded portion of each
 // open (its external_funded_cents basis) — play funded by buyback / promo /
 // commission credit banks NO playthrough, so selling a card back (or spending
-// non-deposit credit on packs) does NOT unlock deposits never played through:
-//   deposit 100, used 100                -> withdrawable
-//   deposit 20,  used 0                  -> locked
-//   deposit 100, used 50, sold 100       -> locked (balance 150 is irrelevant)
-//   commission 100 spent, deposit 100    -> locked (promo play banks 0 used)
+// non-deposit credit on packs) does NOT play a deposit through.
+//
+// Only the part still to play is held (partial unlock, 2026-10-14). The gate
+// used to be all-or-nothing, so a RM 10.55 bonus-share sell-back locked a
+// customer's whole RM 38.95 and a top-up locked winnings that were already
+// free. The held part is exactly the money that has not been played:
+//   deposit 100, used 100                -> all withdrawable
+//   deposit 20,  used 0                  -> 20 held (balance 20: nothing leaves)
+//   deposit 100, used 50, sold 100       -> 50 held, 100 of balance 150 leaves
+//   commission 100 spent, deposit 100    -> 100 held (promo play banks 0 used)
 //
 // Pure cent math, unit-tested here; walletSummary computes the same two sums
 // in SQL and feeds them through this gate. The future cashout writer MUST
@@ -38,6 +43,17 @@ export interface PlaythroughState {
 export function playthroughState(t: PlaythroughInput): PlaythroughState {
   const remainingCents = Math.max(0, t.depositedCents - t.usedCents);
   return { withdrawable: remainingCents === 0, remainingCents };
+}
+
+/** What may leave, in cents: the available balance less spend-only bonus and
+ *  less what is still to play through. Clamped at 0 — a delivery fee spends
+ *  normal money and can take the balance below the two holds. */
+export function withdrawableCents(t: {
+  availableCents: number;
+  bonusCents: number;
+  remainingCents: number;
+}): number {
+  return Math.max(0, t.availableCents - t.bonusCents - t.remainingCents);
 }
 
 /** The wallet fields the gate branches on (a structural subset of
@@ -72,7 +88,7 @@ export interface WithdrawalGateWallet {
  * unit tests in __tests__/gateway-withdrawal.unit.spec.ts assert them by
  * regex (both the caller-level precheck cases and the service-level gate
  * cases), AND the storefront does too — `src/lib/vault-errors.ts` passes them
- * through by phrase ("under review", "deposits must be spent on packs", "you
+ * through by phrase ("under review", "more on packs", "you
  * can withdraw up to") and `src/app/bank-withdrawal/WithdrawForm.tsx`'s
  * REMEDIES links them to their fix. A reword that drops a phrase turns the
  * customer's refusal back into "Something went wrong" (as it was until
@@ -97,9 +113,12 @@ export function withdrawalGateError(
     return new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
   }
   if (wallet.playthrough.remaining > 0) {
+    const spend = `Spend RM ${wallet.playthrough.remaining.toFixed(2)} more on packs`;
     return new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
-      `RM ${wallet.playthrough.remaining.toFixed(2)} of your deposits must be spent on packs before you can withdraw.`,
+      wallet.withdrawable > 0
+        ? `You can withdraw up to RM ${wallet.withdrawable.toFixed(2)}. ${spend} to unlock the rest.`
+        : `${spend} to unlock withdrawals.`,
     );
   }
   return new MedusaError(

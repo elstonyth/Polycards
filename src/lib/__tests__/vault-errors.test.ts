@@ -138,7 +138,11 @@ describe('VAULT_RULES backend-message contract', () => {
       // withdrawable.ts withdrawalGateError — freeze, no top-up, playthrough, cap
       'Top up at least once to unlock withdrawals and deliveries.',
       'Withdrawals are unavailable while your account is under review. Contact support.',
+      // (the old playthrough wording stays listed: a storefront deploy can
+      // land before the backend one)
       'RM 5.00 of your deposits must be spent on packs before you can withdraw.',
+      'Spend RM 5.00 more on packs to unlock withdrawals.',
+      'You can withdraw up to RM 28.40. Spend RM 10.55 more on packs to unlock the rest.',
       'You can withdraw up to RM 12.34 right now.',
       // service.ts withdrawForCashout
       'Daily withdrawal limit reached. You can withdraw RM 100.00 more today.',
