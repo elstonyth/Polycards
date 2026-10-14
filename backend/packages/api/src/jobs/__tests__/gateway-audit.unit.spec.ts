@@ -124,7 +124,7 @@ describe('gateway audit job', () => {
   // daily, 50 a run is 1,200 a day, and oldest-first let re-checks use up
   // every batch, so nothing created after 10-13 13:31 was ever audited (no
   // TGPay fee backfilled, no disagreement seen).
-  it('checks never-audited rows first; re-checks take what is left, stalest first', async () => {
+  it('open findings first, then never-audited rows; re-checks take what is left, stalest first', async () => {
     fakeGateway.script({
       getDepositDetail: { state: 'success', amount: 50, netAmount: 49.4 },
     });
@@ -134,20 +134,22 @@ describe('gateway audit job', () => {
     ];
     const h = harness([]);
     h.packs.listGatewayDeposits.mockImplementation(
-      async (f: { audited_at?: unknown }) =>
-        f.audited_at === null ? fresh : stale,
+      async (f: { audit_note?: unknown; audited_at?: unknown }) =>
+        f.audit_note ? [] : f.audited_at === null ? fresh : stale,
     );
     await gatewayAuditJob(h.container as never);
     const calls = h.packs.listGatewayDeposits.mock.calls as unknown as [
       Record<string, unknown>,
       { take: number; order: Record<string, string> },
     ][];
-    expect(calls[0][0]).toMatchObject({ audited_at: null });
-    expect(calls[0][1]).toEqual({ take: 50, order: { created_at: 'ASC' } });
-    expect(calls[1][0]).toMatchObject({
+    // Open findings (none here) come first, then the never-checked.
+    expect(calls[0][0]).toMatchObject({ audit_note: { $ne: null } });
+    expect(calls[1][0]).toMatchObject({ audited_at: null });
+    expect(calls[1][1]).toEqual({ take: 50, order: { created_at: 'ASC' } });
+    expect(calls[2][0]).toMatchObject({
       audited_at: { $lt: expect.any(Date) },
     });
-    expect(calls[1][1]).toEqual({ take: 49, order: { audited_at: 'ASC' } });
+    expect(calls[2][1]).toEqual({ take: 49, order: { audited_at: 'ASC' } });
     const ids = (
       h.packs.updateGatewayDeposits.mock.calls as unknown as [{ id: string }][]
     ).map((c) => c[0].id);
@@ -165,7 +167,64 @@ describe('gateway audit job', () => {
     });
     const h = harness(fifty);
     await gatewayAuditJob(h.container as never);
-    expect(h.packs.listGatewayDeposits).toHaveBeenCalledTimes(1);
+    // The open-findings query, then the new rows fill the batch.
+    expect(h.packs.listGatewayDeposits).toHaveBeenCalledTimes(2);
+  });
+
+  // 2026-10-14: a RM 512.40 TGPay payout refunded while TGPay still held it
+  // PENDING sat on Settlement for a day between checks, a payout that may yet
+  // be paid twice. A row with an open finding is re-checked every hour, at any
+  // age, ahead of everything else; a retired gateway's rows (which cannot be
+  // checked) are left out, and a row picked twice is checked once.
+  it('re-checks a row with an open finding within the hour, once, never a retired gateway', async () => {
+    fakeGateway.script({
+      getWithdrawalDetail: { state: 'failed', amount: 512.4 },
+    });
+    const flagged = {
+      id: 'gpw_flag',
+      gateway: 'fake',
+      merchant_transaction_id: 'PC-flag',
+      status: 'failed',
+      amount: '512.40',
+      net_amount: null,
+      audit_note: 'gateway still reports pending for a payout we refunded',
+      audited_at: new Date(Date.now() - 2 * 60 * 60 * 1000),
+      created_at: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000),
+    };
+    const h = harness([]);
+    h.packs.listGatewayWithdrawals.mockImplementation(
+      async (f: { audit_note?: unknown; audited_at?: unknown }) =>
+        f.audit_note || (f.audited_at && f.audited_at !== null)
+          ? [flagged]
+          : [],
+    );
+    const before = Date.now();
+    await gatewayAuditJob(h.container as never);
+    const [[filter, opts]] = h.packs.listGatewayWithdrawals.mock
+      .calls as unknown as [
+      {
+        audit_note: unknown;
+        audited_at: { $lt: Date };
+        gateway: { $nin: string[] };
+        created_at?: unknown;
+      },
+      { take: number; order: Record<string, string> },
+    ][];
+    expect(filter.audit_note).toEqual({ $ne: null });
+    // Any age: no window on an open finding.
+    expect(filter.created_at).toBeUndefined();
+    expect(filter.gateway.$nin).toContain('globepay');
+    const age = before - filter.audited_at.$lt.getTime();
+    expect(age).toBeGreaterThanOrEqual(60 * 60 * 1000 - 1000);
+    expect(age).toBeLessThan(2 * 60 * 60 * 1000);
+    expect(opts).toEqual({ take: 50, order: { audited_at: 'ASC' } });
+    // Returned by the open-findings query AND the daily re-check: one call.
+    expect(fakeGateway.calls.withdrawalDetails).toEqual(['PC-flag']);
+    // The gateway now agrees (failed = failed): the finding clears.
+    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledTimes(1);
+    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'gpw_flag', audit_note: null }),
+    );
   });
 
   it('does nothing while the real-gateway switch is off', async () => {

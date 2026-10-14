@@ -8,10 +8,12 @@ import {
   getWithdrawalDetail,
   resolveActiveGateway,
   rowGatewayConfigs,
+  RETIRED_GATEWAYS,
 } from '../modules/packs/gateway';
 import { classifyRequeryError } from '../modules/packs/gateway-reconcile';
 import {
   GATEWAY_AUDIT_BATCH,
+  GATEWAY_AUDIT_FINDING_REPEAT_MS,
   GATEWAY_AUDIT_REPEAT_MS,
   GATEWAY_AUDIT_WINDOW_MS,
   depositAuditNote,
@@ -56,34 +58,61 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     created_at: { $gte: since },
     audited_at: { $lt: repeatBefore },
   };
-  const first = {
-    take: GATEWAY_AUDIT_BATCH,
-    order: { created_at: 'ASC' as const },
+  // Rows with an open finding go before all of them, every hour and at any
+  // age, until the gateway agrees: one can be a payout paid twice in waiting
+  // (2026-10-14: a RM 512.40 TGPay payout refunded while TGPay still held
+  // it, which the daily re-check left on Settlement for a day). A retired
+  // gateway's rows are left out: they cannot be checked, ever.
+  const open = {
+    audit_note: { $ne: null },
+    audited_at: {
+      $lt: new Date(now.getTime() - GATEWAY_AUDIT_FINDING_REPEAT_MS),
+    },
+    gateway: { $nin: [...RETIRED_GATEWAYS] },
   };
-  const rest = (taken: number) => ({
-    take: GATEWAY_AUDIT_BATCH - taken,
-    order: { audited_at: 'ASC' as const },
-  });
+  const steps: {
+    filter: Record<string, unknown>;
+    order: Record<string, 'ASC'>;
+  }[] = [
+    { filter: open, order: { audited_at: 'ASC' } },
+    { filter: fresh, order: { created_at: 'ASC' } },
+    { filter: stale, order: { audited_at: 'ASC' } },
+  ];
+  // One batch per kind, filled in that order; a row two steps both pick is
+  // checked once.
+  async function queue<R extends { id: string }>(
+    list: (
+      filter: Record<string, unknown>,
+      opts: { take: number; order: Record<string, 'ASC'> },
+    ) => Promise<R[]>,
+    status: string[],
+  ): Promise<R[]> {
+    const out: R[] = [];
+    const seen = new Set<string>();
+    for (const step of steps) {
+      const take = GATEWAY_AUDIT_BATCH - out.length;
+      if (take <= 0) break;
+      for (const row of await list(
+        { status, ...step.filter },
+        { take, order: step.order },
+      )) {
+        if (!seen.has(row.id)) {
+          seen.add(row.id);
+          out.push(row);
+        }
+      }
+    }
+    return out;
+  }
 
   let checked = 0;
   let findings = 0;
   let skipped = 0;
 
-  const depositStatus = ['settled', 'failed', 'expired'];
-  const newDeposits = await packs.listGatewayDeposits(
-    { status: depositStatus, ...fresh },
-    first,
+  const deposits = await queue(
+    (f, o) => packs.listGatewayDeposits(f as never, o),
+    ['settled', 'failed', 'expired'],
   );
-  const deposits =
-    newDeposits.length < GATEWAY_AUDIT_BATCH
-      ? [
-          ...newDeposits,
-          ...(await packs.listGatewayDeposits(
-            { status: depositStatus, ...stale },
-            rest(newDeposits.length),
-          )),
-        ]
-      : newDeposits;
   for (const row of deposits) {
     let answer: GatewayAnswer;
     let netAmount: number | null = null;
@@ -145,21 +174,10 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     }
   }
 
-  const withdrawalStatus = ['settled', 'failed'];
-  const newWithdrawals = await packs.listGatewayWithdrawals(
-    { status: withdrawalStatus, ...fresh },
-    first,
+  const withdrawals = await queue(
+    (f, o) => packs.listGatewayWithdrawals(f as never, o),
+    ['settled', 'failed'],
   );
-  const withdrawals =
-    newWithdrawals.length < GATEWAY_AUDIT_BATCH
-      ? [
-          ...newWithdrawals,
-          ...(await packs.listGatewayWithdrawals(
-            { status: withdrawalStatus, ...stale },
-            rest(newWithdrawals.length),
-          )),
-        ]
-      : newWithdrawals;
   for (const row of withdrawals) {
     let answer: GatewayAnswer;
     let netAmount: number | null = null;
