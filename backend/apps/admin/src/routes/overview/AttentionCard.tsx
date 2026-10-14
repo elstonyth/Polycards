@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { Button, Container, Heading, Text } from '@medusajs/ui';
+import { Button, Container, Heading, Label, Switch, Text } from '@medusajs/ui';
 import { ArrowUpTray, Clock, Gift, TruckFast } from '@medusajs/icons';
 import {
   useDeliveryOrderCount,
@@ -14,6 +14,7 @@ import { attentionWithdrawals, staleDeposits } from '../../lib/dashboard';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { isForbidden } from './helpers';
 import { SectionError } from './SectionState';
+import { useAttentionAlert } from './use-attention-alert';
 
 interface Item {
   id: string;
@@ -62,6 +63,27 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   const ready = useDeliveryOrderCount('ready_to_ship');
   const runs = useReferralSettlements();
   const queries = [held, pending, requested, processed, ready, runs];
+  const shipping = [requested, processed, ready];
+
+  const w = held.data
+    ? attentionWithdrawals(held.data.withdrawals, held.data.total)
+    : undefined;
+  const s = pending.data
+    ? staleDeposits(pending.data.deposits, pending.data.total)
+    : undefined;
+  const toShip = shipping.every((q) => q.data !== undefined)
+    ? shipping.reduce((n, q) => n + (q.data ?? 0), 0)
+    : undefined;
+  const drafts = runs.data?.filter((r) => r.status === 'draft');
+
+  // Only queues that loaded are counted, so a failed read is never "zero".
+  const counts: Record<string, number> = {};
+  if (w) counts.withdrawals = w.count;
+  if (s) counts.deposits = s.count;
+  if (toShip !== undefined) counts.orders = toShip;
+  if (drafts) counts.referrals = drafts.length;
+  const { soundOn, setSound } = useAttentionAlert(counts);
+
   // A query this role may not read is left out; any other failure shows.
   // If the role can read none of them, the card hides rather than claim
   // "all clear" about queues it can't see.
@@ -70,50 +92,40 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   const loading = queries.some((q) => q.isPending);
 
   const items: Item[] = [];
-  if (held.data) {
-    const w = attentionWithdrawals(held.data.withdrawals, held.data.total);
-    if (w.count > 0) {
-      items.push({
-        id: 'withdrawals',
-        icon: <ArrowUpTray />,
-        title: t('dashboard.withdrawalsToApprove', {
-          count: w.count,
-          shown: String(w.count),
-        }),
-        detail: t(
-          w.amountPartial
-            ? 'dashboard.withdrawalsDetailCapped'
-            : 'dashboard.withdrawalsDetail',
-          { amount: rm(w.amount), age: w.oldest ? timeAgo(w.oldest) : '—' },
-        ),
-        to: '/withdrawals',
-        action: t('dashboard.review'),
-        urgent: true,
-      });
-    }
+  if (w && w.count > 0) {
+    items.push({
+      id: 'withdrawals',
+      icon: <ArrowUpTray />,
+      title: t('dashboard.withdrawalsToApprove', {
+        count: w.count,
+        shown: String(w.count),
+      }),
+      detail: t(
+        w.amountPartial
+          ? 'dashboard.withdrawalsDetailCapped'
+          : 'dashboard.withdrawalsDetail',
+        { amount: rm(w.amount), age: w.oldest ? timeAgo(w.oldest) : '—' },
+      ),
+      to: '/withdrawals',
+      action: t('dashboard.review'),
+      urgent: true,
+    });
   }
-  if (pending.data) {
-    const s = staleDeposits(pending.data.deposits, pending.data.total);
-    if (s.count > 0) {
-      const shown = s.capped ? `${s.count}+` : String(s.count);
-      items.push({
-        id: 'deposits',
-        icon: <Clock />,
-        title: t('dashboard.staleTopups', { count: s.count, shown }),
-        detail: t('dashboard.staleDetail', {
-          age: s.oldest ? timeAgo(s.oldest) : '—',
-        }),
-        to: '/deposits',
-        action: t('dashboard.check'),
-        urgent: true,
-      });
-    }
+  if (s && s.count > 0) {
+    const shown = s.capped ? `${s.count}+` : String(s.count);
+    items.push({
+      id: 'deposits',
+      icon: <Clock />,
+      title: t('dashboard.staleTopups', { count: s.count, shown }),
+      detail: t('dashboard.staleDetail', {
+        age: s.oldest ? timeAgo(s.oldest) : '—',
+      }),
+      to: '/deposits',
+      action: t('dashboard.check'),
+      urgent: true,
+    });
   }
-  const toShip = [requested, processed, ready].reduce(
-    (n, q) => n + (q.data ?? 0),
-    0,
-  );
-  if (toShip > 0) {
+  if (toShip) {
     items.push({
       id: 'orders',
       icon: <TruckFast />,
@@ -126,8 +138,7 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
       action: t('dashboard.ship'),
     });
   }
-  const drafts = (runs.data ?? []).filter((r) => r.status === 'draft');
-  if (drafts.length > 0) {
+  if (drafts?.length) {
     items.push({
       id: 'referrals',
       icon: <Gift />,
@@ -149,13 +160,24 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
     <Container
       className={`pc-settle flex flex-col gap-3 [animation-delay:40ms] ${className}`}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <Heading level="h3">{t('dashboard.attentionTitle')}</Heading>
-        {items.length > 0 && (
-          <Text size="small" className="text-ui-fg-subtle tabular-nums">
-            {items.length}
-          </Text>
-        )}
+        <div className="flex items-center gap-2">
+          <Switch
+            id="pc-attention-sound"
+            size="small"
+            checked={soundOn}
+            onCheckedChange={setSound}
+          />
+          <Label
+            htmlFor="pc-attention-sound"
+            size="small"
+            className="text-ui-fg-subtle"
+            title={t('dashboard.soundHint')}
+          >
+            {t('dashboard.sound')}
+          </Label>
+        </div>
       </div>
       {items.map((item) => (
         <Row key={item.id} item={item} />

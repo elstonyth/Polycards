@@ -195,6 +195,29 @@ check(
   (await page.getByText("Couldn't load this section.").count()) === 0,
   'no dashboard section failed to load',
 );
+
+// Medusa's bell is in the header (positive control) but hidden.
+const bell = page.locator('[data-testid="notifications-trigger-button"]');
+check((await bell.count()) > 0, 'notification bell still rendered by Medusa');
+check(!(await bell.first().isVisible()), 'notification bell hidden');
+
+// Attention alert: the tab title carries the waiting count, and the Sound
+// switch toggles and remembers its choice.
+const title = await page.title();
+check(/^(\(\d+\) )?Polycards Admin$/.test(title), `tab title "${title}"`);
+const sound = page.getByRole('switch', { name: 'Sound' });
+check(
+  (await sound.getAttribute('aria-checked')) === 'false',
+  'sound starts off',
+);
+await sound.click();
+check(
+  (await sound.getAttribute('aria-checked')) === 'true' &&
+    (await page.evaluate(() => localStorage.getItem('pc-dashboard-sound'))) ===
+      'on',
+  'sound switch turns on and is remembered',
+);
+await sound.click();
 await page.screenshot({ path: `${OUT}/overview-light.png`, fullPage: true });
 
 // The same page in Medusa's dark theme (the operator's own choice).

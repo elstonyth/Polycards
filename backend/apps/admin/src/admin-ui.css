@@ -7,8 +7,8 @@
  * own and must not reflow.
  *
  * Deliberate GLOBAL exceptions, all at the bottom of this file: the Geist
- * font, and rules on the prebuilt Settings sidebar, which our routes never
- * render, so `.pc-admin` can never reach it.
+ * font, and rules on the prebuilt Settings sidebar and header bell, which our
+ * routes never render, so `.pc-admin` can never reach them.
  *
  * Plain CSS custom properties (Medusa's own design tokens) rather than @apply
  * or forked components, so this survives a @medusajs/ui upgrade.
@@ -216,4 +216,15 @@
   .pc-dashboard .pc-ping::after {
     animation: none;
   }
+}
+
+/* --- Header notification bell ------------------------------------------- */
+/*
+ * Medusa's bell counts every notification row, and on this store those are
+ * customer emails and storefront feed items with no title: it lights up and
+ * opens an empty list. Hidden until it carries operator alerts; the Dashboard's
+ * attention card (with its sound switch) is where waiting work shows.
+ */
+[data-testid='notifications-trigger-button'] {
+  display: none;
 }

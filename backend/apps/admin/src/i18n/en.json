@@ -1113,6 +1113,8 @@
     "noFlow": "No payments in these periods yet.",
     "attentionTitle": "Needs your attention",
     "allClear": "All clear — nothing is waiting on you.",
+    "sound": "Sound",
+    "soundHint": "Play a sound when something new needs you. Works while a Dashboard tab is open.",
     "withdrawalsToApprove_one": "{{shown}} withdrawal to approve",
     "withdrawalsToApprove_other": "{{shown}} withdrawals to approve",
     "withdrawalsDetail": "{{amount}} waiting · oldest {{age}}",

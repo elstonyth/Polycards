@@ -250,3 +250,20 @@ export const paymentStatus = (kind: PaymentRow['kind'], status: string) =>
     labelKey: 'dashboard.status.unknown',
     color: 'grey' as StatusColor,
   };
+
+/**
+ * Whether any attention queue grew since the last reading — the Dashboard's
+ * cue to play its alert. A queue's first reading only sets its baseline, so
+ * opening the page with work already waiting (or a failed load recovering)
+ * stays quiet.
+ */
+export const attentionIncreased = (
+  prev: Record<string, number>,
+  next: Record<string, number>,
+) => Object.entries(next).some(([key, n]) => key in prev && n > prev[key]);
+
+/** Browser tab title with the number of waiting items, e.g. "(3) Polycards Admin". */
+export const attentionTitle = (title: string, n: number) => {
+  const base = title.replace(/^\(\d+\) /, '');
+  return n > 0 ? `(${n}) ${base}` : base;
+};

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   amountChange,
+  attentionIncreased,
+  attentionTitle,
   attentionWithdrawals,
   deltaTone,
   latestPayments,
@@ -325,5 +327,55 @@ describe('paymentStatus', () => {
       labelKey: 'dashboard.status.paid',
       color: 'green',
     });
+  });
+});
+
+describe('attentionIncreased', () => {
+  // Decides when the Dashboard plays its alert sound.
+  it('is false on the first reading (nothing to compare with)', () => {
+    expect(attentionIncreased({}, { withdrawals: 3 })).toBe(false);
+  });
+  it('is true when any queue grows', () => {
+    expect(
+      attentionIncreased(
+        { withdrawals: 1, orders: 2 },
+        { withdrawals: 1, orders: 3 },
+      ),
+    ).toBe(true);
+  });
+  it('counts growth from zero', () => {
+    expect(attentionIncreased({ deposits: 0 }, { deposits: 1 })).toBe(true);
+  });
+  it('takes a queue read for the first time as its baseline', () => {
+    // e.g. a queue whose first load failed: its later recovery is not news.
+    expect(
+      attentionIncreased({ withdrawals: 1 }, { withdrawals: 1, deposits: 4 }),
+    ).toBe(false);
+  });
+  it('stays quiet when queues shrink or hold', () => {
+    expect(
+      attentionIncreased(
+        { withdrawals: 2, orders: 1 },
+        { withdrawals: 1, orders: 1 },
+      ),
+    ).toBe(false);
+    expect(attentionIncreased({ withdrawals: 2 }, { withdrawals: 2 })).toBe(
+      false,
+    );
+  });
+});
+
+describe('attentionTitle', () => {
+  it('prefixes the tab title with the number of things waiting', () => {
+    expect(attentionTitle('Polycards Admin', 6)).toBe('(6) Polycards Admin');
+  });
+  it('leaves the title alone when nothing is waiting', () => {
+    expect(attentionTitle('Polycards Admin', 0)).toBe('Polycards Admin');
+  });
+  it('replaces an earlier count instead of stacking them', () => {
+    expect(attentionTitle('(3) Polycards Admin', 1)).toBe(
+      '(1) Polycards Admin',
+    );
+    expect(attentionTitle('(3) Polycards Admin', 0)).toBe('Polycards Admin');
   });
 });
