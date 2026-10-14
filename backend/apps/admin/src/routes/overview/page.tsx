@@ -76,26 +76,32 @@ const OverviewPage = () => {
         {statsFailed && <SectionError onRetry={() => void stats.refetch()} />}
       </Container>
 
-      {/* Dimmed while a new scope or period loads (the old numbers stay). */}
-      <div
-        className={`flex flex-col gap-y-3 transition-opacity ${
-          stats.isPlaceholderData ? 'opacity-50' : ''
-        }`}
-        aria-busy={stats.isPlaceholderData}
-      >
+      <div className="flex flex-col gap-y-3">
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
           {!statsHidden && (
             <MoneyFlowCard
               scope={scope}
               stats={stats.data}
+              statsStale={stats.isPlaceholderData}
               statsFailed={statsFailed}
               className="xl:col-span-2"
             />
           )}
+          {/* The work queue ignores the switch and the period: never dimmed. */}
           <AttentionCard className={statsHidden ? 'xl:col-span-3' : ''} />
         </div>
 
-        {!statsHidden && <KpiTiles report={stats.data} failed={statsFailed} />}
+        {/* Dimmed while a new scope or period loads (the old numbers stay). */}
+        {!statsHidden && (
+          <div
+            className={`transition-opacity ${
+              stats.isPlaceholderData ? 'opacity-50' : ''
+            }`}
+            aria-busy={stats.isPlaceholderData}
+          >
+            <KpiTiles report={stats.data} failed={statsFailed} />
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">

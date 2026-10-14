@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Badge, Button, Container, Heading, Text } from '@medusajs/ui';
+import { Badge, Button, Container, Text } from '@medusajs/ui';
 import { useGatewayAudit, useGatewayBalance } from '../../lib/queries';
 import { inCurrency, LEDGER_CURRENCY, rm } from '../../lib/format';
 import { Hint } from '../../components/Hint';
@@ -16,13 +16,17 @@ import { GatewaySwitchDrawer } from './GatewaySwitchDrawer';
 const Tile = ({
   label,
   hint,
+  className = '',
   children,
 }: {
   label: string;
   hint?: string;
+  className?: string;
   children: ReactNode;
 }) => (
-  <div className="bg-ui-bg-subtle flex min-w-0 flex-col gap-1 px-6 py-4">
+  <div
+    className={`bg-ui-bg-subtle flex min-w-0 flex-col gap-1 px-6 py-4 ${className}`}
+  >
     <div className="flex items-center gap-1.5">
       <Text size="small" className="text-ui-fg-subtle">
         {label}
@@ -68,8 +72,9 @@ export const GatewayStrip = ({ currency }: { currency: string }) => {
         ['balanceCurrent', b?.balance?.current],
         ['balanceT1', b?.balance?.t1],
       ];
-  const showWallets =
-    !balance.isError && b?.enabled !== false && b?.balance !== null;
+  // Only once the wallet answered: until then we can't know whether it is
+  // TGPay's two wallets or A3Pay's three.
+  const showWallets = !balance.isError && !!b?.enabled && !!b.balance;
 
   const a = audit.data;
   const check = audit.isError
@@ -95,6 +100,8 @@ export const GatewayStrip = ({ currency }: { currency: string }) => {
   );
 
   const tiles = 2 + (showWallets ? wallets.length : 0);
+  // Two columns on small screens: an odd count would leave an empty cell.
+  const lastSpan = tiles % 2 === 1 ? 'sm:col-span-2 lg:col-span-1' : '';
   const cols =
     tiles >= 5
       ? 'lg:grid-cols-5'
@@ -103,13 +110,19 @@ export const GatewayStrip = ({ currency }: { currency: string }) => {
         : 'lg:grid-cols-2';
 
   return (
-    <Container className="p-0" data-testid={`rail-card-${currency}`}>
+    <Container
+      className="p-0"
+      data-testid={`rail-card-${currency}`}
+      aria-busy={balance.isPending || audit.isPending}
+    >
       <div
         className={`bg-ui-border-base grid grid-cols-1 gap-px sm:grid-cols-2 ${cols}`}
       >
         <Tile label={t('settlement.gatewayLabel')}>
           <div className="flex flex-wrap items-center gap-2">
-            <Heading level="h2">{b?.label ?? '…'}</Heading>
+            <Text size="xlarge" weight="plus">
+              {b?.label ?? '…'}
+            </Text>
             {status ? (
               <Badge size="2xsmall" color={status.color}>
                 {status.text}
@@ -118,14 +131,15 @@ export const GatewayStrip = ({ currency }: { currency: string }) => {
           </div>
           {/* Only RM has a choice of gateway; a regional rail runs beside it. */}
           {currency === LEDGER_CURRENCY ? (
-            <Button
-              variant="transparent"
-              size="small"
-              className="text-ui-fg-interactive -ml-2 self-start"
-              onClick={() => setSwitching(true)}
-            >
-              {t('settlement.switchGateway')}
-            </Button>
+            <GatewaySwitchDrawer open={switching} onOpenChange={setSwitching}>
+              <Button
+                variant="transparent"
+                size="small"
+                className="text-ui-fg-interactive -ml-2 self-start"
+              >
+                {t('settlement.switchGateway')}
+              </Button>
+            </GatewaySwitchDrawer>
           ) : null}
         </Tile>
 
@@ -136,9 +150,9 @@ export const GatewayStrip = ({ currency }: { currency: string }) => {
                 label={t(`settlement.${key}`)}
                 hint={t(`settlement.${key}Hint`)}
               >
-                <Heading level="h2" className="tabular-nums">
+                <Text size="xlarge" weight="plus" className="tabular-nums">
                   {value == null ? '…' : inCurrency(value, walletCurrency)}
-                </Heading>
+                </Text>
               </Tile>
             ))
           : null}
@@ -146,6 +160,7 @@ export const GatewayStrip = ({ currency }: { currency: string }) => {
         <Tile
           label={t('settlement.gatewayCheck')}
           hint={[t('settlement.checkHint'), ...history].join(' ')}
+          className={lastSpan}
         >
           {check ? (
             <Badge size="small" color={check.color} className="self-start">
@@ -156,13 +171,13 @@ export const GatewayStrip = ({ currency }: { currency: string }) => {
               …
             </Text>
           )}
-          {a?.last_audited_at ? (
-            <Text size="xsmall" className="text-ui-fg-muted">
-              {t('settlement.checkedAt', {
-                when: new Date(a.last_audited_at).toLocaleString('en-MY'),
-              })}
-            </Text>
-          ) : null}
+          <Text size="xsmall" className="text-ui-fg-subtle">
+            {a?.last_audited_at
+              ? t('settlement.checkedAt', {
+                  when: new Date(a.last_audited_at).toLocaleString('en-MY'),
+                })
+              : t('settlement.checkCadence')}
+          </Text>
         </Tile>
       </div>
 
@@ -186,10 +201,6 @@ export const GatewayStrip = ({ currency }: { currency: string }) => {
         <Text size="small" className="text-ui-fg-subtle border-t px-6 py-3">
           {t('settlement.balanceWarning', { message: b.warning })}
         </Text>
-      ) : null}
-
-      {currency === LEDGER_CURRENCY ? (
-        <GatewaySwitchDrawer open={switching} onOpenChange={setSwitching} />
       ) : null}
     </Container>
   );

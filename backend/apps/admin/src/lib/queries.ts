@@ -3,6 +3,7 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type QueryClient,
   type UseQueryResult,
 } from '@tanstack/react-query';
 import { toast } from '@medusajs/ui';
@@ -40,7 +41,6 @@ import {
   revokePackGift,
   type PackGift,
   getDeliveryOrder,
-  getEconomyReport,
   getProfitReport,
   type CustomerScope,
   type ProfitRange,
@@ -107,7 +107,6 @@ import {
   type SupportPull,
   type DeliveryOrdersPage,
   type DeliveryStatus,
-  type EconomyReport,
   type EligibleProduct,
   type FxChange,
   type FxRateState,
@@ -226,9 +225,16 @@ export const useCreatePixelPokemon = () => {
   });
 };
 
-// from/to are ISO strings for the period window (undefined = all time). Appended
-// to the key inline so qk.economy stays a flat prefix (query-keys.test.ts).
-// keepPreviousData avoids a skeleton flash when switching periods.
+/** Money moved, or a player changed group (which moves them in or out of
+ *  "real customers"): the Profit report and the Dashboard's figures are
+ *  stale. Marks every cached view; only mounted ones refetch. */
+export const invalidateMoneyViews = (qc: QueryClient) =>
+  Promise.all([
+    qc.invalidateQueries({ queryKey: qk.profitReportKey }),
+    qc.invalidateQueries({ queryKey: ['admin', 'stats'] }),
+    qc.invalidateQueries({ queryKey: ['admin', 'gateway-settlement'] }),
+  ]);
+
 // Profit report. keepPreviousData so a period or scope switch swaps the
 // numbers without a skeleton flash; a half-picked custom range never fires.
 export const useProfitReport = (
@@ -248,16 +254,6 @@ export const useProfitReport = (
     placeholderData: keepPreviousData,
     enabled: range !== 'custom' || (from !== '' && to !== '' && from <= to),
     refetchOnWindowFocus: true,
-  });
-
-export const useEconomy = (
-  from?: string,
-  to?: string,
-): UseQueryResult<EconomyReport> =>
-  useQuery({
-    queryKey: [...qk.economy, from ?? 'all', to ?? 'all'],
-    queryFn: () => getEconomyReport(from, to),
-    placeholderData: keepPreviousData,
   });
 
 // Stats page. keepPreviousData so switching presets swaps the numbers without
@@ -637,6 +633,7 @@ export const useAdjustCredits = () => {
       qc.invalidateQueries({ queryKey: qk.customerTransactionsKey(vars.id) });
       // The Players list shows the wallet column this just moved.
       qc.invalidateQueries({ queryKey: qk.playersKey });
+      void invalidateMoneyViews(qc);
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
@@ -1072,6 +1069,7 @@ export const useApproveWithdrawal = () => {
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: qk.gatewayWithdrawalsKey });
+      void invalidateMoneyViews(qc);
     },
   });
 };
@@ -1102,6 +1100,7 @@ export const useDenyWithdrawal = () => {
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: qk.gatewayWithdrawalsKey });
+      void invalidateMoneyViews(qc);
     },
   });
 };
@@ -1324,6 +1323,7 @@ export const useSetPlayerGroup = (customerId: string | null) => {
         qc.invalidateQueries({ queryKey: qk.customerGroups }),
         qc.invalidateQueries({ queryKey: qk.customerGroupCounts }),
         qc.invalidateQueries({ queryKey: qk.playersKey }),
+        invalidateMoneyViews(qc),
       ]);
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),

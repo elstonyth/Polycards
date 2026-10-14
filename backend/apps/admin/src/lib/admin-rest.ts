@@ -441,19 +441,6 @@ export interface EconomyReport {
   }[];
 }
 
-// Optional [from, to) ISO window scopes the ledger totals to a period; omit
-// both for all-time (the default). Liability + RTP are always current-state.
-export async function getEconomyReport(
-  from?: string,
-  to?: string,
-): Promise<EconomyReport> {
-  const qs = new URLSearchParams();
-  if (from) qs.set('from', from);
-  if (to) qs.set('to', to);
-  const q = qs.toString();
-  return getJson<EconomyReport>(`/admin/economy${q ? `?${q}` : ''}`);
-}
-
 // ── Profit report (cash view, spec 2026-10-14-admin-finance-pages §4) ────────
 
 /** Real customers only ('default': no non-default group, not a generated
@@ -481,6 +468,8 @@ export interface ProfitReport {
   cash: {
     topups: ProfitCashSide;
     withdrawals: ProfitCashSide;
+    /** The regional rails' FX spread (Settlement's "Conversion earned"). */
+    fx_earned: number;
     kept: number;
     /** null when there is no previous window (all time). */
     previous_kept: number | null;
@@ -492,9 +481,15 @@ export interface ProfitReport {
     wallet_no_topup: number;
     /** Payouts requested, not paid yet: already out of the wallets. */
     payouts_in_flight: number;
+    /** Closed weeks' referral commission, not paid yet. */
+    commission_unpaid: number;
     cards: { count: number; delivering: number; sellback: number };
+    /** Cards of players who never topped up: reported, not owed. */
+    cards_no_topup: { count: number; sellback: number };
     total: number;
     all_time_kept: number;
+    /** Cards delivered, all time: they left as goods, a cost. */
+    shipped: { count: number; value: number };
     if_all_cashed_out: number;
   };
   activity: {

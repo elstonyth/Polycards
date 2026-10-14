@@ -6,6 +6,9 @@ export type ResultRow = {
   inCount: number;
   /** Deposit fee + payout fee. */
   fees: number;
+  /** The two fees apart: the gateway charges each direction its own rate. */
+  inFee: number;
+  outFee: number;
   outGross: number;
   outCount: number;
   /** Money in − both fees − money out. */
@@ -18,7 +21,9 @@ export type ResultRow = {
   grossFloor: boolean;
 };
 
-const cents = (n: number) => Math.round(n * 100) / 100;
+// `+ 0` turns a rounded -0 into 0, so a period that nets to nothing never
+// prints "RM -0.00".
+const cents = (n: number) => Math.round(n * 100) / 100 + 0;
 
 /**
  * One row of the Settlement results table. The ledger check is the DEPOSIT
@@ -31,6 +36,8 @@ export const resultRow = (p: SettlementPeriod): ResultRow => ({
   inGross: p.deposits.gross,
   inCount: p.deposits.count,
   fees: cents(p.deposits.fee + p.withdrawals.fee),
+  inFee: p.deposits.fee,
+  outFee: p.withdrawals.fee,
   outGross: p.withdrawals.gross,
   outCount: p.withdrawals.count,
   net: cents(

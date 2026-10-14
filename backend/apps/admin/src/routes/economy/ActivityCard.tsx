@@ -1,18 +1,20 @@
 import { useTranslation } from 'react-i18next';
 import { Container, Heading, Text } from '@medusajs/ui';
 import type { ProfitReport } from '../../lib/admin-rest';
-import { rm } from '../../lib/format';
+import { Hint } from '../../components/Hint';
+import { flowLine } from './signs';
 
 // Order and direction of the lines: what came in to the house first, then
 // what went back out to players.
 const LINES: {
   key: keyof ProfitReport['activity'];
   out?: boolean;
+  hint?: boolean;
 }[] = [
   { key: 'pack_sales' },
   { key: 'delivery_fees' },
-  { key: 'sellbacks', out: true },
-  { key: 'promo_given', out: true },
+  { key: 'sellbacks', out: true, hint: true },
+  { key: 'promo_given', out: true, hint: true },
   { key: 'referral_commission', out: true },
   { key: 'adjustments', out: true },
 ];
@@ -29,23 +31,22 @@ export const ActivityCard = ({ data }: { data: ProfitReport }) => {
         </Text>
       </div>
       <ul className="divide-y border-t">
-        {LINES.map(({ key, out }) => {
-          const v = data.activity[key];
-          return (
-            <li
-              key={key}
-              className="flex items-center justify-between gap-4 px-6 py-2.5"
-            >
+        {LINES.map(({ key, out, hint }) => (
+          <li
+            key={key}
+            className="flex items-center justify-between gap-4 px-6 py-2.5"
+          >
+            <div className="flex items-center gap-1.5">
               <Text size="small" className="text-ui-fg-subtle">
                 {t(`profit.moved.${key}`)}
               </Text>
-              <Text size="small" weight="plus" className="tabular-nums">
-                {/* Adjustments carry their own sign (staff can take back). */}
-                {out && v > 0 ? `− ${rm(v)}` : rm(v)}
-              </Text>
-            </li>
-          );
-        })}
+              {hint && <Hint text={t(`profit.movedHint.${key}`)} />}
+            </div>
+            <Text size="small" weight="plus" className="tabular-nums">
+              {flowLine(data.activity[key], !!out)}
+            </Text>
+          </li>
+        ))}
       </ul>
     </Container>
   );

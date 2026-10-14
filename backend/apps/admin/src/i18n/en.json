@@ -718,8 +718,6 @@
     "period": "Period",
     "feeFloorHint": "{{count}} settled row(s) have no net on file (settled before fee tracking) — the fee shown is a floor, not the total.",
     "grossFloorHint": "{{count}} settled row(s) have no gross on file (likely a deposit settled by hand whose amount_settled was never recorded) — the gross shown is a floor, not the total.",
-    "depositDeltaHint": "Δ = gateway settled gross − ledger credits in the period. Expect 0; a persistent gap is a settled deposit whose credit never landed, or a manual/mock top-up with no gateway row.",
-    "withdrawalDeltaHint": "Δ = gateway settled gross − ledger cash-outs (net of refunds). Debits are written at submit and can settle in a later bucket, so read this across adjacent periods, not as a per-row alarm.",
     "balanceAvailable": "Available",
     "balanceCurrent": "Current",
     "balanceT1": "T+1",
@@ -746,7 +744,7 @@
     "gatewayTitle": "Payment gateway",
     "gatewaySubtitle": "Which gateway customers pay through and are paid out from. Takes effect immediately for new top-ups and withdrawals; money already in flight finishes on the gateway it started on.",
     "gatewayNotConfigured": "not configured in this environment",
-    "gatewayEnvDefault": "env default",
+    "gatewayEnvDefault": "No gateway has been picked here yet, so the server default is in use.",
     "gatewayActiveShort": "Active",
     "gatewayReason": "Reason",
     "gatewayReasonPlaceholder": "Required — audit note for this switch",
@@ -792,7 +790,7 @@
     "checkDiffers_one": "⚠ {{count}} payment differs",
     "checkDiffers_other": "⚠ {{count}} payments differ",
     "checkNever": "Not checked yet",
-    "checkedAt": "checked {{when}}",
+    "checkedAt": "checked {{when}} · hourly, last 7 days",
     "checkHint": "Every settled payment from the last 7 days is re-read at the gateway every hour.",
     "fxTitleShort": "Exchange rate",
     "fxEdit": "Edit rates",
@@ -800,7 +798,7 @@
     "fxDepositRateShort": "Top-up rate",
     "fxPayoutRateShort": "Payout rate",
     "fxPerUnitFee": "per {{unit}} · {{sign}}{{pct}}% fee",
-    "fxExample": "{{currency}} 100 top-up gives RM {{credit}} credit · RM 100 withdrawal sends {{currency}} {{paid}}",
+    "fxExample": "{{topup}} top-up gives {{credit}} credit · RM 100 withdrawal sends {{paid}}",
     "fxAppliesNext": "Applies only to payments started after you save.",
     "cancel": "Cancel",
     "reportTitleMonth": "Results by month",
@@ -830,7 +828,12 @@
       "withdrawal": "Payout"
     },
     "showAllFindings": "Show all {{count}}",
-    "payoutGap": "payouts {{amount}}"
+    "payoutGap": "payouts {{amount}}",
+    "ledgerCheckHint": "Top-ups the gateway settled in the period, against the credit our ledger gave for them. Expect a match: a gap is a settled top-up whose credit never landed, or a top-up made by hand with no gateway row. The payouts line compares payouts the same way, but a payout is debited when requested and can settle in a later period, so read it across neighbouring periods.",
+    "feeSplit": "Top-up fees {{topups}} · payout fees {{payouts}}.",
+    "checkCadence": "hourly, last 7 days",
+    "showFirstFindings": "Show the first {{count}} of {{total}}",
+    "findingsCapped": "The first {{count}} of {{total}} are listed. The rest appear here as these are resolved."
   },
   "pipeline": {
     "label": "Inventory pipeline",
@@ -945,7 +948,21 @@
     "groupFilter": "Group",
     "more": "More actions",
     "exportShort": "Export logins",
-    "generate": "Generate accounts"
+    "generate": "Generate accounts",
+    "noGroupResults": "No players in this group.",
+    "exportStarted": "Preparing the logins file…",
+    "exportDone": "Logins file downloaded.",
+    "activeAgo": "active {{ago}}",
+    "sortBy": "Sort",
+    "sort": {
+      "created_at_desc": "Newest first",
+      "topup_desc": "Most topped up",
+      "withdrawn_desc": "Most withdrawn",
+      "contribution_desc": "Highest net deposit",
+      "spend_desc": "Highest turnover",
+      "wallet_desc": "Biggest wallet",
+      "email_asc": "Email A–Z"
+    }
   },
   "oddsSets": {
     "title": "Player Groups",
@@ -1169,30 +1186,31 @@
     "subtitleAll": "Real money in and out, Malaysia time · all time",
     "scopeReal": "Real customers",
     "scopeAll": "All groups",
-    "scopeAllHint": "Count every account, including other groups and generated accounts.",
+    "scopeAllHint": "Count every account. Real customers leaves out money moved by other groups' accounts and generated accounts, including referral commission they earned from real customers and later withdrew.",
     "cashKept": "Cash kept",
-    "cashKeptHint": "Top-ups received, minus the gateway's fees both ways, minus withdrawals paid.",
+    "cashKeptHint": "Top-ups received, minus the gateway's fees both ways, minus withdrawals paid, plus what the regional rails' exchange spread earned. Real customers only, unless All groups is on.",
     "vsLast": "vs last period",
     "trail": {
       "topups": "Top-ups received",
       "fees": "Gateway fees",
       "withdrawals": "Withdrawals paid",
+      "fx": "Exchange spread",
       "kept": "Cash kept"
     },
     "feeFloor_one": "{{count}} payment has no fee on file yet, so fees shown are a minimum.",
     "feeFloor_other": "{{count}} payments have no fee on file yet, so fees shown are a minimum.",
     "owedTitle": "Still owed to players",
     "owedNow": "right now",
-    "owedSubtitle": "What players could still cash out.",
+    "owedSubtitle": "Everything players hold that could still become a withdrawal, as of now.",
     "walletCash": "Wallets and payouts due",
-    "walletNote": "Plus {{bonus}} bonus and {{noTopup}} in never-topped-up accounts, which can't be withdrawn.",
+    "walletNote": "Not counted: {{bonus}} bonus (cash only after one play-through) and {{noTopup}} in accounts that never topped up (can't be withdrawn until they do).",
     "cards": "Cards in vaults, at sell-back",
     "cardsNote_one": "{{count}} card, {{delivering}} being shipped",
     "cardsNote_other": "{{count}} cards, {{delivering}} being shipped",
-    "cardsHint": "Valued at the 90% sell-back price. Includes free and promo cards, cards being shipped, and cards of players who never topped up.",
+    "cardsHint": "Vaulted and shipping cards of players who have topped up, at the 90% sell-back price. Includes free and promo cards.",
     "ifAllCashedOut": "Profit if all cashed out",
-    "ifAllHint": "All-time cash kept minus what is still owed. Ignores the period picked above.",
-    "ifAllNote": "{{kept}} kept all time − {{owed}} owed",
+    "ifAllHint": "All-time cash kept, minus what is still owed, minus cards already delivered (they left as goods, valued at the same sell-back price). Ignores the period picked above.",
+    "ifAllNote": "{{kept}} kept all time − {{owed}} owed − {{shipped}} shipped",
     "movedTitle": "Where the money moved",
     "movedSubtitle": "Inside the site, this period. Paid credit only; promo has its own line.",
     "moved": {
@@ -1212,7 +1230,17 @@
     "empty": "No active packs.",
     "grossFloor_one": "{{count}} top-up was settled by hand with no amount on file, so top-ups shown are a minimum.",
     "grossFloor_other": "{{count}} top-ups were settled by hand with no amount on file, so top-ups shown are a minimum.",
-    "walletHint": "Paid credit in the wallets of players who have topped up (including balances still locked until deposits are played through), plus withdrawals already requested but not paid yet.",
-    "inFlightNote": "incl. {{amount}} requested, not paid yet"
+    "walletHint": "Withdrawable credit (not bonus) in the wallets of players who have topped up, including balances still locked until deposits are played through, plus payouts requested but not paid yet and closed weeks' referral commission not paid yet.",
+    "inFlightNote": "incl. {{amount}} requested, not paid yet",
+    "estimate": "estimate",
+    "feeSplit": "Top-up fees {{topups}} · payout fees {{payouts}}",
+    "fxHint": "What the SGD and USDT rails' exchange spread earned against the market rate, as Settlement's Conversion earned.",
+    "commissionNote": "incl. {{amount}} referral commission not paid yet",
+    "cardsNoTopupNote_one": "Not counted: {{count}} card ({{value}}) of players who never topped up",
+    "cardsNoTopupNote_other": "Not counted: {{count}} cards ({{value}}) of players who never topped up",
+    "movedHint": {
+      "sellbacks": "Includes free welcome pulls and prize cards sold back: those have no matching sale or promo line.",
+      "promo_given": "Credit promos only: bonus grants, rewards, vouchers and daily rewards. Free pulls and prize cards are not here."
+    }
   }
 }

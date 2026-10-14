@@ -17,7 +17,6 @@ describe('qk', () => {
       'cus_1',
     ]);
     expect(qk.pullsKey).toEqual(['admin', 'pulls']);
-    expect(qk.economy).toEqual(['admin', 'economy']);
     // Custom dates always render ('' outside custom): same always-rendered-
     // segment rule as qk.pulls, so no preset key prefixes another.
     // The scope segment always renders too ('all' by default), so a

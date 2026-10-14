@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Button,
@@ -14,22 +14,47 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { setPaymentFx, type PaymentFxState } from '../../lib/admin-rest';
 import { floorCents, fmtRate, fxKey, round6, usePaymentFx } from './fx-shared';
 
+type FxSave = ReturnType<typeof useSaveFx>;
+
+const useSaveFx = (currency: string) => {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: setPaymentFx,
+    onSuccess: (next) => {
+      qc.setQueryData(fxKey(currency), next);
+      toast.success(t('settlement.fxSaved', { currency }));
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
 /** "Edit rates" — the regional rail's fee and market-rate form in a side
- *  panel. The form mounts when the panel opens, so it always starts from the
- *  saved values. */
+ *  panel, opened by `children` (its trigger, so focus returns there on
+ *  close). The form mounts when the panel opens, so it always starts from the
+ *  saved values; the save lives here, so the panel can't close mid-save. */
 export const FxEditDrawer = ({
   currency,
   open,
   onOpenChange,
+  children,
 }: {
   currency: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  children: ReactElement;
 }) => {
   const { t } = useTranslation();
   const { data: fx } = usePaymentFx(currency);
+  const save = useSaveFx(currency);
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
+    <Drawer
+      open={open}
+      onOpenChange={(next) => {
+        if (next || !save.isPending) onOpenChange(next);
+      }}
+    >
+      <Drawer.Trigger asChild>{children}</Drawer.Trigger>
       <Drawer.Content>
         <Drawer.Header>
           <Drawer.Title>
@@ -40,6 +65,7 @@ export const FxEditDrawer = ({
           <FxForm
             currency={currency}
             fx={fx}
+            save={save}
             onSaved={() => onOpenChange(false)}
           />
         ) : null}
@@ -51,23 +77,16 @@ export const FxEditDrawer = ({
 const FxForm = ({
   currency,
   fx,
+  save,
   onSaved,
 }: {
   currency: string;
   fx: PaymentFxState;
+  save: FxSave;
   onSaved: () => void;
 }) => {
   const { t } = useTranslation();
-  const qc = useQueryClient();
   const prompt = usePrompt();
-  const save = useMutation({
-    mutationFn: setPaymentFx,
-    onSuccess: (next) => {
-      qc.setQueryData(fxKey(currency), next);
-      toast.success(t('settlement.fxSaved', { currency }));
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
-  });
 
   // Never configured (fee_enabled null): start with the fee on, percentages
   // to fill in.
@@ -240,14 +259,14 @@ const FxForm = ({
             onChange={(e) => setReason(e.target.value)}
             placeholder={t('settlement.fxReasonPlaceholder')}
           />
-          <Text size="xsmall" className="text-ui-fg-muted">
+          <Text size="xsmall" className="text-ui-fg-subtle">
             {t('settlement.fxAppliesNext')}
           </Text>
         </div>
       </Drawer.Body>
       <Drawer.Footer>
         <Drawer.Close asChild>
-          <Button size="small" variant="secondary">
+          <Button size="small" variant="secondary" disabled={save.isPending}>
             {t('settlement.cancel')}
           </Button>
         </Drawer.Close>

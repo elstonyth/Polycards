@@ -32,6 +32,8 @@ describe('resultRow', () => {
       inGross: 350,
       inCount: 7,
       fees: 4.8,
+      inFee: 3.8,
+      outFee: 1,
       outGross: 50,
       outCount: 1,
       net: 295.2,
@@ -62,5 +64,30 @@ describe('resultRow', () => {
     expect(r.payoutGap).toBe(12);
     expect(r.feeFloor).toBe(true);
     expect(r.grossFloor).toBe(true);
+  });
+
+  it('a period that nets to nothing reads 0, never -0', () => {
+    const r = resultRow(
+      period({
+        deposits: {
+          count: 1,
+          gross: 0.3,
+          net: 0.2,
+          fee: 0.1,
+          missingNet: 0,
+          missingGross: 0,
+        },
+        withdrawals: {
+          count: 1,
+          gross: 0.2,
+          net: 0.2,
+          fee: 0,
+          missingNet: 0,
+          missingGross: 0,
+        },
+      }),
+    );
+    expect(Object.is(r.net, -0)).toBe(false);
+    expect(r.net).toBe(0);
   });
 });

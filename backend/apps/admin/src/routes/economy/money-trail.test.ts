@@ -6,10 +6,12 @@ const cash = (
   topupFees: number,
   out: number,
   outFees: number,
+  fx = 0,
 ) => ({
   topups: { gross: topups, fees: topupFees },
   withdrawals: { gross: out, fees: outFees },
-  kept: topups - topupFees - out - outFees,
+  fx_earned: fx,
+  kept: topups - topupFees - out - outFees + fx,
 });
 
 describe('moneyTrail', () => {
@@ -40,6 +42,28 @@ describe('moneyTrail', () => {
     }
     expect(t.rows[3]).toMatchObject({ tone: 'loss', amount: -200 });
     expect(t.rows[3].width).toBeCloseTo((200 / 300) * 100);
+  });
+
+  it('the FX spread adds a row after withdrawals and is part of cash kept', () => {
+    const t = moneyTrail(cash(1000, 20, 400, 4, 12));
+    expect(t.rows.map((r) => r.key)).toEqual([
+      'topups',
+      'fees',
+      'withdrawals',
+      'fx',
+      'kept',
+    ]);
+    const fx = t.rows[3];
+    expect(fx).toMatchObject({ amount: 12, tone: 'in' });
+    expect(fx.left).toBeCloseTo(57.6);
+    expect(fx.width).toBeCloseTo(1.2);
+    expect(t.rows[4].amount).toBe(588);
+  });
+
+  it('no spread, no FX row', () => {
+    expect(moneyTrail(cash(10, 0, 5, 0)).rows.some((r) => r.key === 'fx')).toBe(
+      false,
+    );
   });
 
   it('all zero draws nothing (no NaN widths)', () => {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Badge,
@@ -13,34 +13,56 @@ import { usePaymentGateway, useSavePaymentGateway } from '../../lib/queries';
 import { gatewayPreflightRefusal } from '../../lib/admin-rest';
 import type { PaymentGatewayId } from '../../lib/admin-rest';
 
+type GatewaySave = ReturnType<typeof useSavePaymentGateway>;
+
 /** "Switch gateway…" — the active RM gateway (plan 130 §runtime switch), in a
- *  side panel: rarely used, and switching mid-day moves real money. */
+ *  side panel opened by `children` (its trigger, so focus returns there on
+ *  close): rarely used, and switching mid-day moves real money. The save
+ *  lives here and the panel can't close while it runs, so the "Switch
+ *  anyway" answer to a refused live check is never lost. */
 export const GatewaySwitchDrawer = ({
   open,
   onOpenChange,
+  children,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  children: ReactElement;
 }) => {
   const { t } = useTranslation();
+  const saveGateway = useSavePaymentGateway();
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
+    <Drawer
+      open={open}
+      onOpenChange={(next) => {
+        if (next || !saveGateway.isPending) onOpenChange(next);
+      }}
+    >
+      <Drawer.Trigger asChild>{children}</Drawer.Trigger>
       <Drawer.Content>
         <Drawer.Header>
           <Drawer.Title>{t('settlement.gatewayTitle')}</Drawer.Title>
         </Drawer.Header>
         <Drawer.Body className="overflow-y-auto">
-          <GatewaySwitch onDone={() => onOpenChange(false)} />
+          <GatewaySwitch
+            saveGateway={saveGateway}
+            onDone={() => onOpenChange(false)}
+          />
         </Drawer.Body>
       </Drawer.Content>
     </Drawer>
   );
 };
 
-const GatewaySwitch = ({ onDone }: { onDone: () => void }) => {
+const GatewaySwitch = ({
+  saveGateway,
+  onDone,
+}: {
+  saveGateway: GatewaySave;
+  onDone: () => void;
+}) => {
   const { t } = useTranslation();
   const gateway = usePaymentGateway();
-  const saveGateway = useSavePaymentGateway();
   const prompt = usePrompt();
   const [chosen, setChosen] = useState<PaymentGatewayId | null>(null);
   const [gatewayReason, setGatewayReason] = useState('');
@@ -96,8 +118,8 @@ const GatewaySwitch = ({ onDone }: { onDone: () => void }) => {
   return (
     <div className="flex flex-col gap-4">
       {gateway.data?.setting === null ? (
-        <Text size="small" className="text-ui-fg-muted">
-          ({t('settlement.gatewayEnvDefault')})
+        <Text size="small" className="text-ui-fg-subtle">
+          {t('settlement.gatewayEnvDefault')}
         </Text>
       ) : null}
       {gateway.isError ? (
@@ -133,7 +155,7 @@ const GatewaySwitch = ({ onDone }: { onDone: () => void }) => {
                     {t('settlement.gatewayActiveShort')}
                   </Badge>
                 ) : !g.configured ? (
-                  <Text size="small" className="text-ui-fg-muted">
+                  <Text size="small" className="text-ui-fg-subtle">
                     {t('settlement.gatewayNotConfigured')}
                   </Text>
                 ) : null}

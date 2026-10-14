@@ -92,12 +92,15 @@ export const NetChange = ({ cur, prev }: { cur: number; prev: number }) => {
 export const MoneyFlowCard = ({
   scope = 'all',
   stats,
+  statsStale = false,
   statsFailed = false,
   className = '',
 }: {
   /** Real customers only, or every account (the Dashboard's switch). */
   scope?: CustomerScope;
   stats: StatsReport | undefined;
+  /** `stats` is the previous scope or period's, kept while the new loads. */
+  statsStale?: boolean;
   /** The stats query failed: show a dash, not an endless skeleton. */
   statsFailed?: boolean;
   className?: string;
@@ -110,9 +113,14 @@ export const MoneyFlowCard = ({
   const animate = !prefersReducedMotion();
   const net = stats ? netCashIn(stats.current.stats) : undefined;
   const prevNet = stats ? netCashIn(stats.previous.stats) : undefined;
+  // Either half still shows the previous scope or period: dim the card.
+  const stale = statsStale || flow.isPlaceholderData;
 
   return (
-    <Container className={`pc-settle flex flex-col gap-4 ${className}`}>
+    <Container
+      className={`pc-settle flex flex-col gap-4 transition-opacity ${stale ? 'opacity-50' : ''} ${className}`}
+      aria-busy={stale}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <Text size="small" className="text-ui-fg-subtle">

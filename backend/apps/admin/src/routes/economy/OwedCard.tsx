@@ -4,18 +4,19 @@ import { Badge, Container, Heading, Text } from '@medusajs/ui';
 import type { ProfitReport } from '../../lib/admin-rest';
 import { rm } from '../../lib/format';
 import { Hint } from '../../components/Hint';
+import { signed } from './signs';
 
 const Tile = ({
   label,
   hint,
   value,
-  note,
+  notes,
   tone = '',
 }: {
   label: string;
   hint?: string;
   value: string;
-  note: ReactNode;
+  notes: ReactNode[];
   tone?: string;
 }) => (
   <div className="bg-ui-bg-subtle flex flex-col gap-0.5 px-6 py-4">
@@ -25,12 +26,14 @@ const Tile = ({
       </Text>
       {hint && <Hint text={hint} />}
     </div>
-    <Heading level="h2" className={`tabular-nums ${tone}`}>
+    <Text size="xlarge" weight="plus" className={`tabular-nums ${tone}`}>
       {value}
-    </Heading>
-    <Text size="xsmall" className="text-ui-fg-muted">
-      {note}
     </Text>
+    {notes.filter(Boolean).map((n, i) => (
+      <Text key={i} size="xsmall" className="text-ui-fg-subtle">
+        {n}
+      </Text>
+    ))}
   </div>
 );
 
@@ -55,45 +58,54 @@ export const OwedCard = ({ data }: { data: ProfitReport }) => {
         <Tile
           label={t('profit.walletCash')}
           hint={t('profit.walletHint')}
-          value={rm(owed.wallet_cash + owed.payouts_in_flight)}
-          note={
-            <>
-              {owed.payouts_in_flight > 0 && (
-                <span className="block">
-                  {t('profit.inFlightNote', {
-                    amount: rm(owed.payouts_in_flight),
-                  })}
-                </span>
-              )}
-              {t('profit.walletNote', {
-                bonus: rm(owed.wallet_bonus),
-                noTopup: rm(owed.wallet_no_topup),
-              })}
-            </>
-          }
+          value={rm(
+            owed.wallet_cash + owed.payouts_in_flight + owed.commission_unpaid,
+          )}
+          notes={[
+            owed.payouts_in_flight > 0 &&
+              t('profit.inFlightNote', { amount: rm(owed.payouts_in_flight) }),
+            owed.commission_unpaid > 0 &&
+              t('profit.commissionNote', {
+                amount: rm(owed.commission_unpaid),
+              }),
+            t('profit.walletNote', {
+              bonus: rm(owed.wallet_bonus),
+              noTopup: rm(owed.wallet_no_topup),
+            }),
+          ]}
         />
         <Tile
           label={t('profit.cards')}
           hint={t('profit.cardsHint')}
           value={rm(owed.cards.sellback)}
-          note={t('profit.cardsNote', {
-            count: owed.cards.count,
-            delivering: owed.cards.delivering,
-          })}
+          notes={[
+            t('profit.cardsNote', {
+              count: owed.cards.count,
+              delivering: owed.cards.delivering,
+            }),
+            owed.cards_no_topup.count > 0 &&
+              t('profit.cardsNoTopupNote', {
+                count: owed.cards_no_topup.count,
+                value: rm(owed.cards_no_topup.sellback),
+              }),
+          ]}
         />
         <Tile
           label={t('profit.ifAllCashedOut')}
           hint={t('profit.ifAllHint')}
-          value={rm(owed.if_all_cashed_out)}
+          value={signed(owed.if_all_cashed_out)}
           tone={
             owed.if_all_cashed_out < 0
               ? 'text-ui-fg-error'
               : 'text-ui-tag-green-text'
           }
-          note={t('profit.ifAllNote', {
-            kept: rm(owed.all_time_kept),
-            owed: rm(owed.total),
-          })}
+          notes={[
+            t('profit.ifAllNote', {
+              kept: signed(owed.all_time_kept),
+              owed: rm(owed.total),
+              shipped: rm(owed.shipped.value),
+            }),
+          ]}
         />
       </div>
     </Container>

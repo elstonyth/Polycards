@@ -26,7 +26,6 @@ export const qk = {
   // row across views (out of 'held', into 'pending' or 'failed'), unlike a
   // plain read that only ever touches the one (page, status, sort) it fetched.
   gatewayWithdrawalsKey: ['admin', 'gateway-withdrawals'] as const,
-  economy: ['admin', 'economy'] as const,
   // (range, from, to, scope) always render — custom dates are '' for the
   // presets, scope 'all' unless the real-customer switch is on.
   stats: (range: string, from: string, to: string, scope = 'all') =>

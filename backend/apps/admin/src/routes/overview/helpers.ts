@@ -20,6 +20,19 @@ const mytText = (iso: string) =>
     .replace('T', ' ');
 export const windowText = (w: { from: string; to: string }) =>
   `${mytText(w.from)} – ${mytText(w.to)}`;
+
+// Fixed names: en-GB's Intl writes "Sept" on newer ICU builds.
+const MONTHS = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ');
+/** The MYT days a half-open window covers: "1 Oct – 14 Oct 2026". */
+export const dayRangeText = (w: { from: string; to: string }) => {
+  const a = new Date(Date.parse(w.from) + MYT_MS);
+  const b = new Date(Date.parse(w.to) - 1 + MYT_MS);
+  const day = (d: Date) => `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+  const ya = a.getUTCFullYear();
+  const yb = b.getUTCFullYear();
+  if (ya !== yb) return `${day(a)} ${ya} – ${day(b)} ${yb}`;
+  return day(a) === day(b) ? `${day(b)} ${yb}` : `${day(a)} – ${day(b)} ${yb}`;
+};
 export const todayMyt = () =>
   new Date(Date.now() + MYT_MS).toISOString().slice(0, 10);
 

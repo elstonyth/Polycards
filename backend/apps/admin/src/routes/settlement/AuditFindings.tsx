@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { Button, Container, StatusBadge, Table, Text } from '@medusajs/ui';
 import { useGatewayAudit } from '../../lib/queries';
 import { rm } from '../../lib/format';
@@ -20,6 +21,8 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
   const [all, setAll] = useState(false);
   const a = audit.data;
   if (!a || a.findings_total === 0) return null;
+  // The backend lists at most 100 findings; the bar counts them all.
+  const capped = a.findings.length < a.findings_total;
 
   return (
     <Container className="p-0" data-testid={`audit-card-${currency}`}>
@@ -77,13 +80,18 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
                       <Text
                         as="span"
                         size="xsmall"
-                        className="text-ui-fg-muted block break-all font-mono"
+                        className="text-ui-fg-subtle block break-all font-mono"
                       >
                         {ref} · {f.gateway}
                       </Text>
                     </Table.Cell>
                     <Table.Cell className="font-mono text-xs">
-                      {f.customer_id}
+                      <Link
+                        to={`/customers/${f.customer_id}`}
+                        className="text-ui-fg-interactive hover:text-ui-fg-interactive-hover"
+                      >
+                        {f.customer_id}
+                      </Link>
                     </Table.Cell>
                     <Table.Cell>
                       <StatusBadge color={s.color}>{t(s.labelKey)}</StatusBadge>
@@ -106,9 +114,26 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
                 variant="transparent"
                 onClick={() => setAll(true)}
               >
-                {t('settlement.showAllFindings', { count: a.findings.length })}
+                {capped
+                  ? t('settlement.showFirstFindings', {
+                      count: a.findings.length,
+                      total: a.findings_total,
+                    })
+                  : t('settlement.showAllFindings', {
+                      count: a.findings.length,
+                    })}
               </Button>
             </div>
+          ) : all && capped ? (
+            <Text
+              size="xsmall"
+              className="text-ui-fg-subtle border-t px-6 py-3"
+            >
+              {t('settlement.findingsCapped', {
+                count: a.findings.length,
+                total: a.findings_total,
+              })}
+            </Text>
           ) : null}
         </div>
       ) : null}

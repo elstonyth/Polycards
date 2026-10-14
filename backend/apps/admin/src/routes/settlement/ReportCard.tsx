@@ -45,7 +45,11 @@ export const ReportCard = ({ currency }: { currency: string }) => {
   const { t } = useTranslation();
   const [granularity, setGranularity] =
     useState<SettlementGranularity>('month');
-  const { data, isError } = useSettlementReport(granularity, 12, currency);
+  const { data, isError, isPlaceholderData } = useSettlementReport(
+    granularity,
+    12,
+    currency,
+  );
   const rows = (data?.periods ?? []).map(resultRow);
   const feeFloors = rows.filter((r) => r.feeFloor).length;
   const grossFloors = rows.filter((r) => r.grossFloor).length;
@@ -105,7 +109,12 @@ export const ReportCard = ({ currency }: { currency: string }) => {
           {t('settlement.empty')}
         </Text>
       ) : (
-        <>
+        // The previous granularity's rows stay while the new one loads; dim
+        // them so "Aug 2026" never reads as a week under "Results by week".
+        <div
+          className={`transition-opacity ${isPlaceholderData ? 'opacity-50' : ''}`}
+          aria-busy={isPlaceholderData}
+        >
           <div className="overflow-x-auto border-t">
             <Table>
               <Table.Header>
@@ -126,9 +135,7 @@ export const ReportCard = ({ currency }: { currency: string }) => {
                   <Table.HeaderCell>
                     <span className="inline-flex items-center gap-1.5">
                       {t('settlement.ledgerCheck')}
-                      <Hint
-                        text={`${t('settlement.depositDeltaHint')} ${t('settlement.withdrawalDeltaHint')}`}
-                      />
+                      <Hint text={t('settlement.ledgerCheckHint')} />
                     </span>
                   </Table.HeaderCell>
                 </Table.Row>
@@ -148,24 +155,35 @@ export const ReportCard = ({ currency }: { currency: string }) => {
                       <Text
                         as="span"
                         size="xsmall"
-                        className="text-ui-fg-muted block"
+                        className="text-ui-fg-subtle block"
                       >
                         {t('settlement.topupsCount', { count: r.inCount })}
                       </Text>
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
-                      {floor(
-                        r.fees,
-                        r.feeFloor,
-                        t('settlement.feeFloorFootnote'),
-                      )}
+                      {/* One column, but each direction has its own rate:
+                          the split is on hover. */}
+                      <Tooltip
+                        content={[
+                          t('settlement.feeSplit', {
+                            topups: rm(r.inFee),
+                            payouts: rm(r.outFee),
+                          }),
+                          r.feeFloor ? t('settlement.feeFloorFootnote') : '',
+                        ].join(' ')}
+                      >
+                        <span tabIndex={0} className="cursor-help">
+                          {r.feeFloor ? '≥ ' : ''}
+                          {rm(r.fees)}
+                        </span>
+                      </Tooltip>
                     </Table.Cell>
                     <Table.Cell className="text-right tabular-nums">
                       {rm(r.outGross)}
                       <Text
                         as="span"
                         size="xsmall"
-                        className="text-ui-fg-muted block"
+                        className="text-ui-fg-subtle block"
                       >
                         {t('settlement.payoutsCount', { count: r.outCount })}
                       </Text>
@@ -188,7 +206,7 @@ export const ReportCard = ({ currency }: { currency: string }) => {
                           <Text
                             as="span"
                             size="small"
-                            className="text-ui-fg-muted"
+                            className="text-ui-fg-subtle"
                           >
                             {t('settlement.matches')}
                           </Text>
@@ -210,7 +228,7 @@ export const ReportCard = ({ currency }: { currency: string }) => {
                         <Text
                           as="span"
                           size="xsmall"
-                          className="text-ui-fg-muted block tabular-nums"
+                          className="text-ui-fg-subtle block tabular-nums"
                         >
                           {t('settlement.payoutGap', {
                             amount: `${r.payoutGap > 0 ? '+' : ''}${rm(r.payoutGap)}`,
@@ -226,18 +244,18 @@ export const ReportCard = ({ currency }: { currency: string }) => {
           {feeFloors > 0 || grossFloors > 0 ? (
             <div className="flex flex-wrap gap-2 border-t px-6 py-3">
               {feeFloors > 0 ? (
-                <Text size="xsmall" className="text-ui-fg-muted">
+                <Text size="xsmall" className="text-ui-fg-subtle">
                   {t('settlement.feeFloorFootnote')}
                 </Text>
               ) : null}
               {grossFloors > 0 ? (
-                <Text size="xsmall" className="text-ui-fg-muted">
+                <Text size="xsmall" className="text-ui-fg-subtle">
                   {t('settlement.grossFloorFootnote')}
                 </Text>
               ) : null}
             </div>
           ) : null}
-        </>
+        </div>
       )}
     </Container>
   );

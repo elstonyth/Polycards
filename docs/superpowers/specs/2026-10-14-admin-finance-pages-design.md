@@ -125,16 +125,18 @@ All three windows (current, previous, all time) come from one scan per table, an
 
 ### 4.3 Page (`/economy`, label "Profit report"): mockup A
 
-1. **Header.** "Profit report", one line saying "Real money in and out, Malaysia time · {window}". On the right, a **Real customers** pill and an **All groups** switch. Below, the Dashboard's period buttons plus **All time**.
-2. **Cash kept.** A big figure, coloured by sign, with "vs last period" as an RM change (hidden for All time). Below it, a money trail of four rows, each a bar and an amount: Top-ups received, Gateway fees, Withdrawals paid, Cash kept.
+1. **Header.** "Profit report", one line saying "Real money in and out, Malaysia time · {window}", the window written as days ("1 Oct – 14 Oct 2026"). On the right, a **Real customers** pill and an **All groups** switch. Below, the Dashboard's period buttons plus **All time**.
+2. **Cash kept.** A big figure, coloured by sign and written "− RM x" when negative, with "vs last period" as an RM change (hidden for All time). Below it, a money trail, each row a bar and an amount: Top-ups received, Gateway fees, Withdrawals paid, Exchange spread (only when `fx_earned` ≠ 0), Cash kept.
    - Bars are scaled to top-ups;
-   - when withdrawals exceed top-ups, the bars scale to the larger side and Cash kept shows negative in red;
-   - a "fee is a floor" note appears only when `missing_fees` > 0.
+   - when money out exceeds top-ups, the bars scale to the larger side and Cash kept shows negative in red;
+   - the Gateway fees ⓘ splits top-up fees from payout fees;
+   - a "fee is a floor" note appears only when `missing_fees` > 0, and an "estimate" badge sits by the title whenever a fee or gross figure is a floor;
+   - on phones the bar moves under its label and amount.
 3. **Still owed to players** ("right now" badge). Three tiles:
-   - Withdrawable wallets, with a note giving the bonus and never-topped-up totals;
-   - Cards in vaults at sell-back, with "N cards, M being shipped";
-   - Profit if all cashed out (all-time cash kept − still owed), with the note "all time, not the period above".
-4. **Where the money moved.** Six rows: Pack sales, Sell-backs paid, Promo given, Delivery fees, Referral commission paid, Admin adjustments.
+   - Wallets and payouts due (wallet cash + payouts in flight + unpaid commission), with notes for the in-flight and commission parts and for the bonus and never-topped-up totals left out;
+   - Cards in vaults at sell-back, with "N cards, M being shipped" and a note for never-topped-up players' cards left out;
+   - Profit if all cashed out (all-time cash kept − still owed − shipped), with the three parts as its note.
+4. **Where the money moved.** Six rows: Pack sales, Delivery fees, Sell-backs paid, Promo given, Referral commission paid, Admin adjustments. On a money-out row a payment reads "− RM x" and a take-back "+ RM x". Sell-backs and Promo given carry an ⓘ (free and prize cards).
 5. **Pack payout rate.** Pack, price, expected back, and a meter with a mark at 100% plus a badge. The badge is red over 100% and amber from 95%. The table stays sortable.
 
 Wording stays short: one line under each title, and the rest goes in ⓘ tooltips.
@@ -175,7 +177,7 @@ The header shows "Settlement · Gateway money, one tab per currency." with pill 
 | ------------ | ------------------------------------------------------------------------------------------- |
 | Period       |                                                                                             |
 | Money in     | gross, with "N top-ups" beneath                                                             |
-| Fees         | deposit fee + payout fee                                                                    |
+| Fees         | deposit fee + payout fee; the split is on hover                                            |
 | Money out    | gross, with "N payouts" beneath                                                             |
 | Net cash     | in − fees − out                                                                             |
 | Ledger check | ✓ matches when the deposit delta is 0; otherwise an amber "RM X gap" with the ⓘ explanation |
@@ -186,7 +188,8 @@ The header shows "Settlement · Gateway money, one tab per currency." with pill 
 **Gateway audit card** renders only when `findings_total > 0`:
 
 - a warning bar, "N payments the gateway disagrees with · last checked …", with Hide/Show;
-- a table with Payment (kind + short reference), Player, Our status, Amount and Gateway says.
+- a table with Payment (kind + short reference), Player (linked to the player's page), Our status, Amount and Gateway says;
+- the first 10 rows, then "Show all N"; when the backend's 100-row cap cuts the list, the button and a footnote say "first N of total".
 
 The old "our settled deposits / payouts" totals are dropped; the results table already carries those figures.
 
@@ -218,7 +221,8 @@ The old "our settled deposits / payouts" totals are dropped; the results table a
   8. Turnover;
   9. Joined: date, with "Disabled" beneath when disabled.
 - **Removed from the list** (still on the player's page): Real name, Pulls, Last turnover, and the separate Total top up and Total withdraw columns.
-- The same sorts are available where the column survives, plus "Net deposit".
+- The same sorts are available where the column survives, plus "Net deposit". A **Sort ▾** select also offers the ones with no column: most topped up, most withdrawn, email A–Z.
+- Joined shows "active {ago}" beneath, from the last turnover.
 - **Filter:** a **Group ▾** select next to search, with All groups, Default and each other group. The backend `GET /admin/players` gains `group=<id>|default`:
   - a group id filters to that group's members;
   - `default` excludes members of non-default groups.

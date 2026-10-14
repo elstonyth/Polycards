@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Badge, Button, Container, Heading, Text } from '@medusajs/ui';
-import { rm } from '../../lib/format';
+import { inCurrency, rm } from '../../lib/format';
 import { FxEditDrawer } from './FxEditDrawer';
 import { fmtRate, floorCents, usePaymentFx } from './fx-shared';
 
@@ -18,10 +18,10 @@ const Stat = ({
     <Text size="small" className="text-ui-fg-subtle">
       {label}
     </Text>
-    <Heading level="h2" className="tabular-nums">
+    <Text size="xlarge" weight="plus" className="tabular-nums">
       {value}
-    </Heading>
-    <Text size="xsmall" className="text-ui-fg-muted">
+    </Text>
+    <Text size="xsmall" className="text-ui-fg-subtle">
       {note}
     </Text>
   </div>
@@ -31,16 +31,24 @@ const Stat = ({
  *  fee and rate form opens in a side panel from "Edit rates". */
 export const ExchangeRateCard = ({ currency }: { currency: string }) => {
   const { t } = useTranslation();
-  const { data: fx, isError } = usePaymentFx(currency);
+  const { data: fx, isError, isPending } = usePaymentFx(currency);
   const [editing, setEditing] = useState(false);
   const q = fx?.quote;
   const unit = fx?.unit ?? `1 ${currency}`;
   return (
-    <Container className="p-0" data-testid={`fx-card-${currency}`}>
+    <Container
+      className="p-0"
+      data-testid={`fx-card-${currency}`}
+      aria-busy={isPending}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
         <div className="flex items-center gap-2">
           <Heading level="h2">{t('settlement.fxTitleShort')}</Heading>
-          {q ? (
+          {isPending ? (
+            <Badge color="grey" size="2xsmall">
+              …
+            </Badge>
+          ) : q ? (
             <Badge color="green" size="2xsmall">
               {q.feeEnabled
                 ? t('settlement.fxQuoting')
@@ -54,14 +62,15 @@ export const ExchangeRateCard = ({ currency }: { currency: string }) => {
             </Badge>
           )}
         </div>
-        <Button
-          size="small"
-          variant="secondary"
-          disabled={!fx}
-          onClick={() => setEditing(true)}
+        <FxEditDrawer
+          currency={currency}
+          open={editing}
+          onOpenChange={setEditing}
         >
-          {t('settlement.fxEdit')}
-        </Button>
+          <Button size="small" variant="secondary" disabled={!fx}>
+            {t('settlement.fxEdit')}
+          </Button>
+        </FxEditDrawer>
       </div>
 
       <div className="bg-ui-border-base grid grid-cols-1 gap-px border-t sm:grid-cols-2 lg:grid-cols-4">
@@ -121,9 +130,9 @@ export const ExchangeRateCard = ({ currency }: { currency: string }) => {
       {q ? (
         <Text size="small" className="text-ui-fg-subtle border-t px-6 py-3">
           {t('settlement.fxExample', {
-            currency,
-            credit: floorCents(100 * q.depositRate).toFixed(2),
-            paid: floorCents(100 / q.payoutRate).toFixed(2),
+            topup: inCurrency(100, currency),
+            credit: rm(floorCents(100 * q.depositRate)),
+            paid: inCurrency(floorCents(100 / q.payoutRate), currency),
           })}
         </Text>
       ) : null}
@@ -132,12 +141,6 @@ export const ExchangeRateCard = ({ currency }: { currency: string }) => {
           {t('settlement.fxQuoteError', { error: fx.quote_error, currency })}
         </Text>
       )}
-
-      <FxEditDrawer
-        currency={currency}
-        open={editing}
-        onOpenChange={setEditing}
-      />
     </Container>
   );
 };

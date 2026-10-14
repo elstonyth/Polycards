@@ -17,6 +17,7 @@ import {
   Table,
   Text,
   Textarea,
+  toast,
   Tooltip,
 } from '@medusajs/ui';
 import {
@@ -34,7 +35,7 @@ import {
   useSetPlayerDisabled,
 } from '../../lib/queries';
 import type { PlayerRow } from '../../lib/admin-rest';
-import { rm } from '../../lib/format';
+import { rm, timeAgo } from '../../lib/format';
 import {
   DEFAULT_PLAYER_GROUP_NAME,
   isDefaultPlayerGroup,
@@ -69,6 +70,18 @@ type SortKey =
   | 'contribution'
   | 'spend';
 
+// The sorts with no column of their own (top-up, withdrawn, email) live in
+// this menu with the common ones; the headers sort too. Each is `key:dir`.
+const SORTS = [
+  'created_at:desc',
+  'topup:desc',
+  'withdrawn:desc',
+  'contribution:desc',
+  'spend:desc',
+  'wallet:desc',
+  'email:asc',
+] as const;
+
 // Two letters for the avatar: initials of the name, else the email's start.
 const initials = (p: PlayerRow): string => {
   const words = (p.name ?? '').trim().split(/\s+/).filter(Boolean);
@@ -92,8 +105,8 @@ const joined = (iso: string): string => {
 
 // The All Players list (spec 2026-10-14-admin-finance-pages §8): who, how to
 // reach them, their group and level, and four money figures. Everything else
-// (real name, pulls, last turnover, the top-up and withdraw totals) is on the
-// player's own page, one click away.
+// (real name, pulls, the top-up and withdraw totals) is on the player's own
+// page, one click away; the Sort menu still orders by those totals.
 const PlayersPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -122,7 +135,7 @@ const PlayersPage = () => {
 
   // Sorting resets to page 0 — the operator re-ordered the whole result set,
   // so staying on page 3 of the old order would show an arbitrary slice.
-  const { sort, sortHeader } = useTableSort<SortKey>(
+  const { sort, setSort, sortHeader } = useTableSort<SortKey>(
     { key: 'created_at', dir: 'desc' },
     { onChange: () => setPage(0) },
   );
@@ -151,21 +164,32 @@ const PlayersPage = () => {
     setTarget({ id: p.id, email: p.email, disabled: p.disabled });
   };
 
+  // No try/finally: the React Compiler skips a component that has one.
   async function applyDisable() {
     if (!target || !reason.trim()) return;
-    try {
-      await setDisabled.mutateAsync({
+    await setDisabled
+      .mutateAsync({
         id: target.id,
         disabled: !target.disabled,
         reason: reason.trim(),
-      });
-    } catch {
-      // The hook's onError already surfaced a toast. Swallowing here keeps the
-      // rejection from being unhandled and lets `finally` reset either way.
-    } finally {
-      closeModal();
-    }
+      })
+      // The hook's onError already surfaced a toast; swallowing keeps the
+      // rejection from being unhandled, and the modal closes either way.
+      .catch(() => undefined);
+    closeModal();
   }
+
+  const exportLogins = () => {
+    toast.info(t('players.exportStarted'));
+    exporter.mutate(undefined, {
+      onSuccess: () => toast.success(t('players.exportDone')),
+    });
+  };
+  // A header sort the menu doesn't list (name, oldest first…) shows 'Sort'.
+  const sortValue = sort ? `${sort.key}:${sort.dir}` : 'created_at:desc';
+  const menuSort = (SORTS as readonly string[]).includes(sortValue)
+    ? sortValue
+    : '';
 
   return (
     <div className="flex flex-col gap-y-3">
@@ -201,6 +225,25 @@ const PlayersPage = () => {
                 ))}
               </Select.Content>
             </Select>
+            <Select
+              value={menuSort}
+              onValueChange={(v) => {
+                const [key, dir] = v.split(':') as [SortKey, 'asc' | 'desc'];
+                setSort({ key, dir });
+                setPage(0);
+              }}
+            >
+              <Select.Trigger className="w-44" aria-label={t('players.sortBy')}>
+                <Select.Value placeholder={t('players.sortBy')} />
+              </Select.Trigger>
+              <Select.Content>
+                {SORTS.map((v) => (
+                  <Select.Item key={v} value={v}>
+                    {t(`players.sort.${v.replace(':', '_')}`)}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select>
             <Input
               type="search"
               className="w-72"
@@ -231,7 +274,7 @@ const PlayersPage = () => {
                 <DropdownMenu.Item
                   className="gap-x-2"
                   disabled={exporter.isPending}
-                  onClick={() => exporter.mutate(undefined)}
+                  onClick={exportLogins}
                 >
                   <ArrowDownTray className="text-ui-fg-subtle" />
                   {t('players.exportShort')}
@@ -252,7 +295,11 @@ const PlayersPage = () => {
         ) : data.players.length === 0 ? (
           <div className="border-t px-6 py-8">
             <Text className="text-ui-fg-subtle">
-              {q || group ? t('players.noResults') : t('players.empty')}
+              {q
+                ? t('players.noResults')
+                : group
+                  ? t('players.noGroupResults')
+                  : t('players.empty')}
             </Text>
           </div>
         ) : (
@@ -325,7 +372,7 @@ const PlayersPage = () => {
                             <Text
                               as="span"
                               size="xsmall"
-                              className="text-ui-fg-muted block truncate"
+                              className="text-ui-fg-subtle block truncate"
                             >
                               {p.email}
                             </Text>
@@ -340,10 +387,20 @@ const PlayersPage = () => {
                           <span className="inline-flex items-center gap-1.5">
                             {p.phone}
                             {p.phone_verified ? (
-                              <CheckCircleSolid
-                                className="text-ui-tag-green-icon"
-                                aria-label={t('players.verifiedYes')}
-                              />
+                              <Tooltip content={t('players.verifiedYes')}>
+                                <span
+                                  role="img"
+                                  tabIndex={0}
+                                  aria-label={t('players.verifiedYes')}
+                                  className="inline-flex"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <CheckCircleSolid
+                                    aria-hidden
+                                    className="text-ui-tag-green-icon"
+                                  />
+                                </span>
+                              </Tooltip>
                             ) : null}
                           </span>
                         ) : (
@@ -375,7 +432,7 @@ const PlayersPage = () => {
                         {p.vault_count > 0 ? (
                           <>
                             {rm(p.vault_value)}
-                            <span className="text-ui-fg-muted text-xs">
+                            <span className="text-ui-fg-subtle text-xs">
                               {' '}
                               ({p.vault_count})
                             </span>
@@ -410,6 +467,17 @@ const PlayersPage = () => {
                       </Table.Cell>
                       <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
                         {joined(p.registered_at)}
+                        {p.last_spend_at ? (
+                          <Text
+                            as="span"
+                            size="xsmall"
+                            className="text-ui-fg-subtle block"
+                          >
+                            {t('players.activeAgo', {
+                              ago: timeAgo(p.last_spend_at),
+                            })}
+                          </Text>
+                        ) : null}
                         {p.disabled ? (
                           <span className="mt-0.5 block">
                             <StatusBadge color="red">

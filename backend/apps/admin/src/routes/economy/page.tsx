@@ -7,7 +7,7 @@ import { useProfitReport } from '../../lib/queries';
 import { useScopeParam } from '../../lib/scope-param';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { RangePicker } from '../overview/RangePicker';
-import { todayMyt, windowText } from '../overview/helpers';
+import { dayRangeText, todayMyt } from '../overview/helpers';
 import { SectionError } from '../overview/SectionState';
 import { ScopeSwitch } from './ScopeSwitch';
 import { CashCard } from './CashCard';
@@ -57,7 +57,7 @@ const ProfitReportPage = () => {
               {!data
                 ? '…'
                 : data.window
-                  ? t('profit.subtitle', { window: windowText(data.window) })
+                  ? t('profit.subtitle', { window: dayRangeText(data.window) })
                   : t('profit.subtitleAll')}
             </Text>
           </div>

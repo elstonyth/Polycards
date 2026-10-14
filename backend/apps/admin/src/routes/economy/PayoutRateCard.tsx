@@ -71,7 +71,16 @@ export const PayoutRateCard = ({ data }: { data: ProfitReport }) => {
             <Table.Body>
               {rows.map((p) => (
                 <Table.Row key={p.slug}>
-                  <Table.Cell>{p.title}</Table.Cell>
+                  <Table.Cell>
+                    <div className="flex flex-col py-1">
+                      <span>{p.title}</span>
+                      {p.category && (
+                        <Text size="xsmall" className="text-ui-fg-subtle">
+                          {p.category}
+                        </Text>
+                      )}
+                    </div>
+                  </Table.Cell>
                   <Table.Cell className="text-right tabular-nums">
                     {rm(p.price)}
                   </Table.Cell>

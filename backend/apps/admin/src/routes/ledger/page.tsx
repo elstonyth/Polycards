@@ -313,7 +313,7 @@ const LedgerPage = () => {
                           <td> forwards it fine). */}
                       <td
                         colSpan={COLUMN_COUNT}
-                        className="text-ui-fg-muted txt-compact-xsmall-plus px-6 py-1.5"
+                        className="text-ui-fg-subtle txt-compact-xsmall-plus px-6 py-1.5"
                       >
                         {dayLabel(g.day)}
                       </td>
@@ -342,7 +342,7 @@ const LedgerPage = () => {
                                 type="button"
                                 aria-expanded={open}
                                 aria-label={`${t('ledger.details')} — ${row.display_id}`}
-                                className="text-ui-fg-muted hover:text-ui-fg-subtle txt-compact-xsmall mt-0.5 block font-mono"
+                                className="text-ui-fg-subtle hover:text-ui-fg-base txt-compact-xsmall mt-0.5 block font-mono"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   toggle(row.id);
@@ -359,7 +359,7 @@ const LedgerPage = () => {
                                 <Text
                                   as="span"
                                   size="xsmall"
-                                  className="text-ui-fg-muted block"
+                                  className="text-ui-fg-subtle block"
                                 >
                                   {row.customer.email}
                                 </Text>
