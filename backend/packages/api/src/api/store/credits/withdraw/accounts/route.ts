@@ -252,6 +252,15 @@ export async function POST(
   // "already on my list" is decided from the locked read. Two strangers saving
   // one number in the same instant can both get through; that race is not the
   // farming pattern this stops.
+  //
+  // A number another customer has only SAVED blocks under the same holder
+  // name (one person, several accounts: 10 of the 13 clusters). Otherwise
+  // anyone who knew a stranger's number could save it first and lock the real
+  // owner out. A number already PAID OUT to blocks under any name.
+  const sameHolder = (name: string | null) =>
+    name == null ||
+    name.toLowerCase().replace(/\s+/g, ' ').trim() ===
+      account.accountHolderName.toLowerCase().replace(/\s+/g, ' ');
   const heldByAnother =
     !payoutAccountSharingAllowed(customerId) &&
     (
@@ -259,7 +268,9 @@ export async function POST(
         customerId,
         accountNumber,
       )
-    ).some((h) => findBank(h.bank_code)?.id === bankCode);
+    ).some(
+      (h) => findBank(h.bank_code)?.id === bankCode && sameHolder(h.holder_name),
+    );
 
   // The cap is checked against the list read INSIDE the lock, not against one
   // this handler read earlier — otherwise two concurrent saves could both see

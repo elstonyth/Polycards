@@ -74,6 +74,12 @@ medusaIntegrationTestRunner({
         expect(
           holders.find((h) => h.customer_id === legacySaver.id)?.bank_code,
         ).toBe('MYMB2U');
+        expect(holders.find((h) => h.customer_id === saver.id)?.holder_name).toBe(
+          'TAN AH KOW',
+        );
+        expect(
+          holders.find((h) => h.customer_id === payee.id)?.holder_name,
+        ).toBeNull();
         expect(ids).not.toContain(odd.id);
 
         expect(await packs.otherPayoutAccountHolders(me.id, '999')).toEqual([]);

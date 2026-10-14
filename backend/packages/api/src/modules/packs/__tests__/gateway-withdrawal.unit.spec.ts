@@ -1,4 +1,12 @@
+// Lets one test give a bank its own payout floor: Touch 'n Go is the only
+// bank with one, and it is paused.
+jest.mock('../banks', () => {
+  const actual = jest.requireActual('../banks');
+  return { ...actual, bankPayoutMinRm: jest.fn(actual.bankPayoutMinRm) };
+});
+
 import { MedusaError, Modules } from '@medusajs/framework/utils';
+import { bankPayoutMinRm } from '../banks';
 import {
   GATEWAY_WD_MIN_RM,
   withdrawalsEnabled,
@@ -437,6 +445,24 @@ describe('startWithdrawal — money ordering', () => {
     );
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+  });
+
+  it('holds a destination to its own payout floor before any row or debit', async () => {
+    const actual = jest.requireActual('../banks').bankPayoutMinRm;
+    jest.mocked(bankPayoutMinRm).mockImplementation(() => 100);
+    try {
+      const h = harness();
+      await expect(start(h, { gateway: 'tgpay', amount: 56 })).rejects.toThrow(
+        'Withdrawals must be between RM 100 and RM 30,000 for Maybank.',
+      );
+      expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+      expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+      await expect(
+        start(harness(), { gateway: 'tgpay', amount: 100 }),
+      ).resolves.toBeTruthy();
+    } finally {
+      jest.mocked(bankPayoutMinRm).mockImplementation(actual);
+    }
   });
 
   // TNG is paused in banks.ts (2026-10-14): TGPay refused 97 of 110 TNG

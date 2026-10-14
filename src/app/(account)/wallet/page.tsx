@@ -3,7 +3,7 @@ import { unstable_rethrow } from 'next/navigation';
 import { Check, Lock } from 'lucide-react';
 import { AccountHeader, Panel, StatCards } from '@/components/account/ui';
 import { PlaythroughProgress } from '@/components/account/PlaythroughProgress';
-import { TopUpButton } from '@/app/(account)/me/MeActions';
+import { TopUpButton } from '@/components/account/TopUpButton';
 import { getWallet } from '@/lib/actions/wallet';
 import { getPaymentLimits } from '@/lib/actions/vault';
 import { DEFAULT_PAYMENT_LIMITS } from '@/lib/payment-limits';

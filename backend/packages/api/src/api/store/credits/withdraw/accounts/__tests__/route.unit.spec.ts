@@ -582,6 +582,22 @@ describe('POST accounts — one bank account, one Polycards account', () => {
     );
   });
 
+  it('a number another customer only saved blocks under the same holder name, not another', async () => {
+    otherPayoutAccountHolders.mockResolvedValue([
+      { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: 'tan  AH kow' },
+    ]);
+    await expect(POST(mkReq(VALID_BODY), mkRes())).rejects.toThrow(
+      SHARED_PAYOUT_ACCOUNT_MESSAGE,
+    );
+
+    // A stranger who saved the number first cannot lock the owner out.
+    otherPayoutAccountHolders.mockResolvedValue([
+      { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: 'Someone Else' },
+    ]);
+    await POST(mkReq(VALID_BODY), mkRes());
+    expect(updateCustomers).toHaveBeenCalledTimes(1);
+  });
+
   it('allows the same digits at a different bank', async () => {
     otherPayoutAccountHolders.mockResolvedValue([
       { customer_id: 'cus_2', bank_code: 'PBBEMYKL' },

@@ -25,7 +25,8 @@ import { getAvatarFrames } from '@/lib/data/avatar-frames';
 import { rm, rm0 } from '@/lib/format';
 import { SlabImage } from '@/components/SlabImage';
 import { toCardView } from '@/lib/card-view';
-import { LogoutButton, TopUpButton } from './MeActions';
+import { LogoutButton } from './MeActions';
+import { TopUpButton } from '@/components/account/TopUpButton';
 import { MeHeader } from './MeAppearance';
 import { EquippedFrameProvider } from './equipped-frame';
 
