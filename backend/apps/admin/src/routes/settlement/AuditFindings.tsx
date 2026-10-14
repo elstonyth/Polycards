@@ -5,6 +5,7 @@ import { Button, Container, StatusBadge, Table, Text } from '@medusajs/ui';
 import { useGatewayAudit } from '../../lib/queries';
 import { rm } from '../../lib/format';
 import { paymentStatus } from '../../lib/dashboard';
+import { auditCounts } from './audit-counts';
 
 // The first few are enough to act on; the rest are one click away.
 const SHOWN = 10;
@@ -20,17 +21,28 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
   const [open, setOpen] = useState(true);
   const [all, setAll] = useState(false);
   const a = audit.data;
-  if (!a || a.findings_total === 0) return null;
-  // The backend lists at most 100 findings; the bar counts them all.
-  const capped = a.findings.length < a.findings_total;
+  if (!a) return null;
+  const n = auditCounts(a);
+  if (!n.show) return null;
+  const capped = n.capped;
 
   return (
     <Container className="p-0" data-testid={`audit-card-${currency}`}>
-      <div className="bg-ui-tag-orange-bg flex flex-wrap items-center justify-between gap-3 px-6 py-3">
+      <div
+        className={`${n.differ > 0 ? 'bg-ui-tag-orange-bg' : 'bg-ui-bg-subtle'} flex flex-wrap items-center justify-between gap-3 px-6 py-3`}
+      >
         <Text size="small">
-          <Text as="span" size="small" weight="plus">
-            {t('settlement.findingsBar', { count: a.findings_total })}
-          </Text>
+          {n.differ > 0 ? (
+            <Text as="span" size="small" weight="plus">
+              {t('settlement.findingsBar', { count: n.differ })}
+            </Text>
+          ) : null}
+          {n.retired > 0 ? (
+            <Text as="span" size="small" className="text-ui-fg-subtle">
+              {n.differ > 0 ? ' · ' : ''}
+              {t('settlement.retiredFindings', { count: n.retired })}
+            </Text>
+          ) : null}
           {a.last_audited_at ? (
             <Text as="span" size="small" className="text-ui-fg-subtle">
               {' · '}
@@ -117,7 +129,7 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
                 {capped
                   ? t('settlement.showFirstFindings', {
                       count: a.findings.length,
-                      total: a.findings_total,
+                      total: n.all,
                     })
                   : t('settlement.showAllFindings', {
                       count: a.findings.length,
@@ -131,7 +143,7 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
             >
               {t('settlement.findingsCapped', {
                 count: a.findings.length,
-                total: a.findings_total,
+                total: n.all,
               })}
             </Text>
           ) : null}
