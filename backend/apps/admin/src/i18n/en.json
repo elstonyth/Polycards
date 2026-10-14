@@ -1258,7 +1258,7 @@
     "wallet": "Wallet",
     "walletBonus": "incl. {{amount}} bonus",
     "walletNoBonus": "no bonus credit",
-    "vault": "Vault",
+    "vault": "Cards held",
     "vaultCards_one": "{{count, number}} card",
     "vaultCards_other": "{{count, number}} cards",
     "vaultNote": "{{amount}} at sell-back",
@@ -1309,6 +1309,8 @@
     "giftPacks": "Gift packs",
     "bonusCredit": "Bonus credit",
     "joined": "Joined {{date}}",
-    "activeAgo": "active {{ago}}"
+    "activeAgo": "active {{ago}}",
+    "shipping_one": "{{count, number}} being shipped",
+    "shipping_other": "{{count, number}} being shipped"
   }
 }

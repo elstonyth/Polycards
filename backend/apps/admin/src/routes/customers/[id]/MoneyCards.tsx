@@ -131,14 +131,25 @@ export const MoneySummary = ({
         }
       />
       <Tile
+        // Vaulted AND being shipped (both still owed), so not the Vault tab's
+        // count: a shipment in progress is named in the note.
         label={t('playerMoney.vault')}
         value={
           cards === null ? '—' : t('playerMoney.vaultCards', { count: cards })
         }
         note={
-          sellback === null
+          sellback === null || !money
             ? undefined
-            : t('playerMoney.vaultNote', { amount: rm(sellback) })
+            : [
+                t('playerMoney.vaultNote', { amount: rm(sellback) }),
+                money.owed.cards.delivering > 0
+                  ? t('playerMoney.shipping', {
+                      count: money.owed.cards.delivering,
+                    })
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')
         }
       />
     </div>
