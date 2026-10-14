@@ -112,6 +112,15 @@ beforeEach(() => {
     if (String(url).endsWith('/api/Payout/SubmitPayout')) {
       return { status: 400, text: async () => submitReply };
     }
+    // Asked about after a refusal (refusalConfirmed): a refused submit leaves
+    // nothing, so A3Pay answers its live "Not found" (a3pay-client.ts).
+    if (String(url).endsWith('/api/Payout/GetPayoutDetail')) {
+      return {
+        status: 400,
+        text: async () =>
+          '{"isSuccess":false,"errorCode":null,"errorMessage":"Not found"}',
+      };
+    }
     // Anything else (an ops alert) is beyond what these cases own.
     return {
       status: 500,

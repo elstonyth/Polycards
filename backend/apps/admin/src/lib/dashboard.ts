@@ -4,6 +4,7 @@ import type {
   ReferralSettlement,
   SettlementReport,
   StatsFigures,
+  GatewayAuditFinding,
 } from './admin-rest';
 
 // Data shaping for the Dashboard (docs/superpowers/specs/
@@ -170,6 +171,27 @@ export const attentionWithdrawals = (
   amount: rows.reduce((sum, r) => sum + r.amount, 0),
   oldest: oldestOf(rows),
 });
+
+/**
+ * Payouts we refunded that the gateway still holds or has paid: money that
+ * may leave twice (2026-10-14, a RM 512.40 TGPay payout). Read off the audit's
+ * findings by its own two notes (backend gateway-audit.ts withdrawalAuditNote).
+ */
+export const doublePayRisks = (findings: GatewayAuditFinding[]) => {
+  const risky = findings.filter(
+    (f) =>
+      f.kind === 'withdrawal' &&
+      f.status === 'failed' &&
+      /DOUBLE PAYMENT|pending for a payout we refunded/.test(f.note),
+  );
+  return {
+    count: risky.length,
+    paid: risky.filter((f) => /DOUBLE PAYMENT/.test(f.note)).length,
+    amount:
+      Math.round(risky.reduce((sum, f) => sum + (f.amount ?? 0), 0) * 100) /
+      100,
+  };
+};
 
 /**
  * Pending deposits past the reconcile window. The route sorts pending oldest

@@ -1180,7 +1180,12 @@
     "periodLabel": "Period",
     "liveNow": "Live · updated just now",
     "liveAgo": "Live · updated {{ago}} ago",
-    "scopeHint": "The tiles and the money chart follow this switch. Work waiting on you and the latest payments always show everyone."
+    "scopeHint": "The tiles and the money chart follow this switch. Work waiting on you and the latest payments always show everyone.",
+    "doublePay_one": "{{shown}} payout may be paid twice",
+    "doublePay_other": "{{shown}} payouts may be paid twice",
+    "doublePayHeld": "{{amount}} refunded · gateway still holds it",
+    "doublePayPaid_one": "{{amount}} refunded · gateway paid {{count, number}}",
+    "doublePayPaid_other": "{{amount}} refunded · gateway paid {{count, number}}"
   },
   "profit": {
     "title": "Profit report",
