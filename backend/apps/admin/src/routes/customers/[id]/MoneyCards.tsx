@@ -6,23 +6,14 @@ import { rm, timeAgo } from '../../../lib/format';
 import { Hint } from '../../../components/Hint';
 import { CountUp } from '../../overview/KpiTiles';
 import { delta, signed } from '../../economy/signs';
-import { standing, type StandingRow } from './standing';
 
 // The player page's money (GET /admin/customers/:id/money): four headline
-// tiles, top-ups and withdrawals by period, where the house stands with this
-// player, and their play. Wrapped by the page in .pc-dashboard, so the
-// settle-in and bar-grow motion (admin-ui.css) applies here too.
+// tiles, top-ups and withdrawals by period, and their play. Wrapped by the page in .pc-dashboard, so the
+// settle-in motion (admin-ui.css) applies here too.
 
 const PERIODS = ['today', 'd7', 'month', 'all'] as const;
 
-const BAR: Record<StandingRow['tone'], string> = {
-  in: 'bg-ui-tag-green-icon',
-  out: 'bg-ui-tag-red-icon',
-  kept: 'bg-ui-tag-green-icon opacity-50',
-  loss: 'bg-ui-tag-red-icon opacity-50',
-};
-
-const Tile = ({
+export const StatTile = ({
   label,
   hint,
   value,
@@ -84,7 +75,7 @@ export const MoneySummary = ({
     : null;
   return (
     <div className="bg-ui-border-base grid grid-cols-1 gap-px border-t sm:grid-cols-2 xl:grid-cols-4">
-      <Tile
+      <StatTile
         label={
           !money
             ? t('playerMoney.resultLabel')
@@ -105,7 +96,7 @@ export const MoneySummary = ({
         valueClass={resultTone}
         note={t('playerMoney.resultNote')}
       />
-      <Tile
+      <StatTile
         label={t('playerMoney.contribution')}
         hint={t('playerMoney.contributionHint')}
         value={money ? signed(money.periods.all.contribution) : '—'}
@@ -121,16 +112,27 @@ export const MoneySummary = ({
             : undefined
         }
       />
-      <Tile
+      <StatTile
         label={t('playerMoney.wallet')}
         value={view ? rm(view.balance) : '—'}
         note={
-          view && view.bonus_balance > 0
-            ? t('playerMoney.walletBonus', { amount: rm(view.bonus_balance) })
-            : t('playerMoney.walletNoBonus')
+          money
+            ? [
+                t('playerMoney.walletWithdrawable', {
+                  amount: rm(money.wallet.withdrawable),
+                }),
+                money.wallet.bonus > 0
+                  ? t('playerMoney.walletBonus', {
+                      amount: rm(money.wallet.bonus),
+                    })
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')
+            : undefined
         }
       />
-      <Tile
+      <StatTile
         // Vaulted AND being shipped (both still owed), so not the Vault tab's
         // count: a shipment in progress is named in the note.
         label={t('playerMoney.vault')}
@@ -235,112 +237,6 @@ export const PeriodsCard = ({ money }: { money: CustomerMoney }) => {
           </Table.Body>
         </Table>
       </div>
-    </Container>
-  );
-};
-
-/** Where the house stands: the Profit report's trail for this player alone,
- *  carried on down to "if they cashed out now". */
-export const StandingCard = ({ money }: { money: CustomerMoney }) => {
-  const { t } = useTranslation();
-  const { cash, owed } = money;
-  const { rows } = standing(money);
-  const missing = cash.topups.missing_fees + cash.withdrawals.missing_fees;
-  const grossFloor = cash.topups.missing_gross > 0;
-  const noTopupCards = owed.cards_no_topup.count;
-  const hints: Partial<Record<StandingRow['key'], string>> = {
-    fees: t('profit.feeSplit', {
-      topups: rm(cash.topups.fees),
-      payouts: rm(cash.withdrawals.fees),
-    }),
-    fx: t('profit.fxHint'),
-    cards: t('playerMoney.cardsHint'),
-  };
-  return (
-    <Container className="pc-settle flex flex-col gap-4 [animation-delay:80ms]">
-      <div className="flex items-center gap-1.5">
-        <Heading level="h2">{t('playerMoney.standingTitle')}</Heading>
-        <Hint text={t('playerMoney.standingHint')} />
-        {(grossFloor || missing > 0) && (
-          <Badge size="2xsmall" color="orange">
-            {t('profit.estimate')}
-          </Badge>
-        )}
-      </div>
-
-      <ul className="flex flex-col gap-2.5">
-        {rows.map((r) => {
-          const hint = hints[r.key];
-          return (
-            // Phones: label and amount on one line, the bar under them.
-            <li
-              key={r.key}
-              className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 sm:grid-cols-[minmax(0,11rem)_minmax(6rem,1fr)_8.5rem] ${r.total ? 'border-t pt-2.5' : ''}`}
-            >
-              <div className="flex min-w-0 items-center gap-1.5">
-                <Text
-                  size="small"
-                  weight={r.total ? 'plus' : 'regular'}
-                  className={r.total ? '' : 'text-ui-fg-subtle'}
-                >
-                  {t(`playerMoney.trail.${r.key}`)}
-                </Text>
-                {hint && <Hint text={hint} />}
-              </div>
-              <div
-                className="bg-ui-bg-component relative col-span-2 row-start-2 h-3 overflow-hidden rounded-full sm:col-span-1 sm:row-start-auto"
-                aria-hidden
-              >
-                <div
-                  className={`pc-grow absolute inset-y-0 origin-left rounded-full ${BAR[r.tone]}`}
-                  style={{ left: `${r.left}%`, width: `${r.width}%` }}
-                />
-              </div>
-              <Text
-                size="small"
-                weight="plus"
-                className={`text-right tabular-nums ${
-                  r.tone === 'loss'
-                    ? 'text-ui-fg-error'
-                    : r.key === 'result' && r.amount > 0
-                      ? 'text-ui-tag-green-text'
-                      : ''
-                }`}
-              >
-                {r.key === 'topups' && grossFloor ? '≥ ' : ''}
-                {r.key === 'fx' && r.amount > 0 ? '+ ' : ''}
-                {signed(r.amount)}
-              </Text>
-            </li>
-          );
-        })}
-      </ul>
-
-      {(grossFloor ||
-        missing > 0 ||
-        owed.wallet_no_topup > 0 ||
-        noTopupCards > 0) && (
-        <div className="flex flex-col gap-1">
-          {grossFloor && (
-            <Text size="xsmall" className="text-ui-fg-subtle">
-              {t('profit.grossFloor', { count: cash.topups.missing_gross })}
-            </Text>
-          )}
-          {missing > 0 && (
-            <Text size="xsmall" className="text-ui-fg-subtle">
-              {t('profit.feeFloor', { count: missing })}
-            </Text>
-          )}
-          {(owed.wallet_no_topup > 0 || noTopupCards > 0) && (
-            <Text size="xsmall" className="text-ui-fg-subtle">
-              {t('playerMoney.noTopup', {
-                amount: rm(owed.wallet_no_topup),
-                count: noTopupCards,
-              })}
-            </Text>
-          )}
-        </div>
-      )}
     </Container>
   );
 };

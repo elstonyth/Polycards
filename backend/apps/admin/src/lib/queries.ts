@@ -388,10 +388,15 @@ export const useCustomerAudit = (
 export const useCustomerTransactions = (
   id: string | null,
   page = 0,
+  reasons?: readonly string[] | null,
 ): UseQueryResult<{ items: SupportTransaction[]; total: number }> =>
   useQuery({
-    queryKey: qk.customerTransactions(id ?? '', page),
-    queryFn: () => getCustomerTransactions(id!, page),
+    queryKey: qk.customerTransactions(
+      id ?? '',
+      page,
+      reasons?.length ? reasons.join(',') : 'all',
+    ),
+    queryFn: () => getCustomerTransactions(id!, page, 25, reasons ?? undefined),
     enabled: !!id,
     placeholderData: keepPreviousData,
   });
@@ -404,14 +409,14 @@ export const useCustomerPulls = (
   page = 0,
   // status only — getCustomerPulls also accepts `source`, but nothing needs it
   // here and an un-keyed filter would collide in the cache.
-  opts?: { status?: string },
+  opts?: { status?: string; sort?: 'newest' | 'value' },
 ): UseQueryResult<{
   items: SupportPull[];
   total: number;
   fx?: { rate: number; firm: boolean };
 }> =>
   useQuery({
-    queryKey: qk.customerPulls(id ?? '', page, opts?.status),
+    queryKey: qk.customerPulls(id ?? '', page, opts?.status, opts?.sort),
     queryFn: () => getCustomerPulls(id!, page, 25, opts),
     enabled: !!id,
     placeholderData: keepPreviousData,

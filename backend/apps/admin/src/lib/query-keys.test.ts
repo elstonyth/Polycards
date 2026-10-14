@@ -133,6 +133,7 @@ describe('qk', () => {
       'pulls',
       0,
       'all',
+      'newest',
     ]);
     expect(qk.customerPulls('cus_1', 2, 'vaulted')).toEqual([
       'admin',
@@ -141,7 +142,12 @@ describe('qk', () => {
       'pulls',
       2,
       'vaulted',
+      'newest',
     ]);
+    // The Vault tab's "highest value" order is its own sibling entry.
+    expect(qk.customerPulls('cus_1', 0, 'vaulted', 'value')).not.toEqual(
+      qk.customerPulls('cus_1', 0, 'vaulted'),
+    );
     // Neither key is a prefix of the other, and customerPullsKey is still a
     // strict prefix of both (one invalidation still clears every filter/page).
     const key = qk.customerPullsKey('cus_1');
@@ -156,6 +162,18 @@ describe('qk', () => {
     const vaulted = qk.customerPulls('cus_1', 0, 'vaulted');
     expect(unfiltered.length).toBe(vaulted.length);
     expect(unfiltered).not.toEqual(vaulted);
+  });
+
+  it('keys a wallet page by its type filter, under the per-customer prefix', () => {
+    const all = qk.customerTransactions('cus_1', 0);
+    const money = qk.customerTransactions('cus_1', 0, 'topup,cashout');
+    expect(all.at(-1)).toBe('all');
+    expect(all.length).toBe(money.length);
+    expect(all).not.toEqual(money);
+    const key = qk.customerTransactionsKey('cus_1');
+    for (const k of [all, money]) {
+      expect(k.slice(0, key.length)).toEqual([...key]);
+    }
   });
 
   it('keys the pull ledger and the delivery-order list by customer', () => {

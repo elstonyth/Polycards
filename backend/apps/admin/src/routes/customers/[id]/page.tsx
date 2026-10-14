@@ -28,8 +28,6 @@ import {
   useCustomerReferral,
   useCustomerGroupsAdmin,
   useCustomerMoney,
-  useCustomerPulls,
-  useCustomerTransactions,
   useDeliveryOrders,
   useFreezeCustomer,
   usePayoutDetails,
@@ -41,7 +39,6 @@ import {
   useSetCustomerRealName,
   useSetCustomerPhone,
   useSetPlayerGroup,
-  useSpendReport,
   useUnfreezeCustomer,
   type CustomerReferralCard,
 } from '../../../lib/queries';
@@ -56,7 +53,6 @@ import type {
   DeliveryStatus,
   PayoutDetails,
 } from '../../../lib/admin-rest';
-import { resolveImageUrl } from '../../../lib/image-url';
 import {
   effectiveOddsSet,
   isDefaultPlayerGroup,
@@ -65,12 +61,10 @@ import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { Pager } from '../../../components/Pager';
 import { PullsTable } from '../../../components/PullsTable';
 import { GiftAndBonusPanels } from './gift-and-bonus';
-import {
-  MoneySummary,
-  PeriodsCard,
-  PlayCard,
-  StandingCard,
-} from './MoneyCards';
+import { MoneySummary, PeriodsCard, PlayCard } from './MoneyCards';
+import { LevelTab } from './LevelTab';
+import { VaultTab } from './VaultTab';
+import { WalletTab } from './WalletTab';
 
 // ponytail: no config export — keeps route out of sidebar nav (mirrors packs/[slug]/page.tsx)
 
@@ -753,374 +747,6 @@ const ProfileTab = ({ customerId }: { customerId: string | null }) => {
   );
 };
 
-const LvlTab = ({ customerId }: { customerId: string | null }) => {
-  const { t } = useTranslation();
-  // Same query key as the header's — served from cache, not a second request.
-  const { data: view, isError: viewError } = useCustomerGacha(customerId);
-  const { data: detail } = useCustomerDetail(customerId);
-  const { data: report, isError: reportError } = useSpendReport(customerId);
-  const vip = view?.vip ?? null;
-  const next = vip?.next ?? null;
-  const periods = report?.periods ?? [];
-
-  // Clamped both ends: a 0 threshold would divide by zero, and spend can sit
-  // PAST the next rung's threshold in the window between a qualifying purchase
-  // and the level-up saga writing the new projection.
-  const pct =
-    next && next.threshold > 0
-      ? Math.min(100, Math.max(0, (vip!.spend / next.threshold) * 100))
-      : 100;
-
-  return (
-    <>
-      <Container className="p-0">
-        {viewError ? (
-          <div className="px-6 py-6">
-            <Text size="small" className="text-ui-fg-error">
-              Failed to load.
-            </Text>
-          </div>
-        ) : !view ? (
-          <div className="px-6 py-6">
-            <LoadingSkeleton />
-          </div>
-        ) : !vip ? (
-          // The ladder is empty or this player has never spent — there is no
-          // level to draw, and a "LV 0 / 0% to LV 1" card would be a fiction.
-          <div className="px-6 py-6">
-            <Text className="text-ui-fg-subtle">{t('players.noLevel')}</Text>
-          </div>
-        ) : (
-          <>
-            <div className="flex flex-wrap items-baseline gap-3 px-6 py-4">
-              <Heading level="h1">
-                {t('players.levelHeading', { level: vip.level })}
-              </Heading>
-              <Badge size="small" color="purple">
-                {t('customer360.vipPeakLevel', {
-                  level: vip.highest_level_ever,
-                })}
-              </Badge>
-            </div>
-
-            <div className="grid grid-cols-1 gap-px border-t bg-ui-border-base md:grid-cols-2">
-              <div className="bg-ui-bg-subtle px-6 py-4">
-                <Text size="small" className="text-ui-fg-subtle">
-                  {t('players.memberSince')}
-                </Text>
-                <Heading level="h2" className="mt-1 tabular-nums">
-                  {detail ? orderDateTime(detail.customer.created_at) : '—'}
-                </Heading>
-              </div>
-              <div className="bg-ui-bg-subtle px-6 py-4">
-                <Text size="small" className="text-ui-fg-subtle">
-                  {t('customer360.vipSpend')}
-                </Text>
-                <Heading level="h2" className="mt-1 tabular-nums">
-                  {rm(vip.spend)}
-                </Heading>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2 border-t px-6 py-4">
-              <Text size="small" className="text-ui-fg-subtle">
-                {t('players.nextTier')}
-              </Text>
-              {/* Native progress semantics without the element: role+aria give
-                  a screen reader the same numbers the bar shows sighted eyes. */}
-              <div
-                className="bg-ui-bg-subtle h-2 w-full overflow-hidden rounded-full"
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round(pct)}
-                aria-label={t('players.nextTier')}
-              >
-                <div
-                  className="bg-ui-fg-interactive h-full rounded-full"
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-              <Text size="small" className="text-ui-fg-subtle">
-                {next
-                  ? t('players.toNextLevel', {
-                      amount: rm(next.remaining),
-                      level: next.level,
-                    })
-                  : t('players.topTier')}
-              </Text>
-            </div>
-          </>
-        )}
-      </Container>
-
-      <Container className="p-0">
-        <div className="px-6 py-4">
-          <Heading level="h2">{t('players.spendReport')}</Heading>
-        </div>
-        {reportError ? (
-          <div className="border-t px-6 py-6">
-            <Text size="small" className="text-ui-fg-error">
-              Failed to load.
-            </Text>
-          </div>
-        ) : !report ? (
-          <div className="border-t px-6 py-6">
-            <LoadingSkeleton />
-          </div>
-        ) : periods.length === 0 ? (
-          <div className="border-t px-6 py-6">
-            <Text className="text-ui-fg-subtle">{t('players.spendEmpty')}</Text>
-          </div>
-        ) : (
-          <div
-            className="overflow-x-auto border-t"
-            tabIndex={0}
-            role="region"
-            aria-label="Turnover report table"
-          >
-            <Table>
-              <Table.Header>
-                <Table.Row>
-                  <Table.HeaderCell>{t('players.period')}</Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('players.spend')}
-                  </Table.HeaderCell>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {periods.map((p) => (
-                  <Table.Row key={p.period}>
-                    <Table.Cell className="tabular-nums">{p.period}</Table.Cell>
-                    <Table.Cell className="text-right tabular-nums">
-                      {rm(p.spend)}
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table>
-          </div>
-        )}
-      </Container>
-    </>
-  );
-};
-
-const WalletTab = ({ customerId }: { customerId: string | null }) => {
-  const { t } = useTranslation();
-  const [page, setPage] = useState(0);
-  // Same query key as the header's — React Query serves it from cache, so this
-  // is a read of already-fetched data, not a second request.
-  const { data: view } = useCustomerGacha(customerId);
-  const { data, isError } = useCustomerTransactions(customerId, page);
-  const rows = data?.items ?? [];
-
-  return (
-    <Container className="p-0">
-      <div className="px-6 py-4">
-        <Text size="small" className="text-ui-fg-subtle">
-          {t('customer360.balance')}
-        </Text>
-        <Heading level="h1" className="mt-1 tabular-nums">
-          {view ? rm(view.balance) : '—'}
-        </Heading>
-      </div>
-
-      {isError ? (
-        <div className="border-t px-6 py-6">
-          <Text size="small" className="text-ui-fg-error">
-            Failed to load.
-          </Text>
-        </div>
-      ) : !data ? (
-        <div className="border-t px-6 py-6">
-          <LoadingSkeleton />
-        </div>
-      ) : rows.length === 0 ? (
-        <div className="border-t px-6 py-6">
-          <Text className="text-ui-fg-subtle">{t('support.empty')}</Text>
-        </div>
-      ) : (
-        <>
-          <div
-            className="overflow-x-auto border-t"
-            tabIndex={0}
-            role="region"
-            aria-label="Credit ledger table"
-          >
-            <Table>
-              <Table.Header>
-                <Table.Row>
-                  <Table.HeaderCell>{t('support.when')}</Table.HeaderCell>
-                  <Table.HeaderCell>{t('support.reason')}</Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('support.amount')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell>{t('support.note')}</Table.HeaderCell>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {rows.map((tx) => (
-                  <Table.Row key={tx.id}>
-                    <Table.Cell className="text-ui-fg-subtle tabular-nums whitespace-nowrap">
-                      {orderDateTime(tx.created_at)}
-                    </Table.Cell>
-                    <Table.Cell>
-                      <Badge size="2xsmall">{tx.reason}</Badge>
-                    </Table.Cell>
-                    {/* Debits red, credits left at the base colour — same
-                        convention as the support desk's ledger. */}
-                    <Table.Cell
-                      className={`text-right tabular-nums ${tx.amount < 0 ? 'text-ui-fg-error' : ''}`}
-                    >
-                      {rm(tx.amount)}
-                    </Table.Cell>
-                    <Table.Cell className="text-ui-fg-subtle max-w-[24rem] truncate">
-                      {tx.reference ?? '—'}
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table>
-          </div>
-          <Pager
-            page={page}
-            onPage={setPage}
-            pageSize={25}
-            count={rows.length}
-            total={data.total}
-          />
-        </>
-      )}
-    </Container>
-  );
-};
-
-const VaultTab = ({ customerId }: { customerId: string | null }) => {
-  const { t } = useTranslation();
-  const [page, setPage] = useState(0);
-  const { data: view } = useCustomerGacha(customerId);
-  // status:'vaulted' is applied server-side AND keyed, so this never shows a
-  // bought-back card and never collides with the support page's full history.
-  const { data, isError } = useCustomerPulls(customerId, page, {
-    status: 'vaulted',
-  });
-  const rows = data?.items ?? [];
-
-  return (
-    <Container className="p-0">
-      <div className="grid grid-cols-1 gap-px bg-ui-border-base md:grid-cols-3">
-        <div className="bg-ui-bg-subtle px-6 py-4">
-          <Text size="small" className="text-ui-fg-subtle">
-            {t('customer360.vault')}
-          </Text>
-          <Heading level="h1" className="mt-1 tabular-nums">
-            {view ? view.vault.count : '—'}
-          </Heading>
-        </div>
-        <div className="bg-ui-bg-subtle px-6 py-4">
-          <Text size="small" className="text-ui-fg-subtle">
-            {t('players.vaultFmv')}
-          </Text>
-          <Heading level="h1" className="mt-1 tabular-nums">
-            {view ? rm(view.vault.market_value) : '—'}
-          </Heading>
-        </div>
-        <div className="bg-ui-bg-subtle px-6 py-4">
-          <Text size="small" className="text-ui-fg-subtle">
-            {t('players.vaultPrice')}
-          </Text>
-          <Heading level="h1" className="mt-1 tabular-nums">
-            {view ? rm(view.vault.display_value) : '—'}
-          </Heading>
-        </div>
-      </div>
-
-      {isError ? (
-        <div className="border-t px-6 py-6">
-          <Text size="small" className="text-ui-fg-error">
-            Failed to load.
-          </Text>
-        </div>
-      ) : !data ? (
-        <div className="border-t px-6 py-6">
-          <LoadingSkeleton />
-        </div>
-      ) : rows.length === 0 ? (
-        <div className="border-t px-6 py-6">
-          <Text className="text-ui-fg-subtle">{t('support.empty')}</Text>
-        </div>
-      ) : (
-        <>
-          <div
-            className="overflow-x-auto border-t"
-            tabIndex={0}
-            role="region"
-            aria-label="Vaulted cards table"
-          >
-            <Table>
-              <Table.Header>
-                <Table.Row>
-                  <Table.HeaderCell>{t('support.card')}</Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('players.qty')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('support.value')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell>{t('players.pulledAt')}</Table.HeaderCell>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {rows.map((p) => (
-                  <Table.Row key={p.id}>
-                    <Table.Cell>
-                      <div className="flex items-center gap-3">
-                        {/* `?.image` and not just `p.card`: a card row with an
-                            empty image would render <img src=""> — which the
-                            browser resolves to the page URL and refetches. */}
-                        {p.card?.image && (
-                          <img
-                            src={resolveImageUrl(p.card.image)}
-                            alt=""
-                            loading="lazy"
-                            decoding="async"
-                            className="h-10 w-8 shrink-0 rounded object-contain"
-                          />
-                        )}
-                        <span className="max-w-[20rem] truncate">
-                          {p.card?.name ?? '—'}
-                        </span>
-                      </div>
-                    </Table.Cell>
-                    {/* One pack open yields one card. */}
-                    <Table.Cell className="text-right tabular-nums">
-                      1
-                    </Table.Cell>
-                    <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
-                      {rm(p.card?.market_value ?? null)}
-                    </Table.Cell>
-                    <Table.Cell className="text-ui-fg-subtle tabular-nums whitespace-nowrap">
-                      {orderDateTime(p.rolled_at)}
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table>
-          </div>
-          <Pager
-            page={page}
-            onPage={setPage}
-            pageSize={25}
-            count={rows.length}
-            total={data.total}
-          />
-        </>
-      )}
-    </Container>
-  );
-};
-
 // Shipping half of the Orders tab: this player's delivery orders, read-only.
 // Managing/bulk-editing a shipment stays on the All Orders page — this is the
 // player's record of what was sent, not a second place to change it.
@@ -1755,7 +1381,6 @@ const Customer360Page = () => {
       ) : (
         <>
           <PeriodsCard money={money} />
-          <StandingCard money={money} />
           <PlayCard money={money} />
         </>
       )}
@@ -1863,9 +1488,15 @@ const Customer360Page = () => {
           body would keep the previous player's table offset and — worse — the
           previous player's bank-form draft. */}
       {tab === 'profile' && <ProfileTab key={id} customerId={customerId} />}
-      {tab === 'lvl' && <LvlTab key={id} customerId={customerId} />}
-      {tab === 'wallet' && <WalletTab key={id} customerId={customerId} />}
-      {tab === 'vault' && <VaultTab key={id} customerId={customerId} />}
+      {tab === 'lvl' && customerId && (
+        <LevelTab key={id} customerId={customerId} />
+      )}
+      {tab === 'wallet' && customerId && (
+        <WalletTab key={id} customerId={customerId} />
+      )}
+      {tab === 'vault' && customerId && (
+        <VaultTab key={id} customerId={customerId} />
+      )}
       {/* Both take a non-null id — see the OrdersTab note. key={id} is what
           makes their keepPreviousData safe: the body remounts on a customer
           change, so there is no previous player's page to hold over. */}

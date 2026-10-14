@@ -157,14 +157,21 @@ export interface SupportCustomer {
 export interface SupportTransaction {
   id: string;
   amount: number;
+  /** The row's spend-only bonus part, signed like it (RM). /transactions
+   *  only; absent on the /gacha slice. */
+  bonus?: number;
   reason: string;
   reference: string | null;
   created_at: string;
+  /** Ledger display id (TP…, SP…) where one exists. /transactions only. */
+  ledger_display_id?: string | null;
 }
 
 export interface SupportPull {
   id: string;
   pack_id: string;
+  /** The pack's title (/pulls only). */
+  pack_title?: string | null;
   rolled_at: string;
   status: 'vaulted' | 'bought_back';
   buyback_amount: number | null;
@@ -242,9 +249,15 @@ export async function getCustomerGacha(id: string): Promise<CustomerGacha> {
   );
 }
 
-export const getCustomerTransactions = (id: string, page = 0, limit = 25) =>
+// `reasons` keeps only those ledger reasons (the Wallet tab's filter).
+export const getCustomerTransactions = (
+  id: string,
+  page = 0,
+  limit = 25,
+  reasons?: readonly string[],
+) =>
   getJson<{ items: SupportTransaction[]; total: number }>(
-    `/admin/customers/${encodeURIComponent(id)}/transactions?limit=${limit}&offset=${page * limit}`,
+    `/admin/customers/${encodeURIComponent(id)}/transactions?limit=${limit}&offset=${page * limit}${reasons?.length ? `&reasons=${reasons.join(',')}` : ''}`,
   );
 
 // `opts` narrows the history server-side (status = vaulted | bought_back |
@@ -254,13 +267,14 @@ export const getCustomerPulls = (
   id: string,
   page = 0,
   limit = 25,
-  opts?: { status?: string; source?: string },
+  opts?: { status?: string; source?: string; sort?: 'newest' | 'value' },
 ) => {
   const params = new URLSearchParams({
     limit: String(limit),
     offset: String(page * limit),
   });
   if (opts?.status) params.set('status', opts.status);
+  if (opts?.sort && opts.sort !== 'newest') params.set('sort', opts.sort);
   if (opts?.source) params.set('source', opts.source);
   return getJson<{
     items: SupportPull[];
@@ -1779,6 +1793,18 @@ export interface CustomerMoney {
     topup_at: string | null;
     withdrawal_at: string | null;
     open_at: string | null;
+  };
+  /** The wallet as the player's withdraw button sees it (walletSummary). */
+  wallet: {
+    balance: number;
+    withdrawable: number;
+    /** Spend-only bonus inside the balance. */
+    bonus: number;
+    frozen: boolean;
+    /** Never topped up = nothing may be withdrawn or shipped. */
+    has_topup: boolean;
+    /** Deposits must be spent on packs before they can leave. */
+    playthrough: { deposited: number; used: number; remaining: number };
   };
   cash: ProfitReport['cash'];
   owed: ProfitReport['owed'];
