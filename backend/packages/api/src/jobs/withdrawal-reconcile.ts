@@ -1,9 +1,9 @@
 import { MedusaContainer } from '@medusajs/framework/types';
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils';
 import { resolvePacks, type GatewayWithdrawals } from '../modules/packs/facets';
+import { anyGatewayEnabled } from '../modules/packs/gateway-deposit';
 import {
   applyWithdrawalOutcome,
-  anyWithdrawalsEnabled,
   refundWithdrawal,
   withdrawalIdempotencyReference,
 } from '../modules/packs/gateway-withdrawal';
@@ -40,7 +40,10 @@ export default async function withdrawalReconcileJob(
 ) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   await resolveActiveGateway(container);
-  if (!anyWithdrawalsEnabled()) return;
+  // Gated on the integration, NOT on payouts being open: a pause or a
+  // switch-off stops new payouts, but the ones already in flight must still
+  // settle or refund (a lost callback, a stranded debit).
+  if (!anyGatewayEnabled()) return;
 
   const packs = resolvePacks<GatewayWithdrawals>(container);
   // Per-row gateway, same reasoning as the deposit sweep.

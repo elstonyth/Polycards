@@ -28,7 +28,11 @@ import {
 } from './gateway';
 import { loadPaymentFxQuote, payoutForWithdrawal } from './payment-fx';
 import { A3PAY_PAYOUT_FLOAT_EMPTY } from './a3pay-client';
-import { alertPayoutDisabled, alertPayoutFloatEmpty } from './ops-alert';
+import {
+  alertOps,
+  alertPayoutDisabled,
+  alertPayoutFloatEmpty,
+} from './ops-alert';
 import { contactIfNeeded } from '../../api/utils/customer-contact';
 import { newMerchantTransactionId } from './gateway-deposit';
 import { gatewayEnv, gatewayEnvName } from './gateway-env';
@@ -173,10 +177,14 @@ async function regionalFloatShort(
   config: GatewayConfig,
   gatewayAmount: number,
 ): Promise<{ available: number; currency: string } | null> {
+  // The wallet pays the amount PLUS the gateway's own payout fee, rounded up
+  // to the cent: an amount that passed on its own could still be refused.
+  const fee = GATEWAYS[config.kind as PaymentGateway]?.payoutFeePercent ?? 0;
+  const needed = Math.ceil(gatewayAmount * (100 + fee) - 1e-6) / 100;
   try {
     const b = await checkBalance(config);
     const available = Number(b.availableBalance);
-    return Number.isFinite(available) && available < gatewayAmount
+    return Number.isFinite(available) && available < needed
       ? { available, currency: b.currencyCode }
       : null;
   } catch {
@@ -215,7 +223,9 @@ function floatCannotPayAnything(
   gateway: PaymentGateway,
   short: { available: number },
 ): boolean {
-  return short.available < (GATEWAYS[gateway].currencyLimits?.withdrawalMin ?? 0);
+  return (
+    short.available < (GATEWAYS[gateway].currencyLimits?.withdrawalMin ?? 0)
+  );
 }
 
 /**
@@ -398,24 +408,42 @@ export function formatGatewayFailureReason(input: {
   accountNumber: string;
   accountHolderName: string;
 }): string {
-  const escape = (raw: string) => raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  let redacted = input.message
-    // A digit, then 5+ more digits with an optional single space or hyphen
-    // between each — covers grouped, hyphenated and plain account numbers.
-    .replace(/\d(?:[\s-]?\d){5,}/g, '[redacted]');
-  const account = input.accountNumber.trim();
-  if (account.length >= 4) {
-    redacted = redacted.replaceAll(account, '[redacted]');
-  }
-  const holder = input.accountHolderName.trim();
-  if (holder.length >= 3) {
-    redacted = redacted.replace(new RegExp(escape(holder), 'gi'), '[redacted]');
-  }
+  const redacted = redactPayoutText(
+    input.message,
+    input.accountNumber,
+    input.accountHolderName,
+  );
   return (
     `${input.prefix}: codes=${input.codes.join(',') || 'none'} ` +
     `httpStatus=${input.httpStatus} bankCode=${input.bankCode} ` +
     `msg=${redacted}`
   ).slice(0, 400);
+}
+
+/**
+ * The three redaction rules above, for any gateway free text bound for
+ * `failure_reason`: formatGatewayFailureReason's refusal message, and the
+ * Remark an A3Pay operator types when they fail a payout by hand.
+ */
+export function redactPayoutText(
+  message: string,
+  accountNumber: string,
+  accountHolderName: string,
+): string {
+  const escape = (raw: string) => raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let redacted = message
+    // A digit, then 5+ more digits with an optional single space or hyphen
+    // between each — covers grouped, hyphenated and plain account numbers.
+    .replace(/\d(?:[\s-]?\d){5,}/g, '[redacted]');
+  const account = accountNumber.trim();
+  if (account.length >= 4) {
+    redacted = redacted.replaceAll(account, '[redacted]');
+  }
+  const holder = accountHolderName.trim();
+  if (holder.length >= 3) {
+    redacted = redacted.replace(new RegExp(escape(holder), 'gi'), '[redacted]');
+  }
+  return redacted;
 }
 
 export type StartWithdrawalInput = {
@@ -664,7 +692,9 @@ export async function startWithdrawal(
         input.customerId,
         precheckDestination.accountNumber,
       )
-    ).some((h) => h.holder_name == null && findBank(h.bank_code)?.id === bankId);
+    ).some(
+      (h) => h.holder_name == null && findBank(h.bank_code)?.id === bankId,
+    );
     if (paidElsewhere) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
@@ -889,7 +919,31 @@ export async function startWithdrawal(
     // 'pending' when it has SEEN the debit (in which case this call did not
     // throw), and nothing has submitted to the gateway yet, so 'settled' is
     // impossible.
-    await packs.updateGatewayWithdrawals({ id: row.id, status: 'failed' });
+    //
+    // Unless the debit DID commit and only its answer was lost (a dropped
+    // connection): a 'failed' row is never refunded, so closing it would
+    // strand the money. Close only once the wd: debit is known to be absent;
+    // otherwise leave it pending, where the sweep's not-found path refunds a
+    // real debit and closes a missing one without minting money.
+    let debited: boolean | null = null;
+    try {
+      const [landed] = await packs.listCreditTransactions(
+        {
+          customer_id: input.customerId,
+          source_transaction_id: withdrawalIdempotencyReference(
+            input.customerId,
+            merchantTransactionId,
+          ),
+        },
+        { take: 1 },
+      );
+      debited = Boolean(landed);
+    } catch {
+      // Cannot tell: pending is the side that cannot lose money.
+    }
+    if (debited === false) {
+      await packs.updateGatewayWithdrawals({ id: row.id, status: 'failed' });
+    }
     throw error;
   }
 
@@ -1267,7 +1321,7 @@ export async function refundWithdrawal(
     merchantTransactionId: withdrawal.merchant_transaction_id,
     outcome: 'refunded',
   });
-  await packs.updateGatewayWithdrawals({
+  const closed = await packs.updateGatewayWithdrawals({
     selector: { id: withdrawal.id, status: fromStatus },
     data: {
       status: 'failed',
@@ -1282,6 +1336,23 @@ export async function refundWithdrawal(
         : {}),
     },
   });
+  // The close is scoped to fromStatus. Losing it after the refund committed
+  // is harmless when another refund closed the row first, but not when a
+  // SUCCESS for the same payout claimed it in between (a FAIL and a SUCCESS
+  // racing): the customer is then refunded AND paid, and nothing else says so.
+  if (Array.isArray(closed) && closed.length === 0) {
+    const [row] = await packs.listGatewayWithdrawals(
+      { id: withdrawal.id },
+      { take: 1 },
+    );
+    if (row?.status === 'settled') {
+      void alertOps(
+        scope,
+        `refund-vs-settled:${withdrawal.merchant_transaction_id}`,
+        `Payout ${withdrawal.merchant_transaction_id} (customer ${withdrawal.customer_id}) was REFUNDED RM ${Number(withdrawal.amount)}, but a success for it settled the row at the same moment. If the gateway really paid, the customer has the money twice: check the gateway's record and recover the refund by hand.`,
+      );
+    }
+  }
   if (!refund.replayed) {
     try {
       await notifyFeed(scope, {
@@ -1612,10 +1683,7 @@ export async function submitHeldWithdrawal(
   // Checked before the claim, so a short float leaves the row HELD for an
   // approval after the top-up instead of refunding the customer.
   if (row.gateway_amount != null && !isLedgerGateway(gatewayId)) {
-    const short = await regionalFloatShort(
-      config,
-      Number(row.gateway_amount),
-    );
+    const short = await regionalFloatShort(config, Number(row.gateway_amount));
     if (short) {
       if (floatCannotPayAnything(gatewayId, short)) {
         payoutFloatEmptyUntil.set(

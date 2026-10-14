@@ -270,6 +270,38 @@ describe('TopUpSheet gateway branch', () => {
     expect(container.textContent).not.toContain('ADDED');
   });
 
+  // Navigation does not block: re-enabling Pay while the cashier page loads
+  // let a second tap open a second deposit (and a second A3Pay order).
+  it('keeps Pay disabled while the cashier page loads', async () => {
+    startDeposit.mockResolvedValue({
+      ok: true,
+      url: 'https://cashier.example/pay/abc',
+      amount: 300,
+    });
+    const pay = payButton();
+    await click(pay);
+    expect(pay.disabled).toBe(true);
+    expect(pay.textContent).toMatch(/Taking you to payment/);
+    await click(pay);
+    expect(startDeposit).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-enables Pay when the customer comes back to a cached page', async () => {
+    startDeposit.mockResolvedValue({
+      ok: true,
+      url: 'https://cashier.example/pay/abc',
+      amount: 300,
+    });
+    const pay = payButton();
+    await click(pay);
+    await act(async () => {
+      const back = new Event('pageshow') as PageTransitionEvent;
+      Object.defineProperty(back, 'persisted', { value: true });
+      window.dispatchEvent(back);
+    });
+    expect(pay.disabled).toBe(false);
+  });
+
   // Ads funnel: pressing Pay starts a top-up, whatever the gateway answers —
   // sent before the checkout call so the redirect can't swallow the beacon.
   it('reports InitiateCheckout with the amount when Pay is pressed', async () => {

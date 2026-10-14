@@ -211,6 +211,14 @@ export async function getPaymentLimits(): Promise<PaymentLimits> {
       withdrawalsEnabled: rail.withdrawals_enabled,
       deposit: rail.deposit,
       withdrawal: rail.withdrawal,
+      ...(rail.withdrawal_rm
+        ? {
+            withdrawalRm: {
+              minRm: rail.withdrawal_rm.min_rm,
+              maxRm: rail.withdrawal_rm.max_rm,
+            },
+          }
+        : {}),
       rate: rail.rate,
     })),
   };
@@ -608,6 +616,9 @@ export type CreditTxn = {
   // Signed bonus-credit part of `amount` (spend-only credit); 0 when none or
   // when an older backend omits it.
   bonus: number;
+  // Sell-back rows: the part that must be spent on packs once before it can
+  // be withdrawn; 0 otherwise.
+  playthrough: number;
 };
 
 export type TransactionsResult =
@@ -662,6 +673,7 @@ export async function getTransactions(
       reference: row.reference ?? null,
       gateway: row.gateway ?? null,
       bonus: row.bonus ?? 0,
+      playthrough: row.playthrough ?? 0,
     })),
     page: safePage,
     hasMore: totals?.has_more ?? false,

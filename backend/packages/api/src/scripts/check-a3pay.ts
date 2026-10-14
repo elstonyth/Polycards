@@ -14,11 +14,12 @@ import syncPaymentFxJob from '../jobs/sync-payment-fx';
  *
  *   ./node_modules/.bin/medusa exec src/scripts/check-a3pay.ts
  *
- * 1. Refreshes the SGD->MYR feed rate (the same job that runs every 6h), so
+ * 1. Refreshes the SGD->MYR feed rate (the same job that runs hourly), so
  *    SGD payments are not paused waiting for the first tick.
- * 2. CheckAccBalance — one signed, read-only call. Success proves the base
- *    URL, our private key (they verified our signature), their AES key, the
- *    MID and the IP whitelist all at once.
+ * 2. CheckAccBalance — one read-only call. Success proves the base URL, the
+ *    AES key, the MID and the IP whitelist. NOT our private key: A3Pay ignores
+ *    the signature on read calls (a3pay-client.ts), so a bad
+ *    A3PAY_MERCHANT_PRIVATE_KEY only shows on the first SubmitPayout.
  * 3. GetSupportedBankList — their live payout bank codes, to compare with
  *    SG_BANKS in banks.ts.
  *

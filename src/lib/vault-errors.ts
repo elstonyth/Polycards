@@ -83,7 +83,7 @@ export const VAULT_RULES: ErrorRule[] = [
   //
   // Above /amount/i and /not found|404/i, per the ORDER note.
   [
-    /top up at least once|deposits must be spent on packs|under review|you can withdraw up to|daily withdrawal limit|withdrawals are not available on this account|this bank account|select a saved bank account|choose a bank from the list|valid account number|looks like a card number|account numbers are|account holder name|add an email address|withdrawal is no longer open/i,
+    /top up at least once|more on packs|must be spent on packs|under review|you can withdraw up to|daily withdrawal limit|withdrawals are not available on this account|this bank account|select a saved bank account|choose a bank from the list|valid account number|looks like a card number|account numbers are|account holder name|add an email address|withdrawal is no longer open/i,
     (text) => text,
   ],
   // Regional rail (A3Pay, SGD) refusals (gateway-deposit.ts,
@@ -92,7 +92,7 @@ export const VAULT_RULES: ErrorRule[] = [
   // amount…"), which the broad /amount/ rule below rewrote into a wrong
   // "Enter a valid amount (up to RM 10,000…)". Above it, per the ORDER note.
   [
-    /exchange rate just changed|must come to between|temporarily unavailable on our side|payments are paused|top-ups are not available|name on the bank account/i,
+    /exchange rate just changed|must come to between|temporarily unavailable on our side|payments are paused|top-ups are not available|name on the bank account|top-ups still waiting/i,
     (text) => text,
   ],
   [/withdrawals are not open/i, 'Withdrawals are not open yet.'],

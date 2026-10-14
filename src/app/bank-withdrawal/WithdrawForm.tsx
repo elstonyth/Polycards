@@ -19,7 +19,6 @@ import {
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { PhoneGateAction } from '@/components/account/PhoneGateAction';
-import { PlaythroughProgress } from '@/components/account/PlaythroughProgress';
 import { cn } from '@/lib/utils';
 
 // The payout band (and whether withdrawals are even open) belongs to
@@ -78,7 +77,9 @@ export function nextAmountText(
  *  cap, the daily limit, a paused channel) get no link. The phone gate has
  *  its own PhoneGateAction. */
 const REMEDIES: [RegExp, string | null, string][] = [
-  [/deposits must be spent on packs/i, '/slots', 'Open packs'],
+  // "more on packs" is the 2026-10-14 wording; the older one stays matched
+  // in case the storefront deploys before the backend.
+  [/more on packs|must be spent on packs/i, '/slots', 'Open packs'],
   // null = open the top-up sheet in place, like the no-top-up notice does.
   [/top up at least once/i, null, 'Top up'],
   [/under review/i, '/contact', 'Contact support'],
@@ -120,20 +121,24 @@ function WithdrawRemedy({ error }: { error: string }) {
   );
 }
 
-/** The sky "spend to unlock" hold — shared by the no-top-up and playthrough
- *  notices, which differ only in heading, body and first action. */
+/** The sky "spend to unlock" notice — shared by the no-top-up hold and the
+ *  still-to-play note, which differ only in heading, body and first action.
+ *  The note is not a hold (the rest of the balance can still leave), so it
+ *  takes its own id and the form's hold reason stays unique. */
 function UnlockHold({
+  id = 'withdraw-hold-reason',
   title,
   action,
   children,
 }: {
+  id?: string;
   title: ReactNode;
   action: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div
-      id="withdraw-hold-reason"
+      id={id}
       role="status"
       className="mt-4 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3.5"
     >
@@ -182,10 +187,10 @@ export default function WithdrawForm({
   frozen?: boolean;
   /** The account has never topped up, so nothing may leave (2026-10-11). */
   noTopup?: boolean;
-  /** The wallet's playthrough state, passed as-is. The form decides whether it
-   *  is the hold to show (withdrawable.ts's order: freeze, then no top-up, then
-   *  playthrough), and then says how much more to spend on packs instead of a
-   *  bare RM 0.00 and a generic refusal. */
+  /** The wallet's playthrough state, passed as-is. Only `remaining` is held
+   *  back (partial unlock, 2026-10-14) — it is already left out of
+   *  `withdrawable` — so the form names it rather than blocking on it. A
+   *  freeze or a missing top-up outranks it (withdrawable.ts's order). */
   playthrough?: { deposited: number; used: number; remaining: number } | null;
   /** Spend-only bonus credit inside the balance, already left out of
    *  `withdrawable` — named so the gap to the balance is not a mystery. */
@@ -193,11 +198,13 @@ export default function WithdrawForm({
 }) {
   const hasBonus = Math.round(bonus * 100) > 0;
   const needsTopup = !frozen && noTopup;
-  const locked =
-    !frozen && !needsTopup && playthrough !== null && playthrough.remaining > 0;
+  const toPlay =
+    !frozen && !needsTopup && playthrough !== null && playthrough.remaining > 0
+      ? playthrough.remaining
+      : 0;
   // Any hold means no amount can pass the server's gate, so the form says
   // why up front and does not invite an attempt that is certain to fail.
-  const onHold = frozen || needsTopup || locked;
+  const onHold = frozen || needsTopup;
   // The payout debits the balance server-side; repaint it here so the header
   // chip is not stale. (This used to light the Me-tab money dot too — that dot
   // was suspended 2026-08-11; see components/account/credit-dot.tsx.)
@@ -232,6 +239,10 @@ export default function WithdrawForm({
   const rail = toRegional
     ? rails.find((option) => option.currency === selectedAccount.currency)
     : undefined;
+  // The RM band THIS payout is judged by: the rail's own (its RM band
+  // narrowed to what pays inside its S$ band) for a regional account, else
+  // the active gateway's. At 3.2017, S$30 needs RM 96.05, not RM 50.
+  const payoutBand = rail?.withdrawalRm ?? limits.withdrawal;
   // The channel itself, not the band — the admin can close withdrawals
   // outright while a gateway stays configured (getPaymentLimits, plan 135).
   // Judged against the rail that would pay the chosen account; before one is
@@ -304,10 +315,10 @@ export default function WithdrawForm({
   // RM 100 — smaller TNG payouts are refused by the gateway). The backend
   // enforces the same figure; this states it before the customer taps.
   const accountMin =
-    selected?.minRm != null && selected.minRm > limits.withdrawal.minRm
+    selected?.minRm != null && selected.minRm > payoutBand.minRm
       ? selected.minRm
       : null;
-  const minRm = accountMin ?? limits.withdrawal.minRm;
+  const minRm = accountMin ?? payoutBand.minRm;
   // What a regional bank receives for this RM amount, at today's payout rate
   // (floored to the cent, exactly as the backend quotes and locks it).
   const payoutRegional =
@@ -316,9 +327,13 @@ export default function WithdrawForm({
   async function submit() {
     if (submitting || !formValid || withdrawalsClosed || blocked) return;
     setError(null);
-    if (amount < minRm || amount > limits.withdrawal.maxRm) {
+    if (amount < minRm || amount > payoutBand.maxRm) {
+      // A rail's floor is a converted figure (RM 96.05): show its cents.
+      const floor = Number.isInteger(minRm) ? rm0(minRm) : rm(minRm);
       setError(
-        `Withdrawals must be between ${rm0(minRm)} and ${rm0(limits.withdrawal.maxRm)}${accountMin !== null ? ` for ${selected?.bankName}` : ''}.`,
+        accountMin === null && rail?.withdrawalRm
+          ? `${rail.ui.payoutNoun} must be between ${floor} and ${rm0(payoutBand.maxRm)} today.`
+          : `Withdrawals must be between ${floor} and ${rm0(payoutBand.maxRm)}${accountMin !== null ? ` for ${selected?.bankName}` : ''}.`,
       );
       return;
     }
@@ -426,6 +441,11 @@ export default function WithdrawForm({
             {withdrawable == null ? '—' : rm(withdrawable)}
           </span>
         </div>
+        {toPlay > 0 && (
+          <p className="mt-1 text-[12px] text-neutral-500">
+            Not counting {rm(toPlay)} you still need to play.
+          </p>
+        )}
         {hasBonus && !frozen && (
           <p className="mt-1 text-[12px] text-neutral-500">
             Excludes {rm(bonus)} bonus credit — it&apos;s for opening packs and
@@ -451,9 +471,10 @@ export default function WithdrawForm({
         </UnlockHold>
       )}
 
-      {locked && (
+      {toPlay > 0 && (
         <UnlockHold
-          title={`Spend ${rm(playthrough.remaining)} more on packs to withdraw`}
+          id="withdraw-play-note"
+          title={`Spend ${rm(toPlay)} on packs to unlock it`}
           action={
             <Link href="/slots" className={pillVariants({ size: 'sm' })}>
               Open packs
@@ -461,10 +482,9 @@ export default function WithdrawForm({
           }
         >
           <p className="mt-1 text-[13px] text-white/60">
-            Your deposit must be spent on packs first. Selling cards back
-            doesn&apos;t count.
+            Top-ups, and the bonus part of cards you sell, must be played once.
+            The rest of your balance isn&apos;t locked.
           </p>
-          <PlaythroughProgress {...playthrough} />
         </UnlockHold>
       )}
 
@@ -500,8 +520,7 @@ export default function WithdrawForm({
             Minimum withdrawal is {rm0(limits.withdrawal.minRm)}
           </p>
           <p className="mt-1 text-[13px] text-white/60">
-            You have {rm(withdrawable ?? 0)}. Reach{' '}
-            {rm0(limits.withdrawal.minRm)} to withdraw.
+            You have {rm(withdrawable ?? 0)} ready to withdraw.
           </p>
         </div>
       )}

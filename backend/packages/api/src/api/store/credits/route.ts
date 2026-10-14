@@ -112,6 +112,13 @@ export async function GET(
         // The row's spend-only bonus part (MYR, spec 2026-10-07): a grant, a
         // bonus-funded open, or the bonus share of a sell-back.
         bonus: Number(t.bonus_cents ?? 0) / 100,
+        // The part of a sell-back that came from bonus, gift or prize play and
+        // must be spent on packs once before it can leave (MYR). Buyback rows
+        // only: a top-up's basis is its whole amount and needs no badge.
+        playthrough:
+          t.reason === 'buyback'
+            ? Math.max(0, Number(t.external_funded_cents ?? 0)) / 100
+            : 0,
         created_at: t.created_at,
       };
     }),
@@ -122,9 +129,9 @@ export async function GET(
       is_frozen: wallet.isFrozen,
       // No top-up ever = withdrawals and deliveries locked (2026-10-11).
       has_topup: wallet.hasTopup,
-      // Playthrough gate (withdrawable.ts): deposits must be fully spent on
-      // pack opens before balance can be withdrawn. withdrawable = 0 while
-      // playthrough.remaining > 0; spending on packs is never restricted.
+      // Playthrough gate (withdrawable.ts): playthrough.remaining is held
+      // until spent on packs; withdrawable = available − bonus − remaining
+      // (≥ 0). Spending on packs is never restricted.
       withdrawable: wallet.withdrawable,
       // Spend-only bonus credit inside balance (spec 2026-10-07) — never
       // withdrawable; the wallet page shows it apart.

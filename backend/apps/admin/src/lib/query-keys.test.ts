@@ -17,16 +17,54 @@ describe('qk', () => {
       'cus_1',
     ]);
     expect(qk.pullsKey).toEqual(['admin', 'pulls']);
-    expect(qk.economy).toEqual(['admin', 'economy']);
     // Custom dates always render ('' outside custom): same always-rendered-
     // segment rule as qk.pulls, so no preset key prefixes another.
-    expect(qk.stats('today', '', '')).toEqual(['admin', 'stats', 'today', '', '']);
+    // The scope segment always renders too ('all' by default), so a
+    // real-customers key never shares a cache entry with everyone's.
+    expect(qk.stats('today', '', '')).toEqual([
+      'admin',
+      'stats',
+      'today',
+      '',
+      '',
+      'all',
+    ]);
+    expect(qk.stats('today', '', '', 'default')).toEqual([
+      'admin',
+      'stats',
+      'today',
+      '',
+      '',
+      'default',
+    ]);
     expect(qk.stats('custom', '2026-09-01', '2026-09-10')).toEqual([
       'admin',
       'stats',
       'custom',
       '2026-09-01',
       '2026-09-10',
+      'all',
+    ]);
+    expect(qk.settlement('month', 12, '')).toEqual([
+      'admin',
+      'gateway-settlement',
+      'month',
+      12,
+      '',
+      'all',
+    ]);
+    // Under one prefix, so the Dashboard's live refresh reaches every view.
+    const profit = qk.profitReport('month', '', '', 'default');
+    expect(profit).toEqual([
+      'admin',
+      'profit-report',
+      'month',
+      '',
+      '',
+      'default',
+    ]);
+    expect(profit.slice(0, qk.profitReportKey.length)).toEqual([
+      ...qk.profitReportKey,
     ]);
     expect(qk.eligibleProducts).toEqual(['admin', 'eligible-products']);
   });
@@ -67,13 +105,15 @@ describe('qk', () => {
       0,
       '',
       'created_at:desc',
+      '',
     ]);
-    expect(qk.players(2, 'ada', 'email:asc')).toEqual([
+    expect(qk.players(2, 'ada', 'email:asc', 'default')).toEqual([
       'admin',
       'players',
       2,
       'ada',
       'email:asc',
+      'default',
     ]);
     // playersKey must be a strict prefix of every page key, or a post-disable
     // invalidation would leave the row's status stale on the current page.
@@ -442,5 +482,25 @@ describe('qk', () => {
     expect(
       qk.inventory('charizard').slice(0, qk.inventoryItemKey.length),
     ).not.toEqual([...qk.inventoryItemKey]);
+  });
+
+  it('keys the dashboard counts and recent payments under the list prefixes', () => {
+    // Approving a withdrawal or updating an order invalidates these prefixes,
+    // so the Dashboard's light queries refresh with the full lists.
+    const prefix = (key: readonly unknown[], p: readonly unknown[]) =>
+      key.slice(0, p.length);
+    expect(
+      prefix(qk.deliveryOrderCount('requested'), qk.deliveryOrdersKey),
+    ).toEqual([...qk.deliveryOrdersKey]);
+    expect(
+      prefix(qk.recentGatewayWithdrawals(5), qk.gatewayWithdrawalsKey),
+    ).toEqual([...qk.gatewayWithdrawalsKey]);
+    expect(qk.recentGatewayDeposits(5).slice(0, 2)).toEqual([
+      'admin',
+      'gateway-deposits',
+    ]);
+    expect(qk.deliveryOrderCount('requested')).not.toEqual(
+      qk.deliveryOrderCount('processed'),
+    );
   });
 });

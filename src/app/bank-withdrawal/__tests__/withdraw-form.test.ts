@@ -288,6 +288,45 @@ describe('WithdrawForm', () => {
     expect(startWithdrawal).not.toHaveBeenCalled();
   });
 
+  // The form enters RM. A Singapore account is paid through A3Pay in S$, so
+  // its floor is what pays S$30 at today's rate, not the RM gateway's RM 50.
+  it("judges a Singapore account by the S$ rail's own RM band", async () => {
+    const SG_ACCOUNT = {
+      ...READY_ACCOUNT,
+      id: 'acc_sg',
+      bankCode: 'DBSSSGSG',
+      bankName: 'DBS Bank',
+      currency: 'SGD',
+    };
+    getPaymentLimits.mockResolvedValue({
+      gateway: 'tgpay',
+      deposit: { minRm: 50, maxRm: 10000 },
+      withdrawal: { minRm: 50, maxRm: 30000 },
+      depositsEnabled: true,
+      withdrawalsEnabled: true,
+      regional: [
+        {
+          gateway: 'a3pay',
+          currency: 'SGD',
+          depositsEnabled: true,
+          withdrawalsEnabled: true,
+          deposit: { min: 30, max: 3150 },
+          withdrawal: { min: 30, max: 10000 },
+          withdrawalRm: { minRm: 96.05, maxRm: 30000 },
+          rate: { deposit: 3.169804, payout: 3.201662 },
+        },
+      ],
+    });
+    await render([SG_ACCOUNT], 1000);
+    setValue('select[aria-label="Saved bank account"]', SG_ACCOUNT.id);
+    setValue('input[aria-label="Withdrawal amount in RM"]', '80');
+    await submit();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'Singapore payouts must be between RM 96.05 and RM 30,000 today.',
+    );
+    expect(startWithdrawal).not.toHaveBeenCalled();
+  });
+
   it('caps a typed or pasted amount at the withdrawable figure', async () => {
     await render();
     fillValidForm('200');
@@ -431,21 +470,38 @@ describe('WithdrawForm', () => {
 describe('WithdrawForm — why the balance is held, and the way out', () => {
   const SHORT = { deposited: 50, used: 45, remaining: 5 };
 
-  it('names the playthrough shortfall and disables the form instead of a bare RM 0.00', async () => {
+  it('names what is still to play instead of a bare RM 0.00', async () => {
     await render([READY_ACCOUNT], 0, { playthrough: SHORT });
+    const note = container.querySelector('#withdraw-play-note');
+    expect(note?.textContent).toContain('Spend RM 5.00 on packs to unlock it');
     expect(container.textContent).toContain(
-      'Spend RM 5.00 more on packs to withdraw',
+      'Not counting RM 5.00 you still need to play',
     );
-    expect(
-      container
-        .querySelector('[role="progressbar"]')
-        ?.getAttribute('aria-valuenow'),
-    ).toBe('90');
-    expect(container.querySelector('a[href="/slots"]')?.textContent).toBe(
+    // The "RM 174.22 total" read as the customer's deposits (2026-10-14).
+    expect(container.querySelector('[role="progressbar"]')).toBeNull();
+    expect(container.textContent).not.toContain('Selling cards back');
+    expect(note?.querySelector('a[href="/slots"]')?.textContent).toBe(
       'Open packs',
+    );
+    // Nothing free yet: the payout floor is the hold, and it says so.
+    expect(container.textContent).toContain('Minimum withdrawal is RM 50');
+    expect(container.textContent).toContain(
+      'You have RM 0.00 ready to withdraw',
     );
     expect(amountInput().disabled).toBe(true);
     expect(submitButton().disabled).toBe(true);
+  });
+
+  // Partial unlock (2026-10-14): only the part still to play is held, so the
+  // rest can leave while the note explains the gap.
+  it('lets the rest leave while part is still to play', async () => {
+    await render([READY_ACCOUNT], 100, {
+      playthrough: { deposited: 60, used: 49.45, remaining: 10.55 },
+    });
+    expect(container.querySelector('#withdraw-hold-reason')).toBeNull();
+    expect(container.querySelector('#withdraw-play-note')).not.toBeNull();
+    fillValidForm();
+    expect(submitButton().disabled).toBe(false);
   });
 
   it('a frozen account gets the review notice, never "spend more"', async () => {
@@ -453,7 +509,7 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
     // to open packs would send it down a path that still ends refused.
     await render([READY_ACCOUNT], 0, { frozen: true, playthrough: SHORT });
     expect(container.textContent).toContain('under review');
-    expect(container.textContent).not.toContain('Spend RM');
+    expect(container.textContent).not.toContain('still need to play');
     expect(container.querySelector('a[href="/contact"]')).not.toBeNull();
     expect(amountInput().disabled).toBe(true);
     expect(submitButton().disabled).toBe(true);
@@ -489,7 +545,7 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
   it('no top-up outranks playthrough; a freeze outranks both (withdrawable.ts order)', async () => {
     await render([READY_ACCOUNT], 0, { noTopup: true, playthrough: SHORT });
     expect(container.textContent).toContain('Top up at least once');
-    expect(container.textContent).not.toContain('Spend RM');
+    expect(container.textContent).not.toContain('still need to play');
     act(() => root.unmount());
     container.remove();
 
@@ -546,14 +602,13 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
   it('puts the fix under a backend refusal', async () => {
     startWithdrawal.mockResolvedValue({
       ok: false,
-      error:
-        'RM 5.00 of your deposits must be spent on packs before you can withdraw.',
+      error: 'Spend RM 5.00 more on packs to unlock withdrawals.',
     });
     await render();
     fillValidForm();
     await submit();
     const alert = container.querySelector('[role="alert"]');
-    expect(alert?.textContent).toContain('must be spent on packs');
+    expect(alert?.textContent).toContain('more on packs');
     expect(alert?.querySelector('a[href="/slots"]')?.textContent).toBe(
       'Open packs',
     );
@@ -562,7 +617,9 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
   it('explains a balance under the payout floor instead of snapping the field', async () => {
     await render([READY_ACCOUNT], 30);
     expect(container.textContent).toContain('Minimum withdrawal is RM 50');
-    expect(container.textContent).toContain('You have RM 30.00');
+    expect(container.textContent).toContain(
+      'You have RM 30.00 ready to withdraw',
+    );
     expect(container.textContent).not.toContain('bonus credit');
     expect(container.textContent).not.toContain('Top up at least once');
     expect(amountInput().disabled).toBe(true);

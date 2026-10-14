@@ -146,6 +146,13 @@ export default async function TransactionsPage({
                           <Badge>bonus</Badge>
                         </span>
                       )}
+                      {/* A sell-back from bonus, gift or prize play: this part
+                          must go through packs once before it can leave. */}
+                      {Math.round(t.playthrough * 100) > 0 && (
+                        <span className="ml-2 inline-block whitespace-nowrap align-middle">
+                          <Badge tone="sky">+{rm(t.playthrough)} to play</Badge>
+                        </span>
+                      )}
                     </td>
                     {/* The gateway id support asks for — same value the
                         receipt email and the admin pages show. Internal rows

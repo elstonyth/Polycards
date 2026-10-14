@@ -1,6 +1,8 @@
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
 import { Modules } from '@medusajs/framework/utils';
 import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from './utils';
+import { PACKS_MODULE } from '../../src/modules/packs';
+import type PacksModuleService from '../../src/modules/packs/service';
 
 jest.setTimeout(240 * 1000);
 
@@ -178,6 +180,33 @@ medusaIntegrationTestRunner({
         for (let i = 1; i < stamps.length; i++) {
           expect(stamps[i - 1]).toBeGreaterThanOrEqual(stamps[i]);
         }
+      });
+
+      // RF (the weekly referral commission payout, payWeeklySettlement) is a
+      // real ledger type with its own Referral tab; the route's allowlist
+      // left it out, so the tab answered 400.
+      it('filters by type=RF (referral payouts)', async () => {
+        const { id } = await registerCustomer('admin-ledger-route-rf@test.dev');
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.createLedgerEntries([
+          {
+            display_id: 'RF26TEST0001',
+            type: 'RF' as const,
+            customer_id: id,
+            occurred_at: new Date(),
+            wallet_delta: 12.5,
+            vault_delta: null,
+            payload: null,
+            ref_id: 'wsl_rf_test',
+          },
+        ]);
+        const res = await api.get('/admin/ledger?type=RF', {
+          headers: adminHeaders(),
+        });
+        expect(res.status).toBe(200);
+        const entries = res.data.entries as AdminLedgerRow[];
+        expect(entries.map((e) => e.display_id)).toContain('RF26TEST0001');
+        expect(entries.every((e) => e.type === 'RF')).toBe(true);
       });
 
       it('400s an invalid type, date or q filter instead of silently widening it', async () => {

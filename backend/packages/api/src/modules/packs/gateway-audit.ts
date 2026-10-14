@@ -64,7 +64,10 @@ export function depositAuditNote(
   if (state === 'success') {
     return `gateway says PAID (${amount.toFixed(2)}) but the row is ${row.status} — customer paid and was not credited`;
   }
-  if (state === 'pending') {
+  // An expired top-up the gateway still shows pending was simply never paid:
+  // the gateway does not close abandoned orders. If the customer pays later,
+  // the re-check above reports PAID.
+  if (state === 'pending' && row.status !== 'expired') {
     return `gateway still reports pending for a row we marked ${row.status}`;
   }
   return null;

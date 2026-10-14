@@ -97,11 +97,22 @@ export async function loadPaymentFxQuote(
  */
 export const PAYMENT_FX_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * The age limit for a LIVE feed (source 'coinbase', fetched hourly). Seven
+ * days was sized for ECB's holidays; a live rate that old means every hourly
+ * run has failed for days while the 0.5% fee is the only cushion. Six hours
+ * rides out a few failed runs; when Coinbase stays down the job falls back to
+ * ECB, whose rate is then aged by PAYMENT_FX_MAX_AGE_MS as before.
+ */
+export const PAYMENT_FX_LIVE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
 /** The highest fee, in percent of the mid, either direction may carry. */
 export const PAYMENT_FX_MAX_FEE_PERCENT = 20;
 
 export type PaymentFxRow = {
   rate: unknown;
+  /** Which feed wrote `rate` (sync-payment-fx.ts): 'coinbase' | 'frankfurter'. */
+  source?: unknown;
   fetched_at?: Date | string | null;
   manual_override?: boolean | null;
   manual_rate?: unknown;
@@ -156,11 +167,19 @@ export function paymentFxQuote(
 ): PaymentFxQuote | { error: string } {
   if (!row) return { error: `No ${currency} exchange rate is set.` };
   const manual = row.manual_override ? positive(row.manual_rate) : null;
+  // A pin the admin set on purpose is never silently swapped for the feed.
+  if (row.manual_override && !manual) {
+    return { error: `The pinned ${currency} exchange rate is not usable.` };
+  }
   const mid = manual ?? positive(row.rate);
   if (!mid) return { error: `No usable ${currency} exchange rate.` };
   if (!manual) {
     const fetched = row.fetched_at ? new Date(row.fetched_at).getTime() : NaN;
-    if (!Number.isFinite(fetched) || now - fetched > PAYMENT_FX_MAX_AGE_MS) {
+    const maxAge =
+      row.source === 'coinbase'
+        ? PAYMENT_FX_LIVE_MAX_AGE_MS
+        : PAYMENT_FX_MAX_AGE_MS;
+    if (!Number.isFinite(fetched) || now - fetched > maxAge) {
       return { error: `The ${currency} exchange rate is out of date.` };
     }
   }
@@ -233,9 +252,42 @@ export function regionalDepositBand(
       currencyBand.depositMin,
       Math.ceil((ledgerBand.depositMin / quote.depositRate) * 100 - 1e-6) / 100,
     ),
+    // Less the nudge A3Pay may add (PAYIN_NUDGE_CENTS), so the nudged sum
+    // still credits inside the RM band and the row re-locks normally.
     max: Math.min(
       currencyBand.depositMax,
-      Math.floor((ledgerBand.depositMax / quote.depositRate) * 100 + 1e-6) /
+      (Math.floor((ledgerBand.depositMax / quote.depositRate) * 100 + 1e-6) -
+        PAYIN_NUDGE_CENTS) /
+        100,
+    ),
+  };
+}
+
+/**
+ * The RM band a payout to a regional bank may take TODAY: the RM band,
+ * narrowed so the S$ it converts to (floored to the cent, as
+ * payoutForWithdrawal does) sits inside the gateway's own S$ band. The form
+ * enters RM, so this is the band it can check before the customer taps; at
+ * 3.2017, S$30 needs RM 96.05, not the RM band's RM 50.
+ */
+export function regionalWithdrawalBand(
+  quote: Pick<PaymentFxQuote, 'payoutRate'>,
+  currencyBand: { withdrawalMin: number; withdrawalMax: number },
+  ledgerBand: { withdrawalMin: number; withdrawalMax: number },
+): { min: number; max: number } {
+  let min =
+    Math.ceil(currencyBand.withdrawalMin * quote.payoutRate * 100 - 1e-6) /
+    100;
+  // The payout floors to the cent, so the rounded-up RM can still land a
+  // cent short of the S$ floor; one more cent always clears it.
+  if (payoutForWithdrawal(min, quote) < currencyBand.withdrawalMin) {
+    min = (cents(min) + 1) / 100;
+  }
+  return {
+    min: Math.max(ledgerBand.withdrawalMin, min),
+    max: Math.min(
+      ledgerBand.withdrawalMax,
+      Math.floor(currencyBand.withdrawalMax * quote.payoutRate * 100 + 1e-6) /
         100,
     ),
   };
@@ -329,6 +381,23 @@ export function callbackLedgerAmount(row: RowFx, reported: number): number {
     }
   }
   return toLedgerAmount(row, reported);
+}
+
+/**
+ * True when a row locked in another currency is reported paid more than a
+ * nudge away from its locked gateway amount. A3Pay matches a payin ONLY by its
+ * exact nudged sum, so such a report is a slip at their end (a manual match),
+ * never a customer who paid a different amount. RM rows and unreadable
+ * amounts are false here: the existing money fences handle those.
+ */
+export function offLock(row: RowFx, reported: number): boolean {
+  if (row.currency == null || row.currency === LEDGER_CURRENCY_CODE) {
+    return false;
+  }
+  const locked = Number(row.gatewayAmount);
+  if (row.gatewayAmount == null || !Number.isFinite(locked)) return false;
+  if (!Number.isFinite(reported)) return false;
+  return Math.abs(cents(reported) - cents(locked)) > PAYIN_NUDGE_CENTS;
 }
 
 /** The identity lock, for an RM row. */

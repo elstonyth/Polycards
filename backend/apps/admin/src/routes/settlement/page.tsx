@@ -5,16 +5,18 @@ import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { usePaymentGateway } from '../../lib/queries';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { LEDGER_CURRENCY } from '../../lib/format';
-import { RailCard } from './RailCard';
-import { RegionalFxCard } from './RegionalFxCard';
+import { GatewayStrip } from './GatewayStrip';
+import { ExchangeRateCard } from './ExchangeRateCard';
 import { ReportCard } from './ReportCard';
-import { AuditCard } from './AuditCard';
+import { AuditFindings } from './AuditFindings';
 
 // Settlement — one tab per currency the site takes money in (RM, then each
 // regional rail: SGD today, USDT when it ships). Every tab reads the same way,
-// top to bottom: the gateway and its live wallet, the exchange rate (regional
-// rails only), the weekly/monthly result from this database, and the audit of
-// our rows against the gateway. The tab is in the URL (?currency=SGD), so each
+// top to bottom (spec 2026-10-14-admin-finance-pages §6): one strip with the
+// gateway, its live wallet and the audit's verdict; the exchange rate
+// (regional rails only); the monthly/weekly result from this database; and
+// the audit's findings, only when there are any. Edit forms open in side
+// panels. The tab is in the URL (?currency=SGD), so each
 // currency is a page an operator can link to.
 //
 // The tab list comes from the backend's gateway registry, so a new rail gets
@@ -77,12 +79,12 @@ const SettlementPage = () => {
         // Keyed: a tab switch starts every card fresh, never with the other
         // currency's form state.
         <div key={currency} className="flex flex-col gap-y-3">
-          <RailCard currency={currency} />
+          <GatewayStrip currency={currency} />
           {currency !== LEDGER_CURRENCY ? (
-            <RegionalFxCard currency={currency} />
+            <ExchangeRateCard currency={currency} />
           ) : null}
           <ReportCard currency={currency} />
-          <AuditCard currency={currency} />
+          <AuditFindings currency={currency} />
         </div>
       )}
     </div>

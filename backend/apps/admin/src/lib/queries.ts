@@ -3,6 +3,7 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type QueryClient,
   type UseQueryResult,
 } from '@tanstack/react-query';
 import { toast } from '@medusajs/ui';
@@ -40,7 +41,10 @@ import {
   revokePackGift,
   type PackGift,
   getDeliveryOrder,
-  getEconomyReport,
+  getProfitReport,
+  type CustomerScope,
+  type ProfitRange,
+  type ProfitReport,
   getStatsReport,
   type StatsRange,
   type StatsReport,
@@ -103,7 +107,6 @@ import {
   type SupportPull,
   type DeliveryOrdersPage,
   type DeliveryStatus,
-  type EconomyReport,
   type EligibleProduct,
   type FxChange,
   type FxRateState,
@@ -222,17 +225,35 @@ export const useCreatePixelPokemon = () => {
   });
 };
 
-// from/to are ISO strings for the period window (undefined = all time). Appended
-// to the key inline so qk.economy stays a flat prefix (query-keys.test.ts).
-// keepPreviousData avoids a skeleton flash when switching periods.
-export const useEconomy = (
-  from?: string,
-  to?: string,
-): UseQueryResult<EconomyReport> =>
+/** Money moved, or a player changed group (which moves them in or out of
+ *  "real customers"): the Profit report and the Dashboard's figures are
+ *  stale. Marks every cached view; only mounted ones refetch. */
+export const invalidateMoneyViews = (qc: QueryClient) =>
+  Promise.all([
+    qc.invalidateQueries({ queryKey: qk.profitReportKey }),
+    qc.invalidateQueries({ queryKey: ['admin', 'stats'] }),
+    qc.invalidateQueries({ queryKey: ['admin', 'gateway-settlement'] }),
+  ]);
+
+// Profit report. keepPreviousData so a period or scope switch swaps the
+// numbers without a skeleton flash; a half-picked custom range never fires.
+export const useProfitReport = (
+  range: ProfitRange,
+  from: string,
+  to: string,
+  scope: CustomerScope,
+): UseQueryResult<ProfitReport> =>
   useQuery({
-    queryKey: [...qk.economy, from ?? 'all', to ?? 'all'],
-    queryFn: () => getEconomyReport(from, to),
+    queryKey: qk.profitReport(
+      range,
+      range === 'custom' ? from : '',
+      range === 'custom' ? to : '',
+      scope,
+    ),
+    queryFn: () => getProfitReport(range, from, to, scope),
     placeholderData: keepPreviousData,
+    enabled: range !== 'custom' || (from !== '' && to !== '' && from <= to),
+    refetchOnWindowFocus: true,
   });
 
 // Stats page. keepPreviousData so switching presets swaps the numbers without
@@ -243,10 +264,11 @@ export const useStats = (
   range: StatsRange,
   from: string,
   to: string,
+  scope: CustomerScope = 'all',
 ): UseQueryResult<StatsReport> =>
   useQuery({
-    queryKey: qk.stats(range, from, to),
-    queryFn: () => getStatsReport(range, from, to),
+    queryKey: qk.stats(range, from, to, scope),
+    queryFn: () => getStatsReport(range, from, to, scope),
     placeholderData: keepPreviousData,
     enabled: range !== 'custom' || (from !== '' && to !== '' && from <= to),
     // The dashboard's QueryClient disables focus refetch; "today" is live,
@@ -260,10 +282,11 @@ export const useSettlementReport = (
   granularity: SettlementGranularity,
   periods: number,
   currency: string,
+  scope: CustomerScope = 'all',
 ): UseQueryResult<SettlementReport> =>
   useQuery({
-    queryKey: qk.settlement(granularity, periods, currency),
-    queryFn: () => getSettlementReport(granularity, periods, currency),
+    queryKey: qk.settlement(granularity, periods, currency, scope),
+    queryFn: () => getSettlementReport(granularity, periods, currency, scope),
     placeholderData: keepPreviousData,
   });
 
@@ -610,6 +633,7 @@ export const useAdjustCredits = () => {
       qc.invalidateQueries({ queryKey: qk.customerTransactionsKey(vars.id) });
       // The Players list shows the wallet column this just moved.
       qc.invalidateQueries({ queryKey: qk.playersKey });
+      void invalidateMoneyViews(qc);
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
@@ -1045,6 +1069,7 @@ export const useApproveWithdrawal = () => {
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: qk.gatewayWithdrawalsKey });
+      void invalidateMoneyViews(qc);
     },
   });
 };
@@ -1075,6 +1100,7 @@ export const useDenyWithdrawal = () => {
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: qk.gatewayWithdrawalsKey });
+      void invalidateMoneyViews(qc);
     },
   });
 };
@@ -1133,10 +1159,11 @@ export const usePlayers = (
   page = 0,
   q?: string,
   sort?: string,
+  group?: string,
 ): UseQueryResult<PlayersPage> =>
   useQuery({
-    queryKey: qk.players(page, q, sort),
-    queryFn: () => listPlayers(page, q, 50, sort),
+    queryKey: qk.players(page, q, sort, group),
+    queryFn: () => listPlayers(page, q, 50, sort, group),
     placeholderData: keepPreviousData,
   });
 
@@ -1296,6 +1323,7 @@ export const useSetPlayerGroup = (customerId: string | null) => {
         qc.invalidateQueries({ queryKey: qk.customerGroups }),
         qc.invalidateQueries({ queryKey: qk.customerGroupCounts }),
         qc.invalidateQueries({ queryKey: qk.playersKey }),
+        invalidateMoneyViews(qc),
       ]);
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
@@ -1703,3 +1731,32 @@ export const useDeleteAnnouncement = () => {
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.announcements }),
   });
 };
+
+// ── Dashboard (spec §7) ──────────────────────────────────────────────────────
+// Light reads for the home page: a count per delivery status (limit 1, only
+// `total` is used) and the newest few payments, instead of 50-row pages.
+
+export const useDeliveryOrderCount = (
+  status: DeliveryStatus,
+): UseQueryResult<number> =>
+  useQuery({
+    queryKey: qk.deliveryOrderCount(status),
+    queryFn: () => listDeliveryOrders(status, 0, undefined, 1),
+    select: (page) => page.total,
+  });
+
+export const useRecentGatewayDeposits = (
+  limit: number,
+): UseQueryResult<GatewayDepositsResponse> =>
+  useQuery({
+    queryKey: qk.recentGatewayDeposits(limit),
+    queryFn: () => getGatewayDeposits(0, 'all', limit),
+  });
+
+export const useRecentGatewayWithdrawals = (
+  limit: number,
+): UseQueryResult<GatewayWithdrawalsResponse> =>
+  useQuery({
+    queryKey: qk.recentGatewayWithdrawals(limit),
+    queryFn: () => getGatewayWithdrawals(0, 'all', limit),
+  });

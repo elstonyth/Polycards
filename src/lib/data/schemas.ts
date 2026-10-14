@@ -604,6 +604,12 @@ export const PaymentConfigSchema = z.looseObject({
           min: finite.nullable(),
           max: finite.nullable(),
         }),
+        // The RM a payout through this rail may take today. Optional: a
+        // backend older than this field leaves the form on the RM band.
+        withdrawal_rm: z
+          .looseObject({ min_rm: finite, max_rm: finite })
+          .optional()
+          .catch(undefined),
         rate: z.looseObject({ deposit: finite, payout: finite }).nullable(),
       }),
     )
@@ -633,6 +639,9 @@ export const CreditTransactionSchema = z.looseObject({
   // Signed bonus-credit part of `amount` (MYR). Optional for the same
   // older-backend reason; absent = no bonus part.
   bonus: finite.optional(),
+  // Sell-back rows: the part to spend on packs once before it can leave
+  // (MYR, 2026-10-14). Optional for the same older-backend reason.
+  playthrough: finite.optional(),
 });
 
 /** GET /store/credits as the Transactions page reads it. The totals are SOFT:

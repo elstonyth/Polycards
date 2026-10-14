@@ -60,10 +60,10 @@ const byRank = (a: PageConfig, b: PageConfig) => (a.rank ?? 0) - (b.rank ?? 0);
 type Entry = { path: string; label: string };
 type Group = Entry & { children: Entry[] };
 
-// Phase 1 state: Dashboard opens /stats (spec §6.2a); Customer support and
-// Import collection remain children until Phase 3 merges them.
+// Customer support and Import collection remain children until Phase 3
+// merges them.
 const GROUPS: Group[] = [
-  { path: '/stats', label: 'pcNav.dashboard', children: [] },
+  { path: '/overview', label: 'pcNav.dashboard', children: [] },
   { path: '/deliveries', label: 'pcNav.orders', children: [] },
   {
     path: '/payments',
@@ -122,10 +122,11 @@ const GROUPS: Group[] = [
   },
 ];
 
-// Core list pages replaced by a redirect (spec §6.2). Phase 2 repoints
-// /orders (the post-login landing) from /stats to /overview.
+// Core list pages replaced by a redirect (spec §6.2). /orders is also the
+// post-login landing; /stats was folded into the Dashboard.
 const REDIRECTS: [string, string][] = [
-  ['/orders', '/stats'],
+  ['/orders', '/overview'],
+  ['/stats', '/overview'],
   ['/customers', '/players'],
   ['/reservations', '/inventory/list'],
   ['/products', '/cards'],
