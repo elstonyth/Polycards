@@ -604,6 +604,12 @@ export const PaymentConfigSchema = z.looseObject({
           min: finite.nullable(),
           max: finite.nullable(),
         }),
+        // The RM a payout through this rail may take today. Optional: a
+        // backend older than this field leaves the form on the RM band.
+        withdrawal_rm: z
+          .looseObject({ min_rm: finite, max_rm: finite })
+          .optional()
+          .catch(undefined),
         rate: z.looseObject({ deposit: finite, payout: finite }).nullable(),
       }),
     )

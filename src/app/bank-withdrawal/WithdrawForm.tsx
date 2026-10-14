@@ -232,6 +232,10 @@ export default function WithdrawForm({
   const rail = toRegional
     ? rails.find((option) => option.currency === selectedAccount.currency)
     : undefined;
+  // The RM band THIS payout is judged by: the rail's own (its RM band
+  // narrowed to what pays inside its S$ band) for a regional account, else
+  // the active gateway's. At 3.2017, S$30 needs RM 96.05, not RM 50.
+  const payoutBand = rail?.withdrawalRm ?? limits.withdrawal;
   // The channel itself, not the band — the admin can close withdrawals
   // outright while a gateway stays configured (getPaymentLimits, plan 135).
   // Judged against the rail that would pay the chosen account; before one is
@@ -304,10 +308,10 @@ export default function WithdrawForm({
   // RM 100 — smaller TNG payouts are refused by the gateway). The backend
   // enforces the same figure; this states it before the customer taps.
   const accountMin =
-    selected?.minRm != null && selected.minRm > limits.withdrawal.minRm
+    selected?.minRm != null && selected.minRm > payoutBand.minRm
       ? selected.minRm
       : null;
-  const minRm = accountMin ?? limits.withdrawal.minRm;
+  const minRm = accountMin ?? payoutBand.minRm;
   // What a regional bank receives for this RM amount, at today's payout rate
   // (floored to the cent, exactly as the backend quotes and locks it).
   const payoutRegional =
@@ -316,9 +320,13 @@ export default function WithdrawForm({
   async function submit() {
     if (submitting || !formValid || withdrawalsClosed || blocked) return;
     setError(null);
-    if (amount < minRm || amount > limits.withdrawal.maxRm) {
+    if (amount < minRm || amount > payoutBand.maxRm) {
+      // A rail's floor is a converted figure (RM 96.05): show its cents.
+      const floor = Number.isInteger(minRm) ? rm0(minRm) : rm(minRm);
       setError(
-        `Withdrawals must be between ${rm0(minRm)} and ${rm0(limits.withdrawal.maxRm)}${accountMin !== null ? ` for ${selected?.bankName}` : ''}.`,
+        accountMin === null && rail?.withdrawalRm
+          ? `${rail.ui.payoutNoun} must be between ${floor} and ${rm0(payoutBand.maxRm)} today.`
+          : `Withdrawals must be between ${floor} and ${rm0(payoutBand.maxRm)}${accountMin !== null ? ` for ${selected?.bankName}` : ''}.`,
       );
       return;
     }

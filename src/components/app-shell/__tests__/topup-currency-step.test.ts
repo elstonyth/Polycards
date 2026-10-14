@@ -159,6 +159,58 @@ describe('TopUpSheet — choose a currency first', () => {
     expect(amountInput()).toBeNull();
   });
 
+  it('shows a closed S$ rail as Paused, not as nothing', async () => {
+    await mount({
+      ...WITH_SGD,
+      regional: [{ ...WITH_SGD.regional[0], depositsEnabled: false }],
+    });
+    const sgd = button('Singapore Dollar');
+    expect(sgd?.disabled).toBe(true);
+    expect(sgd?.textContent).toMatch(/Paused/);
+  });
+
+  it('keeps the refusal on screen when the re-read finds the S$ rail closed', async () => {
+    await mount(WITH_SGD);
+    await act(async () => button('Singapore Dollar')!.click());
+    startDeposit.mockResolvedValueOnce({
+      ok: false,
+      error: 'SGD payments are paused right now — please try again shortly.',
+    });
+    getPaymentLimits.mockResolvedValue({
+      ...WITH_SGD,
+      regional: [{ ...WITH_SGD.regional[0], depositsEnabled: false }],
+    });
+    await act(async () => button('Pay')!.click());
+    expect(container.textContent).toContain('Choose a currency');
+    expect(container.textContent).toContain('SGD payments are paused');
+  });
+
+  it('keeps the S$ rail when the re-read after a refusal fails', async () => {
+    await mount(WITH_SGD);
+    await act(async () => button('Singapore Dollar')!.click());
+    // getPaymentLimits answers its defaults (gateway "unknown", no rails)
+    // when the backend cannot be reached.
+    getPaymentLimits.mockResolvedValue({ ...RM_ONLY, gateway: 'unknown' });
+    await act(async () => button('Pay')!.click());
+    expect(amountInput()?.getAttribute('aria-label')).toBe(
+      'Top-up amount in S$',
+    );
+  });
+
+  // A3Pay matches a payment ONLY by its exact amount, and may ask for a few
+  // cents more than the sheet showed (S$100 -> S$100.01).
+  it('tells an S$ payer to transfer the exact amount the next page shows', async () => {
+    await mount(WITH_SGD);
+    await act(async () => button('Singapore Dollar')!.click());
+    expect(container.textContent).toMatch(/exact amount/i);
+    expect(container.textContent).toMatch(/cents included/i);
+    act(() => root.unmount());
+    root = createRoot(container);
+    await mount(WITH_SGD);
+    await act(async () => button('Malaysian Ringgit')!.click());
+    expect(container.textContent).not.toMatch(/cents included/i);
+  });
+
   it('pays in S$ with the rate it showed, so the backend can refuse a moved one', async () => {
     await mount(WITH_SGD);
     await act(async () => button('Singapore Dollar')!.click());
