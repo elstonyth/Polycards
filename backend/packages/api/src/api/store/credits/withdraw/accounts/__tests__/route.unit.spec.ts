@@ -82,7 +82,7 @@ const mkReq = (body: Record<string, unknown> | null = null) =>
 const VALID_BODY = {
   bank_code: 'MBBEMYKL',
   bank_name: 'Maybank',
-  account_number: '1234567890',
+  account_number: '123456789012',
   account_holder_name: 'Tan Ah Kow',
 };
 
@@ -97,10 +97,10 @@ const fullList = () =>
 const SAVED_AT = '2026-01-01T00:00:00.000Z';
 
 const savedShape = (over: Partial<Record<string, unknown>> = {}) => ({
-  id: savedBankAccountId('MBBEMYKL', '1234567890'),
+  id: savedBankAccountId('MBBEMYKL', '123456789012'),
   bankCode: 'MBBEMYKL',
   bankName: 'Maybank',
-  accountNumber: '1234567890',
+  accountNumber: '123456789012',
   accountHolderName: 'Tan Ah Kow',
   savedAt: SAVED_AT,
   ...over,
@@ -249,7 +249,7 @@ describe('POST /store/credits/withdraw/accounts', () => {
       metadata: expect.objectContaining({
         bank_accounts: [
           expect.objectContaining({
-            id: savedBankAccountId('MBBEMYKL', '1234567890'),
+            id: savedBankAccountId('MBBEMYKL', '123456789012'),
             bankCode: 'MBBEMYKL',
             bankName: 'Maybank',
           }),
@@ -399,11 +399,11 @@ describe('POST accounts — the new-destination notice', () => {
       template: 'bank-account-added',
       data: expect.objectContaining({
         bank_name: 'Maybank',
-        account_last4: '7890',
+        account_last4: '9012',
       }),
     });
     // The full number must never leave the database on this path.
-    expect(JSON.stringify(emails[0])).not.toContain('1234567890');
+    expect(JSON.stringify(emails[0])).not.toContain('123456789012');
   });
 
   it('also drops an in-app feed row for the same event', async () => {
@@ -418,7 +418,7 @@ describe('POST accounts — the new-destination notice', () => {
     expect(feed).toHaveLength(1);
     expect(feed[0]).toMatchObject({
       receiver_id: 'cus_1',
-      data: expect.objectContaining({ account_last4: '7890' }),
+      data: expect.objectContaining({ account_last4: '9012' }),
     });
   });
 

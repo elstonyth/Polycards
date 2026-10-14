@@ -39,7 +39,8 @@ describe('bank registry', () => {
   it('covers every TGPay SWIFT row and keeps every retired-gateway code as an alias', () => {
     const tgpay = MY_BANKS.filter((b) => b.codes.tgpay).length;
     const aliased = MY_BANKS.filter((b) => b.legacyAliases.length).length;
-    expect(tgpay).toBe(21);
+    // 21 TGPay SWIFT rows less Touch 'n Go, paused 2026-10-14.
+    expect(tgpay).toBe(20);
     expect(aliased).toBe(31);
   });
 
@@ -58,13 +59,13 @@ describe('bank registry', () => {
     // account under it reads as "not available", never as unknown).
     expect(gatewayBankCode('BOOSTMY', 'tgpay')).toBeNull();
     expect(findBank('BODE')?.id).toBe('BOOSTMY');
-    // Touch 'n Go eWallet: an account saved under the retired gateway's code
-    // pays out through TGPay's code for it.
-    expect(gatewayBankCode('MYTNGO', 'tgpay')).toEqual({
-      code: 'TNGDRMYKL',
-      name: "Touch 'n Go",
-    });
-    expect(findBank('TNGDRMYKL')?.id).toBe('TNGMY');
+    // Touch 'n Go eWallet is PAUSED (2026-10-14): it still resolves, under its
+    // id and the retired gateway's code, but no TGPay-family gateway pays to it
+    // and the picker leaves it out.
+    expect(findBank('MYTNGO')?.id).toBe('TNGMY');
+    expect(gatewayBankCode('TNGMY', 'tgpay')).toBeNull();
+    expect(gatewayBankCode('TNGMY', 'the7pay')).toBeNull();
+    expect(banksFor('tgpay').map((b) => b.bankCode)).not.toContain('TNGMY');
     // Touch 'n Go carries its own RM 100 payout floor (TGPay refused smaller
     // TNG payouts on 2026-10-09); banks have none of their own.
     expect(bankPayoutMinRm('TNGMY')).toBe(100);
@@ -75,7 +76,7 @@ describe('bank registry', () => {
 
   it('picker lists carry canonical ids and neutral names; the dummy bank only on the TGPay sandbox', () => {
     const tgpay = banksFor('tgpay');
-    expect(tgpay).toHaveLength(21);
+    expect(tgpay).toHaveLength(20);
     expect(tgpay[0]).toEqual({ bankCode: 'PHBMMYKL', bankName: 'Affin Bank' });
     expect(banksFor('tgpay', { sandbox: true })[0].bankCode).toBe(
       TGPAY_SANDBOX_BANK.id,

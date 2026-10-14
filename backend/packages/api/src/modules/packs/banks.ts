@@ -39,6 +39,12 @@ export type Bank = {
    * so the floor is RM 100 until TGPay states the real limit.
    */
   payoutMinRm?: number;
+  /**
+   * Account-number lengths this bank issues. Unset = not checked. Set only
+   * where every settled payout agrees (prod, to 2026-10-14): a wrong length
+   * never paid, and 16-digit Maybank/CIMB numbers were debit cards.
+   */
+  accountLengths?: readonly number[];
 };
 
 const bank = (
@@ -68,20 +74,30 @@ export const MY_BANKS: readonly Bank[] = [
   bank('BKRMMYKL', 'Bank Rakyat', { code: 'MYBKRM', name: 'Bank Kerjasama Rakyat' }, { code: 'BKRMMYKL', name: 'Bank Kerjasama Rakyat Malaysia Berhad' }),
   bank('BMMBMYKL', 'Bank Muamalat', { code: 'MYBMMB', name: 'Bank Muamalat' }, { code: 'BMMBMYKL', name: 'Bank Muamalat (Malaysia) Berhad' }),
   bank('BSNAMYK1', 'Bank Simpanan Nasional (BSN)', { code: 'MYBSNB', name: 'Bank Simpanan National' }, { code: 'BSNAMYK1', name: 'Bank Simpanan Nasional Berhad' }),
-  bank('CIBBMYKL', 'CIMB Bank', { code: 'MYCIMB', name: 'CIMB Bank Berhad' }, { code: 'CIBBMYKL', name: 'CIMB Bank Berhad' }),
+  // 10 is what every settled payout used. 14 stays open: CIMB is reported to
+  // issue 14-digit current accounts, and refusing a real one costs more than
+  // letting a typo through to the bank.
+  { ...bank('CIBBMYKL', 'CIMB Bank', { code: 'MYCIMB', name: 'CIMB Bank Berhad' }, { code: 'CIBBMYKL', name: 'CIMB Bank Berhad' }), accountLengths: [10, 14] },
   bank('CITIMYKL', 'Citibank', null, { code: 'CITIMYKL', name: 'Citibank Berhad' }),
-  bank('HLBBMYKL', 'Hong Leong Bank', { code: 'MYHLBB', name: 'Hong Leong Bank Berhad' }, { code: 'HLBBMYKL', name: 'Hong Leong Bank Berhad' }),
+  { ...bank('HLBBMYKL', 'Hong Leong Bank', { code: 'MYHLBB', name: 'Hong Leong Bank Berhad' }, { code: 'HLBBMYKL', name: 'Hong Leong Bank Berhad' }), accountLengths: [11] },
   bank('HBMBMYKL', 'HSBC Bank', { code: 'MYHSBC', name: 'HSBC Bank' }, { code: 'HBMBMYKL', name: 'HSBC Bank Malaysia Berhad' }),
   bank('KFHOMYKL', 'Kuwait Finance House', null, { code: 'KFHOMYKL', name: 'Kuwait Finance House' }),
-  bank('MBBEMYKL', 'Maybank', { code: 'MYMB2U', name: 'Maybank Berhad' }, { code: 'MBBEMYKL', name: 'Maybank / Malayan Banking Berhad' }),
+  { ...bank('MBBEMYKL', 'Maybank', { code: 'MYMB2U', name: 'Maybank Berhad' }, { code: 'MBBEMYKL', name: 'Maybank / Malayan Banking Berhad' }), accountLengths: [12] },
   bank('OCBCMYKL', 'OCBC Bank', { code: 'MYOCBC', name: 'Overseas Chinese Banking Corporation Limited' }, { code: 'OCBCMYKL', name: 'OCBC Bank (Malaysia) Berhad' }),
-  bank('PBBEMYKL', 'Public Bank', { code: 'MYPUBB', name: 'Public Bank Berhad' }, { code: 'PBBEMYKL', name: 'Public Bank Berhad' }),
-  bank('RHBBMYKL', 'RHB Bank', { code: 'MYRHBB', name: 'RHB Bank Berhad' }, { code: 'RHBBMYKL', name: 'RHB Bank Berhad' }),
+  { ...bank('PBBEMYKL', 'Public Bank', { code: 'MYPUBB', name: 'Public Bank Berhad' }, { code: 'PBBEMYKL', name: 'Public Bank Berhad' }), accountLengths: [10] },
+  { ...bank('RHBBMYKL', 'RHB Bank', { code: 'MYRHBB', name: 'RHB Bank Berhad' }, { code: 'RHBBMYKL', name: 'RHB Bank Berhad' }), accountLengths: [14] },
   bank('SCBLMYKX', 'Standard Chartered', { code: 'MYSTCB', name: 'Standard Chartered Bank' }, { code: 'SCBLMYKX', name: 'Standard Chartered Bank (Malaysia) Berhad' }),
-  // Touch 'n Go eWallet keeps its slug id (saved accounts already carry it);
-  // TGPay added a payout code for it after this table was first copied
-  // (their payout-bank page, checked 2026-10-09).
-  { ...bank('TNGMY', "Touch 'n Go eWallet", { code: 'MYTNGO', name: 'Touch N Go' }, { code: 'TNGDRMYKL', name: "Touch 'n Go" }), payoutMinRm: 100 },
+  // Touch 'n Go eWallet keeps its slug id (saved accounts already carry it).
+  // PAUSED 2026-10-14: TGPay's TNG route refused 97 of 110 payouts in a week
+  // ("No payout provider is available for this order") and customers retried
+  // up to 16 times a day. No TGPay code = gone from the picker, saved TNG
+  // accounts read "not available", and the precheck refuses before any debit.
+  // Re-enable once TGPay confirms the route: TGPay code
+  // { code: 'TNGDRMYKL', name: "Touch 'n Go" } (their payout-bank page, 2026-10-09).
+  // Also bring back the TNG "no payout provider" refusal copy in
+  // gateway-withdrawal.ts and its tests, removed with this pause
+  // (git log -S "No payout provider is available").
+  { ...bank('TNGMY', "Touch 'n Go eWallet", { code: 'MYTNGO', name: 'Touch N Go' }, null), payoutMinRm: 100 },
   bank('UOVBMYKL', 'UOB', { code: 'MYUOBB', name: 'United Overseas Bank' }, { code: 'UOVBMYKL', name: 'United Overseas Bank (Malaysia) Berhad' }),
   // No TGPay payout code today (e-wallets, digital and foreign banks): kept so
   // a saved account under one still resolves and reads as "not available with

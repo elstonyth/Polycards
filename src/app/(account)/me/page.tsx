@@ -291,6 +291,15 @@ export default async function MePage() {
                   <p className="font-heading mt-0.5 text-2xl text-white">
                     {rm(walletResult.wallet.balance)}
                   </p>
+                  {/* Right beside the Withdraw button it would otherwise
+                      find out from. Bonus alone never withdraws, so no hint. */}
+                  {!walletResult.wallet.hasTopup &&
+                    walletResult.wallet.balance - walletResult.wallet.bonus >=
+                      0.01 && (
+                      <p className="mt-0.5 text-[12px] font-semibold text-sky-400">
+                        Top up once to unlock withdrawals
+                      </p>
+                    )}
                 </Link>
                 <div className="flex shrink-0 gap-2">
                   <Link

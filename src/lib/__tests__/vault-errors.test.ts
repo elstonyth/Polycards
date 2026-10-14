@@ -154,6 +154,9 @@ describe('VAULT_RULES backend-message contract', () => {
       'Add an email address to your account before withdrawing.',
       'Choose a bank from the list.',
       'Enter a valid account number (digits only).',
+      "That looks like a card number. Enter your bank account number instead — it's in your banking app or on your statement, not on the card.",
+      'Maybank account numbers are 12 digits. Check the number in your banking app.',
+      'CIMB Bank account numbers are 10 or 14 digits. Check the number in your banking app.',
       'Enter the account holder name exactly as the bank has it.',
     ];
     for (const msg of literals) expect(map(msg)).toBe(msg);
