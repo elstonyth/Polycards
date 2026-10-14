@@ -192,6 +192,71 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(await service.creditBalance(customerId)).toBe(50);
       });
 
+      it('insures a prize worth over RM200, like a vault card', async () => {
+        const customerId = 'cus_wd_fee_insured';
+        await service.createCards([
+          {
+            handle: 'big-prize',
+            name: 'Big Prize',
+            set: 'Base',
+            grader: 'PSA',
+            grade: '10',
+            market_value: 100,
+            image: 'x.webp',
+          },
+        ]);
+        await service.mutateCreditAtomic({
+          customerId,
+          amount: 100,
+          reason: 'topup',
+          idempotencyReference: `seed-topup:${customerId}`,
+        });
+        const [pull] = await service.createPulls([
+          {
+            customer_id: customerId,
+            pack_id: 'reward-box-c',
+            card_id: 'big-prize',
+            order_id: null,
+            rolled_at: new Date(),
+            source: 'reward',
+          },
+        ]);
+        // USD 100 at RM 4 per USD: well over the RM200 protection line.
+        const res = await service.recordRewardWithdrawal(
+          customerId,
+          pull.id,
+          ADDRESS,
+          4,
+        );
+        expect(res.status).toBe('requested');
+        const [order] = await service.listDeliveryOrders(
+          { customer_id: customerId },
+          { take: 1 },
+        );
+        const insurance = Number(order.insurance_fee);
+        expect(insurance).toBeGreaterThan(0);
+        expect(await service.creditBalance(customerId)).toBeCloseTo(
+          100 - 15 - insurance,
+          2,
+        );
+      });
+
+      it('reports how many prizes can still ship today', async () => {
+        const customerId = 'cus_wd_allowance';
+        const pullId = await seedPull({ customerId, source: 'reward' });
+        expect(await service.rewardShippingAllowance(customerId)).toEqual({
+          perDay: 1,
+          usedToday: 0,
+          remaining: 1,
+        });
+        await service.recordRewardWithdrawal(customerId, pullId, ADDRESS);
+        expect(await service.rewardShippingAllowance(customerId)).toEqual({
+          perDay: 1,
+          usedToday: 1,
+          remaining: 0,
+        });
+      });
+
       it('charges a Singapore prize RM50', async () => {
         const customerId = 'cus_wd_fee_sg';
         const pullId = await seedPull({ customerId, source: 'reward' });

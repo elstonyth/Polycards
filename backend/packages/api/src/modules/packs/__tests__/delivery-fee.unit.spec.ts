@@ -37,6 +37,8 @@ describe('Singapore delivery', () => {
     // Country typed MY but the address names Singapore: never the RM15 rate.
     expect(deliveryZone('50450', null, 'Singapore', 'MY')).toBe('sg');
     expect(deliveryZone('50450', 'Singapore', 'Marina Bay', 'MY')).toBe('sg');
+    // The Malay spelling bills Singapore too.
+    expect(deliveryZone('50450', null, 'Singapura', 'MY')).toBe('sg');
     // Malaysia unchanged.
     expect(deliveryZone('88000', 'Sabah', 'Kota Kinabalu', 'MY')).toBe('east');
     expect(deliveryZone('50450', 'Selangor', 'Petaling Jaya', 'MY')).toBe(

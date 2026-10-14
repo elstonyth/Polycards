@@ -10,8 +10,9 @@ import {
   deliveryZone,
   isShippableCountry,
   isShippablePostcode,
-  MY_ONLY_MESSAGE,
+  SHIPPING_COUNTRIES_MESSAGE,
   postcodeMessage,
+  ZONE_SHIPPING_MYR,
   CUSTOMER_STATUS_WORD,
 } from '../../../../../modules/packs/delivery';
 
@@ -74,7 +75,7 @@ export async function POST(
   // and point at the free cancel path (a cancel refunds the fee, so
   // re-requesting re-prices cleanly).
   if (!isShippableCountry(snapshot.ship_country_code)) {
-    throw new MedusaError(MedusaError.Types.INVALID_DATA, MY_ONLY_MESSAGE);
+    throw new MedusaError(MedusaError.Types.INVALID_DATA, SHIPPING_COUNTRIES_MESSAGE);
   }
   if (
     !isShippablePostcode(snapshot.ship_postal_code, snapshot.ship_country_code)
@@ -88,21 +89,25 @@ export async function POST(
   // not the postcode alone — otherwise re-pointing a KL-postcode order at a
   // Sabah address would keep the RM15 it paid.
   // Orders that paid no fee (before fees existed, or a free prize before
-  // 2026-10-14) are held to their zone too: otherwise one could be re-pointed
-  // at a dearer zone, Singapore included, and ship there for nothing.
+  // 2026-10-14) may still move to the same or a cheaper zone, but never a
+  // dearer one: otherwise one could be re-pointed at Singapore and ship there
+  // for nothing.
+  const toZone = deliveryZone(
+    snapshot.ship_postal_code,
+    snapshot.ship_province,
+    snapshot.ship_city,
+    snapshot.ship_country_code,
+  );
+  const fromZone = deliveryZone(
+    order.ship_postal_code,
+    order.ship_province,
+    order.ship_city,
+    order.ship_country_code,
+  );
   if (
-    deliveryZone(
-      snapshot.ship_postal_code,
-      snapshot.ship_province,
-      snapshot.ship_city,
-      snapshot.ship_country_code,
-    ) !==
-    deliveryZone(
-      order.ship_postal_code,
-      order.ship_province,
-      order.ship_city,
-      order.ship_country_code,
-    )
+    toZone !== fromZone &&
+    (order.shipping_fee != null ||
+      ZONE_SHIPPING_MYR[toZone] > ZONE_SHIPPING_MYR[fromZone])
   ) {
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,

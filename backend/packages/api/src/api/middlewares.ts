@@ -1071,6 +1071,13 @@ export default defineMiddlewares({
       middlewares: [requirePhoneVerified],
     },
     {
+      // GET /store/rewards/withdraw — today's prize-shipping allowance, read
+      // by the delivery sheet on open. The wildcard above is POST-only.
+      matcher: '/store/rewards/withdraw',
+      method: 'GET',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       // Consolidated daily-rewards state (GET /store/daily) — the /daily
       // surface fetches it on load.
       matcher: '/store/daily',

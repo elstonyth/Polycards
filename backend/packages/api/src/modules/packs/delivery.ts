@@ -174,13 +174,10 @@ export type DeliveryFee = {
   total: number;
 };
 
-// ONE copy of the MY-only rule for both write paths (request step + address
-// edit route) so the guard and its customer copy can't drift.
-export const MY_ONLY_MESSAGE =
+// ONE copy of the shipping-country rule for every write path (request step,
+// prize route, address edit route) so the guard and its copy can't drift.
+export const SHIPPING_COUNTRIES_MESSAGE =
   'We currently ship within Malaysia and Singapore only.';
-export function isMalaysianAddress(countryCode: string): boolean {
-  return countryCode.trim().toUpperCase() === 'MY';
-}
 /** The countries a delivery can go to: Malaysia and (since 2026-10-14)
  *  Singapore, each with its own rate below. */
 export function isShippableCountry(countryCode: string): boolean {
@@ -222,10 +219,12 @@ export function postcodeMessage(countryCode: string): string {
 
 export type DeliveryZone = 'west' | 'east' | 'sg';
 
-// An address that names Singapore anywhere in its state or city. Billed the
-// Singapore rate whatever country code was typed, the same way a Sabah
-// address with a KL postcode is billed East: the dearer reading wins.
-const SINGAPORE_PLACE_RE = /\bsingapore\b/i;
+// An address that names Singapore (or "Singapura", the Malay spelling) in its
+// state or city. Billed the Singapore rate whatever country code was typed,
+// the same way a Sabah address with a KL postcode is billed East: the dearer
+// reading wins. NOT matched on the street lines: a Malaysian "Jalan Singapura"
+// would be over-billed RM50 with no way to correct it.
+const SINGAPORE_PLACE_RE = /\b(singapore|singapura)\b/i;
 
 // The East Malaysian states + their major localities. Matched on the address's
 // province AND city because the postcode alone is customer-typed: a Sabah
@@ -252,7 +251,7 @@ export function deliveryZone(
   return EAST_PLACE_RE.test(place) ? 'east' : 'west';
 }
 
-const ZONE_SHIPPING_MYR: Record<DeliveryZone, number> = {
+export const ZONE_SHIPPING_MYR: Record<DeliveryZone, number> = {
   west: WEST_SHIPPING_MYR,
   east: EAST_SHIPPING_MYR,
   sg: SINGAPORE_SHIPPING_MYR,

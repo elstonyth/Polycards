@@ -48,6 +48,7 @@ import VipRewardGrant from '../models/vip-reward-grant';
 import NotificationRead from '../models/notification-read';
 import LedgerEntry from '../models/ledger-entry';
 import LedgerSequence from '../models/ledger-sequence';
+import FxRate from '../models/fx-rate';
 
 import { POST as claimPOST } from '../../../api/store/rewards/claim/[grantId]/route';
 import { POST as withdrawPOST } from '../../../api/store/rewards/withdraw/route';
@@ -89,6 +90,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
     // A prize delivery writes the OD ledger row that carries its fee.
     LedgerEntry,
     LedgerSequence,
+    // The withdraw route values a prize for its insurance at the live rate.
+    FxRate,
   ],
   testSuite: ({ service }) => {
     // Build a mock req/res. scope.resolve returns the real packs service for every
@@ -134,6 +137,12 @@ moduleIntegrationTestRunner<PacksModuleService>({
     };
 
     const seedRewardPull = async (customerId: string) => {
+      const [rate] = await service.listFxRates({ pair: 'USD_MYR' }, { take: 1 });
+      if (!rate) {
+        await service.createFxRates([
+          { pair: 'USD_MYR', rate: 4, source: 'test', manual_override: false },
+        ]);
+      }
       // Shipping needs one top-up ever (2026-10-11); idempotent per customer.
       await service.mutateCreditAtomic({
         customerId,

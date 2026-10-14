@@ -693,6 +693,65 @@ medusaIntegrationTestRunner({
         expect(await packs.creditBalance(order.customer_id)).toBe(18);
       });
 
+      // Singapore (2026-10-14): shipped direct at RM50; a 6-digit postcode.
+      it('ships to Singapore at RM50, and refuses a 5-digit Singapore postcode', async () => {
+        const token = await registerCustomer('del-fee-sg@test.dev');
+        const pullId = await openOne(token, 'delivery-fee-topup-sg');
+        for (const key of [
+          'delivery-fee-topup-sg2',
+          'delivery-fee-topup-sg3',
+        ]) {
+          await api.post(
+            '/store/credits/topup',
+            { amount: TOPUP },
+            {
+              headers: {
+                ...authed(token),
+                'idempotency-key': key, // gitleaks:allow — test dedupe tag, not a key
+              },
+            },
+          );
+        }
+        const badSg = await addAddress(token, {
+          postal_code: '18983',
+          country_code: 'sg',
+        });
+        const refused = await reqApi(
+          'post',
+          '/store/delivery-orders',
+          authed(token),
+          { pull_ids: [pullId], address_id: badSg },
+        );
+        expect(refused.status).toBe(400);
+        expect(JSON.stringify(refused.data)).toMatch(
+          /6-digit Singapore postcode/,
+        );
+
+        const sgAddr = await addAddress(token, {
+          postal_code: '018983',
+          country_code: 'sg',
+        });
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        const [pull] = await packs.listPulls({ id: pullId }, { take: 1 });
+        const before = await packs.creditBalance(pull.customer_id);
+        const created = await reqApi(
+          'post',
+          '/store/delivery-orders',
+          authed(token),
+          { pull_ids: [pullId], address_id: sgAddr },
+        );
+        expect(created.status).toBe(201);
+        const [order] = await packs.listDeliveryOrders(
+          { id: created.data.order_id },
+          { take: 1 },
+        );
+        expect(Number(order.shipping_fee)).toBe(50);
+        expect(await packs.creditBalance(pull.customer_id)).toBeCloseTo(
+          before - 50 - Number(order.insurance_fee ?? 0),
+          2,
+        );
+      });
+
       it('refuses a non-Malaysian address and a zone-changing address edit', async () => {
         const token = await registerCustomer('del-fee-my@test.dev');
         const pullId = await openOne(token, 'delivery-fee-topup-my');

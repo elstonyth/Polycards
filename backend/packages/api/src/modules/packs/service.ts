@@ -4729,6 +4729,10 @@ class PacksModuleService extends MedusaService({
     customerId: string,
     pullId: string,
     address: Partial<HttpTypes.StoreCustomerAddress>,
+    /** RM per USD, resolved by the caller BEFORE this transaction (as the
+     *  paid path does): values the prize for its mandatory insurance. Absent =
+     *  no card value, so no insurance (older callers, tests). */
+    fx: number | undefined = undefined,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ status: 'requested' | 'capped' | 'invalid' }> {
     // Deliberately NOT behind rewardsRedemptionEnabled (2026-10-08): /task
@@ -4789,12 +4793,16 @@ class PacksModuleService extends MedusaService({
     ) {
       return { status: 'invalid' };
     }
-    // Every delivery pays its zone's shipping (operator decision 2026-10-14;
-    // prize cards shipped free before). A prize carries no card value here,
-    // so there is no insurance: the fee is the zone's shipping alone.
+    // Every delivery pays its zone's fee (operator decision 2026-10-14;
+    // prize cards shipped free before): the zone's shipping, plus the same
+    // mandatory 5% insurance above RM200 of card value a vault card pays.
+    const prizeValue =
+      fx !== undefined && pull
+        ? await this.vaultValueForPulls([pull], fx, sharedContext)
+        : 0;
     const fee = computeDeliveryFee(
       snapshot.ship_postal_code,
-      0,
+      prizeValue,
       snapshot.ship_province,
       snapshot.ship_city,
       snapshot.ship_country_code,
@@ -4809,15 +4817,10 @@ class PacksModuleService extends MedusaService({
     //    draw cap and the withdrawal cap roll over at the same instant. The lock
     //    makes COUNT-then-INSERT atomic per customer. A canceled order shipped
     //    nothing, so it does not use up the day's allowance.
-    const utcDay = new Date().toISOString().slice(0, 10);
     const { withdrawals_per_day } = await this.rewardsSettings(sharedContext);
-    const countRows = await em.execute<{ n: string | null }[]>(
-      `SELECT COUNT(*) AS n FROM delivery_order
-         WHERE customer_id = ? AND is_reward = TRUE AND status <> 'canceled'
-           AND (created_at AT TIME ZONE 'UTC')::date = ?::date AND deleted_at IS NULL`,
-      [customerId, utcDay],
-    );
-    if (Number(countRows[0]?.n ?? 0) >= withdrawals_per_day) {
+    if (
+      (await this.rewardShipmentsToday(em, customerId)) >= withdrawals_per_day
+    ) {
       return { status: 'capped' };
     }
 
@@ -4882,6 +4885,40 @@ class PacksModuleService extends MedusaService({
     );
 
     return { status: 'requested' };
+  }
+
+  // Today's non-canceled prize shipments for a customer, on the SAME UTC day
+  // boundary settleRewardDraw uses (see recordRewardWithdrawal's cap note).
+  private async rewardShipmentsToday(
+    em: LedgerSqlManager,
+    customerId: string,
+  ): Promise<number> {
+    const utcDay = new Date().toISOString().slice(0, 10);
+    const rows = await em.execute<{ n: string | null }[]>(
+      `SELECT COUNT(*) AS n FROM delivery_order
+         WHERE customer_id = ? AND is_reward = TRUE AND status <> 'canceled'
+           AND (created_at AT TIME ZONE 'UTC')::date = ?::date AND deleted_at IS NULL`,
+      [customerId, utcDay],
+    );
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  // How many prize cards the customer can still ship today, so the delivery
+  // sheet prices (and sends) only those. A read: recordRewardWithdrawal's
+  // locked count is still what decides.
+  @InjectTransactionManager()
+  async rewardShippingAllowance(
+    customerId: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ perDay: number; usedToday: number; remaining: number }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const { withdrawals_per_day } = await this.rewardsSettings(sharedContext);
+    const usedToday = await this.rewardShipmentsToday(em, customerId);
+    return {
+      perDay: withdrawals_per_day,
+      usedToday,
+      remaining: Math.max(0, withdrawals_per_day - usedToday),
+    };
   }
 
   // Collapses request-delivery's three writes (order, items, pull flip) plus
