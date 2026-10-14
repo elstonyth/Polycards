@@ -5630,6 +5630,37 @@ class PacksModuleService extends MedusaService({
     );
   }
 
+  // Other customers already tied to this account number: saved on a live
+  // account, or a payout to it that went out or is on its way (failed rows
+  // came back and prove nothing). Payout rows count whoever sent them, deleted
+  // accounts included, so deleting and re-registering does not free a number.
+  // The bank codes come back raw (saved lists may still hold a retired
+  // gateway's alias); the caller compares canonical ids. Read by the
+  // saved-accounts POST route, which refuses a number someone else holds:
+  // 13 clusters of 2-3 accounts on one bank account farmed welcome packs and
+  // tasks by 2026-10-14.
+  @InjectManager()
+  async otherPayoutAccountHolders(
+    customerId: string,
+    accountNumber: string,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ customer_id: string; bank_code: string }[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    return await em.execute(
+      "SELECT c.id AS customer_id, a->>'bankCode' AS bank_code " +
+        'FROM customer c ' +
+        "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
+        "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
+        "WHERE c.deleted_at IS NULL AND c.id <> ? AND a->>'accountNumber' = ? " +
+        'UNION ' +
+        'SELECT customer_id, bank_code FROM gateway_withdrawal ' +
+        'WHERE deleted_at IS NULL AND customer_id <> ? AND account_number = ? ' +
+        "AND status IN ('pending', 'held', 'settled')",
+      [customerId, accountNumber, customerId, accountNumber],
+    );
+  }
+
   // Serialized read-modify-write of `customer.metadata`, the shared JSONB blob
   // that holds avatar_url / avatar_file_id / equipped_frame_level /
   // bank_accounts / handle. Every writer of it spread-merges the WHOLE blob, so

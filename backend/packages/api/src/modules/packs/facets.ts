@@ -72,6 +72,7 @@ export type CustomerWallet = Pick<
   | 'listGatewayDeposits'
   | 'listGatewayWithdrawals'
   | 'mutateCustomerMetadata'
+  | 'otherPayoutAccountHolders'
   | 'walletSummary'
 >;
 
