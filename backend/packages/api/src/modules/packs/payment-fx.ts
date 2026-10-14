@@ -331,6 +331,23 @@ export function callbackLedgerAmount(row: RowFx, reported: number): number {
   return toLedgerAmount(row, reported);
 }
 
+/**
+ * True when a row locked in another currency is reported paid more than a
+ * nudge away from its locked gateway amount. A3Pay matches a payin ONLY by its
+ * exact nudged sum, so such a report is a slip at their end (a manual match),
+ * never a customer who paid a different amount. RM rows and unreadable
+ * amounts are false here: the existing money fences handle those.
+ */
+export function offLock(row: RowFx, reported: number): boolean {
+  if (row.currency == null || row.currency === LEDGER_CURRENCY_CODE) {
+    return false;
+  }
+  const locked = Number(row.gatewayAmount);
+  if (row.gatewayAmount == null || !Number.isFinite(locked)) return false;
+  if (!Number.isFinite(reported)) return false;
+  return Math.abs(cents(reported) - cents(locked)) > PAYIN_NUDGE_CENTS;
+}
+
 /** The identity lock, for an RM row. */
 export const NO_FX: RowFx = { ledgerAmount: null, gatewayAmount: null };
 

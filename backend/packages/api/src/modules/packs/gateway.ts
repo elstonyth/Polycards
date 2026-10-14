@@ -880,7 +880,7 @@ export async function getDepositDetail(
   merchantTransactionId: string,
   config: GatewayConfig,
   fx: RowFx,
-): Promise<DepositDetail> {
+): Promise<DepositDetail & { reportedAmount: number }> {
   const asked = inRowCurrency(config, fx);
   const d = await adapterFor(asked).getDepositDetail(
     merchantTransactionId,
@@ -888,6 +888,8 @@ export async function getDepositDetail(
   );
   return {
     ...d,
+    // What the gateway said, in ITS currency, for the sweep's lock fence.
+    reportedAmount: d.amount,
     amount: toLedgerAmount(fx, d.amount),
     netAmount: toLedgerAmount(fx, d.netAmount),
   };

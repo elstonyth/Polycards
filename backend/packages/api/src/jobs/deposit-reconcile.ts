@@ -194,6 +194,7 @@ export default async function depositReconcileJob(container: MedusaContainer) {
           amount: Number(detail.amount),
           createdAt: new Date(deposit.created_at),
           now,
+          lock: { fx: rowFx(deposit), reported: Number(detail.reportedAmount) },
         });
       } catch (error) {
         // A refusal we cannot attribute must never write a row off — a rotated
@@ -237,7 +238,8 @@ export default async function depositReconcileJob(container: MedusaContainer) {
 
       if (action.kind === 'wait') continue;
 
-      // Requeried above the deposit ceiling. Quarantine, exactly as the callback
+      // Requeried above the deposit ceiling, or (a row locked in another
+      // currency) at a sum off its lock. Quarantine, exactly as the callback
       // route does: no credit, and NOT written off — the row keeps whatever
       // status it already had, so a 'pending' one is seen again next sweep and
       // an 'expired' one (reached via the second scan tier) is seen again for as
@@ -253,7 +255,7 @@ export default async function depositReconcileJob(container: MedusaContainer) {
       if (action.kind === 'quarantine') {
         quarantined += 1;
         logger.error(
-          `[deposit-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, above the RM ${GATEWAY_MAX_RM} deposit ceiling — not credited, not written off; left ${deposit.status} for manual settlement`,
+          `[deposit-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, ${action.reason === 'off-lock' ? `${detail?.reportedAmount} in the gateway's currency, more than a nudge from the row's locked ${deposit.gateway_amount}` : `above the RM ${GATEWAY_MAX_RM} deposit ceiling`} — not credited, not written off; left ${deposit.status} for manual settlement`,
         );
         continue;
       }
