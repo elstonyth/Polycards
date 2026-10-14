@@ -92,6 +92,11 @@ export type GatewayDefinition = {
     withdrawalMin: number;
     withdrawalMax: number;
   };
+  /**
+   * A regional gateway's own fee per payout, in percent, taken from OUR float
+   * on top of the amount paid out. The float pre-check must cover both.
+   */
+  payoutFeePercent?: number;
   /** Are the credentials for this gateway present in the environment? */
   configured: (env: Partial<NodeJS.ProcessEnv>) => boolean;
   /** Its client config from env; throws when `configured` would be false. */
@@ -205,6 +210,8 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
       withdrawalMin: 30,
       withdrawalMax: 10000,
     },
+    // WD 1.5% (back office, above): a S$50.79 payout cost S$51.55 live.
+    payoutFeePercent: 1.5,
   },
 
   // Test-only. Mirrors TGPay's limits and contact requirement field for
@@ -880,7 +887,7 @@ export async function getDepositDetail(
   merchantTransactionId: string,
   config: GatewayConfig,
   fx: RowFx,
-): Promise<DepositDetail> {
+): Promise<DepositDetail & { reportedAmount: number }> {
   const asked = inRowCurrency(config, fx);
   const d = await adapterFor(asked).getDepositDetail(
     merchantTransactionId,
@@ -888,6 +895,8 @@ export async function getDepositDetail(
   );
   return {
     ...d,
+    // What the gateway said, in ITS currency, for the sweep's lock fence.
+    reportedAmount: d.amount,
     amount: toLedgerAmount(fx, d.amount),
     netAmount: toLedgerAmount(fx, d.netAmount),
   };

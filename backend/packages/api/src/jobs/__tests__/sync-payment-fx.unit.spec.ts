@@ -138,8 +138,8 @@ describe('sync-payment-fx', () => {
 
   it('measures a jump against a pinned manual rate, so pinning lets a real move back in', async () => {
     feeds({ 'api.coinbase.com': { status: 200, body: COINBASE('3.40') } });
-    // Stored feed 3.1905 (6.6% away) but the admin pinned 3.38 (0.6% away).
-    const { c, packs } = container(3.1905, 3.38);
+    // Stored feed 3.1905 (6.6% away) but the admin pinned 3.39 (0.3% away).
+    const { c, packs } = container(3.1905, 3.39);
     await syncPaymentFxJob(c);
     expect(packs.updateFxRates.mock.calls[0][0][0]).toMatchObject({
       rate: 3.4,
@@ -159,6 +159,44 @@ describe('sync-payment-fx', () => {
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('every feed failed'),
     );
+    // Not just a log line: the rate now ages toward its limit unseen.
+    expect(alertOps).toHaveBeenCalledWith(
+      c,
+      'fx-feed-down:SGD',
+      expect.stringContaining('every feed failed'),
+      { muteMs: 6 * 60 * 60 * 1000 },
+    );
+  });
+
+  it('alerts when a pinned rate has drifted from the market by more than the fee', async () => {
+    // Pinned 3.30, market 3.40: payouts at 3.30 x 1.005 cost less RM per S$
+    // than the market, so every payout loses money while the pin stays.
+    feeds({ 'api.coinbase.com': { status: 200, body: COINBASE('3.40') } });
+    const { c } = container(3.1905, 3.3);
+    await syncPaymentFxJob(c);
+    expect(alertOps).toHaveBeenCalledWith(
+      c,
+      'fx-pin-drift:SGD',
+      expect.stringContaining('pinned'),
+      { muteMs: 6 * 60 * 60 * 1000 },
+    );
+  });
+
+  it('refuses a feed dated in the future, and never ages a rate from tomorrow', async () => {
+    const day = (offset: number) =>
+      new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    const dated = (date: string) => ({
+      status: 200,
+      body: JSON.stringify({ base: 'SGD', date, rates: { MYR: 3.19 } }),
+    });
+    const url = 'https://api.frankfurter.dev/v1/latest?from=SGD&to=MYR';
+    feeds({ 'api.frankfurter.dev': dated(day(3)) });
+    await expect(
+      fetchPaymentFx('SGD', { url, min: 1, max: 10 }),
+    ).rejects.toThrow(/future/);
+    feeds({ 'api.frankfurter.dev': dated(day(1)) });
+    const { asOf } = await fetchPaymentFx('SGD', { url, min: 1, max: 10 });
+    expect(asOf.getTime()).toBeLessThanOrEqual(Date.now());
   });
 
   it('refuses a jump of more than 5% in one run, and alerts ops', async () => {

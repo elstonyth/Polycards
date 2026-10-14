@@ -189,6 +189,7 @@ The header shows "Settlement · Gateway money, one tab per currency." with pill 
 
 - a warning bar, "N payments the gateway disagrees with · last checked …", with Hide/Show;
 - a table with Payment (kind + short reference), Player (linked to the player's page), Our status, Amount and Gateway says;
+- rows from a retired gateway (they can never be checked again) are listed but counted apart (`retired_total`), so they never hold up the "payments differ" badge;
 - the first 10 rows, then "Show all N"; when the backend's 100-row cap cuts the list, the button and a footnote say "first N of total".
 
 The old "our settled deposits / payouts" totals are dropped; the results table already carries those figures.
@@ -217,12 +218,12 @@ The old "our settled deposits / payouts" totals are dropped; the results table a
   4. Level;
   5. Wallet;
   6. Vault;
-  7. Net deposit (= today's "Total contribution"), with an ⓘ that shows the top-up and withdraw totals for that row;
+  7. Total contribution (top-ups − withdrawals; briefly labelled "Net deposit", renamed back on 2026-10-14 because staff looked for the old name), with an ⓘ that shows the top-up and withdraw totals for that row;
   8. Turnover;
   9. Joined: date, with "Disabled" beneath when disabled;
   10. Status: the enable/disable switch (with its confirm and reason) and the partner badge.
 - **Removed from the list** (still on the player's page): Real name, Pulls, Last turnover, and the separate Total top up and Total withdraw columns.
-- The same sorts are available where the column survives, plus "Net deposit". A **Sort ▾** select also offers the ones with no column: most topped up, most withdrawn, email A–Z.
+- The same sorts are available where the column survives, plus "Total contribution". A **Sort ▾** select also offers the ones with no column: most topped up, most withdrawn, email A–Z.
 - Joined shows "active {ago}" beneath, from the last turnover.
 - **Filter:** a **Group ▾** select next to search, with All groups, Default and each other group. The backend `GET /admin/players` gains `group=<id>|default`:
   - a group id filters to that group's members;

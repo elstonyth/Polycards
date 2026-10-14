@@ -68,6 +68,8 @@ function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
     listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
     creditBalance: jest.fn().mockResolvedValue(50),
     updateGatewayWithdrawals: jest.fn().mockResolvedValue(undefined),
+    // The wd: debit lookup after a failed debit call. None by default.
+    listCreditTransactions: jest.fn().mockResolvedValue([]),
     // The gate + debit unit. Everything the old caller-side policy check did
     // (freeze, locked commissions, playthrough, the daily cap) now happens
     // INSIDE this one service call, under the credit: advisory lock — see the
@@ -928,6 +930,27 @@ describe('startWithdrawal — money ordering', () => {
       id: 'gpw_1',
       status: 'failed',
     });
+  });
+
+  // The debit committed but its acknowledgement was lost (a dropped
+  // connection), so the call threw anyway. Closing the row would strand the
+  // money: nothing refunds a 'failed' row. Left pending, the sweep's
+  // not-found path refunds it once stale.
+  it('leaves the row pending when the debit landed although the call threw', async () => {
+    const h = harness();
+    h.packs.withdrawForCashout.mockRejectedValue(new Error('connection reset'));
+    h.packs.listCreditTransactions.mockResolvedValue([{ id: 'ct_wd' }]);
+    await expect(start(h)).rejects.toThrow(/connection reset/);
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
+  });
+
+  it('leaves the row pending when it cannot tell whether the debit landed', async () => {
+    const h = harness();
+    h.packs.withdrawForCashout.mockRejectedValue(new Error('connection reset'));
+    h.packs.listCreditTransactions.mockRejectedValue(new Error('db down'));
+    await expect(start(h)).rejects.toThrow(/connection reset/);
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
   });
 
   it('stamps their W… id on the row after a successful submit, scoped to pending', async () => {

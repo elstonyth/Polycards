@@ -28,6 +28,16 @@ import { alertOps } from '../modules/packs/ops-alert';
  */
 export const PAYMENT_FX_MAX_JUMP = 0.05;
 
+/** Repeat alerts at most this often (feed down, jump refused, pin drifted). */
+const FX_ALERT_MUTE_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * The smallest pin-vs-market drift worth an alert. A pinned rate loses money
+ * once the market moves past the fee on the losing side; with the fee off
+ * (0%) any drift does, but alerting on noise every run helps nobody.
+ */
+export const PAYMENT_FX_PIN_DRIFT_MIN = 0.005;
+
 /**
  * One feed's rate for `currency` -> MYR, sanity-banded. Two shapes:
  *   Coinbase    { data: { currency, rates: { MYR: "3.18…" } } }  (live, no date)
@@ -63,9 +73,15 @@ export async function fetchPaymentFx(
   // A dated feed (ECB) is aged from its OWN publication day, so the
   // staleness guard measures how old the rate is, not how recently we
   // fetched a feed that may keep serving an old day. A live feed is now.
-  const asOf = /^\d{4}-\d{2}-\d{2}$/.test(data.date ?? '')
+  const now = new Date();
+  const dated = /^\d{4}-\d{2}-\d{2}$/.test(data.date ?? '')
     ? new Date(`${data.date}T00:00:00Z`)
-    : new Date();
+    : null;
+  // A date past tomorrow is a broken feed. Tomorrow's (a timezone ahead) is
+  // clamped to now, or a future stamp would switch the staleness guard off.
+  if (dated && dated.getTime() > now.getTime() + 86_400_000)
+    throw new Error(`FX feed: dated in the future (${data.date})`);
+  const asOf = dated && dated < now ? dated : now;
   const source = data?.data ? 'coinbase' : 'frankfurter';
   return { rate: Math.round(rate * 1e6) / 1e6, asOf, source };
 }
@@ -100,9 +116,11 @@ export default async function syncPaymentFxJob(
       }
     }
     if (!got) {
-      logger.warn(
-        `[sync-payment-fx] ${currency}: every feed failed, keeping last-known`,
-      );
+      const note = `${currency}->MYR: every feed failed, keeping last-known. The rail pauses itself once that rate is too old; check the feeds, or pin a manual rate in Admin → Settlement (the ${currency} tab).`;
+      logger.warn(`[sync-payment-fx] ${note}`);
+      void alertOps(container, `fx-feed-down:${currency}`, note, {
+        muteMs: FX_ALERT_MUTE_MS,
+      });
       continue;
     }
     try {
@@ -122,9 +140,27 @@ export default async function syncPaymentFxJob(
         const note = `${currency}->MYR feed (${source}) says ${rate}, ${((rate / previous - 1) * 100).toFixed(1)}% from the stored ${previous} — NOT applied; the last rate stays. If the move is real, pin a manual rate near it in Admin → Settlement (the ${currency} tab): the feed is measured against a pinned rate, so it resumes once within ${PAYMENT_FX_MAX_JUMP * 100}%.`;
         logger.error(`[sync-payment-fx] ${note}`);
         void alertOps(container, `fx-jump:${currency}`, note, {
-          muteMs: 6 * 60 * 60 * 1000,
+          muteMs: FX_ALERT_MUTE_MS,
         });
         continue;
+      }
+      // A pin never expires, so say when the market has moved past the fee on
+      // the side it loses on: above the pin, payouts are too cheap; below it,
+      // top-ups are credited too much.
+      if (Number.isFinite(pinned) && pinned > 0) {
+        const drift = rate / pinned - 1;
+        const losingFee = row?.fee_enabled
+          ? Number(
+              drift > 0 ? row.payout_fee_percent : row.deposit_fee_percent,
+            ) / 100 || 0
+          : 0;
+        if (Math.abs(drift) > Math.max(PAYMENT_FX_PIN_DRIFT_MIN, losingFee)) {
+          const note = `${currency}->MYR is pinned at ${pinned} but the feed (${source}) says ${rate}, ${(drift * 100).toFixed(2)}% away and past the fee, so every ${drift > 0 ? 'payout' : 'top-up'} now loses money. Update or remove the pin in Admin → Settlement (the ${currency} tab).`;
+          logger.error(`[sync-payment-fx] ${note}`);
+          void alertOps(container, `fx-pin-drift:${currency}`, note, {
+            muteMs: FX_ALERT_MUTE_MS,
+          });
+        }
       }
       if (row)
         await packs.updateFxRates([

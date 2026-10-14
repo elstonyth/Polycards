@@ -695,7 +695,11 @@ export interface GatewayAudit {
    *  getGatewayBalance's. */
   gateway: HistoricalGatewayId;
   last_audited_at: string | null;
+  /** Rows the gateway disagrees with. */
   findings_total: number;
+  /** Rows from a retired gateway, which can never be checked again: listed,
+   *  counted apart. Absent from a backend older than this field. */
+  retired_total?: number;
   totals: { deposits: GatewayAuditTotals; withdrawals: GatewayAuditTotals };
   /** Settled totals of every OTHER gateway that ever moved money, so a switch
    *  never hides the previous gateway's history from this page. */

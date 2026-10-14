@@ -3,6 +3,7 @@ import type { SettlementState } from './gateway-types';
 import { GatewayError } from './gateway-types';
 import { GATEWAY_MAX_RM } from './gateway-deposit';
 import { gatewayEnv } from './gateway-env';
+import { offLock, type RowFx } from './payment-fx';
 import { TGPAY_NOT_FOUND } from './tgpay-client';
 
 // Reconciliation policy for outstanding gateway deposits. Pure decisions,
@@ -104,11 +105,13 @@ export type ReconcileAction =
   /** Non-final AND older than the stale window: stop chasing it. */
   | { kind: 'expire' }
   /**
-   * Requery says settled, but for more than the submit path could ever have
-   * created. Neither credit it nor write it off — the row stays pending for an
-   * operator. Deliberately NOT 'wait': the sweep must say so out loud.
+   * Requery says settled, but for an amount we will not credit unattended:
+   * more than the submit path could ever have created ('ceiling'), or, on a
+   * row locked in another currency, a sum further than a nudge from the lock
+   * ('off-lock'). Neither credit it nor write it off — the row stays pending
+   * for an operator. Deliberately NOT 'wait': the sweep must say so out loud.
    */
-  | { kind: 'quarantine'; amount: number };
+  | { kind: 'quarantine'; amount: number; reason: 'ceiling' | 'off-lock' };
 
 export type ReconcileInput = {
   state: SettlementState;
@@ -116,6 +119,8 @@ export type ReconcileInput = {
   amount: number;
   createdAt: Date;
   now: Date;
+  /** The row's FX lock and what the gateway reported in ITS currency. */
+  lock?: { fx: RowFx; reported: number };
 };
 
 /**
@@ -145,7 +150,13 @@ export function reconcileAction(input: ReconcileInput): ReconcileAction {
     // wrong requery from minting balance. Over it we quarantine rather than
     // settle or write off, because the customer may genuinely have paid.
     if (input.amount > GATEWAY_MAX_RM) {
-      return { kind: 'quarantine', amount: input.amount };
+      return { kind: 'quarantine', amount: input.amount, reason: 'ceiling' };
+    }
+    // Except on a row locked in another currency: A3Pay matches a payin only
+    // by its exact nudged sum, so "the customer paid a different amount" does
+    // not happen there. A different S$ sum is a slip at their end.
+    if (input.lock && offLock(input.lock.fx, input.lock.reported)) {
+      return { kind: 'quarantine', amount: input.amount, reason: 'off-lock' };
     }
     return { kind: 'settle', amount: input.amount };
   }
