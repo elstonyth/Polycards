@@ -176,6 +176,40 @@ describe('gateway audit job', () => {
   // be paid twice. A row with an open finding is re-checked every hour, at any
   // age, ahead of everything else; a retired gateway's rows (which cannot be
   // checked) are left out, and a row picked twice is checked once.
+  // A finding that never clears (the S$ 6-cent A3Pay rounding gap) comes
+  // back every hour. Were open findings allowed the whole batch, 50 of them
+  // would starve new rows of their first check again (#776).
+  it('open findings take at most 10 of the batch: new rows still get checked', async () => {
+    fakeGateway.script({
+      getDepositDetail: { state: 'success', amount: 50, netAmount: 49.4 },
+    });
+    const open = Array.from({ length: 60 }, (_, i) => ({
+      ...settledDeposit,
+      id: `gpd_open_${i}`,
+      merchant_transaction_id: `PC-open-${i}`,
+      audit_note: 'gateway paid 50.06, row credited 50.00',
+      audited_at: new Date(0),
+    }));
+    const h = harness([]);
+    h.packs.listGatewayDeposits.mockImplementation(
+      async (
+        f: { audit_note?: unknown; audited_at?: unknown },
+        o?: { take: number },
+      ) =>
+        f.audit_note
+          ? open.slice(0, o?.take)
+          : f.audited_at === null
+            ? [settledDeposit]
+            : [],
+    );
+    await gatewayAuditJob(h.container as never);
+    const ids = (
+      h.packs.updateGatewayDeposits.mock.calls as unknown as [{ id: string }][]
+    ).map((c) => c[0].id);
+    expect(ids).toHaveLength(11);
+    expect(ids).toContain('gpd_1');
+  });
+
   it('re-checks a row with an open finding within the hour, once, never a retired gateway', async () => {
     fakeGateway.script({
       getWithdrawalDetail: { state: 'failed', amount: 512.4 },
@@ -217,7 +251,8 @@ describe('gateway audit job', () => {
     const age = before - filter.audited_at.$lt.getTime();
     expect(age).toBeGreaterThanOrEqual(60 * 60 * 1000 - 1000);
     expect(age).toBeLessThan(2 * 60 * 60 * 1000);
-    expect(opts).toEqual({ take: 50, order: { audited_at: 'ASC' } });
+    // A small share: open findings never take the whole batch.
+    expect(opts).toEqual({ take: 10, order: { audited_at: 'ASC' } });
     // Returned by the open-findings query AND the daily re-check: one call.
     expect(fakeGateway.calls.withdrawalDetails).toEqual(['PC-flag']);
     // The gateway now agrees (failed = failed): the finding clears.

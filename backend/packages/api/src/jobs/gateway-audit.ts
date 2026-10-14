@@ -13,6 +13,7 @@ import {
 import { classifyRequeryError } from '../modules/packs/gateway-reconcile';
 import {
   GATEWAY_AUDIT_BATCH,
+  GATEWAY_AUDIT_FINDING_BATCH,
   GATEWAY_AUDIT_FINDING_REPEAT_MS,
   GATEWAY_AUDIT_REPEAT_MS,
   GATEWAY_AUDIT_WINDOW_MS,
@@ -73,8 +74,13 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
   const steps: {
     filter: Record<string, unknown>;
     order: Record<string, 'ASC'>;
+    cap?: number;
   }[] = [
-    { filter: open, order: { audited_at: 'ASC' } },
+    {
+      filter: open,
+      order: { audited_at: 'ASC' },
+      cap: GATEWAY_AUDIT_FINDING_BATCH,
+    },
     { filter: fresh, order: { created_at: 'ASC' } },
     { filter: stale, order: { audited_at: 'ASC' } },
   ];
@@ -90,7 +96,10 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     const out: R[] = [];
     const seen = new Set<string>();
     for (const step of steps) {
-      const take = GATEWAY_AUDIT_BATCH - out.length;
+      const take = Math.min(
+        GATEWAY_AUDIT_BATCH - out.length,
+        step.cap ?? GATEWAY_AUDIT_BATCH,
+      );
       if (take <= 0) break;
       for (const row of await list(
         { status, ...step.filter },
