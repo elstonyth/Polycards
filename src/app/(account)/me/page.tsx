@@ -25,7 +25,8 @@ import { getAvatarFrames } from '@/lib/data/avatar-frames';
 import { rm, rm0 } from '@/lib/format';
 import { SlabImage } from '@/components/SlabImage';
 import { toCardView } from '@/lib/card-view';
-import { LogoutButton, TopUpButton } from './MeActions';
+import { LogoutButton } from './MeActions';
+import { TopUpButton } from '@/components/account/TopUpButton';
 import { MeHeader } from './MeAppearance';
 import { EquippedFrameProvider } from './equipped-frame';
 
@@ -291,6 +292,16 @@ export default async function MePage() {
                   <p className="font-heading mt-0.5 text-2xl text-white">
                     {rm(walletResult.wallet.balance)}
                   </p>
+                  {/* Right beside the Withdraw button it would otherwise
+                      find out from. Bonus alone never withdraws, so no hint. */}
+                  {!walletResult.wallet.hasTopup &&
+                    !walletResult.wallet.isFrozen &&
+                    Math.round(walletResult.wallet.balance * 100) >
+                      Math.round(walletResult.wallet.bonus * 100) && (
+                      <p className="mt-0.5 text-[12px] font-semibold text-sky-400">
+                        Top up once to unlock withdrawals
+                      </p>
+                    )}
                 </Link>
                 <div className="flex shrink-0 gap-2">
                   <Link
