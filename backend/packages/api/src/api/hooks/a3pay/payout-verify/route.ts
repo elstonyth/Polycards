@@ -12,6 +12,10 @@ import { a3payConfigFromEnv } from '../../../../modules/packs/a3pay-client';
 // out they POST the payout here; a literal "success" lets it proceed and
 // ANYTHING else rejects it on the spot.
 //
+// DORMANT: A3Pay told us on 2026-10-13 that they do not offer Payout
+// Verification for our merchant, so nothing calls this route and
+// verify_outcome stays NULL. Kept in case they turn it on later.
+//
 // A free second factor on the money-out path: even a request that somehow
 // reached SubmitPayout with our signature only pays if it matches a pending
 // row WE recorded — same reference, same SGD amount we locked, same currency.

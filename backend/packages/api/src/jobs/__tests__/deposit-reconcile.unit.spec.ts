@@ -4,6 +4,10 @@ jest.mock('../../modules/packs/notify-feed', () => ({
 jest.mock('../../modules/packs/topup-receipt', () => ({
   sendTopupReceipt: jest.fn().mockResolvedValue(true),
 }));
+jest.mock('../../modules/packs/ops-alert', () => ({
+  alertOps: jest.fn().mockResolvedValue(undefined),
+}));
+import { alertOps } from '../../modules/packs/ops-alert';
 
 import { setActiveGateway } from '../../modules/packs/gateway';
 import { fakeGateway } from '../../modules/packs/fake-gateway';
@@ -76,13 +80,14 @@ function harness(deposit: Record<string, unknown> = pendingRow) {
       ),
     ),
     claimDepositStatus: jest.fn().mockResolvedValue(true),
-    topUpCreditsWithLedger: jest.fn().mockResolvedValue({
+    // A fresh credit writes exactly what it was asked for.
+    topUpCreditsWithLedger: jest.fn(async (input: { amount: number }) => ({
       id: 'ct_1',
-      balance: 50,
-      amount: 50,
+      balance: input.amount,
+      amount: input.amount,
       replayed: false,
       reference: null,
-    }),
+    })),
   } satisfies FakeFacet<GatewayDeposits>;
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const container = {
@@ -270,5 +275,43 @@ describe('deposit sweep — the expired tier reaches every row in its window', (
     await depositReconcileJob(h.container);
     expect(fakeGateway.calls.depositDetails).toContain('PC-E10');
     expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
+  });
+});
+
+// A row locked in S$ (A3Pay matches only the exact nudged amount): a requery
+// reporting a different S$ sum is held for an operator, and ops is told.
+describe("deposit sweep — an S$ requery off the row's lock", () => {
+  const sgdRow = {
+    ...pendingRow,
+    amount_requested: 154.55,
+    currency: 'SGD',
+    gateway_amount: 50.01,
+  };
+
+  it('quarantines S$500.10 reported on an S$50.01 order, and alerts ops', async () => {
+    (alertOps as jest.Mock).mockClear();
+    const h = harness(sgdRow);
+    fakeGateway.script({
+      getDepositDetail: { state: 'success', amount: 500.1 },
+    });
+    await depositReconcileJob(h.container);
+    expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
+    expect(alertOps).toHaveBeenCalledWith(
+      h.container,
+      'deposit-off-lock:PC-1',
+      expect.stringContaining('500.1'),
+      { muteMs: 6 * 60 * 60 * 1000 },
+    );
+  });
+
+  it('credits the locked order when the requery reports it', async () => {
+    const h = harness(sgdRow);
+    fakeGateway.script({
+      getDepositDetail: { state: 'success', amount: 50.01 },
+    });
+    await depositReconcileJob(h.container);
+    expect(h.packs.topUpCreditsWithLedger).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 154.55 }),
+    );
   });
 });

@@ -17,6 +17,7 @@ import { POST as deposit } from '../deposit/route';
 import { POST as withdrawal } from '../withdrawal/route';
 import { POST as verify } from '../payout-verify/route';
 import { aesEncrypt, signPayload } from '../../../../modules/packs/a3pay';
+import { sweepAlertsVerifyFail } from '../../../../modules/packs/gateway-deposit';
 
 // Two throwaway pairs: OURS (unused by inbound hooks) and A3PAY's, whose
 // private half plays A3Pay signing callbacks.
@@ -162,6 +163,25 @@ describe('POST /hooks/a3pay/deposit', () => {
     );
   });
 
+  it('records what the ledger credited when the credit was a replay', async () => {
+    // A sweep credited this deposit first (proportionally, RM 318.97); the
+    // callback's own figure (the locked RM 319) was never written.
+    const h = harness([sgdDeposit]);
+    h.packs.topUpCreditsWithLedger.mockResolvedValueOnce({
+      id: 'ct_0',
+      balance: 318.97,
+      amount: 318.97,
+      replayed: true,
+      reference: null,
+    });
+    await run(deposit, h, message(payin()));
+    expect(h.packs.claimDepositStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        money: expect.objectContaining({ amount_settled: 318.97 }),
+      }),
+    );
+  });
+
   it('refuses a callback signed by anyone but A3Pay — nothing credited', async () => {
     const h = harness([sgdDeposit]);
     const res = await run(deposit, h, message(payin(), stranger.privateKey));
@@ -188,13 +208,26 @@ describe('POST /hooks/a3pay/deposit', () => {
     expect(res.body).toBe('success');
     expect(h.packs.topUpCreditsWithLedger).not.toHaveBeenCalled();
     expect(h.packs.claimDepositStatus).not.toHaveBeenCalled();
-    // The customer may have paid from an account in another name.
+    // A3Pay matches by exact amount only: the customer most likely never
+    // paid. The text must not invite a hand credit the sweep could repeat.
     expect(alertOps).toHaveBeenCalledWith(
       expect.anything(),
       'payin-verify-fail:PC-1',
       expect.stringContaining('Verify Fail'),
       { muteMs: 6 * 60 * 60 * 1000 },
     );
+    const [[, , text]] = (alertOps as jest.Mock).mock.calls;
+    expect(text).toMatch(/exact amount/);
+    expect(text).toMatch(/Never credit it by admin adjustment/);
+    expect(text).not.toMatch(/payer name/);
+  });
+
+  it('the sweep alerts a Verify Fail only while the deposit is pending', () => {
+    expect(sweepAlertsVerifyFail({ gateway: 'a3pay', status: 'pending' }, 4)).toBe(true);
+    // An expired row is requeried for days; each pass re-alerted it.
+    expect(sweepAlertsVerifyFail({ gateway: 'a3pay', status: 'expired' }, 4)).toBe(false);
+    expect(sweepAlertsVerifyFail({ gateway: 'tgpay', status: 'pending' }, 4)).toBe(false);
+    expect(sweepAlertsVerifyFail({ gateway: 'a3pay', status: 'pending' }, 6)).toBe(false);
   });
 
   it('reports a late Verify Fail on a row already written off, not on a credited one', async () => {
@@ -350,6 +383,55 @@ describe('POST /hooks/a3pay/withdrawal', () => {
     expect(res.body).toBe('success');
     expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledWith(
       expect.objectContaining({ amount: 100, customerId: 'cus_1' }),
+    );
+  });
+
+  it("redacts the account number and holder name out of A3Pay's Remark", async () => {
+    const h = harness([sgdPayout]);
+    await run(
+      withdrawal,
+      h,
+      message(
+        payout({
+          Status: 5,
+          Remark: 'acct 1234567890 name Tan Ah Kow mismatch',
+        }),
+      ),
+    );
+    const [[{ data }]] = h.packs.updateGatewayWithdrawals.mock.calls;
+    expect(data.failure_reason).toBe(
+      'callback status 5: acct [redacted] name [redacted] mismatch',
+    );
+  });
+
+  it('alerts ops when a success settled the row while the refund was in flight', async () => {
+    const h = harness([sgdPayout]);
+    h.packs.listGatewayWithdrawals
+      .mockResolvedValueOnce([sgdPayout])
+      .mockResolvedValueOnce([{ ...sgdPayout, status: 'settled' }]);
+    // The close is scoped to 'pending' and lost the race: zero rows updated.
+    h.packs.updateGatewayWithdrawals.mockResolvedValueOnce([]);
+    (alertOps as jest.Mock).mockClear();
+    await run(withdrawal, h, message(payout({ Status: 5 })));
+    expect(alertOps).toHaveBeenCalledWith(
+      expect.anything(),
+      'refund-vs-settled:PW-1',
+      expect.stringContaining('REFUNDED'),
+    );
+  });
+
+  it('stays quiet when the close lost to another refund, not a success', async () => {
+    const h = harness([sgdPayout]);
+    h.packs.listGatewayWithdrawals
+      .mockResolvedValueOnce([sgdPayout])
+      .mockResolvedValueOnce([{ ...sgdPayout, status: 'failed' }]);
+    h.packs.updateGatewayWithdrawals.mockResolvedValueOnce([]);
+    (alertOps as jest.Mock).mockClear();
+    await run(withdrawal, h, message(payout({ Status: 5 })));
+    expect(alertOps).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'refund-vs-settled:PW-1',
+      expect.anything(),
     );
   });
 

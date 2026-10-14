@@ -4,6 +4,8 @@ import {
   regionalDepositBand,
   regionalWithdrawalBand,
   PAYMENT_FX_MAX_AGE_MS,
+  PAYMENT_FX_LIVE_MAX_AGE_MS,
+  PAYIN_NUDGE_CENTS,
   creditForDeposit,
   paymentFxQuote,
   payoutForWithdrawal,
@@ -99,6 +101,33 @@ describe('paymentFxQuote', () => {
     expect(
       paymentFxQuote({ rate: 3.3, fetched_at: null }, 'SGD', NOW),
     ).toHaveProperty('error');
+  });
+
+  it('ages an hourly Coinbase rate in hours, a daily ECB rate in days', () => {
+    const at = (source: string, ageMs: number) =>
+      paymentFxQuote(
+        { rate: 3.3, fetched_at: new Date(NOW - ageMs), source, ...fee(0.5) },
+        'SGD',
+        NOW,
+      );
+    expect(at('coinbase', PAYMENT_FX_LIVE_MAX_AGE_MS)).not.toHaveProperty('error');
+    expect(at('coinbase', PAYMENT_FX_LIVE_MAX_AGE_MS + 1)).toEqual({
+      error: 'The SGD exchange rate is out of date.',
+    });
+    // ECB skips weekends and holidays: days old is still its newest rate.
+    expect(at('frankfurter', 3 * 24 * 3600_000)).not.toHaveProperty('error');
+  });
+
+  it('a pin without a usable rate pauses the rail, never falls back to the feed', () => {
+    for (const manual_rate of [0, null, 'x', -3]) {
+      expect(
+        paymentFxQuote(
+          { rate: 3.3, fetched_at: fresh, manual_override: true, manual_rate, ...fee(0.5) },
+          'SGD',
+          NOW,
+        ),
+      ).toHaveProperty('error');
+    }
   });
 
   it('refuses a negative or absurd fee', () => {
@@ -203,7 +232,8 @@ describe('review fixes (2026-10-06)', () => {
     // At 3.40, S$3,000 would credit RM 10,200 — over the RM ceiling.
     expect(regionalDepositBand({ depositRate: 3.4 }, sgdBand, rmBand)).toEqual({
       min: 10,
-      max: 2941.17,
+      // RM 10,000 / 3.40 = S$2,941.17, less the room A3Pay's nudge needs.
+      max: 2941.07,
     });
     // At 2.50, S$10 would credit RM 25 — under the RM floor.
     expect(regionalDepositBand({ depositRate: 2.5 }, sgdBand, rmBand)).toEqual({
@@ -214,6 +244,10 @@ describe('review fixes (2026-10-06)', () => {
     const band = regionalDepositBand({ depositRate: 3.4 }, sgdBand, rmBand);
     expect(
       creditForDeposit(band.max, { depositRate: 3.4 }),
+    ).toBeLessThanOrEqual(10000);
+    // ...and so does the top of the band after A3Pay nudges it up.
+    expect(
+      creditForDeposit(band.max + PAYIN_NUDGE_CENTS / 100, { depositRate: 3.4 }),
     ).toBeLessThanOrEqual(10000);
   });
 });

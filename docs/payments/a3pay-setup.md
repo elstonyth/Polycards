@@ -95,7 +95,7 @@ Read from the A3Pay back office (https://backoffice.a3paysg.com, login `polycard
 
 - **Merchant code (MID):** `polycards`, currency SGD.
 - **Keys:** our public key is registered exactly as generated. The AES key matches. A3Pay's public key is RSA-1024.
-- **Back-office flags:** IP Whitelist Check **Active**, Payout Verification **Inactive**, Fund In Verification timeout 10 min. Ask A3Pay to switch Payout Verification on once `/hooks/a3pay/payout-verify` is deployed. It is a free second check on every payout.
+- **Back-office flags:** IP Whitelist Check **Active**, Payout Verification **Inactive**, Fund In Verification timeout 10 min. A3Pay does not offer Payout Verification for our merchant (Wayne, 2026-10-13), so `/hooks/a3pay/payout-verify` is never called. Don't ask again.
 - **Limits and fees (Merchant Transaction Setting):**
   - Deposit OB and BQR: S$10–5,000, **2.5% fee**. Our own top-up floor is **S$30** (an operator decision from 2026-10-12).
   - Payout WD: S$30–10,000, **1.5% fee**. A3Pay lowered the minimum from S$50 at our request on 2026-10-12.
