@@ -15,7 +15,7 @@ import {
   type AddAddressInput,
 } from '@/lib/actions/delivery';
 import { addressViewFromInput } from '@/lib/address-view';
-import { MY_STATES } from '@/lib/my-states';
+import { statesFor } from '@/lib/my-states';
 import { rm } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -333,7 +333,7 @@ function EditAddressModal({
                 <option value="" disabled>
                   Select a state
                 </option>
-                {MY_STATES.map((s) => (
+                {statesFor(form.countryCode).map((s) => (
                   <option key={s} value={s}>
                     {s}
                   </option>
@@ -361,15 +361,20 @@ function EditAddressModal({
               <input
                 aria-label="Country code"
                 autoComplete="country"
-                placeholder="e.g. MY"
+                placeholder="MY or SG"
                 maxLength={2}
                 value={form.countryCode}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const countryCode = e.target.value.toUpperCase();
+                  // A state from the other country's list is never valid.
                   setForm((f) => ({
                     ...f,
-                    countryCode: e.target.value.toUpperCase(),
-                  }))
-                }
+                    countryCode,
+                    province: statesFor(countryCode).includes(f.province ?? '')
+                      ? f.province
+                      : '',
+                  }));
+                }}
                 className={INPUT_CLASS}
               />
             </label>

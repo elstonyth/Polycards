@@ -51,9 +51,12 @@ export const DELIVERY_RULES: ErrorRule[] = [
     'Not enough credit to cover the shipping fee — top up and try again.',
   ],
   [
-    /within Malaysia only/i,
-    'We currently ship within Malaysia only — choose a Malaysian address.',
+    /within Malaysia( and Singapore)? only/i,
+    'We currently ship within Malaysia and Singapore only — choose an address in one of them.',
   ],
+  // The backend names the postcode format the country needs (5 digits for
+  // Malaysia, 6 for Singapore); its sentence is already the fix.
+  [/\d-digit (Malaysian|Singapore) postcode/i, (text) => text],
   [
     /changes the shipping fee zone/i,
     'That address changes the shipping fee zone — cancel this delivery (the fee is refunded) and request it again with the new address.',

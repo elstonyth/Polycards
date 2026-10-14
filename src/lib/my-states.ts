@@ -35,3 +35,14 @@ export const MY_STATES = [
 ] as const;
 
 export type MalaysianState = (typeof MY_STATES)[number];
+
+const SG_STATES: readonly string[] = ['Singapore'];
+
+/**
+ * The State options for an address in `countryCode`. Singapore has no states,
+ * so a Singapore address offers (and stores) just "Singapore", which also
+ * zones it Singapore on the delivery-fee side.
+ */
+export function statesFor(countryCode: string): readonly string[] {
+  return countryCode.trim().toUpperCase() === 'SG' ? SG_STATES : MY_STATES;
+}

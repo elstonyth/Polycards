@@ -6,8 +6,43 @@ import {
   isShippablePostcode,
   EAST_SHIPPING_MYR,
   WEST_SHIPPING_MYR,
+  isShippableCountry,
+  postcodeHint,
 } from '../delivery-fee';
-import { MY_STATES } from '@/lib/my-states';
+import { MY_STATES, statesFor } from '@/lib/my-states';
+
+// Singapore (2026-10-14): shipped direct, flat RM50 — mirrors the backend.
+describe('Singapore delivery', () => {
+  it('ships to Malaysia and Singapore only', () => {
+    expect(isShippableCountry('MY')).toBe(true);
+    expect(isShippableCountry('sg')).toBe(true);
+    expect(isShippableCountry('TH')).toBe(false);
+  });
+
+  it('wants 6 digits for Singapore, 5 for Malaysia', () => {
+    expect(isShippablePostcode('018983', 'SG')).toBe(true);
+    expect(isShippablePostcode('18983', 'SG')).toBe(false);
+    expect(isShippablePostcode('50450', 'MY')).toBe(true);
+    expect(postcodeHint('SG')).toMatch(/6-digit Singapore/);
+    expect(postcodeHint('MY')).toMatch(/5-digit Malaysian/);
+  });
+
+  it('zones and prices Singapore at RM50, the dearer reading winning', () => {
+    expect(deliveryZone('018983', null, 'Singapore', 'SG')).toBe('sg');
+    expect(deliveryZone('50450', null, 'Singapore', 'MY')).toBe('sg');
+    expect(computeDeliveryFee('018983', 100, null, 'Singapore', 'SG')).toEqual({
+      shipping: 50,
+      insurance: 0,
+      total: 50,
+    });
+  });
+
+  it('offers Singapore as the only "state" for a Singapore address', () => {
+    expect(statesFor('SG')).toEqual(['Singapore']);
+    expect(statesFor('MY')).toBe(MY_STATES);
+    expect(statesFor('')).toBe(MY_STATES);
+  });
+});
 
 // Mirror of the backend spec (delivery-fee.unit.spec.ts) — keeps the client
 // preview honest against the authoritative backend charge.

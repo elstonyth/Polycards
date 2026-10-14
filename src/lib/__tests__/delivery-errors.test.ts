@@ -13,6 +13,26 @@ import { isPhoneGateError } from '@/lib/phone-gate';
 const map = (msg: string) =>
   friendlyError(new Error(msg), DELIVERY_RULES, DELIVERY_FALLBACK);
 
+describe('shipping country and postcode refusals (2026-10-14)', () => {
+  it('names both countries, from the new backend sentence or the old one', () => {
+    for (const msg of [
+      'We currently ship within Malaysia and Singapore only.',
+      'We currently ship within Malaysia only.',
+    ]) {
+      expect(map(msg)).toMatch(/within Malaysia and Singapore only/);
+    }
+  });
+
+  it("passes the country's postcode format through", () => {
+    for (const msg of [
+      'Enter a valid 6-digit Singapore postcode for this address.',
+      'Enter a valid 5-digit Malaysian postcode for this address.',
+    ]) {
+      expect(map(msg)).toBe(msg);
+    }
+  });
+});
+
 describe('DELIVERY_RULES backend-message contract', () => {
   it('maps each per-status verdict message to its specific copy', () => {
     expect(

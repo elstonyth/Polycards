@@ -10,19 +10,23 @@ import {
 } from '@/lib/actions/delivery';
 import type { VaultItem } from '@/lib/actions/vault';
 import { addressViewFromInput } from '@/lib/address-view';
-import { MY_STATES } from '@/lib/my-states';
+import { statesFor } from '@/lib/my-states';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { Pill } from '@/components/ui/pill';
 import { INPUT_CLASS } from '@/components/account/ui';
 import {
   computeDeliveryFee,
   deliveryZone,
+  isShippableCountry,
   isShippablePostcode,
+  postcodeHint,
   PROTECTION_INCLUDED_MYR,
+  ZONE_LABEL,
 } from '@/lib/delivery-fee';
 import { rm } from '@/lib/format';
 import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
+import { useTopUp } from '@/components/app-shell/TopUpProvider';
 
 type Props = {
   open: boolean;
@@ -55,6 +59,9 @@ export default function RequestDeliveryModal({
   const [adding, setAdding] = useState(addresses.length === 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The charge is confirmed in a second step before anything is requested.
+  const [confirming, setConfirming] = useState(false);
+  const { balance, openTopUp, refreshBalance } = useTopUp();
   const [form, setForm] = useState<AddAddressInput>({
     firstName: '',
     lastName: '',
@@ -70,10 +77,13 @@ export default function RequestDeliveryModal({
   // Fee preview — mirrors the backend's authoritative charge (delivery-fee.ts).
   // Recomputed per render from the selected address; cheap (two lookups).
   const selectedAddress = addrList.find((a) => a.id === selectedAddr);
-  // Reward cards ship fee-free (POST /store/rewards/withdraw charges nothing),
-  // so only the ordinary cards are priced. Pricing the whole selection showed
-  // "RM 15.00 deducted" on a reward-only request that is never charged.
+  const country = selectedAddress?.countryCode ?? '';
+  // Every delivery pays its zone's shipping (2026-10-14): the vault cards go
+  // as ONE order (shipping + insurance on their value), and each prize card
+  // ships through POST /store/rewards/withdraw as its OWN order, paying the
+  // zone's shipping and no insurance (a prize carries no card value there).
   const paidItems = items.filter((i) => i.source !== 'reward');
+  const prizeItems = items.filter((i) => i.source === 'reward');
   // Rounded to cents like the backend's vaultValueForPulls sum, so a float
   // artifact can't show an insurance line at exactly RM200 that the
   // authoritative charge never applies.
@@ -81,24 +91,43 @@ export default function RequestDeliveryModal({
     Math.round(
       paidItems.reduce((s, i) => s + (i.card.priceMyr ?? 0), 0) * 100,
     ) / 100;
-  const fee =
-    selectedAddress && paidItems.length > 0
+  const priced = (value: number) =>
+    selectedAddress
       ? computeDeliveryFee(
           selectedAddress.postalCode,
-          orderValue,
+          value,
           selectedAddress.province,
           selectedAddress.city,
+          country,
         )
       : null;
-  const nonMalaysian =
-    !!selectedAddress &&
-    selectedAddress.countryCode.trim().toUpperCase() !== 'MY';
+  const fee = paidItems.length > 0 ? priced(orderValue) : null;
+  const prizeShipping = prizeItems.length > 0 ? (priced(0)?.shipping ?? 0) : 0;
+  const totalCharge =
+    Math.round(((fee?.total ?? 0) + prizeShipping * prizeItems.length) * 100) /
+    100;
+  const zone = selectedAddress
+    ? deliveryZone(
+        selectedAddress.postalCode,
+        selectedAddress.province,
+        selectedAddress.city,
+        country,
+      )
+    : null;
+  const unshippableCountry = !!selectedAddress && !isShippableCountry(country);
   // The backend refuses a postcode it can't zone, so say so here rather than
-  // previewing a West rate the request would reject.
+  // previewing a rate the request would reject.
   const badPostcode =
     !!selectedAddress &&
-    !nonMalaysian &&
-    !isShippablePostcode(selectedAddress.postalCode);
+    !unshippableCountry &&
+    !isShippablePostcode(selectedAddress.postalCode, country);
+  const priceable = !!selectedAddress && !unshippableCountry && !badPostcode;
+  // Checked before the request (the backend's floor guard still decides):
+  // a balance that cannot cover the charge is sent to top up instead.
+  const shortBy =
+    priceable && balance != null && totalCharge > balance
+      ? Math.round((totalCharge - balance) * 100) / 100
+      : 0;
 
   // Liquid-glass rim on the panel (frosted fallback on Safari/Firefox).
   useLiquidGlass(panelRef, open, GLASS_SUBTLE);
@@ -170,11 +199,14 @@ export default function RequestDeliveryModal({
         );
         return;
       }
+      // The fees left the balance server-side; repaint the header chip.
+      void refreshBalance();
       onSubmitted(res.shippedIds, res.skipped);
     } catch {
       setError('Couldn’t request delivery. Please try again.');
     } finally {
       setBusy(false);
+      setConfirming(false);
     }
   }
 
@@ -193,10 +225,7 @@ export default function RequestDeliveryModal({
         </h2>
         <p className="mt-1 text-[13px] text-white/55">
           Ship {items.length} card{items.length === 1 ? '' : 's'} to your
-          address.{' '}
-          {paidItems.length > 0
-            ? 'The shipping fee is deducted from your credit balance.'
-            : 'Reward cards ship free.'}
+          address. The shipping fee is deducted from your credit balance.
         </p>
 
         {/* Selected cards. overflow-x-auto clips the halo on all four sides
@@ -234,7 +263,11 @@ export default function RequestDeliveryModal({
                   type="radio"
                   name="addr"
                   checked={selectedAddr === a.id}
-                  onChange={() => setSelectedAddr(a.id)}
+                  onChange={() => {
+                    setSelectedAddr(a.id);
+                    // A new address re-prices: confirm the new charge.
+                    setConfirming(false);
+                  }}
                 />
                 <span>
                   {a.name} — {a.line1}, {a.city} {a.postalCode}{' '}
@@ -331,7 +364,7 @@ export default function RequestDeliveryModal({
                 <option value="" disabled>
                   Select a state
                 </option>
-                {MY_STATES.map((s) => (
+                {statesFor(form.countryCode).map((s) => (
                   <option key={s} value={s}>
                     {s}
                   </option>
@@ -359,15 +392,20 @@ export default function RequestDeliveryModal({
               <input
                 aria-label="Country code"
                 autoComplete="country"
-                placeholder="e.g. MY"
+                placeholder="MY or SG"
                 maxLength={2}
                 value={form.countryCode}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const countryCode = e.target.value.toUpperCase();
+                  // A state from the other country's list is never valid.
                   setForm((f) => ({
                     ...f,
-                    countryCode: e.target.value.toUpperCase(),
-                  }))
-                }
+                    countryCode,
+                    province: statesFor(countryCode).includes(f.province ?? '')
+                      ? f.province
+                      : '',
+                  }));
+                }}
                 className={INPUT_CLASS}
               />
             </label>
@@ -393,48 +431,84 @@ export default function RequestDeliveryModal({
         {/* Fee preview — the backend recomputes and charges authoritatively;
             this mirrors it so the RM total is never a surprise. Hidden while
             the add-address form is open (no priced address selected yet). */}
-        {!adding && fee && !nonMalaysian && !badPostcode && (
+        {!adding && priceable && zone && (
           <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-3 text-[13px]">
-            <div className="flex justify-between text-white/70">
-              <span>
-                Shipping (
-                {deliveryZone(
-                  selectedAddress?.postalCode ?? '',
-                  selectedAddress?.province,
-                  selectedAddress?.city,
-                ) === 'east'
-                  ? 'East'
-                  : 'West'}{' '}
-                Malaysia)
-              </span>
-              <span>{rm(fee.shipping)}</span>
-            </div>
-            {fee.insurance > 0 ? (
+            {fee && (
+              <>
+                <div className="flex justify-between text-white/70">
+                  <span>Shipping ({ZONE_LABEL[zone]})</span>
+                  <span>{rm(fee.shipping)}</span>
+                </div>
+                {fee.insurance > 0 ? (
+                  <div className="mt-1 flex justify-between text-white/70">
+                    <span>Insurance (5% of card value)</span>
+                    <span>{rm(fee.insurance)}</span>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-[12px] text-white/45">
+                    Shipment protection up to {rm(PROTECTION_INCLUDED_MYR)}{' '}
+                    included.
+                  </p>
+                )}
+              </>
+            )}
+            {prizeItems.length > 0 && (
               <div className="mt-1 flex justify-between text-white/70">
-                <span>Insurance (5% of card value)</span>
-                <span>{rm(fee.insurance)}</span>
+                <span>
+                  Prize card shipping ({ZONE_LABEL[zone]}
+                  {prizeItems.length > 1
+                    ? `, ${prizeItems.length} parcels × ${rm(prizeShipping)}`
+                    : ''}
+                  )
+                </span>
+                <span>{rm(prizeShipping * prizeItems.length)}</span>
               </div>
-            ) : (
-              <p className="mt-1 text-[12px] text-white/45">
-                Shipment protection up to {rm(PROTECTION_INCLUDED_MYR)}{' '}
-                included.
-              </p>
             )}
             <div className="mt-2 flex justify-between border-t border-white/10 pt-2 font-semibold text-white">
               <span>Total — deducted from balance</span>
-              <span>{rm(fee.total)}</span>
+              <span>{rm(totalCharge)}</span>
             </div>
+            {balance != null && (
+              <p className="mt-1 text-right text-[12px] text-white/45">
+                Your balance: {rm(balance)}
+              </p>
+            )}
           </div>
         )}
-        {!adding && nonMalaysian && (
+        {/* Checked before anything is requested; the backend's floor guard
+            is still the authority. */}
+        {!adding && shortBy > 0 && (
+          <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
+            <p>
+              Not enough credit: this delivery costs {rm(totalCharge)} and your
+              balance is {rm(balance ?? 0)}. Top up {rm(shortBy)} or more to
+              ship it.
+            </p>
+            <Pill onClick={openTopUp} className="mt-2 px-4">
+              Top up
+            </Pill>
+          </div>
+        )}
+        {!adding && unshippableCountry && (
           <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
-            We currently ship within Malaysia only — choose a Malaysian address.
+            We currently ship within Malaysia and Singapore only — choose an
+            address in one of them.
           </p>
         )}
         {!adding && badPostcode && (
           <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
-            That address needs a valid 5-digit Malaysian postcode before it can
-            be shipped.
+            That address needs {postcodeHint(country)} before it can be shipped.
+          </p>
+        )}
+        {/* The charge is confirmed before anything is requested. */}
+        {confirming && !adding && priceable && shortBy === 0 && (
+          <p
+            role="status"
+            className="mt-3 rounded-xl border border-white/15 bg-white/[0.06] p-3 text-[13px] text-white"
+          >
+            {rm(totalCharge)} will be deducted from your balance to ship{' '}
+            {items.length} card{items.length === 1 ? '' : 's'} to{' '}
+            {ZONE_LABEL[zone ?? 'west']}. Confirm to continue.
           </p>
         )}
 
@@ -454,18 +528,22 @@ export default function RequestDeliveryModal({
         <div className="mt-5 flex justify-end gap-2">
           <button
             type="button"
-            onClick={onClose}
+            onClick={confirming ? () => setConfirming(false) : onClose}
             className="rounded-lg px-4 py-2 text-[13px] text-white/60"
           >
-            Cancel
+            {confirming ? 'Back' : 'Cancel'}
           </button>
           <Pill
             disabled={
-              busy || adding || !selectedAddr || nonMalaysian || badPostcode
+              busy || adding || !selectedAddr || !priceable || shortBy > 0
             }
-            onClick={submit}
+            onClick={confirming ? submit : () => setConfirming(true)}
           >
-            {busy ? 'Requesting…' : 'Request delivery'}
+            {busy
+              ? 'Requesting…'
+              : confirming
+                ? `Confirm & pay ${rm(totalCharge)}`
+                : 'Request delivery'}
           </Pill>
         </div>
       </div>
