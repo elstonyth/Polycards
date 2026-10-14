@@ -217,7 +217,7 @@ const PixelPokedexPage = () => {
                   <img
                     src={resolveImageUrl(spriteUrl)}
                     alt=""
-                    className="border-ui-border-base h-16 w-16 shrink-0 rounded border bg-white object-contain"
+                    className="border-ui-border-base h-16 w-16 shrink-0 rounded border bg-ui-bg-component object-contain"
                   />
                 ) : (
                   <div className="border-ui-border-base bg-ui-bg-base text-ui-fg-muted flex h-16 w-16 shrink-0 items-center justify-center rounded border text-xs">
@@ -333,7 +333,7 @@ const PixelPokedexPage = () => {
                     src={resolveImageUrl(p.image_url)}
                     alt={p.name}
                     loading="lazy"
-                    className="h-16 w-16 shrink-0 rounded bg-white object-contain"
+                    className="h-16 w-16 shrink-0 rounded bg-ui-bg-component object-contain"
                   />
                 ) : (
                   <div className="border-ui-border-base bg-ui-bg-base text-ui-fg-muted flex h-16 w-16 shrink-0 items-center justify-center rounded border text-xs">
