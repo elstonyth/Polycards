@@ -279,6 +279,144 @@ await darkPage.waitForTimeout(3000);
 await darkPage.screenshot({ path: `${OUT}/overview-dark.png`, fullPage: true });
 await dark.close();
 
+// ── Phase 3: finance pages (spec 2026-10-14-admin-finance-pages) ───────────
+const shows = (text) =>
+  page.getByText(text, { exact: true }).first().isVisible();
+
+await page.goto(`${ADMIN}/economy`);
+await settle();
+for (const heading of [
+  'Cash kept',
+  'Still owed to players',
+  'Where the money moved',
+  'Pack payout rate',
+]) {
+  check(await shows(heading), `profit report shows "${heading}"`);
+}
+check(await shows('Real customers'), 'profit report opens on real customers');
+await page.screenshot({ path: `${OUT}/profit-light.png`, fullPage: true });
+await page.getByRole('switch', { name: 'All groups' }).click();
+await page.waitForTimeout(1500);
+check(
+  new URL(page.url()).searchParams.get('scope') === 'all',
+  'All groups puts scope=all in the URL',
+);
+check(await shows('Cash kept'), 'the all-groups view renders');
+await page.getByRole('button', { name: 'All time' }).click();
+await page.waitForTimeout(1500);
+check(
+  (await page.getByText('vs last period').count()) === 0,
+  'all time hides "vs last period"',
+);
+
+await page.goto(`${ADMIN}/overview?scope=all`);
+await settle();
+check(
+  (await page
+    .getByRole('switch', { name: 'All groups' })
+    .getAttribute('aria-checked')) === 'true',
+  'Dashboard ?scope=all turns its switch on',
+);
+
+await page.goto(`${ADMIN}/settlement`);
+await settle();
+check(await shows('Gateway check'), 'Settlement shows the gateway check');
+await page.getByRole('button', { name: 'Switch gateway…' }).click();
+const gatewayPanel = page.getByRole('dialog');
+await gatewayPanel.waitFor({ timeout: 10000 });
+check(
+  await gatewayPanel.getByText('Payment gateway').first().isVisible(),
+  'Switch gateway opens its side panel',
+);
+await page.keyboard.press('Escape');
+await gatewayPanel.waitFor({ state: 'detached', timeout: 5000 });
+await page.screenshot({ path: `${OUT}/settlement-rm.png`, fullPage: true });
+
+await page.goto(`${ADMIN}/settlement?currency=SGD`);
+await settle();
+const fxCard = page.getByTestId('fx-card-SGD');
+if ((await fxCard.count()) > 0) {
+  await fxCard.getByRole('button', { name: 'Edit rates' }).click();
+  const fxPanel = page.getByRole('dialog');
+  await fxPanel.waitFor({ timeout: 10000 });
+  check(
+    await fxPanel.getByTestId('fx-preview-SGD').isVisible(),
+    'Edit rates opens with the live preview',
+  );
+  await page.keyboard.press('Escape');
+} else {
+  check(false, 'the S$ tab has the exchange-rate card');
+}
+
+await page.goto(`${ADMIN}/ledger`);
+await settle();
+const ledgerFailures = [];
+const onLedger = (r) => {
+  if (r.url().includes('/admin/ledger') && r.status() >= 400)
+    ledgerFailures.push(r.status());
+};
+page.on('response', onLedger);
+await page.getByRole('combobox', { name: 'Type' }).click();
+await page.getByRole('option', { name: 'Referral' }).click();
+await page.waitForTimeout(1500);
+page.off('response', onLedger);
+check(
+  ledgerFailures.length === 0 &&
+    (await page.getByText("Couldn't load").count()) === 0,
+  'Transactions: the Referral filter loads',
+);
+await page.getByRole('button', { name: 'Date range' }).click();
+await page.waitForTimeout(400);
+check(
+  (await page.locator('[role="dialog"] input[type="date"]').count()) === 2,
+  'Transactions: the date popover has From and To',
+);
+await page.keyboard.press('Escape');
+
+await page.goto(`${ADMIN}/players`);
+await settle();
+await page.getByRole('combobox', { name: 'Group' }).click();
+const groupOptions = await page.getByRole('option').allInnerTexts();
+check(
+  groupOptions[0] === 'All groups' && groupOptions.length >= 2,
+  `Players: the group filter lists groups (${groupOptions.join(', ')})`,
+);
+await page.keyboard.press('Escape');
+await page.getByRole('button', { name: 'More actions' }).click();
+check(
+  (await page.getByRole('menuitem').allInnerTexts()).includes('Export logins'),
+  'Players: More actions holds Export logins',
+);
+await page.keyboard.press('Escape');
+
+// The four redesigned pages in Medusa's dark theme.
+const dark3 = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  colorScheme: 'dark',
+});
+await dark3.addInitScript(() =>
+  localStorage.setItem('medusa_admin_theme', 'dark'),
+);
+await dark3.request.post(`${BACKEND}/auth/session`, {
+  headers: { authorization: `Bearer ${token}` },
+});
+const darkPage3 = await dark3.newPage();
+darkPage3.on('pageerror', (e) =>
+  errors.push(`${darkPage3.url()}: ${e.message}`),
+);
+for (const [path, name] of [
+  ['/economy', 'profit-dark'],
+  ['/settlement?currency=SGD', 'settlement-sgd-dark'],
+  ['/ledger', 'ledger-dark'],
+  ['/players', 'players-dark'],
+]) {
+  await darkPage3.goto(`${ADMIN}${path}`);
+  await darkPage3.waitForSelector('nav', { timeout: 60000 });
+  await darkPage3.waitForTimeout(2500);
+  await darkPage3.screenshot({ path: `${OUT}/${name}.png`, fullPage: true });
+}
+await dark3.close();
+
 check(errors.length === 0, `no page errors (${errors.length})`);
 for (const e of errors) console.log(`  ${e}`);
 await browser.close();

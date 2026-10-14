@@ -11,7 +11,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import type { SettlementGranularity, StatsReport } from '../../lib/admin-rest';
+import type {
+  CustomerScope,
+  SettlementGranularity,
+  StatsReport,
+} from '../../lib/admin-rest';
 import { useSettlementReport } from '../../lib/queries';
 import { rm } from '../../lib/format';
 import {
@@ -74,7 +78,7 @@ const FlowTooltip = ({
 };
 
 /** Net cash can go negative, so the change shows in RM, not %. */
-const NetChange = ({ cur, prev }: { cur: number; prev: number }) => {
+export const NetChange = ({ cur, prev }: { cur: number; prev: number }) => {
   const { diff, tone } = amountChange(cur, prev);
   const color = tone === 'good' ? 'green' : tone === 'bad' ? 'red' : 'grey';
   return (
@@ -86,11 +90,17 @@ const NetChange = ({ cur, prev }: { cur: number; prev: number }) => {
 
 /** Headline net cash in (picked window) over the 12-period money chart. */
 export const MoneyFlowCard = ({
+  scope = 'all',
   stats,
+  statsStale = false,
   statsFailed = false,
   className = '',
 }: {
+  /** Real customers only, or every account (the Dashboard's switch). */
+  scope?: CustomerScope;
   stats: StatsReport | undefined;
+  /** `stats` is the previous scope or period's, kept while the new loads. */
+  statsStale?: boolean;
   /** The stats query failed: show a dash, not an endless skeleton. */
   statsFailed?: boolean;
   className?: string;
@@ -98,14 +108,19 @@ export const MoneyFlowCard = ({
   const { t } = useTranslation();
   const [granularity, setGranularity] = useState<SettlementGranularity>('week');
   // '' = every rail, in RM (the route's default scope).
-  const flow = useSettlementReport(granularity, 12, '');
+  const flow = useSettlementReport(granularity, 12, '', scope);
   const series = moneyFlowSeries(flow.data);
   const animate = !prefersReducedMotion();
   const net = stats ? netCashIn(stats.current.stats) : undefined;
   const prevNet = stats ? netCashIn(stats.previous.stats) : undefined;
+  // Either half still shows the previous scope or period: dim the card.
+  const stale = statsStale || flow.isPlaceholderData;
 
   return (
-    <Container className={`pc-settle flex flex-col gap-4 ${className}`}>
+    <Container
+      className={`pc-settle flex flex-col gap-4 transition-opacity ${stale ? 'opacity-50' : ''} ${className}`}
+      aria-busy={stale}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <Text size="small" className="text-ui-fg-subtle">

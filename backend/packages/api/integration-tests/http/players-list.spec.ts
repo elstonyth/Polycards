@@ -149,6 +149,101 @@ medusaIntegrationTestRunner({
         expect(res.status).toBe(401);
       });
 
+      // ?group= (spec 2026-10-14-admin-finance-pages §8): `default` is
+      // everyone outside a non-default group (B, ungrouped); a group id is
+      // that group's members (A, in GROUP_NAME). Both hold on the
+      // ledger-sorted path too, which pages its own ids in SQL.
+      it('?group= filters to Default or to one group, sorted or not', async () => {
+        const customers = getContainer().resolve(Modules.CUSTOMER);
+        const [group] = await customers.listCustomerGroups({
+          name: GROUP_NAME,
+        });
+        const ids = (res: { data: { players: { id: string }[] } }) =>
+          res.data.players.map((p) => p.id);
+
+        const byDefault = await list('?group=default');
+        expect(byDefault.status).toBe(200);
+        expect(ids(byDefault)).toContain(bId);
+        expect(ids(byDefault)).not.toContain(aId);
+
+        const byGroup = await list(`?group=${group.id}`);
+        expect(ids(byGroup)).toEqual([aId]);
+        expect(byGroup.data.total).toBe(1);
+
+        const sorted = await list('?group=default&sort=wallet:desc');
+        expect(ids(sorted)).toContain(bId);
+        expect(ids(sorted)).not.toContain(aId);
+        const sortedGroup = await list(`?group=${group.id}&sort=topup:desc`);
+        expect(ids(sortedGroup)).toEqual([aId]);
+
+        const searched = await list(`?group=${group.id}&q=${B_EMAIL}`);
+        expect(ids(searched)).toEqual([]);
+
+        // A handle search (the byHandle id-list path) narrowed by the group.
+        expect(ids(await list(`?group=${group.id}&q=@${A_HANDLE}`))).toEqual([
+          aId,
+        ]);
+        expect(ids(await list(`?group=default&q=@${A_HANDLE}`))).not.toContain(
+          aId,
+        );
+        expect(ids(await list(`?group=default&q=@${B_HANDLE}`))).toContain(
+          bId,
+        );
+
+        expect((await list('?group=bogus')).status).toBe(400);
+      });
+
+      // The list's group chip names the EFFECTIVE player group (the odds
+      // engine's rule), not whichever membership came back first: null means
+      // the default group. B also joins DEFAULT, so a first-membership chip
+      // would be wrong either way round.
+      it('names the effective player group, null for the default', async () => {
+        const customers = getContainer().resolve(Modules.CUSTOMER);
+        const [existingDefault] = await customers.listCustomerGroups({
+          name: 'DEFAULT',
+        });
+        const def =
+          existingDefault ??
+          (await customers.createCustomerGroups({ name: 'DEFAULT' }));
+        // A: Whales + DEFAULT; B: DEFAULT only. A first-membership chip
+        // would say 'DEFAULT' for B (not null) — this tells the rules apart.
+        await customers.addCustomerToGroup([
+          { customer_id: aId, customer_group_id: def.id },
+          { customer_id: bId, customer_group_id: def.id },
+        ]);
+        const res = await list();
+        expect(rowFor(res, aId).player_group).toBe(GROUP_NAME);
+        expect(rowFor(res, bId).groups).toEqual(['DEFAULT']);
+        expect(rowFor(res, bId).player_group).toBeNull();
+
+        // The DEFAULT group's own id means default (ungrouped included), not
+        // "its stored members".
+        const byDefaultId = await list(`?group=${def.id}`);
+        expect(byDefaultId.status).toBe(200);
+        const defaultIds = byDefaultId.data.players.map(
+          (p: { id: string }) => p.id,
+        );
+        expect(defaultIds).toContain(bId);
+        expect(defaultIds).not.toContain(aId);
+
+        // A group that is gone lists nobody, not its old members.
+        const [whales] = await customers.listCustomerGroups({
+          name: GROUP_NAME,
+        });
+        await customers.softDeleteCustomerGroups([whales.id]);
+        const gone = await list(`?group=${whales.id}`);
+        expect(gone.status).toBe(200);
+        expect(gone.data.players).toEqual([]);
+        expect(gone.data.total).toBe(0);
+
+        // Default + search reaches Medusa's filter as { q, id: { $nin } }.
+        const searched = await list(`?group=default&q=${B_EMAIL}`);
+        expect(searched.status).toBe(200);
+        expect(searched.data.players.map((p: { id: string }) => p.id)).toEqual([
+          bId,
+        ]);
+      });
+
       it('200 — lists both customers, newest first, with total', async () => {
         const res = await list();
         expect(res.status).toBe(200);

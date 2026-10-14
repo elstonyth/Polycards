@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Badge,
@@ -13,14 +13,15 @@ import { useSettlementReport } from '../../lib/queries';
 import type { SettlementGranularity } from '../../lib/admin-rest';
 import { LEDGER_CURRENCY, rm } from '../../lib/format';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { Hint } from '../../components/Hint';
+import { resultRow } from './settlement-rows';
 
 // The gateway's calendar weekly/monthly result for one currency, read from
 // this database (audit 2026-08-17 B1/B3/B4/B5), so the operator never has to
-// log into the gateway's back office for "what did this month do": settled
-// gross, the fee they kept, the net, and — because two records of the same
-// money exist — the delta against the credit ledger's own view of the same
-// period. Always RM, the ledger's currency: a regional payment counts at the
-// rate it locked.
+// log into the gateway's back office for "what did this month do": money in,
+// the fees, money out, the net — and, because two records of the same money
+// exist, a check against the credit ledger's own view of the period. Always
+// RM, the ledger's currency: a regional payment counts at the rate it locked.
 
 // MYT bucket key ('YYYY-MM-DD', first day of the week/month) → label. Month
 // keys render as 'Aug 2026'; week keys as their Monday date, which is how an
@@ -40,60 +41,44 @@ const periodLabel = (
   return key;
 };
 
-// Deltas within a cent of zero render quiet; anything larger is the signal
-// this column exists for. Withdrawal deltas are timing-skewed by design
-// (debit at submit, settle later), so they get the subtle tone, not the
-// alarm one — the tooltip carries the reading instructions.
-const deltaCell = (value: number, alarming: boolean) => {
-  if (Math.abs(value) < 0.005) {
-    return <span className="text-ui-fg-muted">—</span>;
-  }
-  return (
-    <span className={alarming ? 'text-ui-fg-error' : 'text-ui-fg-subtle'}>
-      {value > 0 ? '+' : ''}
-      {rm(value)}
-    </span>
-  );
-};
-
-/** A sum that is a FLOOR ("≥ x", with the reason on hover) when `missing`
- *  settled rows had no figure on file. */
-const floor = (value: number, missing: number, hint: string): ReactNode =>
-  missing > 0 ? (
-    <Tooltip content={hint}>
-      <span>≥ {rm(value)}</span>
-    </Tooltip>
-  ) : (
-    rm(value)
-  );
-
 export const ReportCard = ({ currency }: { currency: string }) => {
   const { t } = useTranslation();
   const [granularity, setGranularity] =
     useState<SettlementGranularity>('month');
-  const { data, isError } = useSettlementReport(granularity, 12, currency);
+  const { data, isError, isPlaceholderData } = useSettlementReport(
+    granularity,
+    12,
+    currency,
+  );
+  const rows = (data?.periods ?? []).map(resultRow);
+  const feeFloors = rows.filter((r) => r.feeFloor).length;
+  const grossFloors = rows.filter((r) => r.grossFloor).length;
 
-  const missingNetTotal = (data?.periods ?? []).reduce(
-    (sum, p) => sum + p.deposits.missingNet + p.withdrawals.missingNet,
-    0,
-  );
-  // Deposits only — withdrawals' missingGross is structurally 0 (its gross
-  // basis, `amount`, is never NULL), so there is nothing to total there.
-  const missingGrossTotal = (data?.periods ?? []).reduce(
-    (sum, p) => sum + p.deposits.missingGross,
-    0,
-  );
-  const feeHint = (count: number) => t('settlement.feeFloorHint', { count });
+  // "≥ x" with the reason on hover when some rows had no figure on file.
+  const floor = (value: number, isFloor: boolean, hint: string) =>
+    isFloor ? (
+      <Tooltip content={hint}>
+        <span>≥ {rm(value)}</span>
+      </Tooltip>
+    ) : (
+      rm(value)
+    );
 
   return (
     <Container className="p-0" data-testid={`report-card-${currency}`}>
       <div className="flex flex-wrap items-start justify-between gap-3 px-6 py-4">
         <div>
-          <Heading level="h2">{t('settlement.reportTitle')}</Heading>
+          <Heading level="h2">
+            {t(
+              granularity === 'month'
+                ? 'settlement.reportTitleMonth'
+                : 'settlement.reportTitleWeek',
+            )}
+          </Heading>
           <Text className="text-ui-fg-subtle mt-1" size="small">
             {currency === LEDGER_CURRENCY
-              ? t('settlement.reportSubtitle')
-              : t('settlement.reportSubtitleRegional', { currency })}
+              ? t('settlement.reportSubtitleShort')
+              : t('settlement.reportSubtitleShortRegional')}
           </Text>
         </div>
         <div className="flex flex-wrap gap-1">
@@ -102,6 +87,7 @@ export const ReportCard = ({ currency }: { currency: string }) => {
               key={g}
               size="small"
               variant={granularity === g ? 'primary' : 'secondary'}
+              aria-pressed={granularity === g}
               onClick={() => setGranularity(g)}
             >
               {t(`settlement.${g}`)}
@@ -118,136 +104,159 @@ export const ReportCard = ({ currency }: { currency: string }) => {
         <div className="border-t px-6 py-8">
           <LoadingSkeleton />
         </div>
-      ) : data.periods.length === 0 ? (
+      ) : rows.length === 0 ? (
         <Text className="text-ui-fg-subtle border-t px-6 py-8">
           {t('settlement.empty')}
         </Text>
       ) : (
-        <>
+        // The previous granularity's rows stay while the new one loads; dim
+        // them so "Aug 2026" never reads as a week under "Results by week".
+        <div
+          className={`transition-opacity ${isPlaceholderData ? 'opacity-50' : ''}`}
+          aria-busy={isPlaceholderData}
+        >
           <div className="overflow-x-auto border-t">
             <Table>
               <Table.Header>
-                {/* Group row: one visual bracket per money direction. */}
-                <Table.Row>
-                  <Table.HeaderCell />
-                  <Table.HeaderCell
-                    colSpan={5}
-                    className="border-l text-center"
-                  >
-                    {t('settlement.depositsGroup')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell
-                    colSpan={5}
-                    className="border-l text-center"
-                  >
-                    {t('settlement.withdrawalsGroup')}
-                  </Table.HeaderCell>
-                </Table.Row>
                 <Table.Row>
                   <Table.HeaderCell>{t('settlement.period')}</Table.HeaderCell>
-                  {(['deposit', 'withdrawal'] as const).map((side) => (
-                    <DirectionHeads key={side} side={side} />
-                  ))}
+                  <Table.HeaderCell className="text-right">
+                    {t('settlement.moneyIn')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    {t('settlement.fees')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    {t('settlement.moneyOut')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    {t('settlement.netCash')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>
+                    <span className="inline-flex items-center gap-1.5">
+                      {t('settlement.ledgerCheck')}
+                      <Hint text={t('settlement.ledgerCheckHint')} />
+                    </span>
+                  </Table.HeaderCell>
                 </Table.Row>
               </Table.Header>
               <Table.Body>
-                {data.periods.map((p) => (
-                  <Table.Row key={p.period}>
+                {rows.map((r) => (
+                  <Table.Row key={r.period}>
                     <Table.Cell className="whitespace-nowrap font-medium">
-                      {periodLabel(p.period, data.granularity)}
-                    </Table.Cell>
-                    <Table.Cell className="border-l text-right tabular-nums">
-                      {p.deposits.count || '—'}
+                      {periodLabel(r.period, data.granularity)}
                     </Table.Cell>
                     <Table.Cell className="text-right tabular-nums">
                       {floor(
-                        p.deposits.gross,
-                        p.deposits.missingGross,
-                        t('settlement.grossFloorHint', {
-                          count: p.deposits.missingGross,
-                        }),
+                        r.inGross,
+                        r.grossFloor,
+                        t('settlement.grossFloorFootnote'),
                       )}
+                      <Text
+                        as="span"
+                        size="xsmall"
+                        className="text-ui-fg-subtle block"
+                      >
+                        {t('settlement.topupsCount', { count: r.inCount })}
+                      </Text>
                     </Table.Cell>
                     <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
-                      {floor(
-                        p.deposits.fee,
-                        p.deposits.missingNet,
-                        feeHint(p.deposits.missingNet),
+                      {/* One column, but each direction has its own rate:
+                          the split is on hover. */}
+                      <Tooltip
+                        content={[
+                          t('settlement.feeSplit', {
+                            topups: rm(r.inFee),
+                            payouts: rm(r.outFee),
+                          }),
+                          r.feeFloor ? t('settlement.feeFloorFootnote') : '',
+                        ].join(' ')}
+                      >
+                        <span tabIndex={0} className="cursor-help">
+                          {r.feeFloor ? '≥ ' : ''}
+                          {rm(r.fees)}
+                        </span>
+                      </Tooltip>
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      {rm(r.outGross)}
+                      <Text
+                        as="span"
+                        size="xsmall"
+                        className="text-ui-fg-subtle block"
+                      >
+                        {t('settlement.payoutsCount', { count: r.outCount })}
+                      </Text>
+                    </Table.Cell>
+                    <Table.Cell
+                      className={`text-right tabular-nums ${
+                        r.net > 0
+                          ? 'text-ui-tag-green-text'
+                          : r.net < 0
+                            ? 'text-ui-fg-error'
+                            : ''
+                      }`}
+                    >
+                      {rm(r.net)}
+                    </Table.Cell>
+                    <Table.Cell>
+                      {r.gap === 0 ? (
+                        <span className="text-ui-tag-green-text inline-flex items-center gap-1">
+                          ✓
+                          <Text
+                            as="span"
+                            size="small"
+                            className="text-ui-fg-subtle"
+                          >
+                            {t('settlement.matches')}
+                          </Text>
+                        </span>
+                      ) : (
+                        <Badge
+                          size="2xsmall"
+                          color="orange"
+                          className="tabular-nums"
+                        >
+                          {t('settlement.gap', {
+                            amount: `${r.gap > 0 ? '+' : ''}${rm(r.gap)}`,
+                          })}
+                        </Badge>
                       )}
-                    </Table.Cell>
-                    <Table.Cell className="text-right tabular-nums">
-                      {rm(p.deposits.net)}
-                    </Table.Cell>
-                    <Table.Cell className="text-right tabular-nums">
-                      {deltaCell(p.delta.deposits, true)}
-                    </Table.Cell>
-                    <Table.Cell className="border-l text-right tabular-nums">
-                      {p.withdrawals.count || '—'}
-                    </Table.Cell>
-                    <Table.Cell className="text-right tabular-nums">
-                      {rm(p.withdrawals.gross)}
-                    </Table.Cell>
-                    <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
-                      {floor(
-                        p.withdrawals.fee,
-                        p.withdrawals.missingNet,
-                        feeHint(p.withdrawals.missingNet),
-                      )}
-                    </Table.Cell>
-                    <Table.Cell className="text-right tabular-nums">
-                      {rm(p.withdrawals.net)}
-                    </Table.Cell>
-                    <Table.Cell className="text-right tabular-nums">
-                      {deltaCell(p.delta.withdrawals, false)}
+                      {/* Timing-skewed by design, so never the check — but a
+                          payout debited and never paid shows up here. */}
+                      {r.payoutGap !== 0 ? (
+                        <Text
+                          as="span"
+                          size="xsmall"
+                          className="text-ui-fg-subtle block tabular-nums"
+                        >
+                          {t('settlement.payoutGap', {
+                            amount: `${r.payoutGap > 0 ? '+' : ''}${rm(r.payoutGap)}`,
+                          })}
+                        </Text>
+                      ) : null}
                     </Table.Cell>
                   </Table.Row>
                 ))}
               </Table.Body>
             </Table>
           </div>
-          {missingNetTotal > 0 || missingGrossTotal > 0 ? (
+          {feeFloors > 0 || grossFloors > 0 ? (
             <div className="flex flex-wrap gap-2 border-t px-6 py-3">
-              {missingNetTotal > 0 ? (
-                <Badge size="2xsmall" color="orange">
-                  {feeHint(missingNetTotal)}
-                </Badge>
+              {feeFloors > 0 ? (
+                <Text size="xsmall" className="text-ui-fg-subtle">
+                  {t('settlement.feeFloorFootnote')}
+                </Text>
               ) : null}
-              {missingGrossTotal > 0 ? (
-                <Badge size="2xsmall" color="orange">
-                  {t('settlement.grossFloorHint', {
-                    count: missingGrossTotal,
-                  })}
-                </Badge>
+              {grossFloors > 0 ? (
+                <Text size="xsmall" className="text-ui-fg-subtle">
+                  {t('settlement.grossFloorFootnote')}
+                </Text>
               ) : null}
             </div>
           ) : null}
-        </>
+        </div>
       )}
     </Container>
-  );
-};
-
-const DirectionHeads = ({ side }: { side: 'deposit' | 'withdrawal' }) => {
-  const { t } = useTranslation();
-  return (
-    <>
-      <Table.HeaderCell className="border-l text-right">
-        {t('settlement.count')}
-      </Table.HeaderCell>
-      <Table.HeaderCell className="text-right">
-        {t('settlement.gross')}
-      </Table.HeaderCell>
-      <Table.HeaderCell className="text-right">
-        {t('settlement.fee')}
-      </Table.HeaderCell>
-      <Table.HeaderCell className="text-right">
-        {t('settlement.net')}
-      </Table.HeaderCell>
-      <Table.HeaderCell className="text-right">
-        <Tooltip content={t(`settlement.${side}DeltaHint`)}>
-          <span>{t('settlement.delta')}</span>
-        </Tooltip>
-      </Table.HeaderCell>
-    </>
   );
 };

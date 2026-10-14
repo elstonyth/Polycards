@@ -3,9 +3,11 @@ import { Button, Input, Text } from '@medusajs/ui';
 import type { StatsRange } from '../../lib/admin-rest';
 import { RANGES, todayMyt } from './helpers';
 
-interface Props {
-  range: StatsRange;
-  onRange: (r: StatsRange) => void;
+interface Props<R extends string> {
+  range: R;
+  onRange: (r: R) => void;
+  /** The presets to offer, in order; 'custom' shows the date inputs. */
+  ranges?: readonly R[];
   from: string;
   to: string;
   onFrom: (v: string) => void;
@@ -13,14 +15,15 @@ interface Props {
 }
 
 /** The Stats page's period presets (statsBoard.*, so zhCN keeps working). */
-export const RangePicker = ({
+export const RangePicker = <R extends string = StatsRange>({
   range,
   onRange,
+  ranges = RANGES as readonly string[] as readonly R[],
   from,
   to,
   onFrom,
   onTo,
-}: Props) => {
+}: Props<R>) => {
   const { t } = useTranslation();
   const custom = range === 'custom';
   // YYYY-MM-DD strings order correctly as plain strings.
@@ -32,7 +35,7 @@ export const RangePicker = ({
         role="group"
         aria-label={t('dashboard.periodLabel')}
       >
-        {RANGES.map((r) => (
+        {ranges.map((r) => (
           <Button
             key={r}
             size="small"

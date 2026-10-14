@@ -69,5 +69,5 @@ export function useTableSort<K extends string>(
   // (e.g. the pack editor across `:slug`) and must drop per-view sort state.
   const resetSort = () => setSort(initial);
 
-  return { sort, toggleSort, sortHeader, resetSort };
+  return { sort, setSort, toggleSort, sortHeader, resetSort };
 }

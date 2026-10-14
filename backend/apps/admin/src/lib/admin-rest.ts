@@ -441,17 +441,83 @@ export interface EconomyReport {
   }[];
 }
 
-// Optional [from, to) ISO window scopes the ledger totals to a period; omit
-// both for all-time (the default). Liability + RTP are always current-state.
-export async function getEconomyReport(
-  from?: string,
-  to?: string,
-): Promise<EconomyReport> {
-  const qs = new URLSearchParams();
-  if (from) qs.set('from', from);
-  if (to) qs.set('to', to);
-  const q = qs.toString();
-  return getJson<EconomyReport>(`/admin/economy${q ? `?${q}` : ''}`);
+// ── Profit report (cash view, spec 2026-10-14-admin-finance-pages §4) ────────
+
+/** Real customers only ('default': no non-default group, not a generated
+ *  account) or every account. */
+export type CustomerScope = 'default' | 'all';
+
+/** One direction of real money through the gateway. `fees` covers only rows
+ *  whose net is on file; `missing_fees` counts the rest (fee = a minimum). */
+export interface ProfitCashSide {
+  count: number;
+  gross: number;
+  fees: number;
+  missing_fees: number;
+  /** Settled rows with no amount on file (settled by hand): gross is a floor. */
+  missing_gross: number;
+}
+
+export interface ProfitReport {
+  as_of: string;
+  scope: CustomerScope;
+  range: string;
+  /** ISO instants, half-open; null for all time. */
+  window: { from: string; to: string } | null;
+  previous: { from: string; to: string } | null;
+  cash: {
+    topups: ProfitCashSide;
+    withdrawals: ProfitCashSide;
+    /** The regional rails' FX spread (Settlement's "Conversion earned"). */
+    fx_earned: number;
+    kept: number;
+    /** null when there is no previous window (all time). */
+    previous_kept: number | null;
+  };
+  /** Right now, whatever the window. */
+  owed: {
+    wallet_cash: number;
+    wallet_bonus: number;
+    wallet_no_topup: number;
+    /** Payouts requested, not paid yet: already out of the wallets. */
+    payouts_in_flight: number;
+    /** Closed weeks' referral commission, not paid yet. */
+    commission_unpaid: number;
+    cards: { count: number; delivering: number; sellback: number };
+    /** Cards of players who never topped up: reported, not owed. */
+    cards_no_topup: { count: number; sellback: number };
+    total: number;
+    all_time_kept: number;
+    /** Cards delivered, all time: they left as goods, a cost. */
+    shipped: { count: number; value: number };
+    if_all_cashed_out: number;
+  };
+  activity: {
+    pack_sales: number;
+    sellbacks: number;
+    promo_given: number;
+    delivery_fees: number;
+    referral_commission: number;
+    adjustments: number;
+  };
+  packs: EconomyReport['packs'];
+}
+
+export type ProfitRange = StatsRange | 'all';
+
+// `from`/`to` are inclusive MYT days (YYYY-MM-DD), sent only for 'custom'.
+export async function getProfitReport(
+  range: ProfitRange,
+  from: string,
+  to: string,
+  scope: CustomerScope,
+): Promise<ProfitReport> {
+  const qs = new URLSearchParams({ range, scope });
+  if (range === 'custom') {
+    qs.set('from', from);
+    qs.set('to', to);
+  }
+  return getJson<ProfitReport>(`/admin/profit-report?${qs.toString()}`);
 }
 
 // ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
@@ -481,6 +547,7 @@ export interface StatsFigures {
 
 export interface StatsReport {
   as_of: string;
+  scope?: CustomerScope;
   /** ISO instants; windows are half-open [from, to). */
   current: { from: string; to: string; stats: StatsFigures };
   previous: { from: string; to: string; stats: StatsFigures };
@@ -491,8 +558,10 @@ export async function getStatsReport(
   range: StatsRange,
   from: string,
   to: string,
+  scope: CustomerScope = 'all',
 ): Promise<StatsReport> {
   const qs = new URLSearchParams({ range });
+  if (scope !== 'all') qs.set('scope', scope);
   if (range === 'custom') {
     qs.set('from', from);
     qs.set('to', to);
@@ -544,9 +613,10 @@ export async function getSettlementReport(
   granularity: SettlementGranularity,
   periods: number,
   currency: string,
+  scope: CustomerScope = 'all',
 ): Promise<SettlementReport> {
   return getJson<SettlementReport>(
-    `/admin/payments/settlement?granularity=${granularity}&periods=${periods}&currency=${encodeURIComponent(currency)}`,
+    `/admin/payments/settlement?granularity=${granularity}&periods=${periods}&currency=${encodeURIComponent(currency)}${scope === 'all' ? '' : `&scope=${scope}`}`,
   );
 }
 
@@ -1547,6 +1617,9 @@ export interface PlayerRow {
   phone: string | null;
   /** Customer-group names — the odds-set membership the operator sees. */
   groups: string[];
+  /** The EFFECTIVE player group's name (the odds engine's rule); null = the
+   *  default group. groups[0] is just whichever membership came first. */
+  player_group: string | null;
   vip_level: number;
   wallet_balance: number;
   vault_value: number;
@@ -1588,14 +1661,16 @@ export interface PlayersPage {
 
 // `sort` is `<column>:<asc|desc>`; the route allowlists the column
 // (created_at | email | name) and falls back to created_at.
+// `group` is 'default' (everyone outside a non-default group) or a group id.
 export const listPlayers = (
   page = 0,
   q?: string,
   limit = 50,
   sort = 'created_at:desc',
+  group?: string,
 ) =>
   getJson<PlayersPage>(
-    `/admin/players?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
+    `/admin/players?limit=${limit}&offset=${page * limit}&sort=${encodeURIComponent(sort)}${q ? `&q=${encodeURIComponent(q)}` : ''}${group ? `&group=${encodeURIComponent(group)}` : ''}`,
   );
 
 /** One generated partner account — what POST /admin/players answers and what
