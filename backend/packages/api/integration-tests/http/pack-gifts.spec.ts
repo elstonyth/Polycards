@@ -377,6 +377,14 @@ medusaIntegrationTestRunner({
       const locked = await wallet();
       expect(locked).toMatchObject({ bonus: 0, withdrawable: 0 });
       expect(locked.playthrough.remaining).toBeCloseTo(sale, 2);
+      // The history names the hold on the sell-back row (2026-10-14).
+      const history = await unwrapResponse(
+        api.get('/store/credits', { headers: authed() }),
+      );
+      const saleRow = history.data.transactions.find(
+        (t: { reason: string }) => t.reason === 'buyback',
+      );
+      expect(saleRow.playthrough).toBeCloseTo(sale, 2);
 
       // One RM 300 open plays it through; what is left can then be withdrawn.
       await deposit(PRICE);
@@ -522,7 +530,8 @@ medusaIntegrationTestRunner({
       expect(row.points).toBe((PRICE / 2) * 100);
       expect(row.volume).toBeCloseTo(
         // A bigNumber may come back as a number or as its raw { value } form.
-        (Number(pull.recorded_value_usd?.value ?? pull.recorded_value_usd) * FX) /
+        (Number(pull.recorded_value_usd?.value ?? pull.recorded_value_usd) *
+          FX) /
           2,
         1,
       );

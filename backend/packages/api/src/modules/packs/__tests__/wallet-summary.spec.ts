@@ -81,10 +81,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
             } as Record<string, unknown>,
           ]);
 
-          // balance 160, but used(40) < deposited(100) -> nothing withdrawable.
+          // balance 160, used(40) < deposited(100): the RM60 still to play is
+          // held, the rest may leave (partial unlock, ADR 0011).
           let w = await service.walletSummary(cust);
           expect(w.balance).toBeCloseTo(160, 2);
-          expect(w.withdrawable).toBe(0);
+          expect(w.withdrawable).toBeCloseTo(100, 2);
           expect(w.playthrough).toEqual({
             deposited: 100,
             used: 40,

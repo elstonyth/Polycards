@@ -51,14 +51,15 @@ export default async function WalletPage() {
   const hasBonus = Math.round(w.bonus * 100) > 0;
   const normal =
     (Math.round(w.balance * 100) - Math.round(w.bonus * 100)) / 100;
-  // The payout floor under Withdrawable. "You need X more" only when nothing
-  // else holds the balance — frozen or gated, withdrawable is 0 for another
-  // reason (the withdraw form's belowMin rule). In sen, like Normal above.
+  // The payout floor under Withdrawable. "You need X more" unless a freeze
+  // holds the balance — what is still to play is already out of withdrawable
+  // (partial unlock, 2026-10-14), so the shortfall is real. In sen, like
+  // Normal above.
   const minRm = limits.withdrawal.minRm;
   const shortSen = Math.round(minRm * 100) - Math.round(w.withdrawable * 100);
   const minLine = !w.hasTopup
     ? 'Top up at least once to unlock withdrawals'
-    : !w.isFrozen && gateOpen && shortSen > 0
+    : !w.isFrozen && shortSen > 0
       ? `Minimum withdrawal ${rm0(minRm)} — you need ${rm(shortSen / 100)} more`
       : `Minimum withdrawal ${rm0(minRm)}`;
 
@@ -111,8 +112,7 @@ export default async function WalletPage() {
               Withdrawal gate
             </h2>
             <p className="mt-1 text-sm text-white/55">
-              Deposits must be played through on packs before any balance can be
-              withdrawn.
+              Money you still need to play stays locked. The rest isn&rsquo;t.
             </p>
           </div>
           <span
@@ -127,7 +127,11 @@ export default async function WalletPage() {
             ) : (
               <Lock className="h-3.5 w-3.5" aria-hidden />
             )}
-            {gateOpen ? 'Unlocked' : 'Locked'}
+            {gateOpen
+              ? 'Unlocked'
+              : w.hasTopup
+                ? `${rm(remaining)} to play`
+                : 'Locked'}
           </span>
         </div>
 
@@ -178,16 +182,16 @@ export default async function WalletPage() {
         <ol className="mt-4 space-y-4">
           {[
             {
-              title: 'Play through what you deposit',
-              body: 'Every RM you top up has to be spent opening packs before it can leave your account. Deposit RM100, open RM100 of packs — gate unlocked. The same goes for what you get from selling a card you opened with bonus credit or a vault pack, or won as a prize.',
+              title: 'Play what you top up',
+              body: 'Money you top up must be spent on packs once before you can withdraw it. So must the bonus part of cards you sell.',
             },
             {
-              title: 'Opening packs is what counts — not topping up',
-              body: 'Every pack you open uses your deposit up first, so it moves the gate until your deposits are fully spent — even when you pay with sell-back credit. Topping up again does not unlock anything: it adds to what you still have to play through.',
+              title: 'Packs use it up first',
+              body: 'Each pack you open uses this money first, right after bonus credit. Topping up never locks money you could already withdraw.',
             },
             {
-              title: 'Then the whole balance unlocks',
-              body: 'Once you are fully played through, your entire available balance is withdrawable — winnings included, not just your deposit back. Bonus credit itself is the one exception: it can only be spent on packs, and it is spent first. Task, check-in and challenge rewards pay bonus credit. The bonus part of a pack does not count toward VIP level or the leaderboard, and a pack opened mostly with bonus credit does not count toward tasks. Nothing expires and there is no waiting period.',
+              title: 'The rest is yours',
+              body: 'Everything else, winnings included, can be withdrawn once it reaches the minimum. Bonus credit is for packs only and is used first. Task, check-in and challenge rewards are bonus credit. Bonus play does not count toward VIP or the leaderboard, and mostly-bonus packs do not count toward tasks. Nothing expires.',
             },
           ].map((s, i) => (
             <li key={s.title} className="flex gap-3">
@@ -203,32 +207,31 @@ export default async function WalletPage() {
         </ol>
 
         {/* Worked example — the sell-back case is the one customers get wrong:
-            a bigger balance does not unlock anything. */}
+            selling back plays nothing, but only the unplayed part is held. */}
         <div className="mt-5 rounded-xl border border-white/10 bg-white/[0.03] p-4">
           <p className="text-[11px] uppercase tracking-wide text-white/40">
             Example
           </p>
           <ul className="mt-2 space-y-1.5 text-sm text-white/70">
-            <li>You deposit RM100 — RM100 to play through.</li>
-            <li>You open RM50 of packs — RM50 to go.</li>
+            <li>You top up RM100 — RM100 to play.</li>
+            <li>You open RM50 of packs — RM50 left to play.</li>
             <li>
-              You sell cards back for RM100 — balance is now RM150, but selling
-              back is not playthrough, so it is{' '}
-              <span className="font-semibold text-white">still RM50 to go</span>
-              . Withdrawable stays RM0.
+              You sell cards for RM100 — balance RM150.{' '}
+              <span className="font-semibold text-white">
+                RM50 stays locked
+              </span>
+              ; RM100 can be withdrawn.
             </li>
-            <li>
-              You open RM50 more — gate unlocked, and the full RM100 balance
-              becomes withdrawable.
-            </li>
+            <li>You open RM50 more — all RM100 can be withdrawn.</li>
           </ul>
         </div>
 
         <p className="mt-4 text-[13px] text-white/50">
           Frozen accounts are held until review. Top-ups are credited after the
-          payment provider confirms payment. Bank withdrawals require an
-          unlocked balance and a saved bank account; processing status appears
-          on the withdrawal page. Buyback credit is available immediately.
+          payment provider confirms payment. Bank withdrawals require a
+          withdrawable balance and a saved bank account; processing status
+          appears on the withdrawal page. Buyback credit is available
+          immediately.
         </p>
       </Panel>
     </>

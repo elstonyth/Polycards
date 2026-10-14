@@ -866,7 +866,7 @@ describe('startWithdrawal — money ordering', () => {
       playthrough: { deposited: 100, used: 40, remaining: 60 },
     });
     await expect(start(h)).rejects.toThrow(
-      /RM 60\.00 of your deposits must be spent on packs/,
+      /Spend RM 60\.00 more on packs/,
     );
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
   });
@@ -901,11 +901,11 @@ describe('startWithdrawal — money ordering', () => {
     h.packs.withdrawForCashout.mockRejectedValue(
       new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        'RM 60.00 of your deposits must be spent on packs before you can withdraw.',
+        'Spend RM 60.00 more on packs to unlock withdrawals.',
       ),
     );
     await expect(start(h)).rejects.toThrow(
-      /RM 60\.00 of your deposits must be spent on packs/,
+      /Spend RM 60\.00 more on packs/,
     );
     expect(h.packs.createGatewayWithdrawals).toHaveBeenCalledTimes(1);
     expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
@@ -1134,7 +1134,7 @@ describe('startWithdrawal — approval threshold (held)', () => {
       playthrough: { deposited: 100, used: 40, remaining: 60 },
     });
     await expect(start(h, { amount: 2000 })).rejects.toThrow(
-      /RM 60\.00 of your deposits must be spent on packs/,
+      /Spend RM 60\.00 more on packs/,
     );
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
@@ -1819,7 +1819,7 @@ describe('PacksModuleService.withdrawForCashout', () => {
       }),
     );
     await expect(f.svc.withdrawForCashout(cashout, f.ctx)).rejects.toThrow(
-      /RM 60\.00 of your deposits must be spent on packs/,
+      /Spend RM 60\.00 more on packs/,
     );
     expect(f.withdrawCreditsWithLedger).not.toHaveBeenCalled();
   });

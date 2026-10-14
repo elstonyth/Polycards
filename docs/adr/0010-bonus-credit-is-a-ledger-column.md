@@ -26,11 +26,13 @@ must be played through once, like a deposit.)
 - Every other debit (withdrawal, delivery fee, admin deduction) is floored on
   the Normal Balance inside `mutateCreditAtomic`.
 - Withdrawable = `max(0, available − bonus)` once playthrough is done.
+  (Amended by ADR 0011: `max(0, available − bonus − playthrough remaining)`
+  at all times.)
 - Each pull records `bonus_bp`, the share of its price that was bonus (10000 for
   a gifted pack). A sell-back pays normal credit and stamps that share on the
   buyback row as `external_funded_cents`, which joins the playthrough basis like
-  a deposit: the whole balance stays unwithdrawable until that much has been
-  spent on packs. Sales before 2026-10-09 were paid as bonus and stay bonus.
+  a deposit: that much stays unwithdrawable until it has been spent on packs
+  (the whole balance did, until ADR 0011). Sales before 2026-10-09 were paid as bonus and stay bonus.
 - Gift pulls carry `source = 'gift'`, and a paid pull bonus paid at least half
   of carries `source = 'bonus'`, so every positive `source = 'pack'` count
   (tasks, profile, feed, welcome unlock) excludes them; VIP and referral

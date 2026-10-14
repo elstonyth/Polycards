@@ -297,6 +297,30 @@ describe('CreditTransactionSchema — keeps every reason the backend emits', () 
       'refund_x',
     );
   });
+
+  // 2026-10-14: a sell-back row carries the part still to play through; an
+  // older backend omits it and the row must still parse.
+  it('reads a sell-back playthrough part, and parses without one', () => {
+    const rows = [
+      {
+        id: 'b',
+        amount: 31.63,
+        reason: 'buyback',
+        created_at: '2026-10-14T02:11:01Z',
+        playthrough: 10.55,
+      },
+      {
+        id: 'c',
+        amount: 13.67,
+        reason: 'buyback',
+        created_at: '2026-10-14T02:10:18Z',
+      },
+    ];
+    const parsed = parseList(CreditTransactionSchema, rows);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0]?.playthrough).toBe(10.55);
+    expect(parsed[1]?.playthrough).toBeUndefined();
+  });
 });
 
 // Regression tripwire (plans/005), superseded by the #11 fix above: parseList()

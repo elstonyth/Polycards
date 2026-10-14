@@ -159,16 +159,17 @@ The spend-only slice of a customer's Credit (spec 2026-10-07, ADR 0010). Spent
 only on pack Opens — and FIRST, before normal credit — never withdrawn, never
 pays a delivery fee. A signed column on the ledger (`credit_transaction.bonus_cents`,
 admin grants use reason `bonus_grant`), not a second wallet. **Bonus Balance** =
-Σ bonus_cents; **Normal Balance** = Balance − Bonus Balance. A card pulled with
+Σ bonus*cents; **Normal Balance** = Balance − Bonus Balance. A card pulled with
 bonus or from a Pack Gift sells back as normal credit, but its bonus share
 (`pull.bonus_bp`) must be played through once before it can be withdrawn
 (operator rule 2026-10-09), like a deposit.
-_Avoid_: promo credit (the economy report's bucket for task/voucher credit,
+\_Avoid*: promo credit (the economy report's bucket for task/voucher credit,
 which IS withdrawable), dead chips, free credit
 
 **Available**:
 The spendable balance. Equal to Balance, except that a frozen account reports 0.
-**Withdrawable** is the Normal part of it only, once playthrough is done.
+**Withdrawable** is the Normal part of it less what is still to play through
+(`playthrough.remaining`, ADR 0011).
 (Nothing locks credit any more — the commission lock left with the referral
 programme, ADR 0007.)
 

@@ -470,21 +470,38 @@ describe('WithdrawForm', () => {
 describe('WithdrawForm — why the balance is held, and the way out', () => {
   const SHORT = { deposited: 50, used: 45, remaining: 5 };
 
-  it('names the playthrough shortfall and disables the form instead of a bare RM 0.00', async () => {
+  it('names what is still to play instead of a bare RM 0.00', async () => {
     await render([READY_ACCOUNT], 0, { playthrough: SHORT });
+    const note = container.querySelector('#withdraw-play-note');
+    expect(note?.textContent).toContain('Spend RM 5.00 on packs to unlock it');
     expect(container.textContent).toContain(
-      'Spend RM 5.00 more on packs to withdraw',
+      'Not counting RM 5.00 you still need to play',
     );
-    expect(
-      container
-        .querySelector('[role="progressbar"]')
-        ?.getAttribute('aria-valuenow'),
-    ).toBe('90');
-    expect(container.querySelector('a[href="/slots"]')?.textContent).toBe(
+    // The "RM 174.22 total" read as the customer's deposits (2026-10-14).
+    expect(container.querySelector('[role="progressbar"]')).toBeNull();
+    expect(container.textContent).not.toContain('Selling cards back');
+    expect(note?.querySelector('a[href="/slots"]')?.textContent).toBe(
       'Open packs',
+    );
+    // Nothing free yet: the payout floor is the hold, and it says so.
+    expect(container.textContent).toContain('Minimum withdrawal is RM 50');
+    expect(container.textContent).toContain(
+      'You have RM 0.00 ready to withdraw',
     );
     expect(amountInput().disabled).toBe(true);
     expect(submitButton().disabled).toBe(true);
+  });
+
+  // Partial unlock (2026-10-14): only the part still to play is held, so the
+  // rest can leave while the note explains the gap.
+  it('lets the rest leave while part is still to play', async () => {
+    await render([READY_ACCOUNT], 100, {
+      playthrough: { deposited: 60, used: 49.45, remaining: 10.55 },
+    });
+    expect(container.querySelector('#withdraw-hold-reason')).toBeNull();
+    expect(container.querySelector('#withdraw-play-note')).not.toBeNull();
+    fillValidForm();
+    expect(submitButton().disabled).toBe(false);
   });
 
   it('a frozen account gets the review notice, never "spend more"', async () => {
@@ -492,7 +509,7 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
     // to open packs would send it down a path that still ends refused.
     await render([READY_ACCOUNT], 0, { frozen: true, playthrough: SHORT });
     expect(container.textContent).toContain('under review');
-    expect(container.textContent).not.toContain('Spend RM');
+    expect(container.textContent).not.toContain('still need to play');
     expect(container.querySelector('a[href="/contact"]')).not.toBeNull();
     expect(amountInput().disabled).toBe(true);
     expect(submitButton().disabled).toBe(true);
@@ -528,7 +545,7 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
   it('no top-up outranks playthrough; a freeze outranks both (withdrawable.ts order)', async () => {
     await render([READY_ACCOUNT], 0, { noTopup: true, playthrough: SHORT });
     expect(container.textContent).toContain('Top up at least once');
-    expect(container.textContent).not.toContain('Spend RM');
+    expect(container.textContent).not.toContain('still need to play');
     act(() => root.unmount());
     container.remove();
 
@@ -585,14 +602,13 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
   it('puts the fix under a backend refusal', async () => {
     startWithdrawal.mockResolvedValue({
       ok: false,
-      error:
-        'RM 5.00 of your deposits must be spent on packs before you can withdraw.',
+      error: 'Spend RM 5.00 more on packs to unlock withdrawals.',
     });
     await render();
     fillValidForm();
     await submit();
     const alert = container.querySelector('[role="alert"]');
-    expect(alert?.textContent).toContain('must be spent on packs');
+    expect(alert?.textContent).toContain('more on packs');
     expect(alert?.querySelector('a[href="/slots"]')?.textContent).toBe(
       'Open packs',
     );
@@ -601,7 +617,9 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
   it('explains a balance under the payout floor instead of snapping the field', async () => {
     await render([READY_ACCOUNT], 30);
     expect(container.textContent).toContain('Minimum withdrawal is RM 50');
-    expect(container.textContent).toContain('You have RM 30.00');
+    expect(container.textContent).toContain(
+      'You have RM 30.00 ready to withdraw',
+    );
     expect(container.textContent).not.toContain('bonus credit');
     expect(container.textContent).not.toContain('Top up at least once');
     expect(amountInput().disabled).toBe(true);

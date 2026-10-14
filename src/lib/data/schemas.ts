@@ -639,6 +639,9 @@ export const CreditTransactionSchema = z.looseObject({
   // Signed bonus-credit part of `amount` (MYR). Optional for the same
   // older-backend reason; absent = no bonus part.
   bonus: finite.optional(),
+  // Sell-back rows: the part to spend on packs once before it can leave
+  // (MYR, 2026-10-14). Optional for the same older-backend reason.
+  playthrough: finite.optional(),
 });
 
 /** GET /store/credits as the Transactions page reads it. The totals are SOFT:
