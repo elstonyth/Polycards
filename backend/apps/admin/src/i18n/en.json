@@ -675,28 +675,6 @@
       "applied": "Bonus credit applied"
     }
   },
-  "economy": {
-    "title": "Economy",
-    "subtitle": "Lifetime credit flows and what the vault still owes.",
-    "revenue": "Revenue (opens)",
-    "payouts": "Payouts (buybacks)",
-    "net": "Net margin",
-    "liability": "Vault liability",
-    "liabilityHint": "{{count}} cards owed · display value (FMV × markup, the buyback basis)",
-    "topups": "Top-ups",
-    "adjustments": "Adjustments (net)",
-    "deliveryFees": "Delivery fees (collected)",
-    "referralCommission": "Referral commissions (paid)",
-    "rtpTitle": "Pack RTP (theoretical)",
-    "rtpSubtitle": "Expected payout per open from the current odds × card display values (FMV × markup, default +20%) — the value buyback rates apply to. Above 100% means the pack loses money.",
-    "pack": "Pack",
-    "category": "Category",
-    "price": "Price",
-    "ev": "EV / open",
-    "rtp": "RTP",
-    "empty": "No active packs.",
-    "loadError": "Could not load the economy report."
-  },
   "statsBoard": {
     "ranges": {
       "today": "Today",
@@ -705,7 +683,8 @@
       "30d": "Last 30 days",
       "month": "This month",
       "last_month": "Last month",
-      "custom": "Custom"
+      "custom": "Custom",
+      "all": "All time"
     },
     "from": "From",
     "to": "To",
@@ -1161,5 +1140,53 @@
     "periodLabel": "Period",
     "liveNow": "Live · updated just now",
     "liveAgo": "Live · updated {{ago}} ago"
+  },
+  "profit": {
+    "title": "Profit report",
+    "subtitle": "Real money in and out, Malaysia time · {{window}}",
+    "subtitleAll": "Real money in and out, Malaysia time · all time",
+    "scopeReal": "Real customers",
+    "scopeAll": "All groups",
+    "scopeAllHint": "Count every account, including other groups and generated accounts.",
+    "cashKept": "Cash kept",
+    "cashKeptHint": "Top-ups received after gateway fees, minus withdrawals paid (fees included).",
+    "vsLast": "vs last period",
+    "trail": {
+      "topups": "Top-ups received",
+      "fees": "Gateway fees",
+      "withdrawals": "Withdrawals paid",
+      "kept": "Cash kept"
+    },
+    "feeFloor_one": "{{count}} payment has no fee on file yet, so fees shown are a minimum.",
+    "feeFloor_other": "{{count}} payments have no fee on file yet, so fees shown are a minimum.",
+    "owedTitle": "Still owed to players",
+    "owedNow": "right now",
+    "owedSubtitle": "What players could still cash out.",
+    "walletCash": "Withdrawable wallets",
+    "walletNote": "Plus {{bonus}} bonus and {{noTopup}} in never-topped-up accounts, which can't be withdrawn.",
+    "cards": "Cards in vaults, at sell-back",
+    "cardsNote_one": "{{count}} card, {{delivering}} being shipped",
+    "cardsNote_other": "{{count}} cards, {{delivering}} being shipped",
+    "cardsHint": "Valued at the 90% sell-back price. Includes free and promo cards, and cards being shipped.",
+    "ifAllCashedOut": "Profit if all cashed out",
+    "ifAllHint": "All-time cash kept minus what is still owed. Ignores the period picked above.",
+    "ifAllNote": "{{kept}} kept all time − {{owed}} owed",
+    "movedTitle": "Where the money moved",
+    "movedSubtitle": "Inside the site, this period. Paid credit only; promo has its own line.",
+    "moved": {
+      "pack_sales": "Pack sales",
+      "delivery_fees": "Delivery fees",
+      "sellbacks": "Sell-backs paid",
+      "promo_given": "Promo given",
+      "referral_commission": "Referral commission paid",
+      "adjustments": "Admin adjustments"
+    },
+    "rtpTitle": "Pack payout rate",
+    "rtpSubtitle": "Expected value back per open with today's odds and card values. Over 100% means the pack loses money.",
+    "pack": "Pack",
+    "price": "Price",
+    "expectedBack": "Expected back",
+    "rate": "Payout rate",
+    "empty": "No active packs."
   }
 }

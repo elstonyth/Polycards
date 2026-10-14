@@ -74,7 +74,7 @@ const FlowTooltip = ({
 };
 
 /** Net cash can go negative, so the change shows in RM, not %. */
-const NetChange = ({ cur, prev }: { cur: number; prev: number }) => {
+export const NetChange = ({ cur, prev }: { cur: number; prev: number }) => {
   const { diff, tone } = amountChange(cur, prev);
   const color = tone === 'good' ? 'green' : tone === 'bad' ? 'red' : 'grey';
   return (
