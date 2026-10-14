@@ -45,6 +45,13 @@ export type Bank = {
    * never paid, and 16-digit Maybank/CIMB numbers were debit cards.
    */
   accountLengths?: readonly number[];
+  /**
+   * Env var that must be "true" before this bank is paid out to (read per
+   * call). While it is off the bank behaves as if no gateway had a code for
+   * it: out of the picker, saved accounts "not available", refused before any
+   * debit. Unset = always on.
+   */
+  payoutSwitch?: string;
 };
 
 const bank = (
@@ -88,16 +95,12 @@ export const MY_BANKS: readonly Bank[] = [
   { ...bank('RHBBMYKL', 'RHB Bank', { code: 'MYRHBB', name: 'RHB Bank Berhad' }, { code: 'RHBBMYKL', name: 'RHB Bank Berhad' }), accountLengths: [14] },
   bank('SCBLMYKX', 'Standard Chartered', { code: 'MYSTCB', name: 'Standard Chartered Bank' }, { code: 'SCBLMYKX', name: 'Standard Chartered Bank (Malaysia) Berhad' }),
   // Touch 'n Go eWallet keeps its slug id (saved accounts already carry it).
-  // PAUSED 2026-10-14: TGPay's TNG route refused 97 of 110 payouts in a week
-  // ("No payout provider is available for this order") and customers retried
-  // up to 16 times a day. No TGPay code = gone from the picker, saved TNG
-  // accounts read "not available", and the precheck refuses before any debit.
-  // Re-enable once TGPay confirms the route: TGPay code
-  // { code: 'TNGDRMYKL', name: "Touch 'n Go" } (their payout-bank page, 2026-10-09).
-  // Also bring back the TNG "no payout provider" refusal copy in
-  // gateway-withdrawal.ts and its tests, removed with this pause
-  // (git log -S "No payout provider is available").
-  { ...bank('TNGMY', "Touch 'n Go eWallet", { code: 'MYTNGO', name: 'Touch N Go' }, null), payoutMinRm: 100 },
+  // TGPay payout code from their payout-bank page (2026-10-09). OFF unless
+  // TNG_PAYOUTS_ENABLED=true: TGPay's TNG route refused 97 of 110 payouts in
+  // the week to 2026-10-14 ("No payout provider is available for this order")
+  // and customers retried up to 16 times a day. Turn it on once TGPay confirms
+  // the route (set it on the backend service and worker; the app redeploys).
+  { ...bank('TNGMY', "Touch 'n Go eWallet", { code: 'MYTNGO', name: 'Touch N Go' }, { code: 'TNGDRMYKL', name: "Touch 'n Go" }), payoutMinRm: 100, payoutSwitch: 'TNG_PAYOUTS_ENABLED' },
   bank('UOVBMYKL', 'UOB', { code: 'MYUOBB', name: 'United Overseas Bank' }, { code: 'UOVBMYKL', name: 'United Overseas Bank (Malaysia) Berhad' }),
   // No TGPay payout code today (e-wallets, digital and foreign banks): kept so
   // a saved account under one still resolves and reads as "not available with
@@ -225,17 +228,32 @@ export function canonicalBankCode(alias: string): string | null {
 export function gatewayBankCode(
   alias: string,
   gateway: PaymentGateway,
+  env: Partial<Record<string, string>> = process.env,
 ): GatewayBankCode | null {
-  return findBank(alias)?.codes[gateway] ?? null;
+  const bank = findBank(alias);
+  if (!bank || payoutSwitchedOff(bank, env)) return null;
+  return bank.codes[gateway] ?? null;
+}
+
+/** True while this bank's payoutSwitch env var is not "true". */
+function payoutSwitchedOff(
+  bank: Bank,
+  env: Partial<Record<string, string>>,
+): boolean {
+  return (
+    bank.payoutSwitch !== undefined &&
+    env[bank.payoutSwitch]?.trim().toLowerCase() !== 'true'
+  );
 }
 
 /** Banks a gateway can pay to, in picker order (canonical ids, neutral names). */
 export function banksFor(
   gateway: PaymentGateway,
-  options: { sandbox?: boolean } = {},
+  options: { sandbox?: boolean; env?: Partial<Record<string, string>> } = {},
 ): { bankCode: string; bankName: string }[] {
+  const env = options.env ?? process.env;
   const list = [...MY_BANKS, ...SG_BANKS]
-    .filter((b) => b.codes[gateway])
+    .filter((b) => b.codes[gateway] && !payoutSwitchedOff(b, env))
     .map((b) => ({ bankCode: b.id, bankName: b.name }));
   if (isTgpayKind(gateway) && options.sandbox) {
     list.unshift({
