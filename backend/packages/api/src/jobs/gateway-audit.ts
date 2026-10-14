@@ -45,23 +45,45 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
   const now = new Date();
   const since = new Date(now.getTime() - GATEWAY_AUDIT_WINDOW_MS);
   const repeatBefore = new Date(now.getTime() - GATEWAY_AUDIT_REPEAT_MS);
-  const due = {
+  // Rows never checked come first, oldest first; the daily re-checks take
+  // what is left of the batch, stalest first. One oldest-first query over
+  // both let the re-checks use up every batch once the 7-day window held
+  // more rows than 24 runs can re-check (2026-10-14: 1,460 rows against
+  // 1,200 checks a day), so nothing created after 2026-10-13 13:31 was ever
+  // checked: no TGPay fee backfilled, no disagreement seen.
+  const fresh = { created_at: { $gte: since }, audited_at: null };
+  const stale = {
     created_at: { $gte: since },
-    $or: [{ audited_at: null }, { audited_at: { $lt: repeatBefore } }],
+    audited_at: { $lt: repeatBefore },
   };
-  const options = {
+  const first = {
     take: GATEWAY_AUDIT_BATCH,
     order: { created_at: 'ASC' as const },
   };
+  const rest = (taken: number) => ({
+    take: GATEWAY_AUDIT_BATCH - taken,
+    order: { audited_at: 'ASC' as const },
+  });
 
   let checked = 0;
   let findings = 0;
   let skipped = 0;
 
-  const deposits = await packs.listGatewayDeposits(
-    { status: ['settled', 'failed', 'expired'], ...due },
-    options,
+  const depositStatus = ['settled', 'failed', 'expired'];
+  const newDeposits = await packs.listGatewayDeposits(
+    { status: depositStatus, ...fresh },
+    first,
   );
+  const deposits =
+    newDeposits.length < GATEWAY_AUDIT_BATCH
+      ? [
+          ...newDeposits,
+          ...(await packs.listGatewayDeposits(
+            { status: depositStatus, ...stale },
+            rest(newDeposits.length),
+          )),
+        ]
+      : newDeposits;
   for (const row of deposits) {
     let answer: GatewayAnswer;
     let netAmount: number | null = null;
@@ -123,10 +145,21 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     }
   }
 
-  const withdrawals = await packs.listGatewayWithdrawals(
-    { status: ['settled', 'failed'], ...due },
-    options,
+  const withdrawalStatus = ['settled', 'failed'];
+  const newWithdrawals = await packs.listGatewayWithdrawals(
+    { status: withdrawalStatus, ...fresh },
+    first,
   );
+  const withdrawals =
+    newWithdrawals.length < GATEWAY_AUDIT_BATCH
+      ? [
+          ...newWithdrawals,
+          ...(await packs.listGatewayWithdrawals(
+            { status: withdrawalStatus, ...stale },
+            rest(newWithdrawals.length),
+          )),
+        ]
+      : newWithdrawals;
   for (const row of withdrawals) {
     let answer: GatewayAnswer;
     let netAmount: number | null = null;
