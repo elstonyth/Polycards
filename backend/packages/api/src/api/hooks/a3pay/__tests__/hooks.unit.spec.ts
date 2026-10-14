@@ -353,6 +353,55 @@ describe('POST /hooks/a3pay/withdrawal', () => {
     );
   });
 
+  it("redacts the account number and holder name out of A3Pay's Remark", async () => {
+    const h = harness([sgdPayout]);
+    await run(
+      withdrawal,
+      h,
+      message(
+        payout({
+          Status: 5,
+          Remark: 'acct 1234567890 name Tan Ah Kow mismatch',
+        }),
+      ),
+    );
+    const [[{ data }]] = h.packs.updateGatewayWithdrawals.mock.calls;
+    expect(data.failure_reason).toBe(
+      'callback status 5: acct [redacted] name [redacted] mismatch',
+    );
+  });
+
+  it('alerts ops when a success settled the row while the refund was in flight', async () => {
+    const h = harness([sgdPayout]);
+    h.packs.listGatewayWithdrawals
+      .mockResolvedValueOnce([sgdPayout])
+      .mockResolvedValueOnce([{ ...sgdPayout, status: 'settled' }]);
+    // The close is scoped to 'pending' and lost the race: zero rows updated.
+    h.packs.updateGatewayWithdrawals.mockResolvedValueOnce([]);
+    (alertOps as jest.Mock).mockClear();
+    await run(withdrawal, h, message(payout({ Status: 5 })));
+    expect(alertOps).toHaveBeenCalledWith(
+      expect.anything(),
+      'refund-vs-settled:PW-1',
+      expect.stringContaining('REFUNDED'),
+    );
+  });
+
+  it('stays quiet when the close lost to another refund, not a success', async () => {
+    const h = harness([sgdPayout]);
+    h.packs.listGatewayWithdrawals
+      .mockResolvedValueOnce([sgdPayout])
+      .mockResolvedValueOnce([{ ...sgdPayout, status: 'failed' }]);
+    h.packs.updateGatewayWithdrawals.mockResolvedValueOnce([]);
+    (alertOps as jest.Mock).mockClear();
+    await run(withdrawal, h, message(payout({ Status: 5 })));
+    expect(alertOps).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'refund-vs-settled:PW-1',
+      expect.anything(),
+    );
+  });
+
   it('refuses a forged payout callback', async () => {
     const h = harness([sgdPayout]);
     const res = await run(

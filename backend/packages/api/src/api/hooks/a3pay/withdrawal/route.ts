@@ -8,6 +8,7 @@ import { openCallback, payoutState } from '../../../../modules/packs/a3pay';
 import { a3payConfigFromEnv } from '../../../../modules/packs/a3pay-client';
 import {
   applyWithdrawalOutcome,
+  redactPayoutText,
   refundWithdrawal,
 } from '../../../../modules/packs/gateway-withdrawal';
 import { rowGateway } from '../../../../modules/packs/gateway';
@@ -141,7 +142,9 @@ export async function POST(
         withdrawal,
         null,
         'pending',
-        `callback status ${String(data.Status)}: ${String(data.Remark ?? '').slice(0, 200)}`,
+        // Free text an A3Pay operator typed: it can echo the account number
+        // or holder name, and this column renders on the admin list.
+        `callback status ${String(data.Status)}: ${redactPayoutText(String(data.Remark ?? ''), withdrawal.account_number, withdrawal.account_holder_name ?? '').slice(0, 200)}`,
       );
     } catch (error) {
       logger.error(
