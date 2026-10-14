@@ -107,6 +107,14 @@ medusaIntegrationTestRunner({
           payout_fee_percent: 0.5,
         });
         expect(noSwitch.status).toBe(400);
+        const stringPin = await save({
+          fee_enabled: true,
+          deposit_fee_percent: 0.5,
+          payout_fee_percent: 0.5,
+          manual_override: 'true',
+          manual_rate: 3.2,
+        });
+        expect(stringPin.status).toBe(400);
         const read = await unwrapResponse(
           api.get('/admin/payments/fx?currency=SGD', { headers }),
         );

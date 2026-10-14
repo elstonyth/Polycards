@@ -97,11 +97,22 @@ export async function loadPaymentFxQuote(
  */
 export const PAYMENT_FX_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * The age limit for a LIVE feed (source 'coinbase', fetched hourly). Seven
+ * days was sized for ECB's holidays; a live rate that old means every hourly
+ * run has failed for days while the 0.5% fee is the only cushion. Six hours
+ * rides out a few failed runs; when Coinbase stays down the job falls back to
+ * ECB, whose rate is then aged by PAYMENT_FX_MAX_AGE_MS as before.
+ */
+export const PAYMENT_FX_LIVE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
 /** The highest fee, in percent of the mid, either direction may carry. */
 export const PAYMENT_FX_MAX_FEE_PERCENT = 20;
 
 export type PaymentFxRow = {
   rate: unknown;
+  /** Which feed wrote `rate` (sync-payment-fx.ts): 'coinbase' | 'frankfurter'. */
+  source?: unknown;
   fetched_at?: Date | string | null;
   manual_override?: boolean | null;
   manual_rate?: unknown;
@@ -156,11 +167,19 @@ export function paymentFxQuote(
 ): PaymentFxQuote | { error: string } {
   if (!row) return { error: `No ${currency} exchange rate is set.` };
   const manual = row.manual_override ? positive(row.manual_rate) : null;
+  // A pin the admin set on purpose is never silently swapped for the feed.
+  if (row.manual_override && !manual) {
+    return { error: `The pinned ${currency} exchange rate is not usable.` };
+  }
   const mid = manual ?? positive(row.rate);
   if (!mid) return { error: `No usable ${currency} exchange rate.` };
   if (!manual) {
     const fetched = row.fetched_at ? new Date(row.fetched_at).getTime() : NaN;
-    if (!Number.isFinite(fetched) || now - fetched > PAYMENT_FX_MAX_AGE_MS) {
+    const maxAge =
+      row.source === 'coinbase'
+        ? PAYMENT_FX_LIVE_MAX_AGE_MS
+        : PAYMENT_FX_MAX_AGE_MS;
+    if (!Number.isFinite(fetched) || now - fetched > maxAge) {
       return { error: `The ${currency} exchange rate is out of date.` };
     }
   }
@@ -233,9 +252,12 @@ export function regionalDepositBand(
       currencyBand.depositMin,
       Math.ceil((ledgerBand.depositMin / quote.depositRate) * 100 - 1e-6) / 100,
     ),
+    // Less the nudge A3Pay may add (PAYIN_NUDGE_CENTS), so the nudged sum
+    // still credits inside the RM band and the row re-locks normally.
     max: Math.min(
       currencyBand.depositMax,
-      Math.floor((ledgerBand.depositMax / quote.depositRate) * 100 + 1e-6) /
+      (Math.floor((ledgerBand.depositMax / quote.depositRate) * 100 + 1e-6) -
+        PAYIN_NUDGE_CENTS) /
         100,
     ),
   };
