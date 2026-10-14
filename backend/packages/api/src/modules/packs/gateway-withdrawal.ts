@@ -297,6 +297,22 @@ export function withdrawalRefundReference(
   return `wd-refund:${digest}`;
 }
 
+/** A 16-digit card number (Visa 4, Mastercard/Maestro 5, Mastercard
+ *  2221-2720) that passes the Luhn check. No Malaysian bank account number
+ *  settled here ever matched (prod, to 2026-10-14). */
+function looksLikeCardNumber(digits: string): boolean {
+  if (!/^[0-9]{16}$/.test(digits)) return false;
+  const bin = Number(digits.slice(0, 4));
+  if (!/^[45]/.test(digits) && !(bin >= 2221 && bin <= 2720)) return false;
+  let sum = 0;
+  for (let i = 0; i < 16; i++) {
+    let d = Number(digits[15 - i]);
+    if (i % 2 === 1) d = d * 2 > 9 ? d * 2 - 9 : d * 2;
+    sum += d;
+  }
+  return sum % 10 === 0;
+}
+
 /** Bank account fields, validated at the boundary. Their API gives no field
  * length errors a customer could act on, so sanity-check here. */
 export function withdrawalDetailsError(input: {
@@ -314,6 +330,17 @@ export function withdrawalDetailsError(input: {
     !/^[0-9]{6,34}$/.test(accountNumber)
   ) {
     return 'Enter a valid account number (digits only).';
+  }
+  // Card first: a 16-digit card under Maybank would otherwise get the length
+  // message, which hides the real mistake. 14 of the 15 card-like numbers
+  // TGPay refused (prod, to 2026-10-14) were Luhn-valid Visa/Mastercard.
+  if (looksLikeCardNumber(accountNumber)) {
+    return "That looks like a card number. Enter your bank account number instead — it's in your banking app or on your statement, not on the card.";
+  }
+  const bank = findBank(bankCode);
+  const lengths = bank?.accountLengths;
+  if (lengths && !lengths.includes(accountNumber.length)) {
+    return `${bank.name} account numbers are ${lengths.join(' or ')} digits. Check the number in your banking app.`;
   }
   const holder = input.accountHolderName;
   if (
@@ -1007,21 +1034,6 @@ export async function startWithdrawal(
         throw new MedusaError(
           MedusaError.Types.NOT_ALLOWED,
           'Withdrawals are temporarily unavailable on our side and your balance has been returned. Your bank details are fine — there is no need to change them. Please try again later.',
-        );
-      }
-      // TGPay's Touch 'n Go route has refused every payout since 2026-10-09
-      // 17:12, at any amount, with "No payout provider is available for this
-      // order": their routing, not the customer's wallet. Under the generic
-      // copy below, customers retried 10+ times each "checking" correct
-      // details. Banks still pay, so point them there. Storefront passes it
-      // through on /withdrawals are temporarily unavailable/ (vault-errors.ts).
-      if (
-        findBank(bankCode)?.id === 'TNGMY' &&
-        /no payout provider is available/i.test(error.message)
-      ) {
-        throw new MedusaError(
-          MedusaError.Types.NOT_ALLOWED,
-          "Touch 'n Go withdrawals are temporarily unavailable from our payment provider. Your balance has been returned. Please withdraw to a bank account for now.",
         );
       }
       // Says who refused, and does not instruct the customer to fix something

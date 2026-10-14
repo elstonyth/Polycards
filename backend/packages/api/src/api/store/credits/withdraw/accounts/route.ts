@@ -87,6 +87,32 @@ export {
 };
 
 /**
+ * One bank account, one Polycards account: a number another customer already
+ * holds is refused (sharing-allowed customers excepted). Existing shared
+ * accounts were left alone on purpose (2026-10-14) — only new links are
+ * refused, and re-saving an account the customer already has is not a new
+ * link.
+ */
+export const SHARED_PAYOUT_ACCOUNT_MESSAGE =
+  'This bank account is already linked to another Polycards account. Withdraw to a bank account in your own name, or contact support if this is a mistake.';
+
+/**
+ * Support's override for a genuine shared account (a family member's, a joint
+ * account): customer ids in PAYOUT_ACCOUNT_SHARING_ALLOWED, comma-separated,
+ * read per call.
+ * shortcut: the override is an env list, so granting one is a spec change and
+ * a redeploy; build an admin toggle if overrides become routine.
+ */
+export function payoutAccountSharingAllowed(
+  customerId: string,
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): boolean {
+  return (env.PAYOUT_ACCOUNT_SHARING_ALLOWED ?? '')
+    .split(',')
+    .some((id) => id.trim() === customerId);
+}
+
+/**
  * Register-phase JWTs pass authenticate('customer') with actor_id '' (the
  * documented repo trap — see profile/frame/route.ts). Without this guard,
  * retrieveCustomer('') surfaces as a confusing NOT_FOUND instead of a 401, and
@@ -221,6 +247,31 @@ export async function POST(
     savedAt: new Date().toISOString(),
   };
 
+  // Looked up before the lock (it reads OTHER customers, which this
+  // customer's metadata lock does not cover) but applied inside it, where
+  // "already on my list" is decided from the locked read. Two strangers saving
+  // one number in the same instant can both get through; that race is not the
+  // farming pattern this stops.
+  //
+  // A number another customer has only SAVED blocks under the same holder
+  // name (one person, several accounts: 10 of the 13 clusters). Otherwise
+  // anyone who knew a stranger's number could save it first and lock the real
+  // owner out. A number already PAID OUT to blocks under any name.
+  const sameHolder = (name: string | null) =>
+    name == null ||
+    name.toLowerCase().replace(/\s+/g, ' ').trim() ===
+      account.accountHolderName.toLowerCase().replace(/\s+/g, ' ');
+  const heldByAnother =
+    !payoutAccountSharingAllowed(customerId) &&
+    (
+      await resolvePacks<CustomerWallet>(req.scope).otherPayoutAccountHolders(
+        customerId,
+        accountNumber,
+      )
+    ).some(
+      (h) => findBank(h.bank_code)?.id === bankCode && sameHolder(h.holder_name),
+    );
+
   // The cap is checked against the list read INSIDE the lock, not against one
   // this handler read earlier — otherwise two concurrent saves could both see
   // MAX-1 accounts and both be allowed through.
@@ -239,6 +290,19 @@ export async function POST(
       const prior = accounts[existing] as SavedBankAccount;
       return accounts.map((a, i) =>
         i === existing ? { ...account, savedAt: prior.savedAt } : a,
+      );
+    }
+    if (heldByAnother) {
+      // The refusal tells the customer the number is linked elsewhere; log
+      // it so repeated probing for linked numbers shows up. Last 4 only.
+      req.scope
+        .resolve('logger')
+        .warn(
+          `[saved-accounts] refused a shared payout account for ${customerId} (${bankCode} …${accountNumber.slice(-4)})`,
+        );
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        SHARED_PAYOUT_ACCOUNT_MESSAGE,
       );
     }
     if (accounts.length >= MAX_SAVED_BANK_ACCOUNTS) {

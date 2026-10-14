@@ -1,4 +1,12 @@
+// Lets one test give a bank its own payout floor: Touch 'n Go is the only
+// bank with one, and it is paused.
+jest.mock('../banks', () => {
+  const actual = jest.requireActual('../banks');
+  return { ...actual, bankPayoutMinRm: jest.fn(actual.bankPayoutMinRm) };
+});
+
 import { MedusaError, Modules } from '@medusajs/framework/utils';
+import { bankPayoutMinRm } from '../banks';
 import {
   GATEWAY_WD_MIN_RM,
   withdrawalsEnabled,
@@ -39,10 +47,10 @@ import type { FakeFacet, GatewayWithdrawals } from '../facets';
  *  bank code and number live HERE, in the saved list, and nowhere in a request:
  *  that is the whole point of plan 088. */
 const SAVED_ACCOUNT = {
-  id: savedBankAccountId('MBBEMYKL', '1234567890'),
+  id: savedBankAccountId('MBBEMYKL', '123456789012'),
   bankCode: 'MBBEMYKL',
   bankName: 'Maybank',
-  accountNumber: '1234567890',
+  accountNumber: '123456789012',
   accountHolderName: 'AHMAD BIN ALI',
   savedAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
 };
@@ -241,6 +249,59 @@ describe('withdrawalDetailsError', () => {
   ])('rejects bad details (%#)', (bad, message) => {
     expect(withdrawalDetailsError(bad)).toMatch(message);
   });
+
+  // Prod to 2026-10-14: every settled payout used its bank's real length, and
+  // every 16-digit Maybank/CIMB number (Visa/Mastercard prefix) never paid.
+  const VISA_TEST_CARD = '4111111111111111'; // Luhn-valid
+  it.each([
+    ['MBBEMYKL', '1234567890', /^Maybank account numbers are 12 digits\./],
+    ['MYMB2U', '1234567890', /^Maybank account numbers are 12 digits\./], // legacy alias
+    [
+      'CIBBMYKL',
+      '701234567890',
+      /^CIMB Bank account numbers are 10 or 14 digits\./,
+    ],
+    ['PBBEMYKL', '12345678901', /^Public Bank account numbers are 10 digits\./],
+    [
+      'HLBBMYKL',
+      '1234567890',
+      /^Hong Leong Bank account numbers are 11 digits\./,
+    ],
+    ['RHBBMYKL', '123456789012', /^RHB Bank account numbers are 14 digits\./],
+    ['MBBEMYKL', VISA_TEST_CARD, /^That looks like a card number\./],
+    ['CIBBMYKL', '5555555555554444', /^That looks like a card number\./],
+    // Mastercard's 2-series range (2221-2720).
+    ['BSNAMYK1', '2223003122003222', /^That looks like a card number\./],
+    // BSN accounts are 16 digits, so only the card check guards it.
+    ['BSNAMYK1', VISA_TEST_CARD, /^That looks like a card number\./],
+  ])('refuses %s %s', (bankCode, accountNumber, message) => {
+    expect(
+      withdrawalDetailsError({ ...SAVED_ACCOUNT, bankCode, accountNumber }),
+    ).toMatch(message);
+  });
+
+  it.each([
+    ['MBBEMYKL', '123456789012'],
+    ['CIBBMYKL', '7012345678'],
+    ['CIBBMYKL', '80012345678901'],
+    ['PBBEMYKL', '6123456789'],
+    ['HLBBMYKL', '12345678901'],
+    ['RHBBMYKL', '12345678901234'],
+    // BSN's own 16-digit numbers start with 0; a 16-digit 4… that fails Luhn
+    // is not a card.
+    ['BSNAMYK1', '0410029100012345'],
+    ['BSNAMYK1', '4111111111111112'],
+    // 2-series outside 2221-2720 is not a card prefix.
+    ['BSNAMYK1', '2000000000000006'], // Luhn-valid
+    // Banks without a length on file are not length-checked.
+    ['PHBMMYKL', '123456789'],
+    // Singapore banks pay through A3Pay and keep the generic digit rule.
+    ['DBSSSGSG', '1234567890'],
+  ])('accepts %s %s', (bankCode, accountNumber) => {
+    expect(
+      withdrawalDetailsError({ ...SAVED_ACCOUNT, bankCode, accountNumber }),
+    ).toBeNull();
+  });
 });
 
 describe('startWithdrawal — money ordering', () => {
@@ -386,10 +447,28 @@ describe('startWithdrawal — money ordering', () => {
     expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
   });
 
-  // TGPay refused every Touch 'n Go payout under ~RM 70 with "No payout
-  // provider is available for this order" (2026-10-09); TNG carries its own
-  // RM 100 floor, enforced before any row or debit.
-  it("refuses a Touch 'n Go withdrawal under RM 100 before any row or debit, and lets RM 100 through", async () => {
+  it('holds a destination to its own payout floor before any row or debit', async () => {
+    const actual = jest.requireActual('../banks').bankPayoutMinRm;
+    jest.mocked(bankPayoutMinRm).mockImplementation(() => 100);
+    try {
+      const h = harness();
+      await expect(start(h, { gateway: 'tgpay', amount: 56 })).rejects.toThrow(
+        'Withdrawals must be between RM 100 and RM 30,000 for Maybank.',
+      );
+      expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+      expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+      await expect(
+        start(harness(), { gateway: 'tgpay', amount: 100 }),
+      ).resolves.toBeTruthy();
+    } finally {
+      jest.mocked(bankPayoutMinRm).mockImplementation(actual);
+    }
+  });
+
+  // TNG is paused in banks.ts (2026-10-14): TGPay refused 97 of 110 TNG
+  // payouts in a week and customers kept retrying. A saved TNG account is
+  // refused before any row or debit, so a tap costs nothing.
+  it("refuses a Touch 'n Go withdrawal before any row or debit while TNG payouts are paused", async () => {
     const tng = {
       ...SAVED_ACCOUNT,
       id: savedBankAccountId('TNGMY', '123456789012'),
@@ -399,65 +478,11 @@ describe('startWithdrawal — money ordering', () => {
     };
     const h = harness([tng]);
     await expect(
-      start(h, { gateway: 'tgpay', accountId: tng.id, amount: 56 }),
-    ).rejects.toThrow(
-      "Withdrawals must be between RM 100 and RM 30,000 for Touch 'n Go eWallet.",
-    );
+      start(h, { gateway: 'tgpay', accountId: tng.id, amount: 100 }),
+    ).rejects.toThrow(/not available with the current payout provider/i);
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
     expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
-
-    // A bank account keeps the gateway's own floor (RM 50 here).
-    const h2 = harness([SAVED_ACCOUNT]);
-    await expect(start(h2, { gateway: 'tgpay', amount: 56 })).resolves.toBeTruthy();
-
-    const h3 = harness([tng]);
-    await expect(
-      start(h3, { gateway: 'tgpay', accountId: tng.id, amount: 100 }),
-    ).resolves.toBeTruthy();
-  });
-
-  // From 2026-10-09 17:12 TGPay refused every Touch 'n Go payout, at any
-  // amount, with "No payout provider is available for this order". Customers
-  // retried 10+ times because the generic copy told them to check details.
-  it("sends a Touch 'n Go customer to a bank account when TGPay has no TNG payout provider", async () => {
-    const tng = {
-      ...SAVED_ACCOUNT,
-      id: savedBankAccountId('TNGMY', '123456789012'),
-      bankCode: 'TNGMY',
-      bankName: "Touch 'n Go eWallet",
-      accountNumber: '123456789012',
-    };
-    const noProvider = new GatewayError(
-      'TGPay /transaction/payout/withdraw failed (HTTP 400): No payout provider is available for this order',
-      [],
-      400,
-      true,
-    );
-    const h = harness([tng]);
-    h.packs.withdrawForCashout.mockResolvedValue({
-      id: 'ct_1',
-      balance: 50,
-      amount: -100,
-      replayed: false,
-      reference: null,
-      destination: tng,
-    });
-    fakeGateway.script({ submitWithdrawal: noProvider });
-    const error = (await start(h, { accountId: tng.id, amount: 100 }).catch(
-      (e: unknown) => e,
-    )) as Error;
-    expect(error.message).toBe(
-      "Touch 'n Go withdrawals are temporarily unavailable from our payment provider. Your balance has been returned. Please withdraw to a bank account for now.",
-    );
-    // Still refunded: the refund is the only ledger write on this path.
-    expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
-
-    // The same refusal on a bank account keeps the generic copy.
-    fakeGateway.script({ submitWithdrawal: noProvider });
-    await expect(start(harness())).rejects.toThrow(
-      /refused by the payment provider/i,
-    );
   });
 
   // Test-plan case 3.
@@ -467,6 +492,7 @@ describe('startWithdrawal — money ordering', () => {
       ...SAVED_ACCOUNT,
       id: savedBankAccountId('BOOSTMY', '1234567890'),
       bankCode: 'BOOSTMY',
+      accountNumber: '1234567890',
     };
     const h = harness([unpayable]);
     await expect(
