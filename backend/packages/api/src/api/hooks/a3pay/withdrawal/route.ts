@@ -14,6 +14,8 @@ import {
 import { rowGateway } from '../../../../modules/packs/gateway';
 import { alertOps } from '../../../../modules/packs/ops-alert';
 import { rowFx, toLedgerAmount } from '../../../../modules/packs/payment-fx';
+import { withdrawalAuditNote } from '../../../../modules/packs/gateway-audit';
+import { toOptionalMoney } from '../../../../modules/packs/money';
 
 // A3Pay payout callback (handbook "Payout Callback"). Same authentication as
 // the deposit hook: decrypt, verify the signature, then read only the signed
@@ -125,6 +127,31 @@ export async function POST(
             : '.') +
           ` Investigate A3Pay ${gatewayTransactionId}.`,
       );
+      // On the row too, as the TGPay hook does, so Settlement and the
+      // Dashboard show it at once. In RM at the row's locked rate, the
+      // audit's own unit. Best-effort: A3Pay still gets its answer.
+      try {
+        const paid = toLedgerAmount(rowFx(withdrawal), Number(data.Amount));
+        await packs.updateGatewayWithdrawals({
+          id: withdrawal.id,
+          audited_at: new Date(),
+          audit_note: withdrawalAuditNote(
+            {
+              status: withdrawal.status,
+              amount: toOptionalMoney(withdrawal.amount),
+            },
+            {
+              kind: 'detail',
+              state,
+              amount: Number.isFinite(paid) ? paid : Number(withdrawal.amount),
+            },
+          ),
+        });
+      } catch (error) {
+        logger.error(
+          `[a3pay] could not record the contradiction on ${merchantTransactionId}: ${(error as Error).message}`,
+        );
+      }
     }
     res.status(200).send('success');
     return;

@@ -61,7 +61,7 @@ export async function GET(
     }
   }
 
-  const [deposits, withdrawals] = await Promise.all([
+  const [deposits, latestWithdrawals, refunded] = await Promise.all([
     packs.listGatewayDeposits(
       { audit_note: { $ne: null }, currency },
       { take: FINDINGS_LIMIT, order: { audited_at: 'DESC' } },
@@ -70,7 +70,18 @@ export async function GET(
       { audit_note: { $ne: null }, currency },
       { take: FINDINGS_LIMIT, order: { audited_at: 'DESC' } },
     ),
+    // A refunded payout with a finding may be paid twice, and the Dashboard
+    // counts those from this list: fetched on their own, so a backlog of
+    // newer findings can never push one out of it.
+    packs.listGatewayWithdrawals(
+      { audit_note: { $ne: null }, currency, status: 'failed' },
+      { take: FINDINGS_LIMIT, order: { audited_at: 'DESC' } },
+    ),
   ]);
+  const withdrawals = [
+    ...refunded,
+    ...latestWithdrawals.filter((w) => !refunded.some((r) => r.id === w.id)),
+  ];
 
   const findings = [
     ...deposits.map((d) => ({
@@ -99,8 +110,10 @@ export async function GET(
       note: w.audit_note,
       audited_at: w.audited_at,
     })),
-  ].sort((a, b) =>
-    String(b.audited_at ?? '').localeCompare(String(a.audited_at ?? '')),
+  ].sort(
+    (a, b) =>
+      Number(isRefunded(b)) - Number(isRefunded(a)) ||
+      auditedMs(b.audited_at) - auditedMs(a.audited_at),
   );
 
   res.json({
@@ -114,6 +127,12 @@ export async function GET(
     findings: findings.slice(0, FINDINGS_LIMIT),
   });
 }
+
+const isRefunded = (f: { kind: string; status: string }) =>
+  f.kind === 'withdrawal' && f.status === 'failed';
+// A Date from the model, by time: as a string it starts with the weekday.
+const auditedMs = (at: Date | string | null | undefined) =>
+  at ? new Date(at).getTime() : 0;
 
 type SideTotals = {
   count: number;

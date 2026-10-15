@@ -19,7 +19,7 @@ import {
 import { rm, timeAgo } from '../../lib/format';
 import {
   attentionWithdrawals,
-  doublePayRisks,
+  doublePayAcross,
   staleDeposits,
 } from '../../lib/dashboard';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
@@ -98,10 +98,7 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
     ? shipping.reduce((n, q) => n + (q.data ?? 0), 0)
     : undefined;
   const drafts = runs.data?.filter((r) => r.status === 'draft');
-  const twice =
-    auditRm.data && auditSgd.data
-      ? doublePayRisks([...auditRm.data.findings, ...auditSgd.data.findings])
-      : undefined;
+  const twice = doublePayAcross([auditRm.data, auditSgd.data]);
 
   // Only queues that loaded are counted, so a failed read is never "zero".
   const counts: Record<string, number> = {};

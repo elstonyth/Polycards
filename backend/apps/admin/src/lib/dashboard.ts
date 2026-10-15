@@ -193,6 +193,17 @@ export const doublePayRisks = (findings: GatewayAuditFinding[]) => {
   };
 };
 
+/** doublePayRisks over whichever rails' audits loaded: one that failed must
+ *  not hide the other's. Undefined until one has. */
+export const doublePayAcross = (
+  audits: ({ findings: GatewayAuditFinding[] } | undefined)[],
+) => {
+  const loaded = audits.filter((a) => a !== undefined);
+  return loaded.length > 0
+    ? doublePayRisks(loaded.flatMap((a) => a.findings))
+    : undefined;
+};
+
 /**
  * Pending deposits past the reconcile window. The route sorts pending oldest
  * first and flags `stale` with the sweep's own rule, so the overdue rows lead
