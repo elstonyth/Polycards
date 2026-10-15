@@ -225,14 +225,13 @@ The old "our settled deposits / payouts" totals are dropped; the results table a
   12. Status: the enable/disable switch (with its confirm and reason) and the partner badge.
 - **Removed from the list** (still on the player's page): Real name, Pulls and Last turnover. The separate Total top up and Total withdraw columns were removed here too, then **restored on 2026-10-15** at the operator's request, as sortable "Top-up" and "Withdrawn" columns between Vault and Total contribution.
 - The same sorts are available where the column survives, plus "Total contribution". A **Sort ▾** select also offers the ones with no column: most topped up, most withdrawn, email A–Z.
-- **Real customers panel (added 2026-10-15)**, above the list. It has one row each for Today, Last 7 days (rolling, the Dashboard's "7 days") and This month, all in Malaysia time. Each row shows:
-  - the top player: the most settled top-ups in the period, with "—" when nobody topped up;
-  - top-ups and withdrawals, each with its count;
-  - net (top-ups − settled withdrawals; pending payouts are excluded);
-  - new players and paying players.
+- **Top players panel (added 2026-10-15)**, above the list. It has one row each for Today, Last 7 days (rolling, the Dashboard's "7 days") and This month, all in Malaysia time, and it names players only, with no totals. Each row has four columns:
+  - **Most topped up:** the most settled top-ups, summed, with the count;
+  - **Biggest single top-up:** the largest one;
+  - **Most withdrawn:** the most settled payouts, summed, with the count;
+  - **Most draws:** the most paid pack opens (pull.source `pack` or `bonus`; gift, free and reward packs never count).
 
-  The panel reads `GET /admin/stats?scope=default`, so it always counts real customers (§3) whatever the Group filter says, on the Dashboard's settled-gateway basis. The endpoint's `current.top_topup` is the top player, ties going to the lower customer id. Because the panel uses settled gateway deposits and the list's Top-up column sums the wallet ledger over all time, the two can differ by manual credits.
-- Joined shows "active {ago}" beneath, from the last turnover.
+  A column shows "—" when nobody qualifies. The panel reads `GET /admin/stats/leaders?range=…&scope=default`, so it only ever names real customers (§3), whatever the Group filter says. Ties go to the lower customer id; for the biggest top-up, the earlier one wins. A first version also showed period totals (top-ups, withdrawals, net, new and paying players); those were removed the same day at the operator's request. Because the panel uses settled gateway deposits and the list's Top-up column sums the wallet ledger over all time, the two can differ by manual credits.
 - **Filter:** a **Group ▾** select next to search, with All groups, Default and each other group. The backend `GET /admin/players` gains `group=<id>|default`:
   - a group id filters to that group's members;
   - `default` excludes members of non-default groups.

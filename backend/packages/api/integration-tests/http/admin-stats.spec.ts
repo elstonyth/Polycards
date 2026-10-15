@@ -79,8 +79,6 @@ medusaIntegrationTestRunner({
         expect(Date.parse(today.data.current.to)).toBeLessThanOrEqual(
           Date.parse(today.data.as_of),
         );
-        // Nobody has topped up yet: no player of the period, not a zero one.
-        expect(today.data.current.top_topup).toBeNull();
       });
 
       it('counts sign-ups and gateway top-ups per window, first top-ups over the whole history', async () => {
@@ -227,15 +225,6 @@ medusaIntegrationTestRunner({
             withdrawal_count: 2, // S1, S2
             withdrawal_amount: 250,
           },
-          // The player of the period: Y's 100 + 20 beats W's 40 and X's 30.
-          // Y has no customer row, so no name or email, but still counts.
-          top_topup: {
-            customer_id: 'cus_y',
-            name: null,
-            email: null,
-            amount: 120,
-            count: 2,
-          },
         });
         expect(res.data.previous).toEqual({
           from: '2026-09-07T16:00:00.000Z',
@@ -340,19 +329,6 @@ medusaIntegrationTestRunner({
           withdrawal_amount: 80,
         });
         expect((await stats(q)).data.current.stats.topup_count).toBe(4);
-
-        // The player of the period follows the scope too. Among everyone, all
-        // four paid 100: the lowest customer id wins, so the pick never flips
-        // between two polls.
-        expect(realOnly.data.current.top_topup).toEqual({
-          customer_id: real.id,
-          name: null,
-          email: 'scope-real@test.dev',
-          amount: 100,
-          count: 1,
-        });
-        const [lowest] = [real.id, grouped.id, both.id, generated].sort();
-        expect(all.data.current.top_topup.customer_id).toBe(lowest);
         expect((await stats(`${q}&scope=partners`)).status).toBe(400);
 
         // The settlement report's ledger cross-check follows the scope too.

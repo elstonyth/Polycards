@@ -559,27 +559,11 @@ export interface StatsFigures {
   withdrawal_amount: number;
 }
 
-/** The window's player of the period: the most settled top-ups. */
-export interface TopTopup {
-  customer_id: string;
-  name: string | null;
-  email: string | null;
-  /** MYR. */
-  amount: number;
-  count: number;
-}
-
 export interface StatsReport {
   as_of: string;
   scope?: CustomerScope;
-  /** ISO instants; windows are half-open [from, to). top_topup is null when
-   *  nobody topped up in the window. */
-  current: {
-    from: string;
-    to: string;
-    stats: StatsFigures;
-    top_topup: TopTopup | null;
-  };
+  /** ISO instants; windows are half-open [from, to). */
+  current: { from: string; to: string; stats: StatsFigures };
   previous: { from: string; to: string; stats: StatsFigures };
 }
 
@@ -597,6 +581,40 @@ export async function getStatsReport(
     qs.set('to', to);
   }
   return getJson<StatsReport>(`/admin/stats?${qs.toString()}`);
+}
+
+/** One of GET /admin/stats/leaders' top players for a window. */
+export interface PeriodLeader {
+  customer_id: string;
+  name: string | null;
+  email: string | null;
+  /** MYR; null for draws, which are counted. */
+  amount: number | null;
+  /** Top-ups, payouts or pack opens behind it (1 for the biggest top-up). */
+  count: number;
+}
+
+export interface LeadersReport {
+  as_of: string;
+  scope: CustomerScope;
+  from: string;
+  to: string;
+  /** Each is null when nobody qualifies in the window. */
+  leaders: {
+    topped_up: PeriodLeader | null;
+    biggest_topup: PeriodLeader | null;
+    withdrawn: PeriodLeader | null;
+    draws: PeriodLeader | null;
+  };
+}
+
+export async function getLeaders(
+  range: StatsRange,
+  scope: CustomerScope = 'all',
+): Promise<LeadersReport> {
+  const qs = new URLSearchParams({ range });
+  if (scope !== 'all') qs.set('scope', scope);
+  return getJson<LeadersReport>(`/admin/stats/leaders?${qs.toString()}`);
 }
 
 /** GET /admin/stats/online: signed-in players with the storefront open in the

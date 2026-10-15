@@ -50,18 +50,15 @@ export async function GET(
       packs.signupTopupStats(from, to, scope),
       packs.withdrawalStats(from, to, scope),
     ]).then(([inflow, outflow]) => ({ ...inflow, ...outflow }));
-  // The player of the period is for the current window only: the Dashboard
-  // live-polls this route and never shows one for the window before.
-  const [current, previous, topTopup] = await Promise.all([
+  const [current, previous] = await Promise.all([
     figures(windows.current),
     figures(windows.previous),
-    packs.topTopupCustomer(windows.current.from, windows.current.to, scope),
   ]);
   // Dates serialize to ISO strings.
   res.json({
     as_of: now,
     scope,
-    current: { ...windows.current, stats: current, top_topup: topTopup },
+    current: { ...windows.current, stats: current },
     previous: { ...windows.previous, stats: previous },
   });
 }
