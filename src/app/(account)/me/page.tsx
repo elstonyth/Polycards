@@ -277,7 +277,7 @@ export default async function MePage() {
           </section>
         )}
 
-        {/* Wallet bar */}
+        {/* Balance bar */}
         <section className="rounded-2xl border border-white/10 bg-neutral-900 p-4">
           {walletResult.ok ? (
             <>
@@ -286,7 +286,7 @@ export default async function MePage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <Link href="/wallet" className="min-w-0 hover:opacity-90">
                   <p className="flex items-center gap-0.5 text-[12px] font-semibold uppercase tracking-wide text-neutral-400">
-                    Wallet
+                    Balance
                     <ChevronRight className="h-3.5 w-3.5" aria-hidden />
                   </p>
                   <p className="font-heading mt-0.5 text-2xl text-white">

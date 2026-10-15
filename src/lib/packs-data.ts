@@ -23,7 +23,7 @@ export const FREE_WELCOME_CATEGORY = 'free_welcome';
  *  the server returns this exact string on a refused sell/deliver, so the
  *  storefront's pre-emptive copy has to read identically. */
 export const FREE_PULL_LOCKED_MESSAGE =
-  'Purchase & open any pack to unlock selling & delivery.';
+  'Pay for one pack yourself to unlock selling & delivery.';
 
 /** What the backend claim step still refuses for (spec 2026-10-06). */
 export type FreePackRequirement = 'phone' | 'real_name';

@@ -118,7 +118,7 @@ describe('openPack', () => {
     });
     expect(await openPack('bronze')).toEqual({
       ok: false,
-      error: 'Not enough credits to open this pack.',
+      error: 'Not enough balance to open this pack.',
       needsAuth: false,
       needsTopUp: true,
     });
@@ -349,7 +349,7 @@ describe('openBatch', () => {
     });
     expect(await openBatch('bronze', 3)).toEqual({
       ok: false,
-      error: 'Not enough credits to open this pack.',
+      error: 'Not enough balance to open this pack.',
       needsAuth: false,
       needsTopUp: true,
     });

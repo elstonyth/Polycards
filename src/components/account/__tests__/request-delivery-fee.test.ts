@@ -185,7 +185,7 @@ describe('RequestDeliveryModal confirm and balance', () => {
     mocks.balance = 20;
     await render([item('pull_a', 'pack', 100)], [SG_ADDRESS]);
     const text = host.textContent ?? '';
-    expect(text).toContain('Not enough credit');
+    expect(text).toContain('Not enough balance');
     expect(text).toContain('Top up RM 30.00 or more');
     expect(button('Request delivery')!.disabled).toBe(true);
     await act(async () => button('Top up')!.click());
@@ -257,7 +257,7 @@ describe('RequestDeliveryModal review fixes', () => {
     // wallet read from open time is not repeated.
     mocks.balance = 100;
     await render([item('pull_a', 'pack', 100)], [SG_ADDRESS]);
-    expect(host.textContent).not.toContain('Not enough credit');
+    expect(host.textContent).not.toContain('Not enough balance');
     expect(button('Request delivery')!.disabled).toBe(false);
   });
 

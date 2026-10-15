@@ -288,7 +288,7 @@ export default function RequestDeliveryModal({
         </h2>
         <p className="mt-1 text-[13px] text-white/55">
           Ship {items.length} card{items.length === 1 ? '' : 's'} to your
-          address. The shipping fee is deducted from your credit balance.
+          address. The shipping fee is deducted from your balance.
         </p>
 
         {/* Selected cards. overflow-x-auto clips the halo on all four sides
@@ -546,7 +546,7 @@ export default function RequestDeliveryModal({
               <p className="mt-1 text-right text-[12px] text-white/45">
                 Your balance: {rm(balance)}
                 {wallet !== null && wallet.bonus > 0
-                  ? ` (${rm(wallet.bonus)} bonus — pays for packs only)`
+                  ? ` (${rm(wallet.bonus)} bonus credit — packs only)`
                   : ''}
               </p>
             )}
@@ -565,7 +565,7 @@ export default function RequestDeliveryModal({
         {!adding && shortBy > 0 && (
           <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
             <p>
-              Not enough credit: this delivery costs {rm(totalCharge)} and you
+              Not enough balance: this delivery costs {rm(totalCharge)} and you
               have {rm(spendable ?? 0)} to pay it with
               {wallet !== null && wallet.bonus > 0
                 ? ' (bonus credit can only pay for packs)'

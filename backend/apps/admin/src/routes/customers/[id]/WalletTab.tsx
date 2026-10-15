@@ -26,7 +26,7 @@ const dot = (kind: string, amount: number) =>
 /**
  * The wallet as support needs it: what the player holds, what can leave
  * right now and why not (the withdraw button's own gate: frozen, never
- * topped up, bonus, deposits still to play through), then the ledger in
+ * topped up, bonus, money still to use on packs), then the ledger in
  * words, filterable by kind.
  */
 export const WalletTab = ({ customerId }: { customerId: string }) => {

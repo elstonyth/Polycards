@@ -8,6 +8,7 @@ import { PACKS_MODULE } from '../../modules/packs';
 import type PacksModuleService from '../../modules/packs/service';
 import { findCardInventoryTarget } from '../../modules/packs/card-stock';
 import { FREE_PULL_LOCKED_MESSAGE } from '../../modules/packs/free-pack';
+import { sellbackHoldBp } from '../../modules/packs/bonus-credit';
 import {
   buybackAmount,
   resolveBuybackRate,
@@ -172,8 +173,9 @@ export const buybackPullStep = createStep(
           cardHandle: pull.card_id,
           rate: percent / 100,
           openId: pull.open_id ?? null,
-          // Gift and bonus pulls: that share of the sale must be played through.
-          bonusBp: Number(pull.bonus_bp ?? 0),
+          // Bonus and welcome pulls: that share of the sale must be played
+          // through. A reward's or gift's sale is not held (ADR 0012).
+          bonusBp: sellbackHoldBp(pull),
         }),
       probeDuplicate: async () => {
         const [existing] = await packs.listCreditTransactions(

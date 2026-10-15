@@ -28,7 +28,7 @@ describe('withdrawableNote', () => {
   });
 
   // The production case (2026-10-14): RM 28.67 balance, RM 15 bonus and
-  // RM 13.67 still to play, so nothing can leave and the note must say why
+  // RM 13.67 still to use on packs, so nothing can leave and the note must say why
   // instead of "can be withdrawn now".
   it('names what is held back and why', () => {
     expect(

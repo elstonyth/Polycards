@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { claimTaskReward } from '@/lib/actions/tasks';
 import type { TaskEntry } from '@/lib/data/schemas';
+import { claimNotice } from './task-hub';
 
 // Every way a claim can decline, in the customer's words.
 const CLAIM_FAILURE_COPY: Record<string, string> = {
@@ -34,11 +35,7 @@ export function useClaimTask(onDone: (message: string) => void) {
           );
           return;
         }
-        onDone(
-          res.rewardType === 'credit'
-            ? 'Bonus credit added to your wallet.'
-            : 'Card added to your vault.',
-        );
+        onDone(claimNotice({ ...task.reward, type: res.rewardType }));
       } else if (res.ok && !res.claimed) {
         onDone(CLAIM_FAILURE_COPY[res.reason] ?? CLAIM_FALLBACK);
       } else if (!res.ok) {

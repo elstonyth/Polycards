@@ -1,11 +1,16 @@
 import { MedusaError } from '@medusajs/framework/utils';
 
-// Playthrough withdrawal gate: the customer's lifetime DEPOSIT-FUNDED pack
-// spend must cover their lifetime deposits (used >= deposited) before that
-// money may leave. "Used" counts only the deposit-funded portion of each
-// open (its external_funded_cents basis) — play funded by buyback / promo /
-// commission credit banks NO playthrough, so selling a card back (or spending
-// non-deposit credit on packs) does NOT play a deposit through.
+// Playthrough withdrawal gate: money that must go through packs may not leave
+// until it has been spent on them (used >= deposited). "Deposited" is every
+// post-1b top-up plus every stamped sell-back — the free share of a sale from
+// bonus or the welcome pull (task / challenge rewards and gift packs are not
+// stamped since ADR 0012), stamped as external_funded_cents on the buyback
+// row (DEPOSITED_PT_SEN_SQL). Both join the same external pool, and each open
+// draws its normal (non-bonus) part from that pool first; "used" is what the
+// pool covered (the open's external_funded_cents basis). Bonus spend banks
+// nothing, and neither does an open made once the pool is empty (paid with
+// withdrawable sell-back or commission money), so it cannot play a later
+// deposit through.
 //
 // Only the part still to play is held (partial unlock, 2026-10-14). The gate
 // used to be all-or-nothing, so a RM 10.55 bonus-share sell-back locked a
@@ -21,13 +26,14 @@ import { MedusaError } from '@medusajs/framework/utils';
 // route through this function before writing a 'cashout' ledger row.
 export interface PlaythroughInput {
   /** Σ positive `topup` rows **with a non-NULL external basis** (post-1b era),
-   *  plus each buyback's share from bonus or gift play (2026-10-09), in cents. Pre-1b deposits are grandfathered: they predate
+   *  plus each buyback's stamp (the free share of a sale, 2026-10-09), in
+   *  cents. Pre-1b deposits are grandfathered: they predate
    *  `external_funded_cents` and never require playthrough (their opens' basis
    *  is equally invisible to `usedCents`, so counting them would lock them
    *  forever). */
   depositedCents: number;
-  /** Σ −external_funded_cents over `pack_open` rows, in cents — deposit-funded
-   *  spend only (0 for commission/buyback/adjustment-funded opens). Net: a
+  /** Σ −external_funded_cents over `pack_open` rows, in cents — what the
+   *  external pool covered (0 for an open made once it was empty). Net: a
    *  reversed open's mirror row carries −originalExt, so it gives its
    *  playthrough back. */
   usedCents: number;
@@ -56,8 +62,6 @@ export function withdrawableCents(t: {
   return Math.max(0, t.availableCents - t.bonusCents - t.remainingCents);
 }
 
-/** The wallet fields the gate branches on (a structural subset of
- *  walletSummary's return, so either caller can pass its result straight in). */
 /** Refusal for an account that never topped up (2026-10-11): promo credit
  *  and prizes must not leave as cash or as a shipped card from an account
  *  that never deposited. Shared by the withdrawal gate and both delivery
@@ -66,7 +70,12 @@ export function withdrawableCents(t: {
 export const NO_TOPUP_MESSAGE =
   'Top up at least once to unlock withdrawals and deliveries.';
 
+/** The wallet fields the gate branches on (a structural subset of
+ *  walletSummary's return, so either caller can pass its result straight in). */
 export interface WithdrawalGateWallet {
+  /** The freeze-aware balance, bonus included: what is not withdrawable of it
+   *  is named in the refusal as "for opening packs". */
+  available: number;
   withdrawable: number;
   isFrozen: boolean;
   /** At least one positive top-up row ever (any era, any amount). */
@@ -88,15 +97,16 @@ export interface WithdrawalGateWallet {
  * unit tests in __tests__/gateway-withdrawal.unit.spec.ts assert them by
  * regex (both the caller-level precheck cases and the service-level gate
  * cases), AND the storefront does too — `src/lib/vault-errors.ts` passes them
- * through by phrase ("under review", "more on packs", "you
- * can withdraw up to") and `src/app/bank-withdrawal/WithdrawForm.tsx`'s
- * REMEDIES links them to their fix. A reword that drops a phrase turns the
+ * through by phrase ("under review", "Top up at least once", "is for
+ * opening packs", "you can withdraw up to") and
+ * `src/app/bank-withdrawal/WithdrawForm.tsx`'s REMEDIES links them to their
+ * fix. A reword that drops a phrase turns the
  * customer's refusal back into "Something went wrong" (as it was until
  * 2026-10-03). Update all of them together.
  *
- * Order matters: freeze outranks no-top-up, which outranks playthrough, which
- * outranks the plain "you can withdraw up to X" cap — a frozen account must
- * never be told it is merely short of playthrough.
+ * Order matters: freeze outranks no-top-up, which outranks the for-packs
+ * hold, which outranks the plain "you can withdraw up to X" cap — a frozen
+ * account must never be told its money is merely for packs.
  */
 export function withdrawalGateError(
   wallet: WithdrawalGateWallet,
@@ -112,13 +122,21 @@ export function withdrawalGateError(
   if (!wallet.hasTopup) {
     return new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
   }
-  if (wallet.playthrough.remaining > 0) {
-    const spend = `Spend RM ${wallet.playthrough.remaining.toFixed(2)} more on packs`;
+  // The part not withdrawable (bonus + still to use on packs) is named as
+  // money for packs, never as something spending "unlocks": spending it is
+  // what lowers it (2026-10-15). In cents so a float hair can't print.
+  const forPacks =
+    Math.max(
+      0,
+      Math.round(wallet.available * 100) - Math.round(wallet.withdrawable * 100),
+    ) / 100;
+  if (forPacks > 0) {
+    const y = `RM ${forPacks.toFixed(2)}`;
     return new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       wallet.withdrawable > 0
-        ? `You can withdraw up to RM ${wallet.withdrawable.toFixed(2)}. ${spend} to unlock the rest.`
-        : `${spend} to unlock withdrawals.`,
+        ? `You can withdraw up to RM ${wallet.withdrawable.toFixed(2)} right now. The other ${y} is for opening packs.`
+        : `Nothing is withdrawable yet. Your ${y} is for opening packs.`,
     );
   }
   return new MedusaError(

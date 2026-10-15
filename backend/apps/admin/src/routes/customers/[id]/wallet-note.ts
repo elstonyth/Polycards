@@ -3,7 +3,7 @@ import type { CustomerMoney } from '../../../lib/admin-rest';
 /** The note under "Withdrawable now" (a playerMoney.* key): why nothing, or
  *  not everything, can leave. Frozen and never-topped-up outrank the rest,
  *  as in the withdraw gate; otherwise whatever is held back is named — the
- *  bonus, the deposit still to play through, or both. */
+ *  bonus, the money still to use on packs, or both. */
 export function withdrawableNote(
   w: CustomerMoney['wallet'],
 ):

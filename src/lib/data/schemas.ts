@@ -494,9 +494,8 @@ export const VaultItemSchema = z.looseObject({
     amount: finite,
     percent: finite,
     firm: z.boolean().optional(),
-    // MYR part of `amount` that came from bonus or gift play: paid as normal
-    // credit that must be played through once before it can be withdrawn.
-    // Optional: an older backend omits it.
+    // MYR part of `amount` held for packs (the bonus-paid share, or the
+    // welcome card). Optional: an older backend omits it.
     bonus: finite.optional(),
   }),
 });
@@ -547,6 +546,11 @@ const CreditsSchema = z.looseObject({
   balance: finite,
   topup_total: finite,
   spend_total: finite,
+  // The history's split of spend_total (2026-10-15): all money spent on pack
+  // opens (bonus part included), and money withdrawn. Optional so an older
+  // backend still parses.
+  pack_spend_total: finite.optional(),
+  withdrawn_total: finite.optional(),
   has_more: z.boolean().optional(),
 });
 
@@ -639,8 +643,10 @@ export const CreditTransactionSchema = z.looseObject({
   // Signed bonus-credit part of `amount` (MYR). Optional for the same
   // older-backend reason; absent = no bonus part.
   bonus: finite.optional(),
-  // Sell-back rows: the part to spend on packs once before it can leave
-  // (MYR, 2026-10-14). Optional for the same older-backend reason.
+  // Signed move into (+) or out of (−) "Still to use on packs" (MYR): + a
+  // top-up, + a sell-back's free share (bonus, free-pack or prize pulls), −
+  // what a pack open used of it. Buyback-only before 2026-10-15. Optional for
+  // the same older-backend reason.
   playthrough: finite.optional(),
 });
 
@@ -858,7 +864,7 @@ export const OpenBuybackSchema = z.looseObject({
   vault_amount: finite.optional(),
   instant_deadline_ms: finite.optional(),
   firm: z.boolean().optional(),
-  // MYR part of `amount` that came from bonus or gift play: paid as normal credit that must be played through once before it can be withdrawn (2026-10-09).
+  // MYR part of `amount` held for packs (the bonus-paid share, or the welcome card).
   bonus: finite.optional(),
 });
 

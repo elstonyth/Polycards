@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { toggleSelectAll } from '@/lib/vault-selection';
+import { sellTotals, toggleSelectAll } from '@/lib/vault-selection';
+import { sellBackNotice } from '@/lib/buyback-copy';
 
 describe('toggleSelectAll', () => {
   test('selects every visible id when none are selected', () => {
@@ -28,5 +29,25 @@ describe('toggleSelectAll', () => {
     const next = toggleSelectAll(prev, []);
     expect([...next]).toEqual(['x']);
     expect(next).not.toBe(prev); // always a fresh Set for React state
+  });
+});
+
+describe('sellTotals', () => {
+  test('a mixed selection holds only the bonus-paid part for packs', () => {
+    // A gift-pack card and a task prize quote no held part; a pack paid one
+    // fifth with bonus credit holds one fifth of its sale.
+    const totals = sellTotals([
+      { buyback: { amount: 20, bonus: 0 } },
+      { buyback: { amount: 30, bonus: 0 } },
+      { buyback: { amount: 30, bonus: 6 } },
+    ]);
+    expect(totals).toEqual({ amount: 80, held: 6 });
+    expect(sellBackNotice(totals.amount, totals.held)).toBe(
+      'RM 80.00 added — RM 6.00 of it for packs',
+    );
+  });
+
+  test('nothing selected sells nothing', () => {
+    expect(sellTotals([])).toEqual({ amount: 0, held: 0 });
   });
 });

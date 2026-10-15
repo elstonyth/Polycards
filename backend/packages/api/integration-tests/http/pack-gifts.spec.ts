@@ -3,15 +3,16 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { FREE_WELCOME_CATEGORY } from '../../src/modules/packs/free-pack';
+import { bonusShareSen } from '../../src/modules/packs/bonus-credit';
 import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
 
 // Pack gifts and bonus credit end to end (spec 2026-10-07): an admin gifts
 // packs and bonus credit; the customer opens "Vault x1 + RM300"; a stale screen
-// is refused, never billed; gift and bonus cards sell back as normal credit
-// that must be played through once (2026-10-09), and count toward nothing; a
-// rolled-back open hands the gift back.
+// is refused, never billed; a bonus card's bonus share must be played through
+// once (2026-10-09), a gift card's sale is withdrawable (ADR 0012), and both
+// count toward nothing; a rolled-back open hands the gift back.
 
 const PASSWORD = 'pack-gifts-password-1';
 const ADMIN_EMAIL = 'pack-gifts-admin@test.dev';
@@ -237,8 +238,9 @@ medusaIntegrationTestRunner({
       const [giftRoll, paidRoll] = res.data.rolls;
       expect(giftRoll.pull).toMatchObject({ source: 'gift', bonus_bp: 10000 });
       expect(paidRoll.pull).toMatchObject({ source: 'pack', bonus_bp: 0 });
-      // The gift's sell-back is all bonus; the paid one none.
-      expect(giftRoll.buyback.bonus).toBe(giftRoll.buyback.amount);
+      // Neither sale is held for packs: a gift's sale is withdrawable money
+      // (ADR 0012), like the paid one.
+      expect(giftRoll.buyback.bonus).toBe(0);
       expect(paidRoll.buyback.bonus).toBe(0);
 
       const debits = await openRows();
@@ -356,9 +358,38 @@ medusaIntegrationTestRunner({
         api.get(`/admin/customers/${customerId}/gacha`, { headers: admin() }),
       );
       expect(summary.data.bonus_balance).toBe(0);
+
+      // A bonus-paid pull's sale still stamps its bonus share (two rounds,
+      // ADR 0012 left these alone): in full for the all-bonus row, its share
+      // rounded up for the mixed one. The deposit is grandfathered, so the
+      // stamps are the whole hold.
+      let stamped = 0;
+      for (const [roll, bp] of [
+        [first, 10000],
+        [second, 3334],
+      ] as const) {
+        const sold = await unwrapResponse(
+          api.post(`/store/vault/${roll.pull.id}/buyback`, {}, { headers: authed() }),
+        );
+        expect(sold.status).toBe(200);
+        const [credit] = await packs().listCreditTransactions({
+          pull_id: roll.pull.id,
+        });
+        const held = bonusShareSen(Math.round(Number(credit.amount) * 100), bp);
+        expect(held).toBeGreaterThan(0);
+        expect(credit.external_funded_cents).toBe(held);
+        stamped += held;
+      }
+      expect((await wallet()).playthrough.remaining).toBeCloseTo(
+        stamped / 100,
+        2,
+      );
     });
 
-    it('sells a gifted card back as normal credit, withdrawable once played through', async () => {
+    it('sells a gifted card back as withdrawable money (ADR 0012)', async () => {
+      // One top-up first (no top-up, no withdrawal). Grandfathered: no basis,
+      // so it holds nothing itself.
+      await deposit(PRICE);
       await giftPacks(1, 'sell');
       const opened = await openBatch(1, 1);
       const pullId = opened.data.rolls[0].pull.id;
@@ -371,27 +402,20 @@ medusaIntegrationTestRunner({
         pull_id: pullId,
       });
       const sale = Number(credit.amount);
-      // Normal credit, the whole sale stamped for playthrough (2026-10-09).
+      // Normal credit, nothing stamped for playthrough.
       expect(credit.bonus_cents ?? 0).toBe(0);
-      expect(credit.external_funded_cents).toBe(Math.round(sale * 100));
-      const locked = await wallet();
-      expect(locked).toMatchObject({ bonus: 0, withdrawable: 0 });
-      expect(locked.playthrough.remaining).toBeCloseTo(sale, 2);
-      // The history names the hold on the sell-back row (2026-10-14).
+      expect(credit.external_funded_cents ?? 0).toBe(0);
+      const after = await wallet();
+      expect(after.playthrough.remaining).toBe(0);
+      expect(after.withdrawable).toBeCloseTo(PRICE + sale, 2);
+      // The history marks no hold on the sell-back row.
       const history = await unwrapResponse(
         api.get('/store/credits', { headers: authed() }),
       );
       const saleRow = history.data.transactions.find(
         (t: { reason: string }) => t.reason === 'buyback',
       );
-      expect(saleRow.playthrough).toBeCloseTo(sale, 2);
-
-      // One RM 300 open plays it through; what is left can then be withdrawn.
-      await deposit(PRICE);
-      expect((await openBatch(1, 0)).status).toBe(200);
-      const unlocked = await wallet();
-      expect(unlocked.playthrough.remaining).toBe(0);
-      expect(unlocked.withdrawable).toBeCloseTo(sale, 2);
+      expect(saleRow.playthrough ?? 0).toBeCloseTo(0, 2);
     });
 
     it('counts gift and bonus pulls toward nothing', async () => {

@@ -87,7 +87,9 @@ and ADR 0001 stands: the vault is still a Pull status; the Vault _page_ renders
 Pulls and Pack Gifts side by side. The pack and spin pages use a held gift first
 ("Vault x1", "Bet Vault x1 + RM300.00"); the Open claims exactly the gifts the
 screen showed or is refused (409) — never billed in their place. It writes a
-`source='gift'` Pull whose sell-back pays Bonus Credit.
+`source='gift'` Pull whose sale is withdrawable money once the customer has
+topped up (ADR 0012, decided at sell time; the holds older gift sales left
+are released once by a script after the deploy).
 _Avoid_: voucher (VIP credit grant), free rip (the task reward, a `task_claim`
 row), reward
 
@@ -159,17 +161,27 @@ The spend-only slice of a customer's Credit (spec 2026-10-07, ADR 0010). Spent
 only on pack Opens — and FIRST, before normal credit — never withdrawn, never
 pays a delivery fee. A signed column on the ledger (`credit_transaction.bonus_cents`,
 admin grants use reason `bonus_grant`), not a second wallet. **Bonus Balance** =
-Σ bonus*cents; **Normal Balance** = Balance − Bonus Balance. A card pulled with
-bonus or from a Pack Gift sells back as normal credit, but its bonus share
-(`pull.bonus_bp`) must be played through once before it can be withdrawn
-(operator rule 2026-10-09), like a deposit.
-\_Avoid*: promo credit (the economy report's bucket for task/voucher credit,
-which IS withdrawable), dead chips, free credit
+Σ bonus*cents; **Normal Balance** = Balance − Bonus Balance. Task, check-in,
+challenge and VIP voucher credit is Bonus Credit too (2026-10-11). Free value
+goes through packs twice: a card pulled with bonus or from the Free Welcome
+Pack sells back as normal credit, but its free share (`pull.bonus_bp`; all of
+it for a welcome pull) is **Still to use on packs** and must be spent on a pack
+once more before it can be withdrawn (operator rule 2026-10-09), like a
+deposit. Welcome pulls are held in full only on pulls minted since 2026-10-11;
+older ones sell back fully withdrawable. A Pack Gift's pull and a task or
+weekly-challenge **reward** (any `source='reward'` pull: a card or slab prize,
+or a free rip) sell back fully withdrawable once the customer has topped up,
+decided at sell time (ADR 0012); the holds older reward and gift sales left
+are released once by `scripts/release-old-reward-holds.ts` after the deploy.
+\_Avoid*: promo credit (the economy report's bucket for task/challenge/voucher
+credit), dead chips, free credit
 
 **Available**:
 The spendable balance. Equal to Balance, except that a frozen account reports 0.
-**Withdrawable** is the Normal part of it less what is still to play through
-(`playthrough.remaining`, ADR 0011).
+**Withdrawable** is the Normal part of it less what is **Still to use on
+packs** (`playthrough.remaining`: unspent top-ups and the free share of
+sell-backs, ADR 0011). Screens call everything not withdrawable **For packs**
+(Bonus Credit + Still to use on packs).
 (Nothing locks credit any more — the commission lock left with the referral
 programme, ADR 0007.)
 
@@ -309,10 +321,11 @@ paid pack pulls only;
 achievements (reach VIP level, vault N cards, vault N pixel
 Pokémon) are once per account. Progress is computed live from the underlying
 facts; only claims are stored (`task_claim`, one per customer × task ×
-period). Rewards: credit, a free rip of a pack, or a card straight to the
-vault — the latter two land as `source='reward'` pulls, sellable like any
-pulled card the moment they land (completing the task IS the requirement;
-operator decision 2026-09-03). Only the free welcome pack's `source='free'`
+period). Rewards: credit (Bonus Credit since 2026-10-11), a free rip of a
+pack, or a card straight to the vault — the latter two land as
+`source='reward'` pulls, sellable like any pulled card the moment they land
+(completing the task IS the requirement; operator decision 2026-09-03), and
+their sale is withdrawable money (ADR 0012). Only the free welcome pack's `source='free'`
 pull carries the first-paid-open lock.
 
 **Check-in**:
@@ -348,7 +361,8 @@ VIP-gated. Distinct from a pack Open, though a product prize is delivered as a
 _Avoid_: spin, open (those are the paid pack flow)
 
 **Voucher**:
-A MYR credit grant awarded at a VIP milestone.
+A MYR credit grant awarded at a VIP milestone, paid as Bonus Credit
+(2026-10-11).
 
 **Frame** / **Avatar Frame**:
 A cosmetic avatar border unlocked at every tenth VIP level.

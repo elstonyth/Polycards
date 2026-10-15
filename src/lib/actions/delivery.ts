@@ -631,7 +631,7 @@ export async function shipVaultCards(
         // retry per prize if that cap is ever raised.
         if (
           isPhoneGateError(reason) ||
-          /top up at least once|not enough credit|bonus credit/i.test(reason)
+          /top up at least once|not enough balance|bonus credit/i.test(reason)
         ) {
           skipRest(i, reason);
           break;

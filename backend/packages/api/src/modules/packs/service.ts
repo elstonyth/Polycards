@@ -176,6 +176,7 @@ import {
   consumeBonusSen,
   normalSenSql,
   reasonCashSenSql,
+  releasableRewardHoldSen,
 } from './bonus-credit';
 import { recomputeExternalStamps } from './external-backfill';
 import { levelForSpend } from './vip-ladder';
@@ -229,8 +230,9 @@ import {
 import type { MedusaContainer } from '@medusajs/framework/types';
 
 // plan-033 playthrough basis, per ledger row in sen: a post-1b deposit's
-// amount, plus the part of a card sale that came from bonus or gift play
-// (operator rule 2026-10-09), which the buyback row stamps as
+// amount, plus the held part of a card sale (sellbackHoldBp: the bonus-paid
+// share or a welcome card's sale, operator rule 2026-10-09; gift and reward
+// sales only before ADR 0012), which the buyback row stamps as
 // external_funded_cents — it pays NORMAL credit that must be played through
 // once, like a deposit. Shared between creditSummary and walletSummary (and
 // mirrored by credit-summary.ts's fold) so the scans can't drift.
@@ -2807,8 +2809,9 @@ class PacksModuleService extends MedusaService({
             order_id: null,
             rolled_at: new Date(),
             source: 'reward' as const,
-            // A prize is promo value (operator rule 2026-10-11): its whole
-            // sell-back must be played through once, like a gifted pack.
+            // A prize is promo value (operator rule 2026-10-11): it counts
+            // toward nothing. Its sale is NOT held: task and challenge rewards
+            // sell back withdrawable (ADR 0012, sellbackHoldBp at sell time).
             bonus_bp: BONUS_BP_FULL,
           },
         ],
@@ -3258,6 +3261,10 @@ class PacksModuleService extends MedusaService({
     // Bonus Balance (MYR, spec 2026-10-07): Σ bonus_cents — spend-only credit
     // inside `balance`. Withdrawable never includes it.
     bonusBalance: number;
+    // The customer history's split of spend (2026-10-15): net pack_open spend
+    // with its bonus part, and cashouts net of refunds (normal part only).
+    packSpendTotal: number;
+    withdrawnTotal: number;
   }> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
@@ -3270,6 +3277,8 @@ class PacksModuleService extends MedusaService({
         vip_spend_cents: string | null;
         deposited_pt_cents: string | null;
         bonus_cents: string | null;
+        pack_spend_cents: string | null;
+        withdrawn_cents: string | null;
       }[]
     >(
       'SELECT ' +
@@ -3281,7 +3290,9 @@ class PacksModuleService extends MedusaService({
         // toward nothing (spec 2026-10-07); bonus_cents is ≤ 0 on an open.
         `  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -${normalSenSql()} ELSE 0 END), 0)::bigint AS vip_spend_cents, ` +
         `  COALESCE(SUM(${DEPOSITED_PT_SEN_SQL}), 0)::bigint AS deposited_pt_cents, ` +
-        '  COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents ' +
+        '  COALESCE(SUM(bonus_cents), 0)::bigint AS bonus_cents, ' +
+        "  COALESCE(SUM(CASE WHEN reason = 'pack_open' THEN -ROUND(amount * 100) ELSE 0 END), 0)::bigint AS pack_spend_cents, " +
+        `  COALESCE(${PLAYER_LEDGER_SUMS.withdrawn}, 0)::bigint AS withdrawn_cents ` +
         'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
       [customerId],
     );
@@ -3294,6 +3305,8 @@ class PacksModuleService extends MedusaService({
       vipSpendTotal: Number(r?.vip_spend_cents ?? 0) / 100,
       depositedPlaythroughTotal: Number(r?.deposited_pt_cents ?? 0) / 100,
       bonusBalance: Math.max(0, Number(r?.bonus_cents ?? 0)) / 100,
+      packSpendTotal: Number(r?.pack_spend_cents ?? 0) / 100,
+      withdrawnTotal: Number(r?.withdrawn_cents ?? 0) / 100,
     };
   }
 
@@ -6994,10 +7007,11 @@ class PacksModuleService extends MedusaService({
     // Raw balance = Σ(amount) over the append-only ledger, summed in integer
     // cents to avoid float drift (matches availableBalance pattern, spec §8).
     // Same scan also folds the playthrough inputs: deposited = Σ positive
-    // topup rows; used = Σ −external_funded_cents over pack_open rows —
-    // deposit-funded spend only; buyback/adjustment-funded opens contribute 0,
-    // and a reversed open restores its basis via the mirror row's −originalExt.
-    // Buyback / promo rows touch neither sum.
+    // topup rows plus stamped buyback rows (DEPOSITED_PT_SEN_SQL); used =
+    // Σ −external_funded_cents over pack_open rows — deposit-funded spend
+    // only; buyback/adjustment-funded opens contribute 0, and a reversed open
+    // restores its basis via the mirror row's −originalExt. Promo rows touch
+    // neither sum.
     // Pre-1b topup rows (external_funded_cents IS NULL) are grandfathered out of
     // deposited: they predate the basis column, so their opens' spend is equally
     // invisible to used — counting them would lock those deposits forever.
@@ -9706,15 +9720,16 @@ class PacksModuleService extends MedusaService({
       cardHandle: string;
       rate: number;
       openId: string | null;
-      /** The pull's bonus share (pull.bonus_bp): that part of the sell-back
-       *  must be played through before it can be withdrawn. */
+      /** sellbackHoldBp of the pull (its bonus_bp; 0 for a reward or gift, ADR
+       *  0012): that part of the sell-back must be played through before it
+       *  can be withdrawn. */
       bonusBp?: number;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
     Awaited<ReturnType<PacksModuleService['createCreditTransactions']>>
   > {
-    // A card opened with bonus credit or a gifted pack sells back as NORMAL
+    // A card opened with bonus credit or the welcome pack sells back as NORMAL
     // credit (operator rule 2026-10-09), but its bonus share must be played
     // through once before it can be withdrawn: stamped as external money in,
     // like a deposit, so opens consume it and the playthrough gate counts it
@@ -10406,6 +10421,129 @@ class PacksModuleService extends MedusaService({
     return { rowsUpdated: diff.size };
   }
 
+  // Customers holding a reward or gift sale stamped before ADR 0012 (owner rule
+  // 2026-10-15): the population of the one-shot release below
+  // (scripts/release-old-reward-holds.ts). Read-only.
+  @InjectManager()
+  async customersWithOldRewardHolds(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ customer_id: string }[]>(
+      `SELECT DISTINCT ct.customer_id FROM credit_transaction ct
+         JOIN pull p ON p.id = ct.pull_id
+        WHERE ct.reason = 'buyback' AND ct.deleted_at IS NULL
+          AND ct.external_funded_cents > 0 AND p.source IN ('reward', 'gift')
+        ORDER BY ct.customer_id`,
+      [],
+    );
+    return rows.map((r) => r.customer_id);
+  }
+
+  // Release, once, what a customer's old reward / gift sales still hold:
+  // lowers those buyback rows' external_funded_cents (the playthrough basis
+  // only — no money row, the balance does not move) by min(what is still held,
+  // the stamps), newest first (releasableRewardHoldSen). One locked
+  // transaction, like backfillExternalFundedBasisForCustomer.
+  //
+  // The audit row is the one-shot guard, and it is written on apply even when
+  // nothing is left to release: a stamp opens have already spent cannot be
+  // released, and a later top-up would otherwise let a re-run release top-up
+  // money against it.
+  @InjectTransactionManager()
+  async releaseOldRewardHoldsForCustomer(
+    customerId: string,
+    input: { apply: boolean; actor: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    alreadyReleased: boolean;
+    remainingSen: number;
+    releasedSen: number;
+  }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${customerId}`,
+    ]);
+    const [done] = await em.execute<{ id: string }[]>(
+      `SELECT id FROM admin_action_audit
+        WHERE entity_type = 'customer' AND entity_id = ?
+          AND action = 'release_reward_holds' AND deleted_at IS NULL
+        LIMIT 1`,
+      [customerId],
+    );
+    if (done) return { alreadyReleased: true, remainingSen: 0, releasedSen: 0 };
+
+    // Same basis as walletSummary, plus the external pool opens consume from
+    // (they agree; the release is capped by both so the pool never goes < 0).
+    const [sums] = await em.execute<
+      {
+        deposited_cents: string | null;
+        used_cents: string | null;
+        pool_cents: string | null;
+      }[]
+    >(
+      `SELECT COALESCE(SUM(${DEPOSITED_PT_SEN_SQL}), 0)::bigint AS deposited_cents, ` +
+        "COALESCE(SUM(-external_funded_cents) FILTER (WHERE reason = 'pack_open'), 0)::bigint AS used_cents, " +
+        'COALESCE(SUM(external_funded_cents), 0)::bigint AS pool_cents ' +
+        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
+      [customerId],
+    );
+    const remainingSen = playthroughState({
+      depositedCents: Number(sums?.deposited_cents ?? 0),
+      usedCents: Number(sums?.used_cents ?? 0),
+    }).remainingCents;
+    const stamped = await em.execute<
+      { id: string; external_funded_cents: string | number }[]
+    >(
+      `SELECT ct.id, ct.external_funded_cents FROM credit_transaction ct
+         JOIN pull p ON p.id = ct.pull_id
+        WHERE ct.customer_id = ? AND ct.reason = 'buyback'
+          AND ct.deleted_at IS NULL AND ct.external_funded_cents > 0
+          AND p.source IN ('reward', 'gift')
+        ORDER BY ct.created_at DESC, ct.id DESC`,
+      [customerId],
+    );
+    const release = releasableRewardHoldSen({
+      remainingSen: Math.min(
+        remainingSen,
+        Math.max(0, Number(sums?.pool_cents ?? 0)),
+      ),
+      rows: stamped.map((r) => ({
+        id: r.id,
+        heldSen: Number(r.external_funded_cents),
+      })),
+    });
+    const releasedSen = release.reduce((t, r) => t + r.releaseSen, 0);
+
+    if (input.apply && stamped.length > 0) {
+      for (const r of release) {
+        await em.execute(
+          'UPDATE credit_transaction SET external_funded_cents = external_funded_cents - ?, updated_at = now() WHERE id = ?',
+          [r.releaseSen, r.id],
+        );
+      }
+      await this.audit(
+        {
+          admin_id: input.actor,
+          entity_type: 'customer',
+          entity_id: customerId,
+          action: 'release_reward_holds',
+          before: { remaining_sen: remainingSen },
+          after: {
+            remaining_sen: remainingSen - releasedSen,
+            released_sen: releasedSen,
+            rows: release,
+          },
+          reason:
+            'Owner rule 2026-10-15 (ADR 0012): reward and gift sales are cash; old holds released once.',
+        },
+        sharedContext,
+      );
+    }
+    return { alreadyReleased: false, remainingSen, releasedSen };
+  }
+
   // Grant ladder rewards for every newly-crossed VIP level (Phase 3b §E).
   //
   // Monotonic-grant invariant: derives the trigger level from the MONOTONIC
@@ -10652,7 +10790,7 @@ class PacksModuleService extends MedusaService({
           order_id: null,
           rolled_at: new Date(),
           source: 'reward' as const,
-          bonus_bp: BONUS_BP_FULL, // promo prize: sell-back played through once
+          bonus_bp: BONUS_BP_FULL, // reward: sale not held (ADR 0012)
           stock_earmarked: taken,
         },
       ],
@@ -11729,7 +11867,7 @@ class PacksModuleService extends MedusaService({
             order_id: null,
             rolled_at: new Date(),
             source: 'reward' as const,
-            bonus_bp: BONUS_BP_FULL, // promo prize: sell-back played through once
+            bonus_bp: BONUS_BP_FULL, // reward: sale not held (ADR 0012)
             // Minted UNRESERVED; flipped only once a unit is really taken.
             // Buyback restores flagged pulls only, so false is the safe
             // default — giving back a unit that was never taken would mint a
@@ -12014,7 +12152,7 @@ class PacksModuleService extends MedusaService({
         order_id: null,
         rolled_at: new Date(),
         source: 'reward' as const,
-        bonus_bp: BONUS_BP_FULL, // promo prize: sell-back played through once
+        bonus_bp: BONUS_BP_FULL, // reward: sale not held (ADR 0012)
         stock_earmarked: false, // flipped only if a unit is really taken
       })),
       sharedContext,

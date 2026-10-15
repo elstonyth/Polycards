@@ -624,8 +624,8 @@ export type CreditTxn = {
   // Signed bonus-credit part of `amount` (spend-only credit); 0 when none or
   // when an older backend omits it.
   bonus: number;
-  // Sell-back rows: the part that must be spent on packs once before it can
-  // be withdrawn; 0 otherwise.
+  // Signed move into (+) or out of (−) "Still to use on packs" (top-up, a
+  // sell-back's free share, pack open); 0 otherwise.
   playthrough: number;
 };
 
@@ -635,6 +635,10 @@ export type TransactionsResult =
       balance: number;
       topupTotal: number;
       spendTotal: number;
+      // The split of spendTotal; null when an older backend omits it (the
+      // page then shows the single "Total spent" instead of a fake RM 0.00).
+      packSpendTotal: number | null;
+      withdrawnTotal: number | null;
       transactions: CreditTxn[];
       page: number;
       hasMore: boolean;
@@ -673,6 +677,8 @@ export async function getTransactions(
     balance: totals?.balance ?? 0,
     topupTotal: totals?.topup_total ?? 0,
     spendTotal: totals?.spend_total ?? 0,
+    packSpendTotal: totals?.pack_spend_total ?? null,
+    withdrawnTotal: totals?.withdrawn_total ?? null,
     transactions: rows.map((row) => ({
       id: row.id,
       amount: row.amount,

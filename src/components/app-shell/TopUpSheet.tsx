@@ -478,6 +478,9 @@ export default function TopUpSheet({
             <p className="mt-3 font-heading text-2xl text-white">
               {rm(done.amount)} ADDED
             </p>
+            <p className="mt-1 text-sm text-neutral-300">
+              It&rsquo;s for opening packs.
+            </p>
             <p className="mt-1 text-sm text-neutral-400">
               New balance{' '}
               <span className="font-semibold text-white">
@@ -743,7 +746,7 @@ export default function TopUpSheet({
 
             <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
               <div className="flex items-center justify-between text-neutral-400">
-                <span>Current balance</span>
+                <span>Balance</span>
                 <span className="font-semibold text-neutral-200">
                   {balance == null ? '—' : rm(balance)}
                 </span>
@@ -792,6 +795,11 @@ export default function TopUpSheet({
                 </span>
               </div>
             </div>
+
+            <p className="mt-3 text-[12px] leading-relaxed text-neutral-300">
+              Cards from packs you pay for sell back as withdrawable money,
+              except any part paid with bonus credit.
+            </p>
 
             {/* The remedy sits INSIDE role="alert" so a screen reader gets the
                 problem and the way out in one utterance. PhoneGateAction closes

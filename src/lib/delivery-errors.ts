@@ -44,17 +44,17 @@ export const DELIVERY_RULES: ErrorRule[] = [
   // No top-up ever (2026-10-11): the refusal names its own fix. Above the
   // broad /not allowed|409/ rule, which would misread it as a card problem.
   [/top up at least once/i, (text) => text],
-  // Shipping-fee rules (2026-08-25) — must precede the generic /not allowed/
+  // Delivery-fee rules (2026-08-25) — must precede the generic /not allowed/
   // and /invalid|400/ rules, which would flatten them into wrong diagnoses.
   [
     /exceeds the customer's balance/i,
-    'Not enough credit to cover the shipping fee — top up and try again.',
+    'Not enough balance to cover the delivery fee — top up and try again.',
   ],
-  // Shipping is paid from the normal balance only: bonus credit is spend-only
-  // on packs (backend BONUS_NOT_SPENDABLE_MESSAGE).
+  // The delivery fee is paid from the normal balance only: bonus credit is
+  // spend-only on packs (backend BONUS_NOT_SPENDABLE_MESSAGE).
   [
     /bonus credit can only be spent on packs/i,
-    "Bonus credit can't pay for shipping — top up your balance and try again.",
+    "Bonus credit can only be used on packs, so it can't pay the delivery fee. Top up to pay it.",
   ],
   [
     /within Malaysia( and Singapore)? only/i,
@@ -65,7 +65,7 @@ export const DELIVERY_RULES: ErrorRule[] = [
   [/\d-digit (Malaysian|Singapore) postcode/i, (text) => text],
   [
     /changes the shipping fee zone/i,
-    'That address changes the shipping fee zone — cancel this delivery (the fee is refunded) and request it again with the new address.',
+    'That address changes the delivery fee zone — cancel this delivery (the fee is refunded) and request it again with the new address.',
   ],
   // Specific per-status reasons (sim P3 #9) — must precede the generic rule.
   [

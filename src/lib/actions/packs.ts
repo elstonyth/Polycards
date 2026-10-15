@@ -65,8 +65,8 @@ export type OpenPackResult =
         /** false = quoted on the FX display fallback; selling would be
          *  refused, so the reveal must not present this as a firm offer. */
         firm: boolean;
-        /** MYR part of `amount` from bonus or gift play, to be played
-         *  through before it can be withdrawn; 0 when none. */
+        /** MYR part of `amount` held for packs (the bonus-paid share, or
+         *  the welcome card); 0 when none. */
         bonus: number;
       } | null;
       /** Credit balance AFTER the charge (opens debit the pack price — A2);
@@ -101,7 +101,8 @@ const PACKS_RULES: ErrorRule[] = [
     "You're opening packs too fast — give it a moment and try again.",
   ],
   [UNAUTHORIZED, LOGIN_TO_OPEN],
-  [/not enough credits/i, 'Not enough credits to open this pack.'],
+  // The backend says "credits"; the storefront says "balance".
+  [/not enough (credits|balance)/i, 'Not enough balance to open this pack.'],
   // The welcome pack's verification gate (spec 2026-10-06, backend
   // FREE_PACK_VERIFICATION_MESSAGE). Named, not genericized: "try again" can
   // never succeed here — only finishing verification in Settings can.
@@ -150,7 +151,7 @@ function openFailure(f: Failure): {
     ok: false,
     error: friendlyFailure(f, PACKS_RULES, PACKS_FALLBACK),
     needsAuth: f.kind === 'unauthenticated',
-    needsTopUp: /not enough credits/i.test(f.text),
+    needsTopUp: /not enough (credits|balance)/i.test(f.text),
   };
 }
 

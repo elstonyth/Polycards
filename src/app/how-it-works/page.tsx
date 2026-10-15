@@ -83,7 +83,7 @@ const FAQS: FaqItem[] = [
   },
   {
     q: 'Can I sell my cards?',
-    a: `Eligible cards in your vault sell back for ${BUYBACK_RATE_LABEL} of card value. The pack's displayed instant rate is available during the reveal countdown only. Buyback pays site credit immediately; bank withdrawal has separate eligibility requirements.`,
+    a: `Eligible cards in your vault sell back for ${BUYBACK_RATE_LABEL} of card value. The pack's displayed instant rate is available during the reveal countdown only. Sell-back money reaches your balance at once. Money from the welcome pack’s card, and the part of any sale paid with bonus credit, is for packs. The rest is withdrawable after your first top-up. Shipping cards needs one top-up too.`,
   },
 ];
 

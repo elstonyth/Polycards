@@ -9,6 +9,8 @@ import {
   openBonusBp,
   paidPullSource,
   reasonCashSenSql,
+  releasableRewardHoldSen,
+  sellbackHoldBp,
 } from '../bonus-credit';
 
 describe('bonus credit math', () => {
@@ -73,5 +75,87 @@ describe('bonus credit math', () => {
     expect(reasonCashSenSql()).toContain(
       "WHEN reason IN ('bonus_grant', 'reward_credit', 'voucher_claim') THEN ROUND(amount * 100)",
     );
+  });
+});
+
+describe('sellbackHoldBp: the share of a sale held for packs (2026-10-15)', () => {
+  const pull = (source: string, pack_id: string, bonus_bp: number | null) => ({
+    source,
+    pack_id,
+    bonus_bp,
+  });
+
+  it('holds nothing of a task or challenge reward: its sale is withdrawable', () => {
+    expect(sellbackHoldBp(pull('reward', 'task-reward', BONUS_BP_FULL))).toBe(0);
+    expect(
+      sellbackHoldBp(pull('reward', 'challenge-2026-10-12', BONUS_BP_FULL)),
+    ).toBe(0);
+    // A free rip (task pack reward) opens a REAL pack: a reward all the same.
+    expect(sellbackHoldBp(pull('reward', 'bronze', BONUS_BP_FULL))).toBe(0);
+    expect(
+      sellbackHoldBp(pull('reward', 'challenge-cup-2026', BONUS_BP_FULL)),
+    ).toBe(0);
+  });
+
+  it('holds nothing of an admin gift pack pull', () => {
+    expect(sellbackHoldBp(pull('gift', 'bronze', BONUS_BP_FULL))).toBe(0);
+  });
+
+  it('keeps the bonus share of the welcome pull and bonus opens', () => {
+    expect(sellbackHoldBp(pull('free', 'welcome', BONUS_BP_FULL))).toBe(
+      BONUS_BP_FULL,
+    );
+    expect(sellbackHoldBp(pull('bonus', 'bronze', 3334))).toBe(3334);
+    expect(sellbackHoldBp(pull('pack', 'bronze', 0))).toBe(0);
+    expect(sellbackHoldBp({ bonus_bp: null })).toBe(0);
+  });
+});
+
+describe('releasableRewardHoldSen: releasing old reward / gift holds once', () => {
+  // Rows newest first, as the service reads them.
+  const rows = [
+    { id: 'new', heldSen: 1500 },
+    { id: 'old', heldSen: 3000 },
+  ];
+
+  it('releases nothing when nothing is held', () => {
+    expect(releasableRewardHoldSen({ remainingSen: 0, rows })).toEqual([]);
+    expect(releasableRewardHoldSen({ remainingSen: -50, rows })).toEqual([]);
+    expect(releasableRewardHoldSen({ remainingSen: 2000, rows: [] })).toEqual(
+      [],
+    );
+  });
+
+  it('releases every stamp when they are all still held', () => {
+    expect(releasableRewardHoldSen({ remainingSen: 4500, rows })).toEqual([
+      { id: 'new', releaseSen: 1500 },
+      { id: 'old', releaseSen: 3000 },
+    ]);
+  });
+
+  it('releases only what is still held, newest rows first', () => {
+    // Opens already spent RM 25 of the RM 45 stamped.
+    expect(releasableRewardHoldSen({ remainingSen: 2000, rows })).toEqual([
+      { id: 'new', releaseSen: 1500 },
+      { id: 'old', releaseSen: 500 },
+    ]);
+  });
+
+  it('never releases a top-up hold beyond the stamps', () => {
+    // RM 100 still held, RM 45 of it from reward stamps: RM 55 of top-up stays.
+    const out = releasableRewardHoldSen({ remainingSen: 10000, rows });
+    expect(out.reduce((t, r) => t + r.releaseSen, 0)).toBe(4500);
+  });
+
+  it('ignores a row with no stamp left', () => {
+    expect(
+      releasableRewardHoldSen({
+        remainingSen: 4500,
+        rows: [{ id: 'spent', heldSen: 0 }, ...rows],
+      }),
+    ).toEqual([
+      { id: 'new', releaseSen: 1500 },
+      { id: 'old', releaseSen: 3000 },
+    ]);
   });
 });

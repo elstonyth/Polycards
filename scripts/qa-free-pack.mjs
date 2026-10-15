@@ -714,7 +714,7 @@ try {
     .first()
     .click({ force: true });
   const note = page.getByText(
-    /purchase & open any pack to unlock selling & delivery\./i,
+    /pay for one pack yourself to unlock selling & delivery\./i,
   );
   await note.waitFor({ timeout: 20000 });
   ok('reveal shows the verbatim unlock note');

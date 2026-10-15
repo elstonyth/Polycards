@@ -26,9 +26,18 @@ winnings that were already withdrawable.
 - The refusal names both figures: "You can withdraw up to RM X. Spend RM Y
   more on packs to unlock the rest." The storefront matches "more on packs"
   and still matches the old "must be spent on packs", so a storefront deploy
-  can land before the backend one.
-- `GET /store/credits` returns `playthrough` (MYR) on each sell-back row, so
-  the history shows which sale added to the hold.
+  can land before the backend one. (Reworded 2026-10-15, since spending held
+  money lowers it rather than unlocking anything: "You can withdraw up to RM X
+  right now. The other RM Y is for opening packs." / "Nothing is withdrawable
+  yet. Your RM Y is for opening packs.", where Y = available − withdrawable,
+  bonus included. The storefront matches "is for opening packs" and keeps
+  "more on packs" for a backend deploy that lands later.)
+- `GET /store/credits` returns `playthrough` (MYR) on each row, so the history
+  shows what added to the hold and what spent it. Since 2026-10-15 it is
+  signed and set on top-up (+ its basis), sell-back (+ its stamped free
+  share) and pack-open rows (− the for-packs money the open used); every
+  other row carries 0. Until then it was set on sell-back rows only, never
+  below 0.
 
 ## Consequences
 

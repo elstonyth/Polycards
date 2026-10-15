@@ -5,10 +5,11 @@
 // The ledger stamps every row's bonus part in credit_transaction.bonus_cents
 // (signed: + adds to the bonus balance, − spends it). An open spends bonus
 // FIRST; each pull remembers the share of its price that was bonus
-// (pull.bonus_bp). A sell-back pays NORMAL credit, but that same share of it
-// must be played through once before it can be withdrawn (operator rule
-// 2026-10-09; recordBuybackCreditTransaction), so a bonus grant or a gifted
-// pack only reaches cash after real play.
+// (pull.bonus_bp). Every sell-back pays NORMAL credit. The bonus-paid share of
+// a pull's sale, and the whole sale of the free welcome card, are played
+// through once more before they can be withdrawn (operator rule 2026-10-09;
+// recordBuybackCreditTransaction). A task / challenge reward's or an admin
+// gift pack's sale is cash at once (ADR 0012, sellbackHoldBp).
 
 /** The refusal when a debit other than a pack open would need bonus credit
  *  (delivery fee, withdrawal, admin deduction): the balance covers it, the
@@ -16,7 +17,8 @@
 export const BONUS_NOT_SPENDABLE_MESSAGE =
   "Bonus credit can only be spent on packs — it can't pay for this.";
 
-/** A gifted pack's pull: its whole sell-back must be played through. */
+/** A pull whose whole price was promo value: a gift, the welcome pull, a
+ *  reward. */
 export const BONUS_BP_FULL = 10_000;
 
 /** Bonus spent by an open of `totalSen`: bonus first, capped both ways. */
@@ -53,7 +55,7 @@ export function bonusBpFor(bonusSen: number, priceSen: number): number {
 }
 
 /** One open's bonus share. The free welcome pull is promo value: its whole
- *  sell-back must be played through once (2026-10-11), like a gifted pack. */
+ *  sell-back must be played through once (2026-10-11). */
 export function openBonusBp(
   free: boolean,
   bonusSen: number,
@@ -62,8 +64,8 @@ export function openBonusBp(
   return free ? BONUS_BP_FULL : bonusBpFor(bonusSen, priceSen);
 }
 
-/** The part of a sell-back of `amountSen` that came from bonus or gift
- *  play — the part to play through (rounded up). */
+/** The `bp` share of a sell-back of `amountSen`, rounded up. Fed
+ *  sellbackHoldBp, it is the part to play through. */
 export function bonusShareSen(amountSen: number, bp: number): number {
   const clamped = Math.max(0, Math.min(BONUS_BP_FULL, bp));
   if (amountSen <= 0 || clamped === 0) return 0;
@@ -72,6 +74,40 @@ export function bonusShareSen(amountSen: number, bp: number): number {
 
 export function bonusShareMyr(amount: number, bp: number): number {
   return bonusShareSen(Math.round(amount * 100), bp) / 100;
+}
+
+/** The share of a sale held for packs, decided at SELL time (ADR 0012): a
+ *  task or weekly-challenge reward (every source 'reward' pull: card and slab
+ *  prizes, free rips) and an admin gift pack's pull sell back withdrawable,
+ *  so 0; every other pull keeps its bonus_bp, so the welcome pull and
+ *  bonus-paid opens still go round twice. */
+export function sellbackHoldBp(pull: {
+  source?: string | null;
+  bonus_bp?: number | null;
+}): number {
+  return pull.source === 'reward' || pull.source === 'gift'
+    ? 0
+    : Number(pull.bonus_bp ?? 0);
+}
+
+/** Releasing the holds that reward and gift sales stamped before ADR 0012,
+ *  once per customer. Only what is still held can go (`remainingSen`: opens
+ *  may have spent part of it already), never more than the stamps (the rest
+ *  of the hold is top-up money), taken from the newest stamped rows first.
+ *  `rows` newest first; returns only rows that change. */
+export function releasableRewardHoldSen(input: {
+  remainingSen: number;
+  rows: { id: string; heldSen: number }[];
+}): { id: string; releaseSen: number }[] {
+  let left = Math.max(0, input.remainingSen);
+  const out: { id: string; releaseSen: number }[] = [];
+  for (const row of input.rows) {
+    const releaseSen = Math.min(Math.max(0, row.heldSen), left);
+    if (releaseSen <= 0) continue;
+    out.push({ id: row.id, releaseSen });
+    left -= releaseSen;
+  }
+  return out;
 }
 
 /** A paid row is a bonus open when bonus credit paid at least half its price.

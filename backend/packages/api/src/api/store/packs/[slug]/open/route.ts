@@ -1,4 +1,7 @@
-import { bonusShareMyr } from '../../../../../modules/packs/bonus-credit';
+import {
+  bonusShareMyr,
+  sellbackHoldBp,
+} from '../../../../../modules/packs/bonus-credit';
 import {
   AuthenticatedMedusaRequest,
   MedusaResponse,
@@ -125,9 +128,9 @@ export async function POST(
         marketPriceMyr,
       );
 
-      // A bonus-funded pull: that share of its sale must be played through
-      // before it can be withdrawn (2026-10-09).
-      const bonusBp = Number(result.pull.bonus_bp ?? 0);
+      // A bonus-funded or welcome pull: that share of its sale must be played
+      // through before it can be withdrawn (2026-10-09; sellbackHoldBp).
+      const bonusBp = sellbackHoldBp(result.pull);
       buyback = {
         ...quoted,
         bonus: bonusShareMyr(quoted.amount, bonusBp),
@@ -176,9 +179,9 @@ export async function POST(
     // future promo pack could also be.
     free: isFree,
     // THE LOCK SIGNAL. The reveal suppresses its sell UI and shows the unlock
-    // note ("Purchase & open any pack to unlock selling & delivery") on THIS,
-    // never on `free`: a free pull claimed after a paid open is already
-    // unlocked and fully sellable. Mirrors GET /store/vault's per-item `locked`.
+    // note (FREE_PULL_LOCKED_MESSAGE, free-pack.ts) on THIS, never on `free`:
+    // a free pull claimed after a paid open is already unlocked and fully
+    // sellable. Mirrors GET /store/vault's per-item `locked`.
     locked,
   });
 }

@@ -17,6 +17,8 @@ type FakeRow = {
   vip_spend_cents: string | null;
   deposited_pt_cents: string | null;
   bonus_cents?: string | null;
+  pack_spend_cents?: string | null;
+  withdrawn_cents?: string | null;
 };
 
 /** Fake service: @InjectManager reads `sharedContext.manager` when present
@@ -48,6 +50,8 @@ describe("PacksModuleService.creditSummary (SQL aggregate)", () => {
       vipSpendTotal: 0,
       depositedPlaythroughTotal: 0,
       bonusBalance: 0,
+      packSpendTotal: 0,
+      withdrawnTotal: 0,
     });
   });
 
@@ -60,6 +64,8 @@ describe("PacksModuleService.creditSummary (SQL aggregate)", () => {
       vip_spend_cents: "7947",
       deposited_pt_cents: "8000",
       bonus_cents: "2700",
+      pack_spend_cents: "10647",
+      withdrawn_cents: "5000",
     });
     expect(await svc.creditSummary("cus_1", { manager })).toEqual({
       balance: 20.53,
@@ -69,6 +75,8 @@ describe("PacksModuleService.creditSummary (SQL aggregate)", () => {
       vipSpendTotal: 79.47,
       depositedPlaythroughTotal: 80,
       bonusBalance: 27,
+      packSpendTotal: 106.47,
+      withdrawnTotal: 50,
     });
   });
 

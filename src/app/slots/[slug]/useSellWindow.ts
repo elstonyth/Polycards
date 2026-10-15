@@ -40,8 +40,8 @@ export type SellBackOffer = {
    *  selling would be refused ("Exchange rate unavailable") — render the
    *  unavailable state instead of a firm offer (sim finding P1-1). */
   firm: boolean;
-  /** MYR part of the instant `amount` from bonus or gift play, to be played
-   *  through before it can be withdrawn; 0 = none. The sell confirm says so. */
+  /** MYR part of the instant `amount` that is for opening packs (the bonus
+   *  share, or all of the welcome pull); 0 = none. The sell confirm says so. */
   bonus: number;
 };
 
@@ -68,7 +68,8 @@ export function useSellWindow({
   active: boolean;
   onReveal?: RevealFn;
   onSellBack: SellBackFn;
-  onSold?: (balance: number, amount: number) => void;
+  /** `held` = the part of `amount` that is for opening packs. */
+  onSold?: (balance: number, amount: number, held: number) => void;
   /** The failure twin of `onSold` — same reason, same requirement: a surface
    *  that OUTLIVES this stage. A sell that fails across the deadline is swept
    *  to 'vaulted' with everything else, so the card's inline error never
@@ -248,7 +249,17 @@ export function useSellWindow({
         // failure keeps its red line on the card and raises no toast; only a
         // failure the sweep is about to mask as "Stored in your vault" needs a
         // surface that outlives the stage (#514).
-        if (res.ok) onSold?.(res.balance, res.amount);
+        // The quote's for-packs part, scaled to what actually sold (a late
+        // sale lands at the vault rate, not the quoted instant one).
+        if (res.ok)
+          onSold?.(
+            res.balance,
+            res.amount,
+            offer.amount > 0
+              ? Math.round((res.amount * offer.bonus * 100) / offer.amount) /
+                  100
+              : 0,
+          );
         else if (sweptAway()) onSellFailed?.(res.error);
         return res.ok;
       } catch {
