@@ -16,6 +16,7 @@ import { ReferralCard } from './ReferralCard';
 import { LatestPaymentsCard } from './LatestPaymentsCard';
 import { SectionError } from './SectionState';
 import { LiveBadge } from './LiveBadge';
+import { OnlineNow } from './OnlineNow';
 import { useLiveRefresh } from './use-live-refresh';
 
 // The admin's home page (docs/superpowers/specs/2026-10-14-admin-redesign-
@@ -56,6 +57,7 @@ const OverviewPage = () => {
                 onScope={setScope}
                 hint={t('dashboard.scopeHint')}
               />
+              <OnlineNow scope={scope} />
               <LiveBadge updatedAt={stats.dataUpdatedAt} />
             </div>
           </div>

@@ -19,6 +19,8 @@ type AuthContextValue = {
   refresh: () => Promise<void>;
 };
 
+const PRESENCE_PING_MS = 2 * 60_000;
+
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -55,6 +57,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- async session fetch on mount
     void refresh();
   }, [refresh]);
+
+  // Heartbeat for the admin Dashboard's "online now" (2026-10-15): a
+  // signed-in, visible tab pings /api/presence on sign-in, every 2 minutes and
+  // when it comes back to the foreground, and the backend counts a player
+  // online for 5 minutes after their latest ping. Client-side navigation
+  // reaches the backend for nothing else, so a player browsing would drop off.
+  const customerId = customer?.id;
+  useEffect(() => {
+    if (!customerId) return;
+    const ping = () => {
+      if (document.visibilityState !== 'visible') return;
+      void fetch('/api/presence', { method: 'POST', cache: 'no-store' }).catch(
+        () => {},
+      );
+    };
+    ping();
+    const id = setInterval(ping, PRESENCE_PING_MS);
+    document.addEventListener('visibilitychange', ping);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', ping);
+    };
+  }, [customerId]);
 
   return (
     <AuthContext.Provider value={{ customer, isLoading, setCustomer, refresh }}>

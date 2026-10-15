@@ -46,8 +46,10 @@ import {
   type ProfitRange,
   type ProfitReport,
   getStatsReport,
+  getOnlineNow,
   type StatsRange,
   type StatsReport,
+  type OnlineNow,
   getSettlementReport,
   getGatewayBalance,
   getGatewayAudit,
@@ -281,6 +283,17 @@ export const useStats = (
     enabled: range !== 'custom' || (from !== '' && to !== '' && from <= to),
     // The dashboard's QueryClient disables focus refetch; "today" is live,
     // so coming back to the tab should show fresh numbers.
+    refetchOnWindowFocus: true,
+  });
+
+// The Dashboard's "online now". No keepPreviousData: a scope switch shows
+// "…" rather than the other scope's count.
+export const useOnlineNow = (
+  scope: CustomerScope = 'all',
+): UseQueryResult<OnlineNow> =>
+  useQuery({
+    queryKey: qk.statsOnline(scope),
+    queryFn: () => getOnlineNow(scope),
     refetchOnWindowFocus: true,
   });
 

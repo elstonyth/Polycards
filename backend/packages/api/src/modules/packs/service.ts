@@ -7754,6 +7754,25 @@ class PacksModuleService extends MedusaService({
     };
   }
 
+  // How many of these customer ids are real customers (real-customers.ts),
+  // for GET /admin/stats/online under scope=default. Ids are bound, never
+  // spliced; an empty list is 0 without a query.
+  @InjectManager()
+  async realCustomerCount(
+    ids: string[],
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<number> {
+    if (ids.length === 0) return 0;
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [row] = await em.execute<{ n: number }[]>(
+      `SELECT count(*)::int AS n FROM customer c
+       WHERE c.id IN (${ids.map(() => '?').join(',')})${scopeSql('default', 'c.id')}`,
+      ids,
+    );
+    return row?.n ?? 0;
+  }
+
   // Withdrawal figures for GET /admin/stats over one half-open [from, to)
   // window: settled gateway_withdrawal rows by settled_at, summed on `amount`
   // (the debit), the same basis as the Settlement report, because
