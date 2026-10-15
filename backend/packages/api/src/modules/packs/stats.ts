@@ -46,6 +46,20 @@ export type WithdrawalStats = {
   withdrawal_amount: number;
 };
 
+/** The window's player of the period: the most settled top-ups, on
+ *  SignupTopupStats's basis. */
+export type TopTopup = {
+  customer_id: string;
+  /** First and last name, null when neither is set. */
+  name: string | null;
+  /** Null when the deposit's customer row is gone. */
+  email: string | null;
+  /** MYR, Σ amount_settled. */
+  amount: number;
+  /** Settled deposits. */
+  count: number;
+};
+
 const MYT_OFFSET_MS = 8 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;

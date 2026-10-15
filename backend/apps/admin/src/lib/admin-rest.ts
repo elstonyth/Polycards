@@ -559,11 +559,27 @@ export interface StatsFigures {
   withdrawal_amount: number;
 }
 
+/** The window's player of the period: the most settled top-ups. */
+export interface TopTopup {
+  customer_id: string;
+  name: string | null;
+  email: string | null;
+  /** MYR. */
+  amount: number;
+  count: number;
+}
+
 export interface StatsReport {
   as_of: string;
   scope?: CustomerScope;
-  /** ISO instants; windows are half-open [from, to). */
-  current: { from: string; to: string; stats: StatsFigures };
+  /** ISO instants; windows are half-open [from, to). top_topup is null when
+   *  nobody topped up in the window. */
+  current: {
+    from: string;
+    to: string;
+    stats: StatsFigures;
+    top_topup: TopTopup | null;
+  };
   previous: { from: string; to: string; stats: StatsFigures };
 }
 
