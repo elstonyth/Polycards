@@ -27,6 +27,7 @@ import {
   Users,
 } from '@medusajs/icons';
 import CreatePlayerModal from './CreatePlayerModal';
+import { PeriodLeaders } from './PeriodLeaders';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useCustomerGroupsAdmin,
@@ -70,8 +71,8 @@ type SortKey =
   | 'contribution'
   | 'spend';
 
-// The sorts with no column of their own (top-up, withdrawn, email) live in
-// this menu with the common ones; the headers sort too. Each is `key:dir`.
+// The sort with no column of its own (email) lives in this menu with the
+// common ones; the headers sort too. Each is `key:dir`.
 const SORTS = [
   'created_at:desc',
   'topup:desc',
@@ -104,9 +105,9 @@ const joined = (iso: string): string => {
 };
 
 // The All Players list (spec 2026-10-14-admin-finance-pages §8): who, how to
-// reach them, their group and level, and four money figures. Everything else
-// (real name, pulls, the top-up and withdraw totals) is on the player's own
-// page, one click away; the Sort menu still orders by those totals.
+// reach them, their group and level, and the money figures (the top-up and
+// withdraw totals came back 2026-10-15, at the operator's request). Everything
+// else (real name, pulls) is on the player's own page, one click away.
 const PlayersPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -193,6 +194,7 @@ const PlayersPage = () => {
 
   return (
     <div className="flex flex-col gap-y-3">
+      <PeriodLeaders />
       <Container className="p-0">
         <div className="flex flex-wrap items-start justify-between gap-4 px-6 py-4">
           <div>
@@ -320,6 +322,8 @@ const PlayersPage = () => {
                   <Table.HeaderCell className="text-right">
                     {t('players.vault')}
                   </Table.HeaderCell>
+                  {sortHeader('topup', t('players.topup'), true)}
+                  {sortHeader('withdrawn', t('players.withdrawn'), true)}
                   {sortHeader(
                     'contribution',
                     t('players.netDeposit'),
@@ -440,6 +444,12 @@ const PlayersPage = () => {
                         ) : (
                           <span className="text-ui-fg-muted">—</span>
                         )}
+                      </Table.Cell>
+                      <Table.Cell className="text-right tabular-nums whitespace-nowrap">
+                        {rm(p.total_topup)}
+                      </Table.Cell>
+                      <Table.Cell className="text-right tabular-nums whitespace-nowrap">
+                        {rm(p.total_withdrawn)}
                       </Table.Cell>
                       {/* Negative = the player has taken out more than they
                           put in (wins cashed out), so it reads red. */}
