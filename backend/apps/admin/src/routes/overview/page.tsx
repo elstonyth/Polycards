@@ -8,7 +8,13 @@ import { useStats } from '../../lib/queries';
 import { useScopeParam } from '../../lib/scope-param';
 import { ScopeSwitch } from '../economy/ScopeSwitch';
 import { RangePicker } from './RangePicker';
-import { isForbidden, todayMyt, windowText } from './helpers';
+import {
+  isForbidden,
+  savedRange,
+  saveRange,
+  todayMyt,
+  windowText,
+} from './helpers';
 import { MoneyFlowCard } from './MoneyFlowCard';
 import { AttentionCard } from './AttentionCard';
 import { KpiTiles } from './KpiTiles';
@@ -32,7 +38,7 @@ export const config: RouteConfig = {
 
 const OverviewPage = () => {
   const { t } = useTranslation();
-  const [range, setRange] = useState<StatsRange>('30d');
+  const [range, setRange] = useState<StatsRange>(savedRange);
   const [from, setFrom] = useState(todayMyt);
   const [to, setTo] = useState(todayMyt);
   const custom = range === 'custom';
@@ -69,7 +75,10 @@ const OverviewPage = () => {
         </div>
         <RangePicker
           range={range}
-          onRange={setRange}
+          onRange={(r) => {
+            setRange(r);
+            saveRange(r);
+          }}
           from={from}
           to={to}
           onFrom={setFrom}
