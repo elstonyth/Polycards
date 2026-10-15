@@ -945,6 +945,8 @@
     "player": "Player",
     "level": "Level",
     "netDeposit": "Total contribution",
+    "topup": "Top-up",
+    "withdrawn": "Withdrawn",
     "netDepositHint": "Top-ups {{topup}} − withdrawals {{withdrawn}}",
     "joined": "Joined",
     "allGroups": "All groups",
@@ -965,6 +967,23 @@
       "spend_desc": "Highest turnover",
       "wallet_desc": "Biggest wallet",
       "email_asc": "Email A–Z"
+    },
+    "leaders": {
+      "title": "Real customers",
+      "subtitle": "Default group only · settled payments · Malaysia time",
+      "period": "Period",
+      "today": "Today",
+      "week": "Last 7 days",
+      "month": "This month",
+      "top": "Top player",
+      "toppedUp_one": "{{amount}} · {{count}} top-up",
+      "toppedUp_other": "{{amount}} · {{count}} top-ups",
+      "topups": "Top-ups",
+      "withdrawals": "Withdrawals",
+      "net": "Net",
+      "newPlayers": "New players",
+      "payingPlayers": "Paying players",
+      "loadError": "Could not load"
     }
   },
   "oddsSets": {
