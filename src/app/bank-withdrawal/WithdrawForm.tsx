@@ -2,16 +2,15 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { CheckCircle2, Clock, Landmark, Lock } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Clock, Landmark, Lock } from 'lucide-react';
 import { rm, rm0, timeUntil } from '@/lib/format';
 import { openRails, regionalRailUi } from '@/lib/regional-rails';
+import { isWithdrawLocked, walletSplit } from '@/lib/wallet-split';
 import {
-  isWithdrawLocked,
-  TOPUP_FIRST_HEADING,
-  topupFirstLine,
-  unlockLine,
-  walletSplit,
-} from '@/lib/wallet-split';
+  MoneyRows,
+  WithdrawRules,
+  WithdrawSteps,
+} from '@/components/account/WithdrawSteps';
 import {
   fetchSavedBankAccounts,
   getPaymentLimits,
@@ -92,15 +91,16 @@ export function minimumGap(minRm: number, withdrawable: number): number {
  *  cap, the daily limit, a paused channel) get no link. The phone gate has
  *  its own PhoneGateAction. */
 const REMEDIES: [RegExp, string | null, string][] = [
+  // First: the no-top-up refusal also talks about "money for packs", and it
+  // is the top-up that fixes it. null = open the top-up sheet in place.
+  [/top up at least once/i, null, 'Top up'],
   // The locked refusal (spend first, 2026-10-15): "Withdrawals unlock once
-  // you've used your RM R for packs. …"
+  // you've used RM X more on packs. …"
   [/withdrawals unlock once/i, '/slots', 'Open packs'],
   // shortcut: older backend texts ("… is for opening packs.", "… more on
   // packs"), kept for a storefront-first deploy; drop once both are live.
   [/is for opening packs/i, '/slots', 'Open packs'],
   [/more on packs/i, '/slots', 'Open packs'],
-  // null = open the top-up sheet in place, like the no-top-up notice does.
-  [/top up at least once/i, null, 'Top up'],
   [/under review/i, '/contact', 'Contact support'],
   [/add an email address/i, '/settings', 'Add an email address'],
   [
@@ -160,7 +160,7 @@ export default function WithdrawForm({
   frozen = false,
   noTopup = false,
   bonus = 0,
-  remaining = null,
+  remaining = 0,
 }: {
   /** The server's freeze/locked/playthrough-gated figure — NOT raw balance. */
   withdrawable: number | null;
@@ -176,37 +176,32 @@ export default function WithdrawForm({
   bonus?: number;
   /** playthrough.remaining — what is still to use on packs. While any is
    *  left, the backend shuts the whole gate (spend first, 2026-10-15). */
-  remaining?: number | null;
+  remaining?: number;
 }) {
   const needsTopup = !frozen && noTopup;
-  // The wallet page's split, so both pages agree. A freeze hides it: telling
-  // a frozen account to open packs ends refused. Unknown remaining reads as
-  // "everything not withdrawable and not bonus is still to use": never
-  // promises money the gate would free.
-  const stillOwed =
-    remaining ?? Math.max(0, (available ?? 0) - (withdrawable ?? 0) - bonus);
+  // The wallet page's split, so both pages agree.
   const split =
     !frozen && withdrawable != null && available != null
-      ? walletSplit({ available, withdrawable, bonus, remaining: stillOwed })
+      ? walletSplit({ available, withdrawable, bonus, remaining })
       : null;
-  const showSplit = split !== null && split.forPacks > 0;
   // Topped up, but money is still to use on packs: nothing may leave yet.
   const locked =
-    split !== null &&
     withdrawable != null &&
     isWithdrawLocked({
       hasTopup: !noTopup,
       isFrozen: frozen,
-      remaining: stillOwed,
+      remaining,
       withdrawable,
     });
+  // Can't withdraw yet: the steps replace the form.
+  const cantYet = needsTopup || locked;
   // Any hold means no amount can pass the server's gate, so the form says
   // why up front and does not invite an attempt that is certain to fail.
   const onHold = frozen || needsTopup || locked;
   // The payout debits the balance server-side; repaint it here so the header
   // chip is not stale. (This used to light the Me-tab money dot too — that dot
   // was suspended 2026-08-11; see components/account/credit-dot.tsx.)
-  const { applyBalance, openTopUp } = useTopUp();
+  const { applyBalance } = useTopUp();
   const [saved, setSaved] = useState<SavedBankAccount[] | null>(null);
   const [accountId, setAccountId] = useState('');
   const [amountText, setAmountText] = useState('');
@@ -443,76 +438,14 @@ export default function WithdrawForm({
     );
   }
 
-  return (
-    <div className="mt-6 max-w-md">
-      <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm">
-        <div className="flex items-center justify-between text-neutral-400">
-          <span>Withdrawable</span>
-          <span className="font-semibold text-white">
-            {withdrawable == null ? '—' : rm(withdrawable)}
-          </span>
-        </div>
-        <p className="mt-1 text-[12px] text-neutral-400">
-          Minimum withdrawal {rm(payoutBand.minRm)}
-        </p>
-        {belowMin && (
-          <p
-            id="withdraw-hold-reason"
-            role="status"
-            className="mt-1 text-[12px] text-neutral-300"
-          >
-            {`You can withdraw once your withdrawable money reaches ${rm(payoutBand.minRm)} (${rm(minimumGap(payoutBand.minRm, withdrawable ?? 0))} more).`}
-          </p>
-        )}
-        {locked && split && (
-          <>
-            <p
-              id="withdraw-hold-reason"
-              role="status"
-              className="mt-1 text-[12px] text-neutral-300"
-            >
-              {unlockLine(split)}
-            </p>
-            <Link
-              href="/bank"
-              className="inline-flex min-h-11 items-center text-[12px] font-semibold text-white/70 underline-offset-2 hover:text-white hover:underline"
-            >
-              Save your bank account now&nbsp;<span aria-hidden>→</span>
-            </Link>
-          </>
-        )}
-      </div>
-
-      {/* A real switch, so the lock icon is honest here — unlike the
-          For-packs part below, which is simply money for packs. */}
-      {needsTopup && (
+  // Frozen: one message, nothing else (after every hook above).
+  if (frozen) {
+    return (
+      <div className="mt-6 max-w-md">
         <div
           id="withdraw-hold-reason"
           role="status"
-          className="mt-4 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3.5"
-        >
-          <p className="flex items-center gap-2 text-sm font-semibold text-white">
-            <Lock className="h-4 w-4 shrink-0 text-sky-400" aria-hidden />
-            {TOPUP_FIRST_HEADING}
-          </p>
-          <p className="mt-1.5 text-[13px] text-white/70">
-            {topupFirstLine({
-              depositMinRm: limits.deposit.minRm,
-              unlockSpend: split?.unlockSpend ?? 0,
-              lockedCash: split?.lockedCash ?? 0,
-            })}
-          </p>
-          <Pill size="sm" onClick={openTopUp} className="mt-3">
-            Top up
-          </Pill>
-        </div>
-      )}
-
-      {frozen && (
-        <div
-          id="withdraw-hold-reason"
-          role="status"
-          className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3.5"
+          className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3.5"
         >
           <p className="flex items-center gap-2 text-sm font-semibold text-amber-300">
             <Lock className="h-4 w-4 shrink-0" aria-hidden />
@@ -528,205 +461,256 @@ export default function WithdrawForm({
             Contact support
           </Link>
         </div>
-      )}
+      </div>
+    );
+  }
 
-      {showSplit && (
-        <div
-          id="withdraw-for-packs"
-          className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3.5 text-sm"
-        >
-          <div className="flex items-center justify-between font-semibold text-white">
-            <span>For packs</span>
-            <span className="whitespace-nowrap">{rm(split.forPacks)}</span>
-          </div>
-          <dl className="mt-2 space-y-1.5 text-[13px]">
-            <div className="flex items-start justify-between gap-3">
-              <dt className="text-neutral-400">
-                Bonus credit
-                <span className="block text-[11px] text-neutral-400">
-                  used first
-                </span>
-              </dt>
-              <dd className="text-neutral-200">{rm(split.bonus)}</dd>
-            </div>
-            <div className="flex items-start justify-between gap-3">
-              <dt className="text-neutral-400">Still to use on packs</dt>
-              <dd className="text-neutral-200">{rm(split.stillToUse)}</dd>
-            </div>
-          </dl>
-          <p className="mt-2 text-[13px] text-white/60">
-            Can&rsquo;t go to your bank. Open packs with it.
+  // The remedy sits INSIDE role="alert" so problem and way out are one
+  // announcement. No onNavigate here — this is a page, not a modal.
+  const errorAlert = error && (
+    <div
+      role="alert"
+      className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2"
+    >
+      <p className="text-[13px] font-medium text-red-300">{error}</p>
+      <PhoneGateAction error={error} />
+      <WithdrawRemedy error={error} />
+    </div>
+  );
+
+  return (
+    <div className="mt-6 max-w-md">
+      {cantYet ? (
+        // ---- Can't withdraw yet: the two steps, nothing to fill in --------
+        <section aria-label="Withdrawals">
+          <p className="text-sm text-neutral-400">
+            <span className="font-heading text-2xl">
+              {rm(withdrawable ?? 0)}
+            </span>{' '}
+            withdrawable
           </p>
-          <div className="mt-3 flex items-center gap-3">
-            {/* secondary: the white full-width Withdraw button stays the
-                page's one primary action. */}
-            <Link
-              href="/slots"
-              className={pillVariants({ variant: 'secondary', size: 'sm' })}
-            >
-              Open packs
-            </Link>
-            <Link
-              href="/wallet"
-              className="text-[13px] text-white/60 underline-offset-2 hover:text-white hover:underline"
-            >
-              How it works
-            </Link>
-          </div>
-        </div>
-      )}
-
-      {saved !== null && accounts.length === 0 && (
-        <div className="mt-4 rounded-2xl border border-white/10 bg-neutral-900 px-5 py-6 text-center">
-          <Landmark className="mx-auto h-8 w-8 text-neutral-500" aria-hidden />
-          <p className="mt-2 text-sm text-neutral-300">
-            No saved bank accounts yet.
-          </p>
-          <p className="mt-1 text-[13px] text-neutral-500">
-            Withdrawals go to an account you saved earlier. Add one to get
-            started.
-          </p>
-          <Link
-            href="/bank"
-            className={cn(pillVariants({ size: 'lg' }), 'mt-4 w-full')}
-          >
-            Add a bank account
-          </Link>
-        </div>
-      )}
-
-      {accounts.length > 0 && (
-        <label className="mt-4 block text-[13px] font-semibold text-neutral-300">
-          Withdraw to
-          <select
-            value={accountId}
-            onChange={(e) => setAccountId(e.target.value)}
-            aria-label="Saved bank account"
-            className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none focus:border-white/25"
-          >
-            <option value="" disabled>
-              {usableAccounts.length === 0
-                ? 'No account is available yet'
-                : 'Choose a saved account'}
-            </option>
-            {accounts.map((account) => {
-              const reason = unusableReason(account, now);
-              return (
-                <option
-                  key={account.id}
-                  value={account.id}
-                  disabled={!isUsable(account, now)}
-                >
-                  {account.bankName} ···· {account.accountNumber.slice(-4)} —{' '}
-                  {account.accountHolderName}
-                  {reason ? ` (${reason})` : ''}
-                </option>
-              );
-            })}
-          </select>
-        </label>
-      )}
-
-      {accounts.length > 0 && usableAccounts.length === 0 && (
-        <p className="mt-2 text-[13px] text-neutral-400">
-          New bank accounts need a short wait before first use, to keep your
-          money safe.{' '}
-          <Link
-            href="/bank"
-            className="text-white/80 underline underline-offset-2 hover:text-white"
-          >
-            Manage bank accounts
-          </Link>
-        </p>
-      )}
-
-      <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
-        Amount
-        <span className="mt-1.5 flex items-center gap-2 rounded-xl border border-white/10 bg-neutral-900 px-3">
-          <span className="text-sm font-semibold text-neutral-400">RM</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={amountText}
-            onChange={(e) =>
-              setAmountText(
-                nextAmountText(amountText, e.target.value, withdrawable),
-              )
-            }
-            disabled={withdrawalsClosed || blocked}
-            aria-label="Withdrawal amount in RM"
-            aria-describedby={guidanceId}
-            placeholder="0.00"
-            className="h-11 w-full bg-transparent text-sm text-white outline-none placeholder:text-neutral-600 disabled:opacity-50"
+          <WithdrawSteps
+            id="withdraw-hold-reason"
+            className="mt-5"
+            hasTopup={!noTopup}
+            depositMinRm={limits.deposit.minRm}
+            available={available ?? 0}
+            bonus={bonus}
+            remaining={remaining}
           />
-        </span>
-      </label>
-      {accountMin !== null && !withdrawalsClosed && !blocked && (
-        <p className="mt-2 text-[12px] leading-relaxed text-neutral-400">
-          Minimum withdrawal to {selected?.bankName} is {rm0(accountMin)}.
-        </p>
-      )}
-      {rail && payoutRegional !== null && (
-        <div
-          className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm"
-          data-testid="withdraw-regional-estimate"
-        >
-          <div className="flex items-center justify-between text-neutral-400">
-            <span>Your bank receives</span>
-            <span className="font-semibold text-white">
-              {rail.ui.money(payoutRegional)}
+          {/* Get the cooling-off window out of the way while packs unlock
+              withdrawals — only when there is nothing to pay to yet. */}
+          {saved !== null && usableAccounts.length === 0 && (
+            <Link
+              href="/bank"
+              className="mt-2 inline-flex min-h-11 items-center text-[13px] font-semibold text-white/70 underline-offset-2 hover:text-white hover:underline"
+            >
+              Save your bank account now&nbsp;<span aria-hidden>→</span>
+            </Link>
+          )}
+          {errorAlert}
+        </section>
+      ) : (
+        <>
+          {/* ---- Can withdraw: the figure, then the form ------------------ */}
+          <section aria-label="Withdrawable">
+            <p className="font-heading text-4xl text-white tabular-nums">
+              {withdrawable == null ? '—' : rm(withdrawable)}
+            </p>
+            <p className="mt-1 text-sm text-neutral-300">Withdrawable</p>
+            <p className="mt-0.5 text-[13px] text-neutral-400">
+              Minimum withdrawal {rm(payoutBand.minRm)}
+            </p>
+            {belowMin && (
+              <p
+                id="withdraw-hold-reason"
+                role="status"
+                className="mt-1 text-[13px] text-neutral-300"
+              >
+                {`You can withdraw once your withdrawable money reaches ${rm(payoutBand.minRm)} (${rm(minimumGap(payoutBand.minRm, withdrawable ?? 0))} more).`}
+              </p>
+            )}
+          </section>
+
+          {saved !== null && accounts.length === 0 && (
+            <div className="mt-5 rounded-2xl border border-white/10 bg-neutral-900 px-5 py-6 text-center">
+              <Landmark
+                className="mx-auto h-8 w-8 text-neutral-500"
+                aria-hidden
+              />
+              <p className="mt-2 text-sm text-neutral-300">
+                No saved bank accounts yet.
+              </p>
+              <p className="mt-1 text-[13px] text-neutral-400">
+                Withdrawals go to an account you saved earlier. Add one to get
+                started.
+              </p>
+              <Link
+                href="/bank"
+                className={cn(pillVariants({ size: 'lg' }), 'mt-4 w-full')}
+              >
+                Add a bank account
+              </Link>
+            </div>
+          )}
+
+          {accounts.length > 0 && (
+            <label className="mt-5 block text-[13px] font-semibold text-neutral-300">
+              Withdraw to
+              <select
+                value={accountId}
+                onChange={(e) => setAccountId(e.target.value)}
+                aria-label="Saved bank account"
+                className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none focus:border-white/25"
+              >
+                <option value="" disabled>
+                  {usableAccounts.length === 0
+                    ? 'No account is available yet'
+                    : 'Choose a saved account'}
+                </option>
+                {accounts.map((account) => {
+                  const reason = unusableReason(account, now);
+                  return (
+                    <option
+                      key={account.id}
+                      value={account.id}
+                      disabled={!isUsable(account, now)}
+                    >
+                      {account.bankName} ···· {account.accountNumber.slice(-4)}{' '}
+                      — {account.accountHolderName}
+                      {reason ? ` (${reason})` : ''}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+          )}
+
+          {accounts.length > 0 && usableAccounts.length === 0 && (
+            <p className="mt-2 text-[13px] text-neutral-400">
+              New bank accounts need a short wait before first use, to keep your
+              money safe.{' '}
+              <Link
+                href="/bank"
+                className="text-white/80 underline underline-offset-2 hover:text-white"
+              >
+                Manage bank accounts
+              </Link>
+            </p>
+          )}
+
+          <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
+            Amount
+            <span className="mt-1.5 flex items-center gap-2 rounded-xl border border-white/10 bg-neutral-900 px-3">
+              <span className="text-sm font-semibold text-neutral-400">RM</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={amountText}
+                onChange={(e) =>
+                  setAmountText(
+                    nextAmountText(amountText, e.target.value, withdrawable),
+                  )
+                }
+                disabled={withdrawalsClosed || blocked}
+                aria-label="Withdrawal amount in RM"
+                aria-describedby={guidanceId}
+                placeholder="0.00"
+                className="h-11 w-full bg-transparent text-sm text-white outline-none placeholder:text-neutral-600 disabled:opacity-50"
+              />
             </span>
-          </div>
-          <p className="mt-1 text-right text-[11px] text-neutral-500">
-            {rail.ui.symbol}1 = RM {rail.rate.payout.toFixed(4)} · rate locked
-            when you confirm
+          </label>
+          {accountMin !== null && !withdrawalsClosed && !blocked && (
+            <p className="mt-2 text-[12px] leading-relaxed text-neutral-400">
+              Minimum withdrawal to {selected?.bankName} is {rm0(accountMin)}.
+            </p>
+          )}
+          {rail && payoutRegional !== null && (
+            <div
+              className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm"
+              data-testid="withdraw-regional-estimate"
+            >
+              <div className="flex items-center justify-between text-neutral-400">
+                <span>Your bank receives</span>
+                <span className="font-semibold text-white">
+                  {rail.ui.money(payoutRegional)}
+                </span>
+              </div>
+              <p className="mt-1 text-right text-[11px] text-neutral-400">
+                {rail.ui.symbol}1 = RM {rail.rate.payout.toFixed(4)} · rate
+                locked when you confirm
+              </p>
+            </div>
+          )}
+          {withdrawalsClosed && (
+            <p
+              id="withdraw-amount-guidance"
+              className="mt-2 text-[12px] leading-relaxed text-neutral-400"
+            >
+              {resumeAt
+                ? `Withdrawals are paused until ${resumeAt}. Your balance is safe — please try again after ${resumeAt}.`
+                : 'Withdrawals are paused. Your balance is safe — try again later.'}
+            </p>
+          )}
+
+          {errorAlert}
+
+          <Pill
+            onClick={submit}
+            disabled={submitting || !formValid || withdrawalsClosed || blocked}
+            size="lg"
+            className="mt-4 w-full"
+          >
+            {submitting
+              ? 'Sending…'
+              : amountValid
+                ? rail && payoutRegional !== null
+                  ? `Withdraw ${rm(amount)} → ${rail.ui.money(payoutRegional)}`
+                  : `Withdraw ${rm(amount)}`
+                : 'Withdraw'}
+          </Pill>
+
+          <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">
+            The amount leaves your balance as soon as you confirm. Transfers are
+            usually done in minutes; if the bank rejects it, the money returns
+            to your balance automatically.
           </p>
-        </div>
-      )}
-      {withdrawalsClosed && (
-        <p
-          id="withdraw-amount-guidance"
-          className="mt-2 text-[12px] leading-relaxed text-neutral-400"
-        >
-          {resumeAt
-            ? `Withdrawals are paused until ${resumeAt}. Your balance is safe — please try again after ${resumeAt}.`
-            : 'Withdrawals are paused. Your balance is safe — try again later.'}
-        </p>
+        </>
       )}
 
-      {/* The remedy sits INSIDE role="alert" so problem and way out are one
-          announcement. No onNavigate here — this is a page, not a modal. */}
-      {error && (
-        <div
-          role="alert"
-          className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2"
-        >
-          <p className="text-[13px] font-medium text-red-300">{error}</p>
-          <PhoneGateAction error={error} />
-          <WithdrawRemedy error={error} />
-        </div>
-      )}
-
-      <Pill
-        onClick={submit}
-        disabled={submitting || !formValid || withdrawalsClosed || blocked}
-        size="lg"
-        className="mt-4 w-full"
-      >
-        {submitting
-          ? 'Sending…'
-          : amountValid
-            ? rail && payoutRegional !== null
-              ? `Withdraw ${rm(amount)} → ${rail.ui.money(payoutRegional)}`
-              : `Withdraw ${rm(amount)}`
-            : 'Withdraw'}
-      </Pill>
-
-      <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">
-        The amount leaves your balance as soon as you confirm. Transfers are
-        usually done in minutes; if the bank rejects it, the money returns to
-        your balance automatically.
-      </p>
+      {/* ---- Collapsed: the numbers and the rules, said once ------------- */}
+      <div className="mt-8 border-t border-white/10">
+        {split && withdrawable != null && (
+          <details className="group border-b border-white/10">
+            <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between py-3 text-sm font-semibold text-white [&::-webkit-details-marker]:hidden">
+              Your money
+              <ChevronDown
+                className="h-4 w-4 text-neutral-400 transition-transform group-open:rotate-180 motion-reduce:transition-none"
+                aria-hidden
+              />
+            </summary>
+            <div id="withdraw-money" className="pb-4">
+              <MoneyRows
+                balance={available ?? 0}
+                withdrawable={withdrawable}
+                split={split}
+              />
+            </div>
+          </details>
+        )}
+        <details className="group border-b border-white/10">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between py-3 text-sm font-semibold text-white [&::-webkit-details-marker]:hidden">
+            How withdrawals work
+            <ChevronDown
+              className="h-4 w-4 text-neutral-400 transition-transform group-open:rotate-180 motion-reduce:transition-none"
+              aria-hidden
+            />
+          </summary>
+          <div className="pb-4">
+            <WithdrawRules />
+          </div>
+        </details>
+      </div>
     </div>
   );
 }

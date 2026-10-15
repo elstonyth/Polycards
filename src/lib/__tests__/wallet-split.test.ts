@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   isWithdrawLocked,
-  topupFirstLine,
-  unlockLine,
+  sen,
+  stepTwoCopy,
   walletSplit,
 } from '../wallet-split';
 
-const sen = (n: number) => Math.round(n * 100);
+// Helper strings keep "RM" and the figure on one line.
+const NB = ' ';
 
 describe('walletSplit — Balance / Withdrawable / For packs', () => {
   it('slab RM 300 sold, RM 50 top-up unspent: all locked until it is used', () => {
@@ -153,55 +154,82 @@ describe('walletSplit — Balance / Withdrawable / For packs', () => {
     ).toMatchObject({ forPacks: 0, lockedCash: 50, unlockSpend: 0 });
   });
 
-  it('Balance = withdrawable + locked cash + bonus + still to use, for every backend state', () => {
-    // The backend gate (withdrawable.ts): 0 before a top-up or while anything
-    // is still to use on packs, else everything but bonus.
-    const backendWithdrawable = (
+  it('Balance = withdrawable + withdrawable later + bonus + still to use, for every backend state', () => {
+    type Backend = 'spend-first' | 'partial-hold';
+    // withdrawable.ts. spend-first: 0 before a top-up, while frozen, or while
+    // anything is still to use; else everything but bonus. partial-hold (the
+    // pre-2026-10-15 backend): available − bonus − remaining.
+    const backend = (
+      model: Backend,
       available: number,
       bonus: number,
       remaining: number,
       hasTopup: boolean,
-    ) =>
-      !hasTopup || sen(remaining) > 0
-        ? 0
-        : Math.max(0, sen(available) - sen(bonus)) / 100;
+      frozen: boolean,
+    ) => {
+      if (!hasTopup || frozen) return 0;
+      const rest = Math.max(0, sen(available) - sen(bonus));
+      if (model === 'partial-hold')
+        return Math.max(0, rest - sen(remaining)) / 100;
+      return sen(remaining) > 0 ? 0 : rest / 100;
+    };
     const amounts = [0, 0.01, 0.3, 7.77, 15, 45, 350.55];
-    for (const available of amounts)
-      for (const bonus of amounts.filter((b) => b <= available))
-        for (const remaining of [0, 0.1, 12.34, 50, 999])
-          for (const hasTopup of [true, false]) {
-            const withdrawable = backendWithdrawable(
-              available,
-              bonus,
-              remaining,
-              hasTopup,
-            );
-            const s = walletSplit({
-              available,
-              withdrawable,
-              bonus,
-              remaining,
-            });
-            expect(
-              sen(withdrawable) +
-                sen(s.lockedCash) +
-                sen(s.bonus) +
-                sen(s.stillToUse),
-            ).toBe(sen(available));
-            expect(sen(s.bonus) + sen(s.stillToUse)).toBe(sen(s.forPacks));
-            expect(sen(s.unlockSpend)).toBe(sen(bonus) + sen(remaining));
-            // Locked exactly when the backend says so.
-            expect(
-              isWithdrawLocked({
-                hasTopup,
-                isFrozen: false,
-                remaining,
-                withdrawable,
-              }),
-            ).toBe(hasTopup && sen(remaining) > 0);
-            for (const v of Object.values(s))
-              expect(v).toBeGreaterThanOrEqual(0);
-          }
+    for (const model of ['spend-first', 'partial-hold'] as Backend[])
+      for (const balance of amounts)
+        // bonus may exceed what is left after a delivery fee.
+        for (const bonus of [...amounts, 999])
+          for (const remaining of [0, 0.1, 12.34, 50, 999])
+            for (const hasTopup of [true, false])
+              for (const frozen of [false, true]) {
+                const available = frozen ? 0 : balance;
+                const withdrawable = backend(
+                  model,
+                  available,
+                  bonus,
+                  remaining,
+                  hasTopup,
+                  frozen,
+                );
+                const s = walletSplit({
+                  available,
+                  withdrawable,
+                  bonus,
+                  remaining,
+                });
+                expect(
+                  sen(withdrawable) +
+                    sen(s.lockedCash) +
+                    sen(s.bonus) +
+                    sen(s.stillToUse),
+                ).toBe(sen(available));
+                expect(sen(s.bonus) + sen(s.stillToUse)).toBe(sen(s.forPacks));
+                expect(sen(s.unlockSpend)).toBe(sen(bonus) + sen(remaining));
+                // Locked exactly when the backend shuts the whole gate.
+                expect(
+                  isWithdrawLocked({
+                    hasTopup,
+                    isFrozen: frozen,
+                    remaining,
+                    withdrawable,
+                  }),
+                ).toBe(
+                  hasTopup &&
+                    !frozen &&
+                    sen(remaining) > 0 &&
+                    sen(withdrawable) === 0,
+                );
+                if (model === 'spend-first')
+                  expect(
+                    isWithdrawLocked({
+                      hasTopup,
+                      isFrozen: frozen,
+                      remaining,
+                      withdrawable,
+                    }),
+                  ).toBe(hasTopup && !frozen && sen(remaining) > 0);
+                for (const v of Object.values(s))
+                  expect(v).toBeGreaterThanOrEqual(0);
+              }
   });
 });
 
@@ -222,9 +250,11 @@ describe('isWithdrawLocked — matches the backend gate', () => {
     expect(isWithdrawLocked({ ...base, hasTopup: false })).toBe(false);
   });
 
-  it('nothing left to use (to the sen) is not locked', () => {
+  it('judges zero in sen', () => {
     expect(isWithdrawLocked({ ...base, remaining: 0 })).toBe(false);
     expect(isWithdrawLocked({ ...base, remaining: 0.004 })).toBe(false);
+    // A float hair of withdrawable is still nothing withdrawable.
+    expect(isWithdrawLocked({ ...base, withdrawable: 0.004 })).toBe(true);
   });
 
   it('an older backend that still pays part out is not locked', () => {
@@ -232,46 +262,81 @@ describe('isWithdrawLocked — matches the backend gate', () => {
   });
 });
 
-describe('unlockLine', () => {
-  it('names the spend, the bonus-first rule and what the bank gets after', () => {
-    expect(unlockLine({ unlockSpend: 95, bonus: 15, lockedCash: 30 })).toBe(
-      'Spend RM 95.00 more on packs to unlock withdrawals (packs use bonus credit first). Then RM 30.00 can go to your bank.',
-    );
-  });
-
-  it('drops the bracket with no bonus and the second sentence with nothing locked', () => {
-    expect(unlockLine({ unlockSpend: 50, bonus: 0, lockedCash: 300 })).toBe(
-      'Spend RM 50.00 more on packs to unlock withdrawals. Then RM 300.00 can go to your bank.',
-    );
-    expect(unlockLine({ unlockSpend: 20, bonus: 0, lockedCash: 0 })).toBe(
-      'Spend RM 20.00 more on packs to unlock withdrawals.',
-    );
-  });
-});
-
-describe('topupFirstLine', () => {
-  it('stamped money and cash waiting: names both', () => {
+describe('stepTwoCopy', () => {
+  it('topped up: names the spend, nothing else when there is no bonus', () => {
     expect(
-      topupFirstLine({
-        depositMinRm: 50,
-        unlockSpend: 20.5,
-        lockedCash: 60.47,
+      stepTwoCopy({ hasTopup: true, available: 350, bonus: 0, remaining: 50 }),
+    ).toEqual({ title: `Use RM${NB}50.00 more on packs`, notes: [] });
+  });
+
+  it('topped up with bonus credit: the spend includes it, keyed on the raw bonus', () => {
+    expect(
+      stepTwoCopy({ hasTopup: true, available: 125, bonus: 15, remaining: 80 }),
+    ).toEqual({
+      title: `Use RM${NB}95.00 more on packs`,
+      notes: [
+        `This includes your RM${NB}15.00 bonus credit, which packs use first.`,
+      ],
+    });
+    // Bonus above the balance (frozen read, or a fee took the cash) still
+    // names the whole bonus the packs must take.
+    expect(
+      stepTwoCopy({ hasTopup: true, available: 10, bonus: 25, remaining: 0 })
+        .notes[0],
+    ).toBe(
+      `This includes your RM${NB}25.00 bonus credit, which packs use first.`,
+    );
+  });
+
+  it('remaining above the cash beside the bonus: delivery fees do not count', () => {
+    expect(
+      stepTwoCopy({ hasTopup: true, available: 10, bonus: 10, remaining: 20 }),
+    ).toEqual({
+      title: `Use RM${NB}30.00 more on packs`,
+      notes: [
+        `This includes your RM${NB}10.00 bonus credit, which packs use first.`,
+        'Delivery fees don’t count as pack spending.',
+      ],
+    });
+  });
+
+  it('never topped up, nothing owed yet: just the top-up', () => {
+    expect(
+      stepTwoCopy({ hasTopup: false, available: 30, bonus: 0, remaining: 0 }),
+    ).toEqual({ title: 'Use your top-up on packs', notes: [] });
+  });
+
+  it('never topped up with money for packs: the top-up plus that money', () => {
+    expect(
+      stepTwoCopy({
+        hasTopup: false,
+        available: 80.97,
+        bonus: 0,
+        remaining: 20.5,
       }),
-    ).toBe(
-      'Top up once (from RM 50). Then spend your top-up plus RM 20.50 on packs to unlock withdrawals; after that, RM 60.47 can go to your bank. Card deliveries start after your first top-up.',
-    );
+    ).toEqual({
+      title: 'Use your top-up on packs',
+      notes: [`Plus RM${NB}20.50 you already have for packs.`],
+    });
   });
 
-  it('drops "plus" with nothing owed and "after that" with nothing waiting', () => {
+  it('never topped up, only bonus for packs: names the bonus once', () => {
     expect(
-      topupFirstLine({ depositMinRm: 50, unlockSpend: 0, lockedCash: 30 }),
-    ).toBe(
-      'Top up once (from RM 50). Then spend your top-up on packs to unlock withdrawals; after that, RM 30.00 can go to your bank. Card deliveries start after your first top-up.',
-    );
+      stepTwoCopy({ hasTopup: false, available: 45, bonus: 15, remaining: 0 }),
+    ).toEqual({
+      title: 'Use your top-up on packs',
+      notes: [`Plus your RM${NB}15.00 bonus credit, which packs use first.`],
+    });
+  });
+
+  it('never topped up, bonus and other money for packs: one combined line', () => {
     expect(
-      topupFirstLine({ depositMinRm: 30, unlockSpend: 15, lockedCash: 0 }),
-    ).toBe(
-      'Top up once (from RM 30). Then spend your top-up plus RM 15.00 on packs to unlock withdrawals. Card deliveries start after your first top-up.',
-    );
+      stepTwoCopy({ hasTopup: false, available: 60, bonus: 15, remaining: 20 }),
+    ).toEqual({
+      title: 'Use your top-up on packs',
+      notes: [
+        `Plus RM${NB}35.00 you already have for packs, including your RM${NB}15.00 bonus credit, which packs use first.`,
+      ],
+    });
   });
 });

@@ -136,12 +136,11 @@ describe('VAULT_RULES backend-message contract', () => {
     // to VAULT_FALLBACK, so a customer short of playthrough was told to retry.
     const literals = [
       // withdrawable.ts withdrawalGateError — freeze, no top-up, locked, cap
-      'Top up at least once to unlock withdrawals and deliveries.',
       'Withdrawals are unavailable while your account is under review. Contact support.',
-      "Withdrawals unlock once you've used your RM 10.55 for packs. Open packs with it, then your balance can be withdrawn.",
-      "Withdrawals unlock once you've spent RM 10.55 more on packs. Then your balance, except bonus credit, can be withdrawn.",
-      'Top up at least once to unlock deliveries. Withdrawals unlock once your top-up is used on packs.',
-      // the 2026-10-15 partial-hold wording (deploy skew), then the plain cap
+      'Top up at least once to unlock deliveries. To withdraw, you also need to use all your money for packs.',
+      "Withdrawals unlock once you've used RM 10.55 more on packs. Then your balance, except bonus credit, can be withdrawn.",
+      // the #793 wording (deploy skew), then the plain cap
+      'Top up at least once to unlock withdrawals and deliveries.',
       'You can withdraw up to RM 28.40 right now. The other RM 10.55 is for opening packs.',
       'Nothing is withdrawable yet. Your RM 60.00 is for opening packs.',
       'You can withdraw up to RM 12.34 right now.',

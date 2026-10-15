@@ -89,11 +89,11 @@ const FAQS: FaqItem[] = [
     q: 'When can I withdraw?',
     a: (
       <>
-        Top up once, then use all your money for packs on packs: your top-up,
-        any bonus credit and money from the welcome card. After that, everything
+        Top up once. Then open packs until all your money for packs is used:
+        bonus credit first, then your top-ups, the welcome pack&rsquo;s card
+        sale and the bonus-credit part of any sale. After that, everything
         except bonus credit can be withdrawn, including sales of cards you won
-        from tasks, the weekly challenge and gift packs. Each new top-up pauses
-        withdrawals until it is used.{' '}
+        from tasks, the weekly challenge and gift packs.{' '}
         <Link
           href="/wallet"
           className="font-semibold text-white/80 underline-offset-2 hover:text-white hover:underline"

@@ -2,7 +2,7 @@
 // check-in track, and the row order. Split out of TaskHubClient so the rules
 // that decide WHAT a player sees (and in which order) are unit-tested without
 // rendering anything.
-import { rm } from '@/lib/format';
+import { rm, rmNbsp } from '@/lib/format';
 import type { TaskEntry, TaskHub } from '@/lib/data/schemas';
 
 export const CREDIT_ART = '/images/task/credits-coins.webp';
@@ -59,7 +59,7 @@ export function claimNotice(reward: TaskEntry['reward']): string {
     const amount = reward.amount_myr;
     const what =
       typeof amount === 'number' && Number.isFinite(amount) && amount > 0
-        ? `${rm(amount)} bonus credit`
+        ? `${rmNbsp(amount)} bonus credit`
         : 'Bonus credit';
     return `${what} added. Use it on packs — it can’t be withdrawn.`;
   }

@@ -96,7 +96,7 @@ describe('DELIVERY_RULES backend-message contract', () => {
   it('passes the no-top-up refusal through instead of blaming the cards', () => {
     // withdrawable.ts NO_TOPUP_MESSAGE (backend), a NOT_ALLOWED refusal.
     for (const msg of [
-      'Top up at least once to unlock deliveries. Withdrawals unlock once your top-up is used on packs.',
+      'Top up at least once to unlock deliveries. To withdraw, you also need to use all your money for packs.',
       // the pre-2026-10-15 wording, for deploy skew
       'Top up at least once to unlock withdrawals and deliveries.',
     ])

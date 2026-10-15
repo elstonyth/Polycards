@@ -479,7 +479,8 @@ export default function TopUpSheet({
               {rm(done.amount)} ADDED
             </p>
             <p className="mt-1 text-sm text-neutral-300">
-              Use it on packs to unlock withdrawals.
+              After a top-up, withdrawals pause until you use all your money for
+              packs.
             </p>
             <p className="mt-1 text-sm text-neutral-400">
               New balance{' '}
@@ -797,8 +798,8 @@ export default function TopUpSheet({
             </div>
 
             <p className="mt-3 text-[12px] leading-relaxed text-neutral-300">
-              Top-ups are for opening packs. Topping up pauses withdrawals until
-              it is used on packs.
+              After a top-up, withdrawals pause until you use all your money for
+              packs.
             </p>
 
             {/* The remedy sits INSIDE role="alert" so a screen reader gets the

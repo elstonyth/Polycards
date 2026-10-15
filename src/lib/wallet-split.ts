@@ -1,7 +1,8 @@
-import { rm, rm0 } from '@/lib/format';
+import { rmNbsp } from '@/lib/format';
 
-/** Every money input is a non-negative amount: NaN or a negative reads as 0. */
-const sen = (n: number) =>
+/** Every money input is a non-negative amount: NaN or a negative reads as 0.
+ *  Integer sen, so "is it zero" never trips on float noise. */
+export const sen = (n: number) =>
   Number.isFinite(n) && n > 0 ? Math.round(n * 100) : 0;
 
 /**
@@ -12,14 +13,14 @@ const sen = (n: number) =>
  * - stillToUse is the unspent top-ups and stamped sales (`remaining`), capped
  *   at the non-bonus balance: a delivery fee can push `remaining` above it.
  *   Capped only so the figures add up on screen.
- * - lockedCash is what turns withdrawable once the gate opens: the backend
- *   reports withdrawable 0 for all of it while the gate is shut. 0 once
- *   anything is withdrawable — then the backend's figure already holds it.
+ * - lockedCash ("Withdrawable later") is what turns withdrawable once the
+ *   gate opens: the backend reports withdrawable 0 for all of it while the
+ *   gate is shut. 0 once anything is withdrawable.
  * - unlockSpend is what packs must still take before the gate opens: bonus
  *   (packs spend it first) plus `remaining`, uncapped.
  *
- * Bonus is capped at the balance (a frozen account reads available 0). Worked
- * in integer sen so float noise never prints; returns RM.
+ * Bonus is capped at the balance (a frozen account reads available 0).
+ * Returns RM.
  */
 export function walletSplit(w: {
   available: number;
@@ -58,44 +59,48 @@ export function isWithdrawLocked(w: {
   withdrawable: number;
 }): boolean {
   return (
-    w.hasTopup && !w.isFrozen && sen(w.remaining) > 0 && !(w.withdrawable > 0)
+    w.hasTopup &&
+    !w.isFrozen &&
+    sen(w.remaining) > 0 &&
+    sen(w.withdrawable) === 0
   );
 }
 
-/** The locked line: how much packs must still take, and what the bank gets
- *  after. */
-export function unlockLine(w: {
-  unlockSpend: number;
-  bonus: number;
-  lockedCash: number;
-}): string {
-  return (
-    `Spend ${rm(w.unlockSpend)} more on packs to unlock withdrawals` +
-    (sen(w.bonus) > 0 ? ' (packs use bonus credit first)' : '') +
-    '.' +
-    (sen(w.lockedCash) > 0
-      ? ` Then ${rm(w.lockedCash)} can go to your bank.`
-      : '')
-  );
-}
-
-/** Never topped up: the heading and body the wallet banner and the withdraw
- *  form's top-up notice share. */
+/** /me's hint for an account that never topped up. */
 export const TOPUP_FIRST_HEADING =
   'Top up and use it on packs to unlock withdrawals';
 
-export function topupFirstLine(w: {
-  depositMinRm: number;
-  unlockSpend: number;
-  lockedCash: number;
-}): string {
-  return (
-    `Top up once (from ${rm0(w.depositMinRm)}). Then spend your top-up` +
-    (sen(w.unlockSpend) > 0 ? ` plus ${rm(w.unlockSpend)}` : '') +
-    ' on packs to unlock withdrawals' +
-    (sen(w.lockedCash) > 0
-      ? `; after that, ${rm(w.lockedCash)} can go to your bank.`
-      : '.') +
-    ' Card deliveries start after your first top-up.'
-  );
+/** Step 2 of "unlock withdrawals": what packs must take, and why the figure
+ *  may be more than the customer expects. */
+export function stepTwoCopy(w: {
+  hasTopup: boolean;
+  available: number;
+  bonus: number;
+  remaining: number;
+}): { title: string; notes: string[] } {
+  const bonus = sen(w.bonus);
+  const owed = bonus + sen(w.remaining);
+  const notes: string[] = [];
+  let title: string;
+  const bonusNote = `${rmNbsp(bonus / 100)} bonus credit, which packs use first`;
+  if (w.hasTopup) {
+    title = `Use ${rmNbsp(owed / 100)} more on packs`;
+    if (bonus > 0) notes.push(`This includes your ${bonusNote}.`);
+  } else {
+    title = 'Use your top-up on packs';
+    // One line for what is already for packs, so the bonus isn't named twice.
+    if (owed > 0 && owed === bonus) notes.push(`Plus your ${bonusNote}.`);
+    else if (bonus > 0)
+      notes.push(
+        `Plus ${rmNbsp(owed / 100)} you already have for packs, including your ${bonusNote}.`,
+      );
+    else if (owed > 0)
+      notes.push(`Plus ${rmNbsp(owed / 100)} you already have for packs.`);
+  }
+  // A delivery fee took money that was still owed to packs: the figure above
+  // is more than the cash left beside the bonus.
+  if (sen(w.remaining) > Math.max(0, sen(w.available) - bonus)) {
+    notes.push('Delivery fees don’t count as pack spending.');
+  }
+  return { title, notes };
 }

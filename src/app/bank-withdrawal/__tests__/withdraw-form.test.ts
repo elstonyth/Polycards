@@ -497,301 +497,209 @@ describe('WithdrawForm', () => {
 describe('WithdrawForm — why the balance is held, and the way out', () => {
   // Spec 2026-10-15 (spend first): using the money for packs unlocks
   // withdrawals — but never the old partial "unlock it / the rest" wording.
-  // The For-packs heading row: label, then figure.
-  function forPacksHead() {
-    return container.querySelector('#withdraw-for-packs > div')?.textContent;
-  }
+  const NB = ' ';
+  const PRIMARY = 'bg-neutral-50';
 
   function expectNoUnlockCopy() {
     expect(container.textContent).not.toMatch(
       /unlock it|unlock the rest|still need to play|Available to withdraw/i,
     );
   }
+  const amountField = () =>
+    container.querySelector('input[aria-label="Withdrawal amount in RM"]');
+  const steps = () =>
+    container.querySelector('#withdraw-hold-reason ol')?.textContent ?? '';
+  const status = () => container.querySelector('section')?.textContent ?? '';
+  /** The "Your money" rows, label → figure. */
+  function moneyRows() {
+    return Object.fromEntries(
+      [...container.querySelectorAll('#withdraw-money dl div')]
+        .filter((d) => d.querySelector(':scope > dt'))
+        .map((d) => [
+          d.querySelector('dt')?.textContent,
+          d.querySelector('dd')?.textContent,
+        ]),
+    );
+  }
 
-  it('names the For-packs part and its two lines instead of a bare RM 0.00', async () => {
-    await render([READY_ACCOUNT], 0, { available: 5, remaining: 5 });
-    const split = container.querySelector('#withdraw-for-packs');
-    expect(forPacksHead()).toBe('For packsRM 5.00');
-    expect(split?.textContent).not.toContain('Not withdrawable');
-    expect(split?.textContent).toContain('Bonus credit');
-    expect(split?.textContent).toContain('used first');
-    expect(split?.textContent).toContain('Still to use on packs');
-    expect(split?.textContent).toContain(
-      'Can’t go to your bank. Open packs with it.',
-    );
-    // The "RM 174.22 total" read as the customer's deposits (2026-10-14).
-    expect(container.querySelector('[role="progressbar"]')).toBeNull();
-    expect(split?.querySelector('a[href="/slots"]')?.textContent).toBe(
-      'Open packs',
-    );
-    expectNoUnlockCopy();
-    // Locked: the unlock line is the hold, not a payout-floor goal.
-    expect(container.textContent).toContain('Withdrawable');
-    expect(container.textContent).toContain('Minimum withdrawal RM 50.00');
-    expect(container.querySelector('#withdraw-hold-reason')?.textContent).toBe(
-      'Spend RM 5.00 more on packs to unlock withdrawals.',
-    );
-    expect(container.textContent).not.toContain('You can withdraw once');
-    expect(amountInput().disabled).toBe(true);
-    expect(submitButton().disabled).toBe(true);
+  it('can withdraw: the big figure, the minimum, then the form', async () => {
+    await render([READY_ACCOUNT], 120, {
+      available: 135,
+      bonus: 15,
+      remaining: 0,
+    });
+    expect(status()).toBe('RM 120.00WithdrawableMinimum withdrawal RM 50.00');
+    expect(container.querySelector('#withdraw-hold-reason')).toBeNull();
+    expect(amountField()).not.toBeNull();
+    expect(container.querySelector('#withdraw-hold-reason ol')).toBeNull();
+    expect(moneyRows()).toMatchObject({
+      Balance: 'RM 135.00',
+      Withdrawable: 'RM 120.00',
+      'For packs': 'RM 15.00',
+    });
+    expect(moneyRows()).not.toHaveProperty('Withdrawable later');
+    fillValidForm();
+    expect(submitButton().disabled).toBe(false);
   });
 
-  it('slab RM 300 sold, RM 50 top-up unspent: locked until the RM 50 is used', async () => {
+  it('slab RM 300 sold, RM 50 top-up unspent: the steps replace the form', async () => {
     await render([READY_ACCOUNT], 0, { available: 350, remaining: 50 });
-    expect(container.querySelector('#withdraw-hold-reason')?.textContent).toBe(
-      'Spend RM 50.00 more on packs to unlock withdrawals. Then RM 300.00 can go to your bank.',
+    expect(status()).toContain('RM 0.00 withdrawable');
+    expect(container.querySelectorAll('#withdraw-hold-reason')).toHaveLength(1);
+    expect(steps()).toContain('Top up onceDone');
+    expect(steps()).toContain(`Use RM${NB}50.00 more on packs`);
+    expect(container.textContent).toContain(
+      'Then your balance, except bonus credit, can go to your bank.',
     );
-    expect(container.textContent).toContain('RM 0.00');
-    expect(container.querySelector('a[href="/bank"]')?.textContent).toBe(
-      'Save your bank account now\u00a0→',
+    const open = container.querySelector(
+      '#withdraw-hold-reason a[href="/slots"]',
     );
-    expect(forPacksHead()).toBe('For packsRM 50.00');
+    expect(open?.textContent).toBe('Open packs');
+    expect(open?.className).toContain(PRIMARY);
+    // Nothing to fill in, and no second white pill competing.
+    expect(amountField()).toBeNull();
     expect(
-      container.querySelector('#withdraw-for-packs a[href="/slots"]')
-        ?.textContent,
-    ).toBe('Open packs');
-    expect(amountInput().disabled).toBe(true);
-    expect(amountInput().getAttribute('aria-describedby')).toBe(
-      'withdraw-hold-reason',
-    );
-    expect(submitButton().disabled).toBe(true);
+      [...container.querySelectorAll('button')].some((b) =>
+        /^Withdraw/.test(b.textContent ?? ''),
+      ),
+    ).toBe(false);
+    expect(container.querySelectorAll(`.${PRIMARY}`)).toHaveLength(1);
+    // A payable account is saved: no bank nudge.
+    expect(container.querySelector('a[href="/bank"]')).toBeNull();
+    expect(moneyRows()).toMatchObject({
+      Balance: 'RM 350.00',
+      Withdrawable: 'RM 0.00',
+      'Withdrawable later': 'RM 300.00',
+      'For packs': 'RM 50.00',
+      'Still to use on packs': 'RM 50.00',
+    });
     expectNoUnlockCopy();
   });
 
-  it('locked with bonus credit: the spend counts bonus first, the bank gets the rest', async () => {
+  it('locked with no payable account: one quiet nudge to save one now', async () => {
+    await render([COOLING_ACCOUNT], 0, { available: 350, remaining: 50 });
+    const links = container.querySelectorAll('a[href="/bank"]');
+    expect(links).toHaveLength(1);
+    expect(links[0]?.textContent).toBe(`Save your bank account now${NB}→`);
+    expect(links[0]?.className).not.toContain(PRIMARY);
+    // The big "Add a bank account" pill stays off while locked.
+    expect(container.textContent).not.toContain('Add a bank account');
+  });
+
+  it('locked with bonus credit: step 2 counts the bonus packs use first', async () => {
     await render([READY_ACCOUNT], 0, {
       available: 125,
       bonus: 15,
       remaining: 80,
     });
-    expect(container.querySelector('#withdraw-hold-reason')?.textContent).toBe(
-      'Spend RM 95.00 more on packs to unlock withdrawals (packs use bonus credit first). Then RM 30.00 can go to your bank.',
+    expect(steps()).toContain(`Use RM${NB}95.00 more on packs`);
+    expect(steps()).toContain(
+      `This includes your RM${NB}15.00 bonus credit, which packs use first.`,
     );
+    expect(steps()).not.toContain('Delivery fees');
   });
 
-  it('locked with no cash left (a delivery fee took it): the whole spend, nothing for the bank', async () => {
+  it('locked after a delivery fee took the cash: the whole spend, and why', async () => {
     await render([READY_ACCOUNT], 0, {
       available: 10,
       bonus: 10,
       remaining: 20,
     });
-    expect(container.querySelector('#withdraw-hold-reason')?.textContent).toBe(
-      'Spend RM 30.00 more on packs to unlock withdrawals (packs use bonus credit first).',
-    );
-    expect(amountInput().disabled).toBe(true);
+    expect(steps()).toContain(`Use RM${NB}30.00 more on packs`);
+    expect(steps()).toContain('Delivery fees don’t count as pack spending.');
+    expect(moneyRows()).not.toHaveProperty('Withdrawable later');
   });
 
-  it('an older backend paying part out is not locked: the Withdraw form stays open', async () => {
+  it('an older backend paying part out is not locked: the form stays open', async () => {
     await render([READY_ACCOUNT], 100, {
       available: 190,
       bonus: 10,
       remaining: 80,
     });
     expect(container.querySelector('#withdraw-hold-reason')).toBeNull();
-    expect(container.textContent).not.toContain('more on packs to unlock');
+    expect(container.querySelector('#withdraw-hold-reason ol')).toBeNull();
     fillValidForm();
     expect(submitButton().disabled).toBe(false);
   });
 
-  it('shows all three figures: withdrawable, bonus credit, still to use on packs', async () => {
-    // Older backend: RM 125 balance, RM 30 of it withdrawable, RM 15 bonus.
-    await render([READY_ACCOUNT], 30, {
-      available: 125,
-      bonus: 15,
-      remaining: 80,
-    });
-    const split = container.querySelector('#withdraw-for-packs')!;
-    expect(forPacksHead()).toBe('For packsRM 95.00');
-    const lines = [...split.querySelectorAll('dl > div')].map((row) => [
-      row.querySelector('dt')?.textContent,
-      row.querySelector('dd')?.textContent,
-    ]);
-    expect(lines).toEqual([
-      ['Bonus creditused first', 'RM 15.00'],
-      ['Still to use on packs', 'RM 80.00'],
-    ]);
-    // Below the floor AND a For-packs part: one hold reason, the gap line,
-    // and the disabled field points at it.
-    expect(container.querySelectorAll('#withdraw-hold-reason')).toHaveLength(1);
-    expect(container.querySelector('#withdraw-hold-reason')?.textContent).toBe(
-      'You can withdraw once your withdrawable money reaches RM 50.00 (RM 20.00 more).',
-    );
-    expect(amountInput().disabled).toBe(true);
-    expect(amountInput().getAttribute('aria-describedby')).toBe(
-      'withdraw-hold-reason',
-    );
-  });
-
-  it('shows no For-packs part when the wallet gave no available figure', async () => {
-    await render([READY_ACCOUNT], 0);
-    expect(container.querySelector('#withdraw-for-packs')).toBeNull();
-    expect(container.textContent).toContain('You can withdraw once');
-  });
-
-  it('shows no For-packs part when available is below withdrawable', async () => {
-    // Deploy skew or a stale read: never a negative "for packs".
-    await render([READY_ACCOUNT], 100, { available: 90 });
-    expect(container.querySelector('#withdraw-for-packs')).toBeNull();
-    expect(container.textContent).not.toMatch(/-RM|RM -/);
-  });
-
-  // Nothing left to use on packs: everything but bonus credit can leave,
-  // and the block explains the bonus left behind.
-  it('lets everything but bonus credit leave once nothing is left to use', async () => {
-    await render([READY_ACCOUNT], 100, {
-      available: 110.55,
-      bonus: 10.55,
-      remaining: 0,
-    });
-    expect(container.querySelector('#withdraw-hold-reason')).toBeNull();
-    expect(forPacksHead()).toBe('For packsRM 10.55');
-    expect(container.textContent).not.toContain('You can withdraw once');
-    fillValidForm();
-    expect(submitButton().disabled).toBe(false);
-  });
-
-  it('a frozen account gets the review notice, never "open packs"', async () => {
-    // Freeze outranks every hold (withdrawable.ts): telling a frozen account
-    // to open packs would send it down a path that still ends refused.
-    await render([READY_ACCOUNT], 0, {
-      frozen: true,
-      available: 50,
-      bonus: 15,
-    });
-    expect(container.textContent).toContain('under review');
-    expect(container.querySelector('#withdraw-for-packs')).toBeNull();
-    expect(container.textContent).not.toContain('You can withdraw once');
-    expect(container.querySelector('a[href="/contact"]')).not.toBeNull();
-    expect(container.querySelector('a[href="/slots"]')).toBeNull();
-    expect(amountInput().disabled).toBe(true);
-    expect(submitButton().disabled).toBe(true);
-  });
-
-  it('an account that never topped up is told to top up, not "reach RM 50"', async () => {
+  it('never topped up: Top Up is the one white pill, then Open packs', async () => {
     // The 2026-10-13 ticket: RM 80.97 balance, no top-up ever, and the page
     // said "Reach RM 50 to withdraw" — a goal the customer had already met.
-    // RM 20.50 of it is stamped (still to use on packs); the other RM 60.47
-    // can go to the bank once a top-up and the RM 20.50 are used on packs.
     await render([READY_ACCOUNT], 0, {
       noTopup: true,
       available: 80.97,
       remaining: 20.5,
     });
     expect(container.querySelectorAll('#withdraw-hold-reason')).toHaveLength(1);
-    const hold = container.querySelector('#withdraw-hold-reason');
-    expect(hold?.textContent).toContain(
-      'Top up and use it on packs to unlock withdrawals',
-    );
-    expect(hold?.textContent).toContain(
-      'Top up once (from RM 30). Then spend your top-up plus RM 20.50 on packs to unlock withdrawals; after that, RM 60.47 can go to your bank. Card deliveries start after your first top-up.',
-    );
-    // The minimum is still named, but no "RM X more" goal while on hold.
-    expect(container.textContent).toContain('Minimum withdrawal RM 50.00');
+    expect(steps()).toContain('Top up onceFrom RM 30');
+    expect(steps()).toContain('Use your top-up on packs');
+    expect(steps()).toContain(`Plus RM${NB}20.50 you already have for packs.`);
     expect(container.textContent).not.toContain('You can withdraw once');
-    // The For-packs part shows only the stamped part, not the whole balance.
-    expect(forPacksHead()).toBe('For packsRM 20.50');
-    expect(
-      container.querySelector('#withdraw-for-packs')?.textContent,
-    ).toContain('Can’t go to your bank. Open packs with it.');
-    expectNoUnlockCopy();
-    const topUp = [...(hold?.querySelectorAll('button') ?? [])].find(
-      (b) => b.textContent === 'Top up',
+    const topUp = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Top Up',
     );
-    expect(topUp).toBeTruthy();
+    expect(topUp?.className).toContain(PRIMARY);
     act(() => {
       topUp!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(openTopUp).toHaveBeenCalledOnce();
-    expect(amountInput().disabled).toBe(true);
-    expect(amountInput().getAttribute('aria-describedby')).toBe(
-      'withdraw-hold-reason',
-    );
-    expect(submitButton().disabled).toBe(true);
-  });
-
-  it('never topped up with a bonus-only balance: all of it is bonus credit', async () => {
-    await render([READY_ACCOUNT], 0, {
-      noTopup: true,
-      available: 15,
-      bonus: 15,
-    });
-    const split = container.querySelector('#withdraw-for-packs')!;
-    expect(forPacksHead()).toBe('For packsRM 15.00');
-    const lines = [...split.querySelectorAll('dl > div')].map(
-      (row) => row.querySelector('dd')?.textContent,
-    );
-    expect(lines).toEqual(['RM 15.00', 'RM 0.00']);
-    const hold = container.querySelector('#withdraw-hold-reason')?.textContent;
-    expect(hold).toContain('first top-up');
-    // Nothing waits on the gate: bonus credit never goes to the bank.
-    expect(hold).not.toContain('can go to your bank');
-  });
-
-  it('never topped up: an unstamped RM 30 prize sale can go to the bank once the gate opens', async () => {
-    // RM 45 balance = RM 30 prize sale (no stamp) + RM 15 bonus credit.
-    await render([READY_ACCOUNT], 0, {
-      noTopup: true,
-      available: 45,
-      bonus: 15,
-      remaining: 0,
-    });
     expect(
-      container.querySelector('#withdraw-hold-reason')?.textContent,
-    ).toContain(
-      'Then spend your top-up plus RM 15.00 on packs to unlock withdrawals; after that, RM 30.00 can go to your bank.',
-    );
-    expect(forPacksHead()).toBe('For packsRM 15.00');
-    const lines = [
-      ...container.querySelectorAll('#withdraw-for-packs dl > div dd'),
-    ].map((dd) => dd.textContent);
-    expect(lines).toEqual(['RM 15.00', 'RM 0.00']);
+      container.querySelector('#withdraw-hold-reason a[href="/slots"]')
+        ?.className,
+    ).not.toContain(PRIMARY);
+    expect(container.querySelectorAll(`.${PRIMARY}`)).toHaveLength(1);
+    expect(amountField()).toBeNull();
+    expect(moneyRows()).toMatchObject({
+      'Withdrawable later': 'RM 60.47',
+      'For packs': 'RM 20.50',
+    });
     expectNoUnlockCopy();
   });
 
-  it('never topped up with no remaining figure: promises nothing for the top-up', async () => {
-    // Unknown stamped part reads as all still to use — never overstates.
-    await render([READY_ACCOUNT], 0, {
-      noTopup: true,
-      available: 45,
-      bonus: 15,
-    });
-    expect(container.textContent).not.toContain('can go to your bank');
-    expect(forPacksHead()).toBe('For packsRM 45.00');
-  });
-
-  it('a freeze outranks a missing top-up and a lock (withdrawable.ts order)', async () => {
+  it('frozen: one message and nothing else', async () => {
     await render([READY_ACCOUNT], 0, {
       frozen: true,
+      noTopup: true,
+      available: 50,
+      bonus: 15,
+      remaining: 50,
+    });
+    const holds = container.querySelectorAll('#withdraw-hold-reason');
+    expect(holds).toHaveLength(1);
+    expect(holds[0]?.textContent).toContain('under review');
+    expect(container.querySelector('a[href="/contact"]')).not.toBeNull();
+    expect(container.querySelector('a[href="/slots"]')).toBeNull();
+    expect(container.querySelector('details')).toBeNull();
+    expect(amountField()).toBeNull();
+    expect(container.textContent).not.toContain('Top up once');
+  });
+
+  it('a missing top-up outranks a lock: one hold reason, the top-up steps', async () => {
+    await render([READY_ACCOUNT], 0, {
       noTopup: true,
       available: 50,
       remaining: 50,
     });
     expect(container.querySelectorAll('#withdraw-hold-reason')).toHaveLength(1);
-    expect(container.textContent).toContain('under review');
-    expect(container.textContent).not.toContain('first top-up');
-    expect(container.textContent).not.toContain('more on packs to unlock');
+    expect(steps()).toContain('From RM 30');
   });
 
-  it('a missing top-up outranks a lock', async () => {
-    await render([READY_ACCOUNT], 0, {
-      noTopup: true,
-      available: 50,
-      remaining: 50,
-    });
-    const holds = container.querySelectorAll('#withdraw-hold-reason');
-    expect(holds).toHaveLength(1);
-    expect(holds[0]?.textContent).toContain(
-      'Top up and use it on packs to unlock withdrawals',
-    );
-    expect(container.textContent).not.toContain('more on packs to unlock');
-  });
-
-  it('a fully withdrawable wallet raises no hold and no For-packs part', async () => {
+  it('a fully withdrawable wallet raises no hold and no steps', async () => {
     await render([READY_ACCOUNT], 100, { available: 100 });
     expect(container.querySelector('#withdraw-hold-reason')).toBeNull();
-    expect(container.querySelector('#withdraw-for-packs')).toBeNull();
+    expect(moneyRows()).toMatchObject({ 'For packs': 'RM 0.00' });
     fillValidForm();
     expect(submitButton().disabled).toBe(false);
+  });
+
+  it('the rules sit collapsed below, said once', async () => {
+    await render([READY_ACCOUNT], 100, { available: 100 });
+    const how = [...container.querySelectorAll('details')].find((d) =>
+      d.querySelector('summary')?.textContent?.includes('How withdrawals work'),
+    );
+    expect(how?.open).toBe(false);
+    expect(how?.querySelectorAll('li')).toHaveLength(3);
+    expect(container.textContent).not.toContain('Sell-back money reaches');
   });
 
   it('a "top up at least once" refusal opens the top-up sheet in place', async () => {
@@ -834,8 +742,10 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
     expect(container.querySelector('#withdraw-hold-reason')?.textContent).toBe(
       'You can withdraw once your withdrawable money reaches RM 50.00 (RM 20.00 more).',
     );
-    expect(container.textContent).not.toContain('bonus credit');
-    expect(container.textContent).not.toContain('first top-up');
+    // The status block names only the floor (the rules below are collapsed).
+    const status = container.querySelector('section')?.textContent;
+    expect(status).not.toContain('bonus credit');
+    expect(status).not.toContain('top-up');
     expect(amountInput().disabled).toBe(true);
     expect(amountInput().getAttribute('aria-describedby')).toBe(
       'withdraw-hold-reason',
@@ -901,12 +811,20 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
     expect(withdrawRemedy('You can withdraw up to RM 12.34 right now.')).toBe(
       null,
     );
-    // The spend-first locked refusal leads to opening packs.
+    // The backend's exact refusals (withdrawalGateError, spend first): the
+    // locked one leads to opening packs; the no-top-up one also mentions
+    // "money for packs" but its fix is the top-up, so that rule comes first.
     expect(
       withdrawRemedy(
-        'Withdrawals unlock once you’ve used your RM 50.00 for packs. Open packs with it, then your balance can be withdrawn.',
+        "Withdrawals unlock once you've used RM 50.00 more on packs. Then your balance, except bonus credit, can be withdrawn.",
       ),
     ).toEqual({ href: '/slots', label: 'Open packs' });
+    expect(
+      withdrawRemedy(
+        'Top up at least once to unlock deliveries. To withdraw, you also need to use all your money for packs.',
+      ),
+    ).toEqual({ href: null, label: 'Top up' });
+    // An earlier spend-first wording, kept for deploy skew.
     expect(
       withdrawRemedy(
         "Withdrawals unlock once you've used your RM 50.00 for packs. Open packs with it, then your balance can be withdrawn.",

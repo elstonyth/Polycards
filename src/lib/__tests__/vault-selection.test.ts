@@ -2,6 +2,8 @@ import { describe, expect, test } from 'vitest';
 import { sellTotals, toggleSelectAll } from '@/lib/vault-selection';
 import { sellBackNotice } from '@/lib/buyback-copy';
 
+const NB = String.fromCharCode(0xa0);
+
 describe('toggleSelectAll', () => {
   test('selects every visible id when none are selected', () => {
     const next = toggleSelectAll(new Set(), ['a', 'b', 'c']);
@@ -43,7 +45,7 @@ describe('sellTotals', () => {
     ]);
     expect(totals).toEqual({ amount: 80, held: 6 });
     expect(sellBackNotice(totals.amount, totals.held)).toBe(
-      'RM 80.00 added — RM 6.00 of it for packs',
+      `RM${NB}80.00 added — RM${NB}6.00 of it for packs`,
     );
   });
 

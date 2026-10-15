@@ -70,28 +70,20 @@ export default async function BankWithdrawalPage() {
             frozen={frozen}
             noTopup={noTopup}
             bonus={wallet?.bonus ?? 0}
-            remaining={wallet?.playthrough.remaining ?? null}
+            remaining={wallet?.playthrough.remaining ?? 0}
           />
         ) : (
-          <>
-            <div className="mt-6 flex items-start gap-2.5 rounded-xl border border-white/10 bg-neutral-900 px-4 py-3.5 text-sm text-white/80">
-              <Landmark
-                className="mt-0.5 h-4 w-4 shrink-0 text-white/60"
-                aria-hidden
-              />
-              <span>
-                Bank withdrawals aren&apos;t open yet — payouts go live with the
-                payment gateway. Your balance is safe and stays spendable on
-                packs in the meantime.
-              </span>
-            </div>
-            <p className="mt-4 text-[13px] text-white/60">
-              Sell-back money reaches your balance at once. Money from the
-              welcome pack&rsquo;s card, and the bonus-credit part of any sale,
-              is for packs. Withdrawals unlock once your money for packs is
-              used.
-            </p>
-          </>
+          <div className="mt-6 flex items-start gap-2.5 rounded-xl border border-white/10 bg-neutral-900 px-4 py-3.5 text-sm text-white/80">
+            <Landmark
+              className="mt-0.5 h-4 w-4 shrink-0 text-white/60"
+              aria-hidden
+            />
+            <span>
+              Bank withdrawals aren&apos;t open yet — payouts go live with the
+              payment gateway. Your balance is safe and stays spendable on packs
+              in the meantime.
+            </span>
+          </div>
         )
       ) : (
         <>
