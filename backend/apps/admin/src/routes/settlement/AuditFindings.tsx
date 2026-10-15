@@ -156,6 +156,7 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
                               ? new Date(acked.at).toLocaleString('en-MY')
                               : '—',
                           })}
+                          {acked.reason ? ` · “${acked.reason}”` : ''}
                         </Text>
                       ) : null}
                     </Table.Cell>

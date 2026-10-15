@@ -754,7 +754,12 @@ export interface GatewayAuditFinding {
   audited_at: string | null;
   /** Who acknowledged this finding on Settlement and when, while the note is
    *  still the one they acknowledged. Absent from an older backend. */
-  acknowledged?: { by: string | null; at: string | null } | null;
+  acknowledged?: {
+    by: string | null;
+    at: string | null;
+    /** From the admin action log; absent from an older backend. */
+    reason?: string | null;
+  } | null;
 }
 
 export interface GatewayAudit {

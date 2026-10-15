@@ -76,8 +76,15 @@ export async function GET(
     // A refunded payout with a finding may be paid twice, and the Dashboard
     // counts those from this list: fetched on their own, so a backlog of
     // newer findings can never push one out of it.
+    // Acknowledged ones are dealt with and never take its room (every writer
+    // of audit_note clears the acknowledgement on a new note: stampNote).
     packs.listGatewayWithdrawals(
-      { audit_note: { $ne: null }, currency, status: 'failed' },
+      {
+        audit_note: { $ne: null },
+        currency,
+        status: 'failed',
+        audit_ack_at: null,
+      },
       { take: FINDINGS_LIMIT, order: { audited_at: 'DESC' } },
     ),
   ]);
@@ -122,6 +129,26 @@ export async function GET(
       auditedMs(b.audited_at) - auditedMs(a.audited_at),
   );
 
+  // The reason each acknowledgement was given, from the admin action log:
+  // the latest acknowledge_finding row per finding shown.
+  const shown = findings.slice(0, FINDINGS_LIMIT);
+  const ackedIds = shown
+    .filter((f) => f.acknowledged !== null)
+    .map((f) => f.id);
+  const reasons = new Map<string, string>();
+  if (ackedIds.length > 0) {
+    const rows = await packs.listAdminActionAudits(
+      { entity_id: ackedIds, action: 'acknowledge_finding' },
+      { order: { created_at: 'DESC' } },
+    );
+    for (const r of rows) {
+      if (!reasons.has(r.entity_id)) reasons.set(r.entity_id, r.reason);
+    }
+  }
+  for (const f of shown) {
+    if (f.acknowledged) f.acknowledged.reason = reasons.get(f.id) ?? null;
+  }
+
   res.json({
     currency,
     gateway: active,
@@ -131,7 +158,7 @@ export async function GET(
     acknowledged_total: acknowledgedTotal,
     totals: moneyTotals(totals),
     history,
-    findings: findings.slice(0, FINDINGS_LIMIT),
+    findings: shown,
   });
 }
 
@@ -144,7 +171,11 @@ const acknowledgement = (r: {
   audit_ack_at: Date | string | null;
 }) =>
   r.audit_ack_note !== null && r.audit_ack_note === r.audit_note
-    ? { by: r.audit_ack_by, at: r.audit_ack_at }
+    ? {
+        by: r.audit_ack_by,
+        at: r.audit_ack_at,
+        reason: null as string | null,
+      }
     : null;
 
 const isRefunded = (f: { kind: string; status: string }) =>

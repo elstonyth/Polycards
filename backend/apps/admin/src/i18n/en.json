@@ -846,7 +846,10 @@
     "ackCancel": "Cancel",
     "acknowledgedBy": "Acknowledged by {{who}} · {{when}}",
     "acknowledgedFindings_one": "{{count}} acknowledged",
-    "acknowledgedFindings_other": "{{count}} acknowledged"
+    "acknowledgedFindings_other": "{{count}} acknowledged",
+    "acknowledgedToast": "Finding acknowledged",
+    "checkAcknowledged_one": "{{count, number}} acknowledged, still differs",
+    "checkAcknowledged_other": "{{count, number}} acknowledged, still differ"
   },
   "pipeline": {
     "label": "Inventory pipeline",

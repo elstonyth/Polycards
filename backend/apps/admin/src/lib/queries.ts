@@ -7,6 +7,7 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 import { toast } from '@medusajs/ui';
+import { useTranslation } from 'react-i18next';
 import {
   packsApi,
   type AdminCard,
@@ -355,9 +356,10 @@ export const usePaymentGateway = (): UseQueryResult<PaymentGatewaySetting> =>
 // "may be paid twice" row reads them too.
 export const useAcknowledgeFinding = () => {
   const qc = useQueryClient();
+  const { t } = useTranslation();
   return useMutation({
     mutationFn: acknowledgeAuditFinding,
-    onSuccess: () => toast.success('Finding acknowledged'),
+    onSuccess: () => toast.success(t('settlement.acknowledgedToast')),
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
     // Also after a refusal: a 409 means the note changed, so show the new one.
     onSettled: () =>

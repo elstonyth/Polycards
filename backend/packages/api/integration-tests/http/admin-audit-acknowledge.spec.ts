@@ -149,6 +149,7 @@ medusaIntegrationTestRunner({
         expect(after.findings[1].acknowledged).toEqual({
           by: ADMIN_EMAIL,
           at: expect.any(String),
+          reason: 'TGPay confirmed it will never pay this out',
         });
 
         const [row] = await packs.listAdminActionAudits({
@@ -173,6 +174,32 @@ medusaIntegrationTestRunner({
           ).status,
         ).toBe(200);
         expect((await audit()).findings_total).toBe(0);
+      });
+
+      // A retry after a lost response, or a second operator a moment later:
+      // answered as done, without a second log row or a new who/when.
+      it('acknowledging twice keeps the first acknowledgement', async () => {
+        const { packs, payout } = await seed();
+        const body = {
+          kind: 'withdrawal',
+          id: payout.id,
+          note: PAYOUT_NOTE,
+          reason: 'first',
+        };
+        expect((await acknowledge(body)).status).toBe(200);
+        const first = (await audit()).findings.find(
+          (x: { id: string }) => x.id === payout.id,
+        ).acknowledged;
+        expect(
+          (await acknowledge({ ...body, reason: 'second' })).status,
+        ).toBe(200);
+        const again = (await audit()).findings.find(
+          (x: { id: string }) => x.id === payout.id,
+        ).acknowledged;
+        expect(again).toEqual(first);
+        expect(
+          await packs.listAdminActionAudits({ entity_id: payout.id }),
+        ).toHaveLength(1);
       });
 
       it('a different note brings the finding back', async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { auditCounts } from './audit-counts';
+import { auditCounts, gatewayCheck } from './audit-counts';
 
 const rows = (n: number) => Array.from({ length: n }, () => ({}));
 
@@ -49,6 +49,32 @@ describe('auditCounts', () => {
       acknowledged: 2,
       all: 3,
       capped: false,
+    });
+  });
+});
+
+// The "Gateway check" tile at the top of a Settlement tab.
+describe('gatewayCheck', () => {
+  const at = '2026-10-15T10:00:00Z';
+  it('open findings: they differ', () => {
+    expect(
+      gatewayCheck({ findings_total: 2, acknowledged_total: 1, last_audited_at: at }),
+    ).toEqual({ tone: 'differs', count: 2 });
+  });
+  // Acknowledged is not agreed: the gateway still disagrees with those rows.
+  it('only acknowledged findings: never "all match"', () => {
+    expect(
+      gatewayCheck({ findings_total: 0, acknowledged_total: 3, last_audited_at: at }),
+    ).toEqual({ tone: 'acknowledged', count: 3 });
+  });
+  it('nothing open or acknowledged: all match once audited, else never ran', () => {
+    expect(gatewayCheck({ findings_total: 0, last_audited_at: at })).toEqual({
+      tone: 'match',
+      count: 0,
+    });
+    expect(gatewayCheck({ findings_total: 0, last_audited_at: null })).toEqual({
+      tone: 'never',
+      count: 0,
     });
   });
 });

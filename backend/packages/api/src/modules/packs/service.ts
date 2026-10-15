@@ -8030,7 +8030,10 @@ class PacksModuleService extends MedusaService({
   // dealt with, for the note the operator saw, and records why in the admin
   // action log, in one transaction. The write is scoped to that note: when the
   // audit has written another one since the page loaded, nothing changes and
-  // the answer is 'changed', so a new warning is never acknowledged unseen.
+  // the answer is 'changed', so a new warning is never acknowledged unseen. A
+  // finding already acknowledged for that note is answered as done, keeping
+  // the first who/when and writing no second log row (a retry, or a second
+  // operator a moment later).
   @InjectTransactionManager()
   async acknowledgeAuditFinding(
     input: {
@@ -8050,15 +8053,21 @@ class PacksModuleService extends MedusaService({
       `UPDATE ${table}
           SET audit_ack_note = audit_note, audit_ack_by = ?, audit_ack_at = now()
         WHERE id = ? AND deleted_at IS NULL AND audit_note = ?
+          AND audit_ack_note IS DISTINCT FROM audit_note
         RETURNING id`,
       [input.adminEmail, input.id, input.note],
     );
     if (updated.length === 0) {
-      const [exists] = await em.execute<{ id: string }[]>(
-        `SELECT id FROM ${table} WHERE id = ? AND deleted_at IS NULL`,
+      const [row] = await em.execute<
+        { audit_note: string | null; audit_ack_note: string | null }[]
+      >(
+        `SELECT audit_note, audit_ack_note FROM ${table} WHERE id = ? AND deleted_at IS NULL`,
         [input.id],
       );
-      return exists ? 'changed' : 'not_found';
+      if (!row) return 'not_found';
+      return row.audit_note === input.note && row.audit_ack_note === input.note
+        ? 'acknowledged'
+        : 'changed';
     }
     await this.audit(
       {
