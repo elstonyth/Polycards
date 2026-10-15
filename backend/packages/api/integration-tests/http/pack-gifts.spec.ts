@@ -375,15 +375,19 @@ medusaIntegrationTestRunner({
         const [credit] = await packs().listCreditTransactions({
           pull_id: roll.pull.id,
         });
-        const held = bonusShareSen(Math.round(Number(credit.amount) * 100), bp);
-        expect(held).toBeGreaterThan(0);
-        expect(credit.external_funded_cents).toBe(held);
-        stamped += held;
+        const heldSen = bonusShareSen(
+          Math.round(Number(credit.amount) * 100),
+          bp,
+        );
+        expect(heldSen).toBeGreaterThan(0);
+        expect(credit.external_funded_cents).toBe(heldSen);
+        stamped += heldSen;
       }
-      expect((await wallet()).playthrough.remaining).toBeCloseTo(
-        stamped / 100,
-        2,
-      );
+      const held = await wallet();
+      expect(held.playthrough.remaining).toBeCloseTo(stamped / 100, 2);
+      // Spend first (ADR 0013): while that is still to use on packs, even the
+      // RM 300 of plain cash cannot leave.
+      expect(held.withdrawable).toBe(0);
     });
 
     it('sells a gifted card back as withdrawable money (ADR 0012)', async () => {

@@ -26,6 +26,12 @@ export function money(
 
 export const rm = (n: number) => money(n, { prefix: 'RM ' });
 export const rm0 = (n: number) => money(n, { prefix: 'RM ', decimals: 0 });
+/** `rm` with a non-breaking space, for figures inside running sentences so
+ *  "RM" never wraps away from its number. */
+// Built from its code point: a literal U+00A0 in source gets flattened back
+// into a plain space by editors and formatters, silently (see task-hub.ts).
+export const rmNbsp = (n: number) =>
+  money(n, { prefix: `RM${String.fromCharCode(0xa0)}` });
 /** Singapore dollars — what an A3Pay customer pays or receives. */
 export const sgd = (n: number) => money(n, { prefix: 'S$' });
 export const sgd0 = (n: number) => money(n, { prefix: 'S$', decimals: 0 });

@@ -19,6 +19,12 @@ import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
 import { getOwnProfileHandle, getPublicProfile } from '@/lib/data/profiles';
 import { getWallet } from '@/lib/actions/wallet';
+import {
+  isWithdrawLocked,
+  sen,
+  TOPUP_FIRST_HEADING,
+  walletSplit,
+} from '@/lib/wallet-split';
 import { getVip } from '@/lib/actions/vip';
 import { levelProgressPct } from '@/lib/actions/vip-map';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
@@ -77,6 +83,19 @@ export default async function MePage() {
     getVip(),
     getAvatarFrames(),
   ]);
+  // Locked gate (spend first): what packs must still take before withdrawals
+  // open; null when withdrawals aren't waiting on packs.
+  const gate = walletResult.ok
+    ? {
+        ...walletResult.wallet,
+        remaining: walletResult.wallet.playthrough.remaining,
+      }
+    : null;
+  const unlockSpend =
+    gate && isWithdrawLocked(gate) ? walletSplit(gate).unlockSpend : null;
+  // The Withdraw button only when there is something to withdraw.
+  const canWithdraw =
+    gate !== null && !gate.isFrozen && sen(gate.withdrawable) > 0;
   // Second wave — needs the handle. Supplies header stats and the showcase
   // strip in one cached public-route read.
   const profileResult = handle ? await getPublicProfile(handle) : null;
@@ -296,22 +315,44 @@ export default async function MePage() {
                       find out from. Bonus alone never withdraws, so no hint. */}
                   {!walletResult.wallet.hasTopup &&
                     !walletResult.wallet.isFrozen &&
-                    Math.round(walletResult.wallet.balance * 100) >
-                      Math.round(walletResult.wallet.bonus * 100) && (
+                    sen(walletResult.wallet.balance) >
+                      sen(walletResult.wallet.bonus) && (
                       <p className="mt-0.5 text-[12px] font-semibold text-sky-400">
-                        Top up once to unlock withdrawals
+                        {TOPUP_FIRST_HEADING}
                       </p>
                     )}
+                  {unlockSpend !== null && (
+                    <p className="mt-0.5 text-[12px] font-semibold text-sky-400">
+                      Use{' '}
+                      <span className="whitespace-nowrap">
+                        {rm(unlockSpend)}
+                      </span>{' '}
+                      more on packs to unlock withdrawals.
+                    </p>
+                  )}
                 </Link>
                 <div className="flex shrink-0 gap-2">
-                  <Link
-                    href="/bank-withdrawal"
-                    className={cn(
-                      pillVariants({ variant: 'secondary', size: 'sm' }),
-                    )}
-                  >
-                    Withdraw
-                  </Link>
+                  {canWithdraw ? (
+                    <Link
+                      href="/bank-withdrawal"
+                      className={cn(
+                        pillVariants({ variant: 'secondary', size: 'sm' }),
+                      )}
+                    >
+                      Withdraw
+                    </Link>
+                  ) : (
+                    unlockSpend !== null && (
+                      <Link
+                        href="/slots"
+                        className={cn(
+                          pillVariants({ variant: 'secondary', size: 'sm' }),
+                        )}
+                      >
+                        Open packs
+                      </Link>
+                    )
+                  )}
                   <TopUpButton size="sm" className="" />
                 </div>
               </div>

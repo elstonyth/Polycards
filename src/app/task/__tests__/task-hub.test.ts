@@ -150,7 +150,7 @@ describe('reward art and label', () => {
 describe('claimNotice', () => {
   it('says bonus credit is for packs, naming the amount when known', () => {
     expect(claimNotice({ type: 'credit', amount_myr: 5 })).toBe(
-      'RM 5.00 bonus credit added. Use it on packs — it can’t be withdrawn.',
+      `RM${String.fromCharCode(0xa0)}5.00 bonus credit added. Use it on packs — it can’t be withdrawn.`,
     );
     expect(claimNotice({ type: 'credit' })).toBe(
       'Bonus credit added. Use it on packs — it can’t be withdrawn.',

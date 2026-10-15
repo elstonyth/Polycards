@@ -107,6 +107,7 @@ function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
       hasTopup: true,
       nextUnlock: null,
       withdrawable: 1000,
+      bonus: 0,
       playthrough: { deposited: 0, used: 0, remaining: 0 },
     }),
   } satisfies FakeFacet<GatewayWithdrawals>;
@@ -938,6 +939,7 @@ describe('startWithdrawal — money ordering', () => {
       hasTopup: true,
       nextUnlock: null,
       withdrawable: 0,
+      bonus: 0,
       playthrough: { deposited: 0, used: 0, remaining: 0 },
     });
     await expect(start(h)).rejects.toThrow(/under review/i);
@@ -957,10 +959,11 @@ describe('startWithdrawal — money ordering', () => {
       hasTopup: true,
       nextUnlock: null,
       withdrawable: 0,
+      bonus: 0,
       playthrough: { deposited: 100, used: 40, remaining: 60 },
     });
     await expect(start(h)).rejects.toThrow(
-      /Nothing is withdrawable yet\. Your RM 1000\.00 is for opening packs\./,
+      /Withdrawals unlock once you've used RM 60\.00 more on packs\./,
     );
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
   });
@@ -977,6 +980,7 @@ describe('startWithdrawal — money ordering', () => {
       hasTopup: false,
       nextUnlock: null,
       withdrawable: 0,
+      bonus: 0,
       playthrough: { deposited: 0, used: 0, remaining: 0 },
     });
     await expect(start(h)).rejects.toThrow(/Top up at least once/);
@@ -995,10 +999,10 @@ describe('startWithdrawal — money ordering', () => {
     h.packs.withdrawForCashout.mockRejectedValue(
       new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        'Nothing is withdrawable yet. Your RM 60.00 is for opening packs.',
+        "Withdrawals unlock once you've used RM 60.00 more on packs. Then your balance, except bonus credit, can be withdrawn.",
       ),
     );
-    await expect(start(h)).rejects.toThrow(/is for opening packs/);
+    await expect(start(h)).rejects.toThrow(/Withdrawals unlock once/);
     expect(h.packs.createGatewayWithdrawals).toHaveBeenCalledTimes(1);
     expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
       id: 'gpw_1',
@@ -1119,6 +1123,7 @@ describe('startWithdrawal — approval threshold (held)', () => {
     hasTopup: true,
     nextUnlock: null,
     withdrawable: 5000,
+    bonus: 0,
     playthrough: { deposited: 0, used: 0, remaining: 0 },
   };
 
@@ -1223,10 +1228,11 @@ describe('startWithdrawal — approval threshold (held)', () => {
     h.packs.walletSummary.mockResolvedValue({
       ...roomyWallet,
       withdrawable: 0,
+      bonus: 0,
       playthrough: { deposited: 100, used: 40, remaining: 60 },
     });
     await expect(start(h, { amount: 2000 })).rejects.toThrow(
-      /Nothing is withdrawable yet\. Your RM 5000\.00 is for opening packs\./,
+      /Withdrawals unlock once you've used RM 60\.00 more on packs\./,
     );
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
@@ -1614,6 +1620,7 @@ const fakeWallet = (over: Record<string, unknown> = {}) => ({
   hasTopup: true,
   nextUnlock: null,
   withdrawable: 1000,
+  bonus: 0,
   playthrough: { deposited: 0, used: 0, remaining: 0 },
   ...over,
 });
@@ -1998,11 +2005,12 @@ describe('PacksModuleService.withdrawForCashout', () => {
     const f = fakeService(
       fakeWallet({
         withdrawable: 0,
+        bonus: 0,
         playthrough: { deposited: 100, used: 40, remaining: 60 },
       }),
     );
     await expect(f.svc.withdrawForCashout(cashout, f.ctx)).rejects.toThrow(
-      /Nothing is withdrawable yet\. Your RM 1000\.00 is for opening packs\./,
+      /Withdrawals unlock once you've used RM 60\.00 more on packs\./,
     );
     expect(f.withdrawCreditsWithLedger).not.toHaveBeenCalled();
   });

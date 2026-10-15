@@ -4,7 +4,7 @@ import { useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Loader2 } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
-import { rm } from '@/lib/format';
+import { rm, rmNbsp } from '@/lib/format';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
@@ -169,7 +169,7 @@ export default function SellConfirmModal({
           {bulk && plural ? 'cards leave' : 'card leaves'} your vault and the
           amount is credited to your balance.
           {lockedSen > 0 &&
-            ` ${rm(lockedSen / 100)} of this sale is for opening packs (the part paid with bonus credit, or the welcome pack’s card).`}
+            ` ${rmNbsp(lockedSen / 100)} of this sale is for opening packs (the part paid with bonus credit, or the welcome pack’s card). Selling it pauses withdrawals until this money is used on packs.`}
         </p>
 
         <div className="mt-5 flex gap-2">

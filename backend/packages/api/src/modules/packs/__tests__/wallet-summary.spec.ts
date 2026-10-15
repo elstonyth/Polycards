@@ -81,11 +81,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
             } as Record<string, unknown>,
           ]);
 
-          // balance 160, used(40) < deposited(100): the RM60 still to play is
-          // held, the rest may leave (partial unlock, ADR 0011).
+          // balance 160, used(40) < deposited(100): RM60 is still to use on
+          // packs, so nothing may leave yet (spend first, ADR 0013).
           let w = await service.walletSummary(cust);
           expect(w.balance).toBeCloseTo(160, 2);
-          expect(w.withdrawable).toBeCloseTo(100, 2);
+          expect(w.withdrawable).toBe(0);
           expect(w.playthrough).toEqual({
             deposited: 100,
             used: 40,
@@ -227,6 +227,48 @@ moduleIntegrationTestRunner<PacksModuleService>({
           expect(w.available).toBe(0);
           expect(w.withdrawable).toBe(0);
           expect(w.isFrozen).toBe(true);
+        },
+      );
+
+      it(
+        'walletSummary: freeze zeroes withdrawable even with nothing left to use on packs',
+        async () => {
+          const cust = 'cus_ws_frozen_clear';
+          await service.mutateCreditAtomic({
+            customerId: cust,
+            amount: 100,
+            reason: 'topup',
+            reference: 'topup_ws_frozen_clear',
+          });
+          await service.createCreditTransactions([
+            {
+              customer_id: cust,
+              amount: -100,
+              reason: 'pack_open' as const,
+              pull_id: null,
+              reference: null,
+              external_funded_cents: -10000,
+            } as Record<string, unknown>,
+            {
+              customer_id: cust,
+              amount: 60,
+              reason: 'buyback' as const,
+              pull_id: null,
+              reference: null,
+            } as Record<string, unknown>,
+          ]);
+          let w = await service.walletSummary(cust);
+          expect(w.playthrough.remaining).toBe(0);
+          expect(w.withdrawable).toBeCloseTo(60, 2);
+
+          await service.setManualFreeze({
+            customerId: cust,
+            adminId: 'admin_test',
+            reason: 'wallet summary freeze test',
+          });
+          w = await service.walletSummary(cust);
+          expect(w.available).toBe(0);
+          expect(w.withdrawable).toBe(0);
         },
       );
 

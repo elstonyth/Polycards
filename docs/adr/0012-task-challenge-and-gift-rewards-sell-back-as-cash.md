@@ -2,6 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-15
+- **Amended by**: ADR 0013 (when that cash may leave)
 - **Supersedes**: the gift-pack part of the 2026-10-09 rule (#712) and the
   reward part of #748 (2026-10-11). Those minted gift packs and task and
   weekly-challenge rewards (card and slab prizes, free rips) with a full
@@ -45,6 +46,8 @@ card they paid for.
   bonus-paid share of a pull) and the welcome pack (`source = 'free'`).
 - Rule 1 is unchanged: nothing is withdrawable before the first real top-up.
   Shipping is unchanged too (zone delivery fee, #790).
+- "Cash" means part of the withdrawable balance, and when that balance may
+  leave is ADR 0013's rule: only once nothing is left to use on packs.
 
 ## Consequences
 

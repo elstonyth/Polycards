@@ -48,11 +48,11 @@ describe('withdrawableNote', () => {
       withdrawableNote(
         wallet({
           balance: 50,
-          withdrawable: 40,
+          withdrawable: 0,
           playthrough: { deposited: 20, used: 10, remaining: 10 },
         }),
       ),
-    ).toEqual({ key: 'heldPlay', held: 10 });
+    ).toEqual({ key: 'heldPlay', held: 50 });
   });
 
   it('held is rounded to the sen, never float noise', () => {

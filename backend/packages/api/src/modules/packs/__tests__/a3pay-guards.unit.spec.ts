@@ -295,6 +295,7 @@ describe('a regional payout', () => {
         hasTopup: true,
         nextUnlock: null,
         withdrawable: 1000,
+        bonus: 0,
         playthrough: { deposited: 0, used: 0, remaining: 0 },
       }),
     };
@@ -452,6 +453,7 @@ describe('the payout-float breaker cannot be tripped by one customer', () => {
         hasTopup: true,
         nextUnlock: null,
         withdrawable: 50_000,
+        bonus: 0,
         playthrough: { deposited: 0, used: 0, remaining: 0 },
       }),
     };

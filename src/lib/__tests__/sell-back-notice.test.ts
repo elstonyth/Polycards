@@ -2,21 +2,26 @@ import { describe, expect, it } from 'vitest';
 import { sellBackNotice, sellOfferCopy } from '@/lib/buyback-copy';
 import { toBuybackOffer } from '@/lib/actions/pack-batch-map';
 
+// Sentence figures use a non-breaking space after "RM" (rmNbsp).
+const nb = (s: string) => s.replace(/RM /g, `RM${String.fromCharCode(0xa0)}`);
+
 // Spec 2026-10-15 (revised): the free part of a sale is for opening packs. The
 // sell surfaces lack has_topup, so no variant may call money withdrawable.
 describe('sellBackNotice', () => {
   it('says only what was added when nothing is held', () => {
-    expect(sellBackNotice(30, 0)).toBe('RM 30.00 added.');
-    expect(sellBackNotice(0, 0)).toBe('RM 0.00 added.');
+    expect(sellBackNotice(30, 0)).toBe(nb('RM 30.00 added.'));
+    expect(sellBackNotice(0, 0)).toBe(nb('RM 0.00 added.'));
   });
 
   it('a wholly free sale is for opening packs', () => {
-    expect(sellBackNotice(20, 20)).toBe('RM 20.00 added for opening packs.');
+    expect(sellBackNotice(20, 20)).toBe(
+      nb('RM 20.00 added for opening packs.'),
+    );
   });
 
   it('names the for-packs part of a part-bonus sale', () => {
     expect(sellBackNotice(30, 10)).toBe(
-      'RM 30.00 added — RM 10.00 of it for packs',
+      nb('RM 30.00 added — RM 10.00 of it for packs'),
     );
   });
 
@@ -33,10 +38,12 @@ describe('sellBackNotice', () => {
   });
 
   it('rounds to the sen and clamps the held part to the sale', () => {
-    expect(sellBackNotice(10, 0.004)).toBe('RM 10.00 added.');
-    expect(sellBackNotice(0, 5)).toBe('RM 0.00 added.');
-    expect(sellBackNotice(10, 12)).toBe('RM 10.00 added for opening packs.');
-    expect(sellBackNotice(10, -1)).toBe('RM 10.00 added.');
+    expect(sellBackNotice(10, 0.004)).toBe(nb('RM 10.00 added.'));
+    expect(sellBackNotice(0, 5)).toBe(nb('RM 0.00 added.'));
+    expect(sellBackNotice(10, 12)).toBe(
+      nb('RM 10.00 added for opening packs.'),
+    );
+    expect(sellBackNotice(10, -1)).toBe(nb('RM 10.00 added.'));
   });
 });
 
@@ -51,14 +58,16 @@ describe('sellOfferCopy — the reveal Sell button', () => {
 
   it('a held part gets its line and one clean accessible sentence', () => {
     const copy = sellOfferCopy(30, 90, 10);
-    expect(copy.forPacks).toBe('RM 10.00 of it for packs');
+    expect(copy.forPacks).toBe(nb('RM 10.00 of it for packs'));
     expect(copy.ariaLabel).toBe(
-      'Sell for RM 30.00 (90%), RM 10.00 of it for packs',
+      `Sell for RM 30.00 (90%), ${nb('RM 10.00')} of it for packs`,
     );
   });
 
   it('never names more than the offer as held', () => {
-    expect(sellOfferCopy(20, 90, 25).forPacks).toBe('RM 20.00 of it for packs');
+    expect(sellOfferCopy(20, 90, 25).forPacks).toBe(
+      nb('RM 20.00 of it for packs'),
+    );
     expect(sellOfferCopy(20, 90, 0.004).forPacks).toBeNull();
   });
 

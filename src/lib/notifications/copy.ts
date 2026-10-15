@@ -181,7 +181,7 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
       const amount = numOf(data, 'amount_myr');
       return amount === null
         ? null
-        : `${rm(amount)} added — it’s for opening packs.`;
+        : `${rm(amount)} added. Withdrawals unlock once all your money for packs is used.`;
     },
     href: '/transactions',
     action: 'View ledger',

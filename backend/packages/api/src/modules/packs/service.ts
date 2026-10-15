@@ -6965,11 +6965,11 @@ class PacksModuleService extends MedusaService({
   }
 
   // Wallet summary: raw balance, available (freeze-aware) and the playthrough
-  // withdrawal gate (withdrawable.ts): money not yet played through on packs
-  // stays in the balance until it is. All amounts in MYR (RM) — the ledger is
-  // already stored in MYR decimals, never USD.
+  // withdrawal gate (withdrawable.ts): while money is still to use on packs,
+  // nothing may leave. All amounts in MYR (RM) — the ledger is already stored
+  // in MYR decimals, never USD.
   // available = isFrozen ? 0 : balance  (matches availableBalance).
-  // withdrawable = available − bonus − playthrough.remaining (≥ 0).
+  // withdrawable = playthrough.remaining > 0 ? 0 : available − bonus (≥ 0).
   @InjectManager()
   async walletSummary(
     customerId: string,
@@ -7057,9 +7057,9 @@ class PacksModuleService extends MedusaService({
     // (withdrawalGateError compares `amount <= withdrawable`).
     const available = frozen ? 0 : Math.round(balance * 100) / 100;
 
-    // Playthrough gate: holds only what is still to play (partial unlock,
-    // 2026-10-14, ADR 0011). Spending on packs stays unrestricted either way —
-    // the gate only limits cashout.
+    // Playthrough gate: nothing leaves until what is still to use on packs is
+    // used (spend first, ADR 0013). Spending on packs stays unrestricted
+    // either way — the gate only limits cashout.
     const gate = playthroughState({ depositedCents, usedCents });
     // Bonus credit is spend-only (spec 2026-10-07): it sits inside the
     // balance but never inside what may leave.

@@ -87,9 +87,9 @@ and ADR 0001 stands: the vault is still a Pull status; the Vault _page_ renders
 Pulls and Pack Gifts side by side. The pack and spin pages use a held gift first
 ("Vault x1", "Bet Vault x1 + RM300.00"); the Open claims exactly the gifts the
 screen showed or is refused (409) — never billed in their place. It writes a
-`source='gift'` Pull whose sale is withdrawable money once the customer has
-topped up (ADR 0012, decided at sell time; the holds older gift sales left
-are released once by a script after the deploy).
+`source='gift'` Pull whose sale is plain cash (ADR 0012, decided at sell time;
+the holds older gift sales left were released once by a script after the
+deploy), withdrawable only under the Withdrawable rule (ADR 0013).
 _Avoid_: voucher (VIP credit grant), free rip (the task reward, a `task_claim`
 row), reward
 
@@ -166,22 +166,24 @@ challenge and VIP voucher credit is Bonus Credit too (2026-10-11). Free value
 goes through packs twice: a card pulled with bonus or from the Free Welcome
 Pack sells back as normal credit, but its free share (`pull.bonus_bp`; all of
 it for a welcome pull) is **Still to use on packs** and must be spent on a pack
-once more before it can be withdrawn (operator rule 2026-10-09), like a
-deposit. Welcome pulls are held in full only on pulls minted since 2026-10-11;
-older ones sell back fully withdrawable. A Pack Gift's pull and a task or
-weekly-challenge **reward** (any `source='reward'` pull: a card or slab prize,
-or a free rip) sell back fully withdrawable once the customer has topped up,
-decided at sell time (ADR 0012); the holds older reward and gift sales left
-are released once by `scripts/release-old-reward-holds.ts` after the deploy.
+once more (operator rule 2026-10-09), like a deposit. Welcome pulls are held
+in full only on pulls minted since 2026-10-11; older ones sell back as plain
+cash. A Pack Gift's pull and a task or weekly-challenge **reward** (any
+`source='reward'` pull: a card or slab prize, or a free rip) sell back as plain
+cash, decided at sell time (ADR 0012); the holds older reward and gift sales
+left were released once by `scripts/release-old-reward-holds.ts` after the
+deploy. Plain cash still leaves only under the Withdrawable rule below.
 \_Avoid*: promo credit (the economy report's bucket for task/challenge/voucher
 credit), dead chips, free credit
 
 **Available**:
 The spendable balance. Equal to Balance, except that a frozen account reports 0.
-**Withdrawable** is the Normal part of it less what is **Still to use on
-packs** (`playthrough.remaining`: unspent top-ups and the free share of
-sell-backs, ADR 0011). Screens call everything not withdrawable **For packs**
-(Bonus Credit + Still to use on packs).
+**Withdrawable** is 0 before the first top-up and while anything is **Still
+to use on packs** (`playthrough.remaining`: unspent top-ups and the free share
+of sell-backs); once that is all used, it is the whole Normal part of Available
+(spend first, ADR 0013, replacing ADR 0011's partial hold). Screens call Bonus
+Credit + Still to use on packs **For packs**; the rest of a locked balance is
+the cash that unlocks once the money for packs is used.
 (Nothing locks credit any more — the commission lock left with the referral
 programme, ADR 0007.)
 
@@ -325,8 +327,9 @@ period). Rewards: credit (Bonus Credit since 2026-10-11), a free rip of a
 pack, or a card straight to the vault — the latter two land as
 `source='reward'` pulls, sellable like any pulled card the moment they land
 (completing the task IS the requirement; operator decision 2026-09-03), and
-their sale is withdrawable money (ADR 0012). Only the free welcome pack's `source='free'`
-pull carries the first-paid-open lock.
+their sale is plain cash (ADR 0012), withdrawable only under the Withdrawable
+rule (ADR 0013). Only the free welcome pack's `source='free'` pull carries the
+first-paid-open lock.
 
 **Check-in**:
 The explicit once-per-MYT-day button on /task (`daily_checkin`), counted by

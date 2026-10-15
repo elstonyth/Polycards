@@ -1,6 +1,7 @@
 # ADR 0011 — The playthrough gate holds only the unplayed part
 
-- **Status**: Accepted
+- **Status**: Superseded by ADR 0013 (2026-10-15): withdrawals open only once
+  nothing is left to use on packs, so the partial hold below no longer applies.
 - **Date**: 2026-10-14
 - **Amends**: ADR 0010 (the "whole balance stays unwithdrawable" consequence)
   and `plans/082-withdrawal-gate-under-lock.md` (the all-or-nothing gate).
