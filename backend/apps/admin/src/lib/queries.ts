@@ -357,11 +357,11 @@ export const useAcknowledgeFinding = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: acknowledgeAuditFinding,
-    onSuccess: () => {
-      toast.success('Finding acknowledged');
-      qc.invalidateQueries({ queryKey: ['admin', 'gateway-audit'] });
-    },
+    onSuccess: () => toast.success('Finding acknowledged'),
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+    // Also after a refusal: a 409 means the note changed, so show the new one.
+    onSettled: () =>
+      qc.invalidateQueries({ queryKey: ['admin', 'gateway-audit'] }),
   });
 };
 
