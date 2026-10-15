@@ -90,6 +90,26 @@ export function sellbackHoldBp(pull: {
     : Number(pull.bonus_bp ?? 0);
 }
 
+/** Releasing the holds that reward and gift sales stamped before ADR 0012,
+ *  once per customer. Only what is still held can go (`remainingSen`: opens
+ *  may have spent part of it already), never more than the stamps (the rest
+ *  of the hold is top-up money), taken from the newest stamped rows first.
+ *  `rows` newest first; returns only rows that change. */
+export function releasableRewardHoldSen(input: {
+  remainingSen: number;
+  rows: { id: string; heldSen: number }[];
+}): { id: string; releaseSen: number }[] {
+  let left = Math.max(0, input.remainingSen);
+  const out: { id: string; releaseSen: number }[] = [];
+  for (const row of input.rows) {
+    const releaseSen = Math.min(Math.max(0, row.heldSen), left);
+    if (releaseSen <= 0) continue;
+    out.push({ id: row.id, releaseSen });
+    left -= releaseSen;
+  }
+  return out;
+}
+
 /** A paid row is a bonus open when bonus credit paid at least half its price.
  *  Below that it stays 'pack': a few ringgit of leftover bonus must not
  *  disqualify a real-money open from the counts (tasks, achievements, the

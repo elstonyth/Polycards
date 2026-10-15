@@ -176,6 +176,7 @@ import {
   consumeBonusSen,
   normalSenSql,
   reasonCashSenSql,
+  releasableRewardHoldSen,
 } from './bonus-credit';
 import { recomputeExternalStamps } from './external-backfill';
 import { levelForSpend } from './vip-ladder';
@@ -10418,6 +10419,129 @@ class PacksModuleService extends MedusaService({
       );
     }
     return { rowsUpdated: diff.size };
+  }
+
+  // Customers holding a reward or gift sale stamped before ADR 0012 (owner rule
+  // 2026-10-15): the population of the one-shot release below
+  // (scripts/release-old-reward-holds.ts). Read-only.
+  @InjectManager()
+  async customersWithOldRewardHolds(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ customer_id: string }[]>(
+      `SELECT DISTINCT ct.customer_id FROM credit_transaction ct
+         JOIN pull p ON p.id = ct.pull_id
+        WHERE ct.reason = 'buyback' AND ct.deleted_at IS NULL
+          AND ct.external_funded_cents > 0 AND p.source IN ('reward', 'gift')
+        ORDER BY ct.customer_id`,
+      [],
+    );
+    return rows.map((r) => r.customer_id);
+  }
+
+  // Release, once, what a customer's old reward / gift sales still hold:
+  // lowers those buyback rows' external_funded_cents (the playthrough basis
+  // only — no money row, the balance does not move) by min(what is still held,
+  // the stamps), newest first (releasableRewardHoldSen). One locked
+  // transaction, like backfillExternalFundedBasisForCustomer.
+  //
+  // The audit row is the one-shot guard, and it is written on apply even when
+  // nothing is left to release: a stamp opens have already spent cannot be
+  // released, and a later top-up would otherwise let a re-run release top-up
+  // money against it.
+  @InjectTransactionManager()
+  async releaseOldRewardHoldsForCustomer(
+    customerId: string,
+    input: { apply: boolean; actor: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    alreadyReleased: boolean;
+    remainingSen: number;
+    releasedSen: number;
+  }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `credit:${customerId}`,
+    ]);
+    const [done] = await em.execute<{ id: string }[]>(
+      `SELECT id FROM admin_action_audit
+        WHERE entity_type = 'customer' AND entity_id = ?
+          AND action = 'release_reward_holds' AND deleted_at IS NULL
+        LIMIT 1`,
+      [customerId],
+    );
+    if (done) return { alreadyReleased: true, remainingSen: 0, releasedSen: 0 };
+
+    // Same basis as walletSummary, plus the external pool opens consume from
+    // (they agree; the release is capped by both so the pool never goes < 0).
+    const [sums] = await em.execute<
+      {
+        deposited_cents: string | null;
+        used_cents: string | null;
+        pool_cents: string | null;
+      }[]
+    >(
+      `SELECT COALESCE(SUM(${DEPOSITED_PT_SEN_SQL}), 0)::bigint AS deposited_cents, ` +
+        "COALESCE(SUM(-external_funded_cents) FILTER (WHERE reason = 'pack_open'), 0)::bigint AS used_cents, " +
+        'COALESCE(SUM(external_funded_cents), 0)::bigint AS pool_cents ' +
+        'FROM credit_transaction WHERE customer_id = ? AND deleted_at IS NULL',
+      [customerId],
+    );
+    const remainingSen = playthroughState({
+      depositedCents: Number(sums?.deposited_cents ?? 0),
+      usedCents: Number(sums?.used_cents ?? 0),
+    }).remainingCents;
+    const stamped = await em.execute<
+      { id: string; external_funded_cents: string | number }[]
+    >(
+      `SELECT ct.id, ct.external_funded_cents FROM credit_transaction ct
+         JOIN pull p ON p.id = ct.pull_id
+        WHERE ct.customer_id = ? AND ct.reason = 'buyback'
+          AND ct.deleted_at IS NULL AND ct.external_funded_cents > 0
+          AND p.source IN ('reward', 'gift')
+        ORDER BY ct.created_at DESC, ct.id DESC`,
+      [customerId],
+    );
+    const release = releasableRewardHoldSen({
+      remainingSen: Math.min(
+        remainingSen,
+        Math.max(0, Number(sums?.pool_cents ?? 0)),
+      ),
+      rows: stamped.map((r) => ({
+        id: r.id,
+        heldSen: Number(r.external_funded_cents),
+      })),
+    });
+    const releasedSen = release.reduce((t, r) => t + r.releaseSen, 0);
+
+    if (input.apply && stamped.length > 0) {
+      for (const r of release) {
+        await em.execute(
+          'UPDATE credit_transaction SET external_funded_cents = external_funded_cents - ?, updated_at = now() WHERE id = ?',
+          [r.releaseSen, r.id],
+        );
+      }
+      await this.audit(
+        {
+          admin_id: input.actor,
+          entity_type: 'customer',
+          entity_id: customerId,
+          action: 'release_reward_holds',
+          before: { remaining_sen: remainingSen },
+          after: {
+            remaining_sen: remainingSen - releasedSen,
+            released_sen: releasedSen,
+            rows: release,
+          },
+          reason:
+            'Owner rule 2026-10-15 (ADR 0012): reward and gift sales are cash; old holds released once.',
+        },
+        sharedContext,
+      );
+    }
+    return { alreadyReleased: false, remainingSen, releasedSen };
   }
 
   // Grant ladder rewards for every newly-crossed VIP level (Phase 3b §E).

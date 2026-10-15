@@ -109,6 +109,9 @@ export const ADMIN_AUDIT_ACTIONS = [
   'grant_pack_gift',
   'revoke_pack_gift',
   'grant_bonus_credit',
+  // The one-shot release of old reward / gift sale holds (ADR 0012), entity
+  // 'customer' — see Migration20261015120000.
+  'release_reward_holds',
 ] as const;
 
 // admin_action_audit — append-only record of every admin money mutation

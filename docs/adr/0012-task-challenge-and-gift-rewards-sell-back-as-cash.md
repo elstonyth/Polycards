@@ -30,8 +30,17 @@ card they paid for.
   sold. `bonus_bp` is still minted full on rewards and gifts, because it also
   keeps them out of VIP, the boards, tasks and the challenge. There is no
   migration.
-- **Forward only.** Sales made before the deploy keep their stamp, and their
-  hold stays until it is spent on packs.
+- **Old holds are released once, by a script after the deploy.** Reward and
+  gift sales made before the deploy were stamped under the old rule.
+  `scripts/release-old-reward-holds.ts` (dry run by default, `apply` to write)
+  lowers those buyback rows' `external_funded_cents` by what each customer still
+  holds of them, newest first, never more than the stamps, so held top-up money
+  and bonus / welcome stamps stay held. No money row is written and balances do
+  not move. Each customer gets one `release_reward_holds` audit row, written
+  even when nothing was left to release; it makes a re-run a no-op, so a later
+  top-up is never released. Run it after the deploy, not before: a sale stamped
+  by the old code after the run would be skipped. The sale's SE `ledger_entry`
+  keeps its original `playthrough` figure, as append-only history.
 - **Still two rounds** (ADR 0010, the 2026-10-09 rule): bonus credit (the
   bonus-paid share of a pull) and the welcome pack (`source = 'free'`).
 - Rule 1 is unchanged: nothing is withdrawable before the first real top-up.
