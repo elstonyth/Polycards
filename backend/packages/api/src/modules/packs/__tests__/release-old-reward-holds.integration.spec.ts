@@ -145,7 +145,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
       const after = await service.walletSummary(cus);
       expect(after.balance).toBeCloseTo(before.balance, 2);
       expect(after.playthrough.remaining).toBeCloseTo(16, 2);
-      expect(after.withdrawable).toBeCloseTo(before.withdrawable + 30, 2);
+      // RM 16 (welcome + bonus stamps, top-up) is still to use on packs, so
+      // nothing leaves yet (spend first, ADR 0013).
       expect(await stampOf(reward)).toBe(0);
       expect(await stampOf(gift)).toBe(0);
       expect(await stampOf(welcome)).toBe(800);
@@ -164,6 +165,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
       ).toMatchObject({ alreadyReleased: true, releasedSen: 0 });
       expect(await service.walletSummary(cus)).toEqual(after);
       expect(await audits(cus)).toHaveLength(1);
+
+      // Using the RM 16 opens withdrawals: the whole balance can leave,
+      // the released RM 30 included. Unreleased, RM 30 would still be held.
+      await open(cus, 16, 1600);
+      const opened = await service.walletSummary(cus);
+      expect(opened.playthrough.remaining).toBe(0);
+      expect(opened.withdrawable).toBeCloseTo(before.balance - 16, 2);
     });
 
     it('releases only what is still held, and never a later top-up', async () => {
@@ -230,8 +238,13 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
       await topup(cus, 10, 'rel_notopup_topup');
       w = await service.walletSummary(cus);
-      // The RM 10 top-up is held; the released RM 15 sale is withdrawable.
+      // The RM 10 top-up must be used on packs first.
       expect(w.playthrough.remaining).toBe(10);
+      expect(w.withdrawable).toBe(0);
+      // Used: the released RM 15 sale can leave.
+      await open(cus, 10, 1000);
+      w = await service.walletSummary(cus);
+      expect(w.playthrough.remaining).toBe(0);
       expect(w.withdrawable).toBeCloseTo(15, 2);
     });
   },

@@ -380,10 +380,11 @@ medusaIntegrationTestRunner({
         expect(credit.external_funded_cents).toBe(held);
         stamped += held;
       }
-      expect((await wallet()).playthrough.remaining).toBeCloseTo(
-        stamped / 100,
-        2,
-      );
+      const held = await wallet();
+      expect(held.playthrough.remaining).toBeCloseTo(stamped / 100, 2);
+      // Spend first (ADR 0013): while that is still to use on packs, even the
+      // RM 300 of plain cash cannot leave.
+      expect(held.withdrawable).toBe(0);
     });
 
     it('sells a gifted card back as withdrawable money (ADR 0012)', async () => {

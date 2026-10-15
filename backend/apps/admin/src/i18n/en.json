@@ -1304,14 +1304,14 @@
     "balance": "Balance",
     "balanceNote": "everything in the wallet, bonus included",
     "withdrawableNow": "Withdrawable now",
-    "withdrawableHint": "What the withdraw button allows right now: the balance, less bonus credit and anything still to use on packs. Frozen accounts and players who never topped up can't withdraw.",
+    "withdrawableHint": "What the withdraw button allows right now: nothing while any money is still to use on packs, then the whole balance less bonus credit. Frozen accounts and players who never topped up can't withdraw.",
     "withdrawableNote": "can be withdrawn now",
     "frozenNote": "Frozen: nothing can be withdrawn",
     "noTopupNote": "Never topped up: nothing can be withdrawn",
     "bonusLabel": "Bonus credit",
     "bonusNote": "spend-only, never withdrawable",
     "stillToPlay": "Still to use on packs",
-    "stillToPlayHint": "Top-ups, and the free part of a sell-back (from bonus credit or the welcome pack), must be spent on packs; they can't be withdrawn. Selling what is pulled with them is withdrawable. This is the part not spent yet: it stays in the wallet and can still be used on packs.",
+    "stillToPlayHint": "Top-ups, and the free part of a sell-back (from bonus credit or the welcome pack), must be spent on packs. While any of it is left, nothing can be withdrawn; once it is all used, the whole balance except bonus credit can. This is the part not spent yet: it stays in the wallet and can still be used on packs.",
     "stillToPlayNote": "spent {{used}} of {{deposited}} on packs",
     "nothingHeld": "nothing held back",
     "historyTitle": "Wallet history",
@@ -1363,8 +1363,8 @@
     "colSellNow": "Sell now",
     "sellLocked": "Can't be sold yet: a free welcome card unlocks after the first paid pack.",
     "sellsPaused": "Selling is paused: the exchange-rate feed is down, so the player can't sell any card right now. The prices below are indicative.",
-    "heldBoth": "{{held}} held back: bonus credit and money still to use on packs",
+    "heldBoth": "{{held}} held back: bonus credit, and the rest until the money still to use on packs is used",
     "heldBonus": "{{held}} held back: bonus credit",
-    "heldPlay": "{{held}} held back: still to use on packs"
+    "heldPlay": "{{held}} held back until the money still to use on packs is used"
   }
 }

@@ -166,22 +166,24 @@ challenge and VIP voucher credit is Bonus Credit too (2026-10-11). Free value
 goes through packs twice: a card pulled with bonus or from the Free Welcome
 Pack sells back as normal credit, but its free share (`pull.bonus_bp`; all of
 it for a welcome pull) is **Still to use on packs** and must be spent on a pack
-once more before it can be withdrawn (operator rule 2026-10-09), like a
-deposit. Welcome pulls are held in full only on pulls minted since 2026-10-11;
-older ones sell back fully withdrawable. A Pack Gift's pull and a task or
-weekly-challenge **reward** (any `source='reward'` pull: a card or slab prize,
-or a free rip) sell back fully withdrawable once the customer has topped up,
-decided at sell time (ADR 0012); the holds older reward and gift sales left
-are released once by `scripts/release-old-reward-holds.ts` after the deploy.
+once more (operator rule 2026-10-09), like a deposit. Welcome pulls are held
+in full only on pulls minted since 2026-10-11; older ones sell back as plain
+cash. A Pack Gift's pull and a task or weekly-challenge **reward** (any
+`source='reward'` pull: a card or slab prize, or a free rip) sell back as plain
+cash, decided at sell time (ADR 0012); the holds older reward and gift sales
+left were released once by `scripts/release-old-reward-holds.ts` after the
+deploy. Plain cash still leaves only under the Withdrawable rule below.
 \_Avoid*: promo credit (the economy report's bucket for task/challenge/voucher
 credit), dead chips, free credit
 
 **Available**:
 The spendable balance. Equal to Balance, except that a frozen account reports 0.
-**Withdrawable** is the Normal part of it less what is **Still to use on
-packs** (`playthrough.remaining`: unspent top-ups and the free share of
-sell-backs, ADR 0011). Screens call everything not withdrawable **For packs**
-(Bonus Credit + Still to use on packs).
+**Withdrawable** is 0 before the first top-up and while anything is **Still
+to use on packs** (`playthrough.remaining`: unspent top-ups and the free share
+of sell-backs); once that is all used, it is the whole Normal part of Available
+(spend first, ADR 0013, replacing ADR 0011's partial hold). Screens call Bonus
+Credit + Still to use on packs **For packs**; the rest of a locked balance is
+the cash that unlocks once the money for packs is used.
 (Nothing locks credit any more — the commission lock left with the referral
 programme, ADR 0007.)
 

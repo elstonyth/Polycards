@@ -960,7 +960,7 @@ describe('startWithdrawal — money ordering', () => {
       playthrough: { deposited: 100, used: 40, remaining: 60 },
     });
     await expect(start(h)).rejects.toThrow(
-      /Nothing is withdrawable yet\. Your RM 1000\.00 is for opening packs\./,
+      /Withdrawals unlock once you've used your RM 60\.00 for packs\./,
     );
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
   });
@@ -995,10 +995,10 @@ describe('startWithdrawal — money ordering', () => {
     h.packs.withdrawForCashout.mockRejectedValue(
       new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        'Nothing is withdrawable yet. Your RM 60.00 is for opening packs.',
+        "Withdrawals unlock once you've used your RM 60.00 for packs. Open packs with it, then your balance can be withdrawn.",
       ),
     );
-    await expect(start(h)).rejects.toThrow(/is for opening packs/);
+    await expect(start(h)).rejects.toThrow(/Withdrawals unlock once/);
     expect(h.packs.createGatewayWithdrawals).toHaveBeenCalledTimes(1);
     expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
       id: 'gpw_1',
@@ -1226,7 +1226,7 @@ describe('startWithdrawal — approval threshold (held)', () => {
       playthrough: { deposited: 100, used: 40, remaining: 60 },
     });
     await expect(start(h, { amount: 2000 })).rejects.toThrow(
-      /Nothing is withdrawable yet\. Your RM 5000\.00 is for opening packs\./,
+      /Withdrawals unlock once you've used your RM 60\.00 for packs\./,
     );
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
@@ -2002,7 +2002,7 @@ describe('PacksModuleService.withdrawForCashout', () => {
       }),
     );
     await expect(f.svc.withdrawForCashout(cashout, f.ctx)).rejects.toThrow(
-      /Nothing is withdrawable yet\. Your RM 1000\.00 is for opening packs\./,
+      /Withdrawals unlock once you've used your RM 60\.00 for packs\./,
     );
     expect(f.withdrawCreditsWithLedger).not.toHaveBeenCalled();
   });

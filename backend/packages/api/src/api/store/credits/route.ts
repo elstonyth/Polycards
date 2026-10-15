@@ -147,9 +147,9 @@ export async function GET(
       is_frozen: wallet.isFrozen,
       // No top-up ever = withdrawals and deliveries locked (2026-10-11).
       has_topup: wallet.hasTopup,
-      // Playthrough gate (withdrawable.ts): playthrough.remaining is held
-      // until spent on packs; withdrawable = available − bonus − remaining
-      // (≥ 0). Spending on packs is never restricted.
+      // Playthrough gate (withdrawable.ts, ADR 0013): withdrawable is 0 while
+      // playthrough.remaining > 0, else available − bonus (≥ 0). Spending on
+      // packs is never restricted.
       withdrawable: wallet.withdrawable,
       // Spend-only bonus credit inside balance (spec 2026-10-07) — never
       // withdrawable; the wallet page shows it apart.
