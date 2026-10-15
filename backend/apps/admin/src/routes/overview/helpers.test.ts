@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dayRangeText } from './helpers';
+import { dayRangeText, parseSavedRange } from './helpers';
 
 describe('dayRangeText', () => {
   it('names the MYT days a half-open window covers, year once', () => {
@@ -35,5 +35,19 @@ describe('dayRangeText', () => {
         to: '2026-01-03T16:00:00.000Z',
       }),
     ).toBe('28 Dec 2025 – 3 Jan 2026');
+  });
+});
+
+// The Dashboard opens on Today, or on the range the operator last picked.
+describe('parseSavedRange', () => {
+  it('restores a range picked before', () => {
+    expect(parseSavedRange('30d')).toBe('30d');
+    expect(parseSavedRange('custom')).toBe('custom');
+  });
+
+  it('opens on Today when nothing, or nothing valid, was saved', () => {
+    expect(parseSavedRange(null)).toBe('today');
+    expect(parseSavedRange('forever')).toBe('today');
+    expect(parseSavedRange('')).toBe('today');
   });
 });

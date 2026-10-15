@@ -10,6 +10,29 @@ export const RANGES: StatsRange[] = [
   'custom',
 ];
 
+// The Dashboard opens on the range the operator last picked (this browser),
+// else Today.
+const RANGE_KEY = 'pc-dashboard-range';
+
+export const parseSavedRange = (raw: string | null): StatsRange =>
+  RANGES.includes(raw as StatsRange) ? (raw as StatsRange) : 'today';
+
+export const savedRange = (): StatsRange => {
+  try {
+    return parseSavedRange(window.localStorage.getItem(RANGE_KEY));
+  } catch {
+    return 'today';
+  }
+};
+
+export const saveRange = (range: StatsRange): void => {
+  try {
+    window.localStorage.setItem(RANGE_KEY, range);
+  } catch {
+    // Private mode or blocked storage: the pick still holds for this visit.
+  }
+};
+
 // The backend's windows are MYT (fixed UTC+8). Shift, then read the UTC
 // fields, so the text is MYT whatever timezone the viewer's browser is in.
 const MYT_MS = 8 * 3_600_000;
