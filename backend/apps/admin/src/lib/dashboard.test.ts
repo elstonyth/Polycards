@@ -431,6 +431,19 @@ describe('doublePayRisks', () => {
     ).toEqual({ count: 0, paid: 0, amount: 0 });
   });
 
+  // An operator acknowledged it on Settlement: it no longer needs anyone.
+  it('leaves out a refunded payout someone acknowledged', () => {
+    expect(
+      doublePayRisks([
+        finding({}),
+        finding({
+          id: 'w2',
+          acknowledged: { by: 'ops@test.dev', at: '2026-10-15T10:00:00Z' },
+        }),
+      ]),
+    ).toEqual({ count: 1, paid: 0, amount: 512.4 });
+  });
+
   // One rail's audit failing to load must not hide the other's risks.
   it('counts whichever rails loaded, and nothing when none did', () => {
     const rm = { findings: [finding({})] };

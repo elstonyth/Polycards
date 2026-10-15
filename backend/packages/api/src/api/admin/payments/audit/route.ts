@@ -45,6 +45,8 @@ export async function GET(
   // never hold up the "payments differ" badge.
   let findingsTotal = totals.findings;
   let retiredTotal = 0;
+  // Acknowledged on Settlement: listed, greyed, never in the badge.
+  let acknowledgedTotal = totals.acknowledged;
   const history: ({ gateway: string } & ReturnType<typeof moneyTotals>)[] = [];
   // Retired gateways (globepay) were all RM.
   const others = [
@@ -54,6 +56,7 @@ export async function GET(
   for (const id of others) {
     if (id === active) continue;
     const t = await packs.gatewayAuditTotals(id);
+    acknowledgedTotal += t.acknowledged;
     if (RETIRED_GATEWAYS.includes(id)) retiredTotal += t.findings;
     else findingsTotal += t.findings;
     if (t.deposits.count + t.withdrawals.count > 0) {
@@ -73,8 +76,15 @@ export async function GET(
     // A refunded payout with a finding may be paid twice, and the Dashboard
     // counts those from this list: fetched on their own, so a backlog of
     // newer findings can never push one out of it.
+    // Acknowledged ones are dealt with and never take its room (every writer
+    // of audit_note clears the acknowledgement on a new note: stampNote).
     packs.listGatewayWithdrawals(
-      { audit_note: { $ne: null }, currency, status: 'failed' },
+      {
+        audit_note: { $ne: null },
+        currency,
+        status: 'failed',
+        audit_ack_at: null,
+      },
       { take: FINDINGS_LIMIT, order: { audited_at: 'DESC' } },
     ),
   ]);
@@ -97,6 +107,7 @@ export async function GET(
         toOptionalMoney(d.amount_requested),
       note: d.audit_note,
       audited_at: d.audited_at,
+      acknowledged: acknowledgement(d),
     })),
     ...withdrawals.map((w) => ({
       kind: 'withdrawal' as const,
@@ -109,12 +120,34 @@ export async function GET(
       amount: toOptionalMoney(w.amount),
       note: w.audit_note,
       audited_at: w.audited_at,
+      acknowledged: acknowledgement(w),
     })),
   ].sort(
     (a, b) =>
+      Number(a.acknowledged !== null) - Number(b.acknowledged !== null) ||
       Number(isRefunded(b)) - Number(isRefunded(a)) ||
       auditedMs(b.audited_at) - auditedMs(a.audited_at),
   );
+
+  // The reason each acknowledgement was given, from the admin action log:
+  // the latest acknowledge_finding row per finding shown.
+  const shown = findings.slice(0, FINDINGS_LIMIT);
+  const ackedIds = shown
+    .filter((f) => f.acknowledged !== null)
+    .map((f) => f.id);
+  const reasons = new Map<string, string>();
+  if (ackedIds.length > 0) {
+    const rows = await packs.listAdminActionAudits(
+      { entity_id: ackedIds, action: 'acknowledge_finding' },
+      { order: { created_at: 'DESC' } },
+    );
+    for (const r of rows) {
+      if (!reasons.has(r.entity_id)) reasons.set(r.entity_id, r.reason);
+    }
+  }
+  for (const f of shown) {
+    if (f.acknowledged) f.acknowledged.reason = reasons.get(f.id) ?? null;
+  }
 
   res.json({
     currency,
@@ -122,11 +155,28 @@ export async function GET(
     last_audited_at: totals.lastAuditedAt,
     findings_total: findingsTotal,
     retired_total: retiredTotal,
+    acknowledged_total: acknowledgedTotal,
     totals: moneyTotals(totals),
     history,
-    findings: findings.slice(0, FINDINGS_LIMIT),
+    findings: shown,
   });
 }
+
+// Who acknowledged the finding and when, while the note is still the one
+// they acknowledged; null otherwise (a new note is a new warning).
+const acknowledgement = (r: {
+  audit_note: string | null;
+  audit_ack_note: string | null;
+  audit_ack_by: string | null;
+  audit_ack_at: Date | string | null;
+}) =>
+  r.audit_ack_note !== null && r.audit_ack_note === r.audit_note
+    ? {
+        by: r.audit_ack_by,
+        at: r.audit_ack_at,
+        reason: null as string | null,
+      }
+    : null;
 
 const isRefunded = (f: { kind: string; status: string }) =>
   f.kind === 'withdrawal' && f.status === 'failed';

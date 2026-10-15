@@ -1498,6 +1498,14 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Settlement's Acknowledge: takes a gateway audit finding out of the
+      // "payments differ" count. Moves no money, but it can hide a warning,
+      // so it shares the admin action budget.
+      matcher: '/admin/payments/audit/acknowledge',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Purchase-invoice writer (POLYCARD-BACK §3.5) — raises real inventory
       // counters, up to 200 lines x 1,000,000 qty per call; same admin budget.
       matcher: '/admin/purchase-invoices',

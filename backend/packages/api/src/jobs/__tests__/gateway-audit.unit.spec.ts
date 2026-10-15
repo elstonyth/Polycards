@@ -251,8 +251,13 @@ describe('gateway audit job', () => {
     const age = before - filter.audited_at.$lt.getTime();
     expect(age).toBeGreaterThanOrEqual(60 * 60 * 1000 - 1000);
     expect(age).toBeLessThan(2 * 60 * 60 * 1000);
-    // A small share: open findings never take the whole batch.
-    expect(opts).toEqual({ take: 10, order: { audited_at: 'ASC' } });
+    // A small share: open findings never take the whole batch. Ones an
+    // operator acknowledged go after the rest: DESC puts Postgres's NULLs
+    // (not acknowledged) first.
+    expect(opts).toEqual({
+      take: 10,
+      order: { audit_ack_at: 'DESC', audited_at: 'ASC' },
+    });
     // Returned by the open-findings query AND the daily re-check: one call.
     expect(fakeGateway.calls.withdrawalDetails).toEqual(['PC-flag']);
     // The gateway now agrees (failed = failed): the finding clears.
@@ -260,6 +265,56 @@ describe('gateway audit job', () => {
     expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'gpw_flag', audit_note: null }),
     );
+  });
+
+  // An acknowledgement covers the note it was given for, nothing after it.
+  describe('an acknowledged finding', () => {
+    const acked = {
+      ...settledDeposit,
+      id: 'gpd_ack',
+      audit_note: 'gateway paid 50.06, row credited 50.00',
+      audited_at: new Date(0),
+      audit_ack_note: 'gateway paid 50.06, row credited 50.00',
+      audit_ack_by: 'ops@test.dev',
+      audit_ack_at: new Date(0),
+    };
+    const run = async (gatewayAmount: number) => {
+      fakeGateway.script({
+        getDepositDetail: { state: 'success', amount: gatewayAmount },
+      });
+      const h = harness([]);
+      h.packs.listGatewayDeposits.mockImplementation(
+        async (f: { audit_note?: unknown; audited_at?: unknown }) =>
+          f.audit_note ? [acked] : [],
+      );
+      await gatewayAuditJob(h.container as never);
+      return (
+        h.packs.updateGatewayDeposits.mock.calls as unknown as [
+          Record<string, unknown>,
+        ][]
+      )[0][0];
+    };
+
+    it('stays acknowledged while the gateway gives the same answer', async () => {
+      const update = await run(50.06);
+      expect(update.audit_note).toBe('gateway paid 50.06, row credited 50.00');
+      expect(update).not.toHaveProperty('audit_ack_note');
+    });
+
+    it('comes back as a new warning when the answer changes', async () => {
+      const update = await run(50.1);
+      expect(update.audit_note).toBe('gateway paid 50.10, row credited 50.00');
+      expect(update).toMatchObject({
+        audit_ack_note: null,
+        audit_ack_by: null,
+        audit_ack_at: null,
+      });
+    });
+
+    it('drops the acknowledgement once the gateway agrees', async () => {
+      const update = await run(50);
+      expect(update).toMatchObject({ audit_note: null, audit_ack_note: null });
+    });
   });
 
   it('does nothing while the real-gateway switch is off', async () => {

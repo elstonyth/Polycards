@@ -18,6 +18,7 @@ import {
   GATEWAY_AUDIT_REPEAT_MS,
   GATEWAY_AUDIT_WINDOW_MS,
   depositAuditNote,
+  stampNote,
   withdrawalAuditNote,
   type GatewayAnswer,
 } from '../modules/packs/gateway-audit';
@@ -73,12 +74,14 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
   };
   const steps: {
     filter: Record<string, unknown>;
-    order: Record<string, 'ASC'>;
+    order: Record<string, 'ASC' | 'DESC'>;
     cap?: number;
   }[] = [
     {
       filter: open,
-      order: { audited_at: 'ASC' },
+      // Acknowledged findings after the rest: DESC puts Postgres's NULLs (not
+      // acknowledged) first.
+      order: { audit_ack_at: 'DESC', audited_at: 'ASC' },
       cap: GATEWAY_AUDIT_FINDING_BATCH,
     },
     { filter: fresh, order: { created_at: 'ASC' } },
@@ -89,7 +92,7 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
   async function queue<R extends { id: string }>(
     list: (
       filter: Record<string, unknown>,
-      opts: { take: number; order: Record<string, 'ASC'> },
+      opts: { take: number; order: Record<string, 'ASC' | 'DESC'> },
     ) => Promise<R[]>,
     status: string[],
   ): Promise<R[]> {
@@ -132,7 +135,7 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
       await packs.updateGatewayDeposits({
         id: row.id,
         audited_at: now,
-        audit_note: `gateway "${row.gateway}" is not configured here — not audited`,
+        ...stampNote(row, `gateway "${row.gateway}" is not configured here — not audited`),
       });
       findings += 1;
       continue;
@@ -167,7 +170,7 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     await packs.updateGatewayDeposits({
       id: row.id,
       audited_at: now,
-      audit_note: note,
+      ...stampNote(row, note),
       ...(row.net_amount == null &&
       netAmount !== null &&
       row.status === 'settled'
@@ -195,7 +198,7 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
       await packs.updateGatewayWithdrawals({
         id: row.id,
         audited_at: now,
-        audit_note: `gateway "${row.gateway}" is not configured here — not audited`,
+        ...stampNote(row, `gateway "${row.gateway}" is not configured here — not audited`),
       });
       findings += 1;
       continue;
@@ -241,7 +244,7 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     await packs.updateGatewayWithdrawals({
       id: row.id,
       audited_at: now,
-      audit_note: note,
+      ...stampNote(row, note),
       ...(row.net_amount == null &&
       netAmount !== null &&
       row.status === 'settled'

@@ -5,6 +5,7 @@ import { useGatewayAudit, useGatewayBalance } from '../../lib/queries';
 import { inCurrency, LEDGER_CURRENCY, rm } from '../../lib/format';
 import { Hint } from '../../components/Hint';
 import { GatewaySwitchDrawer } from './GatewaySwitchDrawer';
+import { gatewayCheck } from './audit-counts';
 
 // The top of every currency tab, in one strip: which gateway moves this
 // currency and whether it is open, its live wallet (the payout float that
@@ -77,18 +78,24 @@ export const GatewayStrip = ({ currency }: { currency: string }) => {
   const showWallets = !balance.isError && !!b?.enabled && !!b.balance;
 
   const a = audit.data;
+  const tile = a ? gatewayCheck(a) : null;
   const check = audit.isError
     ? { color: 'red' as const, text: t('settlement.auditLoadError') }
-    : !a
+    : !tile
       ? null
-      : a.findings_total > 0
+      : tile.tone === 'differs'
         ? {
             color: 'orange' as const,
-            text: t('settlement.checkDiffers', { count: a.findings_total }),
+            text: t('settlement.checkDiffers', { count: tile.count }),
           }
-        : a.last_audited_at
-          ? { color: 'green' as const, text: t('settlement.checkAllMatch') }
-          : { color: 'grey' as const, text: t('settlement.checkNever') };
+        : tile.tone === 'acknowledged'
+          ? {
+              color: 'grey' as const,
+              text: t('settlement.checkAcknowledged', { count: tile.count }),
+            }
+          : tile.tone === 'match'
+            ? { color: 'green' as const, text: t('settlement.checkAllMatch') }
+            : { color: 'grey' as const, text: t('settlement.checkNever') };
   const history = (a?.history ?? []).map((h) =>
     t('settlement.auditHistory', {
       gateway: h.gateway,

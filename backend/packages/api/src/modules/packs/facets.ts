@@ -56,6 +56,7 @@ export type GatewayReports = Pick<
   | 'listCustomerAccountStates'
   | 'listGatewayDeposits'
   | 'listGatewayWithdrawals'
+  | 'listAdminActionAudits'
 >;
 
 /**

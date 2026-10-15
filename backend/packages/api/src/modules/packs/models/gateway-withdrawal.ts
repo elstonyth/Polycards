@@ -129,6 +129,14 @@ export const GatewayWithdrawal = model
     // on top of the reconcile sweep: it re-reads rows that are already final.
     audited_at: model.dateTime().nullable(),
     audit_note: model.text().nullable(),
+    // An operator's Acknowledge on Settlement (2026-10-15): the exact note they
+    // acknowledged, who (admin email) and when. The finding counts as
+    // acknowledged only while audit_note still equals audit_ack_note, so a new
+    // answer from the gateway brings it back; the audit job also clears these
+    // when it writes a different note. The reason is in admin_action_audit.
+    audit_ack_note: model.text().nullable(),
+    audit_ack_by: model.text().nullable(),
+    audit_ack_at: model.dateTime().nullable(),
   })
   .indexes([
     // Callback lookup path.

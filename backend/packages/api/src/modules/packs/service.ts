@@ -7957,6 +7957,7 @@ class PacksModuleService extends MedusaService({
       missingGross: number;
     };
     findings: number;
+    acknowledged: number;
     lastAuditedAt: string | null;
   }> {
     const em = (sharedContext.transactionManager ??
@@ -7999,24 +8000,88 @@ class PacksModuleService extends MedusaService({
       [gateway],
     );
     // Scoped to the same gateway as the money totals, so one gateway's
-    // findings and freshness never show up on the other's panel.
+    // findings and freshness never show up on the other's panel. A finding an
+    // operator acknowledged (Settlement, 2026-10-15) is counted apart while
+    // its note is still the one acknowledged.
+    const ACKED = 'audit_ack_note IS NOT DISTINCT FROM audit_note';
     const [audit] = await em.execute<
-      { findings: string; last: string | null }[]
+      { findings: string; acknowledged: string; last: string | null }[]
     >(
-      `SELECT (SELECT COUNT(*) FROM gateway_deposit WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND gateway = ?)
-            + (SELECT COUNT(*) FROM gateway_withdrawal WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND gateway = ?) AS findings,
+      `SELECT (SELECT COUNT(*) FROM gateway_deposit WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND NOT (${ACKED}) AND gateway = ?)
+            + (SELECT COUNT(*) FROM gateway_withdrawal WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND NOT (${ACKED}) AND gateway = ?) AS findings,
+              (SELECT COUNT(*) FROM gateway_deposit WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND ${ACKED} AND gateway = ?)
+            + (SELECT COUNT(*) FROM gateway_withdrawal WHERE deleted_at IS NULL AND audit_note IS NOT NULL AND ${ACKED} AND gateway = ?) AS acknowledged,
               GREATEST(
                 (SELECT MAX(audited_at) FROM gateway_deposit WHERE deleted_at IS NULL AND gateway = ?),
                 (SELECT MAX(audited_at) FROM gateway_withdrawal WHERE deleted_at IS NULL AND gateway = ?)
               ) AS last`,
-      [gateway, gateway, gateway, gateway],
+      [gateway, gateway, gateway, gateway, gateway, gateway],
     );
     return {
       deposits: toTotals(dep),
       withdrawals: toTotals(wd),
       findings: Number(audit?.findings ?? 0),
+      acknowledged: Number(audit?.acknowledged ?? 0),
       lastAuditedAt: audit?.last ? new Date(audit.last).toISOString() : null,
     };
+  }
+
+  // Settlement's Acknowledge (2026-10-15): marks one gateway audit finding as
+  // dealt with, for the note the operator saw, and records why in the admin
+  // action log, in one transaction. The write is scoped to that note: when the
+  // audit has written another one since the page loaded, nothing changes and
+  // the answer is 'changed', so a new warning is never acknowledged unseen. A
+  // finding already acknowledged for that note is answered as done, keeping
+  // the first who/when and writing no second log row (a retry, or a second
+  // operator a moment later).
+  @InjectTransactionManager()
+  async acknowledgeAuditFinding(
+    input: {
+      kind: 'deposit' | 'withdrawal';
+      id: string;
+      note: string;
+      adminId: string;
+      adminEmail: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<'acknowledged' | 'changed' | 'not_found'> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const table =
+      input.kind === 'deposit' ? 'gateway_deposit' : 'gateway_withdrawal';
+    const updated = await em.execute<{ id: string }[]>(
+      `UPDATE ${table}
+          SET audit_ack_note = audit_note, audit_ack_by = ?, audit_ack_at = now()
+        WHERE id = ? AND deleted_at IS NULL AND audit_note = ?
+          AND audit_ack_note IS DISTINCT FROM audit_note
+        RETURNING id`,
+      [input.adminEmail, input.id, input.note],
+    );
+    if (updated.length === 0) {
+      const [row] = await em.execute<
+        { audit_note: string | null; audit_ack_note: string | null }[]
+      >(
+        `SELECT audit_note, audit_ack_note FROM ${table} WHERE id = ? AND deleted_at IS NULL`,
+        [input.id],
+      );
+      if (!row) return 'not_found';
+      return row.audit_note === input.note && row.audit_ack_note === input.note
+        ? 'acknowledged'
+        : 'changed';
+    }
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: table,
+        entity_id: input.id,
+        action: 'acknowledge_finding',
+        before: null,
+        after: { note: input.note },
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+    return 'acknowledged';
   }
 
   @InjectManager()

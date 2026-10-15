@@ -182,6 +182,7 @@ export const doublePayRisks = (findings: GatewayAuditFinding[]) => {
     (f) =>
       f.kind === 'withdrawal' &&
       f.status === 'failed' &&
+      !f.acknowledged &&
       /DOUBLE PAYMENT|pending for a payout we refunded/.test(f.note),
   );
   return {

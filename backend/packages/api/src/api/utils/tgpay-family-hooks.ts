@@ -19,7 +19,10 @@ import {
   refundWithdrawal,
 } from '../../modules/packs/gateway-withdrawal';
 import { alertOps } from '../../modules/packs/ops-alert';
-import { withdrawalAuditNote } from '../../modules/packs/gateway-audit';
+import {
+  stampNote,
+  withdrawalAuditNote,
+} from '../../modules/packs/gateway-audit';
 import { payoutCost, toOptionalMoney } from '../../modules/packs/money';
 
 // The server-notify handlers for every gateway on the TGPay platform (TGPay,
@@ -304,16 +307,21 @@ export function tgpayWithdrawalCallback(kind: TgpayKind): Handler {
           await packs.updateGatewayWithdrawals({
             id: withdrawal.id,
             audited_at: new Date(),
-            audit_note: withdrawalAuditNote(
-              {
-                status: withdrawal.status,
-                amount: toOptionalMoney(withdrawal.amount),
-              },
-              {
-                kind: 'detail',
-                state,
-                amount: Number.isFinite(paid) ? paid : Number(withdrawal.amount),
-              },
+            ...stampNote(
+              withdrawal,
+              withdrawalAuditNote(
+                {
+                  status: withdrawal.status,
+                  amount: toOptionalMoney(withdrawal.amount),
+                },
+                {
+                  kind: 'detail',
+                  state,
+                  amount: Number.isFinite(paid)
+                    ? paid
+                    : Number(withdrawal.amount),
+                },
+              ),
             ),
           });
         } catch (error) {

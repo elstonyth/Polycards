@@ -836,7 +836,20 @@
     "showFirstFindings": "Show the first {{count}} of {{total}}",
     "findingsCapped": "The first {{count}} of {{total}} are listed. The rest appear here as these are resolved.",
     "retiredFindings_one": "{{count, number}} from a retired gateway, which can't be checked",
-    "retiredFindings_other": "{{count, number}} from a retired gateway, which can't be checked"
+    "retiredFindings_other": "{{count, number}} from a retired gateway, which can't be checked",
+    "acknowledge": "Acknowledge",
+    "ackAction": "Action",
+    "ackTitle": "Acknowledge this finding?",
+    "ackDesc": "It stops counting in \"payments differ\" and on the Dashboard. The hourly check keeps running, and a new answer from the gateway brings it back.",
+    "ackReason": "Reason",
+    "ackReasonPlaceholder": "What did you check? (recorded in the audit log)",
+    "ackCancel": "Cancel",
+    "acknowledgedBy": "Acknowledged by {{who}} · {{when}}",
+    "acknowledgedFindings_one": "{{count}} acknowledged",
+    "acknowledgedFindings_other": "{{count}} acknowledged",
+    "acknowledgedToast": "Finding acknowledged",
+    "checkAcknowledged_one": "{{count, number}} acknowledged, still differs",
+    "checkAcknowledged_other": "{{count, number}} acknowledged, still differ"
   },
   "pipeline": {
     "label": "Inventory pipeline",

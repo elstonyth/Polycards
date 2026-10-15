@@ -86,12 +86,19 @@ describe('GET /admin/payments/audit findings', () => {
       status: 'failed',
       audit_note: 'gateway still reports pending for a payout we refunded',
     });
+    const filters: Record<string, unknown>[] = [];
     const ids = await call({
       listGatewayDeposits: async () => [],
-      listGatewayWithdrawals: async (f: { status?: string }) =>
-        f.status === 'failed' ? [risky] : others,
+      listGatewayWithdrawals: async (f: { status?: string }) => {
+        filters.push(f);
+        return f.status === 'failed' ? [risky] : others;
+      },
     });
     expect(ids[0]).toBe('risky');
+    // Acknowledged refunds are dealt with: they never take this list's room.
+    expect(filters.find((f) => f.status === 'failed')).toMatchObject({
+      audit_ack_at: null,
+    });
     expect(ids).toHaveLength(100);
     expect(new Set(ids).size).toBe(100);
   });

@@ -1,4 +1,8 @@
-import { depositAuditNote, withdrawalAuditNote } from '../gateway-audit';
+import {
+  depositAuditNote,
+  stampNote,
+  withdrawalAuditNote,
+} from '../gateway-audit';
 
 const paid = (amount: number) => ({
   kind: 'detail' as const,
@@ -93,5 +97,31 @@ describe('withdrawalAuditNote', () => {
     expect(
       withdrawalAuditNote({ status: 'settled', amount: 100 }, missing),
     ).toMatch(/NO record/);
+  });
+});
+
+// Every writer of audit_note goes through stampNote (the audit job, the
+// TGPay-family and A3Pay payout callbacks): an acknowledgement covers the note
+// it was given for, nothing after it.
+describe('stampNote', () => {
+  const acked = { audit_ack_note: 'old note' };
+  it('keeps an acknowledgement while the note is the one acknowledged', () => {
+    expect(stampNote(acked, 'old note')).toEqual({ audit_note: 'old note' });
+  });
+  it('drops it for any other note, agreement included', () => {
+    const cleared = {
+      audit_ack_note: null,
+      audit_ack_by: null,
+      audit_ack_at: null,
+    };
+    expect(stampNote(acked, 'new note')).toEqual({
+      audit_note: 'new note',
+      ...cleared,
+    });
+    expect(stampNote(acked, null)).toEqual({ audit_note: null, ...cleared });
+  });
+  it('writes only the note on a row nobody acknowledged', () => {
+    expect(stampNote({ audit_ack_note: null }, 'n')).toEqual({ audit_note: 'n' });
+    expect(stampNote({}, null)).toEqual({ audit_note: null });
   });
 });

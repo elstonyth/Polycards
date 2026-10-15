@@ -7,6 +7,7 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 import { toast } from '@medusajs/ui';
+import { useTranslation } from 'react-i18next';
 import {
   packsApi,
   type AdminCard,
@@ -55,6 +56,7 @@ import {
   getSettlementReport,
   getGatewayBalance,
   getGatewayAudit,
+  acknowledgeAuditFinding,
   getPaymentGateway,
   savePaymentGateway,
   gatewayPreflightRefusal,
@@ -349,6 +351,21 @@ export const useGatewayAudit = (
 
 export const usePaymentGateway = (): UseQueryResult<PaymentGatewaySetting> =>
   useQuery({ queryKey: qk.paymentGateway, queryFn: getPaymentGateway });
+
+// Settlement's Acknowledge. Refetches every rail's audit: the Dashboard's
+// "may be paid twice" row reads them too.
+export const useAcknowledgeFinding = () => {
+  const qc = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: acknowledgeAuditFinding,
+    onSuccess: () => toast.success(t('settlement.acknowledgedToast')),
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+    // Also after a refusal: a 409 means the note changed, so show the new one.
+    onSettled: () =>
+      qc.invalidateQueries({ queryKey: ['admin', 'gateway-audit'] }),
+  });
+};
 
 export const useSavePaymentGateway = () => {
   const qc = useQueryClient();
@@ -807,10 +824,7 @@ export const useBulkUpdateDeliveryOrders = () => {
   });
 };
 
-export type {
-  VoucherLadderDTO,
-  VoucherRangeDTO,
-} from './admin-rest';
+export type { VoucherLadderDTO, VoucherRangeDTO } from './admin-rest';
 
 export const useVoucherLadder = (): UseQueryResult<VoucherLadderDTO> =>
   useQuery({ queryKey: qk.voucherLadder, queryFn: getVoucherLadder });
@@ -1721,8 +1735,11 @@ export const useCustomerReferral = (
 export const useSetCustomerRealName = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { customerId: string; realName: string; reason: string }) =>
-      setCustomerRealName(vars.customerId, vars.realName, vars.reason),
+    mutationFn: (vars: {
+      customerId: string;
+      realName: string;
+      reason: string;
+    }) => setCustomerRealName(vars.customerId, vars.realName, vars.reason),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.customerId) });
     },

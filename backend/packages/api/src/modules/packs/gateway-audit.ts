@@ -118,3 +118,22 @@ function rowMoney(amount: number | null): string {
     ? 'nothing (row records no amount)'
     : amount.toFixed(2);
 }
+
+// The fields to write for a new audit note, used by every writer of
+// audit_note: the audit job and the TGPay-family and A3Pay payout callbacks.
+// An operator's acknowledgement (Settlement, 2026-10-15) is dropped when the
+// note it covered is not the one being written, so a new answer from the
+// gateway, agreement included, comes back unacknowledged.
+export function stampNote(
+  row: { audit_ack_note?: string | null },
+  note: string | null,
+): Record<string, unknown> {
+  return row.audit_ack_note != null && row.audit_ack_note !== note
+    ? {
+        audit_note: note,
+        audit_ack_note: null,
+        audit_ack_by: null,
+        audit_ack_at: null,
+      }
+    : { audit_note: note };
+}

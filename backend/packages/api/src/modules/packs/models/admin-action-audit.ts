@@ -45,6 +45,9 @@ export const ADMIN_AUDIT_ENTITY_TYPES = [
   // Pack gifts (spec 2026-10-07): grants and revokes audit against the gift
   // row — see Migration20261007120000. Bonus credit grants audit as 'credit'.
   'pack_gift',
+  // Settlement's Acknowledge (2026-10-15) audits against the finding's row;
+  // payouts already audit as 'gateway_withdrawal'. See Migration20261015160000.
+  'gateway_deposit',
 ] as const;
 
 export const ADMIN_AUDIT_ACTIONS = [
@@ -112,6 +115,9 @@ export const ADMIN_AUDIT_ACTIONS = [
   // The one-shot release of old reward / gift sale holds (ADR 0012), entity
   // 'customer' — see Migration20261015120000.
   'release_reward_holds',
+  // An operator acknowledging a gateway audit finding on Settlement, entity
+  // 'gateway_deposit' or 'gateway_withdrawal' — see Migration20261015160000.
+  'acknowledge_finding',
 ] as const;
 
 // admin_action_audit — append-only record of every admin money mutation

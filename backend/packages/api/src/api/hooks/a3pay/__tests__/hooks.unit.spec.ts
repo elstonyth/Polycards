@@ -451,6 +451,30 @@ describe('POST /hooks/a3pay/withdrawal', () => {
     });
   });
 
+  // Settlement's Acknowledge covered the old note, not this one: the warning
+  // comes back unacknowledged.
+  it('drops an acknowledgement given for an earlier note', async () => {
+    const h = harness([
+      {
+        ...sgdPayout,
+        status: 'failed',
+        audit_note: 'gateway still reports pending for a payout we refunded',
+        audit_ack_note: 'gateway still reports pending for a payout we refunded',
+        audit_ack_by: 'ops@test.dev',
+        audit_ack_at: new Date(0),
+      },
+    ]);
+    await run(withdrawal, h, message(payout({ Status: 4 })));
+    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audit_note: expect.stringContaining('DOUBLE PAYMENT'),
+        audit_ack_note: null,
+        audit_ack_by: null,
+        audit_ack_at: null,
+      }),
+    );
+  });
+
   it('writes no note when a repeated callback agrees with the closed row', async () => {
     const h = harness([{ ...sgdPayout, status: 'failed' }]);
     await run(withdrawal, h, message(payout({ Status: 5 })));

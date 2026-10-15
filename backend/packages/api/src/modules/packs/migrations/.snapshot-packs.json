@@ -2760,6 +2760,34 @@
           "nullable": true,
           "length": 6,
           "mappedType": "datetime"
+        },
+        "audit_ack_note": {
+          "name": "audit_ack_note",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "audit_ack_by": {
+          "name": "audit_ack_by",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "audit_ack_at": {
+          "name": "audit_ack_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
         }
       },
       "name": "gateway_deposit",
@@ -3103,6 +3131,34 @@
         },
         "deleted_at": {
           "name": "deleted_at",
+          "type": "timestamptz",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "length": 6,
+          "mappedType": "datetime"
+        },
+        "audit_ack_note": {
+          "name": "audit_ack_note",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "audit_ack_by": {
+          "name": "audit_ack_by",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "audit_ack_at": {
+          "name": "audit_ack_at",
           "type": "timestamptz",
           "unsigned": false,
           "autoincrement": false,

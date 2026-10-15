@@ -3,11 +3,12 @@ import {
   ADMIN_AUDIT_ENTITY_TYPES,
 } from '../../models/admin-action-audit';
 // Always the LATEST migration that rewrites the CHECKs (each one re-emits the
-// full lists): Migration20261015120000 added 'release_reward_holds', on top of
-// Migration20261007120000's 'pack_gift' and the gift/bonus actions.
-import * as migrationModule from '../Migration20261015120000';
+// full lists): Migration20261015160000 added 'gateway_deposit' and
+// 'acknowledge_finding', on top of Migration20261015120000's
+// 'release_reward_holds' and Migration20261007120000's 'pack_gift'.
+import * as migrationModule from '../Migration20261015160000';
 
-const { Migration20261015120000 } = migrationModule;
+const { Migration20261015160000 } = migrationModule;
 
 // The DB CHECKs on admin_action_audit are only rewritten by an explicit
 // migration (Migration20260906090000 learned this the hard way). A value the
@@ -20,8 +21,8 @@ const { Migration20261015120000 } = migrationModule;
 
 async function checkLists(): Promise<Record<string, string[]>> {
   const sql: string[] = [];
-  const m = Object.create(Migration20261015120000.prototype) as InstanceType<
-    typeof Migration20261015120000
+  const m = Object.create(Migration20261015160000.prototype) as InstanceType<
+    typeof Migration20261015160000
   > & {
     addSql: (s: string) => void;
   };
@@ -58,6 +59,8 @@ describe('admin_action_audit CHECK lists (config-change audit)', () => {
       'customer',
       'announcement',
       'pack_gift',
+      'gateway_deposit',
+      'gateway_withdrawal',
     ]) {
       expect(entity_type).toContain(t);
     }
@@ -77,12 +80,13 @@ describe('admin_action_audit CHECK lists (config-change audit)', () => {
       'revoke_pack_gift',
       'grant_bonus_credit',
       'release_reward_holds',
+      'acknowledge_finding',
     ]) {
       expect(action).toContain(a);
     }
   });
 
   it('exports only the migration class (the loader instantiates the first export)', async () => {
-    expect(Object.keys(migrationModule)).toEqual(['Migration20261015120000']);
+    expect(Object.keys(migrationModule)).toEqual(['Migration20261015160000']);
   });
 });

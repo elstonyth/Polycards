@@ -14,7 +14,10 @@ import {
 import { rowGateway } from '../../../../modules/packs/gateway';
 import { alertOps } from '../../../../modules/packs/ops-alert';
 import { rowFx, toLedgerAmount } from '../../../../modules/packs/payment-fx';
-import { withdrawalAuditNote } from '../../../../modules/packs/gateway-audit';
+import {
+  stampNote,
+  withdrawalAuditNote,
+} from '../../../../modules/packs/gateway-audit';
 import { toOptionalMoney } from '../../../../modules/packs/money';
 
 // A3Pay payout callback (handbook "Payout Callback"). Same authentication as
@@ -135,16 +138,21 @@ export async function POST(
         await packs.updateGatewayWithdrawals({
           id: withdrawal.id,
           audited_at: new Date(),
-          audit_note: withdrawalAuditNote(
-            {
-              status: withdrawal.status,
-              amount: toOptionalMoney(withdrawal.amount),
-            },
-            {
-              kind: 'detail',
-              state,
-              amount: Number.isFinite(paid) ? paid : Number(withdrawal.amount),
-            },
+          ...stampNote(
+            withdrawal,
+            withdrawalAuditNote(
+              {
+                status: withdrawal.status,
+                amount: toOptionalMoney(withdrawal.amount),
+              },
+              {
+                kind: 'detail',
+                state,
+                amount: Number.isFinite(paid)
+                  ? paid
+                  : Number(withdrawal.amount),
+              },
+            ),
           ),
         });
       } catch (error) {
