@@ -88,8 +88,8 @@ Pulls and Pack Gifts side by side. The pack and spin pages use a held gift first
 ("Vault x1", "Bet Vault x1 + RM300.00"); the Open claims exactly the gifts the
 screen showed or is refused (409) — never billed in their place. It writes a
 `source='gift'` Pull whose sale is withdrawable money once the customer has
-topped up (ADR 0012, decided at sell time; gift sales before that keep their
-hold).
+topped up (ADR 0012, decided at sell time; the holds older gift sales left
+are released once by a script after the deploy).
 _Avoid_: voucher (VIP credit grant), free rip (the task reward, a `task_claim`
 row), reward
 
@@ -171,7 +171,8 @@ deposit. Welcome pulls are held in full only on pulls minted since 2026-10-11;
 older ones sell back fully withdrawable. A Pack Gift's pull and a task or
 weekly-challenge **reward** (any `source='reward'` pull: a card or slab prize,
 or a free rip) sell back fully withdrawable once the customer has topped up,
-decided at sell time (ADR 0012); only sales made before that keep their hold.
+decided at sell time (ADR 0012); the holds older reward and gift sales left
+are released once by `scripts/release-old-reward-holds.ts` after the deploy.
 \_Avoid*: promo credit (the economy report's bucket for task/challenge/voucher
 credit), dead chips, free credit
 

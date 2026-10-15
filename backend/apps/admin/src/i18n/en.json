@@ -628,7 +628,8 @@
       "set_player_group": "Moved to another player group",
       "grant_pack_gift": "Gifted packs",
       "revoke_pack_gift": "Revoked a pack gift",
-      "grant_bonus_credit": "Bonus credit"
+      "grant_bonus_credit": "Bonus credit",
+      "release_reward_holds": "Released old prize-sale holds"
     },
     "gift": {
       "title": "Gift packs",
