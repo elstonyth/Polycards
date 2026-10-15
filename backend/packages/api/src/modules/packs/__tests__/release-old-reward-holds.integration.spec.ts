@@ -168,8 +168,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(await service.walletSummary(cus)).toEqual(after);
       expect(await audits(cus)).toHaveLength(1);
 
-      // Using the RM 16 opens withdrawals: the whole balance can leave,
-      // the released RM 30 included. Unreleased, RM 30 would still be held.
+      // Using the RM 16 opens withdrawals: the whole balance can leave, the
+      // released RM 30 included. Unreleased, RM 30 would still be to use on
+      // packs and nothing could leave.
       await open(cus, 16, 1600);
       const opened = await service.walletSummary(cus);
       expect(opened.playthrough.remaining).toBe(0);

@@ -963,7 +963,7 @@ describe('startWithdrawal — money ordering', () => {
       playthrough: { deposited: 100, used: 40, remaining: 60 },
     });
     await expect(start(h)).rejects.toThrow(
-      /Withdrawals unlock once you've spent RM 60\.00 more on packs\./,
+      /Withdrawals unlock once you've used RM 60\.00 more on packs\./,
     );
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
   });
@@ -999,7 +999,7 @@ describe('startWithdrawal — money ordering', () => {
     h.packs.withdrawForCashout.mockRejectedValue(
       new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        "Withdrawals unlock once you've spent RM 60.00 more on packs. Then your balance, except bonus credit, can be withdrawn.",
+        "Withdrawals unlock once you've used RM 60.00 more on packs. Then your balance, except bonus credit, can be withdrawn.",
       ),
     );
     await expect(start(h)).rejects.toThrow(/Withdrawals unlock once/);
@@ -1232,7 +1232,7 @@ describe('startWithdrawal — approval threshold (held)', () => {
       playthrough: { deposited: 100, used: 40, remaining: 60 },
     });
     await expect(start(h, { amount: 2000 })).rejects.toThrow(
-      /Withdrawals unlock once you've spent RM 60\.00 more on packs\./,
+      /Withdrawals unlock once you've used RM 60\.00 more on packs\./,
     );
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
@@ -2010,7 +2010,7 @@ describe('PacksModuleService.withdrawForCashout', () => {
       }),
     );
     await expect(f.svc.withdrawForCashout(cashout, f.ctx)).rejects.toThrow(
-      /Withdrawals unlock once you've spent RM 60\.00 more on packs\./,
+      /Withdrawals unlock once you've used RM 60\.00 more on packs\./,
     );
     expect(f.withdrawCreditsWithLedger).not.toHaveBeenCalled();
   });

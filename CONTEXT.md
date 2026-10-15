@@ -87,9 +87,9 @@ and ADR 0001 stands: the vault is still a Pull status; the Vault _page_ renders
 Pulls and Pack Gifts side by side. The pack and spin pages use a held gift first
 ("Vault x1", "Bet Vault x1 + RM300.00"); the Open claims exactly the gifts the
 screen showed or is refused (409) — never billed in their place. It writes a
-`source='gift'` Pull whose sale is withdrawable money once the customer has
-topped up (ADR 0012, decided at sell time; the holds older gift sales left
-are released once by a script after the deploy).
+`source='gift'` Pull whose sale is plain cash (ADR 0012, decided at sell time;
+the holds older gift sales left were released once by a script after the
+deploy), withdrawable only under the Withdrawable rule (ADR 0013).
 _Avoid_: voucher (VIP credit grant), free rip (the task reward, a `task_claim`
 row), reward
 
@@ -327,8 +327,9 @@ period). Rewards: credit (Bonus Credit since 2026-10-11), a free rip of a
 pack, or a card straight to the vault — the latter two land as
 `source='reward'` pulls, sellable like any pulled card the moment they land
 (completing the task IS the requirement; operator decision 2026-09-03), and
-their sale is withdrawable money (ADR 0012). Only the free welcome pack's `source='free'`
-pull carries the first-paid-open lock.
+their sale is plain cash (ADR 0012), withdrawable only under the Withdrawable
+rule (ADR 0013). Only the free welcome pack's `source='free'` pull carries the
+first-paid-open lock.
 
 **Check-in**:
 The explicit once-per-MYT-day button on /task (`daily_checkin`), counted by

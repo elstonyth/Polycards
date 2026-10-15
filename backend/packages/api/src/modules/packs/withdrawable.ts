@@ -68,7 +68,7 @@ export function withdrawableCents(t: {
  *  paths; the storefront passes it through by phrase ("Top up at least once",
  *  src/lib/vault-errors.ts). */
 export const NO_TOPUP_MESSAGE =
-  'Top up at least once to unlock deliveries. Withdrawals unlock once your top-up is used on packs.';
+  'Top up at least once to unlock deliveries. To withdraw, you also need to use all your money for packs.';
 
 /** The wallet fields the gate branches on (a structural subset of
  *  walletSummary's return, so either caller can pass its result straight in). */
@@ -112,7 +112,11 @@ export function withdrawalGateError(
   wallet: WithdrawalGateWallet,
   amount: number,
 ): MedusaError | null {
-  if (amount <= wallet.withdrawable) return null;
+  // In cents so a float hair can't print. Checked before the early return
+  // too: money still to use on packs refuses even if `withdrawable` (read
+  // elsewhere) disagrees — defense in depth for the spend-first rule.
+  const remainingCents = Math.round(wallet.playthrough.remaining * 100);
+  if (amount <= wallet.withdrawable && remainingCents <= 0) return null;
   if (wallet.isFrozen) {
     return new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
@@ -123,14 +127,12 @@ export function withdrawalGateError(
     return new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
   }
   // Spend first (ADR 0013): spending on packs really does unlock the rest.
-  // Packs spend bonus first, so the amount to spend counts it in. In cents so
-  // a float hair can't print.
-  const remainingCents = Math.round(wallet.playthrough.remaining * 100);
+  // Packs spend bonus first, so the amount to spend counts it in.
   if (remainingCents > 0) {
     const toSpend = (remainingCents + Math.round(wallet.bonus * 100)) / 100;
     return new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
-      `Withdrawals unlock once you've spent RM ${toSpend.toFixed(2)} more on packs. Then your balance, except bonus credit, can be withdrawn.`,
+      `Withdrawals unlock once you've used RM ${toSpend.toFixed(2)} more on packs. Then your balance, except bonus credit, can be withdrawn.`,
     );
   }
   return new MedusaError(

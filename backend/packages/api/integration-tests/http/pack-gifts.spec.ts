@@ -375,10 +375,13 @@ medusaIntegrationTestRunner({
         const [credit] = await packs().listCreditTransactions({
           pull_id: roll.pull.id,
         });
-        const held = bonusShareSen(Math.round(Number(credit.amount) * 100), bp);
-        expect(held).toBeGreaterThan(0);
-        expect(credit.external_funded_cents).toBe(held);
-        stamped += held;
+        const heldSen = bonusShareSen(
+          Math.round(Number(credit.amount) * 100),
+          bp,
+        );
+        expect(heldSen).toBeGreaterThan(0);
+        expect(credit.external_funded_cents).toBe(heldSen);
+        stamped += heldSen;
       }
       const held = await wallet();
       expect(held.playthrough.remaining).toBeCloseTo(stamped / 100, 2);

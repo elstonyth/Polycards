@@ -231,6 +231,48 @@ moduleIntegrationTestRunner<PacksModuleService>({
       );
 
       it(
+        'walletSummary: freeze zeroes withdrawable even with nothing left to use on packs',
+        async () => {
+          const cust = 'cus_ws_frozen_clear';
+          await service.mutateCreditAtomic({
+            customerId: cust,
+            amount: 100,
+            reason: 'topup',
+            reference: 'topup_ws_frozen_clear',
+          });
+          await service.createCreditTransactions([
+            {
+              customer_id: cust,
+              amount: -100,
+              reason: 'pack_open' as const,
+              pull_id: null,
+              reference: null,
+              external_funded_cents: -10000,
+            } as Record<string, unknown>,
+            {
+              customer_id: cust,
+              amount: 60,
+              reason: 'buyback' as const,
+              pull_id: null,
+              reference: null,
+            } as Record<string, unknown>,
+          ]);
+          let w = await service.walletSummary(cust);
+          expect(w.playthrough.remaining).toBe(0);
+          expect(w.withdrawable).toBeCloseTo(60, 2);
+
+          await service.setManualFreeze({
+            customerId: cust,
+            adminId: 'admin_test',
+            reason: 'wallet summary freeze test',
+          });
+          w = await service.walletSummary(cust);
+          expect(w.available).toBe(0);
+          expect(w.withdrawable).toBe(0);
+        },
+      );
+
+      it(
         'walletSummary: pre-1b topup does not count toward deposited',
         async () => {
           const cust = 'cus_ws_pre1b_mixed';

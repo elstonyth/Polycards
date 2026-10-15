@@ -24,7 +24,7 @@ From the wallet (`balance`, `available`, `bonus`, `withdrawable`, `playthrough.r
 
 Labels stay: Balance / Withdrawable / For packs (Bonus credit + Still to use on packs).
 
-- Locked state, topped up, `stillToUse > 0`: under Withdrawable → "Use your RM R for packs to unlock withdrawals. Then RM A can go to your bank." (R = stillToUse, A = lockedCash; omit the second sentence when A = 0).
+- Locked state, topped up, `stillToUse > 0`: under Withdrawable → "Use RM X more on packs to unlock withdrawals. Then RM A can go to your bank." (X = bonus + remaining, because packs spend bonus first; A = lockedCash; omit the second sentence when A = 0). As shipped; see ADR 0013.
 - Never topped up: banner → "Top up once (from RM N) and use it on packs to unlock withdrawals. Card deliveries start after your first top-up." If A > 0 add "Then RM A of your balance can go to your bank." Never promise A is withdrawable right after the top-up.
 - Rules text (wallet + how-it-works):
   1. **Top-ups are for opening packs.** Withdrawals unlock once you've topped up and used all your money for packs.
@@ -34,7 +34,8 @@ Labels stay: Balance / Withdrawable / For packs (Bonus credit + Still to use on 
 - Sell-back sentence (wallet footer, withdraw page, how-it-works, VaultClient, BUYBACK_EXPLANATION): "Sell-back money reaches your balance at once. The part paid with bonus credit, and the welcome pack's card, is for packs. Withdrawals unlock once your money for packs is used."
 - /task, challenge, rank one-liners: replace "sell back as withdrawable money after your first top-up" with "sell back as cash you can withdraw once you've topped up and used your money for packs".
 - Withdrawal refusal (backend `withdrawalGateError`), order unchanged (frozen > no top-up > locked > cap):
-  - locked (`remaining > 0`): `Withdrawals unlock once you've used your RM R for packs. Open packs with it, then your balance can be withdrawn.` (R = remaining, cents-exact)
+  - no top-up (shipped): `Top up at least once to unlock deliveries. To withdraw, you also need to use all your money for packs.`
+  - locked (`remaining > 0`, shipped): `Withdrawals unlock once you've used RM X more on packs. Then your balance, except bonus credit, can be withdrawn.` (X = bonus + remaining, cents-exact)
   - plain cap: `You can withdraw up to RM X right now.` (unchanged)
   Storefront `vault-errors.ts` must pass "Withdrawals unlock once" through; `WithdrawForm.tsx` REMEDIES maps it to Open packs. Keep the old phrases ("is for opening packs", "more on packs") passing through for deploy skew.
 - Top-up notice/toast: "RM X added — use it on packs to unlock withdrawals."

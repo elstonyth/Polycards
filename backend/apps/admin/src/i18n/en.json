@@ -2,7 +2,7 @@
   "creditKind": {
     "bonus": "Bonus credit (spend-only, cannot be withdrawn)",
     "bonusHint": "Default for giveaways and compensation. Untick only to correct a real-money error, such as a paid deposit that never arrived.",
-    "normalHint": "Withdrawable credit the player can cash out. Deductions default here; grant it only to correct a real-money error.",
+    "normalHint": "Normal credit: withdrawable once the player has topped up and nothing is left to use on packs. Deductions default here; grant it only to correct a real-money error.",
     "bonusAmount": "{{amount}} bonus credit",
     "normalAmount": "{{amount}} withdrawable credit"
   },
@@ -620,7 +620,7 @@
     "modalUnfreezeTitle": "Unfreeze account?",
     "modalUnfreezeDesc": "The customer will regain access. Enter a reason for the audit trail.",
     "modalCreditsTitle": "Adjust withdrawable credit",
-    "modalCreditsDesc": "Withdrawable credit the player can cash out: use it only for real-money corrections. Giveaways and compensation go in Bonus credit, in the Gifts and bonus tab. Amount and note are required.",
+    "modalCreditsDesc": "Normal credit: withdrawable once the player has topped up and nothing is left to use on packs. Use it only for real-money corrections. Giveaways and compensation go in Bonus credit, in the Gifts and bonus tab. Amount and note are required.",
     "action": {
       "freeze": "Freeze account",
       "unfreeze": "Unfreeze account",
@@ -664,7 +664,7 @@
     },
     "bonus": {
       "title": "Bonus credit",
-      "subtitle": "Spend-only credit for pack opens; it can't be withdrawn itself. The bonus part of selling a card opened with it is money for packs too. While any of it is unspent, the player can't withdraw anything.",
+      "subtitle": "Spend-only credit for pack opens; never withdrawable itself, but unspent bonus alone doesn't block withdrawals. The bonus part of selling a card opened with it goes to Still to use on packs; while any of that is unspent, the player can't withdraw anything.",
       "balance": "Bonus balance",
       "amount": "Amount (e.g. 50 to give, -50 to take back)",
       "note": "Note (required, audit trail)",
@@ -1330,7 +1330,7 @@
     "bonusLabel": "Bonus credit",
     "bonusNote": "spend-only, never withdrawable",
     "stillToPlay": "Still to use on packs",
-    "stillToPlayHint": "Top-ups, and the free part of a sell-back (from bonus credit or the welcome pack), must be spent on packs. While any of it is left, nothing can be withdrawn; once it is all used, the whole balance except bonus credit can. This is the part not spent yet: it stays in the wallet and can still be used on packs.",
+    "stillToPlayHint": "Top-ups, and the free part of a sell-back (from bonus credit or the welcome pack), must be spent on packs. While any of it is left, nothing can be withdrawn; once it is all used, the whole balance except bonus credit can. Packs spend bonus credit first, so the player's app asks for bonus credit plus this amount. After a delivery fee this can exceed the balance; a top-up doesn't close that gap, only more pack spend does.",
     "stillToPlayNote": "spent {{used}} of {{deposited}} on packs",
     "nothingHeld": "nothing held back",
     "historyTitle": "Wallet history",

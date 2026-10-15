@@ -84,7 +84,7 @@ describe('withdrawalGateError (spend first, 2026-10-15)', () => {
   it('while money is still to use on packs, says how much more to spend', () => {
     const err = withdrawalGateError(wallet({ playthrough: { remaining: 10.55 } }), 5);
     expect(err?.message).toBe(
-      "Withdrawals unlock once you've spent RM 10.55 more on packs. Then your balance, except bonus credit, can be withdrawn.",
+      "Withdrawals unlock once you've used RM 10.55 more on packs. Then your balance, except bonus credit, can be withdrawn.",
     );
     expect(err?.type).toBe('not_allowed');
   });
@@ -94,7 +94,7 @@ describe('withdrawalGateError (spend first, 2026-10-15)', () => {
       wallet({ bonus: 15, playthrough: { remaining: 30 } }),
       5,
     );
-    expect(err?.message).toContain('spent RM 45.00 more on packs');
+    expect(err?.message).toContain('used RM 45.00 more on packs');
   });
 
   it('prints the amount cents-exact', () => {
@@ -123,11 +123,19 @@ describe('withdrawalGateError (spend first, 2026-10-15)', () => {
         5,
       )?.message,
     ).toBe(
-      'Top up at least once to unlock deliveries. Withdrawals unlock once your top-up is used on packs.',
+      'Top up at least once to unlock deliveries. To withdraw, you also need to use all your money for packs.',
     );
   });
 
   it('allows an amount within what is withdrawable', () => {
     expect(withdrawalGateError(wallet({ withdrawable: 28.4 }), 28.4)).toBeNull();
+  });
+
+  it('refuses while money is still to use on packs, even if withdrawable disagrees', () => {
+    const err = withdrawalGateError(
+      wallet({ withdrawable: 50, playthrough: { remaining: 10 } }),
+      20,
+    );
+    expect(err?.message).toMatch(/^Withdrawals unlock once you've used RM 10\.00 more on packs\./);
   });
 });

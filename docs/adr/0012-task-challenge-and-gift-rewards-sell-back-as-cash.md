@@ -2,6 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-15
+- **Amended by**: ADR 0013 (when that cash may leave)
 - **Supersedes**: the gift-pack part of the 2026-10-09 rule (#712) and the
   reward part of #748 (2026-10-11). Those minted gift packs and task and
   weekly-challenge rewards (card and slab prizes, free rips) with a full
