@@ -273,6 +273,12 @@ medusaIntegrationTestRunner({
         expect(sell.data.amount).toBe(spin.data.buyback.amount);
         expect(sell.data.rate_type).toBe('instant');
         expect(sell.data.balance).toBe(spin.data.buyback.amount);
+        // A free rip is a task reward: its sale is not held for packs
+        // (ADR 0012), though the pull's bonus_bp is full.
+        const [credit] = await getContainer()
+          .resolve<PacksModuleService>(PACKS_MODULE)
+          .listCreditTransactions({ pull_id: spin.data.pullId });
+        expect(credit.external_funded_cents ?? 0).toBe(0);
       });
     });
   },

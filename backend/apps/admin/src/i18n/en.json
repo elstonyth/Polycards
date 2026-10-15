@@ -632,7 +632,7 @@
     },
     "gift": {
       "title": "Gift packs",
-      "subtitle": "Unopened packs in this player's vault. They open them as Vault x1 on the pack page. A card from a gifted pack sells back as normal credit that must be spent on packs once before it can be withdrawn.",
+      "subtitle": "Unopened packs in this player's vault. They open them as Vault x1 on the pack page. A card from a gifted pack sells back as withdrawable money once the player has topped up.",
       "pack": "Pack",
       "packPlaceholder": "Choose a pack",
       "packsLoading": "Loading packs…",
@@ -663,7 +663,7 @@
     },
     "bonus": {
       "title": "Bonus credit",
-      "subtitle": "Spend-only credit for pack opens; it can't be withdrawn itself. A card opened with it sells back as normal credit that must be spent on packs once before it can be withdrawn.",
+      "subtitle": "Spend-only credit for pack opens; it can't be withdrawn itself. The bonus part of selling a card opened with it is money for packs too: it can be spent on packs but not withdrawn. Selling what is pulled with that money is withdrawable.",
       "balance": "Bonus balance",
       "amount": "Amount (e.g. 50 to give, -50 to take back)",
       "note": "Note (required, audit trail)",
@@ -1210,7 +1210,7 @@
     "owedNow": "right now",
     "owedSubtitle": "Everything players hold that could still become a withdrawal, as of now.",
     "walletCash": "Wallets and payouts due",
-    "walletNote": "Not counted: {{bonus}} bonus (cash only after one play-through) and {{noTopup}} in accounts that never topped up (can't be withdrawn until they do).",
+    "walletNote": "Not counted: {{bonus}} bonus (spend-only, can't be withdrawn) and {{noTopup}} in accounts that never topped up (can't be withdrawn until they do).",
     "cards": "Cards in vaults, at sell-back",
     "cardsNote_one": "{{count, number}} card, {{delivering}} being shipped",
     "cardsNote_other": "{{count, number}} cards, {{delivering}} being shipped",
@@ -1237,7 +1237,7 @@
     "empty": "No active packs.",
     "grossFloor_one": "{{count}} top-up was settled by hand with no amount on file, so top-ups shown are a minimum.",
     "grossFloor_other": "{{count}} top-ups were settled by hand with no amount on file, so top-ups shown are a minimum.",
-    "walletHint": "Withdrawable credit (not bonus) in the wallets of players who have topped up, including balances still locked until deposits are played through, plus payouts requested but not paid yet and closed weeks' referral commission not paid yet.",
+    "walletHint": "Cash credit (not bonus) in the wallets of players who have topped up, including money still to use on packs, plus payouts requested but not paid yet and closed weeks' referral commission not paid yet.",
     "inFlightNote": "incl. {{amount}} requested, not paid yet",
     "estimate": "estimate",
     "feeSplit": "Top-up fees {{topups}} · payout fees {{payouts}}",
@@ -1303,15 +1303,15 @@
     "balance": "Balance",
     "balanceNote": "everything in the wallet, bonus included",
     "withdrawableNow": "Withdrawable now",
-    "withdrawableHint": "What the withdraw button allows right now: the balance, less bonus credit and any deposit not yet spent on packs. Frozen accounts and players who never topped up can't withdraw.",
+    "withdrawableHint": "What the withdraw button allows right now: the balance, less bonus credit and anything still to use on packs. Frozen accounts and players who never topped up can't withdraw.",
     "withdrawableNote": "can be withdrawn now",
     "frozenNote": "Frozen: nothing can be withdrawn",
     "noTopupNote": "Never topped up: nothing can be withdrawn",
     "bonusLabel": "Bonus credit",
     "bonusNote": "spend-only, never withdrawable",
-    "stillToPlay": "Still to play through",
-    "stillToPlayHint": "Deposits have to be spent on packs once before they can be withdrawn. This is the part not spent yet: it stays in the wallet and can still be used on packs.",
-    "stillToPlayNote": "spent {{used}} of {{deposited}} deposited",
+    "stillToPlay": "Still to use on packs",
+    "stillToPlayHint": "Top-ups, and the free part of a sell-back (from bonus credit or the welcome pack), must be spent on packs; they can't be withdrawn. Selling what is pulled with them is withdrawable. This is the part not spent yet: it stays in the wallet and can still be used on packs.",
+    "stillToPlayNote": "spent {{used}} of {{deposited}} on packs",
     "nothingHeld": "nothing held back",
     "historyTitle": "Wallet history",
     "filter": {
@@ -1362,8 +1362,8 @@
     "colSellNow": "Sell now",
     "sellLocked": "Can't be sold yet: a free welcome card unlocks after the first paid pack.",
     "sellsPaused": "Selling is paused: the exchange-rate feed is down, so the player can't sell any card right now. The prices below are indicative.",
-    "heldBoth": "{{held}} held back: bonus and deposit still to play",
+    "heldBoth": "{{held}} held back: bonus credit and money still to use on packs",
     "heldBonus": "{{held}} held back: bonus credit",
-    "heldPlay": "{{held}} held back: deposit still to play"
+    "heldPlay": "{{held}} held back: still to use on packs"
   }
 }

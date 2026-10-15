@@ -72,6 +72,27 @@ describe('DELIVERY_RULES backend-message contract', () => {
 
   // The phone gate is a NOT_ALLOWED, same class as "no longer available" —
   // so its rule has to win, or the customer is told to fix the wrong thing.
+  // bonus-credit.ts BONUS_NOT_SPENDABLE_MESSAGE, a NOT_ALLOWED refusal the
+  // broad /not allowed/ rule would misread as a card problem.
+  it('says bonus credit cannot pay the delivery fee', () => {
+    expect(
+      map("Bonus credit can only be spent on packs — it can't pay for this."),
+    ).toBe(
+      "Bonus credit can only be used on packs, so it can't pay the delivery fee. Top up to pay it.",
+    );
+  });
+
+  it('calls the fee the delivery fee everywhere', () => {
+    expect(map("Deduction exceeds the customer's balance (RM 5.00)")).toBe(
+      'Not enough balance to cover the delivery fee — top up and try again.',
+    );
+    for (const [, message] of DELIVERY_RULES) {
+      if (typeof message === 'string') {
+        expect(message).not.toMatch(/shipping fee/i);
+      }
+    }
+  });
+
   it('passes the no-top-up refusal through instead of blaming the cards', () => {
     // withdrawable.ts NO_TOPUP_MESSAGE (backend), a NOT_ALLOWED refusal.
     const msg = 'Top up at least once to unlock withdrawals and deliveries.';

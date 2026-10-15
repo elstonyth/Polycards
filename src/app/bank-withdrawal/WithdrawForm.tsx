@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, Clock, Landmark, Lock } from 'lucide-react';
 import { rm, rm0, timeUntil } from '@/lib/format';
 import { openRails, regionalRailUi } from '@/lib/regional-rails';
+import { walletSplit } from '@/lib/wallet-split';
 import {
   fetchSavedBankAccounts,
   getPaymentLimits,
@@ -71,15 +72,25 @@ export function nextAmountText(
   return Number(next.replace(/,/g, '')) > cap ? cap.toFixed(2) : next;
 }
 
+/** How much more `withdrawable` needs to reach the payout floor, in whole sen
+ *  (50 − 49.71 is 0.29, not 0.2900000000000027). Never below 0. */
+export function minimumGap(minRm: number, withdrawable: number): number {
+  return (
+    Math.max(0, Math.round(minRm * 100) - Math.round(withdrawable * 100)) / 100
+  );
+}
+
 /** Backend refusal → the screen that fixes it. Matches the backend's own
  *  wording, which reaches this form verbatim through lib/vault-errors.ts's
  *  withdrawal pass-through rule. Refusals that already say what to do (the
  *  cap, the daily limit, a paused channel) get no link. The phone gate has
  *  its own PhoneGateAction. */
 const REMEDIES: [RegExp, string | null, string][] = [
-  // "more on packs" is the 2026-10-14 wording; the older one stays matched
-  // in case the storefront deploys before the backend.
-  [/more on packs|must be spent on packs/i, '/slots', 'Open packs'],
+  // Both held refusals (2026-10-15) end "… is for opening packs.": "The other
+  // RM Y …" and "Nothing is withdrawable yet. Your RM Y …".
+  [/is for opening packs/i, '/slots', 'Open packs'],
+  // shortcut: pre-2026-10-15 backend text, kept for a storefront-first deploy; drop once both are live.
+  [/more on packs/i, '/slots', 'Open packs'],
   // null = open the top-up sheet in place, like the no-top-up notice does.
   [/top up at least once/i, null, 'Top up'],
   [/under review/i, '/contact', 'Contact support'],
@@ -121,45 +132,6 @@ function WithdrawRemedy({ error }: { error: string }) {
   );
 }
 
-/** The sky "spend to unlock" notice — shared by the no-top-up hold and the
- *  still-to-play note, which differ only in heading, body and first action.
- *  The note is not a hold (the rest of the balance can still leave), so it
- *  takes its own id and the form's hold reason stays unique. */
-function UnlockHold({
-  id = 'withdraw-hold-reason',
-  title,
-  action,
-  children,
-}: {
-  id?: string;
-  title: ReactNode;
-  action: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      id={id}
-      role="status"
-      className="mt-4 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3.5"
-    >
-      <p className="flex items-center gap-2 text-sm font-semibold text-white">
-        <Lock className="h-4 w-4 shrink-0 text-sky-400" aria-hidden />
-        {title}
-      </p>
-      {children}
-      <div className="mt-3 flex items-center gap-3">
-        {action}
-        <Link
-          href="/wallet"
-          className="text-[13px] text-white/60 underline-offset-2 hover:text-white hover:underline"
-        >
-          How it works
-        </Link>
-      </div>
-    </div>
-  );
-}
-
 /**
  * Bank-withdrawal form. The balance is debited the moment the request is
  * accepted — the success state says "on its way", never "paid", because the
@@ -176,32 +148,44 @@ function UnlockHold({
  */
 export default function WithdrawForm({
   withdrawable,
+  available = null,
   frozen = false,
   noTopup = false,
-  playthrough = null,
   bonus = 0,
+  remaining = null,
 }: {
   /** The server's freeze/locked/playthrough-gated figure — NOT raw balance. */
   withdrawable: number | null;
+  /** The wallet's `available` (0 while frozen). What of it is not
+   *  withdrawable is the "For packs" part, named so the gap is no mystery. */
+  available?: number | null;
   /** The account is frozen for review — outranks every other hold. */
   frozen?: boolean;
   /** The account has never topped up, so nothing may leave (2026-10-11). */
   noTopup?: boolean;
-  /** The wallet's playthrough state, passed as-is. Only `remaining` is held
-   *  back (partial unlock, 2026-10-14) — it is already left out of
-   *  `withdrawable` — so the form names it rather than blocking on it. A
-   *  freeze or a missing top-up outranks it (withdrawable.ts's order). */
-  playthrough?: { deposited: number; used: number; remaining: number } | null;
   /** Spend-only bonus credit inside the balance, already left out of
-   *  `withdrawable` — named so the gap to the balance is not a mystery. */
+   *  `withdrawable` — the first line of the For-packs part. */
   bonus?: number;
+  /** playthrough.remaining — the stamped part still to use on packs. Only
+   *  read before a first top-up, to tell it from what the top-up frees. */
+  remaining?: number | null;
 }) {
-  const hasBonus = Math.round(bonus * 100) > 0;
   const needsTopup = !frozen && noTopup;
-  const toPlay =
-    !frozen && !needsTopup && playthrough !== null && playthrough.remaining > 0
-      ? playthrough.remaining
-      : 0;
+  // The wallet page's split (spec 2026-10-15 §3), so both pages agree. A
+  // freeze hides it: telling a frozen account to open packs ends refused.
+  // Unknown remaining reads as "all of it still to use": never promises
+  // money the first top-up would not free.
+  const split =
+    !frozen && withdrawable != null && available != null
+      ? walletSplit({
+          available,
+          withdrawable,
+          bonus,
+          remaining: remaining ?? available,
+          hasTopup: !noTopup,
+        })
+      : null;
+  const showSplit = split !== null && split.forPacks > 0;
   // Any hold means no amount can pass the server's gate, so the form says
   // why up front and does not invite an attempt that is certain to fail.
   const onHold = frozen || needsTopup;
@@ -262,8 +246,9 @@ export default function WithdrawForm({
     : null;
   // Gate open but less than the payout floor: no amount can pass the band, and
   // nextAmountText would snap every attempt down below it — say so instead.
+  // The floor is the rail's (S$ rail: RM 96.05 at 3.2017), as shown on top.
   const belowMin =
-    !onHold && withdrawable != null && withdrawable < limits.withdrawal.minRm;
+    !onHold && withdrawable != null && withdrawable < payoutBand.minRm;
   const blocked = onHold || belowMin;
   const guidanceId = withdrawalsClosed
     ? 'withdraw-amount-guidance'
@@ -402,7 +387,8 @@ export default function WithdrawForm({
 
   if (done) {
     // 'held' means the amount above already left the balance but was parked
-    // for a human to approve instead of being sent to the gateway — it must
+    // for staff to approve instead of being sent to the gateway. "Awaiting
+    // approval", never "under review": that now means a frozen account. It must
     // never read as a completed payout, and the copy below never claims the
     // balance is still spendable (the "Balance now" line already reflects the
     // debit). No threshold figure here on purpose: naming RM 1,000 would be a
@@ -416,7 +402,7 @@ export default function WithdrawForm({
           <CheckCircle2 className="h-12 w-12 text-buyback-fg" aria-hidden />
         )}
         <p className="mt-3 font-heading text-2xl text-white">
-          {rm(done.amount)} {held ? 'UNDER REVIEW' : 'ON ITS WAY'}
+          {rm(done.amount)} {held ? 'AWAITING APPROVAL' : 'ON ITS WAY'}
         </p>
         {/* The balance is RM, but a Singapore bank is paid in S$: name what
             lands, as the form did before the tap. */}
@@ -429,7 +415,7 @@ export default function WithdrawForm({
         )}
         <p className="mt-2 max-w-sm text-sm text-neutral-400">
           {held
-            ? "Withdrawals this size go through a manual review before they're sent to your bank — the amount has already left your balance, and returns automatically if the withdrawal isn't approved. Either way, we'll let you know."
+            ? "Withdrawals this size need staff approval before they're sent to your bank — the amount has already left your balance, and returns automatically if the withdrawal isn't approved. Either way, we'll let you know."
             : 'Your bank transfer is processing — most arrive within minutes. If the bank rejects it, the full amount returns to your balance automatically.'}
         </p>
         <p className="mt-3 text-[12px] text-neutral-500">
@@ -447,56 +433,48 @@ export default function WithdrawForm({
     <div className="mt-6 max-w-md">
       <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm">
         <div className="flex items-center justify-between text-neutral-400">
-          <span>Available to withdraw</span>
-          <span className="font-semibold text-neutral-200">
+          <span>Withdrawable</span>
+          <span className="font-semibold text-white">
             {withdrawable == null ? '—' : rm(withdrawable)}
           </span>
         </div>
-        {toPlay > 0 && (
-          <p className="mt-1 text-[12px] text-neutral-500">
-            Not counting {rm(toPlay)} you still need to play.
-          </p>
-        )}
-        {hasBonus && !frozen && (
-          <p className="mt-1 text-[12px] text-neutral-500">
-            Excludes {rm(bonus)} bonus credit — it&apos;s for opening packs and
-            can&apos;t be withdrawn.
+        <p className="mt-1 text-[12px] text-neutral-400">
+          Minimum withdrawal {rm(payoutBand.minRm)}
+        </p>
+        {belowMin && (
+          <p
+            id="withdraw-hold-reason"
+            role="status"
+            className="mt-1 text-[12px] text-neutral-300"
+          >
+            {`You can withdraw once your withdrawable money reaches ${rm(payoutBand.minRm)} (${rm(minimumGap(payoutBand.minRm, withdrawable ?? 0))} more).`}
           </p>
         )}
       </div>
 
+      {/* A real switch, so the lock icon is honest here — unlike the
+          For-packs part below, which is simply money for packs. */}
       {needsTopup && (
-        <UnlockHold
-          title="Top up at least once to unlock withdrawals"
-          action={
-            <Pill size="sm" onClick={openTopUp}>
-              Top up
-            </Pill>
-          }
+        <div
+          id="withdraw-hold-reason"
+          role="status"
+          className="mt-4 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3.5"
         >
-          <p className="mt-1 text-[13px] text-white/60">
-            After your first top-up, spend it on packs and you can withdraw.
-            Bonus credit is used first and doesn&apos;t count. Your balance
-            stays yours to spend on packs.
+          <p className="flex items-center gap-2 text-sm font-semibold text-white">
+            <Lock className="h-4 w-4 shrink-0 text-sky-400" aria-hidden />
+            Withdrawals and card deliveries start after your first top-up.
           </p>
-        </UnlockHold>
-      )}
-
-      {toPlay > 0 && (
-        <UnlockHold
-          id="withdraw-play-note"
-          title={`Spend ${rm(toPlay)} on packs to unlock it`}
-          action={
-            <Link href="/slots" className={pillVariants({ size: 'sm' })}>
-              Open packs
-            </Link>
-          }
-        >
-          <p className="mt-1 text-[13px] text-white/60">
-            Top-ups, and the bonus part of cards you sell, must be played once.
-            The rest of your balance isn&apos;t locked.
-          </p>
-        </UnlockHold>
+          {split && split.afterTopup > 0 && (
+            <p className="mt-1.5 text-[13px] text-white/70">
+              After your first top-up,{' '}
+              <span className="whitespace-nowrap">{rm(split.afterTopup)}</span>{' '}
+              becomes withdrawable.
+            </p>
+          )}
+          <Pill size="sm" onClick={openTopUp} className="mt-3">
+            Top up
+          </Pill>
+        </div>
       )}
 
       {frozen && (
@@ -521,18 +499,52 @@ export default function WithdrawForm({
         </div>
       )}
 
-      {belowMin && (
+      {showSplit && (
         <div
-          id="withdraw-hold-reason"
-          role="status"
-          className="mt-4 rounded-xl border border-white/10 bg-neutral-900 px-4 py-3.5"
+          id="withdraw-for-packs"
+          className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3.5 text-sm"
         >
-          <p className="text-sm font-semibold text-white">
-            Minimum withdrawal is {rm0(limits.withdrawal.minRm)}
+          <div className="flex items-center justify-between font-semibold text-white">
+            <span>For packs</span>
+            <span className="whitespace-nowrap">{rm(split.forPacks)}</span>
+          </div>
+          <dl className="mt-2 space-y-1.5 text-[13px]">
+            <div className="flex items-start justify-between gap-3">
+              <dt className="text-neutral-400">
+                Bonus credit
+                <span className="block text-[11px] text-neutral-400">
+                  used first
+                </span>
+              </dt>
+              <dd className="text-neutral-200">{rm(split.bonus)}</dd>
+            </div>
+            <div className="flex items-start justify-between gap-3">
+              <dt className="text-neutral-400">Still to use on packs</dt>
+              <dd className="text-neutral-200">{rm(split.stillToUse)}</dd>
+            </div>
+          </dl>
+          <p className="mt-2 text-[13px] text-white/60">
+            Can&rsquo;t go to your bank. Open packs with it.
+            {/* Untrue before a first top-up; the top-up notice covers that. */}
+            {!needsTopup &&
+              ' Sell-back money from those packs is withdrawable, except any part paid with bonus credit.'}
           </p>
-          <p className="mt-1 text-[13px] text-white/60">
-            You have {rm(withdrawable ?? 0)} ready to withdraw.
-          </p>
+          <div className="mt-3 flex items-center gap-3">
+            {/* secondary: the white full-width Withdraw button stays the
+                page's one primary action. */}
+            <Link
+              href="/slots"
+              className={pillVariants({ variant: 'secondary', size: 'sm' })}
+            >
+              Open packs
+            </Link>
+            <Link
+              href="/wallet"
+              className="text-[13px] text-white/60 underline-offset-2 hover:text-white hover:underline"
+            >
+              How it works
+            </Link>
+          </div>
         </div>
       )}
 

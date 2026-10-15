@@ -81,9 +81,7 @@ await confirm.click();
 
 // The toast is the point of this run: it must be visible AFTER the reveal
 // auto-concludes, which is what the inline "+RM x credited" chip cannot do.
-const toast = p
-  .getByRole('status')
-  .filter({ hasText: /credited to your balance/ });
+const toast = p.getByRole('status').filter({ hasText: /^Sold — RM/ });
 await toast.first().waitFor({ state: 'visible', timeout: 20000 });
 console.log('toast:', (await toast.first().innerText()).replace(/\s+/g, ' '));
 await p.screenshot({ path: `${OUT}/spin-sell-toast.png` });

@@ -6,6 +6,7 @@ import Image from 'next/image';
 import { Eye, Lock, Package, Search, Star } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
 import { rm, rm0 } from '@/lib/format';
+import { sellBackNotice } from '@/lib/buyback-copy';
 import {
   getVault,
   sellBackPullsBatch,
@@ -32,7 +33,7 @@ import {
   CardDetailOverlay,
   type CardSeed,
 } from '@/components/cards/CardDetailOverlay';
-import { toggleSelectAll } from '@/lib/vault-selection';
+import { sellTotals, toggleSelectAll } from '@/lib/vault-selection';
 import { VaultActionBar } from '@/components/account/VaultActionBar';
 import { useConsent } from '@/lib/use-consent';
 
@@ -59,7 +60,7 @@ export default function VaultClient({
   const [error, setError] = useState<string | null>(
     initial.ok ? null : initial.error,
   );
-  // Success confirmation (e.g. "Sold N cards for RM X — added to your balance").
+  // Success confirmation (e.g. "Sold N cards — RM X added.", sellBackNotice).
   // Distinct from `error` so a sale reads as a positive result, not a warning.
   const [notice, setNotice] = useState<string | null>(null);
   // Transient top-of-screen confirmation for shipping orders (auto-dismisses).
@@ -125,16 +126,10 @@ export default function VaultClient({
     (s, i) => s + (i.card.priceMyr ?? 0),
     0,
   );
-  const selectedBuyback = sellableSelected.reduce(
-    (s, i) => s + i.buyback.amount,
-    0,
-  );
-  // The part of that sale from bonus or gift play — the confirm says it must
-  // be played through before it can be withdrawn.
-  const selectedBonus = sellableSelected.reduce(
-    (s, i) => s + i.buyback.bonus,
-    0,
-  );
+  // The total, and the part of it that is for opening packs (bonus share, the
+  // welcome card) — the confirm and the sold notice both name it.
+  const { amount: selectedBuyback, held: selectedBonus } =
+    sellTotals(sellableSelected);
   // The vault buyback is a flat rate, uniform across all vaulted items (see the
   // footer copy + actions/vault.ts), so the first item's percent represents the
   // whole batch. The confirm's "You receive" total is the exact sum of per-item
@@ -341,10 +336,13 @@ export default function VaultClient({
         );
       } else {
         // Explicit money confirmation — the whole complaint was "sold, no money."
+        // Every selected card sold (failed === 0), so the confirm's for-packs
+        // total is this sale's.
         setNotice(
-          `Sold ${res.sold} card${res.sold === 1 ? '' : 's'} for ${rm(
+          `Sold ${res.sold} card${res.sold === 1 ? '' : 's'} — ${sellBackNotice(
             res.credited,
-          )} — added to your balance.`,
+            selectedBonus,
+          )}`,
         );
       }
     } finally {
@@ -784,12 +782,15 @@ export default function VaultClient({
       )}
 
       <p className="mt-5 text-[12px] text-neutral-400">
-        Sell-back credits your site balance instantly at the flat{' '}
-        {FLAT_BUYBACK_PERCENT}% buyback rate. Every delivery, prize cards
-        included, pays shipping: RM15 (West Malaysia), RM35 (East Malaysia) or
-        RM50 (Singapore), with protection included up to RM200 — above that add
-        5% insurance of card value. Prize cards ship as separate parcels. Fees
-        are deducted from your credit balance (not bonus credit).
+        Cards sell back at the flat {FLAT_BUYBACK_PERCENT}% buyback rate.
+        Sell-back money reaches your balance at once. Money from the welcome
+        pack&rsquo;s card, and the part of any sale paid with bonus credit, is
+        for packs. The rest is withdrawable after your first top-up. Every
+        delivery, prize cards included, pays shipping: RM15 (West Malaysia),
+        RM35 (East Malaysia) or RM50 (Singapore), with protection included up to
+        RM200 — above that add 5% insurance of card value. Prize cards ship as
+        separate parcels. Fees are deducted from your balance (not bonus
+        credit).
       </p>
 
       {items.length > 0 && consent !== null && (

@@ -11,7 +11,10 @@ import { PACKS_MODULE } from '../../../../../modules/packs';
 import { FREE_WELCOME_CATEGORY } from '../../../../../modules/packs/free-pack';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import { toMoney } from '../../../../../modules/packs/money';
-import { bonusShareMyr } from '../../../../../modules/packs/bonus-credit';
+import {
+  bonusShareMyr,
+  sellbackHoldBp,
+} from '../../../../../modules/packs/bonus-credit';
 import { STALE_GIFT_MESSAGE } from '../../../../../modules/packs/pack-gifts';
 import {
   FLAT_PERCENT,
@@ -173,8 +176,9 @@ export async function POST(
           },
           marketPriceMyr,
         );
-        // Gift and bonus rows: that share of a sale must be played through.
-        const bonusBp = Number(pull.bonus_bp ?? 0);
+        // Bonus rows: that share of a sale must be played through. A gift
+        // row's sale is not held (ADR 0012).
+        const bonusBp = sellbackHoldBp(pull);
         const vaultAmount = buybackAmount(marketPriceMyr, FLAT_PERCENT);
         return {
           pull,

@@ -141,7 +141,7 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
         // contradict it.
         return strOf(data, 'prize_kind') === 'voucher'
           ? `You won a ${rm(amount)} voucher.`
-          : `You won ${rm(amount)} in credit.`;
+          : `You won ${rm(amount)}.`;
       }
       return null;
     },
@@ -162,9 +162,10 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
       const amount = numOf(data, 'amount_myr');
       const level = numOf(data, 'level');
       if (amount === null) return null;
+      // A VIP voucher pays bonus credit since 2026-10-11 (reasonCashSenSql).
       return level
-        ? `${rm(amount)} credited from your Level ${level} voucher.`
-        : `${rm(amount)} credited to your balance.`;
+        ? `${rm(amount)} bonus credit from your Level ${level} voucher. Use it on packs — it can’t be withdrawn.`
+        : `${rm(amount)} bonus credit added. Use it on packs — it can’t be withdrawn.`;
     },
     href: null,
     action: null,
@@ -178,7 +179,9 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
     title: 'Top-up complete',
     body: (data) => {
       const amount = numOf(data, 'amount_myr');
-      return amount === null ? null : `${rm(amount)} added to your balance.`;
+      return amount === null
+        ? null
+        : `${rm(amount)} added — it’s for opening packs.`;
     },
     href: '/transactions',
     action: 'View ledger',
@@ -288,7 +291,17 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
       if (cards && cards > 0)
         parts.push(cards === 1 ? 'a featured card' : `${cards} featured cards`);
       if (parts.length === 0) return null;
-      return `You finished #${rank} — ${parts.join(' and ')} added to your account.`;
+      const credit =
+        credits && credits > 0
+          ? ' Use the bonus credit on packs — it can’t be withdrawn.'
+          : '';
+      const card =
+        cards && cards > 0
+          ? cards === 1
+            ? ' Ship the card (delivery fee applies) or sell it back.'
+            : ' Ship the cards (delivery fee applies) or sell them back.'
+          : '';
+      return `You finished #${rank} — ${parts.join(' and ')} added to your account.${credit}${card}`;
     },
     href: '/leaderboard',
     action: 'View challenge',
@@ -321,7 +334,7 @@ export const NOTIFICATION_COPY: Record<string, NotificationCopy> = {
       const amount = numOf(data, 'amount');
       return amount === null || amount <= 0
         ? null
-        : `You received ${rm(amount)} bonus credit.`;
+        : `${rm(amount)} bonus credit added. Use it on packs — it can’t be withdrawn.`;
     },
     href: '/wallet',
     action: 'View wallet',

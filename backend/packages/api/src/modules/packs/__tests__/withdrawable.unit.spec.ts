@@ -77,8 +77,9 @@ describe('withdrawableCents (partial unlock)', () => {
   });
 });
 
-describe('withdrawalGateError playthrough refusal', () => {
+describe('withdrawalGateError for-packs refusal (2026-10-15)', () => {
   const wallet = (over: Partial<WithdrawalGateWallet>): WithdrawalGateWallet => ({
+    available: 0,
     withdrawable: 0,
     isFrozen: false,
     hasTopup: true,
@@ -86,27 +87,59 @@ describe('withdrawalGateError playthrough refusal', () => {
     ...over,
   });
 
-  it('names what may leave now and what is still to play', () => {
+  it('names what may leave now and the rest as money for packs', () => {
     const err = withdrawalGateError(
-      wallet({ withdrawable: 28.4, playthrough: { remaining: 10.55 } }),
+      wallet({ available: 38.95, withdrawable: 28.4, playthrough: { remaining: 10.55 } }),
       38.95,
     );
     expect(err?.message).toBe(
-      'You can withdraw up to RM 28.40. Spend RM 10.55 more on packs to unlock the rest.',
+      'You can withdraw up to RM 28.40 right now. The other RM 10.55 is for opening packs.',
     );
   });
 
-  it('with nothing free yet, says only what is still to play', () => {
+  it('with nothing withdrawable yet, names the whole for-packs amount', () => {
     const err = withdrawalGateError(
-      wallet({ withdrawable: 0, playthrough: { remaining: 60 } }),
+      wallet({ available: 60, withdrawable: 0, playthrough: { remaining: 60 } }),
       50,
     );
-    expect(err?.message).toBe('Spend RM 60.00 more on packs to unlock withdrawals.');
+    expect(err?.message).toBe('Nothing is withdrawable yet. Your RM 60.00 is for opening packs.');
+  });
+
+  it('counts bonus credit in the for-packs amount', () => {
+    const err = withdrawalGateError(wallet({ available: 100, withdrawable: 80 }), 90);
+    expect(err?.message).toBe(
+      'You can withdraw up to RM 80.00 right now. The other RM 20.00 is for opening packs.',
+    );
+  });
+
+  it('keeps the plain cap when nothing is held', () => {
+    const err = withdrawalGateError(wallet({ available: 50, withdrawable: 50 }), 60);
+    expect(err?.message).toBe('You can withdraw up to RM 50.00 right now.');
+  });
+
+  it('gives the plain cap, not "RM 0.00 is for opening packs", on an empty balance', () => {
+    // A fee took the balance below the hold: nothing is left to name as for packs.
+    const err = withdrawalGateError(
+      wallet({ available: 0, withdrawable: 0, playthrough: { remaining: 10.55 } }),
+      5,
+    );
+    expect(err?.message).toBe('You can withdraw up to RM 0.00 right now.');
+  });
+
+  it('never says spending unlocks anything', () => {
+    const err = withdrawalGateError(
+      wallet({ available: 38.95, withdrawable: 28.4, playthrough: { remaining: 10.55 } }),
+      38.95,
+    );
+    expect(err?.message).not.toMatch(/unlock|release|more on packs/i);
   });
 
   it('allows an amount within the partial withdrawable', () => {
     expect(
-      withdrawalGateError(wallet({ withdrawable: 28.4, playthrough: { remaining: 10.55 } }), 28.4),
+      withdrawalGateError(
+        wallet({ available: 38.95, withdrawable: 28.4, playthrough: { remaining: 10.55 } }),
+        28.4,
+      ),
     ).toBeNull();
   });
 });

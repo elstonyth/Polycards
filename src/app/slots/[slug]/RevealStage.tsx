@@ -12,6 +12,7 @@ import type { WonCard } from '@/lib/actions/packs';
 import type { SellBackOffer, SellBackFn, RevealFn } from './useSellWindow';
 import SellConfirmModal from '@/components/SellConfirmModal';
 import { rm } from '@/lib/format';
+import { sellOfferCopy } from '@/lib/buyback-copy';
 import { FREE_PULL_LOCKED_MESSAGE } from '@/lib/packs-data';
 import { rarityRgb, isTopRarity } from '@/lib/rarity';
 import type { SoundName } from '@/lib/use-sound';
@@ -75,9 +76,10 @@ export function RevealStage({
   onCloseInstant?: (pullIds: string[]) => void;
   onSellBack: SellBackFn;
   onReveal?: RevealFn;
-  /** Fired after a confirmed sell-back: the new balance, and what this card
-   *  credited (so the parent can raise a toast that outlives this stage). */
-  onSold?: (balance: number, amount: number) => void;
+  /** Fired after a confirmed sell-back: the new balance, what this card
+   *  credited and the part of it for opening packs (so the parent can raise a
+   *  toast that outlives this stage). */
+  onSold?: (balance: number, amount: number, held: number) => void;
   /** Fired when a sell-back does NOT land, for the same reason as `onSold`:
    *  past the deadline this stage reports an errored card as plain "Stored in
    *  your vault" and then tears itself down, so the failure needs a surface the
@@ -344,20 +346,32 @@ export function RevealStage({
     // Both actions after reveal (spec decision #26): Sell (primary) + Keep in
     // vault (quiet secondary, ≥44px). Keep concludes the card immediately —
     // it's already vaulted server-side, so no endpoint call.
+    // The sale's free part (bonus-credit share, welcome pull) is for packs; it
+    // rides inside the Sell button, which has room for a second line in its
+    // min-h-12, so the 7rem footer slot does not grow.
+    const sellCopy = sellOfferCopy(offer.amount, offer.percent, offer.bonus);
+    const cardSelling = state.phase === 'selling';
+    const forPacks = cardSelling ? null : sellCopy.forPacks;
     return (
       <>
         <button
           type="button"
           onClick={() => setConfirmIndex(i)}
           disabled={!flipped || state.phase === 'selling'}
-          className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-chase/50 bg-chase/10 px-2 py-1 text-center text-sm font-bold leading-tight text-chase transition-colors hover:bg-chase/20 disabled:opacity-50"
+          // One clean sentence for screen readers; the two visual lines would
+          // otherwise run together without punctuation.
+          aria-label={cardSelling ? undefined : sellCopy.ariaLabel}
+          className="inline-flex min-h-12 w-full flex-wrap items-center justify-center gap-x-2 rounded-xl border border-chase/50 bg-chase/10 px-2 py-1 text-center text-sm font-bold leading-tight text-chase transition-colors hover:bg-chase/20 disabled:opacity-50"
         >
           {state.phase === 'selling' && (
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
           )}
-          {state.phase === 'selling'
-            ? 'Selling…'
-            : `Sell for ${rm(offer.amount)} (${offer.percent}%)`}
+          {cardSelling ? 'Selling…' : sellCopy.label}
+          {forPacks && (
+            <span className="w-full text-[11px] font-medium text-chase/70">
+              · {forPacks}
+            </span>
+          )}
         </button>
         <button
           type="button"

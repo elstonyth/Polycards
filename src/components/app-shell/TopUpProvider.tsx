@@ -193,7 +193,7 @@ export function TopUpProvider({ children }: { children: ReactNode }) {
               balanceWhileWaiting == null ? 0 : next - balanceWhileWaiting;
             if (gained > 0) {
               setCredited({
-                message: `${rm(gained)} added to your balance`,
+                message: `${rm(gained)} added — it’s for opening packs.`,
                 nonce: Date.now(),
               });
             }

@@ -426,7 +426,7 @@ export default function PackDetailClient({
     }
     if (!giftsPending && balance !== null && !affordable(balance, paidCost)) {
       setNeedsTopUp(true);
-      setOpenError('Not enough credits to open.');
+      setOpenError('Not enough balance to open.');
       return;
     }
     setOpenError(null);
@@ -780,8 +780,7 @@ export default function PackDetailClient({
                   <>This pack is sold out right now.</>
                 ) : customer && balance !== null ? (
                   <>
-                    Each open costs {rm(priceNum)} in site credits — your
-                    balance:{' '}
+                    Each open costs {rm(priceNum)} from your balance — you have{' '}
                     <span
                       className={cn(
                         'font-bold',
@@ -793,7 +792,7 @@ export default function PackDetailClient({
                   </>
                 ) : (
                   <>
-                    Each open costs the pack price in site credits — one pack
+                    Each open costs the pack price from your balance — one pack
                     per open, recorded to your account.
                   </>
                 )}

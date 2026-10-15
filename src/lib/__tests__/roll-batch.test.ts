@@ -450,7 +450,7 @@ describe('rollBatch — paid open', () => {
   it('reports a rejection once — a possible debit is never retried', async () => {
     const openBatch = vi.fn(async () => ({
       ok: false as const,
-      error: 'Not enough credits to open this pack.',
+      error: 'Not enough balance to open this pack.',
       needsTopUp: true,
     }));
 

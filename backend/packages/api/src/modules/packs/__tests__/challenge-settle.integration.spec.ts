@@ -21,6 +21,7 @@ import path from 'path';
 import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
 import { PACKS_MODULE } from '../index';
 import type PacksModuleService from '../service';
+import { sellbackHoldBp } from '../bonus-credit';
 import { clearFxDisplayCache } from '../pricing';
 import Pack from '../models/pack';
 import Card from '../models/card';
@@ -237,8 +238,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
         );
         expect(rewardPulls).toHaveLength(1);
         expect(rewardPulls[0]!.card_id).toBe(card.handle); // HANDLE, not id
-        // A prize is promo value: its whole sell-back is played through once.
+        // A prize is promo value (bonus_bp full, counts toward nothing), but
+        // a prize card's sale is withdrawable: nothing held (ADR 0012).
         expect(rewardPulls[0]!.bonus_bp).toBe(10000);
+        expect(sellbackHoldBp(rewardPulls[0]!)).toBe(0);
 
         const second = await service.settleChallengeWeek({});
         expect(second.settled).toBe(false);

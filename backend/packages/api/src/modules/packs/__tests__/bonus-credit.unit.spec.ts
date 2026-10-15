@@ -9,6 +9,7 @@ import {
   openBonusBp,
   paidPullSource,
   reasonCashSenSql,
+  sellbackHoldBp,
 } from '../bonus-credit';
 
 describe('bonus credit math', () => {
@@ -73,5 +74,38 @@ describe('bonus credit math', () => {
     expect(reasonCashSenSql()).toContain(
       "WHEN reason IN ('bonus_grant', 'reward_credit', 'voucher_claim') THEN ROUND(amount * 100)",
     );
+  });
+});
+
+describe('sellbackHoldBp: the share of a sale held for packs (2026-10-15)', () => {
+  const pull = (source: string, pack_id: string, bonus_bp: number | null) => ({
+    source,
+    pack_id,
+    bonus_bp,
+  });
+
+  it('holds nothing of a task or challenge reward: its sale is withdrawable', () => {
+    expect(sellbackHoldBp(pull('reward', 'task-reward', BONUS_BP_FULL))).toBe(0);
+    expect(
+      sellbackHoldBp(pull('reward', 'challenge-2026-10-12', BONUS_BP_FULL)),
+    ).toBe(0);
+    // A free rip (task pack reward) opens a REAL pack: a reward all the same.
+    expect(sellbackHoldBp(pull('reward', 'bronze', BONUS_BP_FULL))).toBe(0);
+    expect(
+      sellbackHoldBp(pull('reward', 'challenge-cup-2026', BONUS_BP_FULL)),
+    ).toBe(0);
+  });
+
+  it('holds nothing of an admin gift pack pull', () => {
+    expect(sellbackHoldBp(pull('gift', 'bronze', BONUS_BP_FULL))).toBe(0);
+  });
+
+  it('keeps the bonus share of the welcome pull and bonus opens', () => {
+    expect(sellbackHoldBp(pull('free', 'welcome', BONUS_BP_FULL))).toBe(
+      BONUS_BP_FULL,
+    );
+    expect(sellbackHoldBp(pull('bonus', 'bronze', 3334))).toBe(3334);
+    expect(sellbackHoldBp(pull('pack', 'bronze', 0))).toBe(0);
+    expect(sellbackHoldBp({ bonus_bp: null })).toBe(0);
   });
 });

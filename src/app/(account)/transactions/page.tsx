@@ -8,6 +8,8 @@ import {
 import { rm } from '@/lib/format';
 import { getPendingDeposits, getTransactions } from '@/lib/actions/vault';
 import {
+  bonusMark,
+  forPacksMark,
   gatewayMethodLabel,
   gatewayStatusLabel,
   reasonLabel,
@@ -80,9 +82,16 @@ export default async function TransactionsPage({
       <AccountHeader title="Transactions" sub="Your top-ups and spending." />
       <StatCards
         items={[
-          { label: 'Current balance', value: rm(res.balance) },
+          { label: 'Balance', value: rm(res.balance) },
           { label: 'Total topped up', value: rm(res.topupTotal) },
-          { label: 'Total spent', value: rm(res.spendTotal) },
+          // Split, not one "Total spent": a withdrawal is not spending. An
+          // older backend sends no split — keep its single total then.
+          ...(res.packSpendTotal == null || res.withdrawnTotal == null
+            ? [{ label: 'Total spent', value: rm(res.spendTotal) }]
+            : [
+                { label: 'Spent on packs', value: rm(res.packSpendTotal) },
+                { label: 'Withdrawn', value: rm(res.withdrawnTotal) },
+              ]),
         ]}
       />
       {/* Above the table: an in-flight top-up is the thing the customer came
@@ -124,6 +133,8 @@ export default async function TransactionsPage({
             <tbody>
               {rows.map((t) => {
                 const at = new Date(t.createdAt);
+                const bonus = bonusMark(t.bonus);
+                const forPacks = forPacksMark(t.playthrough);
                 return (
                   <tr
                     key={t.id}
@@ -140,17 +151,18 @@ export default async function TransactionsPage({
                     <td className="px-4 py-3 text-white/90">
                       {reasonLabel(t.reason)}
                       {/* Any row that moved spend-only bonus credit — a grant,
-                          a bonus-funded open, a bonus sell-back — says so. */}
-                      {Math.round(t.bonus * 100) !== 0 && (
-                        <span className="ml-2 align-middle">
-                          <Badge>bonus</Badge>
+                          a bonus-funded open — says how much. */}
+                      {bonus && (
+                        <span className="ml-2 inline-block whitespace-nowrap align-middle">
+                          <Badge>{bonus}</Badge>
                         </span>
                       )}
-                      {/* A sell-back from bonus, gift or prize play: this part
-                          must go through packs once before it can leave. */}
-                      {Math.round(t.playthrough * 100) > 0 && (
+                      {/* Money into or out of "Still to use on packs" (a
+                          top-up, a sell-back's free share, a pack open), so
+                          the wallet's figure can be traced row by row. */}
+                      {forPacks && (
                         <span className="ml-2 inline-block whitespace-nowrap align-middle">
-                          <Badge tone="sky">+{rm(t.playthrough)} to play</Badge>
+                          <Badge tone="sky">{forPacks}</Badge>
                         </span>
                       )}
                     </td>

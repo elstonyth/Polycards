@@ -222,7 +222,43 @@ describe('useSellWindow — a failed sell is never silent (#514)', () => {
       await hook.current.sell(0);
     });
 
-    expect(onSold).toHaveBeenCalledWith(170, 70);
+    expect(onSold).toHaveBeenCalledWith(170, 70, 0);
     expect(onSellFailed).not.toHaveBeenCalled();
+  });
+});
+
+describe('useSellWindow — the for-packs part of a sale', () => {
+  async function sellOnce(offer: SellBackOffer, soldAmount: number) {
+    const onSold = vi.fn();
+    const hook = renderHook(() =>
+      useSellWindow({
+        offers: [offer],
+        active: true,
+        onSellBack: vi.fn(async () => ({
+          ok: true as const,
+          amount: soldAmount,
+          percent: 50,
+          balance: 200,
+        })),
+        onSold,
+      }),
+    );
+    mounted = hook;
+    await act(async () => {
+      await hook.current.sell(0);
+    });
+    return onSold;
+  }
+
+  test('scales the quoted free part to a late vault-rate sale', async () => {
+    // Quoted RM 70 instant with RM 35 from bonus; the server paid the vault
+    // rate (RM 50), so half of THAT is for packs.
+    const offer = { ...offerAt(Date.now() + 30_000), bonus: 35 };
+    expect(await sellOnce(offer, 50)).toHaveBeenCalledWith(200, 50, 25);
+  });
+
+  test('an unpriced quote reports nothing held instead of NaN', async () => {
+    const offer = { ...offerAt(Date.now() + 30_000), amount: 0, bonus: 5 };
+    expect(await sellOnce(offer, 50)).toHaveBeenCalledWith(200, 50, 0);
   });
 });

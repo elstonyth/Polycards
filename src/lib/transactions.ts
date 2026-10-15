@@ -12,7 +12,7 @@ const REASON_LABEL: Record<CreditReason, string> = {
   pack_open: 'Pack open',
   buyback: 'Sell-back',
   adjustment: 'Adjustment',
-  cashout: 'Cashout',
+  cashout: 'Withdrawal',
   voucher_claim: 'Voucher',
   reward_credit: 'Reward credit',
   daily_reward: 'Daily reward',
@@ -53,10 +53,28 @@ export const reasonLabel = (reason: string): string =>
   (REASON_LABEL as Record<string, string>)[reason] ??
   reason.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 
-/** "+RM 48.00" for credits, "-RM 25.00" for spends (amount carries the sign). */
+/** "+RM 48.00" for credits, "−RM 25.00" for spends (amount carries the sign).
+ *  U+2212, not a hyphen: screen readers read it as "minus". */
 export function signedRm(amount: number): string {
-  const sign = amount > 0 ? '+' : amount < 0 ? '-' : '';
+  const sign = amount > 0 ? '+' : amount < 0 ? '−' : '';
   return `${sign}${rm(Math.abs(amount))}`;
+}
+
+/** A row's move into or out of "Still to use on packs" (spec 2026-10-15 §5):
+ *  "+RM 50.00 for packs" / "−RM 40.00 for packs"; null when it moved none.
+ *  Rows are never marked "withdrawable" — that goes stale once spent. */
+export function forPacksMark(forPacks: number): string | null {
+  return Math.round(forPacks * 100) === 0
+    ? null
+    : `${signedRm(forPacks)} for packs`;
+}
+
+/** "RM 15.00 bonus credit" — the row's bonus part (the amount column carries
+ *  the direction); null when the row has none. */
+export function bonusMark(bonus: number): string | null {
+  return Math.round(bonus * 100) === 0
+    ? null
+    : `${rm(Math.abs(bonus))} bonus credit`;
 }
 
 /**

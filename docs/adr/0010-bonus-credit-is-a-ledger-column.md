@@ -33,6 +33,8 @@ must be played through once, like a deposit.)
   buyback row as `external_funded_cents`, which joins the playthrough basis like
   a deposit: that much stays unwithdrawable until it has been spent on packs
   (the whole balance did, until ADR 0011). Sales before 2026-10-09 were paid as bonus and stay bonus.
+  A gift pack's or a task / challenge reward's sale (`source = 'gift'` or
+  `'reward'`) stamps nothing since ADR 0012 (decided at sell time).
 - Gift pulls carry `source = 'gift'`, and a paid pull bonus paid at least half
   of carries `source = 'bonus'`, so every positive `source = 'pack'` count
   (tasks, profile, feed, welcome unlock) excludes them; VIP and referral

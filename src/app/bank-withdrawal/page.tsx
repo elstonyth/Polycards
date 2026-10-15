@@ -33,7 +33,6 @@ export default async function BankWithdrawalPage() {
   // withdrawable.ts's order, where its tests pin it.
   const frozen = wallet?.isFrozen === true;
   const noTopup = wallet !== null && !wallet.hasTopup;
-  const playthrough = wallet?.playthrough ?? null;
   // Partner groups (spec 2026-09-09): a member of a group that blocks
   // withdrawals gets the notice instead of a form the backend
   // (blockGroupWithdrawals) would refuse on submit. UX only — the refusal
@@ -60,17 +59,18 @@ export default async function BankWithdrawalPage() {
               aria-hidden
             />
             <span>
-              Withdrawals are not available on this account. Your credit balance
-              stays spendable on packs.
+              Withdrawals are not available on this account. Your balance stays
+              spendable on packs.
             </span>
           </div>
         ) : WITHDRAWALS_OPEN ? (
           <WithdrawForm
             withdrawable={withdrawable}
+            available={wallet?.available ?? null}
             frozen={frozen}
             noTopup={noTopup}
-            playthrough={playthrough}
             bonus={wallet?.bonus ?? 0}
+            remaining={wallet?.playthrough.remaining ?? null}
           />
         ) : (
           <>
@@ -81,13 +81,15 @@ export default async function BankWithdrawalPage() {
               />
               <span>
                 Bank withdrawals aren&apos;t open yet — payouts go live with the
-                payment gateway. Your credit balance is safe and stays spendable
-                on packs in the meantime.
+                payment gateway. Your balance is safe and stays spendable on
+                packs in the meantime.
               </span>
             </div>
             <p className="mt-4 text-[13px] text-white/60">
-              Want value out today? Sell-back credits from your vault apply
-              instantly to your balance.
+              Sell-back money reaches your balance at once. Money from the
+              welcome pack&rsquo;s card, and the part of any sale paid with
+              bonus credit, is for packs. The rest is withdrawable after your
+              first top-up.
             </p>
           </>
         )

@@ -135,15 +135,14 @@ describe('VAULT_RULES backend-message contract', () => {
     // The literal backend strings. Before 2026-10-03 every one of these fell
     // to VAULT_FALLBACK, so a customer short of playthrough was told to retry.
     const literals = [
-      // withdrawable.ts withdrawalGateError — freeze, no top-up, playthrough, cap
+      // withdrawable.ts withdrawalGateError — freeze, no top-up, for packs, cap
       'Top up at least once to unlock withdrawals and deliveries.',
       'Withdrawals are unavailable while your account is under review. Contact support.',
-      // (the old playthrough wording stays listed: a storefront deploy can
-      // land before the backend one)
-      'RM 5.00 of your deposits must be spent on packs before you can withdraw.',
-      'Spend RM 5.00 more on packs to unlock withdrawals.',
-      'You can withdraw up to RM 28.40. Spend RM 10.55 more on packs to unlock the rest.',
+      'You can withdraw up to RM 28.40 right now. The other RM 10.55 is for opening packs.',
+      'Nothing is withdrawable yet. Your RM 60.00 is for opening packs.',
       'You can withdraw up to RM 12.34 right now.',
+      // the pre-2026-10-14 wording, still matched
+      'RM 5.00 of your deposits must be spent on packs before you can withdraw.',
       // service.ts withdrawForCashout
       'Daily withdrawal limit reached. You can withdraw RM 100.00 more today.',
       'This withdrawal is no longer open, so nothing was debited. Start a new one.',

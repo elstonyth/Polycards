@@ -70,7 +70,9 @@ export const Pull = model
     // Basis points (0–10000) of this pull's price paid by bonus or a gift:
     // 10000 on a gift, the bonus share of the row's price on a bonus-funded
     // row, 0 otherwise. That share of a sell-back must be played through
-    // before it can be withdrawn (modules/packs/bonus-credit.ts).
+    // before it can be withdrawn — except a 'reward' (task and challenge
+    // rewards) or 'gift' pull's, decided at sell time (sellbackHoldBp in
+    // modules/packs/bonus-credit.ts, ADR 0012).
     bonus_bp: model.number().default(0),
     // The open's stable id (same uuid the pack_open charge row stores in
     // credit_transaction.source_transaction_id) — the money↔card audit link.
