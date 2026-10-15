@@ -59,7 +59,7 @@ describe('SellConfirmModal — sale with a free part', () => {
     expect(text).toContain('Sell for RM 270.00');
     expect(text).toContain('For packs');
     expect(text).toContain(
-      'RM 270.00 of this sale is for opening packs (the part paid with bonus credit, or the welcome pack’s card).',
+      'RM 270.00 of this sale is for opening packs (the part paid with bonus credit, or the welcome pack’s card). Withdrawals stay locked until it is used on packs.',
     );
   });
 

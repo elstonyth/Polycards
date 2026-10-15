@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export type FaqItem = { q: string; a: string };
+export type FaqItem = { q: string; a: ReactNode };
 
 export default function FaqAccordion({ items }: { items: FaqItem[] }) {
   const [open, setOpen] = useState<number | null>(0);
@@ -34,6 +34,8 @@ export default function FaqAccordion({ items }: { items: FaqItem[] }) {
               />
             </button>
             <div
+              // A collapsed answer must not keep its links in the tab order.
+              inert={!isOpen}
               className={cn(
                 'grid transition-[grid-template-rows,opacity] duration-300 ease-in-out',
                 isOpen

@@ -439,8 +439,8 @@ export function TaskHubClient({
         <div className="mt-6 space-y-1 text-xs leading-relaxed text-neutral-400">
           <p>
             Task rewards (cards, slabs, and cards from reward packs) sell back
-            as withdrawable money after your first top-up. Credit rewards are
-            bonus credit for packs.{' '}
+            as cash you can withdraw once you’ve topped up and used your money
+            for packs. Credit rewards are bonus credit for packs.{' '}
             <Link
               href="/wallet"
               className="font-semibold text-neutral-300 underline-offset-2 hover:text-white hover:underline"

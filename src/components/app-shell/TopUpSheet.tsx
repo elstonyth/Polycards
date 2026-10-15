@@ -479,7 +479,7 @@ export default function TopUpSheet({
               {rm(done.amount)} ADDED
             </p>
             <p className="mt-1 text-sm text-neutral-300">
-              It&rsquo;s for opening packs.
+              Use it on packs to unlock withdrawals.
             </p>
             <p className="mt-1 text-sm text-neutral-400">
               New balance{' '}
@@ -797,8 +797,8 @@ export default function TopUpSheet({
             </div>
 
             <p className="mt-3 text-[12px] leading-relaxed text-neutral-300">
-              Cards from packs you pay for sell back as withdrawable money,
-              except any part paid with bonus credit.
+              Top-ups are for opening packs. Topping up pauses withdrawals until
+              it is used on packs.
             </p>
 
             {/* The remedy sits INSIDE role="alert" so a screen reader gets the

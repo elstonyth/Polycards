@@ -8,27 +8,32 @@ import { getWallet } from '@/lib/actions/wallet';
 import { getPaymentLimits } from '@/lib/actions/vault';
 import { DEFAULT_PAYMENT_LIMITS } from '@/lib/payment-limits';
 import { pillVariants } from '@/components/ui/pill';
-import { walletSplit } from '@/lib/wallet-split';
-import { rm, rm0 } from '@/lib/format';
+import {
+  isWithdrawLocked,
+  TOPUP_FIRST_HEADING,
+  topupFirstLine,
+  unlockLine,
+  walletSplit,
+} from '@/lib/wallet-split';
+import { rm } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Wallet' };
 
-// The rules as the owner set them (spec 2026-10-15, revised: bonus credit and
-// the welcome pack go through packs twice; gift packs, task and challenge
-// rewards sell back withdrawable) — one bold lead each.
+// The rules as the owner set them (spec 2026-10-15 "gate spend first":
+// withdrawals open once nothing is left to use on packs) — one bold lead each.
 const RULES = [
   {
     lead: 'Top-ups are for opening packs.',
-    body: 'A top-up can’t be withdrawn as it is. Topping up never lowers what you can already withdraw.',
+    body: 'Withdrawals unlock once you’ve topped up and used all your money for packs. Each new top-up pauses withdrawals until it is used on packs.',
   },
   {
     lead: 'Cards you pull are yours.',
-    body: 'Ship them, or sell them back for withdrawable money. That includes packs you pay for, gift packs from us, and everything you win in tasks and the weekly challenge.',
+    body: 'Ship them, or sell them back. Once nothing is left to use on packs, your whole balance except bonus credit can be withdrawn — including sales of cards you won from tasks, the weekly challenge and gift packs.',
   },
   {
     lead: 'Bonus credit and the welcome pack are for packs.',
-    body: 'Bonus credit comes from check-ins, tasks, challenges, VIP vouchers and promotions. Every pack uses it first. Selling a card pulled with bonus credit or from the welcome pack gives you money for packs. If bonus credit paid only part of the pack, only that part is for packs. Spend that money on a pack, and cards from that pack sell back as withdrawable money, except any part paid with bonus credit.',
+    body: 'Bonus credit comes from check-ins, tasks, challenges, VIP vouchers and promotions. Every pack uses it first. Selling a card pulled with bonus credit or from the welcome pack gives you money for packs. If bonus credit paid only part of the pack, only that part is for packs.',
   },
 ];
 
@@ -68,6 +73,12 @@ export default async function WalletPage() {
 
   const w = res.wallet;
   const split = walletSplit({ ...w, remaining: w.playthrough.remaining });
+  // Topped up, but money is still to use on packs: the backend shuts the
+  // whole gate until it is used.
+  const locked = isWithdrawLocked({
+    ...w,
+    remaining: w.playthrough.remaining,
+  });
 
   return (
     <>
@@ -89,34 +100,20 @@ export default async function WalletPage() {
         >
           <p className="flex items-center gap-2 text-sm font-semibold text-white">
             <Lock className="h-4 w-4 shrink-0 text-sky-400" aria-hidden />
-            Top up once to unlock withdrawals
+            {TOPUP_FIRST_HEADING}
           </p>
           <p className="mt-1.5 text-sm text-white/70">
-            {split.afterTopup > 0 ? (
-              <>
-                Top up once (from{' '}
-                <span className="whitespace-nowrap">
-                  {rm0(limits.deposit.minRm)}
-                </span>
-                ) and <Rm n={split.afterTopup} /> of your balance becomes
-                withdrawable. Card deliveries start then too.
-              </>
-            ) : (
-              <>
-                Withdrawals and card deliveries start after your first top-up
-                (from{' '}
-                <span className="whitespace-nowrap">
-                  {rm0(limits.deposit.minRm)}
-                </span>
-                ).
-              </>
-            )}
+            {topupFirstLine({
+              depositMinRm: limits.deposit.minRm,
+              unlockSpend: split.unlockSpend,
+              lockedCash: split.lockedCash,
+            })}
           </p>
           <TopUpButton size="sm" className="mt-3" />
         </div>
       )}
 
-      {/* ---- Money: Balance = Withdrawable (+ after top-up) + For packs ---- */}
+      {/* ---- Money: Balance = Withdrawable (+ locked) + For packs ---------- */}
       <Panel className="mb-4">
         <h2 className="sr-only">Your money</h2>
         <p className="text-[11px] uppercase tracking-wide text-neutral-400">
@@ -134,33 +131,62 @@ export default async function WalletPage() {
                 {rm(w.withdrawable)}
               </p>
             </div>
-            {/* Never topped up: the banner above already says when
-                withdrawals start, so only the figure waiting on it. */}
-            {(w.isFrozen || w.hasTopup || split.afterTopup > 0) && (
+            {/* Withdrawable + this + For packs = Balance, on screen. */}
+            {split.lockedCash > 0 && (
+              <div className="mt-2 flex items-baseline justify-between gap-3">
+                <p className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-neutral-400">
+                  <Lock className="h-3 w-3 shrink-0" aria-hidden />
+                  Unlocks after packs
+                </p>
+                <p className={`text-xl sm:text-2xl ${FIGURE}`}>
+                  {rm(split.lockedCash)}
+                </p>
+              </div>
+            )}
+            {/* Never topped up: the banner above already says it all. */}
+            {w.isFrozen ? (
               <p className="mt-1.5 text-[13px] text-white/60">
-                {w.isFrozen ? (
-                  'Held while your account is under review.'
-                ) : w.hasTopup ? (
-                  'Can go to your bank. The withdraw page shows the minimum.'
-                ) : (
-                  <>
-                    Withdrawable after your first top-up:{' '}
-                    <Rm n={split.afterTopup} />
-                  </>
-                )}
+                Held while your account is under review.
               </p>
-            )}
-            {!w.isFrozen && w.hasTopup && (
-              <Link
-                href="/bank-withdrawal"
-                className={cn(
-                  pillVariants({ variant: 'secondary', size: 'sm' }),
-                  'mt-3',
-                )}
-              >
-                Withdraw
-              </Link>
-            )}
+            ) : locked ? (
+              <>
+                <p className="mt-1.5 text-[13px] text-white/60">
+                  {unlockLine(split)}
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-x-4">
+                  <Link
+                    href="/slots"
+                    className={cn(
+                      pillVariants({ variant: 'secondary', size: 'sm' }),
+                    )}
+                  >
+                    Open packs
+                  </Link>
+                  <Link
+                    href="/bank"
+                    className="inline-flex min-h-11 items-center text-[12px] font-semibold text-white/70 underline-offset-2 hover:text-white hover:underline"
+                  >
+                    Save your bank account now&nbsp;
+                    <span aria-hidden>→</span>
+                  </Link>
+                </div>
+              </>
+            ) : w.withdrawable > 0 ? (
+              <>
+                <p className="mt-1.5 text-[13px] text-white/60">
+                  Can go to your bank. The withdraw page shows the minimum.
+                </p>
+                <Link
+                  href="/bank-withdrawal"
+                  className={cn(
+                    pillVariants({ variant: 'secondary', size: 'sm' }),
+                    'mt-3',
+                  )}
+                >
+                  Withdraw
+                </Link>
+              </>
+            ) : null}
           </div>
 
           <div>
@@ -239,24 +265,17 @@ export default async function WalletPage() {
           </p>
           <ul className="mt-2 space-y-1.5 text-sm text-white/70">
             <li>
-              Top up <Rm n={50} /> → <Rm n={50} /> for packs.
+              Sell a prize slab for <Rm n={300} />, then top up <Rm n={50} /> →{' '}
+              <Rm n={50} /> still to use on packs, withdrawals locked.
             </li>
             <li>
-              Open a <Rm n={45} /> pack → <Rm n={5} /> for packs.
-            </li>
-            <li>
-              Sell the card back for <Rm n={30} /> →{' '}
+              Open packs with that <Rm n={50} /> →{' '}
               <span className="font-semibold text-white">
-                <Rm n={30} /> withdrawable
+                withdrawals unlock
               </span>
-              .
+              : <Rm n={300} /> plus whatever you sell back can go to your bank.
             </li>
           </ul>
-          <p className="mt-3 text-sm text-white/70">
-            Another example: you have <Rm n={9} /> bonus credit. Open a{' '}
-            <Rm n={45} /> pack and sell its card for <Rm n={30} /> →{' '}
-            <Rm n={6} /> is for packs, <Rm n={24} /> is withdrawable.
-          </p>
         </div>
 
         <p className="mt-4 text-[13px] text-white/60">
@@ -270,9 +289,9 @@ export default async function WalletPage() {
           payment provider confirms payment. Bank withdrawals require a
           withdrawable balance and a saved bank account; processing status
           appears on the withdrawal page. Sell-back money reaches your balance
-          at once. Money from the welcome pack&rsquo;s card, and the part of any
-          sale paid with bonus credit, is for packs. The rest is withdrawable
-          after your first top-up.
+          at once. Money from the welcome pack&rsquo;s card, and the
+          bonus-credit part of any sale, is for packs. Withdrawals unlock once
+          your money for packs is used.
         </p>
       </Panel>
     </>

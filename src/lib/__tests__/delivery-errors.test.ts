@@ -95,8 +95,12 @@ describe('DELIVERY_RULES backend-message contract', () => {
 
   it('passes the no-top-up refusal through instead of blaming the cards', () => {
     // withdrawable.ts NO_TOPUP_MESSAGE (backend), a NOT_ALLOWED refusal.
-    const msg = 'Top up at least once to unlock withdrawals and deliveries.';
-    expect(map(msg)).toBe(msg);
+    for (const msg of [
+      'Top up at least once to unlock deliveries. Withdrawals unlock once your top-up is used on packs.',
+      // the pre-2026-10-15 wording, for deploy skew
+      'Top up at least once to unlock withdrawals and deliveries.',
+    ])
+      expect(map(msg)).toBe(msg);
   });
 
   it('keeps the phone-verification rule ahead of the broad not-allowed rule', () => {

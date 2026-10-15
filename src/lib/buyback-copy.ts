@@ -5,7 +5,7 @@ import { FLAT_BUYBACK_PERCENT } from '@/lib/packs-data';
 import { rm } from '@/lib/format';
 
 export const BUYBACK_RATE_LABEL = `${FLAT_BUYBACK_PERCENT}%`;
-export const BUYBACK_EXPLANATION = `During the reveal countdown, sell at the pack's displayed instant buyback rate. Leaving the reveal or letting the timer expire changes buyback to ${BUYBACK_RATE_LABEL} of card value in your vault. Sell-back money reaches your balance at once. Money from the welcome pack’s card, and the part of any sale paid with bonus credit, is for packs. The rest is withdrawable after your first top-up.`;
+export const BUYBACK_EXPLANATION = `During the reveal countdown, sell at the pack's displayed instant buyback rate. Leaving the reveal or letting the timer expire changes buyback to ${BUYBACK_RATE_LABEL} of card value in your vault. Sell-back money reaches your balance at once. Money from the welcome pack’s card, and the bonus-credit part of any sale, is for packs. Withdrawals unlock once your money for packs is used.`;
 
 /** The toast after a sell-back lands (spec 2026-10-15, revised). `held` is
  *  the quotes' free part (`buyback.bonus`), which is for opening packs. Short

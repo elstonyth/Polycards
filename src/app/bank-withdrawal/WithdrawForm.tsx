@@ -5,7 +5,13 @@ import Link from 'next/link';
 import { CheckCircle2, Clock, Landmark, Lock } from 'lucide-react';
 import { rm, rm0, timeUntil } from '@/lib/format';
 import { openRails, regionalRailUi } from '@/lib/regional-rails';
-import { walletSplit } from '@/lib/wallet-split';
+import {
+  isWithdrawLocked,
+  TOPUP_FIRST_HEADING,
+  topupFirstLine,
+  unlockLine,
+  walletSplit,
+} from '@/lib/wallet-split';
 import {
   fetchSavedBankAccounts,
   getPaymentLimits,
@@ -86,10 +92,12 @@ export function minimumGap(minRm: number, withdrawable: number): number {
  *  cap, the daily limit, a paused channel) get no link. The phone gate has
  *  its own PhoneGateAction. */
 const REMEDIES: [RegExp, string | null, string][] = [
-  // Both held refusals (2026-10-15) end "… is for opening packs.": "The other
-  // RM Y …" and "Nothing is withdrawable yet. Your RM Y …".
+  // The locked refusal (spend first, 2026-10-15): "Withdrawals unlock once
+  // you've used your RM R for packs. …"
+  [/withdrawals unlock once/i, '/slots', 'Open packs'],
+  // shortcut: older backend texts ("… is for opening packs.", "… more on
+  // packs"), kept for a storefront-first deploy; drop once both are live.
   [/is for opening packs/i, '/slots', 'Open packs'],
-  // shortcut: pre-2026-10-15 backend text, kept for a storefront-first deploy; drop once both are live.
   [/more on packs/i, '/slots', 'Open packs'],
   // null = open the top-up sheet in place, like the no-top-up notice does.
   [/top up at least once/i, null, 'Top up'],
@@ -166,29 +174,35 @@ export default function WithdrawForm({
   /** Spend-only bonus credit inside the balance, already left out of
    *  `withdrawable` — the first line of the For-packs part. */
   bonus?: number;
-  /** playthrough.remaining — the stamped part still to use on packs. Only
-   *  read before a first top-up, to tell it from what the top-up frees. */
+  /** playthrough.remaining — what is still to use on packs. While any is
+   *  left, the backend shuts the whole gate (spend first, 2026-10-15). */
   remaining?: number | null;
 }) {
   const needsTopup = !frozen && noTopup;
-  // The wallet page's split (spec 2026-10-15 §3), so both pages agree. A
-  // freeze hides it: telling a frozen account to open packs ends refused.
-  // Unknown remaining reads as "all of it still to use": never promises
-  // money the first top-up would not free.
+  // The wallet page's split, so both pages agree. A freeze hides it: telling
+  // a frozen account to open packs ends refused. Unknown remaining reads as
+  // "everything not withdrawable and not bonus is still to use": never
+  // promises money the gate would free.
+  const stillOwed =
+    remaining ?? Math.max(0, (available ?? 0) - (withdrawable ?? 0) - bonus);
   const split =
     !frozen && withdrawable != null && available != null
-      ? walletSplit({
-          available,
-          withdrawable,
-          bonus,
-          remaining: remaining ?? available,
-          hasTopup: !noTopup,
-        })
+      ? walletSplit({ available, withdrawable, bonus, remaining: stillOwed })
       : null;
   const showSplit = split !== null && split.forPacks > 0;
+  // Topped up, but money is still to use on packs: nothing may leave yet.
+  const locked =
+    split !== null &&
+    withdrawable != null &&
+    isWithdrawLocked({
+      hasTopup: !noTopup,
+      isFrozen: frozen,
+      remaining: stillOwed,
+      withdrawable,
+    });
   // Any hold means no amount can pass the server's gate, so the form says
   // why up front and does not invite an attempt that is certain to fail.
-  const onHold = frozen || needsTopup;
+  const onHold = frozen || needsTopup || locked;
   // The payout debits the balance server-side; repaint it here so the header
   // chip is not stale. (This used to light the Me-tab money dot too — that dot
   // was suspended 2026-08-11; see components/account/credit-dot.tsx.)
@@ -450,6 +464,23 @@ export default function WithdrawForm({
             {`You can withdraw once your withdrawable money reaches ${rm(payoutBand.minRm)} (${rm(minimumGap(payoutBand.minRm, withdrawable ?? 0))} more).`}
           </p>
         )}
+        {locked && split && (
+          <>
+            <p
+              id="withdraw-hold-reason"
+              role="status"
+              className="mt-1 text-[12px] text-neutral-300"
+            >
+              {unlockLine(split)}
+            </p>
+            <Link
+              href="/bank"
+              className="inline-flex min-h-11 items-center text-[12px] font-semibold text-white/70 underline-offset-2 hover:text-white hover:underline"
+            >
+              Save your bank account now&nbsp;<span aria-hidden>→</span>
+            </Link>
+          </>
+        )}
       </div>
 
       {/* A real switch, so the lock icon is honest here — unlike the
@@ -462,15 +493,15 @@ export default function WithdrawForm({
         >
           <p className="flex items-center gap-2 text-sm font-semibold text-white">
             <Lock className="h-4 w-4 shrink-0 text-sky-400" aria-hidden />
-            Withdrawals and card deliveries start after your first top-up.
+            {TOPUP_FIRST_HEADING}
           </p>
-          {split && split.afterTopup > 0 && (
-            <p className="mt-1.5 text-[13px] text-white/70">
-              After your first top-up,{' '}
-              <span className="whitespace-nowrap">{rm(split.afterTopup)}</span>{' '}
-              becomes withdrawable.
-            </p>
-          )}
+          <p className="mt-1.5 text-[13px] text-white/70">
+            {topupFirstLine({
+              depositMinRm: limits.deposit.minRm,
+              unlockSpend: split?.unlockSpend ?? 0,
+              lockedCash: split?.lockedCash ?? 0,
+            })}
+          </p>
           <Pill size="sm" onClick={openTopUp} className="mt-3">
             Top up
           </Pill>
@@ -525,9 +556,6 @@ export default function WithdrawForm({
           </dl>
           <p className="mt-2 text-[13px] text-white/60">
             Can&rsquo;t go to your bank. Open packs with it.
-            {/* Untrue before a first top-up; the top-up notice covers that. */}
-            {!needsTopup &&
-              ' Sell-back money from those packs is withdrawable, except any part paid with bonus credit.'}
           </p>
           <div className="mt-3 flex items-center gap-3">
             {/* secondary: the white full-width Withdraw button stays the

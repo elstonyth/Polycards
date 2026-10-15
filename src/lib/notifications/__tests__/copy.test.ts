@@ -179,7 +179,7 @@ describe('body rendering', () => {
 
   it('money bodies format as RM', () => {
     expect(copyFor('topup_credited').body({ amount_myr: 50 })).toBe(
-      'RM 50.00 added — it’s for opening packs.',
+      'RM 50.00 added. Withdrawals unlock once all your money for packs is used.',
     );
     expect(copyFor('voucher_claimed').body({ amount_myr: 5, level: 3 })).toBe(
       'RM 5.00 bonus credit from your Level 3 voucher. Use it on packs — it can’t be withdrawn.',

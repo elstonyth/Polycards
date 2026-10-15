@@ -784,13 +784,12 @@ export default function VaultClient({
       <p className="mt-5 text-[12px] text-neutral-400">
         Cards sell back at the flat {FLAT_BUYBACK_PERCENT}% buyback rate.
         Sell-back money reaches your balance at once. Money from the welcome
-        pack&rsquo;s card, and the part of any sale paid with bonus credit, is
-        for packs. The rest is withdrawable after your first top-up. Every
-        delivery, prize cards included, pays shipping: RM15 (West Malaysia),
-        RM35 (East Malaysia) or RM50 (Singapore), with protection included up to
-        RM200 — above that add 5% insurance of card value. Prize cards ship as
-        separate parcels. Fees are deducted from your balance (not bonus
-        credit).
+        pack&rsquo;s card, and the bonus-credit part of any sale, is for packs.
+        Withdrawals unlock once your money for packs is used. Every delivery,
+        prize cards included, pays shipping: RM15 (West Malaysia), RM35 (East
+        Malaysia) or RM50 (Singapore), with protection included up to RM200 —
+        above that add 5% insurance of card value. Prize cards ship as separate
+        parcels. Fees are deducted from your balance (not bonus credit).
       </p>
 
       {items.length > 0 && consent !== null && (

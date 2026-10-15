@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
 import { getOwnProfileHandle, getPublicProfile } from '@/lib/data/profiles';
 import { getWallet } from '@/lib/actions/wallet';
+import { isWithdrawLocked, walletSplit } from '@/lib/wallet-split';
 import { getVip } from '@/lib/actions/vip';
 import { levelProgressPct } from '@/lib/actions/vip-map';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
@@ -77,6 +78,16 @@ export default async function MePage() {
     getVip(),
     getAvatarFrames(),
   ]);
+  // Locked gate (spend first): what packs must still take before withdrawals
+  // open; null when withdrawals aren't waiting on packs.
+  const gate = walletResult.ok
+    ? {
+        ...walletResult.wallet,
+        remaining: walletResult.wallet.playthrough.remaining,
+      }
+    : null;
+  const unlockSpend =
+    gate && isWithdrawLocked(gate) ? walletSplit(gate).unlockSpend : null;
   // Second wave — needs the handle. Supplies header stats and the showcase
   // strip in one cached public-route read.
   const profileResult = handle ? await getPublicProfile(handle) : null;
@@ -299,9 +310,15 @@ export default async function MePage() {
                     Math.round(walletResult.wallet.balance * 100) >
                       Math.round(walletResult.wallet.bonus * 100) && (
                       <p className="mt-0.5 text-[12px] font-semibold text-sky-400">
-                        Top up once to unlock withdrawals
+                        Top up and use it on packs to unlock withdrawals
                       </p>
                     )}
+                  {unlockSpend !== null && (
+                    <p className="mt-0.5 text-[12px] font-semibold text-sky-400">
+                      Spend {rm(unlockSpend)} more on packs to unlock
+                      withdrawals.
+                    </p>
+                  )}
                 </Link>
                 <div className="flex shrink-0 gap-2">
                   <Link

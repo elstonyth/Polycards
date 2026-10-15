@@ -123,7 +123,7 @@ describe('TopUpProvider — gateway deposit watch', () => {
 
     expect(container.textContent).toContain('600');
     expect(container.textContent).toContain(
-      'RM 500.00 added — it’s for opening packs.',
+      'RM 500.00 added. Withdrawals unlock once all your money for packs is used.',
     );
     // Server-rendered money surfaces (ledger, /me, /wallet) must re-read.
     // (The money dot's refresh went with the dot itself on 2026-08-11 — see
@@ -143,7 +143,7 @@ describe('TopUpProvider — gateway deposit watch', () => {
     await nextPoll();
 
     expect(container.textContent).not.toContain(
-      'added — it’s for opening packs',
+      'Withdrawals unlock once all your money for packs is used',
     );
     expect(container.textContent).toContain('100');
   });
@@ -187,11 +187,11 @@ describe('TopUpProvider — gateway deposit watch', () => {
     await mount();
     await nextPoll();
     expect(container.textContent).not.toContain(
-      'added — it’s for opening packs',
+      'Withdrawals unlock once all your money for packs is used',
     );
     await nextPoll();
     expect(container.textContent).toContain(
-      'RM 500.00 added — it’s for opening packs.',
+      'RM 500.00 added. Withdrawals unlock once all your money for packs is used.',
     );
   });
 
@@ -211,7 +211,7 @@ describe('TopUpProvider — gateway deposit watch', () => {
     await nextPoll();
     await nextPoll();
     expect(container.textContent).toContain(
-      'RM 500.00 added — it’s for opening packs.',
+      'RM 500.00 added. Withdrawals unlock once all your money for packs is used.',
     );
   });
 
@@ -271,11 +271,11 @@ describe('TopUpProvider — gateway deposit watch', () => {
     await mount();
     await nextPoll();
     expect(container.textContent).not.toContain(
-      'added — it’s for opening packs',
+      'Withdrawals unlock once all your money for packs is used',
     );
     await nextPoll();
     expect(container.textContent).toContain(
-      'RM 500.00 added — it’s for opening packs.',
+      'RM 500.00 added. Withdrawals unlock once all your money for packs is used.',
     );
   });
 });

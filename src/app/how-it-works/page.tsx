@@ -83,7 +83,25 @@ const FAQS: FaqItem[] = [
   },
   {
     q: 'Can I sell my cards?',
-    a: `Eligible cards in your vault sell back for ${BUYBACK_RATE_LABEL} of card value. The pack's displayed instant rate is available during the reveal countdown only. Sell-back money reaches your balance at once. Money from the welcome pack’s card, and the part of any sale paid with bonus credit, is for packs. The rest is withdrawable after your first top-up. Shipping cards needs one top-up too.`,
+    a: `Eligible cards in your vault sell back for ${BUYBACK_RATE_LABEL} of card value. The pack's displayed instant rate is available during the reveal countdown only. Sell-back money reaches your balance at once. Money from the welcome pack’s card, and the bonus-credit part of any sale, is for packs. Withdrawals unlock once your money for packs is used. Shipping cards needs one top-up.`,
+  },
+  {
+    q: 'When can I withdraw?',
+    a: (
+      <>
+        Top up once, then use all your money for packs on packs: your top-up,
+        any bonus credit and money from the welcome card. After that, everything
+        except bonus credit can be withdrawn, including sales of cards you won
+        from tasks, the weekly challenge and gift packs. Each new top-up pauses
+        withdrawals until it is used.{' '}
+        <Link
+          href="/wallet"
+          className="font-semibold text-white/80 underline-offset-2 hover:text-white hover:underline"
+        >
+          See your wallet <span aria-hidden="true">&rarr;</span>
+        </Link>
+      </>
+    ),
   },
 ];
 

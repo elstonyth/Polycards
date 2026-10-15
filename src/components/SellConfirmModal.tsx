@@ -169,7 +169,7 @@ export default function SellConfirmModal({
           {bulk && plural ? 'cards leave' : 'card leaves'} your vault and the
           amount is credited to your balance.
           {lockedSen > 0 &&
-            ` ${rm(lockedSen / 100)} of this sale is for opening packs (the part paid with bonus credit, or the welcome pack’s card).`}
+            ` ${rm(lockedSen / 100)} of this sale is for opening packs (the part paid with bonus credit, or the welcome pack’s card). Withdrawals stay locked until it is used on packs.`}
         </p>
 
         <div className="mt-5 flex gap-2">

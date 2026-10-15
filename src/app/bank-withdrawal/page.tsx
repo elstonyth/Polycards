@@ -87,9 +87,9 @@ export default async function BankWithdrawalPage() {
             </div>
             <p className="mt-4 text-[13px] text-white/60">
               Sell-back money reaches your balance at once. Money from the
-              welcome pack&rsquo;s card, and the part of any sale paid with
-              bonus credit, is for packs. The rest is withdrawable after your
-              first top-up.
+              welcome pack&rsquo;s card, and the bonus-credit part of any sale,
+              is for packs. Withdrawals unlock once your money for packs is
+              used.
             </p>
           </>
         )
