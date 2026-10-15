@@ -33,6 +33,8 @@ export const qk = {
   // Under the admin/stats prefix on purpose: the Dashboard's live refresh
   // invalidates that prefix every 30s.
   statsOnline: (scope: string) => ['admin', 'stats', 'online', scope] as const,
+  statsLeaders: (range: string, scope: string) =>
+    ['admin', 'stats', 'leaders', range, scope] as const,
   // (granularity, periods) always render — same always-rendered-segment rule
   // as qk.pulls: week and month views cache independently.
   settlement: (

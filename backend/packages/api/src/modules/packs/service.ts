@@ -219,7 +219,12 @@ import {
   type RankPayout,
 } from './challenge-settle';
 import { weightedAverageCost } from './inventory-cost';
-import type { SignupTopupStats, TopTopup, WithdrawalStats } from './stats';
+import type {
+  PeriodLeader,
+  PeriodLeaders,
+  SignupTopupStats,
+  WithdrawalStats,
+} from './stats';
 import {
   filterParams,
   filterSql,
@@ -7706,51 +7711,83 @@ class PacksModuleService extends MedusaService({
     };
   }
 
-  // GET /admin/stats's player of the period: the customer with the most
-  // settled top-ups in [from, to), on signupTopupStats's basis (settled
-  // gateway deposits by settled_at, at amount_settled in MYR) and scope. A tie
-  // goes to the lower customer id, so the pick never flips between two polls.
-  // Null when nobody topped up in the window.
+  // GET /admin/stats/leaders over one half-open [from, to) window: who topped
+  // up the most, made the biggest single top-up, withdrew the most and drew
+  // the most packs. Money is the Dashboard's settled gateway basis
+  // (signupTopupStats, withdrawalStats). Draws are paid pack opens, by
+  // rolled_at: pull.source 'pack' or 'bonus', never gift, free or reward
+  // packs. A tie goes to the lower customer id (the biggest top-up: the
+  // earlier one), so a pick never flips between two polls. Null when nobody
+  // qualifies.
   @InjectManager()
-  async topTopupCustomer(
+  async periodLeaders(
     from: Date,
     to: Date,
     scope: CustomerScope = 'all',
     @MedusaContext() sharedContext: Context = {},
-  ): Promise<TopTopup | null> {
+  ): Promise<PeriodLeaders> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    const [row] = await em.execute<
-      {
-        customer_id: string;
-        cents: string;
-        n: number;
-        first_name: string | null;
-        last_name: string | null;
-        email: string | null;
-      }[]
-    >(
-      `SELECT d.customer_id,
-              SUM(ROUND(d.amount_settled * 100))::bigint AS cents,
-              count(*)::int AS n,
-              c.first_name, c.last_name, c.email
-       FROM gateway_deposit d
+    const bounds = [from.toISOString(), to.toISOString()];
+    const who = 'c.first_name, c.last_name, c.email';
+    const pick = async (sql: string): Promise<PeriodLeader | null> => {
+      const [row] = await em.execute<
+        {
+          customer_id: string;
+          cents: string | null;
+          n: number;
+          first_name: string | null;
+          last_name: string | null;
+          email: string | null;
+        }[]
+      >(sql, bounds);
+      if (!row) return null;
+      return {
+        customer_id: row.customer_id,
+        name: [row.first_name, row.last_name].filter(Boolean).join(' ') || null,
+        email: row.email,
+        amount: row.cents === null ? null : Number(row.cents) / 100,
+        count: row.n,
+      };
+    };
+    const deposits = `FROM gateway_deposit d
        LEFT JOIN customer c ON c.id = d.customer_id
        WHERE d.status = 'settled' AND d.deleted_at IS NULL
          AND d.amount_settled > 0
-         AND d.settled_at >= ?::timestamptz AND d.settled_at < ?::timestamptz${scopeSql(scope, 'd.customer_id')}
-       GROUP BY d.customer_id, c.first_name, c.last_name, c.email
-       ORDER BY cents DESC, d.customer_id
-       LIMIT 1`,
-      [from.toISOString(), to.toISOString()],
-    );
-    if (!row) return null;
+         AND d.settled_at >= ?::timestamptz AND d.settled_at < ?::timestamptz${scopeSql(scope, 'd.customer_id')}`;
     return {
-      customer_id: row.customer_id,
-      name: [row.first_name, row.last_name].filter(Boolean).join(' ') || null,
-      email: row.email,
-      amount: Number(row.cents) / 100,
-      count: row.n,
+      topped_up: await pick(
+        `SELECT d.customer_id, SUM(ROUND(d.amount_settled * 100))::bigint AS cents,
+                count(*)::int AS n, ${who}
+         ${deposits}
+         GROUP BY d.customer_id, ${who}
+         ORDER BY cents DESC, d.customer_id LIMIT 1`,
+      ),
+      biggest_topup: await pick(
+        `SELECT d.customer_id, ROUND(d.amount_settled * 100)::bigint AS cents,
+                1 AS n, ${who}
+         ${deposits}
+         ORDER BY d.amount_settled DESC, d.settled_at, d.customer_id LIMIT 1`,
+      ),
+      withdrawn: await pick(
+        `SELECT w.customer_id, SUM(ROUND(w.amount * 100))::bigint AS cents,
+                count(*)::int AS n, ${who}
+         FROM gateway_withdrawal w
+         LEFT JOIN customer c ON c.id = w.customer_id
+         WHERE w.status = 'settled' AND w.deleted_at IS NULL
+           AND w.settled_at >= ?::timestamptz AND w.settled_at < ?::timestamptz${scopeSql(scope, 'w.customer_id')}
+         GROUP BY w.customer_id, ${who}
+         ORDER BY cents DESC, w.customer_id LIMIT 1`,
+      ),
+      draws: await pick(
+        `SELECT p.customer_id, NULL AS cents, count(*)::int AS n, ${who}
+         FROM pull p
+         LEFT JOIN customer c ON c.id = p.customer_id
+         WHERE p.source IN ('pack', 'bonus') AND p.deleted_at IS NULL
+           AND p.rolled_at >= ?::timestamptz AND p.rolled_at < ?::timestamptz${scopeSql(scope, 'p.customer_id')}
+         GROUP BY p.customer_id, ${who}
+         ORDER BY n DESC, p.customer_id LIMIT 1`,
+      ),
     };
   }
 

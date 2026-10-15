@@ -47,9 +47,11 @@ import {
   type ProfitReport,
   getStatsReport,
   getOnlineNow,
+  getLeaders,
   type StatsRange,
   type StatsReport,
   type OnlineNow,
+  type LeadersReport,
   getSettlementReport,
   getGatewayBalance,
   getGatewayAudit,
@@ -294,6 +296,17 @@ export const useOnlineNow = (
   useQuery({
     queryKey: qk.statsOnline(scope),
     queryFn: () => getOnlineNow(scope),
+    refetchOnWindowFocus: true,
+  });
+
+// The All Players page's top players for one window.
+export const useLeaders = (
+  range: StatsRange,
+  scope: CustomerScope = 'all',
+): UseQueryResult<LeadersReport> =>
+  useQuery({
+    queryKey: qk.statsLeaders(range, scope),
+    queryFn: () => getLeaders(range, scope),
     refetchOnWindowFocus: true,
   });
 

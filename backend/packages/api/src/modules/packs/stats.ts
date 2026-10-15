@@ -46,18 +46,28 @@ export type WithdrawalStats = {
   withdrawal_amount: number;
 };
 
-/** The window's player of the period: the most settled top-ups, on
- *  SignupTopupStats's basis. */
-export type TopTopup = {
+/** One of GET /admin/stats/leaders' top players for a window. */
+export type PeriodLeader = {
   customer_id: string;
   /** First and last name, null when neither is set. */
   name: string | null;
-  /** Null when the deposit's customer row is gone. */
+  /** Null when the customer row is gone. */
   email: string | null;
-  /** MYR, Σ amount_settled. */
-  amount: number;
-  /** Settled deposits. */
+  /** MYR; null for draws, which are counted, not summed. */
+  amount: number | null;
+  /** Top-ups, payouts or pack opens behind it (1 for the biggest top-up). */
   count: number;
+};
+
+export type PeriodLeaders = {
+  /** Most settled top-ups, summed. */
+  topped_up: PeriodLeader | null;
+  /** The largest single settled top-up. */
+  biggest_topup: PeriodLeader | null;
+  /** Most settled payouts, summed. */
+  withdrawn: PeriodLeader | null;
+  /** Most paid pack opens. */
+  draws: PeriodLeader | null;
 };
 
 const MYT_OFFSET_MS = 8 * 60 * 60 * 1000;
