@@ -1205,7 +1205,9 @@
     "doublePay_other": "{{shown}} payouts may be paid twice",
     "doublePayHeld": "{{amount}} refunded · gateway still holds it",
     "doublePayPaid_one": "{{amount}} refunded · gateway paid {{count, number}}",
-    "doublePayPaid_other": "{{amount}} refunded · gateway paid {{count, number}}"
+    "doublePayPaid_other": "{{amount}} refunded · gateway paid {{count, number}}",
+    "onlineNow": "online now",
+    "onlineHint": "Signed-in players with the site open in the last 5 minutes. Updates every 30 seconds."
   },
   "profit": {
     "title": "Profit report",

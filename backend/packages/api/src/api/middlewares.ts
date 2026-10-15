@@ -588,6 +588,14 @@ export default defineMiddlewares({
       middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
     },
     {
+      // The signed-in storefront's heartbeat for the Dashboard's "online now"
+      // (utils/presence.ts): one ping per visible tab every 2 minutes, on the
+      // shared read budget.
+      matcher: '/store/presence',
+      method: 'POST',
+      middlewares: [authenticate('customer', ['bearer']), storeReadRateLimit],
+    },
+    {
       // A Google sign-in whose email already has an account: attach the
       // identity instead of refusing (see the route). `allowUnregistered`
       // because the caller holds a REGISTER token — auth_identity_id, no actor

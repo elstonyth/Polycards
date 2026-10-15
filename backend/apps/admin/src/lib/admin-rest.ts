@@ -599,6 +599,23 @@ export async function getStatsReport(
   return getJson<StatsReport>(`/admin/stats?${qs.toString()}`);
 }
 
+/** GET /admin/stats/online: signed-in players with the storefront open in the
+ *  last `window_minutes`. `online` is null when the backend could not read
+ *  its presence store. */
+export interface OnlineNow {
+  as_of: string;
+  scope: CustomerScope;
+  window_minutes: number;
+  online: number | null;
+}
+
+export async function getOnlineNow(
+  scope: CustomerScope = 'all',
+): Promise<OnlineNow> {
+  const qs = scope === 'all' ? '' : `?scope=${scope}`;
+  return getJson<OnlineNow>(`/admin/stats/online${qs}`);
+}
+
 // ── Gateway settlement report (calendar weekly/monthly gateway result) ───────
 
 export type SettlementGranularity = 'week' | 'month';
