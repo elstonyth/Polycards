@@ -45,6 +45,8 @@ export async function GET(
   // never hold up the "payments differ" badge.
   let findingsTotal = totals.findings;
   let retiredTotal = 0;
+  // Acknowledged on Settlement: listed, greyed, never in the badge.
+  let acknowledgedTotal = totals.acknowledged;
   const history: ({ gateway: string } & ReturnType<typeof moneyTotals>)[] = [];
   // Retired gateways (globepay) were all RM.
   const others = [
@@ -54,6 +56,7 @@ export async function GET(
   for (const id of others) {
     if (id === active) continue;
     const t = await packs.gatewayAuditTotals(id);
+    acknowledgedTotal += t.acknowledged;
     if (RETIRED_GATEWAYS.includes(id)) retiredTotal += t.findings;
     else findingsTotal += t.findings;
     if (t.deposits.count + t.withdrawals.count > 0) {
@@ -97,6 +100,7 @@ export async function GET(
         toOptionalMoney(d.amount_requested),
       note: d.audit_note,
       audited_at: d.audited_at,
+      acknowledged: acknowledgement(d),
     })),
     ...withdrawals.map((w) => ({
       kind: 'withdrawal' as const,
@@ -109,9 +113,11 @@ export async function GET(
       amount: toOptionalMoney(w.amount),
       note: w.audit_note,
       audited_at: w.audited_at,
+      acknowledged: acknowledgement(w),
     })),
   ].sort(
     (a, b) =>
+      Number(a.acknowledged !== null) - Number(b.acknowledged !== null) ||
       Number(isRefunded(b)) - Number(isRefunded(a)) ||
       auditedMs(b.audited_at) - auditedMs(a.audited_at),
   );
@@ -122,11 +128,24 @@ export async function GET(
     last_audited_at: totals.lastAuditedAt,
     findings_total: findingsTotal,
     retired_total: retiredTotal,
+    acknowledged_total: acknowledgedTotal,
     totals: moneyTotals(totals),
     history,
     findings: findings.slice(0, FINDINGS_LIMIT),
   });
 }
+
+// Who acknowledged the finding and when, while the note is still the one
+// they acknowledged; null otherwise (a new note is a new warning).
+const acknowledgement = (r: {
+  audit_note: string | null;
+  audit_ack_note: string | null;
+  audit_ack_by: string | null;
+  audit_ack_at: Date | string | null;
+}) =>
+  r.audit_ack_note !== null && r.audit_ack_note === r.audit_note
+    ? { by: r.audit_ack_by, at: r.audit_ack_at }
+    : null;
 
 const isRefunded = (f: { kind: string; status: string }) =>
   f.kind === 'withdrawal' && f.status === 'failed';

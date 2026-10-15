@@ -752,6 +752,9 @@ export interface GatewayAuditFinding {
   amount: number | null;
   note: string;
   audited_at: string | null;
+  /** Who acknowledged this finding on Settlement and when, while the note is
+   *  still the one they acknowledged. Absent from an older backend. */
+  acknowledged?: { by: string | null; at: string | null } | null;
 }
 
 export interface GatewayAudit {
@@ -765,6 +768,9 @@ export interface GatewayAudit {
   /** Rows from a retired gateway, which can never be checked again: listed,
    *  counted apart. Absent from a backend older than this field. */
   retired_total?: number;
+  /** Findings an operator acknowledged: listed last, greyed, never in
+   *  findings_total. Absent from a backend older than this field. */
+  acknowledged_total?: number;
   totals: { deposits: GatewayAuditTotals; withdrawals: GatewayAuditTotals };
   /** Settled totals of every OTHER gateway that ever moved money, so a switch
    *  never hides the previous gateway's history from this page. */
@@ -775,6 +781,19 @@ export interface GatewayAudit {
   }[];
   findings: GatewayAuditFinding[];
 }
+
+/** Settlement's Acknowledge: the note is the one on screen, so a finding the
+ *  audit has re-worded since is refused (409) rather than acknowledged blind. */
+export const acknowledgeAuditFinding = (body: {
+  kind: 'deposit' | 'withdrawal';
+  id: string;
+  note: string;
+  reason: string;
+}) =>
+  postJson<{ acknowledged: boolean }>(
+    '/admin/payments/audit/acknowledge',
+    body,
+  );
 
 export async function getGatewayAudit(
   currency: string,
