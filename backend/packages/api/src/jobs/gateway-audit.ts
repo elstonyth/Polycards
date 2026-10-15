@@ -18,6 +18,7 @@ import {
   GATEWAY_AUDIT_REPEAT_MS,
   GATEWAY_AUDIT_WINDOW_MS,
   depositAuditNote,
+  stampNote,
   withdrawalAuditNote,
   type GatewayAnswer,
 } from '../modules/packs/gateway-audit';
@@ -38,24 +39,6 @@ import { rowFx } from '../modules/packs/payment-fx';
  * row un-stamped so the next run retries it; only a definite answer (a
  * detail, or an explicit not-found) is recorded.
  */
-// The audit note to write, and an operator's acknowledgement dropped when the
-// note it covered is not the one being written (Settlement's Acknowledge,
-// 2026-10-15): a new answer from the gateway, agreement included, comes back
-// unacknowledged.
-function stampNote(
-  row: { audit_ack_note?: string | null },
-  note: string | null,
-): Record<string, unknown> {
-  return row.audit_ack_note != null && row.audit_ack_note !== note
-    ? {
-        audit_note: note,
-        audit_ack_note: null,
-        audit_ack_by: null,
-        audit_ack_at: null,
-      }
-    : { audit_note: note };
-}
-
 export default async function gatewayAuditJob(container: MedusaContainer) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   await resolveActiveGateway(container);
