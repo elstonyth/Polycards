@@ -68,13 +68,16 @@ export function withdrawableCents(t: {
  *  paths; the storefront passes it through by phrase ("Top up at least once",
  *  src/lib/vault-errors.ts). */
 export const NO_TOPUP_MESSAGE =
-  'Top up at least once to unlock withdrawals and deliveries.';
+  'Top up at least once to unlock deliveries. Withdrawals unlock once your top-up is used on packs.';
 
 /** The wallet fields the gate branches on (a structural subset of
  *  walletSummary's return, so either caller can pass its result straight in). */
 export interface WithdrawalGateWallet {
   withdrawable: number;
   isFrozen: boolean;
+  /** Spend-only bonus credit (MYR): packs spend it before the money for
+   *  packs, so the refusal counts it in what is left to spend. */
+  bonus: number;
   /** At least one positive top-up row ever (any era, any amount). */
   hasTopup: boolean;
   playthrough: { remaining: number };
@@ -119,13 +122,15 @@ export function withdrawalGateError(
   if (!wallet.hasTopup) {
     return new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
   }
-  // Spend first (ADR 0013): using this money on packs really does unlock the
-  // rest. In cents so a float hair can't print.
+  // Spend first (ADR 0013): spending on packs really does unlock the rest.
+  // Packs spend bonus first, so the amount to spend counts it in. In cents so
+  // a float hair can't print.
   const remainingCents = Math.round(wallet.playthrough.remaining * 100);
   if (remainingCents > 0) {
+    const toSpend = (remainingCents + Math.round(wallet.bonus * 100)) / 100;
     return new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
-      `Withdrawals unlock once you've used your RM ${(remainingCents / 100).toFixed(2)} for packs. Open packs with it, then your balance can be withdrawn.`,
+      `Withdrawals unlock once you've spent RM ${toSpend.toFixed(2)} more on packs. Then your balance, except bonus credit, can be withdrawn.`,
     );
   }
   return new MedusaError(

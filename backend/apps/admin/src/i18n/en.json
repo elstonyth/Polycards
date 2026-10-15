@@ -633,7 +633,7 @@
     },
     "gift": {
       "title": "Gift packs",
-      "subtitle": "Unopened packs in this player's vault. They open them as Vault x1 on the pack page. A card from a gifted pack sells back as withdrawable money once the player has topped up.",
+      "subtitle": "Unopened packs in this player's vault. They open them as Vault x1 on the pack page. A card from a gifted pack sells back as cash, withdrawable once the player has topped up and used all their money for packs.",
       "pack": "Pack",
       "packPlaceholder": "Choose a pack",
       "packsLoading": "Loading packs…",
@@ -664,7 +664,7 @@
     },
     "bonus": {
       "title": "Bonus credit",
-      "subtitle": "Spend-only credit for pack opens; it can't be withdrawn itself. The bonus part of selling a card opened with it is money for packs too: it can be spent on packs but not withdrawn. Selling what is pulled with that money is withdrawable.",
+      "subtitle": "Spend-only credit for pack opens; it can't be withdrawn itself. The bonus part of selling a card opened with it is money for packs too. While any of it is unspent, the player can't withdraw anything.",
       "balance": "Bonus balance",
       "amount": "Amount (e.g. 50 to give, -50 to take back)",
       "note": "Note (required, audit trail)",
@@ -1382,7 +1382,7 @@
     "colSellNow": "Sell now",
     "sellLocked": "Can't be sold yet: a free welcome card unlocks after the first paid pack.",
     "sellsPaused": "Selling is paused: the exchange-rate feed is down, so the player can't sell any card right now. The prices below are indicative.",
-    "heldBoth": "{{held}} held back: bonus credit, and the rest until the money still to use on packs is used",
+    "heldBoth": "{{held}} held back: bonus credit, plus the rest until money for packs is used",
     "heldBonus": "{{held}} held back: bonus credit",
     "heldPlay": "{{held}} held back until the money still to use on packs is used"
   }

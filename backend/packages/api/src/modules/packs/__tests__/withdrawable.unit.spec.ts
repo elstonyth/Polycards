@@ -76,28 +76,37 @@ describe('withdrawalGateError (spend first, 2026-10-15)', () => {
     withdrawable: 0,
     isFrozen: false,
     hasTopup: true,
+    bonus: 0,
     playthrough: { remaining: 0 },
     ...over,
   });
 
-  it('while money is still to use on packs, says what to use to unlock', () => {
+  it('while money is still to use on packs, says how much more to spend', () => {
     const err = withdrawalGateError(wallet({ playthrough: { remaining: 10.55 } }), 5);
     expect(err?.message).toBe(
-      "Withdrawals unlock once you've used your RM 10.55 for packs. Open packs with it, then your balance can be withdrawn.",
+      "Withdrawals unlock once you've spent RM 10.55 more on packs. Then your balance, except bonus credit, can be withdrawn.",
     );
     expect(err?.type).toBe('not_allowed');
   });
 
-  it('prints the amount cents-exact', () => {
+  it('counts bonus credit in, because packs spend it first', () => {
     const err = withdrawalGateError(
-      wallet({ playthrough: { remaining: 0.1 + 0.2 } }),
+      wallet({ bonus: 15, playthrough: { remaining: 30 } }),
       5,
     );
-    expect(err?.message).toContain('RM 0.30 for packs');
+    expect(err?.message).toContain('spent RM 45.00 more on packs');
+  });
+
+  it('prints the amount cents-exact', () => {
+    const err = withdrawalGateError(
+      wallet({ bonus: 0.1, playthrough: { remaining: 0.2 } }),
+      5,
+    );
+    expect(err?.message).toContain('RM 0.30 more on packs');
   });
 
   it('keeps the plain cap once nothing is left to use on packs', () => {
-    const err = withdrawalGateError(wallet({ withdrawable: 50 }), 60);
+    const err = withdrawalGateError(wallet({ withdrawable: 50, bonus: 20 }), 60);
     expect(err?.message).toBe('You can withdraw up to RM 50.00 right now.');
   });
 
@@ -113,7 +122,9 @@ describe('withdrawalGateError (spend first, 2026-10-15)', () => {
         wallet({ hasTopup: false, playthrough: { remaining: 10 } }),
         5,
       )?.message,
-    ).toMatch(/Top up at least once/);
+    ).toBe(
+      'Top up at least once to unlock deliveries. Withdrawals unlock once your top-up is used on packs.',
+    );
   });
 
   it('allows an amount within what is withdrawable', () => {

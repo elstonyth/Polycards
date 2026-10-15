@@ -26,16 +26,21 @@ they can withdraw anything.
   An open already uses money for packs before other money, so normal play
   clears the hold.
 - The refusal while money is still to use on packs is: "Withdrawals unlock
-  once you've used your RM R for packs. Open packs with it, then your balance
-  can be withdrawn." (R = `playthrough.remaining`). Freeze, no-top-up and the
-  plain "You can withdraw up to RM X right now." are unchanged, in the same
-  order. Using the money for packs really does unlock the rest now, so copy
-  may say "unlock" again.
+  once you've spent RM X more on packs. Then your balance, except bonus
+  credit, can be withdrawn." X = bonus + `playthrough.remaining`, because packs
+  spend bonus first. The no-top-up refusal reads "Top up at least once to
+  unlock deliveries. Withdrawals unlock once your top-up is used on packs."
+  Freeze and the plain "You can withdraw up to RM X right now." are unchanged,
+  and the order is the same. Spending on packs really does unlock the rest
+  now, so copy may say "unlock" again.
 
 ## Consequences
 
 - A delivery fee can take the balance below what is still to use on packs.
-  Such a customer can only clear the hold by topping up again; the refusal
-  names the full remaining amount.
+  A top-up alone does not close that gap, since it adds to what is still to
+  use as much as to the balance. The customer clears it by spending that much
+  more on packs, for example with money from sell-backs. Fees are deliberately
+  not counted as used: that would let a top-up be laundered by requesting a
+  delivery and cancelling it.
 - The storefront passes "Withdrawals unlock once" through and keeps the
   older phrases ("is for opening packs", "more on packs") for deploy skew.

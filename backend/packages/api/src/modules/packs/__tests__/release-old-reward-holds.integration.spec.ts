@@ -145,8 +145,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
       const after = await service.walletSummary(cus);
       expect(after.balance).toBeCloseTo(before.balance, 2);
       expect(after.playthrough.remaining).toBeCloseTo(16, 2);
-      // RM 16 (welcome + bonus stamps, top-up) is still to use on packs, so
-      // nothing leaves yet (spend first, ADR 0013).
+      // RM 16 is still to use on packs (RM 91 topped up and stamped, less the
+      // RM 45 open and the RM 30 released), so nothing leaves yet (spend
+      // first, ADR 0013).
+      expect(after.withdrawable).toBe(0);
       expect(await stampOf(reward)).toBe(0);
       expect(await stampOf(gift)).toBe(0);
       expect(await stampOf(welcome)).toBe(800);

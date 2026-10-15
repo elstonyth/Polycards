@@ -45,6 +45,8 @@ card they paid for.
   bonus-paid share of a pull) and the welcome pack (`source = 'free'`).
 - Rule 1 is unchanged: nothing is withdrawable before the first real top-up.
   Shipping is unchanged too (zone delivery fee, #790).
+- "Cash" means part of the withdrawable balance, and when that balance may
+  leave is ADR 0013's rule: only once nothing is left to use on packs.
 
 ## Consequences
 
