@@ -49,6 +49,7 @@ import {
 import { FRAME_LEVELS } from './avatar-frames';
 import { challengePackId } from './challenge-prize';
 import { FREE_WELCOME_CATEGORY } from './free-pack';
+import type { LosslessWindow } from './lossless';
 import { isGraded, isPsa10, type PoolComposition } from './card-view';
 import {
   USERNAME_RE,
@@ -76,6 +77,7 @@ import NotificationRead from './models/notification-read';
 import PixelPokemon from './models/pixel-pokemon';
 import ChallengeStage from './models/challenge-stage';
 import ChallengeSchedule from './models/challenge-schedule';
+import LosslessSchedule from './models/lossless-schedule';
 import ChallengeSettings from './models/challenge-settings';
 import TierSettings from './models/tier-settings';
 import GatewayDeposit, { DEPOSIT_STATUSES } from './models/gateway-deposit';
@@ -706,6 +708,7 @@ class PacksModuleService extends MedusaService({
   PixelPokemon,
   ChallengeStage,
   ChallengeSchedule,
+  LosslessSchedule,
   ChallengeSettings,
   TierSettings,
   GatewayDeposit,
@@ -11494,6 +11497,175 @@ class PacksModuleService extends MedusaService({
       },
       sharedContext,
     );
+  }
+
+  /**
+   * Every Lossless Mode window that has not ended by `sinceMs` — upcoming,
+   * live, or cancelled-but-not-yet-past-ends_at — as plain LosslessWindow
+   * objects for the pure decision functions in lossless.ts.
+   *
+   * `ends_at > since`, not "live now": the price paths ask about the pull's
+   * own timestamp, which can sit slightly in the past, and the admin list wants
+   * upcoming windows too. losslessStatus does the live/cancelled decision; a
+   * cancelled row is returned on purpose so that decision sees the stamp.
+   * `pack_slugs` comes back as an array or null (json column), never a string.
+   */
+  @InjectManager()
+  async losslessWindows(
+    sinceMs: number,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<LosslessWindow[]> {
+    const rows = await this.listLosslessSchedules(
+      { ends_at: { $gt: new Date(sinceMs) } },
+      {
+        select: ['id', 'starts_at', 'ends_at', 'cancelled_at', 'pack_slugs'],
+      },
+      sharedContext,
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      starts_at: r.starts_at,
+      ends_at: r.ends_at,
+      cancelled_at: r.cancelled_at,
+      pack_slugs: r.pack_slugs as string[] | null,
+    }));
+  }
+
+  /**
+   * Schedule a Lossless Mode window — the row and its audit row in ONE
+   * transaction (the create twin of cancelLosslessSchedule). Validation (end
+   * after start, not already over, known slugs) belongs to the route; this
+   * method trusts its caller the way createChallengeSchedule does.
+   *
+   * Audited against entity_type 'pack': the window changes what a pack's
+   * buyback pays, which is the same question the existing pack config trail
+   * answers ("what rate was in force at that moment"). `kind` tells the two
+   * apart without widening the entity_type CHECK, which would cost a migration.
+   */
+  @InjectTransactionManager()
+  async createLosslessSchedule(
+    input: {
+      startsAt: Date;
+      endsAt: Date;
+      packSlugs: string[] | null;
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ id: string }> {
+    const [created] = await this.createLosslessSchedules(
+      [
+        {
+          starts_at: input.startsAt,
+          ends_at: input.endsAt,
+          // model.json() generates a Record<string, unknown> create input — a
+          // plain array has no string index signature (same double-cast as
+          // createChallengeSchedule's stages).
+          pack_slugs: input.packSlugs as unknown as Record<
+            string,
+            unknown
+          > | null,
+          created_by: input.adminId,
+        },
+      ],
+      sharedContext,
+    );
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'pack',
+        entity_id: created.id,
+        action: 'create',
+        before: null,
+        after: {
+          kind: 'lossless_schedule',
+          starts_at: input.startsAt.toISOString(),
+          ends_at: input.endsAt.toISOString(),
+          pack_slugs: input.packSlugs,
+        },
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+    return { id: created.id };
+  }
+
+  /**
+   * End a Lossless Mode window now — the lock, the write, and the audit row in
+   * ONE transaction. Cancelling stamps `cancelled_at` rather than deleting, so
+   * a live window stops applying immediately (effectiveEndMs) and the row stays
+   * for the trail.
+   *
+   * FOR UPDATE, same idiom as editChallengeSchedule: two operators cancelling
+   * at once apply one after the other, so the second reads the first's stamp
+   * and is refused instead of overwriting `cancelled_at` and auditing a stale
+   * `before`. `now` is read once and used for both the "already over" test and
+   * the stamp, so the two cannot disagree across a tick.
+   */
+  @InjectTransactionManager()
+  async cancelLosslessSchedule(
+    input: { id: string; adminId: string; reason: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ id: string; cancelled_at: Date }> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [row] = await em.execute<
+      {
+        id: string;
+        starts_at: Date | string;
+        ends_at: Date | string;
+        pack_slugs: string[] | null;
+        cancelled_at: Date | string | null;
+      }[]
+    >(
+      `SELECT id, starts_at, ends_at, pack_slugs, cancelled_at
+         FROM lossless_schedule
+        WHERE id = ? AND deleted_at IS NULL
+          FOR UPDATE`,
+      [input.id],
+    );
+    if (!row)
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        'Lossless schedule not found.',
+      );
+    const now = new Date();
+    if (row.cancelled_at || new Date(row.ends_at).getTime() <= now.getTime())
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This schedule already ended or was cancelled.',
+      );
+    // Selector repeats the not-cancelled condition — same discipline as the
+    // challenge stamp; under the row lock it cannot lose.
+    await this.updateLosslessSchedules(
+      {
+        selector: { id: input.id, cancelled_at: null },
+        data: { cancelled_at: now },
+      },
+      sharedContext,
+    );
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'pack',
+        entity_id: input.id,
+        action: 'disable',
+        before: {
+          id: row.id,
+          starts_at: new Date(row.starts_at).toISOString(),
+          ends_at: new Date(row.ends_at).toISOString(),
+          pack_slugs: row.pack_slugs,
+          cancelled_at: null,
+        },
+        after: {
+          kind: 'lossless_schedule',
+          cancelled_at: now.toISOString(),
+        },
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+    return { id: input.id, cancelled_at: now };
   }
 
   // The settled weeks, newest first, with enough per-week summary to drive a
