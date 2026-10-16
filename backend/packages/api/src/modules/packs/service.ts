@@ -16,6 +16,7 @@ import type {
 import { PCT_SCALE } from '@acme/odds-math';
 import type { OddsRarity, TierRangeMap } from '@acme/odds-math';
 import type { Rarity } from './rarity';
+import type { CardRow, CardPriceUpdate } from './sync-market-prices';
 import {
   claimOne,
   claimRows,
@@ -725,6 +726,46 @@ class PacksModuleService extends MedusaService({
   Announcement,
   PackGift,
 }) {
+  // Claim only the exact state priced before the HTTP request. The claim's row
+  // lock lasts through the ORM money write, preserving its raw_* twin atomically.
+  @InjectTransactionManager()
+  async applyCardPriceSync(
+    observed: CardRow,
+    update: CardPriceUpdate,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const applied = await claimOne(em, {
+      table: 'card',
+      ids: [observed.id],
+      where: {
+        pc_product_id: observed.pc_product_id,
+        pc_grade: observed.pc_grade,
+        market_value: Number(observed.market_value),
+        pc_pending_price:
+          observed.pc_pending_price == null
+            ? null
+            : JSON.stringify(observed.pc_pending_price),
+        pc_sync_error: observed.pc_sync_error ?? null,
+      },
+      set: {
+        pc_pending_price:
+          update.pc_pending_price == null
+            ? null
+            : JSON.stringify(update.pc_pending_price),
+        pc_sync_error: update.pc_sync_error,
+        ...(update.pc_synced_at ? { pc_synced_at: update.pc_synced_at } : {}),
+      },
+    });
+    if (applied && update.market_value !== undefined) {
+      await this.updateCards(
+        [{ id: observed.id, market_value: update.market_value }],
+        sharedContext,
+      );
+    }
+    return applied;
+  }
+
   // Every audit row in this service goes through here — one place that knows
   // the shape, and one place a reviewer checks that the row rides the caller's
   // transaction. `sharedContext` is NOT optional: an audit written outside the

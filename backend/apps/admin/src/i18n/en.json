@@ -355,6 +355,32 @@
     "foreignDropped": "{{n}} rows were not yours and were dropped — PRICECHARTING_SELLER_ID does not match the account the API token reads."
   },
   "cards": {
+    "pricing": {
+      "filter": "Price sync",
+      "all": "All cards",
+      "attention": "Needs attention",
+      "pending_confirmation": "Awaiting confirmation",
+      "sync_error": "Source / sync error",
+      "never_synced": "Never synced",
+      "stale": "No sync in 48 hours",
+      "unlinked": "No pricing source",
+      "missing_product": "Inventory product missing",
+      "synced": "Up to date",
+      "loading": "Checking price sync…",
+      "unavailable": "Price sync status unavailable",
+      "loadError": "Could not check pricing. Status is unknown; retry to review affected cards.",
+      "retry": "Retry",
+      "empty": "No cards match these filters.",
+      "count": "{{count}} of {{total}} cards",
+      "current": "Current: {{value}}",
+      "proposed": "Proposed: {{value}}",
+      "source": "PriceCharting #{{id}} · {{grade}}",
+      "firstSeen": "First seen: {{at}}",
+      "confirmAfter": "Eligible for confirmation from {{at}}",
+      "lastSynced": "Last synced: {{at}}",
+      "never": "Never",
+      "policy": "Price moves over 5× need two consistent checks at least 24 hours apart, with the second within 10% of the first. The current price stays until confirmation. Source values below are USD, before exchange rate and markup."
+    },
     "title": "Gacha Cards",
     "subtitle": "Inventory products registered as gacha prizes. Add the item to the product catalog first, then register it here; rarity is chosen per pack in each pack's win-rate editor.",
     "new": "Add from inventory",
@@ -1151,6 +1177,9 @@
     "cardFrame": "Card frame"
   },
   "dashboard": {
+    "pricingAttention_one": "{{count}} card price needs attention",
+    "pricingAttention_other": "{{count}} card prices need attention",
+    "pricingDetail": "{{count}} awaiting confirmation · Review stale prices and missing sources",
     "title": "Dashboard",
     "subtitle": "How Polycards is doing, in Malaysia time · {{window}}",
     "netCash": "Net cash in",

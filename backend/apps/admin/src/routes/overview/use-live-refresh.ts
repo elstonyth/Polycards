@@ -16,6 +16,7 @@ const QUEUE_KEYS: readonly (readonly unknown[])[] = [
   ['admin', 'gateway-deposits'],
   qk.deliveryOrdersKey,
   qk.referralSettlements,
+  qk.pricingHealth,
 ];
 const LIVE_KEYS: readonly (readonly unknown[])[] = [
   ['admin', 'stats'],

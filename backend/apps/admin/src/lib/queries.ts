@@ -67,6 +67,8 @@ import {
   type PaymentGatewaySetting,
   getFxHistory,
   getFxRate,
+  getPricingHealth,
+  type PricingHealth,
   getPulls,
   getGatewayDeposits,
   type GatewayDepositView,
@@ -191,6 +193,15 @@ export const useCards = (
     queryKey: qk.cards,
     queryFn: () => packsApi.admin.cards.query().then((r) => r.cards),
     enabled: opts.enabled ?? true,
+  });
+
+export const usePricingHealth = (): UseQueryResult<PricingHealth> =>
+  useQuery({
+    queryKey: qk.pricingHealth,
+    queryFn: getPricingHealth,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
 
 // `customerId` scopes the ledger to one player (the player-detail tabs). Blank
@@ -517,7 +528,11 @@ export const useUpdateCard = () => {
         ...payload,
       });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.cards }),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: qk.cards }),
+        qc.invalidateQueries({ queryKey: qk.pricingHealth }),
+      ]),
   });
 };
 
@@ -525,7 +540,11 @@ export const useDeleteCard = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (handle: string) => deleteCard(handle),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.cards }),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: qk.cards }),
+        qc.invalidateQueries({ queryKey: qk.pricingHealth }),
+      ]),
   });
 };
 
@@ -537,6 +556,7 @@ export const useRegisterCard = () => {
     onSuccess: () => {
       // The product is no longer eligible once registered, and the card list grew.
       qc.invalidateQueries({ queryKey: qk.cards });
+      qc.invalidateQueries({ queryKey: qk.pricingHealth });
       // MARK STALE, DO NOT REFETCH. invalidateQueries defaults to
       // refetchType:'active', and the Inventory list's bulk tool keeps
       // useEligibleProducts(selected.size > 0) ACTIVE for the whole run — so an

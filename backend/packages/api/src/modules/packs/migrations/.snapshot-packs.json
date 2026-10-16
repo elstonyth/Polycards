@@ -536,6 +536,24 @@
           "length": 6,
           "mappedType": "datetime"
         },
+        "pc_pending_price": {
+          "name": "pc_pending_price",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "json"
+        },
+        "pc_sync_error": {
+          "name": "pc_sync_error",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
         "label_year": {
           "name": "label_year",
           "type": "text",

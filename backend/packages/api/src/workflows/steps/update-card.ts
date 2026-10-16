@@ -73,6 +73,8 @@ type CardSnapshot = {
   sprite_image: string | null;
   pc_product_id: string | null;
   pc_grade: string | null;
+  pc_pending_price: Record<string, unknown> | null;
+  pc_sync_error: string | null;
   market_multiplier: number;
   slab_image: string | null;
   slab_image_key: string | null;
@@ -142,6 +144,8 @@ export const updateCardInvoke = async (
     sprite_image: card.sprite_image ?? null,
     pc_product_id: card.pc_product_id ?? null,
     pc_grade: card.pc_grade ?? null,
+    pc_pending_price: card.pc_pending_price ?? null,
+    pc_sync_error: card.pc_sync_error ?? null,
     market_multiplier: Number(
       card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER,
     ),
@@ -161,6 +165,10 @@ export const updateCardInvoke = async (
   const nextPcGrade =
     input.pc_grade === undefined ? snapshot.pc_grade : input.pc_grade;
   const nextMultiplier = input.market_multiplier ?? snapshot.market_multiplier;
+  const pricingChanged =
+    input.market_value !== snapshot.market_value ||
+    nextPcProductId !== snapshot.pc_product_id ||
+    nextPcGrade !== snapshot.pc_grade;
 
   // MYR listing amount for the Product mirror. Card.price is MYR (the admin
   // renders it with rm()); the NULL-price "use FMV" fallback must CONVERT —
@@ -232,6 +240,9 @@ export const updateCardInvoke = async (
         slab_image_key: nextSlabKey,
         pc_product_id: nextPcProductId,
         pc_grade: nextPcGrade,
+        ...(pricingChanged
+          ? { pc_pending_price: null, pc_sync_error: null }
+          : {}),
         market_multiplier: nextMultiplier,
         label_year: input.label_year ?? null,
         label_note: input.label_note ?? null,
@@ -383,6 +394,8 @@ export const updateCardInvoke = async (
         slab_image_key: snapshot.slab_image_key,
         pc_product_id: snapshot.pc_product_id,
         pc_grade: snapshot.pc_grade,
+        pc_pending_price: snapshot.pc_pending_price,
+        pc_sync_error: snapshot.pc_sync_error,
         market_multiplier: snapshot.market_multiplier,
         label_year: snapshot.label_year,
         label_note: snapshot.label_note,
@@ -425,6 +438,8 @@ export const updateCardStep = createStep(
         slab_image_key: data.card.slab_image_key,
         pc_product_id: data.card.pc_product_id,
         pc_grade: data.card.pc_grade,
+        pc_pending_price: data.card.pc_pending_price,
+        pc_sync_error: data.card.pc_sync_error,
         market_multiplier: data.card.market_multiplier,
         label_year: data.card.label_year,
         label_note: data.card.label_note,

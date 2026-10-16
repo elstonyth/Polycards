@@ -3,6 +3,8 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../modules/packs';
 import type PacksModuleService from '../../../../modules/packs/service';
 import { pageAll } from '../../../utils/page-all';
+import { pendingPriceFor } from '../../../../modules/packs/sync-market-prices';
+import { priceFieldForGrade } from '../../../../modules/packs/pricecharting-grades';
 
 // GET /admin/pricing/health — staleness dashboard for the two money feeds
 // (audit 2026-07-07 #3b): the FX row's age and how many PriceCharting-linked
@@ -46,6 +48,52 @@ export async function GET(
     : [];
   const productHandles = new Set(products.map((p) => p.handle));
   const unlinkedProducts = cardHandles.filter((h) => !productHandles.has(h));
+  let pendingConfirmation = 0;
+  let unlinked = 0;
+  const issues = allCards.flatMap((card) => {
+    const pending = pendingPriceFor({
+      ...card,
+      market_value: Number(card.market_value),
+    });
+    const notLinked = !card.pc_product_id || !card.pc_grade;
+    const error =
+      card.pc_sync_error ||
+      (!notLinked && !priceFieldForGrade(card.pc_grade!)
+        ? `unknown grade '${card.pc_grade}'`
+        : null);
+    const at = card.pc_synced_at ? new Date(card.pc_synced_at).getTime() : null;
+    if (pending) pendingConfirmation++;
+    if (notLinked) unlinked++;
+    const reason = notLinked
+      ? 'unlinked'
+      : error
+        ? 'sync_error'
+        : pending
+          ? 'pending_confirmation'
+          : at === null
+            ? 'never_synced'
+            : !Number.isFinite(at) || now - at > STALE_MS
+              ? 'stale'
+              : !productHandles.has(card.handle)
+                ? 'missing_product'
+                : null;
+    return reason
+      ? [
+          {
+            handle: card.handle,
+            name: card.name,
+            pc_product_id: card.pc_product_id,
+            pc_grade: card.pc_grade,
+            market_value: Number(card.market_value),
+            last_synced_at: card.pc_synced_at,
+            reason,
+            message: error,
+            proposed_value: pending?.proposed_value ?? null,
+            first_seen_at: pending?.first_seen_at ?? null,
+          },
+        ]
+      : [];
+  });
 
   res.json({
     fx: fxRow
@@ -63,6 +111,9 @@ export async function GET(
       linked: linkedCards.length,
       never_synced: neverSynced,
       stale_48h: stale,
+      pending_confirmation: pendingConfirmation,
+      unlinked,
+      issues,
       // Card handles with NO matching Product — broken handle coupling.
       missing_product: unlinkedProducts,
     },

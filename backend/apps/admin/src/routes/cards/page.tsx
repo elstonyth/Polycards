@@ -1,5 +1,5 @@
 import { useRef, useState, type ChangeEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Checkbox,
@@ -12,6 +12,7 @@ import {
   Input,
   Label,
   StatusBadge,
+  Select,
   FocusModal,
   Prompt,
   toast,
@@ -27,6 +28,7 @@ import {
   useTierSettings,
   useUpdateCard,
   useUploadImage,
+  usePricingHealth,
 } from '../../lib/queries';
 import type { TierRangeMap } from '@acme/odds-math';
 import { outsideEveryRange } from '../../lib/tier-ranges';
@@ -39,6 +41,12 @@ import CardPokemonFields from './CardPokemonFields';
 import { GachaPipelineHint } from '../../components/GachaPipelineHint';
 import { GraderGradeSelect } from '../../components/GraderGradeSelect';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { PricingStatus } from './PricingStatus';
+import {
+  matchesPricingFilter,
+  PRICING_FILTERS,
+  pricingFilterFromParam,
+} from '../../lib/pricing-filter';
 
 export const config: RouteConfig = {
   label: 'pcNav.cards',
@@ -125,6 +133,14 @@ const GachaCardsPage = () => {
   const navigate = useNavigate();
   const prompt = usePrompt();
   const { data: cards = null, isError, refetch } = useCards();
+  const pricing = usePricingHealth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const pricingFilter = pricingFilterFromParam(searchParams.get('pricing'));
+  const pricingIssues = new Map(
+    pricing.data?.cards.issues.map((issue) => [issue.handle, issue]),
+  );
+  const pricingFiltered = pricingFilter !== 'all';
+  const pricingUnavailable = pricing.isError || pricing.data === undefined;
   // Tier price ranges — only the bulk "add to pack" confirm reads them. The
   // chosen pack's own override (pack.tier_ranges) wins; the global
   // /tier-defaults ladder is the fallback. {} (nothing configured, or the
@@ -301,6 +317,9 @@ const GachaCardsPage = () => {
   };
 
   const visible = (cards ?? [])
+    .filter((c) =>
+      matchesPricingFilter(pricingIssues.get(c.handle), pricingFilter),
+    )
     .filter((c) => {
       const needle = q.trim().toLowerCase();
       if (!needle) return true;
@@ -450,11 +469,60 @@ const GachaCardsPage = () => {
 
       <GachaPipelineHint current="card" />
 
-      {cards !== null && (
+      <div className="flex flex-wrap items-start gap-3 px-6 py-3">
+        <div className="w-56 shrink-0">
+          <Label htmlFor="card-pricing-filter">
+            {t('cards.pricing.filter')}
+          </Label>
+          <Select
+            value={pricingFilter}
+            onValueChange={(value) => {
+              setSearchParams((params) => {
+                const next = new URLSearchParams(params);
+                if (value === 'all') next.delete('pricing');
+                else next.set('pricing', value);
+                return next;
+              });
+              setSelected(new Set());
+              anchorRef.current = null;
+            }}
+          >
+            <Select.Trigger id="card-pricing-filter">
+              <Select.Value />
+            </Select.Trigger>
+            <Select.Content>
+              {PRICING_FILTERS.map((value) => (
+                <Select.Item key={value} value={value}>
+                  {t(`cards.pricing.${value}`)}
+                </Select.Item>
+              ))}
+            </Select.Content>
+          </Select>
+        </div>
+        <Text size="small" className="text-ui-fg-subtle max-w-2xl">
+          {t('cards.pricing.policy')}
+        </Text>
+      </div>
+
+      {pricing.isError && (
+        <div className="flex items-center gap-3 px-6 py-3" role="alert">
+          <Text size="small">{t('cards.pricing.loadError')}</Text>
+          <Button
+            size="small"
+            variant="secondary"
+            onClick={() => void pricing.refetch()}
+          >
+            {t('cards.pricing.retry')}
+          </Button>
+        </div>
+      )}
+
+      {cards !== null && !(pricingFiltered && pricingUnavailable) && (
         <Text size="small" className="text-ui-fg-subtle px-6 pb-2">
-          {q.trim()
-            ? `${visible.length} of ${cards.length} cards`
-            : `${cards.length} cards`}
+          {t('cards.pricing.count', {
+            count: visible.length,
+            total: cards.length,
+          })}
         </Text>
       )}
 
@@ -487,6 +555,16 @@ const GachaCardsPage = () => {
       ) : cards.length === 0 ? (
         <div className="px-6 py-8">
           <Text className="text-ui-fg-subtle">{t('cards.list.empty')}</Text>
+        </div>
+      ) : pricingFiltered && pricingUnavailable ? (
+        <div className="px-6 py-8" role="status">
+          <Text className="text-ui-fg-subtle">
+            {t(`cards.pricing.${pricing.isError ? 'unavailable' : 'loading'}`)}
+          </Text>
+        </div>
+      ) : visible.length === 0 ? (
+        <div className="px-6 py-8">
+          <Text className="text-ui-fg-subtle">{t('cards.pricing.empty')}</Text>
         </div>
       ) : (
         <div
@@ -530,6 +608,7 @@ const GachaCardsPage = () => {
                   {sortHeader('created', t('cards.list.created'))}
                 </Table.HeaderCell>
                 <Table.HeaderCell>{t('cards.list.status')}</Table.HeaderCell>
+                <Table.HeaderCell>{t('cards.pricing.filter')}</Table.HeaderCell>
                 <Table.HeaderCell className="text-right">
                   {t('cards.list.actions')}
                 </Table.HeaderCell>
@@ -587,6 +666,13 @@ const GachaCardsPage = () => {
                         ? t('cards.list.listed')
                         : t('cards.list.hidden')}
                     </StatusBadge>
+                  </Table.Cell>
+                  <Table.Cell>
+                    <PricingStatus
+                      issue={pricingIssues.get(c.handle)}
+                      loading={pricing.data === undefined}
+                      failed={pricing.isError}
+                    />
                   </Table.Cell>
                   <Table.Cell className="text-right">
                     <div className="flex justify-end gap-2">
