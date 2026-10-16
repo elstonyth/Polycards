@@ -5,6 +5,7 @@ export const qk = {
   pack: (slug: string) => ['admin', 'pack', slug] as const,
   packOdds: (slug: string) => ['admin', 'pack', slug, 'odds'] as const,
   cards: ['admin', 'cards'] as const,
+  pricingHealth: ['admin', 'pricing-health'] as const,
   // The customer segment always renders (defaulting to 'all', same rule as the
   // source segment): appended-only, the site-wide key would be a strict PREFIX
   // of the player-scoped one and an exact-key invalidation of one would nuke

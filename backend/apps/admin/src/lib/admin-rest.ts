@@ -105,6 +105,47 @@ async function getJson<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+export interface PricingIssue {
+  handle: string;
+  name: string;
+  pc_product_id: string | null;
+  pc_grade: string | null;
+  market_value: number;
+  last_synced_at: string | null;
+  reason:
+    | 'pending_confirmation'
+    | 'sync_error'
+    | 'never_synced'
+    | 'stale'
+    | 'unlinked'
+    | 'missing_product';
+  proposed_value: number | null;
+  first_seen_at: string | null;
+  message: string | null;
+}
+
+export interface PricingHealth {
+  fx: {
+    rate: number;
+    source: string;
+    manual_override: boolean;
+    fetched_at: string | null;
+    age_hours: number | null;
+  } | null;
+  cards: {
+    linked: number;
+    never_synced: number;
+    stale_48h: number;
+    missing_product: string[];
+    pending_confirmation: number;
+    unlinked: number;
+    issues: PricingIssue[];
+  };
+}
+
+export const getPricingHealth = (): Promise<PricingHealth> =>
+  getJson('/admin/pricing/health');
+
 // Inventory products that can still be registered as gacha cards (no card with
 // their handle yet). The "Add card" picker is driven by this list.
 export interface EligibleProduct {

@@ -1,4 +1,36 @@
 {
+  "cards": {
+    "pricing": {
+      "filter": "价格同步",
+      "all": "全部卡牌",
+      "attention": "需要处理",
+      "pending_confirmation": "等待确认",
+      "sync_error": "来源／同步错误",
+      "never_synced": "尚未同步",
+      "stale": "超过48小时未同步",
+      "unlinked": "未关联价格来源",
+      "missing_product": "库存商品缺失",
+      "synced": "已更新",
+      "loading": "正在检查价格同步…",
+      "unavailable": "暂时无法获取价格同步状态",
+      "loadError": "无法检查价格。目前状态未知，请重试以查看受影响的卡牌。",
+      "retry": "重试",
+      "empty": "没有符合筛选条件的卡牌。",
+      "count": "显示 {{count}} 张，共 {{total}} 张卡牌",
+      "current": "当前：{{value}}",
+      "proposed": "待确认：{{value}}",
+      "source": "PriceCharting #{{id}} · {{grade}}",
+      "firstSeen": "首次发现：{{at}}",
+      "confirmAfter": "可确认时间：{{at}} 起",
+      "lastSynced": "上次同步：{{at}}",
+      "never": "从未同步",
+      "policy": "超过5倍的价格变动须经过两次一致检查，间隔至少24小时，且第二次价格与首次相差不超过10%。确认前保留当前价格。下方来源价格以美元计，未包含汇率及加价。"
+    }
+  },
+  "dashboard": {
+    "pricingAttention": "{{count}} 张卡牌价格需要处理",
+    "pricingDetail": "{{count}} 张等待确认 · 检查过期价格及缺失来源"
+  },
   "statsBoard": {
     "ranges": {
       "today": "今天",

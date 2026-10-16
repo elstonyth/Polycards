@@ -15,6 +15,7 @@ import {
   useGatewayDeposits,
   useGatewayWithdrawals,
   useReferralSettlements,
+  usePricingHealth,
 } from '../../lib/queries';
 import { rm, timeAgo } from '../../lib/format';
 import {
@@ -76,6 +77,7 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   // Both rails: a refunded payout either gateway still holds or paid.
   const auditRm = useGatewayAudit('MYR');
   const auditSgd = useGatewayAudit('SGD');
+  const pricing = usePricingHealth();
   const queries = [
     held,
     pending,
@@ -85,6 +87,7 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
     runs,
     auditRm,
     auditSgd,
+    pricing,
   ];
   const shipping = [requested, processed, ready];
 
@@ -107,6 +110,8 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
   if (toShip !== undefined) counts.orders = toShip;
   if (drafts) counts.referrals = drafts.length;
   if (twice) counts.doublePay = twice.count;
+  if (pricing.data && !pricing.isError)
+    counts.pricing = pricing.data.cards.issues.length;
   const { soundOn, setSound } = useAttentionAlert(counts);
 
   // A query this role may not read is left out; any other failure shows.
@@ -150,6 +155,21 @@ export const AttentionCard = ({ className = '' }: { className?: string }) => {
         { amount: rm(w.amount), age: w.oldest ? timeAgo(w.oldest) : '—' },
       ),
       to: '/withdrawals',
+      action: t('dashboard.review'),
+      urgent: true,
+    });
+  }
+  if (pricing.data && pricing.data.cards.issues.length > 0) {
+    items.push({
+      id: 'pricing',
+      icon: <ExclamationCircle />,
+      title: t('dashboard.pricingAttention', {
+        count: pricing.data.cards.issues.length,
+      }),
+      detail: t('dashboard.pricingDetail', {
+        count: pricing.data.cards.pending_confirmation,
+      }),
+      to: '/cards?pricing=attention',
       action: t('dashboard.review'),
       urgent: true,
     });
