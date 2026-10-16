@@ -4,6 +4,7 @@ import { PACKS_MODULE } from '../../../modules/packs';
 import { FREE_WELCOME_CATEGORY } from '../../../modules/packs/free-pack';
 import { compositionGroup } from '../../../modules/packs/card-view';
 import { withLossless } from '../../../modules/packs/lossless';
+import { losslessWindowsForDisplay } from './lossless-display';
 
 // GET /store/packs — the gacha pack catalog for /claw and the home "Open Packs"
 // tiles. A plain Medusa store route (publishable-key scoped, but NOT subject to
@@ -63,13 +64,11 @@ export async function GET(
 }
 
 // The cache holds the plain catalog; Lossless Mode is laid over a copy on every
-// request, so a window starting or being cancelled shows at once instead of
-// after the TTL, and no cached body can carry a stale 100.
+// request at Date.now() (windows via the 10s display memo), so no cached body
+// can carry a stale 100 and a window's start/end flips on time.
 async function withLosslessBadges(req: MedusaRequest, body: CatalogBody) {
-  const packsModuleService: PacksModuleService =
-    req.scope.resolve(PACKS_MODULE);
+  const windows = await losslessWindowsForDisplay(req);
   const now = Date.now();
-  const windows = await packsModuleService.losslessWindows(now);
   return {
     ...body,
     packs: body.packs.map((p) => withLossless(p, windows, now)),

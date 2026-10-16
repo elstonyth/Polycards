@@ -4,6 +4,7 @@ import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { clearPackListCache } from '../../src/api/store/packs/route';
 import { clearPackDetailCache } from '../../src/api/store/packs/[slug]/route';
+import { clearLosslessDisplayMemo } from '../../src/api/store/packs/lossless-display';
 import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -36,6 +37,7 @@ medusaIntegrationTestRunner({
         // by an earlier test would otherwise be served to this one.
         clearPackListCache();
         clearPackDetailCache();
+        clearLosslessDisplayMemo();
 
         const container = getContainer();
         const key = await container.resolve(Modules.API_KEY).createApiKeys({
@@ -186,6 +188,8 @@ medusaIntegrationTestRunner({
         };
       };
 
+      afterEach(() => jest.restoreAllMocks());
+
       const liveAllWindow = () =>
         packs.createLosslessSchedule({
           startsAt: new Date(Date.now() - 60_000),
@@ -319,8 +323,10 @@ medusaIntegrationTestRunner({
         });
         const after = await mintPull(customerId);
 
-        // Same caches, still warm: they must hold the plain body, so the cancel
-        // shows at once instead of after the 30s TTL.
+        // Same pack caches, still warm; only the 10s windows memo is reset
+        // (its lag is covered below). The caches must hold the plain body, so
+        // the cancel shows without waiting out their 30s TTL.
+        clearLosslessDisplayMemo();
         expect(await storeBadges()).toEqual({
           list: PACK_PERCENT,
           detail: PACK_PERCENT,
@@ -342,6 +348,46 @@ medusaIntegrationTestRunner({
           percent: PACK_PERCENT,
           amount: PACK_AMOUNT,
         });
+      });
+
+      it('badges read windows through a 10s memo; the price never does', async () => {
+        const { token, customerId } = await registerCustomer('ls-memo@test.dev');
+        // Warms the memo with "no windows".
+        expect(await storeBadges()).toEqual({
+          list: PACK_PERCENT,
+          detail: PACK_PERCENT,
+        });
+        await liveAllWindow();
+
+        // A new window reaches the badges only on the memo refresh (≤10s)…
+        expect(await storeBadges()).toEqual({
+          list: PACK_PERCENT,
+          detail: PACK_PERCENT,
+        });
+        // …but the sell reads windows live, so it pays 100% straight away.
+        const pullId = await mintPull(customerId);
+        expect(await sell(token, pullId)).toMatchObject({
+          percent: 100,
+          amount: LOSSLESS_AMOUNT,
+        });
+
+        clearLosslessDisplayMemo();
+        expect(await storeBadges()).toEqual({ list: 100, detail: 100 });
+      });
+
+      it('a failed windows read serves the badges at the pack rate, not a 500, and is not memoized', async () => {
+        await liveAllWindow();
+        jest
+          .spyOn(packs, 'losslessWindows')
+          .mockRejectedValue(new Error('lossless_schedule unavailable'));
+        expect(await storeBadges()).toEqual({
+          list: PACK_PERCENT,
+          detail: PACK_PERCENT,
+        });
+
+        // The next request retries rather than serving a memoized failure.
+        jest.restoreAllMocks();
+        expect(await storeBadges()).toEqual({ list: 100, detail: 100 });
       });
     });
   },

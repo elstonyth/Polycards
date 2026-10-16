@@ -5,6 +5,7 @@ import { cardByHandle, toCardView } from '../../../../modules/packs/card-view';
 import { normalizePublishedOdds } from '../../../../workflows/steps/create-pack';
 import { toMoney } from '../../../../modules/packs/money';
 import { withLossless } from '../../../../modules/packs/lossless';
+import { losslessWindowsForDisplay } from '../lossless-display';
 import { pageAll } from '../../../utils/page-all';
 import { demoTierSplit } from '../../../../modules/packs/odds-sets';
 import {
@@ -62,9 +63,8 @@ export async function GET(
   // The cache holds the plain body; Lossless Mode is laid over a copy on every
   // request (see store/packs/route.ts), never cached.
   const send = async (body: DetailBody): Promise<void> => {
-    const now = Date.now();
-    const windows = await packsModuleService.losslessWindows(now);
-    res.json({ ...body, pack: withLossless(body.pack, windows, now) });
+    const windows = await losslessWindowsForDisplay(req);
+    res.json({ ...body, pack: withLossless(body.pack, windows, Date.now()) });
   };
 
   const cached = packCache.get(slug);
