@@ -49,6 +49,7 @@ import { fmtPct, rm, slugKeystroke, toSlug } from '../../lib/format';
 import { useTableSort } from '../../lib/use-table-sort';
 import { GachaPipelineHint } from '../../components/GachaPipelineHint';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { LosslessTab } from './LosslessTab';
 
 // Client-side sort — this list is unpaged, the whole catalog is in hand.
 // 'rtp' orders the EV / RTP column ("which pack leaks money" reads by RTP).
@@ -169,7 +170,7 @@ const PacksListPage = () => {
   // Which sub-tab is showing. The free welcome pack is an ordinary pack in a
   // reserved category, so it is split off here rather than filtered by hand:
   // the money packs tab never shows it, the Free pack tab shows only it.
-  const [tab, setTab] = useState<'packs' | 'free'>('packs');
+  const [tab, setTab] = useState<'packs' | 'free' | 'lossless'>('packs');
   const [mode, setMode] = useState<'create' | 'edit' | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [deleteTarget, setDeleteTarget] = useState<AdminPack | null>(null);
@@ -632,7 +633,9 @@ const PacksListPage = () => {
       <Tabs
         className="divide-y"
         value={tab}
-        onValueChange={(v) => setTab(v === 'free' ? 'free' : 'packs')}
+        onValueChange={(v) =>
+          setTab(v === 'free' || v === 'lossless' ? v : 'packs')
+        }
       >
         <div className="flex items-start justify-between gap-4 px-6 py-4">
           <div>
@@ -641,46 +644,57 @@ const PacksListPage = () => {
               {t('packs.subtitle')}
             </Text>
           </div>
-          <Input
-            className="w-56"
-            placeholder="Search title…"
-            aria-label="Search packs by title"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-          <Select
-            value={statusFilter}
-            onValueChange={(v) =>
-              setStatusFilter(
-                v === 'draft' || v === 'active' || v === 'sold_out' ? v : 'all',
-              )
-            }
-          >
-            <Select.Trigger className="w-44" aria-label="Filter by status">
-              <Select.Value />
-            </Select.Trigger>
-            <Select.Content>
-              <Select.Item value="all">All statuses</Select.Item>
-              <Select.Item value="draft">
-                {t(PACK_STATUS_LABEL.draft)}
-              </Select.Item>
-              <Select.Item value="active">
-                {t(PACK_STATUS_LABEL.active)}
-              </Select.Item>
-              <Select.Item value="sold_out">
-                {t(PACK_STATUS_LABEL.sold_out)}
-              </Select.Item>
-            </Select.Content>
-          </Select>
-          <Button size="small" variant="primary" onClick={openCreate}>
-            {tab === 'free' ? t('packs.free.create') : t('packs.new')}
-          </Button>
+          {/* The Lossless tab lists schedule windows, not packs: search, status
+              filter and "New pack" have nothing to act on there. */}
+          {tab !== 'lossless' && (
+            <>
+              <Input
+                className="w-56"
+                placeholder="Search title…"
+                aria-label="Search packs by title"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+              <Select
+                value={statusFilter}
+                onValueChange={(v) =>
+                  setStatusFilter(
+                    v === 'draft' || v === 'active' || v === 'sold_out'
+                      ? v
+                      : 'all',
+                  )
+                }
+              >
+                <Select.Trigger className="w-44" aria-label="Filter by status">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  <Select.Item value="all">All statuses</Select.Item>
+                  <Select.Item value="draft">
+                    {t(PACK_STATUS_LABEL.draft)}
+                  </Select.Item>
+                  <Select.Item value="active">
+                    {t(PACK_STATUS_LABEL.active)}
+                  </Select.Item>
+                  <Select.Item value="sold_out">
+                    {t(PACK_STATUS_LABEL.sold_out)}
+                  </Select.Item>
+                </Select.Content>
+              </Select>
+              <Button size="small" variant="primary" onClick={openCreate}>
+                {tab === 'free' ? t('packs.free.create') : t('packs.new')}
+              </Button>
+            </>
+          )}
         </div>
 
         <div className="px-6 py-3">
           <Tabs.List>
             <Tabs.Trigger value="packs">{t('packs.tabs.packs')}</Tabs.Trigger>
             <Tabs.Trigger value="free">{t('packs.tabs.free')}</Tabs.Trigger>
+            <Tabs.Trigger value="lossless">
+              {t('packs.tabs.lossless')}
+            </Tabs.Trigger>
           </Tabs.List>
         </div>
 
@@ -692,6 +706,9 @@ const PacksListPage = () => {
             {t('packs.free.hint')}
           </Text>
           {table}
+        </Tabs.Content>
+        <Tabs.Content value="lossless">
+          <LosslessTab />
         </Tabs.Content>
       </Tabs>
 

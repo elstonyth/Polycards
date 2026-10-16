@@ -54,5 +54,60 @@
     "withdrawal_count": "提现笔数",
     "withdrawal_amount": "提现金额",
     "previous": "上一段 {{value}}"
+  },
+  "packs": {
+    "tabs": {
+      "lossless": "无损模式"
+    },
+    "lossless": {
+      "hint": "在窗口时间内，所选卡包的即时回售（30 秒揭晓）按 100% 结算。从金库回售仍为 90%。卡包自身的回售比例不会被修改，窗口结束后无需清理。",
+      "schedule": "安排无损模式",
+      "allPacks": "全部卡包",
+      "empty": "暂无无损模式窗口。",
+      "loadError": "无法加载无损模式窗口。",
+      "col": {
+        "start": "开始（马来西亚时间）",
+        "end": "结束（马来西亚时间）",
+        "packs": "卡包",
+        "status": "状态",
+        "actions": "操作"
+      },
+      "status": {
+        "upcoming": "即将开始",
+        "live": "进行中",
+        "ended": "已结束",
+        "cancelled": "已取消"
+      },
+      "form": {
+        "title": "安排无损模式",
+        "subtitle": "窗口进行期间，所选卡包的即时回售（30 秒揭晓）按 100% 结算。从金库回售仍为 90%。",
+        "start": "开始时间",
+        "end": "结束时间",
+        "allPacks": "全部卡包",
+        "allPacksHint": "所有付费卡包。关闭后可自选卡包。",
+        "pickPacks": "卡包",
+        "noPacks": "请至少选择一个卡包。",
+        "noPackList": "没有可选的付费卡包。",
+        "reason": "原因（审计记录）",
+        "reasonPlaceholder": "例如：周末活动",
+        "endBeforeStart": "结束时间必须晚于开始时间。",
+        "endPast": "请选择未来的结束时间。",
+        "cancel": "取消",
+        "save": "安排无损模式"
+      },
+      "cancel": {
+        "action": "取消窗口",
+        "title": "取消此窗口？",
+        "description": "窗口会立即停止生效，即时回售恢复为各卡包自身的比例。已按 100% 支付的回售不会撤销。",
+        "reason": "原因（审计记录）",
+        "reasonPlaceholder": "例如：误操作安排",
+        "confirm": "取消窗口",
+        "keep": "保留窗口"
+      },
+      "toast": {
+        "scheduled": "已安排无损模式",
+        "cancelled": "已取消无损模式窗口"
+      }
+    }
   }
 }

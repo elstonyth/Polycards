@@ -15,6 +15,8 @@ import {
   type AdminCardUpdate,
   type AdminPack,
   type AdminPackWrite,
+  type LosslessSchedule,
+  type LosslessScheduleWrite,
   type PackOddsResponse,
   type PullsResponse,
 } from './packs-api';
@@ -643,6 +645,38 @@ export const useDeletePack = () => {
   return useMutation({
     mutationFn: (slug: string) => deletePack(slug),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.packs }),
+  });
+};
+
+// Lossless Mode windows (newest start first, max 100). Windows are priced
+// server-side, so the only client duty is to keep this list fresh after a write.
+export const useLosslessSchedules = (): UseQueryResult<LosslessSchedule[]> =>
+  useQuery({
+    queryKey: qk.losslessSchedules,
+    queryFn: () =>
+      packsApi.admin['lossless-schedules'].query().then((r) => r.schedules),
+  });
+
+export const useCreateLosslessSchedule = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: LosslessScheduleWrite) =>
+      packsApi.admin['lossless-schedules'].mutate(vars),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.losslessSchedules }),
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
+
+export const useCancelLosslessSchedule = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; reason: string }) =>
+      packsApi.admin['lossless-schedules'].$id.cancel.mutate({
+        $id: vars.id,
+        reason: vars.reason,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.losslessSchedules }),
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   });
 };
 

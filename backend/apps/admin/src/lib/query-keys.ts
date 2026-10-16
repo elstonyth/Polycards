@@ -2,6 +2,7 @@
 // invalidation can target the odds without touching the pack list.
 export const qk = {
   packs: ['admin', 'packs'] as const,
+  losslessSchedules: ['admin', 'lossless-schedules'] as const,
   pack: (slug: string) => ['admin', 'pack', slug] as const,
   packOdds: (slug: string) => ['admin', 'pack', slug, 'odds'] as const,
   cards: ['admin', 'cards'] as const,
