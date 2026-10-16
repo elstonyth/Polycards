@@ -1409,6 +1409,21 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Schedule a Lossless Mode window (POST /admin/lossless-schedules) — it
+      // lifts a pack's instant sell to 100%, so it shares the admin money-
+      // mutation budget.
+      matcher: '/admin/lossless-schedules',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Cancel a window (POST /admin/lossless-schedules/:id/cancel); "*" spans
+      // "/" so it covers the nested path.
+      matcher: '/admin/lossless-schedules/*',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Challenge settings singleton patch (POST /admin/challenge/settings) —
       // retimes the reward cycle (cadence/reset), so it shares the admin
       // money-mutation budget.

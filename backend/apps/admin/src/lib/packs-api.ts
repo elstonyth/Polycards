@@ -282,8 +282,47 @@ export interface PullsResponse {
   topRarities: TopRarity[];
 }
 
+// One Lossless Mode window (mirrors LosslessScheduleView in the API's
+// admin/lossless-schedules routes — the admin app doesn't import from the
+// backend package). While it is live, the chosen packs' INSTANT buyback pays
+// 100%; vault sells stay at the flat rate and no pack's own rate is edited.
+export interface LosslessSchedule {
+  id: string;
+  starts_at: string;
+  ends_at: string;
+  /** ends_at, or the cancel time if that came first — when it stops applying. */
+  effective_end: string;
+  /** null = every paid pack. */
+  pack_slugs: string[] | null;
+  cancelled_at: string | null;
+  created_by: string;
+  status: 'upcoming' | 'live' | 'ended' | 'cancelled';
+}
+
+export interface LosslessScheduleWrite {
+  starts_at: string;
+  ends_at: string;
+  /** null = every paid pack; otherwise a non-empty list of paid-pack slugs. */
+  pack_slugs: string[] | null;
+  reason: string;
+}
+
 type PacksApi = {
   admin: {
+    'lossless-schedules': {
+      query: () => Promise<{ schedules: LosslessSchedule[] }>;
+      mutate: (
+        input: LosslessScheduleWrite,
+      ) => Promise<{ schedule: LosslessSchedule }>;
+      $id: {
+        cancel: {
+          mutate: (input: {
+            $id: string;
+            reason: string;
+          }) => Promise<{ schedule: LosslessSchedule }>;
+        };
+      };
+    };
     packs: {
       query: () => Promise<{ packs: AdminPack[] }>;
       mutate: (input: AdminPackWrite) => Promise<{ pack: { slug: string } }>;

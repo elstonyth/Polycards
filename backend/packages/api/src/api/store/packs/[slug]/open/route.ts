@@ -126,6 +126,8 @@ export async function POST(
           instant_closed_at: result.pull.instant_closed_at,
         },
         marketPriceMyr,
+        undefined,
+        result.pull.source,
       );
 
       // A bonus-funded or welcome pull: that share of its sale must be played

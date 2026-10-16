@@ -54,7 +54,58 @@
     "new": "New pack",
     "tabs": {
       "packs": "Packs",
-      "free": "Free pack"
+      "free": "Free pack",
+      "lossless": "Lossless Mode"
+    },
+    "lossless": {
+      "hint": "Windows where instant sells (the 30-second reveal) pay 100% on the chosen packs. Vault sells stay at 90%. A pack's own buyback rate is never edited, so a window ending needs no clean-up.",
+      "schedule": "Schedule Lossless Mode",
+      "allPacks": "All packs",
+      "empty": "No Lossless Mode windows yet.",
+      "loadError": "Could not load Lossless Mode windows.",
+      "col": {
+        "start": "Start (MYT)",
+        "end": "End (MYT)",
+        "packs": "Packs",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "status": {
+        "upcoming": "Upcoming",
+        "live": "Live",
+        "ended": "Ended",
+        "cancelled": "Cancelled"
+      },
+      "form": {
+        "title": "Schedule Lossless Mode",
+        "subtitle": "While the window is live, instant sells (the 30-second reveal) pay 100% on the chosen packs. Vault sells stay at 90%.",
+        "start": "Starts",
+        "end": "Ends",
+        "allPacks": "All packs",
+        "allPacksHint": "Every paid pack. Turn off to choose packs.",
+        "pickPacks": "Packs",
+        "noPacks": "Choose at least one pack.",
+        "noPackList": "No paid packs to choose from.",
+        "reason": "Reason (audit trail)",
+        "reasonPlaceholder": "e.g. Weekend promo",
+        "endBeforeStart": "End must be after start.",
+        "endPast": "Pick an end time in the future.",
+        "cancel": "Cancel",
+        "save": "Schedule Lossless Mode"
+      },
+      "cancel": {
+        "action": "Cancel",
+        "title": "Cancel this window?",
+        "description": "New pulls go back to each pack's own rate right away. Cards already pulled before the cancel keep 100% for the rest of their 30-second reveal. Sells already paid at 100% are not reversed.",
+        "reason": "Reason (audit trail)",
+        "reasonPlaceholder": "e.g. Scheduled by mistake",
+        "confirm": "Cancel window",
+        "keep": "Keep window"
+      },
+      "toast": {
+        "scheduled": "Lossless Mode scheduled",
+        "cancelled": "Lossless Mode window cancelled"
+      }
     },
     "free": {
       "create": "Create free pack",

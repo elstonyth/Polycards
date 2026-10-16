@@ -63,6 +63,8 @@ function mkScope(opts: { hasPaid?: boolean; rows?: any[] } = {}) {
       listPacks: async () => [{ slug: 'pack_1', buyback_percent: 95 }],
       listFxRates: async () => [],
       hasPaidOpen: async () => opts.hasPaid ?? true,
+      // No Lossless window: quotes stay at the pack's own rate.
+      losslessWindows: async () => [],
     }),
   };
 }
