@@ -57,7 +57,7 @@ export const view = (
     effective_end: new Date(effectiveEndMs(w)).toISOString(),
     pack_slugs: w.pack_slugs,
     cancelled_at:
-      r.cancelled_at === null ? null : new Date(r.cancelled_at).toISOString(),
+      r.cancelled_at == null ? null : new Date(r.cancelled_at).toISOString(),
     created_by: r.created_by,
     status: losslessStatus(w, now),
   };

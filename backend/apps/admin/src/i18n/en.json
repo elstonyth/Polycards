@@ -96,7 +96,7 @@
       "cancel": {
         "action": "Cancel",
         "title": "Cancel this window?",
-        "description": "It stops applying right away; instant sells go back to each pack's own rate. Sells already paid at 100% are not reversed.",
+        "description": "New pulls go back to each pack's own rate right away. Cards already pulled before the cancel keep 100% for the rest of their 30-second reveal. Sells already paid at 100% are not reversed.",
         "reason": "Reason (audit trail)",
         "reasonPlaceholder": "e.g. Scheduled by mistake",
         "confirm": "Cancel window",

@@ -166,6 +166,11 @@ The 7 packs currently carry a hand-set 100. After deploy:
    minutes back), end = Mon 19 Oct 00:00 MYT, All packs. Backdating covers any
    pull made under the hand-set 100 that is still inside its sell window, so
    step 3 cannot turn its 100% quote into a 90% credit.
+   Wait at least 5 minutes (BUYBACK_REVEAL_GRACE_MS) after creating the window
+   before step 3, so every pull rolled under the hand-set 100 has closed its
+   instant window. The form's start defaults to the minute the modal opened, so
+   typing an exact now − 5 min can be refused by the time it is submitted; take
+   the default or a minute later.
 2. Verify `store/packs` still shows 100 for all 7.
 3. Set each pack's normal rate back to 90 in admin; verify still 100
    (overlay) on the public API.

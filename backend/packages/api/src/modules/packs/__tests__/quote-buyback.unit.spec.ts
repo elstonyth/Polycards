@@ -47,4 +47,21 @@ describe("quoteBuyback", () => {
     });
     expect((await packs.quoteBuyback("p1", pull, 2, NOW, "reward")).percent).toBe(90);
   });
+  it("decides on preloaded windows without reading them again (open-batch)", async () => {
+    const live: LosslessWindow = {
+      id: "lw1",
+      starts_at: new Date(NOW - 60_000),
+      ends_at: new Date(NOW + 60_000),
+      cancelled_at: null,
+      pack_slugs: null,
+    };
+    const packs = fakePacks({ slug: "p1", category: "pokemon", buyback_percent: 90 });
+    const read = jest.fn();
+    (packs as unknown as { losslessWindows: unknown }).losslessWindows = read;
+    const pull = { rolled_at: new Date(NOW - 1000) };
+    expect(
+      (await packs.quoteBuyback("p1", pull, 2, NOW, "pack", [live])).percent,
+    ).toBe(100);
+    expect(read).not.toHaveBeenCalled();
+  });
 });

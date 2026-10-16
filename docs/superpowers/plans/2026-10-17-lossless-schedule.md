@@ -190,5 +190,5 @@ Behavior:
 - [ ] Full checks: backend `yarn test:unit`, `npx tsc --noEmit -p .`; admin vitest + tsc.
 - [ ] Push branch, open PR to `master` (body: why, overlay design, vault untouched, rollout steps). Enable auto-merge while checks run.
 - [ ] After deploy: `curl` the public `store/packs` (still 100, hand-set) and `GET /admin/lossless-schedules` responds.
-- [ ] Rollout per spec: create window start = now − 5 min, end = 2026-10-19T00:00 MYT, All packs; confirm `store/packs` 100; set the 7 packs' normal rate to 90 in admin; confirm `store/packs` still 100 and admin edit form shows 90.
+- [ ] Rollout per spec: create window start = now − 5 min, end = 2026-10-19T00:00 MYT, All packs; confirm `store/packs` 100; wait at least 5 minutes (BUYBACK_REVEAL_GRACE_MS) after creating the window so every pull rolled under the hand-set 100 has closed its instant window (the form's start defaults to the minute the modal opened; an exact now − 5 min can be refused); then set the 7 packs' normal rate to 90 in admin; confirm `store/packs` still 100 and admin edit form shows 90.
 - [ ] Monday after 00:00 MYT: confirm `store/packs` shows 90 for all 7.

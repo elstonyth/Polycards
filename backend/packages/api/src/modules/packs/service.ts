@@ -3274,6 +3274,10 @@ class PacksModuleService extends MedusaService({
     // The pull's source: a reward pull is never lifted by Lossless Mode, so a
     // quote that left it out would offer 100% the credit then refuses.
     source?: string | null,
+    // Windows already read by the caller (open-batch: once per batch, with
+    // sinceMs at or before this pull's rolled_at — a superset decides the same).
+    // Omitted: read here.
+    preloaded?: LosslessWindow[],
   ): Promise<{
     percent: number;
     amount: number;
@@ -3283,7 +3287,7 @@ class PacksModuleService extends MedusaService({
     const rolledMs = new Date(pull.rolled_at).getTime();
     const [[pack], windows] = await Promise.all([
       this.listPacks({ slug: packSlug }, { take: 1 }),
-      this.losslessWindows(rolledMs),
+      preloaded ?? this.losslessWindows(rolledMs),
     ]);
     const { percent, rate_type } = resolveBuybackRate(
       withLossless(pack, windows, rolledMs, source),

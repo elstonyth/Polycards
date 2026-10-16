@@ -223,8 +223,6 @@ medusaIntegrationTestRunner({
 
         expect(await storeBadges()).toEqual({ list: 100, detail: 100 });
 
-        const pullId = await mintPull(customerId);
-
         // Admin reads the CONFIGURED rate for the edit form — never overlaid —
         // while its payable-now quote matches what the customer is offered.
         const adminToken = await mintSuperAdmin(
@@ -237,6 +235,10 @@ medusaIntegrationTestRunner({
         const adminPack = await get(`/admin/packs/${PACK_SLUG}`, adminHeaders);
         expect(adminPack.status).toBe(200);
         expect(adminPack.data.pack.buyback_percent).toBe(PACK_PERCENT);
+
+        // Minted after the admin setup so its 30s instant window is not spent
+        // before the sell below.
+        const pullId = await mintPull(customerId);
         const adminPulls = await get(
           `/admin/customers/${customerId}/pulls`,
           adminHeaders,
@@ -375,18 +377,27 @@ medusaIntegrationTestRunner({
         expect(await storeBadges()).toEqual({ list: 100, detail: 100 });
       });
 
-      it('a failed windows read serves the badges at the pack rate, not a 500, and is not memoized', async () => {
+      it('a failed windows read serves the badges at the pack rate, not a 500, and is not retried until the memo TTL', async () => {
         await liveAllWindow();
-        jest
+        const read = jest
           .spyOn(packs, 'losslessWindows')
           .mockRejectedValue(new Error('lossless_schedule unavailable'));
         expect(await storeBadges()).toEqual({
           list: PACK_PERCENT,
           detail: PACK_PERCENT,
         });
+        // One read for both routes: the failure is memoized, not retried per
+        // request (which under pool exhaustion parks every catalog view).
+        expect(read).toHaveBeenCalledTimes(1);
 
-        // The next request retries rather than serving a memoized failure.
+        // Recovered, but still inside the TTL: the plain badges stand.
         jest.restoreAllMocks();
+        expect(await storeBadges()).toEqual({
+          list: PACK_PERCENT,
+          detail: PACK_PERCENT,
+        });
+        // The memo reset stands in for the 10s TTL running out.
+        clearLosslessDisplayMemo();
         expect(await storeBadges()).toEqual({ list: 100, detail: 100 });
       });
     });
