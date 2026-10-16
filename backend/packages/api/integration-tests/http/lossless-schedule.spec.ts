@@ -390,5 +390,167 @@ medusaIntegrationTestRunner({
         expect(await storeBadges()).toEqual({ list: 100, detail: 100 });
       });
     });
+
+    describe('Lossless Mode admin API', () => {
+      let packs: PacksModuleService;
+      let adminHeaders: Record<string, string>;
+
+      beforeEach(async () => {
+        clearPackListCache();
+        clearPackDetailCache();
+        clearLosslessDisplayMemo();
+
+        const container = getContainer();
+        packs = container.resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.createPacks([
+          {
+            slug: PACK_SLUG,
+            title: 'Lossless Test Pack',
+            category: 'pokemon',
+            price: 10,
+            image: '/cdn/ls-pack.webp',
+            buyback_percent: PACK_PERCENT,
+          },
+          {
+            slug: 'ls-free',
+            title: 'Free Welcome',
+            category: 'free_welcome',
+            price: 0,
+            image: '/cdn/ls-free.webp',
+            buyback_percent: PACK_PERCENT,
+          },
+          {
+            slug: 'ls-reward',
+            title: 'Reward Box',
+            category: 'reward_box',
+            price: 0,
+            image: '/cdn/ls-reward.webp',
+            buyback_percent: PACK_PERCENT,
+          },
+        ]);
+        const token = await mintSuperAdmin(
+          container,
+          api,
+          'ls-api-admin@test.dev',
+          PASSWORD,
+        );
+        adminHeaders = { authorization: `Bearer ${token}` };
+      });
+
+      const post = (path: string, body: unknown) =>
+        unwrapResponse(api.post(path, body, { headers: adminHeaders }));
+
+      const liveBody = (over: Record<string, unknown> = {}) => ({
+        starts_at: new Date(Date.now() - 60_000).toISOString(),
+        ends_at: new Date(Date.now() + 60 * 60_000).toISOString(),
+        pack_slugs: [PACK_SLUG],
+        reason: 'lossless api test',
+        ...over,
+      });
+
+      const list = async () => {
+        const res = await unwrapResponse(
+          api.get('/admin/lossless-schedules', { headers: adminHeaders }),
+        );
+        expect(res.status).toBe(200);
+        return res.data.schedules as {
+          id: string;
+          status: string;
+          cancelled_at: string | null;
+          effective_end: string;
+          ends_at: string;
+        }[];
+      };
+
+      it('POST schedules a window, audits it in the same transaction, and GET lists it live', async () => {
+        const res = await post('/admin/lossless-schedules', liveBody());
+        expect(res.status).toBe(200);
+        const created = res.data.schedule;
+        expect(created).toMatchObject({
+          pack_slugs: [PACK_SLUG],
+          cancelled_at: null,
+          status: 'live',
+        });
+        expect(created.effective_end).toBe(created.ends_at);
+
+        const audits = await packs.listAdminActionAudits(
+          { entity_type: 'pack', entity_id: created.id },
+          { take: 10 },
+        );
+        expect(audits).toHaveLength(1);
+        expect(audits[0]).toMatchObject({
+          action: 'create',
+          reason: 'lossless api test',
+        });
+        expect(audits[0].admin_id).toBe(created.created_by);
+
+        const rows = await list();
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ id: created.id, status: 'live' });
+      });
+
+      it('POST with no reason is refused and writes nothing', async () => {
+        const res = await post('/admin/lossless-schedules', {
+          ...liveBody(),
+          reason: undefined,
+        });
+        expect(res.status).toBe(400);
+        expect(await list()).toHaveLength(0);
+      });
+
+      it.each([
+        ['an unknown slug', 'no-such-pack'],
+        ['the free welcome pack', 'ls-free'],
+        ['a reward box', 'ls-reward'],
+      ])('POST naming %s is refused with the offending slug and writes nothing', async (_name, slug) => {
+        const res = await post(
+          '/admin/lossless-schedules',
+          liveBody({ pack_slugs: [PACK_SLUG, slug] }),
+        );
+        expect(res.status).toBe(400);
+        expect(res.data.message).toBe(`Unknown or ineligible pack: ${slug}`);
+        expect(await list()).toHaveLength(0);
+      });
+
+      it('cancel ends a live window; cancelling again is refused', async () => {
+        const created = (await post('/admin/lossless-schedules', liveBody()))
+          .data.schedule;
+
+        const cancel = await post(
+          `/admin/lossless-schedules/${created.id}/cancel`,
+          { reason: 'lossless api test cancel' },
+        );
+        expect(cancel.status).toBe(200);
+        expect(cancel.data.schedule).toMatchObject({
+          id: created.id,
+          status: 'ended',
+        });
+        expect(cancel.data.schedule.cancelled_at).not.toBeNull();
+        expect(
+          new Date(cancel.data.schedule.effective_end).getTime(),
+        ).toBeLessThan(new Date(cancel.data.schedule.ends_at).getTime());
+        expect((await list())[0].status).toBe('ended');
+
+        const again = await post(
+          `/admin/lossless-schedules/${created.id}/cancel`,
+          { reason: 'lossless api test cancel again' },
+        );
+        expect(again.status).toBe(400);
+        expect(again.data.message).toBe(
+          'This schedule already ended or was cancelled.',
+        );
+      });
+
+      it('cancel without a reason is refused and the window stays live', async () => {
+        const created = (await post('/admin/lossless-schedules', liveBody()))
+          .data.schedule;
+        const res = await post(
+          `/admin/lossless-schedules/${created.id}/cancel`,
+          {},
+        );
+        expect(res.status).toBe(400);
+        expect((await list())[0].status).toBe('live');
+      });
+    });
   },
 });

@@ -19,7 +19,7 @@ export type LosslessStatus = 'upcoming' | 'live' | 'ended' | 'cancelled';
 
 // Reserved categories that never get lossless: the free welcome pack and reward
 // boxes are promo grants, not purchases (no constant exists for reward_box).
-const REWARD_BOX_CATEGORY = 'reward_box';
+export const REWARD_BOX_CATEGORY = 'reward_box';
 
 // Pull source for free rips; task/challenge prizes must not be lifted to 100%.
 const EXCLUDED_SOURCE = 'reward';
