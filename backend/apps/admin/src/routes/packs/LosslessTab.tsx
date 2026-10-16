@@ -383,9 +383,15 @@ export const LosslessTab = () => {
                   {when(s.starts_at)}
                 </Table.Cell>
                 {/* effective_end, not ends_at: a window cancelled early reads as
-                    ending when it was cancelled. */}
+                    ending when it was cancelled. Clamped to the start because
+                    one cancelled before it began would otherwise end before it
+                    starts (both are toISOString, so they compare as strings). */}
                 <Table.Cell className="whitespace-nowrap tabular-nums">
-                  {when(s.effective_end)}
+                  {when(
+                    s.effective_end < s.starts_at
+                      ? s.starts_at
+                      : s.effective_end,
+                  )}
                 </Table.Cell>
                 <Table.Cell className="max-w-md break-words">
                   {packsLabel(
@@ -427,14 +433,14 @@ export const LosslessTab = () => {
       {cancelTarget !== null && (
         <CancelPrompt
           onClose={() => setCancelTarget(null)}
+          // mutateAsync, not a per-call mutate callback: those are dropped if
+          // the operator leaves the tab mid-request. The hook's onError has
+          // already toasted a failure, so the rejection is swallowed here.
           onConfirm={(reason) =>
-            cancel.mutate(
-              { id: cancelTarget.id, reason },
-              {
-                onSuccess: () =>
-                  toast.success(t('packs.lossless.toast.cancelled')),
-              },
-            )
+            void cancel
+              .mutateAsync({ id: cancelTarget.id, reason })
+              .then(() => toast.success(t('packs.lossless.toast.cancelled')))
+              .catch(() => undefined)
           }
         />
       )}
