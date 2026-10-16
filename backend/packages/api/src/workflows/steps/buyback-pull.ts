@@ -14,6 +14,7 @@ import {
   resolveBuybackRate,
   type BuybackRateType,
 } from '../../modules/packs/buyback-rate';
+import { withLossless } from '../../modules/packs/lossless';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   displayMarketPrice,
@@ -118,6 +119,11 @@ export const buybackPullStep = createStep(
     // spot"), the flat rate after — decided HERE from rolled_at, never by the
     // caller, so the better rate can't be claimed late via the raw API.
     const [pack] = await packs.listPacks({ slug: pull.pack_id }, { take: 1 });
+    // Lossless Mode is decided at the immutable rolled_at — the instant the
+    // vault and reveal quotes use too — so a window cancelled after the roll
+    // cannot cut a sell the reveal already offered at 100%.
+    const rolledMs = new Date(pull.rolled_at).getTime();
+    const windows = await packs.losslessWindows(rolledMs);
     // Re-read the closure stamp right before pricing. `pull` was read several
     // awaits ago (frozen check + card + pack lookups); the reveal's async
     // close-instant POST could have landed in that gap, and pricing the instant
@@ -130,7 +136,8 @@ export const buybackPullStep = createStep(
     // under-credit a sell the reveal UI already quoted at the instant rate.
     // `rolled_at` stays from the first read: it's immutable after insert.
     const [fresh] = await packs.listPulls({ id: pull.id }, { take: 1 });
-    const { percent, rate_type } = resolveBuybackRate(pack, {
+    const priced = withLossless(pack, windows, rolledMs, pull.source);
+    const { percent, rate_type } = resolveBuybackRate(priced, {
       rolled_at: pull.rolled_at,
       revealed_at: fresh?.revealed_at ?? pull.revealed_at,
       // Once the reveal has closed the window (left it / concluded), the credit

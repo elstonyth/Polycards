@@ -114,6 +114,10 @@ export async function POST(
         instant_closed_at: null,
       },
       marketPriceMyr,
+      undefined,
+      // A free rip is a source='reward' pull on a real pack: Lossless Mode
+      // never lifts it, and the quote must say so to match the credit.
+      'reward',
     );
     buyback = {
       ...quoted,

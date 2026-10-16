@@ -12,7 +12,9 @@ import {
   buybackAmount,
   instantDeadlineMs,
   resolveBuybackRate,
+  revealGraceMs,
 } from '../../../../../modules/packs/buyback-rate';
+import { withLossless } from '../../../../../modules/packs/lossless';
 
 // GET /admin/customers/:id/pulls — paginated pull history for the support
 // view. Same row shape as the gacha route's `pulls` slice, PLUS the
@@ -85,6 +87,9 @@ export async function GET(
   // until this customer's first PAID open, so it must show no payable-now quote
   // while locked — admin and customer refuse on the SAME rule.
   const freeUnlocked = await packs.hasPaidOpen(id);
+  // Lossless windows for the payable-now quotes, read once — the same since
+  // bound as GET /store/vault, so the desk sees the customer's number.
+  const windows = await packs.losslessWindows(Date.now() - revealGraceMs());
   const filter: Record<string, unknown> = { customer_id: id };
   if (status) filter.status = status;
   if (source) filter.source = source;
@@ -158,7 +163,12 @@ export async function GET(
           Number(card.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
         );
         const { percent, rate_type } = resolveBuybackRate(
-          packBySlug.get(p.pack_id),
+          withLossless(
+            packBySlug.get(p.pack_id),
+            windows,
+            new Date(p.rolled_at).getTime(),
+            p.source,
+          ),
           {
             rolled_at: p.rolled_at,
             revealed_at: p.revealed_at,

@@ -49,7 +49,7 @@ import {
 import { FRAME_LEVELS } from './avatar-frames';
 import { challengePackId } from './challenge-prize';
 import { FREE_WELCOME_CATEGORY } from './free-pack';
-import type { LosslessWindow } from './lossless';
+import { withLossless, type LosslessWindow } from './lossless';
 import { isGraded, isPsa10, type PoolComposition } from './card-view';
 import {
   USERNAME_RE,
@@ -3271,13 +3271,25 @@ class PacksModuleService extends MedusaService({
     // buyback pays MYR credits, so the percent is of what the customer sees.
     valueMyr: number,
     nowMs: number = Date.now(),
+    // The pull's source: a reward pull is never lifted by Lossless Mode, so a
+    // quote that left it out would offer 100% the credit then refuses.
+    source?: string | null,
   ): Promise<{
     percent: number;
     amount: number;
     rate_type: BuybackRate['rate_type'];
   }> {
-    const [pack] = await this.listPacks({ slug: packSlug }, { take: 1 });
-    const { percent, rate_type } = resolveBuybackRate(pack, pull, nowMs);
+    // Lossless Mode is decided at rolled_at, exactly as the credit decides it.
+    const rolledMs = new Date(pull.rolled_at).getTime();
+    const [[pack], windows] = await Promise.all([
+      this.listPacks({ slug: packSlug }, { take: 1 }),
+      this.losslessWindows(rolledMs),
+    ]);
+    const { percent, rate_type } = resolveBuybackRate(
+      withLossless(pack, windows, rolledMs, source),
+      pull,
+      nowMs,
+    );
     return { percent, amount: buybackAmount(valueMyr, percent), rate_type };
   }
 

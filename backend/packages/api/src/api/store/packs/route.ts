@@ -3,6 +3,7 @@ import PacksModuleService from '../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../modules/packs';
 import { FREE_WELCOME_CATEGORY } from '../../../modules/packs/free-pack';
 import { compositionGroup } from '../../../modules/packs/card-view';
+import { withLossless } from '../../../modules/packs/lossless';
 
 // GET /store/packs — the gacha pack catalog for /claw and the home "Open Packs"
 // tiles. A plain Medusa store route (publishable-key scoped, but NOT subject to
@@ -21,12 +22,13 @@ import { compositionGroup } from '../../../modules/packs/card-view';
 // way. Decision + upgrade path recorded in plan 116.
 const CACHE_TTL_MS = 30_000;
 const LIST_KEY = 'list';
-const listCache = new Map<string, { expires: number; body: unknown }>();
+type CatalogBody = Awaited<ReturnType<typeof computeCatalogBody>>;
+const listCache = new Map<string, { expires: number; body: CatalogBody }>();
 
 /** Single-flight guard: concurrent misses during an expiry window share ONE
  *  compute — the catalog query plus the composition aggregate below, which a
  *  miss stampede would otherwise run N times for identical bodies. */
-let inFlight: Promise<unknown> | null = null;
+let inFlight: Promise<CatalogBody> | null = null;
 
 /** Test seam: module state outlives a test's fixtures — one jest process is one
  *  module instance, so a prior test's catalog would be served to the next. */
@@ -41,7 +43,7 @@ export async function GET(
 ): Promise<void> {
   const cached = listCache.get(LIST_KEY);
   if (cached && cached.expires > Date.now()) {
-    res.json(cached.body);
+    res.json(await withLosslessBadges(req, cached.body));
     return;
   }
 
@@ -57,10 +59,24 @@ export async function GET(
   }
   // A rejected compute rejects every waiter identically — same outcome as
   // each having run it, minus the duplicate work.
-  res.json(await inFlight);
+  res.json(await withLosslessBadges(req, await inFlight));
 }
 
-async function computeCatalogBody(req: MedusaRequest): Promise<unknown> {
+// The cache holds the plain catalog; Lossless Mode is laid over a copy on every
+// request, so a window starting or being cancelled shows at once instead of
+// after the TTL, and no cached body can carry a stale 100.
+async function withLosslessBadges(req: MedusaRequest, body: CatalogBody) {
+  const packsModuleService: PacksModuleService =
+    req.scope.resolve(PACKS_MODULE);
+  const now = Date.now();
+  const windows = await packsModuleService.losslessWindows(now);
+  return {
+    ...body,
+    packs: body.packs.map((p) => withLossless(p, windows, now)),
+  };
+}
+
+async function computeCatalogBody(req: MedusaRequest) {
   const packsModuleService: PacksModuleService =
     req.scope.resolve(PACKS_MODULE);
 

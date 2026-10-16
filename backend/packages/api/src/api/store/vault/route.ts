@@ -12,7 +12,9 @@ import {
   UNQUOTED_BUYBACK,
   buybackAmount,
   resolveBuybackRate,
+  revealGraceMs,
 } from '../../../modules/packs/buyback-rate';
+import { withLossless } from '../../../modules/packs/lossless';
 import { isChallengePrizePack } from '../../../modules/packs/challenge-prize';
 import { bestLiveTierByHandle } from '../../../modules/packs/card-tier';
 import {
@@ -56,11 +58,15 @@ export async function GET(
   const customerId = req.auth_context.actor_id;
   // ONE hasPaidOpen read for the whole list (the unlock is computed, never
   // stored — see modules/packs/free-pack.ts), resolved next to the FX read so
-  // it costs no extra round trip.
-  const [{ rate: fxRate, firm: fxFirm }, freeUnlocked] = await Promise.all([
-    resolveFxRateInfo(packs),
-    packs.hasPaidOpen(customerId),
-  ]);
+  // it costs no extra round trip. Same for the Lossless windows: a pull still
+  // inside its instant window was rolled within the reveal grace, so nothing
+  // that ended before that can lift a quote here.
+  const [{ rate: fxRate, firm: fxFirm }, freeUnlocked, windows] =
+    await Promise.all([
+      resolveFxRateInfo(packs),
+      packs.hasPaidOpen(customerId),
+      packs.losslessWindows(Date.now() - revealGraceMs()),
+    ]);
 
   const pulls = await packs.listPulls(
     { customer_id: customerId, status: 'vaulted' },
@@ -139,7 +145,14 @@ export async function GET(
       // task is the requirement), so the two facts coincide. The field stays:
       // the storefront keys its Sell affordance off it.
       const sellable = !locked;
-      const { percent, rate_type } = resolveBuybackRate(pack, {
+      // Lossless Mode at rolled_at, as the credit decides it (buyback-pull.ts).
+      const priced = withLossless(
+        pack,
+        windows,
+        new Date(p.rolled_at).getTime(),
+        p.source,
+      );
+      const { percent, rate_type } = resolveBuybackRate(priced, {
         rolled_at: p.rolled_at,
         revealed_at: p.revealed_at,
         // Reaching the vault means the reveal was left, so the window is closed
