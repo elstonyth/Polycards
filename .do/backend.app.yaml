@@ -426,13 +426,13 @@ envs:
 
   # Rolling-24h GLOBAL ceiling on admin-minted credit (credit adjustments and
   # bonus grants, across every admin and every customer) — see
-  # modules/packs/credit-adjust.ts. The code default is 1,000,000; raised
-  # 2026-10-11 because routine group grants can fill that in one run and block
-  # every other grant for the day. Set 0 to refuse every grant (incident stop
-  # lever).
+  # modules/packs/credit-adjust.ts. The code default is 1,000,000; raised to
+  # 2,000,000 on 2026-10-11 and 3,000,000 on 2026-10-17 because routine group
+  # grants can fill it in one run and block every other grant for the day. Set
+  # 0 to refuse every grant (incident stop lever).
   - key: ADJUST_DAILY_MINT_MAX_RM
     scope: RUN_TIME
-    value: "2000000"
+    value: "3000000"
 
   # Gifted packs' OWN rolling-24h ceiling (pack price x quantity), split from
   # the credit pool 2026-10-17 so a bulk group grant can't block compensation
