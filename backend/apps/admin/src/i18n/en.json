@@ -719,7 +719,7 @@
       "note": "Note (required, never shown to the player)",
       "send": "Send",
       "confirmTitle": "Send {{quantity}}× {{pack}} to {{email}}?",
-      "confirmDesc": "The packs land in the player's vault unopened. Their price counts toward the daily mint cap.",
+      "confirmDesc": "The packs land in the player's vault unopened. Their price counts toward the daily gift-pack cap, separate from the credit cap.",
       "sent": "Sent {{quantity}}× {{pack}}",
       "loadError": "Failed to load gifts.",
       "empty": "No gifted packs yet.",

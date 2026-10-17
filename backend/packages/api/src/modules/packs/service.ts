@@ -151,6 +151,7 @@ import {
 import {
   adjustDailyMintError,
   ADJUST_DAILY_MINT_MAX_RM_DEFAULT,
+  GIFT_DAILY_MINT_MAX_RM_DEFAULT,
 } from './credit-adjust';
 import {
   STALE_GIFT_MESSAGE,
@@ -3435,17 +3436,33 @@ class PacksModuleService extends MedusaService({
   ): Promise<number> {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
-    // Bonus credit grants and gifted packs (spec 2026-10-07) mint value the
-    // same way — a gifted pack's card can be shipped — so they share the one
-    // ceiling: positive adjustment + positive bonus_grant + gift value.
+    // Bonus credit grants (spec 2026-10-07) mint value the same way, so they
+    // share this ceiling: positive adjustment + positive bonus_grant. Gifted
+    // packs have their own pool since 2026-10-17 (rollingPackGiftMintCents).
     const rows = await em.execute<{ sum_cents: string | null }[]>(
-      'SELECT (' +
-        '  (SELECT COALESCE(SUM(ROUND(amount * 100)), 0) FROM credit_transaction ' +
-        "    WHERE reason IN ('adjustment', 'bonus_grant') AND amount > 0 AND deleted_at IS NULL " +
-        "    AND created_at > now() - interval '24 hours') + " +
-        '  (SELECT COALESCE(SUM(ROUND(value_myr * 100)), 0) FROM pack_gift ' +
-        "    WHERE deleted_at IS NULL AND created_at > now() - interval '24 hours')" +
-        ')::bigint AS sum_cents',
+      'SELECT COALESCE(SUM(ROUND(amount * 100)), 0)::bigint AS sum_cents FROM credit_transaction ' +
+        "WHERE reason IN ('adjustment', 'bonus_grant') AND amount > 0 AND deleted_at IS NULL " +
+        "AND created_at > now() - interval '24 hours'",
+    );
+    return Number(rows[0]?.sum_cents ?? 0);
+  }
+
+  // Rolling-24h GLOBAL value of gifted packs, in integer cents. Backs the
+  // GIFT_DAILY_MINT_MAX_RM ceiling in grantPackGifts; same rules as
+  // rollingAdjustmentMintCents (no customer scope, locked caller). Revoked
+  // gifts still count: revoking cannot buy back headroom.
+  // shortcut: no (created_at) index; pack_gift holds manual admin grants only,
+  // so a seq scan is tiny. Add a partial index on (created_at) WHERE
+  // deleted_at IS NULL if this reaches slow logs.
+  @InjectManager()
+  async rollingPackGiftMintCents(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<number> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const rows = await em.execute<{ sum_cents: string | null }[]>(
+      'SELECT COALESCE(SUM(ROUND(value_myr * 100)), 0)::bigint AS sum_cents FROM pack_gift ' +
+        "WHERE deleted_at IS NULL AND created_at > now() - interval '24 hours'",
     );
     return Number(rows[0]?.sum_cents ?? 0);
   }
@@ -9613,7 +9630,7 @@ class PacksModuleService extends MedusaService({
   // (stampPackGiftPulls); a rolled-back open releases it (releasePackGifts).
 
   /** Grant N gifts of one pack. Idempotent on the request key; counts its
-   *  value toward the shared daily mint ceiling (ADJUST_DAILY_MINT_MAX_RM). */
+   *  value toward the gift-pack daily ceiling (GIFT_DAILY_MINT_MAX_RM). */
   @InjectTransactionManager()
   async grantPackGifts(
     input: {
@@ -9683,8 +9700,9 @@ class PacksModuleService extends MedusaService({
       };
     }
 
-    // The same global ceiling as a credit grant, under the same lock (taken
-    // FIRST — see adminAdjustCredit). A gift is worth its pack price.
+    // Gifts' OWN global ceiling (GIFT_DAILY_MINT_MAX_RM, split from the credit
+    // pool 2026-10-17), under the same lock as a credit grant (taken FIRST —
+    // see adminAdjustCredit). A gift is worth its pack price.
     await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
       'credit-adjust:mint-window',
     ]);
@@ -9692,11 +9710,16 @@ class PacksModuleService extends MedusaService({
     const valueCents = priceCents * quantity;
     const capCents =
       nonNegativeIntFromEnv(
-        'ADJUST_DAILY_MINT_MAX_RM',
-        ADJUST_DAILY_MINT_MAX_RM_DEFAULT,
+        'GIFT_DAILY_MINT_MAX_RM',
+        GIFT_DAILY_MINT_MAX_RM_DEFAULT,
       ) * 100;
-    const windowCents = await this.rollingAdjustmentMintCents(sharedContext);
-    const refusal = adjustDailyMintError(windowCents, valueCents, capCents);
+    const windowCents = await this.rollingPackGiftMintCents(sharedContext);
+    const refusal = adjustDailyMintError(
+      windowCents,
+      valueCents,
+      capCents,
+      'gift',
+    );
     if (refusal) throw new MedusaError(MedusaError.Types.NOT_ALLOWED, refusal);
 
     const created = await this.createPackGifts(
