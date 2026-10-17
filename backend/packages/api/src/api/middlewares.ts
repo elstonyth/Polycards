@@ -51,6 +51,7 @@ import { refuseCrossOriginAdminWrite } from './utils/admin-origin-guard';
 import { requireReportKey } from './reports/require-report-key';
 import { requireTurnstile } from './utils/turnstile-guard';
 import { requireVouchedVisitor } from './utils/visitor-ip';
+import { adminRbacRoutes } from './admin-rbac';
 
 // Custom-route middleware. /store/* is NOT a default customer-protected prefix
 // (only /store/customers/me/* is), so every customer-owned route here must opt
@@ -1134,6 +1135,12 @@ export default defineMiddlewares({
       matcher: '/admin/*',
       middlewares: [refuseCrossOriginAdminWrite],
     },
+    // RBAC for every custom admin route (admin-rbac.ts): a policy per custom
+    // prefix and method, plus the write policy for custom writes under a core
+    // prefix. Policy-only entries — the framework adds the no-op handler and
+    // wraps it in its permission check. Guarded by
+    // __tests__/admin-rbac-coverage.unit.spec.ts.
+    ...adminRbacRoutes,
     // Admin money-mutation routes — already auth-protected by the framework
     // admin auth, so no explicit authenticate() entry is needed here. All share
     // one limiter instance (one budget + one Redis connection). The limiter keys
