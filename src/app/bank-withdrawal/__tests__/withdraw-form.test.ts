@@ -258,7 +258,7 @@ describe('WithdrawForm', () => {
     });
     await render();
     expect(container.textContent).toContain(
-      'Withdrawals are paused until 6:00 AM. Your balance is safe — please try again after 6:00 AM.',
+      'Withdrawals are paused until 6:00 AM (Malaysia time). Your balance is safe — please try again then.',
     );
     expect(submitButton().disabled).toBe(true);
   });

@@ -26,6 +26,7 @@ import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { PhoneGateAction } from '@/components/account/PhoneGateAction';
 import { cn } from '@/lib/utils';
+import { reopenLabel } from '@/lib/reopen-time';
 
 // The payout band (and whether withdrawals are even open) belongs to
 // whichever gateway the admin has active (TGPay caps at RM 30,000; another
@@ -47,7 +48,10 @@ const isUsable = (account: SavedBankAccount, now: Date) =>
 /** Why a destination cannot be picked yet, in the customer's terms. */
 function unusableReason(account: SavedBankAccount, now: Date): string | null {
   if (account.supported === false) {
-    return 'not available with the current payout provider';
+    return (
+      account.unavailableReason ??
+      'not available with the current payout provider'
+    );
   }
   if (typeof account.usableFrom !== 'string') {
     return 'save it again to use it';
@@ -245,13 +249,10 @@ export default function WithdrawForm({
     ? !rail
     : !limits.withdrawalsEnabled &&
       (selectedAccount !== undefined || rails.length === 0);
-  // A timed pause (provider outage) names when to come back, in Malaysia time.
+  // A timed pause or the admin's switch / daily hours names when to come
+  // back, in Malaysia time.
   const resumeAt = limits.withdrawalsPausedUntil
-    ? new Date(limits.withdrawalsPausedUntil).toLocaleTimeString('en-US', {
-        timeZone: 'Asia/Kuala_Lumpur',
-        hour: 'numeric',
-        minute: '2-digit',
-      })
+    ? reopenLabel(limits.withdrawalsPausedUntil)
     : null;
   // Gate open but less than the payout floor: no amount can pass the band, and
   // nextAmountText would snap every attempt down below it — say so instead.
@@ -648,7 +649,7 @@ export default function WithdrawForm({
               className="mt-2 text-[12px] leading-relaxed text-neutral-400"
             >
               {resumeAt
-                ? `Withdrawals are paused until ${resumeAt}. Your balance is safe — please try again after ${resumeAt}.`
+                ? `Withdrawals are paused until ${resumeAt} (Malaysia time). Your balance is safe — please try again then.`
                 : 'Withdrawals are paused. Your balance is safe — try again later.'}
             </p>
           )}

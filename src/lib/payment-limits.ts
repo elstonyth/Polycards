@@ -43,6 +43,8 @@ export type PaymentLimits = {
   withdrawalsEnabled: boolean;
   /** ISO instant a timed withdrawal pause ends; absent when there is none. */
   withdrawalsPausedUntil?: string | null;
+  /** Closed by the admin or a timed pause: Withdraw answers with a popup. */
+  withdrawalsUnavailable?: boolean;
 };
 
 /**

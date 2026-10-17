@@ -33,6 +33,7 @@ import { SlabImage } from '@/components/SlabImage';
 import { toCardView } from '@/lib/card-view';
 import { LogoutButton } from './MeActions';
 import { TopUpButton } from '@/components/account/TopUpButton';
+import { WithdrawLink } from '@/components/account/WithdrawLink';
 import { MeHeader } from './MeAppearance';
 import { EquippedFrameProvider } from './equipped-frame';
 
@@ -333,14 +334,13 @@ export default async function MePage() {
                 </Link>
                 <div className="flex shrink-0 gap-2">
                   {canWithdraw ? (
-                    <Link
-                      href="/bank-withdrawal"
+                    <WithdrawLink
                       className={cn(
                         pillVariants({ variant: 'secondary', size: 'sm' }),
                       )}
                     >
                       Withdraw
-                    </Link>
+                    </WithdrawLink>
                   ) : (
                     unlockSpend !== null && (
                       <Link

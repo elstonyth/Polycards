@@ -12,6 +12,7 @@ import type {
   FakeFacet,
   CustomerWallet,
 } from '../../../../../../modules/packs/facets';
+import { DEFAULT_WITHDRAWAL_CONTROLS } from '../../../../../../modules/packs/withdrawal-controls';
 
 // Saved payout accounts live in customer.metadata.bank_accounts and are the
 // picker source for the withdraw form. Three properties matter enough to pin:
@@ -51,6 +52,9 @@ const mutateCustomerMetadata = jest.fn(
 // Other customers holding the same account number (none by default).
 const otherPayoutAccountHolders = jest.fn();
 
+// The admin withdrawal controls; open by default.
+const withdrawalControls = jest.fn(async () => DEFAULT_WITHDRAWAL_CONTROLS);
+
 const createNotifications = jest.fn();
 const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
 
@@ -60,6 +64,7 @@ const scope = {
       return {
         mutateCustomerMetadata,
         otherPayoutAccountHolders,
+        withdrawalControls,
       } satisfies FakeFacet<CustomerWallet>;
     if (key === 'notification') return { createNotifications };
     if (key === 'logger') return logger;
@@ -539,6 +544,36 @@ describe('GET /store/credits/withdraw/accounts', () => {
     expect(
       (res as { json: jest.Mock }).json.mock.calls[0][0].accounts[0].usableFrom,
     ).toBeNull();
+  });
+
+  // The admin's Touch 'n Go switch and floor reach the picker: a paused TNG
+  // account shows as unavailable with the reason, and its minimum is the
+  // admin's. A bank account is untouched.
+  it("marks a Touch 'n Go account paused and states the admin minimum", async () => {
+    const tng = savedShape({
+      id: savedBankAccountId('TNGMY', '0123456789'),
+      bankCode: 'TNGMY',
+      bankName: "Touch 'n Go eWallet",
+      accountNumber: '0123456789',
+    });
+    retrieveCustomer.mockResolvedValue({
+      metadata: { bank_accounts: [tng, savedShape()] },
+    });
+    withdrawalControls.mockResolvedValueOnce({
+      ...DEFAULT_WITHDRAWAL_CONTROLS,
+      tng: { ...DEFAULT_WITHDRAWAL_CONTROLS.tng, open: false, min_rm: 200 },
+    });
+    const res = mkRes();
+    await GET(mkReq(), res);
+    const [tngView, bankView] = (res as { json: jest.Mock }).json.mock
+      .calls[0][0].accounts;
+    expect(tngView).toMatchObject({
+      supported: false,
+      minRm: 200,
+      unavailableReason: "Touch 'n Go withdrawals are paused for now",
+    });
+    expect(bankView.unavailableReason).toBeUndefined();
+    expect(bankView.minRm).toBeNull();
   });
 });
 

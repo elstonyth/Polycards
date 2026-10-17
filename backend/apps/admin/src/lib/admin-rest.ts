@@ -899,6 +899,54 @@ export async function savePaymentGateway(input: {
   return postJson<PaymentGatewaySetting>('/admin/payments/gateway', input);
 }
 
+// ── Withdrawal controls (2026-10-17) ────────────────────────────────────────
+// The Withdraw and Touch 'n Go switches, a daily closed window for each
+// (Malaysia time, may wrap past midnight) and the TNG minimum. Mirrors the
+// API's withdrawal-controls.ts.
+
+export interface DailyClosure {
+  on: boolean;
+  /** "HH:MM", Malaysia time. */
+  close_at: string | null;
+  reopen_at: string | null;
+}
+export interface ChannelControl {
+  open: boolean;
+  /** ISO instant a switched-off channel reopens by itself; null = only an
+   *  admin reopens it. */
+  off_until: string | null;
+  schedule: DailyClosure;
+}
+export interface WithdrawalControls {
+  withdrawals: ChannelControl;
+  tng: ChannelControl & { min_rm: number | null };
+}
+export interface ChannelStatus {
+  open: boolean;
+  /** ISO; null while closed = only an admin can reopen it. */
+  reopens_at: string | null;
+}
+export interface WithdrawalControlsView {
+  controls: WithdrawalControls;
+  status: { withdrawals: ChannelStatus; tng: ChannelStatus };
+  /** What the server config allows whatever the switches say. */
+  env: { withdrawals: boolean; tng: boolean };
+  tng_min_floor_rm: number;
+}
+
+export async function getWithdrawalControls(): Promise<WithdrawalControlsView> {
+  return getJson<WithdrawalControlsView>('/admin/payments/withdrawal-controls');
+}
+
+export async function saveWithdrawalControls(
+  input: WithdrawalControls & { reason: string },
+): Promise<WithdrawalControlsView> {
+  return postJson<WithdrawalControlsView>(
+    '/admin/payments/withdrawal-controls',
+    input,
+  );
+}
+
 // PriceCharting proxies (the API token lives server-side only). A 503 from the
 // proxy means PRICECHARTING_API_TOKEN is not configured — surface the message
 // and fall back to manual FMV entry.

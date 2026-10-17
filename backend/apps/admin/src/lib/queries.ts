@@ -61,6 +61,9 @@ import {
   acknowledgeAuditFinding,
   getPaymentGateway,
   savePaymentGateway,
+  getWithdrawalControls,
+  saveWithdrawalControls,
+  type WithdrawalControlsView,
   gatewayPreflightRefusal,
   type SettlementGranularity,
   type SettlementReport,
@@ -364,6 +367,26 @@ export const useGatewayAudit = (
 
 export const usePaymentGateway = (): UseQueryResult<PaymentGatewaySetting> =>
   useQuery({ queryKey: qk.paymentGateway, queryFn: getPaymentGateway });
+
+export const useWithdrawalControls = (): UseQueryResult<WithdrawalControlsView> =>
+  useQuery({
+    queryKey: qk.withdrawalControls,
+    queryFn: getWithdrawalControls,
+    // The status line ("closed until 6:00 AM") follows the clock.
+    refetchInterval: 60_000,
+  });
+
+export const useSaveWithdrawalControls = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: saveWithdrawalControls,
+    onSuccess: (data) => {
+      toast.success('Withdrawal controls saved');
+      qc.setQueryData(qk.withdrawalControls, data);
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
 
 // Settlement's Acknowledge. Refetches every rail's audit: the Dashboard's
 // "may be paid twice" row reads them too.

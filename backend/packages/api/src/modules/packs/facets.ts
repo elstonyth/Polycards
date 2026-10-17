@@ -44,6 +44,7 @@ export type GatewayWithdrawals = Pick<
   | 'walletSummary'
   | 'withdrawCreditsWithLedger'
   | 'withdrawForCashout'
+  | 'withdrawalControls'
 >;
 
 /** The read-only /admin/payments/* reports. Never moves money. */
@@ -76,6 +77,7 @@ export type CustomerWallet = Pick<
   | 'mutateCustomerMetadata'
   | 'otherPayoutAccountHolders'
   | 'walletSummary'
+  | 'withdrawalControls'
 >;
 
 /**

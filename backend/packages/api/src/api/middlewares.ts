@@ -1471,6 +1471,13 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      // Withdraw / Touch 'n Go switches, schedules and TNG minimum. Opens or
+      // closes every customer's payouts — same budget as the gateway switch.
+      matcher: '/admin/payments/withdrawal-controls',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Avatar-frame catalog write — cosmetic but repaints avatars storefront
       // -wide; same admin money-mutation budget as site-settings.
       matcher: '/admin/avatar-frames',
