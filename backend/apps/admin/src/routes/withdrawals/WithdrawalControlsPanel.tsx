@@ -247,8 +247,15 @@ export const WithdrawalControlsPanel = () => {
       confirmText: t('withdrawalControls.save'),
     });
     if (!confirmed) return;
+    // Re-settled at the click: a reopen time that passed since the last
+    // fetch would otherwise be refused as "must be in the future".
+    const at = Date.now();
     save.mutate(
-      { ...value, reason: reason.trim() },
+      {
+        withdrawals: settle(value.withdrawals, at),
+        tng: settle(value.tng, at),
+        reason: reason.trim(),
+      },
       {
         onSuccess: () => {
           setDraft(null);
