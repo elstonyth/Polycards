@@ -175,6 +175,8 @@ import {
   BONUS_BP_FULL,
   BONUS_NOT_SPENDABLE_MESSAGE,
   LEADERBOARD_PULL_SQL,
+  NORMAL_SHARE_SQL,
+  REAL_MONEY_PULL_SQL,
   bonusShareSen,
   consumeBonusSen,
   normalSenSql,

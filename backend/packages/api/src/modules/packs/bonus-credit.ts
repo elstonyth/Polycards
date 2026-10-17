@@ -141,3 +141,9 @@ export const reasonCashSenSql = (t = ''): string =>
 /** Leaderboards count opens paid with normal or bonus credit in full.
  *  Gift, free and reward pulls remain excluded (operator rule 2026-10-17). */
 export const LEADERBOARD_PULL_SQL = "pu.source IN ('pack', 'bonus')";
+
+/** Finance views still count only the normal-credit share of a pull. */
+export const REAL_MONEY_PULL_SQL =
+  "pu.source IN ('pack', 'bonus') AND pu.bonus_bp < 10000";
+
+export const NORMAL_SHARE_SQL = '((10000 - pu.bonus_bp) / 10000.0)';
