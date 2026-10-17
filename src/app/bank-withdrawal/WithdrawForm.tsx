@@ -73,16 +73,18 @@ const bandEdge = (
   money0: (n: number) => string,
 ) => (Number.isInteger(n) ? money0(n) : money(n));
 
-/** What a regional bank may receive per payout, from whichever edges the
- *  rail sets ("S$30–S$10,000", "from S$30"); null when it sets neither. */
+/** A regional rail's own per-payout limit in its currency, from whichever
+ *  edges it sets ("Singapore limit S$30–S$10,000"); null when it sets
+ *  neither. Its limit, not what reaches the bank: the RM band may bind first. */
 function regionalBandText(
   band: { min: number | null; max: number | null },
   ui: RegionalRailUi,
 ): string | null {
   const min = band.min !== null ? bandEdge(band.min, ui.money, ui.money0) : '';
   const max = band.max !== null ? bandEdge(band.max, ui.money, ui.money0) : '';
-  if (min && max) return `${min}–${max}`;
-  return min ? `from ${min}` : max ? `up to ${max}` : null;
+  const range =
+    min && max ? `${min}–${max}` : min ? `from ${min}` : max && `up to ${max}`;
+  return range ? `${ui.country} limit ${range}` : null;
 }
 
 /** Digits (commas allowed as thousands separators), at most one dot and two
@@ -548,7 +550,7 @@ export default function WithdrawForm({
             </p>
             <p className="mt-1 text-sm text-neutral-300">Withdrawable</p>
             <p className="mt-0.5 text-[13px] text-neutral-400">
-              {`${floorText}–${maxText} per withdrawal${regionalBand ? ` (${regionalBand} to your bank)` : ''}`}
+              {`${floorText}–${maxText} per withdrawal${regionalBand ? ` (${regionalBand})` : ''}`}
             </p>
             {belowMin && (
               <p

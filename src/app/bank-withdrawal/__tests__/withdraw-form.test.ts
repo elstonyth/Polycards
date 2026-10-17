@@ -820,9 +820,10 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
       ],
     });
     await render([{ ...READY_ACCOUNT, id: 'acc_sg', currency: 'SGD' }], 80);
-    // The RM band it is judged by, and the S$ that band pays into the bank.
+    // The RM band it is judged by, and the rail's own S$ limit — not "what
+    // reaches the bank": RM 30,000 pays ~S$9,370, never S$10,000.
     expect(container.textContent).toContain(
-      'RM 96.05–RM 30,000 per withdrawal (S$30–S$10,000 to your bank)',
+      'RM 96.05–RM 30,000 per withdrawal (Singapore limit S$30–S$10,000)',
     );
     expect(container.querySelector('#withdraw-hold-reason')?.textContent).toBe(
       'You can withdraw once your withdrawable money reaches RM 96.05 (RM 16.05 more).',
