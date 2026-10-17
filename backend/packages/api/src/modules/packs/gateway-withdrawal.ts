@@ -260,6 +260,25 @@ export function payoutGatewayFor(
 }
 
 /**
+ * The currency a saved bank is paid in, whether or not its rail is open now:
+ * the active gateway's when it can pay the bank, else that of a regional
+ * gateway that could (open or closed). Unlike payoutGatewayFor, a closed rail
+ * does not turn a Singapore bank into an RM one, so the storefront keeps it
+ * under Singapore, shown as unavailable, instead of filing it under Malaysia.
+ */
+export function payoutCurrencyFor(
+  bankCode: string,
+  active: PaymentGateway,
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): string {
+  if (bankSupportedBy(bankCode, active, env)) return GATEWAYS[active].currency;
+  const regional = GATEWAY_IDS.find(
+    (id) => !isLedgerGateway(id) && bankSupportedBy(bankCode, id, env),
+  );
+  return GATEWAYS[regional ?? active].currency;
+}
+
+/**
  * A timed pause for a provider outage with a known end, so nobody has to be
  * awake to reopen: GATEWAY_WITHDRAWALS_PAUSED_UNTIL is an ISO instant WITH its
  * offset (e.g. 2026-10-08T06:00:00+08:00). Before it, withdrawalsEnabled() is

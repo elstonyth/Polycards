@@ -77,7 +77,7 @@ const bandEdge = (
 /** A regional rail's own per-payout limit in its currency, from whichever
  *  edges it sets ("Singapore limit S$30–S$10,000"); null when it sets
  *  neither. Its limit, not what reaches the bank: the RM band may bind first. */
-function regionalBandText(
+export function regionalBandText(
   band: { min: number | null; max: number | null },
   ui: RegionalRailUi,
 ): string | null {
@@ -255,45 +255,6 @@ export default function WithdrawForm({
   const attemptKey = useRef<string | null>(null);
 
   const [limits, setLimits] = useState<PaymentLimits>(DEFAULT_PAYMENT_LIMITS);
-  // Regional payout rails (Singapore via A3Pay), open and priced. An account
-  // in a regional currency is paid through its rail in that currency; every
-  // other account through the active gateway in RM.
-  const rails = openRails(limits.regional, 'withdrawal');
-  const selectedAccount = saved?.find((a) => a.id === accountId);
-  const toRegional =
-    selectedAccount?.currency !== undefined &&
-    selectedAccount.currency !== 'MYR';
-  const rail = toRegional
-    ? rails.find((option) => option.currency === selectedAccount.currency)
-    : undefined;
-  // The RM band THIS payout is judged by: the rail's own (its RM band
-  // narrowed to what pays inside its S$ band) for a regional account, else
-  // the active gateway's. At 3.2017, S$30 needs RM 96.05, not RM 50.
-  const payoutBand = rail?.withdrawalRm ?? limits.withdrawal;
-  // The channel itself, not the band — the admin can close withdrawals
-  // outright while a gateway stays configured (getPaymentLimits, plan 135).
-  // Judged against the rail that would pay the chosen account; before one is
-  // chosen, open if any rail is.
-  const withdrawalsClosed = toRegional
-    ? !rail
-    : !limits.withdrawalsEnabled &&
-      (selectedAccount !== undefined || rails.length === 0);
-  // A timed pause or the admin's switch / daily hours names when to come
-  // back, in Malaysia time.
-  const resumeAt = limits.withdrawalsPausedUntil
-    ? reopenLabel(limits.withdrawalsPausedUntil)
-    : null;
-  // Gate open but less than the payout floor: no amount can pass the band, and
-  // nextAmountText would snap every attempt down below it — say so instead.
-  // The floor is the rail's (S$ rail: RM 96.05 at 3.2017), as shown on top.
-  const belowMin =
-    !onHold && withdrawable != null && withdrawable < payoutBand.minRm;
-  const blocked = onHold || belowMin;
-  const guidanceId = withdrawalsClosed
-    ? 'withdraw-amount-guidance'
-    : blocked
-      ? 'withdraw-hold-reason'
-      : undefined;
   useEffect(() => {
     let cancelled = false;
     getPaymentLimits()
@@ -330,14 +291,19 @@ export default function WithdrawForm({
   const accounts = saved ?? [];
   const usableAccounts = accounts.filter((a) => isUsable(a, now));
   // One country's saved accounts at a time, picked by flag: the chosen
-  // account's country, else the one the customer tapped, else the first.
+  // account's country, else the one the customer tapped, else the first one
+  // with an account that can be paid now, else the first.
   const countries = bankCountryGroups(accounts);
   const shown =
     countries.find((group) => group.items.some((a) => a.id === accountId)) ??
     countries.find((group) => group.country === country) ??
+    countries.find((group) => group.items.some((a) => isUsable(a, now))) ??
     countries[0];
+  const shownUsable = shown?.items.some((a) => isUsable(a, now)) ?? false;
   function chooseCountry(next: string) {
     setCountry(next);
+    // A refusal about the other country's account no longer applies.
+    setError(null);
     // Its one usable account is preselected, as the whole list is on load.
     const usable =
       countries
@@ -345,6 +311,38 @@ export default function WithdrawForm({
         ?.items.filter((a) => isUsable(a, now)) ?? [];
     setAccountId(usable.length === 1 ? (usable[0]?.id ?? '') : '');
   }
+
+  // Regional payout rails (Singapore via A3Pay), open and priced. An account
+  // in a regional currency is paid through its rail in that currency; every
+  // other account through the active gateway in RM.
+  const rails = openRails(limits.regional, 'withdrawal');
+  const selectedAccount = saved?.find((a) => a.id === accountId);
+  // The currency this payout goes out in: the chosen account's, else that of
+  // the country on show, so the Singapore pill shows the S$ rail's band
+  // before an account is picked.
+  const payCurrency = selectedAccount
+    ? selectedAccount.currency
+    : shown?.items[0]?.currency;
+  const toRegional = payCurrency !== undefined && payCurrency !== 'MYR';
+  const rail = toRegional
+    ? rails.find((option) => option.currency === payCurrency)
+    : undefined;
+  // The RM band THIS payout is judged by: the rail's own (its RM band
+  // narrowed to what pays inside its S$ band) for a regional account, else
+  // the active gateway's. At 3.2017, S$30 needs RM 96.05, not RM 50.
+  const payoutBand = rail?.withdrawalRm ?? limits.withdrawal;
+  // The channel itself, not the band — the admin can close withdrawals
+  // outright while a gateway stays configured (getPaymentLimits, plan 135).
+  // Judged against the rail that would pay the country on show; with no
+  // saved account at all, open if any rail is.
+  const withdrawalsClosed = toRegional
+    ? !rail
+    : !limits.withdrawalsEnabled && (shown !== undefined || rails.length === 0);
+  // A timed pause or the admin's switch / daily hours names when to come
+  // back, in Malaysia time.
+  const resumeAt = limits.withdrawalsPausedUntil
+    ? reopenLabel(limits.withdrawalsPausedUntil)
+    : null;
 
   // nextAmountText already limited the text to digits, commas and two
   // decimals, so stripping the commas leaves a plain number (or "." -> NaN).
@@ -366,6 +364,17 @@ export default function WithdrawForm({
   const maxText = bandEdge(payoutBand.maxRm, rm, rm0);
   const band = rail?.withdrawal;
   const regionalBand = rail ? regionalBandText(rail.withdrawal, rail.ui) : null;
+  // Gate open but less than the payout floor: no amount can pass the band, and
+  // nextAmountText would snap every attempt down below it — say so instead.
+  // The floor is the one shown on top: the rail's (S$ rail: RM 96.05 at
+  // 3.2017), or the chosen account's own (Touch 'n Go: RM 100).
+  const belowMin = !onHold && withdrawable != null && withdrawable < minRm;
+  const blocked = onHold || belowMin;
+  const guidanceId = withdrawalsClosed
+    ? 'withdraw-amount-guidance'
+    : blocked
+      ? 'withdraw-hold-reason'
+      : undefined;
   // What a regional bank receives for this RM amount, at today's payout rate
   // (floored to the cent, exactly as the backend quotes and locks it).
   const payoutRegional =
@@ -576,7 +585,7 @@ export default function WithdrawForm({
                 role="status"
                 className="mt-1 text-[13px] text-neutral-300"
               >
-                {`You can withdraw once your withdrawable money reaches ${rm(payoutBand.minRm)} (${rm(minimumGap(payoutBand.minRm, withdrawable ?? 0))} more).`}
+                {`You can withdraw${accountMin !== null ? ` to ${selected?.bankName}` : ''} once your withdrawable money reaches ${floorText} (${rm(minimumGap(minRm, withdrawable ?? 0))} more).`}
               </p>
             )}
           </section>
@@ -624,7 +633,7 @@ export default function WithdrawForm({
                 className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none focus:border-white/25"
               >
                 <option value="" disabled>
-                  {!shown?.items.some((a) => isUsable(a, now))
+                  {!shownUsable
                     ? 'No account is available yet'
                     : 'Choose a saved account'}
                 </option>
@@ -646,7 +655,7 @@ export default function WithdrawForm({
             </label>
           )}
 
-          {accounts.length > 0 && usableAccounts.length === 0 && (
+          {accounts.length > 0 && !shownUsable && (
             <p className="mt-2 text-[13px] text-neutral-400">
               New bank accounts need a short wait before first use, to keep your
               money safe.{' '}

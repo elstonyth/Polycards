@@ -39,9 +39,10 @@ export function BankCountryToggle({
             key={group.country}
             type="button"
             aria-pressed={value === group.country}
-            onClick={() => onChange(group.country)}
+            // Re-tapping the country on show must not clear what was picked.
+            onClick={() => value !== group.country && onChange(group.country)}
             className={cn(
-              'flex min-h-10 items-center justify-center gap-2 rounded-full px-3 text-sm font-semibold transition-colors',
+              'flex min-h-11 items-center justify-center gap-2 rounded-full px-3 text-sm font-semibold transition-colors',
               'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
               value === group.country
                 ? 'bg-neutral-50 text-neutral-950'

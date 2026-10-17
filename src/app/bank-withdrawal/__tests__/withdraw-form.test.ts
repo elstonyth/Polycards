@@ -34,8 +34,10 @@ vi.mock('@/components/app-shell/TopUpProvider', () => ({
 import WithdrawForm, {
   minimumGap,
   nextAmountText,
+  regionalBandText,
   withdrawRemedy,
 } from '../WithdrawForm';
+import { REGIONAL_RAILS } from '@/lib/regional-rails';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -399,6 +401,118 @@ describe('WithdrawForm', () => {
     await render([READY_ACCOUNT]);
     expect(toggle()).toEqual([]);
     expect(listed()).toEqual([READY_ACCOUNT.id]);
+  });
+
+  // The country toggle, past the happy path. The S$ rail is open and priced.
+  const SG_LIMITS = {
+    gateway: 'tgpay',
+    deposit: { minRm: 50, maxRm: 10000 },
+    withdrawal: { minRm: 50, maxRm: 30000 },
+    depositsEnabled: true,
+    withdrawalsEnabled: true,
+    regional: [
+      {
+        gateway: 'a3pay',
+        currency: 'SGD',
+        depositsEnabled: true,
+        withdrawalsEnabled: true,
+        deposit: { min: 30, max: 3150 },
+        withdrawal: { min: 30, max: 10000 },
+        withdrawalRm: { minRm: 96.05, maxRm: 30000 },
+        rate: { deposit: 3.169804, payout: 3.201662 },
+      },
+    ],
+  };
+  const DBS = {
+    ...READY_ACCOUNT,
+    id: 'acc_dbs',
+    bankName: 'DBS Bank',
+    currency: 'SGD',
+  };
+  const OCBC = {
+    ...READY_ACCOUNT,
+    id: 'acc_ocbc',
+    bankName: 'OCBC Bank',
+    currency: 'SGD',
+  };
+  const pill = (name: string) =>
+    [
+      ...container.querySelectorAll<HTMLButtonElement>('[role="group"] button'),
+    ].find((b) => b.textContent === name)!;
+  const accountSelect = () =>
+    container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Saved bank account"]',
+    )!;
+  const bandLine = () => container.querySelector('section')?.textContent ?? '';
+
+  it("shows the Singapore rail's band as soon as its flag is on", async () => {
+    getPaymentLimits.mockResolvedValue(SG_LIMITS);
+    await render([READY_ACCOUNT, DBS, OCBC], 1000);
+    act(() => pill('Singapore').click());
+    // Two Singapore accounts: none is chosen for the customer...
+    expect(accountSelect().value).toBe('');
+    // ...but the band is already the S$ rail's, not the RM gateway's.
+    expect(bandLine()).toContain(
+      'RM 96.05–RM 30,000 per withdrawal (Singapore limit S$30–S$10,000)',
+    );
+  });
+
+  it('re-tapping the country on show keeps the chosen account', async () => {
+    const CIMB = { ...READY_ACCOUNT, id: 'acc_cimb', bankName: 'CIMB Bank' };
+    await render([READY_ACCOUNT, CIMB, DBS]);
+    setValue('select[aria-label="Saved bank account"]', CIMB.id);
+    act(() => pill('Malaysia').click());
+    expect(accountSelect().value).toBe(CIMB.id);
+  });
+
+  it('opens on the country with an account ready to pay', async () => {
+    await render([COOLING_ACCOUNT, DBS, OCBC]);
+    expect(pill('Singapore').getAttribute('aria-pressed')).toBe('true');
+    expect(accountSelect().options[0]?.textContent).toBe(
+      'Choose a saved account',
+    );
+    // Malaysia's only account is still cooling off: say so, and why.
+    act(() => pill('Malaysia').click());
+    expect(accountSelect().options[0]?.textContent).toBe(
+      'No account is available yet',
+    );
+    expect(container.textContent).toContain(
+      'New bank accounts need a short wait before first use',
+    );
+  });
+
+  it("clears one country's refusal when the customer switches country", async () => {
+    await render([READY_ACCOUNT, DBS], 1000);
+    fillValidForm('20');
+    await submit();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'Withdrawals must be between RM 50 and RM 50,000.',
+    );
+    act(() => pill('Singapore').click());
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  // The hold names the floor the band shows: a Touch 'n Go account's own.
+  it("holds the form under a chosen account's own floor, naming the bank", async () => {
+    const TNG = {
+      ...READY_ACCOUNT,
+      id: 'acc_tng',
+      bankCode: 'TNG',
+      bankName: "Touch 'n Go",
+      minRm: 100,
+    };
+    await render([READY_ACCOUNT, TNG], 60);
+    expect(amountInput().disabled).toBe(false);
+    setValue('select[aria-label="Saved bank account"]', TNG.id);
+    expect(bandLine()).toContain('RM 100–RM 50,000 per withdrawal');
+    expect(container.querySelector('#withdraw-hold-reason')?.textContent).toBe(
+      "You can withdraw to Touch 'n Go once your withdrawable money reaches RM 100 (RM 40.00 more).",
+    );
+    expect(amountInput().disabled).toBe(true);
+    // Maybank's floor is the gateway's RM 50: the form opens again.
+    setValue('select[aria-label="Saved bank account"]', READY_ACCOUNT.id);
+    expect(container.querySelector('#withdraw-hold-reason')).toBeNull();
+    expect(amountInput().disabled).toBe(false);
   });
 
   it('caps a typed or pasted amount at the withdrawable figure', async () => {
@@ -811,7 +925,7 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
     await render([READY_ACCOUNT], 30);
     expect(container.textContent).toContain('RM 50–RM 50,000 per withdrawal');
     expect(container.querySelector('#withdraw-hold-reason')?.textContent).toBe(
-      'You can withdraw once your withdrawable money reaches RM 50.00 (RM 20.00 more).',
+      'You can withdraw once your withdrawable money reaches RM 50 (RM 20.00 more).',
     );
     // The status block names only the floor (the rules below are collapsed).
     const status = container.querySelector('section')?.textContent;
@@ -926,6 +1040,25 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
         'Top up at least once to unlock withdrawals and deliveries.',
       ),
     ).toEqual({ href: null, label: 'Top up' });
+  });
+});
+
+describe('regionalBandText', () => {
+  it('names whichever edges the rail sets, cents only when there are some', () => {
+    const ui = REGIONAL_RAILS.SGD!;
+    expect(regionalBandText({ min: 30, max: 10000 }, ui)).toBe(
+      'Singapore limit S$30–S$10,000',
+    );
+    expect(regionalBandText({ min: 30, max: null }, ui)).toBe(
+      'Singapore limit from S$30',
+    );
+    expect(regionalBandText({ min: null, max: 10000 }, ui)).toBe(
+      'Singapore limit up to S$10,000',
+    );
+    expect(regionalBandText({ min: null, max: null }, ui)).toBeNull();
+    expect(regionalBandText({ min: 30, max: 9370.5 }, ui)).toBe(
+      'Singapore limit S$30–S$9,370.50',
+    );
   });
 });
 

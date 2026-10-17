@@ -4,14 +4,11 @@ import type {
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { findBank, sandboxOnlyBank } from '../../../../../modules/packs/banks';
-import {
-  GATEWAYS,
-  resolveActiveGateway,
-} from '../../../../../modules/packs/gateway';
+import { resolveActiveGateway } from '../../../../../modules/packs/gateway';
 import {
   regionalPayoutGateways,
   withdrawalDetailsError,
-  payoutGatewayFor,
+  payoutCurrencyFor,
 } from '../../../../../modules/packs/gateway-withdrawal';
 import {
   resolvePacks,
@@ -177,7 +174,7 @@ async function accountViews(
     regionalPayoutGateways(),
   ).map((view) => ({
     ...view,
-    currency: GATEWAYS[payoutGatewayFor(view.bankCode, active)].currency,
+    currency: payoutCurrencyFor(view.bankCode, active),
     ...(isTngBank(view.bankCode)
       ? {
           minRm: destinationMinRm(view.bankCode, controls),

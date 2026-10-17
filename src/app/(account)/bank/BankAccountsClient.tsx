@@ -93,7 +93,7 @@ export function BankAccountsClient() {
   }, []);
 
   // One country's banks at a time, picked by flag. Falls back to the first
-  // country when the chosen one has none (its rail closed meanwhile).
+  // country when the chosen one has no banks (no Malaysian banks at all).
   const countries = bankCountryGroups(banks ?? []);
   const shown =
     countries.find((group) => group.country === country) ?? countries[0];

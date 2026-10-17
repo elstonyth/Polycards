@@ -82,4 +82,31 @@ describe('BankAccountsClient — bank country', () => {
     expect(container.querySelector('[role="group"]')).toBeNull();
     expect(listed()).toEqual(['Maybank', 'CIMB Bank']);
   });
+
+  it('drops the picked bank when the country changes, not on a re-tap', async () => {
+    await openAddForm([...MY, ...SG]);
+    const select = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Bank"]',
+    )!;
+    const pick = (code: string) =>
+      act(() => {
+        Object.getOwnPropertyDescriptor(
+          HTMLSelectElement.prototype,
+          'value',
+        )!.set!.call(select, code);
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    pick('MBB');
+    act(() => countryButton('Malaysia')!.click());
+    expect(select.value).toBe('MBB');
+    // A Maybank code must never ride along under the Singapore list.
+    act(() => countryButton('Singapore')!.click());
+    expect(select.value).toBe('');
+  });
+
+  it('lists Singapore banks when no Malaysian bank is offered', async () => {
+    await openAddForm(SG);
+    expect(container.querySelector('[role="group"]')).toBeNull();
+    expect(listed()).toEqual(['DBS Bank']);
+  });
 });
