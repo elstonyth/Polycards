@@ -491,17 +491,31 @@ medusaIntegrationTestRunner({
       ).toEqual(['opened', 'revoked']);
     });
 
-    it('counts gifts and bonus toward the daily mint ceiling', async () => {
-      const before = process.env.ADJUST_DAILY_MINT_MAX_RM;
-      process.env.ADJUST_DAILY_MINT_MAX_RM = '500';
+    it('caps gifts in their own daily pool, apart from credit and bonus', async () => {
+      const keys = ['ADJUST_DAILY_MINT_MAX_RM', 'GIFT_DAILY_MINT_MAX_RM'];
+      const before = keys.map((k) => process.env[k]);
+      process.env.ADJUST_DAILY_MINT_MAX_RM = String(PRICE);
+      process.env.GIFT_DAILY_MINT_MAX_RM = String(PRICE);
       try {
         expect((await giftPacks(1, 'cap-gift')).status).toBe(201);
-        const refused = await grantBonus(PRICE, 'cap-bonus');
-        expect(refused.status).toBe(400);
-        expect(refused.data.message).toMatch(/Daily credit-adjustment limit/);
+        const giftRefused = await giftPacks(1, 'cap-gift-2');
+        expect(giftRefused.status).toBe(400);
+        expect(giftRefused.data.message).toMatch(/GIFT_DAILY_MINT_MAX_RM/);
+
+        // The gift ate none of the credit pool...
+        expect((await grantBonus(PRICE, 'cap-bonus')).status).toBe(200);
+        const bonusRefused = await grantBonus(1, 'cap-bonus-2');
+        expect(bonusRefused.status).toBe(400);
+        expect(bonusRefused.data.message).toMatch(/ADJUST_DAILY_MINT_MAX_RM/);
+
+        // ...and a full credit pool no longer blocks a gift (2026-10-17).
+        process.env.GIFT_DAILY_MINT_MAX_RM = String(PRICE * 2);
+        expect((await giftPacks(1, 'cap-gift-3')).status).toBe(201);
       } finally {
-        if (before === undefined) delete process.env.ADJUST_DAILY_MINT_MAX_RM;
-        else process.env.ADJUST_DAILY_MINT_MAX_RM = before;
+        keys.forEach((k, i) => {
+          if (before[i] === undefined) delete process.env[k];
+          else process.env[k] = before[i];
+        });
       }
     });
 

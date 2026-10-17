@@ -14,8 +14,8 @@ export const PackGift = model
     id: model.id({ prefix: 'pgift' }).primaryKey(),
     customer_id: model.text(),
     pack_id: model.text(), // = Pack.slug
-    // The pack price at grant time — what the gift counts toward the daily
-    // mint ceiling (ADJUST_DAILY_MINT_MAX_RM), like a credit grant.
+    // The pack price at grant time — what the gift counts toward the
+    // gift-pack daily ceiling (GIFT_DAILY_MINT_MAX_RM).
     value_myr: model.bigNumber(),
     // Admin note, never shown to the customer.
     note: model.text(),
