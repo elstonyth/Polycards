@@ -5,6 +5,7 @@ import type {
 import type { ICustomerModuleService } from '@medusajs/framework/types';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../../../modules/packs';
+import { referralWeekFor } from '../../../../../modules/packs/referral';
 import type PacksModuleService from '../../../../../modules/packs/service';
 
 // GET /admin/referrals/settlements/:id — one run with all its lines (the
@@ -68,7 +69,8 @@ export async function GET(
   res.json({
     settlement: {
       id: run.id,
-      week_start: new Date(run.week_start).toISOString().slice(0, 10),
+      // The MYT Tuesday, not the UTC date a day early (see the list route).
+      week_start: referralWeekFor(new Date(run.week_start)).weekStartIso,
       status: run.status,
       approved_by: run.approved_by,
       approved_at: run.approved_at,

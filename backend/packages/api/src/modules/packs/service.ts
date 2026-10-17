@@ -1431,6 +1431,43 @@ class PacksModuleService extends MedusaService({
     return byReferrer;
   }
 
+  // Admin referral card (2026-10-17): each listed downline member's spend this
+  // settlement week and all-time, on the same turnover definition the close
+  // pays on (normal part of pack_open, net of reversals), clamped to 0 like
+  // the close. Lifetime is the Players list's "total spend" rule too.
+  @InjectManager()
+  async referralDownlineSpend(
+    input: { customerIds: string[]; now?: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, { week_cents: number; lifetime_cents: number }>> {
+    const week = referralWeekFor(input.now ?? new Date());
+    const thisWeek = await this.packTurnoverCentsByCustomer(
+      {
+        startUtc: week.startUtc,
+        endUtcExcl: week.endUtcExcl,
+        customerIds: input.customerIds,
+      },
+      sharedContext,
+    );
+    const lifetime = await this.packTurnoverCentsByCustomer(
+      {
+        startUtc: new Date(0),
+        endUtcExcl: week.endUtcExcl,
+        customerIds: input.customerIds,
+      },
+      sharedContext,
+    );
+    return new Map(
+      input.customerIds.map((id) => [
+        id,
+        {
+          week_cents: Math.max(thisWeek.get(id) ?? 0, 0),
+          lifetime_cents: Math.max(lifetime.get(id) ?? 0, 0),
+        },
+      ]),
+    );
+  }
+
   // The Tuesday close ("TUES CHECK"): compute the just-ended week's referral
   // commissions into a DRAFT settlement run. No money moves here —
   // payWeeklySettlement (after the admin approve gate) does that.
@@ -1691,7 +1728,7 @@ class PacksModuleService extends MedusaService({
         before: { status: 'draft' },
         after: { status: 'approved' },
         reason:
-          `week ${new Date(run.week_start).toISOString().slice(0, 10)}` +
+          `week ${referralWeekFor(new Date(run.week_start)).weekStartIso}` +
           (input.reason ? `: ${input.reason}` : ''),
       },
       sharedContext,
@@ -1982,6 +2019,8 @@ class PacksModuleService extends MedusaService({
         `Only an approved run can be paid (this one is '${run.status}').`,
       );
     }
+    // The RF payload keeps the UTC date its stored rows have always carried;
+    // the audit reason below names the week by its MYT Tuesday like the screens.
     const weekStartIso = new Date(run.week_start).toISOString().slice(0, 10);
     const pending = await this.listWeeklySettlementLines(
       { settlement_id: run.id, status: 'pending' },
@@ -2104,7 +2143,7 @@ class PacksModuleService extends MedusaService({
           action: 'pay_settlement',
           before: { status: run.status },
           after: { paid, skipped },
-          reason: `week ${weekStartIso}`,
+          reason: `week ${referralWeekFor(new Date(run.week_start)).weekStartIso}`,
         },
         sharedContext,
       );
@@ -2135,6 +2174,31 @@ class PacksModuleService extends MedusaService({
       status: string;
     }[];
   }> {
+    return {
+      ...(await this.referralLiveWeek(input, sharedContext)),
+      history: await this.settlementHistoryFor(
+        { customerId: input.customerId },
+        sharedContext,
+      ),
+    };
+  }
+
+  // The still-open week's live numbers, shared by the storefront panel and the
+  // admin referral card so the two can never disagree.
+  @InjectManager()
+  async referralLiveWeek(
+    input: { customerId: string; now?: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    downline_count: number;
+    week: {
+      start: string;
+      turnover_cents: number;
+      rate_bp: number;
+      projected_cents: number;
+      partner: boolean;
+    };
+  }> {
     const week = referralWeekFor(input.now ?? new Date());
 
     // One joined aggregate instead of materialising every downline id into an
@@ -2150,16 +2214,19 @@ class PacksModuleService extends MedusaService({
       // exactly what closeReferralWeek does (it drops a downline whose net
       // week turnover is <= 0). Summing raw rows let one refunded member drag
       // the projection below the real payout, and at scale onto a different
-      // TIER (bug review 2026-08-25).
+      // TIER (bug review 2026-08-25). The week window sits in the JOIN, not
+      // a CASE, so the (customer_id, created_at) index range-scans one week
+      // instead of reading every member's whole ledger; a member with no rows
+      // in it still gets one NULL-joined row, so the count is unchanged.
       'SELECT COUNT(*)::bigint AS downline_count, ' +
         '  COALESCE(SUM(GREATEST(per_customer, 0)), 0)::bigint AS turnover_cents ' +
         'FROM ( ' +
         '  SELECT ra.customer_id, ' +
-        '    COALESCE(SUM(CASE WHEN ct.created_at >= ? AND ct.created_at < ? ' +
-        `      THEN -${normalSenSql('ct.')} ELSE 0 END), 0)::bigint AS per_customer ` +
+        `    COALESCE(SUM(-${normalSenSql('ct.')}), 0)::bigint AS per_customer ` +
         '  FROM referral_attribution ra ' +
         '  LEFT JOIN credit_transaction ct ON ct.customer_id = ra.customer_id ' +
         "    AND ct.reason = 'pack_open' AND ct.deleted_at IS NULL " +
+        '    AND ct.created_at >= ? AND ct.created_at < ? ' +
         '  WHERE ra.referrer_id = ? AND ra.deleted_at IS NULL ' +
         '  GROUP BY ra.customer_id ' +
         ') d',
@@ -2184,10 +2251,6 @@ class PacksModuleService extends MedusaService({
         projected_cents: payoutCents(turnoverCents, rateBp),
         partner: partnerBp != null,
       },
-      history: await this.settlementHistoryFor(
-        { customerId: input.customerId },
-        sharedContext,
-      ),
     };
   }
 
@@ -2220,10 +2283,11 @@ class PacksModuleService extends MedusaService({
       { select: ['id', 'week_start'], take: lines.length },
       sharedContext,
     );
+    // The MYT Tuesday the week starts — week_start's UTC date is a day early.
     const weekById = new Map(
       runs.map((r) => [
         r.id,
-        new Date(r.week_start).toISOString().slice(0, 10),
+        referralWeekFor(new Date(r.week_start)).weekStartIso,
       ]),
     );
     return lines.map((l) => ({

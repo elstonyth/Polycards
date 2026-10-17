@@ -357,6 +357,21 @@ const GroupCard = ({ customerId }: { customerId: string }) => {
   );
 };
 
+// When this week's line pays: auto-approval holds a whole run with any line
+// over its limit for an admin, and the close voids a line over the ceiling.
+// Never promise Wednesday when one of those applies.
+const payoutNote = (
+  projectedCents: number,
+  limits: CustomerReferralCard['payout_limits'],
+): string =>
+  projectedCents <= 0
+    ? 'Nothing to pay yet.'
+    : projectedCents > limits.line_ceiling_cents
+      ? `Over the ${rm(limits.line_ceiling_cents / 100)} line ceiling — the close voids it for review, so it will not pay as is.`
+      : projectedCents > limits.auto_approve_max_cents
+        ? `Over ${rm(limits.auto_approve_max_cents / 100)} — an admin must approve the week on the Referrals page before it pays.`
+        : 'Usually paid the Wednesday after it closes; a week holding any line over the auto-approve limit waits for an admin.';
+
 // Referral card (rebuild, spec 2026-08-24): who referred them, their direct
 // downline, their weekly payout lines, and the partner-rate control. The rate
 // REPLACES the tier table for this customer; bounds come from the Referrals
@@ -399,6 +414,7 @@ const ReferralCardBody = ({
   const { data: settings } = useReferralSettings();
   const setRate = useSetPartnerRate();
   const setReferrer = useSetCustomerReferrer();
+  const navigate = useNavigate();
   const [referrerInput, setReferrerInput] = useState(
     () => data.referred_by ?? '',
   );
@@ -431,6 +447,17 @@ const ReferralCardBody = ({
   // control here with the same message, rather than let the operator type a
   // value the Set button then rejects.
   const lockedByGroup = data.partner_group;
+  // Which rule sets this week's rate — the order the close applies it in.
+  const rateSource = lockedByGroup
+    ? `Partner rate · group ${lockedByGroup.name}`
+    : data.partner_referral_bp !== null
+      ? 'Partner rate'
+      : 'Tier rate';
+  // shortcut: sums the last 50 lines the route returns (one per week, so all
+  // history since the 29 Sep launch); move to a server total past 50 weeks.
+  const paidCents = data.lines
+    .filter((l) => l.status === 'paid')
+    .reduce((sum, l) => sum + l.amount_cents, 0);
 
   return (
     <div className="border-t px-6 py-4">
@@ -472,7 +499,29 @@ const ReferralCardBody = ({
           </div>
         </dd>
         <dt className="text-ui-fg-subtle">Direct referrals</dt>
-        <dd>{data.downline.length}</dd>
+        {/* ?? and the week guard: during a rolling deploy an older API
+            instance can answer without these fields. */}
+        <dd>{data.downline_count ?? data.downline.length}</dd>
+        {data.week && (
+          <>
+            <dt className="text-ui-fg-subtle">This week</dt>
+            <dd>
+              <div className="tabular-nums">
+                {rm(data.week.turnover_cents / 100)} spend ×{' '}
+                {data.week.rate_bp / 100}% ={' '}
+                <span className="font-medium">
+                  {rm(data.week.projected_cents / 100)}
+                </span>
+              </div>
+              <Text size="xsmall" className="text-ui-fg-muted">
+                {rateSource} · week of {data.week.start}, still open.{' '}
+                {payoutNote(data.week.projected_cents, data.payout_limits)}
+              </Text>
+            </dd>
+          </>
+        )}
+        <dt className="text-ui-fg-subtle">Total paid</dt>
+        <dd className="tabular-nums">{rm(paidCents / 100)}</dd>
         <dt className="text-ui-fg-subtle">Partner rate</dt>
         <dd>
           {lockedByGroup ? (
@@ -553,20 +602,117 @@ const ReferralCardBody = ({
           )}
         </dd>
       </dl>
+      {data.downline.length > 0 && (
+        <div className="mt-4">
+          <Text size="small" className="text-ui-fg-subtle">
+            Referrals
+          </Text>
+          <div className="mt-1 max-h-96 overflow-y-auto">
+            <Table>
+              <Table.Header>
+                <Table.Row>
+                  <Table.HeaderCell>Player</Table.HeaderCell>
+                  <Table.HeaderCell>Referred since</Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    This week
+                  </Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    Lifetime
+                  </Table.HeaderCell>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {data.downline.map((d) => (
+                  <Table.Row key={d.customer_id}>
+                    <Table.Cell>
+                      <button
+                        type="button"
+                        className="text-ui-fg-interactive text-left hover:underline"
+                        onClick={() => navigate(`/customers/${d.customer_id}`)}
+                      >
+                        {d.name ?? d.email ?? d.customer_id}
+                      </button>
+                      {d.name && d.email && (
+                        <div className="text-ui-fg-muted text-xs">
+                          {d.email}
+                        </div>
+                      )}
+                    </Table.Cell>
+                    <Table.Cell className="text-ui-fg-subtle whitespace-nowrap text-xs">
+                      {orderDateTime(d.since)}
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      {rm(d.week_spend_cents / 100)}
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      {rm(d.lifetime_spend_cents / 100)}
+                    </Table.Cell>
+                  </Table.Row>
+                ))}
+              </Table.Body>
+            </Table>
+          </div>
+          <Text size="xsmall" className="text-ui-fg-muted mt-2">
+            Spend counts pack opens paid with real money, net of refunds. Opens
+            paid with bonus credit earn no commission.
+          </Text>
+        </div>
+      )}
       {data.lines.length > 0 && (
         <div className="mt-4">
           <Text size="small" className="text-ui-fg-subtle">
             Weekly payouts
           </Text>
-          <ul className="mt-1 flex flex-col gap-1 text-sm">
-            {data.lines.slice(0, 8).map((l) => (
-              <li key={l.id} className="flex items-center gap-2">
-                <Badge size="2xsmall">Commission</Badge>
-                <span className="tabular-nums">{rm(l.amount_cents / 100)}</span>
-                <span className="text-ui-fg-muted text-xs">{l.status}</span>
-              </li>
-            ))}
-          </ul>
+          <div className="mt-1 max-h-96 overflow-y-auto">
+            <Table>
+              <Table.Header>
+                <Table.Row>
+                  <Table.HeaderCell>Week of</Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    Referral spend
+                  </Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    Rate
+                  </Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    Commission
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>Status</Table.HeaderCell>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {data.lines.map((l) => (
+                  <Table.Row key={l.id}>
+                    <Table.Cell className="whitespace-nowrap tabular-nums">
+                      {l.week_start ?? '—'}
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      {rm(l.basis_cents / 100)}
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      {l.rate_bp / 100}%
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      {rm(l.amount_cents / 100)}
+                    </Table.Cell>
+                    <Table.Cell>
+                      <StatusBadge
+                        color={
+                          l.status === 'paid'
+                            ? 'green'
+                            : l.status === 'voided'
+                              ? 'red'
+                              : 'orange'
+                        }
+                      >
+                        {l.status}
+                      </StatusBadge>
+                    </Table.Cell>
+                  </Table.Row>
+                ))}
+              </Table.Body>
+            </Table>
+          </div>
         </div>
       )}
     </div>
