@@ -1,9 +1,18 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Container, Heading, Table, Text } from '@medusajs/ui';
+import {
+  Badge,
+  Button,
+  Container,
+  Heading,
+  StatusBadge,
+  Table,
+  Text,
+} from '@medusajs/ui';
 import {
   useCustomerGacha,
   useCustomerMoney,
+  useCustomerPackGifts,
   useCustomerPulls,
 } from '../../../lib/queries';
 import { orderDateTime, rm, timeAgo } from '../../../lib/format';
@@ -33,6 +42,15 @@ export const VaultTab = ({ customerId }: { customerId: string }) => {
     status: 'vaulted',
     sort,
   });
+  // Same key as the Gifts and bonus tab, so a send or revoke there refreshes
+  // this list too.
+  const { data: gifts } = useCustomerPackGifts(customerId);
+  // Still in the player's vault as a pack: not opened yet, or a claim that
+  // never produced a card (stuck — revoke it from Gifts and bonus).
+  const unopenedGifts = (gifts ?? []).filter(
+    (g) => g.state === 'unopened' || g.state === 'stuck',
+  );
+  const giftPulls = new Set((gifts ?? []).map((g) => g.pull_id));
   const rows = data?.items ?? [];
   const shipping = money?.owed.cards.delivering ?? 0;
   // The FX feed is on its display fallback: every sell is refused, so the
@@ -76,6 +94,73 @@ export const VaultTab = ({ customerId }: { customerId: string }) => {
           }
         />
       </div>
+
+      {unopenedGifts.length > 0 && (
+        <>
+          <div className="border-t px-6 py-4">
+            <Heading level="h2">
+              {t('playerMoney.giftPacksTitle')} ({unopenedGifts.length})
+            </Heading>
+            <Text className="text-ui-fg-subtle mt-1" size="small">
+              {t('playerMoney.giftPacksNote')}
+            </Text>
+          </div>
+          <div
+            className="overflow-x-auto border-t"
+            tabIndex={0}
+            role="region"
+            aria-label={t('playerMoney.giftPacksTitle')}
+          >
+            <Table>
+              <Table.Header>
+                <Table.Row>
+                  <Table.HeaderCell>
+                    {t('customer360.gift.colPack')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>
+                    {t('customer360.gift.colState')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    {t('playerMoney.colValue')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>
+                    {t('customer360.gift.colGranted')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>
+                    {t('customer360.gift.colNote')}
+                  </Table.HeaderCell>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {unopenedGifts.map((g) => (
+                  <Table.Row key={g.id}>
+                    <Table.Cell>{g.pack_title}</Table.Cell>
+                    <Table.Cell>
+                      <StatusBadge color={g.state === 'stuck' ? 'red' : 'blue'}>
+                        {t(`customer360.gift.state.${g.state}`, g.state)}
+                      </StatusBadge>
+                    </Table.Cell>
+                    <Table.Cell className="text-ui-fg-subtle whitespace-nowrap text-right tabular-nums">
+                      {rm(g.value_myr)}
+                    </Table.Cell>
+                    <Table.Cell className="whitespace-nowrap">
+                      <div className="tabular-nums">
+                        {orderDateTime(g.created_at)}
+                      </div>
+                      <div className="text-ui-fg-subtle txt-compact-xsmall">
+                        {timeAgo(g.created_at)}
+                      </div>
+                    </Table.Cell>
+                    <Table.Cell className="text-ui-fg-subtle max-w-[20rem] truncate">
+                      {g.note}
+                    </Table.Cell>
+                  </Table.Row>
+                ))}
+              </Table.Body>
+            </Table>
+          </div>
+        </>
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t px-6 py-4">
         <Heading level="h2">{t('playerMoney.vaultTitle')}</Heading>
@@ -166,9 +251,14 @@ export const VaultTab = ({ customerId }: { customerId: string }) => {
                           <div className="max-w-[22rem] truncate">
                             {p.card?.name ?? '—'}
                           </div>
-                          {p.pack_title && (
-                            <div className="text-ui-fg-subtle txt-compact-xsmall truncate">
+                          {(p.pack_title || giftPulls.has(p.id)) && (
+                            <div className="text-ui-fg-subtle txt-compact-xsmall flex items-center gap-1.5 truncate">
                               {p.pack_title}
+                              {giftPulls.has(p.id) && (
+                                <Badge size="2xsmall" color="blue">
+                                  {t('playerMoney.fromGift')}
+                                </Badge>
+                              )}
                             </div>
                           )}
                         </div>

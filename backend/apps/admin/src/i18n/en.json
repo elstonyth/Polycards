@@ -1471,6 +1471,10 @@
     "storefrontValue": "Storefront value",
     "fmvNote": "FMV {{amount}}",
     "vaultTitle": "Cards in vault",
+    "giftPacksTitle": "Unopened gift packs",
+    "giftPacksNote": "Packs sent from Gifts and bonus that the player has not opened yet. They open them as Vault x1 on the pack page. Revoke one from Gifts and bonus.",
+    "colValue": "Value",
+    "fromGift": "Gift",
     "sort": {
       "newest": "Newest",
       "value": "Highest value"
