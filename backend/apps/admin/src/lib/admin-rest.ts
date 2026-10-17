@@ -2447,10 +2447,41 @@ export interface CustomerReferralCard {
   /** Non-null when the player's group is a partner group: its rate is what
    *  pays them and the manual control below is locked (spec 2026-09-09). */
   partner_group: { id: string; name: string; rate_bp: number } | null;
-  downline: { customer_id: string; since: string }[];
+  /** Direct referrals, uncapped — the downline list stops at 1000. */
+  downline_count: number;
+  /** The still-open settlement week, live — the same numbers the player's own
+   *  /referral page shows. rate_bp is the effective rate (group > manual >
+   *  tier); partner says it came from a group or manual rate. */
+  week: {
+    start: string;
+    turnover_cents: number;
+    rate_bp: number;
+    projected_cents: number;
+    partner: boolean;
+  };
+  /** What can stop a week's line paying on Wednesday: over
+   *  auto_approve_max_cents the run waits for an admin; over
+   *  line_ceiling_cents the close voids the line. */
+  payout_limits: {
+    auto_approve_max_cents: number;
+    line_ceiling_cents: number;
+  };
+  /** Spend is commission spend: the normal (non-bonus) part of pack opens,
+   *  net of reversals — the Players list's "total spend" rule. name/email are
+   *  null for a customer whose record is gone. */
+  downline: {
+    customer_id: string;
+    since: string;
+    name: string | null;
+    email: string | null;
+    week_spend_cents: number;
+    lifetime_spend_cents: number;
+  }[];
   lines: {
     id: string;
     settlement_id: string;
+    /** MYT Tuesday the line's week starts, 'YYYY-MM-DD'. */
+    week_start: string | null;
     basis_cents: number;
     rate_bp: number;
     amount_cents: number;

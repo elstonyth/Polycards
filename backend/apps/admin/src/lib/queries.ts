@@ -1759,7 +1759,14 @@ export const useSetCustomerReferrer = () => {
       reason: string;
     }) => setCustomerReferrer(vars.customerId, vars.referrerId, vars.reason),
     onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: qk.customerReferral(vars.customerId) });
+      // Every referral card, not just this player's: the old and the new
+      // referrer's downline lists and week totals both change.
+      qc.invalidateQueries({
+        predicate: (q) =>
+          q.queryKey[0] === 'admin' &&
+          q.queryKey[1] === 'customer' &&
+          q.queryKey[3] === 'referral',
+      });
       // The server writes an audit row — the History tab must see it.
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.customerId) });
     },
