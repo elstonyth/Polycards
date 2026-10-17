@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import { Landmark, Trash2 } from 'lucide-react';
 import {
   addSavedBankAccount,
@@ -12,6 +11,7 @@ import {
   type WithdrawBank,
 } from '@/lib/actions/vault';
 import { Pill, pillVariants } from '@/components/ui/pill';
+import { WithdrawLink } from '@/components/account/WithdrawLink';
 import { timeUntil } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -44,7 +44,9 @@ function payoutStatus(
     // Kept, not lost: the current payout provider cannot pay to this bank.
     // It becomes usable again when a provider that serves it is active.
     return {
-      label: 'Not available with the current payout provider',
+      label:
+        account.unavailableReason ??
+        'Not available with the current payout provider',
       ready: false,
     };
   }
@@ -280,12 +282,11 @@ export function BankAccountsClient() {
             <Pill onClick={() => setAdding(true)} size="lg" className="flex-1">
               Add bank account
             </Pill>
-            <Link
-              href="/bank-withdrawal"
+            <WithdrawLink
               className={cn(pillVariants({ variant: 'secondary', size: 'lg' }))}
             >
               Withdraw
-            </Link>
+            </WithdrawLink>
           </div>
         )
       )}

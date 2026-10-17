@@ -8,7 +8,14 @@ import {
   resolveWithdrawalDestination,
   sharedAccountCheckApplies,
 } from './saved-accounts';
-import { bankPayoutMinRm, findBank } from './banks';
+import { findBank } from './banks';
+import {
+  channelStatus,
+  destinationMinRm,
+  isTngBank,
+  tngPausedMessage,
+  withdrawalsClosedMessage,
+} from './withdrawal-controls';
 import {
   GATEWAYS,
   gatewayConfigFor,
@@ -645,6 +652,18 @@ export async function startWithdrawal(
   const replayedEarly = await replayExisting();
   if (replayedEarly) return replayedEarly;
 
+  // The admin's Withdraw switch and its daily schedule (withdrawal-controls.ts).
+  // After the replay, so the retry of an in-flight withdrawal still reports
+  // it; before any row or debit, so nothing is written for a certain refusal.
+  const controls = await packs.withdrawalControls();
+  const withdrawStatus = channelStatus(controls.withdrawals, Date.now());
+  if (!withdrawStatus.open) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      withdrawalsClosedMessage(withdrawStatus.reopens_at),
+    );
+  }
+
   // Our payout wallet was short moments ago (see PAYOUT_FLOAT_COOLDOWN_MS).
   // After the replay, so the retry of an in-flight withdrawal still reports
   // it; before any row or debit, so nothing is written for a certain refusal.
@@ -679,6 +698,17 @@ export async function startWithdrawal(
   const detailsInvalid = withdrawalDetailsError(precheckDestination);
   if (detailsInvalid) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, detailsInvalid);
+  }
+  // The admin's Touch 'n Go switch. Ahead of the bank check so the customer
+  // reads "Touch 'n Go is paused", not "not available with the provider".
+  if (isTngBank(precheckDestination.bankCode)) {
+    const tngStatus = channelStatus(controls.tng, Date.now());
+    if (!tngStatus.open) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        tngPausedMessage(tngStatus.reopens_at),
+      );
+    }
   }
   // A bank the active gateway cannot pay to is refused HERE, before any
   // debit, with the reason. The adapter would refuse it too, but only after
@@ -717,11 +747,15 @@ export async function startWithdrawal(
       );
     }
   }
-  // A destination with its own payout floor (Touch 'n Go: RM 100) is held to
-  // it here, before any row or debit — the gateway refuses below it as a
-  // definite error, which would cost a row, a debit and a refund per tap. The
-  // wording keeps the band phrase the storefront passes through verbatim.
-  const destinationMin = bankPayoutMinRm(precheckDestination.bankCode);
+  // A destination with its own payout floor (Touch 'n Go: RM 100, or the
+  // admin's higher minimum) is held to it here, before any row or debit — the
+  // gateway refuses below its floor as a definite error, which would cost a
+  // row, a debit and a refund per tap. The wording keeps the band phrase the
+  // storefront passes through verbatim.
+  const destinationMin = destinationMinRm(
+    precheckDestination.bankCode,
+    controls,
+  );
   if (destinationMin !== null && amount < destinationMin) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,

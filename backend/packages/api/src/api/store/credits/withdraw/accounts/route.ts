@@ -30,6 +30,12 @@ import {
   sendSavedAccountAddedNotice,
   sendSavedAccountRemovedNotice,
 } from '../../../../../modules/packs/saved-account-notice';
+import {
+  channelStatus,
+  destinationMinRm,
+  isTngBank,
+  tngPausedReason,
+} from '../../../../../modules/packs/withdrawal-controls';
 
 // Saved payout bank accounts — GET (list) / POST (add) / DELETE (remove) on
 // /store/credits/withdraw/accounts. Storage is customer.metadata.bank_accounts,
@@ -158,6 +164,12 @@ async function accountViews(
   accounts: Parameters<typeof savedBankAccountViews>[0],
 ) {
   const active = await resolveActiveGateway(req.scope);
+  // The admin's Touch 'n Go switch and floor (withdrawal-controls.ts), so the
+  // form shows a paused TNG account as such and states the right minimum.
+  const controls = await resolvePacks<CustomerWallet>(
+    req.scope,
+  ).withdrawalControls();
+  const tng = channelStatus(controls.tng, Date.now());
   return savedBankAccountViews(
     accounts,
     active,
@@ -166,6 +178,17 @@ async function accountViews(
   ).map((view) => ({
     ...view,
     currency: GATEWAYS[payoutGatewayFor(view.bankCode, active)].currency,
+    ...(isTngBank(view.bankCode)
+      ? {
+          minRm: destinationMinRm(view.bankCode, controls),
+          ...(tng.open
+            ? {}
+            : {
+                supported: false,
+                unavailableReason: tngPausedReason(tng.reopens_at),
+              }),
+        }
+      : {}),
   }));
 }
 

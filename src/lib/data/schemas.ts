@@ -591,6 +591,9 @@ export const PaymentConfigSchema = z.looseObject({
   withdrawals_enabled: z.boolean().optional(),
   // ISO instant a timed withdrawal pause ends (null/absent = no timed pause).
   withdrawals_paused_until: z.string().nullable().optional(),
+  // Closed by the admin (switch or daily hours) or a timed pause: the Withdraw
+  // button opens an "unavailable" popup. Absent (older backend) = not closed.
+  withdrawals_unavailable: z.boolean().optional(),
   // Regional rails beside the active gateway (A3Pay: SGD). Optional — an
   // older backend has none, and a malformed list must not fail the bands.
   regional: z
@@ -800,6 +803,9 @@ export const SavedBankAccountsSchema = z.looseObject({
       // The bank's own payout floor (RM), e.g. Touch 'n Go 100; null/absent =
       // only the gateway's floor applies.
       minRm: z.number().nullish(),
+      // Why an unsupported account cannot be paid right now, when it is not
+      // the provider (e.g. the admin paused Touch 'n Go).
+      unavailableReason: z.string().nullish(),
     }),
   ),
 });

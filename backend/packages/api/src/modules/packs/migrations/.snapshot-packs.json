@@ -5656,6 +5656,15 @@
           "nullable": true,
           "mappedType": "json"
         },
+        "withdrawal_controls": {
+          "name": "withdrawal_controls",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "json"
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamptz",

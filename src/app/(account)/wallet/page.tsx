@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { unstable_rethrow } from 'next/navigation';
 import { AccountHeader, Panel } from '@/components/account/ui';
+import { WithdrawLink } from '@/components/account/WithdrawLink';
 import {
   MoneyRows,
   WithdrawRules,
@@ -109,12 +110,11 @@ export default async function WalletPage() {
         )}
         <div className="mt-4 flex flex-wrap items-center gap-x-5">
           {canWithdraw ? (
-            <Link
-              href="/bank-withdrawal"
+            <WithdrawLink
               className={cn(pillVariants({ variant: 'secondary', size: 'sm' }))}
             >
               Withdraw
-            </Link>
+            </WithdrawLink>
           ) : (
             // Payout status lives on the withdraw page, locked or not.
             w.hasTopup &&

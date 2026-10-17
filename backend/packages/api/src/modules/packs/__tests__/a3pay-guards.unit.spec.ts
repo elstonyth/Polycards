@@ -10,6 +10,7 @@ import {
 } from '../gateway-withdrawal';
 import { resetOpsAlerts } from '../ops-alert';
 import { savedBankAccountId } from '../saved-accounts';
+import { DEFAULT_WITHDRAWAL_CONTROLS } from '../withdrawal-controls';
 import { aesDecrypt } from '../a3pay';
 
 // The money guards PR #755's review added on the A3Pay (SGD) rail, each of
@@ -298,6 +299,7 @@ describe('a regional payout', () => {
         bonus: 0,
         playthrough: { deposited: 0, used: 0, remaining: 0 },
       }),
+      withdrawalControls: jest.fn().mockResolvedValue(DEFAULT_WITHDRAWAL_CONTROLS),
     };
   }
   const start = (
@@ -456,6 +458,7 @@ describe('the payout-float breaker cannot be tripped by one customer', () => {
         bonus: 0,
         playthrough: { deposited: 0, used: 0, remaining: 0 },
       }),
+      withdrawalControls: jest.fn().mockResolvedValue(DEFAULT_WITHDRAWAL_CONTROLS),
     };
   }
   const go = (packs: ReturnType<typeof packsFor>, amount: number) =>

@@ -50,6 +50,10 @@ import { FRAME_LEVELS } from './avatar-frames';
 import { challengePackId } from './challenge-prize';
 import { FREE_WELCOME_CATEGORY } from './free-pack';
 import { withLossless, type LosslessWindow } from './lossless';
+import {
+  parseWithdrawalControls,
+  type WithdrawalControls,
+} from './withdrawal-controls';
 import { isGraded, isPsa10, type PoolComposition } from './card-view';
 import {
   USERNAME_RE,
@@ -970,6 +974,55 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     return data;
+  }
+
+  // Admin withdrawal controls (withdrawal-controls.ts): the Withdraw and
+  // Touch 'n Go switches, their daily schedules and the TNG floor. Read live
+  // on every withdrawal and config request — one row, no cache, so a switch
+  // takes effect on the next tap.
+  @InjectManager()
+  async withdrawalControls(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<WithdrawalControls> {
+    const [row] = await this.listSiteSettings({}, { take: 1 }, sharedContext);
+    return parseWithdrawalControls(row?.withdrawal_controls ?? null);
+  }
+
+  // Replaces the whole blob (the route validated it) and audits before and
+  // after under the existing site_settings / edit_site_settings pair.
+  @InjectTransactionManager()
+  async editWithdrawalControls(
+    input: { controls: WithdrawalControls; adminId: string; reason: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<WithdrawalControls> {
+    const [row] = await this.listSiteSettings({}, { take: 1 }, sharedContext);
+    const before = {
+      withdrawal_controls: parseWithdrawalControls(
+        row?.withdrawal_controls ?? null,
+      ),
+    };
+    const data = { withdrawal_controls: input.controls };
+    if (row) {
+      await this.updateSiteSettings(
+        { selector: { id: row.id }, data },
+        sharedContext,
+      );
+    } else {
+      await this.createSiteSettings([{ id: 'global', ...data }], sharedContext);
+    }
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'site_settings',
+        entity_id: row?.id ?? 'singleton',
+        action: 'edit_site_settings',
+        before,
+        after: data,
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+    return input.controls;
   }
 
   // ── Referral rebuild (spec 2026-08-24) ─────────────────────────────────
