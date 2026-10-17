@@ -332,6 +332,48 @@ describe('WithdrawForm', () => {
     expect(startWithdrawal).not.toHaveBeenCalled();
   });
 
+  // A destination's own floor (Touch 'n Go: RM 100) is the band's lower edge
+  // once it is chosen — never two different minimums on one screen.
+  it("shows a per-bank floor as the band's minimum for that account", async () => {
+    const TNG_ACCOUNT = {
+      ...READY_ACCOUNT,
+      id: 'acc_tng',
+      bankCode: 'TNG',
+      bankName: "Touch 'n Go",
+      minRm: 100,
+    };
+    await render([READY_ACCOUNT, TNG_ACCOUNT], 1000);
+    const status = () => container.querySelector('section')?.textContent;
+    expect(status()).toContain('RM 50–RM 50,000 per withdrawal');
+    setValue('select[aria-label="Saved bank account"]', TNG_ACCOUNT.id);
+    expect(status()).toContain('RM 100–RM 50,000 per withdrawal');
+    setValue('input[aria-label="Withdrawal amount in RM"]', '80');
+    await submit();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      "Withdrawals must be between RM 100 and RM 50,000 for Touch 'n Go.",
+    );
+    expect(startWithdrawal).not.toHaveBeenCalled();
+  });
+
+  it('groups saved accounts by the country they pay into', async () => {
+    const SG_ACCOUNT = { ...READY_ACCOUNT, id: 'acc_sg', currency: 'SGD' };
+    const groups = () =>
+      [...container.querySelectorAll('optgroup')].map((g) => [
+        g.label,
+        [...g.querySelectorAll('option')].map((o) => o.value),
+      ]);
+    await render([READY_ACCOUNT, SG_ACCOUNT, COOLING_ACCOUNT]);
+    expect(groups()).toEqual([
+      ['Malaysia', [READY_ACCOUNT.id, COOLING_ACCOUNT.id]],
+      ['Singapore', [SG_ACCOUNT.id]],
+    ]);
+    act(() => root.unmount());
+    container.remove();
+    // No Singapore account: no empty Singapore group.
+    await render([READY_ACCOUNT]);
+    expect(groups()).toEqual([['Malaysia', [READY_ACCOUNT.id]]]);
+  });
+
   it('caps a typed or pasted amount at the withdrawable figure', async () => {
     await render();
     fillValidForm('200');
@@ -528,7 +570,9 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
       bonus: 15,
       remaining: 0,
     });
-    expect(status()).toBe('RM 120.00WithdrawableMinimum withdrawal RM 50.00');
+    expect(status()).toBe(
+      'RM 120.00WithdrawableRM 50–RM 50,000 per withdrawal',
+    );
     expect(container.querySelector('#withdraw-hold-reason')).toBeNull();
     expect(amountField()).not.toBeNull();
     expect(container.querySelector('#withdraw-hold-reason ol')).toBeNull();
@@ -738,7 +782,7 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
 
   it('explains a balance under the payout floor instead of snapping the field', async () => {
     await render([READY_ACCOUNT], 30);
-    expect(container.textContent).toContain('Minimum withdrawal RM 50.00');
+    expect(container.textContent).toContain('RM 50–RM 50,000 per withdrawal');
     expect(container.querySelector('#withdraw-hold-reason')?.textContent).toBe(
       'You can withdraw once your withdrawable money reaches RM 50.00 (RM 20.00 more).',
     );
@@ -776,7 +820,10 @@ describe('WithdrawForm — why the balance is held, and the way out', () => {
       ],
     });
     await render([{ ...READY_ACCOUNT, id: 'acc_sg', currency: 'SGD' }], 80);
-    expect(container.textContent).toContain('Minimum withdrawal RM 96.05');
+    // The RM band it is judged by, and the S$ that band pays into the bank.
+    expect(container.textContent).toContain(
+      'RM 96.05–RM 30,000 per withdrawal (S$30–S$10,000 to your bank)',
+    );
     expect(container.querySelector('#withdraw-hold-reason')?.textContent).toBe(
       'You can withdraw once your withdrawable money reaches RM 96.05 (RM 16.05 more).',
     );

@@ -17,6 +17,8 @@ export type RegionalRailUi = {
    *  their bank cannot send by mistake. */
   flag: FlagCountry;
   name: string;
+  /** The group its banks sit under in the bank pickers ("Singapore"). */
+  country: string;
   /** The picker row's subline, before the rate. */
   hint: string;
   presets: readonly number[];
@@ -40,6 +42,7 @@ export const REGIONAL_RAILS: Readonly<Record<string, RegionalRailUi>> = {
     symbol: 'S$',
     flag: 'SG',
     name: 'Singapore Dollar',
+    country: 'Singapore',
     hint: 'PayNow QR · bank transfer',
     presets: [50, 100, 300, 1000],
     defaultAmount: '100',
@@ -84,4 +87,25 @@ export function openRails(
       kind === 'deposit' ? rail.depositsEnabled : rail.withdrawalsEnabled;
     return open && rail.rate && ui ? [{ ...rail, rate: rail.rate, ui }] : [];
   });
+}
+
+/** Payout banks or saved accounts split by the country they pay into, for
+ *  the pickers' <optgroup>s: Malaysia (RM, or no currency from an older
+ *  backend) first, then each regional rail's. A group with nothing in it is
+ *  left out (the backend drops a closed rail's banks); a currency this build
+ *  has no rail for keeps a group of its own rather than vanishing. */
+export function bankCountryGroups<T extends { currency?: string }>(
+  items: readonly T[],
+): { country: string; items: T[] }[] {
+  const groups = new Map<string, T[]>([['Malaysia', []]]);
+  for (const item of items) {
+    const country =
+      !item.currency || item.currency === 'MYR'
+        ? 'Malaysia'
+        : (regionalRailUi(item.currency)?.country ?? item.currency);
+    groups.set(country, [...(groups.get(country) ?? []), item]);
+  }
+  return [...groups]
+    .filter(([, list]) => list.length > 0)
+    .map(([country, list]) => ({ country, items: list }));
 }

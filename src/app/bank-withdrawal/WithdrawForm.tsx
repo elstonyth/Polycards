@@ -4,7 +4,12 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, ChevronDown, Clock, Landmark, Lock } from 'lucide-react';
 import { rm, rm0, timeUntil } from '@/lib/format';
-import { openRails, regionalRailUi } from '@/lib/regional-rails';
+import {
+  bankCountryGroups,
+  openRails,
+  regionalRailUi,
+  type RegionalRailUi,
+} from '@/lib/regional-rails';
 import { isWithdrawLocked, walletSplit } from '@/lib/wallet-split';
 import {
   MoneyRows,
@@ -58,6 +63,26 @@ function unusableReason(account: SavedBankAccount, now: Date): string | null {
   }
   const wait = timeUntil(account.usableFrom, now);
   return wait ? `available ${wait}` : null;
+}
+
+/** A band edge as the customer reads it: a whole figure bare (RM 50), a
+ *  converted one with its cents (the S$ rail's floor, RM 96.05). */
+const bandEdge = (
+  n: number,
+  money: (n: number) => string,
+  money0: (n: number) => string,
+) => (Number.isInteger(n) ? money0(n) : money(n));
+
+/** What a regional bank may receive per payout, from whichever edges the
+ *  rail sets ("S$30–S$10,000", "from S$30"); null when it sets neither. */
+function regionalBandText(
+  band: { min: number | null; max: number | null },
+  ui: RegionalRailUi,
+): string | null {
+  const min = band.min !== null ? bandEdge(band.min, ui.money, ui.money0) : '';
+  const max = band.max !== null ? bandEdge(band.max, ui.money, ui.money0) : '';
+  if (min && max) return `${min}–${max}`;
+  return min ? `from ${min}` : max ? `up to ${max}` : null;
 }
 
 /** Digits (commas allowed as thousands separators), at most one dot and two
@@ -315,6 +340,12 @@ export default function WithdrawForm({
       ? selected.minRm
       : null;
   const minRm = accountMin ?? payoutBand.minRm;
+  // The band shown under the figure and named by the band refusal — one
+  // wording for both, the selected account's (per-bank floor included).
+  const floorText = bandEdge(minRm, rm, rm0);
+  const maxText = bandEdge(payoutBand.maxRm, rm, rm0);
+  const band = rail?.withdrawal;
+  const regionalBand = rail ? regionalBandText(rail.withdrawal, rail.ui) : null;
   // What a regional bank receives for this RM amount, at today's payout rate
   // (floored to the cent, exactly as the backend quotes and locks it).
   const payoutRegional =
@@ -324,16 +355,13 @@ export default function WithdrawForm({
     if (submitting || !formValid || withdrawalsClosed || blocked) return;
     setError(null);
     if (amount < minRm || amount > payoutBand.maxRm) {
-      // A rail's floor is a converted figure (RM 96.05): show its cents.
-      const floor = Number.isInteger(minRm) ? rm0(minRm) : rm(minRm);
       setError(
         accountMin === null && rail?.withdrawalRm
-          ? `${rail.ui.payoutNoun} must be between ${floor} and ${rm0(payoutBand.maxRm)} today.`
-          : `Withdrawals must be between ${floor} and ${rm0(payoutBand.maxRm)}${accountMin !== null ? ` for ${selected?.bankName}` : ''}.`,
+          ? `${rail.ui.payoutNoun} must be between ${floorText} and ${maxText} today.`
+          : `Withdrawals must be between ${floorText} and ${maxText}${accountMin !== null ? ` for ${selected?.bankName}` : ''}.`,
       );
       return;
     }
-    const band = rail?.withdrawal;
     if (
       rail &&
       payoutRegional !== null &&
@@ -520,7 +548,7 @@ export default function WithdrawForm({
             </p>
             <p className="mt-1 text-sm text-neutral-300">Withdrawable</p>
             <p className="mt-0.5 text-[13px] text-neutral-400">
-              Minimum withdrawal {rm(payoutBand.minRm)}
+              {`${floorText}–${maxText} per withdrawal${regionalBand ? ` (${regionalBand} to your bank)` : ''}`}
             </p>
             {belowMin && (
               <p
@@ -569,20 +597,25 @@ export default function WithdrawForm({
                     ? 'No account is available yet'
                     : 'Choose a saved account'}
                 </option>
-                {accounts.map((account) => {
-                  const reason = unusableReason(account, now);
-                  return (
-                    <option
-                      key={account.id}
-                      value={account.id}
-                      disabled={!isUsable(account, now)}
-                    >
-                      {account.bankName} ···· {account.accountNumber.slice(-4)}{' '}
-                      — {account.accountHolderName}
-                      {reason ? ` (${reason})` : ''}
-                    </option>
-                  );
-                })}
+                {bankCountryGroups(accounts).map((group) => (
+                  <optgroup key={group.country} label={group.country}>
+                    {group.items.map((account) => {
+                      const reason = unusableReason(account, now);
+                      return (
+                        <option
+                          key={account.id}
+                          value={account.id}
+                          disabled={!isUsable(account, now)}
+                        >
+                          {account.bankName} ····{' '}
+                          {account.accountNumber.slice(-4)} —{' '}
+                          {account.accountHolderName}
+                          {reason ? ` (${reason})` : ''}
+                        </option>
+                      );
+                    })}
+                  </optgroup>
+                ))}
               </select>
             </label>
           )}

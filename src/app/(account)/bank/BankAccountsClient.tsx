@@ -13,6 +13,7 @@ import {
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { WithdrawLink } from '@/components/account/WithdrawLink';
 import { timeUntil } from '@/lib/format';
+import { bankCountryGroups } from '@/lib/regional-rails';
 import { cn } from '@/lib/utils';
 
 // Saved payout accounts — list, add, remove. This list is where withdrawals
@@ -223,10 +224,14 @@ export function BankAccountsClient() {
               <option value="" disabled>
                 {banks == null ? 'Loading banks…' : 'Choose your bank'}
               </option>
-              {(banks ?? []).map((bank) => (
-                <option key={bank.bankCode} value={bank.bankCode}>
-                  {bank.bankName}
-                </option>
+              {bankCountryGroups(banks ?? []).map((group) => (
+                <optgroup key={group.country} label={group.country}>
+                  {group.items.map((bank) => (
+                    <option key={bank.bankCode} value={bank.bankCode}>
+                      {bank.bankName}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </label>
