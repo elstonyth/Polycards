@@ -49,7 +49,15 @@ export function BankCountryToggle({
             )}
           >
             {group.flag && (
-              <CountryFlag country={group.flag} className="h-3.5 w-[21px]" />
+              <CountryFlag
+                country={group.flag}
+                // The white-on-white edge of Singapore's flag needs a dark
+                // hairline on the selected (white) pill.
+                className={cn(
+                  'h-3.5 w-[21px]',
+                  value === group.country && 'ring-neutral-950/20',
+                )}
+              />
             )}
             {group.country}
           </button>
