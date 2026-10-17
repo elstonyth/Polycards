@@ -205,13 +205,19 @@ describe('RequestDeliveryModal confirm and balance', () => {
 });
 
 describe('RequestDeliveryModal review fixes', () => {
-  test('bonus credit cannot pay shipping: a bonus-heavy balance is sent to top up', async () => {
+  test('bonus credit pays shipping: a bonus-heavy balance still ships', async () => {
     mocks.balance = 80;
     mocks.bonus = 60;
     await render([item('pull_a', 'pack', 100)], [SG_ADDRESS]);
-    const text = host.textContent ?? '';
-    expect(text).toContain('bonus credit can only pay for packs');
-    expect(text).toContain('Top up RM 30.00 or more');
+    expect(host.textContent).not.toContain('Not enough balance');
+    expect(button('Request delivery')!.disabled).toBe(false);
+  });
+
+  test('a balance under the fee, bonus included, is sent to top up', async () => {
+    mocks.balance = 40;
+    mocks.bonus = 30;
+    await render([item('pull_a', 'pack', 100)], [SG_ADDRESS]);
+    expect(host.textContent).toContain('Top up RM 10.00 or more');
     expect(button('Request delivery')!.disabled).toBe(true);
   });
 
