@@ -30,6 +30,7 @@ import {
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { PhoneGateAction } from '@/components/account/PhoneGateAction';
+import { BankCountryToggle } from '@/components/account/BankCountryToggle';
 import { cn } from '@/lib/utils';
 import { reopenLabel } from '@/lib/reopen-time';
 
@@ -235,6 +236,7 @@ export default function WithdrawForm({
   const { applyBalance } = useTopUp();
   const [saved, setSaved] = useState<SavedBankAccount[] | null>(null);
   const [accountId, setAccountId] = useState('');
+  const [country, setCountry] = useState('');
   const [amountText, setAmountText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -327,6 +329,22 @@ export default function WithdrawForm({
   const now = new Date();
   const accounts = saved ?? [];
   const usableAccounts = accounts.filter((a) => isUsable(a, now));
+  // One country's saved accounts at a time, picked by flag: the chosen
+  // account's country, else the one the customer tapped, else the first.
+  const countries = bankCountryGroups(accounts);
+  const shown =
+    countries.find((group) => group.items.some((a) => a.id === accountId)) ??
+    countries.find((group) => group.country === country) ??
+    countries[0];
+  function chooseCountry(next: string) {
+    setCountry(next);
+    // Its one usable account is preselected, as the whole list is on load.
+    const usable =
+      countries
+        .find((group) => group.country === next)
+        ?.items.filter((a) => isUsable(a, now)) ?? [];
+    setAccountId(usable.length === 1 ? (usable[0]?.id ?? '') : '');
+  }
 
   // nextAmountText already limited the text to digits, commas and two
   // decimals, so stripping the commas leaves a plain number (or "." -> NaN).
@@ -585,8 +603,19 @@ export default function WithdrawForm({
             </div>
           )}
 
+          <BankCountryToggle
+            groups={countries}
+            value={shown?.country ?? ''}
+            onChange={chooseCountry}
+            className="mt-5"
+          />
           {accounts.length > 0 && (
-            <label className="mt-5 block text-[13px] font-semibold text-neutral-300">
+            <label
+              className={cn(
+                'block text-[13px] font-semibold text-neutral-300',
+                countries.length > 1 ? 'mt-3' : 'mt-5',
+              )}
+            >
               Withdraw to
               <select
                 value={accountId}
@@ -595,29 +624,24 @@ export default function WithdrawForm({
                 className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none focus:border-white/25"
               >
                 <option value="" disabled>
-                  {usableAccounts.length === 0
+                  {!shown?.items.some((a) => isUsable(a, now))
                     ? 'No account is available yet'
                     : 'Choose a saved account'}
                 </option>
-                {bankCountryGroups(accounts).map((group) => (
-                  <optgroup key={group.country} label={group.country}>
-                    {group.items.map((account) => {
-                      const reason = unusableReason(account, now);
-                      return (
-                        <option
-                          key={account.id}
-                          value={account.id}
-                          disabled={!isUsable(account, now)}
-                        >
-                          {account.bankName} ····{' '}
-                          {account.accountNumber.slice(-4)} —{' '}
-                          {account.accountHolderName}
-                          {reason ? ` (${reason})` : ''}
-                        </option>
-                      );
-                    })}
-                  </optgroup>
-                ))}
+                {(shown?.items ?? []).map((account) => {
+                  const reason = unusableReason(account, now);
+                  return (
+                    <option
+                      key={account.id}
+                      value={account.id}
+                      disabled={!isUsable(account, now)}
+                    >
+                      {account.bankName} ···· {account.accountNumber.slice(-4)}{' '}
+                      — {account.accountHolderName}
+                      {reason ? ` (${reason})` : ''}
+                    </option>
+                  );
+                })}
               </select>
             </label>
           )}

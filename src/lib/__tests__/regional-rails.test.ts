@@ -10,22 +10,22 @@ describe('bankCountryGroups', () => {
 
   it('puts Malaysia first and Singapore after, in list order', () => {
     expect(bankCountryGroups([DBS, MAYBANK, OLD_BACKEND])).toEqual([
-      { country: 'Malaysia', items: [MAYBANK, OLD_BACKEND] },
-      { country: 'Singapore', items: [DBS] },
+      { country: 'Malaysia', flag: 'MY', items: [MAYBANK, OLD_BACKEND] },
+      { country: 'Singapore', flag: 'SG', items: [DBS] },
     ]);
   });
 
   it('leaves out a country with no banks', () => {
     expect(bankCountryGroups([MAYBANK])).toEqual([
-      { country: 'Malaysia', items: [MAYBANK] },
+      { country: 'Malaysia', flag: 'MY', items: [MAYBANK] },
     ]);
     expect(bankCountryGroups([DBS])).toEqual([
-      { country: 'Singapore', items: [DBS] },
+      { country: 'Singapore', flag: 'SG', items: [DBS] },
     ]);
     expect(bankCountryGroups([])).toEqual([]);
   });
 
-  it('keeps a bank in a currency this build has no rail for', () => {
+  it('keeps a bank in a currency this build has no rail for, with no flag', () => {
     const USDT = { bankCode: 'TRC20', bankName: 'USDT', currency: 'USDT' };
     expect(bankCountryGroups([USDT])).toEqual([
       { country: 'USDT', items: [USDT] },

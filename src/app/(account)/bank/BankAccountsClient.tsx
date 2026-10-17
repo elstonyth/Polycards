@@ -12,6 +12,7 @@ import {
 } from '@/lib/actions/vault';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { WithdrawLink } from '@/components/account/WithdrawLink';
+import { BankCountryToggle } from '@/components/account/BankCountryToggle';
 import { timeUntil } from '@/lib/format';
 import { bankCountryGroups } from '@/lib/regional-rails';
 import { cn } from '@/lib/utils';
@@ -68,6 +69,7 @@ export function BankAccountsClient() {
 
   // Add-form state
   const [adding, setAdding] = useState(false);
+  const [country, setCountry] = useState('Malaysia');
   const [bankCode, setBankCode] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [holderName, setHolderName] = useState('');
@@ -89,6 +91,12 @@ export function BankAccountsClient() {
       cancelled = true;
     };
   }, []);
+
+  // One country's banks at a time, picked by flag. Falls back to the first
+  // country when the chosen one has none (its rail closed meanwhile).
+  const countries = bankCountryGroups(banks ?? []);
+  const shown =
+    countries.find((group) => group.country === country) ?? countries[0];
 
   const formValid =
     bankCode !== '' &&
@@ -213,6 +221,15 @@ export function BankAccountsClient() {
 
       {adding ? (
         <div className="rounded-2xl border border-white/10 bg-neutral-900 p-4">
+          <BankCountryToggle
+            groups={countries}
+            value={shown?.country ?? ''}
+            onChange={(next) => {
+              setCountry(next);
+              setBankCode('');
+            }}
+            className="mb-3"
+          />
           <label className="block text-[13px] font-semibold text-neutral-300">
             Bank
             <select
@@ -224,14 +241,10 @@ export function BankAccountsClient() {
               <option value="" disabled>
                 {banks == null ? 'Loading banks…' : 'Choose your bank'}
               </option>
-              {bankCountryGroups(banks ?? []).map((group) => (
-                <optgroup key={group.country} label={group.country}>
-                  {group.items.map((bank) => (
-                    <option key={bank.bankCode} value={bank.bankCode}>
-                      {bank.bankName}
-                    </option>
-                  ))}
-                </optgroup>
+              {(shown?.items ?? []).map((bank) => (
+                <option key={bank.bankCode} value={bank.bankCode}>
+                  {bank.bankName}
+                </option>
               ))}
             </select>
           </label>

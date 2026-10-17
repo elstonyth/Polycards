@@ -89,23 +89,40 @@ export function openRails(
   });
 }
 
+/** One country's share of a bank picker: its name, its flag (none for a
+ *  currency this build has no rail for), and its banks or saved accounts. */
+export type BankCountryGroup<T> = {
+  country: string;
+  flag?: FlagCountry;
+  items: T[];
+};
+
+/** The country a bank pays into, by its currency: RM (or none, from an
+ *  older backend) is Malaysia; a currency with no rail here is named as is. */
+function bankCountry(
+  currency: string | undefined,
+): Omit<BankCountryGroup<never>, 'items'> {
+  if (!currency || currency === 'MYR')
+    return { country: 'Malaysia', flag: 'MY' };
+  const ui = regionalRailUi(currency);
+  return ui ? { country: ui.country, flag: ui.flag } : { country: currency };
+}
+
 /** Payout banks or saved accounts split by the country they pay into, for
- *  the pickers' <optgroup>s: Malaysia (RM, or no currency from an older
- *  backend) first, then each regional rail's. A group with nothing in it is
- *  left out (the backend drops a closed rail's banks); a currency this build
- *  has no rail for keeps a group of its own rather than vanishing. */
+ *  the pickers' country toggle: Malaysia first, then each regional rail's. A
+ *  group with nothing in it is left out (the backend drops a closed rail's
+ *  banks); a currency this build has no rail for keeps a group of its own
+ *  rather than vanishing. */
 export function bankCountryGroups<T extends { currency?: string }>(
   items: readonly T[],
-): { country: string; items: T[] }[] {
-  const groups = new Map<string, T[]>([['Malaysia', []]]);
+): BankCountryGroup<T>[] {
+  const groups = new Map<string, BankCountryGroup<T>>([
+    ['Malaysia', { ...bankCountry(undefined), items: [] }],
+  ]);
   for (const item of items) {
-    const country =
-      !item.currency || item.currency === 'MYR'
-        ? 'Malaysia'
-        : (regionalRailUi(item.currency)?.country ?? item.currency);
-    groups.set(country, [...(groups.get(country) ?? []), item]);
+    const where = bankCountry(item.currency);
+    const group = groups.get(where.country) ?? { ...where, items: [] };
+    groups.set(where.country, { ...group, items: [...group.items, item] });
   }
-  return [...groups]
-    .filter(([, list]) => list.length > 0)
-    .map(([country, list]) => ({ country, items: list }));
+  return [...groups.values()].filter((group) => group.items.length > 0);
 }

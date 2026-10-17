@@ -355,23 +355,50 @@ describe('WithdrawForm', () => {
     expect(startWithdrawal).not.toHaveBeenCalled();
   });
 
-  it('groups saved accounts by the country they pay into', async () => {
-    const SG_ACCOUNT = { ...READY_ACCOUNT, id: 'acc_sg', currency: 'SGD' };
-    const groups = () =>
-      [...container.querySelectorAll('optgroup')].map((g) => [
-        g.label,
-        [...g.querySelectorAll('option')].map((o) => o.value),
-      ]);
+  it("lists one country's saved accounts at a time, switched by flag", async () => {
+    const SG_ACCOUNT = {
+      ...READY_ACCOUNT,
+      id: 'acc_sg',
+      bankName: 'DBS Bank',
+      currency: 'SGD',
+    };
+    const select = () =>
+      container.querySelector<HTMLSelectElement>(
+        'select[aria-label="Saved bank account"]',
+      )!;
+    const listed = () =>
+      [...select().options].map((o) => o.value).filter(Boolean);
+    const toggle = () =>
+      [...container.querySelectorAll('[role="group"] button')].map(
+        (b) =>
+          `${b.textContent}${b.getAttribute('aria-pressed') === 'true' ? ' (on)' : ''}`,
+      );
     await render([READY_ACCOUNT, SG_ACCOUNT, COOLING_ACCOUNT]);
-    expect(groups()).toEqual([
-      ['Malaysia', [READY_ACCOUNT.id, COOLING_ACCOUNT.id]],
-      ['Singapore', [SG_ACCOUNT.id]],
-    ]);
+    expect(toggle()).toEqual(['Malaysia (on)', 'Singapore']);
+    expect(listed()).toEqual([READY_ACCOUNT.id, COOLING_ACCOUNT.id]);
+
+    const singapore = [
+      ...container.querySelectorAll<HTMLButtonElement>('[role="group"] button'),
+    ].find((b) => b.textContent === 'Singapore')!;
+    act(() => singapore.click());
+    expect(toggle()).toEqual(['Malaysia', 'Singapore (on)']);
+    expect(listed()).toEqual([SG_ACCOUNT.id]);
+    // Its one usable account is chosen for the customer.
+    expect(select().value).toBe(SG_ACCOUNT.id);
+
     act(() => root.unmount());
     container.remove();
-    // No Singapore account: no empty Singapore group.
+    // The only usable account is Singapore's: preselected, so that flag is on.
+    await render([COOLING_ACCOUNT, SG_ACCOUNT]);
+    expect(toggle()).toEqual(['Malaysia', 'Singapore (on)']);
+    expect(select().value).toBe(SG_ACCOUNT.id);
+
+    act(() => root.unmount());
+    container.remove();
+    // One country only: no toggle, the plain list.
     await render([READY_ACCOUNT]);
-    expect(groups()).toEqual([['Malaysia', [READY_ACCOUNT.id]]]);
+    expect(toggle()).toEqual([]);
+    expect(listed()).toEqual([READY_ACCOUNT.id]);
   });
 
   it('caps a typed or pasted amount at the withdrawable figure', async () => {
