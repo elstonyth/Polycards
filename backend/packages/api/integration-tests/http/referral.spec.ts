@@ -280,6 +280,11 @@ medusaIntegrationTestRunner({
         );
         expect(card.status).toBe(200);
         expect(card.data.week).toEqual(rLive.data.week);
+        expect(card.data.downline_count).toBe(1);
+        expect(card.data.payout_limits).toEqual({
+          auto_approve_max_cents: 100_000,
+          line_ceiling_cents: 5_000_000,
+        });
         expect(card.data.downline).toEqual([
           expect.objectContaining({
             customer_id: attribution.customer_id,
@@ -372,6 +377,27 @@ medusaIntegrationTestRunner({
             rate_bp: 50,
             amount_cents: 500,
             status: 'paid',
+          }),
+        ]);
+
+        // A deleted referral stays listed by id, unnamed, its spend still
+        // counted (the close counts it too).
+        await getContainer()
+          .resolve(Modules.CUSTOMER)
+          .softDeleteCustomers([attribution.customer_id]);
+        const cardDeleted = await unwrapResponse(
+          api.get(`/admin/customers/${attribution.referrer_id}/referral`, {
+            headers: adminHeaders(),
+          }),
+        );
+        expect(cardDeleted.status).toBe(200);
+        expect(cardDeleted.data.downline_count).toBe(1);
+        expect(cardDeleted.data.downline).toEqual([
+          expect.objectContaining({
+            customer_id: attribution.customer_id,
+            name: null,
+            email: null,
+            lifetime_spend_cents: 150_000,
           }),
         ]);
       });

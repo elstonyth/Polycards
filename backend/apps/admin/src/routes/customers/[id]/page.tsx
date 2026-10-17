@@ -357,6 +357,21 @@ const GroupCard = ({ customerId }: { customerId: string }) => {
   );
 };
 
+// When this week's line pays: auto-approval holds a whole run with any line
+// over its limit for an admin, and the close voids a line over the ceiling.
+// Never promise Wednesday when one of those applies.
+const payoutNote = (
+  projectedCents: number,
+  limits: CustomerReferralCard['payout_limits'],
+): string =>
+  projectedCents <= 0
+    ? 'Nothing to pay yet.'
+    : projectedCents > limits.line_ceiling_cents
+      ? `Over the ${rm(limits.line_ceiling_cents / 100)} line ceiling — the close voids it for review, so it will not pay as is.`
+      : projectedCents > limits.auto_approve_max_cents
+        ? `Over ${rm(limits.auto_approve_max_cents / 100)} — an admin must approve the week on the Referrals page before it pays.`
+        : 'Usually paid the Wednesday after it closes; a week holding any line over the auto-approve limit waits for an admin.';
+
 // Referral card (rebuild, spec 2026-08-24): who referred them, their direct
 // downline, their weekly payout lines, and the partner-rate control. The rate
 // REPLACES the tier table for this customer; bounds come from the Referrals
@@ -484,21 +499,27 @@ const ReferralCardBody = ({
           </div>
         </dd>
         <dt className="text-ui-fg-subtle">Direct referrals</dt>
-        <dd>{data.downline.length}</dd>
-        <dt className="text-ui-fg-subtle">This week</dt>
-        <dd>
-          <div className="tabular-nums">
-            {rm(data.week.turnover_cents / 100)} spend ×{' '}
-            {data.week.rate_bp / 100}% ={' '}
-            <span className="font-medium">
-              {rm(data.week.projected_cents / 100)}
-            </span>
-          </div>
-          <Text size="xsmall" className="text-ui-fg-muted">
-            {rateSource} · week of {data.week.start}, still open. Paid the
-            Wednesday after it closes.
-          </Text>
-        </dd>
+        {/* ?? and the week guard: during a rolling deploy an older API
+            instance can answer without these fields. */}
+        <dd>{data.downline_count ?? data.downline.length}</dd>
+        {data.week && (
+          <>
+            <dt className="text-ui-fg-subtle">This week</dt>
+            <dd>
+              <div className="tabular-nums">
+                {rm(data.week.turnover_cents / 100)} spend ×{' '}
+                {data.week.rate_bp / 100}% ={' '}
+                <span className="font-medium">
+                  {rm(data.week.projected_cents / 100)}
+                </span>
+              </div>
+              <Text size="xsmall" className="text-ui-fg-muted">
+                {rateSource} · week of {data.week.start}, still open.{' '}
+                {payoutNote(data.week.projected_cents, data.payout_limits)}
+              </Text>
+            </dd>
+          </>
+        )}
         <dt className="text-ui-fg-subtle">Total paid</dt>
         <dd className="tabular-nums">{rm(paidCents / 100)}</dd>
         <dt className="text-ui-fg-subtle">Partner rate</dt>
@@ -591,7 +612,7 @@ const ReferralCardBody = ({
               <Table.Header>
                 <Table.Row>
                   <Table.HeaderCell>Player</Table.HeaderCell>
-                  <Table.HeaderCell>Joined</Table.HeaderCell>
+                  <Table.HeaderCell>Referred since</Table.HeaderCell>
                   <Table.HeaderCell className="text-right">
                     This week
                   </Table.HeaderCell>

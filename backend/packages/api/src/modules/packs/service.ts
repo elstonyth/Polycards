@@ -1726,7 +1726,7 @@ class PacksModuleService extends MedusaService({
         before: { status: 'draft' },
         after: { status: 'approved' },
         reason:
-          `week ${new Date(run.week_start).toISOString().slice(0, 10)}` +
+          `week ${referralWeekFor(new Date(run.week_start)).weekStartIso}` +
           (input.reason ? `: ${input.reason}` : ''),
       },
       sharedContext,
@@ -2017,6 +2017,8 @@ class PacksModuleService extends MedusaService({
         `Only an approved run can be paid (this one is '${run.status}').`,
       );
     }
+    // The RF payload keeps the UTC date its stored rows have always carried;
+    // the audit reason below names the week by its MYT Tuesday like the screens.
     const weekStartIso = new Date(run.week_start).toISOString().slice(0, 10);
     const pending = await this.listWeeklySettlementLines(
       { settlement_id: run.id, status: 'pending' },
@@ -2139,7 +2141,7 @@ class PacksModuleService extends MedusaService({
           action: 'pay_settlement',
           before: { status: run.status },
           after: { paid, skipped },
-          reason: `week ${weekStartIso}`,
+          reason: `week ${referralWeekFor(new Date(run.week_start)).weekStartIso}`,
         },
         sharedContext,
       );
@@ -2170,6 +2172,31 @@ class PacksModuleService extends MedusaService({
       status: string;
     }[];
   }> {
+    return {
+      ...(await this.referralLiveWeek(input, sharedContext)),
+      history: await this.settlementHistoryFor(
+        { customerId: input.customerId },
+        sharedContext,
+      ),
+    };
+  }
+
+  // The still-open week's live numbers, shared by the storefront panel and the
+  // admin referral card so the two can never disagree.
+  @InjectManager()
+  async referralLiveWeek(
+    input: { customerId: string; now?: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    downline_count: number;
+    week: {
+      start: string;
+      turnover_cents: number;
+      rate_bp: number;
+      projected_cents: number;
+      partner: boolean;
+    };
+  }> {
     const week = referralWeekFor(input.now ?? new Date());
 
     // One joined aggregate instead of materialising every downline id into an
@@ -2185,16 +2212,19 @@ class PacksModuleService extends MedusaService({
       // exactly what closeReferralWeek does (it drops a downline whose net
       // week turnover is <= 0). Summing raw rows let one refunded member drag
       // the projection below the real payout, and at scale onto a different
-      // TIER (bug review 2026-08-25).
+      // TIER (bug review 2026-08-25). The week window sits in the JOIN, not
+      // a CASE, so the (customer_id, created_at) index range-scans one week
+      // instead of reading every member's whole ledger; a member with no rows
+      // in it still gets one NULL-joined row, so the count is unchanged.
       'SELECT COUNT(*)::bigint AS downline_count, ' +
         '  COALESCE(SUM(GREATEST(per_customer, 0)), 0)::bigint AS turnover_cents ' +
         'FROM ( ' +
         '  SELECT ra.customer_id, ' +
-        '    COALESCE(SUM(CASE WHEN ct.created_at >= ? AND ct.created_at < ? ' +
-        `      THEN -${normalSenSql('ct.')} ELSE 0 END), 0)::bigint AS per_customer ` +
+        `    COALESCE(SUM(-${normalSenSql('ct.')}), 0)::bigint AS per_customer ` +
         '  FROM referral_attribution ra ' +
         '  LEFT JOIN credit_transaction ct ON ct.customer_id = ra.customer_id ' +
         "    AND ct.reason = 'pack_open' AND ct.deleted_at IS NULL " +
+        '    AND ct.created_at >= ? AND ct.created_at < ? ' +
         '  WHERE ra.referrer_id = ? AND ra.deleted_at IS NULL ' +
         '  GROUP BY ra.customer_id ' +
         ') d',
@@ -2219,10 +2249,6 @@ class PacksModuleService extends MedusaService({
         projected_cents: payoutCents(turnoverCents, rateBp),
         partner: partnerBp != null,
       },
-      history: await this.settlementHistoryFor(
-        { customerId: input.customerId },
-        sharedContext,
-      ),
     };
   }
 

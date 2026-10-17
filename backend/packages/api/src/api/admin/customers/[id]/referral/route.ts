@@ -8,7 +8,11 @@ import { MedusaError, Modules } from '@medusajs/framework/utils';
 import type { ICustomerModuleService } from '@medusajs/types';
 import { reqReason } from '../../../rewards-settings/validate';
 import { resolveGroupPolicyForCustomer } from '../../../../../modules/packs/group-policy';
-import { referralWeekFor } from '../../../../../modules/packs/referral';
+import {
+  MAX_SETTLEMENT_LINE_MYR,
+  REFERRAL_AUTO_APPROVE_MAX_LINE_MYR,
+  referralWeekFor,
+} from '../../../../../modules/packs/referral';
 
 // GET /admin/customers/:id/referral — the Customer-360 referral card: who
 // referred them, their direct downline with each member's spend, this week's
@@ -21,8 +25,11 @@ export async function GET(
   const customerId = req.params.id;
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
   const customers = req.scope.resolve<ICustomerModuleService>(Modules.CUSTOMER);
+  // ONE instant for the header week and the per-member week spend, so a read
+  // across the Tuesday 00:00 MYT cutover cannot mix two weeks.
+  const now = new Date();
 
-  const [[referredBy], downline, [state], lines, groupPolicy, summary] =
+  const [[referredBy], downline, [state], lines, groupPolicy, live] =
     await Promise.all([
       packs.listReferralAttributions({ customer_id: customerId }, { take: 1 }),
       // shortcut: the card lists at most 1000 members; page it if a partner
@@ -37,13 +44,16 @@ export async function GET(
         { order: { created_at: 'DESC' }, take: 50 },
       ),
       resolveGroupPolicyForCustomer(req.scope, customerId),
-      packs.referralStorefrontSummary({ customerId }),
+      packs.referralLiveWeek({ customerId, now }),
     ]);
 
   const memberIds = downline.map((d) => d.customer_id);
   const settlementIds = [...new Set(lines.map((l) => l.settlement_id))];
   // ONE batched lookup each for spend, names and line weeks, never per row.
-  const spend = await packs.referralDownlineSpend({ customerIds: memberIds });
+  const spend = await packs.referralDownlineSpend({
+    customerIds: memberIds,
+    now,
+  });
   const people = memberIds.length
     ? await customers.listCustomers(
         { id: memberIds },
@@ -84,7 +94,15 @@ export async function GET(
     referred_by: referredBy?.referrer_id ?? null,
     partner_referral_bp: state?.partner_referral_bp ?? null,
     partner_group: partnerGroup,
-    week: summary.week,
+    // Uncapped, unlike the downline list below.
+    downline_count: live.downline_count,
+    week: live.week,
+    // What can stop the week's line paying on Wednesday: over the auto-approve
+    // limit it waits for an admin; over the ceiling the close voids it.
+    payout_limits: {
+      auto_approve_max_cents: REFERRAL_AUTO_APPROVE_MAX_LINE_MYR * 100,
+      line_ceiling_cents: MAX_SETTLEMENT_LINE_MYR * 100,
+    },
     // A deleted customer has no row — the id alone still identifies them.
     downline: downline.map((d) => {
       const c = personById.get(d.customer_id);
