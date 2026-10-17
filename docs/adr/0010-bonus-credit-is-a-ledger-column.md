@@ -24,7 +24,8 @@ must be played through once, like a deposit.)
 - A pack open spends bonus FIRST (`settleOpen`), stamping `−bonus used`; only
   the rest draws on deposits, so bonus-funded play banks no playthrough.
 - Every other debit (withdrawal, delivery fee, admin deduction) is floored on
-  the Normal Balance inside `mutateCreditAtomic`.
+  the Normal Balance inside `mutateCreditAtomic`. (Since ADR 0014, 2026-10-17,
+  a delivery fee spends bonus first too, and a cancel refunds that part as bonus.)
 - Withdrawable = `max(0, available − bonus)` once playthrough is done.
   (Amended by ADR 0011: `max(0, available − bonus − playthrough remaining)`
   at all times; back to this rule by ADR 0013, with 0 until playthrough is

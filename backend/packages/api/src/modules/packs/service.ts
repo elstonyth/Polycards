@@ -340,7 +340,9 @@ export type CreditMutationInput = {
    * spend-only bonus. Only a 'bonus_grant' row may carry it, and it must equal
    * the row's amount in sen. A 'reward_credit' row (task / challenge prize) or
    * a 'voucher_claim' row (VIP voucher) is stamped whole-row bonus by mutateCreditAtomic itself (2026-10-11). Pack
-   * opens compute theirs in settleOpen.
+   * opens compute theirs in settleOpen. A 'delivery_fee' charge takes its
+   * bonus share itself (bonus first, ADR 0014); a 'delivery_fee' refund passes
+   * the share its charge took, 0..amount, so it goes back as bonus.
    */
   bonusCents?: number;
 };
@@ -3603,10 +3605,33 @@ class PacksModuleService extends MedusaService({
         );
       }
       bonusDeltaCents = deltaCents;
+    } else if (input.reason === 'delivery_fee') {
+      // Bonus credit may pay delivery fees, bonus first like a pack open
+      // (owner rule 2026-10-17, ADR 0014). A refund returns the bonus part its
+      // charge took AS bonus, or request-then-cancel would launder bonus into
+      // withdrawable cash.
+      if (deltaCents < 0) {
+        if (input.bonusCents) {
+          throw new MedusaError(
+            MedusaError.Types.INVALID_DATA,
+            'A delivery fee charge takes its bonus share itself.',
+          );
+        }
+        bonusDeltaCents = -Math.min(bonusBeforeCents, -deltaCents);
+      } else {
+        const back = input.bonusCents ?? 0;
+        if (!Number.isInteger(back) || back < 0 || back > deltaCents) {
+          throw new MedusaError(
+            MedusaError.Types.INVALID_DATA,
+            'A delivery fee refund can return at most its own amount as bonus.',
+          );
+        }
+        bonusDeltaCents = back;
+      }
     } else if (input.bonusCents) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
-        'Only a bonus_grant row may carry bonusCents.',
+        'Only a bonus_grant or delivery_fee row may carry bonusCents.',
       );
     } else if (
       input.reason === 'reward_credit' ||
@@ -3657,10 +3682,12 @@ class PacksModuleService extends MedusaService({
     }
 
     // 3) Floor check — covers both "enough credit to open" and "no overdraft".
-    //    Only a pack open may spend bonus credit; every other debit is floored
-    //    against the NORMAL balance (a bonus take-back was bounded above).
+    //    Only a pack open or a delivery fee may spend bonus credit; every other
+    //    debit is floored against the NORMAL balance (a bonus take-back was
+    //    bounded above).
     const spendableCents =
       input.reason === 'pack_open' ||
+      input.reason === 'delivery_fee' ||
       input.reason === 'bonus_grant' ||
       input.reason === 'reward_credit' ||
       input.reason === 'voucher_claim'
@@ -9353,12 +9380,23 @@ class PacksModuleService extends MedusaService({
         }
         const refund = -storedWallet || 0; // stored charge is negative; || 0 kills -0
         if (refund > 0) {
+          // The bonus part the charge took goes back as bonus (ADR 0014).
+          const [taken] = await em.execute<{ bonus_cents: string | null }[]>(
+            'SELECT COALESCE(SUM(-bonus_cents), 0)::bigint AS bonus_cents FROM credit_transaction ' +
+              "WHERE customer_id = ? AND reason = 'delivery_fee' AND reference = ? " +
+              'AND amount < 0 AND deleted_at IS NULL',
+            [order.customer_id, input.orderId],
+          );
           await this.mutateCreditAtomic(
             {
               customerId: order.customer_id,
               amount: refund,
               reason: 'delivery_fee',
               reference: `refund:${input.orderId}`,
+              bonusCents: Math.min(
+                Math.max(0, Number(taken?.bonus_cents ?? 0)),
+                Math.round(refund * 100),
+              ),
             },
             sharedContext,
           );
