@@ -44,7 +44,8 @@ export const VaultTab = ({ customerId }: { customerId: string }) => {
   });
   // Same key as the Gifts and bonus tab, so a send or revoke there refreshes
   // this list too.
-  const { data: gifts } = useCustomerPackGifts(customerId);
+  const { data: gifts, isError: giftsFailed } =
+    useCustomerPackGifts(customerId);
   // Still in the player's vault as a pack: not opened yet, or a claim that
   // never produced a card (stuck — revoke it from Gifts and bonus).
   const unopenedGifts = (gifts ?? []).filter(
@@ -95,6 +96,14 @@ export const VaultTab = ({ customerId }: { customerId: string }) => {
         />
       </div>
 
+      {/* A failed read must not look like "no gifts held". */}
+      {giftsFailed && !gifts && (
+        <div className="border-t px-6 py-4">
+          <Text size="small" className="text-ui-fg-error">
+            {t('customer360.gift.loadError')}
+          </Text>
+        </div>
+      )}
       {unopenedGifts.length > 0 && (
         <>
           <div className="border-t px-6 py-4">
