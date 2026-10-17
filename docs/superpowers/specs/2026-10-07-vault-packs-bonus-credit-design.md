@@ -1,5 +1,16 @@
 # Vault Packs (gifted packs) + Bonus Credit (泥码) — design
 
+> **2026-10-17 operator amendment — leaderboard and challenge only:** pack
+> opens paid with bonus credit now count exactly like normal-credit opens:
+> full card value for both `pack` and `bonus` pulls in the all-time board,
+> weekly ranking, personal weekly total and community pool. All-time board
+> eligibility uses full net pack-open spend. This includes existing pulls;
+> granting credit alone adds no pulled value. Gift/free/reward pulls remain
+> excluded. Existing settlement snapshots remain frozen. VIP, tasks,
+> achievements, referral commission, feed, withdrawal and playthrough rules
+> remain unchanged. This supersedes the board exclusions and normal-share
+> weighting described below.
+
 Date: 2026-10-07. Approved section by section in chat by the operator (Elston) the
 same day, relaying the ask from Wei Yuan.
 

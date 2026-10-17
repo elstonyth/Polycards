@@ -174,6 +174,7 @@ import { consumeExternalSen } from './external-funded';
 import {
   BONUS_BP_FULL,
   BONUS_NOT_SPENDABLE_MESSAGE,
+  LEADERBOARD_PULL_SQL,
   NORMAL_SHARE_SQL,
   REAL_MONEY_PULL_SQL,
   bonusShareSen,
@@ -2401,8 +2402,8 @@ class PacksModuleService extends MedusaService({
         // shipped a card before claiming (review 2026-08-25 finding 2). This
         // also rides IDX_pull_customer_id_rolled_at instead of scanning for a
         // status that has no index.
-        // Gifted packs and bonus-funded opens count toward nothing (spec
-        // 2026-10-07): bonus play must not farm achievements and their prizes.
+        // Gifted packs and bonus-funded opens do not count toward achievements
+        // (spec 2026-10-07); board eligibility is separate.
         em.execute<{ n: string }[]>(
           'SELECT COUNT(*)::bigint AS n FROM pull ' +
             "WHERE customer_id = ? AND deleted_at IS NULL AND source NOT IN ('gift', 'bonus')",
@@ -7267,8 +7268,8 @@ class PacksModuleService extends MedusaService({
   // RANKING = volume, the pulled value the board displays (operator
   // 2026-10-12: ranking by spend while showing pulled value read as a broken
   // board — a lower figure sat above a higher one). Spend still decides who
-  // is ON the board: only players with real money spent on pack opens, from
-  // the credit ledger (reason 'pack_open', the same rows the charge step
+  // is ON the board: players spending normal or bonus credit on pack opens,
+  // from the credit ledger (reason 'pack_open', the same rows the charge step
   // writes); it also breaks a tie on the rounded value. points = spend(MYR) ×
   // 100 (the display convention the storefront always used).
   //
@@ -7276,8 +7277,7 @@ class PacksModuleService extends MedusaService({
   // draw-time USD value (recorded_value_usd, stamped by the open workflows so a
   // mid-week price sync can't rewrite history), falling back to live
   // market_value(USD) × the card's multiplier for pre-backfill rows — × the
-  // live FX rate. Only pulls real money paid for count (REAL_MONEY_PULL_SQL:
-  // 'pack' and part-bonus 'bonus' rows), each in its normal share: reward-box
+  // live FX rate. Both 'pack' and 'bonus' pulls count at full value: reward-box
   // prizes, free welcome pulls and gifts are not played packs (positive
   // filter, so a future source can never leak onto the board by default).
   //
@@ -7317,29 +7317,24 @@ class PacksModuleService extends MedusaService({
       // window subtracts from that week even if its original charge predates
       // it — intended (the week's honest net spend), not a bug.
       'WITH spend AS ( ' +
-        // Normal part only: bonus-funded opens count toward nothing (spec
-        // 2026-10-07); bonus_cents is ≤ 0 on an open, ≥ 0 on its reversal.
-        `  SELECT customer_id, SUM(-${normalSenSql()})::bigint AS spend_cents ` +
+        // Board participation includes bonus; VIP/referral/cash totals do not.
+        '  SELECT customer_id, SUM(-ROUND(amount * 100))::bigint AS spend_cents ' +
         '    FROM credit_transaction ' +
         "   WHERE reason = 'pack_open' " +
         '     AND deleted_at IS NULL AND customer_id IS NOT NULL ' +
         (since === null ? '' : '     AND created_at >= ?::timestamptz ') +
         '   GROUP BY customer_id ' +
-        `   HAVING SUM(-${normalSenSql()}) > 0 ` +
+        '   HAVING SUM(-ROUND(amount * 100)) > 0 ' +
         '), wins AS ( ' +
-        // Each pull's value counts in its NORMAL share only (bonus_bp), the
-        // same split as the spend above, so a part-bonus open neither drops
-        // its card nor counts its bonus part.
+        // Bonus-funded and normal-credit opens contribute the same full value.
         '  SELECT pu.customer_id, COUNT(*) AS pulls, ' +
         '         SUM((' +
         PULLED_VALUE_USD_SQL +
-        ') * ' +
-        NORMAL_SHARE_SQL +
-        ') AS volume_usd ' +
+        ')) AS volume_usd ' +
         '    FROM pull pu ' +
         '    LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
         '   WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND ' +
-        REAL_MONEY_PULL_SQL +
+        LEADERBOARD_PULL_SQL +
         ' ' +
         (since === null ? '' : '     AND pu.rolled_at >= ?::timestamptz ') +
         '   GROUP BY pu.customer_id ' +
@@ -7445,7 +7440,7 @@ class PacksModuleService extends MedusaService({
   // an optional TIER filter. Raw SQL rather than listPulls because the tier is
   // a join: rarity is a PACK-level property (pack_odds), not a column on pull,
   // so "the last N Immortal pulls" needs the (pack_id, card_id) odds row.
-  // Only source='pack' rows — the same positive filter as leaderboardTop
+  // Only source='pack' rows — bonus-funded board eligibility is separate.
   // (reward prizes are private vault items, free welcome pulls a signup gift).
   // The scan rides IDX_pull_rolled_at and stops at `limit` matches; a tier
   // nobody has hit yet walks the whole ledger, once per 5s (the route's cache).
@@ -11876,7 +11871,7 @@ class PacksModuleService extends MedusaService({
   // customers (recorded draw-time USD value, live FMV × multiplier fallback
   // for pre-backfill rows, × FX → MYR) since the week anchor (shared
   // CHALLENGE_WEEK_ANCHOR_CTE). Mirrors leaderboardTop's wins CTE
-  // (real-money pulls in their normal share); read-only, so the
+  // (normal and bonus-credit pulls in full); read-only, so the
   // pool is REAL ledger data even while the reward settlement engine is inert.
   @InjectManager()
   async challengeWeekPool(
@@ -11891,13 +11886,11 @@ class PacksModuleService extends MedusaService({
         'SELECT ' +
         '  ROUND(COALESCE(SUM((' +
         PULLED_VALUE_USD_SQL +
-        ') * ' +
-        NORMAL_SHARE_SQL +
-        '), 0) * ? * 100) / 100 AS pooled_myr ' +
+        ')), 0) * ? * 100) / 100 AS pooled_myr ' +
         '  FROM pull pu ' +
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
         ' WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND ' +
-        REAL_MONEY_PULL_SQL +
+        LEADERBOARD_PULL_SQL +
         ' ' +
         '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
         '   AND pu.rolled_at <  (SELECT end_utc FROM anchor)',
@@ -11926,13 +11919,11 @@ class PacksModuleService extends MedusaService({
         'SELECT pu.customer_id, COUNT(*) AS pulls, ' +
         '       ROUND(SUM((' +
         PULLED_VALUE_USD_SQL +
-        ') * ' +
-        NORMAL_SHARE_SQL +
-        ') * ? * 100) / 100 AS volume_myr ' +
+        ')) * ? * 100) / 100 AS volume_myr ' +
         '  FROM pull pu ' +
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
         ' WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND ' +
-        REAL_MONEY_PULL_SQL +
+        LEADERBOARD_PULL_SQL +
         ' ' +
         '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
         '   AND pu.rolled_at <  (SELECT end_utc FROM anchor) ' +
@@ -11956,7 +11947,7 @@ class PacksModuleService extends MedusaService({
   // The SAME weekly pulled-value figure as challengeWeekTop, for ONE customer.
   // Exists because the board is a top-10 SLICE: a player below it has no row
   // there, so nothing can say how far off they are. Shares the anchor CTE, the
-  // pulled-value expression and the real-money filter with the board and
+  // pulled-value expression and the paid-pull filter with the board and
   // the pool, so the gap the storefront renders can never disagree with the
   // row it is measured against.
   //
@@ -11979,13 +11970,11 @@ class PacksModuleService extends MedusaService({
         'SELECT COUNT(*) AS pulls, ' +
         '       ROUND(COALESCE(SUM((' +
         PULLED_VALUE_USD_SQL +
-        ') * ' +
-        NORMAL_SHARE_SQL +
-        '), 0) * ? * 100) / 100 AS volume_myr ' +
+        ')), 0) * ? * 100) / 100 AS volume_myr ' +
         '  FROM pull pu ' +
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
         ' WHERE pu.deleted_at IS NULL AND ' +
-        REAL_MONEY_PULL_SQL +
+        LEADERBOARD_PULL_SQL +
         ' ' +
         '   AND pu.customer_id = ? ' +
         '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
