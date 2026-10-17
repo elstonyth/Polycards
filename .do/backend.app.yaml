@@ -450,6 +450,15 @@ envs:
     scope: RUN_TIME
     value: "true"
 
+  # One bank account, one Polycards account (#770): saving a payout account
+  # another customer already holds is refused, except for the customer ids
+  # listed here (comma-separated). Support's override for a genuine shared
+  # account; read per request by api/store/credits/withdraw/accounts.
+  # Collector1856 added 2026-10-17 at the operator's request.
+  - key: PAYOUT_ACCOUNT_SHARING_ALLOWED
+    scope: RUN_TIME
+    value: cus_01M4AY4MYMKZ7CAV9VK311RKSZ
+
   # ── TGPay (plan 130) — the payment gateway since the 2026-09-06 cutover.
   # The key pair comes from the production back office (admin.tgpay365.com →
   # Settings → General → API keys, 2FA-gated) and is injected by

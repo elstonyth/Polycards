@@ -339,7 +339,8 @@ export const SHARED_PAYOUT_ACCOUNT_MESSAGE =
 /**
  * Support's override for a genuine shared account (a family member's, a joint
  * account): customer ids in PAYOUT_ACCOUNT_SHARING_ALLOWED, comma-separated,
- * read per call.
+ * read per call. A `*` entry allows everyone, switching the one-bank-account
+ * rule off at save and at payout (operator decision, 2026-10-17).
  * shortcut: the override is an env list, so granting one is a spec change and
  * a redeploy; build an admin toggle if overrides become routine.
  */
@@ -349,7 +350,7 @@ export function payoutAccountSharingAllowed(
 ): boolean {
   return (env.PAYOUT_ACCOUNT_SHARING_ALLOWED ?? '')
     .split(',')
-    .some((id) => id.trim() === customerId);
+    .some((id) => id.trim() === '*' || id.trim() === customerId);
 }
 
 /** Destinations saved before the shared-account check shipped are exempt at
