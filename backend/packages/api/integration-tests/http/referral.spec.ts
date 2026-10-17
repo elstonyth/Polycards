@@ -5,7 +5,7 @@
 //   (loop)  close → admin review → approve → pay → store history shows paid
 //   (admin) partner-rate bounds enforced; settings edit persists
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils';
-import { Modules } from '@medusajs/framework/utils';
+import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { referralWeekFor } from '../../src/modules/packs/referral';
@@ -247,8 +247,49 @@ medusaIntegrationTestRunner({
         expect(rLive.data.week.rate_bp).toBe(50);
         expect(rLive.data.week.projected_cents).toBe(500);
 
-        // Tuesday close (the current, still-open week — closed explicitly).
+        // An older RM500 open counts toward lifetime spend but not the week.
         const week = referralWeekFor(new Date());
+        const [old] = await packs.createCreditTransactions([
+          {
+            customer_id: attribution.customer_id,
+            amount: -500,
+            reason: 'pack_open',
+          },
+        ]);
+        // created_at is ORM-managed on insert: age the row with one raw UPDATE.
+        const pg = getContainer().resolve(
+          ContainerRegistrationKeys.PG_CONNECTION,
+        ) as unknown as {
+          raw: (
+            sql: string,
+            bindings: unknown[],
+          ) => Promise<{ rowCount: number }>;
+        };
+        const aged = await pg.raw(
+          'UPDATE credit_transaction SET created_at = ? WHERE id = ?',
+          [new Date(week.startUtc.getTime() - 24 * 3600 * 1000), old.id],
+        );
+        expect(aged.rowCount).toBe(1);
+
+        // Admin card: the same live week as the player's panel, plus each
+        // downline member named with their week and lifetime spend.
+        const card = await unwrapResponse(
+          api.get(`/admin/customers/${attribution.referrer_id}/referral`, {
+            headers: adminHeaders(),
+          }),
+        );
+        expect(card.status).toBe(200);
+        expect(card.data.week).toEqual(rLive.data.week);
+        expect(card.data.downline).toEqual([
+          expect.objectContaining({
+            customer_id: attribution.customer_id,
+            email: 'recruit@test.dev',
+            week_spend_cents: 100_000,
+            lifetime_spend_cents: 150_000,
+          }),
+        ]);
+
+        // Tuesday close (the current, still-open week — closed explicitly).
         const closed = await packs.closeReferralWeek({
           weekStartIso: week.weekStartIso,
         });
@@ -261,6 +302,9 @@ medusaIntegrationTestRunner({
         expect(list.status).toBe(200);
         expect(list.data.settlements).toHaveLength(1);
         expect(list.data.settlements[0].status).toBe('draft');
+        // Every screen names the week by its MYT Tuesday — week_start is
+        // stored as Monday 16:00 UTC, whose UTC date is a day early.
+        expect(list.data.settlements[0].week_start).toBe(week.weekStartIso);
         // A small week is not held: the hourly auto-approval will take it.
         expect(list.data.settlements[0].held_for_review).toBe(false);
         const detail = await unwrapResponse(
@@ -268,6 +312,7 @@ medusaIntegrationTestRunner({
             headers: adminHeaders(),
           }),
         );
+        expect(detail.data.settlement.week_start).toBe(week.weekStartIso);
         expect(detail.data.lines.length).toBeGreaterThanOrEqual(1);
         // The line names who it pays and whose spend makes up its basis.
         const line = detail.data.lines.find(
@@ -312,6 +357,23 @@ medusaIntegrationTestRunner({
         expect(rAfter.data.history).toHaveLength(1);
         expect(rAfter.data.history[0].status).toBe('paid');
         expect(rAfter.data.history[0].amount_cents).toBe(500);
+        expect(rAfter.data.history[0].week_start).toBe(week.weekStartIso);
+
+        // The admin card's payout line names its week.
+        const cardAfter = await unwrapResponse(
+          api.get(`/admin/customers/${attribution.referrer_id}/referral`, {
+            headers: adminHeaders(),
+          }),
+        );
+        expect(cardAfter.data.lines).toEqual([
+          expect.objectContaining({
+            week_start: week.weekStartIso,
+            basis_cents: 100_000,
+            rate_bp: 50,
+            amount_cents: 500,
+            status: 'paid',
+          }),
+        ]);
       });
 
       it('admin settings edit persists and partner-rate enforces bounds', async () => {

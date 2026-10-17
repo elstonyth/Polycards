@@ -1429,6 +1429,43 @@ class PacksModuleService extends MedusaService({
     return byReferrer;
   }
 
+  // Admin referral card (2026-10-17): each listed downline member's spend this
+  // settlement week and all-time, on the same turnover definition the close
+  // pays on (normal part of pack_open, net of reversals), clamped to 0 like
+  // the close. Lifetime is the Players list's "total spend" rule too.
+  @InjectManager()
+  async referralDownlineSpend(
+    input: { customerIds: string[]; now?: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, { week_cents: number; lifetime_cents: number }>> {
+    const week = referralWeekFor(input.now ?? new Date());
+    const thisWeek = await this.packTurnoverCentsByCustomer(
+      {
+        startUtc: week.startUtc,
+        endUtcExcl: week.endUtcExcl,
+        customerIds: input.customerIds,
+      },
+      sharedContext,
+    );
+    const lifetime = await this.packTurnoverCentsByCustomer(
+      {
+        startUtc: new Date(0),
+        endUtcExcl: week.endUtcExcl,
+        customerIds: input.customerIds,
+      },
+      sharedContext,
+    );
+    return new Map(
+      input.customerIds.map((id) => [
+        id,
+        {
+          week_cents: Math.max(thisWeek.get(id) ?? 0, 0),
+          lifetime_cents: Math.max(lifetime.get(id) ?? 0, 0),
+        },
+      ]),
+    );
+  }
+
   // The Tuesday close ("TUES CHECK"): compute the just-ended week's referral
   // commissions into a DRAFT settlement run. No money moves here —
   // payWeeklySettlement (after the admin approve gate) does that.
@@ -2218,10 +2255,11 @@ class PacksModuleService extends MedusaService({
       { select: ['id', 'week_start'], take: lines.length },
       sharedContext,
     );
+    // The MYT Tuesday the week starts — week_start's UTC date is a day early.
     const weekById = new Map(
       runs.map((r) => [
         r.id,
-        new Date(r.week_start).toISOString().slice(0, 10),
+        referralWeekFor(new Date(r.week_start)).weekStartIso,
       ]),
     );
     return lines.map((l) => ({
