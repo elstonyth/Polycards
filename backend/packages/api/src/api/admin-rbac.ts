@@ -118,6 +118,7 @@ export const CORE_PREFIX_WRITES: {
     'gateway',
     'withdrawals/*/approve',
     'withdrawals/*/deny',
+    'withdrawal-controls',
   ].map((sub) => ({
     matcher: `/admin/payments/${sub}`,
     method: 'POST' as const,
