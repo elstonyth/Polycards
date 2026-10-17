@@ -18,7 +18,7 @@ import { stepTwoCopy, type walletSplit } from '@/lib/wallet-split';
 export const WITHDRAW_RULES = [
   'Top up once. After a top-up, withdrawals pause until you use all your money for packs.',
   'Cards you pull are yours: ship them, or sell them back. Sales of cards from packs you pay for, gift packs, and task and challenge rewards become withdrawable once your money for packs is used.',
-  'Bonus credit and the welcome pack’s card are for packs. Packs use bonus credit first.',
+  'Bonus credit pays for packs and delivery fees, never withdrawals. The welcome pack’s card is for packs. Packs use bonus credit first.',
 ] as const;
 
 function StepMark({ n, done = false }: { n: number; done?: boolean }) {

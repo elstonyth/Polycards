@@ -44,9 +44,9 @@ open (`source='free'`), an opened Pack Gift (`source='gift'`) or a paid open
 that Bonus Credit paid at least half of (`source='bonus'`). The append-only
 source of truth for the live-pulls feed, the leaderboard, and the Vault. Only
 `source='pack'` counts toward tasks, achievements, the feed and the welcome
-unlock. Money and value never depend on the source: VIP, referral and board
-spend take each open's normal part, and board and challenge value take each
-pull's normal share (`bonus_bp`).
+unlock. VIP and referral spend take each open's normal part. Leaderboard and
+challenge value count the full value of `pack` and `bonus` pulls; leaderboard
+spend counts both normal and bonus credit (operator rule 2026-10-17).
 _Avoid_: spin, roll, result
 
 **Free Welcome Pack**:

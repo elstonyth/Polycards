@@ -97,6 +97,62 @@ medusaIntegrationTestRunner({
         expect(wallet).toMatchObject({ balance: 0, bonus: 0, withdrawable: 0 });
       });
 
+      it('lets a delivery fee spend bonus first, and refunds that part as bonus', async () => {
+        const cid = 'cus_bonus_fee';
+        await plainDeposit(cid, 100);
+        await grant(cid, 30);
+
+        const charge = await packs().mutateCreditAtomic({
+          customerId: cid,
+          amount: -50,
+          reason: 'delivery_fee',
+          reference: 'order_fee_1',
+        });
+        const [row] = await packs().listCreditTransactions({ id: charge.id });
+        expect(row.bonus_cents).toBe(-3000);
+        let wallet = await packs().walletSummary(cid);
+        expect(wallet).toMatchObject({ balance: 80, bonus: 0, withdrawable: 80 });
+
+        // A charge never names its own bonus share.
+        await expect(
+          packs().mutateCreditAtomic({
+            customerId: cid,
+            amount: -5,
+            reason: 'delivery_fee',
+            bonusCents: -500,
+          }),
+        ).rejects.toThrow(/takes its bonus share itself/);
+        await expect(
+          packs().mutateCreditAtomic({
+            customerId: cid,
+            amount: 50,
+            reason: 'delivery_fee',
+            bonusCents: 5001,
+          }),
+        ).rejects.toThrow(/at most its own amount as bonus/);
+
+        // Cancel: the bonus comes back as bonus, so withdrawable is unchanged
+        // by the round trip (no request-then-cancel laundering).
+        await packs().mutateCreditAtomic({
+          customerId: cid,
+          amount: 50,
+          reason: 'delivery_fee',
+          reference: 'refund:order_fee_1',
+          bonusCents: 3000,
+        });
+        wallet = await packs().walletSummary(cid);
+        expect(wallet).toMatchObject({ balance: 130, bonus: 30, withdrawable: 100 });
+
+        // More than the whole balance, bonus included, is still refused.
+        await expect(
+          packs().mutateCreditAtomic({
+            customerId: cid,
+            amount: -131,
+            reason: 'delivery_fee',
+          }),
+        ).rejects.toThrow(/Deduction exceeds the customer's balance/);
+      });
+
       it('floors every other debit on the normal balance', async () => {
         const cid = 'cus_bonus_floor';
         await plainDeposit(cid, 100);
@@ -106,14 +162,14 @@ medusaIntegrationTestRunner({
           packs().mutateCreditAtomic({
             customerId: cid,
             amount: -150,
-            reason: 'delivery_fee',
+            reason: 'adjustment',
           }),
         ).rejects.toThrow(/Bonus credit can only be spent on packs/);
 
         await packs().mutateCreditAtomic({
           customerId: cid,
           amount: -100,
-          reason: 'delivery_fee',
+          reason: 'adjustment',
         });
 
         // Normal is now 0: an admin deduction cannot touch the bonus either.
@@ -167,7 +223,7 @@ medusaIntegrationTestRunner({
             reason: 'adjustment',
             bonusCents: 5000,
           }),
-        ).rejects.toThrow(/Only a bonus_grant row may carry bonusCents/);
+        ).rejects.toThrow(/Only a bonus_grant or delivery_fee row may carry bonusCents/);
       });
 
       it('hands the bonus back when an open is reversed', async () => {
