@@ -61,9 +61,9 @@ export const Pull = model
     // For reward pulls, card_id holds the product_handle sentinel.
     // Model-owned CHECK (pull_source_check) emitted by db:generate — do NOT
     // hand-write a separate CHECK (would collide → 42710).
-    // 'gift' (an admin-gifted pack, spec 2026-10-07) and 'bonus' (a paid row
-    // that spent any bonus credit) count toward NOTHING — every board, task and
-    // unlock reads a positive source = 'pack' filter.
+    // 'gift' is an admin-gifted pack; 'bonus' means bonus paid at least half.
+    // Boards count 'pack' and 'bonus' in full; tasks, feed and welcome unlock
+    // still require source = 'pack'. Gifts remain excluded from all of them.
     source: model
       .enum(['pack', 'reward', 'free', 'gift', 'bonus'])
       .default('pack'),

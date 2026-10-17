@@ -9,7 +9,7 @@ import { ResetCountdown } from './ResetCountdown';
 
 // The standard's rules block (页面介绍) — rendered under the live content.
 const RULES = [
-  'Packs you pay for add their pull value to your personal weekly ranking and the community pool, minus any share paid with bonus credit. Gift packs, the welcome pack and task or challenge rewards add nothing.',
+  'Packs opened with normal or bonus credit add their full pull value to your personal weekly ranking and the community pool. Gift packs, the welcome pack and task or challenge reward cards do not count.',
   'As the community reaches each milestone, a new reward stage unlocks.',
   'Rewards are cumulative — a higher stage includes every reward from the stages before it.',
   'At the end of the week, the top 10 on the Weekly Pull Value board receive all rewards unlocked that week.',

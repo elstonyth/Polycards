@@ -202,6 +202,41 @@ moduleIntegrationTestRunner<PacksModuleService>({
     });
 
     describe('settleChallengeWeek', () => {
+      it('uses full bonus-funded value to unlock stages and pay the winner', async () => {
+        const { card } = await seedBase();
+        await seedStage(1, 700, [{ rank: 1, credits: 50 }]);
+        await seedPriorWeekPull('cus_normal', card, 100);
+        await service.createPulls([
+          {
+            customer_id: 'cus_bonus',
+            pack_id: 'bronze-pack',
+            card_id: card.handle,
+            rolled_at: priorWeekDate(),
+            source: 'bonus',
+            bonus_bp: 10000,
+            recorded_value_usd: 200,
+          },
+        ]);
+
+        const result = await service.settleChallengeWeek({});
+        expect(result.winners).toEqual([
+          expect.objectContaining({
+            customerId: 'cus_bonus',
+            rank: 1,
+            credits: 50,
+          }),
+        ]);
+        const [payout] = await service.listChallengePayouts({
+          customer_id: 'cus_bonus',
+        });
+        expect(payout.snapshot).toMatchObject({
+          pool_myr: 1200,
+          ranking: ['cus_bonus', 'cus_normal'],
+        });
+        expect((await service.settleChallengeWeek({})).settled).toBe(false);
+        expect(await service.creditBalance('cus_bonus')).toBe(50);
+      });
+
       it('settles once: credits paid, card minted, second run is a no-op', async () => {
         const { card } = await seedBase();
         await service.createChallengeStages([
@@ -838,7 +873,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
         // The admin edit that used to strand cus_b: the only unlocked stage is
         // deleted between ticks, so nothing live backs the frozen table.
         await service.deleteChallengeStages(
-          (await service.listChallengeStages({}, { take: 10 })).map((r) => r.id),
+          (await service.listChallengeStages({}, { take: 10 })).map(
+            (r) => r.id,
+          ),
         );
 
         const tick2 = await service.settleChallengeWeek({});
