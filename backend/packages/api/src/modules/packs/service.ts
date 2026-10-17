@@ -3451,6 +3451,9 @@ class PacksModuleService extends MedusaService({
   // GIFT_DAILY_MINT_MAX_RM ceiling in grantPackGifts; same rules as
   // rollingAdjustmentMintCents (no customer scope, locked caller). Revoked
   // gifts still count: revoking cannot buy back headroom.
+  // shortcut: no (created_at) index; pack_gift holds manual admin grants only,
+  // so a seq scan is tiny. Add a partial index on (created_at) WHERE
+  // deleted_at IS NULL if this reaches slow logs.
   @InjectManager()
   async rollingPackGiftMintCents(
     @MedusaContext() sharedContext: Context = {},

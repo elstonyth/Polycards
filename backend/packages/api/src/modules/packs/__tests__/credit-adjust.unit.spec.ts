@@ -99,7 +99,7 @@ describe("adjustDailyMintError", () => {
     const msg = adjustDailyMintError(9_500_00, 1_000_00, CAP);
     expect(msg).toContain("ADJUST_DAILY_MINT_MAX_RM");
     expect(msg).toContain("9500.00"); // already granted in the window
-    expect(msg).toContain("500.00"); // remaining today
+    expect(msg).toContain("500.00 remaining in that 24h window");
   });
 
   it("never reports negative remaining headroom once the window is over cap", () => {

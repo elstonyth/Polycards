@@ -66,7 +66,7 @@ export function adjustDailyMintError(
       ? "Daily gift-pack limit reached (GIFT_DAILY_MINT_MAX_RM): "
       : "Daily credit-adjustment limit reached (ADJUST_DAILY_MINT_MAX_RM): ") +
     `RM ${(windowCents / 100).toFixed(2)} already ${pool === "gift" ? "gifted" : "granted"} in the last 24h, ` +
-    `RM ${remaining.toFixed(2)} remaining today.`
+    `RM ${remaining.toFixed(2)} remaining in that 24h window.`
   );
 }
 
