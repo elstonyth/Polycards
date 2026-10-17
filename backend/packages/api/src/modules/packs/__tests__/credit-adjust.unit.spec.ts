@@ -117,6 +117,14 @@ describe("adjustDailyMintError", () => {
     expect(adjustDailyMintError(0, 0, 0)).toBeNull();
   });
 
+  it("names the gift pool's own env var for a gift refusal", () => {
+    const msg = adjustDailyMintError(49_990_00, 45_00, 50_000_00, "gift");
+    expect(msg).toContain("GIFT_DAILY_MINT_MAX_RM");
+    expect(msg).not.toContain("ADJUST_DAILY_MINT_MAX_RM");
+    expect(msg).toContain("RM 49990.00 already gifted");
+    expect(msg).toContain("RM 10.00 remaining");
+  });
+
   it("refuses every positive grant when the cap is 0 (incident stop lever)", () => {
     expect(adjustDailyMintError(0, 1, 0)).toMatch(/ADJUST_DAILY_MINT_MAX_RM/);
   });

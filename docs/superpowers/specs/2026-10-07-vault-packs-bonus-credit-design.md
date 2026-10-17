@@ -146,6 +146,10 @@ Both are audit-logged with the admin's id, carry an idempotency key, and count t
 the existing daily mint cap `ADJUST_DAILY_MINT_MAX_RM` (a gift counts as its pack
 price × quantity at grant time).
 
+> **Changed 2026-10-17:** gifts now have their own daily cap, `GIFT_DAILY_MINT_MAX_RM`
+> (RM 50,000). Bonus credit still shares `ADJUST_DAILY_MINT_MAX_RM`. A bulk group bonus
+> grant had filled the shared cap and blocked RM 45 compensation gifts.
+
 **Rules**
 
 | Situation                                                                                  | Behavior                                                     |
