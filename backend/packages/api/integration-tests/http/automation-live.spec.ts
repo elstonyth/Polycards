@@ -37,7 +37,7 @@ medusaIntegrationTestRunner({
       await packs.createCreditTransactions([
         {
           customer_id: customer.id,
-          amount: 20,
+          amount: 30,
           bonus_cents: 500,
           reason: 'topup',
         },
@@ -109,6 +109,27 @@ medusaIntegrationTestRunner({
         { action: 'save', config },
         { headers },
       );
+      expect(
+        (await api.get('/admin/automation/live', { headers })).data.config,
+      ).toMatchObject({ timingMode: 'fixed', intervalSeconds: 2 });
+      expect(
+        (
+          await unwrapResponse(
+            api.post(
+              '/admin/automation/live',
+              {
+                action: 'save',
+                config: {
+                  ...config,
+                  timingMode: 'humanized',
+                  humanizedTestClock: true,
+                },
+              },
+              { headers },
+            ),
+          )
+        ).status,
+      ).toBe(400);
       expect(await tickLive(container)).toBe(false);
       expect(
         (await packs.listAndCountPulls({ customer_id: customer.id }))[1],
@@ -129,7 +150,15 @@ medusaIntegrationTestRunner({
       ).toBe(400);
       await api.post(
         '/admin/automation/live',
-        { action: 'run', config },
+        {
+          action: 'run',
+          config: {
+            ...config,
+            timingMode: 'random',
+            randomMinSeconds: 2,
+            randomMaxSeconds: 2,
+          },
+        },
         { headers },
       );
       const ticks = await Promise.all([
@@ -144,8 +173,8 @@ medusaIntegrationTestRunner({
         customerId: customer.id,
         costCents: 1000,
         saleCents: 720,
-        startingCents: 2000,
-        endingCents: 1720,
+        startingCents: 3000,
+        endingCents: 2720,
         startingBonusCents: 500,
         endingBonusCents: 0,
         differenceCents: 0,
@@ -205,7 +234,7 @@ medusaIntegrationTestRunner({
         ),
       ).toBe(true);
       expect(await packs.creditSummary(customer.id)).toMatchObject({
-        balance: 11.6,
+        balance: 21.6,
         bonusBalance: 0,
       });
       const settledPulls = await packs.listPulls({ customer_id: customer.id });
@@ -280,12 +309,76 @@ medusaIntegrationTestRunner({
       expect(
         (await packs.listAndCountPulls({ customer_id: customer.id }))[1],
       ).toBe(3);
+      await api.post(
+        '/admin/automation/live',
+        {
+          action: 'run',
+          config: {
+            ...config,
+            maxCyclesPerAccount: 1,
+            timingMode: 'humanized',
+            humanizedRegion: 'mysg',
+          },
+        },
+        { headers },
+      );
+      const tomorrow = new Date(Date.now() + 86400000)
+        .toISOString()
+        .slice(0, 10);
+      let clock = Date.parse(`${tomorrow}T00:00:00Z`);
+      expect(await tickLive(container, () => clock)).toBe(false);
+      const sleeping = (await api.get('/admin/automation/live', { headers }))
+        .data;
+      expect(sleeping).toMatchObject({
+        status: 'running',
+        cycles: [],
+        nextRunAt: clock + 4 * 3600000,
+      });
+      expect(sleeping.schedules[0].waitReason).toContain('Sleeping');
+      expect(await tickLive(container, () => clock + 1000)).toBe(false);
+      expect(
+        (await packs.listAndCountPulls({ customer_id: customer.id }))[1],
+      ).toBe(3);
+      let humanized = sleeping;
+      for (
+        let attempt = 0;
+        attempt < 100 && humanized.cycles.length === 0;
+        attempt++
+      ) {
+        clock = humanized.nextRunAt;
+        await tickLive(container, () => clock);
+        humanized = (await api.get('/admin/automation/live', { headers })).data;
+      }
+      expect(humanized.status).toBe('completed');
+      expect(humanized.cycles).toHaveLength(1);
+      expect(humanized.cycles[0]).toMatchObject({
+        differenceCents: 0,
+        bonusDifferenceCents: 0,
+        costCents: 1000,
+        saleCents: 720,
+        error: null,
+      });
+      const [humanizedPull] = await packs.listPulls({
+        id: humanized.cycles[0].pullId,
+      });
+      expect(humanizedPull.status).toBe('bought_back');
+      expect(
+        (
+          await api.get('/store/pulls/recent?pack_id=live-pack&rarity=Rare', {
+            headers: storeHeaders,
+          })
+        ).data.pulls,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: humanizedPull.id }),
+        ]),
+      );
       // Simulate a disable arriving after the next draw, at the separate sell boundary.
       const disabled = jest
         .spyOn(packs, 'isAccountDisabled')
         .mockImplementation(
           async (id) =>
-            (await packs.listAndCountPulls({ customer_id: id }))[1] > 3,
+            (await packs.listAndCountPulls({ customer_id: id }))[1] > 4,
         );
       try {
         await api.post(
