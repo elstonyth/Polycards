@@ -9,6 +9,7 @@ import {
   withdrawalsEnabled,
 } from '../../../../../modules/packs/gateway-withdrawal';
 import { GATEWAYS } from '../../../../../modules/packs/gateway';
+import { findBank } from '../../../../../modules/packs/banks';
 
 // GET /store/credits/withdraw/banks — the payout bank picker's source: the
 // banks the ACTIVE gateway can pay to, as canonical ids (banks.ts). Cached
@@ -19,7 +20,14 @@ const CACHE_MS = 10 * 60 * 1000;
 let cache: {
   gateway: string;
   at: number;
-  banks: { bankCode: string; bankName: string; currency: string }[];
+  banks: {
+    bankCode: string;
+    bankName: string;
+    currency: string;
+    accountLengths?: readonly number[];
+    accountPattern?: string;
+    accountHint?: string;
+  }[];
 } | null = null;
 
 export async function GET(
@@ -41,13 +49,21 @@ export async function GET(
   }
   if (!cache || cache.gateway !== key || Date.now() - cache.at > CACHE_MS) {
     const seen = new Set<string>();
-    const banks: { bankCode: string; bankName: string; currency: string }[] =
-      [];
+    const banks: NonNullable<typeof cache>['banks'] = [];
     for (const gateway of gateways) {
       for (const bank of await getSupportedBanks(gatewayConfigFor(gateway))) {
         if (seen.has(bank.bankCode)) continue;
+        const { accountLengths, accountPattern, accountHint } =
+          findBank(bank.bankCode) ?? {};
+        if (!accountLengths?.length) continue;
         seen.add(bank.bankCode);
-        banks.push({ ...bank, currency: GATEWAYS[gateway].currency });
+        banks.push({
+          ...bank,
+          currency: GATEWAYS[gateway].currency,
+          accountLengths,
+          ...(accountPattern ? { accountPattern } : {}),
+          ...(accountHint ? { accountHint } : {}),
+        });
       }
     }
     cache = { gateway: key, at: Date.now(), banks };

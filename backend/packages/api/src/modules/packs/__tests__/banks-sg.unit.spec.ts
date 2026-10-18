@@ -49,7 +49,7 @@ describe('Singapore banks (A3Pay) beside the Malaysian registry', () => {
     expect(gatewayBankCode('MBBEMYKL', 'a3pay')).toBeNull();
     expect(gatewayBankCode('DBSSSGSG', 'tgpay')).toBeNull();
     expect(banksFor('a3pay').map((b) => b.bankCode)).toEqual(
-      SG_BANKS.map((b) => b.id),
+      SG_BANKS.filter((b) => b.id !== 'ALLIANCESG').map((b) => b.id),
     );
     expect(banksFor('tgpay').some((b) => b.bankCode.endsWith('SG'))).toBe(
       false,

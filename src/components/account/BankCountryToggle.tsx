@@ -8,8 +8,8 @@ import { cn } from '@/lib/utils';
 /**
  * Which country's banks a bank picker lists: one flagged pill per country,
  * the leaderboard's segmented toggle (aria-pressed buttons, not ARIA tabs —
- * the select below is the only panel). Nothing renders with one country to
- * offer, e.g. while the Singapore rail is closed.
+ * the select below is the only panel). Keep even one country's label visible
+ * so an unavailable Malaysian rail never makes Singapore look domestic.
  */
 export function BankCountryToggle({
   groups,
@@ -23,7 +23,7 @@ export function BankCountryToggle({
   className?: string;
 }) {
   const labelId = useId();
-  if (groups.length < 2) return null;
+  if (groups.length === 0) return null;
   return (
     <div className={className}>
       <p id={labelId} className="text-[13px] font-semibold text-neutral-300">

@@ -366,6 +366,10 @@ export type WithdrawBank = {
   bankName: string;
   /** The currency the bank is paid in; absent = RM. */
   currency?: string;
+  /** Bank-specific account lengths from the backend's bank registry. */
+  accountLengths?: number[];
+  accountPattern?: string;
+  accountHint?: string;
 };
 
 export type WithdrawBanksResult =
@@ -407,8 +411,8 @@ export type SavedBankAccount = {
   /** This destination's own payout floor (RM) when above the provider's —
    *  Touch 'n Go: 100. Null/absent = the provider's floor applies. */
   minRm?: number | null;
-  /** Why it is unsupported when the reason is not the provider (the admin
-   *  paused Touch 'n Go); absent = the provider cannot pay to it. */
+  /** Why it is unavailable (e.g. invalid account details or paused Touch 'n Go);
+   *  absent = the provider cannot pay to it. */
   unavailableReason?: string | null;
   /** The currency the bank is paid in; absent = RM. */
   currency?: string;

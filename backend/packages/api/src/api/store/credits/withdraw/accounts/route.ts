@@ -172,21 +172,32 @@ async function accountViews(
     active,
     undefined,
     regionalPayoutGateways(),
-  ).map((view) => ({
-    ...view,
-    currency: payoutCurrencyFor(view.bankCode, active),
-    ...(isTngBank(view.bankCode)
-      ? {
-          minRm: destinationMinRm(view.bankCode, controls),
-          ...(tng.open
-            ? {}
-            : {
-                supported: false,
-                unavailableReason: tngPausedReason(tng.reopens_at),
-              }),
-        }
-      : {}),
-  }));
+  ).map((view) => {
+    const invalid = withdrawalDetailsError(view);
+    return {
+      ...view,
+      currency: payoutCurrencyFor(view.bankCode, active),
+      ...(isTngBank(view.bankCode)
+        ? {
+            minRm: destinationMinRm(view.bankCode, controls),
+            ...(tng.open
+              ? {}
+              : {
+                  supported: false,
+                  unavailableReason: tngPausedReason(tng.reopens_at),
+                }),
+          }
+        : {}),
+      ...(invalid
+        ? {
+            supported: false,
+            unavailableReason: findBank(view.bankCode)?.accountLengths?.length
+              ? `${invalid} Remove this account and add it again with the correct bank country and account number.`
+              : invalid,
+          }
+        : {}),
+    };
+  });
 }
 
 export async function GET(

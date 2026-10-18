@@ -18,7 +18,48 @@ import {
   WalletSchema,
   DeliveryOrderSchema,
   CREDIT_REASONS,
+  WithdrawBanksSchema,
 } from '../schemas';
+
+describe('withdrawal bank validation metadata', () => {
+  it('passes valid account patterns and rejects invalid regular expressions', () => {
+    const bank = {
+      bankCode: 'PAYNOWSG',
+      bankName: 'PayNow',
+      accountLengths: [8, 10],
+      accountPattern: '^[1-9][0-9]{6,14}$',
+      accountHint: 'Use your PayNow mobile number.',
+    };
+    expect(WithdrawBanksSchema.parse({ banks: [bank] }).banks[0]).toEqual(bank);
+    expect(
+      WithdrawBanksSchema.safeParse({
+        banks: [{ ...bank, accountPattern: '[' }],
+      }).success,
+    ).toBe(false);
+  });
+  const bank = {
+    bankCode: 'MBBESGSG',
+    bankName: 'Maybank (SG)',
+    currency: 'SGD',
+  };
+
+  it('keeps bank-specific lengths and accepts older responses without them', () => {
+    expect(
+      WithdrawBanksSchema.parse({
+        banks: [{ ...bank, accountLengths: [11] }, bank],
+      }).banks,
+    ).toEqual([{ ...bank, accountLengths: [11] }, bank]);
+  });
+
+  it.each(
+    [[], [0], [11.5], ['11']].map((accountLengths) => ({ accountLengths })),
+  )('rejects malformed length metadata %j', ({ accountLengths }) => {
+    expect(
+      WithdrawBanksSchema.safeParse({ banks: [{ ...bank, accountLengths }] })
+        .success,
+    ).toBe(false);
+  });
+});
 
 describe('parseList — drops invalid items, never throws', () => {
   it('returns [] for non-arrays (mirrors Array.isArray guard)', () => {

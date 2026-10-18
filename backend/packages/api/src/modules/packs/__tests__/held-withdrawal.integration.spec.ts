@@ -45,7 +45,7 @@ import { fakeGateway } from '../fake-gateway';
 
 jest.setTimeout(300 * 1000);
 
-const ACCOUNT_NUMBER = '1234567890';
+const ACCOUNT_NUMBER = '123456789012';
 const ADMIN = 'usr_admin_1';
 const PAYER_IP = '10.0.0.7';
 

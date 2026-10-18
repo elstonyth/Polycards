@@ -138,7 +138,7 @@ const REMEDIES: [RegExp, string | null, string][] = [
   [
     // NOT "bank details": the paused-payouts refusal says "Your bank details
     // are fine", and linking it to /bank would contradict it.
-    /bank account|account number|account holder name|choose a bank/i,
+    /bank account|account number|account holder name|choose (?:a|another) bank|mobile number linked to PayNow/i,
     '/bank',
     'Manage bank accounts',
   ],

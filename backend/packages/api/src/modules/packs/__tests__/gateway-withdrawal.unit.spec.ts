@@ -268,6 +268,13 @@ describe('withdrawalDetailsError', () => {
   const VISA_TEST_CARD = '4111111111111111'; // Luhn-valid
   it.each([
     ['MBBEMYKL', '1234567890', /^Maybank account numbers are 12 digits\./],
+    [
+      'MBBESGSG',
+      '123456789012',
+      /^Maybank \(SG\) account numbers are 11 digits\./,
+    ],
+    ['DBSSSGSG', '123456789012', /^DBS Bank account numbers are 10 digits\./],
+    ['POSBSG', '1234567890', /^POSB account numbers are 9 digits\./],
     ['MYMB2U', '1234567890', /^Maybank account numbers are 12 digits\./], // legacy alias
     [
       'CIBBMYKL',
@@ -278,15 +285,14 @@ describe('withdrawalDetailsError', () => {
     [
       'HLBBMYKL',
       '1234567890',
-      /^Hong Leong Bank account numbers are 11 digits\./,
+      /^Hong Leong Bank account numbers are 11 or 13 digits\./,
     ],
     ['RHBBMYKL', '123456789012', /^RHB Bank account numbers are 14 digits\./],
     ['MBBEMYKL', VISA_TEST_CARD, /^That looks like a card number\./],
     ['CIBBMYKL', '5555555555554444', /^That looks like a card number\./],
-    // Mastercard's 2-series range (2221-2720).
-    ['BSNAMYK1', '2223003122003222', /^That looks like a card number\./],
-    // BSN accounts are 16 digits, so only the card check guards it.
-    ['BSNAMYK1', VISA_TEST_CARD, /^That looks like a card number\./],
+    // Mastercard's 2-series range (2221-2720) is also a card hint at the wrong length.
+    ['MBBEMYKL', '2223003122003222', /^That looks like a card number\./],
+    ['ALLIANCESG', '012345678901', /unavailable/i],
   ])('refuses %s %s', (bankCode, accountNumber, message) => {
     expect(
       withdrawalDetailsError({ ...SAVED_ACCOUNT, bankCode, accountNumber }),
@@ -306,10 +312,24 @@ describe('withdrawalDetailsError', () => {
     ['BSNAMYK1', '4111111111111112'],
     // 2-series outside 2221-2720 is not a card prefix.
     ['BSNAMYK1', '2000000000000006'], // Luhn-valid
-    // Banks without a length on file are not length-checked.
-    ['PHBMMYKL', '123456789'],
-    // Singapore banks pay through A3Pay and keep the generic digit rule.
+    ['PHBMMYKL', '123456789012'],
+    ['MBBESGSG', '01234567890'],
     ['DBSSSGSG', '1234567890'],
+    ['POSBSG', '123456789'],
+    ['OCBCSGSG', '012345678901'],
+    ['OCBCSGSG', '0123456789012345678'], // published virtual-account range
+    ['UOVBSGSG', '0123456'], // virtual account
+    ['HSBCSGSG', '012345678901'],
+    ['HSBCSGSG', '012345678901234567'], // virtual account
+    ['CIBBSGSG', '1234567890'],
+    ['RHBBSGSG', '01234567890'],
+    ['HLBBSGSG', '012345678901234567'],
+    ['BKCHSGSG', '012345678901234'],
+    ['GXSSG', '0123456789'],
+    ['GXSSG', '01234567890'],
+    ['MARIBANKSG', '012345678'],
+    ['ANEXTSG', '01234567890'],
+    ['PAYNOWSG', '6591234567'],
   ])('accepts %s %s', (bankCode, accountNumber) => {
     expect(
       withdrawalDetailsError({ ...SAVED_ACCOUNT, bankCode, accountNumber }),
@@ -729,9 +749,9 @@ describe('startWithdrawal — money ordering', () => {
     // A wallet the registry knows but TGPay has no payout code for.
     const unpayable = {
       ...SAVED_ACCOUNT,
-      id: savedBankAccountId('BOOSTMY', '1234567890'),
+      id: savedBankAccountId('BOOSTMY', '123456789012'),
       bankCode: 'BOOSTMY',
-      accountNumber: '1234567890',
+      accountNumber: '123456789012',
     };
     const h = harness([unpayable]);
     await expect(
@@ -1581,7 +1601,7 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       // bigNumber column: arrives as a string.
       amount: '1500',
       bank_code: 'MBBEMYKL',
-      account_number: '1234567890',
+      account_number: SAVED_ACCOUNT.accountNumber,
       account_holder_name: 'AHMAD BIN ALI',
       gateway: 'fake',
       status: 'held',
