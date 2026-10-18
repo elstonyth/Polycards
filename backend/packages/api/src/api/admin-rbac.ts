@@ -33,6 +33,7 @@ export const OPERATION_BY_METHOD = {
  *  them byte-identical to what the middleware entries check. */
 export const CUSTOM_ADMIN_RESOURCES = {
   announcements: 'announcement',
+  automation: 'automation',
   'avatar-frames': 'avatar_frame',
   cards: 'card',
   challenge: 'challenge',
@@ -139,6 +140,16 @@ const METHODS_BY_OPERATION = Object.entries(OPERATION_BY_METHOD).reduce<
  *  0.1.x), never a bare `/admin/x*`, which would also catch any future
  *  sibling prefix that merely starts with the same letters. */
 export const adminRbacRoutes: MiddlewareRoute[] = [
+  {
+    matcher: '/admin/automation',
+    methods: ['GET'],
+    policies: [{ resource: 'customer', operation: 'read' }],
+  },
+  {
+    matcher: '/admin/automation/accounts',
+    methods: ['POST'],
+    policies: [{ resource: 'customer', operation: 'read' }],
+  },
   ...Object.entries(CUSTOM_ADMIN_RESOURCES).flatMap(([prefix, resource]) =>
     [`/admin/${prefix}`, `/admin/${prefix}/*`].flatMap((matcher) =>
       Object.entries(METHODS_BY_OPERATION).map(([operation, methods]) => ({

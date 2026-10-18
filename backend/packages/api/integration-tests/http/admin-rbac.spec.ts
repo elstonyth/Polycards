@@ -22,6 +22,11 @@ jest.setTimeout(240 * 1000);
 const WRITES: { method: 'post' | 'delete'; path: string; policy: string }[] = [
   {
     method: 'post',
+    path: '/admin/automation/accounts',
+    policy: 'automation:update',
+  },
+  {
+    method: 'post',
     path: '/admin/referrals/settlements/wset_none/approve',
     policy: 'referral:update',
   },
@@ -53,7 +58,12 @@ const WRITES: { method: 'post' | 'delete'; path: string; policy: string }[] = [
   },
 ];
 
-const READS = ['/admin/referrals/settlements', '/admin/packs', '/admin/ledger'];
+const READS = [
+  '/admin/referrals/settlements',
+  '/admin/packs',
+  '/admin/ledger',
+  '/admin/automation',
+];
 
 medusaIntegrationTestRunner({
   inApp: true,

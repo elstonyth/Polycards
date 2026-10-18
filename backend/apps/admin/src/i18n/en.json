@@ -1251,7 +1251,8 @@
     "weeklyChallenge": "Weekly challenge",
     "storefront": "Storefront",
     "announcements": "Announcements",
-    "cardFrame": "Card frame"
+    "cardFrame": "Card frame",
+    "automation": "Automation"
   },
   "dashboard": {
     "pricingAttention_one": "{{count}} card price needs attention",
@@ -1512,5 +1513,41 @@
     "heldBoth": "{{held}} held back: bonus credit, plus the rest until money for packs is used",
     "heldBonus": "{{held}} held back: bonus credit",
     "heldPlay": "{{held}} held back until the money still to use on packs is used"
+  },
+  "automationMonitor": {
+    "subtitle": "Original accounts, balances and leaderboards from the Polycards API.",
+    "readOnly": "Read only",
+    "notRunning": "Automation off",
+    "refresh": "Refresh",
+    "accounts": "Accounts",
+    "leaderboard": "Leaderboard",
+    "loadError": "Could not load this view. Check your admin session and permissions, then refresh.",
+    "loaded": "Accounts loaded",
+    "totalBalance": "Combined balance (MYR)",
+    "updated": "Balance snapshot updated",
+    "search": "Search name or email",
+    "unavailable": "{{count}} account is unavailable and excluded from the total.",
+    "unavailable_other": "{{count}} accounts are unavailable and excluded from the total.",
+    "manualRefresh": "Reads only when opened or refreshed. No pulls, sales, credit changes or background runs.",
+    "account": "Account",
+    "email": "Email",
+    "balance": "Balance (MYR)",
+    "status": "Account status",
+    "states": {
+      "active": "Active",
+      "frozen": "Frozen",
+      "disabled": "Disabled",
+      "unavailable": "Unavailable"
+    },
+    "loading": "Loading…",
+    "noAccounts": "No matching accounts.",
+    "period": "Leaderboard period",
+    "weekly": "Weekly",
+    "alltime": "All time",
+    "boardNote": "Current public top 10. Results may be cached for up to 30 seconds. Monitoring only.",
+    "rank": "Rank",
+    "pulledValue": "Pulled value (MYR)",
+    "pulls": "Pulls",
+    "noEntries": "No leaderboard entries."
   }
 }
