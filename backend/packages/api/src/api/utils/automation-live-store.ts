@@ -316,6 +316,10 @@ export async function tickLive(container: MedusaContainer): Promise<boolean> {
           await checkpoint();
         },
         sell: async (customerId, pullId) => {
+          if (await packs.isAccountDisabled(customerId))
+            throw new Error(
+              'Account was disabled before settlement. The paid card remains in the vault.',
+            );
           const { result } = await buybackPullWorkflow(container).run({
             input: { customer_id: customerId, pull_id: pullId },
           });

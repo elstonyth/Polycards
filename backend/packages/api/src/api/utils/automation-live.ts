@@ -22,6 +22,21 @@ export function createLiveState(): LiveState {
   };
 }
 
+function nextCustomer(state: LiveState): string | undefined {
+  const { config } = state;
+  if (
+    !config ||
+    state.spentCents + state.packPriceCents >
+      Math.round(config.maxSpendMyr * 100)
+  )
+    return undefined;
+  return config.customerIds.find(
+    (id) =>
+      state.cycles.filter((cycle) => cycle.customerId === id).length <
+      config.maxCyclesPerAccount,
+  );
+}
+
 export function claimLiveCycle(
   state: LiveState,
   now: number,
@@ -40,17 +55,8 @@ export function claimLiveCycle(
     (state.nextRunAt ?? 0) > now
   )
     return null;
-  const { config } = state;
-  const customerId = config.customerIds.find(
-    (id) =>
-      state.cycles.filter((cycle) => cycle.customerId === id).length <
-      config.maxCyclesPerAccount,
-  );
-  if (
-    !customerId ||
-    state.spentCents + state.packPriceCents >
-      Math.round(config.maxSpendMyr * 100)
-  ) {
+  const customerId = nextCustomer(state);
+  if (!customerId) {
     state.status = 'completed';
     state.nextRunAt = null;
     return null;
@@ -85,6 +91,11 @@ export function completeLiveCycle(
       cycle.error ??
       'Balance verification differs from the expected settlement. Review this cycle.';
   }
+  if (
+    (state.status === 'running' || state.status === 'paused') &&
+    !nextCustomer(state)
+  )
+    state.status = 'completed';
   state.nextRunAt =
     state.status === 'running' && state.config
       ? now + state.config.intervalSeconds * 1000

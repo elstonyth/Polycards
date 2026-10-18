@@ -164,6 +164,34 @@ medusaIntegrationTestRunner({
       expect(
         (await packs.listAndCountPulls({ customer_id: customer.id }))[1],
       ).toBe(1);
+      // Simulate a disable arriving after the next draw, at the separate sell boundary.
+      const disabled = jest
+        .spyOn(packs, 'isAccountDisabled')
+        .mockImplementation(
+          async (id) =>
+            (await packs.listAndCountPulls({ customer_id: id }))[1] > 1,
+        );
+      try {
+        await api.post(
+          '/admin/automation/live',
+          { action: 'run', config },
+          { headers },
+        );
+        expect(await tickLive(container)).toBe(true);
+        const refused = (await api.get('/admin/automation/live', { headers }))
+          .data;
+        expect(refused.status).toBe('failed');
+        expect(refused.cycles[0].error).toContain('disabled');
+        const [unsold] = await packs.listPulls({
+          id: refused.cycles[0].pullId,
+        });
+        expect(unsold.status).toBe('vaulted');
+        expect(
+          await packs.listCreditTransactions({ pull_id: unsold.id }),
+        ).toHaveLength(0);
+      } finally {
+        disabled.mockRestore();
+      }
     });
   },
 });
