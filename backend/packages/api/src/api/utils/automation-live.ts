@@ -24,12 +24,7 @@ export function createLiveState(): LiveState {
 
 function nextCustomer(state: LiveState): string | undefined {
   const { config } = state;
-  if (
-    !config ||
-    state.spentCents + state.packPriceCents >
-      Math.round(config.maxSpendMyr * 100)
-  )
-    return undefined;
+  if (!config) return undefined;
   return config.customerIds.find(
     (id) =>
       state.cycles.filter((cycle) => cycle.customerId === id).length <
@@ -117,7 +112,7 @@ export function validateLiveConfig(
           'customerIds',
           'intervalSeconds',
           'maxCyclesPerAccount',
-          'maxSpendMyr',
+          'maxSpendMyr', // Accepted from older clients, discarded below.
         ].includes(key),
     ) ||
     typeof input.packSlug !== 'string' ||
@@ -137,20 +132,16 @@ export function validateLiveConfig(
     Number(input.intervalSeconds) > 86400 ||
     !Number.isInteger(input.maxCyclesPerAccount) ||
     Number(input.maxCyclesPerAccount) < 1 ||
-    Number(input.maxCyclesPerAccount) > 10 ||
-    typeof input.maxSpendMyr !== 'number' ||
-    !Number.isFinite(input.maxSpendMyr) ||
-    input.maxSpendMyr < 0.01 ||
-    input.maxSpendMyr > 8000 ||
-    Math.abs(input.maxSpendMyr * 100 - Math.round(input.maxSpendMyr * 100)) >
-      0.000001
+    Number(input.maxCyclesPerAccount) > 10
   )
     throw new Error(
-      'Choose a paid pack, 1–80 monitored customer accounts, 2–86400 seconds, 1–10 cycles and a spend limit up to RM8,000 (two decimals).',
+      'Choose a paid pack, 1–80 monitored customer accounts, 2–86400 seconds and 1–10 cycles per account.',
     );
   return {
-    ...input,
+    packSlug: input.packSlug,
     customerIds: [...input.customerIds],
+    intervalSeconds: input.intervalSeconds,
+    maxCyclesPerAccount: input.maxCyclesPerAccount,
   } as unknown as LiveConfig;
 }
 

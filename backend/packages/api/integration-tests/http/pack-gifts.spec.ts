@@ -6,6 +6,7 @@ import { FREE_WELCOME_CATEGORY } from '../../src/modules/packs/free-pack';
 import { bonusShareSen } from '../../src/modules/packs/bonus-credit';
 import { clearLeaderboardCache } from '../../src/api/store/leaderboard/route';
 import { clearChallengeCache } from '../../src/api/store/challenge/route';
+import { clearRecentPullsCache } from '../../src/api/store/pulls/recent/route';
 import { mintSuperAdmin, postStoreCustomer, unwrapResponse } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -14,8 +15,8 @@ jest.setTimeout(240 * 1000);
 // packs and bonus credit; the customer opens "Vault x1 + RM300"; a stale screen
 // is refused, never billed; a bonus card's bonus share must be played through
 // once (2026-10-09), a gift card's sale is withdrawable (ADR 0012), and both
-// remain excluded from tasks and feed. Bonus-funded opens count fully on
-// boards; gifts do not. A rolled-back open hands the gift back.
+// remain excluded from tasks. Bonus-funded opens count fully on boards and
+// public pull history; gifts do not. A rolled-back open hands the gift back.
 
 const PASSWORD = 'pack-gifts-password-1';
 const ADMIN_EMAIL = 'pack-gifts-admin@test.dev';
@@ -372,7 +373,11 @@ medusaIntegrationTestRunner({
         [second, 3334],
       ] as const) {
         const sold = await unwrapResponse(
-          api.post(`/store/vault/${roll.pull.id}/buyback`, {}, { headers: authed() }),
+          api.post(
+            `/store/vault/${roll.pull.id}/buyback`,
+            {},
+            { headers: authed() },
+          ),
         );
         expect(sold.status).toBe(200);
         const [credit] = await packs().listCreditTransactions({
@@ -425,7 +430,7 @@ medusaIntegrationTestRunner({
       expect(saleRow.playthrough ?? 0).toBeCloseTo(0, 2);
     });
 
-    it('excludes gift and bonus pulls from achievements, feed and welcome unlock', async () => {
+    it('shows bonus draws in the feed while excluding gifts and retaining achievement and welcome rules', async () => {
       const task = await unwrapResponse(
         api.post(
           '/admin/tasks',
@@ -451,12 +456,16 @@ medusaIntegrationTestRunner({
         api.get('/store/tasks', { headers: authed() }),
       );
       expect(hub.data.tasks[0].progress.completed).toBe(false);
+      clearRecentPullsCache();
       const recent = await unwrapResponse(
         api.get('/store/pulls/recent', { headers: storeHeaders }),
       );
       const pulls = JSON.stringify(recent.data);
       const mine = await packs().listPulls({ customer_id: customerId });
-      for (const p of mine) expect(pulls).not.toContain(p.id);
+      for (const p of mine) {
+        if (p.source === 'bonus') expect(pulls).toContain(p.id);
+        else expect(pulls).not.toContain(p.id);
+      }
     });
 
     it('revokes an unopened gift and refuses an opened one', async () => {

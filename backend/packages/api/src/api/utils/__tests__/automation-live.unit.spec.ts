@@ -11,36 +11,40 @@ const config = {
   customerIds: ['cus_live'],
   intervalSeconds: 5,
   maxCyclesPerAccount: 1,
-  maxSpendMyr: 100,
 };
 
 describe('live automation', () => {
-  it('completes immediately when cycles or budget are exhausted, even with a one-day interval', () => {
-    for (const limits of [
-      { maxCyclesPerAccount: 1, maxSpendMyr: 100 },
-      { maxCyclesPerAccount: 2, maxSpendMyr: 10 },
-    ]) {
-      const state = createLiveState();
-      Object.assign(state, {
-        config: { ...config, ...limits, intervalSeconds: 86400 },
-        packPriceCents: 1000,
-        status: 'running',
-        runId: 'run-1',
-      });
+  it('finishes every selected cycle without a total spend cap, then completes immediately', () => {
+    const state = createLiveState();
+    Object.assign(state, {
+      config: {
+        ...config,
+        maxSpendMyr: 10,
+        maxCyclesPerAccount: 2,
+        intervalSeconds: 86400,
+      },
+      packPriceCents: 900000,
+      status: 'running',
+      runId: 'run-1',
+    });
+    for (let index = 0; index < 2; index++) {
+      state.nextRunAt = 0;
       const cycle = claimLiveCycle(state, 100)!;
+      expect(cycle?.customerId).toBe('cus_live');
       completeLiveCycle(
         state,
         {
           ...cycle,
-          costCents: 1000,
+          costCents: 900000,
           differenceCents: 0,
           bonusDifferenceCents: 0,
         },
         200,
       );
-      expect(state.status).toBe('completed');
-      expect(state.nextRunAt).toBeNull();
+      expect(state.status).toBe(index === 0 ? 'running' : 'completed');
     }
+    expect(state.spentCents).toBe(1800000);
+    expect(state.nextRunAt).toBeNull();
   });
   it('never starts from reading or saving settings, and never claims twice', () => {
     const state = createLiveState();
@@ -53,10 +57,10 @@ describe('live automation', () => {
     expect(claimLiveCycle(state, 101)).toBeNull();
   });
 
-  it('honors spend, per-account cycles, next-run time and stop during settlement', () => {
+  it('honors per-account cycles, next-run time and stop during settlement', () => {
     const state = createLiveState();
     Object.assign(state, {
-      config: { ...config, maxSpendMyr: 10 },
+      config,
       packPriceCents: 1000,
       status: 'running',
       runId: 'run-1',
@@ -110,12 +114,14 @@ describe('live automation', () => {
     }
   });
 
-  it('requires finite, cent-exact budgets and bounded intervals and cycle counts', () => {
+  it('discards legacy spend caps while preserving the selected run settings', () => {
+    expect(
+      validateLiveConfig({ ...config, maxSpendMyr: 10 }, ['cus_live']),
+    ).toEqual(config);
+  });
+
+  it('requires bounded intervals and cycle counts', () => {
     for (const input of [
-      { maxSpendMyr: NaN },
-      { maxSpendMyr: 0 },
-      { maxSpendMyr: 8001 },
-      { maxSpendMyr: 10.001 },
       { maxCyclesPerAccount: 0 },
       { maxCyclesPerAccount: 11 },
       { intervalSeconds: 1 },

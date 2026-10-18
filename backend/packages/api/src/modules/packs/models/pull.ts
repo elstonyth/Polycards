@@ -62,7 +62,7 @@ export const Pull = model
     // Model-owned CHECK (pull_source_check) emitted by db:generate — do NOT
     // hand-write a separate CHECK (would collide → 42710).
     // 'gift' is an admin-gifted pack; 'bonus' means bonus paid at least half.
-    // Boards count 'pack' and 'bonus' in full; tasks, feed and welcome unlock
+    // Boards and public history count 'pack' and 'bonus'; tasks and welcome unlock
     // still require source = 'pack'. Gifts remain excluded from all of them.
     source: model
       .enum(['pack', 'reward', 'free', 'gift', 'bonus'])

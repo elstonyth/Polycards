@@ -10,7 +10,7 @@ jest.setTimeout(240_000);
 medusaIntegrationTestRunner({
   inApp: true,
   testSuite: ({ api, getContainer }) => {
-    it('runs an actual paid draw and buyback once, preserving sandbox isolation and both balances', async () => {
+    it('settles every selected draw without a spend cap and publishes each pull to the storefront feed', async () => {
       const container = getContainer();
       const token = await mintSuperAdmin(
         container,
@@ -19,10 +19,20 @@ medusaIntegrationTestRunner({
         'live-test-password',
       );
       const headers = { authorization: `Bearer ${token}` };
+      const key = await container.resolve(Modules.API_KEY).createApiKeys({
+        title: 'live-feed-test',
+        type: 'publishable',
+        created_by: 'live-feed-test',
+      });
+      const storeHeaders = { 'x-publishable-api-key': key.token };
       const packs = container.resolve<PacksModuleService>(PACKS_MODULE);
       const customers = container.resolve(Modules.CUSTOMER);
       const [customer] = await customers.createCustomers([
-        { email: 'live-account@example.test', has_account: true },
+        {
+          email: 'live-account@example.test',
+          first_name: 'Live Player',
+          has_account: true,
+        },
       ]);
       await packs.createCreditTransactions([
         {
@@ -92,8 +102,7 @@ medusaIntegrationTestRunner({
         packSlug: 'live-pack',
         customerIds: [customer.id],
         intervalSeconds: 2,
-        maxCyclesPerAccount: 1,
-        maxSpendMyr: 10,
+        maxCyclesPerAccount: 3,
       };
       await api.post(
         '/admin/automation/live',
@@ -159,17 +168,124 @@ medusaIntegrationTestRunner({
       expect(
         (await api.get('/admin/automation/sandbox', { headers })).data.profiles,
       ).toEqual([]);
+      // Warm the public feed before later draws, then verify cache expiry includes them too.
+      expect(
+        (await api.get('/store/pulls/recent', { headers: storeHeaders })).data
+          .pulls,
+      ).toEqual([
+        expect.objectContaining({
+          id: pull.id,
+          name: 'Live card',
+          pack_id: 'live-pack',
+        }),
+      ]);
+      for (let index = 0; index < 2; index++) {
+        await new Promise((resolve) => setTimeout(resolve, 2100));
+        const attempts = await Promise.all([
+          tickLive(container),
+          tickLive(container),
+        ]);
+        expect(attempts.filter(Boolean)).toHaveLength(1);
+      }
+      const completed = (await api.get('/admin/automation/live', { headers }))
+        .data;
+      expect(completed.status).toBe('completed');
+      expect(completed.spentCents).toBe(3000);
+      expect(completed.cycles).toHaveLength(3);
+      expect(
+        completed.cycles.every(
+          (cycle: {
+            differenceCents: number;
+            bonusDifferenceCents: number;
+            error: string | null;
+          }) =>
+            cycle.differenceCents === 0 &&
+            cycle.bonusDifferenceCents === 0 &&
+            cycle.error === null,
+        ),
+      ).toBe(true);
+      expect(await packs.creditSummary(customer.id)).toMatchObject({
+        balance: 11.6,
+        bonusBalance: 0,
+      });
+      const settledPulls = await packs.listPulls({ customer_id: customer.id });
+      expect(settledPulls).toHaveLength(3);
+      expect(settledPulls.map((row) => row.source).sort()).toEqual([
+        'bonus',
+        'pack',
+        'pack',
+      ]);
+      expect(settledPulls.every((row) => row.status === 'bought_back')).toBe(
+        true,
+      );
+      const settledTransactions = await packs.listCreditTransactions({
+        customer_id: customer.id,
+      });
+      expect(
+        await packs.pullDrought({ packId: 'live-pack', rarity: 'Immortal' }),
+      ).toBe(3);
+      expect(
+        await packs.pullGaps({
+          packId: 'live-pack',
+          rarity: 'Rare',
+          limit: 20,
+        }),
+      ).toMatchObject({
+        current: 0,
+        avg: 1,
+        hits: expect.arrayContaining(
+          settledPulls.map((row) =>
+            expect.objectContaining({ id: row.id, gap: 1 }),
+          ),
+        ),
+      });
+      expect(
+        settledTransactions.filter((row) => row.reason === 'pack_open'),
+      ).toHaveLength(3);
+      for (const row of settledPulls) {
+        expect(
+          settledTransactions.filter(
+            (transaction) => transaction.pull_id === row.id,
+          ),
+        ).toHaveLength(1);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5100));
+      for (const path of [
+        '/store/pulls/recent',
+        '/store/pulls/recent?pack_id=live-pack',
+      ]) {
+        const publicBody = (await api.get(path, { headers: storeHeaders }))
+          .data;
+        expect(publicBody.drought).toMatchObject({ Immortal: 3, Legendary: 3 });
+        const feed = publicBody.pulls;
+        expect(feed).toHaveLength(3);
+        expect(feed.map((row: { id: string }) => row.id).sort()).toEqual(
+          settledPulls.map((row) => row.id).sort(),
+        );
+        for (const row of feed) {
+          expect(row).toMatchObject({
+            name: 'Live card',
+            pack_id: 'live-pack',
+            pack_title: 'Live pack',
+            rarity: 'Rare',
+            marketPriceMyr: 8,
+            who: 'Live Player',
+          });
+          expect(row).not.toHaveProperty('customer_id');
+          expect(row).not.toHaveProperty('email');
+        }
+      }
       await api.post('/admin/automation/live', { action: 'stop' }, { headers });
       expect(await tickLive(container)).toBe(false);
       expect(
         (await packs.listAndCountPulls({ customer_id: customer.id }))[1],
-      ).toBe(1);
+      ).toBe(3);
       // Simulate a disable arriving after the next draw, at the separate sell boundary.
       const disabled = jest
         .spyOn(packs, 'isAccountDisabled')
         .mockImplementation(
           async (id) =>
-            (await packs.listAndCountPulls({ customer_id: id }))[1] > 1,
+            (await packs.listAndCountPulls({ customer_id: id }))[1] > 3,
         );
       try {
         await api.post(
