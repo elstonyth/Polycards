@@ -34,8 +34,8 @@ export function CardDetail({
   entrance?: boolean;
 }) {
   const rarity = seed.rarity ?? detail?.rarity ?? null;
-  // A challenge prize keeps the challenge's prism frame here; the card's pack
-  // tier still reads on the chip below, so no information is lost.
+  // A challenge prize keeps the challenge's prism frame here and shows no tier
+  // chip — it was won in the challenge, not pulled at that tier.
   const frameVariant = seed.frameVariant;
   // Tier colour, for anything STATING the tier (the chip). Always the card's
   // own rarity — a prize frame changes the presentation, not the fact.
@@ -156,7 +156,7 @@ export function CardDetail({
         >
           {seed.name}
         </h1>
-        {rarity && (
+        {rarity && !frameVariant && (
           <span
             className={cn(
               rise,
