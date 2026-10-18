@@ -113,7 +113,8 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
           </div>
           <span className="text-[11px] text-neutral-400 tabular-nums">
             {task.requirement.type === 'topup_myr'
-              ? `${rm(task.progress.current)}/${rm0(task.progress.target)}`
+              ? // Sen only when there are some: RM 99.99 must never round to "done".
+                `${(Number.isInteger(task.progress.current) ? rm0 : rm)(task.progress.current)}/${rm0(task.progress.target)}`
               : `${task.progress.current}/${task.progress.target}`}
           </span>
         </div>
