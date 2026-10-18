@@ -272,8 +272,9 @@ export function payoutCurrencyFor(
   env: Partial<NodeJS.ProcessEnv> = process.env,
 ): string {
   if (bankSupportedBy(bankCode, active, env)) return GATEWAYS[active].currency;
+  // Display keeps the bank's regional currency even when its account format is unavailable.
   const regional = GATEWAY_IDS.find(
-    (id) => !isLedgerGateway(id) && bankSupportedBy(bankCode, id, env),
+    (id) => !isLedgerGateway(id) && findBank(bankCode)?.codes[id],
   );
   return GATEWAYS[regional ?? active].currency;
 }
@@ -343,9 +344,7 @@ export function withdrawalRefundReference(
   return `wd-refund:${digest}`;
 }
 
-/** A 16-digit card number (Visa 4, Mastercard/Maestro 5, Mastercard
- *  2221-2720) that passes the Luhn check. No Malaysian bank account number
- *  settled here ever matched (prod, to 2026-10-14). */
+/** A card-number hint, not proof: 16 digits with Visa/Mastercard prefix and Luhn. */
 function looksLikeCardNumber(digits: string): boolean {
   if (!/^[0-9]{16}$/.test(digits)) return false;
   const bin = Number(digits.slice(0, 4));
@@ -370,22 +369,30 @@ export function withdrawalDetailsError(input: {
   if (typeof bankCode !== 'string' || !/^[A-Z0-9]{2,20}$/.test(bankCode)) {
     return 'Choose a bank from the list.';
   }
+  const bank = findBank(bankCode);
+  if (!bank) return 'Pick a bank from the list.';
+  const lengths = bank.accountLengths;
+  if (!lengths?.length) {
+    return `Withdrawals to ${bank.name} are unavailable. Choose another bank.`;
+  }
   const accountNumber = input.accountNumber;
   if (
     typeof accountNumber !== 'string' ||
-    !/^[0-9]{6,34}$/.test(accountNumber)
+    !/^[0-9]{5,34}$/.test(accountNumber)
   ) {
     return 'Enter a valid account number (digits only).';
   }
-  // Card first: a 16-digit card under Maybank would otherwise get the length
-  // message, which hides the real mistake. 14 of the 15 card-like numbers
-  // TGPay refused (prod, to 2026-10-14) were Luhn-valid Visa/Mastercard.
-  if (looksLikeCardNumber(accountNumber)) {
-    return "That looks like a card number. Enter your bank account number instead — it's in your banking app or on your statement, not on the card.";
+  if (
+    bank.accountPattern &&
+    !new RegExp(bank.accountPattern).test(accountNumber)
+  ) {
+    return bank.accountHint ?? 'Enter a valid account number for this bank.';
   }
-  const bank = findBank(bankCode);
-  const lengths = bank?.accountLengths;
-  if (lengths && !lengths.includes(accountNumber.length)) {
+  if (!lengths.includes(accountNumber.length)) {
+    // Valid bank accounts can also pass Luhn; use the card hint only for a wrong length.
+    if (looksLikeCardNumber(accountNumber)) {
+      return "That looks like a card number. Enter your bank account number instead — it's in your banking app or on your statement, not on the card.";
+    }
     return `${bank.name} account numbers are ${lengths.join(' or ')} digits. Check the number in your banking app.`;
   }
   const holder = input.accountHolderName;
@@ -1786,6 +1793,19 @@ export async function submitHeldWithdrawal(
     throw new MedusaError(
       MedusaError.Types.NOT_FOUND,
       `Withdrawal '${input.withdrawalId}' not found.`,
+    );
+  }
+
+  // Held rows can predate bank validation; refuse before claiming or sending.
+  const detailsInvalid = withdrawalDetailsError({
+    bankCode: row.bank_code,
+    accountNumber: row.account_number,
+    accountHolderName: row.account_holder_name,
+  });
+  if (detailsInvalid) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `${detailsInvalid} Deny this withdrawal and ask the customer to save the correct bank details.`,
     );
   }
 

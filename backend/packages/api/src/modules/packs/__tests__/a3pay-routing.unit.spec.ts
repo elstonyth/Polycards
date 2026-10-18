@@ -74,6 +74,7 @@ describe('routing to the regional rail', () => {
   it('a Singapore bank stays SGD whether or not its rail is open', () => {
     expect(payoutCurrencyFor('DBSSSGSG', 'tgpay', A3PAY_ENV)).toBe('SGD');
     expect(payoutCurrencyFor('DBSSSGSG', 'tgpay', {})).toBe('SGD');
+    expect(payoutCurrencyFor('ALLIANCESG', 'tgpay', {})).toBe('SGD');
     expect(payoutCurrencyFor('MBBEMYKL', 'tgpay', {})).toBe('MYR');
     expect(payoutCurrencyFor('NOT_A_BANK', 'tgpay', {})).toBe('MYR');
   });

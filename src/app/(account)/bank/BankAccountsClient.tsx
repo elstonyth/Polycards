@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils';
 // GO: the withdraw form submits an account id and the server resolves the bank
 // details from here, so this page is the only place a payout destination is
 // chosen. The backend caps the list at 5 and validates with the payout-submit
-// rules, so anything saved here is guaranteed submittable.
+// rules. Existing accounts are rechecked when listed and used.
 //
 // A newly added account may have to wait out a cooling-off window before it can
 // receive money; the server says when via `usableFrom`. That state is rendered
@@ -43,8 +43,7 @@ function payoutStatus(
   now: Date,
 ): { label: string; ready: boolean } {
   if (account.supported === false) {
-    // Kept, not lost: the current payout provider cannot pay to this bank.
-    // It becomes usable again when a provider that serves it is active.
+    // Keep invalid or unavailable destinations visible with their remedy.
     return {
       label:
         account.unavailableReason ??
@@ -69,7 +68,7 @@ export function BankAccountsClient() {
 
   // Add-form state
   const [adding, setAdding] = useState(false);
-  const [country, setCountry] = useState('Malaysia');
+  const [country, setCountry] = useState('');
   const [bankCode, setBankCode] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [holderName, setHolderName] = useState('');
@@ -92,27 +91,38 @@ export function BankAccountsClient() {
     };
   }, []);
 
-  // One country's banks at a time, picked by flag. Falls back to the first
-  // country when the chosen one has no banks (no Malaysian banks at all).
+  // Require the customer's choice, even when only one country is available.
   const countries = bankCountryGroups(banks ?? []);
-  const shown =
-    countries.find((group) => group.country === country) ?? countries[0];
+  const shown = countries.find((group) => group.country === country);
+  const selectedBank = shown?.items.find((bank) => bank.bankCode === bankCode);
+  const lengths = selectedBank?.accountLengths;
+  const accountNumberValid =
+    /^[0-9]{5,34}$/.test(accountNumber) &&
+    (!lengths || lengths.includes(accountNumber.length)) &&
+    (!selectedBank?.accountPattern ||
+      new RegExp(selectedBank.accountPattern).test(accountNumber));
+  const numberHint =
+    selectedBank?.accountHint ??
+    (lengths && lengths.length <= 2
+      ? `${selectedBank.bankName} account numbers are ${lengths.join(' or ')} digits. Check your bank country and account number.`
+      : 'Check your bank country and use the account number shown in your banking app, not a card number.');
+  const numberInvalid =
+    selectedBank !== undefined && accountNumber !== '' && !accountNumberValid;
 
   const formValid =
-    bankCode !== '' &&
-    /^[0-9]{6,34}$/.test(accountNumber) &&
-    holderName.trim().length >= 2;
+    selectedBank !== undefined &&
+    accountNumberValid &&
+    holderName.trim().length >= 2 &&
+    holderName.trim().length <= 120;
 
   async function submitAdd() {
     if (submitting || !formValid) return;
     setError(null);
     setSubmitting(true);
     try {
-      const bankName =
-        (banks ?? []).find((b) => b.bankCode === bankCode)?.bankName ?? '';
       const res = await addSavedBankAccount({
         bankCode,
-        bankName,
+        bankName: selectedBank.bankName,
         accountNumber,
         accountHolderName: holderName.trim(),
       });
@@ -122,6 +132,7 @@ export function BankAccountsClient() {
       }
       setAccounts(res.accounts);
       setAdding(false);
+      setCountry('');
       setBankCode('');
       setAccountNumber('');
       setHolderName('');
@@ -227,6 +238,8 @@ export function BankAccountsClient() {
             onChange={(next) => {
               setCountry(next);
               setBankCode('');
+              setAccountNumber('');
+              setError(null);
             }}
             className="mb-3"
           />
@@ -234,12 +247,21 @@ export function BankAccountsClient() {
             Bank
             <select
               value={bankCode}
-              onChange={(e) => setBankCode(e.target.value)}
+              onChange={(e) => {
+                setBankCode(e.target.value);
+                setAccountNumber('');
+                setError(null);
+              }}
+              disabled={!shown}
               aria-label="Bank"
               className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none focus:border-white/25"
             >
               <option value="" disabled>
-                {banks == null ? 'Loading banks…' : 'Choose your bank'}
+                {banks == null
+                  ? 'Loading banks…'
+                  : !shown
+                    ? 'Choose bank country first'
+                    : 'Choose your bank'}
               </option>
               {(shown?.items ?? []).map((bank) => (
                 <option key={bank.bankCode} value={bank.bankCode}>
@@ -254,15 +276,28 @@ export function BankAccountsClient() {
             <input
               type="text"
               inputMode="numeric"
+              disabled={!selectedBank}
               value={accountNumber}
               onChange={(e) =>
                 setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))
               }
               aria-label="Account number"
+              aria-invalid={numberInvalid}
+              aria-describedby="bank-account-number-hint"
               placeholder="Digits only"
               className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-white/25"
             />
           </label>
+          <p
+            id="bank-account-number-hint"
+            aria-live="polite"
+            className={cn(
+              'mt-1.5 text-[13px]',
+              numberInvalid ? 'text-red-300' : 'text-neutral-400',
+            )}
+          >
+            {numberHint}
+          </p>
 
           <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
             Account holder name

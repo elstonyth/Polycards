@@ -320,6 +320,47 @@ describe('a regional payout', () => {
       'https://us/payout-verify',
     );
 
+  it('refuses a Malaysian-length Maybank number saved under Singapore before any debit or gateway call', async () => {
+    const wrongCountry = {
+      ...SG_ACCOUNT,
+      id: savedBankAccountId('MBBESGSG', '123456789012'),
+      bankCode: 'MBBESGSG',
+      bankName: 'Maybank (SG)',
+      accountNumber: '123456789012',
+    };
+    const packs = withdrawHarness();
+    packs.savedBankAccountsFor.mockResolvedValue([wrongCountry]);
+    await expect(start(packs, { accountId: wrongCountry.id })).rejects.toThrow(
+      /Maybank \(SG\) account numbers are 11 digits/,
+    );
+    expect(packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+    expect(packs.withdrawForCashout).not.toHaveBeenCalled();
+    expect(fetchCalls).toEqual([]);
+  });
+
+  it.each<[string, string, RegExp]>([
+    ['ALLIANCESG', '123456789012', /unavailable/i],
+    ['PAYNOWSG', '0123456789', /mobile number linked to PayNow/i],
+  ])(
+    'refuses saved %s details before debit or gateway access',
+    async (bankCode, accountNumber, message) => {
+      const saved = {
+        ...SG_ACCOUNT,
+        id: savedBankAccountId(bankCode, accountNumber),
+        bankCode,
+        accountNumber,
+      };
+      const packs = withdrawHarness();
+      packs.savedBankAccountsFor.mockResolvedValue([saved]);
+      await expect(start(packs, { accountId: saved.id })).rejects.toThrow(
+        message,
+      );
+      expect(packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+      expect(packs.withdrawForCashout).not.toHaveBeenCalled();
+      expect(fetchCalls).toEqual([]);
+    },
+  );
+
   // The S$ the customer is shown ("S$50.14 to your bank") must be the S$ we
   // ask A3Pay to pay and the S$ locked on the row — one figure, end to end.
   it('shows, submits and stores the same S$ amount', async () => {
@@ -605,6 +646,33 @@ describe('approving a held A3Pay payout', () => {
       adminId: 'usr_admin_1',
       payerIp: '10.0.0.7',
     });
+
+  it.each<[string, string, RegExp]>([
+    [
+      'MBBESGSG',
+      '123456789012',
+      /Maybank \(SG\) account numbers are 11 digits/,
+    ],
+    ['ALLIANCESG', '123456789012', /unavailable/i],
+    ['PAYNOWSG', '0123456789', /mobile number linked to PayNow/i],
+  ])(
+    'keeps invalid %s details held before claiming or contacting the gateway',
+    async (bankCode, accountNumber, message) => {
+      const packs = approveHarness();
+      packs.listGatewayWithdrawals.mockResolvedValue([
+        {
+          ...heldRow,
+          bank_code: bankCode,
+          account_number: accountNumber,
+        },
+      ]);
+      await expect(approve(packs)).rejects.toThrow(message);
+      expect(packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
+      expect(packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+      expect(packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+      expect(fetchCalls).toEqual([]);
+    },
+  );
 
   it('is not shut by the ACTIVE gateway having payouts off, and stays held (no claim) while our S$ float is short', async () => {
     balanceSgd = 250; // S$1,000 locked on the row

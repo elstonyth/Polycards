@@ -772,6 +772,22 @@ export const WithdrawBanksSchema = z.looseObject({
       // The currency that bank is paid in (SGD for Singapore banks via
       // A3Pay). Optional: an older backend sends none, meaning RM.
       currency: z.string().optional(),
+      accountLengths: z
+        .array(z.number().int().positive())
+        .nonempty()
+        .optional(),
+      accountPattern: z
+        .string()
+        .refine((pattern) => {
+          try {
+            new RegExp(pattern);
+            return true;
+          } catch {
+            return false;
+          }
+        })
+        .optional(),
+      accountHint: z.string().optional(),
     }),
   ),
 });

@@ -237,6 +237,56 @@ describe('POST /store/credits/withdraw/accounts', () => {
     expect(updateCustomers).not.toHaveBeenCalled();
   });
 
+  it('refuses a Malaysian-length Maybank number under Singapore before saving', async () => {
+    await expect(
+      POST(mkReq({ ...VALID_BODY, bank_code: 'MBBESGSG' }), mkRes()),
+    ).rejects.toThrow(/Maybank \(SG\) account numbers are 11 digits/);
+    expect(mutateCustomerMetadata).not.toHaveBeenCalled();
+    expect(createNotifications).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, string, RegExp]>([
+    ['ALLIANCESG', '123456789012', /unavailable/i],
+    ['PAYNOWSG', '0123456789', /mobile number linked to PayNow/i],
+  ])(
+    'refuses %s before saving unverified or malformed details',
+    async (bankCode, accountNumber, message) => {
+      await expect(
+        POST(
+          mkReq({
+            ...VALID_BODY,
+            bank_code: bankCode,
+            account_number: accountNumber,
+          }),
+          mkRes(),
+        ),
+      ).rejects.toThrow(message);
+      expect(mutateCustomerMetadata).not.toHaveBeenCalled();
+      expect(createNotifications).not.toHaveBeenCalled();
+    },
+  );
+
+  it('saves an 11-digit Maybank Singapore number without dropping its leading zero', async () => {
+    await POST(
+      mkReq({
+        ...VALID_BODY,
+        bank_code: 'MBBESGSG',
+        account_number: '01234567890',
+      }),
+      mkRes(),
+    );
+    expect(updateCustomers).toHaveBeenCalledWith('cus_1', {
+      metadata: {
+        bank_accounts: [
+          expect.objectContaining({
+            bankCode: 'MBBESGSG',
+            accountNumber: '01234567890',
+          }),
+        ],
+      },
+    });
+  });
+
   it('ignores any submitted bank name — the registry supplies it', async () => {
     retrieveCustomer.mockResolvedValue({ metadata: { bank_accounts: [] } });
     await POST(mkReq({ ...VALID_BODY, bank_name: 'evil\nline' }), mkRes());
@@ -519,6 +569,67 @@ describe('DELETE /store/credits/withdraw/accounts', () => {
 });
 
 describe('GET /store/credits/withdraw/accounts', () => {
+  it('keeps an unverified Singapore bank under Singapore without asking to re-add it', async () => {
+    const account = savedShape({
+      id: savedBankAccountId('ALLIANCESG', '123456789012'),
+      bankCode: 'ALLIANCESG',
+      bankName: 'Alliance Bank (SG)',
+    });
+    retrieveCustomer.mockResolvedValue({
+      metadata: { bank_accounts: [account] },
+    });
+    const res = mkRes();
+    await GET(mkReq(), res);
+    expect((res as { json: jest.Mock }).json).toHaveBeenCalledWith({
+      accounts: [
+        expect.objectContaining({
+          ...account,
+          currency: 'SGD',
+          supported: false,
+          unavailableReason:
+            'Withdrawals to Alliance Bank (SG) are unavailable. Choose another bank.',
+        }),
+      ],
+    });
+    expect(updateCustomers).not.toHaveBeenCalled();
+  });
+
+  it('keeps invalid saved details visible but unavailable, with correction guidance', async () => {
+    const invalid = savedShape({
+      id: savedBankAccountId('MBBESGSG', '123456789012'),
+      bankCode: 'MBBESGSG',
+      bankName: 'Maybank (SG)',
+    });
+    const invalidMy = savedShape({
+      id: savedBankAccountId('MBBEMYKL', '12345678901'),
+      accountNumber: '12345678901',
+    });
+    retrieveCustomer.mockResolvedValue({
+      metadata: { bank_accounts: [invalid, invalidMy, savedShape()] },
+    });
+    const res = mkRes();
+    await GET(mkReq(), res);
+    const [blocked, blockedMy, valid] = (res as { json: jest.Mock }).json.mock
+      .calls[0][0].accounts;
+    expect(blocked).toMatchObject({
+      ...invalid,
+      supported: false,
+      currency: 'SGD',
+      unavailableReason: expect.stringMatching(
+        /Maybank \(SG\) account numbers are 11 digits.*Remove.*correct bank country/i,
+      ),
+    });
+    expect(blockedMy).toMatchObject({
+      supported: false,
+      unavailableReason: expect.stringContaining(
+        'Maybank account numbers are 12 digits',
+      ),
+    });
+    expect(valid.supported).toBe(true);
+    expect(valid.unavailableReason).toBeUndefined();
+    expect(updateCustomers).not.toHaveBeenCalled();
+  });
+
   it('lists the parsed accounts', async () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [savedShape(), 'junk'] },
@@ -551,10 +662,10 @@ describe('GET /store/credits/withdraw/accounts', () => {
   // admin's. A bank account is untouched.
   it("marks a Touch 'n Go account paused and states the admin minimum", async () => {
     const tng = savedShape({
-      id: savedBankAccountId('TNGMY', '0123456789'),
+      id: savedBankAccountId('TNGMY', '012345678901'),
       bankCode: 'TNGMY',
       bankName: "Touch 'n Go eWallet",
-      accountNumber: '0123456789',
+      accountNumber: '012345678901',
     });
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [tng, savedShape()] },

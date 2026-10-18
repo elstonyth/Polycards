@@ -161,6 +161,18 @@ async function submit() {
 }
 
 describe('WithdrawForm', () => {
+  it('points bank-format refusals to saved bank settings', async () => {
+    await render();
+    for (const error of [
+      'Enter the mobile number linked to PayNow, with country code for overseas numbers (digits only).',
+      'Withdrawals to Alliance Bank (SG) are unavailable. Choose another bank.',
+    ]) {
+      expect(withdrawRemedy(error)).toEqual({
+        href: '/bank',
+        label: 'Manage bank accounts',
+      });
+    }
+  });
   it('offers the saved accounts and no bank fields at all', async () => {
     await render([READY_ACCOUNT, COOLING_ACCOUNT]);
     expect(fetchSavedBankAccounts).toHaveBeenCalledOnce();
@@ -397,9 +409,9 @@ describe('WithdrawForm', () => {
 
     act(() => root.unmount());
     container.remove();
-    // One country only: no toggle, the plain list.
+    // Keep the bank country visible even when only one is available.
     await render([READY_ACCOUNT]);
-    expect(toggle()).toEqual([]);
+    expect(toggle()).toEqual(['Malaysia (on)']);
     expect(listed()).toEqual([READY_ACCOUNT.id]);
   });
 
@@ -444,6 +456,31 @@ describe('WithdrawForm', () => {
       'select[aria-label="Saved bank account"]',
     )!;
   const bandLine = () => container.querySelector('section')?.textContent ?? '';
+
+  it('blocks an existing account whose number does not match its bank country', async () => {
+    getPaymentLimits.mockResolvedValue(SG_LIMITS);
+    const invalid = {
+      ...DBS,
+      bankCode: 'MBBESGSG',
+      bankName: 'Maybank (SG)',
+      accountNumber: '123456789012',
+      supported: false,
+      unavailableReason:
+        'Maybank (SG) account numbers must be 11 digits. Remove this account and add it again with the correct bank country and account number.',
+    };
+    await render([invalid], 1000);
+    expect(
+      accountSelect().querySelector<HTMLOptionElement>(
+        `option[value="${invalid.id}"]`,
+      )?.disabled,
+    ).toBe(true);
+    expect(container.textContent).toContain(invalid.unavailableReason);
+    expect(submitButton().disabled).toBe(true);
+    setValue('select[aria-label="Saved bank account"]', invalid.id);
+    setValue('input[aria-label="Withdrawal amount in RM"]', '100');
+    await submit();
+    expect(startWithdrawal).not.toHaveBeenCalled();
+  });
 
   it("shows the Singapore rail's band as soon as its flag is on", async () => {
     getPaymentLimits.mockResolvedValue(SG_LIMITS);
