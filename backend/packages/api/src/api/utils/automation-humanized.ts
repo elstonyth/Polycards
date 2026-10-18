@@ -277,7 +277,7 @@ export function createHumanizedState(
   };
 }
 
-// shortcut: QA timing omits result-driven bursts, traits and fatigue; port them when desktop schedule parity is required.
+// shortcut: timing omits result-driven bursts, traits and fatigue; port them when desktop schedule parity is required.
 export function planHumanized(
   state: HumanizedState,
   nowMs: number,

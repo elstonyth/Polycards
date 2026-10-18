@@ -229,13 +229,17 @@ export async function changeLive(
         runId: randomUUID(),
         spentCents: 0,
         cycles: [],
+        schedules: [],
         nextRunAt: Date.now(),
         error: null,
       });
   });
 }
 
-export async function tickLive(container: MedusaContainer): Promise<boolean> {
+export async function tickLive(
+  container: MedusaContainer,
+  clock: () => number = Date.now,
+): Promise<boolean> {
   const claimed = await database(container).transaction(async (transaction) => {
     const { rows } = await transaction.raw(
       `select state from automation_live where id = 'global' and deleted_at is null and (state->>'status' = 'running' or state->'pending'->>'id' is not null) for update skip locked`,
@@ -243,8 +247,14 @@ export async function tickLive(container: MedusaContainer): Promise<boolean> {
     if (!rows.length) return null;
     const state = decode(rows[0].state);
     const previousStatus = state.status;
-    const cycle = claimLiveCycle(state, Date.now());
-    if (!cycle && state.status === previousStatus) return null;
+    const previousSchedules = state.schedules;
+    const cycle = claimLiveCycle(state, clock());
+    if (
+      !cycle &&
+      state.status === previousStatus &&
+      state.schedules === previousSchedules
+    )
+      return null;
     await transaction.raw(
       `update automation_live set state = ?::jsonb, updated_at = now() where id = 'global'`,
       [JSON.stringify(state)],
@@ -327,7 +337,7 @@ export async function tickLive(container: MedusaContainer): Promise<boolean> {
   await editLive(container, 'worker', (state) => {
     if (state.runId !== claimed.runId)
       throw new Error('Live run changed during settlement.');
-    completeLiveCycle(state, cycle, Date.now());
+    completeLiveCycle(state, cycle, clock());
   });
   return true;
 }

@@ -83,7 +83,13 @@ export function validateAutomationConfig(value: unknown): AutomationConfig {
 }
 
 export function automationDelayMs(
-  config: AutomationConfig,
+  config: Pick<
+    AutomationConfig,
+    | 'timingMode'
+    | 'fixedIntervalSeconds'
+    | 'randomMinSeconds'
+    | 'randomMaxSeconds'
+  >,
   random = Math.random,
 ): number {
   if (config.timingMode === 'fixed') return config.fixedIntervalSeconds * 1000;

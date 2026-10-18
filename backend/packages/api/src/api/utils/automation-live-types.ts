@@ -1,8 +1,28 @@
+import type { HumanizedState } from './automation-humanized';
+
+export const DEFAULT_LIVE_TIMING = {
+  timingMode: 'fixed',
+  randomMinSeconds: 2,
+  randomMaxSeconds: 5,
+  humanizedRegion: 'mysg',
+} as const;
+
 export interface LiveConfig {
   packSlug: string;
   customerIds: string[];
   intervalSeconds: number;
   maxCyclesPerAccount: number;
+  timingMode?: 'fixed' | 'random' | 'humanized';
+  randomMinSeconds?: number;
+  randomMaxSeconds?: number;
+  humanizedRegion?: 'mysg' | 'global';
+}
+
+export interface LiveSchedule {
+  customerId: string;
+  humanized: HumanizedState;
+  nextRunAt: number;
+  waitReason: string;
 }
 
 export interface LiveCycleAmounts {
@@ -40,6 +60,7 @@ export interface LiveState {
   pending: LiveCycle | null;
   cycles: LiveCycle[];
   error: string | null;
+  schedules?: LiveSchedule[];
 }
 
 export interface LiveSnapshot extends LiveState {
