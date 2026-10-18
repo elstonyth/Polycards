@@ -115,7 +115,7 @@ export function AutomationPage() {
         </div>
         <div className="border-t px-6 py-3">
           <Tabs value={tab} onValueChange={setTab}>
-            <Tabs.List aria-label={t('pcNav.automation')}>
+            <Tabs.List aria-label={t('pcNav.automation')} className="flex-wrap">
               <Tabs.Trigger value="live">Live workspace</Tabs.Trigger>
               <Tabs.Trigger value="sandbox">Test workspace</Tabs.Trigger>
               <Tabs.Trigger value="accounts">
