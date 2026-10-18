@@ -17,6 +17,8 @@ import type {
 } from '../../../../../packages/api/src/api/utils/automation-live-types';
 import { DEFAULT_LIVE_TIMING } from '../../../../../packages/api/src/api/utils/automation-live-types';
 import { rm } from '../../lib/format';
+import { getLiveAccountActivity } from './live-account-activity';
+import type { LiveAccountActivity } from './live-account-activity';
 
 declare const __BACKEND_URL__: string;
 const KEY = ['automation-live'];
@@ -91,6 +93,9 @@ export function LivePanel() {
     state?.status === 'paused' ||
     !!state?.pending;
   const busy = action.isPending;
+  const cycleTarget = state?.runId
+    ? (state.config?.maxCyclesPerAccount ?? config.maxCyclesPerAccount)
+    : config.maxCyclesPerAccount;
   const update = <K extends keyof LiveConfig>(key: K, value: LiveConfig[K]) =>
     setDraft({ ...config, [key]: value });
   const error = action.error?.message ?? query.error?.message ?? state?.error;
@@ -104,6 +109,33 @@ export function LivePanel() {
   const schedules = new Map(
     state?.schedules?.map((row) => [row.customerId, row]),
   );
+  const activities = new Map(
+    state?.accounts.map((account) => [
+      account.id,
+      getLiveAccountActivity(
+        state,
+        account.id,
+        config.customerIds.includes(account.id),
+      ),
+    ]),
+  );
+  const activityCounts = new Map<
+    string,
+    {
+      color: LiveAccountActivity['color'];
+      count: number;
+    }
+  >();
+  for (const id of config.customerIds) {
+    const activity = activities.get(id);
+    if (!activity) continue;
+    const group = activityCounts.get(activity.label) ?? {
+      color: activity.color,
+      count: 0,
+    };
+    group.count++;
+    activityCounts.set(activity.label, group);
+  }
   return (
     <>
       <Container>
@@ -228,7 +260,8 @@ export function LivePanel() {
         )}
         {state?.pending && (
           <Text className="mt-4" size="small">
-            Settling cycle {state.pending.id}
+            {activities.get(state.pending.customerId)?.label ?? 'Pending'} cycle{' '}
+            {state.pending.id}
             {state.pending.pullId ? ` · Pull ${state.pending.pullId}` : ''}
           </Text>
         )}
@@ -381,6 +414,22 @@ export function LivePanel() {
             Select all active accounts
           </Button>
         </div>
+        <div
+          role="group"
+          aria-label="Selected account activity"
+          className="mt-3 flex flex-wrap gap-2"
+        >
+          {[...activityCounts].map(([label, group]) => (
+            <StatusBadge key={label} color={group.color}>
+              {label} · {group.count}
+            </StatusBadge>
+          ))}
+        </div>
+        <Text size="small" className="mt-2 text-ui-fg-subtle">
+          Activity updates automatically while the run is active. Next check
+          times follow your browser’s local timezone; session checks may
+          schedule a later draw.
+        </Text>
         {!state?.accounts.length && (
           <Text className="mt-3 text-ui-fg-subtle">
             Add existing customer emails in the Accounts tab to make them
@@ -388,47 +437,64 @@ export function LivePanel() {
           </Text>
         )}
         <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {state?.accounts.map((account) => (
-            <label
-              key={account.id}
-              className="flex items-start gap-2 rounded-md border p-3 text-sm"
-            >
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={config.customerIds.includes(account.id)}
-                disabled={active || busy || account.status !== 'active'}
-                onChange={(event) =>
-                  update(
-                    'customerIds',
-                    event.target.checked
-                      ? [...config.customerIds, account.id]
-                      : config.customerIds.filter((id) => id !== account.id),
-                  )
-                }
-              />
-              <span>
-                {account.name}
-                <span className="block text-ui-fg-subtle">
-                  {account.balance === null
-                    ? 'Unavailable'
-                    : rm(account.balance)}{' '}
-                  · {account.status}
-                </span>
-                {state.config?.timingMode === 'humanized' &&
-                  schedules.has(account.id) && (
+          {state?.accounts.map((account) => {
+            const activity = activities.get(account.id)!;
+            return (
+              <label
+                key={account.id}
+                data-account-id={account.id}
+                className="flex items-start gap-2 rounded-md border p-3 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  aria-label={`Select ${account.name}`}
+                  className="mt-1"
+                  checked={config.customerIds.includes(account.id)}
+                  disabled={active || busy || account.status !== 'active'}
+                  onChange={(event) =>
+                    update(
+                      'customerIds',
+                      event.target.checked
+                        ? [...config.customerIds, account.id]
+                        : config.customerIds.filter((id) => id !== account.id),
+                    )
+                  }
+                />
+                <span className="min-w-0 flex-1 space-y-1">
+                  <span className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="break-words font-medium">
+                      {account.name}
+                    </span>
+                    <StatusBadge color={activity.color}>
+                      {activity.label}
+                    </StatusBadge>
+                  </span>
+                  <span className="block text-ui-fg-subtle">
+                    {account.balance === null
+                      ? 'Unavailable'
+                      : rm(account.balance)}{' '}
+                    · Account {account.status}
+                  </span>
+                  <span className="block">{activity.reason}</span>
+                  {activity.nextCheckAt !== null && (
                     <span className="block text-ui-fg-subtle">
-                      {schedules.get(account.id)!.humanized.label} ·{' '}
-                      {state!.cycles.filter(
-                        (cycle) => cycle.customerId === account.id,
-                      ).length >= config.maxCyclesPerAccount
-                        ? 'Completed'
-                        : `${schedules.get(account.id)!.waitReason} · ${new Date(schedules.get(account.id)!.nextRunAt).toLocaleString()}`}
+                      Next check:{' '}
+                      <time
+                        dateTime={new Date(activity.nextCheckAt).toISOString()}
+                      >
+                        {new Date(activity.nextCheckAt).toLocaleString()}
+                      </time>
                     </span>
                   )}
-              </span>
-            </label>
-          ))}
+                  <span className="block text-ui-fg-subtle">
+                    {activity.settledCycles}/{cycleTarget} cycles settled
+                    {schedules.has(account.id) &&
+                      ` · ${schedules.get(account.id)!.humanized.label}`}
+                  </span>
+                </span>
+              </label>
+            );
+          })}
         </div>
       </Container>
       <Container className="p-0">
@@ -489,7 +555,7 @@ export function LivePanel() {
                   <Table.Cell>
                     {cycle.error ??
                       (!cycle.finishedAt
-                        ? 'Settling'
+                        ? (activities.get(cycle.customerId)?.label ?? 'Pending')
                         : cycle.differenceCents === 0 &&
                             cycle.bonusDifferenceCents === 0
                           ? 'Settled'
