@@ -3,7 +3,6 @@ export interface LiveConfig {
   customerIds: string[];
   intervalSeconds: number;
   maxCyclesPerAccount: number;
-  maxSpendMyr: number;
 }
 
 export interface LiveCycleAmounts {

@@ -180,13 +180,7 @@ export async function changeLive(
     }
     const snapshot = await readLive(container);
     const pack = snapshot.packs.find((pack) => pack.slug === config.packSlug);
-    if (
-      !pack ||
-      Math.round(pack.price * 100) > Math.round(config.maxSpendMyr * 100)
-    )
-      throw invalid(
-        'Choose an available paid pack within the run spend limit.',
-      );
+    if (!pack) throw invalid('Choose an available paid pack.');
     if (
       config.customerIds.some(
         (id) =>
@@ -260,11 +254,7 @@ export async function tickLive(container: MedusaContainer): Promise<boolean> {
           cycle,
           config: state.config,
           runId: state.runId,
-          maxPrice:
-            Math.min(
-              state.packPriceCents,
-              Math.round(state.config.maxSpendMyr * 100) - state.spentCents,
-            ) / 100,
+          maxPrice: state.packPriceCents / 100,
         }
       : null;
   });

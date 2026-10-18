@@ -77,7 +77,6 @@ export function LivePanel() {
       customerIds: [],
       intervalSeconds: 5,
       maxCyclesPerAccount: 1,
-      maxSpendMyr: 800,
     };
   const active =
     state?.status === 'running' ||
@@ -219,7 +218,7 @@ export function LivePanel() {
         <Heading level="h2">Live configuration</Heading>
         <fieldset
           disabled={active || busy || !state}
-          className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
+          className="mt-4 grid gap-4 sm:grid-cols-3"
         >
           <div className="space-y-2">
             <Label htmlFor="live-pack">Paid pack</Label>
@@ -266,21 +265,12 @@ export function LivePanel() {
               }
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="live-spend">Run spend limit (MYR)</Label>
-            <Input
-              id="live-spend"
-              type="number"
-              min={0.01}
-              max={8000}
-              step="0.01"
-              value={config.maxSpendMyr}
-              onChange={(event) =>
-                update('maxSpendMyr', Number(event.target.value))
-              }
-            />
-          </div>
         </fieldset>
+        <Text size="small" className="mt-3 text-ui-fg-subtle">
+          No total spend cap. Runs finish the selected cycles while account
+          balances cover each draw. Each draw appears in the storefront’s recent
+          pulls feed, including cards sold back.
+        </Text>
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
           <Heading level="h3">
             Customer accounts · {config.customerIds.length} selected
