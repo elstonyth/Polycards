@@ -1464,6 +1464,11 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      matcher: '/admin/automation/accounts',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Active payment gateway switch (plan 130). Flips where every customer
       // pays and is paid out — same admin budget as the other settings writes.
       matcher: '/admin/payments/gateway',
