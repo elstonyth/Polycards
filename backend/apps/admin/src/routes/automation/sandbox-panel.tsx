@@ -66,8 +66,13 @@ export function SandboxPanel() {
     queryKey: KEY,
     queryFn: ({ signal }) => requestSandbox(undefined, signal),
     retry: false,
-    refetchInterval: (query) =>
-      query.state.data?.status === 'running' ? 2000 : false,
+    refetchInterval: (query) => {
+      const state = query.state.data;
+      if (state?.status !== 'running') return false;
+      return state.nextRunAt && state.nextRunAt - Date.now() > 15000
+        ? 10000
+        : 2000;
+    },
     refetchIntervalInBackground: false,
   });
   const action = useMutation({
@@ -193,21 +198,6 @@ export function SandboxPanel() {
           </Text>
         )}
       </Container>
-
-      <RunSettings
-        config={visibleConfig}
-        disabled={disabled || profiles.length === 0}
-        profiles={profiles}
-        selectedProfile={selected}
-        onChange={(config) => {
-          setDraft(config);
-          setDirty(true);
-        }}
-        onSelectProfile={(id) => {
-          setSelected(id);
-          setDirty(true);
-        }}
-      />
 
       <Container className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -340,6 +330,21 @@ export function SandboxPanel() {
           </Text>
         </details>
       </Container>
+
+      <RunSettings
+        config={visibleConfig}
+        disabled={disabled || profiles.length === 0}
+        profiles={profiles}
+        selectedProfile={selected}
+        onChange={(config) => {
+          setDraft(config);
+          setDirty(true);
+        }}
+        onSelectProfile={(id) => {
+          setSelected(id);
+          setDirty(true);
+        }}
+      />
 
       <Container className="space-y-4">
         <Heading level="h2">Profiles and latest results</Heading>

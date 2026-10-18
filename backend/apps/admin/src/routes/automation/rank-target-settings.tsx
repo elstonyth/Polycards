@@ -195,10 +195,7 @@ export function RankTargetSettings({
           ))}
         </ul>
       )}
-      <details
-        className="mt-4"
-        open={targets.length === 0 || editingId !== null ? true : undefined}
-      >
+      <details className="mt-4" open={editingId !== null ? true : undefined}>
         <summary className="cursor-pointer text-sm font-medium">
           {t(
             editingId
