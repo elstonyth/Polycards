@@ -18,6 +18,7 @@ import type {
 } from '../../../../../packages/api/src/api/utils/automation-monitor-types';
 import { rm } from '../../lib/format';
 import { SandboxPanel } from './sandbox-panel';
+import { LivePanel } from './live-panel';
 
 declare const __BACKEND_URL__: string;
 
@@ -48,7 +49,7 @@ const MANUAL_REFRESH = {
 
 export function AutomationPage() {
   const { t } = useTranslation();
-  const [tab, setTab] = useState('sandbox');
+  const [tab, setTab] = useState('live');
   const [period, setPeriod] = useState<'weekly' | 'alltime'>('weekly');
   const [search, setSearch] = useState('');
   const accounts = useQuery({
@@ -85,11 +86,13 @@ export function AutomationPage() {
           <div className="space-y-2">
             <Heading level="h1">{t('pcNav.automation')}</Heading>
             <Text size="small" className="text-ui-fg-subtle">
-              {tab === 'sandbox'
-                ? 'Configure and run isolated cloud tests. Original accounts remain read-only in the monitoring tabs.'
-                : t('automationMonitor.subtitle')}
+              {tab === 'live'
+                ? 'Run real pack draws and settle buybacks against production customer balances.'
+                : tab === 'sandbox'
+                  ? 'Configure and run isolated cloud tests. Original accounts remain read-only in the monitoring tabs.'
+                  : t('automationMonitor.subtitle')}
             </Text>
-            {tab !== 'sandbox' && (
+            {(tab === 'accounts' || tab === 'leaderboard') && (
               <div className="flex gap-2">
                 <StatusBadge color="blue">
                   {t('automationMonitor.readOnly')}
@@ -100,7 +103,7 @@ export function AutomationPage() {
               </div>
             )}
           </div>
-          {tab !== 'sandbox' && (
+          {(tab === 'accounts' || tab === 'leaderboard') && (
             <Button
               variant="secondary"
               isLoading={query.isFetching}
@@ -113,6 +116,7 @@ export function AutomationPage() {
         <div className="border-t px-6 py-3">
           <Tabs value={tab} onValueChange={setTab}>
             <Tabs.List aria-label={t('pcNav.automation')}>
+              <Tabs.Trigger value="live">Live workspace</Tabs.Trigger>
               <Tabs.Trigger value="sandbox">Test workspace</Tabs.Trigger>
               <Tabs.Trigger value="accounts">
                 {t('automationMonitor.accounts')}
@@ -125,7 +129,7 @@ export function AutomationPage() {
         </div>
       </Container>
 
-      {tab !== 'sandbox' && query.isError && (
+      {(tab === 'accounts' || tab === 'leaderboard') && query.isError && (
         <Container>
           <Text role="alert" className="text-ui-fg-error">
             {t('automationMonitor.loadError')}
@@ -133,7 +137,9 @@ export function AutomationPage() {
         </Container>
       )}
 
-      {tab === 'sandbox' ? (
+      {tab === 'live' ? (
+        <LivePanel />
+      ) : tab === 'sandbox' ? (
         <SandboxPanel />
       ) : tab === 'accounts' ? (
         <>
