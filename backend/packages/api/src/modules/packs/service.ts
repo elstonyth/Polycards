@@ -72,6 +72,7 @@ import DeliveryOrderItem from './models/delivery-order-item';
 import VipLevel from './models/vip-level';
 import RewardsSettings from './models/rewards-settings';
 import SiteSettings from './models/site-settings';
+import AutomationMonitor from './models/automation-monitor';
 import CustomerAccountState from './models/customer-account-state';
 import PlayerPayoutDetails from './models/player-payout-details';
 import AdminActionAudit from './models/admin-action-audit';
@@ -707,6 +708,7 @@ class PacksModuleService extends MedusaService({
   VipLevel,
   RewardsSettings,
   SiteSettings,
+  AutomationMonitor,
   CustomerAccountState,
   PlayerPayoutDetails,
   AdminActionAudit,
