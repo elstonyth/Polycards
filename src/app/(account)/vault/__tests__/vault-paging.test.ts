@@ -158,3 +158,32 @@ describe('vault paging', () => {
     expect(showing()).toBe('30/45');
   });
 });
+
+describe('weekly-challenge prizes', () => {
+  test('state no rarity: no tile label, no chip, no filter match', async () => {
+    const prize = (i: number, rarity: string) =>
+      ({ ...item(i, rarity), challengePrize: true }) as VaultItem;
+    await act(async () => {
+      root.render(
+        createElement(VaultClient, {
+          key: 'prizes',
+          initial: {
+            ok: true,
+            items: [
+              item(0, 'Common'),
+              item(1, 'Rare'),
+              prize(2, 'Immortal'),
+              prize(3, 'Rare'),
+            ],
+            balance: 0,
+          },
+          addresses: [],
+          initialGifts: [],
+        }),
+      );
+    });
+    expect(container.textContent).not.toMatch(/Immortal/i);
+    await click('Rare');
+    expect(showing()).toBe('1/1');
+  });
+});
