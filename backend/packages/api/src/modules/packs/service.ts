@@ -7343,7 +7343,7 @@ class PacksModuleService extends MedusaService({
   // sinceMs = null → all-time; a timestamp → weekly window.
   @InjectManager()
   async leaderboardTop(
-    opts: { sinceMs: number | null; limit: number },
+    opts: { sinceMs: number | null; limit: number; customerIds?: string[] },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
     { customer_id: string; pulls: number; points: number; volume: number }[]
@@ -7402,11 +7402,28 @@ class PacksModuleService extends MedusaService({
         '       ROUND(COALESCE(w.volume_usd, 0) * ? * 100) / 100 AS volume_myr ' +
         '  FROM spend s ' +
         '  LEFT JOIN wins w ON w.customer_id = s.customer_id ' +
+        (opts.customerIds?.length
+          ? ' WHERE s.customer_id IN (' +
+            opts.customerIds.map(() => '?').join(', ') +
+            ') '
+          : '') +
         ' ORDER BY volume_myr DESC, s.spend_cents DESC, s.customer_id ASC ' +
         ' LIMIT ?',
       since === null
-        ? [DEFAULT_MARKET_MULTIPLIER, fxRate, opts.limit]
-        : [since, DEFAULT_MARKET_MULTIPLIER, since, fxRate, opts.limit],
+        ? [
+            DEFAULT_MARKET_MULTIPLIER,
+            fxRate,
+            ...(opts.customerIds ?? []),
+            opts.limit,
+          ]
+        : [
+            since,
+            DEFAULT_MARKET_MULTIPLIER,
+            since,
+            fxRate,
+            ...(opts.customerIds ?? []),
+            opts.limit,
+          ],
     );
 
     return rows.map((r) => ({

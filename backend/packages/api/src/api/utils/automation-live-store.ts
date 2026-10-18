@@ -30,6 +30,11 @@ import type {
   LiveState,
 } from './automation-live-types';
 import { pageAll } from './page-all';
+import { observeLiveRanks } from './automation-live-leaderboard';
+import {
+  liveRankTargetsToObserve,
+  refreshLiveRankGoals,
+} from './automation-live-rank';
 
 interface Connection {
   raw(
@@ -230,6 +235,8 @@ export async function changeLive(
         spentCents: 0,
         cycles: [],
         schedules: [],
+        rankGoals: undefined,
+        nextDrawAt: undefined,
         nextRunAt: Date.now(),
         error: null,
       });
@@ -246,15 +253,23 @@ export async function tickLive(
     );
     if (!rows.length) return null;
     const state = decode(rows[0].state);
-    const previousStatus = state.status;
-    const previousSchedules = state.schedules;
-    const cycle = claimLiveCycle(state, clock());
+    const previous = JSON.stringify(state);
     if (
-      !cycle &&
-      state.status === previousStatus &&
-      state.schedules === previousSchedules
-    )
-      return null;
+      state.status === 'running' &&
+      !state.pending &&
+      state.config?.rankTargets?.length &&
+      (state.nextRunAt ?? 0) <= clock()
+    ) {
+      const targets = liveRankTargetsToObserve(state, clock());
+      const observations = await observeLiveRanks(
+        service(container),
+        targets,
+        clock,
+      );
+      refreshLiveRankGoals(state, observations, clock());
+    }
+    const cycle = claimLiveCycle(state, clock());
+    if (!cycle && JSON.stringify(state) === previous) return null;
     await transaction.raw(
       `update automation_live set state = ?::jsonb, updated_at = now() where id = 'global'`,
       [JSON.stringify(state)],

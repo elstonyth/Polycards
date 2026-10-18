@@ -1,4 +1,5 @@
 import type { LiveSnapshot } from '../../../../../packages/api/src/api/utils/automation-live-types';
+import { liveRankReady } from '../../../../../packages/api/src/api/utils/automation-live-rank';
 
 export interface LiveAccountActivity {
   label: string;
@@ -65,7 +66,32 @@ export function getLiveAccountActivity(
       'red',
       failed.error ?? 'Settlement balance mismatch needs review.',
     );
-  if (settledCycles >= (state.config?.maxCyclesPerAccount ?? 1))
+  const ranked = !!state.config?.rankTargets?.length;
+  if (
+    ranked &&
+    !state.config?.rankTargets?.some(
+      (target) => target.customerId === customerId,
+    )
+  )
+    return activity(
+      'No rank goal',
+      'grey',
+      'Only accounts with a configured rank goal draw in this run.',
+    );
+  const goal = ranked
+    ? state.rankGoals?.find((row) => row.target.profileId === customerId)
+    : undefined;
+  if (goal?.done)
+    return activity(
+      goal.status.state === 'secured'
+        ? 'Rank goal reached'
+        : goal.status.state === 'limited'
+          ? 'Goal limit reached'
+          : 'Goal needs review',
+      goal.status.state === 'secured' ? 'green' : 'orange',
+      goal.status.reason,
+    );
+  if (!ranked && settledCycles >= (state.config?.maxCyclesPerAccount ?? 1))
     return activity(
       'Completed',
       'green',
@@ -89,6 +115,15 @@ export function getLiveAccountActivity(
     );
   if (state.status !== 'running')
     return activity('Ready', 'grey', 'Waiting for a live run to start.');
+  if (ranked && !goal?.status.eligible)
+    return activity(
+      goal?.status.state === 'stale'
+        ? 'Rank data unavailable'
+        : 'Checking rank',
+      'orange',
+      goal?.status.reason ?? 'Waiting for a fresh live leaderboard.',
+      goal?.nextCheckAt ?? state.nextRunAt,
+    );
   if (state.config?.timingMode === 'humanized') {
     const schedule = state.schedules?.find(
       (row) => row.customerId === customerId,
@@ -120,8 +155,9 @@ export function getLiveAccountActivity(
   }
   const nextCustomer = state.config?.customerIds.find(
     (id) =>
+      liveRankReady(state, id, now) &&
       state.cycles.filter((cycle) => cycle.customerId === id).length <
-      (state.config?.maxCyclesPerAccount ?? 1),
+        (state.config?.maxCyclesPerAccount ?? 1),
   );
   if (customerId !== nextCustomer || state.pending)
     return activity(
@@ -129,12 +165,15 @@ export function getLiveAccountActivity(
       'orange',
       'Waiting for earlier accounts to finish.',
     );
-  return state.nextRunAt && state.nextRunAt > now
+  const nextDrawAt = ranked
+    ? (state.nextDrawAt ?? state.nextRunAt)
+    : state.nextRunAt;
+  return nextDrawAt && nextDrawAt > now
     ? activity(
         'Waiting',
         'orange',
         'Waiting for the configured draw interval.',
-        state.nextRunAt,
+        nextDrawAt,
       )
     : activity(
         'Pending',

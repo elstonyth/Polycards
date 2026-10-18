@@ -1,4 +1,17 @@
 import type { HumanizedState } from './automation-humanized';
+import type { RankRuntime } from './automation-rank';
+
+export interface LiveRankTarget {
+  customerId: string;
+  period: 'weekly' | 'alltime';
+  targetRank: number;
+}
+
+export interface LiveRankGoal extends RankRuntime {
+  done: boolean;
+  nextCheckAt: number;
+  observationExpiresAt: number;
+}
 
 export const DEFAULT_LIVE_TIMING = {
   timingMode: 'fixed',
@@ -16,6 +29,7 @@ export interface LiveConfig {
   randomMinSeconds?: number;
   randomMaxSeconds?: number;
   humanizedRegion?: 'mysg' | 'global';
+  rankTargets?: LiveRankTarget[];
 }
 
 export interface LiveSchedule {
@@ -57,10 +71,12 @@ export interface LiveState {
   packPriceCents: number;
   spentCents: number;
   nextRunAt: number | null;
+  nextDrawAt?: number;
   pending: LiveCycle | null;
   cycles: LiveCycle[];
   error: string | null;
   schedules?: LiveSchedule[];
+  rankGoals?: LiveRankGoal[];
 }
 
 export interface LiveSnapshot extends LiveState {

@@ -373,12 +373,123 @@ medusaIntegrationTestRunner({
           expect.objectContaining({ id: humanizedPull.id }),
         ]),
       );
+      const [competitor] = await customers.createCustomers([
+        {
+          email: 'rank-competitor@example.test',
+          first_name: 'Rank Competitor',
+          has_account: true,
+        },
+      ]);
+      await packs.createCreditTransactions([
+        { customer_id: competitor.id, amount: -10, reason: 'pack_open' },
+      ]);
+      await packs.createPulls([
+        {
+          customer_id: competitor.id,
+          pack_id: 'live-pack',
+          card_id: 'live-card',
+          rolled_at: new Date(),
+          source: 'pack',
+          recorded_value_usd: 1000,
+        },
+      ]);
+      const ownRows = await packs.leaderboardTop({
+        sinceMs: null,
+        limit: 1,
+        customerIds: [customer.id],
+      });
+      expect(ownRows).toEqual([
+        expect.objectContaining({
+          customer_id: customer.id,
+          pulls: 4,
+          volume: 32,
+        }),
+      ]);
+      await api.post(
+        '/admin/automation/live',
+        {
+          action: 'run',
+          config: {
+            ...config,
+            maxCyclesPerAccount: 1,
+            rankTargets: [
+              { customerId: customer.id, period: 'alltime', targetRank: 1 },
+            ],
+          },
+        },
+        { headers },
+      );
+      expect(await tickLive(container)).toBe(true);
+      const rankedDraw = (await api.get('/admin/automation/live', { headers }))
+        .data;
+      expect(rankedDraw.status).toBe('running');
+      expect(rankedDraw.cycles).toEqual([
+        expect.objectContaining({
+          differenceCents: 0,
+          bonusDifferenceCents: 0,
+          error: null,
+        }),
+      ]);
+      expect(
+        (await packs.listPulls({ id: rankedDraw.cycles[0].pullId }))[0].status,
+      ).toBe('bought_back');
+      let rankClock = rankedDraw.nextRunAt;
+      expect(await tickLive(container, () => rankClock)).toBe(false);
+      const limited = (await api.get('/admin/automation/live', { headers }))
+        .data;
+      expect(limited.status).toBe('completed');
+      expect(limited.rankGoals[0]).toMatchObject({
+        done: true,
+        status: { state: 'limited', currentRank: 2, mode: 'live' },
+      });
+      expect(limited.cycles).toHaveLength(1);
+      await new Promise((resolve) => setTimeout(resolve, 5100));
+      expect(
+        (
+          await api.get('/store/pulls/recent?pack_id=live-pack', {
+            headers: storeHeaders,
+          })
+        ).data.pulls,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: rankedDraw.cycles[0].pullId }),
+        ]),
+      );
+      await api.post(
+        '/admin/automation/live',
+        {
+          action: 'run',
+          config: {
+            ...config,
+            maxCyclesPerAccount: 1,
+            rankTargets: [
+              { customerId: customer.id, period: 'alltime', targetRank: 2 },
+            ],
+          },
+        },
+        { headers },
+      );
+      rankClock = Date.now();
+      expect(await tickLive(container, () => rankClock)).toBe(false);
+      expect(await tickLive(container, () => rankClock + 2000)).toBe(false);
+      const secured = (await api.get('/admin/automation/live', { headers }))
+        .data;
+      expect(secured.status).toBe('completed');
+      expect(secured.cycles).toEqual([]);
+      expect(secured.rankGoals[0]).toMatchObject({
+        done: true,
+        status: { state: 'secured', currentRank: 2 },
+      });
       // Simulate a disable arriving after the next draw, at the separate sell boundary.
+      const pullsBeforeDisable = (
+        await packs.listAndCountPulls({ customer_id: customer.id })
+      )[1];
       const disabled = jest
         .spyOn(packs, 'isAccountDisabled')
         .mockImplementation(
           async (id) =>
-            (await packs.listAndCountPulls({ customer_id: id }))[1] > 4,
+            (await packs.listAndCountPulls({ customer_id: id }))[1] >
+            pullsBeforeDisable,
         );
       try {
         await api.post(
