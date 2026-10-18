@@ -37,6 +37,7 @@ import AdminActionAudit from '../models/admin-action-audit';
 import VipMemberState from '../models/vip-member-state';
 import VipRewardGrant from '../models/vip-reward-grant';
 import NotificationRead from '../models/notification-read';
+import LosslessSchedule from '../models/lossless-schedule';
 
 // Import the vault route handler under test
 import { GET as vaultGET } from '../../../api/store/vault/route';
@@ -47,6 +48,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
   moduleName: PACKS_MODULE,
   resolve: path.resolve(__dirname, '../../..', 'modules/packs'),
   moduleModels: [
+    LosslessSchedule,
     Pack,
     Card,
     PackOdds,

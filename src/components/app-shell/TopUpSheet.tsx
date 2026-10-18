@@ -246,7 +246,8 @@ export default function TopUpSheet({
 
   // Step 1's rows: RM always — marked paused, not hidden, when the admin has
   // closed RM top-ups, so the customer is told rather than left wondering —
-  // then every open regional rail.
+  // then every open regional rail, then any closed one the backend still
+  // reports, paused for the same reason.
   const rmPaused = USE_GATEWAY && !limits.depositsEnabled;
   const currencyOptions: CurrencyOption[] = [
     {
@@ -266,6 +267,21 @@ export default function TopUpSheet({
       name: option.ui.name,
       hint: `${option.ui.hint} · ${option.ui.symbol}1 = RM ${option.rate.deposit.toFixed(4)}`,
     })),
+    ...(USE_GATEWAY ? (limits.regional ?? []) : []).flatMap((closed) => {
+      const ui = regionalRailUi(closed.currency);
+      return ui && !rails.some((open) => open.currency === closed.currency)
+        ? [
+            {
+              code: closed.currency,
+              symbol: ui.symbol,
+              flag: ui.flag,
+              name: ui.name,
+              hint: 'Paused right now — your balance and cards are unaffected',
+              disabled: true,
+            },
+          ]
+        : [];
+    }),
   ];
   // The picker shows until a currency is chosen — and again if the chosen
   // rail closes while the sheet is open (its form would have nothing to pay).
@@ -325,6 +341,9 @@ export default function TopUpSheet({
     if (submitting || !canPay) return;
     setError(null);
     setSubmitting(true);
+    // Set once we hand the page to the cashier: navigation does not block,
+    // so re-enabling Pay meanwhile let a second tap open a second deposit.
+    let leaving = false;
     // Ads funnel (lib/pixel.ts): the customer has started a top-up. Sent
     // before the checkout call so the beacon is out before the cashier
     // redirect takes the page away.
@@ -348,9 +367,15 @@ export default function TopUpSheet({
           setError(res.error);
           // A regional refusal may be that rate change: re-read the rails so
           // the sheet shows today's rate before the customer retries.
+          // An unreachable backend answers the defaults, which carry no
+          // rails: keep what the sheet has rather than drop the S$ form.
           if (rail) {
             getPaymentLimits()
-              .then(setLimits)
+              .then((fresh) => {
+                if (fresh.gateway !== DEFAULT_PAYMENT_LIMITS.gateway) {
+                  setLimits(fresh);
+                }
+              })
               .catch(() => {});
           }
           return;
@@ -364,6 +389,7 @@ export default function TopUpSheet({
         // return page to keep re-reading for a bit, because crediting happens on
         // the backend sweep and can land after they are already back.
         markDepositInFlight();
+        leaving = true;
         leaveFor(res.url);
         return;
       }
@@ -384,9 +410,19 @@ export default function TopUpSheet({
     } catch {
       setError('Something went wrong. Please try again.');
     } finally {
-      setSubmitting(false);
+      if (!leaving) setSubmitting(false);
     }
   }
+
+  // Back from the cashier to a page restored from the browser's cache: the
+  // sheet is as it was left, Pay included, so let it be pressed again.
+  useEffect(() => {
+    const onShow = (event: PageTransitionEvent) => {
+      if (event.persisted) setSubmitting(false);
+    };
+    window.addEventListener('pageshow', onShow);
+    return () => window.removeEventListener('pageshow', onShow);
+  }, []);
 
   if (!open) return null;
 
@@ -441,6 +477,10 @@ export default function TopUpSheet({
             <CheckCircle2 className="h-12 w-12 text-buyback-fg" aria-hidden />
             <p className="mt-3 font-heading text-2xl text-white">
               {rm(done.amount)} ADDED
+            </p>
+            <p className="mt-1 text-sm text-neutral-300">
+              After a top-up, withdrawals pause until you use all your money for
+              packs.
             </p>
             <p className="mt-1 text-sm text-neutral-400">
               New balance{' '}
@@ -499,6 +539,16 @@ export default function TopUpSheet({
                 </li>
               ))}
             </ul>
+            {/* A refusal that closed the chosen rail lands the customer back
+                here; its reason must come with them. */}
+            {error && (
+              <p
+                role="alert"
+                className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[13px] font-medium text-red-300"
+              >
+                {error}
+              </p>
+            )}
             <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">
               Your balance is always kept in RM — other currencies are converted
               when you pay.
@@ -697,7 +747,7 @@ export default function TopUpSheet({
 
             <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
               <div className="flex items-center justify-between text-neutral-400">
-                <span>Current balance</span>
+                <span>Balance</span>
                 <span className="font-semibold text-neutral-200">
                   {balance == null ? '—' : rm(balance)}
                 </span>
@@ -724,6 +774,16 @@ export default function TopUpSheet({
                   {rail.ui.symbol}1 = RM {rail.rate.deposit.toFixed(4)}
                 </p>
               )}
+              {/* A3Pay matches a transfer ONLY by its exact amount, and may
+                  ask for a few cents more than this to keep it unique. */}
+              {rail && (
+                <p className="mt-2 text-[12px] leading-snug text-neutral-300">
+                  Transfer the exact amount the next page shows, cents included.
+                  It can be a few cents more than this (for example{' '}
+                  {rail.ui.symbol}100.01). A rounded amount can’t be matched to
+                  your top-up.
+                </p>
+              )}
               <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">
                 {/* On the gateway path the credit is NOT immediate — it lands
                     when the provider confirms the payment. Calling this "New
@@ -736,6 +796,11 @@ export default function TopUpSheet({
                 </span>
               </div>
             </div>
+
+            <p className="mt-3 text-[12px] leading-relaxed text-neutral-300">
+              After a top-up, withdrawals pause until you use all your money for
+              packs.
+            </p>
 
             {/* The remedy sits INSIDE role="alert" so a screen reader gets the
                 problem and the way out in one utterance. PhoneGateAction closes

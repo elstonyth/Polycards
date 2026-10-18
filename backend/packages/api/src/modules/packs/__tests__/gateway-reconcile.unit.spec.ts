@@ -104,10 +104,32 @@ describe('reconcileAction', () => {
     expect(action).toEqual({
       kind: 'quarantine',
       amount: GATEWAY_MAX_RM + 1,
+      reason: 'ceiling',
     });
     // 'fail' and 'expire' are the write-off kinds — quarantine must be neither.
     expect(action.kind).not.toBe('fail');
     expect(action.kind).not.toBe('expire');
+  });
+
+  it("honours the row gateway's own ceiling: an S$5,000 top-up settles, an RM one still quarantines", () => {
+    expect(
+      reconcileAction({
+        state: 'success',
+        amount: 15850.3,
+        createdAt: minutesAgo(5),
+        now,
+        ceiling: 20000,
+      }),
+    ).toEqual({ kind: 'settle', amount: 15850.3 });
+    expect(
+      reconcileAction({
+        state: 'success',
+        amount: 10000.01,
+        createdAt: minutesAgo(5),
+        now,
+        ceiling: 10000,
+      }),
+    ).toMatchObject({ kind: 'quarantine', reason: 'ceiling' });
   });
 
   it('settles a success exactly AT the ceiling', () => {
@@ -163,6 +185,71 @@ describe('reconcileAction', () => {
         now,
       }),
     ).toEqual({ kind: 'wait' });
+  });
+
+  // A3Pay matches a payin ONLY by its exact (nudged) amount, so a requery
+  // that says a different S$ sum was paid is not a customer paying more or
+  // less: it is a manual-match slip at their end. Hold it for an operator.
+  describe('a row with an FX lock (S$ locked at S$50.01 = RM 154.55)', () => {
+    const fx = {
+      ledgerAmount: 154.55,
+      gatewayAmount: 50.01,
+      currency: 'SGD',
+    };
+    const settle = (reported: number, amount: number) =>
+      reconcileAction({
+        state: 'success',
+        amount,
+        createdAt: minutesAgo(5),
+        now,
+        lock: { fx, reported },
+      });
+
+    it('settles the locked amount, and a nudge either way inside 10 cents', () => {
+      expect(settle(50.01, 154.55)).toEqual({ kind: 'settle', amount: 154.55 });
+      expect(settle(50.11, 154.85)).toEqual({ kind: 'settle', amount: 154.85 });
+      expect(settle(49.91, 154.24)).toEqual({ kind: 'settle', amount: 154.24 });
+    });
+
+    it('quarantines a reported S$ amount further than a nudge from the lock', () => {
+      expect(settle(500.1, 1545.5)).toEqual({
+        kind: 'quarantine',
+        amount: 1545.5,
+        reason: 'off-lock',
+      });
+      expect(settle(50.12, 154.89)).toMatchObject({
+        kind: 'quarantine',
+        reason: 'off-lock',
+      });
+      expect(settle(5.01, 15.48)).toMatchObject({ kind: 'quarantine' });
+    });
+
+    it('leaves an RM row (no lock) to the ceiling alone', () => {
+      expect(
+        reconcileAction({
+          state: 'success',
+          amount: 300,
+          createdAt: minutesAgo(5),
+          now,
+          lock: {
+            fx: { ledgerAmount: 50, gatewayAmount: null, currency: 'MYR' },
+            reported: 300,
+          },
+        }),
+      ).toEqual({ kind: 'settle', amount: 300 });
+    });
+
+    it('never fences a failed or pending answer', () => {
+      expect(
+        reconcileAction({
+          state: 'failed',
+          amount: 1545.5,
+          createdAt: minutesAgo(5),
+          now,
+          lock: { fx, reported: 500.1 },
+        }),
+      ).toEqual({ kind: 'fail' });
+    });
   });
 });
 

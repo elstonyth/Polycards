@@ -7,6 +7,7 @@ export type ChargePackOpenInput = {
   pack_id: string; // = Pack.slug
   customer_id: string; // from the authenticated token — NEVER the request body
   open_id: string; // per-open uuid minted in the workflow body before charge
+  max_price?: number;
 };
 
 export type ChargePackOpenResult = {
@@ -54,6 +55,21 @@ export const chargePackOpenStep = createStep(
         'This pack has no valid price and cannot be opened.',
       );
     }
+    if (
+      input.max_price !== undefined &&
+      (!Number.isFinite(input.max_price) ||
+        input.max_price <= 0 ||
+        price <= 0 ||
+        price > input.max_price ||
+        pack.status !== 'active' ||
+        pack.in_stock === false ||
+        ['free_welcome', 'reward_box'].includes(pack.category))
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'Live pack price exceeds the run limit or the pack is no longer available.',
+      );
+    }
 
     // A free pack debits nothing — skip the pointless -0 ledger row (and the
     // lock): there's no overspend to guard when nothing is charged.
@@ -79,7 +95,11 @@ export const chargePackOpenStep = createStep(
     });
 
     return new StepResponse(
-      { price, balance, bonus_cents: bonusCents } satisfies ChargePackOpenResult,
+      {
+        price,
+        balance,
+        bonus_cents: bonusCents,
+      } satisfies ChargePackOpenResult,
       { open_id: input.open_id } satisfies CompensateData,
     );
   },

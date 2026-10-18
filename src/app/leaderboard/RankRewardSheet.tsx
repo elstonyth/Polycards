@@ -3,6 +3,7 @@
 
 import { useRef } from 'react';
 import { createPortal } from 'react-dom';
+import Link from 'next/link';
 import { X } from 'lucide-react';
 import type { ChallengeRankReward } from '@/lib/data/challenge';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -134,6 +135,17 @@ export function RankRewardSheet({
           </button>
         </div>
         <RankRewardList rewards={rewards} />
+        <p className="mt-3 text-xs leading-relaxed text-neutral-400">
+          Prize cards and slabs sell back as cash you can withdraw once you’ve
+          topped up and used your money for packs; credit prizes are bonus
+          credit for packs.{' '}
+          <Link
+            href="/wallet"
+            className="font-semibold text-neutral-300 underline-offset-2 hover:text-white hover:underline"
+          >
+            How it works <span aria-hidden="true">&rarr;</span>
+          </Link>
+        </p>
       </div>
     </div>,
     document.body,

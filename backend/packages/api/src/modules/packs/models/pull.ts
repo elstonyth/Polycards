@@ -61,16 +61,18 @@ export const Pull = model
     // For reward pulls, card_id holds the product_handle sentinel.
     // Model-owned CHECK (pull_source_check) emitted by db:generate — do NOT
     // hand-write a separate CHECK (would collide → 42710).
-    // 'gift' (an admin-gifted pack, spec 2026-10-07) and 'bonus' (a paid row
-    // that spent any bonus credit) count toward NOTHING — every board, task and
-    // unlock reads a positive source = 'pack' filter.
+    // 'gift' is an admin-gifted pack; 'bonus' means bonus paid at least half.
+    // Boards and public history count 'pack' and 'bonus'; tasks and welcome unlock
+    // still require source = 'pack'. Gifts remain excluded from all of them.
     source: model
       .enum(['pack', 'reward', 'free', 'gift', 'bonus'])
       .default('pack'),
     // Basis points (0–10000) of this pull's price paid by bonus or a gift:
     // 10000 on a gift, the bonus share of the row's price on a bonus-funded
     // row, 0 otherwise. That share of a sell-back must be played through
-    // before it can be withdrawn (modules/packs/bonus-credit.ts).
+    // before it can be withdrawn — except a 'reward' (task and challenge
+    // rewards) or 'gift' pull's, decided at sell time (sellbackHoldBp in
+    // modules/packs/bonus-credit.ts, ADR 0012).
     bonus_bp: model.number().default(0),
     // The open's stable id (same uuid the pack_open charge row stores in
     // credit_transaction.source_transaction_id) — the money↔card audit link.

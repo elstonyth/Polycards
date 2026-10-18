@@ -14,6 +14,9 @@ export const FREE_PACK_VERIFICATION_MESSAGE =
 export const FREE_PACK_SHARED_PHONE_MESSAGE =
   'This phone number is linked to more than one account, so the welcome pack can’t be claimed. Contact customer service.';
 
-/** User-facing reason shown whenever a locked free pull is refused. */
+/** User-facing reason shown whenever a locked free pull is refused. "Paid
+ *  yourself" is hasPaidOpen's rule: only a source='pack' pull unlocks, and
+ *  paidPullSource makes a pack paid half or more with bonus 'bonus'; gifts are
+ *  'gift', free rips 'reward'. Short: it fits the 9px vault tile. */
 export const FREE_PULL_LOCKED_MESSAGE =
-  'Purchase & open any pack to unlock selling & delivery.';
+  'Pay for one pack yourself to unlock selling & delivery.';

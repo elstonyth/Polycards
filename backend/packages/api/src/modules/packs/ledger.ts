@@ -35,8 +35,10 @@ export type LedgerPayload =
       // The part of this sell-back paid as bonus credit (MYR), when non-zero —
       // sales from 2026-10-07 until the 2026-10-09 rule below.
       bonus?: number;
-      // The part of this sell-back (MYR) that came from bonus or gift play: paid
-      // as normal credit that must be played through once (2026-10-09).
+      // The part of this sell-back (MYR) held for packs: the bonus-paid share
+      // or a welcome card's sale, paid as normal credit that must be played
+      // through once (2026-10-09). Gift and reward sales carry it only before
+      // 2026-10-15 (ADR 0012).
       playthrough?: number;
     }
   // shipping_fee/insurance_fee: the wallet charge breakdown (2026-08-25) —

@@ -1,0 +1,13 @@
+# Cloud Automation test workspace
+
+Automation opens the **Test workspace** tab. Create up to 80 synthetic profiles, choose timing and limits, then save settings or explicitly start a test. Original-account monitoring remains in the other tabs; those accounts cannot be selected by the test runner.
+
+New test profiles receive 100 virtual credits. Bonus grants affect only these profiles. Every simulated cycle debits 10 credits (bonus first), draws a fixture card, credits an 80% fixture sale, and verifies total and bonus balances in integer cents. Fixture cards, values and competitors are synthetic, nonredeemable, and independent of production odds. This tests scheduling and state accounting, not the real pack-opening or buyback workflows.
+
+Fixed, Random and Humanized modes share the existing validated timing helpers. Humanized uses stable personas and regional sessions; its optional accelerated clock skips virtual waits only. Desktop result-driven bursts, traits and fatigue are not implemented. Settings JSON imports only the supported timing and limits; browser IDs, destinations, passwords and API URLs are ignored. Rank targets operate exclusively on the synthetic leaderboard, with preview/monitor/test modes, buffers and finite cycle/spend/duration limits.
+
+The dedicated `automation_sandbox` table holds the latest configuration, profiles, wallets, schedule and results. It has no relationship to customer or financial tables. Authenticated admin GET/POST routes require `automation:read`/`automation:update`, and POST uses the existing action rate limit and origin/CSRF checks.
+
+The existing cloud worker checks every two seconds. A single row lock serializes every mutation and tick, prevents overlapping cycles, and preserves state across restarts. Waiting transitions are saved, missed ticks are not replayed in bursts, and one cycle settles atomically before Stop takes effect. Timing is a minimum interval and can run later under worker load. Idle checks do not write state. Only the latest run is kept, capped at 80 profiles × 10 cycles; profile balances survive subsequent runs.
+
+Deployment adds one table and one scheduled job. No profiles are generated and no run starts during migration or page loading. Rollback is the prior application deployment; keep the new table to retain test results. Stop an active test before a rollback.

@@ -48,9 +48,21 @@ export function alertPayinVerifyFail(
   void alertOps(
     scope,
     `payin-verify-fail:${deposit.merchant_transaction_id}`,
-    `${gateway ? GATEWAYS[gateway].label : 'The gateway'} reports Verify Fail (status 4) on deposit ${deposit.merchant_transaction_id} (customer ${deposit.customer_id}) — the payer name or amount did not match, e.g. paid from an account in another name. Check their back office; if the money arrived, settle it by hand.`,
+    `${gateway ? GATEWAYS[gateway].label : 'The gateway'} reports Verify Fail (status 4) on deposit ${deposit.merchant_transaction_id} (customer ${deposit.customer_id}) — A3Pay matches a payment ONLY by its exact amount (cents included), so the customer most likely never transferred it or sent a different sum. No action unless they show proof of payment; then ask A3Pay to match it in their back office so the callback credits it. Never credit it by admin adjustment: the sweep could credit it a second time.`,
     { muteMs: 6 * 60 * 60 * 1000 },
   );
+}
+
+/**
+ * Does the SWEEP alert on this Verify Fail? Only while the row is pending: an
+ * expired row is requeried for days, and every pass re-alerted an abandoned
+ * order (the mute lives in one process's memory). A callback still alerts.
+ */
+export function sweepAlertsVerifyFail(
+  deposit: { gateway?: string | null; status: string },
+  statusId: unknown,
+): boolean {
+  return deposit.status === 'pending' && isPayinVerifyFail(deposit.gateway, statusId);
 }
 
 /** Payin status 4 from A3Pay (TGPay has no such status). */
@@ -302,7 +314,12 @@ export async function startDeposit(
     };
   }
 
-  const invalid = topUpAmountError(creditAmount);
+  // A regional top-up is bounded by its own S$ band (above), which credits
+  // past the site-wide RM ceiling at S$5,000; its RM fence is its own.
+  const invalid = topUpAmountError(
+    creditAmount,
+    fx ? GATEWAYS[gateway].limits.depositMax : undefined,
+  );
   if (invalid) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, invalid);
   }
@@ -517,7 +534,8 @@ export async function startDeposit(
   const relock =
     nudged !== null &&
     nudged.credit <= GATEWAYS[gateway].limits.depositMax &&
-    topUpAmountError(nudged.credit) === null
+    topUpAmountError(nudged.credit, GATEWAYS[gateway].limits.depositMax) ===
+      null
       ? nudged
       : null;
   await packs.updateGatewayDeposits({
@@ -719,7 +737,7 @@ export async function applyDepositOutcome(
 
   await sendTopupReceipt(scope, {
     customerId: deposit.customer_id,
-    amount,
+    amount: mutation.amount,
     reference: outcome.gatewayRef,
     merchantTransactionId: deposit.merchant_transaction_id,
     paymentMethodCode: deposit.payment_method_code,
@@ -748,7 +766,8 @@ export async function applyDepositOutcome(
         : {}),
     },
     money: {
-      amount_settled: amount,
+      // What the ledger holds: on a replay, the credit another caller wrote.
+      amount_settled: mutation.amount,
       ...(outcome.netAmount !== undefined
         ? { net_amount: outcome.netAmount }
         : {}),

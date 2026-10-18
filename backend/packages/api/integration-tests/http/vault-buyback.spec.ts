@@ -495,6 +495,7 @@ medusaIntegrationTestRunner({
             rolled_at: new Date(),
             status: 'vaulted' as const,
             source: 'reward' as const,
+            bonus_bp: 10000,
           },
         ]);
 
@@ -519,6 +520,13 @@ medusaIntegrationTestRunner({
         );
         expect(sell.status).toBe(200);
         expect(sell.data.amount).toBe(row.buyback.amount);
+        // A prize card's sale is withdrawable money, not held for packs
+        // (ADR 0012), though its bonus_bp is full: quote and credit agree.
+        expect(row.buyback.bonus).toBe(0);
+        const [credit] = await packs.listCreditTransactions({
+          pull_id: prize.id,
+        });
+        expect(credit.external_funded_cents ?? 0).toBe(0);
       });
 
       // Free welcome pull (spec 2026-08-14): locked from sell/deliver until the
@@ -547,6 +555,7 @@ medusaIntegrationTestRunner({
             rolled_at: new Date(),
             status: 'vaulted' as const,
             source: 'free' as const,
+            bonus_bp: 10000, // as the welcome open mints it since 2026-10-11
           },
         ]);
 
@@ -578,6 +587,14 @@ medusaIntegrationTestRunner({
         );
         expect(sell.status).toBe(200);
         expect(sell.data.amount).toBeGreaterThan(0);
+        // The welcome card still goes round twice (unlike rewards and gifts,
+        // ADR 0012): its whole sale is stamped for packs.
+        const [credit] = await packs.listCreditTransactions({
+          pull_id: free.id,
+        });
+        expect(credit.external_funded_cents).toBe(
+          Math.round(Number(credit.amount) * 100),
+        );
       });
 
       // A task/achievement reward (source='reward' on the 'task-reward'
@@ -599,6 +616,7 @@ medusaIntegrationTestRunner({
             rolled_at: new Date(),
             status: 'vaulted' as const,
             source: 'reward' as const,
+            bonus_bp: 10000, // as claimTask mints it since 2026-10-11
           },
         ]);
 
@@ -620,6 +638,16 @@ medusaIntegrationTestRunner({
         expect(sell.status).toBe(200);
         expect(sell.data.amount).toBe(row.buyback.amount);
         expect(sell.data.balance).toBe(row.buyback.amount);
+        // Not held for packs (ADR 0012): nothing stamped, nothing to play.
+        expect(row.buyback.bonus).toBe(0);
+        const [credit] = await packs.listCreditTransactions({
+          pull_id: reward.id,
+        });
+        expect(credit.external_funded_cents ?? 0).toBe(0);
+        expect(
+          (await packs.walletSummary(await customerIdOf(token))).playthrough
+            .remaining,
+        ).toBe(0);
       });
 
       // Dropping the source guard must not open the old sentinel path: a

@@ -154,7 +154,7 @@ try {
   ).newPage();
   await login(page2, email, PASSWORD);
   await page2.getByRole('button', { name: /open pack/i }).click();
-  await page2.getByText(/not enough credits/i).waitFor({ timeout: 15000 });
+  await page2.getByText(/not enough balance/i).waitFor({ timeout: 15000 });
   await page2
     .getByRole('link', { name: /add credits in your vault/i })
     .waitFor({ timeout: 5000 });

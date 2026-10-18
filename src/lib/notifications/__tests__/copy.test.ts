@@ -179,10 +179,10 @@ describe('body rendering', () => {
 
   it('money bodies format as RM', () => {
     expect(copyFor('topup_credited').body({ amount_myr: 50 })).toBe(
-      'RM 50.00 added to your balance.',
+      'RM 50.00 added. Withdrawals unlock once all your money for packs is used.',
     );
     expect(copyFor('voucher_claimed').body({ amount_myr: 5, level: 3 })).toBe(
-      'RM 5.00 credited from your Level 3 voucher.',
+      'RM 5.00 bonus credit from your Level 3 voucher. Use it on packs — it can’t be withdrawn.',
     );
     expect(copyFor('withdrawal_paid').body({ amount_myr: 50 })).toBe(
       'RM 50.00 has been sent to your bank.',
@@ -192,7 +192,7 @@ describe('body rendering', () => {
     );
   });
 
-  // Spec 2026-10-07 §1, verbatim.
+  // Spec 2026-10-07 §1; the bonus line is spec 2026-10-15 §3.
   it('announces a gifted pack and bonus credit', () => {
     expect(
       copyFor('pack_gift_received').body({
@@ -203,7 +203,7 @@ describe('body rendering', () => {
     ).toBe('You received 2× Bronze Pack — open it from your Vault.');
     expect(copyFor('pack_gift_received').href).toBe('/vault');
     expect(copyFor('bonus_credit_received').body({ amount: 300 })).toBe(
-      'You received RM 300.00 bonus credit.',
+      'RM 300.00 bonus credit added. Use it on packs — it can’t be withdrawn.',
     );
     expect(copyFor('bonus_credit_received').href).toBe('/wallet');
     // A payload missing its facts degrades to no detail line.
@@ -222,13 +222,13 @@ describe('body rendering', () => {
   it('challenge_payout composes credits and cards naturally', () => {
     const body = copyFor('challenge_payout').body;
     expect(body({ rank: 1, credits: 150, card_count: 0 })).toBe(
-      'You finished #1 — RM 150.00 in bonus credit added to your account.',
+      'You finished #1 — RM 150.00 in bonus credit added to your account. Use the bonus credit on packs — it can’t be withdrawn.',
     );
     expect(body({ rank: 3, credits: 0, card_count: 2 })).toBe(
-      'You finished #3 — 2 featured cards added to your account.',
+      'You finished #3 — 2 featured cards added to your account. Ship the cards (delivery fee applies) or sell them back.',
     );
     expect(body({ rank: 2, credits: 50, card_count: 1 })).toBe(
-      'You finished #2 — RM 50.00 in bonus credit and a featured card added to your account.',
+      'You finished #2 — RM 50.00 in bonus credit and a featured card added to your account. Use the bonus credit on packs — it can’t be withdrawn. Ship the card (delivery fee applies) or sell it back.',
     );
     // Nothing granted (all cards skipped, no credits) → no detail line.
     expect(body({ rank: 4, credits: 0, card_count: 0 })).toBeNull();
@@ -245,7 +245,7 @@ describe('body rendering', () => {
       'You won a RM 5.00 voucher.',
     );
     expect(body({ prize_kind: 'credit', amount_myr: 5, title: '' })).toBe(
-      'You won RM 5.00 in credit.',
+      'You won RM 5.00.',
     );
     // A titled prize (product) still wins over both.
     expect(

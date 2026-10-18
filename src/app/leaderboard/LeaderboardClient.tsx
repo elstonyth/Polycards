@@ -117,8 +117,8 @@ export default function LeaderboardClient({
       {/* How the board works — honest, no payout promise. */}
       <p className="mt-3 text-[12px] text-neutral-400">
         {period === 'This Week'
-          ? 'This week ranks by pulled value — every eligible pack draw counts. It is the Weekly Challenge board.'
-          : 'All Time — ranked by lifetime pulled value.'}
+          ? 'This week ranks by pulled value — only the part of each pack you paid yourself counts. It is the Weekly Challenge board.'
+          : 'All Time — ranked by lifetime pulled value, counting the part of each pack you paid yourself.'}
       </p>
 
       {/* Standings */}

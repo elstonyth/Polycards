@@ -4,14 +4,11 @@ import type {
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { findBank, sandboxOnlyBank } from '../../../../../modules/packs/banks';
-import {
-  GATEWAYS,
-  resolveActiveGateway,
-} from '../../../../../modules/packs/gateway';
+import { resolveActiveGateway } from '../../../../../modules/packs/gateway';
 import {
   regionalPayoutGateways,
   withdrawalDetailsError,
-  payoutGatewayFor,
+  payoutCurrencyFor,
 } from '../../../../../modules/packs/gateway-withdrawal';
 import {
   resolvePacks,
@@ -19,7 +16,9 @@ import {
 } from '../../../../../modules/packs/facets';
 import {
   MAX_SAVED_BANK_ACCOUNTS,
+  SHARED_PAYOUT_ACCOUNT_MESSAGE,
   parseSavedBankAccounts,
+  payoutAccountSharingAllowed,
   savedBankAccountId,
   savedBankAccountViews,
   type SavedBankAccount,
@@ -28,6 +27,12 @@ import {
   sendSavedAccountAddedNotice,
   sendSavedAccountRemovedNotice,
 } from '../../../../../modules/packs/saved-account-notice';
+import {
+  channelStatus,
+  destinationMinRm,
+  isTngBank,
+  tngPausedReason,
+} from '../../../../../modules/packs/withdrawal-controls';
 
 // Saved payout bank accounts — GET (list) / POST (add) / DELETE (remove) on
 // /store/credits/withdraw/accounts. Storage is customer.metadata.bank_accounts,
@@ -81,36 +86,12 @@ import {
 // the backfill script can share them without importing an API route.
 export {
   MAX_SAVED_BANK_ACCOUNTS,
+  SHARED_PAYOUT_ACCOUNT_MESSAGE,
   parseSavedBankAccounts,
+  payoutAccountSharingAllowed,
   savedBankAccountId,
   type SavedBankAccount,
 };
-
-/**
- * One bank account, one Polycards account: a number another customer already
- * holds is refused (sharing-allowed customers excepted). Existing shared
- * accounts were left alone on purpose (2026-10-14) — only new links are
- * refused, and re-saving an account the customer already has is not a new
- * link.
- */
-export const SHARED_PAYOUT_ACCOUNT_MESSAGE =
-  'This bank account is already linked to another Polycards account. Withdraw to a bank account in your own name, or contact support if this is a mistake.';
-
-/**
- * Support's override for a genuine shared account (a family member's, a joint
- * account): customer ids in PAYOUT_ACCOUNT_SHARING_ALLOWED, comma-separated,
- * read per call.
- * shortcut: the override is an env list, so granting one is a spec change and
- * a redeploy; build an admin toggle if overrides become routine.
- */
-export function payoutAccountSharingAllowed(
-  customerId: string,
-  env: Partial<NodeJS.ProcessEnv> = process.env,
-): boolean {
-  return (env.PAYOUT_ACCOUNT_SHARING_ALLOWED ?? '')
-    .split(',')
-    .some((id) => id.trim() === customerId);
-}
 
 /**
  * Register-phase JWTs pass authenticate('customer') with actor_id '' (the
@@ -180,15 +161,43 @@ async function accountViews(
   accounts: Parameters<typeof savedBankAccountViews>[0],
 ) {
   const active = await resolveActiveGateway(req.scope);
+  // The admin's Touch 'n Go switch and floor (withdrawal-controls.ts), so the
+  // form shows a paused TNG account as such and states the right minimum.
+  const controls = await resolvePacks<CustomerWallet>(
+    req.scope,
+  ).withdrawalControls();
+  const tng = channelStatus(controls.tng, Date.now());
   return savedBankAccountViews(
     accounts,
     active,
     undefined,
     regionalPayoutGateways(),
-  ).map((view) => ({
-    ...view,
-    currency: GATEWAYS[payoutGatewayFor(view.bankCode, active)].currency,
-  }));
+  ).map((view) => {
+    const invalid = withdrawalDetailsError(view);
+    return {
+      ...view,
+      currency: payoutCurrencyFor(view.bankCode, active),
+      ...(isTngBank(view.bankCode)
+        ? {
+            minRm: destinationMinRm(view.bankCode, controls),
+            ...(tng.open
+              ? {}
+              : {
+                  supported: false,
+                  unavailableReason: tngPausedReason(tng.reopens_at),
+                }),
+          }
+        : {}),
+      ...(invalid
+        ? {
+            supported: false,
+            unavailableReason: findBank(view.bankCode)?.accountLengths?.length
+              ? `${invalid} Remove this account and add it again with the correct bank country and account number.`
+              : invalid,
+          }
+        : {}),
+    };
+  });
 }
 
 export async function GET(
@@ -256,7 +265,9 @@ export async function POST(
   // A number another customer has only SAVED blocks under the same holder
   // name (one person, several accounts: 10 of the 13 clusters). Otherwise
   // anyone who knew a stranger's number could save it first and lock the real
-  // owner out. A number already PAID OUT to blocks under any name.
+  // owner out. A number already PAID OUT to blocks under any name, and a
+  // different spelling that slips in here is stopped at payout
+  // (startWithdrawal refuses a number someone else was paid to first).
   const sameHolder = (name: string | null) =>
     name == null ||
     name.toLowerCase().replace(/\s+/g, ' ').trim() ===

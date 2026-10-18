@@ -1,7 +1,37 @@
 {
+  "cards": {
+    "pricing": {
+      "filter": "价格同步",
+      "all": "全部卡牌",
+      "attention": "需要处理",
+      "pending_confirmation": "等待确认",
+      "sync_error": "来源／同步错误",
+      "never_synced": "尚未同步",
+      "stale": "超过48小时未同步",
+      "unlinked": "未关联价格来源",
+      "missing_product": "库存商品缺失",
+      "synced": "已更新",
+      "loading": "正在检查价格同步…",
+      "unavailable": "暂时无法获取价格同步状态",
+      "loadError": "无法检查价格。目前状态未知，请重试以查看受影响的卡牌。",
+      "retry": "重试",
+      "empty": "没有符合筛选条件的卡牌。",
+      "count": "显示 {{count}} 张，共 {{total}} 张卡牌",
+      "current": "当前：{{value}}",
+      "proposed": "待确认：{{value}}",
+      "source": "PriceCharting #{{id}} · {{grade}}",
+      "firstSeen": "首次发现：{{at}}",
+      "confirmAfter": "可确认时间：{{at}} 起",
+      "lastSynced": "上次同步：{{at}}",
+      "never": "从未同步",
+      "policy": "超过5倍的价格变动须经过两次一致检查，间隔至少24小时，且第二次价格与首次相差不超过10%。确认前保留当前价格。下方来源价格以美元计，未包含汇率及加价。"
+    }
+  },
+  "dashboard": {
+    "pricingAttention": "{{count}} 张卡牌价格需要处理",
+    "pricingDetail": "{{count}} 张等待确认 · 检查过期价格及缺失来源"
+  },
   "statsBoard": {
-    "title": "数据看板",
-    "subtitle": "注册、充值与提现 · {{current}}（马来西亚时间）· 对比 {{previous}}",
     "ranges": {
       "today": "今天",
       "yesterday": "昨天",
@@ -9,7 +39,8 @@
       "30d": "近30天",
       "month": "本月",
       "last_month": "上月",
-      "custom": "自定义"
+      "custom": "自定义",
+      "all": "全部时间"
     },
     "from": "开始日期",
     "to": "结束日期",
@@ -22,8 +53,61 @@
     "first_topup_amount": "首充金额",
     "withdrawal_count": "提现笔数",
     "withdrawal_amount": "提现金额",
-    "vsPrevious": "vs 上一段",
-    "previous": "上一段 {{value}}",
-    "loadError": "无法加载数据。"
+    "previous": "上一段 {{value}}"
+  },
+  "packs": {
+    "tabs": {
+      "lossless": "无损模式"
+    },
+    "lossless": {
+      "hint": "在窗口时间内，所选卡包的即时回售（30 秒揭晓）按 100% 结算。从金库回售仍为 90%。卡包自身的回售比例不会被修改，窗口结束后无需清理。",
+      "schedule": "安排无损模式",
+      "allPacks": "全部卡包",
+      "empty": "暂无无损模式窗口。",
+      "loadError": "无法加载无损模式窗口。",
+      "col": {
+        "start": "开始（马来西亚时间）",
+        "end": "结束（马来西亚时间）",
+        "packs": "卡包",
+        "status": "状态",
+        "actions": "操作"
+      },
+      "status": {
+        "upcoming": "即将开始",
+        "live": "进行中",
+        "ended": "已结束",
+        "cancelled": "已取消"
+      },
+      "form": {
+        "title": "安排无损模式",
+        "subtitle": "窗口进行期间，所选卡包的即时回售（30 秒揭晓）按 100% 结算。从金库回售仍为 90%。",
+        "start": "开始时间",
+        "end": "结束时间",
+        "allPacks": "全部卡包",
+        "allPacksHint": "所有付费卡包。关闭后可自选卡包。",
+        "pickPacks": "卡包",
+        "noPacks": "请至少选择一个卡包。",
+        "noPackList": "没有可选的付费卡包。",
+        "reason": "原因（审计记录）",
+        "reasonPlaceholder": "例如：周末活动",
+        "endBeforeStart": "结束时间必须晚于开始时间。",
+        "endPast": "请选择未来的结束时间。",
+        "cancel": "取消",
+        "save": "安排无损模式"
+      },
+      "cancel": {
+        "action": "取消窗口",
+        "title": "取消此窗口？",
+        "description": "新抽出的卡立即恢复为各卡包自身的比例。取消前已抽出的卡，在剩余的 30 秒展示时间内仍按 100% 回售。已按 100% 支付的回售不会撤销。",
+        "reason": "原因（审计记录）",
+        "reasonPlaceholder": "例如：误操作安排",
+        "confirm": "取消窗口",
+        "keep": "保留窗口"
+      },
+      "toast": {
+        "scheduled": "已安排无损模式",
+        "cancelled": "已取消无损模式窗口"
+      }
+    }
   }
 }

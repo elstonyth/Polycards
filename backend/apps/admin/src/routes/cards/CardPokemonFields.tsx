@@ -236,7 +236,7 @@ const CardPokemonFields = ({
           <img
             src={previewSrc}
             alt=""
-            className="border-ui-border-base h-16 w-16 shrink-0 rounded border bg-white object-contain"
+            className="border-ui-border-base h-16 w-16 shrink-0 rounded border bg-ui-bg-component object-contain"
           />
         ) : (
           <div className="border-ui-border-base bg-ui-bg-base text-ui-fg-muted flex h-16 w-16 shrink-0 items-center justify-center rounded border text-xs">
@@ -302,7 +302,7 @@ const CardPokemonFields = ({
                     <img
                       src={src}
                       alt=""
-                      className="h-8 w-8 shrink-0 bg-white object-contain"
+                      className="h-8 w-8 shrink-0 bg-ui-bg-component object-contain"
                     />
                   ) : (
                     <span className="bg-ui-bg-base h-8 w-8 shrink-0 rounded" />

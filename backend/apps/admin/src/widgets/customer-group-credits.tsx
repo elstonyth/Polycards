@@ -22,6 +22,7 @@ import { rm } from '../lib/format';
 import { BonusCreditToggle } from '../components/BonusCreditToggle';
 import { isBonusGrant } from '../lib/credit-kind';
 import { qk } from '../lib/query-keys';
+import { invalidateMoneyViews } from '../lib/queries';
 import type { GroupCreditCustomer } from '../lib/admin-rest';
 import {
   createGroupCreditAdjustment,
@@ -183,7 +184,7 @@ function GroupCreditEditor({ data: group }: Props) {
       await runGroupCreditAdjustment(snapshot, previous, setResults);
       void queryClient.invalidateQueries({ queryKey: ['admin', 'customer'] });
       void queryClient.invalidateQueries({ queryKey: qk.playersKey });
-      void queryClient.invalidateQueries({ queryKey: qk.economy });
+      void invalidateMoneyViews(queryClient);
     } finally {
       running.current = false;
       setBusy(false);

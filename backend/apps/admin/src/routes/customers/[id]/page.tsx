@@ -6,7 +6,9 @@ import {
   Badge,
   Button,
   Container,
+  DropdownMenu,
   Heading,
+  IconButton,
   Input,
   Label,
   Prompt,
@@ -17,7 +19,7 @@ import {
   Text,
   toast,
 } from '@medusajs/ui';
-import { ArrowLeft } from '@medusajs/icons';
+import { ArrowLeft, EllipsisHorizontal } from '@medusajs/icons';
 import {
   useAdjustCredits,
   useCustomerAudit,
@@ -25,8 +27,7 @@ import {
   useCustomerGacha,
   useCustomerReferral,
   useCustomerGroupsAdmin,
-  useCustomerPulls,
-  useCustomerTransactions,
+  useCustomerMoney,
   useDeliveryOrders,
   useFreezeCustomer,
   usePayoutDetails,
@@ -38,17 +39,20 @@ import {
   useSetCustomerRealName,
   useSetCustomerPhone,
   useSetPlayerGroup,
-  useSpendReport,
   useUnfreezeCustomer,
   type CustomerReferralCard,
 } from '../../../lib/queries';
-import { deliveryStatusLabel, orderDateTime, rm } from '../../../lib/format';
+import {
+  deliveryStatusLabel,
+  orderDateTime,
+  rm,
+  timeAgo,
+} from '../../../lib/format';
 import type {
   CustomerAudit,
   DeliveryStatus,
   PayoutDetails,
 } from '../../../lib/admin-rest';
-import { resolveImageUrl } from '../../../lib/image-url';
 import {
   effectiveOddsSet,
   isDefaultPlayerGroup,
@@ -57,6 +61,10 @@ import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
 import { Pager } from '../../../components/Pager';
 import { PullsTable } from '../../../components/PullsTable';
 import { GiftAndBonusPanels } from './gift-and-bonus';
+import { MoneySummary, PeriodsCard, PlayCard } from './MoneyCards';
+import { LevelTab } from './LevelTab';
+import { VaultTab } from './VaultTab';
+import { WalletTab } from './WalletTab';
 
 // ponytail: no config export — keeps route out of sidebar nav (mirrors packs/[slug]/page.tsx)
 
@@ -94,7 +102,31 @@ const deliveryTone = (
 type ModalKind = 'freeze' | 'unfreeze' | 'credits';
 
 type TabKey =
-  'profile' | 'lvl' | 'wallet' | 'vault' | 'orders' | 'pulls' | 'history';
+  | 'wallet'
+  | 'vault'
+  | 'orders'
+  | 'pulls'
+  | 'gifts'
+  | 'lvl'
+  | 'profile'
+  | 'history';
+
+// Two letters for the avatar: initials of the name, else the email's start
+// (the Players list's rule).
+const initials = (name: string, email: string): string => {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return words[0][0] + words[1][0];
+  return (words[0] ?? email).slice(0, 2);
+};
+
+// '14 Oct 2026', in Malaysia time.
+const joinedDate = (iso: string): string =>
+  new Date(iso).toLocaleDateString('en-MY', {
+    timeZone: 'Asia/Kuala_Lumpur',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
 
 // ── Tab bodies ──────────────────────────────────────────────────────────────
 // One component per tab, following routes/deliveries/page.tsx: an inactive
@@ -325,6 +357,21 @@ const GroupCard = ({ customerId }: { customerId: string }) => {
   );
 };
 
+// When this week's line pays: auto-approval holds a whole run with any line
+// over its limit for an admin, and the close voids a line over the ceiling.
+// Never promise Wednesday when one of those applies.
+const payoutNote = (
+  projectedCents: number,
+  limits: CustomerReferralCard['payout_limits'],
+): string =>
+  projectedCents <= 0
+    ? 'Nothing to pay yet.'
+    : projectedCents > limits.line_ceiling_cents
+      ? `Over the ${rm(limits.line_ceiling_cents / 100)} line ceiling — the close voids it for review, so it will not pay as is.`
+      : projectedCents > limits.auto_approve_max_cents
+        ? `Over ${rm(limits.auto_approve_max_cents / 100)} — an admin must approve the week on the Referrals page before it pays.`
+        : 'Usually paid the Wednesday after it closes; a week holding any line over the auto-approve limit waits for an admin.';
+
 // Referral card (rebuild, spec 2026-08-24): who referred them, their direct
 // downline, their weekly payout lines, and the partner-rate control. The rate
 // REPLACES the tier table for this customer; bounds come from the Referrals
@@ -367,6 +414,7 @@ const ReferralCardBody = ({
   const { data: settings } = useReferralSettings();
   const setRate = useSetPartnerRate();
   const setReferrer = useSetCustomerReferrer();
+  const navigate = useNavigate();
   const [referrerInput, setReferrerInput] = useState(
     () => data.referred_by ?? '',
   );
@@ -399,6 +447,17 @@ const ReferralCardBody = ({
   // control here with the same message, rather than let the operator type a
   // value the Set button then rejects.
   const lockedByGroup = data.partner_group;
+  // Which rule sets this week's rate — the order the close applies it in.
+  const rateSource = lockedByGroup
+    ? `Partner rate · group ${lockedByGroup.name}`
+    : data.partner_referral_bp !== null
+      ? 'Partner rate'
+      : 'Tier rate';
+  // shortcut: sums the last 50 lines the route returns (one per week, so all
+  // history since the 29 Sep launch); move to a server total past 50 weeks.
+  const paidCents = data.lines
+    .filter((l) => l.status === 'paid')
+    .reduce((sum, l) => sum + l.amount_cents, 0);
 
   return (
     <div className="border-t px-6 py-4">
@@ -440,7 +499,29 @@ const ReferralCardBody = ({
           </div>
         </dd>
         <dt className="text-ui-fg-subtle">Direct referrals</dt>
-        <dd>{data.downline.length}</dd>
+        {/* ?? and the week guard: during a rolling deploy an older API
+            instance can answer without these fields. */}
+        <dd>{data.downline_count ?? data.downline.length}</dd>
+        {data.week && (
+          <>
+            <dt className="text-ui-fg-subtle">This week</dt>
+            <dd>
+              <div className="tabular-nums">
+                {rm(data.week.turnover_cents / 100)} spend ×{' '}
+                {data.week.rate_bp / 100}% ={' '}
+                <span className="font-medium">
+                  {rm(data.week.projected_cents / 100)}
+                </span>
+              </div>
+              <Text size="xsmall" className="text-ui-fg-muted">
+                {rateSource} · week of {data.week.start}, still open.{' '}
+                {payoutNote(data.week.projected_cents, data.payout_limits)}
+              </Text>
+            </dd>
+          </>
+        )}
+        <dt className="text-ui-fg-subtle">Total paid</dt>
+        <dd className="tabular-nums">{rm(paidCents / 100)}</dd>
         <dt className="text-ui-fg-subtle">Partner rate</dt>
         <dd>
           {lockedByGroup ? (
@@ -521,20 +602,117 @@ const ReferralCardBody = ({
           )}
         </dd>
       </dl>
+      {data.downline.length > 0 && (
+        <div className="mt-4">
+          <Text size="small" className="text-ui-fg-subtle">
+            Referrals
+          </Text>
+          <div className="mt-1 max-h-96 overflow-y-auto">
+            <Table>
+              <Table.Header>
+                <Table.Row>
+                  <Table.HeaderCell>Player</Table.HeaderCell>
+                  <Table.HeaderCell>Referred since</Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    This week
+                  </Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    Lifetime
+                  </Table.HeaderCell>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {data.downline.map((d) => (
+                  <Table.Row key={d.customer_id}>
+                    <Table.Cell>
+                      <button
+                        type="button"
+                        className="text-ui-fg-interactive text-left hover:underline"
+                        onClick={() => navigate(`/customers/${d.customer_id}`)}
+                      >
+                        {d.name ?? d.email ?? d.customer_id}
+                      </button>
+                      {d.name && d.email && (
+                        <div className="text-ui-fg-muted text-xs">
+                          {d.email}
+                        </div>
+                      )}
+                    </Table.Cell>
+                    <Table.Cell className="text-ui-fg-subtle whitespace-nowrap text-xs">
+                      {orderDateTime(d.since)}
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      {rm(d.week_spend_cents / 100)}
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      {rm(d.lifetime_spend_cents / 100)}
+                    </Table.Cell>
+                  </Table.Row>
+                ))}
+              </Table.Body>
+            </Table>
+          </div>
+          <Text size="xsmall" className="text-ui-fg-muted mt-2">
+            Spend counts pack opens paid with real money, net of refunds. Opens
+            paid with bonus credit earn no commission.
+          </Text>
+        </div>
+      )}
       {data.lines.length > 0 && (
         <div className="mt-4">
           <Text size="small" className="text-ui-fg-subtle">
             Weekly payouts
           </Text>
-          <ul className="mt-1 flex flex-col gap-1 text-sm">
-            {data.lines.slice(0, 8).map((l) => (
-              <li key={l.id} className="flex items-center gap-2">
-                <Badge size="2xsmall">Commission</Badge>
-                <span className="tabular-nums">{rm(l.amount_cents / 100)}</span>
-                <span className="text-ui-fg-muted text-xs">{l.status}</span>
-              </li>
-            ))}
-          </ul>
+          <div className="mt-1 max-h-96 overflow-y-auto">
+            <Table>
+              <Table.Header>
+                <Table.Row>
+                  <Table.HeaderCell>Week of</Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    Referral spend
+                  </Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    Rate
+                  </Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    Commission
+                  </Table.HeaderCell>
+                  <Table.HeaderCell>Status</Table.HeaderCell>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {data.lines.map((l) => (
+                  <Table.Row key={l.id}>
+                    <Table.Cell className="whitespace-nowrap tabular-nums">
+                      {l.week_start ?? '—'}
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      {rm(l.basis_cents / 100)}
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      {l.rate_bp / 100}%
+                    </Table.Cell>
+                    <Table.Cell className="text-right tabular-nums">
+                      {rm(l.amount_cents / 100)}
+                    </Table.Cell>
+                    <Table.Cell>
+                      <StatusBadge
+                        color={
+                          l.status === 'paid'
+                            ? 'green'
+                            : l.status === 'voided'
+                              ? 'red'
+                              : 'orange'
+                        }
+                      >
+                        {l.status}
+                      </StatusBadge>
+                    </Table.Cell>
+                  </Table.Row>
+                ))}
+              </Table.Body>
+            </Table>
+          </div>
         </div>
       )}
     </div>
@@ -712,374 +890,6 @@ const ProfileTab = ({ customerId }: { customerId: string | null }) => {
         )}
       </Container>
     </>
-  );
-};
-
-const LvlTab = ({ customerId }: { customerId: string | null }) => {
-  const { t } = useTranslation();
-  // Same query key as the header's — served from cache, not a second request.
-  const { data: view, isError: viewError } = useCustomerGacha(customerId);
-  const { data: detail } = useCustomerDetail(customerId);
-  const { data: report, isError: reportError } = useSpendReport(customerId);
-  const vip = view?.vip ?? null;
-  const next = vip?.next ?? null;
-  const periods = report?.periods ?? [];
-
-  // Clamped both ends: a 0 threshold would divide by zero, and spend can sit
-  // PAST the next rung's threshold in the window between a qualifying purchase
-  // and the level-up saga writing the new projection.
-  const pct =
-    next && next.threshold > 0
-      ? Math.min(100, Math.max(0, (vip!.spend / next.threshold) * 100))
-      : 100;
-
-  return (
-    <>
-      <Container className="p-0">
-        {viewError ? (
-          <div className="px-6 py-6">
-            <Text size="small" className="text-ui-fg-error">
-              Failed to load.
-            </Text>
-          </div>
-        ) : !view ? (
-          <div className="px-6 py-6">
-            <LoadingSkeleton />
-          </div>
-        ) : !vip ? (
-          // The ladder is empty or this player has never spent — there is no
-          // level to draw, and a "LV 0 / 0% to LV 1" card would be a fiction.
-          <div className="px-6 py-6">
-            <Text className="text-ui-fg-subtle">{t('players.noLevel')}</Text>
-          </div>
-        ) : (
-          <>
-            <div className="flex flex-wrap items-baseline gap-3 px-6 py-4">
-              <Heading level="h1">
-                {t('players.levelHeading', { level: vip.level })}
-              </Heading>
-              <Badge size="small" color="purple">
-                {t('customer360.vipPeakLevel', {
-                  level: vip.highest_level_ever,
-                })}
-              </Badge>
-            </div>
-
-            <div className="grid grid-cols-1 gap-px border-t bg-ui-border-base md:grid-cols-2">
-              <div className="bg-ui-bg-subtle px-6 py-4">
-                <Text size="small" className="text-ui-fg-subtle">
-                  {t('players.memberSince')}
-                </Text>
-                <Heading level="h2" className="mt-1 tabular-nums">
-                  {detail ? orderDateTime(detail.customer.created_at) : '—'}
-                </Heading>
-              </div>
-              <div className="bg-ui-bg-subtle px-6 py-4">
-                <Text size="small" className="text-ui-fg-subtle">
-                  {t('customer360.vipSpend')}
-                </Text>
-                <Heading level="h2" className="mt-1 tabular-nums">
-                  {rm(vip.spend)}
-                </Heading>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2 border-t px-6 py-4">
-              <Text size="small" className="text-ui-fg-subtle">
-                {t('players.nextTier')}
-              </Text>
-              {/* Native progress semantics without the element: role+aria give
-                  a screen reader the same numbers the bar shows sighted eyes. */}
-              <div
-                className="bg-ui-bg-subtle h-2 w-full overflow-hidden rounded-full"
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round(pct)}
-                aria-label={t('players.nextTier')}
-              >
-                <div
-                  className="bg-ui-fg-interactive h-full rounded-full"
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-              <Text size="small" className="text-ui-fg-subtle">
-                {next
-                  ? t('players.toNextLevel', {
-                      amount: rm(next.remaining),
-                      level: next.level,
-                    })
-                  : t('players.topTier')}
-              </Text>
-            </div>
-          </>
-        )}
-      </Container>
-
-      <Container className="p-0">
-        <div className="px-6 py-4">
-          <Heading level="h2">{t('players.spendReport')}</Heading>
-        </div>
-        {reportError ? (
-          <div className="border-t px-6 py-6">
-            <Text size="small" className="text-ui-fg-error">
-              Failed to load.
-            </Text>
-          </div>
-        ) : !report ? (
-          <div className="border-t px-6 py-6">
-            <LoadingSkeleton />
-          </div>
-        ) : periods.length === 0 ? (
-          <div className="border-t px-6 py-6">
-            <Text className="text-ui-fg-subtle">{t('players.spendEmpty')}</Text>
-          </div>
-        ) : (
-          <div
-            className="overflow-x-auto border-t"
-            tabIndex={0}
-            role="region"
-            aria-label="Turnover report table"
-          >
-            <Table>
-              <Table.Header>
-                <Table.Row>
-                  <Table.HeaderCell>{t('players.period')}</Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('players.spend')}
-                  </Table.HeaderCell>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {periods.map((p) => (
-                  <Table.Row key={p.period}>
-                    <Table.Cell className="tabular-nums">{p.period}</Table.Cell>
-                    <Table.Cell className="text-right tabular-nums">
-                      {rm(p.spend)}
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table>
-          </div>
-        )}
-      </Container>
-    </>
-  );
-};
-
-const WalletTab = ({ customerId }: { customerId: string | null }) => {
-  const { t } = useTranslation();
-  const [page, setPage] = useState(0);
-  // Same query key as the header's — React Query serves it from cache, so this
-  // is a read of already-fetched data, not a second request.
-  const { data: view } = useCustomerGacha(customerId);
-  const { data, isError } = useCustomerTransactions(customerId, page);
-  const rows = data?.items ?? [];
-
-  return (
-    <Container className="p-0">
-      <div className="px-6 py-4">
-        <Text size="small" className="text-ui-fg-subtle">
-          {t('customer360.balance')}
-        </Text>
-        <Heading level="h1" className="mt-1 tabular-nums">
-          {view ? rm(view.balance) : '—'}
-        </Heading>
-      </div>
-
-      {isError ? (
-        <div className="border-t px-6 py-6">
-          <Text size="small" className="text-ui-fg-error">
-            Failed to load.
-          </Text>
-        </div>
-      ) : !data ? (
-        <div className="border-t px-6 py-6">
-          <LoadingSkeleton />
-        </div>
-      ) : rows.length === 0 ? (
-        <div className="border-t px-6 py-6">
-          <Text className="text-ui-fg-subtle">{t('support.empty')}</Text>
-        </div>
-      ) : (
-        <>
-          <div
-            className="overflow-x-auto border-t"
-            tabIndex={0}
-            role="region"
-            aria-label="Credit ledger table"
-          >
-            <Table>
-              <Table.Header>
-                <Table.Row>
-                  <Table.HeaderCell>{t('support.when')}</Table.HeaderCell>
-                  <Table.HeaderCell>{t('support.reason')}</Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('support.amount')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell>{t('support.note')}</Table.HeaderCell>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {rows.map((tx) => (
-                  <Table.Row key={tx.id}>
-                    <Table.Cell className="text-ui-fg-subtle tabular-nums whitespace-nowrap">
-                      {orderDateTime(tx.created_at)}
-                    </Table.Cell>
-                    <Table.Cell>
-                      <Badge size="2xsmall">{tx.reason}</Badge>
-                    </Table.Cell>
-                    {/* Debits red, credits left at the base colour — same
-                        convention as the support desk's ledger. */}
-                    <Table.Cell
-                      className={`text-right tabular-nums ${tx.amount < 0 ? 'text-ui-fg-error' : ''}`}
-                    >
-                      {rm(tx.amount)}
-                    </Table.Cell>
-                    <Table.Cell className="text-ui-fg-subtle max-w-[24rem] truncate">
-                      {tx.reference ?? '—'}
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table>
-          </div>
-          <Pager
-            page={page}
-            onPage={setPage}
-            pageSize={25}
-            count={rows.length}
-            total={data.total}
-          />
-        </>
-      )}
-    </Container>
-  );
-};
-
-const VaultTab = ({ customerId }: { customerId: string | null }) => {
-  const { t } = useTranslation();
-  const [page, setPage] = useState(0);
-  const { data: view } = useCustomerGacha(customerId);
-  // status:'vaulted' is applied server-side AND keyed, so this never shows a
-  // bought-back card and never collides with the support page's full history.
-  const { data, isError } = useCustomerPulls(customerId, page, {
-    status: 'vaulted',
-  });
-  const rows = data?.items ?? [];
-
-  return (
-    <Container className="p-0">
-      <div className="grid grid-cols-1 gap-px bg-ui-border-base md:grid-cols-3">
-        <div className="bg-ui-bg-subtle px-6 py-4">
-          <Text size="small" className="text-ui-fg-subtle">
-            {t('customer360.vault')}
-          </Text>
-          <Heading level="h1" className="mt-1 tabular-nums">
-            {view ? view.vault.count : '—'}
-          </Heading>
-        </div>
-        <div className="bg-ui-bg-subtle px-6 py-4">
-          <Text size="small" className="text-ui-fg-subtle">
-            {t('players.vaultFmv')}
-          </Text>
-          <Heading level="h1" className="mt-1 tabular-nums">
-            {view ? rm(view.vault.market_value) : '—'}
-          </Heading>
-        </div>
-        <div className="bg-ui-bg-subtle px-6 py-4">
-          <Text size="small" className="text-ui-fg-subtle">
-            {t('players.vaultPrice')}
-          </Text>
-          <Heading level="h1" className="mt-1 tabular-nums">
-            {view ? rm(view.vault.display_value) : '—'}
-          </Heading>
-        </div>
-      </div>
-
-      {isError ? (
-        <div className="border-t px-6 py-6">
-          <Text size="small" className="text-ui-fg-error">
-            Failed to load.
-          </Text>
-        </div>
-      ) : !data ? (
-        <div className="border-t px-6 py-6">
-          <LoadingSkeleton />
-        </div>
-      ) : rows.length === 0 ? (
-        <div className="border-t px-6 py-6">
-          <Text className="text-ui-fg-subtle">{t('support.empty')}</Text>
-        </div>
-      ) : (
-        <>
-          <div
-            className="overflow-x-auto border-t"
-            tabIndex={0}
-            role="region"
-            aria-label="Vaulted cards table"
-          >
-            <Table>
-              <Table.Header>
-                <Table.Row>
-                  <Table.HeaderCell>{t('support.card')}</Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('players.qty')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell className="text-right">
-                    {t('support.value')}
-                  </Table.HeaderCell>
-                  <Table.HeaderCell>{t('players.pulledAt')}</Table.HeaderCell>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {rows.map((p) => (
-                  <Table.Row key={p.id}>
-                    <Table.Cell>
-                      <div className="flex items-center gap-3">
-                        {/* `?.image` and not just `p.card`: a card row with an
-                            empty image would render <img src=""> — which the
-                            browser resolves to the page URL and refetches. */}
-                        {p.card?.image && (
-                          <img
-                            src={resolveImageUrl(p.card.image)}
-                            alt=""
-                            loading="lazy"
-                            decoding="async"
-                            className="h-10 w-8 shrink-0 rounded object-contain"
-                          />
-                        )}
-                        <span className="max-w-[20rem] truncate">
-                          {p.card?.name ?? '—'}
-                        </span>
-                      </div>
-                    </Table.Cell>
-                    {/* One pack open yields one card. */}
-                    <Table.Cell className="text-right tabular-nums">
-                      1
-                    </Table.Cell>
-                    <Table.Cell className="text-ui-fg-subtle text-right tabular-nums">
-                      {rm(p.card?.market_value ?? null)}
-                    </Table.Cell>
-                    <Table.Cell className="text-ui-fg-subtle tabular-nums whitespace-nowrap">
-                      {orderDateTime(p.rolled_at)}
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table>
-          </div>
-          <Pager
-            page={page}
-            onPage={setPage}
-            pageSize={25}
-            count={rows.length}
-            total={data.total}
-          />
-        </>
-      )}
-    </Container>
   );
 };
 
@@ -1445,7 +1255,7 @@ const Customer360Page = () => {
   const { id = '' } = useParams();
   const customerId = id || null;
 
-  const [tab, setTab] = useState<TabKey>('profile');
+  const [tab, setTab] = useState<TabKey>('wallet');
 
   // Offset page for the audit table (the endpoint serves 50/page).
   const [auditPage, setAuditPage] = useState(0);
@@ -1460,6 +1270,10 @@ const Customer360Page = () => {
   }
 
   const { data: view, isError: viewError } = useCustomerGacha(customerId);
+  // Name for the header; the Profile tab reads the same cached query.
+  const { data: detail } = useCustomerDetail(customerId);
+  const moneyQ = useCustomerMoney(customerId);
+  const money = moneyQ.data;
   const auditQ = useCustomerAudit(customerId, auditPage);
 
   const freeze = useFreezeCustomer();
@@ -1476,6 +1290,9 @@ const Customer360Page = () => {
   // Partner badge in the header (spec 2026-09-09). Shares the ReferralCard's
   // query key, so the card's own fetch answers this for free.
   const referralQ = useCustomerReferral(id ?? '');
+  const playerName = [detail?.customer.first_name, detail?.customer.last_name]
+    .filter(Boolean)
+    .join(' ');
 
   // ── Modal state ─────────────────────────────────────────────────────────────
   const [modal, setModal] = useState<ModalKind | null>(null);
@@ -1558,62 +1375,86 @@ const Customer360Page = () => {
       : !reason.trim();
 
   return (
-    <div className="flex flex-col gap-y-3">
-      {/* ── Header ─────────────────────────────────────────────── */}
-      <Container className="p-0">
-        <div className="flex items-start justify-between gap-4 px-6 py-4">
-          <div>
+    <div className="pc-dashboard flex flex-col gap-y-3">
+      {/* ── Header: who, their account state, the actions, and the four
+          numbers staff check first. ───────────────────────────────── */}
+      <Container className="pc-settle p-0">
+        <div className="flex flex-wrap items-start justify-between gap-4 px-6 py-4">
+          <div className="min-w-0">
             <button
               type="button"
               onClick={() => navigate(-1)}
-              className="text-ui-fg-subtle hover:text-ui-fg-base mb-2 flex items-center gap-1 text-sm"
+              className="text-ui-fg-subtle hover:text-ui-fg-base mb-3 flex items-center gap-1 text-sm"
             >
               <ArrowLeft className="h-4 w-4" />
               {t('customer360.back')}
             </button>
-            <div className="flex items-center gap-2">
-              <Heading level="h2">{view?.customer.email ?? id}</Heading>
-              {view?.vip && (
-                <Badge size="small" color="purple">
-                  {t('customer360.vipLevel', { level: view.vip.level })}
-                </Badge>
-              )}
-              {isFrozen && (
-                <Badge size="small" color="red">
-                  {t('customer360.frozen')}
-                </Badge>
-              )}
-              {isDisabled && (
-                <Badge size="small" color="red">
-                  {t('players.disabled')}
-                </Badge>
-              )}
-              {/* Partner account (spec 2026-09-09) — from the referral card's
-                  query, which the Profile tab also reads; the header shows it
-                  whatever tab is open. Names the group when the group is the
-                  source, since that is where it has to be changed. */}
-              {referralQ.data?.partner_group ? (
-                <Badge size="small" color="purple">
-                  {t('players.partnerViaGroup', {
-                    group: referralQ.data.partner_group.name,
-                  })}
-                </Badge>
-              ) : referralQ.data?.partner_referral_bp !== null &&
-                referralQ.data?.partner_referral_bp !== undefined ? (
-                <Badge size="small" color="purple">
-                  {t('players.partner')}
-                </Badge>
-              ) : null}
+            <div className="flex min-w-0 items-center gap-3">
+              <span
+                aria-hidden
+                className="bg-ui-bg-component text-ui-fg-subtle txt-compact-small-plus flex size-10 shrink-0 items-center justify-center rounded-full uppercase"
+              >
+                {initials(playerName, view?.customer.email ?? id)}
+              </span>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Heading level="h2" className="truncate">
+                    {playerName || view?.customer.email || id}
+                  </Heading>
+                  {view?.vip && (
+                    <Badge size="small" color="purple">
+                      {t('customer360.vipLevel', { level: view.vip.level })}
+                    </Badge>
+                  )}
+                  {isFrozen && (
+                    <Badge size="small" color="red">
+                      {t('customer360.frozen')}
+                    </Badge>
+                  )}
+                  {isDisabled && (
+                    <Badge size="small" color="red">
+                      {t('players.disabled')}
+                    </Badge>
+                  )}
+                  {/* Partner account (spec 2026-09-09) — from the referral card's
+                      query, which the Profile tab also reads; the header shows it
+                      whatever tab is open. Names the group when the group is the
+                      source, since that is where it has to be changed. */}
+                  {referralQ.data?.partner_group ? (
+                    <Badge size="small" color="purple">
+                      {t('players.partnerViaGroup', {
+                        group: referralQ.data.partner_group.name,
+                      })}
+                    </Badge>
+                  ) : referralQ.data?.partner_referral_bp !== null &&
+                    referralQ.data?.partner_referral_bp !== undefined ? (
+                    <Badge size="small" color="purple">
+                      {t('players.partner')}
+                    </Badge>
+                  ) : null}
+                </div>
+                {view && (
+                  <Text
+                    size="small"
+                    className="text-ui-fg-subtle mt-0.5 break-words"
+                  >
+                    {[
+                      playerName ? view.customer.email : null,
+                      t('playerMoney.joined', {
+                        date: joinedDate(view.customer.created_at),
+                      }),
+                      money?.last.open_at
+                        ? t('playerMoney.activeAgo', {
+                            ago: timeAgo(money.last.open_at),
+                          })
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </Text>
+                )}
+              </div>
             </div>
-            {view?.customer.created_at && (
-              <Text className="text-ui-fg-subtle mt-1" size="small">
-                {t('customer360.memberSince', {
-                  date: new Date(view.customer.created_at).toLocaleDateString(
-                    'en-US',
-                  ),
-                })}
-              </Text>
-            )}
             {viewError && (
               <Text size="small" className="text-ui-fg-error mt-1">
                 Failed to load.
@@ -1649,54 +1490,46 @@ const Customer360Page = () => {
               >
                 {t('customer360.btnAdjustCredits')}
               </Button>
+              {/* Gift packs and Bonus credit live in their own tab now; these
+                  jump straight to it. */}
+              <DropdownMenu>
+                <DropdownMenu.Trigger asChild>
+                  <IconButton size="small" aria-label={t('playerMoney.more')}>
+                    <EllipsisHorizontal />
+                  </IconButton>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Content align="end">
+                  <DropdownMenu.Item onClick={() => setTab('gifts')}>
+                    {t('playerMoney.giftPacks')}
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item onClick={() => setTab('gifts')}>
+                    {t('playerMoney.bonusCredit')}
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu>
             </div>
           )}
         </div>
 
-        {view && (
-          <div className="grid grid-cols-1 gap-px border-t bg-ui-border-base md:grid-cols-3">
-            <div className="bg-ui-bg-subtle px-6 py-4">
-              <Text size="small" className="text-ui-fg-subtle">
-                {t('customer360.balance')}
-              </Text>
-              <Heading level="h1" className="mt-1 tabular-nums">
-                {rm(view.balance)}
-              </Heading>
-            </div>
-            <div className="bg-ui-bg-subtle px-6 py-4">
-              <Text size="small" className="text-ui-fg-subtle">
-                {t('customer360.vault')}
-              </Text>
-              <Heading level="h1" className="mt-1 tabular-nums">
-                {view.vault.count}
-              </Heading>
-              <Text size="small" className="text-ui-fg-subtle">
-                {rm(view.vault.market_value)} FMV
-              </Text>
-            </div>
-            {view.vip && (
-              <div className="bg-ui-bg-subtle px-6 py-4">
-                <Text size="small" className="text-ui-fg-subtle">
-                  {t('customer360.vipSpend')}
-                </Text>
-                <Heading level="h1" className="mt-1 tabular-nums">
-                  {rm(view.vip.spend)}
-                </Heading>
-                <Text size="small" className="text-ui-fg-subtle">
-                  {t('customer360.vipPeakLevel', {
-                    level: view.vip.highest_level_ever,
-                  })}
-                </Text>
-              </div>
-            )}
-          </div>
-        )}
+        <MoneySummary money={money} view={view} />
       </Container>
 
-      {/* Gift packs + Bonus credit, beside the credit adjust above. key={id}:
-          the route doesn't remount on a customer change, so an unsent note
-          must not carry over to the next player. */}
-      {customerId && <GiftAndBonusPanels key={id} customerId={customerId} />}
+      {moneyQ.isError ? (
+        <Container>
+          <Text size="small" className="text-ui-fg-error">
+            {t('playerMoney.loadError')}
+          </Text>
+        </Container>
+      ) : !money ? (
+        <Container>
+          <LoadingSkeleton />
+        </Container>
+      ) : (
+        <>
+          <PeriodsCard money={money} />
+          <PlayCard money={money} />
+        </>
+      )}
 
       {/* ── Prompt modal — single instance, content varies by modal kind ─── */}
       <Prompt
@@ -1767,13 +1600,12 @@ const Customer360Page = () => {
 
       {/* ── Tabs ───────────────────────────────────────────────── */}
       <Container className="p-0">
-        <div className="px-6 py-3">
+        <div className="overflow-x-auto px-6 py-3">
           <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
-            <Tabs.List aria-label="Player detail sections">
-              <Tabs.Trigger value="profile">
-                {t('players.tabProfile')}
-              </Tabs.Trigger>
-              <Tabs.Trigger value="lvl">{t('players.tabLvl')}</Tabs.Trigger>
+            <Tabs.List
+              aria-label="Player detail sections"
+              className="whitespace-nowrap"
+            >
               <Tabs.Trigger value="wallet">
                 {t('players.tabWallet')}
               </Tabs.Trigger>
@@ -1782,6 +1614,13 @@ const Customer360Page = () => {
                 {t('players.tabOrders')}
               </Tabs.Trigger>
               <Tabs.Trigger value="pulls">{t('players.tabPulls')}</Tabs.Trigger>
+              <Tabs.Trigger value="gifts">
+                {t('playerMoney.tabGifts')}
+              </Tabs.Trigger>
+              <Tabs.Trigger value="lvl">{t('players.tabLvl')}</Tabs.Trigger>
+              <Tabs.Trigger value="profile">
+                {t('players.tabProfile')}
+              </Tabs.Trigger>
               <Tabs.Trigger value="history">
                 {t('players.tabHistory')}
               </Tabs.Trigger>
@@ -1795,9 +1634,15 @@ const Customer360Page = () => {
           body would keep the previous player's table offset and — worse — the
           previous player's bank-form draft. */}
       {tab === 'profile' && <ProfileTab key={id} customerId={customerId} />}
-      {tab === 'lvl' && <LvlTab key={id} customerId={customerId} />}
-      {tab === 'wallet' && <WalletTab key={id} customerId={customerId} />}
-      {tab === 'vault' && <VaultTab key={id} customerId={customerId} />}
+      {tab === 'lvl' && customerId && (
+        <LevelTab key={id} customerId={customerId} />
+      )}
+      {tab === 'wallet' && customerId && (
+        <WalletTab key={id} customerId={customerId} />
+      )}
+      {tab === 'vault' && customerId && (
+        <VaultTab key={id} customerId={customerId} />
+      )}
       {/* Both take a non-null id — see the OrdersTab note. key={id} is what
           makes their keepPreviousData safe: the body remounts on a customer
           change, so there is no previous player's page to hold over. */}
@@ -1806,6 +1651,10 @@ const Customer360Page = () => {
       )}
       {tab === 'pulls' && customerId && (
         <PullsTab key={id} customerId={customerId} />
+      )}
+      {/* key={id}: an unsent note must not carry over to the next player. */}
+      {tab === 'gifts' && customerId && (
+        <GiftAndBonusPanels key={id} customerId={customerId} />
       )}
       {tab === 'history' && (
         <HistoryTab

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
+  bonusMark,
   elapsedLabel,
+  forPacksMark,
   gatewayMethodLabel,
   gatewayStatusLabel,
   reasonLabel,
@@ -14,8 +16,8 @@ describe('reasonLabel', () => {
     expect(reasonLabel('buyback')).toBe('Sell-back');
     expect(reasonLabel('adjustment')).toBe('Adjustment');
   });
-  it('labels the cashout reason', () => {
-    expect(reasonLabel('cashout')).toBe('Cashout');
+  it('labels the cashout reason as the Withdrawn card does', () => {
+    expect(reasonLabel('cashout')).toBe('Withdrawal');
   });
   it('labels a bonus grant the way the player knows it', () => {
     expect(reasonLabel('bonus_grant')).toBe('Bonus credit');
@@ -51,7 +53,8 @@ describe('gateway facts on the statement', () => {
 describe('signedRm', () => {
   it('prefixes a sign and formats the magnitude', () => {
     expect(signedRm(48)).toBe('+RM 48.00');
-    expect(signedRm(-25)).toBe('-RM 25.00');
+    // U+2212, not a hyphen: screen readers say "minus".
+    expect(signedRm(-25)).toBe('−RM 25.00');
     expect(signedRm(0)).toBe('RM 0.00');
   });
 });
@@ -71,5 +74,31 @@ describe('elapsedLabel', () => {
   it('clamps a start instant that is ahead of now', () => {
     const now = 1_000_000_000;
     expect(elapsedLabel(now + minutes(5), now)).toBe('just now');
+  });
+});
+
+// Spec 2026-10-15 §5: the history explains "Still to use on packs" row by row.
+describe('forPacksMark', () => {
+  it('marks money going into for-packs (top-up, free share of a sale)', () => {
+    expect(forPacksMark(50)).toBe('+RM 50.00 for packs');
+  });
+  it('marks the for-packs money a pack open used', () => {
+    expect(forPacksMark(-40)).toBe('−RM 40.00 for packs');
+  });
+  it('leaves a row that moved none unmarked', () => {
+    expect(forPacksMark(0)).toBeNull();
+    expect(forPacksMark(0.001)).toBeNull();
+    // Rounds to −0 sen: still nothing moved, never "−RM 0.00 for packs".
+    expect(forPacksMark(-0.004)).toBeNull();
+  });
+});
+
+describe('bonusMark', () => {
+  it('shows the bonus part as an amount, whichever way it moved', () => {
+    expect(bonusMark(-15)).toBe('RM 15.00 bonus credit');
+    expect(bonusMark(10)).toBe('RM 10.00 bonus credit');
+  });
+  it('is absent when the row has no bonus part', () => {
+    expect(bonusMark(0)).toBeNull();
   });
 });

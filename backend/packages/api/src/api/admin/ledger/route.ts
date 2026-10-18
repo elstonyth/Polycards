@@ -21,6 +21,7 @@ const LEDGER_TYPES: LedgerType[] = [
   'AD',
   'WP',
   'WD',
+  'RF',
 ];
 
 export type AdminLedgerRow = {

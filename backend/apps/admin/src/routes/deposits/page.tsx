@@ -9,7 +9,6 @@ import {
   Select,
   StatusBadge,
 } from '@medusajs/ui';
-import { CurrencyDollar } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { useGatewayDeposits } from '../../lib/queries';
 import type {
@@ -22,10 +21,10 @@ import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 export const config: RouteConfig = {
-  label: 'Deposits',
-  icon: CurrencyDollar,
-  nested: '/orders',
-  rank: 2,
+  label: 'pcNav.deposits',
+  translationNs: 'translation',
+  rank: 1,
+  nested: '/payments',
 };
 
 const VIEWS: GatewayDepositView[] = [

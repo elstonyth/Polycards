@@ -1,28 +1,38 @@
 import { MedusaError } from '@medusajs/framework/utils';
 
-// Playthrough withdrawal gate: a balance is withdrawable only once the
-// customer's lifetime DEPOSIT-FUNDED pack spend covers their lifetime deposits
-// (used >= deposited). "Used" counts only the deposit-funded portion of each
-// open (its external_funded_cents basis) — play funded by buyback / promo /
-// commission credit banks NO playthrough, so selling a card back (or spending
-// non-deposit credit on packs) does NOT unlock deposits never played through:
-//   deposit 100, used 100                -> withdrawable
-//   deposit 20,  used 0                  -> locked
-//   deposit 100, used 50, sold 100       -> locked (balance 150 is irrelevant)
-//   commission 100 spent, deposit 100    -> locked (promo play banks 0 used)
+// Playthrough withdrawal gate: money that must go through packs may not leave
+// until it has been spent on them (used >= deposited). "Deposited" is every
+// post-1b top-up plus every stamped sell-back — the free share of a sale from
+// bonus or the welcome pull (task / challenge rewards and gift packs are not
+// stamped since ADR 0012), stamped as external_funded_cents on the buyback
+// row (DEPOSITED_PT_SEN_SQL). Both join the same external pool, and each open
+// draws its normal (non-bonus) part from that pool first; "used" is what the
+// pool covered (the open's external_funded_cents basis). Bonus spend banks
+// nothing, and neither does an open made once the pool is empty (paid with
+// withdrawable sell-back or commission money), so it cannot play a later
+// deposit through.
+//
+// Spend first (2026-10-15, ADR 0013, replacing ADR 0011's partial hold):
+// while anything is still to use on packs, NOTHING may leave; once it is all
+// used, everything but bonus credit may. Opening a pack spends the money for
+// packs before other money, so normal play clears the hold:
+//   deposit 100, used 100                -> all but bonus withdrawable
+//   deposit 20,  used 0                  -> nothing leaves
+//   card sold for 1000, then deposit 500 -> nothing leaves until 500 is used
 //
 // Pure cent math, unit-tested here; walletSummary computes the same two sums
 // in SQL and feeds them through this gate. The future cashout writer MUST
 // route through this function before writing a 'cashout' ledger row.
 export interface PlaythroughInput {
   /** Σ positive `topup` rows **with a non-NULL external basis** (post-1b era),
-   *  plus each buyback's share from bonus or gift play (2026-10-09), in cents. Pre-1b deposits are grandfathered: they predate
+   *  plus each buyback's stamp (the free share of a sale, 2026-10-09), in
+   *  cents. Pre-1b deposits are grandfathered: they predate
    *  `external_funded_cents` and never require playthrough (their opens' basis
    *  is equally invisible to `usedCents`, so counting them would lock them
    *  forever). */
   depositedCents: number;
-  /** Σ −external_funded_cents over `pack_open` rows, in cents — deposit-funded
-   *  spend only (0 for commission/buyback/adjustment-funded opens). Net: a
+  /** Σ −external_funded_cents over `pack_open` rows, in cents — what the
+   *  external pool covered (0 for an open made once it was empty). Net: a
    *  reversed open's mirror row carries −originalExt, so it gives its
    *  playthrough back. */
   usedCents: number;
@@ -40,19 +50,34 @@ export function playthroughState(t: PlaythroughInput): PlaythroughState {
   return { withdrawable: remainingCents === 0, remainingCents };
 }
 
-/** The wallet fields the gate branches on (a structural subset of
- *  walletSummary's return, so either caller can pass its result straight in). */
+/** What may leave, in cents: nothing while money is still to use on packs,
+ *  else the available balance less spend-only bonus (clamped at 0). */
+export function withdrawableCents(t: {
+  availableCents: number;
+  bonusCents: number;
+  remainingCents: number;
+}): number {
+  return t.remainingCents > 0
+    ? 0
+    : Math.max(0, t.availableCents - t.bonusCents);
+}
+
 /** Refusal for an account that never topped up (2026-10-11): promo credit
  *  and prizes must not leave as cash or as a shipped card from an account
  *  that never deposited. Shared by the withdrawal gate and both delivery
  *  paths; the storefront passes it through by phrase ("Top up at least once",
  *  src/lib/vault-errors.ts). */
 export const NO_TOPUP_MESSAGE =
-  'Top up at least once to unlock withdrawals and deliveries.';
+  'Top up at least once to unlock deliveries. To withdraw, you also need to use all your money for packs.';
 
+/** The wallet fields the gate branches on (a structural subset of
+ *  walletSummary's return, so either caller can pass its result straight in). */
 export interface WithdrawalGateWallet {
   withdrawable: number;
   isFrozen: boolean;
+  /** Spend-only bonus credit (MYR): packs spend it before the money for
+   *  packs, so the refusal counts it in what is left to spend. */
+  bonus: number;
   /** At least one positive top-up row ever (any era, any amount). */
   hasTopup: boolean;
   playthrough: { remaining: number };
@@ -72,21 +97,26 @@ export interface WithdrawalGateWallet {
  * unit tests in __tests__/gateway-withdrawal.unit.spec.ts assert them by
  * regex (both the caller-level precheck cases and the service-level gate
  * cases), AND the storefront does too — `src/lib/vault-errors.ts` passes them
- * through by phrase ("under review", "deposits must be spent on packs", "you
- * can withdraw up to") and `src/app/bank-withdrawal/WithdrawForm.tsx`'s
- * REMEDIES links them to their fix. A reword that drops a phrase turns the
+ * through by phrase ("under review", "Top up at least once", "Withdrawals
+ * unlock once", "you can withdraw up to") and
+ * `src/app/bank-withdrawal/WithdrawForm.tsx`'s REMEDIES links them to their
+ * fix. A reword that drops a phrase turns the
  * customer's refusal back into "Something went wrong" (as it was until
  * 2026-10-03). Update all of them together.
  *
- * Order matters: freeze outranks no-top-up, which outranks playthrough, which
- * outranks the plain "you can withdraw up to X" cap — a frozen account must
- * never be told it is merely short of playthrough.
+ * Order matters: freeze outranks no-top-up, which outranks the money still
+ * to use on packs, which outranks the plain "you can withdraw up to X" cap — a
+ * frozen account must never be told it merely has packs to open.
  */
 export function withdrawalGateError(
   wallet: WithdrawalGateWallet,
   amount: number,
 ): MedusaError | null {
-  if (amount <= wallet.withdrawable) return null;
+  // In cents so a float hair can't print. Checked before the early return
+  // too: money still to use on packs refuses even if `withdrawable` (read
+  // elsewhere) disagrees — defense in depth for the spend-first rule.
+  const remainingCents = Math.round(wallet.playthrough.remaining * 100);
+  if (amount <= wallet.withdrawable && remainingCents <= 0) return null;
   if (wallet.isFrozen) {
     return new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
@@ -96,10 +126,13 @@ export function withdrawalGateError(
   if (!wallet.hasTopup) {
     return new MedusaError(MedusaError.Types.NOT_ALLOWED, NO_TOPUP_MESSAGE);
   }
-  if (wallet.playthrough.remaining > 0) {
+  // Spend first (ADR 0013): spending on packs really does unlock the rest.
+  // Packs spend bonus first, so the amount to spend counts it in.
+  if (remainingCents > 0) {
+    const toSpend = (remainingCents + Math.round(wallet.bonus * 100)) / 100;
     return new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
-      `RM ${wallet.playthrough.remaining.toFixed(2)} of your deposits must be spent on packs before you can withdraw.`,
+      `Withdrawals unlock once you've used RM ${toSpend.toFixed(2)} more on packs. Then your balance, except bonus credit, can be withdrawn.`,
     );
   }
   return new MedusaError(

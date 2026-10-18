@@ -135,11 +135,17 @@ describe('VAULT_RULES backend-message contract', () => {
     // The literal backend strings. Before 2026-10-03 every one of these fell
     // to VAULT_FALLBACK, so a customer short of playthrough was told to retry.
     const literals = [
-      // withdrawable.ts withdrawalGateError — freeze, no top-up, playthrough, cap
-      'Top up at least once to unlock withdrawals and deliveries.',
+      // withdrawable.ts withdrawalGateError — freeze, no top-up, locked, cap
       'Withdrawals are unavailable while your account is under review. Contact support.',
-      'RM 5.00 of your deposits must be spent on packs before you can withdraw.',
+      'Top up at least once to unlock deliveries. To withdraw, you also need to use all your money for packs.',
+      "Withdrawals unlock once you've used RM 10.55 more on packs. Then your balance, except bonus credit, can be withdrawn.",
+      // the #793 wording (deploy skew), then the plain cap
+      'Top up at least once to unlock withdrawals and deliveries.',
+      'You can withdraw up to RM 28.40 right now. The other RM 10.55 is for opening packs.',
+      'Nothing is withdrawable yet. Your RM 60.00 is for opening packs.',
       'You can withdraw up to RM 12.34 right now.',
+      // the pre-2026-10-14 wording, still matched
+      'RM 5.00 of your deposits must be spent on packs before you can withdraw.',
       // service.ts withdrawForCashout
       'Daily withdrawal limit reached. You can withdraw RM 100.00 more today.',
       'This withdrawal is no longer open, so nothing was debited. Start a new one.',
@@ -160,6 +166,8 @@ describe('VAULT_RULES backend-message contract', () => {
       'Maybank account numbers are 12 digits. Check the number in your banking app.',
       'CIMB Bank account numbers are 10 or 14 digits. Check the number in your banking app.',
       'Enter the account holder name exactly as the bank has it.',
+      'Enter the mobile number linked to PayNow, with country code for overseas numbers (digits only).',
+      'Withdrawals to Alliance Bank (SG) are unavailable. Choose another bank.',
     ];
     for (const msg of literals) expect(map(msg)).toBe(msg);
   });
@@ -175,6 +183,9 @@ describe('VAULT_RULES backend-message contract', () => {
       'SGD payments are paused right now — please try again shortly.',
       'SGD top-ups are not available right now.',
       'Enter the name on the bank account you are paying from.',
+      // The pending-cap refusal (gateway-deposit.ts): fell to the generic
+      // "Something went wrong" and hid why every retry failed.
+      'You have several top-ups still waiting for payment. Finish one, or wait a few minutes before starting another.',
     ];
     for (const msg of literals) expect(map(msg)).toBe(msg);
   });

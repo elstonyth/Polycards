@@ -38,11 +38,13 @@ export type GatewayWithdrawals = Pick<
   | 'listCustomerAccountStates'
   | 'listFxRates'
   | 'listGatewayWithdrawals'
+  | 'otherPayoutAccountHolders'
   | 'savedBankAccountsFor'
   | 'updateGatewayWithdrawals'
   | 'walletSummary'
   | 'withdrawCreditsWithLedger'
   | 'withdrawForCashout'
+  | 'withdrawalControls'
 >;
 
 /** The read-only /admin/payments/* reports. Never moves money. */
@@ -55,6 +57,7 @@ export type GatewayReports = Pick<
   | 'listCustomerAccountStates'
   | 'listGatewayDeposits'
   | 'listGatewayWithdrawals'
+  | 'listAdminActionAudits'
 >;
 
 /**
@@ -74,6 +77,7 @@ export type CustomerWallet = Pick<
   | 'mutateCustomerMetadata'
   | 'otherPayoutAccountHolders'
   | 'walletSummary'
+  | 'withdrawalControls'
 >;
 
 /**

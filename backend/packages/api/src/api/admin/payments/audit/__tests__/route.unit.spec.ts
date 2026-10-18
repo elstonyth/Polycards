@@ -105,6 +105,7 @@ type Body = {
   currency: string;
   gateway: string;
   findings_total: number;
+  retired_total: number;
   totals: { deposits: { count: number; gross: number; net: number } };
   history: {
     gateway: string;
@@ -155,8 +156,10 @@ describe('GET /admin/payments/audit', () => {
     expect(body.gateway).toBe('fake');
     expect(body.findings).toHaveLength(1);
     // Counted over every RM gateway the list covers (1 each in the fake):
-    // the active one, TGPay, The 7 Pay and the retired globepay.
-    expect(body.findings_total).toBe(4);
+    // the active one, TGPay and The 7 Pay differ; the retired globepay can
+    // never be checked again, so it is counted apart (#780).
+    expect(body.findings_total).toBe(3);
+    expect(body.retired_total).toBe(1);
     // The retired gateway's settled history is still listed; A3Pay (SGD) is
     // not RM history.
     expect(body.history.map((h) => h.gateway)).toEqual(['globepay']);

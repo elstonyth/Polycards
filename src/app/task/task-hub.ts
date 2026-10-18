@@ -2,7 +2,7 @@
 // check-in track, and the row order. Split out of TaskHubClient so the rules
 // that decide WHAT a player sees (and in which order) are unit-tested without
 // rendering anything.
-import { rm } from '@/lib/format';
+import { rm, rmNbsp } from '@/lib/format';
 import type { TaskEntry, TaskHub } from '@/lib/data/schemas';
 
 export const CREDIT_ART = '/images/task/credits-coins.webp';
@@ -48,6 +48,24 @@ export function rewardLabel(reward: TaskEntry['reward']): {
     };
   }
   return { name: REWARD_LABEL[reward.type] ?? 'Reward', value: null };
+}
+
+/** The line shown once a claim lands (spec 2026-10-15 §3): bonus credit is
+ *  for packs only; a prize card ships for a fee or sells back withdrawable. A
+ *  free rip normally hands the player to the slot instead; one that could not
+ *  (no claim id) waits in the free-rip list at the top of /task. */
+export function claimNotice(reward: TaskEntry['reward']): string {
+  if (reward.type === 'credit') {
+    const amount = reward.amount_myr;
+    const what =
+      typeof amount === 'number' && Number.isFinite(amount) && amount > 0
+        ? `${rmNbsp(amount)} bonus credit`
+        : 'Bonus credit';
+    return `${what} added. Use it on packs — it can’t be withdrawn.`;
+  }
+  if (reward.type === 'pack')
+    return 'Free rip added — spin it from the top of this page.';
+  return 'Card added to your Vault. Ship it (delivery fee applies) or sell it back.';
 }
 
 /** The picture of the prize: the card's slab, the pack's shot, or the credit

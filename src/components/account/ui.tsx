@@ -67,7 +67,7 @@ export function StatCards({
     // grid of cards only fits ~140px of value, so a real balance wrapped after
     // the "RM" — money must never break across lines. Cards resume at sm,
     // where the column is wide enough to hold the longest figure.
-    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4">
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-4">
       {items.map((s) => (
         <div
           key={s.label}

@@ -1,0 +1,768 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polycards admin — Vault mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+@font-face { font-family: 'Nekst'; src: url('../../../../public/fonts/Nekst-Black.woff2') format('woff2'); font-weight: 900; font-display: swap; }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  font-family: Geist, system-ui, -apple-system, Segoe UI, sans-serif;
+  background: #08080a; color: #f4f4f5;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; }
+
+/* ---------- Page chrome: direction picker (not part of the admin) ---------- */
+.picker {
+  max-width: 1480px; margin: 0 auto; padding: 22px 24px 10px;
+  display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-end; justify-content: space-between;
+}
+.picker h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.picker p { margin: 0; font-size: 13px; color: #a1a1aa; max-width: 70ch; line-height: 1.5; }
+.options { display: flex; gap: 8px; flex-wrap: wrap; align-items: stretch; }
+.option {
+  all: unset; cursor: pointer; padding: 10px 14px; border-radius: 12px; min-width: 190px; max-width: 240px;
+  border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.03);
+  transition: background .18s ease, border-color .18s ease;
+}
+.option:hover { background: rgba(255,255,255,.06); }
+.option.selected { border-color: #fafafa; background: rgba(255,255,255,.09); }
+.option:focus-visible, .replay:focus-visible { outline: 2px solid #fafafa; outline-offset: 2px; }
+.option strong { display: flex; gap: 6px; align-items: center; font-size: 13px; font-weight: 600; }
+.option span { display: block; font-size: 12px; color: #a1a1aa; margin-top: 3px; line-height: 1.4; }
+.rec { font-size: 10.5px; font-weight: 600; padding: 2px 6px; border-radius: 999px; background: #fafafa; color: #0a0a0a; }
+.replay {
+  all: unset; cursor: pointer; padding: 10px 14px; border-radius: 12px; font-size: 13px; font-weight: 500;
+  border: 1px solid rgba(255,255,255,.12); color: #e4e4e7; align-self: center;
+}
+.replay:hover { background: rgba(255,255,255,.06); }
+.stage { max-width: 1480px; margin: 0 auto; padding: 10px 24px 48px; }
+
+/* ---------- Direction tokens ---------- */
+body[data-dir="a"] .app {
+  --bg: #0a0a0a; --bg-image: none; --frame-border: rgba(255,255,255,.08);
+  --sb-bg: #0d0d0d; --sb-border: rgba(255,255,255,.07); --sb-blur: none;
+  --logo-bg: #fafafa; --logo-fg: #0a0a0a;
+  --search-bg: #161616; --search-border: rgba(255,255,255,.06);
+  --nav-fg: #a3a3a3; --nav-hover: #161616; --nav-active-bg: #1f1f1f; --nav-active-fg: #fafafa;
+  --nav-active-ic-bg: transparent; --nav-active-ic-fg: #fafafa;
+  --line: rgba(255,255,255,.07);
+  --text: #fafafa; --text-2: #a3a3a3; --text-3: #8f8f8f;
+  --panel: #141414; --panel-solid: #141414; --panel-border: rgba(255,255,255,.08);
+  --panel-shadow: none; --panel-blur: none; --radius: 14px;
+  --seg-bg: #101010; --seg-active-bg: #262626; --seg-active-fg: #fafafa; --seg-active-shadow: none;
+  --accent: #fafafa; --accent-fg: #0a0a0a;
+  --btn2-bg: #1f1f1f; --btn2-fg: #fafafa; --btn2-border: rgba(255,255,255,.08);
+  --good: #2fbf6e; --good-bg: rgba(47,191,110,.12); --bad: #f87171; --bad-bg: rgba(248,113,113,.12);
+  --hl: #ffb020; --hl-bg: rgba(255,176,32,.12);
+  --money-in: #2fbf6e;
+  --series-in: #2fbf6e; --series-out: #d4d4d4;
+  --area-top: rgba(47,191,110,.30); --area-bot: rgba(47,191,110,0);
+  --grid: rgba(255,255,255,.07); --track: #1f1f1f; --fill-cur: #fafafa; --fill-prev: #404040;
+  --bar: #262626; --bar-hl: #ffb020; --bar-hl-glow: none;
+  --tip-bg: #1f1f1f; --tip-fg: #fafafa; --tip-sub: #a3a3a3; --tip-border: rgba(255,255,255,.12); --tip-shadow: 0 10px 30px rgba(0,0,0,.55);
+  --row-bg: #181818; --row-border: rgba(255,255,255,.06); --att-ic-bg: #222; --att-ic-fg: #fafafa;
+  --avatar-bg: #262626; --avatar-fg: #e5e5e5;
+  --num-font: 'Nekst', Geist, sans-serif; --num-weight: 900; --num-track: 0.005em;
+  --big-size: 46px; --kpi-size: 30px; --title-weight: 600;
+}
+body[data-dir="b"] .app {
+  --bg: #0c0806;
+  --bg-image:
+    radial-gradient(900px 520px at 6% -10%, rgba(255,106,20,.32), transparent 62%),
+    radial-gradient(720px 520px at 100% -5%, rgba(255,170,60,.10), transparent 60%),
+    radial-gradient(900px 640px at 55% 125%, rgba(255,90,10,.14), transparent 60%);
+  --frame-border: rgba(255,200,160,.10);
+  --sb-bg: rgba(18,11,8,.55); --sb-border: rgba(255,210,180,.08); --sb-blur: blur(14px);
+  --logo-bg: linear-gradient(135deg,#ff6a14,#ffb020); --logo-fg: #1a0c04;
+  --search-bg: rgba(255,240,230,.05); --search-border: rgba(255,210,180,.10);
+  --nav-fg: #cdbcae; --nav-hover: rgba(255,240,230,.05); --nav-active-bg: rgba(255,240,230,.07); --nav-active-fg: #fff7f0;
+  --nav-active-ic-bg: linear-gradient(135deg,#ff6a14,#ff9a3c); --nav-active-ic-fg: #1a0c04;
+  --line: rgba(255,214,186,.09);
+  --text: #fff7f0; --text-2: #cdbcae; --text-3: #a39183;
+  --panel: rgba(255,244,235,.045); --panel-solid: #1b130e; --panel-border: rgba(255,214,186,.12);
+  --panel-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 24px 48px -24px rgba(0,0,0,.75);
+  --panel-blur: blur(18px) saturate(140%); --radius: 22px;
+  --seg-bg: rgba(255,240,230,.04); --seg-active-bg: rgba(255,240,230,.13); --seg-active-fg: #fff7f0; --seg-active-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+  --accent: linear-gradient(135deg,#ff6a14,#ff9a3c); --accent-fg: #1a0c04;
+  --btn2-bg: rgba(255,240,230,.06); --btn2-fg: #fff7f0; --btn2-border: rgba(255,214,186,.14);
+  --good: #4ade80; --good-bg: rgba(74,222,128,.12); --bad: #fb7185; --bad-bg: rgba(251,113,133,.13);
+  --hl: #ff8a2a; --hl-bg: rgba(255,138,42,.15);
+  --money-in: #4ade80;
+  --series-in: #ff8a2a; --series-out: #ead7c6;
+  --area-top: rgba(255,112,26,.50); --area-bot: rgba(255,112,26,0);
+  --grid: rgba(255,214,186,.08); --track: rgba(255,240,230,.07); --fill-cur: #ff8a2a; --fill-prev: rgba(234,215,198,.30);
+  --bar: rgba(255,240,230,.09); --bar-hl: #ff8a2a; --bar-hl-glow: drop-shadow(0 0 14px rgba(255,122,26,.55));
+  --tip-bg: rgba(255,250,245,.96); --tip-fg: #1a0c04; --tip-sub: #6b5646; --tip-border: rgba(255,255,255,.6); --tip-shadow: 0 14px 34px rgba(0,0,0,.45);
+  --row-bg: rgba(255,240,230,.04); --row-border: rgba(255,214,186,.09); --att-ic-bg: rgba(255,240,230,.07); --att-ic-fg: #ffd2ad;
+  --avatar-bg: rgba(255,240,230,.08); --avatar-fg: #ffd2ad;
+  --num-font: Geist, sans-serif; --num-weight: 300; --num-track: -0.025em;
+  --big-size: 48px; --kpi-size: 32px; --title-weight: 500;
+}
+body[data-dir="c"] .app {
+  --bg: #eef0f4;
+  --bg-image:
+    radial-gradient(800px 520px at 92% -12%, rgba(196,181,253,.28), transparent 60%),
+    radial-gradient(760px 520px at -4% 112%, rgba(167,243,208,.30), transparent 60%);
+  --frame-border: rgba(15,23,42,.06);
+  --sb-bg: rgba(255,255,255,.72); --sb-border: rgba(15,23,42,.06); --sb-blur: blur(12px);
+  --logo-bg: #0b0d12; --logo-fg: #ffffff;
+  --search-bg: #f2f3f7; --search-border: transparent;
+  --nav-fg: #4b5263; --nav-hover: #f1f2f6; --nav-active-bg: #0b0d12; --nav-active-fg: #ffffff;
+  --nav-active-ic-bg: transparent; --nav-active-ic-fg: #ffffff;
+  --line: rgba(15,23,42,.07);
+  --text: #0b0d12; --text-2: #4b5263; --text-3: #626a7d;
+  --panel: #ffffff; --panel-solid: #ffffff; --panel-border: rgba(15,23,42,.05);
+  --panel-shadow: 0 1px 2px rgba(15,23,42,.04), 0 18px 40px -16px rgba(15,23,42,.16);
+  --panel-blur: none; --radius: 24px;
+  --seg-bg: #f2f3f7; --seg-active-bg: #ffffff; --seg-active-fg: #0b0d12; --seg-active-shadow: 0 1px 2px rgba(15,23,42,.08), 0 2px 8px rgba(15,23,42,.06);
+  --accent: #0b0d12; --accent-fg: #ffffff;
+  --btn2-bg: #f2f3f7; --btn2-fg: #0b0d12; --btn2-border: transparent;
+  --good: #0f8f52; --good-bg: rgba(15,143,82,.10); --bad: #d93d42; --bad-bg: rgba(217,61,66,.10);
+  --hl: #6d4dff; --hl-bg: rgba(109,77,255,.10);
+  --money-in: #0f8f52;
+  --series-in: #6d4dff; --series-out: #0b0d12;
+  --area-top: rgba(109,77,255,.30); --area-bot: rgba(52,211,153,.05);
+  --grid: rgba(15,23,42,.08); --track: #eef0f4; --fill-cur: #6d4dff; --fill-prev: #c9cdd8;
+  --bar: #e6e8ef; --bar-hl: #6d4dff; --bar-hl-glow: none;
+  --tip-bg: #0b0d12; --tip-fg: #ffffff; --tip-sub: #b4b9c6; --tip-border: transparent; --tip-shadow: 0 12px 30px rgba(15,23,42,.25);
+  --row-bg: #f7f8fb; --row-border: transparent; --att-ic-bg: #ffffff; --att-ic-fg: #0b0d12;
+  --avatar-bg: #eef0f4; --avatar-fg: #0b0d12;
+  --num-font: Geist, sans-serif; --num-weight: 600; --num-track: -0.035em;
+  --big-size: 46px; --kpi-size: 32px; --title-weight: 600;
+}
+
+/* ---------- App frame ---------- */
+.app {
+  display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 900px;
+  border-radius: 18px; overflow: hidden; border: 1px solid var(--frame-border);
+  background-color: var(--bg); background-image: var(--bg-image);
+  color: var(--text); font-size: 14px;
+  transition: background-color .35s ease, color .35s ease;
+}
+
+/* Sidebar — mirrors what the Mercur shell can actually render:
+   store header, search, icon + label rows, settings + user at the bottom. */
+.sb {
+  display: flex; flex-direction: column; gap: 6px; padding: 12px;
+  background: var(--sb-bg); border-right: 1px solid var(--sb-border);
+  -webkit-backdrop-filter: var(--sb-blur); backdrop-filter: var(--sb-blur);
+}
+.store { display: grid; grid-template-columns: 28px 1fr 16px; gap: 10px; align-items: center; padding: 6px; border-radius: 10px; }
+.store .av { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; font-weight: 700; font-size: 13px; background: var(--logo-bg); color: var(--logo-fg); }
+.store b { font-size: 13.5px; font-weight: 600; }
+.store i { color: var(--text-3); font-style: normal; letter-spacing: 1px; }
+.search {
+  display: flex; align-items: center; gap: 8px; margin: 4px 0 6px; padding: 8px 10px; border-radius: 10px;
+  background: var(--search-bg); border: 1px solid var(--search-border); color: var(--text-2); font-size: 13px;
+}
+.search kbd { margin-left: auto; font-family: inherit; font-size: 11px; color: var(--text-3); }
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav a {
+  display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 10px;
+  color: var(--nav-fg); text-decoration: none; font-size: 13.5px; font-weight: 500;
+  transition: background .18s ease, color .18s ease;
+}
+.nav a:hover { background: var(--nav-hover); color: var(--text); }
+.nav .ic { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; flex: none; transition: background .25s ease; }
+.nav a.active { background: var(--nav-active-bg); color: var(--nav-active-fg); }
+.nav a.active .ic { background: var(--nav-active-ic-bg); color: var(--nav-active-ic-fg); }
+.nav svg, .sicon { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.sb-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+.user { display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: center; padding: 10px 6px 4px; border-top: 1px solid var(--line); }
+.user .av { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 600; background: var(--avatar-bg); color: var(--avatar-fg); }
+.user b { display: block; font-size: 13px; font-weight: 600; }
+.user span { font-size: 12px; color: var(--text-2); }
+
+/* Main column */
+.main { display: flex; flex-direction: column; min-width: 0; container: main / inline-size; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 28px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--text-2);
+}
+.topbar .crumbs b { color: var(--text); font-weight: 500; }
+.topbar .right { display: flex; align-items: center; gap: 10px; }
+.chip { font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--hl-bg); color: var(--hl); }
+.iconbtn { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; background: var(--btn2-bg); border: 1px solid var(--btn2-border); color: var(--text); }
+.content { padding: 24px 28px 32px; display: flex; flex-direction: column; gap: 16px; }
+
+.head { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; justify-content: space-between; margin-bottom: 4px; }
+.head h2 { margin: 0; font-size: 24px; font-weight: var(--title-weight); letter-spacing: -0.015em; }
+.head p { margin: 5px 0 0; color: var(--text-2); font-size: 13px; }
+.seg { display: inline-flex; flex-wrap: wrap; padding: 3px; gap: 2px; border-radius: 12px; background: var(--seg-bg); border: 1px solid var(--line); }
+.seg button {
+  all: unset; cursor: pointer; padding: 6px 11px; border-radius: 9px; font-size: 12.5px; font-weight: 500; color: var(--text-2);
+  transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+}
+.seg button:hover { color: var(--text); }
+.seg button[aria-pressed="true"] { background: var(--seg-active-bg); color: var(--seg-active-fg); box-shadow: var(--seg-active-shadow); }
+.seg button:focus-visible, .btn:focus-visible { outline: 2px solid var(--hl); outline-offset: 2px; }
+
+/* Panels */
+.row { display: grid; gap: 16px; }
+.row-1 { grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); }
+.row-2 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.row-3 { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+@container main (max-width: 980px) {
+  .row-1, .row-3 { grid-template-columns: minmax(0, 1fr); }
+  .row-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.panel {
+  position: relative; padding: 20px; border-radius: var(--radius);
+  background: var(--panel); border: 1px solid var(--panel-border); box-shadow: var(--panel-shadow);
+  -webkit-backdrop-filter: var(--panel-blur); backdrop-filter: var(--panel-blur);
+  transition: border-color .2s ease, transform .2s ease;
+}
+.ptitle { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ptitle h3 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -0.005em; }
+.ptitle .sub { font-size: 12.5px; color: var(--text-2); }
+.label { font-size: 13px; color: var(--text-2); font-weight: 500; }
+.num { font-family: var(--num-font); font-weight: var(--num-weight); letter-spacing: var(--num-track); font-variant-numeric: tabular-nums; line-height: 1.05; }
+.big { font-size: var(--big-size); margin-top: 8px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
+.delta { display: inline-flex; align-items: center; gap: 4px; font-family: Geist, sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0; padding: 3px 8px; border-radius: 999px; line-height: 1.3; }
+.delta.good { background: var(--good-bg); color: var(--good); }
+.delta.bad { background: var(--bad-bg); color: var(--bad); }
+.vs { font-size: 12.5px; color: var(--text-2); margin-top: 6px; }
+
+/* B: ember glow behind the headline panel. C: holo foil tile. */
+body[data-dir="b"] .hero::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: radial-gradient(520px 240px at 18% 0%, rgba(255,120,30,.20), transparent 70%);
+}
+body[data-dir="c"] .kpi.holo {
+  background: linear-gradient(120deg, #d7f8e8 0%, #e3dcff 34%, #ffe2d4 66%, #d5eaff 100%);
+  background-size: 220% 220%; animation: sheen 14s ease-in-out infinite alternate;
+}
+@keyframes sheen { from { background-position: 0% 50%; } to { background-position: 100% 50%; } }
+body[data-dir="c"] .kpi.holo .track { background: rgba(255,255,255,.6); }
+
+/* Hero chart */
+.hero-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.legend { display: flex; gap: 14px; font-size: 12.5px; color: var(--text-2); margin-top: 14px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.legend .in i { background: var(--series-in); }
+.legend .out i { background: var(--series-out); }
+.chart { position: relative; margin-top: 8px; }
+.chart svg { display: block; width: 100%; height: 250px; overflow: visible; }
+.gridline { stroke: var(--grid); stroke-dasharray: 3 5; }
+.axis { fill: var(--text-3); font-size: 11px; font-family: Geist, sans-serif; }
+.st-top { stop-color: var(--area-top); }
+.st-bot { stop-color: var(--area-bot); }
+.s-in { fill: none; stroke: var(--series-in); stroke-width: 2.25; }
+.s-out { fill: none; stroke: var(--series-out); stroke-width: 2; stroke-dasharray: 5 5; opacity: .85; }
+.xhair { stroke: var(--text-3); stroke-dasharray: 3 4; opacity: 0; transition: opacity .15s ease; }
+.hdot { opacity: 0; transition: opacity .15s ease; stroke: var(--panel-solid); stroke-width: 2.5; }
+.hdot.in { fill: var(--series-in); }
+.hdot.out { fill: var(--series-out); }
+.chart.hover .xhair, .chart.hover .hdot { opacity: 1; }
+.tip {
+  position: absolute; top: 0; left: 0; pointer-events: none; z-index: 2; min-width: 168px;
+  padding: 9px 11px; border-radius: 12px; font-size: 12px; white-space: nowrap;
+  background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-border); box-shadow: var(--tip-shadow);
+  opacity: 0; transform: translate(-50%, calc(-100% - 14px)); transition: opacity .15s ease;
+}
+.chart.hover .tip { opacity: 1; }
+.tip .d { color: var(--tip-sub); margin-bottom: 4px; }
+.tip .r { display: flex; justify-content: space-between; gap: 14px; }
+.tip .r b { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Needs attention */
+.att { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.att-row {
+  display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  padding: 12px; border-radius: calc(var(--radius) - 6px); background: var(--row-bg); border: 1px solid var(--row-border);
+  transition: transform .18s ease, border-color .18s ease;
+}
+.att-row:hover { transform: translateY(-1px); border-color: var(--panel-border); }
+.att-ic { position: relative; width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; background: var(--att-ic-bg); color: var(--att-ic-fg); }
+.att-ic .dot { position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 50%; background: var(--hl); box-shadow: 0 0 0 3px var(--panel-solid); }
+.att-ic .dot::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--hl); animation: ping 2.4s cubic-bezier(.16,1,.3,1) infinite; }
+@keyframes ping { 0% { transform: scale(1); opacity: .7; } 80%, 100% { transform: scale(2.6); opacity: 0; } }
+.att-row b { display: block; font-size: 13.5px; font-weight: 600; }
+.att-row span { display: block; font-size: 12.5px; color: var(--text-2); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn {
+  all: unset; cursor: pointer; padding: 7px 12px; border-radius: 10px; font-size: 12.5px; font-weight: 600; text-align: center;
+  background: var(--btn2-bg); color: var(--btn2-fg); border: 1px solid var(--btn2-border); transition: filter .18s ease, transform .18s ease;
+}
+.btn:hover { filter: brightness(1.12); }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+.att-foot { margin-top: 12px; font-size: 12px; color: var(--text-3); }
+
+/* KPI tiles */
+.kpi { display: flex; flex-direction: column; }
+.kpi .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.kpi .val { font-size: var(--kpi-size); margin: 10px 0 4px; }
+.kpi .sub { font-size: 12.5px; color: var(--text-2); min-height: 18px; }
+.cmp { display: grid; gap: 7px; margin-top: 14px; }
+.cmp-row { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 10px; align-items: center; font-size: 11.5px; color: var(--text-2); }
+.track { height: 6px; border-radius: 999px; background: var(--track); overflow: hidden; }
+.fill { height: 100%; border-radius: 999px; transform-origin: left center; transition: transform .9s cubic-bezier(.16,1,.3,1); }
+.fill.cur { background: var(--fill-cur); }
+.fill.prev { background: var(--fill-prev); }
+
+/* Referral bars */
+.bars svg { display: block; width: 100%; height: 190px; overflow: visible; margin-top: 10px; }
+.bar { fill: var(--bar); transform-box: fill-box; transform-origin: 50% 100%; transition: transform .7s cubic-bezier(.16,1,.3,1); }
+.bar.hl { fill: var(--bar-hl); filter: var(--bar-hl-glow); }
+.bar.pre { transform: scaleY(0); }
+.bar-val { fill: var(--text); font-size: 12px; font-weight: 600; font-family: Geist, sans-serif; }
+
+/* Latest payments */
+.pay { margin-top: 10px; }
+.pay-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto 128px; gap: 12px; align-items: center; padding: 10px 2px; border-top: 1px solid var(--line); }
+.pay-row:first-child { border-top: 0; }
+.pay .av { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 600; background: var(--avatar-bg); color: var(--avatar-fg); }
+.pay b { display: block; font-size: 13.5px; font-weight: 600; }
+.pay span { font-size: 12px; color: var(--text-2); }
+.amt { font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.amt.in { color: var(--money-in); }
+.pstat { justify-self: end; font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.pstat.ok { background: var(--good-bg); color: var(--good); }
+.pstat.wait { background: var(--hl-bg); color: var(--hl); }
+.pstat.info { background: var(--btn2-bg); color: var(--text-2); border: 1px solid var(--btn2-border); }
+.pstat.bad { background: var(--bad-bg); color: var(--bad); }
+.link { font-size: 12.5px; color: var(--text-2); text-decoration: none; font-weight: 500; }
+.link:hover { color: var(--text); }
+
+/* Entrance: a quick 260ms settle that enhances an already-visible page.
+   No long choreography — panels land within ~0.4s total. */
+.anim .panel, .anim .head { animation: rise .26s cubic-bezier(.16,1,.3,1) both; }
+.anim .row-1 .panel:nth-child(2) { animation-delay: .04s; }
+.anim .row-2 .panel:nth-child(1) { animation-delay: .08s; }
+.anim .row-2 .panel:nth-child(2) { animation-delay: .10s; }
+.anim .row-2 .panel:nth-child(3) { animation-delay: .12s; }
+.anim .row-2 .panel:nth-child(4) { animation-delay: .14s; }
+.anim .row-3 .panel:nth-child(1) { animation-delay: .16s; }
+.anim .row-3 .panel:nth-child(2) { animation-delay: .18s; }
+.anim .att-row { animation: slide .32s cubic-bezier(.16,1,.3,1) both; }
+.anim .att-row:nth-child(2) { animation-delay: .06s; }
+.anim .att-row:nth-child(3) { animation-delay: .12s; }
+.anim .att-row:nth-child(4) { animation-delay: .18s; }
+@keyframes rise { from { opacity: .001; transform: translateY(8px); } }
+@keyframes slide { from { opacity: .001; transform: translateX(10px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim .panel, .anim .head, .anim .att-row { animation: none; }
+  .att-ic .dot::after, body[data-dir="c"] .kpi.holo { animation: none; }
+  .fill, .bar { transition: none; }
+}
+</style>
+</head>
+<body data-dir="a">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3.5 10.5 12 3.5l8.5 7V20a1 1 0 0 1-1 1H15v-6H9v6H4.5a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-truck" viewBox="0 0 24 24"><path d="M2.5 6.5h11v10h-11zM13.5 9.5h4l3 3.2v3.8h-7z"/><circle cx="6.5" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></symbol>
+  <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M4 7.5h14.5a1.5 1.5 0 0 1 1.5 1.5v9.5a1.5 1.5 0 0 1-1.5 1.5H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M4 7.5V6.2A1.7 1.7 0 0 1 5.7 4.5H16"/><circle cx="16" cy="13.7" r="1.2"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5c.6-3.1 2.8-5 5.5-5s4.9 1.9 5.5 5"/><path d="M15.6 5a3 3 0 0 1 0 6M17.6 14.7c1.6.6 2.6 2.2 3 4.8"/></symbol>
+  <symbol id="i-pack" viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="17" rx="2.5"/><path d="M5 8h14M9 12.5l3 3 3-3"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1.2"/><path d="M5 9v9.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V9M10 13h4"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3.6 2.6 5.2 5.8.9-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.9z"/></symbol>
+  <symbol id="i-store" viewBox="0 0 24 24"><path d="M4 9.5 5.6 4.5h12.8L20 9.5zM4 9.5a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0M5.5 12v8h13v-8"/></symbol>
+  <symbol id="i-cog" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16.5v-5.2a6 6 0 0 1 12 0v5.2l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0"/></symbol>
+  <symbol id="i-out" viewBox="0 0 24 24"><path d="M12 15V4.5M7.8 8.5 12 4.3l4.2 4.2M4 14v5a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-gift" viewBox="0 0 24 24"><rect x="4" y="9" width="16" height="11" rx="1.5"/><path d="M3 9h18M12 9v11M12 9c-1.4-2.8-5-3.3-5-1.1C7 9 9.5 9 12 9zm0 0c1.4-2.8 5-3.3 5-1.1C17 9 14.5 9 12 9z"/></symbol>
+</svg>
+
+<header class="picker">
+  <div>
+    <h1>Polycards admin — Vault (approved 2026-10-14)</h1>
+    <p>Reference mockup for docs/superpowers/specs/2026-10-14-admin-redesign-design.md. Sample numbers only. Hover the chart, switch the date range, and use Replay to see the motion.</p>
+  </div>
+  <button class="replay" id="replay" type="button">↻ Replay</button>
+</header>
+
+<div class="stage">
+  <div class="app">
+    <aside class="sb">
+      <div class="store"><div class="av">P</div><b>Polycards</b><i>•••</i></div>
+      <div class="search"><svg class="sicon"><use href="#i-search"/></svg>Search<kbd>Ctrl K</kbd></div>
+      <nav class="nav" aria-label="Main">
+        <a href="#" class="active"><span class="ic"><svg><use href="#i-home"/></svg></span>Dashboard</a>
+        <a href="#"><span class="ic"><svg><use href="#i-truck"/></svg></span>Orders</a>
+        <a href="#"><span class="ic"><svg><use href="#i-wallet"/></svg></span>Payments</a>
+        <a href="#"><span class="ic"><svg><use href="#i-users"/></svg></span>Players</a>
+        <a href="#"><span class="ic"><svg><use href="#i-pack"/></svg></span>Packs</a>
+        <a href="#"><span class="ic"><svg><use href="#i-box"/></svg></span>Stock</a>
+        <a href="#"><span class="ic"><svg><use href="#i-star"/></svg></span>Rewards</a>
+        <a href="#"><span class="ic"><svg><use href="#i-store"/></svg></span>Storefront</a>
+      </nav>
+      <div class="sb-foot">
+        <nav class="nav" aria-label="Settings"><a href="#"><span class="ic"><svg><use href="#i-cog"/></svg></span>Settings</a></nav>
+        <div class="user"><div class="av">OA</div><div><b>Ops admin</b><span>Signed in</span></div></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="crumbs"><b>Dashboard</b></div>
+        <div class="right"><span class="chip">Sample data</span><span class="iconbtn"><svg class="sicon"><use href="#i-bell"/></svg></span></div>
+      </div>
+
+      <div class="content anim" id="content">
+        <div class="head">
+          <div>
+            <h2 id="greet">Good evening</h2>
+            <p>How Polycards is doing · Malaysia time · updated just now</p>
+          </div>
+          <div class="seg" id="range" role="group" aria-label="Date range">
+            <button type="button" data-r="today" aria-pressed="false">Today</button>
+            <button type="button" data-r="yesterday" aria-pressed="false">Yesterday</button>
+            <button type="button" data-r="7d" aria-pressed="false">7 days</button>
+            <button type="button" data-r="30d" aria-pressed="true">30 days</button>
+            <button type="button" data-r="month" aria-pressed="false">This month</button>
+            <button type="button" data-r="last_month" aria-pressed="false">Last month</button>
+            <button type="button" data-r="30d" data-custom="1" aria-pressed="false">Custom</button>
+          </div>
+        </div>
+
+        <section class="row row-1">
+          <div class="panel hero">
+            <div class="hero-top">
+              <div>
+                <div class="label">Net cash in <span style="color:var(--text-3)">(top-ups − withdrawals)</span></div>
+                <div class="big num"><span id="net">RM 0</span><span class="delta good" id="net-delta">▲ 0%</span></div>
+                <div class="vs" id="net-vs">vs previous 30 days</div>
+              </div>
+              <div class="seg" id="gran" role="group" aria-label="Chart period">
+                <button type="button" data-g="weeks" aria-pressed="true">12 weeks</button>
+                <button type="button" data-g="months" aria-pressed="false">12 months</button>
+              </div>
+            </div>
+            <div class="legend"><span class="in"><i></i>Money in (top-ups)</span><span class="out"><i></i>Money out (withdrawals)</span></div>
+            <div class="chart" id="hero-chart">
+              <svg id="hero-svg" role="img" aria-label="Money in versus money out per period"></svg>
+              <div class="tip" id="tip"></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="ptitle"><h3>Needs your attention</h3><span class="sub">4 items</span></div>
+            <div class="att">
+              <div class="att-row">
+                <div class="att-ic"><svg class="sicon"><use href="#i-out"/></svg><span class="dot"></span></div>
+                <div><b>3 withdrawals to approve</b><span>RM 4,250 · oldest 25 min ago</span></div>
+                <button class="btn primary" type="button">Review</button>
+              </div>
+              <div class="att-row">
+                <div class="att-ic"><svg class="sicon"><use href="#i-truck"/></svg></div>
+                <div><b>7 orders to ship</b><span>Oldest requested 2 days ago</span></div>
+                <button class="btn" type="button">Ship</button>
+              </div>
+              <div class="att-row">
+                <div class="att-ic"><svg class="sicon"><use href="#i-clock"/></svg></div>
+                <div><b>1 top-up not credited</b><span>Paid 42 min ago</span></div>
+                <button class="btn" type="button">Check</button>
+              </div>
+              <div class="att-row">
+                <div class="att-ic"><svg class="sicon"><use href="#i-gift"/></svg></div>
+                <div><b>Referral payout ready</b><span>Week of 6 Oct · RM 2,140</span></div>
+                <button class="btn" type="button">Review</button>
+              </div>
+            </div>
+            <div class="att-foot">Items disappear from here once they're handled.</div>
+          </div>
+        </section>
+
+        <section class="row row-2" id="kpis">
+          <div class="panel kpi" data-k="signups">
+            <div class="top"><span class="label">New players</span><span class="delta good" data-delta>▲ 0%</span></div>
+            <div class="val num" data-val>0</div>
+            <div class="sub" data-sub></div>
+            <div class="cmp"><div class="cmp-row"><span>This period</span><div class="track"><div class="fill cur"></div></div></div><div class="cmp-row"><span>Previous</span><div class="track"><div class="fill prev"></div></div></div></div>
+          </div>
+          <div class="panel kpi holo" data-k="topups">
+            <div class="top"><span class="label">Top-ups</span><span class="delta good" data-delta>▲ 0%</span></div>
+            <div class="val num" data-val>RM 0</div>
+            <div class="sub" data-sub></div>
+            <div class="cmp"><div class="cmp-row"><span>This period</span><div class="track"><div class="fill cur"></div></div></div><div class="cmp-row"><span>Previous</span><div class="track"><div class="fill prev"></div></div></div></div>
+          </div>
+          <div class="panel kpi" data-k="firstCount">
+            <div class="top"><span class="label">First-time top-ups</span><span class="delta good" data-delta>▲ 0%</span></div>
+            <div class="val num" data-val>0</div>
+            <div class="sub" data-sub></div>
+            <div class="cmp"><div class="cmp-row"><span>This period</span><div class="track"><div class="fill cur"></div></div></div><div class="cmp-row"><span>Previous</span><div class="track"><div class="fill prev"></div></div></div></div>
+          </div>
+          <div class="panel kpi" data-k="withdrawals">
+            <div class="top"><span class="label">Withdrawals</span><span class="delta good" data-delta>▲ 0%</span></div>
+            <div class="val num" data-val>RM 0</div>
+            <div class="sub" data-sub></div>
+            <div class="cmp"><div class="cmp-row"><span>This period</span><div class="track"><div class="fill cur"></div></div></div><div class="cmp-row"><span>Previous</span><div class="track"><div class="fill prev"></div></div></div></div>
+          </div>
+        </section>
+
+        <section class="row row-3">
+          <div class="panel bars">
+            <div class="ptitle"><h3>Referral commission per week</h3><a class="link" href="#">Open referrals →</a></div>
+            <div class="vs">Last 12 weekly payouts · this week highlighted</div>
+            <svg id="ref-svg" role="img" aria-label="Referral commission paid per week"></svg>
+          </div>
+          <div class="panel">
+            <div class="ptitle"><h3>Latest payments</h3><a class="link" href="#">View all →</a></div>
+            <div class="pay">
+              <div class="pay-row"><div class="av">KR</div><div><b>@kaito.rips</b><span>Top-up · 2 min ago</span></div><div class="amt in">+RM 500.00</div><span class="pstat ok">Credited</span></div>
+              <div class="pay-row"><div class="av">MT</div><div><b>@miya_tcg</b><span>Withdrawal · 6 min ago</span></div><div class="amt">−RM 1,250.00</div><span class="pstat wait">Needs approval</span></div>
+              <div class="pay-row"><div class="av">ZC</div><div><b>@zh.collects</b><span>Top-up · 11 min ago</span></div><div class="amt in">+RM 100.00</div><span class="pstat ok">Credited</span></div>
+              <div class="pay-row"><div class="av">RK</div><div><b>@ripking88</b><span>Withdrawal · 18 min ago</span></div><div class="amt">−RM 320.00</div><span class="pstat info">Sent to bank</span></div>
+              <div class="pay-row"><div class="av">LP</div><div><b>@lunar.pulls</b><span>Top-up · 42 min ago</span></div><div class="amt in">+RM 50.00</div><span class="pstat bad">Not credited</span></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const easeOutExpo = t => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
+  const easeInOutCubic = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  const rm = v => 'RM ' + Math.round(v).toLocaleString('en-MY');
+  const n0 = v => Math.round(v).toLocaleString('en-MY');
+
+  // Sample figures, shaped like GET /admin/stats (current vs previous window).
+  const RANGES = {
+    today:      { vs: 'yesterday, same time', cur: { signups: 14, topups: 6820, topupCustomers: 31, topupCount: 44, firstCount: 5, firstAmount: 740, withdrawals: 3120, withdrawalCount: 9 },
+                  prev: { signups: 11, topups: 5960, topupCustomers: 27, topupCount: 39, firstCount: 3, firstAmount: 410, withdrawals: 3890, withdrawalCount: 12 } },
+    yesterday:  { vs: 'the day before', cur: { signups: 19, topups: 8410, topupCustomers: 36, topupCount: 52, firstCount: 6, firstAmount: 930, withdrawals: 5210, withdrawalCount: 14 },
+                  prev: { signups: 16, topups: 7720, topupCustomers: 33, topupCount: 47, firstCount: 7, firstAmount: 1010, withdrawals: 4480, withdrawalCount: 11 } },
+    '7d':       { vs: 'previous 7 days', cur: { signups: 96, topups: 41280, topupCustomers: 142, topupCount: 388, firstCount: 29, firstAmount: 4630, withdrawals: 24410, withdrawalCount: 61 },
+                  prev: { signups: 84, topups: 37020, topupCustomers: 131, topupCount: 352, firstCount: 25, firstAmount: 3980, withdrawals: 25120, withdrawalCount: 66 } },
+    '30d':      { vs: 'previous 30 days', cur: { signups: 312, topups: 126480, topupCustomers: 418, topupCount: 1284, firstCount: 61, firstAmount: 9870, withdrawals: 78270, withdrawalCount: 143 },
+                  prev: { signups: 289, topups: 109950, topupCustomers: 377, topupCount: 1131, firstCount: 57, firstAmount: 9120, withdrawals: 74120, withdrawalCount: 151 } },
+    month:      { vs: 'same days last month', cur: { signups: 151, topups: 60420, topupCustomers: 233, topupCount: 611, firstCount: 33, firstAmount: 5110, withdrawals: 35980, withdrawalCount: 70 },
+                  prev: { signups: 128, topups: 51200, topupCustomers: 204, topupCount: 548, firstCount: 27, firstAmount: 4290, withdrawals: 38410, withdrawalCount: 77 } },
+    last_month: { vs: 'the month before', cur: { signups: 298, topups: 118240, topupCustomers: 396, topupCount: 1190, firstCount: 58, firstAmount: 9310, withdrawals: 72860, withdrawalCount: 139 },
+                  prev: { signups: 241, topups: 94310, topupCustomers: 331, topupCount: 970, firstCount: 49, firstAmount: 7720, withdrawals: 61930, withdrawalCount: 118 } }
+  };
+
+  // Sample series, shaped like GET /admin/payments/settlement (week | month buckets).
+  const HERO = {
+    weeks: { labels: ['21 Jul','28 Jul','4 Aug','11 Aug','18 Aug','25 Aug','1 Sep','8 Sep','15 Sep','22 Sep','29 Sep','6 Oct'],
+             in:  [18240,21510,19830,24120,22640,27910,26350,31420,29870,33610,30940,36220],
+             out: [11420,12960,14110,13240,15830,16420,18970,17650,20210,19480,22130,21340] },
+    months: { labels: ['Nov','Dec','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct'],
+             in:  [42100,55300,61200,73400,69800,88200,94100,102600,118300,126400,131200,142800],
+             out: [25300,31200,38400,41100,45600,52300,57800,63100,70400,76900,81200,85600] }
+  };
+  const REF = { labels: HERO.weeks.labels, values: [820,940,1010,980,1240,1180,1390,1460,1525,1710,1880,2140] };
+
+  function countUp(el, to, fmt, dur = 900) {
+    const from = Number(el.dataset.cur || 0);
+    el.dataset.cur = to;
+    if (reduce || from === to) { el.textContent = fmt(to); return; }
+    const t0 = performance.now();
+    const tick = now => {
+      const p = Math.min(1, (now - t0) / dur);
+      el.textContent = fmt(from + (to - from) * easeOutExpo(p));
+      if (p < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    // rAF stalls in background/occluded tabs; never leave a half-counted number behind.
+    setTimeout(() => { if (Number(el.dataset.cur) === to) el.textContent = fmt(to); }, dur + 60);
+  }
+
+  // A rise is good, except for money leaving (withdrawals), where it is red.
+  function setDelta(el, cur, prev, riseIsBad = false) {
+    if (!prev) { el.textContent = '—'; el.className = 'delta'; return; }
+    const pct = ((cur - prev) / prev) * 100;
+    const up = pct >= 0;
+    el.textContent = (up ? '▲ ' : '▼ ') + Math.abs(pct).toFixed(1) + '%';
+    el.className = 'delta ' + ((up !== riseIsBad) ? 'good' : 'bad');
+  }
+
+  const TILES = {
+    signups:     { fmt: n0, sub: (c, p) => 'Previous period: ' + n0(p.signups) },
+    topups:      { fmt: rm, sub: c => n0(c.topupCount) + ' top-ups · ' + n0(c.topupCustomers) + ' players' },
+    firstCount:  { fmt: n0, sub: c => rm(c.firstAmount) + ' from first-timers' },
+    withdrawals: { fmt: rm, riseIsBad: true, sub: c => n0(c.withdrawalCount) + ' payouts sent' }
+  };
+
+  let rangeKey = '30d';
+  function renderNumbers() {
+    const { cur: c, prev: p, vs } = RANGES[rangeKey];
+    countUp($('#net'), c.topups - c.withdrawals, rm, 1000);
+    setDelta($('#net-delta'), c.topups - c.withdrawals, p.topups - p.withdrawals);
+    $('#net-vs').textContent = 'vs ' + vs;
+    $$('#kpis .kpi').forEach(tile => {
+      const k = tile.dataset.k, t = TILES[k];
+      countUp($('[data-val]', tile), c[k], t.fmt);
+      setDelta($('[data-delta]', tile), c[k], p[k], t.riseIsBad);
+      $('[data-sub]', tile).textContent = t.sub(c, p);
+      const top = Math.max(c[k], p[k]) || 1;
+      $('.fill.cur', tile).style.transform = `scaleX(${c[k] / top})`;
+      $('.fill.prev', tile).style.transform = `scaleX(${p[k] / top})`;
+    });
+  }
+
+  function niceScale(maxVal, ticks = 4) {
+    const rough = maxVal / ticks;
+    const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+    const norm = rough / mag;
+    const stepN = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10;
+    const step = stepN * mag;
+    return { step, max: Math.ceil(maxVal / step) * step };
+  }
+  const k = v => (v >= 1000 ? (v / 1000).toLocaleString('en-MY', { maximumFractionDigits: 1 }) + 'k' : String(v));
+
+  // Catmull-Rom through the points, as cubic Béziers.
+  function smooth(pts) {
+    let d = `M${pts[0][0]},${pts[0][1]}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+      const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+      d += ` C${c1[0]},${c1[1]} ${c2[0]},${c2[1]} ${p2[0]},${p2[1]}`;
+    }
+    return d;
+  }
+
+  let gran = 'weeks';
+  function renderHero(animate) {
+    const svg = $('#hero-svg'), chart = $('#hero-chart'), tip = $('#tip');
+    const d = HERO[gran];
+    const W = svg.clientWidth || 800, H = 250, L = 46, R = 10, T = 14, B = 30;
+    const count = d.labels.length;
+    const { max, step } = niceScale(Math.max(...d.in, ...d.out));
+    const x = i => L + (i * (W - L - R)) / (count - 1);
+    const y = v => T + (H - T - B) * (1 - v / max);
+    const base = y(0);
+    const pin = d.in.map((v, i) => [x(i), y(v)]);
+    const pout = d.out.map((v, i) => [x(i), y(v)]);
+    const lineIn = smooth(pin);
+    let grid = '';
+    for (let v = 0; v <= max + 1e-6; v += step) {
+      grid += `<line class="gridline" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/>`
+            + `<text class="axis" x="${L - 10}" y="${y(v) + 4}" text-anchor="end">${v === 0 ? '0' : k(v)}</text>`;
+    }
+    const every = W < 560 ? 3 : 2;
+    const xl = d.labels.map((l, i) => ((count - 1 - i) % every === 0
+      ? `<text class="axis" x="${x(i)}" y="${H - 8}" text-anchor="middle">${l}</text>` : '')).join('');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.innerHTML = `
+      <defs>
+        <linearGradient id="g-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="st-top"/><stop offset="1" class="st-bot"/></linearGradient>
+        <clipPath id="hero-clip"><rect id="hero-clip-rect" x="0" y="0" width="${animate && !reduce ? 0 : W}" height="${H}"/></clipPath>
+      </defs>
+      ${grid}${xl}
+      <g clip-path="url(#hero-clip)">
+        <path d="${lineIn} L${x(count - 1)},${base} L${x(0)},${base} Z" fill="url(#g-area)"/>
+        <path d="${smooth(pout)}" class="s-out"/>
+        <path d="${lineIn}" class="s-in"/>
+      </g>
+      <line class="xhair" id="xh" x1="0" x2="0" y1="${T}" y2="${base}"/>
+      <circle class="hdot out" id="dot-out" r="4.5" cx="-20" cy="-20"/>
+      <circle class="hdot in" id="dot-in" r="5" cx="-20" cy="-20"/>`;
+
+    if (animate && !reduce) {
+      const rect = $('#hero-clip-rect'), t0 = performance.now(), dur = 1100;
+      const tick = now => {
+        const p = Math.min(1, (now - t0) / dur);
+        rect.setAttribute('width', W * easeInOutCubic(p));
+        if (p < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+      setTimeout(() => rect.setAttribute('width', W), dur + 60);
+    }
+
+    svg.onmousemove = e => {
+      const r = svg.getBoundingClientRect();
+      const sx = ((e.clientX - r.left) / r.width) * W;
+      const i = Math.max(0, Math.min(count - 1, Math.round(((sx - L) / (W - L - R)) * (count - 1))));
+      $('#xh').setAttribute('x1', x(i)); $('#xh').setAttribute('x2', x(i));
+      $('#dot-in').setAttribute('cx', x(i)); $('#dot-in').setAttribute('cy', y(d.in[i]));
+      $('#dot-out').setAttribute('cx', x(i)); $('#dot-out').setAttribute('cy', y(d.out[i]));
+      tip.innerHTML = `<div class="d">${gran === 'weeks' ? 'Week of ' : ''}${d.labels[i]}</div>`
+        + `<div class="r"><span>Money in</span><b>${rm(d.in[i])}</b></div>`
+        + `<div class="r"><span>Money out</span><b>${rm(d.out[i])}</b></div>`
+        + `<div class="r"><span>Net</span><b>${rm(d.in[i] - d.out[i])}</b></div>`;
+      const left = Math.max(90, Math.min(r.width - 90, (x(i) / W) * r.width));
+      tip.style.left = left + 'px';
+      tip.style.top = (y(d.in[i]) / H) * r.height + 'px';
+      chart.classList.add('hover');
+    };
+    svg.onmouseleave = () => chart.classList.remove('hover');
+  }
+
+  function renderBars(animate) {
+    const svg = $('#ref-svg');
+    const W = svg.clientWidth || 480, H = 190, T = 28, B = 26, gap = 8;
+    const count = REF.values.length, bw = (W - gap * (count - 1)) / count;
+    const max = Math.max(...REF.values) * 1.08;
+    let s = '';
+    REF.values.forEach((v, i) => {
+      const h = ((H - T - B) * v) / max, x0 = i * (bw + gap), y0 = H - B - h, yb = H - B, r = Math.min(5, bw / 2);
+      const last = i === count - 1;
+      // Rounded at the data end only; square on the baseline.
+      s += `<path class="bar${last ? ' hl' : ''}${animate && !reduce ? ' pre' : ''}" style="transition-delay:${i * 35}ms"
+              d="M${x0},${yb} V${y0 + r} Q${x0},${y0} ${x0 + r},${y0} H${x0 + bw - r} Q${x0 + bw},${y0} ${x0 + bw},${y0 + r} V${yb} Z"><title>${REF.labels[i]}: ${rm(v)}</title></path>`;
+      if (last) s += `<text class="bar-val" x="${x0 + bw / 2}" y="${y0 - 9}" text-anchor="middle">${rm(v)}</text>`;
+      if (i === 0 || i === count - 1 || i === Math.floor(count / 2)) {
+        s += `<text class="axis" x="${x0 + bw / 2}" y="${H - 7}" text-anchor="middle">${REF.labels[i]}</text>`;
+      }
+    });
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.innerHTML = s;
+    if (animate && !reduce) setTimeout(() => $$('.bar', svg).forEach(b => b.classList.remove('pre')), 30);
+  }
+
+  function zeroFills() {
+    $$('#kpis .fill').forEach(f => { f.style.transition = 'none'; f.style.transform = 'scaleX(0)'; });
+    void document.body.offsetWidth;
+    $$('#kpis .fill').forEach(f => { f.style.transition = ''; });
+  }
+
+  function replay() {
+    const content = $('#content');
+    content.classList.remove('anim'); void content.offsetWidth; content.classList.add('anim');
+    $$('[data-cur]').forEach(el => { el.dataset.cur = 0; });
+    zeroFills();
+    renderHero(true); renderBars(true);
+    requestAnimationFrame(renderNumbers);
+  }
+
+  const h = new Date().getHours();
+  $('#greet').textContent = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+
+  $$('#range button').forEach(b => b.addEventListener('click', () => {
+    $$('#range button').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
+    rangeKey = b.dataset.r;
+    renderNumbers();
+  }));
+  $$('#gran button').forEach(b => b.addEventListener('click', () => {
+    $$('#gran button').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
+    gran = b.dataset.g;
+    renderHero(true);
+  }));
+  $$('.option').forEach(b => b.addEventListener('click', () => {
+    document.body.dataset.dir = b.dataset.choice;
+    $$('.option').forEach(o => o.classList.toggle('selected', o === b));
+    replay();
+  }));
+  $('#replay').addEventListener('click', replay);
+
+  let rt;
+  addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { renderHero(false); renderBars(false); }, 120); });
+
+  zeroFills();
+  renderHero(true);
+  renderBars(true);
+  requestAnimationFrame(renderNumbers);
+})();
+</script>
+</body>
+</html>

@@ -8,11 +8,17 @@ import { openCallback, payoutState } from '../../../../modules/packs/a3pay';
 import { a3payConfigFromEnv } from '../../../../modules/packs/a3pay-client';
 import {
   applyWithdrawalOutcome,
+  redactPayoutText,
   refundWithdrawal,
 } from '../../../../modules/packs/gateway-withdrawal';
 import { rowGateway } from '../../../../modules/packs/gateway';
 import { alertOps } from '../../../../modules/packs/ops-alert';
 import { rowFx, toLedgerAmount } from '../../../../modules/packs/payment-fx';
+import {
+  stampNote,
+  withdrawalAuditNote,
+} from '../../../../modules/packs/gateway-audit';
+import { toOptionalMoney } from '../../../../modules/packs/money';
 
 // A3Pay payout callback (handbook "Payout Callback"). Same authentication as
 // the deposit hook: decrypt, verify the signature, then read only the signed
@@ -124,6 +130,36 @@ export async function POST(
             : '.') +
           ` Investigate A3Pay ${gatewayTransactionId}.`,
       );
+      // On the row too, as the TGPay hook does, so Settlement and the
+      // Dashboard show it at once. In RM at the row's locked rate, the
+      // audit's own unit. Best-effort: A3Pay still gets its answer.
+      try {
+        const paid = toLedgerAmount(rowFx(withdrawal), Number(data.Amount));
+        await packs.updateGatewayWithdrawals({
+          id: withdrawal.id,
+          audited_at: new Date(),
+          ...stampNote(
+            withdrawal,
+            withdrawalAuditNote(
+              {
+                status: withdrawal.status,
+                amount: toOptionalMoney(withdrawal.amount),
+              },
+              {
+                kind: 'detail',
+                state,
+                amount: Number.isFinite(paid)
+                  ? paid
+                  : Number(withdrawal.amount),
+              },
+            ),
+          ),
+        });
+      } catch (error) {
+        logger.error(
+          `[a3pay] could not record the contradiction on ${merchantTransactionId}: ${(error as Error).message}`,
+        );
+      }
     }
     res.status(200).send('success');
     return;
@@ -141,7 +177,9 @@ export async function POST(
         withdrawal,
         null,
         'pending',
-        `callback status ${String(data.Status)}: ${String(data.Remark ?? '').slice(0, 200)}`,
+        // Free text an A3Pay operator typed: it can echo the account number
+        // or holder name, and this column renders on the admin list.
+        `callback status ${String(data.Status)}: ${redactPayoutText(String(data.Remark ?? ''), withdrawal.account_number, withdrawal.account_holder_name ?? '').slice(0, 200)}`,
       );
     } catch (error) {
       logger.error(

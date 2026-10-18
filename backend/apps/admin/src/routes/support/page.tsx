@@ -14,7 +14,6 @@ import {
   Text,
   toast,
 } from "@medusajs/ui";
-import { Buildings } from "@medusajs/icons";
 import type { RouteConfig } from "@mercurjs/dashboard-sdk";
 import { searchCustomers, type SupportCustomer } from "../../lib/admin-rest";
 import {
@@ -30,10 +29,10 @@ import { BonusCreditToggle } from "../../components/BonusCreditToggle";
 import { adjustCreditVars, isBonusGrant } from "../../lib/credit-kind";
 
 export const config: RouteConfig = {
-  label: "Customer Support",
-  icon: Buildings,
-  nested: "/customers",
-  rank: 1,
+  label: "pcNav.customerSupport",
+  translationNs: "translation",
+  rank: 2,
+  nested: "/players",
 };
 
 const SupportPage = () => {

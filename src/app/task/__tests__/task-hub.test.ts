@@ -3,6 +3,7 @@ import type { TaskEntry, TaskHub } from '@/lib/data/schemas';
 import {
   CREDIT_ART,
   checkinCount,
+  claimNotice,
   claimableCounts,
   orderForDisplay,
   rewardArt,
@@ -143,5 +144,35 @@ describe('reward art and label', () => {
     expect(
       rewardLabel({ type: 'pack', pack_id: 'bronze', pack_price_myr: 30 }),
     ).toEqual({ name: 'Free rip · bronze', value: 30 });
+  });
+});
+
+describe('claimNotice', () => {
+  it('says bonus credit is for packs, naming the amount when known', () => {
+    expect(claimNotice({ type: 'credit', amount_myr: 5 })).toBe(
+      `RM${String.fromCharCode(0xa0)}5.00 bonus credit added. Use it on packs — it can’t be withdrawn.`,
+    );
+    expect(claimNotice({ type: 'credit' })).toBe(
+      'Bonus credit added. Use it on packs — it can’t be withdrawn.',
+    );
+    // A zero or broken amount must never print "RM 0.00" or "RM NaN".
+    for (const amount_myr of [0, Number.NaN])
+      expect(claimNotice({ type: 'credit', amount_myr })).toBe(
+        'Bonus credit added. Use it on packs — it can’t be withdrawn.',
+      );
+  });
+
+  it('says a prize card ships (for a fee) or sells back', () => {
+    expect(claimNotice({ type: 'card', card_name: 'Mew' })).toBe(
+      'Card added to your Vault. Ship it (delivery fee applies) or sell it back.',
+    );
+  });
+});
+
+describe('claimNotice — a free rip with no spin to hand over', () => {
+  it('points at the waiting free rip, not at the Vault', () => {
+    expect(claimNotice({ type: 'pack', pack_id: 'bronze' })).toBe(
+      'Free rip added — spin it from the top of this page.',
+    );
   });
 });

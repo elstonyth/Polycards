@@ -174,7 +174,7 @@ describe('PackDetailClient — vault packs', () => {
     expect(panel).not.toContain('Vault x');
   });
 
-  // Balance 0: a gift-only open must not be refused as "Not enough credits".
+  // Balance 0: a gift-only open must not be refused as "Not enough balance".
   test('a gift-only open goes to the reel even with no balance', async () => {
     mocks.getPackGifts.mockResolvedValue([gift()]);
     await render(1);
@@ -184,12 +184,12 @@ describe('PackDetailClient — vault packs', () => {
     expect(open).toBeDefined();
     await act(async () => open!.click());
     expect(mocks.push).toHaveBeenCalledWith('/slots/bronze/spin?count=1');
-    expect(container.textContent).not.toContain('Not enough credits');
+    expect(container.textContent).not.toContain('Not enough balance');
   });
 
   // The price may yet drop to a gift: no credit refusal before the read lands
   // (the reel re-reads and gates before any charge).
-  test('no "Not enough credits" while the gift read is pending', async () => {
+  test('no "Not enough balance" while the gift read is pending', async () => {
     mocks.getPackGifts.mockReturnValue(new Promise(() => {}));
     await render(1);
     const open = [...container.querySelectorAll('button')].find(
@@ -197,7 +197,7 @@ describe('PackDetailClient — vault packs', () => {
     );
     await act(async () => open!.click());
     expect(mocks.push).toHaveBeenCalledWith('/slots/bronze/spin?count=1');
-    expect(container.textContent).not.toContain('Not enough credits');
+    expect(container.textContent).not.toContain('Not enough balance');
   });
 });
 

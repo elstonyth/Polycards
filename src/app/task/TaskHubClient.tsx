@@ -309,9 +309,11 @@ function AchievementsTab({
             value={`L${hub.vip_level}`}
             help={
               <HelpTip label="How VIP levels work">
-                Your VIP level rises with lifetime spend. Achievements below
-                that say &ldquo;reach level N&rdquo; are measured against this
-                number, and each one pays out once.
+                Your VIP level rises with the part of each pack you pay yourself
+                &mdash; bonus credit, gift packs, the welcome pack and task
+                reward packs don&rsquo;t count. Achievements below that say
+                &ldquo;reach level N&rdquo; are measured against this number,
+                and each one pays out once.
               </HelpTip>
             }
           />
@@ -432,6 +434,27 @@ export function TaskHubClient({
           <AchievementsTab hub={taskHub} tabs={tabs} {...claimProps} />
         )}
       </div>
+
+      {taskHub && (
+        <div className="mt-6 space-y-1 text-xs leading-relaxed text-neutral-400">
+          <p>
+            Task rewards (cards, slabs, and cards from reward packs) sell back
+            as cash you can withdraw once you’ve topped up and used your money
+            for packs. Credit rewards are bonus credit for packs.{' '}
+            <Link
+              href="/wallet"
+              className="font-semibold text-neutral-300 underline-offset-2 hover:text-white hover:underline"
+            >
+              How it works <span aria-hidden="true">&rarr;</span>
+            </Link>
+          </p>
+          <p>
+            Daily and weekly tasks count packs you pay for. Packs paid half or
+            more with bonus credit, gift packs, the welcome pack and task reward
+            packs don&rsquo;t count.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

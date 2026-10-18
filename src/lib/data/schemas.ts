@@ -494,9 +494,8 @@ export const VaultItemSchema = z.looseObject({
     amount: finite,
     percent: finite,
     firm: z.boolean().optional(),
-    // MYR part of `amount` that came from bonus or gift play: paid as normal
-    // credit that must be played through once before it can be withdrawn.
-    // Optional: an older backend omits it.
+    // MYR part of `amount` held for packs (the bonus-paid share, or the
+    // welcome card). Optional: an older backend omits it.
     bonus: finite.optional(),
   }),
 });
@@ -547,6 +546,11 @@ const CreditsSchema = z.looseObject({
   balance: finite,
   topup_total: finite,
   spend_total: finite,
+  // The history's split of spend_total (2026-10-15): all money spent on pack
+  // opens (bonus part included), and money withdrawn. Optional so an older
+  // backend still parses.
+  pack_spend_total: finite.optional(),
+  withdrawn_total: finite.optional(),
   has_more: z.boolean().optional(),
 });
 
@@ -587,6 +591,9 @@ export const PaymentConfigSchema = z.looseObject({
   withdrawals_enabled: z.boolean().optional(),
   // ISO instant a timed withdrawal pause ends (null/absent = no timed pause).
   withdrawals_paused_until: z.string().nullable().optional(),
+  // Closed by the admin (switch or daily hours) or a timed pause: the Withdraw
+  // button opens an "unavailable" popup. Absent (older backend) = not closed.
+  withdrawals_unavailable: z.boolean().optional(),
   // Regional rails beside the active gateway (A3Pay: SGD). Optional — an
   // older backend has none, and a malformed list must not fail the bands.
   regional: z
@@ -604,6 +611,12 @@ export const PaymentConfigSchema = z.looseObject({
           min: finite.nullable(),
           max: finite.nullable(),
         }),
+        // The RM a payout through this rail may take today. Optional: a
+        // backend older than this field leaves the form on the RM band.
+        withdrawal_rm: z
+          .looseObject({ min_rm: finite, max_rm: finite })
+          .optional()
+          .catch(undefined),
         rate: z.looseObject({ deposit: finite, payout: finite }).nullable(),
       }),
     )
@@ -633,6 +646,11 @@ export const CreditTransactionSchema = z.looseObject({
   // Signed bonus-credit part of `amount` (MYR). Optional for the same
   // older-backend reason; absent = no bonus part.
   bonus: finite.optional(),
+  // Signed move into (+) or out of (−) "Still to use on packs" (MYR): + a
+  // top-up, + a sell-back's free share (bonus, free-pack or prize pulls), −
+  // what a pack open used of it. Buyback-only before 2026-10-15. Optional for
+  // the same older-backend reason.
+  playthrough: finite.optional(),
 });
 
 /** GET /store/credits as the Transactions page reads it. The totals are SOFT:
@@ -739,6 +757,10 @@ export const WithdrawStartSchema = z.looseObject({
   amount: finite,
   balance: finite,
   status: z.enum(['pending', 'held']).optional(),
+  // A regional payout (Singapore): the currency the bank is paid in and the
+  // amount it receives. Absent on an RM payout and on an older backend.
+  currency: z.string().optional().catch(undefined),
+  payAmount: finite.optional().catch(undefined),
 });
 
 /** GET /store/credits/withdraw/banks response — the payout bank picker. */
@@ -750,6 +772,22 @@ export const WithdrawBanksSchema = z.looseObject({
       // The currency that bank is paid in (SGD for Singapore banks via
       // A3Pay). Optional: an older backend sends none, meaning RM.
       currency: z.string().optional(),
+      accountLengths: z
+        .array(z.number().int().positive())
+        .nonempty()
+        .optional(),
+      accountPattern: z
+        .string()
+        .refine((pattern) => {
+          try {
+            new RegExp(pattern);
+            return true;
+          } catch {
+            return false;
+          }
+        })
+        .optional(),
+      accountHint: z.string().optional(),
     }),
   ),
 });
@@ -781,6 +819,9 @@ export const SavedBankAccountsSchema = z.looseObject({
       // The bank's own payout floor (RM), e.g. Touch 'n Go 100; null/absent =
       // only the gateway's floor applies.
       minRm: z.number().nullish(),
+      // Why an unsupported account cannot be paid right now, when it is not
+      // the provider (e.g. the admin paused Touch 'n Go).
+      unavailableReason: z.string().nullish(),
     }),
   ),
 });
@@ -845,7 +886,7 @@ export const OpenBuybackSchema = z.looseObject({
   vault_amount: finite.optional(),
   instant_deadline_ms: finite.optional(),
   firm: z.boolean().optional(),
-  // MYR part of `amount` that came from bonus or gift play: paid as normal credit that must be played through once before it can be withdrawn (2026-10-09).
+  // MYR part of `amount` held for packs (the bonus-paid share, or the welcome card).
   bonus: finite.optional(),
 });
 
@@ -1065,6 +1106,13 @@ export const ClaimGrantSchema = z.looseObject({
 /** POST /store/rewards/withdraw response. */
 export const WithdrawPrizeSchema = z.looseObject({
   status: z.enum(['requested', 'capped', 'invalid']),
+});
+
+/** GET /store/rewards/withdraw — today's prize-shipping allowance. */
+export const PrizeAllowanceSchema = z.looseObject({
+  per_day: finite,
+  used_today: finite,
+  remaining: finite,
 });
 
 /** GET /store/daily — the VIP voucher/frame grant state (packs/service.ts

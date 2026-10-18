@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-// A card opened with bonus credit or a vault pack sells back as NORMAL credit,
-// but its bonus share must be played through once before it can be withdrawn
-// (2026-10-09). The confirm says so; an ordinary sale reads as before.
+// The free part of a sale (bonus-credit share, the welcome pull) is for
+// opening packs, not withdrawable (#712, kept 2026-10-15). The confirm
+// names that part; a sale with none reads as before.
 
 vi.mock('@/lib/use-liquid-glass', () => ({
   useLiquidGlass: () => {},
@@ -53,20 +53,20 @@ function render(bonus: number) {
   return document.body.textContent ?? '';
 }
 
-describe('SellConfirmModal — sale from bonus play', () => {
-  test('pays normal credit and names the part to play through', () => {
+describe('SellConfirmModal — sale with a free part', () => {
+  test('names the part that is for opening packs', () => {
     const text = render(270);
     expect(text).toContain('Sell for RM 270.00');
-    expect(text).not.toContain('bonus +');
-    expect(text).toContain('To play through');
+    expect(text).toContain('For packs');
     expect(text).toContain(
-      'RM 270.00 of it came from bonus credit, a vault pack or a prize',
+      `RM${String.fromCharCode(0xa0)}270.00 of this sale is for opening packs (the part paid with bonus credit, or the welcome pack’s card). Selling it pauses withdrawals until this money is used on packs.`,
     );
   });
 
-  test('an ordinary sale reads exactly as before', () => {
+  test('any other sale says nothing about packs', () => {
     const text = render(0);
     expect(text).toContain('Sell for RM 270.00');
-    expect(text).not.toContain('play through');
+    expect(text).not.toContain('For packs');
+    expect(text).not.toContain('for opening packs');
   });
 });

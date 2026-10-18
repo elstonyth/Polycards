@@ -1,4 +1,7 @@
-import { bonusShareMyr } from '../../../modules/packs/bonus-credit';
+import {
+  bonusShareMyr,
+  sellbackHoldBp,
+} from '../../../modules/packs/bonus-credit';
 import {
   AuthenticatedMedusaRequest,
   MedusaResponse,
@@ -9,7 +12,9 @@ import {
   UNQUOTED_BUYBACK,
   buybackAmount,
   resolveBuybackRate,
+  revealGraceMs,
 } from '../../../modules/packs/buyback-rate';
+import { withLossless } from '../../../modules/packs/lossless';
 import { isChallengePrizePack } from '../../../modules/packs/challenge-prize';
 import { bestLiveTierByHandle } from '../../../modules/packs/card-tier';
 import {
@@ -53,11 +58,15 @@ export async function GET(
   const customerId = req.auth_context.actor_id;
   // ONE hasPaidOpen read for the whole list (the unlock is computed, never
   // stored — see modules/packs/free-pack.ts), resolved next to the FX read so
-  // it costs no extra round trip.
-  const [{ rate: fxRate, firm: fxFirm }, freeUnlocked] = await Promise.all([
-    resolveFxRateInfo(packs),
-    packs.hasPaidOpen(customerId),
-  ]);
+  // it costs no extra round trip. Same for the Lossless windows: a pull still
+  // inside its instant window was rolled within the reveal grace, so nothing
+  // that ended before that can lift a quote here.
+  const [{ rate: fxRate, firm: fxFirm }, freeUnlocked, windows] =
+    await Promise.all([
+      resolveFxRateInfo(packs),
+      packs.hasPaidOpen(customerId),
+      packs.losslessWindows(Date.now() - revealGraceMs()),
+    ]);
 
   const pulls = await packs.listPulls(
     { customer_id: customerId, status: 'vaulted' },
@@ -136,7 +145,14 @@ export async function GET(
       // task is the requirement), so the two facts coincide. The field stays:
       // the storefront keys its Sell affordance off it.
       const sellable = !locked;
-      const { percent, rate_type } = resolveBuybackRate(pack, {
+      // Lossless Mode at rolled_at, as the credit decides it (buyback-pull.ts).
+      const priced = withLossless(
+        pack,
+        windows,
+        new Date(p.rolled_at).getTime(),
+        p.source,
+      );
+      const { percent, rate_type } = resolveBuybackRate(priced, {
         rolled_at: p.rolled_at,
         revealed_at: p.revealed_at,
         // Reaching the vault means the reveal was left, so the window is closed
@@ -183,8 +199,9 @@ export async function GET(
         // the sell/deliver lock must be keyed off `locked`, NEVER off `source`.
         source: p.source ?? 'pack',
         locked,
-        // Share of a sell-back paid as spend-only bonus credit (spec
-        // 2026-10-07): 10000 on a gift, the bonus share on a bonus open.
+        // Share of the pull's price paid as bonus or promo (spec 2026-10-07):
+        // 10000 on a gift, the bonus share on a bonus open. What of a sale is
+        // held is buyback.bonus (a reward's or gift's: none, ADR 0012).
         bonus_bp: Number(p.bonus_bp ?? 0),
         // Can this row be SOLD? Now exactly `!locked` — a reward card sells
         // like any other (and still ships via the reward path). Kept as its
@@ -211,11 +228,12 @@ export async function GET(
           : {
               percent,
               amount: buybackAmount(marketPriceMyr, percent),
-              // The part of that amount from bonus or gift play, which
-              // must be played through before it can be withdrawn.
+              // The part of that amount from bonus or welcome-pack play,
+              // which must be played through before it can be withdrawn.
+              // None for a reward or a gift (ADR 0012).
               bonus: bonusShareMyr(
                 buybackAmount(marketPriceMyr, percent),
-                Number(p.bonus_bp ?? 0),
+                sellbackHoldBp(p),
               ),
               rate_type,
               // false when amount was computed on the display FX fallback — the

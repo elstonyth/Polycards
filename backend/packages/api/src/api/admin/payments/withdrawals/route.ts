@@ -232,7 +232,8 @@ export async function GET(
     gateway_status: r.gateway_status,
     // Plan 095. Both are operator-facing on purpose: `failure_reason` says why
     // a payout died, and `verify_outcome` says how we answered their Payout
-    // Verification (active on the production merchant).
+    // Verification, where a gateway offers it. A3Pay does not for our
+    // merchant, so an A3Pay row always reads NULL here.
     //
     // A null verify_outcome NARROWS the search, it does not conclude it. Three
     // things produce one: their call never reached us; it reached us but was

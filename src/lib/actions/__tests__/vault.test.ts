@@ -10,6 +10,7 @@ vi.mock('@/lib/store', () => ({ store: storeShim }));
 import {
   ackReportedDeposits,
   getPendingDeposits,
+  getTransactions,
   getUnreportedDeposits,
   getVault,
   readPendingDeposits,
@@ -67,6 +68,25 @@ describe('startWithdrawal — Idempotency-Key', () => {
       reference: 'PC-W1',
       status: 'pending',
     });
+  });
+
+  it('carries what a Singapore bank receives, and nothing for an RM payout', async () => {
+    backend({
+      'POST /store/credits/withdraw': {
+        body: { ...WITHDRAW_OK.body, currency: 'SGD', payAmount: 50.14 },
+      },
+    });
+    expect(
+      await startWithdrawal({ amount: 160, accountId: 'acct_1' }),
+    ).toMatchObject({ payout: { currency: 'SGD', amount: 50.14 } });
+    backend({
+      'POST /store/credits/withdraw': {
+        body: { ...WITHDRAW_OK.body, currency: 'MYR', payAmount: 50 },
+      },
+    });
+    expect(
+      await startWithdrawal({ amount: 50, accountId: 'acct_1' }),
+    ).not.toHaveProperty('payout');
   });
 });
 
@@ -253,6 +273,42 @@ describe('sellBackPull', () => {
     expect(await sellBackPull('pull_1')).toEqual({
       ok: false,
       error: 'Got an unexpected response. Please try again.',
+    });
+  });
+});
+
+describe('getTransactions — the history totals', () => {
+  const PAGE = {
+    balance: 120,
+    topup_total: 200,
+    spend_total: 145,
+    transactions: [],
+    has_more: false,
+  };
+
+  it('carries the split totals when the backend sends them', async () => {
+    backend({
+      'GET /store/credits': {
+        body: { ...PAGE, pack_spend_total: 45, withdrawn_total: 100 },
+      },
+    });
+    expect(await getTransactions(1)).toMatchObject({
+      ok: true,
+      spendTotal: 145,
+      packSpendTotal: 45,
+      withdrawnTotal: 100,
+    });
+  });
+
+  // Deploy skew: an older backend sends only spend_total. The page must fall
+  // back to its single "Total spent" card, never show a made-up RM 0.00.
+  it('reports the split as unknown (null) when an older backend omits it', async () => {
+    backend({ 'GET /store/credits': { body: PAGE } });
+    expect(await getTransactions(1)).toMatchObject({
+      ok: true,
+      spendTotal: 145,
+      packSpendTotal: null,
+      withdrawnTotal: null,
     });
   });
 });

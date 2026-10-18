@@ -32,6 +32,7 @@ import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { useVaultDot } from '@/components/app-shell/VaultDotProvider';
 import { useSound } from '@/lib/use-sound';
 import { rm, affordable } from '@/lib/format';
+import { sellBackNotice } from '@/lib/buyback-copy';
 import { logger } from '@/lib/logger';
 import { trackPixel } from '@/lib/pixel';
 import { cn } from '@/lib/utils';
@@ -514,7 +515,7 @@ export default function SlotMachineClient({
         !affordable(balance, paidCost)
       ) {
         setNeedsTopUp(true);
-        setError('Not enough credits to spin.');
+        setError('Not enough balance to spin.');
         return;
       }
     }
@@ -954,19 +955,21 @@ export default function SlotMachineClient({
     seq: number;
     tone: 'success' | 'error';
   } | null>(null);
-  const sellRun = useRef({ count: 0, total: 0, seq: 0 });
+  const sellRun = useRef({ count: 0, total: 0, held: 0, seq: 0 });
   const handleSold = useCallback(
-    (newBalance: number, amount: number) => {
+    (newBalance: number, amount: number, held: number) => {
       applyBalance(newBalance);
       const run = sellRun.current;
       run.count += 1;
       run.total += amount;
+      run.held += held;
       run.seq += 1;
+      const notice = sellBackNotice(run.total, run.held);
       setSellToast({
         text:
           run.count === 1
-            ? `Sold — ${rm(amount)} credited to your balance.`
-            : `Sold ${run.count} cards — ${rm(run.total)} credited to your balance.`,
+            ? `Sold — ${notice}`
+            : `Sold ${run.count} cards — ${notice}`,
         seq: run.seq,
         tone: 'success',
       });
@@ -991,7 +994,12 @@ export default function SlotMachineClient({
   // is NOT reset — it only has to keep changing, and reusing a value could
   // collide with the key React is still holding.
   const closeSellToast = useCallback(() => {
-    sellRun.current = { count: 0, total: 0, seq: sellRun.current.seq };
+    sellRun.current = {
+      count: 0,
+      total: 0,
+      held: 0,
+      seq: sellRun.current.seq,
+    };
     setSellToast(null);
   }, []);
 

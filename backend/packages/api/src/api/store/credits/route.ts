@@ -6,6 +6,7 @@ import {
   resolvePacks,
   type CustomerWallet,
 } from '../../../modules/packs/facets';
+import { forPacksCents } from '../../../modules/packs/credit-summary';
 import { parsePaginationParams } from '../../../utils/pagination';
 
 // GET /store/credits — the authenticated customer's site-credit balance
@@ -94,7 +95,13 @@ export async function GET(
   res.json({
     balance: summary.balance,
     topup_total: summary.topupTotal,
+    // Every debit, kept for older storefronts. The history shows the two
+    // below instead (2026-10-15): a withdrawal is not spending.
     spend_total: summary.spendTotal,
+    // Everything spent on pack opens, bonus part included, net of reversals;
+    // and cashouts net of refunds. Delivery fees are in neither.
+    pack_spend_total: summary.packSpendTotal,
+    withdrawn_total: summary.withdrawnTotal,
     transactions: transactions.map((t) => {
       // Payment-gateway reference — the id support and the customer quote to
       // the gateway; same value the admin pages and receipt emails show.
@@ -109,9 +116,27 @@ export async function GET(
         reference,
         gateway: reference ? (gatewayByRef.get(reference) ?? null) : null,
         pull_id: t.pull_id,
-        // The row's spend-only bonus part (MYR, spec 2026-10-07): a grant, a
-        // bonus-funded open, or the bonus share of a sell-back.
+        // The row's spend-only bonus part (MYR, spec 2026-10-07): a grant or
+        // a bonus-funded open (a sell-back's free share is stamped as
+        // external_funded_cents instead — see playthrough below).
         bonus: Number(t.bonus_cents ?? 0) / 100,
+        // Signed move into (+) or out of (−) "still to use on packs" (MYR,
+        // spec 2026-10-15 §5): + a top-up with a basis, + a sell-back's
+        // stamped free share (the bonus-paid share or a welcome card; gift
+        // and reward sales are stamped only before 2026-10-15, ADR 0012),
+        // − the for-packs money a pack open used (its reversal gives it
+        // back); 0 on every other row. Was buyback-only and ≥ 0 until 2026-10-15; extended
+        // in place rather than adding a parallel field. The marks add up to
+        // playthrough.deposited − used.
+        playthrough:
+          forPacksCents({
+            amount: Number(t.amount),
+            reason: t.reason,
+            externalFundedCents:
+              t.external_funded_cents == null
+                ? null
+                : Number(t.external_funded_cents),
+          }) / 100,
         created_at: t.created_at,
       };
     }),
@@ -122,9 +147,9 @@ export async function GET(
       is_frozen: wallet.isFrozen,
       // No top-up ever = withdrawals and deliveries locked (2026-10-11).
       has_topup: wallet.hasTopup,
-      // Playthrough gate (withdrawable.ts): deposits must be fully spent on
-      // pack opens before balance can be withdrawn. withdrawable = 0 while
-      // playthrough.remaining > 0; spending on packs is never restricted.
+      // Playthrough gate (withdrawable.ts, ADR 0013): withdrawable is 0 while
+      // playthrough.remaining > 0, else available − bonus (≥ 0). Spending on
+      // packs is never restricted.
       withdrawable: wallet.withdrawable,
       // Spend-only bonus credit inside balance (spec 2026-10-07) — never
       // withdrawable; the wallet page shows it apart.

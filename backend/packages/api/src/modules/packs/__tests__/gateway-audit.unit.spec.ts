@@ -1,4 +1,8 @@
-import { depositAuditNote, withdrawalAuditNote } from '../gateway-audit';
+import {
+  depositAuditNote,
+  stampNote,
+  withdrawalAuditNote,
+} from '../gateway-audit';
 
 const paid = (amount: number) => ({
   kind: 'detail' as const,
@@ -36,6 +40,22 @@ describe('depositAuditNote', () => {
     expect(
       depositAuditNote({ status: 'settled', amount: 50 }, missing),
     ).toMatch(/NO record/);
+  });
+
+  // 2026-10-14 prod: 418 of 420 findings were this. The customer opened a
+  // top-up and never paid; the gateway never closes the order. Not a
+  // disagreement. If they pay later the gateway says PAID, which the 7-day
+  // re-check reports below.
+  it('an expired top-up the gateway still shows unpaid is no finding', () => {
+    expect(
+      depositAuditNote({ status: 'expired', amount: null }, pending),
+    ).toBeNull();
+  });
+
+  it('a failed top-up the gateway now shows pending is still a finding', () => {
+    expect(
+      depositAuditNote({ status: 'failed', amount: null }, pending),
+    ).toMatch(/pending for a row we marked failed/);
   });
 
   it('a written-off row the gateway says was PAID is the loudest finding', () => {
@@ -77,5 +97,31 @@ describe('withdrawalAuditNote', () => {
     expect(
       withdrawalAuditNote({ status: 'settled', amount: 100 }, missing),
     ).toMatch(/NO record/);
+  });
+});
+
+// Every writer of audit_note goes through stampNote (the audit job, the
+// TGPay-family and A3Pay payout callbacks): an acknowledgement covers the note
+// it was given for, nothing after it.
+describe('stampNote', () => {
+  const acked = { audit_ack_note: 'old note' };
+  it('keeps an acknowledgement while the note is the one acknowledged', () => {
+    expect(stampNote(acked, 'old note')).toEqual({ audit_note: 'old note' });
+  });
+  it('drops it for any other note, agreement included', () => {
+    const cleared = {
+      audit_ack_note: null,
+      audit_ack_by: null,
+      audit_ack_at: null,
+    };
+    expect(stampNote(acked, 'new note')).toEqual({
+      audit_note: 'new note',
+      ...cleared,
+    });
+    expect(stampNote(acked, null)).toEqual({ audit_note: null, ...cleared });
+  });
+  it('writes only the note on a row nobody acknowledged', () => {
+    expect(stampNote({ audit_ack_note: null }, 'n')).toEqual({ audit_note: 'n' });
+    expect(stampNote({}, null)).toEqual({ audit_note: null });
   });
 });

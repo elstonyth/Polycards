@@ -16,7 +16,7 @@ import { INPUT_CLASS } from '@/components/account/ui';
 import { PhoneField } from '@/components/PhoneField';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { cn } from '@/lib/utils';
-import { MY_STATES } from '@/lib/my-states';
+import { stateAfterCountryChange, statesFor } from '@/lib/my-states';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 
 const EMPTY_FORM: AddAddressInput = {
@@ -269,13 +269,18 @@ export function AddressesClient({
           aria-label={label}
           value={form[key] ?? ''}
           onChange={(e) =>
-            setForm((f) => ({
-              ...f,
-              [key]:
-                key === 'countryCode'
-                  ? e.target.value.toUpperCase()
-                  : e.target.value,
-            }))
+            setForm((f) => {
+              if (key !== 'countryCode') {
+                return { ...f, [key]: e.target.value };
+              }
+              const countryCode = e.target.value.toUpperCase();
+              // A state from the other country's list is never valid.
+              return {
+                ...f,
+                countryCode,
+                province: stateAfterCountryChange(countryCode, f.province),
+              };
+            })
           }
           className={INPUT_CLASS}
           {...props}
@@ -397,7 +402,7 @@ export function AddressesClient({
                 <option value="" disabled>
                   Select a state
                 </option>
-                {MY_STATES.map((s) => (
+                {statesFor(form.countryCode).map((s) => (
                   <option key={s} value={s}>
                     {s}
                   </option>
@@ -410,11 +415,11 @@ export function AddressesClient({
             })}
             {field('Country code', 'countryCode', {
               autoComplete: 'country',
-              placeholder: 'e.g. MY',
+              placeholder: 'MY or SG',
               maxLength: 2,
               required: true,
               pattern: '[A-Za-z]{2}',
-              title: 'Two-letter country code, for example MY',
+              title: 'Two-letter country code: MY or SG',
             })}
             <div className="col-span-2">
               <label className="block">

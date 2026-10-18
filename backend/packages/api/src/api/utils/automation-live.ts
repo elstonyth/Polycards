@@ -1,0 +1,377 @@
+import { randomInt, randomUUID } from 'node:crypto';
+import { automationDelayMs } from './automation-config';
+import {
+  createHumanizedState,
+  planHumanized,
+  recordHumanizedCycle,
+} from './automation-humanized';
+import { DEFAULT_LIVE_TIMING } from './automation-live-types';
+import {
+  liveRankReady,
+  nextLiveRankCheck,
+  validateLiveRankTargets,
+} from './automation-live-rank';
+import { markRankDispatched } from './automation-rank';
+import type {
+  LiveConfig,
+  LiveCycle,
+  LiveCycleAmounts,
+  LiveState,
+} from './automation-live-types';
+
+export function createLiveState(): LiveState {
+  return {
+    version: 1,
+    mode: 'live',
+    status: 'idle',
+    config: null,
+    runId: null,
+    packPriceCents: 0,
+    spentCents: 0,
+    nextRunAt: null,
+    pending: null,
+    cycles: [],
+    error: null,
+    schedules: [],
+  };
+}
+
+const timingRandom = () => randomInt(1_000_000) / 1_000_000;
+
+function remainingCustomers(state: LiveState): string[] {
+  const { config } = state;
+  if (!config) return [];
+  return config.customerIds.filter(
+    (id) =>
+      (!config.rankTargets?.length ||
+        config.rankTargets.some((target) => target.customerId === id)) &&
+      !state.rankGoals?.some(
+        (goal) => goal.target.profileId === id && goal.done,
+      ) &&
+      state.cycles.filter((cycle) => cycle.customerId === id).length <
+        config.maxCyclesPerAccount,
+  );
+}
+
+export function claimLiveCycle(
+  state: LiveState,
+  now: number,
+  random: () => number = timingRandom,
+): LiveCycle | null {
+  if (state.pending) {
+    // shortcut: interrupted money operations need operator review; never replay an uncertain debit.
+    if (now - state.pending.startedAt > 300000) {
+      state.status = 'failed';
+      state.error = `Interrupted cycle ${state.pending.id}: review its pull and ledger before another run.`;
+    }
+    return null;
+  }
+  if (
+    state.status !== 'running' ||
+    !state.config ||
+    (state.nextRunAt ?? 0) > now
+  )
+    return null;
+  const remaining = remainingCustomers(state);
+  const ranked = !!state.config.rankTargets?.length;
+  if (!remaining.length) {
+    const done =
+      !ranked ||
+      (!!state.rankGoals?.length && state.rankGoals.every((goal) => goal.done));
+    state.status = done ? 'completed' : 'running';
+    state.nextRunAt = done
+      ? null
+      : Math.max(now + 2000, nextLiveRankCheck(state, now));
+    return null;
+  }
+  const eligible = remaining.filter((id) => liveRankReady(state, id, now));
+  let customerId = eligible[0];
+  if (!customerId) {
+    state.nextRunAt = Math.max(now + 2000, nextLiveRankCheck(state, now));
+    return null;
+  }
+  if (
+    ranked &&
+    state.config.timingMode !== 'humanized' &&
+    (state.nextDrawAt ?? 0) > now
+  ) {
+    state.nextRunAt = Math.min(
+      state.nextDrawAt!,
+      Math.max(now + 2000, nextLiveRankCheck(state, now)),
+    );
+    return null;
+  }
+  if (state.config.timingMode === 'humanized') {
+    state.schedules = remaining.map((id) => {
+      const previous = state.schedules?.find((row) => row.customerId === id);
+      if (previous && previous.nextRunAt > now) return previous;
+      const humanized = previous
+        ? { ...previous.humanized }
+        : createHumanizedState(
+            id,
+            state.config!.humanizedRegion ??
+              DEFAULT_LIVE_TIMING.humanizedRegion,
+          );
+      const plan = planHumanized(humanized, now, random);
+      return {
+        customerId: id,
+        humanized,
+        nextRunAt: now + plan.delayMs,
+        waitReason: plan.reason,
+      };
+    });
+    state.nextRunAt = Math.min(
+      ...state.schedules
+        .filter((row) => eligible.includes(row.customerId))
+        .map((row) => row.nextRunAt),
+    );
+    const ready = state.schedules.find(
+      (row) => row.nextRunAt <= now && eligible.includes(row.customerId),
+    );
+    if (ranked)
+      state.nextRunAt = Math.min(
+        state.nextRunAt,
+        Math.max(now + 2000, nextLiveRankCheck(state, now)),
+      );
+    if (!ready) return null;
+    customerId = ready.customerId;
+  }
+  const goal = state.rankGoals?.find(
+    (row) => row.target.profileId === customerId,
+  );
+  if (ranked && goal) markRankDispatched(goal, now);
+  state.pending = {
+    id: randomUUID(),
+    customerId,
+    startedAt: now,
+    finishedAt: null,
+    error: null,
+  };
+  return state.pending;
+}
+
+export function completeLiveCycle(
+  state: LiveState,
+  cycle: LiveCycle,
+  now: number,
+  random: () => number = timingRandom,
+): void {
+  if (state.pending?.id !== cycle.id)
+    throw new Error('Live cycle ownership changed. Review the ledger.');
+  state.cycles.push({ ...cycle, finishedAt: now });
+  state.spentCents += cycle.costCents ?? 0;
+  state.pending = null;
+  if (
+    cycle.error ||
+    cycle.differenceCents !== 0 ||
+    cycle.bonusDifferenceCents !== 0
+  ) {
+    state.status = 'failed';
+    state.error =
+      cycle.error ??
+      'Balance verification differs from the expected settlement. Review this cycle.';
+  }
+  if (
+    (state.status === 'running' || state.status === 'paused') &&
+    !remainingCustomers(state).length &&
+    !state.config?.rankTargets?.length
+  )
+    state.status = 'completed';
+  if (
+    state.config?.timingMode === 'humanized' &&
+    !cycle.error &&
+    cycle.differenceCents === 0 &&
+    cycle.bonusDifferenceCents === 0
+  ) {
+    const schedule = state.schedules?.find(
+      (row) => row.customerId === cycle.customerId,
+    );
+    if (schedule) {
+      recordHumanizedCycle(schedule.humanized, now, random);
+      const plan = planHumanized(schedule.humanized, now, random);
+      schedule.nextRunAt = now + plan.delayMs;
+      schedule.waitReason = plan.reason;
+    }
+  }
+  state.nextRunAt = null;
+  if (state.status === 'running' && state.config) {
+    if (state.config.timingMode === 'humanized') {
+      const remaining = new Set(remainingCustomers(state));
+      const due =
+        state.schedules
+          ?.filter((row) => remaining.has(row.customerId))
+          .map((row) => row.nextRunAt) ?? [];
+      state.nextRunAt = Math.max(
+        now + 2000,
+        due.length ? Math.min(...due) : now + 2000,
+      );
+    } else {
+      state.nextRunAt =
+        now +
+        automationDelayMs(
+          {
+            timingMode:
+              state.config.timingMode ?? DEFAULT_LIVE_TIMING.timingMode,
+            fixedIntervalSeconds: state.config.intervalSeconds,
+            randomMinSeconds:
+              state.config.randomMinSeconds ??
+              DEFAULT_LIVE_TIMING.randomMinSeconds,
+            randomMaxSeconds:
+              state.config.randomMaxSeconds ??
+              DEFAULT_LIVE_TIMING.randomMaxSeconds,
+          },
+          random,
+        );
+    }
+    if (state.config.rankTargets?.length) {
+      if (state.config.timingMode !== 'humanized')
+        state.nextDrawAt = state.nextRunAt;
+      const goal = state.rankGoals?.find(
+        (row) => row.target.profileId === cycle.customerId,
+      );
+      if (goal) goal.nextCheckAt = now + 2000;
+      state.nextRunAt = Math.min(
+        state.nextRunAt,
+        Math.max(now + 2000, nextLiveRankCheck(state, now)),
+      );
+    }
+  }
+}
+
+export function validateLiveConfig(
+  value: unknown,
+  allowedIds: string[],
+): LiveConfig {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('Provide live run settings.');
+  const input: Record<string, unknown> = { ...DEFAULT_LIVE_TIMING, ...value };
+  if (
+    Object.keys(input).some(
+      (key) =>
+        ![
+          'packSlug',
+          'customerIds',
+          'intervalSeconds',
+          'maxCyclesPerAccount',
+          'maxSpendMyr', // Accepted from older clients, discarded below.
+          'timingMode',
+          'randomMinSeconds',
+          'randomMaxSeconds',
+          'humanizedRegion',
+          'rankTargets',
+        ].includes(key),
+    ) ||
+    typeof input.packSlug !== 'string' ||
+    !/^[a-zA-Z0-9_-]{1,160}$/.test(input.packSlug) ||
+    !Array.isArray(input.customerIds) ||
+    input.customerIds.length < 1 ||
+    input.customerIds.length > 80 ||
+    input.customerIds.some(
+      (id) =>
+        typeof id !== 'string' ||
+        !id.startsWith('cus_') ||
+        !allowedIds.includes(id),
+    ) ||
+    new Set(input.customerIds).size !== input.customerIds.length ||
+    !Number.isInteger(input.intervalSeconds) ||
+    Number(input.intervalSeconds) < 2 ||
+    Number(input.intervalSeconds) > 86400 ||
+    !Number.isInteger(input.maxCyclesPerAccount) ||
+    Number(input.maxCyclesPerAccount) < 1 ||
+    Number(input.maxCyclesPerAccount) > 10 ||
+    typeof input.timingMode !== 'string' ||
+    !['fixed', 'random', 'humanized'].includes(input.timingMode) ||
+    typeof input.humanizedRegion !== 'string' ||
+    !['mysg', 'global'].includes(input.humanizedRegion) ||
+    ![input.randomMinSeconds, input.randomMaxSeconds].every(
+      (number) =>
+        Number.isInteger(number) &&
+        Number(number) >= 2 &&
+        Number(number) <= 86400,
+    ) ||
+    Number(input.randomMinSeconds) > Number(input.randomMaxSeconds)
+  )
+    throw new Error(
+      'Choose a paid pack, 1–80 monitored customers, Fixed/Random/Humanized timing, 2–86400 second intervals with minimum no greater than maximum, a supported region and 1–10 cycles per account.',
+    );
+  return {
+    packSlug: input.packSlug,
+    customerIds: [...input.customerIds],
+    intervalSeconds: input.intervalSeconds,
+    maxCyclesPerAccount: input.maxCyclesPerAccount,
+    timingMode: input.timingMode,
+    randomMinSeconds: input.randomMinSeconds,
+    randomMaxSeconds: input.randomMaxSeconds,
+    humanizedRegion: input.humanizedRegion,
+    ...(input.rankTargets === undefined
+      ? {}
+      : {
+          rankTargets: validateLiveRankTargets(
+            input.rankTargets,
+            input.customerIds,
+          ),
+        }),
+  } as unknown as LiveConfig;
+}
+
+interface LiveCycleServices {
+  balance(): Promise<{ balance: number; bonusBalance: number }>;
+  open(
+    customerId: string,
+    openId: string,
+    maxPrice: number,
+  ): Promise<{
+    pullId: string;
+    cardName: string;
+    price: number;
+    bonusUsed: number;
+  }>;
+  checkpoint(result: LiveCycleAmounts): Promise<void>;
+  sell(customerId: string, pullId: string): Promise<{ amount: number }>;
+}
+
+export async function executeLiveCycle(
+  customerId: string,
+  openId: string,
+  maxPrice: number,
+  services: LiveCycleServices,
+): Promise<LiveCycleAmounts> {
+  const before = await services.balance();
+  const opened = await services.open(customerId, openId, maxPrice);
+  const result: LiveCycleAmounts = {
+    pullId: opened.pullId,
+    cardName: opened.cardName,
+    costCents: Math.round(opened.price * 100),
+    startingCents: Math.round(before.balance * 100),
+    startingBonusCents: Math.round(before.bonusBalance * 100),
+  };
+  await services.checkpoint(result);
+  const sold = await services.sell(customerId, opened.pullId);
+  const after = await services.balance();
+  result.saleCents = Math.round(sold.amount * 100);
+  result.endingCents = Math.round(after.balance * 100);
+  result.expectedCents =
+    result.startingCents - result.costCents + result.saleCents;
+  result.differenceCents = result.endingCents - result.expectedCents;
+  result.endingBonusCents = Math.round(after.bonusBalance * 100);
+  result.expectedBonusCents =
+    result.startingBonusCents - Math.round(opened.bonusUsed * 100);
+  result.bonusDifferenceCents =
+    result.endingBonusCents - result.expectedBonusCents;
+  if (
+    ![
+      result.costCents,
+      result.saleCents,
+      result.endingCents,
+      result.expectedCents,
+      result.differenceCents,
+      result.endingBonusCents,
+      result.expectedBonusCents,
+      result.bonusDifferenceCents,
+    ].every(Number.isSafeInteger)
+  )
+    throw new Error(
+      'Invalid live ledger amounts. Review this cycle before starting another run.',
+    );
+  return result;
+}

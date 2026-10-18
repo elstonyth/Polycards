@@ -2,6 +2,7 @@ import path from 'path';
 import { moduleIntegrationTestRunner } from '@medusajs/test-utils';
 import { PACKS_MODULE } from '../index';
 import type PacksModuleService from '../service';
+import { sellbackHoldBp } from '../bonus-credit';
 import TaskDefinition from '../models/task-definition';
 import TaskClaim from '../models/task-claim';
 import DailyCheckin from '../models/daily-checkin';
@@ -202,8 +203,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
       });
       expect(rewardPulls).toHaveLength(1);
       expect(rewardPulls[0].status).toBe('vaulted');
-      // A prize is promo value: its whole sell-back is played through once.
+      // A prize is promo value (bonus_bp full, counts toward nothing), but a
+      // prize card's sale is withdrawable: nothing held (ADR 0012).
       expect(rewardPulls[0].bonus_bp).toBe(10000);
+      expect(sellbackHoldBp(rewardPulls[0])).toBe(0);
       // The minted pull is what the route's post-commit take is keyed off.
       expect(claim.claimed && claim.ref).toBe(rewardPulls[0].id);
       // Achievements are once EVER — a re-claim is refused.
@@ -327,8 +330,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(pulls).toHaveLength(1);
         expect(pulls[0].pack_id).toBe('bronze');
         expect(pulls[0].card_id).toBe('rolled-card');
-        // A prize is promo value: its whole sell-back is played through once.
+        // A free rip is a task reward: promo value (bonus_bp full, counts
+        // toward nothing), but its sale is withdrawable (ADR 0012).
         expect(pulls[0].bonus_bp).toBe(10000);
+        expect(sellbackHoldBp(pulls[0])).toBe(0);
         // The taken unit is earmarked on the pull, so selling the card back
         // restores it (buyback-pull.ts restores earmarked pulls only).
         expect(takes).toBe(1);

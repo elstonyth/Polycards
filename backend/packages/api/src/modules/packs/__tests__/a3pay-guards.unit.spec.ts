@@ -10,6 +10,8 @@ import {
 } from '../gateway-withdrawal';
 import { resetOpsAlerts } from '../ops-alert';
 import { savedBankAccountId } from '../saved-accounts';
+import { DEFAULT_WITHDRAWAL_CONTROLS } from '../withdrawal-controls';
+import { aesDecrypt } from '../a3pay';
 
 // The money guards PR #755's review added on the A3Pay (SGD) rail, each of
 // which must refuse BEFORE any row or debit (or, on a held approval, before
@@ -111,6 +113,15 @@ beforeEach(() => {
     if (String(url).endsWith('/api/Payout/SubmitPayout')) {
       return { status: 400, text: async () => submitReply };
     }
+    // Asked about after a refusal (refusalConfirmed): a refused submit leaves
+    // nothing, so A3Pay answers its live "Not found" (a3pay-client.ts).
+    if (String(url).endsWith('/api/Payout/GetPayoutDetail')) {
+      return {
+        status: 400,
+        text: async () =>
+          '{"isSuccess":false,"errorCode":null,"errorMessage":"Not found"}',
+      };
+    }
     // Anything else (an ops alert) is beyond what these cases own.
     return {
       status: 500,
@@ -173,12 +184,12 @@ describe('a regional top-up A3Pay nudges by a cent', () => {
       updateGatewayDeposits: jest.fn().mockResolvedValue(undefined),
     };
   }
-  const pay = (packs: ReturnType<typeof depositPacks>) =>
+  const pay = (packs: ReturnType<typeof depositPacks>, amount = 50) =>
     startDeposit(
       scopeFor(packs),
       {
         customerId: 'cus_1',
-        amount: 50,
+        amount,
         ipAddress: '1.2.3.4',
         gateway: 'a3pay',
         paymentMethodCode: 'BQR',
@@ -226,6 +237,33 @@ describe('a regional top-up A3Pay nudges by a cent', () => {
     expect(result.amount).toBe(155.03);
   });
 
+  // Operator decision 2026-10-14: S$ top-ups go up to A3Pay's own S$5,000,
+  // which credits past the RM 10,000 that caps RM top-ups.
+  it('takes S$5,000 (RM 15,500 at 3.10) and re-locks its nudge', async () => {
+    payinActual = 5000.01;
+    const packs = depositPacks();
+    const result = await pay(packs, 5000);
+    expect(packs.createDepositCapped.mock.calls[0][0].data).toMatchObject({
+      amount_requested: 15500,
+      gateway_amount: 5000,
+    });
+    expect(packs.updateGatewayDeposits).toHaveBeenCalledWith({
+      id: 'gpd_1',
+      gateway_transaction_id: 'D2026101200009999',
+      gateway_amount: 5000.01,
+      amount_requested: 15500.03,
+    });
+    expect(result.amount).toBe(15500.03);
+  });
+
+  it("refuses more than A3Pay's own S$5,000 before any row", async () => {
+    const packs = depositPacks();
+    await expect(pay(packs, 5000.01)).rejects.toThrow(
+      /between SGD 30.00 and SGD 5,000.00/,
+    );
+    expect(packs.createDepositCapped).not.toHaveBeenCalled();
+  });
+
   it('an un-nudged order keeps its lock', async () => {
     payinActual = 50;
     const packs = depositPacks();
@@ -243,6 +281,7 @@ describe('a regional payout', () => {
     return {
       listFxRates: jest.fn().mockResolvedValue([FX_ROW]),
       savedBankAccountsFor: jest.fn().mockResolvedValue([SG_ACCOUNT]),
+      otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
       listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
       createGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
       updateGatewayWithdrawals: jest.fn(),
@@ -257,8 +296,10 @@ describe('a regional payout', () => {
         hasTopup: true,
         nextUnlock: null,
         withdrawable: 1000,
+        bonus: 0,
         playthrough: { deposited: 0, used: 0, remaining: 0 },
       }),
+      withdrawalControls: jest.fn().mockResolvedValue(DEFAULT_WITHDRAWAL_CONTROLS),
     };
   }
   const start = (
@@ -278,6 +319,116 @@ describe('a regional payout', () => {
       'https://us/notify-wd',
       'https://us/payout-verify',
     );
+
+  it('refuses a Malaysian-length Maybank number saved under Singapore before any debit or gateway call', async () => {
+    const wrongCountry = {
+      ...SG_ACCOUNT,
+      id: savedBankAccountId('MBBESGSG', '123456789012'),
+      bankCode: 'MBBESGSG',
+      bankName: 'Maybank (SG)',
+      accountNumber: '123456789012',
+    };
+    const packs = withdrawHarness();
+    packs.savedBankAccountsFor.mockResolvedValue([wrongCountry]);
+    await expect(start(packs, { accountId: wrongCountry.id })).rejects.toThrow(
+      /Maybank \(SG\) account numbers are 11 digits/,
+    );
+    expect(packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+    expect(packs.withdrawForCashout).not.toHaveBeenCalled();
+    expect(fetchCalls).toEqual([]);
+  });
+
+  it.each<[string, string, RegExp]>([
+    ['ALLIANCESG', '123456789012', /unavailable/i],
+    ['PAYNOWSG', '0123456789', /mobile number linked to PayNow/i],
+  ])(
+    'refuses saved %s details before debit or gateway access',
+    async (bankCode, accountNumber, message) => {
+      const saved = {
+        ...SG_ACCOUNT,
+        id: savedBankAccountId(bankCode, accountNumber),
+        bankCode,
+        accountNumber,
+      };
+      const packs = withdrawHarness();
+      packs.savedBankAccountsFor.mockResolvedValue([saved]);
+      await expect(start(packs, { accountId: saved.id })).rejects.toThrow(
+        message,
+      );
+      expect(packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+      expect(packs.withdrawForCashout).not.toHaveBeenCalled();
+      expect(fetchCalls).toEqual([]);
+    },
+  );
+
+  // The S$ the customer is shown ("S$50.14 to your bank") must be the S$ we
+  // ask A3Pay to pay and the S$ locked on the row — one figure, end to end.
+  it('shows, submits and stores the same S$ amount', async () => {
+    const packs = withdrawHarness();
+    packs.withdrawForCashout.mockResolvedValue({
+      id: 'ct_1',
+      balance: 0,
+      amount: -330,
+      replayed: false,
+      reference: null,
+      destination: SG_ACCOUNT,
+    });
+    packs.updateGatewayWithdrawals.mockResolvedValue(undefined);
+    let sent: Record<string, unknown> | null = null;
+    const base = global.fetch;
+    global.fetch = jest.fn(async (url: string, init?: { body?: string }) => {
+      if (String(url).endsWith('/api/Payout/SubmitPayout')) {
+        const envelope = JSON.parse(String(init?.body)) as { Data: string };
+        sent = JSON.parse(aesDecrypt(envelope.Data, 'k'));
+        return {
+          status: 200,
+          text: async () =>
+            '{"isSuccess":true,"data":{"paymentOrderId":"W2026101400000099"}}',
+        };
+      }
+      return (base as unknown as (u: string) => Promise<unknown>)(url);
+    }) as unknown as typeof fetch;
+
+    const result = await start(packs, { amount: 160 });
+    const shown = (result as { payAmount?: number }).payAmount;
+    expect(shown).toBeGreaterThan(0);
+    // What A3Pay is told to pay, to the cent.
+    expect(sent).not.toBeNull();
+    expect(
+      Number((sent as unknown as { PayoutAmount: string }).PayoutAmount),
+    ).toBe(shown);
+    // What the row locks (and a held approval would submit).
+    expect(packs.createGatewayWithdrawals).toHaveBeenCalledWith([
+      expect.objectContaining({ gateway_amount: shown, currency: 'SGD' }),
+    ]);
+  });
+
+  // A retried tap (same Idempotency-Key) replays the original: it must name
+  // the S$ already locked and sent, never a re-quote at today's rate.
+  it("a replay echoes the row's locked S$, not today's", async () => {
+    const packs = withdrawHarness();
+    packs.listGatewayWithdrawals.mockResolvedValue([
+      {
+        merchant_transaction_id: 'PC-1',
+        gateway_transaction_id: 'W2026101400000025',
+        amount: 160,
+        status: 'pending',
+        currency: 'SGD',
+        gateway_amount: 50.14,
+      },
+    ]);
+    packs.creditBalance.mockResolvedValue(33387.4);
+    const result = await start(packs, {
+      amount: 160,
+      idempotencyKey: 'tap-1',
+    });
+    expect(result).toMatchObject({
+      replayed: true,
+      currency: 'SGD',
+      payAmount: 50.14,
+    });
+    expect(packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+  });
 
   it('is refused before any row or debit when the quoted rate has moved', async () => {
     const packs = withdrawHarness();
@@ -317,6 +468,7 @@ describe('the payout-float breaker cannot be tripped by one customer', () => {
     return {
       listFxRates: jest.fn().mockResolvedValue([FX_ROW]),
       savedBankAccountsFor: jest.fn().mockResolvedValue([SG_ACCOUNT]),
+      otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
       listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
       createGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
       updateGatewayWithdrawals: jest.fn().mockResolvedValue(undefined),
@@ -344,8 +496,10 @@ describe('the payout-float breaker cannot be tripped by one customer', () => {
         hasTopup: true,
         nextUnlock: null,
         withdrawable: 50_000,
+        bonus: 0,
         playthrough: { deposited: 0, used: 0, remaining: 0 },
       }),
+      withdrawalControls: jest.fn().mockResolvedValue(DEFAULT_WITHDRAWAL_CONTROLS),
     };
   }
   const go = (packs: ReturnType<typeof packsFor>, amount: number) =>
@@ -371,6 +525,19 @@ describe('the payout-float breaker cannot be tripped by one customer', () => {
     const small = packsFor();
     await go(small, 198).catch(() => undefined); // S$60
     expect(small.createGatewayWithdrawals).toHaveBeenCalled();
+  });
+
+  it("counts A3Pay's own payout fee: S$100 needs S$101.50 in the float", async () => {
+    // The wallet pays the amount PLUS A3Pay's 1.5%, so S$100.50 cannot.
+    balanceSgd = 100.5;
+    const short = packsFor();
+    await expect(go(short, 330)).rejects.toThrow(/on our side/i);
+    expect(short.createGatewayWithdrawals).not.toHaveBeenCalled();
+
+    balanceSgd = 101.5;
+    const enough = packsFor();
+    await go(enough, 330).catch(() => undefined);
+    expect(enough.createGatewayWithdrawals).toHaveBeenCalled();
   });
 
   it('a refusal merely MENTIONING funds does not trip it while the balance read says the float is fine', async () => {
@@ -479,6 +646,33 @@ describe('approving a held A3Pay payout', () => {
       adminId: 'usr_admin_1',
       payerIp: '10.0.0.7',
     });
+
+  it.each<[string, string, RegExp]>([
+    [
+      'MBBESGSG',
+      '123456789012',
+      /Maybank \(SG\) account numbers are 11 digits/,
+    ],
+    ['ALLIANCESG', '123456789012', /unavailable/i],
+    ['PAYNOWSG', '0123456789', /mobile number linked to PayNow/i],
+  ])(
+    'keeps invalid %s details held before claiming or contacting the gateway',
+    async (bankCode, accountNumber, message) => {
+      const packs = approveHarness();
+      packs.listGatewayWithdrawals.mockResolvedValue([
+        {
+          ...heldRow,
+          bank_code: bankCode,
+          account_number: accountNumber,
+        },
+      ]);
+      await expect(approve(packs)).rejects.toThrow(message);
+      expect(packs.claimWithdrawalAgainstDebit).not.toHaveBeenCalled();
+      expect(packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+      expect(packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+      expect(fetchCalls).toEqual([]);
+    },
+  );
 
   it('is not shut by the ACTIVE gateway having payouts off, and stays held (no claim) while our S$ float is short', async () => {
     balanceSgd = 250; // S$1,000 locked on the row

@@ -8,6 +8,8 @@ import {
   INSURANCE_RATE,
   isEastMalaysiaPostcode,
   PROTECTION_INCLUDED_MYR,
+  SINGAPORE_PLACE_RE,
+  SINGAPORE_SHIPPING_MYR,
   WEST_SHIPPING_MYR,
 } from '@/lib/delivery-fee';
 
@@ -59,6 +61,7 @@ describe('delivery fee parity: storefront mirror vs backend truth', () => {
   it.each([
     ['WEST_SHIPPING_MYR', WEST_SHIPPING_MYR],
     ['EAST_SHIPPING_MYR', EAST_SHIPPING_MYR],
+    ['SINGAPORE_SHIPPING_MYR', SINGAPORE_SHIPPING_MYR],
     ['PROTECTION_INCLUDED_MYR', PROTECTION_INCLUDED_MYR],
     ['INSURANCE_RATE', INSURANCE_RATE],
   ])('storefront %s matches the backend literal', (name, mirrored) => {
@@ -71,6 +74,12 @@ describe('delivery fee parity: storefront mirror vs backend truth', () => {
     // every comparison below pass vacuously.
     expect(backend.length).toBeGreaterThan(20);
     expect(EAST_PLACE_RE.source).toBe(backend);
+  });
+
+  it('SINGAPORE_PLACE_RE is character-identical on both sides', () => {
+    const m = backendSrc().match(/const SINGAPORE_PLACE_RE\s*=\s*\/(.+)\/i;/);
+    if (!m) throw renamed('SINGAPORE_PLACE_RE');
+    expect(SINGAPORE_PLACE_RE.source).toBe(m[1]);
   });
 
   it('the East Malaysia postcode band matches the backend', () => {

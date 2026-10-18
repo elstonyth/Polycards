@@ -16,6 +16,9 @@ export type RegionalRail = {
   withdrawalsEnabled: boolean;
   deposit: { min: number | null; max: number | null };
   withdrawal: { min: number | null; max: number | null };
+  /** The RM a payout through this rail may take today (its RM band narrowed
+   *  to the S$ band at today's rate); absent from an older backend. */
+  withdrawalRm?: { minRm: number; maxRm: number };
   rate: { deposit: number; payout: number } | null;
 };
 
@@ -40,6 +43,8 @@ export type PaymentLimits = {
   withdrawalsEnabled: boolean;
   /** ISO instant a timed withdrawal pause ends; absent when there is none. */
   withdrawalsPausedUntil?: string | null;
+  /** Closed by the admin or a timed pause: Withdraw answers with a popup. */
+  withdrawalsUnavailable?: boolean;
 };
 
 /**

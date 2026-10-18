@@ -11,7 +11,6 @@ import {
   toast,
   usePrompt,
 } from '@medusajs/ui';
-import { Users } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useApproveReferralSettlement,
@@ -40,10 +39,10 @@ import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 // run list ("TUES CHECK" happens here: review, then Approve), and the
 // selected run's line detail with per-line void.
 export const config: RouteConfig = {
-  label: 'Referrals',
-  icon: Users,
-  // After Settlement (34) — the money-reporting cluster's tail.
-  rank: 35,
+  label: 'pcNav.referrals',
+  translationNs: 'translation',
+  rank: 1,
+  nested: '/players',
 };
 
 const fromCents = (cents: number): string => rm(cents / 100);

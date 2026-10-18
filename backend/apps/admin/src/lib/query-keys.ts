@@ -2,9 +2,11 @@
 // invalidation can target the odds without touching the pack list.
 export const qk = {
   packs: ['admin', 'packs'] as const,
+  losslessSchedules: ['admin', 'lossless-schedules'] as const,
   pack: (slug: string) => ['admin', 'pack', slug] as const,
   packOdds: (slug: string) => ['admin', 'pack', slug, 'odds'] as const,
   cards: ['admin', 'cards'] as const,
+  pricingHealth: ['admin', 'pricing-health'] as const,
   // The customer segment always renders (defaulting to 'all', same rule as the
   // source segment): appended-only, the site-wide key would be a strict PREFIX
   // of the player-scoped one and an exact-key invalidation of one would nuke
@@ -26,19 +28,42 @@ export const qk = {
   // row across views (out of 'held', into 'pending' or 'failed'), unlike a
   // plain read that only ever touches the one (page, status, sort) it fetched.
   gatewayWithdrawalsKey: ['admin', 'gateway-withdrawals'] as const,
-  economy: ['admin', 'economy'] as const,
-  // (range, from, to) always render — custom dates are '' for the presets.
-  stats: (range: string, from: string, to: string) =>
-    ['admin', 'stats', range, from, to] as const,
+  // (range, from, to, scope) always render — custom dates are '' for the
+  // presets, scope 'all' unless the real-customer switch is on.
+  stats: (range: string, from: string, to: string, scope = 'all') =>
+    ['admin', 'stats', range, from, to, scope] as const,
+  // Under the admin/stats prefix on purpose: the Dashboard's live refresh
+  // invalidates that prefix every 30s.
+  statsOnline: (scope: string) => ['admin', 'stats', 'online', scope] as const,
+  statsLeaders: (range: string, scope: string) =>
+    ['admin', 'stats', 'leaders', range, scope] as const,
   // (granularity, periods) always render — same always-rendered-segment rule
   // as qk.pulls: week and month views cache independently.
-  settlement: (granularity: string, periods: number, currency: string) =>
-    ['admin', 'gateway-settlement', granularity, periods, currency] as const,
+  settlement: (
+    granularity: string,
+    periods: number,
+    currency: string,
+    scope = 'all',
+  ) =>
+    [
+      'admin',
+      'gateway-settlement',
+      granularity,
+      periods,
+      currency,
+      scope,
+    ] as const,
+  // The Profit report, every segment always rendered; one prefix for all of
+  // them (the Dashboard's live refresh invalidates by it).
+  profitReportKey: ['admin', 'profit-report'] as const,
+  profitReport: (range: string, from: string, to: string, scope: string) =>
+    ['admin', 'profit-report', range, from, to, scope] as const,
   gatewayBalance: (currency: string) =>
     ['admin', 'gateway-balance', currency] as const,
   gatewayAudit: (currency: string) =>
     ['admin', 'gateway-audit', currency] as const,
   paymentGateway: ['admin', 'payment-gateway'] as const,
+  withdrawalControls: ['admin', 'withdrawal-controls'] as const,
   // Referral rebuild (spec 2026-08-24).
   referralSettings: ['admin', 'referral-settings'] as const,
   taskDefinitions: ['admin', 'task-definitions'] as const,
@@ -54,16 +79,21 @@ export const qk = {
     ['admin', 'customer', id, 'pack-gifts'] as const,
   customerAudit: (id: string, page: number) =>
     ['admin', 'customer', id, 'audit', page] as const,
-  customerTransactions: (id: string, page: number) =>
-    ['admin', 'customer', id, 'transactions', page] as const,
+  // The filter segment always renders, the customerPulls rule below.
+  customerTransactions: (id: string, page: number, filter = 'all') =>
+    ['admin', 'customer', id, 'transactions', page, filter] as const,
   // The status segment always renders (defaulting to 'all', same shape as
   // qk.pulls' source segment) rather than being appended only when filtered:
   // an appended segment would make the unfiltered key a strict PREFIX of the
   // filtered one, so an exact-key invalidation of the support page's full
   // history would also nuke the Vault tab's vaulted-only cache. Disjoint
   // siblings can't do that.
-  customerPulls: (id: string, page: number, status?: string) =>
-    ['admin', 'customer', id, 'pulls', page, status ?? 'all'] as const,
+  customerPulls: (
+    id: string,
+    page: number,
+    status?: string,
+    sort: 'newest' | 'value' = 'newest',
+  ) => ['admin', 'customer', id, 'pulls', page, status ?? 'all', sort] as const,
   // 4-segment prefix — invalidates ALL pages of a customer's audit in one call
   customerAuditKey: (id: string) => ['admin', 'customer', id, 'audit'] as const,
   // 4-segment prefix — invalidates ALL pages of a customer's transaction ledger in one call
@@ -91,6 +121,15 @@ export const qk = {
   // 2-segment prefix — invalidates ALL delivery-order pages/filters in one call
   deliveryOrdersKey: ['admin', 'delivery-orders'] as const,
   deliveryOrder: (id: string) => ['admin', 'delivery-order', id] as const,
+  // Dashboard (spec §7): a count-only read per status, and the newest few
+  // payments. Under the list prefixes so every invalidation of the full lists
+  // (order updates, withdrawal approve/deny) refreshes these too.
+  deliveryOrderCount: (status: string) =>
+    ['admin', 'delivery-orders', 'count', status] as const,
+  recentGatewayDeposits: (limit: number) =>
+    ['admin', 'gateway-deposits', 'recent', limit] as const,
+  recentGatewayWithdrawals: (limit: number) =>
+    ['admin', 'gateway-withdrawals', 'recent', limit] as const,
   fxRate: ['admin', 'pricing', 'fx'] as const,
   fxHistory: ['admin', 'pricing', 'fx', 'history'] as const,
   voucherLadder: ['admin', 'daily-rewards', 'vouchers'] as const,
@@ -106,8 +145,15 @@ export const qk = {
   tierSettings: ['admin', 'tier-settings'] as const,
 
   // ── Epic 2 (Players) ───────────────────────────────────────────────────────
-  players: (page: number, q?: string, sort?: string) =>
-    ['admin', 'players', page, q ?? '', sort ?? 'created_at:desc'] as const,
+  players: (page: number, q?: string, sort?: string, group?: string) =>
+    [
+      'admin',
+      'players',
+      page,
+      q ?? '',
+      sort ?? 'created_at:desc',
+      group ?? '',
+    ] as const,
   // 2-segment prefix — invalidates ALL pages/searches of the players list
   playersKey: ['admin', 'players'] as const,
   // The core Medusa customer record behind the Profile tab. Named rather than
@@ -119,6 +165,7 @@ export const qk = {
     ['admin', 'customer', id, 'payout-details'] as const,
   spendReport: (id: string) =>
     ['admin', 'customer', id, 'spend-report'] as const,
+  customerMoney: (id: string) => ['admin', 'customer', id, 'money'] as const,
   // ── Epic 3 (Odds) ──
   customerGroups: ['admin', 'customer-groups'] as const,
   // SIBLING namespace, not a child of customerGroups: the member count comes

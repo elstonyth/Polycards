@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Button,
@@ -22,9 +22,10 @@ import {
   usePacks,
   useRevokePackGift,
 } from '../../../lib/queries';
-import { httpStatus, type PackGift } from '../../../lib/admin-rest';
+import { type PackGift } from '../../../lib/admin-rest';
 import { orderDateTime, rm } from '../../../lib/format';
 import { LoadingSkeleton } from '../../../components/LoadingSkeleton';
+import { attemptKey, settleAttempt } from './grant-attempts';
 
 // Gift packs + Bonus credit (spec 2026-10-07 §2). Both follow the page's own
 // pattern: plain useState fields, one Prompt to confirm, the hook toasts errors
@@ -51,25 +52,6 @@ type Confirm =
   | { kind: 'bonus' }
   | { kind: 'revoke'; gift: PackGift };
 
-// One idempotency key per ATTEMPT, held for the exact values it was sent with
-// (`sig`). A re-press after a lost response (no HTTP status) or a 5xx replays
-// the same key, so a grant that committed is not granted twice. Any change to
-// the values, a success, or a 4xx refusal (nothing committed) starts fresh.
-// Same contract as group-credit-edit.ts's runGroupCreditAdjustment.
-type Attempt = { key: string; sig: string };
-
-function attemptKey(ref: { current: Attempt | null }, sig: string): string {
-  if (ref.current?.sig !== sig) {
-    ref.current = { key: crypto.randomUUID(), sig };
-  }
-  return ref.current.key;
-}
-
-function settleAttempt(ref: { current: Attempt | null }, err?: unknown) {
-  const status = err === undefined ? 200 : httpStatus(err);
-  if (status !== undefined && status < 500) ref.current = null;
-}
-
 export const GiftAndBonusPanels = ({ customerId }: { customerId: string }) => {
   const { t } = useTranslation();
   // Same key as the page header's — a cache read, not a second request.
@@ -89,8 +71,9 @@ export const GiftAndBonusPanels = ({ customerId }: { customerId: string }) => {
   const [bonusAmount, setBonusAmount] = useState('');
   const [bonusNote, setBonusNote] = useState('');
   const [confirm, setConfirm] = useState<Confirm | null>(null);
-  const giftAttempt = useRef<Attempt | null>(null);
-  const bonusAttempt = useRef<Attempt | null>(null);
+  // Idempotency slots, kept outside the panel: see grant-attempts.ts.
+  const giftAttempt = `gift:${customerId}`;
+  const bonusAttempt = `bonus:${customerId}`;
 
   const email = view?.customer.email ?? customerId;
 

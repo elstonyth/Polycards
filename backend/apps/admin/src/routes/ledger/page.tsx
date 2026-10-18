@@ -6,70 +6,93 @@ import {
   Container,
   Heading,
   Input,
+  Popover,
+  Select,
   Table,
   Text,
 } from '@medusajs/ui';
-import { ChevronDownMini, ChevronRightMini, Receipt } from '@medusajs/icons';
+import { Calendar } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import { useLedger } from '../../lib/queries';
 import type { LedgerType } from '../../lib/admin-rest';
-import { orderDateTime, rm } from '../../lib/format';
+import { rm } from '../../lib/format';
 import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { groupByDay } from './day-groups';
 
-// rank 31 lands between Economy (30) and Weekly Challenge (33), both top-level.
 export const config: RouteConfig = {
-  label: 'Transactions',
-  icon: Receipt,
-  rank: 31,
+  label: 'pcNav.transactions',
+  translationNs: 'translation',
+  rank: 2,
+  nested: '/payments',
 };
 
-// undefined is the "All" tab. WP (challenge settlement) is written by
-// settleChallengeWinner (plan 060); RF (the weekly referral commission payout)
-// by payWeeklySettlement. Every type in this list now has a writer, so no tab
-// is structurally empty.
-const TYPES: (LedgerType | undefined)[] = [
-  undefined,
-  'TP',
-  'SP',
-  'SE',
-  'OD',
-  'AD',
-  'WP',
-  'WD',
-  'RF',
-];
+// WP (challenge settlement) is written by settleChallengeWinner (plan 060); RF
+// (the weekly referral commission payout) by payWeeklySettlement. Every type
+// here has a writer, so no option is structurally empty.
+const TYPES: LedgerType[] = ['TP', 'SP', 'SE', 'OD', 'AD', 'WP', 'WD', 'RF'];
 
-// Header cells above; the payload expander spans all of them.
-const COLUMN_COUNT = 6;
+// One colour per kind of movement, so a long day scans by type at a glance:
+// money in green, spending blue, sells and prizes purple, cash out orange.
+const TYPE_COLOR: Record<
+  LedgerType,
+  'green' | 'blue' | 'purple' | 'grey' | 'orange'
+> = {
+  TP: 'green',
+  SP: 'blue',
+  SE: 'purple',
+  OD: 'grey',
+  AD: 'orange',
+  WP: 'purple',
+  WD: 'orange',
+  RF: 'green',
+};
+
+// Type, Player, Time, Wallet, Vault; day rows and the payload span them all.
+const COLUMN_COUNT = 5;
 
 // EXACTLY the backend's sort allow-list (api/admin/ledger/route.ts). Player
-// lives in another module and Affect folds two nullable deltas into one cell,
-// so neither is server-sortable; those headers stay plain.
+// lives in another module, and the two amounts are nullable deltas, so none of
+// those is server-sortable; those headers stay plain.
 type SortKey = 'occurred_at' | 'display_id' | 'type';
 
-// 'TP' -> 'ledger.typeTp'; the All tab -> 'ledger.typeAll'. Shared by the
-// filter tabs AND the Type column, so one code can never carry two names.
+// 'TP' -> 'ledger.typeTp'; all -> 'ledger.typeAll'. Shared by the filter and
+// the Type chip, so one code can never carry two names.
 const typeLabelKey = (tp: LedgerType | undefined): string =>
   `ledger.type${tp ? tp[0] + tp[1].toLowerCase() : 'All'}`;
 
-// One-line summary per row, matching spec §5.4's example ("wallet -RM5,000,
-// vault +RM4,000"). The sign is pulled OUT in front of the currency so both
-// directions read the same way — `rm(-5000)` alone would render "RM -5,000.00"
-// against a "+RM 5,000.00" sibling. A side that is null or zero is dropped, and
-// a row that moves neither shows an em-dash rather than an empty cell.
-function affectSummary(wallet: number | null, vault: number | null): string {
-  const parts: string[] = [];
-  const signed = (n: number): string =>
-    `${n > 0 ? '+' : '-'}${rm(Math.abs(n))}`;
-  if (wallet !== null && wallet !== 0) parts.push(`wallet ${signed(wallet)}`);
-  if (vault !== null && vault !== 0) parts.push(`vault ${signed(vault)}`);
-  return parts.length ? parts.join(', ') : '—';
-}
+const MYT_MS = 8 * 3_600_000;
+// '9:12 PM' in Malaysia time, whatever the viewer's timezone.
+const mytTime = (iso: string): string => {
+  const d = new Date(Date.parse(iso) + MYT_MS);
+  const h = d.getUTCHours();
+  const m = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${h % 12 || 12}:${m} ${h < 12 ? 'AM' : 'PM'}`;
+};
+// '2026-10-13' -> '13 Oct 2026' (the key is already a MYT day).
+const dayLabel = (day: string): string =>
+  new Date(`${day}T00:00:00Z`).toLocaleDateString('en-MY', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+
+/** A signed amount for one side of a movement; '—' when it did not move. */
+const Delta = ({ value }: { value: number | null }) =>
+  value === null || value === 0 ? (
+    <span className="text-ui-fg-muted">—</span>
+  ) : (
+    <span className={value > 0 ? 'text-ui-tag-green-text' : ''}>
+      {value > 0 ? '+' : '−'}
+      {rm(Math.abs(value))}
+    </span>
+  );
 
 // The Transactions list (POLYCARD-BACK §5.4) — READ-ONLY by spec: no create,
-// edit, delete or export affordance anywhere on this page.
+// edit, delete or export affordance anywhere on this page. Layout per spec
+// 2026-10-14-admin-finance-pages §7: one filter row, rows grouped by day.
 const LedgerPage = () => {
   const { t } = useTranslation();
   const [page, setPage] = useState(0);
@@ -129,11 +152,12 @@ const LedgerPage = () => {
   // shipped legitimately sees zero rows, and "No transactions yet." there would
   // read as data loss.
   const filtered = Boolean(q || type || from || to);
+  const dated = Boolean(from || to);
 
   return (
     <div className="flex flex-col gap-y-3">
       <Container className="p-0">
-        <div className="flex flex-col gap-4 px-6 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-4 px-6 py-4">
           <div>
             <Heading level="h2">{t('ledger.title')}</Heading>
             <Text className="text-ui-fg-subtle mt-1" size="small">
@@ -142,42 +166,103 @@ const LedgerPage = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* aria-pressed, not variant alone: `primary` vs `secondary` is a
-                colour-only cue, so a screen reader had no way to tell which
-                type tab was active. Same standard as the payload expander's
-                aria-expanded below. */}
-            {TYPES.map((tp) => (
-              <Button
-                key={tp ?? 'all'}
-                size="small"
-                variant={type === tp ? 'primary' : 'secondary'}
-                aria-pressed={type === tp}
-                onClick={() => onFilter(() => setType(tp))}
+            <Select
+              value={type ?? 'all'}
+              onValueChange={(v) =>
+                onFilter(() =>
+                  setType(v === 'all' ? undefined : (v as LedgerType)),
+                )
+              }
+            >
+              <Select.Trigger
+                className="w-40"
+                aria-label={t('ledger.typeSelect')}
               >
-                {t(typeLabelKey(tp))}
-              </Button>
-            ))}
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
+                <Select.Item value="all">{t('ledger.allTypes')}</Select.Item>
+                {TYPES.map((tp) => (
+                  <Select.Item key={tp} value={tp}>
+                    {t(typeLabelKey(tp))}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select>
+
+            <Popover>
+              <Popover.Trigger asChild>
+                <Button
+                  size="base"
+                  variant="secondary"
+                  aria-label={`${t('ledger.dateFilter')}: ${
+                    dated
+                      ? t('ledger.dateRange', {
+                          from: from || '…',
+                          to: to || '…',
+                        })
+                      : t('ledger.anyDate')
+                  }`}
+                >
+                  <Calendar />
+                  {dated
+                    ? t('ledger.dateRange', {
+                        from: from || '…',
+                        to: to || '…',
+                      })
+                    : t('ledger.anyDate')}
+                </Button>
+              </Popover.Trigger>
+              <Popover.Content className="flex w-64 flex-col gap-3 p-3">
+                <div className="flex flex-col gap-1">
+                  <Text size="xsmall" className="text-ui-fg-subtle">
+                    {t('ledger.from')}
+                  </Text>
+                  <Input
+                    type="date"
+                    size="small"
+                    aria-label={t('ledger.from')}
+                    value={from}
+                    onChange={(e) => onFilter(() => setFrom(e.target.value))}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Text size="xsmall" className="text-ui-fg-subtle">
+                    {t('ledger.to')}
+                  </Text>
+                  <Input
+                    type="date"
+                    size="small"
+                    aria-label={t('ledger.to')}
+                    value={to}
+                    onChange={(e) => onFilter(() => setTo(e.target.value))}
+                  />
+                </div>
+                {dated ? (
+                  <Button
+                    size="small"
+                    variant="transparent"
+                    className="self-end"
+                    onClick={() =>
+                      onFilter(() => {
+                        setFrom('');
+                        setTo('');
+                      })
+                    }
+                  >
+                    {t('ledger.clearDates')}
+                  </Button>
+                ) : null}
+              </Popover.Content>
+            </Popover>
+
             <Input
               type="search"
-              className="w-72"
+              className="w-64"
               placeholder={t('ledger.searchPlaceholder')}
               aria-label={t('ledger.searchPlaceholder')}
               value={search}
               onChange={(e) => onFilter(() => setSearch(e.target.value))}
-            />
-            <Input
-              type="date"
-              className="w-40"
-              aria-label={t('ledger.from')}
-              value={from}
-              onChange={(e) => onFilter(() => setFrom(e.target.value))}
-            />
-            <Input
-              type="date"
-              className="w-40"
-              aria-label={t('ledger.to')}
-              value={to}
-              onChange={(e) => onFilter(() => setTo(e.target.value))}
             />
           </div>
         </div>
@@ -206,83 +291,104 @@ const LedgerPage = () => {
             <Table>
               <Table.Header>
                 <Table.Row>
-                  {sortHeader('display_id', t('ledger.colId'))}
                   {sortHeader('type', t('ledger.colType'))}
                   <Table.HeaderCell>{t('ledger.colPlayer')}</Table.HeaderCell>
-                  {sortHeader('occurred_at', t('ledger.colWhen'))}
-                  <Table.HeaderCell>{t('ledger.colAffect')}</Table.HeaderCell>
-                  <Table.HeaderCell>{t('ledger.colDetails')}</Table.HeaderCell>
+                  {sortHeader('occurred_at', t('ledger.colTime'))}
+                  <Table.HeaderCell className="text-right">
+                    {t('ledger.colWallet')}
+                  </Table.HeaderCell>
+                  <Table.HeaderCell className="text-right">
+                    {t('ledger.colVault')}
+                  </Table.HeaderCell>
                 </Table.Row>
               </Table.Header>
               <Table.Body>
-                {data.entries.map((row) => {
-                  const open = expanded.has(row.id);
-                  return (
-                    // A mapped array needs the KEY ON THE FRAGMENT ITSELF — the
-                    // `<>` shorthand cannot carry props, hence the explicit
-                    // <Fragment key={...}>.
-                    <Fragment key={row.id}>
-                      <Table.Row
-                        className="cursor-pointer"
-                        onClick={() => toggle(row.id)}
+                {groupByDay(data.entries).map((g, gi) => (
+                  // Index in the key: a list sorted by type can show the same
+                  // day twice (groupByDay never merges them).
+                  <Fragment key={`${g.day}-${gi}`}>
+                    <Table.Row className="bg-ui-bg-subtle hover:bg-ui-bg-subtle">
+                      {/* Plain <td>: Medusa types Table.Cell as
+                          HTMLAttributes, which has no colSpan (its runtime
+                          <td> forwards it fine). */}
+                      <td
+                        colSpan={COLUMN_COUNT}
+                        className="text-ui-fg-subtle txt-compact-xsmall-plus px-6 py-1.5"
                       >
-                        <Table.Cell className="font-mono whitespace-nowrap">
-                          {row.display_id}
-                        </Table.Cell>
-                        <Table.Cell>
-                          {/* The TRANSLATED label, not the raw 'TP' code: the
-                              page ships no legend, and the filter tab for the
-                              same value already says "Top-up". Nothing is lost
-                              — display_id is TYPE+YY+Q#+serial, so the code is
-                              still on the row, one cell to the left. */}
-                          <Badge size="2xsmall">
-                            {t(typeLabelKey(row.type))}
-                          </Badge>
-                        </Table.Cell>
-                        <Table.Cell className="break-words">
-                          {/* Falls back to the EMAIL, not an em-dash: `name` is
-                              nullable and a nameless row would otherwise be
-                              unidentifiable. Same rule as the players table. */}
-                          {row.customer.name ?? row.customer.email}
-                        </Table.Cell>
-                        <Table.Cell className="text-ui-fg-subtle whitespace-nowrap">
-                          {orderDateTime(row.occurred_at)}
-                        </Table.Cell>
-                        <Table.Cell className="tabular-nums whitespace-nowrap">
-                          {affectSummary(row.wallet_delta, row.vault_delta)}
-                        </Table.Cell>
-                        {/* Real button so the expander is reachable by keyboard
-                            too; stopPropagation keeps the row handler from
-                            firing a second toggle straight back. */}
-                        <Table.Cell onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            className="text-ui-fg-interactive"
-                            aria-expanded={open}
-                            aria-label={`${t('ledger.colDetails')} — ${row.display_id}`}
+                        {dayLabel(g.day)}
+                      </td>
+                    </Table.Row>
+                    {g.rows.map((row) => {
+                      const open = expanded.has(row.id);
+                      return (
+                        <Fragment key={row.id}>
+                          <Table.Row
+                            className="cursor-pointer"
                             onClick={() => toggle(row.id)}
                           >
-                            {open ? <ChevronDownMini /> : <ChevronRightMini />}
-                          </button>
-                        </Table.Cell>
-                      </Table.Row>
-                      {open && (
-                        <Table.Row className="bg-ui-bg-subtle">
-                          {/* Plain <td>: Medusa types Table.Cell as
-                              HTMLAttributes, which has no colSpan (its runtime
-                              <td> forwards it fine), so the spanning cell can't
-                              use the component. Same workaround as the packs
-                              table's odds expander. */}
-                          <td colSpan={COLUMN_COUNT} className="px-6 py-2">
-                            <pre className="text-ui-fg-subtle text-xs whitespace-pre-wrap">
-                              {JSON.stringify(row.payload, null, 2)}
-                            </pre>
-                          </td>
-                        </Table.Row>
-                      )}
-                    </Fragment>
-                  );
-                })}
+                            <Table.Cell className="whitespace-nowrap">
+                              <Badge
+                                size="2xsmall"
+                                color={TYPE_COLOR[row.type]}
+                              >
+                                {t(typeLabelKey(row.type))}
+                              </Badge>
+                              {/* The ID is the details toggle: a real button,
+                                  so keyboard and screen-reader users get the
+                                  expander the whole row offers by click.
+                                  stopPropagation keeps the row handler from
+                                  toggling it straight back. */}
+                              <button
+                                type="button"
+                                aria-expanded={open}
+                                aria-label={`${t('ledger.details')} — ${row.display_id}`}
+                                className="text-ui-fg-subtle hover:text-ui-fg-base txt-compact-xsmall mt-0.5 block font-mono"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggle(row.id);
+                                }}
+                              >
+                                {row.display_id}
+                              </button>
+                            </Table.Cell>
+                            <Table.Cell className="break-words">
+                              {/* Falls back to the EMAIL: `name` is nullable
+                                  and a nameless row would be unidentifiable. */}
+                              {row.customer.name ?? row.customer.email}
+                              {row.customer.name ? (
+                                <Text
+                                  as="span"
+                                  size="xsmall"
+                                  className="text-ui-fg-subtle block"
+                                >
+                                  {row.customer.email}
+                                </Text>
+                              ) : null}
+                            </Table.Cell>
+                            <Table.Cell className="text-ui-fg-subtle whitespace-nowrap tabular-nums">
+                              {mytTime(row.occurred_at)}
+                            </Table.Cell>
+                            <Table.Cell className="text-right tabular-nums whitespace-nowrap">
+                              <Delta value={row.wallet_delta} />
+                            </Table.Cell>
+                            <Table.Cell className="text-right tabular-nums whitespace-nowrap">
+                              <Delta value={row.vault_delta} />
+                            </Table.Cell>
+                          </Table.Row>
+                          {open && (
+                            <Table.Row className="bg-ui-bg-subtle">
+                              <td colSpan={COLUMN_COUNT} className="px-6 py-2">
+                                <pre className="text-ui-fg-subtle text-xs whitespace-pre-wrap">
+                                  {JSON.stringify(row.payload, null, 2)}
+                                </pre>
+                              </td>
+                            </Table.Row>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </Fragment>
+                ))}
               </Table.Body>
             </Table>
           </div>

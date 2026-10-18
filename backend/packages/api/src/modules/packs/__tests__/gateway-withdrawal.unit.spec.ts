@@ -29,6 +29,10 @@ import {
   withdrawalReconcileAction,
 } from '../gateway-reconcile';
 import { savedBankAccountId } from '../saved-accounts';
+import {
+  DEFAULT_WITHDRAWAL_CONTROLS,
+  type WithdrawalControls,
+} from '../withdrawal-controls';
 import PacksModuleService from '../service';
 import { POST as withdrawRoute } from '../../../api/store/credits/withdraw/route';
 
@@ -61,11 +65,15 @@ function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
     // withdrawForCashout, on that method's own transaction manager — see the
     // service describe below, which runs the real SQL against a fake `em`.
     savedBankAccountsFor: jest.fn().mockResolvedValue(savedAccounts),
+    // Other customers on the same number. None by default.
+    otherPayoutAccountHolders: jest.fn().mockResolvedValue([]),
     createGatewayWithdrawals: jest.fn().mockResolvedValue([{ id: 'gpw_1' }]),
     // Idempotency-Key replay lookup. Empty by default — no prior intent.
     listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
     creditBalance: jest.fn().mockResolvedValue(50),
     updateGatewayWithdrawals: jest.fn().mockResolvedValue(undefined),
+    // The wd: debit lookup after a failed debit call. None by default.
+    listCreditTransactions: jest.fn().mockResolvedValue([]),
     // The gate + debit unit. Everything the old caller-side policy check did
     // (freeze, locked commissions, playthrough, the daily cap) now happens
     // INSIDE this one service call, under the credit: advisory lock — see the
@@ -103,8 +111,13 @@ function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
       hasTopup: true,
       nextUnlock: null,
       withdrawable: 1000,
+      bonus: 0,
       playthrough: { deposited: 0, used: 0, remaining: 0 },
     }),
+    // The admin switches (withdrawal-controls.ts). Open by default.
+    withdrawalControls: jest
+      .fn<Promise<WithdrawalControls>, []>()
+      .mockResolvedValue(DEFAULT_WITHDRAWAL_CONTROLS),
   } satisfies FakeFacet<GatewayWithdrawals>;
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   return {
@@ -255,6 +268,13 @@ describe('withdrawalDetailsError', () => {
   const VISA_TEST_CARD = '4111111111111111'; // Luhn-valid
   it.each([
     ['MBBEMYKL', '1234567890', /^Maybank account numbers are 12 digits\./],
+    [
+      'MBBESGSG',
+      '123456789012',
+      /^Maybank \(SG\) account numbers are 11 digits\./,
+    ],
+    ['DBSSSGSG', '123456789012', /^DBS Bank account numbers are 10 digits\./],
+    ['POSBSG', '1234567890', /^POSB account numbers are 9 digits\./],
     ['MYMB2U', '1234567890', /^Maybank account numbers are 12 digits\./], // legacy alias
     [
       'CIBBMYKL',
@@ -265,15 +285,14 @@ describe('withdrawalDetailsError', () => {
     [
       'HLBBMYKL',
       '1234567890',
-      /^Hong Leong Bank account numbers are 11 digits\./,
+      /^Hong Leong Bank account numbers are 11 or 13 digits\./,
     ],
     ['RHBBMYKL', '123456789012', /^RHB Bank account numbers are 14 digits\./],
     ['MBBEMYKL', VISA_TEST_CARD, /^That looks like a card number\./],
     ['CIBBMYKL', '5555555555554444', /^That looks like a card number\./],
-    // Mastercard's 2-series range (2221-2720).
-    ['BSNAMYK1', '2223003122003222', /^That looks like a card number\./],
-    // BSN accounts are 16 digits, so only the card check guards it.
-    ['BSNAMYK1', VISA_TEST_CARD, /^That looks like a card number\./],
+    // Mastercard's 2-series range (2221-2720) is also a card hint at the wrong length.
+    ['MBBEMYKL', '2223003122003222', /^That looks like a card number\./],
+    ['ALLIANCESG', '012345678901', /unavailable/i],
   ])('refuses %s %s', (bankCode, accountNumber, message) => {
     expect(
       withdrawalDetailsError({ ...SAVED_ACCOUNT, bankCode, accountNumber }),
@@ -293,10 +312,24 @@ describe('withdrawalDetailsError', () => {
     ['BSNAMYK1', '4111111111111112'],
     // 2-series outside 2221-2720 is not a card prefix.
     ['BSNAMYK1', '2000000000000006'], // Luhn-valid
-    // Banks without a length on file are not length-checked.
-    ['PHBMMYKL', '123456789'],
-    // Singapore banks pay through A3Pay and keep the generic digit rule.
+    ['PHBMMYKL', '123456789012'],
+    ['MBBESGSG', '01234567890'],
     ['DBSSSGSG', '1234567890'],
+    ['POSBSG', '123456789'],
+    ['OCBCSGSG', '012345678901'],
+    ['OCBCSGSG', '0123456789012345678'], // published virtual-account range
+    ['UOVBSGSG', '0123456'], // virtual account
+    ['HSBCSGSG', '012345678901'],
+    ['HSBCSGSG', '012345678901234567'], // virtual account
+    ['CIBBSGSG', '1234567890'],
+    ['RHBBSGSG', '01234567890'],
+    ['HLBBSGSG', '012345678901234567'],
+    ['BKCHSGSG', '012345678901234'],
+    ['GXSSG', '0123456789'],
+    ['GXSSG', '01234567890'],
+    ['MARIBANKSG', '012345678'],
+    ['ANEXTSG', '01234567890'],
+    ['PAYNOWSG', '6591234567'],
   ])('accepts %s %s', (bankCode, accountNumber) => {
     expect(
       withdrawalDetailsError({ ...SAVED_ACCOUNT, bankCode, accountNumber }),
@@ -447,6 +480,51 @@ describe('startWithdrawal — money ordering', () => {
     expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
   });
 
+  // A number another customer has already been PAID to is refused at payout,
+  // before any row or debit, for destinations saved since the check shipped.
+  it('refuses a payout to a number another customer was already paid to', async () => {
+    // A destination saved since the check shipped is still inside its
+    // 24 h cooling-off today; switch the wait off so the check is reached.
+    const prevCooldown = process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS;
+    process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS = '0';
+    try {
+      const fresh = { ...SAVED_ACCOUNT, savedAt: '2026-10-14T00:00:00+08:00' };
+      const h = harness([fresh]);
+      h.packs.otherPayoutAccountHolders.mockResolvedValue([
+        { customer_id: 'cus_2', bank_code: 'MYMB2U', holder_name: null },
+      ]);
+      await expect(start(h, { gateway: 'tgpay', amount: 56 })).rejects.toThrow(
+        /already linked to another Polycards account/,
+      );
+      expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+      expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+
+      // Only saved elsewhere (not paid): the save check already ruled on it.
+      const h2 = harness([fresh]);
+      h2.packs.otherPayoutAccountHolders.mockResolvedValue([
+        { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: 'X' },
+      ]);
+      await expect(
+        start(h2, { gateway: 'tgpay', amount: 56 }),
+      ).resolves.toBeTruthy();
+
+      // Saved before the check shipped: an existing cluster, left alone.
+      const old = { ...SAVED_ACCOUNT, savedAt: '2026-10-13T23:59:59+08:00' };
+      const h3 = harness([old]);
+      h3.packs.otherPayoutAccountHolders.mockResolvedValue([
+        { customer_id: 'cus_2', bank_code: 'MBBEMYKL', holder_name: null },
+      ]);
+      await expect(
+        start(h3, { gateway: 'tgpay', amount: 56 }),
+      ).resolves.toBeTruthy();
+      expect(h3.packs.otherPayoutAccountHolders).not.toHaveBeenCalled();
+    } finally {
+      if (prevCooldown === undefined)
+        delete process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS;
+      else process.env.PAYOUT_DESTINATION_COOLDOWN_HOURS = prevCooldown;
+    }
+  });
+
   it('holds a destination to its own payout floor before any row or debit', async () => {
     const actual = jest.requireActual('../banks').bankPayoutMinRm;
     jest.mocked(bankPayoutMinRm).mockImplementation(() => 100);
@@ -465,9 +543,52 @@ describe('startWithdrawal — money ordering', () => {
     }
   });
 
-  // TNG is paused in banks.ts (2026-10-14): TGPay refused 97 of 110 TNG
-  // payouts in a week and customers kept retrying. A saved TNG account is
-  // refused before any row or debit, so a tap costs nothing.
+  // TNG is off unless TNG_PAYOUTS_ENABLED=true (banks.ts): TGPay refused 97
+  // of 110 TNG payouts in a week and customers kept retrying. A saved TNG
+  // account is refused before any row or debit, so a tap costs nothing.
+  // Switched on, TGPay still refuses TNG now and then; the customer is sent
+  // to a bank account instead of being told to check correct details.
+  it("sends a Touch 'n Go customer to a bank account when TGPay has no TNG payout provider", async () => {
+    const prev = process.env.TNG_PAYOUTS_ENABLED;
+    process.env.TNG_PAYOUTS_ENABLED = 'true';
+    try {
+      const tng = {
+        ...SAVED_ACCOUNT,
+        id: savedBankAccountId('TNGMY', '123456789012'),
+        bankCode: 'TNGMY',
+        bankName: "Touch 'n Go eWallet",
+        accountNumber: '123456789012',
+      };
+      const noProvider = new GatewayError(
+        'TGPay /transaction/payout/withdraw failed (HTTP 400): No payout provider is available for this order',
+        [],
+        400,
+        true,
+      );
+      const h = harness([tng]);
+      h.packs.withdrawForCashout.mockResolvedValue({
+        id: 'ct_1',
+        balance: 50,
+        amount: -100,
+        replayed: false,
+        reference: null,
+        destination: tng,
+      });
+      fakeGateway.script({ submitWithdrawal: noProvider });
+      const error = (await start(h, { accountId: tng.id, amount: 100 }).catch(
+        (e: unknown) => e,
+      )) as Error;
+      expect(error.message).toBe(
+        "Touch 'n Go withdrawals are temporarily unavailable from our payment provider. Your balance has been returned. Please withdraw to a bank account for now.",
+      );
+      // Still refunded: the refund is the only ledger write on this path.
+      expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+    } finally {
+      if (prev === undefined) delete process.env.TNG_PAYOUTS_ENABLED;
+      else process.env.TNG_PAYOUTS_ENABLED = prev;
+    }
+  });
+
   it("refuses a Touch 'n Go withdrawal before any row or debit while TNG payouts are paused", async () => {
     const tng = {
       ...SAVED_ACCOUNT,
@@ -485,14 +606,152 @@ describe('startWithdrawal — money ordering', () => {
     expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
   });
 
+  // The admin's Withdraw switch and daily schedule (withdrawal-controls.ts):
+  // refused before any row or debit, like every certain refusal.
+  describe('admin withdrawal controls', () => {
+    const TNG = {
+      ...SAVED_ACCOUNT,
+      id: savedBankAccountId('TNGMY', '123456789012'),
+      bankCode: 'TNGMY',
+      bankName: "Touch 'n Go eWallet",
+      accountNumber: '123456789012',
+    };
+    const controls = (
+      over: Partial<WithdrawalControls>,
+    ): WithdrawalControls => ({
+      ...DEFAULT_WITHDRAWAL_CONTROLS,
+      ...over,
+    });
+    // A three-minute window around the current Malaysia minute.
+    const windowAroundNow = () => {
+      const minute = Math.floor(
+        ((Date.now() + 8 * 3_600_000) % 86_400_000) / 60_000,
+      );
+      const hhmm = (m: number) => {
+        const w = (m + 1440) % 1440;
+        return `${String(Math.floor(w / 60)).padStart(2, '0')}:${String(w % 60).padStart(2, '0')}`;
+      };
+      return {
+        on: true,
+        close_at: hhmm(minute - 1),
+        reopen_at: hhmm(minute + 2),
+      };
+    };
+    const expectNothingWritten = (h: ReturnType<typeof harness>) => {
+      expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+      expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+      expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    };
+
+    it('refuses every new withdrawal while the Withdraw switch is off', async () => {
+      const h = harness();
+      h.packs.withdrawalControls.mockResolvedValue(
+        controls({
+          withdrawals: {
+            open: false,
+            off_until: null,
+            schedule: DEFAULT_WITHDRAWAL_CONTROLS.withdrawals.schedule,
+          },
+        }),
+      );
+      await expect(start(h)).rejects.toThrow(
+        'Withdrawals are paused for maintenance. Please try again later.',
+      );
+      expectNothingWritten(h);
+    });
+
+    it('names the reopen time when the switch-off has one', async () => {
+      const h = harness();
+      h.packs.withdrawalControls.mockResolvedValue(
+        controls({
+          withdrawals: {
+            open: false,
+            off_until: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+            schedule: DEFAULT_WITHDRAWAL_CONTROLS.withdrawals.schedule,
+          },
+        }),
+      );
+      await expect(start(h)).rejects.toThrow(
+        /^Withdrawals are paused for maintenance until \w{3} \d{1,2} \w{3}, /,
+      );
+      expectNothingWritten(h);
+    });
+
+    it('refuses inside the daily closed window and names the reopen time', async () => {
+      const h = harness();
+      h.packs.withdrawalControls.mockResolvedValue(
+        controls({
+          withdrawals: {
+            open: true,
+            off_until: null,
+            schedule: windowAroundNow(),
+          },
+        }),
+      );
+      await expect(start(h)).rejects.toThrow(
+        /^Withdrawals are paused for maintenance until /,
+      );
+      expectNothingWritten(h);
+    });
+
+    it("refuses a Touch 'n Go payout while the TNG switch is off, in TNG's words", async () => {
+      const prev = process.env.TNG_PAYOUTS_ENABLED;
+      process.env.TNG_PAYOUTS_ENABLED = 'true';
+      try {
+        const h = harness([TNG]);
+        h.packs.withdrawalControls.mockResolvedValue(
+          controls({
+            tng: { ...DEFAULT_WITHDRAWAL_CONTROLS.tng, open: false },
+          }),
+        );
+        await expect(
+          start(h, { gateway: 'tgpay', accountId: TNG.id, amount: 100 }),
+        ).rejects.toThrow(/^Touch 'n Go withdrawals are paused for now\./);
+        expectNothingWritten(h);
+        // A bank account is untouched by the TNG switch.
+        const bank = harness();
+        bank.packs.withdrawalControls.mockResolvedValue(
+          controls({
+            tng: { ...DEFAULT_WITHDRAWAL_CONTROLS.tng, open: false },
+          }),
+        );
+        await expect(start(bank)).resolves.toMatchObject({
+          status: 'pending',
+        });
+      } finally {
+        if (prev === undefined) delete process.env.TNG_PAYOUTS_ENABLED;
+        else process.env.TNG_PAYOUTS_ENABLED = prev;
+      }
+    });
+
+    it("holds a Touch 'n Go payout to the admin's raised minimum", async () => {
+      const prev = process.env.TNG_PAYOUTS_ENABLED;
+      process.env.TNG_PAYOUTS_ENABLED = 'true';
+      try {
+        const h = harness([TNG]);
+        h.packs.withdrawalControls.mockResolvedValue(
+          controls({
+            tng: { ...DEFAULT_WITHDRAWAL_CONTROLS.tng, min_rm: 200 },
+          }),
+        );
+        await expect(
+          start(h, { gateway: 'tgpay', accountId: TNG.id, amount: 150 }),
+        ).rejects.toThrow(/between RM 200 and/);
+        expectNothingWritten(h);
+      } finally {
+        if (prev === undefined) delete process.env.TNG_PAYOUTS_ENABLED;
+        else process.env.TNG_PAYOUTS_ENABLED = prev;
+      }
+    });
+  });
   // Test-plan case 3.
   it("refuses a bank the active gateway cannot pay to BEFORE any debit, in the customer's words", async () => {
     // A wallet the registry knows but TGPay has no payout code for.
     const unpayable = {
       ...SAVED_ACCOUNT,
-      id: savedBankAccountId('BOOSTMY', '1234567890'),
+      id: savedBankAccountId('BOOSTMY', '123456789012'),
       bankCode: 'BOOSTMY',
-      accountNumber: '1234567890',
+      accountNumber: '123456789012',
     };
     const h = harness([unpayable]);
     await expect(
@@ -713,6 +972,100 @@ describe('startWithdrawal — money ordering', () => {
     });
   });
 
+  // Production 2026-10-14 (PC-286fcc20…, RM 512.40): a refusal-shaped answer
+  // to a payout TGPay had in fact created. It was refunded at once, the
+  // customer's retry was paid, and TGPay still held the first one PENDING.
+  // So a refusal is refunded only once the gateway confirms it holds no such
+  // payout; one it holds (or cannot be asked about) stays pending.
+  it.each([
+    [
+      'the gateway holds the payout',
+      {
+        transactionId: 'T-1',
+        merchantTransactionId: 'PC-x',
+        statusId: null,
+        status: 'PENDING',
+        amount: 50,
+        netAmount: Number.NaN,
+        paymentMethodCode: 'WD',
+        bankReferenceNo: null,
+        uniqueReferenceNo: null,
+        state: 'pending' as const,
+      },
+    ],
+    [
+      'the gateway cannot be asked',
+      new GatewayError('non-JSON response', [], 502),
+    ],
+  ])(
+    'does NOT refund a refusal when %s: the row stays pending for the sweep',
+    async (_label, detail) => {
+      const h = harness();
+      fakeGateway.script({
+        submitWithdrawal: new GatewayError('nope', ['PMT10013'], 400, true),
+        getWithdrawalDetail: detail,
+      });
+      const result = await start(h);
+      expect(result.transactionId).toBeNull();
+      expect(result.status).toBe('pending');
+      // Asked once, before any refund.
+      expect(fakeGateway.calls.withdrawalDetails).toHaveLength(1);
+      expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+      expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'failed' }),
+      );
+      expect(h.logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('refusal not confirmed'),
+      );
+    },
+  );
+
+  // Their payout callback finds a row by THEIR id (tgpay-family-hooks), and
+  // the sweep never refunds a row carrying one on a later "not found". A
+  // refused-looking payout the gateway holds must therefore carry it, plus
+  // the refusal on record: run logs last minutes, the row lasts.
+  it('records the id of a refused payout the gateway holds, on the pending row only', async () => {
+    const h = harness();
+    fakeGateway.script({
+      submitWithdrawal: new GatewayError('nope', ['PMT10013'], 400, true),
+      getWithdrawalDetail: {
+        transactionId: 'T-1',
+        merchantTransactionId: 'PC-x',
+        statusId: null,
+        status: 'PENDING',
+        amount: 50,
+        netAmount: Number.NaN,
+        paymentMethodCode: 'WD',
+        bankReferenceNo: null,
+        uniqueReferenceNo: null,
+        state: 'pending' as const,
+      },
+    });
+    await start(h);
+    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledTimes(1);
+    expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
+      selector: { id: 'gpw_1', status: 'pending' },
+      data: {
+        gateway_transaction_id: 'T-1',
+        failure_reason: expect.stringMatching(/holds it.*PMT10013/),
+      },
+    });
+    const [{ data }] = h.packs.updateGatewayWithdrawals.mock.calls[0];
+    expect(data.failure_reason).not.toMatch(/1234567890|AHMAD BIN ALI/i);
+  });
+
+  it('writes nothing to a pending row the gateway cannot be asked about', async () => {
+    const h = harness();
+    fakeGateway.script({
+      submitWithdrawal: new GatewayError('nope', ['PMT10013'], 400, true),
+      getWithdrawalDetail: new GatewayError('non-JSON response', [], 502),
+    });
+    await start(h);
+    // The sweep's 1h "never existed" clock reads updated_at: a write here
+    // would restart it on a row with no gateway id to guard it.
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+  });
+
   // The classic double-payout window: the request reached the gateway and
   // only the RESPONSE was lost. Refunding here + the payout executing =
   // customer paid twice. The row must stay pending for the sweep.
@@ -752,6 +1105,7 @@ describe('startWithdrawal — money ordering', () => {
       hasTopup: true,
       nextUnlock: null,
       withdrawable: 0,
+      bonus: 0,
       playthrough: { deposited: 0, used: 0, remaining: 0 },
     });
     await expect(start(h)).rejects.toThrow(/under review/i);
@@ -771,10 +1125,11 @@ describe('startWithdrawal — money ordering', () => {
       hasTopup: true,
       nextUnlock: null,
       withdrawable: 0,
+      bonus: 0,
       playthrough: { deposited: 100, used: 40, remaining: 60 },
     });
     await expect(start(h)).rejects.toThrow(
-      /RM 60\.00 of your deposits must be spent on packs/,
+      /Withdrawals unlock once you've used RM 60\.00 more on packs\./,
     );
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
   });
@@ -791,6 +1146,7 @@ describe('startWithdrawal — money ordering', () => {
       hasTopup: false,
       nextUnlock: null,
       withdrawable: 0,
+      bonus: 0,
       playthrough: { deposited: 0, used: 0, remaining: 0 },
     });
     await expect(start(h)).rejects.toThrow(/Top up at least once/);
@@ -809,12 +1165,10 @@ describe('startWithdrawal — money ordering', () => {
     h.packs.withdrawForCashout.mockRejectedValue(
       new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
-        'RM 60.00 of your deposits must be spent on packs before you can withdraw.',
+        "Withdrawals unlock once you've used RM 60.00 more on packs. Then your balance, except bonus credit, can be withdrawn.",
       ),
     );
-    await expect(start(h)).rejects.toThrow(
-      /RM 60\.00 of your deposits must be spent on packs/,
-    );
+    await expect(start(h)).rejects.toThrow(/Withdrawals unlock once/);
     expect(h.packs.createGatewayWithdrawals).toHaveBeenCalledTimes(1);
     expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
       id: 'gpw_1',
@@ -838,6 +1192,27 @@ describe('startWithdrawal — money ordering', () => {
       id: 'gpw_1',
       status: 'failed',
     });
+  });
+
+  // The debit committed but its acknowledgement was lost (a dropped
+  // connection), so the call threw anyway. Closing the row would strand the
+  // money: nothing refunds a 'failed' row. Left pending, the sweep's
+  // not-found path refunds it once stale.
+  it('leaves the row pending when the debit landed although the call threw', async () => {
+    const h = harness();
+    h.packs.withdrawForCashout.mockRejectedValue(new Error('connection reset'));
+    h.packs.listCreditTransactions.mockResolvedValue([{ id: 'ct_wd' }]);
+    await expect(start(h)).rejects.toThrow(/connection reset/);
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
+    expect(fakeGateway.calls.withdrawals).toEqual([]);
+  });
+
+  it('leaves the row pending when it cannot tell whether the debit landed', async () => {
+    const h = harness();
+    h.packs.withdrawForCashout.mockRejectedValue(new Error('connection reset'));
+    h.packs.listCreditTransactions.mockRejectedValue(new Error('db down'));
+    await expect(start(h)).rejects.toThrow(/connection reset/);
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
   });
 
   it('stamps their W… id on the row after a successful submit, scoped to pending', async () => {
@@ -914,6 +1289,7 @@ describe('startWithdrawal — approval threshold (held)', () => {
     hasTopup: true,
     nextUnlock: null,
     withdrawable: 5000,
+    bonus: 0,
     playthrough: { deposited: 0, used: 0, remaining: 0 },
   };
 
@@ -1018,10 +1394,11 @@ describe('startWithdrawal — approval threshold (held)', () => {
     h.packs.walletSummary.mockResolvedValue({
       ...roomyWallet,
       withdrawable: 0,
+      bonus: 0,
       playthrough: { deposited: 100, used: 40, remaining: 60 },
     });
     await expect(start(h, { amount: 2000 })).rejects.toThrow(
-      /RM 60\.00 of your deposits must be spent on packs/,
+      /Withdrawals unlock once you've used RM 60\.00 more on packs\./,
     );
     expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
     expect(h.packs.withdrawForCashout).not.toHaveBeenCalled();
@@ -1177,6 +1554,43 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       );
       expect(sent).toHaveLength(0);
     });
+
+    // #747's 501 is exact (path + status + text) and means nothing was
+    // created. Asking the gateway first (#791) put the refund behind a
+    // lookup The 7 Pay may not answer while payouts are off: the payout
+    // then sat pending, with the customer's money, for good.
+    it('payouts switched off: refunds without asking the gateway', async () => {
+      fakeGateway.script({
+        submitWithdrawal: payoutDisabled(),
+        getWithdrawalDetail: new GatewayError('Payout not available', [], 501),
+      });
+      const h = harness();
+      await expect(start(h)).rejects.toThrow(/temporarily unavailable/i);
+      expect(fakeGateway.calls.withdrawalDetails).toHaveLength(0);
+      expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+    });
+
+    // The wallet is short whether or not this one payout is confirmed:
+    // the next customer would be refused the same way.
+    it('an empty wallet the gateway cannot confirm stays pending, yet trips the breaker and alerts ops', async () => {
+      fakeGateway.script({
+        submitWithdrawal: floatEmpty(),
+        getWithdrawalDetail: new GatewayError('non-JSON response', [], 502),
+      });
+      const h = harness();
+      const result = await start(h);
+      expect(result.status).toBe('pending');
+      expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+      expect(sent).toHaveLength(1);
+      expect(sent[0].text).toMatch(/payout wallet is short/i);
+      expect(sent[0].text).toMatch(/left pending/i);
+      expect(sent[0].text).not.toMatch(/refunded to the customer/i);
+
+      const h2 = harness();
+      const next = (await start(h2).catch((e: unknown) => e)) as Error;
+      expect(next.message).toMatch(/nothing was taken/i);
+      expect(h2.packs.withdrawForCashout).not.toHaveBeenCalled();
+    });
   });
 
   describe('submitHeldWithdrawal (admin approve)', () => {
@@ -1187,7 +1601,7 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       // bigNumber column: arrives as a string.
       amount: '1500',
       bank_code: 'MBBEMYKL',
-      account_number: '1234567890',
+      account_number: SAVED_ACCOUNT.accountNumber,
       account_holder_name: 'AHMAD BIN ALI',
       gateway: 'fake',
       status: 'held',
@@ -1289,6 +1703,60 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       );
       expect(sent).toHaveLength(0);
     });
+
+    it('payouts switched off: refunds without asking the gateway', async () => {
+      fakeGateway.script({
+        submitWithdrawal: payoutDisabled(),
+        getWithdrawalDetail: new GatewayError('Payout not available', [], 501),
+      });
+      const h = approveHarness();
+      await expect(h.approve()).rejects.toThrow(/payouts are not enabled/i);
+      expect(fakeGateway.calls.withdrawalDetails).toHaveLength(0);
+      expect(h.packs.withdrawCreditsWithLedger).toHaveBeenCalledTimes(1);
+    });
+
+    it('an empty wallet the gateway cannot confirm stays pending, yet trips the breaker and alerts ops', async () => {
+      fakeGateway.script({
+        submitWithdrawal: floatEmpty(),
+        getWithdrawalDetail: new GatewayError('non-JSON response', [], 502),
+      });
+      const h = approveHarness();
+      await expect(h.approve()).resolves.toMatchObject({ status: 'pending' });
+      expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+      expect(sent).toHaveLength(1);
+      expect(sent[0].text).toMatch(/admin approve/);
+      expect(sent[0].text).toMatch(/left pending/i);
+      const next = (await start(harness()).catch((e: unknown) => e)) as Error;
+      expect(next.message).toMatch(/nothing was taken/i);
+    });
+
+    it('records the id of a refused payout the gateway holds, on the pending row only', async () => {
+      fakeGateway.script({
+        submitWithdrawal: new GatewayError('nope', ['PMT10013'], 400, true),
+        getWithdrawalDetail: {
+          transactionId: 'T-9',
+          merchantTransactionId: 'PW-HELD-1',
+          statusId: null,
+          status: 'PENDING',
+          amount: 1500,
+          netAmount: Number.NaN,
+          paymentMethodCode: 'WD',
+          bankReferenceNo: null,
+          uniqueReferenceNo: null,
+          state: 'pending' as const,
+        },
+      });
+      const h = approveHarness();
+      await expect(h.approve()).resolves.toMatchObject({ status: 'pending' });
+      expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+      expect(h.packs.updateGatewayWithdrawals).toHaveBeenCalledWith({
+        selector: { id: 'gpw_h1', status: 'pending' },
+        data: {
+          gateway_transaction_id: 'T-9',
+          failure_reason: expect.stringMatching(/^approve refused.*holds it/),
+        },
+      });
+    });
   });
 });
 
@@ -1318,6 +1786,7 @@ const fakeWallet = (over: Record<string, unknown> = {}) => ({
   hasTopup: true,
   nextUnlock: null,
   withdrawable: 1000,
+  bonus: 0,
   playthrough: { deposited: 0, used: 0, remaining: 0 },
   ...over,
 });
@@ -1702,11 +2171,12 @@ describe('PacksModuleService.withdrawForCashout', () => {
     const f = fakeService(
       fakeWallet({
         withdrawable: 0,
+        bonus: 0,
         playthrough: { deposited: 100, used: 40, remaining: 60 },
       }),
     );
     await expect(f.svc.withdrawForCashout(cashout, f.ctx)).rejects.toThrow(
-      /RM 60\.00 of your deposits must be spent on packs/,
+      /Withdrawals unlock once you've used RM 60\.00 more on packs\./,
     );
     expect(f.withdrawCreditsWithLedger).not.toHaveBeenCalled();
   });

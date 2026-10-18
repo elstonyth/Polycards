@@ -204,6 +204,7 @@ export async function getPaymentLimits(): Promise<PaymentLimits> {
     depositsEnabled: r.data.deposits_enabled ?? true,
     withdrawalsEnabled: r.data.withdrawals_enabled ?? true,
     withdrawalsPausedUntil: r.data.withdrawals_paused_until ?? null,
+    withdrawalsUnavailable: r.data.withdrawals_unavailable ?? false,
     regional: (r.data.regional ?? []).map((rail) => ({
       gateway: rail.gateway,
       currency: rail.currency,
@@ -211,6 +212,14 @@ export async function getPaymentLimits(): Promise<PaymentLimits> {
       withdrawalsEnabled: rail.withdrawals_enabled,
       deposit: rail.deposit,
       withdrawal: rail.withdrawal,
+      ...(rail.withdrawal_rm
+        ? {
+            withdrawalRm: {
+              minRm: rail.withdrawal_rm.min_rm,
+              maxRm: rail.withdrawal_rm.max_rm,
+            },
+          }
+        : {}),
       rate: rail.rate,
     })),
   };
@@ -357,6 +366,10 @@ export type WithdrawBank = {
   bankName: string;
   /** The currency the bank is paid in; absent = RM. */
   currency?: string;
+  /** Bank-specific account lengths from the backend's bank registry. */
+  accountLengths?: number[];
+  accountPattern?: string;
+  accountHint?: string;
 };
 
 export type WithdrawBanksResult =
@@ -398,6 +411,9 @@ export type SavedBankAccount = {
   /** This destination's own payout floor (RM) when above the provider's —
    *  Touch 'n Go: 100. Null/absent = the provider's floor applies. */
   minRm?: number | null;
+  /** Why it is unavailable (e.g. invalid account details or paused Touch 'n Go);
+   *  absent = the provider cannot pay to it. */
+  unavailableReason?: string | null;
   /** The currency the bank is paid in; absent = RM. */
   currency?: string;
 };
@@ -476,6 +492,9 @@ export type StartWithdrawalResult =
        *  submit outcome was ambiguous; either way the sweep/callback resolves
        *  it from here. Mirrors the backend's StartWithdrawalResult#status. */
       status: 'pending' | 'held';
+      /** What the bank receives when it is paid in another currency (a
+       *  Singapore payout: S$). Absent on an RM payout. */
+      payout?: { currency: string; amount: number };
     }
   | { ok: false; error: string; needsAuth?: boolean };
 
@@ -551,6 +570,11 @@ export async function startWithdrawal(input: {
     // pre-094 backend, which has no held state — 'pending' is the accurate
     // default there, not a guess.
     status: r.data.status ?? 'pending',
+    ...(r.data.currency &&
+    r.data.currency !== 'MYR' &&
+    r.data.payAmount !== undefined
+      ? { payout: { currency: r.data.currency, amount: r.data.payAmount } }
+      : {}),
   };
 }
 
@@ -608,6 +632,9 @@ export type CreditTxn = {
   // Signed bonus-credit part of `amount` (spend-only credit); 0 when none or
   // when an older backend omits it.
   bonus: number;
+  // Signed move into (+) or out of (−) "Still to use on packs" (top-up, a
+  // sell-back's free share, pack open); 0 otherwise.
+  playthrough: number;
 };
 
 export type TransactionsResult =
@@ -616,6 +643,10 @@ export type TransactionsResult =
       balance: number;
       topupTotal: number;
       spendTotal: number;
+      // The split of spendTotal; null when an older backend omits it (the
+      // page then shows the single "Total spent" instead of a fake RM 0.00).
+      packSpendTotal: number | null;
+      withdrawnTotal: number | null;
       transactions: CreditTxn[];
       page: number;
       hasMore: boolean;
@@ -654,6 +685,8 @@ export async function getTransactions(
     balance: totals?.balance ?? 0,
     topupTotal: totals?.topup_total ?? 0,
     spendTotal: totals?.spend_total ?? 0,
+    packSpendTotal: totals?.pack_spend_total ?? null,
+    withdrawnTotal: totals?.withdrawn_total ?? null,
     transactions: rows.map((row) => ({
       id: row.id,
       amount: row.amount,
@@ -662,6 +695,7 @@ export async function getTransactions(
       reference: row.reference ?? null,
       gateway: row.gateway ?? null,
       bonus: row.bonus ?? 0,
+      playthrough: row.playthrough ?? 0,
     })),
     page: safePage,
     hasMore: totals?.has_more ?? false,

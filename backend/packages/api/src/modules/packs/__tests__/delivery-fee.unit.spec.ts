@@ -7,7 +7,59 @@ import {
   EAST_SHIPPING_MYR,
   PROTECTION_INCLUDED_MYR,
   INSURANCE_RATE,
+  SINGAPORE_SHIPPING_MYR,
+  isShippableCountry,
+  postcodeMessage,
 } from '../delivery';
+
+// Singapore (operator decision 2026-10-14): shipped direct, flat RM50.
+describe('Singapore delivery', () => {
+  it('ships to Malaysia and Singapore only', () => {
+    expect(isShippableCountry('MY')).toBe(true);
+    expect(isShippableCountry(' sg ')).toBe(true);
+    expect(isShippableCountry('TH')).toBe(false);
+    expect(isShippableCountry('')).toBe(false);
+  });
+
+  it('wants a 6-digit postcode for Singapore and 5 for Malaysia', () => {
+    expect(isShippablePostcode('018956', 'SG')).toBe(true);
+    expect(isShippablePostcode('18956', 'SG')).toBe(false);
+    expect(isShippablePostcode('50450', 'MY')).toBe(true);
+    expect(isShippablePostcode('018956', 'MY')).toBe(false);
+    // No country = Malaysia, as every caller before Singapore assumed.
+    expect(isShippablePostcode('50450')).toBe(true);
+    expect(postcodeMessage('SG')).toMatch(/6-digit Singapore postcode/);
+    expect(postcodeMessage('MY')).toMatch(/5-digit Malaysian postcode/);
+  });
+
+  it('zones a Singapore address SG, and bills the dearer zone on a mismatch', () => {
+    expect(deliveryZone('018956', null, 'Singapore', 'SG')).toBe('sg');
+    // Country typed MY but the address names Singapore: never the RM15 rate.
+    expect(deliveryZone('50450', null, 'Singapore', 'MY')).toBe('sg');
+    expect(deliveryZone('50450', 'Singapore', 'Marina Bay', 'MY')).toBe('sg');
+    // The Malay spelling bills Singapore too.
+    expect(deliveryZone('50450', null, 'Singapura', 'MY')).toBe('sg');
+    // Malaysia unchanged.
+    expect(deliveryZone('88000', 'Sabah', 'Kota Kinabalu', 'MY')).toBe('east');
+    expect(deliveryZone('50450', 'Selangor', 'Petaling Jaya', 'MY')).toBe(
+      'west',
+    );
+  });
+
+  it('charges RM50 shipping to Singapore, with the same insurance rule', () => {
+    expect(SINGAPORE_SHIPPING_MYR).toBe(50);
+    expect(computeDeliveryFee('018956', 100, null, 'Singapore', 'SG')).toEqual({
+      shipping: 50,
+      insurance: 0,
+      total: 50,
+    });
+    expect(computeDeliveryFee('018956', 400, null, 'Singapore', 'SG')).toEqual({
+      shipping: 50,
+      insurance: 20,
+      total: 70,
+    });
+  });
+});
 
 describe('isEastMalaysiaPostcode', () => {
   it('classifies Labuan/Sabah/Sarawak ranges as East', () => {

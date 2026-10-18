@@ -137,6 +137,11 @@ export const TGPAY_PAYOUT_FLOAT_EMPTY = 'TGPAY_PAYOUT_FLOAT_EMPTY';
  *  "Payout not available in production yet (contact The 7 Pay)". Like the
  *  empty wallet, nothing the customer does can fix it. */
 export const TGPAY_PAYOUT_DISABLED = 'TGPAY_PAYOUT_DISABLED';
+/** A 4xx whose text is THEIR upstream's server error ("API error 502: …")
+ *  or an HTML page: the request may well have gone through behind it, so it
+ *  is ambiguous, never a refusal. Production 2026-10-14: such a 400 on a
+ *  RM 512.40 payout was refunded at once while TGPay held it PENDING. */
+export const TGPAY_UPSTREAM_ERROR = 'TGPAY_UPSTREAM_ERROR';
 
 type TgpayResponse<T> = { status?: number; msg?: string; data?: T };
 type TgpayErrorBody = {
@@ -251,13 +256,21 @@ async function post<T>(
         [parsed.errors, parsed.message, parsed.msg].filter(Boolean).join(' '),
       );
     if (payoutDisabled) codes.push(TGPAY_PAYOUT_DISABLED);
+    // A 4xx that only relays their upstream's server error, or an HTML page,
+    // is not their API saying no: the payout may exist behind it.
+    const upstreamError = /\bAPI error 5\d\d\b|<!doctype|<html/i.test(
+      [parsed.errors, parsed.message, parsed.msg].filter(Boolean).join(' '),
+    );
+    if (upstreamError) codes.push(TGPAY_UPSTREAM_ERROR);
     throw new TgpayError(
       `${label} ${path} failed (HTTP ${response.status}): ${detail}`,
       codes,
       response.status,
-      // 4xx with a JSON body = they parsed us and said no. 5xx and 2xx-without-
-      // data are ambiguous: the request may have been accepted.
-      (response.status >= 400 && response.status < 500) || payoutDisabled,
+      // 4xx with a JSON body = they parsed us and said no. 5xx, a 4xx wrapping
+      // an upstream server error, and 2xx-without-data are ambiguous: the
+      // request may have been accepted.
+      (response.status >= 400 && response.status < 500 && !upstreamError) ||
+        payoutDisabled,
     );
   }
   return parsed.data;

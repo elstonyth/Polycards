@@ -4,13 +4,19 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
-import type { ICustomerModuleService } from '@medusajs/framework/types';
+import type {
+  FilterableCustomerProps,
+  ICustomerModuleService,
+} from '@medusajs/framework/types';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
 import type { PlayerLedgerSort } from '../../../modules/packs/service';
 import { resolveFxRate } from '../../../modules/packs/pricing';
 import { isPartnerGroup } from '../../../modules/packs/group-policy';
-import { effectivePlayerGroup } from '../../../modules/packs/odds-sets';
+import {
+  effectivePlayerGroup,
+  isDefaultPlayerGroup,
+} from '../../../modules/packs/odds-sets';
 import {
   mintPartnerAccount,
   type PartnerAccountRow,
@@ -70,8 +76,43 @@ export async function GET(
       ? rawQ.trim().slice(0, 100)
       : undefined;
 
+  // ?group= (spec 2026-10-14-admin-finance-pages §8): `default` is everyone
+  // outside a non-default group (the odds engine's rule, so ungrouped counts);
+  // a group id is that group's members. Anything else is refused, not ignored:
+  // a dropped filter would list every player as if it matched.
+  const rawGroup = req.query.group;
+  if (
+    rawGroup !== undefined &&
+    rawGroup !== '' &&
+    (typeof rawGroup !== 'string' ||
+      !(rawGroup === 'default' || /^cusgroup_[A-Za-z0-9]+$/.test(rawGroup)))
+  ) {
+    // The input is not echoed back: say what is accepted instead.
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Invalid `group` filter: use `default` or a customer group id.',
+    );
+  }
+  let group = typeof rawGroup === 'string' && rawGroup ? rawGroup : null;
+
   const customers = req.scope.resolve<ICustomerModuleService>(Modules.CUSTOMER);
   const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+
+  // The DEFAULT group's own id means `default` (everyone outside a
+  // non-default group, ungrouped included), never "its stored members":
+  // every sign-up joins it, so that list would be every customer. A group
+  // that is gone (or never was) has no members to list.
+  if (group && group !== 'default') {
+    const [found] = await customers.listCustomerGroups(
+      { id: group },
+      { select: ['id', 'name', 'metadata'] },
+    );
+    if (!found) {
+      res.json({ total: 0, offset, limit, players: [] });
+      return;
+    }
+    if (isDefaultPlayerGroup(found)) group = 'default';
+  }
 
   const { key: sortKey, dir: sortDir } = parseSortParam(
     req.query.sort,
@@ -107,14 +148,36 @@ export async function GET(
   // ponytail: to-many `groups` join under skip/take — Medusa paginates on the
   // customer, and players-list.spec.ts pages limit=1 with a grouped customer in
   // the set, so this holds; revisit only if a page ever short-counts.
-  const filters = byHandle
+  let filters: { id?: string[] | { $nin: string[] }; q?: string } = byHandle
     ? { id: [...new Set([byHandle, ...textIds])] }
     : q
       ? { q }
       : {};
+  // The group narrows whatever the search matched.
+  const include =
+    group && group !== 'default' ? await packs.groupMemberIds(group) : null;
+  const exclude =
+    group === 'default' ? new Set(await packs.nonDefaultMemberIds()) : null;
+  if (include) {
+    const members = new Set(include);
+    filters = Array.isArray(filters.id)
+      ? { id: filters.id.filter((id) => members.has(id)) }
+      : { ...filters, id: include };
+  } else if (exclude && exclude.size > 0) {
+    filters = Array.isArray(filters.id)
+      ? { id: filters.id.filter((id) => !exclude.has(id)) }
+      : { ...filters, id: { $nin: [...exclude] } };
+  }
+  // $nin is a real operator in Medusa's filter layer; its public type only
+  // declares the plain forms.
+  const customerFilters = filters as FilterableCustomerProps;
+  if (Array.isArray(filters.id) && filters.id.length === 0) {
+    res.json({ total: 0, offset, limit, players: [] });
+    return;
+  }
   const [page, total] = LEDGER_SORTS.has(sortKey)
     ? await ledgerSortedPage()
-    : await customers.listAndCountCustomers(filters, {
+    : await customers.listAndCountCustomers(customerFilters, {
         skip: offset,
         take: limit,
         order,
@@ -124,20 +187,23 @@ export async function GET(
   // The same filters, ordered by a ledger total: the sorted ids come from
   // SQL, then the customers are loaded and put back in that order.
   async function ledgerSortedPage() {
-    const scope =
-      filters.id ??
-      (q
-        ? (
-            await customers.listCustomers(
-              { q },
-              { select: ['id'], take: MAX_SORTED_MATCHES },
-            )
-          ).map((c) => c.id)
-        : null);
+    // An explicit id list (a handle match, or a group's members) is the
+    // scope; a text search resolves to its matches, the group included.
+    const scope = filters.q
+      ? (
+          await customers.listCustomers(customerFilters, {
+            select: ['id'],
+            take: MAX_SORTED_MATCHES,
+          })
+        ).map((c) => c.id)
+      : Array.isArray(filters.id)
+        ? filters.id
+        : null;
     const sorted = await packs.playerIdsByLedger({
       key: sortKey as PlayerLedgerSort,
       dir: sortDir,
       ids: scope,
+      excludeIds: exclude ? [...exclude] : undefined,
       limit,
       offset,
     });
@@ -184,6 +250,9 @@ export async function GET(
         name,
         phone: c.phone ?? null,
         groups: (c.groups ?? []).map((g) => g.name),
+        // The EFFECTIVE player group (the odds engine's rule), null = the
+        // default group; groups[0] is just whichever membership came first.
+        player_group: effective?.name ?? null,
         vip_level: agg.vipLevel.get(c.id) ?? 1,
         wallet_balance: (w?.balanceCents ?? 0) / 100,
         vault_value: (v?.cents ?? 0) / 100,

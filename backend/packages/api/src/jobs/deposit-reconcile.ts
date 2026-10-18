@@ -7,14 +7,17 @@ import {
   alertPayinVerifyFail,
   applyDepositOutcome,
   anyGatewayEnabled,
-  isPayinVerifyFail,
+  sweepAlertsVerifyFail,
 } from '../modules/packs/gateway-deposit';
 import {
+  GATEWAYS,
   getDepositDetail,
   resolveActiveGateway,
+  rowGateway,
   rowGatewayConfigs,
 } from '../modules/packs/gateway';
 import { toOptionalMoney } from '../modules/packs/money';
+import { alertOps } from '../modules/packs/ops-alert';
 import {
   GATEWAY_EXPIRED_RETRY_BATCH,
   GATEWAY_EXPIRED_RETRY_MS,
@@ -70,6 +73,13 @@ let expiredCursor: Date | null = null;
 export function __resetFullSweepMarkerForTests(): void {
   lastFullSweepAt = null;
   expiredCursor = null;
+}
+
+/** The RM ceiling a requeried credit may reach on this row: its gateway's own
+ *  (A3Pay's S$5,000 top-ups pass RM 10,000), else the site-wide one. */
+function depositCeiling(deposit: { gateway?: string | null }): number {
+  const gateway = rowGateway(deposit);
+  return gateway ? GATEWAYS[gateway].limits.depositMax : GATEWAY_MAX_RM;
 }
 
 export default async function depositReconcileJob(container: MedusaContainer) {
@@ -186,7 +196,7 @@ export default async function depositReconcileJob(container: MedusaContainer) {
           config,
           rowFx(deposit),
         );
-        if (isPayinVerifyFail(deposit.gateway, detail.statusId)) {
+        if (sweepAlertsVerifyFail(deposit, detail.statusId)) {
           alertPayinVerifyFail(container, deposit);
         }
         action = reconcileAction({
@@ -194,6 +204,8 @@ export default async function depositReconcileJob(container: MedusaContainer) {
           amount: Number(detail.amount),
           createdAt: new Date(deposit.created_at),
           now,
+          lock: { fx: rowFx(deposit), reported: Number(detail.reportedAmount) },
+          ceiling: depositCeiling(deposit),
         });
       } catch (error) {
         // A refusal we cannot attribute must never write a row off — a rotated
@@ -237,7 +249,8 @@ export default async function depositReconcileJob(container: MedusaContainer) {
 
       if (action.kind === 'wait') continue;
 
-      // Requeried above the deposit ceiling. Quarantine, exactly as the callback
+      // Requeried above the deposit ceiling, or (a row locked in another
+      // currency) at a sum off its lock. Quarantine, exactly as the callback
       // route does: no credit, and NOT written off — the row keeps whatever
       // status it already had, so a 'pending' one is seen again next sweep and
       // an 'expired' one (reached via the second scan tier) is seen again for as
@@ -252,8 +265,18 @@ export default async function depositReconcileJob(container: MedusaContainer) {
       // ever stops holding, this is the property that has to be revisited.
       if (action.kind === 'quarantine') {
         quarantined += 1;
+        // Off the lock is a slip at the gateway with a customer possibly
+        // owed money: an operator must see it, not only the log.
+        if (action.reason === 'off-lock') {
+          void alertOps(
+            container,
+            `deposit-off-lock:${deposit.merchant_transaction_id}`,
+            `Deposit ${deposit.merchant_transaction_id} (customer ${deposit.customer_id}): the gateway reports ${detail?.reportedAmount} paid, but the order was locked at ${deposit.gateway_amount}. Not credited and left pending. Check the gateway's record; if the customer paid, have the gateway correct the order so its callback credits it. Never credit it by admin adjustment.`,
+            { muteMs: 6 * 60 * 60 * 1000 },
+          );
+        }
         logger.error(
-          `[deposit-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, above the RM ${GATEWAY_MAX_RM} deposit ceiling — not credited, not written off; left ${deposit.status} for manual settlement`,
+          `[deposit-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, ${action.reason === 'off-lock' ? `${detail?.reportedAmount} in the gateway's currency, more than a nudge from the row's locked ${deposit.gateway_amount}` : `above the RM ${depositCeiling(deposit)} deposit ceiling`} — not credited, not written off; left ${deposit.status} for manual settlement`,
         );
         continue;
       }

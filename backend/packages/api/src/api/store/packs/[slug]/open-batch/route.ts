@@ -11,7 +11,10 @@ import { PACKS_MODULE } from '../../../../../modules/packs';
 import { FREE_WELCOME_CATEGORY } from '../../../../../modules/packs/free-pack';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import { toMoney } from '../../../../../modules/packs/money';
-import { bonusShareMyr } from '../../../../../modules/packs/bonus-credit';
+import {
+  bonusShareMyr,
+  sellbackHoldBp,
+} from '../../../../../modules/packs/bonus-credit';
 import { STALE_GIFT_MESSAGE } from '../../../../../modules/packs/pack-gifts';
 import {
   FLAT_PERCENT,
@@ -150,6 +153,12 @@ export async function POST(
         Number(c.market_multiplier ?? DEFAULT_MARKET_MULTIPLIER),
       ]),
     );
+    // Lossless windows read ONCE for the batch, from its earliest rolled_at:
+    // a per-roll read inside the Promise.all below doubled the connections a
+    // batch holds at once. Every roll still decides at its own rolled_at.
+    const windows = await packsService.losslessWindows(
+      Math.min(...result.pulls.map((p) => new Date(p.rolled_at).getTime())),
+    );
 
     rolls = await Promise.all(
       result.rolls.map(async (card, i) => {
@@ -172,9 +181,13 @@ export async function POST(
             instant_closed_at: null,
           },
           marketPriceMyr,
+          undefined,
+          pull.source,
+          windows,
         );
-        // Gift and bonus rows: that share of a sale must be played through.
-        const bonusBp = Number(pull.bonus_bp ?? 0);
+        // Bonus rows: that share of a sale must be played through. A gift
+        // row's sale is not held (ADR 0012).
+        const bonusBp = sellbackHoldBp(pull);
         const vaultAmount = buybackAmount(marketPriceMyr, FLAT_PERCENT);
         return {
           pull,
