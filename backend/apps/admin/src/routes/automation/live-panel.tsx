@@ -15,6 +15,7 @@ import type {
   LiveConfig,
   LiveSnapshot,
 } from '../../../../../packages/api/src/api/utils/automation-live-types';
+import { DEFAULT_LIVE_TIMING } from '../../../../../packages/api/src/api/utils/automation-live-types';
 import { rm } from '../../lib/format';
 
 declare const __BACKEND_URL__: string;
@@ -56,10 +57,14 @@ export function LivePanel() {
     queryKey: KEY,
     queryFn: ({ signal }) => requestLive(undefined, signal),
     retry: false,
-    refetchInterval: (query) =>
-      query.state.data?.status === 'running' || query.state.data?.pending
-        ? 3000
-        : false,
+    refetchInterval: (query) => {
+      const state = query.state.data;
+      if (state?.pending) return 3000;
+      if (state?.status !== 'running') return false;
+      return state.nextRunAt && state.nextRunAt - Date.now() > 15000
+        ? 10000
+        : 3000;
+    },
   });
   const action = useMutation({
     mutationFn: (input: Record<string, unknown>) => requestLive(input),
@@ -71,14 +76,16 @@ export function LivePanel() {
     onSettled: () => cache.invalidateQueries({ queryKey: KEY }),
   });
   const state = query.data;
-  const config = draft ??
-    state?.config ?? {
-      packSlug: '',
-      customerIds: [],
-      intervalSeconds: 5,
-      maxCyclesPerAccount: 1,
-      maxSpendMyr: 800,
-    };
+  const config = {
+    ...DEFAULT_LIVE_TIMING,
+    ...(draft ??
+      state?.config ?? {
+        packSlug: '',
+        customerIds: [],
+        intervalSeconds: 5,
+        maxCyclesPerAccount: 1,
+      }),
+  };
   const active =
     state?.status === 'running' ||
     state?.status === 'paused' ||
@@ -93,6 +100,9 @@ export function LivePanel() {
   ];
   const names = new Map(
     state?.accounts.map((account) => [account.id, account.name]),
+  );
+  const schedules = new Map(
+    state?.schedules?.map((row) => [row.customerId, row]),
   );
   return (
     <>
@@ -140,6 +150,14 @@ export function LivePanel() {
               verifies total and bonus balances. Stop lets any current
               settlement finish.
             </Text>
+            {state?.status === 'running' &&
+              state.nextRunAt &&
+              !state.pending && (
+                <Text size="small" className="text-ui-fg-subtle">
+                  Next scheduled check:{' '}
+                  {new Date(state.nextRunAt).toLocaleString()}
+                </Text>
+              )}
           </div>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -241,18 +259,83 @@ export function LivePanel() {
             </Select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="live-interval">Interval (seconds)</Label>
-            <Input
-              id="live-interval"
-              type="number"
-              min={2}
-              max={86400}
-              value={config.intervalSeconds}
-              onChange={(event) =>
-                update('intervalSeconds', Number(event.target.value))
+            <Label htmlFor="live-timing">Draw timing</Label>
+            <Select
+              value={config.timingMode}
+              onValueChange={(value) =>
+                update(
+                  'timingMode',
+                  value as NonNullable<LiveConfig['timingMode']>,
+                )
               }
-            />
+              disabled={active || busy}
+            >
+              <Select.Trigger id="live-timing">
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
+                <Select.Item value="fixed">Fixed interval</Select.Item>
+                <Select.Item value="random">Random interval</Select.Item>
+                <Select.Item value="humanized">Humanized</Select.Item>
+              </Select.Content>
+            </Select>
           </div>
+          {config.timingMode === 'fixed' && (
+            <div className="space-y-2">
+              <Label htmlFor="live-interval">Interval (seconds)</Label>
+              <Input
+                id="live-interval"
+                type="number"
+                min={2}
+                max={86400}
+                value={config.intervalSeconds}
+                onChange={(event) =>
+                  update('intervalSeconds', Number(event.target.value))
+                }
+              />
+            </div>
+          )}
+          {config.timingMode === 'random' &&
+            (['randomMinSeconds', 'randomMaxSeconds'] as const).map((key) => (
+              <div className="space-y-2" key={key}>
+                <Label htmlFor={`live-${key}`}>
+                  {key === 'randomMinSeconds'
+                    ? 'Minimum interval (seconds)'
+                    : 'Maximum interval (seconds)'}
+                </Label>
+                <Input
+                  id={`live-${key}`}
+                  type="number"
+                  min={2}
+                  max={86400}
+                  value={config[key]}
+                  onChange={(event) => update(key, Number(event.target.value))}
+                />
+              </div>
+            ))}
+          {config.timingMode === 'humanized' && (
+            <div className="space-y-2">
+              <Label htmlFor="live-region">Humanized region</Label>
+              <Select
+                value={config.humanizedRegion}
+                onValueChange={(value) =>
+                  update(
+                    'humanizedRegion',
+                    value as NonNullable<LiveConfig['humanizedRegion']>,
+                  )
+                }
+                disabled={active || busy}
+              >
+                <Select.Trigger id="live-region">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  <Select.Item value="mysg">Malaysia / Singapore</Select.Item>
+                  <Select.Item value="global">Global mix</Select.Item>
+                </Select.Content>
+              </Select>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="live-cycles">Cycles per account</Label>
             <Input
@@ -266,21 +349,19 @@ export function LivePanel() {
               }
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="live-spend">Run spend limit (MYR)</Label>
-            <Input
-              id="live-spend"
-              type="number"
-              min={0.01}
-              max={8000}
-              step="0.01"
-              value={config.maxSpendMyr}
-              onChange={(event) =>
-                update('maxSpendMyr', Number(event.target.value))
-              }
-            />
-          </div>
         </fieldset>
+        {config.timingMode === 'humanized' && (
+          <Text size="small" className="mt-3 text-ui-fg-subtle">
+            Humanized timing follows each account’s regional sleep, activity
+            sessions and persona intervals on the real clock. Accounts can wait
+            hours for a session; waiting accounts do not block others.
+          </Text>
+        )}
+        <Text size="small" className="mt-3 text-ui-fg-subtle">
+          No total spend cap. Runs finish the selected cycles while account
+          balances cover each draw. Each draw appears in the storefront’s recent
+          pulls feed, including cards sold back.
+        </Text>
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
           <Heading level="h3">
             Customer accounts · {config.customerIds.length} selected
@@ -334,6 +415,17 @@ export function LivePanel() {
                     : rm(account.balance)}{' '}
                   · {account.status}
                 </span>
+                {state.config?.timingMode === 'humanized' &&
+                  schedules.has(account.id) && (
+                    <span className="block text-ui-fg-subtle">
+                      {schedules.get(account.id)!.humanized.label} ·{' '}
+                      {state!.cycles.filter(
+                        (cycle) => cycle.customerId === account.id,
+                      ).length >= config.maxCyclesPerAccount
+                        ? 'Completed'
+                        : `${schedules.get(account.id)!.waitReason} · ${new Date(schedules.get(account.id)!.nextRunAt).toLocaleString()}`}
+                    </span>
+                  )}
               </span>
             </label>
           ))}

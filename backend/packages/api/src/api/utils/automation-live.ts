@@ -1,4 +1,11 @@
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
+import { automationDelayMs } from './automation-config';
+import {
+  createHumanizedState,
+  planHumanized,
+  recordHumanizedCycle,
+} from './automation-humanized';
+import { DEFAULT_LIVE_TIMING } from './automation-live-types';
 import type {
   LiveConfig,
   LiveCycle,
@@ -19,18 +26,16 @@ export function createLiveState(): LiveState {
     pending: null,
     cycles: [],
     error: null,
+    schedules: [],
   };
 }
 
-function nextCustomer(state: LiveState): string | undefined {
+const timingRandom = () => randomInt(1_000_000) / 1_000_000;
+
+function remainingCustomers(state: LiveState): string[] {
   const { config } = state;
-  if (
-    !config ||
-    state.spentCents + state.packPriceCents >
-      Math.round(config.maxSpendMyr * 100)
-  )
-    return undefined;
-  return config.customerIds.find(
+  if (!config) return [];
+  return config.customerIds.filter(
     (id) =>
       state.cycles.filter((cycle) => cycle.customerId === id).length <
       config.maxCyclesPerAccount,
@@ -40,6 +45,7 @@ function nextCustomer(state: LiveState): string | undefined {
 export function claimLiveCycle(
   state: LiveState,
   now: number,
+  random: () => number = timingRandom,
 ): LiveCycle | null {
   if (state.pending) {
     // shortcut: interrupted money operations need operator review; never replay an uncertain debit.
@@ -55,11 +61,36 @@ export function claimLiveCycle(
     (state.nextRunAt ?? 0) > now
   )
     return null;
-  const customerId = nextCustomer(state);
-  if (!customerId) {
+  const remaining = remainingCustomers(state);
+  if (!remaining.length) {
     state.status = 'completed';
     state.nextRunAt = null;
     return null;
+  }
+  let customerId = remaining[0];
+  if (state.config.timingMode === 'humanized') {
+    state.schedules = remaining.map((id) => {
+      const previous = state.schedules?.find((row) => row.customerId === id);
+      if (previous && previous.nextRunAt > now) return previous;
+      const humanized = previous
+        ? { ...previous.humanized }
+        : createHumanizedState(
+            id,
+            state.config!.humanizedRegion ??
+              DEFAULT_LIVE_TIMING.humanizedRegion,
+          );
+      const plan = planHumanized(humanized, now, random);
+      return {
+        customerId: id,
+        humanized,
+        nextRunAt: now + plan.delayMs,
+        waitReason: plan.reason,
+      };
+    });
+    state.nextRunAt = Math.min(...state.schedules.map((row) => row.nextRunAt));
+    const ready = state.schedules.find((row) => row.nextRunAt <= now);
+    if (!ready) return null;
+    customerId = ready.customerId;
   }
   state.pending = {
     id: randomUUID(),
@@ -75,6 +106,7 @@ export function completeLiveCycle(
   state: LiveState,
   cycle: LiveCycle,
   now: number,
+  random: () => number = timingRandom,
 ): void {
   if (state.pending?.id !== cycle.id)
     throw new Error('Live cycle ownership changed. Review the ledger.');
@@ -93,13 +125,56 @@ export function completeLiveCycle(
   }
   if (
     (state.status === 'running' || state.status === 'paused') &&
-    !nextCustomer(state)
+    !remainingCustomers(state).length
   )
     state.status = 'completed';
-  state.nextRunAt =
-    state.status === 'running' && state.config
-      ? now + state.config.intervalSeconds * 1000
-      : null;
+  if (
+    state.config?.timingMode === 'humanized' &&
+    !cycle.error &&
+    cycle.differenceCents === 0 &&
+    cycle.bonusDifferenceCents === 0
+  ) {
+    const schedule = state.schedules?.find(
+      (row) => row.customerId === cycle.customerId,
+    );
+    if (schedule) {
+      recordHumanizedCycle(schedule.humanized, now, random);
+      const plan = planHumanized(schedule.humanized, now, random);
+      schedule.nextRunAt = now + plan.delayMs;
+      schedule.waitReason = plan.reason;
+    }
+  }
+  state.nextRunAt = null;
+  if (state.status === 'running' && state.config) {
+    if (state.config.timingMode === 'humanized') {
+      const remaining = new Set(remainingCustomers(state));
+      const due =
+        state.schedules
+          ?.filter((row) => remaining.has(row.customerId))
+          .map((row) => row.nextRunAt) ?? [];
+      state.nextRunAt = Math.max(
+        now + 2000,
+        due.length ? Math.min(...due) : now + 2000,
+      );
+    } else {
+      state.nextRunAt =
+        now +
+        automationDelayMs(
+          {
+            timingMode:
+              state.config.timingMode ?? DEFAULT_LIVE_TIMING.timingMode,
+            fixedIntervalSeconds: state.config.intervalSeconds,
+            randomMinSeconds:
+              state.config.randomMinSeconds ??
+              DEFAULT_LIVE_TIMING.randomMinSeconds,
+            randomMaxSeconds:
+              state.config.randomMaxSeconds ??
+              DEFAULT_LIVE_TIMING.randomMaxSeconds,
+          },
+          random,
+        );
+    }
+  }
 }
 
 export function validateLiveConfig(
@@ -108,7 +183,7 @@ export function validateLiveConfig(
 ): LiveConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('Provide live run settings.');
-  const input = value as Record<string, unknown>;
+  const input: Record<string, unknown> = { ...DEFAULT_LIVE_TIMING, ...value };
   if (
     Object.keys(input).some(
       (key) =>
@@ -117,7 +192,11 @@ export function validateLiveConfig(
           'customerIds',
           'intervalSeconds',
           'maxCyclesPerAccount',
-          'maxSpendMyr',
+          'maxSpendMyr', // Accepted from older clients, discarded below.
+          'timingMode',
+          'randomMinSeconds',
+          'randomMaxSeconds',
+          'humanizedRegion',
         ].includes(key),
     ) ||
     typeof input.packSlug !== 'string' ||
@@ -138,19 +217,30 @@ export function validateLiveConfig(
     !Number.isInteger(input.maxCyclesPerAccount) ||
     Number(input.maxCyclesPerAccount) < 1 ||
     Number(input.maxCyclesPerAccount) > 10 ||
-    typeof input.maxSpendMyr !== 'number' ||
-    !Number.isFinite(input.maxSpendMyr) ||
-    input.maxSpendMyr < 0.01 ||
-    input.maxSpendMyr > 8000 ||
-    Math.abs(input.maxSpendMyr * 100 - Math.round(input.maxSpendMyr * 100)) >
-      0.000001
+    typeof input.timingMode !== 'string' ||
+    !['fixed', 'random', 'humanized'].includes(input.timingMode) ||
+    typeof input.humanizedRegion !== 'string' ||
+    !['mysg', 'global'].includes(input.humanizedRegion) ||
+    ![input.randomMinSeconds, input.randomMaxSeconds].every(
+      (number) =>
+        Number.isInteger(number) &&
+        Number(number) >= 2 &&
+        Number(number) <= 86400,
+    ) ||
+    Number(input.randomMinSeconds) > Number(input.randomMaxSeconds)
   )
     throw new Error(
-      'Choose a paid pack, 1–80 monitored customer accounts, 2–86400 seconds, 1–10 cycles and a spend limit up to RM8,000 (two decimals).',
+      'Choose a paid pack, 1–80 monitored customers, Fixed/Random/Humanized timing, 2–86400 second intervals with minimum no greater than maximum, a supported region and 1–10 cycles per account.',
     );
   return {
-    ...input,
+    packSlug: input.packSlug,
     customerIds: [...input.customerIds],
+    intervalSeconds: input.intervalSeconds,
+    maxCyclesPerAccount: input.maxCyclesPerAccount,
+    timingMode: input.timingMode,
+    randomMinSeconds: input.randomMinSeconds,
+    randomMaxSeconds: input.randomMaxSeconds,
+    humanizedRegion: input.humanizedRegion,
   } as unknown as LiveConfig;
 }
 

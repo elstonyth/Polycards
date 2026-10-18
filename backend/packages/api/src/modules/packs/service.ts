@@ -7499,7 +7499,7 @@ class PacksModuleService extends MedusaService({
   // an optional TIER filter. Raw SQL rather than listPulls because the tier is
   // a join: rarity is a PACK-level property (pack_odds), not a column on pull,
   // so "the last N Immortal pulls" needs the (pack_id, card_id) odds row.
-  // Only source='pack' rows — bonus-funded board eligibility is separate.
+  // Paid draws include bonus-funded opens; gift/reward/free pulls stay private.
   // (reward prizes are private vault items, free welcome pulls a signup gift).
   // The scan rides IDX_pull_rolled_at and stops at `limit` matches; a tier
   // nobody has hit yet walks the whole ledger, once per 5s (the route's cache).
@@ -7519,7 +7519,7 @@ class PacksModuleService extends MedusaService({
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const params: unknown[] = [];
-    let where = "p.deleted_at IS NULL AND p.source = 'pack'";
+    let where = "p.deleted_at IS NULL AND p.source IN ('pack', 'bonus')";
     if (opts.packId) {
       where += ' AND p.pack_id = ?';
       params.push(opts.packId);
@@ -7557,14 +7557,14 @@ class PacksModuleService extends MedusaService({
     const rows = await em.execute<{ n: number | string }[]>(
       'WITH last_hit AS (' +
         '  SELECT p.rolled_at, p.id FROM pull p ' +
-        "   WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
+        "   WHERE p.deleted_at IS NULL AND p.source IN ('pack', 'bonus')" +
         packSql +
         '     AND ' +
         PULL_TIER_SQL +
         '   ORDER BY p.rolled_at DESC, p.id DESC LIMIT 1' +
         ') ' +
         'SELECT COUNT(*)::int AS n FROM pull p ' +
-        " WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
+        " WHERE p.deleted_at IS NULL AND p.source IN ('pack', 'bonus')" +
         packSql +
         '   AND (NOT EXISTS (SELECT 1 FROM last_hit) ' +
         '        OR (p.rolled_at, p.id) > (SELECT rolled_at, id FROM last_hit))',
@@ -7613,7 +7613,7 @@ class PacksModuleService extends MedusaService({
       PULL_TIER_SQL +
       ' AS hit ' +
       '    FROM pull p ' +
-      "   WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
+      "   WHERE p.deleted_at IS NULL AND p.source IN ('pack', 'bonus')" +
       packSql +
       '), hits AS (' +
       '  SELECT id, customer_id, rolled_at, n, ' +
