@@ -4,6 +4,7 @@ import type {
   LiveSnapshot,
 } from '../../../../../packages/api/src/api/utils/automation-live-types';
 import { getLiveAccountActivity } from './live-account-activity';
+import { refreshLiveRankGoals } from '../../../../../packages/api/src/api/utils/automation-live-rank';
 
 const now = Date.UTC(2026, 9, 18, 14);
 const cycle: LiveCycle = {
@@ -60,6 +61,67 @@ function snapshot(overrides: Partial<LiveSnapshot> = {}): LiveSnapshot {
 }
 
 describe('Live account activity', () => {
+  it('shows goal results separately from cycle completion and excludes accounts without goals', () => {
+    const state = snapshot({ cycles: [cycle], schedules: [] });
+    state.config!.rankTargets = [
+      { customerId: 'a', period: 'weekly', targetRank: 1 },
+    ];
+    refreshLiveRankGoals(state, [], now);
+    expect(getLiveAccountActivity(state, 'b', true, now).label).toBe(
+      'No rank goal',
+    );
+    expect(getLiveAccountActivity(state, 'a', true, now)).toMatchObject({
+      label: 'Rank data unavailable',
+      settledCycles: 1,
+    });
+    state.rankGoals![0].done = true;
+    state.rankGoals![0].status.state = 'limited';
+    expect(getLiveAccountActivity(state, 'a', true, now).label).toBe(
+      'Goal limit reached',
+    );
+    state.rankGoals![0].status.state = 'secured';
+    expect(getLiveAccountActivity(state, 'a', true, now).label).toBe(
+      'Rank goal reached',
+    );
+  });
+
+  it('keeps paused and failed run precedence over a waiting rank goal', () => {
+    const state = snapshot();
+    state.config!.rankTargets = [
+      { customerId: 'a', period: 'weekly', targetRank: 1 },
+    ];
+    refreshLiveRankGoals(state, [], now);
+    state.status = 'paused';
+    expect(getLiveAccountActivity(state, 'a', true, now).label).toBe('Paused');
+    state.status = 'failed';
+    expect(getLiveAccountActivity(state, 'a', true, now).label).toBe('Blocked');
+  });
+
+  it('skips accounts without a goal when describing the fixed draw queue', () => {
+    const state = snapshot({ schedules: [] });
+    state.config!.timingMode = 'fixed';
+    state.config!.rankTargets = [
+      { customerId: 'b', period: 'weekly', targetRank: 1 },
+    ];
+    refreshLiveRankGoals(
+      state,
+      [
+        {
+          customerId: 'b',
+          periodKey: 'week',
+          observedAt: now,
+          ownPulls: 0,
+          ownValueMyr: 0,
+          entries: [{ customerId: 'external', pulls: 1, valueMyr: 100 }],
+        },
+      ],
+      now,
+    );
+    expect(getLiveAccountActivity(state, 'b', true, now)).toMatchObject({
+      label: 'Waiting',
+      reason: 'Waiting for the configured draw interval.',
+    });
+  });
   it.each([
     'Between activity sessions',
     'Session break',

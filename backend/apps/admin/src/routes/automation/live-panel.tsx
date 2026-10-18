@@ -19,6 +19,7 @@ import { DEFAULT_LIVE_TIMING } from '../../../../../packages/api/src/api/utils/a
 import { rm } from '../../lib/format';
 import { getLiveAccountActivity } from './live-account-activity';
 import type { LiveAccountActivity } from './live-account-activity';
+import { LiveRankSettings } from './live-rank-settings';
 
 declare const __BACKEND_URL__: string;
 const KEY = ['automation-live'];
@@ -392,9 +393,16 @@ export function LivePanel() {
         )}
         <Text size="small" className="mt-3 text-ui-fg-subtle">
           No total spend cap. Runs finish the selected cycles while account
-          balances cover each draw. Each draw appears in the storefront’s recent
-          pulls feed, including cards sold back.
+          balances cover each draw, or stop earlier when rank goals finish. Each
+          draw appears in the storefront’s recent pulls feed, including cards
+          sold back.
         </Text>
+        <LiveRankSettings
+          config={config}
+          state={state}
+          disabled={active || busy || !state}
+          onChange={setDraft}
+        />
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
           <Heading level="h3">
             Customer accounts · {config.customerIds.length} selected

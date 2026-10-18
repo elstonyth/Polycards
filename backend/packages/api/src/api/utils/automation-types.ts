@@ -13,7 +13,7 @@ export interface AutomationConfig {
 export interface AutomationRankTarget {
   profileId: string;
   period: 'weekly' | 'alltime';
-  mode: 'monitor' | 'shadow' | 'test';
+  mode: 'monitor' | 'shadow' | 'test' | 'live';
   goal: 'reach' | 'maintain';
   targetRank: number;
   secureBufferMyr: number;

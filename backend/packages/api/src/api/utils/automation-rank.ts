@@ -88,6 +88,7 @@ export function validateRankTargets(value: unknown): AutomationRankTarget[] {
 export interface RankObservation {
   periodKey: string;
   observedAt: number;
+  validUntil?: number;
   customerId: string;
   ownPulls: number;
   ownValueMyr: number;
@@ -113,7 +114,10 @@ export function createRankRuntime(
 ): RankRuntime {
   return {
     target,
-    expiresAt: now + target.maxDurationMinutes * 60_000,
+    expiresAt:
+      target.mode === 'live'
+        ? Number.MAX_SAFE_INTEGER
+        : now + target.maxDurationMinutes * 60_000,
     periodKey: null,
     lastObservation: null,
     heldSamples: 0,
@@ -123,7 +127,10 @@ export function createRankRuntime(
     lastOwnPulls: 0,
     status: {
       state: 'ready',
-      reason: 'Waiting for a fresh sandbox leaderboard.',
+      reason:
+        target.mode === 'live'
+          ? 'Waiting for a fresh live leaderboard.'
+          : 'Waiting for a fresh sandbox leaderboard.',
       period: target.period,
       mode: target.mode,
       targetRank: target.targetRank,
@@ -162,7 +169,7 @@ function decision(
     state,
     reason,
     wouldDraw: draw,
-    eligible: draw && runtime.target.mode === 'test',
+    eligible: draw && ['test', 'live'].includes(runtime.target.mode),
   });
   if (done) status.stopReason = reason;
   return {
@@ -216,6 +223,9 @@ export function evaluateRank(
     !Number.isFinite(observation.observedAt) ||
     now - observation.observedAt > 15_000 ||
     observation.observedAt > now ||
+    (observation.validUntil !== undefined &&
+      (!Number.isFinite(observation.validUntil) ||
+        observation.validUntil <= now)) ||
     !money(observation.ownValueMyr, 1_000_000_000) ||
     !Number.isInteger(observation.ownPulls) ||
     observation.ownPulls < 0 ||
@@ -233,7 +243,7 @@ export function evaluateRank(
       'Fresh leaderboard data unavailable; holding without drawing.',
       now,
       false,
-      target.mode !== 'test',
+      !['test', 'live'].includes(target.mode),
     );
   }
   if (
@@ -244,7 +254,7 @@ export function evaluateRank(
     return decision(
       runtime,
       'period_changed',
-      'Leaderboard period changed; start a new sandbox run to target the new period.',
+      'Leaderboard period changed; start a new run to target the new period.',
       now,
       false,
       true,
@@ -311,7 +321,7 @@ export function evaluateRank(
     runtime.heldSamples = held ? runtime.heldSamples + 1 : 0;
     runtime.lostSamples = held ? 0 : runtime.lostSamples + 1;
   }
-  const modeDone = target.mode !== 'test';
+  const modeDone = !['test', 'live'].includes(target.mode);
   if (!held) {
     if (boundary && options.ownedCustomerIds.has(boundary.customerId)) {
       return decision(
@@ -374,8 +384,10 @@ export function evaluateRank(
   }
   if (
     options.completedCycles >= Math.min(target.maxCycles, options.maxCycles) ||
-    Math.round(options.spentMyr * 100) + Math.round(options.nextCostMyr * 100) >
-      Math.round(target.maxSpendMyr * 100)
+    (target.mode !== 'live' &&
+      Math.round(options.spentMyr * 100) +
+        Math.round(options.nextCostMyr * 100) >
+        Math.round(target.maxSpendMyr * 100))
   ) {
     return decision(
       runtime,

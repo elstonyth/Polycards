@@ -261,7 +261,11 @@ describe('live automation', () => {
       { intervalSeconds: 1 },
       { intervalSeconds: 5.5 },
       { packSlug: '' },
-      { rankTargets: [] },
+      {
+        rankTargets: [
+          { customerId: 'cus_live', period: 'invalid', targetRank: 1 },
+        ],
+      },
     ])
       expect(() =>
         validateLiveConfig({ ...config, ...input }, ['cus_live']),

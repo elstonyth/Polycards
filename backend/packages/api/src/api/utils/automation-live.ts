@@ -6,6 +6,12 @@ import {
   recordHumanizedCycle,
 } from './automation-humanized';
 import { DEFAULT_LIVE_TIMING } from './automation-live-types';
+import {
+  liveRankReady,
+  nextLiveRankCheck,
+  validateLiveRankTargets,
+} from './automation-live-rank';
+import { markRankDispatched } from './automation-rank';
 import type {
   LiveConfig,
   LiveCycle,
@@ -37,8 +43,13 @@ function remainingCustomers(state: LiveState): string[] {
   if (!config) return [];
   return config.customerIds.filter(
     (id) =>
+      (!config.rankTargets?.length ||
+        config.rankTargets.some((target) => target.customerId === id)) &&
+      !state.rankGoals?.some(
+        (goal) => goal.target.profileId === id && goal.done,
+      ) &&
       state.cycles.filter((cycle) => cycle.customerId === id).length <
-      config.maxCyclesPerAccount,
+        config.maxCyclesPerAccount,
   );
 }
 
@@ -62,12 +73,34 @@ export function claimLiveCycle(
   )
     return null;
   const remaining = remainingCustomers(state);
+  const ranked = !!state.config.rankTargets?.length;
   if (!remaining.length) {
-    state.status = 'completed';
-    state.nextRunAt = null;
+    const done =
+      !ranked ||
+      (!!state.rankGoals?.length && state.rankGoals.every((goal) => goal.done));
+    state.status = done ? 'completed' : 'running';
+    state.nextRunAt = done
+      ? null
+      : Math.max(now + 2000, nextLiveRankCheck(state, now));
     return null;
   }
-  let customerId = remaining[0];
+  const eligible = remaining.filter((id) => liveRankReady(state, id, now));
+  let customerId = eligible[0];
+  if (!customerId) {
+    state.nextRunAt = Math.max(now + 2000, nextLiveRankCheck(state, now));
+    return null;
+  }
+  if (
+    ranked &&
+    state.config.timingMode !== 'humanized' &&
+    (state.nextDrawAt ?? 0) > now
+  ) {
+    state.nextRunAt = Math.min(
+      state.nextDrawAt!,
+      Math.max(now + 2000, nextLiveRankCheck(state, now)),
+    );
+    return null;
+  }
   if (state.config.timingMode === 'humanized') {
     state.schedules = remaining.map((id) => {
       const previous = state.schedules?.find((row) => row.customerId === id);
@@ -87,11 +120,26 @@ export function claimLiveCycle(
         waitReason: plan.reason,
       };
     });
-    state.nextRunAt = Math.min(...state.schedules.map((row) => row.nextRunAt));
-    const ready = state.schedules.find((row) => row.nextRunAt <= now);
+    state.nextRunAt = Math.min(
+      ...state.schedules
+        .filter((row) => eligible.includes(row.customerId))
+        .map((row) => row.nextRunAt),
+    );
+    const ready = state.schedules.find(
+      (row) => row.nextRunAt <= now && eligible.includes(row.customerId),
+    );
+    if (ranked)
+      state.nextRunAt = Math.min(
+        state.nextRunAt,
+        Math.max(now + 2000, nextLiveRankCheck(state, now)),
+      );
     if (!ready) return null;
     customerId = ready.customerId;
   }
+  const goal = state.rankGoals?.find(
+    (row) => row.target.profileId === customerId,
+  );
+  if (ranked && goal) markRankDispatched(goal, now);
   state.pending = {
     id: randomUUID(),
     customerId,
@@ -125,7 +173,8 @@ export function completeLiveCycle(
   }
   if (
     (state.status === 'running' || state.status === 'paused') &&
-    !remainingCustomers(state).length
+    !remainingCustomers(state).length &&
+    !state.config?.rankTargets?.length
   )
     state.status = 'completed';
   if (
@@ -174,6 +223,18 @@ export function completeLiveCycle(
           random,
         );
     }
+    if (state.config.rankTargets?.length) {
+      if (state.config.timingMode !== 'humanized')
+        state.nextDrawAt = state.nextRunAt;
+      const goal = state.rankGoals?.find(
+        (row) => row.target.profileId === cycle.customerId,
+      );
+      if (goal) goal.nextCheckAt = now + 2000;
+      state.nextRunAt = Math.min(
+        state.nextRunAt,
+        Math.max(now + 2000, nextLiveRankCheck(state, now)),
+      );
+    }
   }
 }
 
@@ -197,6 +258,7 @@ export function validateLiveConfig(
           'randomMinSeconds',
           'randomMaxSeconds',
           'humanizedRegion',
+          'rankTargets',
         ].includes(key),
     ) ||
     typeof input.packSlug !== 'string' ||
@@ -241,6 +303,14 @@ export function validateLiveConfig(
     randomMinSeconds: input.randomMinSeconds,
     randomMaxSeconds: input.randomMaxSeconds,
     humanizedRegion: input.humanizedRegion,
+    ...(input.rankTargets === undefined
+      ? {}
+      : {
+          rankTargets: validateLiveRankTargets(
+            input.rankTargets,
+            input.customerIds,
+          ),
+        }),
   } as unknown as LiveConfig;
 }
 
