@@ -332,8 +332,16 @@ medusaIntegrationTestRunner({
       expect(sleeping).toMatchObject({
         status: 'running',
         cycles: [],
-        nextRunAt: clock + 4 * 3600000,
       });
+      // Desktop routines shift sleep by ±75 minutes, daily jitter by ±20,
+      // then add up to ten minutes of stable wake lag.
+      expect(sleeping.nextRunAt).toBeGreaterThanOrEqual(
+        clock + (240 - 95) * 60000,
+      );
+      expect(sleeping.nextRunAt).toBeLessThanOrEqual(
+        clock + (240 + 95 + 10) * 60000,
+      );
+      expect(sleeping.schedules[0].humanized.timerKind).toBe('OFFLINE_END');
       expect(sleeping.schedules[0].waitReason).toContain('Sleeping');
       expect(await tickLive(container, () => clock + 1000)).toBe(false);
       expect(
