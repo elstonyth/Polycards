@@ -26,9 +26,20 @@ describe('bankCountryGroups', () => {
   });
 
   it('keeps a bank in a currency this build has no rail for, with no flag', () => {
-    const USDT = { bankCode: 'TRC20', bankName: 'USDT', currency: 'USDT' };
-    expect(bankCountryGroups([USDT])).toEqual([
-      { country: 'USDT', items: [USDT] },
+    const THB = { bankCode: 'KBANKTH', bankName: 'Kasikorn', currency: 'THB' };
+    expect(bankCountryGroups([THB])).toEqual([
+      { country: 'THB', items: [THB] },
+    ]);
+  });
+
+  it('groups USDT wallets under their own toggle with the Tether mark', () => {
+    const TRC = {
+      bankCode: 'USDTTRC20',
+      bankName: 'USDT · TRC20 (Tron)',
+      currency: 'USDT',
+    };
+    expect(bankCountryGroups([TRC])).toEqual([
+      { country: 'USDT', flag: 'USDT', items: [TRC] },
     ]);
   });
 });

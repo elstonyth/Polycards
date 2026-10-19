@@ -145,7 +145,12 @@ describe('sync-payment-fx', () => {
       rate: 3.4,
       source: 'coinbase',
     });
-    expect(alertOps).not.toHaveBeenCalled();
+    // The job prices USDT too, and this mock serves only SGD: no SGD alert.
+    expect(
+      jest
+        .mocked(alertOps)
+        .mock.calls.filter(([, key]) => String(key).includes('SGD')),
+    ).toEqual([]);
   });
 
   it('prices USDT from Coinbase USDT, falling back to USD by proxy only', async () => {

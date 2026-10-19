@@ -374,15 +374,15 @@ async function depositLegs(admin, cust) {
   const tooBig = await call('POST', '/store/credits/deposit', {
     token: cust,
     body: {
-      amount: 5000,
+      amount: 5001,
       currency: 'SGD',
       payment_method_code: 'OB',
       payer_name: 'TAN AH KOW',
     },
   });
   check(
-    'SGD band enforced (S$5,000 > S$3,000)',
-    tooBig.status === 400,
+    'SGD band enforced (S$5,001 > S$5,000, #785)',
+    tooBig.status === 400 && /5,000/.test(tooBig.json.message ?? ''),
     tooBig.json.message,
   );
   const forged = await fetch(`${API}/hooks/a3pay/deposit`, {

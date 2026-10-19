@@ -228,7 +228,8 @@ describe('USDT wallets in the bank registry', () => {
     expect(
       withdrawalDetailsError({
         bankCode: 'MBBEMYKL',
-        accountNumber: '12345678',
+        // Maybank accounts are 12 digits (#813), so only the name is missing.
+        accountNumber: '123456789012',
       }),
     ).toMatch(/holder name/);
   });
