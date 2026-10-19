@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Badge, Button, Container, Heading, Table, Text } from '@medusajs/ui';
 import {
   ArrowPath,
@@ -18,14 +17,13 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import type { AutomationActivity } from '../../../../../packages/api/src/api/utils/automation-live-types';
 import { rm } from '../../lib/format';
 import { prefersReducedMotion } from '../../lib/use-count-up';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { CountUp } from '../overview/KpiTiles';
 import { TIER_ORDER, ago, tierColor } from './tiers';
+import { useAutomationActivity } from './use-automation-activity';
 
-declare const __BACKEND_URL__: string;
 // Generated, text-free key art (a graded slab in a burst of light).
 const BIG_HIT_ART = new URL('./assets/big-hit.webp', import.meta.url).href;
 
@@ -37,27 +35,6 @@ const WINDOWS = [
 const GRID = 'var(--border-base)';
 const TICK = { fill: 'var(--fg-subtle)', fontSize: 11 };
 const count = (n: number) => Math.round(n).toLocaleString('en-US');
-
-async function readActivity(
-  days: number,
-  signal: AbortSignal,
-): Promise<AutomationActivity> {
-  const response = await fetch(
-    `${__BACKEND_URL__}/admin/automation/activity?days=${days}`,
-    { credentials: 'include', cache: 'no-store', signal },
-  );
-  if (!response.ok) throw new Error(`Activity failed (${response.status}).`);
-  return response.json() as Promise<AutomationActivity>;
-}
-
-export function useAutomationActivity(days: number) {
-  return useQuery({
-    queryKey: ['automation-activity', days],
-    queryFn: ({ signal }) => readActivity(days, signal),
-    refetchInterval: 30_000,
-    placeholderData: (previous) => previous,
-  });
-}
 
 export function TierChip({ rarity }: { rarity: string }) {
   return (
