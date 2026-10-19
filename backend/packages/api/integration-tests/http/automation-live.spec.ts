@@ -3,7 +3,18 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { tickLive } from '../../src/api/utils/automation-live-store';
+import automationLiveJob from '../../src/jobs/automation-live';
 import { mintSuperAdmin, unwrapResponse } from './utils';
+
+// The app's own scheduled job calls tickLive every 2 s. This suite drives
+// every tick itself (often with a fake clock) and counts which call claimed a
+// cycle, so a job tick landing in between made it flaky. Keep the schedule,
+// drop the work.
+jest.mock('../../src/jobs/automation-live', () => ({
+  __esModule: true,
+  default: jest.fn(async () => undefined),
+  config: { name: 'automation-live', schedule: '*/2 * * * * *' },
+}));
 
 jest.setTimeout(240_000);
 
@@ -527,6 +538,8 @@ medusaIntegrationTestRunner({
       } finally {
         disabled.mockRestore();
       }
+      // The scheduler ran the stub, so the real job never raced the ticks above.
+      expect(automationLiveJob).toHaveBeenCalled();
     });
   },
 });
