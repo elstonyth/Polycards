@@ -1,4 +1,7 @@
-import type { HumanizedState } from './automation-humanized';
+import type {
+  HumanizedAssignment,
+  HumanizedState,
+} from './automation-humanized';
 import type { RankRuntime } from './automation-rank';
 
 export interface LiveRankTarget {
@@ -76,6 +79,7 @@ export interface LiveState {
   cycles: LiveCycle[];
   error: string | null;
   schedules?: LiveSchedule[];
+  humanizedAssignments?: HumanizedAssignment[];
   rankGoals?: LiveRankGoal[];
 }
 

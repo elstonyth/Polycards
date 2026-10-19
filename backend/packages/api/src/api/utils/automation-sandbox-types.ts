@@ -1,5 +1,8 @@
 import type { AutomationConfig } from './automation-types';
-import type { HumanizedState } from './automation-humanized';
+import type {
+  HumanizedAssignment,
+  HumanizedState,
+} from './automation-humanized';
 import type { RankRuntime } from './automation-rank';
 
 export interface SandboxProfile {
@@ -48,6 +51,7 @@ export interface SandboxState {
   selectedProfileIds: string[];
   profiles: SandboxProfile[];
   results: SandboxResult[];
+  humanizedAssignments?: HumanizedAssignment[];
   runId: string | null;
   startedAt: number | null;
   finishedAt: number | null;

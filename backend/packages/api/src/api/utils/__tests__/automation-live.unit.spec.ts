@@ -54,7 +54,7 @@ describe('live automation', () => {
     });
     expect(claimLiveCycle(state, now, () => 0.5)).toBeNull();
     expect(state.status).toBe('running');
-    expect(state.nextRunAt).toBe(now + 4 * 3600000);
+    expect(state.nextRunAt).toBe(now + 13_500_000);
     expect(state.schedules?.[0].waitReason).toContain('Sleeping');
     expect(
       claimLiveCycle(JSON.parse(JSON.stringify(state)), now + 1000, () => 0.01),
