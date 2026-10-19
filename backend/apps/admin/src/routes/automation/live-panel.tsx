@@ -304,9 +304,19 @@ export function LivePanel() {
   const runs = [...(run ? [run] : []), ...(state?.history ?? [])];
   const status = STATUS[state?.status ?? 'idle'];
   const runConfig = state?.config;
+  // An account skipped for low balance is done at whatever it reached.
   const planned =
     runConfig && !runConfig.rankTargets?.length
-      ? runConfig.customerIds.length * runConfig.maxCyclesPerAccount
+      ? runConfig.customerIds.reduce(
+          (sum, id) =>
+            sum +
+            (state?.cycles.some((c) => c.customerId === id && c.skipped)
+              ? state.cycles.filter(
+                  (c) => c.customerId === id && settledCycle(c),
+                ).length
+              : runConfig.maxCyclesPerAccount),
+          0,
+        )
       : null;
   const soldCents = run?.soldCents ?? 0;
   const describe = (row: LiveRunSummary) =>
