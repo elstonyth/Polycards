@@ -2,7 +2,7 @@
 // check-in track, and the row order. Split out of TaskHubClient so the rules
 // that decide WHAT a player sees (and in which order) are unit-tested without
 // rendering anything.
-import { rm, rmNbsp } from '@/lib/format';
+import { rm, rm0, rmNbsp } from '@/lib/format';
 import type { TaskEntry, TaskHub } from '@/lib/data/schemas';
 
 export const CREDIT_ART = '/images/task/credits-coins.webp';
@@ -81,41 +81,91 @@ export function rewardArt(reward: TaskEntry['reward']): string | null {
 export const isClaimable = (t: TaskEntry): boolean =>
   t.progress.completed && !t.claimed;
 
-/** The challenge side of a row: which icon a requirement wears and the unit
- *  its "N more … to go" counts in. An unknown type (a backend newer than this
- *  page) falls back to a neutral flag and a bare count — never a crash. */
+/** The challenge side of a row, read the way the boss sketched it: a verb, a
+ *  picture of what to do it to, and how many — "RIP [Bronze Pack] ×10". An
+ *  unknown type (a backend newer than this page) falls back to a neutral GOAL
+ *  with no picture — never a crash. */
 export type ChallengeKind =
-  'rip' | 'pull' | 'vault' | 'level' | 'checkin' | 'other';
+  'rip' | 'pull' | 'vault' | 'level' | 'checkin' | 'topup' | 'other';
 
-const CHALLENGE: Record<
+export interface Challenge {
+  kind: ChallengeKind;
+  verb: string;
+  amount: string;
+  /** What the goal names, pictured: its pack or Pokémon. null = none named,
+   *  or a backend that predates the art — the row shows the kind's icon. */
+  art: string | null;
+}
+
+const GOALS: Record<
   string,
-  { kind: ChallengeKind; one: string; many: string }
+  { kind: ChallengeKind; verb: string; one: string; many: string }
 > = {
-  rip_count: { kind: 'rip', one: 'rip', many: 'rips' },
-  vault_pixel_count: { kind: 'pull', one: 'pull', many: 'pulls' },
-  vault_count: { kind: 'vault', one: 'card', many: 'cards' },
-  reach_level: { kind: 'level', one: 'level', many: 'levels' },
-  checkin_days: { kind: 'checkin', one: 'check-in', many: 'check-ins' },
+  rip_count: { kind: 'rip', verb: 'RIP', one: 'rip', many: 'rips' },
+  vault_pixel_count: { kind: 'pull', verb: 'PULL', one: 'pull', many: 'pulls' },
+  vault_count: { kind: 'vault', verb: 'COLLECT', one: 'card', many: 'cards' },
+  reach_level: { kind: 'level', verb: 'REACH', one: 'level', many: 'levels' },
+  checkin_days: {
+    kind: 'checkin',
+    verb: 'CHECK IN',
+    one: 'check-in',
+    many: 'check-ins',
+  },
+  topup_myr: { kind: 'topup', verb: 'TOP UP', one: '', many: '' },
 };
 
-const challengeOf = (t: TaskEntry) =>
-  Object.hasOwn(CHALLENGE, t.requirement.type)
-    ? CHALLENGE[t.requirement.type]
-    : null;
+const goalOf = (t: TaskEntry) =>
+  Object.hasOwn(GOALS, t.requirement.type) ? GOALS[t.requirement.type] : null;
 
-export const challengeKind = (t: TaskEntry): ChallengeKind =>
-  challengeOf(t)?.kind ?? 'other';
+// Sen only when there are some: RM 99.99 must never round to "done".
+const money = (n: number) => (Number.isInteger(n) ? rm0 : rm)(n);
+
+export function challengeOf(t: TaskEntry): Challenge {
+  const g = goalOf(t);
+  const { target } = t.progress;
+  if (!g)
+    return { kind: 'other', verb: 'GOAL', amount: String(target), art: null };
+  const q = t.requirement;
+  return {
+    kind: g.kind,
+    verb: g.verb,
+    amount:
+      g.kind === 'level'
+        ? `LV ${target}`
+        : g.kind === 'topup'
+          ? money(target)
+          : `×${target}`,
+    art:
+      (g.kind === 'rip'
+        ? q.pack_image
+        : g.kind === 'pull'
+          ? q.pokemon_image
+          : null) ?? null,
+  };
+}
+
+/** The count beside the progress bar, clamped to the goal: "3"/"10", or for
+ *  a money goal "RM 40.50"/"RM 100". */
+export function progressCount(t: TaskEntry): { done: string; of: string } {
+  const { current, target } = t.progress;
+  const done = Math.max(0, Math.min(current, target));
+  return goalOf(t)?.kind === 'topup'
+    ? { done: money(done), of: money(target) }
+    : { done: String(done), of: String(target) };
+}
 
 /** The line under a challenge's progress: what is left, or that it is done. */
 export function challengeStatus(t: TaskEntry): string {
   if (t.claimed) return 'Prize claimed';
   if (t.progress.completed) return 'Complete — your prize is ready';
-  const left = Math.ceil(t.progress.target - t.progress.current);
+  const g = goalOf(t);
+  const gap = t.progress.target - t.progress.current;
   // Target met but not yet flagged complete by the backend.
-  if (!(left > 0)) return 'Almost there';
-  const c = challengeOf(t);
-  return c
-    ? `${left} more ${left === 1 ? c.one : c.many} to go`
+  if (!(gap > 0)) return 'Almost there';
+  if (g?.kind === 'topup') return `Top up ${money(gap)} more`;
+  const left = Math.ceil(gap);
+  return g
+    ? `${left} more ${left === 1 ? g.one : g.many} to go`
     : `${left} to go`;
 }
 

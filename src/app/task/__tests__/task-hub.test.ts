@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { TaskEntry, TaskHub } from '@/lib/data/schemas';
+import { rm, rm0 } from '@/lib/format';
 import {
   CREDIT_ART,
-  challengeKind,
+  challengeOf,
   challengeStatus,
+  progressCount,
   checkinCount,
   claimNotice,
   claimableCounts,
@@ -180,18 +182,86 @@ describe('claimNotice — a free rip with no spin to hand over', () => {
 });
 
 describe('challenge side of a row', () => {
-  it('maps each requirement to its icon kind, unknown types to the fallback', () => {
-    expect(challengeKind(task('a'))).toBe('rip');
+  it('reads each goal as verb · picture · amount', () => {
     expect(
-      challengeKind(task('b', { req: { type: 'vault_pixel_count' } })),
-    ).toBe('pull');
-    expect(challengeKind(task('c', { req: { type: 'checkin_days' } }))).toBe(
-      'checkin',
-    );
+      challengeOf(
+        task('a', {
+          req: {
+            type: 'rip_count',
+            count: 10,
+            pack_id: 'bronze',
+            pack_title: 'Bronze Pack',
+            pack_image: '/b.webp',
+          },
+          progress: { current: 3, target: 10, completed: false },
+        }),
+      ),
+    ).toEqual({
+      kind: 'rip',
+      verb: 'RIP',
+      amount: '×10',
+      art: '/b.webp',
+    });
+    expect(
+      challengeOf(
+        task('b', {
+          req: {
+            type: 'vault_pixel_count',
+            pokemon_name: 'Pikachu',
+            pokemon_image: 'https://cdn/p.gif',
+          },
+        }),
+      ),
+    ).toMatchObject({
+      kind: 'pull',
+      verb: 'PULL',
+      art: 'https://cdn/p.gif',
+    });
+    // Not narrowed (or a backend that predates the art): no picture.
+    expect(challengeOf(task('c'))).toMatchObject({ verb: 'RIP', art: null });
+    expect(
+      challengeOf(
+        task('d', {
+          req: { type: 'reach_level' },
+          progress: { current: 4, target: 10, completed: false },
+        }),
+      ),
+    ).toMatchObject({ verb: 'REACH', amount: 'LV 10' });
+    expect(
+      challengeOf(
+        task('e', {
+          req: { type: 'topup_myr' },
+          progress: { current: 40.5, target: 100, completed: false },
+        }),
+      ),
+    ).toMatchObject({ verb: 'TOP UP', amount: rm0(100) });
+  });
+
+  it('falls back to a neutral goal for types it does not know', () => {
     // A backend newer than this page must not crash it — nor match a
     // prototype key by accident.
     for (const type of ['spend_myr', 'constructor'])
-      expect(challengeKind(task('d', { req: { type } }))).toBe('other');
+      expect(challengeOf(task('x', { req: { type } }))).toMatchObject({
+        kind: 'other',
+        verb: 'GOAL',
+        art: null,
+      });
+  });
+
+  it('counts money goals in RM, sen only when there are some', () => {
+    const topup = (current: number) =>
+      task('t', {
+        req: { type: 'topup_myr' },
+        progress: { current, target: 100, completed: false },
+      });
+    expect(progressCount(topup(40.5))).toEqual({
+      done: rm(40.5),
+      of: rm0(100),
+    });
+    // RM 99.99 must never round to "done".
+    expect(progressCount(topup(99.99)).done).toBe(rm(99.99));
+    expect(progressCount(topup(40)).done).toBe(rm0(40));
+    expect(progressCount(task('r'))).toEqual({ done: '1', of: '3' });
   });
 
   it('counts what is left in the requirement unit', () => {
@@ -212,6 +282,14 @@ describe('challenge side of a row', () => {
         }),
       ),
     ).toBe('50 to go');
+    expect(
+      challengeStatus(
+        task('d', {
+          req: { type: 'topup_myr' },
+          progress: { current: 40.5, target: 100, completed: false },
+        }),
+      ),
+    ).toBe(`Top up ${rm(59.5)} more`);
   });
 
   it('says done, or claimed, instead of a count', () => {

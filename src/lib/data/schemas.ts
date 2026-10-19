@@ -1291,7 +1291,16 @@ export const TaskEntrySchema = z.looseObject({
   id: z.string(),
   kind: z.enum(['daily', 'weekly', 'achievement']),
   title: z.string(),
-  requirement: z.looseObject({ type: z.string() }),
+  requirement: z.looseObject({
+    type: z.string(),
+    // What a narrowed goal names, so the row can SHOW it ("RIP [Bronze Pack]
+    // ×10"): a rip goal's pack, a pull goal's Pokémon. Same optional+nullable
+    // skew rule as the reward: absent/null falls back to the goal's icon.
+    pack_title: z.string().nullable().optional(),
+    pack_image: z.string().nullable().optional(),
+    pokemon_name: z.string().nullable().optional(),
+    pokemon_image: z.string().nullable().optional(),
+  }),
   reward: z.looseObject({
     type: z.string(),
     pack_id: z.string().optional(),

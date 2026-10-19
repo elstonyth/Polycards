@@ -26,6 +26,21 @@ export type TaskReward =
   | { type: 'pack'; pack_id: string }
   | { type: 'card'; card_handle: string };
 
+/** A requirement as GET /store/tasks sends it: a rip goal narrowed to one
+ *  pack also carries that pack's title and art, a pull goal narrowed to one
+ *  Pokémon its name and sprite — so the row can SHOW what to rip or pull, not
+ *  just say it. null = the row is gone or has no picture. */
+export type HubRequirement =
+  | TaskRequirement
+  | (Extract<TaskRequirement, { type: 'rip_count' }> & {
+      pack_title: string | null;
+      pack_image: string | null;
+    })
+  | (Extract<TaskRequirement, { type: 'vault_pixel_count' }> & {
+      pokemon_name: string | null;
+      pokemon_image: string | null;
+    });
+
 /** A reward as GET /store/tasks sends it: pack and card rewards also carry
  *  what they are, what they are worth (RM) and their picture, so the row can
  *  show the prize itself instead of a bare "Free rip" / "Card". null = the
@@ -157,7 +172,10 @@ export function validateTaskRequirement(
         pixel_pokemon_id: (r.pixel_pokemon_id as string | undefined) ?? null,
       };
     case 'topup_myr':
-      if (!posInt(r.amount_myr) || (r.amount_myr as number) > MAX_TASK_TOPUP_MYR)
+      if (
+        !posInt(r.amount_myr) ||
+        (r.amount_myr as number) > MAX_TASK_TOPUP_MYR
+      )
         bad(
           `topup_myr: amount_myr must be whole ringgit, 1..${MAX_TASK_TOPUP_MYR}.`,
         );

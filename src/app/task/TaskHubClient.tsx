@@ -15,6 +15,7 @@ import {
   PackageOpen,
   Sun,
   Target,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react';
 import { checkInToday } from '@/lib/actions/tasks';
@@ -32,11 +33,12 @@ import type { TaskEntry, TaskHub } from '@/lib/data/schemas';
 import { CheckInTrack } from './CheckInTrack';
 import { RewardArt } from './reward-art';
 import {
-  challengeKind,
+  challengeOf,
   challengeStatus,
   checkinCount,
   claimableCounts,
   isClaimable,
+  progressCount,
   rewardLabel,
   splitHub,
   type ChallengeKind,
@@ -67,13 +69,42 @@ const CHALLENGE_ICON: Record<ChallengeKind, LucideIcon> = {
   vault: Layers,
   level: ChevronsUp,
   checkin: CalendarCheck,
+  topup: Wallet,
   other: Flag,
 };
 
+/** The middle of the goal's sum: the pack to rip or the Pokémon to pull,
+ *  else the goal's icon. Decorative — the title below says it in words. */
+function GoalArt({ art, kind }: { art: string | null; kind: ChallengeKind }) {
+  const Icon = CHALLENGE_ICON[kind];
+  return (
+    <span className="relative flex h-14 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04]">
+      {art ? (
+        <Image
+          src={art}
+          alt=""
+          fill
+          sizes="44px"
+          // Pixel sprites stay crisp (and animated) unscaled by the optimizer.
+          unoptimized={kind === 'pull'}
+          className={cn(
+            'object-contain',
+            kind === 'pull' ? 'p-1.5 [image-rendering:pixelated]' : 'p-1',
+          )}
+        />
+      ) : (
+        <Icon className="h-5 w-5 text-neutral-300" aria-hidden />
+      )}
+    </span>
+  );
+}
+
 /**
  * One task as a ticket (2026-10-19, "left is the challenge, right is the
- * reward"): the challenge on the body — what to do and how far along, with a
- * pip per step when the goal is small enough to count — and the prize on a
+ * reward"): the challenge on the body, read as a sum the player gets at a
+ * glance — "RIP [Bronze Pack] ×10" — then the task's own words and how far
+ * along it is, a pip per step when the goal is small enough to count; the
+ * prize on a
  * perforated tear-off stub with its own Claim. A claimable ticket goes gold:
  * the prize sparkles and a light sweeps its Claim pill. A claimed one is
  * stamped and steps back.
@@ -82,7 +113,8 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
   const claimable = isClaimable(task);
   const { claimed } = task;
   const { name } = rewardLabel(task.reward);
-  const Icon = CHALLENGE_ICON[challengeKind(task)];
+  const goal = challengeOf(task);
+  const count = progressCount(task);
   const { current, target } = task.progress;
   const done = Math.max(0, Math.min(current, target));
   const pct = target > 0 ? Math.round((done / target) * 100) : 0;
@@ -102,78 +134,75 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
         )}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col justify-center py-3.5 pr-3 pl-3">
-        <div className="flex items-start gap-2.5">
-          <span
-            className={cn(
-              'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1',
-              claimable
-                ? 'bg-chase/15 text-chase ring-chase/30'
-                : claimed
-                  ? 'bg-white/[0.03] text-neutral-500 ring-white/[0.06]'
-                  : 'bg-white/[0.06] text-neutral-200 ring-white/10',
-            )}
-          >
-            <Icon className="h-4 w-4" aria-hidden />
+      <div className="flex min-w-0 flex-1 flex-col justify-center py-3.5 pr-3 pl-3.5">
+        {/* What to do, as a sum: verb · what · how many. */}
+        <div
+          className={cn(
+            'flex flex-wrap items-center gap-x-2.5 gap-y-1',
+            claimed && 'opacity-50',
+          )}
+        >
+          <span className="font-heading text-lg leading-none text-white">
+            {goal.verb}
           </span>
-          <div className="min-w-0 flex-1">
-            <p
-              className={cn(
-                'text-sm leading-snug font-semibold',
-                claimed ? 'text-neutral-400' : 'text-white',
-              )}
-            >
-              {task.title}
-            </p>
-            <div className="mt-2.5 flex items-center gap-2.5">
-              <div
-                className={cn(
-                  'flex h-2 flex-1',
-                  pips
-                    ? 'gap-[3px]'
-                    : 'overflow-hidden rounded-full bg-white/10',
-                )}
-                role="progressbar"
-                aria-valuenow={current}
-                aria-valuemin={0}
-                aria-valuemax={target}
-                aria-label={`${task.title} progress`}
-              >
-                {pips ? (
-                  // One pip per step, lighting up in turn: 3/10 reads as
-                  // three things done, not as a 30% sliver.
-                  Array.from({ length: target }, (_, i) => (
-                    <span
-                      key={i}
-                      className={cn(
-                        'flex-1 rounded-full',
-                        i < done ? cn(fill, 'bar-grow') : 'bg-white/10',
-                      )}
-                      style={{ '--i': i } as React.CSSProperties}
-                    />
-                  ))
-                ) : (
-                  <span
-                    className={cn('bar-grow rounded-full', fill)}
-                    style={{ width: `${pct}%` }}
-                  />
-                )}
-              </div>
-              <span className="font-heading shrink-0 text-sm leading-none text-white tabular-nums">
-                {done}
-                <span className="text-[11px] text-neutral-400">/{target}</span>
-              </span>
-            </div>
-            <p
-              className={cn(
-                'mt-1.5 text-[11px] leading-snug',
-                claimable ? 'text-chase font-semibold' : 'text-neutral-400',
-              )}
-            >
-              {challengeStatus(task)}
-            </p>
-          </div>
+          <GoalArt art={goal.art} kind={goal.kind} />
+          <span className="font-heading text-2xl leading-none whitespace-nowrap text-white tabular-nums">
+            {goal.amount}
+          </span>
         </div>
+        <p
+          className={cn(
+            'mt-2.5 text-xs leading-snug',
+            claimed ? 'text-neutral-400' : 'text-neutral-300',
+          )}
+        >
+          {task.title}
+        </p>
+        <div className="mt-2.5 flex items-center gap-2.5">
+          <div
+            className={cn(
+              'flex h-2 flex-1',
+              pips ? 'gap-[3px]' : 'overflow-hidden rounded-full bg-white/10',
+            )}
+            role="progressbar"
+            aria-valuenow={current}
+            aria-valuemin={0}
+            aria-valuemax={target}
+            aria-label={`${task.title} progress`}
+          >
+            {pips ? (
+              // One pip per step, lighting up in turn: 3/10 reads as three
+              // things done, not as a 30% sliver.
+              Array.from({ length: target }, (_, i) => (
+                <span
+                  key={i}
+                  className={cn(
+                    'flex-1 rounded-full',
+                    i < done ? cn(fill, 'bar-grow') : 'bg-white/10',
+                  )}
+                  style={{ '--i': i } as React.CSSProperties}
+                />
+              ))
+            ) : (
+              <span
+                className={cn('bar-grow rounded-full', fill)}
+                style={{ width: `${pct}%` }}
+              />
+            )}
+          </div>
+          <span className="font-heading shrink-0 text-sm leading-none whitespace-nowrap text-white tabular-nums">
+            {count.done}
+            <span className="text-[11px] text-neutral-400">/{count.of}</span>
+          </span>
+        </div>
+        <p
+          className={cn(
+            'mt-1.5 text-[11px] leading-snug',
+            claimable ? 'text-chase font-semibold' : 'text-neutral-400',
+          )}
+        >
+          {challengeStatus(task)}
+        </p>
       </div>
 
       {/* The perforation the stub tears off along. */}

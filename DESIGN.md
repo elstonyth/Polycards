@@ -303,11 +303,15 @@ Spec: `docs/superpowers/specs/2026-10-06-task-hub-v2-and-announcements-design.md
 - **Challenge ticket (2026-10-19)** — every task row is a ticket: the
   challenge on the left body, the prize on a tear-off stub at the right
   (`.ticket-cut` in globals.css: two paper tones split at the stub, a notch
-  punched top and bottom of a dashed hairline perforation). The body carries a
-  requirement icon chip (rip / pull / vault / level / check-in, a neutral flag
-  for anything newer), the title, progress as one pip per step when the goal
-  is 10 or fewer (a bar otherwise) with a Nekst `3/10`, and a "N more rips to
-  go" line. The stub carries the prize art, its full name (wraps, never
+  punched top and bottom of a dashed hairline perforation). The body reads
+  the goal as a sum a player gets at a glance — verb, picture, amount: `RIP
+[Bronze Pack art] ×10`, `PULL [Pikachu sprite] ×10`, `TOP UP [wallet] RM
+100`, `REACH [icon] LV 10`. The picture is the pack or Pokémon the goal
+  names (the hub sends `pack_image` / `pokemon_image` on the requirement;
+  a pack's product shot only — never its factory hero `display_image`),
+  else the goal's icon. Below it: the task's own title, progress as one pip
+  per step when the goal is 10 or fewer (a bar otherwise) with a Nekst
+  `3/10`, and a "N more rips to go" line. The stub carries the prize art, its full name (wraps, never
   truncates) and the state: a white Claim pill only when claimable, a quiet
   `Locked` chip while in progress, a tilted `CLAIMED` stamp once taken. The
   list sits bare under its heading — no panel around the tickets.
