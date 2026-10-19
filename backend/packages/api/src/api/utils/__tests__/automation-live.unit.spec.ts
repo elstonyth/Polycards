@@ -4,6 +4,7 @@ import {
   createLiveState,
   executeLiveCycle,
   pickLivePack,
+  summarizeLiveRun,
   validateLiveConfig,
 } from '../automation-live';
 import { createHumanizedState, planHumanized } from '../automation-humanized';
@@ -448,6 +449,58 @@ describe('live automation', () => {
       ],
     });
     expect(claimLiveCycle(state, now, () => 0.5)?.customerId).toBe('cus_early');
+  });
+
+  it('summarizes a run for the history list', () => {
+    const state = createLiveState();
+    expect(summarizeLiveRun(state)).toBeNull();
+    Object.assign(state, {
+      status: 'stopped',
+      runId: 'run-1',
+      startedAt: 50,
+      spentCents: 2000,
+      config: {
+        ...config,
+        packSlug: '',
+        packMix: [
+          { packSlug: 'bronze', weightBp: 6000 },
+          { packSlug: 'gold', weightBp: 4000 },
+        ],
+      },
+      cycles: [
+        {
+          id: 'a',
+          customerId: 'cus_a',
+          startedAt: 100,
+          finishedAt: 200,
+          error: null,
+          saleCents: 900,
+          differenceCents: 0,
+          bonusDifferenceCents: 0,
+        },
+        {
+          id: 'b',
+          customerId: 'cus_b',
+          startedAt: 300,
+          finishedAt: 400,
+          error: 'Insufficient balance',
+        },
+      ],
+    });
+    expect(summarizeLiveRun(state)).toEqual({
+      runId: 'run-1',
+      startedAt: 50,
+      endedAt: 400,
+      status: 'stopped',
+      draws: 2,
+      settled: 1,
+      failed: 1,
+      spentCents: 2000,
+      soldCents: 900,
+      accounts: 2,
+      packSlugs: ['bronze', 'gold'],
+      timingMode: 'fixed',
+    });
   });
 
   it('reports a concurrent balance change as a mismatch', async () => {

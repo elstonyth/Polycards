@@ -23,6 +23,7 @@ import {
   createLiveState,
   executeLiveCycle,
   pickLivePack,
+  summarizeLiveRun,
   validateLiveConfig,
 } from './automation-live';
 import type {
@@ -251,6 +252,9 @@ export async function changeLive(
       state.humanizedAssignments ?? [],
       state.schedules?.map((row) => row.humanized) ?? [],
     );
+    const finished = body.action === 'run' ? summarizeLiveRun(state) : null;
+    if (finished?.draws)
+      state.history = [finished, ...(state.history ?? [])].slice(0, 30);
     state.config = config;
     state.packPriceCents = priceCents;
     state.packPricesCents = pricesCents;
@@ -258,6 +262,7 @@ export async function changeLive(
       Object.assign(state, {
         status: 'running',
         runId: randomUUID(),
+        startedAt: Date.now(),
         spentCents: 0,
         cycles: [],
         schedules:

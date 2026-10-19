@@ -96,6 +96,60 @@ export interface LiveState {
   schedules?: LiveSchedule[];
   humanizedAssignments?: HumanizedAssignment[];
   rankGoals?: LiveRankGoal[];
+  /** When the current run started (absent on runs started before it existed). */
+  startedAt?: number;
+  /** Earlier runs, newest first, archived when the next run starts. */
+  history?: LiveRunSummary[];
+}
+
+export interface LiveRunSummary {
+  runId: string;
+  startedAt: number | null;
+  endedAt: number | null;
+  status: LiveState['status'];
+  draws: number;
+  settled: number;
+  failed: number;
+  spentCents: number;
+  soldCents: number;
+  accounts: number;
+  packSlugs: string[];
+  timingMode: NonNullable<LiveConfig['timingMode']>;
+}
+
+/** GET /admin/automation/activity — house-account draws from the pull ledger. */
+export interface AutomationActivity {
+  windowDays: number;
+  hitTiers: string[];
+  names: Record<string, string>;
+  days: {
+    day: string;
+    draws: number;
+    valueMyr: number;
+    costMyr: number;
+    soldMyr: number;
+  }[];
+  tiers: { rarity: string; draws: number }[];
+  accounts: {
+    customerId: string;
+    draws: number;
+    valueMyr: number;
+    costMyr: number;
+    soldMyr: number;
+    hits: number;
+    lastAt: string;
+  }[];
+  hits: {
+    id: string;
+    customerId: string;
+    rarity: string;
+    cardName: string | null;
+    cardImage: string | null;
+    packTitle: string | null;
+    valueMyr: number;
+    sold: boolean;
+    rolledAt: string;
+  }[];
 }
 
 export interface LiveSnapshot extends LiveState {

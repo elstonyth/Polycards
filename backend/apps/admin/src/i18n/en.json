@@ -1515,7 +1515,7 @@
     "heldPlay": "{{held}} held back until the money still to use on packs is used"
   },
   "automationMonitor": {
-    "subtitle": "Original accounts, balances and leaderboards from the Polycards API.",
+    "subtitle": "The bot accounts, their balances and the public leaderboard.",
     "readOnly": "Read only",
     "notRunning": "Real-account execution off",
     "refresh": "Refresh",
@@ -1528,7 +1528,7 @@
     "search": "Search name or email",
     "unavailable": "{{count}} account is unavailable and excluded from the total.",
     "unavailable_other": "{{count}} accounts are unavailable and excluded from the total.",
-    "manualRefresh": "Reads only when opened or refreshed. No pulls, sales, credit changes or background runs.",
+    "manualRefresh": "Balances update when you open this tab or press Refresh. Pack counts cover the last 7 days.",
     "account": "Account",
     "email": "Email",
     "balance": "Balance (MYR)",
@@ -1544,7 +1544,7 @@
     "period": "Leaderboard period",
     "weekly": "Weekly",
     "alltime": "All time",
-    "boardNote": "Current public top 10. Results may be cached for up to 30 seconds. Monitoring only.",
+    "boardNote": "The public top 10 right now (up to 30 seconds old). Bot accounts never appear on the weekly board.",
     "rank": "Rank",
     "pulledValue": "Pulled value (MYR)",
     "pulls": "Pulls",

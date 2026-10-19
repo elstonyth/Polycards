@@ -18,6 +18,7 @@ import type {
   LiveCycle,
   LiveCycleAmounts,
   LivePackWeight,
+  LiveRunSummary,
   LiveSchedule,
   LiveState,
 } from './automation-live-types';
@@ -113,6 +114,33 @@ function remainingCustomers(state: LiveState): string[] {
       state.cycles.filter((cycle) => cycle.customerId === id).length <
         config.maxCyclesPerAccount,
   );
+}
+
+/** A finished-or-current run in one row, for the run history list. */
+export function summarizeLiveRun(state: LiveState): LiveRunSummary | null {
+  if (!state.runId || !state.config) return null;
+  const settled = state.cycles.filter(
+    (cycle) =>
+      !cycle.error &&
+      cycle.differenceCents === 0 &&
+      cycle.bonusDifferenceCents === 0,
+  );
+  return {
+    runId: state.runId,
+    startedAt: state.startedAt ?? state.cycles[0]?.startedAt ?? null,
+    endedAt: state.cycles.at(-1)?.finishedAt ?? null,
+    status: state.status,
+    draws: state.cycles.length,
+    settled: settled.length,
+    failed: state.cycles.length - settled.length,
+    spentCents: state.spentCents,
+    soldCents: settled.reduce((sum, cycle) => sum + (cycle.saleCents ?? 0), 0),
+    accounts: new Set(state.cycles.map((cycle) => cycle.customerId)).size,
+    packSlugs: state.config.packMix?.map((row) => row.packSlug) ?? [
+      state.config.packSlug,
+    ],
+    timingMode: state.config.timingMode ?? DEFAULT_LIVE_TIMING.timingMode,
+  };
 }
 
 export function claimLiveCycle(

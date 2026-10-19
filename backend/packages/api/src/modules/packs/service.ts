@@ -470,6 +470,15 @@ export type PlayerLedgerSort = keyof typeof PLAYER_LEDGER_SUMS | 'contribution';
 const PULLED_VALUE_USD_SQL =
   'COALESCE(pu.recorded_value_usd, ' + LIVE_VALUE_USD_SQL + ')';
 
+/** One MYT day (or account) of house-account draws — automationActivity. */
+export type AutomationActivityTotals = {
+  day: string;
+  draws: number;
+  valueMyr: number;
+  costMyr: number;
+  soldMyr: number;
+};
+
 // MikroORM bigNumber raw-column shape is {value: string, precision: number}
 // with this default precision — mirrored when the backfill hand-writes the
 // raw_ twin (see @medusajs/utils BigNumber DEFAULT_PRECISION).
@@ -12141,6 +12150,153 @@ class PacksModuleService extends MedusaService({
     return {
       pulls: Number(row?.pulls ?? 0),
       volumeMyr: Number(row?.volume_myr ?? 0),
+    };
+  }
+
+  // Admin Automation dashboard: what the house accounts (the Automation
+  // Accounts list) drew since `sinceMs`, read from the pull ledger so it spans
+  // every run (the live run state keeps only the current run). Days are MYT.
+  // `costMyr` uses each pack's CURRENT price, so it is an estimate after a
+  // repricing; `soldMyr` is what buybacks actually credited.
+  @InjectManager()
+  async automationActivity(
+    opts: {
+      customerIds: string[];
+      sinceMs: number;
+      hitTiers: string[];
+      hitLimit: number;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    days: AutomationActivityTotals[];
+    tiers: { rarity: string; draws: number }[];
+    accounts: (Omit<AutomationActivityTotals, 'day'> & {
+      customerId: string;
+      lastAt: string;
+      hits: number;
+    })[];
+    hits: {
+      id: string;
+      customerId: string;
+      rarity: string;
+      cardName: string | null;
+      cardImage: string | null;
+      packTitle: string | null;
+      valueMyr: number;
+      sold: boolean;
+      rolledAt: string;
+    }[];
+  }> {
+    if (!opts.customerIds.length || !opts.hitTiers.length)
+      return { days: [], tiers: [], accounts: [], hits: [] };
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const fxRate = await resolveFxRate(this);
+    const ids = opts.customerIds.map(() => '?').join(', ');
+    const base =
+      'WITH base AS ( ' +
+      '  SELECT pu.id, pu.customer_id, pu.rolled_at, pu.status, ' +
+      `         (${PULLED_VALUE_USD_SQL}) * ? AS value_myr, ` +
+      '         COALESCE(pu.buyback_amount, 0) AS sold_myr, ' +
+      '         COALESCE(p.price, 0) AS cost_myr, ' +
+      '         p.title AS pack_title, c.name AS card_name, c.image AS card_image, ' +
+      "         COALESCE((SELECT o.rarity FROM pack_odds o WHERE o.pack_id = pu.pack_id AND o.card_id = pu.card_id AND o.deleted_at IS NULL LIMIT 1), 'Common') AS rarity " +
+      '    FROM pull pu ' +
+      '    LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
+      '    LEFT JOIN pack p ON p.slug = pu.pack_id AND p.deleted_at IS NULL ' +
+      `   WHERE pu.deleted_at IS NULL AND ${LEADERBOARD_PULL_SQL} ` +
+      `     AND pu.customer_id IN (${ids}) AND pu.rolled_at >= ? ` +
+      ') ';
+    const params = [
+      DEFAULT_MARKET_MULTIPLIER,
+      fxRate,
+      ...opts.customerIds,
+      new Date(opts.sinceMs),
+    ];
+    const totals =
+      'COUNT(*) AS draws, ' +
+      'ROUND(COALESCE(SUM(value_myr), 0) * 100) / 100 AS value_myr, ' +
+      'ROUND(COALESCE(SUM(cost_myr), 0) * 100) / 100 AS cost_myr, ' +
+      'ROUND(COALESCE(SUM(sold_myr), 0) * 100) / 100 AS sold_myr ';
+    type Totals = {
+      draws: string;
+      value_myr: string | null;
+      cost_myr: string | null;
+      sold_myr: string | null;
+    };
+    const money = (row: Totals) => ({
+      draws: Number(row.draws),
+      valueMyr: Number(row.value_myr ?? 0),
+      costMyr: Number(row.cost_myr ?? 0),
+      soldMyr: Number(row.sold_myr ?? 0),
+    });
+    const tierList = opts.hitTiers.map(() => '?').join(', ');
+    const [days, tiers, accounts, hits] = await Promise.all([
+      em.execute<(Totals & { day: string })[]>(
+        base +
+          "SELECT to_char(rolled_at AT TIME ZONE 'Asia/Kuala_Lumpur', 'YYYY-MM-DD') AS day, " +
+          totals +
+          'FROM base GROUP BY 1 ORDER BY 1',
+        params,
+      ),
+      em.execute<{ rarity: string; draws: string }[]>(
+        base + 'SELECT rarity, COUNT(*) AS draws FROM base GROUP BY rarity',
+        params,
+      ),
+      em.execute<
+        (Totals & { customer_id: string; last_at: Date; hits: string })[]
+      >(
+        base +
+          'SELECT customer_id, MAX(rolled_at) AS last_at, ' +
+          `COUNT(*) FILTER (WHERE rarity IN (${tierList})) AS hits, ` +
+          totals +
+          'FROM base GROUP BY customer_id ORDER BY value_myr DESC',
+        [...params, ...opts.hitTiers],
+      ),
+      em.execute<
+        {
+          id: string;
+          customer_id: string;
+          rarity: string;
+          card_name: string | null;
+          card_image: string | null;
+          pack_title: string | null;
+          value_myr: string | null;
+          status: string;
+          rolled_at: Date;
+        }[]
+      >(
+        base +
+          'SELECT id, customer_id, rarity, card_name, card_image, pack_title, ' +
+          'ROUND(value_myr * 100) / 100 AS value_myr, status, rolled_at ' +
+          `FROM base WHERE rarity IN (${tierList}) ` +
+          'ORDER BY rolled_at DESC, id DESC LIMIT ?',
+        [...params, ...opts.hitTiers, opts.hitLimit],
+      ),
+    ]);
+    return {
+      days: days.map((row) => ({ day: row.day, ...money(row) })),
+      tiers: tiers.map((row) => ({
+        rarity: row.rarity,
+        draws: Number(row.draws),
+      })),
+      accounts: accounts.map((row) => ({
+        customerId: row.customer_id,
+        lastAt: new Date(row.last_at).toISOString(),
+        hits: Number(row.hits),
+        ...money(row),
+      })),
+      hits: hits.map((row) => ({
+        id: row.id,
+        customerId: row.customer_id,
+        rarity: row.rarity,
+        cardName: row.card_name,
+        cardImage: row.card_image,
+        packTitle: row.pack_title,
+        valueMyr: Number(row.value_myr ?? 0),
+        sold: row.status === 'bought_back',
+        rolledAt: new Date(row.rolled_at).toISOString(),
+      })),
     };
   }
 
