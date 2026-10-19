@@ -300,6 +300,11 @@ export default function WithdrawForm({
     countries.find((group) => group.items.some((a) => isUsable(a, now))) ??
     countries[0];
   const shownUsable = shown?.items.some((a) => isUsable(a, now)) ?? false;
+  // USDT wallets sit in their own group: word the form for a wallet there.
+  const walletGroup = shown?.items.some((a) => a.wallet) ?? false;
+  const offersWallets = countries.some((group) =>
+    group.items.some((a) => a.wallet),
+  );
   function chooseCountry(next: string) {
     setCountry(next);
     // A refusal about the other country's account no longer applies.
@@ -461,6 +466,9 @@ export default function WithdrawForm({
     // debit). No threshold figure here on purpose: naming RM 1,000 would be a
     // second source of truth for a value the backend reads from an env var.
     const held = done.status === 'held';
+    const toWallet = done.payout
+      ? regionalRailUi(done.payout.currency)?.paidTo === 'wallet'
+      : false;
     return (
       <div className="mt-6 flex max-w-md flex-col items-center rounded-2xl border border-white/10 bg-neutral-900 px-6 py-8 text-center">
         {held ? (
@@ -477,13 +485,15 @@ export default function WithdrawForm({
           <p className="mt-1 text-sm font-semibold text-neutral-200">
             {regionalRailUi(done.payout.currency)?.money(done.payout.amount) ??
               `${done.payout.currency} ${done.payout.amount.toFixed(2)}`}{' '}
-            to your bank
+            {toWallet ? 'to your wallet' : 'to your bank'}
           </p>
         )}
         <p className="mt-2 max-w-sm text-sm text-neutral-400">
           {held
-            ? "Withdrawals this size need staff approval before they're sent to your bank — the amount has already left your balance, and returns automatically if the withdrawal isn't approved. Either way, we'll let you know."
-            : 'Your bank transfer is processing — most arrive within minutes. If the bank rejects it, the full amount returns to your balance automatically.'}
+            ? `Withdrawals this size need staff approval before they're sent to your ${toWallet ? 'wallet' : 'bank'} — the amount has already left your balance, and returns automatically if the withdrawal isn't approved. Either way, we'll let you know.`
+            : toWallet
+              ? 'Your USDT transfer is processing — most arrive within minutes. If it fails, the full amount returns to your balance automatically.'
+              : 'Your bank transfer is processing — most arrive within minutes. If the bank rejects it, the full amount returns to your balance automatically.'}
         </p>
         <p className="mt-3 text-[12px] text-neutral-500">
           Reference <span className="font-mono">{done.reference}</span>
@@ -617,6 +627,7 @@ export default function WithdrawForm({
             value={shown?.country ?? ''}
             onChange={chooseCountry}
             className="mt-5"
+            label={offersWallets ? 'Bank country or wallet' : undefined}
           />
           {accounts.length > 0 && (
             <label
@@ -629,7 +640,7 @@ export default function WithdrawForm({
               <select
                 value={accountId}
                 onChange={(e) => setAccountId(e.target.value)}
-                aria-label="Saved bank account"
+                aria-label={walletGroup ? 'Saved wallet' : 'Saved bank account'}
                 className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none focus:border-white/25"
               >
                 <option value="" disabled>
@@ -658,13 +669,14 @@ export default function WithdrawForm({
 
           {accounts.length > 0 && !shownUsable && (
             <p className="mt-2 text-[13px] text-neutral-400">
-              New bank accounts need a short wait before first use, to keep your
-              money safe.{' '}
+              {walletGroup
+                ? 'New wallets need a short wait before first use, to keep your money safe.'
+                : 'New bank accounts need a short wait before first use, to keep your money safe.'}{' '}
               <Link
                 href="/bank"
                 className="text-white/80 underline underline-offset-2 hover:text-white"
               >
-                Manage bank accounts
+                {walletGroup ? 'Manage wallets' : 'Manage bank accounts'}
               </Link>
             </p>
           )}
@@ -741,9 +753,9 @@ export default function WithdrawForm({
           </Pill>
 
           <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">
-            The amount leaves your balance as soon as you confirm. Transfers are
-            usually done in minutes; if the bank rejects it, the money returns
-            to your balance automatically.
+            {walletGroup
+              ? 'The amount leaves your balance as soon as you confirm. USDT transfers are usually done in minutes; if one fails, the money returns to your balance automatically.'
+              : 'The amount leaves your balance as soon as you confirm. Transfers are usually done in minutes; if the bank rejects it, the money returns to your balance automatically.'}
           </p>
         </>
       )}

@@ -35,6 +35,10 @@ export type RegionalRailUi = {
   payoutNoun: string;
   /** Who the withdraw estimate says is paid ("Your bank"). */
   payee: string;
+  /** What a payout lands in, for the withdraw page's copy. */
+  paidTo: 'bank' | 'wallet';
+  /** The top-up sheet's "pay the exact amount" note, in this rail's units. */
+  exactAmountNote: string;
 };
 
 export const REGIONAL_RAILS: Readonly<Record<string, RegionalRailUi>> = {
@@ -63,6 +67,9 @@ export const REGIONAL_RAILS: Readonly<Record<string, RegionalRailUi>> = {
     money0: sgd0,
     payoutNoun: 'Singapore payouts',
     payee: 'Your bank',
+    paidTo: 'bank',
+    exactAmountNote:
+      'Transfer the exact amount the next page shows, cents included. It can be a few cents more than this (for example S$100.01). A rounded amount can’t be matched to your top-up.',
   },
   // USDT (GlobePay365): the two chains it takes, in the codes the backend
   // allow-lists for that gateway (UTRC / UERC).
@@ -90,6 +97,9 @@ export const REGIONAL_RAILS: Readonly<Record<string, RegionalRailUi>> = {
     money0: usdt0,
     payoutNoun: 'USDT payouts',
     payee: 'Your wallet',
+    paidTo: 'wallet',
+    exactAmountNote:
+      'Send the exact amount the next page shows, decimals included. It can be slightly more than this (for example USDT 100.01). A rounded amount can’t be matched to your top-up.',
   },
 };
 

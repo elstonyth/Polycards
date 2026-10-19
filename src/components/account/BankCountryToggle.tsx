@@ -16,18 +16,21 @@ export function BankCountryToggle({
   value,
   onChange,
   className,
+  label = 'Bank country',
 }: {
   groups: readonly Omit<BankCountryGroup<unknown>, 'items'>[];
   value: string;
   onChange: (country: string) => void;
   className?: string;
+  /** "Bank country or wallet" once a USDT wallet group is on offer. */
+  label?: string;
 }) {
   const labelId = useId();
   if (groups.length === 0) return null;
   return (
     <div className={className}>
       <p id={labelId} className="text-[13px] font-semibold text-neutral-300">
-        Bank country
+        {label}
       </p>
       <div
         role="group"

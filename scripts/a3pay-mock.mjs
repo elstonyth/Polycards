@@ -495,7 +495,7 @@ createServer(async (req, res) => {
       return send(
         res,
         200,
-        `<!doctype html><meta name=viewport content="width=device-width"><title>${TENANT.label} mock cashier</title>
+        `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width"><title>${TENANT.label} mock cashier</title>
 <body style="font-family:system-ui;max-width:420px;margin:40px auto;padding:0 16px">
 <h2>${TENANT.label} (local mock)</h2><p>Pay <b>${TENANT.symbol}${p.actual.toFixed(2)}</b> by ${p.method}<br>Payer: ${p.payer ?? '-'}<br>Order ${p.orderId}</p>
 <p><a id=pay href="/cashier/${p.orderId}/pay">Pay now</a> · <a id=fail href="/cashier/${p.orderId}/fail">Fail payment</a></p></body>`,

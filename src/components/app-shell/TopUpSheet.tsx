@@ -779,10 +779,7 @@ export default function TopUpSheet({
                   it unique. */}
               {rail && (
                 <p className="mt-2 text-[12px] leading-snug text-neutral-300">
-                  Transfer the exact amount the next page shows, cents included.
-                  It can be a few cents more than this (for example{' '}
-                  {rail.ui.money(100.01)}). A rounded amount can’t be matched to
-                  your top-up.
+                  {rail.ui.exactAmountNote}
                 </p>
               )}
               <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">

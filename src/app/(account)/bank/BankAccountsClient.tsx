@@ -98,6 +98,12 @@ export function BankAccountsClient() {
   // A USDT wallet takes an address and no holder name. Its checksum is the
   // server's to judge (it says what is wrong); here only the shape.
   const wallet = selectedBank?.wallet;
+  // The USDT group lists networks, not banks: word the form for a wallet
+  // as soon as it is picked, before a network is.
+  const walletGroup = shown?.items.some((bank) => bank.wallet) ?? false;
+  const offersWallets = countries.some((group) =>
+    group.items.some((bank) => bank.wallet),
+  );
   const lengths = selectedBank?.accountLengths;
   const accountNumberValid =
     (wallet ? accountNumber !== '' : /^[0-9]{5,34}$/.test(accountNumber)) &&
@@ -106,9 +112,11 @@ export function BankAccountsClient() {
       new RegExp(selectedBank.accountPattern).test(accountNumber));
   const numberHint =
     selectedBank?.accountHint ??
-    (lengths && lengths.length <= 2
-      ? `${selectedBank.bankName} account numbers are ${lengths.join(' or ')} digits. Check your bank country and account number.`
-      : 'Check your bank country and use the account number shown in your banking app, not a card number.');
+    (walletGroup
+      ? 'Choose the network your wallet uses first.'
+      : lengths && lengths.length <= 2
+        ? `${selectedBank.bankName} account numbers are ${lengths.join(' or ')} digits. Check your bank country and account number.`
+        : 'Check your bank country and use the account number shown in your banking app, not a card number.');
   const numberInvalid =
     selectedBank !== undefined && accountNumber !== '' && !accountNumberValid;
 
@@ -250,9 +258,10 @@ export function BankAccountsClient() {
               setError(null);
             }}
             className="mb-3"
+            label={offersWallets ? 'Bank country or wallet' : undefined}
           />
           <label className="block text-[13px] font-semibold text-neutral-300">
-            Bank
+            {walletGroup ? 'Network' : 'Bank'}
             <select
               value={bankCode}
               onChange={(e) => {
@@ -263,7 +272,7 @@ export function BankAccountsClient() {
                 setError(null);
               }}
               disabled={!shown}
-              aria-label="Bank"
+              aria-label={walletGroup ? 'Network' : 'Bank'}
               className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-neutral-900 px-3 text-sm text-white outline-none focus:border-white/25"
             >
               <option value="" disabled>
@@ -271,7 +280,9 @@ export function BankAccountsClient() {
                   ? 'Loading banks…'
                   : !shown
                     ? 'Choose bank country first'
-                    : 'Choose your bank'}
+                    : walletGroup
+                      ? 'Choose a network'
+                      : 'Choose your bank'}
               </option>
               {(shown?.items ?? []).map((bank) => (
                 <option key={bank.bankCode} value={bank.bankCode}>
@@ -281,12 +292,13 @@ export function BankAccountsClient() {
             </select>
           </label>
 
-          {wallet ? (
+          {walletGroup ? (
             <>
               <label className="mt-3 block text-[13px] font-semibold text-neutral-300">
                 Wallet address
                 <input
                   type="text"
+                  disabled={!wallet}
                   autoComplete="off"
                   autoCapitalize="none"
                   spellCheck={false}
@@ -317,11 +329,13 @@ export function BankAccountsClient() {
               >
                 {numberHint}
               </p>
-              <p className="mt-2 text-[12px] leading-snug text-amber-300/80">
-                Paste the address from your wallet&apos;s receive screen for{' '}
-                {selectedBank?.bankName}. USDT sent to a wrong address or
-                network can&apos;t be recovered.
-              </p>
+              {selectedBank && (
+                <p className="mt-2 text-[12px] leading-snug text-amber-300/80">
+                  Paste the address from your wallet&apos;s receive screen for{' '}
+                  {selectedBank.bankName}. USDT sent to a wrong address or
+                  network can&apos;t be recovered.
+                </p>
+              )}
             </>
           ) : (
             <>
