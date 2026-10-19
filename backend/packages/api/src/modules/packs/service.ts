@@ -2738,7 +2738,7 @@ class PacksModuleService extends MedusaService({
       ? await this.listPacks(
           { slug: [...packSlugs] },
           {
-            select: ['slug', 'title', 'price', 'image'],
+            select: ['slug', 'title', 'price', 'image', 'status'],
             take: packSlugs.size,
           },
           sharedContext,
@@ -2813,12 +2813,16 @@ class PacksModuleService extends MedusaService({
       return reward;
     };
     const hubRequirement = (q: TaskRequirement): HubRequirement => {
-      if (q.type === 'rip_count' && q.pack_id)
+      if (q.type === 'rip_count' && q.pack_id) {
+        // A draft pack is not on sale: its name and art stay unpublished.
+        const p = packBySlug.get(q.pack_id);
+        const shown = p?.status === 'active' ? p : undefined;
         return {
           ...q,
-          pack_title: packBySlug.get(q.pack_id)?.title ?? null,
-          pack_image: packArt(q.pack_id),
+          pack_title: shown?.title ?? null,
+          pack_image: shown?.image || null,
         };
+      }
       if (q.type === 'vault_pixel_count' && q.pixel_pokemon_id) {
         const p = pixelById.get(q.pixel_pokemon_id);
         return {

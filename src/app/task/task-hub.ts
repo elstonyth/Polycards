@@ -2,7 +2,7 @@
 // check-in track, and the row order. Split out of TaskHubClient so the rules
 // that decide WHAT a player sees (and in which order) are unit-tested without
 // rendering anything.
-import { rm, rm0, rmNbsp } from '@/lib/format';
+import { rm, rmAuto, rmNbsp } from '@/lib/format';
 import type { TaskEntry, TaskHub } from '@/lib/data/schemas';
 
 export const CREDIT_ART = '/images/task/credits-coins.webp';
@@ -11,8 +11,10 @@ export const CREDIT_ART = '/images/task/credits-coins.webp';
 // already been flattened back into a plain space once, silently.
 const NBSP = String.fromCharCode(0xa0);
 
+const CREDIT_LABEL = 'Bonus credit';
+
 const REWARD_LABEL: Record<string, string> = {
-  credit: 'Bonus credit',
+  credit: CREDIT_LABEL,
   pack: 'Free rip',
   card: 'Card',
 };
@@ -50,6 +52,11 @@ export function rewardLabel(reward: TaskEntry['reward']): {
   return { name: REWARD_LABEL[reward.type] ?? 'Reward', value: null };
 }
 
+/** The prize's name on the ticket stub: the art's badge already shows the
+ *  worth, so credit just says what it is. */
+export const stubName = (reward: TaskEntry['reward']): string =>
+  reward.type === 'credit' ? CREDIT_LABEL : rewardLabel(reward).name;
+
 /** The line shown once a claim lands (spec 2026-10-15 §3): bonus credit is
  *  for packs only; a prize card ships for a fee or sells back withdrawable. A
  *  free rip normally hands the player to the slot instead; one that could not
@@ -81,10 +88,6 @@ export function rewardArt(reward: TaskEntry['reward']): string | null {
 export const isClaimable = (t: TaskEntry): boolean =>
   t.progress.completed && !t.claimed;
 
-/** The challenge side of a row, read the way the boss sketched it: a verb, a
- *  picture of what to do it to, and how many — "RIP [Bronze Pack] ×10". An
- *  unknown type (a backend newer than this page) falls back to a neutral GOAL
- *  with no picture — never a crash. */
 export type ChallengeKind =
   'rip' | 'pull' | 'vault' | 'level' | 'checkin' | 'topup' | 'other';
 
@@ -95,6 +98,8 @@ export interface Challenge {
   /** What the goal names, pictured: its pack or Pokémon. null = none named,
    *  or a backend that predates the art — the row shows the kind's icon. */
   art: string | null;
+  /** That pack's or Pokémon's name — the picture's alt text. */
+  subject: string | null;
 }
 
 const GOALS: Record<
@@ -117,14 +122,21 @@ const GOALS: Record<
 const goalOf = (t: TaskEntry) =>
   Object.hasOwn(GOALS, t.requirement.type) ? GOALS[t.requirement.type] : null;
 
-// Sen only when there are some: RM 99.99 must never round to "done".
-const money = (n: number) => (Number.isInteger(n) ? rm0 : rm)(n);
-
+/** The challenge side of a row, read the way the boss sketched it: a verb, a
+ *  picture of what to do it to, and how many — "RIP [Bronze Pack] ×10". An
+ *  unknown type (a backend newer than this page) falls back to a neutral GOAL
+ *  with no picture — never a crash. */
 export function challengeOf(t: TaskEntry): Challenge {
   const g = goalOf(t);
   const { target } = t.progress;
   if (!g)
-    return { kind: 'other', verb: 'GOAL', amount: String(target), art: null };
+    return {
+      kind: 'other',
+      verb: 'GOAL',
+      amount: String(target),
+      art: null,
+      subject: null,
+    };
   const q = t.requirement;
   return {
     kind: g.kind,
@@ -133,36 +145,63 @@ export function challengeOf(t: TaskEntry): Challenge {
       g.kind === 'level'
         ? `LV ${target}`
         : g.kind === 'topup'
-          ? money(target)
+          ? rmAuto(target)
           : `×${target}`,
     art:
       (g.kind === 'rip'
         ? q.pack_image
         : g.kind === 'pull'
           ? q.pokemon_image
+          : null) || null,
+    subject:
+      (g.kind === 'rip'
+        ? q.pack_title
+        : g.kind === 'pull'
+          ? q.pokemon_name
           : null) ?? null,
   };
 }
 
-/** The count beside the progress bar, clamped to the goal: "3"/"10", or for
- *  a money goal "RM 40.50"/"RM 100". */
-export function progressCount(t: TaskEntry): { done: string; of: string } {
+/** How far along a task is, clamped to its goal: the bar's fill (rounded
+ *  DOWN, so a bar is never full before the goal is), whether it draws one
+ *  pip per step (a count of 10 or fewer — never money, where RM 9.75 of
+ *  RM 10 would light every pip), the count beside it ("3"/"10"; a money
+ *  goal shows only the RM in, its target being the row's headline — a
+ *  "RM 999.99/RM 1,000" squeezed the bar to nothing on a phone), and the
+ *  bar's screen-reader text ("3 of 10", "RM 40.50 of RM 100"). */
+export function progressOf(t: TaskEntry): {
+  done: number;
+  pct: number;
+  pips: boolean;
+  count: { done: string; of: string | null };
+  label: string;
+} {
   const { current, target } = t.progress;
   const done = Math.max(0, Math.min(current, target));
-  return goalOf(t)?.kind === 'topup'
-    ? { done: money(done), of: money(target) }
-    : { done: String(done), of: String(target) };
+  const money = goalOf(t)?.kind === 'topup';
+  const fmt = money ? rmAuto : String;
+  return {
+    done,
+    pct: target > 0 ? Math.floor((done / target) * 100) : 0,
+    pips: !money && Number.isInteger(target) && target > 0 && target <= 10,
+    count: { done: fmt(done), of: money ? null : fmt(target) },
+    label: `${fmt(done)} of ${fmt(target)}`,
+  };
 }
 
 /** The line under a challenge's progress: what is left, or that it is done. */
 export function challengeStatus(t: TaskEntry): string {
   if (t.claimed) return 'Prize claimed';
   if (t.progress.completed) return 'Complete — your prize is ready';
+  // A goal of 0 is one the backend could not read (an unknown type fails
+  // closed) — it can never complete, so it must not look nearly done.
+  if (!(t.progress.target > 0)) return 'Not available right now';
   const g = goalOf(t);
   const gap = t.progress.target - t.progress.current;
   // Target met but not yet flagged complete by the backend.
   if (!(gap > 0)) return 'Almost there';
-  if (g?.kind === 'topup') return `Top up ${money(gap)} more`;
+  if (g?.kind === 'topup')
+    return `Top up ${rmAuto(gap).replace(' ', NBSP)} more`;
   const left = Math.ceil(gap);
   return g
     ? `${left} more ${left === 1 ? g.one : g.many} to go`

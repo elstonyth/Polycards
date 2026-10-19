@@ -1,7 +1,7 @@
 import Image from 'next/image';
 import { Gift } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { rm, rm0 } from '@/lib/format';
+import { rmAuto } from '@/lib/format';
 import { priceTier, TIER_COLOR } from '@/lib/price-tier';
 import type { TaskEntry } from '@/lib/data/schemas';
 import { rewardArt, rewardLabel } from './task-hub';
@@ -75,7 +75,6 @@ export function RewardArt({
       className={cn(
         'relative flex shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]',
         claimable && 'claim-ring border-transparent',
-        claimed && 'opacity-45',
         className,
       )}
     >
@@ -84,6 +83,9 @@ export function RewardArt({
           className={cn(
             'relative h-[82%] w-[82%]',
             tierRgb && 'drop-shadow-[0_0_10px_rgba(var(--tier-rgb),0.55)]',
+            // Only the picture steps back: the worth badge is the one place
+            // a claimed prize's value shows, so it keeps full contrast.
+            claimed && 'opacity-45',
           )}
           style={
             tierRgb
@@ -100,11 +102,17 @@ export function RewardArt({
           />
         </span>
       ) : (
-        <Gift className="h-1/3 w-1/3 text-neutral-500" aria-hidden />
+        <Gift
+          className={cn(
+            'h-1/3 w-1/3 text-neutral-500',
+            claimed && 'opacity-45',
+          )}
+          aria-hidden
+        />
       )}
       {!compact && value != null && value > 0 && (
         <span className="font-heading absolute -bottom-2 left-1/2 -translate-x-1/2 rounded-full border border-white/10 bg-neutral-950 px-1.5 py-px text-[10px] leading-tight whitespace-nowrap text-chase tabular-nums">
-          {Number.isInteger(value) ? rm0(value) : rm(value)}
+          {rmAuto(value)}
         </span>
       )}
       {claimable && <Sparkles />}

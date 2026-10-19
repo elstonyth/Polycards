@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { TaskEntry, TaskHub } from '@/lib/data/schemas';
-import { rm, rm0 } from '@/lib/format';
+import { rm, rm0, rmAuto } from '@/lib/format';
 import {
   CREDIT_ART,
   challengeOf,
   challengeStatus,
-  progressCount,
+  progressOf,
   checkinCount,
   claimNotice,
   claimableCounts,
@@ -13,6 +13,7 @@ import {
   rewardArt,
   rewardLabel,
   splitHub,
+  stubName,
 } from '../task-hub';
 
 const task = (
@@ -201,6 +202,7 @@ describe('challenge side of a row', () => {
       verb: 'RIP',
       amount: '×10',
       art: '/b.webp',
+      subject: 'Bronze Pack',
     });
     expect(
       challengeOf(
@@ -249,19 +251,90 @@ describe('challenge side of a row', () => {
   });
 
   it('counts money goals in RM, sen only when there are some', () => {
-    const topup = (current: number) =>
+    const topup = (current: number, target = 100) =>
       task('t', {
         req: { type: 'topup_myr' },
-        progress: { current, target: 100, completed: false },
+        progress: { current, target, completed: false },
       });
-    expect(progressCount(topup(40.5))).toEqual({
-      done: rm(40.5),
-      of: rm0(100),
+    // The row's headline already says the RM target; the count is just
+    // how much is in, and the screen-reader text carries both.
+    expect(progressOf(topup(40.5))).toMatchObject({
+      count: { done: rm(40.5), of: null },
+      label: `${rm(40.5)} of ${rm0(100)}`,
     });
-    // RM 99.99 must never round to "done".
-    expect(progressCount(topup(99.99)).done).toBe(rm(99.99));
-    expect(progressCount(topup(40)).done).toBe(rm0(40));
-    expect(progressCount(task('r'))).toEqual({ done: '1', of: '3' });
+    // RM 99.99 must never round to "done" — not in the count, not in the bar.
+    expect(progressOf(topup(99.99)).count.done).toBe(rm(99.99));
+    expect(progressOf(topup(99.99)).pct).toBe(99);
+    expect(progressOf(topup(40)).count.done).toBe(rm0(40));
+    // Money never draws pips: RM 9.75 of RM 10 would light all ten.
+    expect(progressOf(topup(9.75, 10)).pips).toBe(false);
+    expect(progressOf(task('r'))).toMatchObject({
+      count: { done: '1', of: '3' },
+      label: '1 of 3',
+    });
+  });
+
+  it('clamps progress to the goal and picks pips only for small counts', () => {
+    const at = (current: number, target: number) =>
+      progressOf(
+        task('p', { progress: { current, target, completed: false } }),
+      );
+    expect(at(12, 10)).toMatchObject({ done: 10, pct: 100 });
+    expect(at(-1, 10)).toMatchObject({ done: 0, pct: 0 });
+    expect(at(995, 1000).pct).toBe(99);
+    expect(at(3, 10).pips).toBe(true);
+    expect(at(3, 11).pips).toBe(false);
+    expect(at(0, 0)).toMatchObject({ pct: 0, pips: false });
+  });
+
+  it('words every known goal in its own verb and unit', () => {
+    const row = (type: string, target: number, current: number) =>
+      task(type, {
+        req: { type },
+        progress: { current, target, completed: false },
+      });
+    const table: [string, number, string, string, string][] = [
+      ['vault_count', 25, 'COLLECT', '×25', '24 more cards to go'],
+      ['reach_level', 10, 'REACH', 'LV 10', '9 more levels to go'],
+      ['checkin_days', 3, 'CHECK IN', '×3', '2 more check-ins to go'],
+      ['rip_count', 2, 'RIP', '×2', '1 more rip to go'],
+    ];
+    for (const [type, target, verb, amount, status] of table) {
+      const current = target - Number(status.split(' ')[0]);
+      expect(challengeOf(row(type, target, current))).toMatchObject({
+        verb,
+        amount,
+      });
+      expect(challengeStatus(row(type, target, current))).toBe(status);
+    }
+  });
+
+  it('names the pictured pack or Pokémon for its alt text', () => {
+    expect(
+      challengeOf(
+        task('n', {
+          req: { type: 'rip_count', pack_title: 'Bronze Pack', pack_image: '' },
+        }),
+      ),
+    ).toMatchObject({ subject: 'Bronze Pack', art: null });
+  });
+
+  it('says a goal it cannot measure is unavailable, not nearly done', () => {
+    expect(
+      challengeStatus(
+        task('z', {
+          req: { type: 'spend_myr' },
+          progress: { current: 0, target: 0, completed: false },
+        }),
+      ),
+    ).toBe('Not available right now');
+  });
+
+  it('labels the stub prize without repeating the worth on the badge', () => {
+    expect(stubName({ type: 'credit', amount_myr: 50 })).toBe('Bonus credit');
+    expect(
+      stubName({ type: 'pack', pack_id: 'bronze', pack_title: 'Bronze Pack' }),
+    ).toBe('Free rip · Bronze Pack');
   });
 
   it('counts what is left in the requirement unit', () => {
@@ -289,7 +362,9 @@ describe('challenge side of a row', () => {
           progress: { current: 40.5, target: 100, completed: false },
         }),
       ),
-    ).toBe(`Top up ${rm(59.5)} more`);
+    ).toBe(
+      `Top up ${rmAuto(59.5).replace(' ', String.fromCharCode(0xa0))} more`,
+    );
   });
 
   it('says done, or claimed, instead of a count', () => {

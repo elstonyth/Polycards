@@ -29,6 +29,7 @@ import {
   UnavailablePanel,
 } from '@/components/task-ui';
 import { cn } from '@/lib/utils';
+import { usePrefersReducedMotion } from '@/lib/use-reveal';
 import type { TaskEntry, TaskHub } from '@/lib/data/schemas';
 import { CheckInTrack } from './CheckInTrack';
 import { RewardArt } from './reward-art';
@@ -38,9 +39,10 @@ import {
   checkinCount,
   claimableCounts,
   isClaimable,
-  progressCount,
-  rewardLabel,
+  progressOf,
   splitHub,
+  stubName,
+  type Challenge,
   type ChallengeKind,
   type HubTabs,
 } from './task-hub';
@@ -74,26 +76,37 @@ const CHALLENGE_ICON: Record<ChallengeKind, LucideIcon> = {
 };
 
 /** The middle of the goal's sum: the pack to rip or the Pokémon to pull,
- *  else the goal's icon. Decorative — the title below says it in words. */
-function GoalArt({ art, kind }: { art: string | null; kind: ChallengeKind }) {
-  const Icon = CHALLENGE_ICON[kind];
+ *  else the goal's icon — also when the picture fails to load, and for a
+ *  Pokémon under reduced motion (its sprite is an animated GIF that CSS
+ *  cannot pause). Named for screen readers either way: the admin's title
+ *  need not say which pack or Pokémon. */
+function GoalArt({ goal }: { goal: Challenge }) {
+  const reduced = usePrefersReducedMotion();
+  const [broken, setBroken] = useState(false);
+  const Icon = CHALLENGE_ICON[goal.kind];
+  const pull = goal.kind === 'pull';
+  const src = goal.art && !broken && !(pull && reduced) ? goal.art : null;
   return (
     <span className="relative flex h-14 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04]">
-      {art ? (
+      {src ? (
         <Image
-          src={art}
-          alt=""
+          src={src}
+          alt={goal.subject ?? ''}
           fill
           sizes="44px"
           // Pixel sprites stay crisp (and animated) unscaled by the optimizer.
-          unoptimized={kind === 'pull'}
+          unoptimized={pull}
+          onError={() => setBroken(true)}
           className={cn(
             'object-contain',
-            kind === 'pull' ? 'p-1.5 [image-rendering:pixelated]' : 'p-1',
+            pull ? 'p-1.5 [image-rendering:pixelated]' : 'p-1',
           )}
         />
       ) : (
-        <Icon className="h-5 w-5 text-neutral-300" aria-hidden />
+        <>
+          <Icon className="h-5 w-5 text-neutral-300" aria-hidden />
+          {goal.subject && <span className="sr-only">{goal.subject}</span>}
+        </>
       )}
     </span>
   );
@@ -101,24 +114,19 @@ function GoalArt({ art, kind }: { art: string | null; kind: ChallengeKind }) {
 
 /**
  * One task as a ticket (2026-10-19, "left is the challenge, right is the
- * reward"): the challenge on the body, read as a sum the player gets at a
- * glance — "RIP [Bronze Pack] ×10" — then the task's own words and how far
- * along it is, a pip per step when the goal is small enough to count; the
- * prize on a
- * perforated tear-off stub with its own Claim. A claimable ticket goes gold:
- * the prize sparkles and a light sweeps its Claim pill. A claimed one is
- * stamped and steps back.
+ * reward"). The body reads the goal as a sum the player gets at a glance —
+ * "RIP [Bronze Pack] ×10" — then the task's own words and how far along it
+ * is, a pip per step when the goal is a small count. The prize sits on a
+ * perforated tear-off stub: a Claim pill once it can be claimed, a Locked
+ * chip until then. A claimable ticket goes gold (the prize sparkles, a light
+ * sweeps its Claim); a claimed one is stamped and steps back.
  */
 function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
   const claimable = isClaimable(task);
   const { claimed } = task;
-  const { name } = rewardLabel(task.reward);
   const goal = challengeOf(task);
-  const count = progressCount(task);
-  const { current, target } = task.progress;
-  const done = Math.max(0, Math.min(current, target));
-  const pct = target > 0 ? Math.round((done / target) * 100) : 0;
-  const pips = Number.isInteger(target) && target > 0 && target <= 10;
+  const progress = progressOf(task);
+  const { target } = task.progress;
   const fill = claimed ? 'bg-neutral-600' : 'bg-chase';
   return (
     <li className="relative isolate flex [--stub:7rem] sm:[--stub:8.5rem]">
@@ -138,14 +146,14 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
         {/* What to do, as a sum: verb · what · how many. */}
         <div
           className={cn(
-            'flex flex-wrap items-center gap-x-2.5 gap-y-1',
+            'flex flex-wrap items-center gap-x-2 gap-y-1',
             claimed && 'opacity-50',
           )}
         >
           <span className="font-heading text-lg leading-none text-white">
             {goal.verb}
           </span>
-          <GoalArt art={goal.art} kind={goal.kind} />
+          <GoalArt key={goal.art ?? goal.kind} goal={goal} />
           <span className="font-heading text-2xl leading-none whitespace-nowrap text-white tabular-nums">
             {goal.amount}
           </span>
@@ -162,15 +170,18 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
           <div
             className={cn(
               'flex h-2 flex-1',
-              pips ? 'gap-[3px]' : 'overflow-hidden rounded-full bg-white/10',
+              progress.pips
+                ? 'gap-[3px]'
+                : 'overflow-hidden rounded-full bg-white/10',
             )}
             role="progressbar"
-            aria-valuenow={current}
+            aria-valuenow={progress.done}
             aria-valuemin={0}
             aria-valuemax={target}
+            aria-valuetext={progress.label}
             aria-label={`${task.title} progress`}
           >
-            {pips ? (
+            {progress.pips ? (
               // One pip per step, lighting up in turn: 3/10 reads as three
               // things done, not as a 30% sliver.
               Array.from({ length: target }, (_, i) => (
@@ -178,7 +189,7 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
                   key={i}
                   className={cn(
                     'flex-1 rounded-full',
-                    i < done ? cn(fill, 'bar-grow') : 'bg-white/10',
+                    i < progress.done ? cn(fill, 'bar-grow') : 'bg-white/10',
                   )}
                   style={{ '--i': i } as React.CSSProperties}
                 />
@@ -186,13 +197,17 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
             ) : (
               <span
                 className={cn('bar-grow rounded-full', fill)}
-                style={{ width: `${pct}%` }}
+                style={{ width: `${progress.pct}%` }}
               />
             )}
           </div>
           <span className="font-heading shrink-0 text-sm leading-none whitespace-nowrap text-white tabular-nums">
-            {count.done}
-            <span className="text-[11px] text-neutral-400">/{count.of}</span>
+            {progress.count.done}
+            {progress.count.of && (
+              <span className="text-[11px] text-neutral-400">
+                /{progress.count.of}
+              </span>
+            )}
           </span>
         </div>
         <p
@@ -227,15 +242,14 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
         </span>
         {/* The name WRAPS rather than truncates: a card name clipped to
             "Poncho-Weari…" on a phone is exactly the "what do I get?"
-            complaint this page exists to answer. The worth sits on the
-            art's badge, so credit just says what it is. */}
+            complaint this page exists to answer. */}
         <p
           className={cn(
             'mt-3.5 text-center text-[11px] leading-tight text-balance',
             claimed ? 'text-neutral-400' : 'text-neutral-200',
           )}
         >
-          {task.reward.type === 'credit' ? 'Bonus credit' : name}
+          {stubName(task.reward)}
         </p>
         {/* Only a prize that can be claimed gets a button; one still being
             worked for says so instead of showing a dead Claim. */}

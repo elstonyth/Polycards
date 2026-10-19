@@ -863,7 +863,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     // The goal side of /task shows WHAT to rip or pull ("RIP [Bronze Pack]
     // ×10"), so a narrowed goal carries its pack's / Pokémon's name and art.
     it('a pack- or Pokémon-scoped goal carries its name and picture (2026-10-19)', async () => {
-      await service.createPacks([
+      const [, , , gone] = await service.createPacks([
         {
           slug: 'goal-pack',
           title: 'Goal Pack',
@@ -883,6 +883,23 @@ moduleIntegrationTestRunner<PacksModuleService>({
           display_image: '/images/polycards/celebration-factory.webp',
           status: 'active',
         },
+        {
+          // Not on sale yet: its name and art must not reach customers.
+          slug: 'draft-pack',
+          title: 'Secret Pack',
+          category: 'standard',
+          price: 30,
+          image: '/secret.webp',
+          status: 'draft',
+        },
+        {
+          slug: 'gone-pack',
+          title: 'Gone Pack',
+          category: 'standard',
+          price: 30,
+          image: '/gone.webp',
+          status: 'active',
+        },
       ]);
       await asPixelPokemonCrud(service).createPixelPokemon([
         {
@@ -892,13 +909,16 @@ moduleIntegrationTestRunner<PacksModuleService>({
           image_url: 'https://cdn.test/pika.png',
         },
       ]);
-      const save = async (requirement: Record<string, unknown>) =>
+      const save = async (
+        requirement: Record<string, unknown>,
+        reward: Record<string, unknown> = { type: 'credit', amount_myr: 1 },
+      ) =>
         (
           await service.saveTaskDefinition({
             kind: 'weekly',
             title: `goal ${String(requirement.type)}`,
             requirement,
-            reward: { type: 'credit', amount_myr: 1 },
+            reward,
             active: true,
             sort: 0,
             adminId: 'admin_1',
@@ -916,11 +936,21 @@ moduleIntegrationTestRunner<PacksModuleService>({
         pixel_pokemon_id: 'px_goal',
       });
       const any = await save({ type: 'rip_count', count: 5 });
-      const heroOnly = await save({
+      const heroOnly = await save(
+        { type: 'rip_count', count: 1, pack_id: 'hero-only' },
+        { type: 'pack', pack_id: 'hero-only' },
+      );
+      const draft = await save({
         type: 'rip_count',
         count: 1,
-        pack_id: 'hero-only',
+        pack_id: 'draft-pack',
       });
+      const deleted = await save({
+        type: 'rip_count',
+        count: 1,
+        pack_id: 'gone-pack',
+      });
+      await service.softDeletePacks([gone.id]);
 
       const hub = await service.taskHubFor({ customerId: 'cus_goal_art' });
       const req = (id: string) =>
@@ -939,8 +969,17 @@ moduleIntegrationTestRunner<PacksModuleService>({
         pokemon_name: 'Pikachu',
         pokemon_image: 'https://cdn.test/pika.png',
       });
-      // A tile never shows the wide factory hero, so no shot = no picture.
+      // A tile never shows the wide factory hero, so no shot = no picture —
+      // on the goal and on the prize alike.
       expect(req(heroOnly)).toMatchObject({ pack_image: null });
+      expect(hub.tasks.find((t) => t.id === heroOnly)!.reward).toMatchObject({
+        pack_image: null,
+      });
+      expect(req(draft)).toMatchObject({ pack_title: null, pack_image: null });
+      expect(req(deleted)).toMatchObject({
+        pack_title: null,
+        pack_image: null,
+      });
       // Not narrowed: nothing to picture, sent as stored.
       expect(req(any)).toEqual({
         type: 'rip_count',

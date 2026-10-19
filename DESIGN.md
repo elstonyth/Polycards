@@ -303,18 +303,24 @@ Spec: `docs/superpowers/specs/2026-10-06-task-hub-v2-and-announcements-design.md
 - **Challenge ticket (2026-10-19)** — every task row is a ticket: the
   challenge on the left body, the prize on a tear-off stub at the right
   (`.ticket-cut` in globals.css: two paper tones split at the stub, a notch
-  punched top and bottom of a dashed hairline perforation). The body reads
-  the goal as a sum a player gets at a glance — verb, picture, amount: `RIP
-[Bronze Pack art] ×10`, `PULL [Pikachu sprite] ×10`, `TOP UP [wallet] RM
-100`, `REACH [icon] LV 10`. The picture is the pack or Pokémon the goal
-  names (the hub sends `pack_image` / `pokemon_image` on the requirement;
-  a pack's product shot only — never its factory hero `display_image`),
-  else the goal's icon. Below it: the task's own title, progress as one pip
-  per step when the goal is 10 or fewer (a bar otherwise) with a Nekst
-  `3/10`, and a "N more rips to go" line. The stub carries the prize art, its full name (wraps, never
-  truncates) and the state: a white Claim pill only when claimable, a quiet
-  `Locked` chip while in progress, a tilted `CLAIMED` stamp once taken. The
-  list sits bare under its heading — no panel around the tickets.
+  punched top and bottom of a dashed hairline perforation).
+  - **Body** — the goal reads as a sum a player gets at a glance: verb,
+    picture, amount — `RIP [Bronze Pack] ×10`, `PULL [Pikachu] ×10`,
+    `TOP UP [wallet] RM 100`, `REACH [icon] LV 10`. The picture is the pack
+    or Pokémon the goal names (the hub sends `pack_image` / `pokemon_image`
+    on the requirement — a pack's product shot only, never its factory hero
+    `display_image`, and nothing for a draft pack), else the goal's icon;
+    a Pokémon's animated sprite also falls back to the icon under reduced
+    motion. The picture's alt is that pack's or Pokémon's name. Below it:
+    the task's own title, progress as one pip per step for a count of 10 or
+    fewer (a bar otherwise; money never uses pips), a Nekst `3/10` (a money
+    goal shows only the RM in — its target is the headline), and a
+    "N more rips to go" line.
+  - **Stub** — the prize art (dimmed once claimed, its worth badge never),
+    its full name (wraps, never truncates), then the state: a white Claim
+    pill only when claimable, a quiet `Locked` chip while in progress, a
+    tilted `CLAIMED` stamp once taken.
+  - The list sits bare under its heading — no panel around the tickets.
 - **Prize art** — every task shows the prize itself on a neutral pedestal
   (white/4%): the card's slab lit by its own value tier (Glow Is Earned), the
   pack's shot, or the credit coins; the worth sits under it in Nekst.
