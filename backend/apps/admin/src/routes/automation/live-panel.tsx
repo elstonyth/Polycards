@@ -106,9 +106,10 @@ function currentRun(state: LiveSnapshot): LiveRunSummary | null {
         ? null
         : (state.cycles.at(-1)?.finishedAt ?? null),
     status: state.status,
-    draws: state.cycles.length,
+    draws: state.cycles.filter((cycle) => !cycle.skipped).length,
     settled: settled.length,
-    failed: state.cycles.length - settled.length,
+    failed:
+      state.cycles.filter((cycle) => !cycle.skipped).length - settled.length,
     spentCents: state.spentCents,
     soldCents: settled.reduce((sum, cycle) => sum + (cycle.saleCents ?? 0), 0),
     accounts: new Set(state.cycles.map((cycle) => cycle.customerId)).size,
@@ -918,7 +919,8 @@ export function LivePanel() {
                         : '—'}
                     </Text>
                     <Text size="xsmall" className="text-ui-fg-subtle">
-                      {cycle.cardName ?? 'Opening…'}
+                      {cycle.cardName ??
+                        (cycle.skipped || cycle.error ? '—' : 'Opening…')}
                     </Text>
                   </Table.Cell>
                   <Table.Cell className="whitespace-nowrap tabular-nums">
@@ -934,6 +936,14 @@ export function LivePanel() {
                     {cycle.error ? (
                       <Badge size="2xsmall" color="red" title={cycle.error}>
                         Failed
+                      </Badge>
+                    ) : cycle.skipped ? (
+                      <Badge
+                        size="2xsmall"
+                        color="orange"
+                        title={cycle.skipped}
+                      >
+                        Skipped: low balance
                       </Badge>
                     ) : !cycle.finishedAt ? (
                       <Badge size="2xsmall" color="blue">

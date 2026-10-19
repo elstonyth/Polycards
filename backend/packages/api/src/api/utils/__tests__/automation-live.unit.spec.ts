@@ -179,6 +179,38 @@ describe('live automation', () => {
     expect(state.spentCents).toBe(1800000);
     expect(state.nextRunAt).toBeNull();
   });
+  it('ends only the skipped account and keeps the run going for the rest', () => {
+    const state = createLiveState();
+    Object.assign(state, {
+      config: {
+        ...config,
+        customerIds: ['cus_broke', 'cus_live'],
+        maxCyclesPerAccount: 2,
+        intervalSeconds: 2,
+      },
+      status: 'running',
+      runId: 'run-1',
+    });
+    const broke = claimLiveCycle(state, 100)!;
+    expect(broke.customerId).toBe('cus_broke');
+    completeLiveCycle(state, { ...broke, skipped: 'Balance too low' }, 200);
+    expect(state.status).toBe('running');
+    expect(state.error).toBeNull();
+    for (const now of [3000, 6000]) {
+      const cycle = claimLiveCycle(state, now)!;
+      expect(cycle.customerId).toBe('cus_live');
+      completeLiveCycle(
+        state,
+        { ...cycle, differenceCents: 0, bonusDifferenceCents: 0 },
+        now + 100,
+      );
+    }
+    expect(state.status).toBe('completed');
+    expect(
+      state.cycles.filter((cycle) => cycle.customerId === 'cus_broke'),
+    ).toHaveLength(1);
+  });
+
   it('never starts from reading or saving settings, and never claims twice', () => {
     const state = createLiveState();
     state.config = config;

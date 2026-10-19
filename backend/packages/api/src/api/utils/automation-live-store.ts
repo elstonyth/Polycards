@@ -350,57 +350,66 @@ export async function tickLive(
     );
     if (account?.frozen) throw new Error('Account is frozen.');
     await resolveFxRateStrict(packs);
+    const balanceCents = Math.round(
+      (await packs.creditSummary(cycle.customerId)).balance * 100,
+    );
     const packSlug = claimed.config.packMix
-      ? pickLivePack(
-          claimed.config.packMix,
-          claimed.pricesCents,
-          Math.round(
-            (await packs.creditSummary(cycle.customerId)).balance * 100,
-          ),
-        )
+      ? pickLivePack(claimed.config.packMix, claimed.pricesCents, balanceCents)
       : claimed.config.packSlug;
     cycle.packSlug = packSlug;
-    const amounts = await executeLiveCycle(
-      cycle.customerId,
-      cycle.id,
-      claimed.pricesCents[packSlug] / 100,
-      {
-        balance: () => packs.creditSummary(cycle.customerId),
-        open: async (customerId, openId, maxPrice) => {
-          const { result } = await openPackWorkflow(container).run({
-            input: {
-              customer_id: customerId,
-              pack_id: packSlug,
-              open_id: openId,
-              max_price: maxPrice,
-            },
-          });
-          return {
-            pullId: result.pull.id,
-            cardName: result.card.name,
-            price: result.price,
-            bonusUsed: result.bonus_cents / 100,
-          };
+    const priceCents = claimed.pricesCents[packSlug];
+    // Checked before any money moves: one empty wallet must not stop the
+    // other accounts, so it only ends this account's draws for the run.
+    if (balanceCents < priceCents) {
+      cycle.skipped = `Balance RM ${(balanceCents / 100).toFixed(2)} cannot cover RM ${(priceCents / 100).toFixed(2)}. No more draws for this account in this run.`;
+    } else {
+      const amounts = await executeLiveCycle(
+        cycle.customerId,
+        cycle.id,
+        priceCents / 100,
+        {
+          balance: () => packs.creditSummary(cycle.customerId),
+          open: async (customerId, openId, maxPrice) => {
+            const { result } = await openPackWorkflow(container).run({
+              input: {
+                customer_id: customerId,
+                pack_id: packSlug,
+                open_id: openId,
+                max_price: maxPrice,
+              },
+            });
+            return {
+              pullId: result.pull.id,
+              cardName: result.card.name,
+              price: result.price,
+              bonusUsed: result.bonus_cents / 100,
+            };
+          },
+          checkpoint: async (result) => {
+            Object.assign(cycle, result);
+            await checkpoint();
+          },
+          sell: async (customerId, pullId) => {
+            if (await packs.isAccountDisabled(customerId))
+              throw new Error(
+                'Account was disabled before settlement. The paid card remains in the vault.',
+              );
+            const { result } = await buybackPullWorkflow(container).run({
+              input: { customer_id: customerId, pull_id: pullId },
+            });
+            return result;
+          },
         },
-        checkpoint: async (result) => {
-          Object.assign(cycle, result);
-          await checkpoint();
-        },
-        sell: async (customerId, pullId) => {
-          if (await packs.isAccountDisabled(customerId))
-            throw new Error(
-              'Account was disabled before settlement. The paid card remains in the vault.',
-            );
-          const { result } = await buybackPullWorkflow(container).run({
-            input: { customer_id: customerId, pull_id: pullId },
-          });
-          return result;
-        },
-      },
-    );
-    Object.assign(cycle, amounts);
+      );
+      Object.assign(cycle, amounts);
+    }
   } catch (error) {
-    cycle.error = error instanceof Error ? error.message : 'Live cycle failed.';
+    // Workflow failures arrive as plain objects, not Error instances.
+    const message =
+      error && typeof error === 'object' && 'message' in error
+        ? String(error.message)
+        : '';
+    cycle.error = message || 'Live cycle failed.';
     container
       .resolve(ContainerRegistrationKeys.LOGGER)
       .error(`Live automation cycle ${cycle.id}: ${cycle.error}`);
