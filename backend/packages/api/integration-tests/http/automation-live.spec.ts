@@ -457,16 +457,18 @@ medusaIntegrationTestRunner({
       });
       expect(limited.cycles).toHaveLength(1);
       await new Promise((resolve) => setTimeout(resolve, 5100));
-      expect(
-        (
-          await api.get('/store/pulls/recent?pack_id=live-pack', {
-            headers: storeHeaders,
-          })
-        ).data.pulls,
-      ).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ id: rankedDraw.cycles[0].pullId }),
-        ]),
+      const feed = (
+        await api.get('/store/pulls/recent?pack_id=live-pack', {
+          headers: storeHeaders,
+        })
+      ).data.pulls as Record<string, unknown>[];
+      const botRow = feed.find((row) => row.id === rankedDraw.cycles[0].pullId);
+      const playerRow = feed.find((row) => row.who === 'Rank Competitor');
+      // A live bot draw reads exactly like any other player's pull in the
+      // public feed: its own name, the same fields, no automation marker.
+      expect(botRow).toMatchObject({ who: 'Live Player' });
+      expect(Object.keys(botRow!).sort()).toEqual(
+        Object.keys(playerRow!).sort(),
       );
       await api.post(
         '/admin/automation/live',
