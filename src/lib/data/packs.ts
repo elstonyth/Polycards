@@ -411,8 +411,6 @@ interface BackendRecentPull {
   avatar_url?: string | null;
   /** Equipped milestone frame, resolved backend-side. */
   frame_url?: string | null;
-  /** House-run account; absent on an older backend. */
-  house?: boolean;
 }
 
 /** A feed row: the won card (its `handle` opens the card-detail overlay;
@@ -436,8 +434,6 @@ export type RecentPull = CardView & {
   avatar: string | null;
   /** Equipped milestone frame overlay; null = none. */
   frame: string | null;
-  /** A house-run account's pull; rendered with a House label. */
-  house: boolean;
   /** ISO roll time — the absolute timestamp the history rows print. */
   rolledAt: string;
   /** Relative timestamp, e.g. "4m ago" (computed at render). */
@@ -512,7 +508,6 @@ export async function getRecentPulls(
         // The same seed → pfp mapping as the leaderboard / public profile.
         avatar: p.avatar_url ?? (p.seed != null ? avatarForSeed(p.seed) : null),
         frame: p.frame_url ?? null,
-        house: p.house === true,
         rolledAt: p.rolled_at,
         agoLabel: relativeTime(p.rolled_at),
       };
@@ -566,8 +561,6 @@ export interface PullGapHit {
   who: string;
   avatar: string | null;
   frame: string | null;
-  /** A house-run account's hit; rendered with a House label. */
-  house: boolean;
 }
 
 export interface PullGaps {
@@ -620,7 +613,6 @@ export async function getPullGaps(
       who: h.who ?? 'Anonymous',
       avatar: h.avatar_url ?? (h.seed != null ? avatarForSeed(h.seed) : null),
       frame: h.frame_url ?? null,
-      house: h.house === true,
     })),
   };
 }

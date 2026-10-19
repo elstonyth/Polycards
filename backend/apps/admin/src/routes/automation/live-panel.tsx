@@ -462,8 +462,7 @@ export function LivePanel() {
         )}
         <Text size="xsmall" className="text-ui-fg-muted mt-4">
           Runs keep going when you close this page. Opening the page never
-          starts one. These accounts never count on the weekly prize board, and
-          the shop labels their pulls “House”.
+          starts one. These accounts never count on the weekly prize board.
         </Text>
       </Container>
 

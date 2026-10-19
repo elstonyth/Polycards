@@ -92,10 +92,9 @@ function AccountListEditor({ current }: { current: string[] }) {
     <Container>
       <Heading level="h2">Edit the account list</Heading>
       <Text size="small" className="text-ui-fg-subtle">
-        One email per line, up to 80. These accounts can be used in runs, never
-        rank on the weekly prize board, and show as “House” in the shop. Saving
-        replaces the whole list; an account you remove counts on this week’s
-        board again with all its pulls.
+        One email per line, up to 80. These accounts can be used in runs and
+        never rank on the weekly prize board. Saving replaces the whole list; an
+        account you remove counts on this week’s board again with all its pulls.
       </Text>
       <Textarea
         aria-label="Bot account emails"
