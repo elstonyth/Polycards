@@ -8,7 +8,7 @@ import {
 import { fakeGateway, type FakeConfig } from './fake-gateway';
 import * as a3pay from './a3pay-client';
 import type { A3payConfig } from './a3pay-client';
-import { toLedgerAmount, type RowFx } from './payment-fx';
+import { PAYIN_NUDGE_CENTS, toLedgerAmount, type RowFx } from './payment-fx';
 import { gatewayEnv } from './gateway-env';
 import { PACKS_MODULE } from './index';
 import {
@@ -116,6 +116,15 @@ export type GatewayDefinition = {
    * nudgedDeposit / callbackLedgerAmount). Default PAYIN_NUDGE_CENTS.
    */
   payinNudgeCents?: number;
+  /**
+   * A payin that lands further from its lock than a nudge, but within this,
+   * is credited by the sweep for what ARRIVED, at the locked rate, instead of
+   * held: max(minCents, percent of the order). For crypto, where an
+   * exchange's withdrawal fee makes short arrivals routine (owner decision
+   * 2026-10-20). Unset = exact-amount gateways (A3Pay): anything off the
+   * nudge is held for staff.
+   */
+  payinArrivedTolerance?: { percent: number; minCents: number };
   /** Their server-to-server callback targets on OUR backend. */
   hooks: { deposit: string; withdrawal: string; payoutVerify?: string };
   /**
@@ -252,6 +261,8 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
     // PROVISIONAL, up to 1 USDT: crypto cashiers make amounts unique with
     // larger tails than A3Pay's cent. Measure payinActualAmount on staging.
     payinNudgeCents: 100,
+    // Short or over by up to max(2 USDT, 10%): credit what arrived.
+    payinArrivedTolerance: { percent: 10, minCents: 200 },
     hooks: {
       deposit: '/hooks/gp365/deposit',
       withdrawal: '/hooks/gp365/withdrawal',
@@ -379,6 +390,25 @@ export function rowGateway(row: {
   gateway?: string | null;
 }): PaymentGateway | null {
   return isPaymentGateway(row.gateway) ? row.gateway : null;
+}
+
+/**
+ * How far (cents of its currency) a payin on `gateway` may land from its
+ * locked `lockedAmount` and still be credited by the sweep (for what arrived,
+ * at the locked rate): the nudge window, widened by payinArrivedTolerance
+ * where the gateway has one. Further off is held (payment-fx.ts offLock).
+ */
+export function payinLockWindowCents(
+  gateway: PaymentGateway,
+  lockedAmount: number,
+): number {
+  const { payinNudgeCents = PAYIN_NUDGE_CENTS, payinArrivedTolerance } =
+    GATEWAYS[gateway];
+  if (!payinArrivedTolerance) return payinNudgeCents;
+  const share = Number.isFinite(lockedAmount)
+    ? Math.floor(lockedAmount * payinArrivedTolerance.percent + 1e-6)
+    : 0;
+  return Math.max(payinNudgeCents, payinArrivedTolerance.minCents, share);
 }
 
 // ---------------------------------------------------------------------------
@@ -945,10 +975,7 @@ export function submitDeposit(
  * a later A3PAY_CURRENCY edit must not turn live payouts into refunds. Rows
  * from before the column (currency absent) keep the config's currency.
  */
-export function inRowCurrency(
-  config: GatewayConfig,
-  fx: RowFx,
-): GatewayConfig {
+export function inRowCurrency(config: GatewayConfig, fx: RowFx): GatewayConfig {
   const currency = typeof fx.currency === 'string' ? fx.currency : '';
   return currency &&
     'currencyCode' in config &&

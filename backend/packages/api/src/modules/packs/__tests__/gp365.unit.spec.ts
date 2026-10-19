@@ -18,6 +18,7 @@ import {
   submitDeposit,
   submitWithdrawal,
   type GatewayConfig,
+  payinLockWindowCents,
 } from '../gateway';
 import { isPayinVerifyFail, regionalDepositGateway } from '../gateway-deposit';
 import { savedBankAccountViews } from '../saved-accounts';
@@ -26,7 +27,8 @@ import {
   regionalPayoutGateways,
   withdrawalDetailsError,
 } from '../gateway-withdrawal';
-import { PAYMENT_FX_FEEDS } from '../payment-fx';
+import { PAYMENT_FX_FEEDS, offLock } from '../payment-fx';
+import { reconcileAction } from '../gateway-reconcile';
 
 // GlobePay365 (USDT): a second tenant of the A3Pay platform, beside A3Pay.
 
@@ -397,5 +399,43 @@ describe('the shared adapter, bound to GlobePay365', () => {
       ),
     ).rejects.toMatchObject({ definite: true, codes: ['A3PAY_UNKNOWN_BANK'] });
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe('a USDT payin that lands off its lock is credited for what arrived', () => {
+  // Owner decision 2026-10-20: an exchange's withdrawal fee makes short
+  // arrivals routine on crypto. Within max(2 USDT, 10%) of the order the
+  // sweep credits the USDT that arrived at the locked rate; further off, it
+  // stays held for staff. A3Pay (S$) keeps its exact-amount 10-cent window.
+  it('sizes the window per gateway', () => {
+    expect(payinLockWindowCents('a3pay', 50)).toBe(10);
+    expect(payinLockWindowCents('a3pay', 5000)).toBe(10);
+    expect(payinLockWindowCents('gp365', 10)).toBe(200); // 2 USDT floor
+    expect(payinLockWindowCents('gp365', 50)).toBe(500); // 10%
+    expect(payinLockWindowCents('gp365', 1000)).toBe(10000);
+    expect(payinLockWindowCents('gp365', Number.NaN)).toBe(200);
+  });
+
+  const lock = { ledgerAmount: 208.95, gatewayAmount: 50, currency: 'USDT' };
+  const sweep = (reported: number) =>
+    reconcileAction({
+      state: 'success',
+      amount: Math.floor((20895 * Math.round(reported * 100)) / 5000) / 100,
+      createdAt: new Date(Date.now() - 60_000),
+      now: new Date(),
+      lock: { fx: lock, reported, windowCents: payinLockWindowCents('gp365', 50) },
+    });
+
+  it('credits a short or over arrival inside the window at the locked rate', () => {
+    // 48 of 50 USDT arrived: RM 208.95 x 48/50 = RM 200.59.
+    expect(sweep(48)).toEqual({ kind: 'settle', amount: 200.59 });
+    expect(sweep(45)).toEqual({ kind: 'settle', amount: 188.05 });
+    expect(sweep(55)).toEqual({ kind: 'settle', amount: 229.84 });
+  });
+
+  it('holds anything further off for staff', () => {
+    expect(sweep(44.99)).toMatchObject({ kind: 'quarantine', reason: 'off-lock' });
+    expect(sweep(55.01)).toMatchObject({ kind: 'quarantine', reason: 'off-lock' });
+    expect(offLock(lock, 40, payinLockWindowCents('gp365', 50))).toBe(true);
   });
 });
