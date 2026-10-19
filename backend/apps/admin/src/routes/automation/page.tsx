@@ -28,7 +28,8 @@ import type {
 import { rm } from '../../lib/format';
 import { SandboxPanel } from './sandbox-panel';
 import { LivePanel } from './live-panel';
-import { OverviewPanel, useAutomationActivity } from './overview-panel';
+import { OverviewPanel } from './overview-panel';
+import { useAutomationActivity } from './use-automation-activity';
 import { ago } from './tiers';
 
 declare const __BACKEND_URL__: string;
