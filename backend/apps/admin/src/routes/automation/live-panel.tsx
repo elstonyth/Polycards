@@ -191,8 +191,7 @@ export function LivePanel() {
             <Text size="small" className="text-ui-fg-subtle">
               Production customer balances, real pack draws and buyback
               settlements. Accounts on the Automation Accounts list never rank
-              on the weekly challenge board or receive its prizes, and the
-              storefront feeds label their pulls “House”.
+              on the weekly challenge board or receive its prizes.
             </Text>
             <Text size="small">
               Runs continue in the cloud when this browser is closed. Opening
@@ -535,8 +534,8 @@ export function LivePanel() {
         <Text size="small" className="mt-3 text-ui-fg-subtle">
           No total spend cap. Runs finish the selected cycles while account
           balances cover each draw, or stop earlier when rank goals finish. Each
-          draw appears in the storefront’s recent pulls feed with a House label,
-          including cards sold back.
+          draw appears in the storefront’s recent pulls feed, including cards
+          sold back.
         </Text>
         <LiveRankSettings
           config={config}

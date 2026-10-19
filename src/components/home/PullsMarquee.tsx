@@ -28,8 +28,7 @@ export default function PullsMarquee({ pulls }: { pulls: RecentPull[] }) {
             aria-hidden
           />
           <span className="text-[13px] text-neutral-400">
-            {pull.who}
-            {pull.house && ' (House)'} pulled
+            {pull.who} pulled
           </span>
           <span className="font-heading text-sm tabular-nums text-white">
             {pull.priceMyr != null ? rm(pull.priceMyr) : '—'}

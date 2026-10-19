@@ -2,7 +2,6 @@ import type { MedusaRequest } from '@medusajs/framework/http';
 import { Modules } from '@medusajs/framework/utils';
 import type PacksModuleService from '../../../modules/packs/service';
 import { publicProfileFields, seedOf } from '../../../utils/profile-handle';
-import { monitoredCustomerIds } from '../../utils/automation-monitor';
 
 /** The PII-safe display fields a public pull feed prints for a puller — the
  *  leaderboard's set (utils/profile-handle: first_name, handle, avatar) plus
@@ -14,8 +13,6 @@ export interface PullerProfile {
   profile_handle: string | null;
   avatar_url: string | null;
   frame_url: string | null;
-  /** House-run account (admin Automation Accounts list); the feeds label it. */
-  house: boolean;
 }
 
 export const ANONYMOUS_PULLER: PullerProfile = {
@@ -24,7 +21,6 @@ export const ANONYMOUS_PULLER: PullerProfile = {
   profile_handle: null,
   avatar_url: null,
   frame_url: null,
-  house: false,
 };
 
 /**
@@ -49,19 +45,13 @@ export async function loadPullerProfiles(
   profileOf(customerId: string | null, fallbackKey: string): PullerProfile;
 }> {
   const ids = [...new Set(customerIds.filter((id): id is string => !!id))];
-  const [disabled, frames, customers, house] = await Promise.all([
+  const [disabled, frames, customers] = await Promise.all([
     packs.disabledCustomerIds(ids),
     packs
       .siteSettings()
       .then((s) => s.avatar_frames)
       .catch((): Record<string, string> => ({})),
     listCustomersNullsafe(req, ids),
-    // shortcut: an unreadable Automation Accounts list leaves rows unlabelled
-    // rather than 500ing a public feed; fix the row if labels go missing.
-    packs
-      .listAutomationMonitors({ id: 'global' }, { take: 1 })
-      .then(([saved]) => new Set(monitoredCustomerIds(saved?.accounts)))
-      .catch(() => new Set<string>()),
   ]);
   const byId = new Map(customers.map((c) => [c.id, c]));
   return {
@@ -83,7 +73,6 @@ export async function loadPullerProfiles(
         avatar_url: profile.avatarUrl,
         frame_url:
           typeof level === 'number' ? (frames[String(level)] ?? null) : null,
-        house: !!customerId && house.has(customerId),
       };
     },
   };
