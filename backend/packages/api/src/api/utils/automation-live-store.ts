@@ -22,6 +22,7 @@ import {
   completeLiveCycle,
   createLiveState,
   executeLiveCycle,
+  pickLivePack,
   validateLiveConfig,
 } from './automation-live';
 import type {
@@ -179,6 +180,7 @@ export async function changeLive(
   const packs = service(container);
   let config;
   let priceCents = 0;
+  let pricesCents: Record<string, number> = {};
   if (body.action === 'save' || body.action === 'run') {
     try {
       config = validateLiveConfig(body.config, await selectedCustomers(packs));
@@ -188,8 +190,22 @@ export async function changeLive(
       );
     }
     const snapshot = await readLive(container);
-    const pack = snapshot.packs.find((pack) => pack.slug === config.packSlug);
-    if (!pack) throw invalid('Choose an available paid pack.');
+    const catalog = new Map(
+      snapshot.packs.map((pack) => [pack.slug, Math.round(pack.price * 100)]),
+    );
+    const mix = config.packMix ?? [{ packSlug: config.packSlug, weightBp: 1 }];
+    if (mix.some((row) => !catalog.has(row.packSlug)))
+      throw invalid('Choose available paid packs.');
+    pricesCents = Object.fromEntries(
+      mix.map((row) => [row.packSlug, catalog.get(row.packSlug)!]),
+    );
+    // A mix's weighted average stands in for "the pack price" in rank estimates.
+    priceCents = Math.round(
+      mix.reduce(
+        (sum, row) => sum + pricesCents[row.packSlug] * row.weightBp,
+        0,
+      ) / mix.reduce((sum, row) => sum + row.weightBp, 0),
+    );
     if (
       config.customerIds.some(
         (id) =>
@@ -201,7 +217,6 @@ export async function changeLive(
       throw invalid(
         'Every selected account must exist and be active and unfrozen.',
       );
-    priceCents = Math.round(pack.price * 100);
     if (body.action === 'run') await resolveFxRateStrict(packs);
   }
   await editLive(container, actorId, (state) => {
@@ -238,6 +253,7 @@ export async function changeLive(
     );
     state.config = config;
     state.packPriceCents = priceCents;
+    state.packPricesCents = pricesCents;
     if (body.action === 'run')
       Object.assign(state, {
         status: 'running',
@@ -301,7 +317,10 @@ export async function tickLive(
           cycle,
           config: state.config,
           runId: state.runId,
-          maxPrice: state.packPriceCents / 100,
+          // Runs started before per-pack prices existed carry only packPriceCents.
+          pricesCents: state.packPricesCents ?? {
+            [state.config.packSlug]: state.packPriceCents,
+          },
         }
       : null;
   });
@@ -326,17 +345,27 @@ export async function tickLive(
     );
     if (account?.frozen) throw new Error('Account is frozen.');
     await resolveFxRateStrict(packs);
+    const packSlug = claimed.config.packMix
+      ? pickLivePack(
+          claimed.config.packMix,
+          claimed.pricesCents,
+          Math.round(
+            (await packs.creditSummary(cycle.customerId)).balance * 100,
+          ),
+        )
+      : claimed.config.packSlug;
+    cycle.packSlug = packSlug;
     const amounts = await executeLiveCycle(
       cycle.customerId,
       cycle.id,
-      claimed.maxPrice,
+      claimed.pricesCents[packSlug] / 100,
       {
         balance: () => packs.creditSummary(cycle.customerId),
         open: async (customerId, openId, maxPrice) => {
           const { result } = await openPackWorkflow(container).run({
             input: {
               customer_id: customerId,
-              pack_id: claimed.config.packSlug,
+              pack_id: packSlug,
               open_id: openId,
               max_price: maxPrice,
             },

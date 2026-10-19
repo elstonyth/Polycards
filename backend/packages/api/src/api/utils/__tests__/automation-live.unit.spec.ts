@@ -3,6 +3,7 @@ import {
   completeLiveCycle,
   createLiveState,
   executeLiveCycle,
+  pickLivePack,
   validateLiveConfig,
 } from '../automation-live';
 import { createHumanizedState, planHumanized } from '../automation-humanized';
@@ -340,6 +341,113 @@ describe('live automation', () => {
       expect(open).toHaveBeenCalledTimes(1);
       expect(sell).not.toHaveBeenCalled();
     }
+  });
+
+  it('picks packs by basis-point weight and skips packs the balance cannot cover', () => {
+    const mix = [
+      { packSlug: 'bronze', weightBp: 7500 },
+      { packSlug: 'diamond', weightBp: 2500 },
+    ];
+    const prices = { bronze: 5000, diamond: 500000 };
+    expect(pickLivePack(mix, prices, 1_000_000, () => 0)).toBe('bronze');
+    expect(pickLivePack(mix, prices, 1_000_000, () => 0.7499)).toBe('bronze');
+    expect(pickLivePack(mix, prices, 1_000_000, () => 0.75)).toBe('diamond');
+    expect(pickLivePack(mix, prices, 1_000_000, () => 0.999999)).toBe(
+      'diamond',
+    );
+    // RM 100 covers Bronze only: Diamond drops out for this draw.
+    expect(pickLivePack(mix, prices, 10000, () => 0.999999)).toBe('bronze');
+    // Nothing affordable: the full mix stands and the open fails as usual.
+    expect(pickLivePack(mix, prices, 0, () => 0.999999)).toBe('diamond');
+  });
+
+  it('accepts a pack mix in 0.01% steps that totals exactly 100%', () => {
+    const packMix = [
+      ['celebration', 2500],
+      ['ascended', 2000],
+      ['bronze', 2500],
+      ['silver', 1500],
+      ['gold', 1000],
+      ['platinum', 250],
+      ['diamond', 200],
+      ['poncho', 50],
+      ['unused', 0],
+    ].map(([packSlug, weightBp]) => ({ packSlug, weightBp }));
+    expect(
+      validateLiveConfig({ ...config, packSlug: '', packMix }, ['cus_live'])
+        .packMix,
+    ).toEqual(packMix.slice(0, 8));
+    for (const bad of [
+      [{ packSlug: 'bronze', weightBp: 9999 }],
+      [
+        { packSlug: 'bronze', weightBp: 9999.5 },
+        { packSlug: 'gold', weightBp: 0.5 },
+      ],
+      [
+        { packSlug: 'bronze', weightBp: 5000 },
+        { packSlug: 'bronze', weightBp: 5000 },
+      ],
+      [{ packSlug: 'bronze', weightBp: 10000, extra: 1 }],
+      [{ packSlug: 'bad slug', weightBp: 10000 }],
+      [],
+    ])
+      expect(() =>
+        validateLiveConfig({ ...config, packMix: bad }, ['cus_live']),
+      ).toThrow();
+  });
+
+  it('bounds Humanized pace to whole 1–10× steps', () => {
+    expect(
+      validateLiveConfig({ ...config, humanizedPace: 5 }, ['cus_live'])
+        .humanizedPace,
+    ).toBe(5);
+    for (const humanizedPace of [0, 11, 1.5, '2'])
+      expect(() =>
+        validateLiveConfig({ ...config, humanizedPace }, ['cus_live']),
+      ).toThrow();
+  });
+
+  it('serves the longest-waiting due Humanized account first', () => {
+    const ready = (id: string) => {
+      const humanized = createHumanizedState(id, 'mysg');
+      let now = Date.parse('2026-10-18T04:00:00Z');
+      for (let index = 0; index < 100; index++) {
+        const plan = planHumanized(humanized, now, () => 0.5);
+        if (plan.ready) break;
+        now += plan.delayMs;
+      }
+      return { humanized, now };
+    };
+    const late = ready('cus_late');
+    const early = ready('cus_early');
+    const now = Math.max(late.now, early.now) + 60_000;
+    late.humanized.nextDrawAt = now - 1000;
+    early.humanized.nextDrawAt = now - 50_000;
+    const state = createLiveState();
+    Object.assign(state, {
+      status: 'running',
+      config: {
+        ...config,
+        customerIds: ['cus_late', 'cus_early'],
+        timingMode: 'humanized',
+        humanizedRegion: 'mysg',
+      },
+      schedules: [
+        {
+          customerId: 'cus_late',
+          humanized: late.humanized,
+          nextRunAt: now - 1000,
+          waitReason: 'Within active session',
+        },
+        {
+          customerId: 'cus_early',
+          humanized: early.humanized,
+          nextRunAt: now - 50_000,
+          waitReason: 'Within active session',
+        },
+      ],
+    });
+    expect(claimLiveCycle(state, now, () => 0.5)?.customerId).toBe('cus_early');
   });
 
   it('reports a concurrent balance change as a mismatch', async () => {

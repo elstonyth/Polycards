@@ -13,6 +13,7 @@ import {
 } from '@medusajs/ui';
 import type {
   LiveConfig,
+  LivePackWeight,
   LiveSnapshot,
 } from '../../../../../packages/api/src/api/utils/automation-live-types';
 import { DEFAULT_LIVE_TIMING } from '../../../../../packages/api/src/api/utils/automation-live-types';
@@ -23,6 +24,32 @@ import { LiveRankSettings } from './live-rank-settings';
 
 declare const __BACKEND_URL__: string;
 const KEY = ['automation-live'];
+
+// The operator's standing mix (2026-10-19), matched to live packs by slug or
+// title. Unmatched packs start at 0%; every rate stays editable.
+const SUGGESTED_RATES: [RegExp, number][] = [
+  [/30th|celebration/i, 2500],
+  [/ascended|\bah\b/i, 2000],
+  [/bronze/i, 2500],
+  [/silver/i, 1500],
+  [/gold/i, 1000],
+  [/platinum/i, 250],
+  [/diamond/i, 200],
+  [/poncho/i, 50],
+];
+
+function suggestedMix(packs: LiveSnapshot['packs']): LivePackWeight[] {
+  return packs.map((pack) => ({
+    packSlug: pack.slug,
+    weightBp:
+      SUGGESTED_RATES.find(([pattern]) =>
+        pattern.test(`${pack.slug} ${pack.title}`),
+      )?.[1] ?? 0,
+  }));
+}
+
+const percent = (bp: number) =>
+  `${(bp / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
 
 async function requestLive(
   input?: Record<string, unknown>,
@@ -99,6 +126,24 @@ export function LivePanel() {
     : config.maxCyclesPerAccount;
   const update = <K extends keyof LiveConfig>(key: K, value: LiveConfig[K]) =>
     setDraft({ ...config, [key]: value });
+  const mixTotal =
+    config.packMix?.reduce((sum, row) => sum + row.weightBp, 0) ?? 0;
+  const packChosen = config.packMix ? mixTotal === 10000 : !!config.packSlug;
+  const packTitles = new Map(
+    state?.packs.map((pack) => [pack.slug, pack.title]),
+  );
+  const setRate = (slug: string, bp: number) =>
+    update(
+      'packMix',
+      (state?.packs ?? []).map((pack) => ({
+        packSlug: pack.slug,
+        weightBp:
+          pack.slug === slug
+            ? bp
+            : (config.packMix?.find((row) => row.packSlug === pack.slug)
+                ?.weightBp ?? 0),
+      })),
+    );
   const error = action.error?.message ?? query.error?.message ?? state?.error;
   const cycles = [
     ...(state?.cycles ?? []),
@@ -145,7 +190,9 @@ export function LivePanel() {
             <Heading level="h2">Live workspace</Heading>
             <Text size="small" className="text-ui-fg-subtle">
               Production customer balances, real pack draws and buyback
-              settlements. Pulls follow normal leaderboard and reward rules.
+              settlements. Accounts on the Automation Accounts list never rank
+              on the weekly challenge board or receive its prizes, and the
+              storefront feeds label their pulls “House”.
             </Text>
             <Text size="small">
               Runs continue in the cloud when this browser is closed. Opening
@@ -199,7 +246,7 @@ export function LivePanel() {
                 !state ||
                 active ||
                 busy ||
-                !config.packSlug ||
+                !packChosen ||
                 !config.customerIds.length
               }
               onClick={() => action.mutate({ action: 'save', config })}
@@ -209,10 +256,7 @@ export function LivePanel() {
             {!active && (
               <Button
                 disabled={
-                  !state ||
-                  busy ||
-                  !config.packSlug ||
-                  !config.customerIds.length
+                  !state || busy || !packChosen || !config.customerIds.length
                 }
                 onClick={() => action.mutate({ action: 'run', config })}
               >
@@ -274,24 +318,49 @@ export function LivePanel() {
           className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
         >
           <div className="space-y-2">
-            <Label htmlFor="live-pack">Paid pack</Label>
+            <Label htmlFor="live-pack-mode">Pack choice</Label>
             <Select
-              value={config.packSlug || undefined}
-              onValueChange={(value) => update('packSlug', value)}
+              value={config.packMix ? 'mix' : 'single'}
+              onValueChange={(value) =>
+                update(
+                  'packMix',
+                  value === 'mix'
+                    ? suggestedMix(state?.packs ?? [])
+                    : undefined,
+                )
+              }
               disabled={active || busy}
             >
-              <Select.Trigger id="live-pack">
-                <Select.Value placeholder="Choose a live pack" />
+              <Select.Trigger id="live-pack-mode">
+                <Select.Value />
               </Select.Trigger>
               <Select.Content>
-                {state?.packs.map((pack) => (
-                  <Select.Item value={pack.slug} key={pack.slug}>
-                    {pack.title} · {rm(pack.price)}
-                  </Select.Item>
-                ))}
+                <Select.Item value="single">One pack</Select.Item>
+                <Select.Item value="mix">Random by rates</Select.Item>
               </Select.Content>
             </Select>
           </div>
+          {!config.packMix && (
+            <div className="space-y-2">
+              <Label htmlFor="live-pack">Paid pack</Label>
+              <Select
+                value={config.packSlug || undefined}
+                onValueChange={(value) => update('packSlug', value)}
+                disabled={active || busy}
+              >
+                <Select.Trigger id="live-pack">
+                  <Select.Value placeholder="Choose a live pack" />
+                </Select.Trigger>
+                <Select.Content>
+                  {state?.packs.map((pack) => (
+                    <Select.Item value={pack.slug} key={pack.slug}>
+                      {pack.title} · {rm(pack.price)}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="live-timing">Draw timing</Label>
             <Select
@@ -370,6 +439,29 @@ export function LivePanel() {
               </Select>
             </div>
           )}
+          {config.timingMode === 'humanized' && (
+            <div className="space-y-2">
+              <Label htmlFor="live-pace">Humanized pace</Label>
+              <Select
+                value={String(config.humanizedPace)}
+                onValueChange={(value) =>
+                  update('humanizedPace', Number(value))
+                }
+                disabled={active || busy}
+              >
+                <Select.Trigger id="live-pace">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  {[1, 2, 3, 5, 10].map((pace) => (
+                    <Select.Item value={String(pace)} key={pace}>
+                      {pace === 1 ? '1× (desktop timing)' : `${pace}× faster`}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="live-cycles">Cycles per account</Label>
             <Input
@@ -384,18 +476,67 @@ export function LivePanel() {
             />
           </div>
         </fieldset>
+        {config.packMix && (
+          <fieldset
+            disabled={active || busy || !state}
+            className="mt-4 space-y-3"
+          >
+            <legend className="text-sm font-medium">
+              Pack rates · {percent(mixTotal)} of 100%
+            </legend>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {state?.packs.map((pack) => (
+                <div className="space-y-2" key={pack.slug}>
+                  <Label htmlFor={`live-rate-${pack.slug}`}>
+                    {pack.title} · {rm(pack.price)}
+                  </Label>
+                  <Input
+                    id={`live-rate-${pack.slug}`}
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.01}
+                    value={
+                      (config.packMix?.find((row) => row.packSlug === pack.slug)
+                        ?.weightBp ?? 0) / 100
+                    }
+                    onChange={(event) =>
+                      setRate(
+                        pack.slug,
+                        Math.round(Number(event.target.value) * 100) || 0,
+                      )
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+            <Text
+              size="small"
+              className={
+                mixTotal === 10000 ? 'text-ui-fg-subtle' : 'text-ui-fg-error'
+              }
+            >
+              {mixTotal === 10000
+                ? 'Each draw picks a pack at these rates. A pack the account cannot afford is skipped for that draw and the other rates scale up.'
+                : `Rates must add up to exactly 100% (now ${percent(mixTotal)}).`}
+            </Text>
+          </fieldset>
+        )}
         {config.timingMode === 'humanized' && (
           <Text size="small" className="mt-3 text-ui-fg-subtle">
             Humanized timing follows each account’s regional sleep, activity
             sessions and persona intervals on the real clock. Accounts can wait
-            hours for a session; waiting accounts do not block others.
+            hours for a session; waiting accounts do not block others. Pace
+            shortens waits inside a session and allows that many times more
+            draws per session; sleep and session hours stay real. Draws run one
+            at a time across all accounts (about 15 a minute at most).
           </Text>
         )}
         <Text size="small" className="mt-3 text-ui-fg-subtle">
           No total spend cap. Runs finish the selected cycles while account
           balances cover each draw, or stop earlier when rank goals finish. Each
-          draw appears in the storefront’s recent pulls feed, including cards
-          sold back.
+          draw appears in the storefront’s recent pulls feed with a House label,
+          including cards sold back.
         </Text>
         <LiveRankSettings
           config={config}
@@ -525,6 +666,8 @@ export function LivePanel() {
                   <Table.Cell>
                     {names.get(cycle.customerId) ?? cycle.customerId}
                     <Text size="small" className="text-ui-fg-subtle">
+                      {cycle.packSlug &&
+                        `${packTitles.get(cycle.packSlug) ?? cycle.packSlug} · `}
                       {cycle.cardName ?? cycle.id}
                       {cycle.pullId && (
                         <>

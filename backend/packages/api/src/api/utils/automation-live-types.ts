@@ -21,10 +21,19 @@ export const DEFAULT_LIVE_TIMING = {
   randomMinSeconds: 2,
   randomMaxSeconds: 5,
   humanizedRegion: 'mysg',
+  humanizedPace: 1,
 } as const;
+
+/** One pack in a weighted mix; weightBp is hundredths of a percent (250 = 2.5%). */
+export interface LivePackWeight {
+  packSlug: string;
+  weightBp: number;
+}
 
 export interface LiveConfig {
   packSlug: string;
+  /** When set, each draw picks a pack by weight instead of packSlug. */
+  packMix?: LivePackWeight[];
   customerIds: string[];
   intervalSeconds: number;
   maxCyclesPerAccount: number;
@@ -32,6 +41,8 @@ export interface LiveConfig {
   randomMinSeconds?: number;
   randomMaxSeconds?: number;
   humanizedRegion?: 'mysg' | 'global';
+  /** 1 = desktop timing; N divides in-session waits by N and allows N× draws per session. */
+  humanizedPace?: number;
   rankTargets?: LiveRankTarget[];
 }
 
@@ -60,6 +71,7 @@ export interface LiveCycleAmounts {
 export interface LiveCycle extends Partial<LiveCycleAmounts> {
   id: string;
   customerId: string;
+  packSlug?: string;
   startedAt: number;
   finishedAt: number | null;
   error: string | null;
@@ -71,7 +83,10 @@ export interface LiveState {
   status: 'idle' | 'running' | 'paused' | 'completed' | 'stopped' | 'failed';
   config: LiveConfig | null;
   runId: string | null;
+  /** Single pack price, or the mix's weighted average (rank goal estimates). */
   packPriceCents: number;
+  /** Price per pack the run may open, fixed at save/run (each open's max_price). */
+  packPricesCents?: Record<string, number>;
   spentCents: number;
   nextRunAt: number | null;
   nextDrawAt?: number;
