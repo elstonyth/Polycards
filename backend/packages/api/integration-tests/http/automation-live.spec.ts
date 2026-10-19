@@ -161,10 +161,11 @@ medusaIntegrationTestRunner({
         },
         { headers },
       );
+      const firstDrawAt = Date.now() + 60000;
       const ticks = await Promise.all([
-        tickLive(container),
-        tickLive(container),
-        tickLive(container),
+        tickLive(container, () => firstDrawAt),
+        tickLive(container, () => firstDrawAt),
+        tickLive(container, () => firstDrawAt),
       ]);
       expect(ticks.filter(Boolean)).toHaveLength(1);
       const view = (await api.get('/admin/automation/live', { headers })).data;
@@ -209,10 +210,14 @@ medusaIntegrationTestRunner({
         }),
       ]);
       for (let index = 0; index < 2; index++) {
-        await new Promise((resolve) => setTimeout(resolve, 2100));
+        const scheduled = (await api.get('/admin/automation/live', { headers }))
+          .data;
+        const dueAt = scheduled.nextRunAt;
+        expect(dueAt).toBeGreaterThan(firstDrawAt);
+        expect(await tickLive(container, () => dueAt - 1)).toBe(false);
         const attempts = await Promise.all([
-          tickLive(container),
-          tickLive(container),
+          tickLive(container, () => dueAt),
+          tickLive(container, () => dueAt),
         ]);
         expect(attempts.filter(Boolean)).toHaveLength(1);
       }
