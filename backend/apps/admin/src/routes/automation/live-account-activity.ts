@@ -54,6 +54,8 @@ export function getLiveAccountActivity(
         )
       : activity('Drawing', 'blue', 'Opening the paid pack.');
   }
+  const skipped = cycles.find((cycle) => cycle.skipped);
+  if (skipped) return activity('Out of balance', 'orange', skipped.skipped!);
   const failed = cycles.find(
     (cycle) =>
       cycle.error ||

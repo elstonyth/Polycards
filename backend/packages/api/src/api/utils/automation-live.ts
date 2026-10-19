@@ -110,6 +110,8 @@ function remainingCustomers(state: LiveState): string[] {
       !state.rankGoals?.some(
         (goal) => goal.target.profileId === id && goal.done,
       ) &&
+      // An account that ran out of balance is finished for this run.
+      !state.cycles.some((cycle) => cycle.customerId === id && cycle.skipped) &&
       state.cycles.filter((cycle) => cycle.customerId === id).length <
         config.maxCyclesPerAccount,
   );
@@ -254,10 +256,13 @@ export function completeLiveCycle(
   state.cycles.push({ ...cycle, finishedAt: now });
   state.spentCents += cycle.costCents ?? 0;
   state.pending = null;
+  // A skip happens before any money moves (see tickLive), so it ends only
+  // that account's draws; anything else unexpected stops the run for review.
   if (
-    cycle.error ||
-    cycle.differenceCents !== 0 ||
-    cycle.bonusDifferenceCents !== 0
+    !cycle.skipped &&
+    (cycle.error ||
+      cycle.differenceCents !== 0 ||
+      cycle.bonusDifferenceCents !== 0)
   ) {
     state.status = 'failed';
     state.error =

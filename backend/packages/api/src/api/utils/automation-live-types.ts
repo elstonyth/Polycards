@@ -72,6 +72,8 @@ export interface LiveCycle extends Partial<LiveCycleAmounts> {
   id: string;
   customerId: string;
   packSlug?: string;
+  /** Why the account was skipped before any money moved (e.g. low balance). */
+  skipped?: string;
   startedAt: number;
   finishedAt: number | null;
   error: string | null;

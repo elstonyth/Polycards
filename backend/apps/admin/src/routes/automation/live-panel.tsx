@@ -704,6 +704,7 @@ export function LivePanel() {
                   </Table.Cell>
                   <Table.Cell>
                     {cycle.error ??
+                      cycle.skipped ??
                       (!cycle.finishedAt
                         ? (activities.get(cycle.customerId)?.label ?? 'Pending')
                         : cycle.differenceCents === 0 &&
