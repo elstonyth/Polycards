@@ -854,5 +854,89 @@ moduleIntegrationTestRunner<PacksModuleService>({
         0,
       );
     });
+
+    it('top-up goals count settled top-ups in their window (2026-10-19)', async () => {
+      const cus = 'cus_topup';
+      const now = new Date('2026-10-07T04:00:00Z'); // Wed 12:00 MYT
+      const at = async (row: { id: string }, when: string) => {
+        // created_at is a framework column the update type does not expose
+        // (same idiom as referral-close.integration.spec.ts).
+        await service.updateCreditTransactions({
+          selector: { id: row.id },
+          data: { created_at: new Date(when) } as never,
+        });
+      };
+      const [today, monday, lastWeek, deleted, reversal, adjustment] =
+        await service.createCreditTransactions([
+          { customer_id: cus, amount: 60, reason: 'topup' },
+          { customer_id: cus, amount: 30.5, reason: 'topup' },
+          { customer_id: cus, amount: 500, reason: 'topup' },
+          { customer_id: cus, amount: 1000, reason: 'topup' },
+          { customer_id: cus, amount: -20, reason: 'topup' },
+          { customer_id: cus, amount: 999, reason: 'adjustment' },
+        ]);
+      await at(today, '2026-10-07T03:00:00Z');
+      await at(monday, '2026-10-05T02:00:00Z'); // Mon 10:00 MYT
+      await at(lastWeek, '2026-10-03T02:00:00Z');
+      await at(deleted, '2026-10-07T03:00:00Z');
+      await at(reversal, '2026-10-07T03:00:00Z');
+      await at(adjustment, '2026-10-07T03:00:00Z');
+      await service.softDeleteCreditTransactions([deleted.id]);
+
+      const save = async (
+        kind: 'daily' | 'weekly' | 'achievement',
+        amount_myr: number,
+      ) =>
+        (
+          await service.saveTaskDefinition({
+            kind,
+            title: `Top up RM ${amount_myr}`,
+            requirement: { type: 'topup_myr', amount_myr },
+            reward: { type: 'credit', amount_myr: 1 },
+            active: true,
+            sort: 0,
+            adminId: 'admin_1',
+            reason: 'seed',
+          })
+        ).id;
+      const daily = await save('daily', 50);
+      const weekly = await save('weekly', 100);
+      const total = await save('achievement', 600);
+
+      const hub = await service.taskHubFor({ customerId: cus, now });
+      const progress = (id: string) =>
+        hub.tasks.find((t) => t.id === id)!.progress;
+      expect(progress(daily)).toEqual({
+        current: 50,
+        target: 50,
+        completed: true,
+      });
+      // 60 today + 30.5 Monday; last week, the deleted row, the reversal and
+      // the admin adjustment all stay out.
+      expect(progress(weekly)).toEqual({
+        current: 90.5,
+        target: 100,
+        completed: false,
+      });
+      expect(progress(total)).toEqual({
+        current: 590.5,
+        target: 600,
+        completed: false,
+      });
+      expect(
+        await service.claimTask({ customerId: cus, taskId: weekly, now }),
+      ).toEqual({ claimed: false, reason: 'not_completed' });
+      expect(
+        await service.claimTask({ customerId: cus, taskId: daily, now }),
+      ).toMatchObject({ claimed: true });
+
+      // Next Monday the week starts empty; the lifetime total does not.
+      const nextWeek = new Date('2026-10-12T04:00:00Z');
+      const next = await service.taskHubFor({ customerId: cus, now: nextWeek });
+      expect(next.tasks.find((t) => t.id === weekly)!.progress.current).toBe(0);
+      expect(next.tasks.find((t) => t.id === total)!.progress.current).toBe(
+        590.5,
+      );
+    });
   },
 });
