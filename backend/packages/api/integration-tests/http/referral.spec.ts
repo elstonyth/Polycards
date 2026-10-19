@@ -141,6 +141,7 @@ medusaIntegrationTestRunner({
         expect(code).toMatch(/^[A-Z0-9]{8}$/);
         expect(rPanel.data.handle).toBeTruthy();
         expect(rPanel.data.downline_count).toBe(0);
+        expect(rPanel.data.friends).toEqual([]);
         const rRead = await unwrapResponse(
           api.get('/store/referral', { headers: authed(referrerToken) }),
         );
@@ -246,6 +247,25 @@ medusaIntegrationTestRunner({
         expect(rLive.data.week.turnover_cents).toBe(100_000);
         expect(rLive.data.week.rate_bp).toBe(50);
         expect(rLive.data.week.projected_cents).toBe(500);
+
+        // The player's own friend list: the recruit by public name + handle
+        // with this week's spend, never their email or customer id. The
+        // recruit's own panel lists nobody (whoever invited you is not listed).
+        expect(rLive.data.friends).toEqual([
+          {
+            name: expect.any(String),
+            handle: recruitPanel.data.handle,
+            joined_at: expect.any(String),
+            week_spend_cents: 100_000,
+          },
+        ]);
+        const friendsWire = JSON.stringify(rLive.data.friends);
+        expect(friendsWire).not.toContain('recruit@test.dev');
+        expect(friendsWire).not.toContain(attribution.customer_id);
+        const recruitLive = await unwrapResponse(
+          api.get('/store/referral', { headers: authed(recruitToken) }),
+        );
+        expect(recruitLive.data.friends).toEqual([]);
 
         // An older RM500 open counts toward lifetime spend but not the week.
         const week = referralWeekFor(new Date());
