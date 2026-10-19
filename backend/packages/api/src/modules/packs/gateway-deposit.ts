@@ -300,7 +300,12 @@ export async function startDeposit(
     // Today's S$ band: the gateway's own, narrowed so the converted credit
     // also fits the RM band — refused here in S$, not later in RM.
     const band = currencyLimits
-      ? regionalDepositBand(quote, currencyLimits, GATEWAYS[gateway].limits)
+      ? regionalDepositBand(
+          quote,
+          currencyLimits,
+          GATEWAYS[gateway].limits,
+          GATEWAYS[gateway].payinNudgeCents,
+        )
       : null;
     if (band && (paid < band.min || paid > band.max)) {
       throw new MedusaError(

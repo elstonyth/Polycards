@@ -6061,17 +6061,34 @@ class PacksModuleService extends MedusaService({
   // 13 clusters of 2-3 accounts on one bank account farmed welcome packs and
   // tasks by 2026-10-14. Both sides compare digits only, without leading
   // zeros: padding with a 0, or an older saved entry with spaces or dashes,
-  // does not slip past it.
+  // does not slip past it. A USDT wallet address (`exact`) is compared whole
+  // instead: its digits alone collide across unrelated Tron addresses. EVM
+  // addresses are stored lowercase, so exact equality covers them too.
   @InjectManager()
   async otherPayoutAccountHolders(
     customerId: string,
     accountNumber: string,
+    exact = false,
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
     { customer_id: string; bank_code: string; holder_name: string | null }[]
   > {
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
+    if (exact) {
+      return await em.execute(
+        "SELECT c.id AS customer_id, a->>'bankCode' AS bank_code, a->>'accountHolderName' AS holder_name " +
+          'FROM customer c ' +
+          "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
+          "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
+          "WHERE c.deleted_at IS NULL AND c.id <> ? AND a->>'accountNumber' = ? " +
+          'UNION ' +
+          'SELECT customer_id, bank_code, NULL AS holder_name FROM gateway_withdrawal ' +
+          'WHERE deleted_at IS NULL AND customer_id <> ? AND account_number = ? ' +
+          "AND status IN ('pending', 'held', 'settled')",
+        [customerId, accountNumber, customerId, accountNumber],
+      );
+    }
     return await em.execute(
       "SELECT c.id AS customer_id, a->>'bankCode' AS bank_code, a->>'accountHolderName' AS holder_name " +
         'FROM customer c ' +

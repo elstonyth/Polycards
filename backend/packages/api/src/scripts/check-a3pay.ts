@@ -13,6 +13,7 @@ import {
   type A3payKind,
 } from '../modules/packs/a3pay-client';
 import syncPaymentFxJob from '../jobs/sync-payment-fx';
+import { banksFor, gatewayBankCode } from '../modules/packs/banks';
 
 /**
  * Preflight for a tenant of the A3Pay platform — A3Pay (SGD, the default) or
@@ -29,13 +30,15 @@ import syncPaymentFxJob from '../jobs/sync-payment-fx';
  *    A3PAY_MERCHANT_PRIVATE_KEY only shows on the first SubmitPayout.
  *    GlobePay365 answered reads 403 until our public key was registered
  *    (staging, 2026-10-14), so there it does cover the key.
- * 3. GetSupportedBankList — their live payout bank codes, to compare with
- *    SG_BANKS / USDT_WALLETS in banks.ts.
+ * 3. GetSupportedBankList — their live payout bank codes; every code our
+ *    picker offers (SG_BANKS / USDT_WALLETS in banks.ts) must be among them,
+ *    and the balance must be in the tenant's own currency.
  * 4. GetPayinDetail / GetPayoutDetail for a reference that cannot exist: the
  *    answer must read as not-found (A3PAY_NOT_FOUND), because that answer is
  *    what lets the sweeps write off a stale deposit or refund a payout.
  *
- * Never prints a key.
+ * Never prints a key. Not fully read-only: step 1 writes the FX row of the
+ * database it runs against.
  */
 export default async function checkA3pay({ container, args }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
@@ -64,6 +67,13 @@ export default async function checkA3pay({ container, args }: ExecArgs) {
     logger.info(
       `${tag} CheckAccBalance OK — current ${b.currCode} ${b.currentBalanceAmount}, available ${b.availableBalanceAmount}`,
     );
+    // A multi-currency MID answers in its own currency: the float check
+    // would read the wrong balance.
+    if (b.currCode.toUpperCase() !== config.currencyCode.toUpperCase()) {
+      logger.error(
+        `${tag} balance is in ${b.currCode}, not ${config.currencyCode} — wrong MID or CurrCode`,
+      );
+    }
   } catch (error) {
     logger.error(`${tag} CheckAccBalance FAILED: ${(error as Error).message}`);
   }
@@ -72,6 +82,20 @@ export default async function checkA3pay({ container, args }: ExecArgs) {
     const banks = await getSupportedBankList(config);
     logger.info(
       `${tag} ${banks.length} payout banks: ${banks.map((b) => b.bankCode).join(', ')}`,
+    );
+    // Every code our picker offers must be one they pay to, or that payout
+    // fails at SubmitPayout after the debit.
+    const live = new Set(banks.map((b) => b.bankCode.toUpperCase()));
+    const missing = banksFor(kind)
+      .map((b) => gatewayBankCode(b.bankCode, kind)?.code)
+      .filter(
+        (code): code is string => !!code && !live.has(code.toUpperCase()),
+      );
+    (missing.length ? logger.error : logger.info).call(
+      logger,
+      missing.length
+        ? `${tag} our picker offers codes they do NOT list: ${missing.join(', ')}`
+        : `${tag} every payout code our picker offers is in their list (OK)`,
     );
   } catch (error) {
     logger.error(

@@ -19,10 +19,7 @@ import {
   submitWithdrawal,
   type GatewayConfig,
 } from '../gateway';
-import {
-  isPayinVerifyFail,
-  regionalDepositGateway,
-} from '../gateway-deposit';
+import { isPayinVerifyFail, regionalDepositGateway } from '../gateway-deposit';
 import { savedBankAccountViews } from '../saved-accounts';
 import {
   payoutGatewayFor,
@@ -92,6 +89,40 @@ describe('GlobePay365 config — its own GP365_* keys', () => {
     );
     expect(() => a3payConfigFromEnv(GP365_ENV)).toThrow(/A3PAY_API_BASE/);
     expect(a3payFamilyConfigured('gp365', { A3PAY_API_BASE: 'x' })).toBe(false);
+  });
+
+  it('refuses a staging host in production, and any CurrCode but its own', () => {
+    expect(() =>
+      a3payFamilyConfigFromEnv('gp365', {
+        ...GP365_ENV,
+        NODE_ENV: 'production',
+      }),
+    ).toThrow(/staging host in production/);
+    expect(
+      a3payFamilyConfigFromEnv('gp365', {
+        ...GP365_ENV,
+        NODE_ENV: 'production',
+        GP365_API_BASE: 'https://mapi.globepay365.com',
+      }).baseUrl,
+    ).toBe('https://mapi.globepay365.com');
+    expect(() =>
+      a3payFamilyConfigFromEnv('gp365', {
+        ...GP365_ENV,
+        GP365_CURRENCY: 'USD',
+      }),
+    ).toThrow(/GP365_CURRENCY must be USDT/);
+    // Production's A3Pay host and its explicit A3PAY_CURRENCY=SGD still load.
+    expect(
+      a3payConfigFromEnv({
+        NODE_ENV: 'production',
+        A3PAY_API_BASE: 'https://mapi.a3paysg.com',
+        A3PAY_MERCHANT_CODE: 'polycards',
+        A3PAY_AES_KEY: 'k',
+        A3PAY_MERCHANT_PRIVATE_KEY: 'k',
+        A3PAY_PUBLIC_KEY: 'k',
+        A3PAY_CURRENCY: 'SGD',
+      }).currencyCode,
+    ).toBe('SGD');
   });
 
   it('switched on only by GP365_ENABLED, beside the RM gateway', () => {
@@ -181,12 +212,18 @@ describe('USDT wallets in the bank registry', () => {
     ])
       expect(walletAddressValid('evm', address)).toBe(true);
     // One hex digit mistyped in a checksummed address: refused.
-    expect(walletAddressValid('evm', '0xdAC17F958D2ee523a2206206994597C13D831ec8')).toBe(false);
+    expect(
+      walletAddressValid('evm', '0xdAC17F958D2ee523a2206206994597C13D831ec8'),
+    ).toBe(false);
     // One letter's case flipped: refused.
-    expect(walletAddressValid('evm', '0xDAC17F958D2ee523a2206206994597C13D831ec7')).toBe(false);
+    expect(
+      walletAddressValid('evm', '0xDAC17F958D2ee523a2206206994597C13D831ec7'),
+    ).toBe(false);
     // One case throughout carries no checksum: accepted on shape (EIP-55).
     expect(walletAddressValid('evm', EVM.toLowerCase())).toBe(true);
-    expect(walletAddressValid('evm', `0x${EVM.slice(2).toUpperCase()}`)).toBe(true);
+    expect(walletAddressValid('evm', `0x${EVM.slice(2).toUpperCase()}`)).toBe(
+      true,
+    );
     expect(walletAddressValid('evm', EVM.slice(0, -1))).toBe(false);
     expect(walletAddressValid('evm', `0x${'g'.repeat(40)}`)).toBe(false);
     expect(walletAddressValid('evm', TRON)).toBe(false);
@@ -195,8 +232,20 @@ describe('USDT wallets in the bank registry', () => {
   it('saved-account views flag wallets, never banks', () => {
     const views = savedBankAccountViews(
       [
-        { id: 'a', bankCode: 'USDTTRC20', bankName: 'USDT · TRC20 (Tron)', accountNumber: TRON, accountHolderName: 'USDT · TRC20 (Tron)' },
-        { id: 'b', bankCode: 'MBBEMYKL', bankName: 'Maybank', accountNumber: '12345678', accountHolderName: 'AHMAD' },
+        {
+          id: 'a',
+          bankCode: 'USDTTRC20',
+          bankName: 'USDT · TRC20 (Tron)',
+          accountNumber: TRON,
+          accountHolderName: 'USDT · TRC20 (Tron)',
+        },
+        {
+          id: 'b',
+          bankCode: 'MBBEMYKL',
+          bankName: 'Maybank',
+          accountNumber: '12345678',
+          accountHolderName: 'AHMAD',
+        },
       ],
       'tgpay',
       0,

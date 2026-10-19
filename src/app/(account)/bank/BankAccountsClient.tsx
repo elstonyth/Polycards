@@ -308,7 +308,11 @@ export function BankAccountsClient() {
                   }
                   aria-label="Wallet address"
                   aria-invalid={numberInvalid}
-                  aria-describedby="bank-account-number-hint"
+                  aria-describedby={
+                    selectedBank
+                      ? 'bank-account-number-hint wallet-address-warning'
+                      : 'bank-account-number-hint'
+                  }
                   placeholder={
                     wallet === 'tron'
                       ? 'Starts with T'
@@ -330,7 +334,10 @@ export function BankAccountsClient() {
                 {numberHint}
               </p>
               {selectedBank && (
-                <p className="mt-2 text-[12px] leading-snug text-amber-300/80">
+                <p
+                  id="wallet-address-warning"
+                  className="mt-2 text-[12px] leading-snug text-amber-300/80"
+                >
                   Paste the address from your wallet&apos;s receive screen for{' '}
                   {selectedBank.bankName}. USDT sent to a wrong address or
                   network can&apos;t be recovered.

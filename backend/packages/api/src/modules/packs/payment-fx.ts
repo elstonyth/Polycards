@@ -263,18 +263,19 @@ export function regionalDepositBand(
   quote: Pick<PaymentFxQuote, 'depositRate'>,
   currencyBand: { depositMin: number; depositMax: number },
   ledgerBand: { depositMin: number; depositMax: number },
+  windowCents: number = PAYIN_NUDGE_CENTS,
 ): { min: number; max: number } {
   return {
     min: Math.max(
       currencyBand.depositMin,
       Math.ceil((ledgerBand.depositMin / quote.depositRate) * 100 - 1e-6) / 100,
     ),
-    // Less the nudge A3Pay may add (PAYIN_NUDGE_CENTS), so the nudged sum
-    // still credits inside the RM band and the row re-locks normally.
+    // Less the nudge the gateway may add (its payinNudgeCents), so the
+    // nudged sum still credits inside the RM band and the row re-locks.
     max: Math.min(
       currencyBand.depositMax,
       (Math.floor((ledgerBand.depositMax / quote.depositRate) * 100 + 1e-6) -
-        PAYIN_NUDGE_CENTS) /
+        windowCents) /
         100,
     ),
   };
@@ -413,14 +414,18 @@ export function callbackLedgerAmount(
  * never a customer who paid a different amount. RM rows and unreadable
  * amounts are false here: the existing money fences handle those.
  */
-export function offLock(row: RowFx, reported: number): boolean {
+export function offLock(
+  row: RowFx,
+  reported: number,
+  windowCents: number = PAYIN_NUDGE_CENTS,
+): boolean {
   if (row.currency == null || row.currency === LEDGER_CURRENCY_CODE) {
     return false;
   }
   const locked = Number(row.gatewayAmount);
   if (row.gatewayAmount == null || !Number.isFinite(locked)) return false;
   if (!Number.isFinite(reported)) return false;
-  return Math.abs(cents(reported) - cents(locked)) > PAYIN_NUDGE_CENTS;
+  return Math.abs(cents(reported) - cents(locked)) > windowCents;
 }
 
 /** The identity lock, for an RM row. */

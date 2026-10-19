@@ -773,6 +773,7 @@ export async function startWithdrawal(
       await packs.otherPayoutAccountHolders(
         input.customerId,
         precheckDestination.accountNumber,
+        findBank(precheckDestination.bankCode)?.wallet !== undefined,
       )
     ).some(
       (h) => h.holder_name == null && findBank(h.bank_code)?.id === bankId,

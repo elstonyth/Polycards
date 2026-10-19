@@ -747,6 +747,7 @@ describe('POST accounts — one bank account, one Polycards account', () => {
     expect(otherPayoutAccountHolders).toHaveBeenCalledWith(
       'cus_1',
       '123456789012',
+      false,
     );
     expect(updateCustomers).not.toHaveBeenCalled();
     expect(createNotifications).not.toHaveBeenCalled();
@@ -781,6 +782,29 @@ describe('POST accounts — one bank account, one Polycards account', () => {
     ]);
     await POST(mkReq(VALID_BODY), mkRes());
     expect(updateCustomers).toHaveBeenCalledTimes(1);
+  });
+
+  it('a USDT wallet is matched by its whole address, and only a paid-out one blocks', () => {
+    const TRON = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+    const body = { bank_code: 'USDTTRC20', account_number: TRON };
+    return (async () => {
+      // Someone else only SAVED it: wallets have no holder name to tell
+      // owners apart, and the address is public, so this must not block.
+      otherPayoutAccountHolders.mockResolvedValue([
+        { customer_id: 'cus_2', bank_code: 'USDTTRC20', holder_name: 'USDT · TRC20 (Tron)' },
+      ]);
+      await POST(mkReq(body), mkRes());
+      expect(updateCustomers).toHaveBeenCalledTimes(1);
+      expect(otherPayoutAccountHolders).toHaveBeenCalledWith('cus_1', TRON, true);
+
+      // Already paid out to another customer: refused.
+      otherPayoutAccountHolders.mockResolvedValue([
+        { customer_id: 'cus_2', bank_code: 'USDTTRC20', holder_name: null },
+      ]);
+      await expect(POST(mkReq(body), mkRes())).rejects.toThrow(
+        SHARED_PAYOUT_ACCOUNT_MESSAGE,
+      );
+    })();
   });
 
   it('allows the same digits at a different bank', async () => {

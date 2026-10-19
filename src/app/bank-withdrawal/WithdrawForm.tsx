@@ -85,7 +85,9 @@ export function regionalBandText(
   const max = band.max !== null ? bandEdge(band.max, ui.money, ui.money0) : '';
   const range =
     min && max ? `${min}–${max}` : min ? `from ${min}` : max && `up to ${max}`;
-  return range ? `${ui.country} limit ${range}` : null;
+  // USDT's "country" is its own symbol: "limit USDT 10–…", not "USDT limit USDT 10–…".
+  const label = ui.country === ui.symbol ? 'limit' : `${ui.country} limit`;
+  return range ? `${label} ${range}` : null;
 }
 
 /** Digits (commas allowed as thousands separators), at most one dot and two
@@ -719,8 +721,8 @@ export default function WithdrawForm({
                 </span>
               </div>
               <p className="mt-1 text-right text-[11px] text-neutral-400">
-                {rail.ui.unit} = RM {rail.rate.payout.toFixed(4)} · rate
-                locked when you confirm
+                {rail.ui.unit} = RM {rail.rate.payout.toFixed(4)} · rate locked
+                when you confirm
               </p>
             </div>
           )}

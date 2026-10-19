@@ -78,6 +78,22 @@ export function a3payFamilyConfigFromEnv<K extends A3payKind>(
   ) {
     throw new Error(`${label}: ${envPrefix}_API_BASE must be an https URL.`);
   }
+  // A staging host in production would open top-ups on a test cashier whose
+  // signed "paid" callbacks credit real RM.
+  if (env.NODE_ENV === 'production' && /stg/i.test(new URL(baseUrl).hostname)) {
+    throw new Error(
+      `${label}: ${envPrefix}_API_BASE points at a staging host in production.`,
+    );
+  }
+  // Rows store the registry currency and are requeried in it (inRowCurrency):
+  // any other CurrCode here would refuse every callback and read live rows as
+  // "Not found", which authorises refunds.
+  const currencyCode = env[`${envPrefix}_CURRENCY`] ?? currency;
+  if (currencyCode !== currency) {
+    throw new Error(
+      `${label}: ${envPrefix}_CURRENCY must be ${currency}, not ${currencyCode}.`,
+    );
+  }
   return {
     kind,
     // Required, not defaulted: a default could only ever be production.
@@ -86,7 +102,7 @@ export function a3payFamilyConfigFromEnv<K extends A3payKind>(
     aesKey: required('AES_KEY'),
     privateKey: required('MERCHANT_PRIVATE_KEY'),
     publicKey: required('PUBLIC_KEY'),
-    currencyCode: env[`${envPrefix}_CURRENCY`] ?? currency,
+    currencyCode,
   };
 }
 

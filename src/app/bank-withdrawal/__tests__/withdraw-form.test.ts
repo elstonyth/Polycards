@@ -1103,6 +1103,12 @@ describe('regionalBandText', () => {
       'Singapore limit S$30–S$9,370.50',
     );
   });
+
+  it('does not repeat USDT, whose "country" is its own symbol', () => {
+    expect(regionalBandText({ min: 10, max: 5000 }, REGIONAL_RAILS.USDT!)).toBe(
+      'limit USDT 10–USDT 5,000',
+    );
+  });
 });
 
 describe('minimumGap', () => {

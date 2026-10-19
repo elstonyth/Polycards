@@ -278,19 +278,24 @@ export async function POST(
   // owner out. A number already PAID OUT to blocks under any name, and a
   // different spelling that slips in here is stopped at payout
   // (startWithdrawal refuses a number someone else was paid to first).
+  // A wallet has no holder name to tell owners apart, and its address is
+  // public on-chain: only a wallet already PAID OUT to blocks it here.
   const sameHolder = (name: string | null) =>
     name == null ||
-    name.toLowerCase().replace(/\s+/g, ' ').trim() ===
-      account.accountHolderName.toLowerCase().replace(/\s+/g, ' ');
+    (!bank.wallet &&
+      name.toLowerCase().replace(/\s+/g, ' ').trim() ===
+        account.accountHolderName.toLowerCase().replace(/\s+/g, ' '));
   const heldByAnother =
     !payoutAccountSharingAllowed(customerId) &&
     (
       await resolvePacks<CustomerWallet>(req.scope).otherPayoutAccountHolders(
         customerId,
         accountNumber,
+        bank.wallet !== undefined,
       )
     ).some(
-      (h) => findBank(h.bank_code)?.id === bankCode && sameHolder(h.holder_name),
+      (h) =>
+        findBank(h.bank_code)?.id === bankCode && sameHolder(h.holder_name),
     );
 
   // The cap is checked against the list read INSIDE the lock, not against one

@@ -77,6 +77,12 @@ export function __resetFullSweepMarkerForTests(): void {
 
 /** The RM ceiling a requeried credit may reach on this row: its gateway's own
  *  (A3Pay's S$5,000 top-ups pass RM 10,000), else the site-wide one. */
+/** The row gateway's nudge window, the same one its callback allows. */
+function nudgeWindow(deposit: { gateway?: string | null }): number | undefined {
+  const gateway = rowGateway(deposit);
+  return gateway ? GATEWAYS[gateway].payinNudgeCents : undefined;
+}
+
 function depositCeiling(deposit: { gateway?: string | null }): number {
   const gateway = rowGateway(deposit);
   return gateway ? GATEWAYS[gateway].limits.depositMax : GATEWAY_MAX_RM;
@@ -204,7 +210,11 @@ export default async function depositReconcileJob(container: MedusaContainer) {
           amount: Number(detail.amount),
           createdAt: new Date(deposit.created_at),
           now,
-          lock: { fx: rowFx(deposit), reported: Number(detail.reportedAmount) },
+          lock: {
+            fx: rowFx(deposit),
+            reported: Number(detail.reportedAmount),
+            windowCents: nudgeWindow(deposit),
+          },
           ceiling: depositCeiling(deposit),
         });
       } catch (error) {
