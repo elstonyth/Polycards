@@ -4,6 +4,7 @@ import type {
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../../modules/packs';
+import { payoutCents } from '../../../modules/packs/referral';
 import type PacksModuleService from '../../../modules/packs/service';
 import { generateReferralCode } from '../../../utils/referral-code';
 import { ensureProfileHandleWorkflow } from '../../../workflows/ensure-profile-handle';
@@ -44,5 +45,16 @@ export async function GET(
     listReferralFriends(req.scope, { customerId, now }),
   ]);
 
-  res.json({ handle: result.handle, code, ...summary, friends });
+  res.json({
+    handle: result.handle,
+    code,
+    ...summary,
+    // What each friend earned the player this week: their share at the
+    // week's rate, rounded down per row like a payout line, so the rows can
+    // sum a few sen under projected_cents. Their raw spend stays here.
+    friends: friends.map(({ week_spend_cents, ...friend }) => ({
+      ...friend,
+      week_earned_cents: payoutCents(week_spend_cents, summary.week.rate_bp),
+    })),
+  });
 }

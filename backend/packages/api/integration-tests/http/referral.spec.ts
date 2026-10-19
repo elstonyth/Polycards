@@ -249,14 +249,15 @@ medusaIntegrationTestRunner({
         expect(rLive.data.week.projected_cents).toBe(500);
 
         // The player's own friend list: the recruit by public name + handle
-        // with this week's spend, never their email or customer id. The
+        // with what they earned the player this week (one friend, so the
+        // same 500 as the projection), never their email, id or spend. The
         // recruit's own panel lists nobody (whoever invited you is not listed).
         expect(rLive.data.friends).toEqual([
           {
             name: expect.any(String),
             handle: recruitPanel.data.handle,
             joined_at: expect.any(String),
-            week_spend_cents: 100_000,
+            week_earned_cents: 500,
           },
         ]);
         const friendsWire = JSON.stringify(rLive.data.friends);

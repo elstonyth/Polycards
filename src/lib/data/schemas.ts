@@ -1272,7 +1272,8 @@ export const ReferralSummarySchema = z.looseObject({
   }),
   history: z.array(SettlementHistoryRowSchema),
   /** The player's own invited friends, newest first: public name + handle
-   *  only, capped server-side (downline_count stays the full total).
+   *  and what each earned the player this week (cents, rounded down per
+   *  row), capped server-side (downline_count stays the full total).
    *  Optional and caught (deploy-skew rule): an older backend or a malformed
    *  list hides the list instead of blanking the page, and never tells a
    *  player with referrals that they have none. */
@@ -1282,7 +1283,7 @@ export const ReferralSummarySchema = z.looseObject({
         name: z.string(),
         handle: z.string().nullable(),
         joined_at: z.string(),
-        week_spend_cents: finite,
+        week_earned_cents: finite,
       }),
     )
     .optional()

@@ -70,14 +70,24 @@ describe('GET /store/referral', () => {
       customerId: 'cus_me',
       now: input.now,
     });
+    // The player sees what the friend earned them (RM123.45 at 0.5%, rounded
+    // down), never the friend's own spend.
     expect(out.body).toEqual(
       expect.objectContaining({
         handle: 'MeHandle',
         code: 'F42B0700',
         downline_count: 1,
-        friends: [friend],
+        friends: [
+          {
+            name: 'AshK',
+            handle: 'AshK',
+            joined_at: friend.joined_at,
+            week_earned_cents: 61,
+          },
+        ],
       }),
     );
+    expect(JSON.stringify(out.body)).not.toContain('week_spend_cents');
   });
 
   it('401s without a verified customer', async () => {

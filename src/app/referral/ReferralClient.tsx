@@ -158,10 +158,11 @@ function SharePanel({ code }: { code: string }) {
   );
 }
 
-// Who the player invited, newest first. Names follow the leaderboard (public
-// display name, linked to the profile when it has a handle) — the backend
-// never sends a friend's email, phone or id. Last on the page so a long list
-// doesn't push the payouts out of sight.
+// Who the player invited, newest first, and what each earned them this week.
+// Names follow the leaderboard (public display name, linked to the profile
+// when it has a handle) — the backend never sends a friend's email, phone, id
+// or spend. Last on the page so a long list doesn't push the payouts out of
+// sight.
 function FriendsPanel({
   friends,
   total,
@@ -205,14 +206,14 @@ function FriendsPanel({
               <div className="shrink-0 text-right">
                 <p
                   className={
-                    f.week_spend_cents > 0
+                    f.week_earned_cents > 0
                       ? 'text-sm text-white'
                       : 'text-sm text-neutral-400'
                   }
                 >
-                  {fromCents(f.week_spend_cents)}
+                  {fromCents(f.week_earned_cents)}
                 </p>
-                <p className="text-xs text-neutral-400">spent this week</p>
+                <p className="text-xs text-neutral-400">earned you this week</p>
               </div>
             </li>
           ))}
