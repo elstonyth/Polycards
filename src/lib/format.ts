@@ -118,6 +118,16 @@ export function pullTime(iso: string): string {
   return `${day} ${MONTHS[d.getUTCMonth()]}, ${String(h12).padStart(2, '0')}:${minute}:${second} ${h24 < 12 ? 'AM' : 'PM'}`;
 }
 
+// Calendar date in Malaysian time ("19 Oct 2026") — the referral friend
+// list's joined dates. Fixed UTC+8 and hand-rolled for the same server/client
+// parity as pullTime. Unparsable → "".
+export function mytDate(iso: string): string {
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return '';
+  const d = new Date(ms + MYT_OFFSET_MS);
+  return `${String(d.getUTCDate()).padStart(2, '0')} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
 // The mirror of relativeTime for a FUTURE instant ("in 45m", "in 23h", "in 2d")
 // — used by the saved-payout-account surfaces to say when a cooling-off
 // destination becomes usable. Returns null for a time that has already passed
