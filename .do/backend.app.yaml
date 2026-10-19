@@ -455,9 +455,11 @@ envs:
   # listed here (comma-separated). Support's override for a genuine shared
   # account; read per request by api/store/credits/withdraw/accounts.
   # Collector1856 added 2026-10-17 at the operator's request.
+  # "*" allows everyone: the operator switched the rule off for all customers
+  # 2026-10-17. Keep the value quoted; a bare * is a YAML alias and breaks the spec.
   - key: PAYOUT_ACCOUNT_SHARING_ALLOWED
     scope: RUN_TIME
-    value: cus_01M4AY4MYMKZ7CAV9VK311RKSZ
+    value: "*,cus_01M4AY4MYMKZ7CAV9VK311RKSZ"
 
   # ── TGPay (plan 130) — the payment gateway since the 2026-09-06 cutover.
   # The key pair comes from the production back office (admin.tgpay365.com →
