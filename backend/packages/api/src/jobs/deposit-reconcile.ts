@@ -110,7 +110,7 @@ function heldMessage(
   const gateway = rowGateway(deposit);
   const tolerance = gateway ? GATEWAYS[gateway].payinArrivedTolerance : undefined;
   return tolerance
-    ? `${head} That is further off than the ${(payinLockWindowCents(gateway!, Number(deposit.gateway_amount)) / 100).toFixed(2)} ${GATEWAYS[gateway!].currency} it credits automatically. Check what arrived in the gateway's back office and talk to the customer. Do not credit it by admin adjustment: the sweep still watches the order and would credit it a second time.`
+    ? `${head} That is further off than the ${(payinLockWindowCents(gateway!, Number(deposit.gateway_amount)) / 100).toFixed(2)} ${GATEWAYS[gateway!].currency} it credits automatically. Check what arrived in the gateway's back office, then use Admin → Deposits → Settle for what arrived (it credits the gateway's figure at the locked rate, once). Never credit it by admin adjustment: the sweep still watches the order and would credit it a second time.`
     : `${head} Check the gateway's record; if the customer paid, have the gateway correct the order so its callback credits it. Never credit it by admin adjustment.`;
 }
 

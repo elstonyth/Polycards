@@ -334,12 +334,70 @@ async function depositLegs(admin, cust) {
   const r4 = row('gateway_deposit', m4);
   check(
     '40 of 50 USDT (beyond 5 USDT) is held, not credited',
-    r4[0] === 'pending' && !r4[6] &&
+    r4[0] === 'pending' &&
+      !r4[6] &&
       (await balance(cust)).balance === beforeFar,
     r4.join('|'),
   );
 
-    // ---- 5. Guards
+  // ---- 4c. Staff settle the held one for what arrived (admin action)
+  const id4 = sql(
+    `select id from gateway_deposit where merchant_transaction_id='${m4}'`,
+  );
+  const settlePath = `/admin/payments/deposits/${id4}/settle-arrived`;
+  const q4 = await call('GET', settlePath, { token: admin, admin: true });
+  check(
+    'preview reads the gateway: ordered 50, arrived 40, credits RM 167.16',
+    q4.status === 200 &&
+      q4.json.quote?.ordered === 50 &&
+      q4.json.quote?.arrived === 40 &&
+      q4.json.quote?.credit === 167.16,
+    JSON.stringify(q4.json),
+  );
+  const staleAsk = await call('POST', settlePath, {
+    token: admin,
+    admin: true,
+    body: { expected_credit: 208.95, reason: 'gp365 e2e: stale figure' },
+  });
+  check(
+    'a figure the operator was not shown is refused (409), nothing credited',
+    staleAsk.status === 409 &&
+      (await balance(cust)).balance === beforeFar &&
+      row('gateway_deposit', m4)[0] === 'pending',
+    `${staleAsk.status} ${staleAsk.json.message}`,
+  );
+  const s4 = await call('POST', settlePath, {
+    token: admin,
+    admin: true,
+    body: { expected_credit: 167.16, reason: 'gp365 e2e: settle what arrived' },
+  });
+  const r4b = row('gateway_deposit', m4);
+  check(
+    'settled for what arrived: RM 167.16, ledger +167.16, audited',
+    s4.status === 200 &&
+      r4b[0] === 'settled' &&
+      Number(r4b[6]) === 167.16 &&
+      Math.round(((await balance(cust)).balance - beforeFar) * 100) === 16716 &&
+      Number(
+        sql(
+          `select count(*) from admin_action_audit where action='settle_deposit' and entity_id='${id4}'`,
+        ),
+      ) === 1,
+    `${s4.status} ${r4b.join('|')} ${s4.json.message ?? ''}`,
+  );
+  const again = await call('POST', settlePath, {
+    token: admin,
+    admin: true,
+    body: { expected_credit: 167.16, reason: 'gp365 e2e: second click' },
+  });
+  check(
+    'a second click credits nothing more',
+    again.status >= 400 &&
+      Math.round(((await balance(cust)).balance - beforeFar) * 100) === 16716,
+    `${again.status} ${again.json.message}`,
+  );
+
+  // ---- 5. Guards
   const sgdMethod = await call('POST', '/store/credits/deposit', {
     token: cust,
     body: { amount: 100, currency: 'USDT', payment_method_code: 'BQR' },

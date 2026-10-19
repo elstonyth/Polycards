@@ -1608,7 +1608,39 @@ export interface GatewayDeposit {
   created_at: string;
   settled_at: string | null;
   stale: boolean;
+  /** A held USDT deposit staff may settle for what arrived. */
+  can_settle_arrived: boolean;
 }
+
+/** What settling a held USDT deposit would credit, read live from the
+ *  gateway (GET /admin/payments/deposits/:id/settle-arrived). */
+export interface ArrivedQuote {
+  depositId: string;
+  merchantTransactionId: string;
+  customerId: string;
+  currency: string;
+  ordered: number;
+  arrived: number;
+  requested: number;
+  credit: number;
+}
+
+export const getArrivedQuote = (id: string) =>
+  getJson<{ quote: ArrivedQuote }>(
+    `/admin/payments/deposits/${encodeURIComponent(id)}/settle-arrived`,
+  ).then((r) => r.quote);
+
+/** The RM shown is sent back: if the gateway's record moved since, the
+ *  backend refuses (409) instead of crediting a figure nobody saw. */
+export const settleArrivedDeposit = (body: {
+  id: string;
+  expectedCredit: number;
+  reason: string;
+}) =>
+  postJson<{ settled: boolean; replayed: boolean; quote: ArrivedQuote }>(
+    `/admin/payments/deposits/${encodeURIComponent(body.id)}/settle-arrived`,
+    { expected_credit: body.expectedCredit, reason: body.reason },
+  );
 
 export interface GatewayDepositsResponse {
   total: number;

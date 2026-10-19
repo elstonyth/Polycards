@@ -5,6 +5,7 @@ import {
   type GatewayReports,
 } from '../../../../modules/packs/facets';
 import { GATEWAY_STALE_AFTER_MS } from '../../../../modules/packs/gateway-reconcile';
+import { canSettleArrived } from '../../../../modules/packs/settle-arrived';
 import {
   parsePaginationParams,
   parseSortParam,
@@ -153,6 +154,8 @@ export async function GET(
     gateway_status: r.gateway_status,
     created_at: r.created_at,
     settled_at: r.settled_at,
+    // A held USDT deposit staff may settle for what arrived (settle-arrived).
+    can_settle_arrived: canSettleArrived(r),
     stale:
       r.status === 'pending' &&
       now - new Date(r.created_at).getTime() > GATEWAY_STALE_AFTER_MS,

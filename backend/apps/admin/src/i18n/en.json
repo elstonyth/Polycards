@@ -553,7 +553,20 @@
     "empty": "No deposits in this view.",
     "loadError": "Could not load deposits.",
     "tableLabel": "Deposits table",
-    "paidIn": "paid {{amount}}"
+    "paidIn": "paid {{amount}}",
+    "settleArrived": "Settle for what arrived",
+    "settleTitle": "Credit what arrived?",
+    "settleDesc": "The customer sent a different amount than the order. This credits what the gateway reports arrived, at the rate locked when the order was made. The amount comes from the gateway's record, not from you.",
+    "settleOrdered": "Ordered",
+    "settleArrivedLabel": "Arrived",
+    "settleCredit": "Credits",
+    "settleCreditNote": "at the locked rate (the order would have credited {{requested}})",
+    "settleReason": "Reason",
+    "settleReasonPlaceholder": "What did you check? (recorded in the audit log)",
+    "settleLoading": "Reading the gateway's record…",
+    "settleCancel": "Cancel",
+    "settleConfirm": "Credit {{amount}}",
+    "settledToast": "Credited {{amount}}"
   },
   "withdrawals": {
     "title": "Withdrawals",

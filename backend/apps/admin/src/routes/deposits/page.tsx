@@ -2,15 +2,23 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
+  Button,
   Container,
   Heading,
+  Label,
+  Prompt,
   Text,
+  Textarea,
   Table,
   Select,
   StatusBadge,
 } from '@medusajs/ui';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
-import { useGatewayDeposits } from '../../lib/queries';
+import {
+  useArrivedQuote,
+  useGatewayDeposits,
+  useSettleArrived,
+} from '../../lib/queries';
 import type {
   GatewayDeposit,
   GatewayDepositView,
@@ -87,6 +95,15 @@ const DepositsPage = () => {
   };
 
   const staleOnPage = data?.deposits.filter((d) => d.stale).length ?? 0;
+
+  // Settle a held USDT deposit for what arrived. The quote is read live from
+  // the gateway when the dialog opens; the RM shown is sent back, so a record
+  // that moved meanwhile is refused (409) rather than credited unseen.
+  const [target, setTarget] = useState<GatewayDeposit | null>(null);
+  const [reason, setReason] = useState('');
+  const quote = useArrivedQuote(target?.id ?? null);
+  const settle = useSettleArrived();
+  const fmt = (n: number) => `${quote.data?.currency ?? ''} ${n.toFixed(2)}`;
 
   return (
     <div className="flex flex-col gap-y-3">
@@ -201,6 +218,20 @@ const DepositsPage = () => {
                           ? t('deposits.statusStale')
                           : t(`deposits.statusLabel.${d.status}`),
                       )}
+                      {d.can_settle_arrived && (
+                        <div className="mt-1">
+                          <Button
+                            size="small"
+                            variant="secondary"
+                            onClick={() => {
+                              setTarget(d);
+                              setReason('');
+                            }}
+                          >
+                            {t('deposits.settleArrived')}
+                          </Button>
+                        </div>
+                      )}
                     </Table.Cell>
                     {/* All references support can quote: ours (merchant) is
                         what their back office lists, theirs (gateway) is null
@@ -231,6 +262,86 @@ const DepositsPage = () => {
             </Table>
           </div>
         )}
+        <Prompt
+          variant="confirmation"
+          open={target !== null}
+          onOpenChange={(o) => {
+            if (!o) setTarget(null);
+          }}
+        >
+          <Prompt.Content>
+            <Prompt.Header>
+              <Prompt.Title>{t('deposits.settleTitle')}</Prompt.Title>
+              <Prompt.Description>{t('deposits.settleDesc')}</Prompt.Description>
+            </Prompt.Header>
+            <div className="flex flex-col gap-1 px-6 pb-2">
+              {quote.isPending ? (
+                <Text size="small" className="text-ui-fg-subtle">
+                  {t('deposits.settleLoading')}
+                </Text>
+              ) : quote.isError ? (
+                <Text size="small" className="text-ui-fg-error">
+                  {quote.error instanceof Error
+                    ? quote.error.message
+                    : String(quote.error)}
+                </Text>
+              ) : quote.data ? (
+                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+                  <dt className="text-ui-fg-subtle">
+                    {t('deposits.settleOrdered')}
+                  </dt>
+                  <dd className="tabular-nums">{fmt(quote.data.ordered)}</dd>
+                  <dt className="text-ui-fg-subtle">
+                    {t('deposits.settleArrivedLabel')}
+                  </dt>
+                  <dd className="tabular-nums">{fmt(quote.data.arrived)}</dd>
+                  <dt className="text-ui-fg-subtle">
+                    {t('deposits.settleCredit')}
+                  </dt>
+                  <dd className="tabular-nums font-medium">
+                    {rm(quote.data.credit)}{' '}
+                    <span className="text-ui-fg-subtle text-xs font-normal">
+                      {t('deposits.settleCreditNote', {
+                        requested: rm(quote.data.requested),
+                      })}
+                    </span>
+                  </dd>
+                </dl>
+              ) : null}
+              <Label htmlFor="settle-reason" size="small" className="mt-2">
+                {t('deposits.settleReason')}
+              </Label>
+              <Textarea
+                id="settle-reason"
+                maxLength={500}
+                value={reason}
+                placeholder={t('deposits.settleReasonPlaceholder')}
+                onChange={(e) => setReason(e.target.value)}
+              />
+            </div>
+            <Prompt.Footer>
+              <Prompt.Cancel>{t('deposits.settleCancel')}</Prompt.Cancel>
+              <Prompt.Action
+                disabled={!quote.data || !reason.trim() || settle.isPending}
+                onClick={() => {
+                  if (!target || !quote.data || !reason.trim()) return;
+                  settle.mutate({
+                    id: target.id,
+                    expectedCredit: quote.data.credit,
+                    reason: reason.trim(),
+                  });
+                  setTarget(null);
+                }}
+              >
+                {quote.data
+                  ? t('deposits.settleConfirm', {
+                      amount: rm(quote.data.credit),
+                    })
+                  : t('deposits.settleArrived')}
+              </Prompt.Action>
+            </Prompt.Footer>
+          </Prompt.Content>
+        </Prompt>
         {data && (
           <Pager
             page={page}
