@@ -46,6 +46,10 @@ export function BankCountryToggle({
             onClick={() => value !== group.country && onChange(group.country)}
             className={cn(
               'flex min-h-11 items-center justify-center gap-2 rounded-full px-3 text-sm font-semibold transition-colors',
+              // Three pills (with USDT) leave ~80px each on a 320px phone,
+              // too narrow for flag + "Singapore" side by side: stack them.
+              groups.length > 2 &&
+                'max-[359px]:flex-col max-[359px]:gap-0.5 max-[359px]:px-1.5 max-[359px]:text-[13px]',
               'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
               value === group.country
                 ? 'bg-neutral-50 text-neutral-950'
