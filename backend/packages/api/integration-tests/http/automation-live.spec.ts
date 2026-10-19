@@ -161,10 +161,11 @@ medusaIntegrationTestRunner({
         },
         { headers },
       );
+      const firstDrawAt = Date.now() + 60000;
       const ticks = await Promise.all([
-        tickLive(container),
-        tickLive(container),
-        tickLive(container),
+        tickLive(container, () => firstDrawAt),
+        tickLive(container, () => firstDrawAt),
+        tickLive(container, () => firstDrawAt),
       ]);
       expect(ticks.filter(Boolean)).toHaveLength(1);
       const view = (await api.get('/admin/automation/live', { headers })).data;
@@ -209,10 +210,14 @@ medusaIntegrationTestRunner({
         }),
       ]);
       for (let index = 0; index < 2; index++) {
-        await new Promise((resolve) => setTimeout(resolve, 2100));
+        const scheduled = (await api.get('/admin/automation/live', { headers }))
+          .data;
+        const dueAt = scheduled.nextRunAt;
+        expect(dueAt).toBeGreaterThan(firstDrawAt);
+        expect(await tickLive(container, () => dueAt - 1)).toBe(false);
         const attempts = await Promise.all([
-          tickLive(container),
-          tickLive(container),
+          tickLive(container, () => dueAt),
+          tickLive(container, () => dueAt),
         ]);
         expect(attempts.filter(Boolean)).toHaveLength(1);
       }
@@ -332,8 +337,16 @@ medusaIntegrationTestRunner({
       expect(sleeping).toMatchObject({
         status: 'running',
         cycles: [],
-        nextRunAt: clock + 4 * 3600000,
       });
+      // Desktop routines shift sleep by ±75 minutes, daily jitter by ±20,
+      // then add up to ten minutes of stable wake lag.
+      expect(sleeping.nextRunAt).toBeGreaterThanOrEqual(
+        clock + (240 - 95) * 60000,
+      );
+      expect(sleeping.nextRunAt).toBeLessThanOrEqual(
+        clock + (240 + 95 + 10) * 60000,
+      );
+      expect(sleeping.schedules[0].humanized.timerKind).toBe('OFFLINE_END');
       expect(sleeping.schedules[0].waitReason).toContain('Sleeping');
       expect(await tickLive(container, () => clock + 1000)).toBe(false);
       expect(

@@ -1,7 +1,8 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import { automationDelayMs } from './automation-config';
 import {
-  createHumanizedState,
+  createHumanizedStates,
+  rememberHumanizedAssignments,
   planHumanized,
   recordHumanizedCycle,
 } from './automation-humanized';
@@ -102,16 +103,26 @@ export function claimLiveCycle(
     return null;
   }
   if (state.config.timingMode === 'humanized') {
-    state.schedules = remaining.map((id) => {
+    for (const row of state.schedules ?? [])
+      row.humanized.regionChoice ??=
+        state.config.humanizedRegion ?? DEFAULT_LIVE_TIMING.humanizedRegion;
+    state.humanizedAssignments = rememberHumanizedAssignments(
+      state.humanizedAssignments ?? [],
+      state.schedules?.map((row) => row.humanized) ?? [],
+    );
+    const assignments = createHumanizedStates(
+      state.config.customerIds,
+      state.config.humanizedRegion ?? DEFAULT_LIVE_TIMING.humanizedRegion,
+      state.humanizedAssignments,
+    );
+    state.schedules = state.config.customerIds.map((id) => {
       const previous = state.schedules?.find((row) => row.customerId === id);
-      if (previous && previous.nextRunAt > now) return previous;
+      if (previous && (previous.nextRunAt > now || !remaining.includes(id)))
+        return previous;
       const humanized = previous
         ? { ...previous.humanized }
-        : createHumanizedState(
-            id,
-            state.config!.humanizedRegion ??
-              DEFAULT_LIVE_TIMING.humanizedRegion,
-          );
+        : assignments.find((row) => row.profileId === id)!;
+      if (!humanized.timerKind) humanized.waitReason = previous?.waitReason;
       const plan = planHumanized(humanized, now, random);
       return {
         customerId: id,
@@ -120,13 +131,24 @@ export function claimLiveCycle(
         waitReason: plan.reason,
       };
     });
+    state.humanizedAssignments = rememberHumanizedAssignments(
+      state.humanizedAssignments,
+      assignments,
+    );
     state.nextRunAt = Math.min(
       ...state.schedules
-        .filter((row) => eligible.includes(row.customerId))
+        .filter(
+          (row) =>
+            remaining.includes(row.customerId) &&
+            eligible.includes(row.customerId),
+        )
         .map((row) => row.nextRunAt),
     );
     const ready = state.schedules.find(
-      (row) => row.nextRunAt <= now && eligible.includes(row.customerId),
+      (row) =>
+        remaining.includes(row.customerId) &&
+        row.nextRunAt <= now &&
+        eligible.includes(row.customerId),
     );
     if (ranked)
       state.nextRunAt = Math.min(
@@ -187,7 +209,10 @@ export function completeLiveCycle(
       (row) => row.customerId === cycle.customerId,
     );
     if (schedule) {
-      recordHumanizedCycle(schedule.humanized, now, random);
+      recordHumanizedCycle(schedule.humanized, now, random, {
+        spend: cycle.costCents ?? 0,
+        value: cycle.saleCents ?? 0,
+      });
       const plan = planHumanized(schedule.humanized, now, random);
       schedule.nextRunAt = now + plan.delayMs;
       schedule.waitReason = plan.reason;

@@ -1,5 +1,6 @@
 import {
   createHumanizedState,
+  createHumanizedStates,
   planHumanized,
   recordHumanizedCycle,
   type HumanizedState,
@@ -19,16 +20,11 @@ function ready(state: HumanizedState, initial = start) {
   throw new Error('No humanized session within bounded search');
 }
 
-describe('adapted humanized API QA schedule', () => {
+describe('desktop Humanized schedule runtime', () => {
   it('assigns stable personas and global regions with JSON-serializable state', () => {
-    const states = Array.from({ length: 80 }, (_, i) =>
-      createHumanizedState(`profile-${i}`, 'global'),
-    );
-    expect(states).toEqual(
-      Array.from({ length: 80 }, (_, i) =>
-        createHumanizedState(`profile-${i}`, 'global'),
-      ),
-    );
+    const ids = Array.from({ length: 80 }, (_, i) => `profile-${i}`);
+    const states = createHumanizedStates(ids, 'global');
+    expect(states).toEqual(createHumanizedStates(ids, 'global'));
     expect(new Set(states.map((state) => state.persona)).size).toBe(5);
     expect(new Set(states.map((state) => state.region)).size).toBe(7);
     expect(JSON.parse(JSON.stringify(states))).toEqual(states);
@@ -39,7 +35,7 @@ describe('adapted humanized API QA schedule', () => {
     const state = createHumanizedState('sleep', 'mysg');
     const now = Date.parse('2026-10-18T00:00:00Z'); // 08:00 MYT
     const result = planHumanized(state, now, random);
-    expect(result).toMatchObject({ ready: false, delayMs: 4 * 3600_000 });
+    expect(result).toMatchObject({ ready: false, delayMs: 13_860_000 });
     expect(result.reason).toContain('Sleeping');
     const wake = planHumanized(state, now + result.delayMs, random);
     expect(wake.ready).toBe(false);
@@ -54,7 +50,7 @@ describe('adapted humanized API QA schedule', () => {
     expect(planHumanized(state, due - 1000, () => 0.01)).toMatchObject({
       ready: false,
       delayMs: 1000,
-      reason: 'Thinking before first draw',
+      reason: 'Session warm-up before first draw',
     });
     expect(
       planHumanized(
@@ -73,12 +69,13 @@ describe('adapted humanized API QA schedule', () => {
     const now = ready(state);
     const delay = recordHumanizedCycle(state, now, random);
     expect(state.sessionDraws).toBe(1);
-    expect(delay).toBeGreaterThanOrEqual(120_000);
+    expect(delay).toBeGreaterThan(0);
     expect(planHumanized(state, now, random).ready).toBe(false);
-    state.sessionDraws = 9;
+    state.sessionDraws = 100;
+    recordHumanizedCycle(state, now, random);
     expect(planHumanized(state, now, random)).toMatchObject({
       ready: false,
-      reason: 'Session break',
+      reason: 'Natural session ending / fatigue',
     });
   });
 
@@ -97,11 +94,45 @@ describe('adapted humanized API QA schedule', () => {
       region: 'use' as const,
     };
     expect(
-      planHumanized(state, Date.parse('2026-07-01T06:00:00Z'), random).delayMs,
-    ).toBe(5.5 * 3600_000);
+      planHumanized(
+        structuredClone(state),
+        Date.parse('2026-07-01T06:00:00Z'),
+        random,
+      ).delayMs,
+    ).toBe(18_720_000);
     expect(
-      planHumanized(state, Date.parse('2026-01-01T06:00:00Z'), random).delayMs,
-    ).toBe(6.5 * 3600_000);
+      planHumanized(
+        structuredClone(state),
+        Date.parse('2026-01-01T06:00:00Z'),
+        random,
+      ).delayMs,
+    ).toBe(21_540_000);
+  });
+
+  it('preserves old persisted draw timers through the upgrade and rechecks sleep at dispatch', () => {
+    const state = createHumanizedState('old-draw', 'mysg');
+    const due = ready(state);
+    delete state.timerKind;
+    delete state.waitReason;
+    state.waitReason = 'Thinking before first draw';
+    expect(
+      planHumanized(structuredClone(state), due - 1000, () => 0.01),
+    ).toMatchObject({ ready: false, delayMs: 1000 });
+    expect(planHumanized(structuredClone(state), due, random).ready).toBe(true);
+    expect(
+      planHumanized(state, Date.parse('2026-10-20T00:00:00Z'), random),
+    ).toMatchObject({ ready: false });
+    expect(state.timerKind).toBe('OFFLINE_END');
+  });
+
+  it('returns expired passive breaks to the planner instead of treating them as paid draw timers', () => {
+    const state = createHumanizedState('passive', 'mysg');
+    const now = ready(state);
+    state.timerKind = 'SHORT_BREAK_END';
+    state.nextDrawAt = now;
+    expect(planHumanized(state, now, random).ready).toBe(false);
+    expect(state.nextDrawAt).toBeGreaterThan(now);
+    expect(state.timerKind).toBe('DRAW');
   });
 
   it('rejects invalid clocks and random values', () => {

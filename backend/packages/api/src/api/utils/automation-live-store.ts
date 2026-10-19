@@ -30,6 +30,10 @@ import type {
   LiveState,
 } from './automation-live-types';
 import { pageAll } from './page-all';
+import {
+  createHumanizedStates,
+  rememberHumanizedAssignments,
+} from './automation-humanized';
 import { observeLiveRanks } from './automation-live-leaderboard';
 import {
   liveRankTargetsToObserve,
@@ -226,6 +230,12 @@ export async function changeLive(
     if (state.status === 'running' || state.status === 'paused')
       throw invalid('Stop the current live run before editing settings.');
     if (!config) throw invalid('Live settings required.');
+    for (const row of state.schedules ?? [])
+      row.humanized.regionChoice ??= state.config?.humanizedRegion ?? 'mysg';
+    state.humanizedAssignments = rememberHumanizedAssignments(
+      state.humanizedAssignments ?? [],
+      state.schedules?.map((row) => row.humanized) ?? [],
+    );
     state.config = config;
     state.packPriceCents = priceCents;
     if (body.action === 'run')
@@ -234,7 +244,19 @@ export async function changeLive(
         runId: randomUUID(),
         spentCents: 0,
         cycles: [],
-        schedules: [],
+        schedules:
+          config.timingMode === 'humanized'
+            ? createHumanizedStates(
+                config.customerIds,
+                config.humanizedRegion ?? 'mysg',
+                state.humanizedAssignments,
+              ).map((humanized) => ({
+                customerId: humanized.profileId,
+                humanized,
+                nextRunAt: Date.now(),
+                waitReason: 'Planning activity',
+              }))
+            : [],
         rankGoals: undefined,
         nextDrawAt: undefined,
         nextRunAt: Date.now(),
