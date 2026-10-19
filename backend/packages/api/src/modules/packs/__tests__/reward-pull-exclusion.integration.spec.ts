@@ -47,6 +47,7 @@ import VipMemberState from '../models/vip-member-state';
 import VipRewardGrant from '../models/vip-reward-grant';
 import NotificationRead from '../models/notification-read';
 import LosslessSchedule from '../models/lossless-schedule';
+import AutomationMonitor from '../models/automation-monitor';
 
 jest.setTimeout(300 * 1000);
 
@@ -69,6 +70,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     VipMemberState,
     VipRewardGrant,
     NotificationRead,
+    AutomationMonitor,
   ],
   testSuite: ({ service }) => {
     // Each test gets unique IDs to avoid unique-constraint conflicts.

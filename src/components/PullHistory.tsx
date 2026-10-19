@@ -6,6 +6,7 @@ import { ChartNoAxesColumn } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
 import { FramedAvatar } from '@/components/FramedAvatar';
+import { HouseTag } from '@/components/HouseTag';
 import { SlabImage } from '@/components/SlabImage';
 import { TierBadge } from '@/components/TierBadge';
 import { PullGapsChart } from '@/components/PullGapsChart';
@@ -65,7 +66,7 @@ function Row({
   const value = pull.priceMyr != null ? rm(pull.priceMyr) : '—';
   // The label carries EVERYTHING sighted users see in the row — an aria-label
   // REPLACES the content for SR users.
-  const label = `${pull.who} pulled ${pull.name} — ${pull.rarity}, ${value}, ${pull.agoLabel}`;
+  const label = `${pull.who}${pull.house ? ' (House)' : ''} pulled ${pull.name} — ${pull.rarity}, ${value}, ${pull.agoLabel}`;
   // No ring-offset: both controls now sit INSIDE the neutral-900 row (which
   // goes neutral-800 on hover), where the old page-ground offset color drew a
   // dark band around the ring.
@@ -93,6 +94,7 @@ function Row({
           <span className="truncate text-sm font-semibold text-white">
             {pull.who}
           </span>
+          {pull.house && <HouseTag />}
           {/* Wraps under the name when the two don't fit side by side (a long
               name on a 360-412px phone) instead of running under the slab
               thumb. Below a 320px container it is dropped: the ~60px left for

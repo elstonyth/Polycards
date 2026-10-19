@@ -197,6 +197,36 @@ medusaIntegrationTestRunner({
         expect(all.status).toBe(200);
         expect(all.data.pulls).toHaveLength(2);
       });
+
+      it('labels pulls by Automation accounts as house pulls', async () => {
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.createPulls([
+          {
+            customer_id: 'cus_recent_house',
+            pack_id: PACK_A,
+            card_id: CARD_A,
+            order_id: null,
+            rolled_at: new Date(Date.now() + 1000),
+            source: 'pack',
+          },
+        ]);
+        await packs.createAutomationMonitors([
+          {
+            id: 'global',
+            accounts: { customer_ids: ['cus_recent_house'] },
+            updated_by: 'test',
+          },
+        ]);
+
+        const scoped = await unwrapResponse(
+          api.get(`/store/pulls/recent?pack_id=${PACK_A}`, {
+            headers: storeHeaders,
+          }),
+        );
+        expect(
+          scoped.data.pulls.map((p: { house: boolean }) => p.house),
+        ).toEqual([true, false]);
+      });
     });
   },
 });

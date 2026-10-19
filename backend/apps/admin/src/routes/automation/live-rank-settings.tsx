@@ -19,7 +19,7 @@ export function LiveRankSettings({
   onChange(config: LiveConfig): void;
 }) {
   const [customerId, setCustomerId] = useState('');
-  const [period, setPeriod] = useState<'weekly' | 'alltime'>('weekly');
+  const period = 'alltime';
   const [targetRank, setTargetRank] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const targets = config.rankTargets ?? [];
@@ -47,8 +47,9 @@ export function LiveRankSettings({
       <Text size="small" className="text-ui-fg-subtle">
         Optional. With goals configured, only those accounts draw. A goal stops
         after two fresh checks confirm its Top N rank, or its cycle limit is
-        reached. Humanized timing still applies. Rankings can change afterward;
-        rewards follow normal challenge rules.
+        reached. Humanized timing still applies. Rankings can change afterward.
+        Goals use the all-time board only: Automation accounts never rank on the
+        weekly challenge board or receive its prizes.
       </Text>
       {disabled && (
         <Text size="small">
@@ -82,22 +83,6 @@ export function LiveRankSettings({
                     {account.name}
                   </Select.Item>
                 ))}
-            </Select.Content>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="live-rank-period">Leaderboard</Label>
-          <Select
-            value={period}
-            disabled={disabled}
-            onValueChange={(value) => setPeriod(value as 'weekly' | 'alltime')}
-          >
-            <Select.Trigger id="live-rank-period">
-              <Select.Value />
-            </Select.Trigger>
-            <Select.Content>
-              <Select.Item value="weekly">Weekly</Select.Item>
-              <Select.Item value="alltime">All time</Select.Item>
             </Select.Content>
           </Select>
         </div>

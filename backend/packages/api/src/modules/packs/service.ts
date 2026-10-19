@@ -12046,6 +12046,13 @@ class PacksModuleService extends MedusaService({
   // challenge-week window as challengeWeekPool (shared CHALLENGE_WEEK_ANCHOR_CTE).
   // Standard §"Weekly Pulled Value Challenge": end-of-week top-10 receive the
   // unlocked cumulative rewards.
+  //
+  // Accounts on the admin Automation Accounts list (automation_monitor) are
+  // house-run and never rank here. The public board, /task, the posters,
+  // live rank checks AND settleChallengeWeek all read this query, so the
+  // ranks shown are the ranks paid. Their pulls still count in
+  // challengeWeekPool. Membership is read at query time: an account removed
+  // from the list competes again with its whole week.
   @InjectManager()
   async challengeWeekTop(
     opts: ChallengeWeekAnchor & { limit: number },
@@ -12069,6 +12076,9 @@ class PacksModuleService extends MedusaService({
         ' ' +
         '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
         '   AND pu.rolled_at <  (SELECT end_utc FROM anchor) ' +
+        '   AND NOT EXISTS (SELECT 1 FROM automation_monitor am ' +
+        "        WHERE am.id = 'global' AND am.deleted_at IS NULL " +
+        "          AND am.accounts -> 'customer_ids' @> jsonb_build_array(pu.customer_id)) " +
         ' GROUP BY pu.customer_id ' +
         ' ORDER BY volume_myr DESC NULLS LAST, pu.customer_id ASC ' +
         ' LIMIT ?',

@@ -93,6 +93,7 @@ describe('GET /api/pull-gaps', () => {
         who: 'Anonymous',
         avatar: '/images/pfps/pfp-8.webp',
         frame: null,
+        house: false,
       },
     ]);
   });

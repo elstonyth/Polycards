@@ -3,6 +3,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { cn } from '@/lib/utils';
 import { FramedAvatar } from '@/components/FramedAvatar';
+import { HouseTag } from '@/components/HouseTag';
 import { TierBadge } from '@/components/TierBadge';
 import { rarityRgb, TOP_RARITIES } from '@/lib/rarity';
 import { gapScale, gapPercent } from '@/lib/pull-gaps';
@@ -215,6 +216,7 @@ export function PullGapsChart({
                     <span className="truncate text-[12px] font-semibold text-white">
                       {h.who}
                     </span>
+                    {h.house && <HouseTag />}
                   </>
                 }
                 gap={h.gap}
@@ -222,7 +224,7 @@ export function PullGapsChart({
                 linePos={linePos}
                 lineStyle={lineStyle}
                 fill="rgba(255, 255, 255, 0.72)"
-                title={`${h.who} · ${pullTime(h.rolledAt)} · ${h.gap} pulls since the previous ${data.rarity}`}
+                title={`${h.who}${h.house ? ' (House)' : ''} · ${pullTime(h.rolledAt)} · ${h.gap} pulls since the previous ${data.rarity}`}
               />
             ))}
           </ol>

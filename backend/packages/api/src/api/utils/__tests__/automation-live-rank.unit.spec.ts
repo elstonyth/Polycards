@@ -41,18 +41,20 @@ const observation = (now = NOW, held = false): RankObservation => ({
 });
 
 it('accepts only distinct selected live customers and achievable Top N allocations', () => {
-  expect(validateLiveConfig(config, config.customerIds).rankTargets).toEqual(
-    config.rankTargets,
-  );
+  const alltime = [{ ...config.rankTargets![0], period: 'alltime' as const }];
+  expect(
+    validateLiveConfig({ ...config, rankTargets: alltime }, config.customerIds)
+      .rankTargets,
+  ).toEqual(alltime);
+  const [goal] = alltime;
   for (const rankTargets of [
-    [{ ...config.rankTargets![0], customerId: 'cus_other' }],
-    [config.rankTargets![0], config.rankTargets![0]],
-    [{ ...config.rankTargets![0], targetRank: 11 }],
-    [{ ...config.rankTargets![0], mode: 'test' }],
-    [
-      config.rankTargets![0],
-      { ...config.rankTargets![0], customerId: 'cus_b' },
-    ],
+    // Automation accounts never rank on the weekly prize board.
+    config.rankTargets,
+    [{ ...goal, customerId: 'cus_other' }],
+    [goal, goal],
+    [{ ...goal, targetRank: 11 }],
+    [{ ...goal, mode: 'test' }],
+    [goal, { ...goal, customerId: 'cus_b' }],
   ])
     expect(() =>
       validateLiveConfig({ ...config, rankTargets }, config.customerIds),

@@ -229,6 +229,7 @@ export const RecentPullSchema = z.looseObject({
   profile_handle: z.string().nullable().optional(),
   avatar_url: z.string().nullable().optional(),
   frame_url: z.string().nullable().optional(),
+  house: z.boolean().optional(),
 });
 
 /** GET /store/pulls/recent — the feed. `drought` stays unvalidated here: the
@@ -261,6 +262,7 @@ export const PullGapsSchema = z.looseObject({
       profile_handle: z.string().nullable().optional(),
       avatar_url: z.string().nullable().optional(),
       frame_url: z.string().nullable().optional(),
+      house: z.boolean().optional(),
     }),
   ),
 });
@@ -1429,6 +1431,8 @@ export const RecentPollResponseSchema = z.object({
       profileHandle: z.string().nullable(),
       avatar: z.string().nullable(),
       frame: z.string().nullable(),
+      // Defaulted: a page cached by an older server sends no flag.
+      house: z.boolean().default(false),
       rolledAt: z.string(),
       agoLabel: z.string(),
     }),
@@ -1455,6 +1459,7 @@ export const PullGapsPollResponseSchema = z.object({
       who: z.string(),
       avatar: z.string().nullable(),
       frame: z.string().nullable(),
+      house: z.boolean().default(false),
     }),
   ),
 });

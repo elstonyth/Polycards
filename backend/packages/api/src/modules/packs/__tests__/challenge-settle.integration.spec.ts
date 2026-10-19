@@ -44,6 +44,7 @@ import ChallengeSettings from '../models/challenge-settings';
 import ChallengePayout from '../models/challenge-payout';
 import LedgerEntry from '../models/ledger-entry';
 import LedgerSequence from '../models/ledger-sequence';
+import AutomationMonitor from '../models/automation-monitor';
 
 jest.setTimeout(300 * 1000);
 
@@ -97,6 +98,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     ChallengePayout,
     LedgerEntry,
     LedgerSequence,
+    AutomationMonitor,
   ],
   testSuite: ({ service }) => {
     beforeEach(() => {
@@ -706,6 +708,41 @@ moduleIntegrationTestRunner<PacksModuleService>({
         expect(await service.creditBalance('cus_a')).toBe(100);
         expect(await service.creditBalance('cus_b')).toBe(50);
         expect(await service.creditBalance('cus_c')).toBe(25);
+      });
+
+      it('never ranks or pays an Automation account; the next customer takes its rank', async () => {
+        const { card } = await seedBase();
+        await seedStage(1, 100, [
+          { rank: 1, credits: 100 },
+          { rank: 2, credits: 50 },
+        ]);
+        await seedPriorWeekPull('cus_house', card, 300);
+        await seedPriorWeekPull('cus_a', card, 200);
+        await seedPriorWeekPull('cus_b', card, 100);
+        await service.createAutomationMonitors([
+          {
+            id: 'global',
+            accounts: { customer_ids: ['cus_house'] },
+            updated_by: 'test',
+          },
+        ]);
+
+        expect(
+          (
+            await service.challengeWeekTop({ ...WEEK, weeksBack: 1, limit: 10 })
+          ).map((row) => row.customer_id),
+        ).toEqual(['cus_a', 'cus_b']);
+        // Its pulls still fill the community pool: 600 USD × fx 4.
+        expect(await service.challengeWeekPool({ ...WEEK, weeksBack: 1 })).toBe(
+          2400,
+        );
+        const r = await service.settleChallengeWeek({});
+        expect(r.winners.map((w) => [w.customerId, w.rank])).toEqual([
+          ['cus_a', 1],
+          ['cus_b', 2],
+        ]);
+        expect(await service.creditBalance('cus_house')).toBe(0);
+        expect(await service.creditBalance('cus_a')).toBe(100);
       });
 
       it('an admin anchor change cannot re-pay a week overlapping a paid one', async () => {

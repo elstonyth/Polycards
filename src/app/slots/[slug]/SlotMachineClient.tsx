@@ -755,6 +755,7 @@ export default function SlotMachineClient({
         avatar: null,
         frame: null,
         profileHandle: null,
+        house: false,
         rolledAt: new Date(now).toISOString(),
         agoLabel: 'just now',
       }));

@@ -31,6 +31,7 @@ const pull = (
   who: 'PW',
   avatar: null,
   frame: null,
+  house: false,
   rolledAt: '2026-09-02T13:38:44.000Z',
   agoLabel: 'just now',
 });
