@@ -16,7 +16,7 @@ import {
   UnavailablePanel,
 } from '@/components/task-ui';
 import { cn } from '@/lib/utils';
-import { rm } from '@/lib/format';
+import { rm, rm0 } from '@/lib/format';
 import type { TaskEntry, TaskHub } from '@/lib/data/schemas';
 import { CheckInTrack } from './CheckInTrack';
 import { RewardArt } from './reward-art';
@@ -112,7 +112,10 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
             />
           </div>
           <span className="text-[11px] text-neutral-400 tabular-nums">
-            {task.progress.current}/{task.progress.target}
+            {task.requirement.type === 'topup_myr'
+              ? // Sen only when there are some: RM 99.99 must never round to "done".
+                `${(Number.isInteger(task.progress.current) ? rm0 : rm)(task.progress.current)}/${rm0(task.progress.target)}`
+              : `${task.progress.current}/${task.progress.target}`}
           </span>
         </div>
       </div>

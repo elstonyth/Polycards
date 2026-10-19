@@ -259,6 +259,8 @@ describe('taskFactsFor splits today out of the task week', () => {
         ];
       if (sql.includes('GROUP BY c.pixel_pokemon_id'))
         return [{ pixel_pokemon_id: 'px_1', n: '9', n_week: '3', n_day: '2' }];
+      if (sql.includes('FROM credit_transaction'))
+        return [{ week_sen: '15000', day_sen: '4050', total_sen: '90000' }];
       return [{ n: '20' }];
     });
     const facts: TaskFacts = await (
@@ -278,11 +280,49 @@ describe('taskFactsFor splits today out of the task week', () => {
     expect(facts.day.pixelPullsById.get('px_1')).toBe(2);
     expect(facts.vaultPixelCount).toBe(9);
     expect(facts.vaultCount).toBe(20);
+    expect(facts.week.topupMyr).toBe(150);
+    expect(facts.day.topupMyr).toBe(40.5);
+    expect(facts.topupMyrTotal).toBe(900);
+    // Real gateway money only: positive topup rows, never soft-deleted ones,
+    // and the normal part (a bonus slice is promo money, not a top-up).
+    const topupSql = execute.mock.calls.find(([sql]) =>
+      sql.includes('FROM credit_transaction'),
+    )![0];
+    expect(topupSql).toMatch(/reason = 'topup' AND amount > 0/);
+    expect(topupSql).toMatch(/deleted_at IS NULL/);
+    expect(topupSql).toMatch(/bonus_cents/);
     // The period pixel counts are paid pulls only; the lifetime one is not.
     const pixelSql = execute.mock.calls.find(([sql]) =>
       sql.includes('GROUP BY c.pixel_pokemon_id'),
     )![0];
     expect(pixelSql.match(/p\.source = 'pack'/g)).toHaveLength(2);
     expect(pixelSql).not.toMatch(/WHERE p\.customer_id = \? AND p\.source/);
+  });
+});
+
+describe('taskFactsFor top-up sums', () => {
+  it('a customer with no top-up rows reads 0, not NaN', async () => {
+    const svc = Object.create(
+      PacksModuleService.prototype,
+    ) as PacksModuleService;
+    Object.assign(svc, {
+      listDailyCheckins: jest.fn(async () => []),
+      listVipMemberStates: jest.fn(async () => []),
+    });
+    const facts: TaskFacts = await (
+      svc as unknown as {
+        taskFactsFor: (input: unknown, ctx: unknown) => Promise<TaskFacts>;
+      }
+    ).taskFactsFor(
+      {
+        customerId: 'cus_1',
+        week: taskWeekFor(new Date()),
+        day: taskDayFor(new Date()),
+      },
+      { manager: { execute: jest.fn(async () => []) } },
+    );
+    expect(facts.week.topupMyr).toBe(0);
+    expect(facts.day.topupMyr).toBe(0);
+    expect(facts.topupMyrTotal).toBe(0);
   });
 });

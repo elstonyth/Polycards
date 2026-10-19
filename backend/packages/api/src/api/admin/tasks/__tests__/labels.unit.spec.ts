@@ -145,3 +145,18 @@ describe('resolveTaskLabels — cadence wording (daily tasks, 2026-10-06)', () =
     expect(out.get('f')!.requirement).toBe('Rip 2 × Pack bronze this week');
   });
 });
+
+describe('resolveTaskLabels — top-up goals (2026-10-19)', () => {
+  it('reads the amount in whole ringgit with the cadence', async () => {
+    const credit = { type: 'credit', amount_myr: 1 };
+    const out = await resolveTaskLabels(stub, [
+      { id: 'a', kind: 'daily', requirement: { type: 'topup_myr', amount_myr: 50 }, reward: credit },
+      { id: 'b', kind: 'weekly', requirement: { type: 'topup_myr', amount_myr: 1000 }, reward: credit },
+      { id: 'c', kind: 'achievement', requirement: { type: 'topup_myr', amount_myr: 5000 }, reward: credit },
+    ]);
+    expect(out.get('a')!.requirement).toBe('Top up RM 50 today');
+    expect(out.get('b')!.requirement).toBe('Top up RM 1,000 this week');
+    expect(out.get('c')!.requirement).toBe('Top up RM 5,000 in total');
+  });
+});
+

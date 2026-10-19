@@ -2424,7 +2424,7 @@ class PacksModuleService extends MedusaService({
           .slice(0, 10),
       );
     }
-    const [checkins, ripRows, [stateRow], vaultRows, pixelRows] =
+    const [checkins, ripRows, [stateRow], vaultRows, pixelRows, topupRows] =
       await Promise.all([
         this.listDailyCheckins(
           { customer_id: input.customerId, checkin_date: weekDays },
@@ -2504,7 +2504,27 @@ class PacksModuleService extends MedusaService({
             input.customerId,
           ],
         ),
+        // RM credited by settled gateway top-ups — the same positive
+        // reason='topup' rows (normal part) as the Players list's top-up
+        // column. Bucketed by when the credit landed, not when it was paid.
+        em.execute<
+          { week_sen: string | null; day_sen: string | null; total_sen: string | null }[]
+        >(
+          `SELECT COALESCE(SUM(${normalSenSql()}) FILTER (WHERE created_at >= ? AND created_at < ?), 0)::bigint AS week_sen, ` +
+            `  COALESCE(SUM(${normalSenSql()}) FILTER (WHERE created_at >= ? AND created_at < ?), 0)::bigint AS day_sen, ` +
+            `  COALESCE(SUM(${normalSenSql()}), 0)::bigint AS total_sen ` +
+            'FROM credit_transaction ' +
+            "WHERE customer_id = ? AND reason = 'topup' AND amount > 0 AND deleted_at IS NULL",
+          [
+            input.week.startUtc,
+            input.week.endUtcExcl,
+            input.day.startUtc,
+            input.day.endUtcExcl,
+            input.customerId,
+          ],
+        ),
       ]);
+    const myr = (sen: string | null | undefined) => Number(sen ?? 0) / 100;
     const sum = (m: Map<string, number>) =>
       [...m.values()].reduce((a, b) => a + b, 0);
     const tally = <R>(rows: R[], key: (r: R) => string, n: (r: R) => string) =>
@@ -2515,12 +2535,14 @@ class PacksModuleService extends MedusaService({
       checkinDays: number,
       ripsByPack: Map<string, number>,
       pixelPullsById: Map<string, number>,
+      topupMyr: number,
     ): PeriodFacts => ({
       checkinDays,
       rips: sum(ripsByPack),
       ripsByPack,
       pixelPulls: sum(pixelPullsById),
       pixelPullsById,
+      topupMyr,
     });
     const byPixel = tally(
       pixelRows,
@@ -2540,6 +2562,7 @@ class PacksModuleService extends MedusaService({
           (r) => r.pixel_pokemon_id,
           (r) => r.n_day,
         ),
+        myr(topupRows[0]?.day_sen),
       ),
       week: period(
         checkins.length,
@@ -2553,11 +2576,13 @@ class PacksModuleService extends MedusaService({
           (r) => r.pixel_pokemon_id,
           (r) => r.n_week,
         ),
+        myr(topupRows[0]?.week_sen),
       ),
       vipLevel: stateRow ? Number(stateRow.highest_level_ever) : 1,
       vaultCount: Number(vaultRows[0]?.n ?? 0),
       vaultPixelCount: sum(byPixel),
       vaultPixelCountById: byPixel,
+      topupMyrTotal: myr(topupRows[0]?.total_sen),
     };
   }
 

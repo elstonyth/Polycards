@@ -396,7 +396,11 @@ function TaskEditor({
                   label={COUNT_LABEL[draft.reqType] ?? "Amount"}
                   htmlFor="task-count"
                   hint={
-                    draft.reqType === "checkin_days" ? "1 to 7." : undefined
+                    draft.reqType === "checkin_days"
+                      ? "1 to 7."
+                      : draft.reqType === "topup_myr"
+                        ? "Whole RM, real top-ups only."
+                        : undefined
                   }
                   className="w-32"
                 >
