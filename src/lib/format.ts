@@ -26,6 +26,9 @@ export function money(
 
 export const rm = (n: number) => money(n, { prefix: 'RM ' });
 export const rm0 = (n: number) => money(n, { prefix: 'RM ', decimals: 0 });
+/** Whole ringgit without the ".00", sen only when there are some — so
+ *  RM 99.99 never rounds up to a "done-looking" RM 100. */
+export const rmAuto = (n: number) => (Number.isInteger(n) ? rm0(n) : rm(n));
 /** `rm` with a non-breaking space, for figures inside running sentences so
  *  "RM" never wraps away from its number. */
 // Built from its code point: a literal U+00A0 in source gets flattened back

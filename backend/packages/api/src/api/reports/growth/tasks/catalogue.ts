@@ -24,12 +24,13 @@ export type CatalogueTask = {
    *  display price today; null when the pack or card is gone. */
   value_myr: number | null;
   /** The prize's official picture as stored (often storefront-relative,
-   *  which is what fetchBytes resolves itself); null for a credit. */
+   *  which is what fetchBytes resolves itself); null for a credit, or a
+   *  pack/card with no product shot (never the pack page's factory hero). */
   image: string | null;
   ends_at: string | null;
 };
 
-/** The prize as the /task page words it (TaskHubClient rewardLabel), so a
+/** The prize as the /task page words it (task-hub.ts rewardLabel), so a
  *  post and the page a player opens from it say the same thing. A pack or
  *  card that no longer exists is marked for staff, as the admin console
  *  marks it, because nobody can claim it. */
@@ -112,8 +113,8 @@ export async function taskCatalogue(
         requirement.type === 'checkin_days' ? requirement.days : null,
       ...prizeLabel(t.reward),
       prize_type: t.reward.type,
-      // The hub already resolved the prize's picture (pack shot, else hero;
-      // slab, else raw scan) — the same one /task shows beside the task.
+      // The hub already resolved the prize's picture (the pack's product
+      // shot; slab, else raw scan) — the same one /task shows on the task.
       image:
         t.reward.type === 'pack'
           ? t.reward.pack_image

@@ -137,6 +137,7 @@ import {
   type TaskFacts,
   type TaskKind,
   type TaskRequirement,
+  type HubRequirement,
   type HubReward,
   type TaskReward,
 } from './tasks';
@@ -689,7 +690,10 @@ function toPackGiftView(
     grant_key: g.grant_key,
     // A row created in this transaction has no created_at until it flushes
     // (the column defaults to now() in the database): it was created now.
-    created_at: (g.created_at ? new Date(g.created_at) : new Date()).toISOString(),
+    created_at: (g.created_at
+      ? new Date(g.created_at)
+      : new Date()
+    ).toISOString(),
     opened_at: iso(g.opened_at),
     pull_id: g.pull_id ?? null,
     revoked_at: iso(g.revoked_at),
@@ -1057,10 +1061,7 @@ class PacksModuleService extends MedusaService({
     | {
         bound: false;
         reason:
-          | 'self'
-          | 'already_bound'
-          | 'not_a_new_account'
-          | 'referrer_disabled';
+          'self' | 'already_bound' | 'not_a_new_account' | 'referrer_disabled';
       }
   > {
     if (input.customerId === input.referrerId) {
@@ -2508,7 +2509,11 @@ class PacksModuleService extends MedusaService({
         // reason='topup' rows (normal part) as the Players list's top-up
         // column. Bucketed by when the credit landed, not when it was paid.
         em.execute<
-          { week_sen: string | null; day_sen: string | null; total_sen: string | null }[]
+          {
+            week_sen: string | null;
+            day_sen: string | null;
+            total_sen: string | null;
+          }[]
         >(
           `SELECT COALESCE(SUM(${normalSenSql()}) FILTER (WHERE created_at >= ? AND created_at < ?), 0)::bigint AS week_sen, ` +
             `  COALESCE(SUM(${normalSenSql()}) FILTER (WHERE created_at >= ? AND created_at < ?), 0)::bigint AS day_sen, ` +
@@ -2618,7 +2623,7 @@ class PacksModuleService extends MedusaService({
       id: string;
       kind: TaskKind;
       title: string;
-      requirement: TaskRequirement;
+      requirement: HubRequirement;
       reward: HubReward;
       progress: { current: number; target: number; completed: boolean };
       claimed: boolean;
@@ -2717,16 +2722,23 @@ class PacksModuleService extends MedusaService({
     // neither which card nor what it is worth.
     const packSlugs = new Set<string>(pendingSpins.map((s) => s.pack_id));
     const cardHandles = new Set<string>();
+    // The goal side gets pictures too: the pack a rip goal names, the Pokémon
+    // a pull goal names — "RIP [Bronze Pack] ×10" reads at a glance.
+    const pixelIds = new Set<string>();
     for (const d of live) {
       const r = d.reward as unknown as TaskReward;
       if (r.type === 'pack') packSlugs.add(r.pack_id);
       if (r.type === 'card') cardHandles.add(r.card_handle);
+      const q = d.requirement as unknown as TaskRequirement;
+      if (q.type === 'rip_count' && q.pack_id) packSlugs.add(q.pack_id);
+      if (q.type === 'vault_pixel_count' && q.pixel_pokemon_id)
+        pixelIds.add(q.pixel_pokemon_id);
     }
     const packRows = packSlugs.size
       ? await this.listPacks(
           { slug: [...packSlugs] },
           {
-            select: ['slug', 'title', 'price', 'image', 'display_image'],
+            select: ['slug', 'title', 'price', 'image', 'status'],
             take: packSlugs.size,
           },
           sharedContext,
@@ -2751,19 +2763,27 @@ class PacksModuleService extends MedusaService({
           sharedContext,
         )
       : [];
+    // SINGULAR runtime name — see pixel-pokemon-service.ts.
+    const pixelRows = pixelIds.size
+      ? await asPixelPokemonCrud(this).listPixelPokemon(
+          { id: [...pixelIds] },
+          { select: ['id', 'name', 'image_url'], take: pixelIds.size },
+          sharedContext,
+        )
+      : [];
+    const pixelById = new Map(pixelRows.map((p) => [p.id, p]));
     const fxRate = cardRows.length
       ? await resolveFxRate(this)
       : DEFAULT_USD_MYR;
     const packBySlug = new Map(packRows.map((p) => [p.slug, p]));
     const cardByHandle = new Map(cardRows.map((c) => [c.handle, c]));
-    // The prize's picture: a pack's product shot (`image`; the hero
-    // `display_image` only when there is none), a card's graded slab (the
-    // raw scan only when there is none). As stored — the storefront
-    // resolves relative paths like every other pack/card image.
-    const packArt = (slug: string): string | null => {
-      const p = packBySlug.get(slug);
-      return p?.image || p?.display_image || null;
-    };
+    // The prize's picture: a pack's product shot (`image` — never the hero
+    // `display_image`, a wide factory scene meant only for the /slots stage,
+    // same rule as every pack tile), a card's graded slab (the raw scan only
+    // when there is none). As stored — the storefront resolves relative paths
+    // like every other pack/card image.
+    const packArt = (slug: string): string | null =>
+      packBySlug.get(slug)?.image || null;
     const hubReward = (reward: TaskReward): HubReward => {
       if (reward.type === 'pack') {
         const p = packBySlug.get(reward.pack_id);
@@ -2792,6 +2812,27 @@ class PacksModuleService extends MedusaService({
       }
       return reward;
     };
+    const hubRequirement = (q: TaskRequirement): HubRequirement => {
+      if (q.type === 'rip_count' && q.pack_id) {
+        // A draft pack is not on sale: its name and art stay unpublished.
+        const p = packBySlug.get(q.pack_id);
+        const shown = p?.status === 'active' ? p : undefined;
+        return {
+          ...q,
+          pack_title: shown?.title ?? null,
+          pack_image: shown?.image || null,
+        };
+      }
+      if (q.type === 'vault_pixel_count' && q.pixel_pokemon_id) {
+        const p = pixelById.get(q.pixel_pokemon_id);
+        return {
+          ...q,
+          pokemon_name: p?.name ?? null,
+          pokemon_image: p?.image_url ?? null,
+        };
+      }
+      return q;
+    };
     return {
       week_start: week.weekStartIso,
       day_key: day.dayIso,
@@ -2811,7 +2852,7 @@ class PacksModuleService extends MedusaService({
           id: d.id,
           kind,
           title: d.title,
-          requirement,
+          requirement: hubRequirement(requirement),
           reward: hubReward(d.reward as unknown as TaskReward),
           progress: taskProgress(kind, requirement, facts),
           claimed: claimed.has(`${d.id}:${taskPeriodKey(kind, period)}`),
@@ -2851,10 +2892,7 @@ class PacksModuleService extends MedusaService({
     | {
         claimed: false;
         reason:
-          | 'not_found'
-          | 'not_completed'
-          | 'already_claimed'
-          | 'window_closed';
+          'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
       }
   > {
     // Deliberately NOT filtered on active: retiring a task must never strand
@@ -5060,7 +5098,10 @@ class PacksModuleService extends MedusaService({
     if (
       !snapshot ||
       !isShippableCountry(snapshot.ship_country_code) ||
-      !isShippablePostcode(snapshot.ship_postal_code, snapshot.ship_country_code)
+      !isShippablePostcode(
+        snapshot.ship_postal_code,
+        snapshot.ship_country_code,
+      )
     ) {
       return { status: 'invalid' };
     }
@@ -12169,8 +12210,7 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      | SettleSnapshot
-      | undefined;
+      SettleSnapshot | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME
@@ -12586,8 +12626,7 @@ class PacksModuleService extends MedusaService({
   private async reserveSettledStock(
     winner: SettledWinner,
     decrementStock:
-      | ((handle: string, qty: number) => Promise<boolean>)
-      | undefined,
+      ((handle: string, qty: number) => Promise<boolean>) | undefined,
     weekStartIso: string,
   ): Promise<void> {
     if (!decrementStock) return;
