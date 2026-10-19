@@ -29,6 +29,10 @@ import {
   withdrawalReconcileAction,
 } from '../gateway-reconcile';
 import { savedBankAccountId } from '../saved-accounts';
+import {
+  DEFAULT_WITHDRAWAL_CONTROLS,
+  type WithdrawalControls,
+} from '../withdrawal-controls';
 import PacksModuleService from '../service';
 import { POST as withdrawRoute } from '../../../api/store/credits/withdraw/route';
 
@@ -110,6 +114,10 @@ function harness(savedAccounts: unknown[] = [SAVED_ACCOUNT]) {
       bonus: 0,
       playthrough: { deposited: 0, used: 0, remaining: 0 },
     }),
+    // The admin switches (withdrawal-controls.ts). Open by default.
+    withdrawalControls: jest
+      .fn<Promise<WithdrawalControls>, []>()
+      .mockResolvedValue(DEFAULT_WITHDRAWAL_CONTROLS),
   } satisfies FakeFacet<GatewayWithdrawals>;
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   return {
@@ -260,6 +268,13 @@ describe('withdrawalDetailsError', () => {
   const VISA_TEST_CARD = '4111111111111111'; // Luhn-valid
   it.each([
     ['MBBEMYKL', '1234567890', /^Maybank account numbers are 12 digits\./],
+    [
+      'MBBESGSG',
+      '123456789012',
+      /^Maybank \(SG\) account numbers are 11 digits\./,
+    ],
+    ['DBSSSGSG', '123456789012', /^DBS Bank account numbers are 10 digits\./],
+    ['POSBSG', '1234567890', /^POSB account numbers are 9 digits\./],
     ['MYMB2U', '1234567890', /^Maybank account numbers are 12 digits\./], // legacy alias
     [
       'CIBBMYKL',
@@ -270,15 +285,14 @@ describe('withdrawalDetailsError', () => {
     [
       'HLBBMYKL',
       '1234567890',
-      /^Hong Leong Bank account numbers are 11 digits\./,
+      /^Hong Leong Bank account numbers are 11 or 13 digits\./,
     ],
     ['RHBBMYKL', '123456789012', /^RHB Bank account numbers are 14 digits\./],
     ['MBBEMYKL', VISA_TEST_CARD, /^That looks like a card number\./],
     ['CIBBMYKL', '5555555555554444', /^That looks like a card number\./],
-    // Mastercard's 2-series range (2221-2720).
-    ['BSNAMYK1', '2223003122003222', /^That looks like a card number\./],
-    // BSN accounts are 16 digits, so only the card check guards it.
-    ['BSNAMYK1', VISA_TEST_CARD, /^That looks like a card number\./],
+    // Mastercard's 2-series range (2221-2720) is also a card hint at the wrong length.
+    ['MBBEMYKL', '2223003122003222', /^That looks like a card number\./],
+    ['ALLIANCESG', '012345678901', /unavailable/i],
   ])('refuses %s %s', (bankCode, accountNumber, message) => {
     expect(
       withdrawalDetailsError({ ...SAVED_ACCOUNT, bankCode, accountNumber }),
@@ -298,10 +312,24 @@ describe('withdrawalDetailsError', () => {
     ['BSNAMYK1', '4111111111111112'],
     // 2-series outside 2221-2720 is not a card prefix.
     ['BSNAMYK1', '2000000000000006'], // Luhn-valid
-    // Banks without a length on file are not length-checked.
-    ['PHBMMYKL', '123456789'],
-    // Singapore banks pay through A3Pay and keep the generic digit rule.
+    ['PHBMMYKL', '123456789012'],
+    ['MBBESGSG', '01234567890'],
     ['DBSSSGSG', '1234567890'],
+    ['POSBSG', '123456789'],
+    ['OCBCSGSG', '012345678901'],
+    ['OCBCSGSG', '0123456789012345678'], // published virtual-account range
+    ['UOVBSGSG', '0123456'], // virtual account
+    ['HSBCSGSG', '012345678901'],
+    ['HSBCSGSG', '012345678901234567'], // virtual account
+    ['CIBBSGSG', '1234567890'],
+    ['RHBBSGSG', '01234567890'],
+    ['HLBBSGSG', '012345678901234567'],
+    ['BKCHSGSG', '012345678901234'],
+    ['GXSSG', '0123456789'],
+    ['GXSSG', '01234567890'],
+    ['MARIBANKSG', '012345678'],
+    ['ANEXTSG', '01234567890'],
+    ['PAYNOWSG', '6591234567'],
   ])('accepts %s %s', (bankCode, accountNumber) => {
     expect(
       withdrawalDetailsError({ ...SAVED_ACCOUNT, bankCode, accountNumber }),
@@ -578,14 +606,152 @@ describe('startWithdrawal — money ordering', () => {
     expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
   });
 
+  // The admin's Withdraw switch and daily schedule (withdrawal-controls.ts):
+  // refused before any row or debit, like every certain refusal.
+  describe('admin withdrawal controls', () => {
+    const TNG = {
+      ...SAVED_ACCOUNT,
+      id: savedBankAccountId('TNGMY', '123456789012'),
+      bankCode: 'TNGMY',
+      bankName: "Touch 'n Go eWallet",
+      accountNumber: '123456789012',
+    };
+    const controls = (
+      over: Partial<WithdrawalControls>,
+    ): WithdrawalControls => ({
+      ...DEFAULT_WITHDRAWAL_CONTROLS,
+      ...over,
+    });
+    // A three-minute window around the current Malaysia minute.
+    const windowAroundNow = () => {
+      const minute = Math.floor(
+        ((Date.now() + 8 * 3_600_000) % 86_400_000) / 60_000,
+      );
+      const hhmm = (m: number) => {
+        const w = (m + 1440) % 1440;
+        return `${String(Math.floor(w / 60)).padStart(2, '0')}:${String(w % 60).padStart(2, '0')}`;
+      };
+      return {
+        on: true,
+        close_at: hhmm(minute - 1),
+        reopen_at: hhmm(minute + 2),
+      };
+    };
+    const expectNothingWritten = (h: ReturnType<typeof harness>) => {
+      expect(h.packs.createGatewayWithdrawals).not.toHaveBeenCalled();
+      expect(h.packs.withdrawForCashout.mock.calls.length).toBe(0);
+      expect(h.packs.withdrawCreditsWithLedger).not.toHaveBeenCalled();
+    };
+
+    it('refuses every new withdrawal while the Withdraw switch is off', async () => {
+      const h = harness();
+      h.packs.withdrawalControls.mockResolvedValue(
+        controls({
+          withdrawals: {
+            open: false,
+            off_until: null,
+            schedule: DEFAULT_WITHDRAWAL_CONTROLS.withdrawals.schedule,
+          },
+        }),
+      );
+      await expect(start(h)).rejects.toThrow(
+        'Withdrawals are paused for maintenance. Please try again later.',
+      );
+      expectNothingWritten(h);
+    });
+
+    it('names the reopen time when the switch-off has one', async () => {
+      const h = harness();
+      h.packs.withdrawalControls.mockResolvedValue(
+        controls({
+          withdrawals: {
+            open: false,
+            off_until: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+            schedule: DEFAULT_WITHDRAWAL_CONTROLS.withdrawals.schedule,
+          },
+        }),
+      );
+      await expect(start(h)).rejects.toThrow(
+        /^Withdrawals are paused for maintenance until \w{3} \d{1,2} \w{3}, /,
+      );
+      expectNothingWritten(h);
+    });
+
+    it('refuses inside the daily closed window and names the reopen time', async () => {
+      const h = harness();
+      h.packs.withdrawalControls.mockResolvedValue(
+        controls({
+          withdrawals: {
+            open: true,
+            off_until: null,
+            schedule: windowAroundNow(),
+          },
+        }),
+      );
+      await expect(start(h)).rejects.toThrow(
+        /^Withdrawals are paused for maintenance until /,
+      );
+      expectNothingWritten(h);
+    });
+
+    it("refuses a Touch 'n Go payout while the TNG switch is off, in TNG's words", async () => {
+      const prev = process.env.TNG_PAYOUTS_ENABLED;
+      process.env.TNG_PAYOUTS_ENABLED = 'true';
+      try {
+        const h = harness([TNG]);
+        h.packs.withdrawalControls.mockResolvedValue(
+          controls({
+            tng: { ...DEFAULT_WITHDRAWAL_CONTROLS.tng, open: false },
+          }),
+        );
+        await expect(
+          start(h, { gateway: 'tgpay', accountId: TNG.id, amount: 100 }),
+        ).rejects.toThrow(/^Touch 'n Go withdrawals are paused for now\./);
+        expectNothingWritten(h);
+        // A bank account is untouched by the TNG switch.
+        const bank = harness();
+        bank.packs.withdrawalControls.mockResolvedValue(
+          controls({
+            tng: { ...DEFAULT_WITHDRAWAL_CONTROLS.tng, open: false },
+          }),
+        );
+        await expect(start(bank)).resolves.toMatchObject({
+          status: 'pending',
+        });
+      } finally {
+        if (prev === undefined) delete process.env.TNG_PAYOUTS_ENABLED;
+        else process.env.TNG_PAYOUTS_ENABLED = prev;
+      }
+    });
+
+    it("holds a Touch 'n Go payout to the admin's raised minimum", async () => {
+      const prev = process.env.TNG_PAYOUTS_ENABLED;
+      process.env.TNG_PAYOUTS_ENABLED = 'true';
+      try {
+        const h = harness([TNG]);
+        h.packs.withdrawalControls.mockResolvedValue(
+          controls({
+            tng: { ...DEFAULT_WITHDRAWAL_CONTROLS.tng, min_rm: 200 },
+          }),
+        );
+        await expect(
+          start(h, { gateway: 'tgpay', accountId: TNG.id, amount: 150 }),
+        ).rejects.toThrow(/between RM 200 and/);
+        expectNothingWritten(h);
+      } finally {
+        if (prev === undefined) delete process.env.TNG_PAYOUTS_ENABLED;
+        else process.env.TNG_PAYOUTS_ENABLED = prev;
+      }
+    });
+  });
   // Test-plan case 3.
   it("refuses a bank the active gateway cannot pay to BEFORE any debit, in the customer's words", async () => {
     // A wallet the registry knows but TGPay has no payout code for.
     const unpayable = {
       ...SAVED_ACCOUNT,
-      id: savedBankAccountId('BOOSTMY', '1234567890'),
+      id: savedBankAccountId('BOOSTMY', '123456789012'),
       bankCode: 'BOOSTMY',
-      accountNumber: '1234567890',
+      accountNumber: '123456789012',
     };
     const h = harness([unpayable]);
     await expect(
@@ -1435,7 +1601,7 @@ describe('an empty TGPay payout wallet (TGPAY_PAYOUT_FLOAT_EMPTY)', () => {
       // bigNumber column: arrives as a string.
       amount: '1500',
       bank_code: 'MBBEMYKL',
-      account_number: '1234567890',
+      account_number: SAVED_ACCOUNT.accountNumber,
       account_holder_name: 'AHMAD BIN ALI',
       gateway: 'fake',
       status: 'held',

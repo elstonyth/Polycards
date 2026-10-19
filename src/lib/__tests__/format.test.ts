@@ -3,12 +3,21 @@ import {
   money,
   rm,
   rm0,
+  rmAuto,
   num,
   relativeTime,
   timeUntil,
   pullTime,
   affordable,
 } from '../format';
+
+describe('rmAuto', () => {
+  it('drops .00 on whole ringgit and keeps sen when there are some', () => {
+    expect(rmAuto(100)).toBe(rm0(100));
+    expect(rmAuto(99.99)).toBe(rm(99.99));
+    expect(rmAuto(40.5)).toBe(rm(40.5));
+  });
+});
 
 describe('affordable — integer-sen comparison', () => {
   it('does not false-block a fractional cost that a float would', () => {

@@ -591,6 +591,9 @@ export const PaymentConfigSchema = z.looseObject({
   withdrawals_enabled: z.boolean().optional(),
   // ISO instant a timed withdrawal pause ends (null/absent = no timed pause).
   withdrawals_paused_until: z.string().nullable().optional(),
+  // Closed by the admin (switch or daily hours) or a timed pause: the Withdraw
+  // button opens an "unavailable" popup. Absent (older backend) = not closed.
+  withdrawals_unavailable: z.boolean().optional(),
   // Regional rails beside the active gateway (A3Pay: SGD). Optional — an
   // older backend has none, and a malformed list must not fail the bands.
   regional: z
@@ -769,6 +772,22 @@ export const WithdrawBanksSchema = z.looseObject({
       // The currency that bank is paid in (SGD for Singapore banks via
       // A3Pay). Optional: an older backend sends none, meaning RM.
       currency: z.string().optional(),
+      accountLengths: z
+        .array(z.number().int().positive())
+        .nonempty()
+        .optional(),
+      accountPattern: z
+        .string()
+        .refine((pattern) => {
+          try {
+            new RegExp(pattern);
+            return true;
+          } catch {
+            return false;
+          }
+        })
+        .optional(),
+      accountHint: z.string().optional(),
     }),
   ),
 });
@@ -800,6 +819,9 @@ export const SavedBankAccountsSchema = z.looseObject({
       // The bank's own payout floor (RM), e.g. Touch 'n Go 100; null/absent =
       // only the gateway's floor applies.
       minRm: z.number().nullish(),
+      // Why an unsupported account cannot be paid right now, when it is not
+      // the provider (e.g. the admin paused Touch 'n Go).
+      unavailableReason: z.string().nullish(),
     }),
   ),
 });
@@ -1269,7 +1291,16 @@ export const TaskEntrySchema = z.looseObject({
   id: z.string(),
   kind: z.enum(['daily', 'weekly', 'achievement']),
   title: z.string(),
-  requirement: z.looseObject({ type: z.string() }),
+  requirement: z.looseObject({
+    type: z.string(),
+    // What a narrowed goal names, so the row can SHOW it ("RIP [Bronze Pack]
+    // ×10"): a rip goal's pack, a pull goal's Pokémon. Same optional+nullable
+    // skew rule as the reward: absent/null falls back to the goal's icon.
+    pack_title: z.string().nullable().optional(),
+    pack_image: z.string().nullable().optional(),
+    pokemon_name: z.string().nullable().optional(),
+    pokemon_image: z.string().nullable().optional(),
+  }),
   reward: z.looseObject({
     type: z.string(),
     pack_id: z.string().optional(),

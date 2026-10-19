@@ -64,12 +64,10 @@ export default function RequestDeliveryModal({
   // The charge is confirmed in a second step before anything is requested.
   const [confirming, setConfirming] = useState(false);
   const { balance, openTopUp, refreshBalance } = useTopUp();
-  // Read on open: the wallet's bonus part (fees cannot spend it) and today's
-  // prize-shipping allowance. Null until (or unless) each answers.
-  const [wallet, setWallet] = useState<{
-    balance: number;
-    bonus: number;
-  } | null>(null);
+  // Read on open: the wallet balance (the fallback while the top-up context
+  // has none) and today's prize-shipping allowance. Null until (or unless)
+  // each answers.
+  const [wallet, setWallet] = useState<{ balance: number } | null>(null);
   const hasPrizes = items.some((i) => i.source === 'reward');
   const [prizeAllowance, setPrizeAllowance] = useState<{
     perDay: number;
@@ -81,7 +79,7 @@ export default function RequestDeliveryModal({
     getWallet()
       .then((r) => {
         if (!cancelled && r.ok) {
-          setWallet({ balance: r.wallet.balance, bonus: r.wallet.bonus });
+          setWallet({ balance: r.wallet.balance });
         }
       })
       .catch(() => {});
@@ -177,15 +175,10 @@ export default function RequestDeliveryModal({
   // What actually ships now: the vault cards plus the prizes today's limit lets.
   const shipCount = paidItems.length + prizeItems.length;
   // Checked before the request (the backend's floor guard still decides):
-  // a balance that cannot cover the charge is sent to top up instead. Fees
-  // are paid from the NORMAL balance only — bonus credit is spend-only on
-  // packs — so the spendable figure excludes it once the wallet is read. The
-  // LIVE balance, so a top-up made from this sheet clears the shortfall.
-  const liveBalance = balance ?? wallet?.balance ?? null;
-  const spendable =
-    liveBalance != null
-      ? Math.round((liveBalance - (wallet?.bonus ?? 0)) * 100) / 100
-      : null;
+  // a balance that cannot cover the charge is sent to top up instead. Bonus
+  // credit pays fees too (ADR 0014), so the whole balance counts. The LIVE
+  // balance, so a top-up made from this sheet clears the shortfall.
+  const spendable = balance ?? wallet?.balance ?? null;
   const shortBy =
     priceable && spendable != null && totalCharge > spendable
       ? Math.round((totalCharge - spendable) * 100) / 100
@@ -545,9 +538,6 @@ export default function RequestDeliveryModal({
             {balance != null && (
               <p className="mt-1 text-right text-[12px] text-white/45">
                 Your balance: {rm(balance)}
-                {wallet !== null && wallet.bonus > 0
-                  ? ` (${rm(wallet.bonus)} bonus credit — packs only)`
-                  : ''}
               </p>
             )}
           </div>
@@ -566,11 +556,8 @@ export default function RequestDeliveryModal({
           <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
             <p>
               Not enough balance: this delivery costs {rm(totalCharge)} and you
-              have {rm(spendable ?? 0)} to pay it with
-              {wallet !== null && wallet.bonus > 0
-                ? ' (bonus credit can only pay for packs)'
-                : ''}
-              . Top up {rm(shortBy)} or more to ship it.
+              have {rm(spendable ?? 0)}. Top up {rm(shortBy)} or more to ship
+              it.
             </p>
             <Pill onClick={openTopUp} className="mt-2 px-4">
               Top up

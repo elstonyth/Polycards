@@ -4,6 +4,10 @@ import {
   scrubSpanUrls,
 } from './src/lib/sentry-breadcrumbs';
 import { sentryDataCollection } from './src/lib/sentry-data-collection';
+import { installTranslateDomGuard } from './src/lib/translate-dom-guard';
+
+// Synchronous and top-level, so it is in place before hydration.
+installTranslateDomGuard();
 
 Sentry.init({
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,

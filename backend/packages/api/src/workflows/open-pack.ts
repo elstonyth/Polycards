@@ -16,6 +16,8 @@ import { settleVipStep } from "./steps/settle-vip";
 export type OpenPackInput = {
   pack_id: string; // = Pack.slug
   customer_id: string; // from the authenticated token — NEVER the request body
+  open_id?: string;
+  max_price?: number;
 };
 
 // open-pack — the gacha "open a pack" business process.
@@ -46,7 +48,8 @@ export const openPackWorkflow = createWorkflow(
     const charged = transform({ input }, (d) => ({
       pack_id: d.input.pack_id,
       customer_id: d.input.customer_id,
-      open_id: randomUUID(),
+      open_id: d.input.open_id ?? randomUUID(),
+      max_price: d.input.max_price,
     }));
 
     // ── PAYMENT SEAM (filled, Task A2) ───────────────────────────────────────
@@ -75,8 +78,8 @@ export const openPackWorkflow = createWorkflow(
       source: d.claim.free ? ("free" as const) : ("pack" as const),
     }));
     // Bonus credit (spec 2026-10-07): an open bonus paid at least half of is a
-    // 'bonus' pull (counts toward nothing); any bonus share of its sell-back
-    // must be played through before it can be withdrawn.
+    // 'bonus' pull (counts toward boards and public history); its bonus share
+    // of sell-back must be played through before it can be withdrawn.
     const pull = recordPullStep(
       transform({ recordInput, charge }, (d) => {
         const bonusBp = openBonusBp(
@@ -145,6 +148,7 @@ export const openPackWorkflow = createWorkflow(
       // Post-charge balance so the storefront can update in place.
       balance: d.charge.balance,
       price: d.charge.price,
+      bonus_cents: d.charge.bonus_cents,
     }));
     return new WorkflowResponse(result);
   },

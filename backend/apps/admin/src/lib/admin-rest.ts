@@ -899,6 +899,54 @@ export async function savePaymentGateway(input: {
   return postJson<PaymentGatewaySetting>('/admin/payments/gateway', input);
 }
 
+// ── Withdrawal controls (2026-10-17) ────────────────────────────────────────
+// The Withdraw and Touch 'n Go switches, a daily closed window for each
+// (Malaysia time, may wrap past midnight) and the TNG minimum. Mirrors the
+// API's withdrawal-controls.ts.
+
+export interface DailyClosure {
+  on: boolean;
+  /** "HH:MM", Malaysia time. */
+  close_at: string | null;
+  reopen_at: string | null;
+}
+export interface ChannelControl {
+  open: boolean;
+  /** ISO instant a switched-off channel reopens by itself; null = only an
+   *  admin reopens it. */
+  off_until: string | null;
+  schedule: DailyClosure;
+}
+export interface WithdrawalControls {
+  withdrawals: ChannelControl;
+  tng: ChannelControl & { min_rm: number | null };
+}
+export interface ChannelStatus {
+  open: boolean;
+  /** ISO; null while closed = only an admin can reopen it. */
+  reopens_at: string | null;
+}
+export interface WithdrawalControlsView {
+  controls: WithdrawalControls;
+  status: { withdrawals: ChannelStatus; tng: ChannelStatus };
+  /** What the server config allows whatever the switches say. */
+  env: { withdrawals: boolean; tng: boolean };
+  tng_min_floor_rm: number;
+}
+
+export async function getWithdrawalControls(): Promise<WithdrawalControlsView> {
+  return getJson<WithdrawalControlsView>('/admin/payments/withdrawal-controls');
+}
+
+export async function saveWithdrawalControls(
+  input: WithdrawalControls & { reason: string },
+): Promise<WithdrawalControlsView> {
+  return postJson<WithdrawalControlsView>(
+    '/admin/payments/withdrawal-controls',
+    input,
+  );
+}
+
 // PriceCharting proxies (the API token lives server-side only). A 503 from the
 // proxy means PRICECHARTING_API_TOKEN is not configured — surface the message
 // and fall back to manual FMV entry.
@@ -2447,10 +2495,41 @@ export interface CustomerReferralCard {
   /** Non-null when the player's group is a partner group: its rate is what
    *  pays them and the manual control below is locked (spec 2026-09-09). */
   partner_group: { id: string; name: string; rate_bp: number } | null;
-  downline: { customer_id: string; since: string }[];
+  /** Direct referrals, uncapped — the downline list stops at 1000. */
+  downline_count: number;
+  /** The still-open settlement week, live — the same numbers the player's own
+   *  /referral page shows. rate_bp is the effective rate (group > manual >
+   *  tier); partner says it came from a group or manual rate. */
+  week: {
+    start: string;
+    turnover_cents: number;
+    rate_bp: number;
+    projected_cents: number;
+    partner: boolean;
+  };
+  /** What can stop a week's line paying on Wednesday: over
+   *  auto_approve_max_cents the run waits for an admin; over
+   *  line_ceiling_cents the close voids the line. */
+  payout_limits: {
+    auto_approve_max_cents: number;
+    line_ceiling_cents: number;
+  };
+  /** Spend is commission spend: the normal (non-bonus) part of pack opens,
+   *  net of reversals — the Players list's "total spend" rule. name/email are
+   *  null for a customer whose record is gone. */
+  downline: {
+    customer_id: string;
+    since: string;
+    name: string | null;
+    email: string | null;
+    week_spend_cents: number;
+    lifetime_spend_cents: number;
+  }[];
   lines: {
     id: string;
     settlement_id: string;
+    /** MYT Tuesday the line's week starts, 'YYYY-MM-DD'. */
+    week_start: string | null;
     basis_cents: number;
     rate_bp: number;
     amount_cents: number;

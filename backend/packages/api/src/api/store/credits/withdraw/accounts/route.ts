@@ -4,14 +4,11 @@ import type {
 } from '@medusajs/framework/http';
 import { MedusaError, Modules } from '@medusajs/framework/utils';
 import { findBank, sandboxOnlyBank } from '../../../../../modules/packs/banks';
-import {
-  GATEWAYS,
-  resolveActiveGateway,
-} from '../../../../../modules/packs/gateway';
+import { resolveActiveGateway } from '../../../../../modules/packs/gateway';
 import {
   regionalPayoutGateways,
   withdrawalDetailsError,
-  payoutGatewayFor,
+  payoutCurrencyFor,
 } from '../../../../../modules/packs/gateway-withdrawal';
 import {
   resolvePacks,
@@ -30,6 +27,12 @@ import {
   sendSavedAccountAddedNotice,
   sendSavedAccountRemovedNotice,
 } from '../../../../../modules/packs/saved-account-notice';
+import {
+  channelStatus,
+  destinationMinRm,
+  isTngBank,
+  tngPausedReason,
+} from '../../../../../modules/packs/withdrawal-controls';
 
 // Saved payout bank accounts — GET (list) / POST (add) / DELETE (remove) on
 // /store/credits/withdraw/accounts. Storage is customer.metadata.bank_accounts,
@@ -158,15 +161,43 @@ async function accountViews(
   accounts: Parameters<typeof savedBankAccountViews>[0],
 ) {
   const active = await resolveActiveGateway(req.scope);
+  // The admin's Touch 'n Go switch and floor (withdrawal-controls.ts), so the
+  // form shows a paused TNG account as such and states the right minimum.
+  const controls = await resolvePacks<CustomerWallet>(
+    req.scope,
+  ).withdrawalControls();
+  const tng = channelStatus(controls.tng, Date.now());
   return savedBankAccountViews(
     accounts,
     active,
     undefined,
     regionalPayoutGateways(),
-  ).map((view) => ({
-    ...view,
-    currency: GATEWAYS[payoutGatewayFor(view.bankCode, active)].currency,
-  }));
+  ).map((view) => {
+    const invalid = withdrawalDetailsError(view);
+    return {
+      ...view,
+      currency: payoutCurrencyFor(view.bankCode, active),
+      ...(isTngBank(view.bankCode)
+        ? {
+            minRm: destinationMinRm(view.bankCode, controls),
+            ...(tng.open
+              ? {}
+              : {
+                  supported: false,
+                  unavailableReason: tngPausedReason(tng.reopens_at),
+                }),
+          }
+        : {}),
+      ...(invalid
+        ? {
+            supported: false,
+            unavailableReason: findBank(view.bankCode)?.accountLengths?.length
+              ? `${invalid} Remove this account and add it again with the correct bank country and account number.`
+              : invalid,
+          }
+        : {}),
+    };
+  });
 }
 
 export async function GET(

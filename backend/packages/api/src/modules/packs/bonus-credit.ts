@@ -113,8 +113,8 @@ export function releasableRewardHoldSen(input: {
 /** A paid row is a bonus open when bonus credit paid at least half its price.
  *  Below that it stays 'pack': a few ringgit of leftover bonus must not
  *  disqualify a real-money open from the counts (tasks, achievements, the
- *  welcome unlock, the feed). Value sums never depend on this — they weight
- *  every row by its normal share (NORMAL_SHARE_SQL). */
+ *  welcome unlock, the feed). Leaderboard and challenge value count both
+ *  sources in full; bonus_bp still governs money and playthrough. */
 export const BONUS_SOURCE_MIN_BP = 5_000;
 
 /** The source of a PAID (not gifted, not free) pull from its bonus share. */
@@ -138,10 +138,12 @@ export const normalSenSql = (t = ''): string =>
 export const reasonCashSenSql = (t = ''): string =>
   `CASE WHEN ${t}reason IN ('bonus_grant', 'reward_credit', 'voucher_claim') THEN ROUND(${t}amount * 100) ELSE ${normalSenSql(t)} END`;
 
-/** A pull (alias `pu`) that real money paid for, in whole or in part. */
+/** Leaderboards count opens paid with normal or bonus credit in full.
+ *  Gift, free and reward pulls remain excluded (operator rule 2026-10-17). */
+export const LEADERBOARD_PULL_SQL = "pu.source IN ('pack', 'bonus')";
+
+/** Finance views still count only the normal-credit share of a pull. */
 export const REAL_MONEY_PULL_SQL =
   "pu.source IN ('pack', 'bonus') AND pu.bonus_bp < 10000";
 
-/** The normal-money share of a pull (alias `pu`), 0..1: value sums on the
- *  boards and the challenge multiply each pull's value by it. */
 export const NORMAL_SHARE_SQL = '((10000 - pu.bonus_bp) / 10000.0)';

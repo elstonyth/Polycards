@@ -83,6 +83,7 @@ const GROUPS: Group[] = [
       { path: '/odds-sets', label: 'pcNav.playerGroups' },
       { path: '/referrals', label: 'pcNav.referrals' },
       { path: '/support', label: 'pcNav.customerSupport' },
+      { path: '/automation', label: 'pcNav.automation' },
     ],
   },
   {

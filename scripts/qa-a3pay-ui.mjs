@@ -140,6 +140,10 @@ for (let i = 0; i < 4; i += 1) {
 await page.goto(`${STORE}/bank-withdrawal`);
 const select = page.getByLabel('Saved bank account');
 await select.waitFor({ timeout: 20000 });
+// The picker lists one country's accounts at a time; with Malaysian ones
+// saved too, Singapore's sit behind its flag.
+const sgPill = page.getByRole('button', { name: 'Singapore', exact: true });
+if (await sgPill.isVisible()) await sgPill.click();
 const dbs = await select
   .locator('option', { hasText: 'DBS Bank' })
   .first()

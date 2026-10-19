@@ -10,6 +10,7 @@ import {
   regionalDepositGateway,
 } from '../gateway-deposit';
 import {
+  payoutCurrencyFor,
   payoutGatewayFor,
   regionalPayoutGateways,
 } from '../gateway-withdrawal';
@@ -65,6 +66,17 @@ describe('routing to the regional rail', () => {
     // Switched off: the Singapore bank falls back to the active gateway,
     // whose own bank check then refuses it before any debit.
     expect(payoutGatewayFor('DBSSSGSG', 'tgpay', {})).toBe('tgpay');
+  });
+
+  // The currency is the bank's, not the rail's state: a saved Singapore bank
+  // stays SGD while A3Pay is switched off, so the storefront files it under
+  // Singapore (shown unavailable) rather than under Malaysia.
+  it('a Singapore bank stays SGD whether or not its rail is open', () => {
+    expect(payoutCurrencyFor('DBSSSGSG', 'tgpay', A3PAY_ENV)).toBe('SGD');
+    expect(payoutCurrencyFor('DBSSSGSG', 'tgpay', {})).toBe('SGD');
+    expect(payoutCurrencyFor('ALLIANCESG', 'tgpay', {})).toBe('SGD');
+    expect(payoutCurrencyFor('MBBEMYKL', 'tgpay', {})).toBe('MYR');
+    expect(payoutCurrencyFor('NOT_A_BANK', 'tgpay', {})).toBe('MYR');
   });
 
   it('A3Pay carries an SGD band and RM fences', () => {

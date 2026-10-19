@@ -14,6 +14,7 @@ const period = (over: Partial<PeriodFacts> = {}): PeriodFacts => ({
   ripsByPack: new Map(),
   pixelPulls: 0,
   pixelPullsById: new Map(),
+  topupMyr: 0,
   ...over,
 });
 
@@ -24,6 +25,7 @@ const facts = (over: Partial<TaskFacts> = {}): TaskFacts => ({
   vaultCount: 0,
   vaultPixelCount: 0,
   vaultPixelCountById: new Map(),
+  topupMyrTotal: 0,
   ...over,
 });
 
@@ -351,5 +353,52 @@ describe('taskPeriodKey', () => {
     expect(taskPeriodKey('daily', at)).toBe('2026-10-07');
     expect(taskPeriodKey('weekly', at)).toBe('2026-10-05');
     expect(taskPeriodKey('achievement', at)).toBe('');
+  });
+});
+
+describe('topup_myr (2026-10-19)', () => {
+  it('is a goal for every cadence, in whole ringgit', () => {
+    for (const kind of ['daily', 'weekly', 'achievement'] as const) {
+      expect(
+        validateTaskRequirement(kind, { type: 'topup_myr', amount_myr: 100 }),
+      ).toEqual({ type: 'topup_myr', amount_myr: 100 });
+    }
+    for (const amount_myr of [0, -5, 10.5, '100', undefined, 100_001]) {
+      expect(() =>
+        validateTaskRequirement('weekly', { type: 'topup_myr', amount_myr }),
+      ).toThrow(/topup_myr/);
+    }
+  });
+
+  it('daily reads today, weekly the task week, achievement the lifetime total', () => {
+    const f = facts({
+      day: period({ topupMyr: 40.5 }),
+      week: period({ topupMyr: 150 }),
+      topupMyrTotal: 900,
+    });
+    const r100 = { type: 'topup_myr' as const, amount_myr: 100 };
+    expect(taskProgress('daily', r100, f)).toEqual({
+      current: 40.5,
+      target: 100,
+      completed: false,
+    });
+    expect(taskProgress('weekly', r100, f)).toEqual({
+      current: 100,
+      target: 100,
+      completed: true,
+    });
+    expect(
+      taskProgress('achievement', { type: 'topup_myr', amount_myr: 1000 }, f),
+    ).toEqual({ current: 900, target: 1000, completed: false });
+  });
+
+  it('one sen short is not done', () => {
+    expect(
+      taskProgress(
+        'weekly',
+        { type: 'topup_myr', amount_myr: 100 },
+        facts({ week: period({ topupMyr: 99.99 }) }),
+      ).completed,
+    ).toBe(false);
   });
 });

@@ -269,6 +269,45 @@ medusaIntegrationTestRunner({
         expect(cancel!.ref_id).toBe(`cancel:${orderId}`);
       });
 
+      it('bonus credit pays the fee first, and a cancel gives that part back as bonus', async () => {
+        const { token, id } = await registerCustomer('ledger-test-bonus@test.dev');
+        const pullId = await openOne(token);
+        const packs = getContainer().resolve<PacksModuleService>(PACKS_MODULE);
+        await packs.mutateCreditAtomic({
+          customerId: id,
+          amount: 10,
+          reason: 'bonus_grant',
+          bonusCents: 1000,
+        });
+        const before = await packs.walletSummary(id);
+        const addressId = await addAddress(token);
+        const created = await api.post(
+          '/store/delivery-orders',
+          { pull_ids: [pullId], address_id: addressId },
+          { headers: authed(token) },
+        );
+        const orderId = created.data.order_id as string;
+        // West RM15: RM 10 from bonus, RM 5 from the normal balance.
+        const [fee] = await packs.listCreditTransactions({
+          customer_id: id,
+          reason: 'delivery_fee',
+          reference: orderId,
+        });
+        expect(Number(fee.amount)).toBe(-15);
+        expect(fee.bonus_cents).toBe(-1000);
+        expect((await packs.walletSummary(id)).bonus).toBe(0);
+
+        await api.post(
+          `/store/delivery-orders/${orderId}/cancel`,
+          {},
+          { headers: authed(token) },
+        );
+        const after = await packs.walletSummary(id);
+        expect(after.balance).toBe(before.balance);
+        expect(after.bonus).toBe(10);
+        expect(after.withdrawable).toBe(before.withdrawable);
+      });
+
       it('a price move BETWEEN create and cancel still nets the order to exactly 0', async () => {
         // THE reversal invariant. A delivery order sits in 'requested' for
         // days while PriceCharting syncs FMV on a schedule and admins edit

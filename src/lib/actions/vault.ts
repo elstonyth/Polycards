@@ -204,6 +204,7 @@ export async function getPaymentLimits(): Promise<PaymentLimits> {
     depositsEnabled: r.data.deposits_enabled ?? true,
     withdrawalsEnabled: r.data.withdrawals_enabled ?? true,
     withdrawalsPausedUntil: r.data.withdrawals_paused_until ?? null,
+    withdrawalsUnavailable: r.data.withdrawals_unavailable ?? false,
     regional: (r.data.regional ?? []).map((rail) => ({
       gateway: rail.gateway,
       currency: rail.currency,
@@ -365,6 +366,10 @@ export type WithdrawBank = {
   bankName: string;
   /** The currency the bank is paid in; absent = RM. */
   currency?: string;
+  /** Bank-specific account lengths from the backend's bank registry. */
+  accountLengths?: number[];
+  accountPattern?: string;
+  accountHint?: string;
 };
 
 export type WithdrawBanksResult =
@@ -406,6 +411,9 @@ export type SavedBankAccount = {
   /** This destination's own payout floor (RM) when above the provider's —
    *  Touch 'n Go: 100. Null/absent = the provider's floor applies. */
   minRm?: number | null;
+  /** Why it is unavailable (e.g. invalid account details or paused Touch 'n Go);
+   *  absent = the provider cannot pay to it. */
+  unavailableReason?: string | null;
   /** The currency the bank is paid in; absent = RM. */
   currency?: string;
 };

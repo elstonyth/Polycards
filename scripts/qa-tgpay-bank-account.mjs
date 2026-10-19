@@ -31,6 +31,7 @@ try {
 
   await page.goto(`${STORE}/bank`, { waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: /add bank account/i }).click();
+  await page.getByRole('button', { name: 'Malaysia', exact: true }).click();
   const bank = page.getByLabel('Bank');
   await bank.waitFor({ state: 'visible', timeout: 20000 });
   const options = await bank.locator('option').allTextContents();

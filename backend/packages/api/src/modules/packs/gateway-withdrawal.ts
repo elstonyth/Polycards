@@ -8,7 +8,14 @@ import {
   resolveWithdrawalDestination,
   sharedAccountCheckApplies,
 } from './saved-accounts';
-import { bankPayoutMinRm, findBank } from './banks';
+import { findBank } from './banks';
+import {
+  channelStatus,
+  destinationMinRm,
+  isTngBank,
+  tngPausedMessage,
+  withdrawalsClosedMessage,
+} from './withdrawal-controls';
 import {
   GATEWAYS,
   gatewayConfigFor,
@@ -253,6 +260,26 @@ export function payoutGatewayFor(
 }
 
 /**
+ * The currency a saved bank is paid in, whether or not its rail is open now:
+ * the active gateway's when it can pay the bank, else that of a regional
+ * gateway that could (open or closed). Unlike payoutGatewayFor, a closed rail
+ * does not turn a Singapore bank into an RM one, so the storefront keeps it
+ * under Singapore, shown as unavailable, instead of filing it under Malaysia.
+ */
+export function payoutCurrencyFor(
+  bankCode: string,
+  active: PaymentGateway,
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+): string {
+  if (bankSupportedBy(bankCode, active, env)) return GATEWAYS[active].currency;
+  // Display keeps the bank's regional currency even when its account format is unavailable.
+  const regional = GATEWAY_IDS.find(
+    (id) => !isLedgerGateway(id) && findBank(bankCode)?.codes[id],
+  );
+  return GATEWAYS[regional ?? active].currency;
+}
+
+/**
  * A timed pause for a provider outage with a known end, so nobody has to be
  * awake to reopen: GATEWAY_WITHDRAWALS_PAUSED_UNTIL is an ISO instant WITH its
  * offset (e.g. 2026-10-08T06:00:00+08:00). Before it, withdrawalsEnabled() is
@@ -317,9 +344,7 @@ export function withdrawalRefundReference(
   return `wd-refund:${digest}`;
 }
 
-/** A 16-digit card number (Visa 4, Mastercard/Maestro 5, Mastercard
- *  2221-2720) that passes the Luhn check. No Malaysian bank account number
- *  settled here ever matched (prod, to 2026-10-14). */
+/** A card-number hint, not proof: 16 digits with Visa/Mastercard prefix and Luhn. */
 function looksLikeCardNumber(digits: string): boolean {
   if (!/^[0-9]{16}$/.test(digits)) return false;
   const bin = Number(digits.slice(0, 4));
@@ -344,22 +369,30 @@ export function withdrawalDetailsError(input: {
   if (typeof bankCode !== 'string' || !/^[A-Z0-9]{2,20}$/.test(bankCode)) {
     return 'Choose a bank from the list.';
   }
+  const bank = findBank(bankCode);
+  if (!bank) return 'Pick a bank from the list.';
+  const lengths = bank.accountLengths;
+  if (!lengths?.length) {
+    return `Withdrawals to ${bank.name} are unavailable. Choose another bank.`;
+  }
   const accountNumber = input.accountNumber;
   if (
     typeof accountNumber !== 'string' ||
-    !/^[0-9]{6,34}$/.test(accountNumber)
+    !/^[0-9]{5,34}$/.test(accountNumber)
   ) {
     return 'Enter a valid account number (digits only).';
   }
-  // Card first: a 16-digit card under Maybank would otherwise get the length
-  // message, which hides the real mistake. 14 of the 15 card-like numbers
-  // TGPay refused (prod, to 2026-10-14) were Luhn-valid Visa/Mastercard.
-  if (looksLikeCardNumber(accountNumber)) {
-    return "That looks like a card number. Enter your bank account number instead — it's in your banking app or on your statement, not on the card.";
+  if (
+    bank.accountPattern &&
+    !new RegExp(bank.accountPattern).test(accountNumber)
+  ) {
+    return bank.accountHint ?? 'Enter a valid account number for this bank.';
   }
-  const bank = findBank(bankCode);
-  const lengths = bank?.accountLengths;
-  if (lengths && !lengths.includes(accountNumber.length)) {
+  if (!lengths.includes(accountNumber.length)) {
+    // Valid bank accounts can also pass Luhn; use the card hint only for a wrong length.
+    if (looksLikeCardNumber(accountNumber)) {
+      return "That looks like a card number. Enter your bank account number instead — it's in your banking app or on your statement, not on the card.";
+    }
     return `${bank.name} account numbers are ${lengths.join(' or ')} digits. Check the number in your banking app.`;
   }
   const holder = input.accountHolderName;
@@ -645,6 +678,18 @@ export async function startWithdrawal(
   const replayedEarly = await replayExisting();
   if (replayedEarly) return replayedEarly;
 
+  // The admin's Withdraw switch and its daily schedule (withdrawal-controls.ts).
+  // After the replay, so the retry of an in-flight withdrawal still reports
+  // it; before any row or debit, so nothing is written for a certain refusal.
+  const controls = await packs.withdrawalControls();
+  const withdrawStatus = channelStatus(controls.withdrawals, Date.now());
+  if (!withdrawStatus.open) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      withdrawalsClosedMessage(withdrawStatus.reopens_at),
+    );
+  }
+
   // Our payout wallet was short moments ago (see PAYOUT_FLOAT_COOLDOWN_MS).
   // After the replay, so the retry of an in-flight withdrawal still reports
   // it; before any row or debit, so nothing is written for a certain refusal.
@@ -679,6 +724,17 @@ export async function startWithdrawal(
   const detailsInvalid = withdrawalDetailsError(precheckDestination);
   if (detailsInvalid) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, detailsInvalid);
+  }
+  // The admin's Touch 'n Go switch. Ahead of the bank check so the customer
+  // reads "Touch 'n Go is paused", not "not available with the provider".
+  if (isTngBank(precheckDestination.bankCode)) {
+    const tngStatus = channelStatus(controls.tng, Date.now());
+    if (!tngStatus.open) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        tngPausedMessage(tngStatus.reopens_at),
+      );
+    }
   }
   // A bank the active gateway cannot pay to is refused HERE, before any
   // debit, with the reason. The adapter would refuse it too, but only after
@@ -717,11 +773,15 @@ export async function startWithdrawal(
       );
     }
   }
-  // A destination with its own payout floor (Touch 'n Go: RM 100) is held to
-  // it here, before any row or debit — the gateway refuses below it as a
-  // definite error, which would cost a row, a debit and a refund per tap. The
-  // wording keeps the band phrase the storefront passes through verbatim.
-  const destinationMin = bankPayoutMinRm(precheckDestination.bankCode);
+  // A destination with its own payout floor (Touch 'n Go: RM 100, or the
+  // admin's higher minimum) is held to it here, before any row or debit — the
+  // gateway refuses below its floor as a definite error, which would cost a
+  // row, a debit and a refund per tap. The wording keeps the band phrase the
+  // storefront passes through verbatim.
+  const destinationMin = destinationMinRm(
+    precheckDestination.bankCode,
+    controls,
+  );
   if (destinationMin !== null && amount < destinationMin) {
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
@@ -1733,6 +1793,19 @@ export async function submitHeldWithdrawal(
     throw new MedusaError(
       MedusaError.Types.NOT_FOUND,
       `Withdrawal '${input.withdrawalId}' not found.`,
+    );
+  }
+
+  // Held rows can predate bank validation; refuse before claiming or sending.
+  const detailsInvalid = withdrawalDetailsError({
+    bankCode: row.bank_code,
+    accountNumber: row.account_number,
+    accountHolderName: row.account_holder_name,
+  });
+  if (detailsInvalid) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `${detailsInvalid} Deny this withdrawal and ask the customer to save the correct bank details.`,
     );
   }
 

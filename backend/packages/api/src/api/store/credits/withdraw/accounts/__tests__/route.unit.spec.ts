@@ -12,6 +12,7 @@ import type {
   FakeFacet,
   CustomerWallet,
 } from '../../../../../../modules/packs/facets';
+import { DEFAULT_WITHDRAWAL_CONTROLS } from '../../../../../../modules/packs/withdrawal-controls';
 
 // Saved payout accounts live in customer.metadata.bank_accounts and are the
 // picker source for the withdraw form. Three properties matter enough to pin:
@@ -51,6 +52,9 @@ const mutateCustomerMetadata = jest.fn(
 // Other customers holding the same account number (none by default).
 const otherPayoutAccountHolders = jest.fn();
 
+// The admin withdrawal controls; open by default.
+const withdrawalControls = jest.fn(async () => DEFAULT_WITHDRAWAL_CONTROLS);
+
 const createNotifications = jest.fn();
 const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
 
@@ -60,6 +64,7 @@ const scope = {
       return {
         mutateCustomerMetadata,
         otherPayoutAccountHolders,
+        withdrawalControls,
       } satisfies FakeFacet<CustomerWallet>;
     if (key === 'notification') return { createNotifications };
     if (key === 'logger') return logger;
@@ -230,6 +235,56 @@ describe('POST /store/credits/withdraw/accounts', () => {
       POST(mkReq({ ...VALID_BODY, account_number: 'not-digits' }), mkRes()),
     ).rejects.toThrow(/valid account number/i);
     expect(updateCustomers).not.toHaveBeenCalled();
+  });
+
+  it('refuses a Malaysian-length Maybank number under Singapore before saving', async () => {
+    await expect(
+      POST(mkReq({ ...VALID_BODY, bank_code: 'MBBESGSG' }), mkRes()),
+    ).rejects.toThrow(/Maybank \(SG\) account numbers are 11 digits/);
+    expect(mutateCustomerMetadata).not.toHaveBeenCalled();
+    expect(createNotifications).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, string, RegExp]>([
+    ['ALLIANCESG', '123456789012', /unavailable/i],
+    ['PAYNOWSG', '0123456789', /mobile number linked to PayNow/i],
+  ])(
+    'refuses %s before saving unverified or malformed details',
+    async (bankCode, accountNumber, message) => {
+      await expect(
+        POST(
+          mkReq({
+            ...VALID_BODY,
+            bank_code: bankCode,
+            account_number: accountNumber,
+          }),
+          mkRes(),
+        ),
+      ).rejects.toThrow(message);
+      expect(mutateCustomerMetadata).not.toHaveBeenCalled();
+      expect(createNotifications).not.toHaveBeenCalled();
+    },
+  );
+
+  it('saves an 11-digit Maybank Singapore number without dropping its leading zero', async () => {
+    await POST(
+      mkReq({
+        ...VALID_BODY,
+        bank_code: 'MBBESGSG',
+        account_number: '01234567890',
+      }),
+      mkRes(),
+    );
+    expect(updateCustomers).toHaveBeenCalledWith('cus_1', {
+      metadata: {
+        bank_accounts: [
+          expect.objectContaining({
+            bankCode: 'MBBESGSG',
+            accountNumber: '01234567890',
+          }),
+        ],
+      },
+    });
   });
 
   it('ignores any submitted bank name — the registry supplies it', async () => {
@@ -514,6 +569,67 @@ describe('DELETE /store/credits/withdraw/accounts', () => {
 });
 
 describe('GET /store/credits/withdraw/accounts', () => {
+  it('keeps an unverified Singapore bank under Singapore without asking to re-add it', async () => {
+    const account = savedShape({
+      id: savedBankAccountId('ALLIANCESG', '123456789012'),
+      bankCode: 'ALLIANCESG',
+      bankName: 'Alliance Bank (SG)',
+    });
+    retrieveCustomer.mockResolvedValue({
+      metadata: { bank_accounts: [account] },
+    });
+    const res = mkRes();
+    await GET(mkReq(), res);
+    expect((res as { json: jest.Mock }).json).toHaveBeenCalledWith({
+      accounts: [
+        expect.objectContaining({
+          ...account,
+          currency: 'SGD',
+          supported: false,
+          unavailableReason:
+            'Withdrawals to Alliance Bank (SG) are unavailable. Choose another bank.',
+        }),
+      ],
+    });
+    expect(updateCustomers).not.toHaveBeenCalled();
+  });
+
+  it('keeps invalid saved details visible but unavailable, with correction guidance', async () => {
+    const invalid = savedShape({
+      id: savedBankAccountId('MBBESGSG', '123456789012'),
+      bankCode: 'MBBESGSG',
+      bankName: 'Maybank (SG)',
+    });
+    const invalidMy = savedShape({
+      id: savedBankAccountId('MBBEMYKL', '12345678901'),
+      accountNumber: '12345678901',
+    });
+    retrieveCustomer.mockResolvedValue({
+      metadata: { bank_accounts: [invalid, invalidMy, savedShape()] },
+    });
+    const res = mkRes();
+    await GET(mkReq(), res);
+    const [blocked, blockedMy, valid] = (res as { json: jest.Mock }).json.mock
+      .calls[0][0].accounts;
+    expect(blocked).toMatchObject({
+      ...invalid,
+      supported: false,
+      currency: 'SGD',
+      unavailableReason: expect.stringMatching(
+        /Maybank \(SG\) account numbers are 11 digits.*Remove.*correct bank country/i,
+      ),
+    });
+    expect(blockedMy).toMatchObject({
+      supported: false,
+      unavailableReason: expect.stringContaining(
+        'Maybank account numbers are 12 digits',
+      ),
+    });
+    expect(valid.supported).toBe(true);
+    expect(valid.unavailableReason).toBeUndefined();
+    expect(updateCustomers).not.toHaveBeenCalled();
+  });
+
   it('lists the parsed accounts', async () => {
     retrieveCustomer.mockResolvedValue({
       metadata: { bank_accounts: [savedShape(), 'junk'] },
@@ -539,6 +655,36 @@ describe('GET /store/credits/withdraw/accounts', () => {
     expect(
       (res as { json: jest.Mock }).json.mock.calls[0][0].accounts[0].usableFrom,
     ).toBeNull();
+  });
+
+  // The admin's Touch 'n Go switch and floor reach the picker: a paused TNG
+  // account shows as unavailable with the reason, and its minimum is the
+  // admin's. A bank account is untouched.
+  it("marks a Touch 'n Go account paused and states the admin minimum", async () => {
+    const tng = savedShape({
+      id: savedBankAccountId('TNGMY', '012345678901'),
+      bankCode: 'TNGMY',
+      bankName: "Touch 'n Go eWallet",
+      accountNumber: '012345678901',
+    });
+    retrieveCustomer.mockResolvedValue({
+      metadata: { bank_accounts: [tng, savedShape()] },
+    });
+    withdrawalControls.mockResolvedValueOnce({
+      ...DEFAULT_WITHDRAWAL_CONTROLS,
+      tng: { ...DEFAULT_WITHDRAWAL_CONTROLS.tng, open: false, min_rm: 200 },
+    });
+    const res = mkRes();
+    await GET(mkReq(), res);
+    const [tngView, bankView] = (res as { json: jest.Mock }).json.mock
+      .calls[0][0].accounts;
+    expect(tngView).toMatchObject({
+      supported: false,
+      minRm: 200,
+      unavailableReason: "Touch 'n Go withdrawals are paused for now",
+    });
+    expect(bankView.unavailableReason).toBeUndefined();
+    expect(bankView.minRm).toBeNull();
   });
 });
 

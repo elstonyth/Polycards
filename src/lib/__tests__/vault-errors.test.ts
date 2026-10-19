@@ -166,6 +166,8 @@ describe('VAULT_RULES backend-message contract', () => {
       'Maybank account numbers are 12 digits. Check the number in your banking app.',
       'CIMB Bank account numbers are 10 or 14 digits. Check the number in your banking app.',
       'Enter the account holder name exactly as the bank has it.',
+      'Enter the mobile number linked to PayNow, with country code for overseas numbers (digits only).',
+      'Withdrawals to Alliance Bank (SG) are unavailable. Choose another bank.',
     ];
     for (const msg of literals) expect(map(msg)).toBe(msg);
   });

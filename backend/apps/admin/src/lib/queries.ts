@@ -61,6 +61,9 @@ import {
   acknowledgeAuditFinding,
   getPaymentGateway,
   savePaymentGateway,
+  getWithdrawalControls,
+  saveWithdrawalControls,
+  type WithdrawalControlsView,
   gatewayPreflightRefusal,
   type SettlementGranularity,
   type SettlementReport,
@@ -364,6 +367,26 @@ export const useGatewayAudit = (
 
 export const usePaymentGateway = (): UseQueryResult<PaymentGatewaySetting> =>
   useQuery({ queryKey: qk.paymentGateway, queryFn: getPaymentGateway });
+
+export const useWithdrawalControls = (): UseQueryResult<WithdrawalControlsView> =>
+  useQuery({
+    queryKey: qk.withdrawalControls,
+    queryFn: getWithdrawalControls,
+    // The status line ("closed until 6:00 AM") follows the clock.
+    refetchInterval: 60_000,
+  });
+
+export const useSaveWithdrawalControls = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: saveWithdrawalControls,
+    onSuccess: (data) => {
+      toast.success('Withdrawal controls saved');
+      qc.setQueryData(qk.withdrawalControls, data);
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  });
+};
 
 // Settlement's Acknowledge. Refetches every rail's audit: the Dashboard's
 // "may be paid twice" row reads them too.
@@ -1759,7 +1782,14 @@ export const useSetCustomerReferrer = () => {
       reason: string;
     }) => setCustomerReferrer(vars.customerId, vars.referrerId, vars.reason),
     onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: qk.customerReferral(vars.customerId) });
+      // Every referral card, not just this player's: the old and the new
+      // referrer's downline lists and week totals both change.
+      qc.invalidateQueries({
+        predicate: (q) =>
+          q.queryKey[0] === 'admin' &&
+          q.queryKey[1] === 'customer' &&
+          q.queryKey[3] === 'referral',
+      });
       // The server writes an audit row — the History tab must see it.
       qc.invalidateQueries({ queryKey: qk.customerAuditKey(vars.customerId) });
     },

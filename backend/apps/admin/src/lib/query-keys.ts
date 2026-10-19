@@ -63,6 +63,7 @@ export const qk = {
   gatewayAudit: (currency: string) =>
     ['admin', 'gateway-audit', currency] as const,
   paymentGateway: ['admin', 'payment-gateway'] as const,
+  withdrawalControls: ['admin', 'withdrawal-controls'] as const,
   // Referral rebuild (spec 2026-08-24).
   referralSettings: ['admin', 'referral-settings'] as const,
   taskDefinitions: ['admin', 'task-definitions'] as const,

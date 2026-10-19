@@ -51,6 +51,7 @@ import { refuseCrossOriginAdminWrite } from './utils/admin-origin-guard';
 import { requireReportKey } from './reports/require-report-key';
 import { requireTurnstile } from './utils/turnstile-guard';
 import { requireVouchedVisitor } from './utils/visitor-ip';
+import { adminRbacRoutes } from './admin-rbac';
 
 // Custom-route middleware. /store/* is NOT a default customer-protected prefix
 // (only /store/customers/me/* is), so every customer-owned route here must opt
@@ -1134,6 +1135,12 @@ export default defineMiddlewares({
       matcher: '/admin/*',
       middlewares: [refuseCrossOriginAdminWrite],
     },
+    // RBAC for every custom admin route (admin-rbac.ts): a policy per custom
+    // prefix and method, plus the write policy for custom writes under a core
+    // prefix. Policy-only entries — the framework adds the no-op handler and
+    // wraps it in its permission check. Guarded by
+    // __tests__/admin-rbac-coverage.unit.spec.ts.
+    ...adminRbacRoutes,
     // Admin money-mutation routes — already auth-protected by the framework
     // admin auth, so no explicit authenticate() entry is needed here. All share
     // one limiter instance (one budget + one Redis connection). The limiter keys
@@ -1457,6 +1464,21 @@ export default defineMiddlewares({
       middlewares: [adminActionRateLimit],
     },
     {
+      matcher: '/admin/automation/accounts',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/automation/sandbox',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      matcher: '/admin/automation/live',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
       // Active payment gateway switch (plan 130). Flips where every customer
       // pays and is paid out — same admin budget as the other settings writes.
       matcher: '/admin/payments/gateway',
@@ -1467,6 +1489,13 @@ export default defineMiddlewares({
       // SGD conversion rate + fees (A3Pay, payment-fx.ts). Reprices every
       // Singapore top-up and payout — same admin budget as the gateway switch.
       matcher: '/admin/payments/fx',
+      method: 'POST',
+      middlewares: [adminActionRateLimit],
+    },
+    {
+      // Withdraw / Touch 'n Go switches, schedules and TNG minimum. Opens or
+      // closes every customer's payouts — same budget as the gateway switch.
+      matcher: '/admin/payments/withdrawal-controls',
       method: 'POST',
       middlewares: [adminActionRateLimit],
     },

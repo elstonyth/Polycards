@@ -50,6 +50,10 @@ import { FRAME_LEVELS } from './avatar-frames';
 import { challengePackId } from './challenge-prize';
 import { FREE_WELCOME_CATEGORY } from './free-pack';
 import { withLossless, type LosslessWindow } from './lossless';
+import {
+  parseWithdrawalControls,
+  type WithdrawalControls,
+} from './withdrawal-controls';
 import { isGraded, isPsa10, type PoolComposition } from './card-view';
 import {
   USERNAME_RE,
@@ -68,6 +72,9 @@ import DeliveryOrderItem from './models/delivery-order-item';
 import VipLevel from './models/vip-level';
 import RewardsSettings from './models/rewards-settings';
 import SiteSettings from './models/site-settings';
+import AutomationMonitor from './models/automation-monitor';
+import AutomationSandbox from './models/automation-sandbox';
+import AutomationLive from './models/automation-live';
 import CustomerAccountState from './models/customer-account-state';
 import PlayerPayoutDetails from './models/player-payout-details';
 import AdminActionAudit from './models/admin-action-audit';
@@ -130,6 +137,7 @@ import {
   type TaskFacts,
   type TaskKind,
   type TaskRequirement,
+  type HubRequirement,
   type HubReward,
   type TaskReward,
 } from './tasks';
@@ -174,6 +182,7 @@ import { consumeExternalSen } from './external-funded';
 import {
   BONUS_BP_FULL,
   BONUS_NOT_SPENDABLE_MESSAGE,
+  LEADERBOARD_PULL_SQL,
   NORMAL_SHARE_SQL,
   REAL_MONEY_PULL_SQL,
   bonusShareSen,
@@ -340,7 +349,9 @@ export type CreditMutationInput = {
    * spend-only bonus. Only a 'bonus_grant' row may carry it, and it must equal
    * the row's amount in sen. A 'reward_credit' row (task / challenge prize) or
    * a 'voucher_claim' row (VIP voucher) is stamped whole-row bonus by mutateCreditAtomic itself (2026-10-11). Pack
-   * opens compute theirs in settleOpen.
+   * opens compute theirs in settleOpen. A 'delivery_fee' charge takes its
+   * bonus share itself (bonus first, ADR 0014); a 'delivery_fee' refund passes
+   * the share its charge took, 0..amount, so it goes back as bonus.
    */
   bonusCents?: number;
 };
@@ -679,7 +690,10 @@ function toPackGiftView(
     grant_key: g.grant_key,
     // A row created in this transaction has no created_at until it flushes
     // (the column defaults to now() in the database): it was created now.
-    created_at: (g.created_at ? new Date(g.created_at) : new Date()).toISOString(),
+    created_at: (g.created_at
+      ? new Date(g.created_at)
+      : new Date()
+    ).toISOString(),
     opened_at: iso(g.opened_at),
     pull_id: g.pull_id ?? null,
     revoked_at: iso(g.revoked_at),
@@ -700,6 +714,9 @@ class PacksModuleService extends MedusaService({
   VipLevel,
   RewardsSettings,
   SiteSettings,
+  AutomationMonitor,
+  AutomationSandbox,
+  AutomationLive,
   CustomerAccountState,
   PlayerPayoutDetails,
   AdminActionAudit,
@@ -969,6 +986,55 @@ class PacksModuleService extends MedusaService({
     return data;
   }
 
+  // Admin withdrawal controls (withdrawal-controls.ts): the Withdraw and
+  // Touch 'n Go switches, their daily schedules and the TNG floor. Read live
+  // on every withdrawal and config request — one row, no cache, so a switch
+  // takes effect on the next tap.
+  @InjectManager()
+  async withdrawalControls(
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<WithdrawalControls> {
+    const [row] = await this.listSiteSettings({}, { take: 1 }, sharedContext);
+    return parseWithdrawalControls(row?.withdrawal_controls ?? null);
+  }
+
+  // Replaces the whole blob (the route validated it) and audits before and
+  // after under the existing site_settings / edit_site_settings pair.
+  @InjectTransactionManager()
+  async editWithdrawalControls(
+    input: { controls: WithdrawalControls; adminId: string; reason: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<WithdrawalControls> {
+    const [row] = await this.listSiteSettings({}, { take: 1 }, sharedContext);
+    const before = {
+      withdrawal_controls: parseWithdrawalControls(
+        row?.withdrawal_controls ?? null,
+      ),
+    };
+    const data = { withdrawal_controls: input.controls };
+    if (row) {
+      await this.updateSiteSettings(
+        { selector: { id: row.id }, data },
+        sharedContext,
+      );
+    } else {
+      await this.createSiteSettings([{ id: 'global', ...data }], sharedContext);
+    }
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'site_settings',
+        entity_id: row?.id ?? 'singleton',
+        action: 'edit_site_settings',
+        before,
+        after: data,
+        reason: input.reason,
+      },
+      sharedContext,
+    );
+    return input.controls;
+  }
+
   // ── Referral rebuild (spec 2026-08-24) ─────────────────────────────────
   // Attribution + settings + partner rates. The weekly engine itself
   // (close/approve/void/pay) lives further down with the other money writers.
@@ -995,10 +1061,7 @@ class PacksModuleService extends MedusaService({
     | {
         bound: false;
         reason:
-          | 'self'
-          | 'already_bound'
-          | 'not_a_new_account'
-          | 'referrer_disabled';
+          'self' | 'already_bound' | 'not_a_new_account' | 'referrer_disabled';
       }
   > {
     if (input.customerId === input.referrerId) {
@@ -1429,6 +1492,43 @@ class PacksModuleService extends MedusaService({
     return byReferrer;
   }
 
+  // Admin referral card (2026-10-17): each listed downline member's spend this
+  // settlement week and all-time, on the same turnover definition the close
+  // pays on (normal part of pack_open, net of reversals), clamped to 0 like
+  // the close. Lifetime is the Players list's "total spend" rule too.
+  @InjectManager()
+  async referralDownlineSpend(
+    input: { customerIds: string[]; now?: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<Map<string, { week_cents: number; lifetime_cents: number }>> {
+    const week = referralWeekFor(input.now ?? new Date());
+    const thisWeek = await this.packTurnoverCentsByCustomer(
+      {
+        startUtc: week.startUtc,
+        endUtcExcl: week.endUtcExcl,
+        customerIds: input.customerIds,
+      },
+      sharedContext,
+    );
+    const lifetime = await this.packTurnoverCentsByCustomer(
+      {
+        startUtc: new Date(0),
+        endUtcExcl: week.endUtcExcl,
+        customerIds: input.customerIds,
+      },
+      sharedContext,
+    );
+    return new Map(
+      input.customerIds.map((id) => [
+        id,
+        {
+          week_cents: Math.max(thisWeek.get(id) ?? 0, 0),
+          lifetime_cents: Math.max(lifetime.get(id) ?? 0, 0),
+        },
+      ]),
+    );
+  }
+
   // The Tuesday close ("TUES CHECK"): compute the just-ended week's referral
   // commissions into a DRAFT settlement run. No money moves here —
   // payWeeklySettlement (after the admin approve gate) does that.
@@ -1689,7 +1789,7 @@ class PacksModuleService extends MedusaService({
         before: { status: 'draft' },
         after: { status: 'approved' },
         reason:
-          `week ${new Date(run.week_start).toISOString().slice(0, 10)}` +
+          `week ${referralWeekFor(new Date(run.week_start)).weekStartIso}` +
           (input.reason ? `: ${input.reason}` : ''),
       },
       sharedContext,
@@ -1980,6 +2080,8 @@ class PacksModuleService extends MedusaService({
         `Only an approved run can be paid (this one is '${run.status}').`,
       );
     }
+    // The RF payload keeps the UTC date its stored rows have always carried;
+    // the audit reason below names the week by its MYT Tuesday like the screens.
     const weekStartIso = new Date(run.week_start).toISOString().slice(0, 10);
     const pending = await this.listWeeklySettlementLines(
       { settlement_id: run.id, status: 'pending' },
@@ -2102,7 +2204,7 @@ class PacksModuleService extends MedusaService({
           action: 'pay_settlement',
           before: { status: run.status },
           after: { paid, skipped },
-          reason: `week ${weekStartIso}`,
+          reason: `week ${referralWeekFor(new Date(run.week_start)).weekStartIso}`,
         },
         sharedContext,
       );
@@ -2133,6 +2235,31 @@ class PacksModuleService extends MedusaService({
       status: string;
     }[];
   }> {
+    return {
+      ...(await this.referralLiveWeek(input, sharedContext)),
+      history: await this.settlementHistoryFor(
+        { customerId: input.customerId },
+        sharedContext,
+      ),
+    };
+  }
+
+  // The still-open week's live numbers, shared by the storefront panel and the
+  // admin referral card so the two can never disagree.
+  @InjectManager()
+  async referralLiveWeek(
+    input: { customerId: string; now?: Date },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    downline_count: number;
+    week: {
+      start: string;
+      turnover_cents: number;
+      rate_bp: number;
+      projected_cents: number;
+      partner: boolean;
+    };
+  }> {
     const week = referralWeekFor(input.now ?? new Date());
 
     // One joined aggregate instead of materialising every downline id into an
@@ -2148,16 +2275,19 @@ class PacksModuleService extends MedusaService({
       // exactly what closeReferralWeek does (it drops a downline whose net
       // week turnover is <= 0). Summing raw rows let one refunded member drag
       // the projection below the real payout, and at scale onto a different
-      // TIER (bug review 2026-08-25).
+      // TIER (bug review 2026-08-25). The week window sits in the JOIN, not
+      // a CASE, so the (customer_id, created_at) index range-scans one week
+      // instead of reading every member's whole ledger; a member with no rows
+      // in it still gets one NULL-joined row, so the count is unchanged.
       'SELECT COUNT(*)::bigint AS downline_count, ' +
         '  COALESCE(SUM(GREATEST(per_customer, 0)), 0)::bigint AS turnover_cents ' +
         'FROM ( ' +
         '  SELECT ra.customer_id, ' +
-        '    COALESCE(SUM(CASE WHEN ct.created_at >= ? AND ct.created_at < ? ' +
-        `      THEN -${normalSenSql('ct.')} ELSE 0 END), 0)::bigint AS per_customer ` +
+        `    COALESCE(SUM(-${normalSenSql('ct.')}), 0)::bigint AS per_customer ` +
         '  FROM referral_attribution ra ' +
         '  LEFT JOIN credit_transaction ct ON ct.customer_id = ra.customer_id ' +
         "    AND ct.reason = 'pack_open' AND ct.deleted_at IS NULL " +
+        '    AND ct.created_at >= ? AND ct.created_at < ? ' +
         '  WHERE ra.referrer_id = ? AND ra.deleted_at IS NULL ' +
         '  GROUP BY ra.customer_id ' +
         ') d',
@@ -2182,10 +2312,6 @@ class PacksModuleService extends MedusaService({
         projected_cents: payoutCents(turnoverCents, rateBp),
         partner: partnerBp != null,
       },
-      history: await this.settlementHistoryFor(
-        { customerId: input.customerId },
-        sharedContext,
-      ),
     };
   }
 
@@ -2218,10 +2344,11 @@ class PacksModuleService extends MedusaService({
       { select: ['id', 'week_start'], take: lines.length },
       sharedContext,
     );
+    // The MYT Tuesday the week starts — week_start's UTC date is a day early.
     const weekById = new Map(
       runs.map((r) => [
         r.id,
-        new Date(r.week_start).toISOString().slice(0, 10),
+        referralWeekFor(new Date(r.week_start)).weekStartIso,
       ]),
     );
     return lines.map((l) => ({
@@ -2298,7 +2425,7 @@ class PacksModuleService extends MedusaService({
           .slice(0, 10),
       );
     }
-    const [checkins, ripRows, [stateRow], vaultRows, pixelRows] =
+    const [checkins, ripRows, [stateRow], vaultRows, pixelRows, topupRows] =
       await Promise.all([
         this.listDailyCheckins(
           { customer_id: input.customerId, checkin_date: weekDays },
@@ -2335,8 +2462,8 @@ class PacksModuleService extends MedusaService({
         // shipped a card before claiming (review 2026-08-25 finding 2). This
         // also rides IDX_pull_customer_id_rolled_at instead of scanning for a
         // status that has no index.
-        // Gifted packs and bonus-funded opens count toward nothing (spec
-        // 2026-10-07): bonus play must not farm achievements and their prizes.
+        // Gifted packs and bonus-funded opens do not count toward achievements
+        // (spec 2026-10-07); board eligibility is separate.
         em.execute<{ n: string }[]>(
           'SELECT COUNT(*)::bigint AS n FROM pull ' +
             "WHERE customer_id = ? AND deleted_at IS NULL AND source NOT IN ('gift', 'bonus')",
@@ -2378,7 +2505,31 @@ class PacksModuleService extends MedusaService({
             input.customerId,
           ],
         ),
+        // RM credited by settled gateway top-ups — the same positive
+        // reason='topup' rows (normal part) as the Players list's top-up
+        // column. Bucketed by when the credit landed, not when it was paid.
+        em.execute<
+          {
+            week_sen: string | null;
+            day_sen: string | null;
+            total_sen: string | null;
+          }[]
+        >(
+          `SELECT COALESCE(SUM(${normalSenSql()}) FILTER (WHERE created_at >= ? AND created_at < ?), 0)::bigint AS week_sen, ` +
+            `  COALESCE(SUM(${normalSenSql()}) FILTER (WHERE created_at >= ? AND created_at < ?), 0)::bigint AS day_sen, ` +
+            `  COALESCE(SUM(${normalSenSql()}), 0)::bigint AS total_sen ` +
+            'FROM credit_transaction ' +
+            "WHERE customer_id = ? AND reason = 'topup' AND amount > 0 AND deleted_at IS NULL",
+          [
+            input.week.startUtc,
+            input.week.endUtcExcl,
+            input.day.startUtc,
+            input.day.endUtcExcl,
+            input.customerId,
+          ],
+        ),
       ]);
+    const myr = (sen: string | null | undefined) => Number(sen ?? 0) / 100;
     const sum = (m: Map<string, number>) =>
       [...m.values()].reduce((a, b) => a + b, 0);
     const tally = <R>(rows: R[], key: (r: R) => string, n: (r: R) => string) =>
@@ -2389,12 +2540,14 @@ class PacksModuleService extends MedusaService({
       checkinDays: number,
       ripsByPack: Map<string, number>,
       pixelPullsById: Map<string, number>,
+      topupMyr: number,
     ): PeriodFacts => ({
       checkinDays,
       rips: sum(ripsByPack),
       ripsByPack,
       pixelPulls: sum(pixelPullsById),
       pixelPullsById,
+      topupMyr,
     });
     const byPixel = tally(
       pixelRows,
@@ -2414,6 +2567,7 @@ class PacksModuleService extends MedusaService({
           (r) => r.pixel_pokemon_id,
           (r) => r.n_day,
         ),
+        myr(topupRows[0]?.day_sen),
       ),
       week: period(
         checkins.length,
@@ -2427,11 +2581,13 @@ class PacksModuleService extends MedusaService({
           (r) => r.pixel_pokemon_id,
           (r) => r.n_week,
         ),
+        myr(topupRows[0]?.week_sen),
       ),
       vipLevel: stateRow ? Number(stateRow.highest_level_ever) : 1,
       vaultCount: Number(vaultRows[0]?.n ?? 0),
       vaultPixelCount: sum(byPixel),
       vaultPixelCountById: byPixel,
+      topupMyrTotal: myr(topupRows[0]?.total_sen),
     };
   }
 
@@ -2467,7 +2623,7 @@ class PacksModuleService extends MedusaService({
       id: string;
       kind: TaskKind;
       title: string;
-      requirement: TaskRequirement;
+      requirement: HubRequirement;
       reward: HubReward;
       progress: { current: number; target: number; completed: boolean };
       claimed: boolean;
@@ -2566,16 +2722,23 @@ class PacksModuleService extends MedusaService({
     // neither which card nor what it is worth.
     const packSlugs = new Set<string>(pendingSpins.map((s) => s.pack_id));
     const cardHandles = new Set<string>();
+    // The goal side gets pictures too: the pack a rip goal names, the Pokémon
+    // a pull goal names — "RIP [Bronze Pack] ×10" reads at a glance.
+    const pixelIds = new Set<string>();
     for (const d of live) {
       const r = d.reward as unknown as TaskReward;
       if (r.type === 'pack') packSlugs.add(r.pack_id);
       if (r.type === 'card') cardHandles.add(r.card_handle);
+      const q = d.requirement as unknown as TaskRequirement;
+      if (q.type === 'rip_count' && q.pack_id) packSlugs.add(q.pack_id);
+      if (q.type === 'vault_pixel_count' && q.pixel_pokemon_id)
+        pixelIds.add(q.pixel_pokemon_id);
     }
     const packRows = packSlugs.size
       ? await this.listPacks(
           { slug: [...packSlugs] },
           {
-            select: ['slug', 'title', 'price', 'image', 'display_image'],
+            select: ['slug', 'title', 'price', 'image', 'status'],
             take: packSlugs.size,
           },
           sharedContext,
@@ -2600,19 +2763,27 @@ class PacksModuleService extends MedusaService({
           sharedContext,
         )
       : [];
+    // SINGULAR runtime name — see pixel-pokemon-service.ts.
+    const pixelRows = pixelIds.size
+      ? await asPixelPokemonCrud(this).listPixelPokemon(
+          { id: [...pixelIds] },
+          { select: ['id', 'name', 'image_url'], take: pixelIds.size },
+          sharedContext,
+        )
+      : [];
+    const pixelById = new Map(pixelRows.map((p) => [p.id, p]));
     const fxRate = cardRows.length
       ? await resolveFxRate(this)
       : DEFAULT_USD_MYR;
     const packBySlug = new Map(packRows.map((p) => [p.slug, p]));
     const cardByHandle = new Map(cardRows.map((c) => [c.handle, c]));
-    // The prize's picture: a pack's product shot (`image`; the hero
-    // `display_image` only when there is none), a card's graded slab (the
-    // raw scan only when there is none). As stored — the storefront
-    // resolves relative paths like every other pack/card image.
-    const packArt = (slug: string): string | null => {
-      const p = packBySlug.get(slug);
-      return p?.image || p?.display_image || null;
-    };
+    // The prize's picture: a pack's product shot (`image` — never the hero
+    // `display_image`, a wide factory scene meant only for the /slots stage,
+    // same rule as every pack tile), a card's graded slab (the raw scan only
+    // when there is none). As stored — the storefront resolves relative paths
+    // like every other pack/card image.
+    const packArt = (slug: string): string | null =>
+      packBySlug.get(slug)?.image || null;
     const hubReward = (reward: TaskReward): HubReward => {
       if (reward.type === 'pack') {
         const p = packBySlug.get(reward.pack_id);
@@ -2641,6 +2812,27 @@ class PacksModuleService extends MedusaService({
       }
       return reward;
     };
+    const hubRequirement = (q: TaskRequirement): HubRequirement => {
+      if (q.type === 'rip_count' && q.pack_id) {
+        // A draft pack is not on sale: its name and art stay unpublished.
+        const p = packBySlug.get(q.pack_id);
+        const shown = p?.status === 'active' ? p : undefined;
+        return {
+          ...q,
+          pack_title: shown?.title ?? null,
+          pack_image: shown?.image || null,
+        };
+      }
+      if (q.type === 'vault_pixel_count' && q.pixel_pokemon_id) {
+        const p = pixelById.get(q.pixel_pokemon_id);
+        return {
+          ...q,
+          pokemon_name: p?.name ?? null,
+          pokemon_image: p?.image_url ?? null,
+        };
+      }
+      return q;
+    };
     return {
       week_start: week.weekStartIso,
       day_key: day.dayIso,
@@ -2660,7 +2852,7 @@ class PacksModuleService extends MedusaService({
           id: d.id,
           kind,
           title: d.title,
-          requirement,
+          requirement: hubRequirement(requirement),
           reward: hubReward(d.reward as unknown as TaskReward),
           progress: taskProgress(kind, requirement, facts),
           claimed: claimed.has(`${d.id}:${taskPeriodKey(kind, period)}`),
@@ -2700,10 +2892,7 @@ class PacksModuleService extends MedusaService({
     | {
         claimed: false;
         reason:
-          | 'not_found'
-          | 'not_completed'
-          | 'already_claimed'
-          | 'window_closed';
+          'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
       }
   > {
     // Deliberately NOT filtered on active: retiring a task must never strand
@@ -3603,10 +3792,33 @@ class PacksModuleService extends MedusaService({
         );
       }
       bonusDeltaCents = deltaCents;
+    } else if (input.reason === 'delivery_fee') {
+      // Bonus credit may pay delivery fees, bonus first like a pack open
+      // (owner rule 2026-10-17, ADR 0014). A refund returns the bonus part its
+      // charge took AS bonus, or request-then-cancel would launder bonus into
+      // withdrawable cash.
+      if (deltaCents < 0) {
+        if (input.bonusCents) {
+          throw new MedusaError(
+            MedusaError.Types.INVALID_DATA,
+            'A delivery fee charge takes its bonus share itself.',
+          );
+        }
+        bonusDeltaCents = -Math.min(bonusBeforeCents, -deltaCents);
+      } else {
+        const back = input.bonusCents ?? 0;
+        if (!Number.isInteger(back) || back < 0 || back > deltaCents) {
+          throw new MedusaError(
+            MedusaError.Types.INVALID_DATA,
+            'A delivery fee refund can return at most its own amount as bonus.',
+          );
+        }
+        bonusDeltaCents = back;
+      }
     } else if (input.bonusCents) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
-        'Only a bonus_grant row may carry bonusCents.',
+        'Only a bonus_grant or delivery_fee row may carry bonusCents.',
       );
     } else if (
       input.reason === 'reward_credit' ||
@@ -3657,10 +3869,12 @@ class PacksModuleService extends MedusaService({
     }
 
     // 3) Floor check — covers both "enough credit to open" and "no overdraft".
-    //    Only a pack open may spend bonus credit; every other debit is floored
-    //    against the NORMAL balance (a bonus take-back was bounded above).
+    //    Only a pack open or a delivery fee may spend bonus credit; every other
+    //    debit is floored against the NORMAL balance (a bonus take-back was
+    //    bounded above).
     const spendableCents =
       input.reason === 'pack_open' ||
+      input.reason === 'delivery_fee' ||
       input.reason === 'bonus_grant' ||
       input.reason === 'reward_credit' ||
       input.reason === 'voucher_claim'
@@ -4884,7 +5098,10 @@ class PacksModuleService extends MedusaService({
     if (
       !snapshot ||
       !isShippableCountry(snapshot.ship_country_code) ||
-      !isShippablePostcode(snapshot.ship_postal_code, snapshot.ship_country_code)
+      !isShippablePostcode(
+        snapshot.ship_postal_code,
+        snapshot.ship_country_code,
+      )
     ) {
       return { status: 'invalid' };
     }
@@ -7176,8 +7393,8 @@ class PacksModuleService extends MedusaService({
   // RANKING = volume, the pulled value the board displays (operator
   // 2026-10-12: ranking by spend while showing pulled value read as a broken
   // board — a lower figure sat above a higher one). Spend still decides who
-  // is ON the board: only players with real money spent on pack opens, from
-  // the credit ledger (reason 'pack_open', the same rows the charge step
+  // is ON the board: players spending normal or bonus credit on pack opens,
+  // from the credit ledger (reason 'pack_open', the same rows the charge step
   // writes); it also breaks a tie on the rounded value. points = spend(MYR) ×
   // 100 (the display convention the storefront always used).
   //
@@ -7185,15 +7402,14 @@ class PacksModuleService extends MedusaService({
   // draw-time USD value (recorded_value_usd, stamped by the open workflows so a
   // mid-week price sync can't rewrite history), falling back to live
   // market_value(USD) × the card's multiplier for pre-backfill rows — × the
-  // live FX rate. Only pulls real money paid for count (REAL_MONEY_PULL_SQL:
-  // 'pack' and part-bonus 'bonus' rows), each in its normal share: reward-box
+  // live FX rate. Both 'pack' and 'bonus' pulls count at full value: reward-box
   // prizes, free welcome pulls and gifts are not played packs (positive
   // filter, so a future source can never leak onto the board by default).
   //
   // sinceMs = null → all-time; a timestamp → weekly window.
   @InjectManager()
   async leaderboardTop(
-    opts: { sinceMs: number | null; limit: number },
+    opts: { sinceMs: number | null; limit: number; customerIds?: string[] },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<
     { customer_id: string; pulls: number; points: number; volume: number }[]
@@ -7226,29 +7442,24 @@ class PacksModuleService extends MedusaService({
       // window subtracts from that week even if its original charge predates
       // it — intended (the week's honest net spend), not a bug.
       'WITH spend AS ( ' +
-        // Normal part only: bonus-funded opens count toward nothing (spec
-        // 2026-10-07); bonus_cents is ≤ 0 on an open, ≥ 0 on its reversal.
-        `  SELECT customer_id, SUM(-${normalSenSql()})::bigint AS spend_cents ` +
+        // Board participation includes bonus; VIP/referral/cash totals do not.
+        '  SELECT customer_id, SUM(-ROUND(amount * 100))::bigint AS spend_cents ' +
         '    FROM credit_transaction ' +
         "   WHERE reason = 'pack_open' " +
         '     AND deleted_at IS NULL AND customer_id IS NOT NULL ' +
         (since === null ? '' : '     AND created_at >= ?::timestamptz ') +
         '   GROUP BY customer_id ' +
-        `   HAVING SUM(-${normalSenSql()}) > 0 ` +
+        '   HAVING SUM(-ROUND(amount * 100)) > 0 ' +
         '), wins AS ( ' +
-        // Each pull's value counts in its NORMAL share only (bonus_bp), the
-        // same split as the spend above, so a part-bonus open neither drops
-        // its card nor counts its bonus part.
+        // Bonus-funded and normal-credit opens contribute the same full value.
         '  SELECT pu.customer_id, COUNT(*) AS pulls, ' +
         '         SUM((' +
         PULLED_VALUE_USD_SQL +
-        ') * ' +
-        NORMAL_SHARE_SQL +
-        ') AS volume_usd ' +
+        ')) AS volume_usd ' +
         '    FROM pull pu ' +
         '    LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
         '   WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND ' +
-        REAL_MONEY_PULL_SQL +
+        LEADERBOARD_PULL_SQL +
         ' ' +
         (since === null ? '' : '     AND pu.rolled_at >= ?::timestamptz ') +
         '   GROUP BY pu.customer_id ' +
@@ -7257,11 +7468,28 @@ class PacksModuleService extends MedusaService({
         '       ROUND(COALESCE(w.volume_usd, 0) * ? * 100) / 100 AS volume_myr ' +
         '  FROM spend s ' +
         '  LEFT JOIN wins w ON w.customer_id = s.customer_id ' +
+        (opts.customerIds?.length
+          ? ' WHERE s.customer_id IN (' +
+            opts.customerIds.map(() => '?').join(', ') +
+            ') '
+          : '') +
         ' ORDER BY volume_myr DESC, s.spend_cents DESC, s.customer_id ASC ' +
         ' LIMIT ?',
       since === null
-        ? [DEFAULT_MARKET_MULTIPLIER, fxRate, opts.limit]
-        : [since, DEFAULT_MARKET_MULTIPLIER, since, fxRate, opts.limit],
+        ? [
+            DEFAULT_MARKET_MULTIPLIER,
+            fxRate,
+            ...(opts.customerIds ?? []),
+            opts.limit,
+          ]
+        : [
+            since,
+            DEFAULT_MARKET_MULTIPLIER,
+            since,
+            fxRate,
+            ...(opts.customerIds ?? []),
+            opts.limit,
+          ],
     );
 
     return rows.map((r) => ({
@@ -7354,7 +7582,7 @@ class PacksModuleService extends MedusaService({
   // an optional TIER filter. Raw SQL rather than listPulls because the tier is
   // a join: rarity is a PACK-level property (pack_odds), not a column on pull,
   // so "the last N Immortal pulls" needs the (pack_id, card_id) odds row.
-  // Only source='pack' rows — the same positive filter as leaderboardTop
+  // Paid draws include bonus-funded opens; gift/reward/free pulls stay private.
   // (reward prizes are private vault items, free welcome pulls a signup gift).
   // The scan rides IDX_pull_rolled_at and stops at `limit` matches; a tier
   // nobody has hit yet walks the whole ledger, once per 5s (the route's cache).
@@ -7374,7 +7602,7 @@ class PacksModuleService extends MedusaService({
     const em = (sharedContext.transactionManager ??
       sharedContext.manager) as unknown as LedgerSqlManager;
     const params: unknown[] = [];
-    let where = "p.deleted_at IS NULL AND p.source = 'pack'";
+    let where = "p.deleted_at IS NULL AND p.source IN ('pack', 'bonus')";
     if (opts.packId) {
       where += ' AND p.pack_id = ?';
       params.push(opts.packId);
@@ -7412,14 +7640,14 @@ class PacksModuleService extends MedusaService({
     const rows = await em.execute<{ n: number | string }[]>(
       'WITH last_hit AS (' +
         '  SELECT p.rolled_at, p.id FROM pull p ' +
-        "   WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
+        "   WHERE p.deleted_at IS NULL AND p.source IN ('pack', 'bonus')" +
         packSql +
         '     AND ' +
         PULL_TIER_SQL +
         '   ORDER BY p.rolled_at DESC, p.id DESC LIMIT 1' +
         ') ' +
         'SELECT COUNT(*)::int AS n FROM pull p ' +
-        " WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
+        " WHERE p.deleted_at IS NULL AND p.source IN ('pack', 'bonus')" +
         packSql +
         '   AND (NOT EXISTS (SELECT 1 FROM last_hit) ' +
         '        OR (p.rolled_at, p.id) > (SELECT rolled_at, id FROM last_hit))',
@@ -7468,7 +7696,7 @@ class PacksModuleService extends MedusaService({
       PULL_TIER_SQL +
       ' AS hit ' +
       '    FROM pull p ' +
-      "   WHERE p.deleted_at IS NULL AND p.source = 'pack'" +
+      "   WHERE p.deleted_at IS NULL AND p.source IN ('pack', 'bonus')" +
       packSql +
       '), hits AS (' +
       '  SELECT id, customer_id, rolled_at, n, ' +
@@ -9353,12 +9581,23 @@ class PacksModuleService extends MedusaService({
         }
         const refund = -storedWallet || 0; // stored charge is negative; || 0 kills -0
         if (refund > 0) {
+          // The bonus part the charge took goes back as bonus (ADR 0014).
+          const [taken] = await em.execute<{ bonus_cents: string | null }[]>(
+            'SELECT COALESCE(SUM(-bonus_cents), 0)::bigint AS bonus_cents FROM credit_transaction ' +
+              "WHERE customer_id = ? AND reason = 'delivery_fee' AND reference = ? " +
+              'AND amount < 0 AND deleted_at IS NULL',
+            [order.customer_id, input.orderId],
+          );
           await this.mutateCreditAtomic(
             {
               customerId: order.customer_id,
               amount: refund,
               reason: 'delivery_fee',
               reference: `refund:${input.orderId}`,
+              bonusCents: Math.min(
+                Math.max(0, Number(taken?.bonus_cents ?? 0)),
+                Math.round(refund * 100),
+              ),
             },
             sharedContext,
           );
@@ -11774,7 +12013,7 @@ class PacksModuleService extends MedusaService({
   // customers (recorded draw-time USD value, live FMV × multiplier fallback
   // for pre-backfill rows, × FX → MYR) since the week anchor (shared
   // CHALLENGE_WEEK_ANCHOR_CTE). Mirrors leaderboardTop's wins CTE
-  // (real-money pulls in their normal share); read-only, so the
+  // (normal and bonus-credit pulls in full); read-only, so the
   // pool is REAL ledger data even while the reward settlement engine is inert.
   @InjectManager()
   async challengeWeekPool(
@@ -11789,13 +12028,11 @@ class PacksModuleService extends MedusaService({
         'SELECT ' +
         '  ROUND(COALESCE(SUM((' +
         PULLED_VALUE_USD_SQL +
-        ') * ' +
-        NORMAL_SHARE_SQL +
-        '), 0) * ? * 100) / 100 AS pooled_myr ' +
+        ')), 0) * ? * 100) / 100 AS pooled_myr ' +
         '  FROM pull pu ' +
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
         ' WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND ' +
-        REAL_MONEY_PULL_SQL +
+        LEADERBOARD_PULL_SQL +
         ' ' +
         '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
         '   AND pu.rolled_at <  (SELECT end_utc FROM anchor)',
@@ -11824,13 +12061,11 @@ class PacksModuleService extends MedusaService({
         'SELECT pu.customer_id, COUNT(*) AS pulls, ' +
         '       ROUND(SUM((' +
         PULLED_VALUE_USD_SQL +
-        ') * ' +
-        NORMAL_SHARE_SQL +
-        ') * ? * 100) / 100 AS volume_myr ' +
+        ')) * ? * 100) / 100 AS volume_myr ' +
         '  FROM pull pu ' +
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
         ' WHERE pu.deleted_at IS NULL AND pu.customer_id IS NOT NULL AND ' +
-        REAL_MONEY_PULL_SQL +
+        LEADERBOARD_PULL_SQL +
         ' ' +
         '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
         '   AND pu.rolled_at <  (SELECT end_utc FROM anchor) ' +
@@ -11854,7 +12089,7 @@ class PacksModuleService extends MedusaService({
   // The SAME weekly pulled-value figure as challengeWeekTop, for ONE customer.
   // Exists because the board is a top-10 SLICE: a player below it has no row
   // there, so nothing can say how far off they are. Shares the anchor CTE, the
-  // pulled-value expression and the real-money filter with the board and
+  // pulled-value expression and the paid-pull filter with the board and
   // the pool, so the gap the storefront renders can never disagree with the
   // row it is measured against.
   //
@@ -11877,13 +12112,11 @@ class PacksModuleService extends MedusaService({
         'SELECT COUNT(*) AS pulls, ' +
         '       ROUND(COALESCE(SUM((' +
         PULLED_VALUE_USD_SQL +
-        ') * ' +
-        NORMAL_SHARE_SQL +
-        '), 0) * ? * 100) / 100 AS volume_myr ' +
+        ')), 0) * ? * 100) / 100 AS volume_myr ' +
         '  FROM pull pu ' +
         '  LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
         ' WHERE pu.deleted_at IS NULL AND ' +
-        REAL_MONEY_PULL_SQL +
+        LEADERBOARD_PULL_SQL +
         ' ' +
         '   AND pu.customer_id = ? ' +
         '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
@@ -11977,8 +12210,7 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      | SettleSnapshot
-      | undefined;
+      SettleSnapshot | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME
@@ -12394,8 +12626,7 @@ class PacksModuleService extends MedusaService({
   private async reserveSettledStock(
     winner: SettledWinner,
     decrementStock:
-      | ((handle: string, qty: number) => Promise<boolean>)
-      | undefined,
+      ((handle: string, qty: number) => Promise<boolean>) | undefined,
     weekStartIso: string,
   ): Promise<void> {
     if (!decrementStock) return;
