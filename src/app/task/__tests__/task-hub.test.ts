@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { TaskEntry, TaskHub } from '@/lib/data/schemas';
 import {
   CREDIT_ART,
+  challengeKind,
+  challengeStatus,
   checkinCount,
   claimNotice,
   claimableCounts,
@@ -174,5 +176,56 @@ describe('claimNotice — a free rip with no spin to hand over', () => {
     expect(claimNotice({ type: 'pack', pack_id: 'bronze' })).toBe(
       'Free rip added — spin it from the top of this page.',
     );
+  });
+});
+
+describe('challenge side of a row', () => {
+  it('maps each requirement to its icon kind, unknown types to the fallback', () => {
+    expect(challengeKind(task('a'))).toBe('rip');
+    expect(
+      challengeKind(task('b', { req: { type: 'vault_pixel_count' } })),
+    ).toBe('pull');
+    expect(challengeKind(task('c', { req: { type: 'checkin_days' } }))).toBe(
+      'checkin',
+    );
+    // A backend newer than this page must not crash it — nor match a
+    // prototype key by accident.
+    for (const type of ['spend_myr', 'constructor'])
+      expect(challengeKind(task('d', { req: { type } }))).toBe('other');
+  });
+
+  it('counts what is left in the requirement unit', () => {
+    expect(challengeStatus(task('a'))).toBe('2 more rips to go');
+    expect(
+      challengeStatus(
+        task('b', {
+          req: { type: 'vault_pixel_count' },
+          progress: { current: 9, target: 10, completed: false },
+        }),
+      ),
+    ).toBe('1 more pull to go');
+    expect(
+      challengeStatus(
+        task('c', {
+          req: { type: 'spend_myr' },
+          progress: { current: 0, target: 50, completed: false },
+        }),
+      ),
+    ).toBe('50 to go');
+  });
+
+  it('says done, or claimed, instead of a count', () => {
+    expect(challengeStatus(task('a', { done: true }))).toBe(
+      'Complete — your prize is ready',
+    );
+    expect(challengeStatus(task('b', { done: true, claimed: true }))).toBe(
+      'Prize claimed',
+    );
+    // Target reached but the backend has not flagged it complete yet.
+    expect(
+      challengeStatus(
+        task('c', { progress: { current: 3, target: 3, completed: false } }),
+      ),
+    ).toBe('Almost there');
   });
 });

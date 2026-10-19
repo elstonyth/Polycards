@@ -81,6 +81,44 @@ export function rewardArt(reward: TaskEntry['reward']): string | null {
 export const isClaimable = (t: TaskEntry): boolean =>
   t.progress.completed && !t.claimed;
 
+/** The challenge side of a row: which icon a requirement wears and the unit
+ *  its "N more … to go" counts in. An unknown type (a backend newer than this
+ *  page) falls back to a neutral flag and a bare count — never a crash. */
+export type ChallengeKind =
+  'rip' | 'pull' | 'vault' | 'level' | 'checkin' | 'other';
+
+const CHALLENGE: Record<
+  string,
+  { kind: ChallengeKind; one: string; many: string }
+> = {
+  rip_count: { kind: 'rip', one: 'rip', many: 'rips' },
+  vault_pixel_count: { kind: 'pull', one: 'pull', many: 'pulls' },
+  vault_count: { kind: 'vault', one: 'card', many: 'cards' },
+  reach_level: { kind: 'level', one: 'level', many: 'levels' },
+  checkin_days: { kind: 'checkin', one: 'check-in', many: 'check-ins' },
+};
+
+const challengeOf = (t: TaskEntry) =>
+  Object.hasOwn(CHALLENGE, t.requirement.type)
+    ? CHALLENGE[t.requirement.type]
+    : null;
+
+export const challengeKind = (t: TaskEntry): ChallengeKind =>
+  challengeOf(t)?.kind ?? 'other';
+
+/** The line under a challenge's progress: what is left, or that it is done. */
+export function challengeStatus(t: TaskEntry): string {
+  if (t.claimed) return 'Prize claimed';
+  if (t.progress.completed) return 'Complete — your prize is ready';
+  const left = Math.ceil(t.progress.target - t.progress.current);
+  // Target met but not yet flagged complete by the backend.
+  if (!(left > 0)) return 'Almost there';
+  const c = challengeOf(t);
+  return c
+    ? `${left} more ${left === 1 ? c.one : c.many} to go`
+    : `${left} to go`;
+}
+
 /** Claimable first (that is what the player came for), then in progress,
  *  then already claimed. Stable inside each band, so the admin's sort order
  *  still holds. */

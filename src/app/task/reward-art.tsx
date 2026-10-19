@@ -11,13 +11,14 @@ const STAR =
   'M12 0C13 7 17 11 24 12C17 13 13 17 12 24C11 17 7 13 0 12C7 11 11 7 12 0Z';
 
 // Where the stars sit around the art, as % of the box, with their size and
-// twinkle offset — staggered so they never all flash at once.
+// twinkle offset — staggered so they never all flash at once. None sits on
+// the bottom edge: that is where the worth badge hangs.
 const STARS = [
   { pos: '-left-2 -top-2', size: 'h-4 w-4', delay: '0s' },
   { pos: '-right-2.5 top-1/4', size: 'h-3 w-3', delay: '0.5s' },
-  { pos: '-bottom-1.5 left-1/4', size: 'h-2.5 w-2.5', delay: '1s' },
-  { pos: '-right-1.5 -bottom-2', size: 'h-4 w-4', delay: '1.4s' },
-  { pos: '-left-2 top-1/2', size: 'h-2 w-2', delay: '0.8s' },
+  { pos: '-left-2.5 bottom-1/4', size: 'h-2.5 w-2.5', delay: '1s' },
+  { pos: '-right-2 bottom-1/3', size: 'h-4 w-4', delay: '1.4s' },
+  { pos: '-left-2 top-1/3', size: 'h-2 w-2', delay: '0.8s' },
 ] as const;
 
 /** Gold stars twinkling around a claimable reward. Decorative: the Claim

@@ -300,6 +300,17 @@ Spec: `docs/superpowers/specs/2026-10-06-task-hub-v2-and-announcements-design.md
 - **Tabs** — Daily · Weekly · Achievements as the leaderboard's segmented
   pill. A tab holding something claimable carries a Chase Gold count badge,
   so the player never has to open every tab to find a reward.
+- **Challenge ticket (2026-10-19)** — every task row is a ticket: the
+  challenge on the left body, the prize on a tear-off stub at the right
+  (`.ticket-cut` in globals.css: two paper tones split at the stub, a notch
+  punched top and bottom of a dashed hairline perforation). The body carries a
+  requirement icon chip (rip / pull / vault / level / check-in, a neutral flag
+  for anything newer), the title, progress as one pip per step when the goal
+  is 10 or fewer (a bar otherwise) with a Nekst `3/10`, and a "N more rips to
+  go" line. The stub carries the prize art, its full name (wraps, never
+  truncates) and the state: a white Claim pill only when claimable, a quiet
+  `Locked` chip while in progress, a tilted `CLAIMED` stamp once taken. The
+  list sits bare under its heading — no panel around the tickets.
 - **Prize art** — every task shows the prize itself on a neutral pedestal
   (white/4%): the card's slab lit by its own value tier (Glow Is Earned), the
   pack's shot, or the credit coins; the worth sits under it in Nekst.
