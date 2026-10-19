@@ -3,7 +3,18 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { tickLive } from '../../src/api/utils/automation-live-store';
+import automationLiveJob from '../../src/jobs/automation-live';
 import { mintSuperAdmin, unwrapResponse } from './utils';
+
+// The app's own scheduled job calls tickLive every 2 s. This suite drives
+// every tick itself (often with a fake clock) and counts which call claimed a
+// cycle, so a job tick landing in between made it flaky. Keep the schedule,
+// drop the work.
+jest.mock('../../src/jobs/automation-live', () => ({
+  __esModule: true,
+  default: jest.fn(async () => undefined),
+  config: { name: 'automation-live', schedule: '*/2 * * * * *' },
+}));
 
 jest.setTimeout(240_000);
 
@@ -457,16 +468,18 @@ medusaIntegrationTestRunner({
       });
       expect(limited.cycles).toHaveLength(1);
       await new Promise((resolve) => setTimeout(resolve, 5100));
-      expect(
-        (
-          await api.get('/store/pulls/recent?pack_id=live-pack', {
-            headers: storeHeaders,
-          })
-        ).data.pulls,
-      ).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ id: rankedDraw.cycles[0].pullId }),
-        ]),
+      const feed = (
+        await api.get('/store/pulls/recent?pack_id=live-pack', {
+          headers: storeHeaders,
+        })
+      ).data.pulls as Record<string, unknown>[];
+      const botRow = feed.find((row) => row.id === rankedDraw.cycles[0].pullId);
+      const playerRow = feed.find((row) => row.who === 'Rank Competitor');
+      // A live bot draw reads exactly like any other player's pull in the
+      // public feed: its own name, the same fields, no automation marker.
+      expect(botRow).toMatchObject({ who: 'Live Player' });
+      expect(Object.keys(botRow!).sort()).toEqual(
+        Object.keys(playerRow!).sort(),
       );
       await api.post(
         '/admin/automation/live',
@@ -525,6 +538,8 @@ medusaIntegrationTestRunner({
       } finally {
         disabled.mockRestore();
       }
+      // The scheduler ran the stub, so the real job never raced the ticks above.
+      expect(automationLiveJob).toHaveBeenCalled();
     });
   },
 });
