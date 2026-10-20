@@ -5,6 +5,7 @@ import { SlabImage } from '@/components/SlabImage';
 import {
   shipVaultCards,
   addAddress,
+  updateAddress,
   getPrizeShippingAllowance,
   type AddressView,
   type AddAddressInput,
@@ -56,10 +57,16 @@ export default function RequestDeliveryModal({
   onSubmitted,
 }: Props) {
   const [addrList, setAddrList] = useState<AddressView[]>(addresses);
+  // A saved address that can ship beats one that can't (old free-text
+  // country rows), so a fixed customer isn't greeted by the warning again.
   const [selectedAddr, setSelectedAddr] = useState<string>(
-    addresses[0]?.id ?? '',
+    (addresses.find((a) => isShippableCountry(a.countryCode)) ?? addresses[0])
+      ?.id ?? '',
   );
   const [adding, setAdding] = useState(addresses.length === 0);
+  // The saved address the form is repairing ("Fix this address"), or null
+  // when it is adding a new one.
+  const [fixingId, setFixingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The charge is confirmed in a second step before anything is requested.
@@ -194,14 +201,30 @@ export default function RequestDeliveryModal({
     setBusy(true);
     setError(null);
     try {
-      const res = await addAddress(form);
-      if (!res.ok) {
-        setError(res.error);
-        return;
+      if (fixingId) {
+        // Repaired in place: a second row would leave the broken one behind.
+        const res = await updateAddress(fixingId, form);
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
+        setAddrList((p) =>
+          p.map((a) =>
+            a.id === fixingId ? addressViewFromInput(fixingId, form) : a,
+          ),
+        );
+        setSelectedAddr(fixingId);
+        setFixingId(null);
+      } else {
+        const res = await addAddress(form);
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
+        // Optimistic: append + select. (A full refresh would re-fetch getAddresses.)
+        setAddrList((p) => [...p, addressViewFromInput(res.addressId, form)]);
+        setSelectedAddr(res.addressId);
       }
-      // Optimistic: append + select. (A full refresh would re-fetch getAddresses.)
-      setAddrList((p) => [...p, addressViewFromInput(res.addressId, form)]);
-      setSelectedAddr(res.addressId);
       setAdding(false);
       // A new address re-prices: confirm the new charge.
       setConfirming(false);
@@ -335,6 +358,7 @@ export default function RequestDeliveryModal({
             <button
               type="button"
               onClick={() => {
+                setFixingId(null);
                 setAdding(true);
                 setConfirming(false);
               }}
@@ -470,7 +494,10 @@ export default function RequestDeliveryModal({
               {addrList.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setAdding(false)}
+                  onClick={() => {
+                    setAdding(false);
+                    setFixingId(null);
+                  }}
                   className="text-[13px] text-white/60"
                 >
                   Cancel
@@ -566,8 +593,8 @@ export default function RequestDeliveryModal({
           <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
             <p>
               This address has “{country}” as its country, so it can’t ship. We
-              ship within Malaysia and Singapore only — enter it again and pick
-              the country from the list.
+              ship within Malaysia and Singapore only — fix it and pick the
+              country from the list.
             </p>
             <Pill
               onClick={() => {
@@ -582,6 +609,7 @@ export default function RequestDeliveryModal({
                   countryCode: '',
                   phone: selectedAddress.phone ?? undefined,
                 });
+                setFixingId(selectedAddress.id);
                 setAdding(true);
                 setConfirming(false);
               }}

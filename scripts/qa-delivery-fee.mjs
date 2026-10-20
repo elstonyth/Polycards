@@ -212,9 +212,28 @@ check(
   await submitBadPostcode.isDisabled(),
 );
 
-// Non-Malaysian address — blocked, submit disabled.
-await modal.getByRole('button', { name: /add a new address/i }).click();
-await fillAddress('London', 'EC1A 1AA', 'GB');
+// Non-MY/SG address — blocked, submit disabled. The form only offers MY and
+// SG now, so seed it through the store API and reopen the modal to load it.
+await api('/store/customers/me/addresses', {
+  method: 'POST',
+  token,
+  body: {
+    first_name: 'Qa',
+    last_name: 'Fee',
+    address_1: `${stamp} Test Rd`,
+    city: 'London',
+    postal_code: 'EC1A 1AA',
+    country_code: 'GB',
+  },
+});
+await page.reload({ waitUntil: 'domcontentloaded' });
+await page
+  .getByRole('button', { name: /^Select (?!All\b).+/ })
+  .first()
+  .click();
+await page.getByRole('button', { name: /^Deliver 1$/ }).click();
+await modal.waitFor({ timeout: 15_000 });
+await modal.getByText(/London/).click();
 text = await modal.innerText();
 const submit = modal.getByRole('button', {
   name: 'Request delivery',
@@ -222,7 +241,7 @@ const submit = modal.getByRole('button', {
 });
 check(
   'non-MY address shows the Malaysia-only notice',
-  /within Malaysia only/i.test(text),
+  /within Malaysia and Singapore only/i.test(text),
 );
 check('non-MY address disables the submit', await submit.isDisabled());
 await page.screenshot({ path: 'docs/research/qa-delivery-fee-nonmy.png' });
