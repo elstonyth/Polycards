@@ -172,4 +172,4 @@ node scripts/qa-a3pay-ui.mjs
 3. Copy the `D…` order id from the address bar.
 4. Open `http://localhost:4455/cashier/<orderId>` and click **Pay now**. The mock sends the signed callback and sends you back to `/me` with the RM credit.
 
-Phone OTP is currently limited to Malaysian visitors (`OTP_VISITOR_COUNTRIES = ['MY']`, operator decision 2026-10-04). If phone verification gates sign-up or withdrawals, Singapore customers will hit it.
+Phone OTP is limited to Malaysian and Singapore visitors (`OTP_VISITOR_COUNTRIES = ['MY', 'SG']`; MY-only from 2026-10-04 until 2026-10-20, which refused Singapore customers).
