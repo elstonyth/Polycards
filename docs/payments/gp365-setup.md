@@ -88,9 +88,20 @@ node scripts/gp365-e2e.mjs payouts
 ## Open before go-live
 
 - **USDT limits.** The `currencyLimits` in `gateway.ts` (deposit 10–2,000, payout 10–5,000) are **placeholders**. Replace them with the back-office settings. Keep the RM `limits.withdrawalMin` (RM 30) below the USDT floor at today's rate, so the USDT floor is the one that binds.
-- **Nudge window.** `payinNudgeCents: 100` lets a payin move up to 1 USDT from what we asked and still re-lock at the same rate. It is **provisional** until staging shows how GlobePay365 makes amounts unique.
-- **Staging is down.** On 2026-10-12, the staging API (`mapi.globepay365stg.com`) answered `HTTP 500.30 – ASP.NET Core app failed to start`. Rerun the preflight once they fix it.
-- **Prove on staging before trusting:**
-  - the not-found shape (preflight);
-  - `payinActualAmount` on a real payin: its decimals, and whether its tail fits the 1 USDT window;
-  - **what the callback `Amount` is when the customer sends a different amount than asked.** The callback fence settles only the exact locked amount. Any other amount stays pending for a human.
+- **Nudge window.** `payinNudgeCents: 100` lets a payin move up to 1 USDT from what we asked and still re-lock at the same rate. Staging never moved an amount (a 10 USDT order stayed 10 in CreatePayin and GetPayinDetail), so the window is probably unused; it is harmless either way.
+
+## Proven on staging (2026-10-20)
+
+Run from the office (egress IP 60.48.37.75, whitelisted by GlobePay365 that day; the earlier 60.48.37.10 answered every signed call with HTTP 403). The worktree backend was pointed at staging with `GP365_MERCHANT_CODE=TestpolycardUSDT` (the dotenv file lacks the MID).
+
+- **Preflight** green: balance in USDT, payout codes `USDTERC` / `USDTTRC` match ours, and an unknown reference reads as **"Not found"** on both requery endpoints.
+- **A wrong IP or key is HTTP 403**, which we classify as ambiguous, never as not-found, so it cannot authorise a refund.
+- **Top-up:** CreatePayin for 10 USDT TRC20 returned order D2026102012416935 and a hosted cashier on `cashier.globepay365stg.com`. Unpaid, it showed "Payment Timeout" within minutes and GetPayinDetail read status 4 (Verify Fail). After GlobePay365 approved it by hand (staging cannot be paid), our deposit sweep credited RM 41.79 from the requery within seconds (net equal: staging fee 0). The callback cannot reach a local backend, so the callback path is still unproven on staging.
+- **Payout:** SubmitPayout for 10 USDT to a TRC20 wallet returned W2026102002371683 at status 6 "Unknown", the balance reserved. Like A3Pay, GlobePay365 posts payouts by hand.
+- **A different amount is not a payment** (GlobePay365, 2026-10-20): if the USDT that arrives differs from the order (e.g. order 10, pay 9), they treat the order as **unpaid** (status 4), and both the callback and GetPayinDetail keep showing the **order** amount, never what arrived. They resolve it by hand. So we never credit a short or over payment, and if they mark one successful, the record still says the order amount and we credit the full order: they must only do that once the full amount has arrived. The storefront tells the customer to send exactly the amount shown, exchange fee included.
+
+## Still open before go-live
+
+- the callback on production (signature, `Amount`, source IP);
+- the production fee and limits (staging: 1–1,000 USDT, fee 0);
+- the production cashier's payment window (staging times out within minutes).

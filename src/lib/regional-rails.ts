@@ -99,7 +99,7 @@ export const REGIONAL_RAILS: Readonly<Record<string, RegionalRailUi>> = {
     payee: 'Your wallet',
     paidTo: 'wallet',
     exactAmountNote:
-      'Send the exact amount the next page shows, decimals included. It can be slightly more than this (for example USDT 100.01). A rounded amount can’t be matched to your top-up.',
+      'Send exactly the amount the next page shows. If your exchange takes a withdrawal fee, add it so that exact amount arrives: a payment that arrives short or over is not credited.',
   },
 };
 

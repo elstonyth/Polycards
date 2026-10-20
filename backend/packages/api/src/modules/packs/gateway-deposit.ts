@@ -45,10 +45,16 @@ export function alertPayinVerifyFail(
 ): void {
   const gateway = rowGateway(deposit);
   const name = gateway ? GATEWAYS[gateway].label : 'The gateway';
+  const head = `${name} reports Verify Fail (status 4) on deposit ${deposit.merchant_transaction_id} (customer ${deposit.customer_id})`;
   void alertOps(
     scope,
     `payin-verify-fail:${deposit.merchant_transaction_id}`,
-    `${name} reports Verify Fail (status 4) on deposit ${deposit.merchant_transaction_id} (customer ${deposit.customer_id}) — ${name} matches a payment ONLY by its exact amount (cents included), so the customer most likely never transferred it or sent a different sum. No action unless they show proof of payment; then ask ${name} to match it in their back office so the callback credits it. Never credit it by admin adjustment: the sweep could credit it a second time.`,
+    // GlobePay365 (2026-10-20, staging): an order not paid in full in time,
+    // or paid a different amount, is status 4, and its record keeps the
+    // ORDER amount, never what arrived.
+    gateway === 'gp365'
+      ? `${head} — the order was not paid in time, or the USDT that arrived differs from the order (GlobePay365 treats that as unpaid). No action unless the customer shows proof of a transfer; then ask GlobePay365 to resolve it by hand: refund what arrived, or mark the order successful ONLY once the full amount has arrived (their record shows the order amount, so a successful mark credits the full order). Never credit it by admin adjustment: the sweep could credit it a second time.`
+      : `${head} — ${name} matches a payment ONLY by its exact amount (cents included), so the customer most likely never transferred it or sent a different sum. No action unless they show proof of payment; then ask ${name} to match it in their back office so the callback credits it. Never credit it by admin adjustment: the sweep could credit it a second time.`,
     { muteMs: 6 * 60 * 60 * 1000 },
   );
 }
