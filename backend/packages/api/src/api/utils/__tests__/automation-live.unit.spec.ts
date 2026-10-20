@@ -64,6 +64,35 @@ describe('live automation', () => {
     expect(state.cycles).toEqual([]);
   });
 
+  it('runs the whole Humanized day faster at higher speed, sleep included', () => {
+    const now = Date.parse('2026-10-18T00:00:00Z');
+    const run = (humanizedPace: number) => {
+      const state = createLiveState();
+      Object.assign(state, {
+        status: 'running',
+        startedAt: now,
+        config: {
+          ...config,
+          timingMode: 'humanized',
+          humanizedRegion: 'mysg',
+          humanizedPace,
+        },
+      });
+      claimLiveCycle(state, now, () => 0.5);
+      return state;
+    };
+    // Same player, same night: at 5× the 3.75 h sleep passes in 45 min.
+    expect(run(1).nextRunAt).toBe(now + 13_500_000);
+    const fast = run(5);
+    expect(fast.nextRunAt).toBe(now + 2_700_000);
+    expect(fast.schedules?.[0].waitReason).toContain('Sleeping');
+    // After waking (45 real min later) the player clock is past its alarm.
+    expect(
+      claimLiveCycle(fast, now + 2_700_000, () => 0.5)?.customerId ??
+        fast.schedules?.[0].waitReason,
+    ).not.toContain('Sleeping');
+  });
+
   it('runs an eligible Humanized account without blocking it behind another account’s wait', () => {
     const humanized = createHumanizedState('cus_ready', 'mysg');
     let now = Date.parse('2026-10-18T04:00:00Z');
@@ -429,12 +458,12 @@ describe('live automation', () => {
       ).toThrow();
   });
 
-  it('bounds Humanized pace to whole 1–10× steps', () => {
+  it('bounds Humanized speed to whole 1–24× steps', () => {
     expect(
       validateLiveConfig({ ...config, humanizedPace: 5 }, ['cus_live'])
         .humanizedPace,
     ).toBe(5);
-    for (const humanizedPace of [0, 11, 1.5, '2'])
+    for (const humanizedPace of [0, 25, 1.5, '2'])
       expect(() =>
         validateLiveConfig({ ...config, humanizedPace }, ['cus_live']),
       ).toThrow();

@@ -41,7 +41,7 @@ export interface LiveConfig {
   randomMinSeconds?: number;
   randomMaxSeconds?: number;
   humanizedRegion?: 'mysg' | 'global';
-  /** 1 = desktop timing; N divides in-session waits by N and allows N× draws per session. */
+  /** Humanized clock speed, 1–24: the players' whole day (sessions, breaks, sleep) runs N× faster. */
   humanizedPace?: number;
   rankTargets?: LiveRankTarget[];
 }
