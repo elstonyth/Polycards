@@ -33,7 +33,7 @@ export function CountrySelect({
       className={INPUT_CLASS}
     >
       <option value="" disabled>
-        Select a country
+        Select country
       </option>
       {COUNTRIES.map((c) => (
         <option key={c.code} value={c.code}>

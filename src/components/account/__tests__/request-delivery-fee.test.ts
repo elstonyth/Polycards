@@ -225,7 +225,7 @@ describe('RequestDeliveryModal confirm and balance', () => {
     )!;
     expect(country.value).toBe('');
     expect([...country.options].map((o) => o.textContent)).toEqual([
-      'Select a country',
+      'Select country',
       'Malaysia',
       'Singapore',
     ]);
