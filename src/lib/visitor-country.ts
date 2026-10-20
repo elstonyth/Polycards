@@ -8,7 +8,8 @@ import geoip from 'geoip-country';
  * minutes to farm free welcome packs. It passed Cloudflare Turnstile as a
  * human, so the human check could not stop it, and every code it requested was
  * a paid SMS. Narrowed from MY+SG to MY on 2026-10-04 (operator request) after
- * the farmer kept returning through a US VPN.
+ * the farmer kept returning through a US VPN. SG restored 2026-10-20: it is a
+ * served market (SGD top-ups, SG delivery) and MY-only refused its customers.
  *
  * The visitor's address comes from `do-connecting-ip`, which DigitalOcean's
  * App Platform ingress sets on every request; App Platform does not forward
@@ -20,7 +21,7 @@ import geoip from 'geoip-country';
  * (backend/packages/api/src/api/utils/visitor-ip.ts), so a direct call to the
  * backend cannot step around it.
  */
-export const OTP_VISITOR_COUNTRIES: readonly string[] = ['MY'];
+export const OTP_VISITOR_COUNTRIES: readonly string[] = ['MY', 'SG'];
 
 /**
  * ISO 3166 alpha-2 country of an IPv4 or IPv6 address, or null when unknown.

@@ -34,13 +34,14 @@ describe('visitorRefusal', () => {
     ['no header (local dev, tests)', null],
     ['a Malaysian address', '175.143.0.1'],
     ['a Malaysian IPv6 address', '2405:3800:8fa:b723::1'],
+    ['a Singapore address', '202.166.0.1'],
   ])('allows %s', (_, header) => {
     expect(visitorRefusal(header)).toBeNull();
   });
 
   it.each([
     ['8.8.8.8', 'visitor country US'],
-    ['202.166.0.1', 'visitor country SG'],
+    ['156.222.253.157', 'visitor country EG'],
     // A client-sent value joined with the ingress's own, in either order.
     ['175.143.0.1, 8.8.8.8', 'more than one visitor address'],
     ['8.8.8.8,175.143.0.1', 'more than one visitor address'],
