@@ -402,6 +402,12 @@ envs:
   - key: GATEWAY_WITHDRAWALS_ENABLED
     scope: RUN_TIME
     value: "true"
+  # Timed pause (gateway-withdrawal.ts withdrawalsPausedUntil): withdrawals
+  # stay closed until this instant and reopen by themselves at it; inert once
+  # past. Set 2026-10-08 01:48 MYT for the payment gateway outage.
+  - key: GATEWAY_WITHDRAWALS_PAUSED_UNTIL
+    scope: RUN_TIME
+    value: "2026-10-08T06:00:00+08:00"
   # Where the customer's browser lands after the gateway's checkout — the
   # pretty storefront domain (customer-facing, unlike the callback base below).
   - key: PAYMENT_RETURN_URL
