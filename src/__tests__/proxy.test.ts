@@ -28,6 +28,14 @@ describe('proxy matcher — runs only for the costly request shape', () => {
     );
   });
 
+  it('matches the content type exactly, as Next does', () => {
+    // `has` values are anchored (^…$). Next only treats the bare type as a
+    // possible action; with a charset it answers 405 itself, without a render.
+    expect(matches('/', { 'content-type': `${FORM}; charset=UTF-8` })).toBe(
+      false,
+    );
+  });
+
   it('never touches other pages (a gateway may POST a form to /transactions)', () => {
     expect(matches('/transactions', { 'content-type': FORM })).toBe(false);
     expect(matches('/slots/bronze-pack', { 'content-type': FORM })).toBe(false);
