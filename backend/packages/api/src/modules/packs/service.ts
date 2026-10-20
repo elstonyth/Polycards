@@ -137,6 +137,7 @@ import {
   type TaskFacts,
   type TaskKind,
   type TaskRequirement,
+  type HubRequirement,
   type HubReward,
   type TaskReward,
 } from './tasks';
@@ -469,6 +470,15 @@ export type PlayerLedgerSort = keyof typeof PLAYER_LEDGER_SUMS | 'contribution';
 const PULLED_VALUE_USD_SQL =
   'COALESCE(pu.recorded_value_usd, ' + LIVE_VALUE_USD_SQL + ')';
 
+/** One MYT day (or account) of house-account draws — automationActivity. */
+export type AutomationActivityTotals = {
+  day: string;
+  draws: number;
+  valueMyr: number;
+  costMyr: number;
+  soldMyr: number;
+};
+
 // MikroORM bigNumber raw-column shape is {value: string, precision: number}
 // with this default precision — mirrored when the backfill hand-writes the
 // raw_ twin (see @medusajs/utils BigNumber DEFAULT_PRECISION).
@@ -689,7 +699,10 @@ function toPackGiftView(
     grant_key: g.grant_key,
     // A row created in this transaction has no created_at until it flushes
     // (the column defaults to now() in the database): it was created now.
-    created_at: (g.created_at ? new Date(g.created_at) : new Date()).toISOString(),
+    created_at: (g.created_at
+      ? new Date(g.created_at)
+      : new Date()
+    ).toISOString(),
     opened_at: iso(g.opened_at),
     pull_id: g.pull_id ?? null,
     revoked_at: iso(g.revoked_at),
@@ -1057,10 +1070,7 @@ class PacksModuleService extends MedusaService({
     | {
         bound: false;
         reason:
-          | 'self'
-          | 'already_bound'
-          | 'not_a_new_account'
-          | 'referrer_disabled';
+          'self' | 'already_bound' | 'not_a_new_account' | 'referrer_disabled';
       }
   > {
     if (input.customerId === input.referrerId) {
@@ -2424,7 +2434,7 @@ class PacksModuleService extends MedusaService({
           .slice(0, 10),
       );
     }
-    const [checkins, ripRows, [stateRow], vaultRows, pixelRows] =
+    const [checkins, ripRows, [stateRow], vaultRows, pixelRows, topupRows] =
       await Promise.all([
         this.listDailyCheckins(
           { customer_id: input.customerId, checkin_date: weekDays },
@@ -2504,7 +2514,31 @@ class PacksModuleService extends MedusaService({
             input.customerId,
           ],
         ),
+        // RM credited by settled gateway top-ups — the same positive
+        // reason='topup' rows (normal part) as the Players list's top-up
+        // column. Bucketed by when the credit landed, not when it was paid.
+        em.execute<
+          {
+            week_sen: string | null;
+            day_sen: string | null;
+            total_sen: string | null;
+          }[]
+        >(
+          `SELECT COALESCE(SUM(${normalSenSql()}) FILTER (WHERE created_at >= ? AND created_at < ?), 0)::bigint AS week_sen, ` +
+            `  COALESCE(SUM(${normalSenSql()}) FILTER (WHERE created_at >= ? AND created_at < ?), 0)::bigint AS day_sen, ` +
+            `  COALESCE(SUM(${normalSenSql()}), 0)::bigint AS total_sen ` +
+            'FROM credit_transaction ' +
+            "WHERE customer_id = ? AND reason = 'topup' AND amount > 0 AND deleted_at IS NULL",
+          [
+            input.week.startUtc,
+            input.week.endUtcExcl,
+            input.day.startUtc,
+            input.day.endUtcExcl,
+            input.customerId,
+          ],
+        ),
       ]);
+    const myr = (sen: string | null | undefined) => Number(sen ?? 0) / 100;
     const sum = (m: Map<string, number>) =>
       [...m.values()].reduce((a, b) => a + b, 0);
     const tally = <R>(rows: R[], key: (r: R) => string, n: (r: R) => string) =>
@@ -2515,12 +2549,14 @@ class PacksModuleService extends MedusaService({
       checkinDays: number,
       ripsByPack: Map<string, number>,
       pixelPullsById: Map<string, number>,
+      topupMyr: number,
     ): PeriodFacts => ({
       checkinDays,
       rips: sum(ripsByPack),
       ripsByPack,
       pixelPulls: sum(pixelPullsById),
       pixelPullsById,
+      topupMyr,
     });
     const byPixel = tally(
       pixelRows,
@@ -2540,6 +2576,7 @@ class PacksModuleService extends MedusaService({
           (r) => r.pixel_pokemon_id,
           (r) => r.n_day,
         ),
+        myr(topupRows[0]?.day_sen),
       ),
       week: period(
         checkins.length,
@@ -2553,11 +2590,13 @@ class PacksModuleService extends MedusaService({
           (r) => r.pixel_pokemon_id,
           (r) => r.n_week,
         ),
+        myr(topupRows[0]?.week_sen),
       ),
       vipLevel: stateRow ? Number(stateRow.highest_level_ever) : 1,
       vaultCount: Number(vaultRows[0]?.n ?? 0),
       vaultPixelCount: sum(byPixel),
       vaultPixelCountById: byPixel,
+      topupMyrTotal: myr(topupRows[0]?.total_sen),
     };
   }
 
@@ -2593,7 +2632,7 @@ class PacksModuleService extends MedusaService({
       id: string;
       kind: TaskKind;
       title: string;
-      requirement: TaskRequirement;
+      requirement: HubRequirement;
       reward: HubReward;
       progress: { current: number; target: number; completed: boolean };
       claimed: boolean;
@@ -2692,16 +2731,23 @@ class PacksModuleService extends MedusaService({
     // neither which card nor what it is worth.
     const packSlugs = new Set<string>(pendingSpins.map((s) => s.pack_id));
     const cardHandles = new Set<string>();
+    // The goal side gets pictures too: the pack a rip goal names, the Pokémon
+    // a pull goal names — "RIP [Bronze Pack] ×10" reads at a glance.
+    const pixelIds = new Set<string>();
     for (const d of live) {
       const r = d.reward as unknown as TaskReward;
       if (r.type === 'pack') packSlugs.add(r.pack_id);
       if (r.type === 'card') cardHandles.add(r.card_handle);
+      const q = d.requirement as unknown as TaskRequirement;
+      if (q.type === 'rip_count' && q.pack_id) packSlugs.add(q.pack_id);
+      if (q.type === 'vault_pixel_count' && q.pixel_pokemon_id)
+        pixelIds.add(q.pixel_pokemon_id);
     }
     const packRows = packSlugs.size
       ? await this.listPacks(
           { slug: [...packSlugs] },
           {
-            select: ['slug', 'title', 'price', 'image', 'display_image'],
+            select: ['slug', 'title', 'price', 'image', 'status'],
             take: packSlugs.size,
           },
           sharedContext,
@@ -2726,19 +2772,27 @@ class PacksModuleService extends MedusaService({
           sharedContext,
         )
       : [];
+    // SINGULAR runtime name — see pixel-pokemon-service.ts.
+    const pixelRows = pixelIds.size
+      ? await asPixelPokemonCrud(this).listPixelPokemon(
+          { id: [...pixelIds] },
+          { select: ['id', 'name', 'image_url'], take: pixelIds.size },
+          sharedContext,
+        )
+      : [];
+    const pixelById = new Map(pixelRows.map((p) => [p.id, p]));
     const fxRate = cardRows.length
       ? await resolveFxRate(this)
       : DEFAULT_USD_MYR;
     const packBySlug = new Map(packRows.map((p) => [p.slug, p]));
     const cardByHandle = new Map(cardRows.map((c) => [c.handle, c]));
-    // The prize's picture: a pack's product shot (`image`; the hero
-    // `display_image` only when there is none), a card's graded slab (the
-    // raw scan only when there is none). As stored — the storefront
-    // resolves relative paths like every other pack/card image.
-    const packArt = (slug: string): string | null => {
-      const p = packBySlug.get(slug);
-      return p?.image || p?.display_image || null;
-    };
+    // The prize's picture: a pack's product shot (`image` — never the hero
+    // `display_image`, a wide factory scene meant only for the /slots stage,
+    // same rule as every pack tile), a card's graded slab (the raw scan only
+    // when there is none). As stored — the storefront resolves relative paths
+    // like every other pack/card image.
+    const packArt = (slug: string): string | null =>
+      packBySlug.get(slug)?.image || null;
     const hubReward = (reward: TaskReward): HubReward => {
       if (reward.type === 'pack') {
         const p = packBySlug.get(reward.pack_id);
@@ -2767,6 +2821,27 @@ class PacksModuleService extends MedusaService({
       }
       return reward;
     };
+    const hubRequirement = (q: TaskRequirement): HubRequirement => {
+      if (q.type === 'rip_count' && q.pack_id) {
+        // A draft pack is not on sale: its name and art stay unpublished.
+        const p = packBySlug.get(q.pack_id);
+        const shown = p?.status === 'active' ? p : undefined;
+        return {
+          ...q,
+          pack_title: shown?.title ?? null,
+          pack_image: shown?.image || null,
+        };
+      }
+      if (q.type === 'vault_pixel_count' && q.pixel_pokemon_id) {
+        const p = pixelById.get(q.pixel_pokemon_id);
+        return {
+          ...q,
+          pokemon_name: p?.name ?? null,
+          pokemon_image: p?.image_url ?? null,
+        };
+      }
+      return q;
+    };
     return {
       week_start: week.weekStartIso,
       day_key: day.dayIso,
@@ -2786,7 +2861,7 @@ class PacksModuleService extends MedusaService({
           id: d.id,
           kind,
           title: d.title,
-          requirement,
+          requirement: hubRequirement(requirement),
           reward: hubReward(d.reward as unknown as TaskReward),
           progress: taskProgress(kind, requirement, facts),
           claimed: claimed.has(`${d.id}:${taskPeriodKey(kind, period)}`),
@@ -2826,10 +2901,7 @@ class PacksModuleService extends MedusaService({
     | {
         claimed: false;
         reason:
-          | 'not_found'
-          | 'not_completed'
-          | 'already_claimed'
-          | 'window_closed';
+          'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
       }
   > {
     // Deliberately NOT filtered on active: retiring a task must never strand
@@ -5035,7 +5107,10 @@ class PacksModuleService extends MedusaService({
     if (
       !snapshot ||
       !isShippableCountry(snapshot.ship_country_code) ||
-      !isShippablePostcode(snapshot.ship_postal_code, snapshot.ship_country_code)
+      !isShippablePostcode(
+        snapshot.ship_postal_code,
+        snapshot.ship_country_code,
+      )
     ) {
       return { status: 'invalid' };
     }
@@ -11980,6 +12055,13 @@ class PacksModuleService extends MedusaService({
   // challenge-week window as challengeWeekPool (shared CHALLENGE_WEEK_ANCHOR_CTE).
   // Standard §"Weekly Pulled Value Challenge": end-of-week top-10 receive the
   // unlocked cumulative rewards.
+  //
+  // Accounts on the admin Automation Accounts list (automation_monitor) are
+  // house-run and never rank here. The public board, /task, the posters,
+  // live rank checks AND settleChallengeWeek all read this query, so the
+  // ranks shown are the ranks paid. Their pulls still count in
+  // challengeWeekPool. Membership is read at query time: an account removed
+  // from the list competes again with its whole week.
   @InjectManager()
   async challengeWeekTop(
     opts: ChallengeWeekAnchor & { limit: number },
@@ -12003,6 +12085,9 @@ class PacksModuleService extends MedusaService({
         ' ' +
         '   AND pu.rolled_at >= (SELECT start_utc FROM anchor) ' +
         '   AND pu.rolled_at <  (SELECT end_utc FROM anchor) ' +
+        '   AND NOT EXISTS (SELECT 1 FROM automation_monitor am ' +
+        "        WHERE am.id = 'global' AND am.deleted_at IS NULL " +
+        "          AND am.accounts -> 'customer_ids' @> jsonb_build_array(pu.customer_id)) " +
         ' GROUP BY pu.customer_id ' +
         ' ORDER BY volume_myr DESC NULLS LAST, pu.customer_id ASC ' +
         ' LIMIT ?',
@@ -12065,6 +12150,153 @@ class PacksModuleService extends MedusaService({
     return {
       pulls: Number(row?.pulls ?? 0),
       volumeMyr: Number(row?.volume_myr ?? 0),
+    };
+  }
+
+  // Admin Automation dashboard: what the house accounts (the Automation
+  // Accounts list) drew since `sinceMs`, read from the pull ledger so it spans
+  // every run (the live run state keeps only the current run). Days are MYT.
+  // `costMyr` uses each pack's CURRENT price, so it is an estimate after a
+  // repricing; `soldMyr` is what buybacks actually credited.
+  @InjectManager()
+  async automationActivity(
+    opts: {
+      customerIds: string[];
+      sinceMs: number;
+      hitTiers: string[];
+      hitLimit: number;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{
+    days: AutomationActivityTotals[];
+    tiers: { rarity: string; draws: number }[];
+    accounts: (Omit<AutomationActivityTotals, 'day'> & {
+      customerId: string;
+      lastAt: string;
+      hits: number;
+    })[];
+    hits: {
+      id: string;
+      customerId: string;
+      rarity: string;
+      cardName: string | null;
+      cardImage: string | null;
+      packTitle: string | null;
+      valueMyr: number;
+      sold: boolean;
+      rolledAt: string;
+    }[];
+  }> {
+    if (!opts.customerIds.length || !opts.hitTiers.length)
+      return { days: [], tiers: [], accounts: [], hits: [] };
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const fxRate = await resolveFxRate(this);
+    const ids = opts.customerIds.map(() => '?').join(', ');
+    const base =
+      'WITH base AS ( ' +
+      '  SELECT pu.id, pu.customer_id, pu.rolled_at, pu.status, ' +
+      `         (${PULLED_VALUE_USD_SQL}) * ? AS value_myr, ` +
+      '         COALESCE(pu.buyback_amount, 0) AS sold_myr, ' +
+      '         COALESCE(p.price, 0) AS cost_myr, ' +
+      '         p.title AS pack_title, c.name AS card_name, c.image AS card_image, ' +
+      "         COALESCE((SELECT o.rarity FROM pack_odds o WHERE o.pack_id = pu.pack_id AND o.card_id = pu.card_id AND o.deleted_at IS NULL LIMIT 1), 'Common') AS rarity " +
+      '    FROM pull pu ' +
+      '    LEFT JOIN card c ON c.handle = pu.card_id AND c.deleted_at IS NULL ' +
+      '    LEFT JOIN pack p ON p.slug = pu.pack_id AND p.deleted_at IS NULL ' +
+      `   WHERE pu.deleted_at IS NULL AND ${LEADERBOARD_PULL_SQL} ` +
+      `     AND pu.customer_id IN (${ids}) AND pu.rolled_at >= ? ` +
+      ') ';
+    const params = [
+      DEFAULT_MARKET_MULTIPLIER,
+      fxRate,
+      ...opts.customerIds,
+      new Date(opts.sinceMs),
+    ];
+    const totals =
+      'COUNT(*) AS draws, ' +
+      'ROUND(COALESCE(SUM(value_myr), 0) * 100) / 100 AS value_myr, ' +
+      'ROUND(COALESCE(SUM(cost_myr), 0) * 100) / 100 AS cost_myr, ' +
+      'ROUND(COALESCE(SUM(sold_myr), 0) * 100) / 100 AS sold_myr ';
+    type Totals = {
+      draws: string;
+      value_myr: string | null;
+      cost_myr: string | null;
+      sold_myr: string | null;
+    };
+    const money = (row: Totals) => ({
+      draws: Number(row.draws),
+      valueMyr: Number(row.value_myr ?? 0),
+      costMyr: Number(row.cost_myr ?? 0),
+      soldMyr: Number(row.sold_myr ?? 0),
+    });
+    const tierList = opts.hitTiers.map(() => '?').join(', ');
+    const [days, tiers, accounts, hits] = await Promise.all([
+      em.execute<(Totals & { day: string })[]>(
+        base +
+          "SELECT to_char(rolled_at AT TIME ZONE 'Asia/Kuala_Lumpur', 'YYYY-MM-DD') AS day, " +
+          totals +
+          'FROM base GROUP BY 1 ORDER BY 1',
+        params,
+      ),
+      em.execute<{ rarity: string; draws: string }[]>(
+        base + 'SELECT rarity, COUNT(*) AS draws FROM base GROUP BY rarity',
+        params,
+      ),
+      em.execute<
+        (Totals & { customer_id: string; last_at: Date; hits: string })[]
+      >(
+        base +
+          'SELECT customer_id, MAX(rolled_at) AS last_at, ' +
+          `COUNT(*) FILTER (WHERE rarity IN (${tierList})) AS hits, ` +
+          totals +
+          'FROM base GROUP BY customer_id ORDER BY value_myr DESC',
+        [...params, ...opts.hitTiers],
+      ),
+      em.execute<
+        {
+          id: string;
+          customer_id: string;
+          rarity: string;
+          card_name: string | null;
+          card_image: string | null;
+          pack_title: string | null;
+          value_myr: string | null;
+          status: string;
+          rolled_at: Date;
+        }[]
+      >(
+        base +
+          'SELECT id, customer_id, rarity, card_name, card_image, pack_title, ' +
+          'ROUND(value_myr * 100) / 100 AS value_myr, status, rolled_at ' +
+          `FROM base WHERE rarity IN (${tierList}) ` +
+          'ORDER BY rolled_at DESC, id DESC LIMIT ?',
+        [...params, ...opts.hitTiers, opts.hitLimit],
+      ),
+    ]);
+    return {
+      days: days.map((row) => ({ day: row.day, ...money(row) })),
+      tiers: tiers.map((row) => ({
+        rarity: row.rarity,
+        draws: Number(row.draws),
+      })),
+      accounts: accounts.map((row) => ({
+        customerId: row.customer_id,
+        lastAt: new Date(row.last_at).toISOString(),
+        hits: Number(row.hits),
+        ...money(row),
+      })),
+      hits: hits.map((row) => ({
+        id: row.id,
+        customerId: row.customer_id,
+        rarity: row.rarity,
+        cardName: row.card_name,
+        cardImage: row.card_image,
+        packTitle: row.pack_title,
+        valueMyr: Number(row.value_myr ?? 0),
+        sold: row.status === 'bought_back',
+        rolledAt: new Date(row.rolled_at).toISOString(),
+      })),
     };
   }
 
@@ -12144,8 +12376,7 @@ class PacksModuleService extends MedusaService({
     // per settleChallengeWinner call), so row 0 is representative — this is
     // not an ordering assumption.
     const prior = existingRows[0]?.snapshot as unknown as
-      | SettleSnapshot
-      | undefined;
+      SettleSnapshot | undefined;
 
     // Sequential, not Promise.all: challengeWeekPool resolves
     // transactionManager ?? manager and listChallengeStages resolves the SAME
@@ -12561,8 +12792,7 @@ class PacksModuleService extends MedusaService({
   private async reserveSettledStock(
     winner: SettledWinner,
     decrementStock:
-      | ((handle: string, qty: number) => Promise<boolean>)
-      | undefined,
+      ((handle: string, qty: number) => Promise<boolean>) | undefined,
     weekStartIso: string,
   ): Promise<void> {
     if (!decrementStock) return;

@@ -11,11 +11,16 @@ export type TaskKind = AdminTaskDefinition['kind'];
 // Mirrors TYPES_BY_KIND in the backend's tasks.ts (the gate that matters):
 // daily and weekly share the repeating goals; lifetime ratchets (VIP level,
 // vault size) are achievement-only.
-const PERIODIC = ['checkin_days', 'rip_count', 'vault_pixel_count'] as const;
+const PERIODIC = [
+  'checkin_days',
+  'rip_count',
+  'vault_pixel_count',
+  'topup_myr',
+] as const;
 export const REQUIREMENT_TYPES: Record<TaskKind, readonly string[]> = {
   daily: PERIODIC,
   weekly: PERIODIC,
-  achievement: ['reach_level', 'vault_count', 'vault_pixel_count'],
+  achievement: ['reach_level', 'vault_count', 'vault_pixel_count', 'topup_myr'],
 };
 
 export const KIND_LABEL: Record<TaskKind, string> = {
@@ -30,6 +35,7 @@ export const REQUIREMENT_LABEL: Record<string, string> = {
   reach_level: 'Reach VIP level N',
   vault_count: 'Vault N cards',
   vault_pixel_count: 'Vault N Pokémon (pixel) cards',
+  topup_myr: 'Top up RM N',
 };
 
 /** The goal select's wording for one cadence. A daily check-in is a single
@@ -53,6 +59,7 @@ export const COUNT_LABEL: Record<string, string> = {
   reach_level: 'Level',
   vault_count: 'Cards',
   vault_pixel_count: 'Cards',
+  topup_myr: 'RM',
 };
 
 export const REWARD_TYPES = ['credit', 'pack', 'card'] as const;
@@ -125,6 +132,7 @@ export const draftFrom = (t: AdminTaskDefinition): Draft => {
     (req.days as number | undefined) ??
     (req.count as number | undefined) ??
     (req.level as number | undefined) ??
+    (req.amount_myr as number | undefined) ??
     1;
   return {
     id: t.id,
@@ -187,6 +195,9 @@ export function draftToPayload(d: Draft): {
         count: n,
         pixel_pokemon_id: d.reqPixel === ANY ? null : d.reqPixel,
       };
+      break;
+    case 'topup_myr':
+      requirement = { type: d.reqType, amount_myr: n };
       break;
     default:
       requirement = { type: d.reqType, count: n };

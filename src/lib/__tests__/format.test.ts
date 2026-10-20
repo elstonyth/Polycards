@@ -3,12 +3,22 @@ import {
   money,
   rm,
   rm0,
+  rmAuto,
   num,
   relativeTime,
   timeUntil,
   pullTime,
+  mytDate,
   affordable,
 } from '../format';
+
+describe('rmAuto', () => {
+  it('drops .00 on whole ringgit and keeps sen when there are some', () => {
+    expect(rmAuto(100)).toBe(rm0(100));
+    expect(rmAuto(99.99)).toBe(rm(99.99));
+    expect(rmAuto(40.5)).toBe(rm(40.5));
+  });
+});
 
 describe('affordable — integer-sen comparison', () => {
   it('does not false-block a fractional cost that a float would', () => {
@@ -132,5 +142,17 @@ describe('pullTime — fixed-MYT absolute roll time', () => {
 
   it('is empty for garbage rather than "NaN NaN"', () => {
     expect(pullTime('not-a-date')).toBe('');
+  });
+});
+
+describe('mytDate — fixed-MYT calendar date', () => {
+  it('prints day, short month and year in UTC+8', () => {
+    expect(mytDate('2026-10-19T04:00:00.000Z')).toBe('19 Oct 2026');
+    // 16:30 UTC on 31 Dec is already New Year's Day in Malaysia.
+    expect(mytDate('2026-12-31T16:30:00.000Z')).toBe('01 Jan 2027');
+  });
+
+  it('is empty for garbage', () => {
+    expect(mytDate('not-a-date')).toBe('');
   });
 });

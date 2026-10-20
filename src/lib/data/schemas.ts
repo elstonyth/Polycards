@@ -1271,8 +1271,26 @@ export const ReferralSummarySchema = z.looseObject({
     partner: z.boolean(),
   }),
   history: z.array(SettlementHistoryRowSchema),
+  /** The player's own invited friends, newest first: public name + handle
+   *  and what each earned the player this week (cents, rounded down per
+   *  row), capped server-side (downline_count stays the full total).
+   *  Optional and caught (deploy-skew rule): an older backend or a malformed
+   *  list hides the list instead of blanking the page, and never tells a
+   *  player with referrals that they have none. */
+  friends: z
+    .array(
+      z.looseObject({
+        name: z.string(),
+        handle: z.string().nullable(),
+        joined_at: z.string(),
+        week_earned_cents: finite,
+      }),
+    )
+    .optional()
+    .catch(undefined),
 });
 export type ReferralSummary = z.infer<typeof ReferralSummarySchema>;
+export type ReferralFriend = NonNullable<ReferralSummary['friends']>[number];
 
 /** GET /store/referral/codes/:code — public owner-of-code check (display
  *  fields only; the backend never puts PII here). */
@@ -1291,7 +1309,16 @@ export const TaskEntrySchema = z.looseObject({
   id: z.string(),
   kind: z.enum(['daily', 'weekly', 'achievement']),
   title: z.string(),
-  requirement: z.looseObject({ type: z.string() }),
+  requirement: z.looseObject({
+    type: z.string(),
+    // What a narrowed goal names, so the row can SHOW it ("RIP [Bronze Pack]
+    // ×10"): a rip goal's pack, a pull goal's Pokémon. Same optional+nullable
+    // skew rule as the reward: absent/null falls back to the goal's icon.
+    pack_title: z.string().nullable().optional(),
+    pack_image: z.string().nullable().optional(),
+    pokemon_name: z.string().nullable().optional(),
+    pokemon_image: z.string().nullable().optional(),
+  }),
   reward: z.looseObject({
     type: z.string(),
     pack_id: z.string().optional(),

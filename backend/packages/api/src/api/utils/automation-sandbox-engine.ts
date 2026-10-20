@@ -5,7 +5,8 @@ import {
   validateAutomationConfig,
 } from './automation-config';
 import {
-  createHumanizedState,
+  createHumanizedStates,
+  rememberHumanizedAssignments,
   planHumanized,
   recordHumanizedCycle,
 } from './automation-humanized';
@@ -175,17 +176,38 @@ export function applySandboxAction(
       throw new SandboxInputError(
         'Every leaderboard target must use a selected test profile.',
       );
+    for (const result of state.results)
+      if (result.humanized)
+        result.humanized.regionChoice ??= state.config.humanizedRegion;
     state.config = config;
     state.selectedProfileIds = ids;
     if (input.action === 'run') {
+      state.humanizedAssignments = rememberHumanizedAssignments(
+        state.humanizedAssignments ?? [],
+        state.results.flatMap((result) =>
+          result.humanized ? [result.humanized] : [],
+        ),
+      );
       const targets = config.rankTargets ?? [];
       const runIds = targets.length
         ? targets.map((target) => target.profileId)
         : ids;
+      const assignments =
+        config.timingMode === 'humanized'
+          ? createHumanizedStates(
+              runIds,
+              config.humanizedRegion,
+              state.humanizedAssignments,
+            )
+          : [];
+      state.humanizedAssignments = rememberHumanizedAssignments(
+        state.humanizedAssignments,
+        assignments,
+      );
       state.results = runIds.map((id): SandboxResult => {
         const humanized =
           config.timingMode === 'humanized'
-            ? createHumanizedState(id, config.humanizedRegion)
+            ? assignments.find((row) => row.profileId === id)!
             : null;
         const target = targets.find((item) => item.profileId === id);
         return {
@@ -461,6 +483,8 @@ export function advanceSandbox(
     return true;
   }
   if (result.humanized) {
+    if (!result.humanized.timerKind)
+      result.humanized.waitReason = result.waitReason ?? undefined;
     let plan = planHumanized(result.humanized, clock, random);
     // Bounded clock advancement skips only virtual waiting, never cycles or ledger checks.
     for (
@@ -493,7 +517,10 @@ export function advanceSandbox(
   settleCycle(state, profile, result, now, random);
   result.waitReason = null;
   const delay = result.humanized
-    ? recordHumanizedCycle(result.humanized, clock, random)
+    ? recordHumanizedCycle(result.humanized, clock, random, {
+        spend: result.cycles[result.cycles.length - 1].costCents,
+        value: result.cycles[result.cycles.length - 1].saleCents,
+      })
     : automationDelayMs(state.config, random);
   result.nextRunAt = clock + delay;
   state.nextRunAt = Math.min(

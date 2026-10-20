@@ -52,11 +52,15 @@ describe('draftFrom → draftToPayload round-trips every requirement shape', () 
       'vault_pixel_count (scoped)',
       { type: 'vault_pixel_count', count: 3, pixel_pokemon_id: 'px_25' },
     ],
+    // Editing a saved top-up task must not reset it to RM 1.
+    ['topup_myr', { type: 'topup_myr', amount_myr: 250 }],
   ];
 
   test.each(cases)('%s', (_name, requirement) => {
     const kind =
-      requirement.type === 'checkin_days' || requirement.type === 'rip_count'
+      requirement.type === 'checkin_days' ||
+      requirement.type === 'rip_count' ||
+      requirement.type === 'topup_myr'
         ? ('weekly' as const)
         : ('achievement' as const);
     const payload = draftToPayload(draftFrom(task({ kind, requirement })));
@@ -276,3 +280,24 @@ describe('taskStatus', () => {
     );
   });
 });
+
+describe('topup_myr goal (2026-10-19)', () => {
+  test('offered for every cadence, labelled in RM', () => {
+    expect(REQUIREMENT_TYPES.daily).toContain('topup_myr');
+    expect(REQUIREMENT_TYPES.weekly).toContain('topup_myr');
+    expect(REQUIREMENT_TYPES.achievement).toContain('topup_myr');
+    expect(requirementLabel('weekly', 'topup_myr')).toBe('Top up RM N');
+  });
+
+  test('sends amount_myr, not count', () => {
+    const payload = draftToPayload({
+      ...blankDraft(),
+      kind: 'daily',
+      reqType: 'topup_myr',
+      reqN: '100',
+      rewardValue: '5',
+    });
+    expect(payload!.requirement).toEqual({ type: 'topup_myr', amount_myr: 100 });
+  });
+});
+

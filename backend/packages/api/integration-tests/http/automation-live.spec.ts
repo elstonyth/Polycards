@@ -3,6 +3,7 @@ import { Modules } from '@medusajs/framework/utils';
 import { PACKS_MODULE } from '../../src/modules/packs';
 import type PacksModuleService from '../../src/modules/packs/service';
 import { tickLive } from '../../src/api/utils/automation-live-store';
+import { clearRecentPullsCache } from '../../src/api/store/pulls/recent/route';
 import automationLiveJob from '../../src/jobs/automation-live';
 import { mintSuperAdmin, unwrapResponse } from './utils';
 
@@ -172,10 +173,11 @@ medusaIntegrationTestRunner({
         },
         { headers },
       );
+      const firstDrawAt = Date.now() + 60000;
       const ticks = await Promise.all([
-        tickLive(container),
-        tickLive(container),
-        tickLive(container),
+        tickLive(container, () => firstDrawAt),
+        tickLive(container, () => firstDrawAt),
+        tickLive(container, () => firstDrawAt),
       ]);
       expect(ticks.filter(Boolean)).toHaveLength(1);
       const view = (await api.get('/admin/automation/live', { headers })).data;
@@ -220,10 +222,14 @@ medusaIntegrationTestRunner({
         }),
       ]);
       for (let index = 0; index < 2; index++) {
-        await new Promise((resolve) => setTimeout(resolve, 2100));
+        const scheduled = (await api.get('/admin/automation/live', { headers }))
+          .data;
+        const dueAt = scheduled.nextRunAt;
+        expect(dueAt).toBeGreaterThan(firstDrawAt);
+        expect(await tickLive(container, () => dueAt - 1)).toBe(false);
         const attempts = await Promise.all([
-          tickLive(container),
-          tickLive(container),
+          tickLive(container, () => dueAt),
+          tickLive(container, () => dueAt),
         ]);
         expect(attempts.filter(Boolean)).toHaveLength(1);
       }
@@ -289,7 +295,8 @@ medusaIntegrationTestRunner({
           ),
         ).toHaveLength(1);
       }
-      await new Promise((resolve) => setTimeout(resolve, 5100));
+      // The feed serves a stale body while it rebuilds (#835); read it fresh.
+      clearRecentPullsCache();
       for (const path of [
         '/store/pulls/recent',
         '/store/pulls/recent?pack_id=live-pack',
@@ -343,8 +350,16 @@ medusaIntegrationTestRunner({
       expect(sleeping).toMatchObject({
         status: 'running',
         cycles: [],
-        nextRunAt: clock + 4 * 3600000,
       });
+      // Desktop routines shift sleep by ±75 minutes, daily jitter by ±20,
+      // then add up to ten minutes of stable wake lag.
+      expect(sleeping.nextRunAt).toBeGreaterThanOrEqual(
+        clock + (240 - 95) * 60000,
+      );
+      expect(sleeping.nextRunAt).toBeLessThanOrEqual(
+        clock + (240 + 95 + 10) * 60000,
+      );
+      expect(sleeping.schedules[0].humanized.timerKind).toBe('OFFLINE_END');
       expect(sleeping.schedules[0].waitReason).toContain('Sleeping');
       expect(await tickLive(container, () => clock + 1000)).toBe(false);
       expect(
@@ -454,17 +469,20 @@ medusaIntegrationTestRunner({
         status: { state: 'limited', currentRank: 2, mode: 'live' },
       });
       expect(limited.cycles).toHaveLength(1);
-      await new Promise((resolve) => setTimeout(resolve, 5100));
-      expect(
-        (
-          await api.get('/store/pulls/recent?pack_id=live-pack', {
-            headers: storeHeaders,
-          })
-        ).data.pulls,
-      ).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ id: rankedDraw.cycles[0].pullId }),
-        ]),
+      // The feed serves a stale body while it rebuilds (#835); read it fresh.
+      clearRecentPullsCache();
+      const feed = (
+        await api.get('/store/pulls/recent?pack_id=live-pack', {
+          headers: storeHeaders,
+        })
+      ).data.pulls as Record<string, unknown>[];
+      const botRow = feed.find((row) => row.id === rankedDraw.cycles[0].pullId);
+      const playerRow = feed.find((row) => row.who === 'Rank Competitor');
+      // A live bot draw reads exactly like any other player's pull in the
+      // public feed: its own name, the same fields, no automation marker.
+      expect(botRow).toMatchObject({ who: 'Live Player' });
+      expect(Object.keys(botRow!).sort()).toEqual(
+        Object.keys(playerRow!).sort(),
       );
       await api.post(
         '/admin/automation/live',

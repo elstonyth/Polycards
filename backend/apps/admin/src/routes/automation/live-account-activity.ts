@@ -54,6 +54,8 @@ export function getLiveAccountActivity(
         )
       : activity('Drawing', 'blue', 'Opening the paid pack.');
   }
+  const skipped = cycles.find((cycle) => cycle.skipped);
+  if (skipped) return activity('Out of balance', 'orange', skipped.skipped!);
   const failed = cycles.find(
     (cycle) =>
       cycle.error ||
@@ -141,13 +143,20 @@ export function getLiveAccountActivity(
         'Scheduled check is due; waiting for the live worker.',
         schedule.nextRunAt,
       );
-    const resting =
-      schedule.waitReason.startsWith('Sleeping') ||
-      ['Between activity sessions', 'Session break'].includes(
-        schedule.waitReason,
-      );
+    const resting = schedule.humanized.timerKind
+      ? ['OFFLINE_END', 'SESSION_BREAK_END', 'SHORT_BREAK_END'].includes(
+          schedule.humanized.timerKind,
+        )
+      : schedule.waitReason.startsWith('Sleeping') ||
+        ['Between activity sessions', 'Session break'].includes(
+          schedule.waitReason,
+        );
     return activity(
-      resting ? 'Resting' : 'Waiting',
+      resting
+        ? 'Resting'
+        : schedule.humanized.behaviorState === 'THINKING'
+          ? 'Thinking'
+          : 'Waiting',
       resting ? 'grey' : 'orange',
       schedule.waitReason,
       schedule.nextRunAt,

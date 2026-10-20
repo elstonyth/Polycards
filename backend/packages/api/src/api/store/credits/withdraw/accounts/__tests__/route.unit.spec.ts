@@ -781,4 +781,22 @@ describe('POST accounts — one bank account, one Polycards account', () => {
     expect(payoutAccountSharingAllowed('cus_1', env)).toBe(false);
     expect(payoutAccountSharingAllowed('cus_1', {})).toBe(false);
   });
+
+  it("'*' on the allowlist lets every customer share", () => {
+    expect(
+      payoutAccountSharingAllowed('cus_1', {
+        PAYOUT_ACCOUNT_SHARING_ALLOWED: '*',
+      }),
+    ).toBe(true);
+    expect(
+      payoutAccountSharingAllowed('cus_1', {
+        PAYOUT_ACCOUNT_SHARING_ALLOWED: 'cus_2, * ',
+      }),
+    ).toBe(true);
+    expect(
+      payoutAccountSharingAllowed('cus_1', {
+        PAYOUT_ACCOUNT_SHARING_ALLOWED: 'cus_*',
+      }),
+    ).toBe(false);
+  });
 });

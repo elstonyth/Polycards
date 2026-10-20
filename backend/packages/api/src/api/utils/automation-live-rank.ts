@@ -24,13 +24,15 @@ export function validateLiveRankTargets(
       ) ||
       !selected.includes(input.customerId) ||
       targets.some((row) => row.customerId === input.customerId) ||
-      !['weekly', 'alltime'].includes(input.period) ||
+      // Automation accounts never rank on the weekly prize board
+      // (challengeWeekTop), so a weekly goal could only burn cycles.
+      input.period !== 'alltime' ||
       !Number.isInteger(input.targetRank) ||
       input.targetRank < 1 ||
       input.targetRank > 10
     ) {
       throw new Error(
-        'Each live goal needs one distinct selected account, a weekly or all-time board, and rank 1–10.',
+        'Each live goal needs one distinct selected account, the all-time board, and rank 1–10. Automation accounts never rank on the weekly prize board.',
       );
     }
     targets.push({

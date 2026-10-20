@@ -26,6 +26,9 @@ export function money(
 
 export const rm = (n: number) => money(n, { prefix: 'RM ' });
 export const rm0 = (n: number) => money(n, { prefix: 'RM ', decimals: 0 });
+/** Whole ringgit without the ".00", sen only when there are some — so
+ *  RM 99.99 never rounds up to a "done-looking" RM 100. */
+export const rmAuto = (n: number) => (Number.isInteger(n) ? rm0(n) : rm(n));
 /** `rm` with a non-breaking space, for figures inside running sentences so
  *  "RM" never wraps away from its number. */
 // Built from its code point: a literal U+00A0 in source gets flattened back
@@ -113,6 +116,16 @@ export function pullTime(iso: string): string {
   const minute = String(d.getUTCMinutes()).padStart(2, '0');
   const second = String(d.getUTCSeconds()).padStart(2, '0');
   return `${day} ${MONTHS[d.getUTCMonth()]}, ${String(h12).padStart(2, '0')}:${minute}:${second} ${h24 < 12 ? 'AM' : 'PM'}`;
+}
+
+// Calendar date in Malaysian time ("19 Oct 2026") — the referral friend
+// list's joined dates. Fixed UTC+8 and hand-rolled for the same server/client
+// parity as pullTime. Unparsable → "".
+export function mytDate(iso: string): string {
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return '';
+  const d = new Date(ms + MYT_OFFSET_MS);
+  return `${String(d.getUTCDate()).padStart(2, '0')} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
 // The mirror of relativeTime for a FUTURE instant ("in 45m", "in 23h", "in 2d")

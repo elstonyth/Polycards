@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Badge,
   Button,
   Container,
   Heading,
@@ -13,16 +14,111 @@ import {
 } from '@medusajs/ui';
 import type {
   LiveConfig,
+  LivePackWeight,
+  LiveRunSummary,
   LiveSnapshot,
+  LiveState,
 } from '../../../../../packages/api/src/api/utils/automation-live-types';
 import { DEFAULT_LIVE_TIMING } from '../../../../../packages/api/src/api/utils/automation-live-types';
+import {
+  CheckCircleSolid,
+  ExclamationCircleSolid,
+  Moon,
+  PauseSolid,
+  PlaySolid,
+  StopCircleSolid,
+} from '@medusajs/icons';
 import { rm } from '../../lib/format';
 import { getLiveAccountActivity } from './live-account-activity';
 import type { LiveAccountActivity } from './live-account-activity';
 import { LiveRankSettings } from './live-rank-settings';
+import { ago } from './tiers';
 
 declare const __BACKEND_URL__: string;
 const KEY = ['automation-live'];
+
+// The operator's standing mix (2026-10-19), matched to live packs by slug or
+// title. Unmatched packs start at 0%; every rate stays editable.
+const SUGGESTED_RATES: [RegExp, number][] = [
+  [/30th|celebration/i, 2500],
+  [/ascended|\bah\b/i, 2000],
+  [/bronze/i, 2500],
+  [/silver/i, 1500],
+  [/gold/i, 1000],
+  [/platinum/i, 250],
+  [/diamond/i, 200],
+  [/poncho/i, 50],
+];
+
+function suggestedMix(packs: LiveSnapshot['packs']): LivePackWeight[] {
+  return packs.map((pack) => ({
+    packSlug: pack.slug,
+    weightBp:
+      SUGGESTED_RATES.find(([pattern]) =>
+        pattern.test(`${pack.slug} ${pack.title}`),
+      )?.[1] ?? 0,
+  }));
+}
+
+const percent = (bp: number) =>
+  `${(bp / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
+
+const STATUS: Record<
+  LiveState['status'],
+  {
+    Icon: typeof Moon;
+    label: string;
+    color: 'green' | 'orange' | 'red' | 'grey';
+  }
+> = {
+  idle: { Icon: Moon, label: 'Not running', color: 'grey' },
+  running: { Icon: PlaySolid, label: 'Running', color: 'green' },
+  paused: { Icon: PauseSolid, label: 'Paused', color: 'orange' },
+  completed: { Icon: CheckCircleSolid, label: 'Finished', color: 'green' },
+  stopped: { Icon: StopCircleSolid, label: 'Stopped', color: 'grey' },
+  failed: {
+    Icon: ExclamationCircleSolid,
+    label: 'Stopped: needs a look',
+    color: 'red',
+  },
+};
+
+const TIMING: Record<NonNullable<LiveConfig['timingMode']>, string> = {
+  fixed: 'Same gap every time',
+  random: 'Random gap',
+  humanized: 'Like a real player',
+};
+
+const settledCycle = (cycle: LiveState['cycles'][number]) =>
+  !cycle.error &&
+  cycle.differenceCents === 0 &&
+  cycle.bonusDifferenceCents === 0;
+
+/** The current run as a history row (the server archives it on the next Start). */
+function currentRun(state: LiveSnapshot): LiveRunSummary | null {
+  if (!state.runId || !state.config) return null;
+  const settled = state.cycles.filter(settledCycle);
+  return {
+    runId: state.runId,
+    startedAt: state.startedAt ?? state.cycles[0]?.startedAt ?? null,
+    endedAt:
+      state.status === 'running' || state.status === 'paused'
+        ? null
+        : (state.cycles.at(-1)?.finishedAt ?? null),
+    status: state.status,
+    draws: state.cycles.filter((cycle) => !cycle.skipped).length,
+    settled: settled.length,
+    failed:
+      state.cycles.filter((cycle) => !cycle.skipped).length - settled.length,
+    spentCents: state.spentCents,
+    soldCents: settled.reduce((sum, cycle) => sum + (cycle.saleCents ?? 0), 0),
+    accounts: new Set(state.cycles.map((cycle) => cycle.customerId)).size,
+    packSlugs: state.config.packMix?.map((row) => row.packSlug) ?? [
+      state.config.packSlug,
+    ],
+    timingMode: state.config.timingMode ?? DEFAULT_LIVE_TIMING.timingMode,
+  };
+}
 
 async function requestLive(
   input?: Record<string, unknown>,
@@ -53,6 +149,53 @@ async function requestLive(
   return body as LiveSnapshot;
 }
 
+function Step({
+  n,
+  title,
+  hint,
+  children,
+}: {
+  n: number;
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="flex gap-4 border-t pt-5 first:border-t-0 first:pt-0">
+      <span
+        aria-hidden
+        className="bg-ui-bg-interactive text-ui-fg-on-color flex size-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold"
+      >
+        {n}
+      </span>
+      <div className="min-w-0 flex-1 space-y-3">
+        <div>
+          <Text weight="plus">{title}</Text>
+          {hint && (
+            <Text size="small" className="text-ui-fg-subtle">
+              {hint}
+            </Text>
+          )}
+        </div>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <Text size="xsmall" className="text-ui-fg-subtle">
+        {label}
+      </Text>
+      <Text weight="plus" className="tabular-nums">
+        {value}
+      </Text>
+    </div>
+  );
+}
+
 export function LivePanel() {
   const cache = useQueryClient();
   const [draft, setDraft] = useState<LiveConfig | null>(null);
@@ -76,7 +219,10 @@ export function LivePanel() {
       cache.setQueryData(KEY, snapshot);
       setDraft(null);
     },
-    onSettled: () => cache.invalidateQueries({ queryKey: KEY }),
+    onSettled: () => {
+      void cache.invalidateQueries({ queryKey: KEY });
+      void cache.invalidateQueries({ queryKey: ['automation-activity'] });
+    },
   });
   const state = query.data;
   const config = {
@@ -94,15 +240,35 @@ export function LivePanel() {
     state?.status === 'paused' ||
     !!state?.pending;
   const busy = action.isPending;
+  const locked = active || busy || !state;
   const cycleTarget = state?.runId
     ? (state.config?.maxCyclesPerAccount ?? config.maxCyclesPerAccount)
     : config.maxCyclesPerAccount;
   const update = <K extends keyof LiveConfig>(key: K, value: LiveConfig[K]) =>
     setDraft({ ...config, [key]: value });
+  const mixTotal =
+    config.packMix?.reduce((sum, row) => sum + row.weightBp, 0) ?? 0;
+  const packChosen = config.packMix ? mixTotal === 10000 : !!config.packSlug;
+  const ready = packChosen && config.customerIds.length > 0;
+  const packTitles = new Map(
+    state?.packs.map((pack) => [pack.slug, pack.title]),
+  );
+  const setRate = (slug: string, bp: number) =>
+    update(
+      'packMix',
+      (state?.packs ?? []).map((pack) => ({
+        packSlug: pack.slug,
+        weightBp:
+          pack.slug === slug
+            ? bp
+            : (config.packMix?.find((row) => row.packSlug === pack.slug)
+                ?.weightBp ?? 0),
+      })),
+    );
   const error = action.error?.message ?? query.error?.message ?? state?.error;
   const cycles = [
-    ...(state?.cycles ?? []),
     ...(state?.pending ? [state.pending] : []),
+    ...[...(state?.cycles ?? [])].reverse(),
   ];
   const names = new Map(
     state?.accounts.map((account) => [account.id, account.name]),
@@ -122,10 +288,7 @@ export function LivePanel() {
   );
   const activityCounts = new Map<
     string,
-    {
-      color: LiveAccountActivity['color'];
-      count: number;
-    }
+    { color: LiveAccountActivity['color']; count: number }
   >();
   for (const id of config.customerIds) {
     const activity = activities.get(id);
@@ -137,86 +300,77 @@ export function LivePanel() {
     group.count++;
     activityCounts.set(activity.label, group);
   }
+  const run = state ? currentRun(state) : null;
+  const runs = [...(run ? [run] : []), ...(state?.history ?? [])];
+  const status = STATUS[state?.status ?? 'idle'];
+  const runConfig = state?.config;
+  // An account skipped for low balance is done at whatever it reached.
+  const planned =
+    runConfig && !runConfig.rankTargets?.length
+      ? runConfig.customerIds.reduce(
+          (sum, id) =>
+            sum +
+            (state?.cycles.some((c) => c.customerId === id && c.skipped)
+              ? state.cycles.filter(
+                  (c) => c.customerId === id && settledCycle(c),
+                ).length
+              : runConfig.maxCyclesPerAccount),
+          0,
+        )
+      : null;
+  const soldCents = run?.soldCents ?? 0;
+  const describe = (row: LiveRunSummary) =>
+    row.packSlugs.length > 1
+      ? `Mix of ${row.packSlugs.length} packs`
+      : (packTitles.get(row.packSlugs[0]) ?? row.packSlugs[0]);
+
   return (
     <>
       <Container>
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-2">
-            <Heading level="h2">Live workspace</Heading>
+          <div className="min-w-0 space-y-1">
             <Text size="small" className="text-ui-fg-subtle">
-              Production customer balances, real pack draws and buyback
-              settlements. Pulls follow normal leaderboard and reward rules.
+              Live runs · real money, real packs
             </Text>
-            <Text size="small">
-              Runs continue in the cloud when this browser is closed. Opening
-              this page never starts a run.
-            </Text>
-          </div>
-          <StatusBadge
-            color={
-              state?.status === 'running'
-                ? 'green'
-                : state?.status === 'failed'
-                  ? 'red'
-                  : 'grey'
-            }
-          >
-            {state?.status ?? 'loading'}
-          </StatusBadge>
-        </div>
-      </Container>
-      <Container>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-2">
-            <Heading level="h2">Live run controls</Heading>
-            <Text size="small">
-              {state?.cycles.filter(
-                (cycle) =>
-                  !cycle.error &&
-                  cycle.differenceCents === 0 &&
-                  cycle.bonusDifferenceCents === 0,
-              ).length ?? 0}{' '}
-              cycles settled · {rm((state?.spentCents ?? 0) / 100)} spent
-            </Text>
-            <Text size="small" className="text-ui-fg-subtle">
-              Each cycle charges the selected pack, sells its returned card and
-              verifies total and bonus balances. Stop lets any current
-              settlement finish.
-            </Text>
-            {state?.status === 'running' &&
-              state.nextRunAt &&
-              !state.pending && (
-                <Text size="small" className="text-ui-fg-subtle">
-                  Next scheduled check:{' '}
-                  {new Date(state.nextRunAt).toLocaleString()}
-                </Text>
-              )}
+            <Heading level="h2" className="flex items-center gap-2">
+              <status.Icon
+                aria-hidden
+                className={
+                  status.color === 'green'
+                    ? 'text-ui-tag-green-icon'
+                    : status.color === 'red'
+                      ? 'text-ui-tag-red-icon'
+                      : status.color === 'orange'
+                        ? 'text-ui-tag-orange-icon'
+                        : 'text-ui-fg-muted'
+                }
+              />
+              {state ? status.label : 'Loading…'}
+            </Heading>
+            {runConfig && state?.runId && (
+              <Text size="small" className="text-ui-fg-subtle">
+                {runConfig.customerIds.length} accounts ·{' '}
+                {runConfig.packMix
+                  ? `mix of ${runConfig.packMix.length} packs`
+                  : (packTitles.get(runConfig.packSlug) ??
+                    runConfig.packSlug)}{' '}
+                · {TIMING[runConfig.timingMode ?? 'fixed']}
+                {runConfig.timingMode === 'humanized' &&
+                (runConfig.humanizedPace ?? 1) > 1
+                  ? ` (${runConfig.humanizedPace}× faster)`
+                  : ''}
+              </Text>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button
-              variant="secondary"
-              disabled={
-                !state ||
-                active ||
-                busy ||
-                !config.packSlug ||
-                !config.customerIds.length
-              }
-              onClick={() => action.mutate({ action: 'save', config })}
-            >
-              Save settings
-            </Button>
             {!active && (
               <Button
-                disabled={
-                  !state ||
-                  busy ||
-                  !config.packSlug ||
-                  !config.customerIds.length
-                }
+                disabled={!state || busy || !ready}
+                isLoading={busy && action.variables?.action === 'run'}
                 onClick={() => action.mutate({ action: 'run', config })}
               >
-                Start live run
+                <PlaySolid aria-hidden />
+                Start run
               </Button>
             )}
             {state?.status === 'running' && (
@@ -248,275 +402,517 @@ export function LivePanel() {
             <Button
               variant="transparent"
               disabled={busy}
+              isLoading={query.isFetching && !busy}
               onClick={() => void query.refetch()}
             >
               Refresh
             </Button>
           </div>
         </div>
-        {error && (
-          <Text role="alert" className="mt-4 text-ui-fg-error">
-            {error}
-          </Text>
-        )}
-        {state?.pending && (
-          <Text className="mt-4" size="small">
-            {activities.get(state.pending.customerId)?.label ?? 'Pending'} cycle{' '}
-            {state.pending.id}
-            {state.pending.pullId ? ` · Pull ${state.pending.pullId}` : ''}
-          </Text>
-        )}
-      </Container>
-      <Container>
-        <Heading level="h2">Live configuration</Heading>
-        <fieldset
-          disabled={active || busy || !state}
-          className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
-        >
-          <div className="space-y-2">
-            <Label htmlFor="live-pack">Paid pack</Label>
-            <Select
-              value={config.packSlug || undefined}
-              onValueChange={(value) => update('packSlug', value)}
-              disabled={active || busy}
-            >
-              <Select.Trigger id="live-pack">
-                <Select.Value placeholder="Choose a live pack" />
-              </Select.Trigger>
-              <Select.Content>
-                {state?.packs.map((pack) => (
-                  <Select.Item value={pack.slug} key={pack.slug}>
-                    {pack.title} · {rm(pack.price)}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="live-timing">Draw timing</Label>
-            <Select
-              value={config.timingMode}
-              onValueChange={(value) =>
-                update(
-                  'timingMode',
-                  value as NonNullable<LiveConfig['timingMode']>,
-                )
-              }
-              disabled={active || busy}
-            >
-              <Select.Trigger id="live-timing">
-                <Select.Value />
-              </Select.Trigger>
-              <Select.Content>
-                <Select.Item value="fixed">Fixed interval</Select.Item>
-                <Select.Item value="random">Random interval</Select.Item>
-                <Select.Item value="humanized">Humanized</Select.Item>
-              </Select.Content>
-            </Select>
-          </div>
-          {config.timingMode === 'fixed' && (
-            <div className="space-y-2">
-              <Label htmlFor="live-interval">Interval (seconds)</Label>
-              <Input
-                id="live-interval"
-                type="number"
-                min={2}
-                max={86400}
-                value={config.intervalSeconds}
-                onChange={(event) =>
-                  update('intervalSeconds', Number(event.target.value))
+
+        {state?.runId && (
+          <div className="mt-5 space-y-4">
+            {planned !== null && (
+              <div>
+                <div
+                  className="bg-ui-bg-component h-2.5 w-full overflow-hidden rounded-full"
+                  role="progressbar"
+                  aria-label="Packs opened in this run"
+                  aria-valuemin={0}
+                  aria-valuemax={planned}
+                  aria-valuenow={run?.settled ?? 0}
+                >
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-pink-500 to-orange-400 transition-[width] duration-700"
+                    style={{
+                      width: `${Math.min(100, ((run?.settled ?? 0) / Math.max(planned, 1)) * 100)}%`,
+                    }}
+                  />
+                </div>
+                <Text size="xsmall" className="text-ui-fg-subtle mt-1">
+                  {run?.settled ?? 0} of {planned} packs done
+                </Text>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+              <Stat label="Packs opened" value={String(run?.draws ?? 0)} />
+              <Stat label="Spent" value={rm((state?.spentCents ?? 0) / 100)} />
+              <Stat label="Sold back for" value={rm(soldCents / 100)} />
+              <Stat
+                label="Net"
+                value={rm((soldCents - (state?.spentCents ?? 0)) / 100)}
+              />
+              <Stat
+                label="Next pack"
+                value={
+                  state?.pending
+                    ? 'Opening now'
+                    : state?.status === 'running' && state.nextRunAt
+                      ? new Date(state.nextRunAt).toLocaleTimeString()
+                      : '—'
                 }
               />
             </div>
-          )}
-          {config.timingMode === 'random' &&
-            (['randomMinSeconds', 'randomMaxSeconds'] as const).map((key) => (
-              <div className="space-y-2" key={key}>
-                <Label htmlFor={`live-${key}`}>
-                  {key === 'randomMinSeconds'
-                    ? 'Minimum interval (seconds)'
-                    : 'Maximum interval (seconds)'}
-                </Label>
-                <Input
-                  id={`live-${key}`}
-                  type="number"
-                  min={2}
-                  max={86400}
-                  value={config[key]}
-                  onChange={(event) => update(key, Number(event.target.value))}
-                />
-              </div>
-            ))}
-          {config.timingMode === 'humanized' && (
-            <div className="space-y-2">
-              <Label htmlFor="live-region">Humanized region</Label>
-              <Select
-                value={config.humanizedRegion}
-                onValueChange={(value) =>
-                  update(
-                    'humanizedRegion',
-                    value as NonNullable<LiveConfig['humanizedRegion']>,
-                  )
-                }
-                disabled={active || busy}
-              >
-                <Select.Trigger id="live-region">
-                  <Select.Value />
-                </Select.Trigger>
-                <Select.Content>
-                  <Select.Item value="mysg">Malaysia / Singapore</Select.Item>
-                  <Select.Item value="global">Global mix</Select.Item>
-                </Select.Content>
-              </Select>
-            </div>
-          )}
-          <div className="space-y-2">
-            <Label htmlFor="live-cycles">Cycles per account</Label>
-            <Input
-              id="live-cycles"
-              type="number"
-              min={1}
-              max={10}
-              value={config.maxCyclesPerAccount}
-              onChange={(event) =>
-                update('maxCyclesPerAccount', Number(event.target.value))
-              }
-            />
           </div>
-        </fieldset>
-        {config.timingMode === 'humanized' && (
-          <Text size="small" className="mt-3 text-ui-fg-subtle">
-            Humanized timing follows each account’s regional sleep, activity
-            sessions and persona intervals on the real clock. Accounts can wait
-            hours for a session; waiting accounts do not block others.
+        )}
+        {state?.pending && (
+          <Text size="small" className="mt-4">
+            {names.get(state.pending.customerId) ?? 'An account'} is{' '}
+            {state.pending.pullId ? 'selling the card from' : 'opening'}{' '}
+            {state.pending.packSlug
+              ? (packTitles.get(state.pending.packSlug) ??
+                state.pending.packSlug)
+              : 'a pack'}
+            {state.pending.cardName ? ` (${state.pending.cardName})` : ''}…
           </Text>
         )}
-        <Text size="small" className="mt-3 text-ui-fg-subtle">
-          No total spend cap. Runs finish the selected cycles while account
-          balances cover each draw, or stop earlier when rank goals finish. Each
-          draw appears in the storefront’s recent pulls feed, including cards
-          sold back.
+        {error && (
+          <Text role="alert" className="text-ui-fg-error mt-4">
+            {error}
+          </Text>
+        )}
+        <Text size="xsmall" className="text-ui-fg-muted mt-4">
+          Runs keep going when you close this page. Opening the page never
+          starts one. These accounts never count on the weekly prize board.
         </Text>
-        <LiveRankSettings
-          config={config}
-          state={state}
-          disabled={active || busy || !state}
-          onChange={setDraft}
-        />
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-          <Heading level="h3">
-            Customer accounts · {config.customerIds.length} selected
-          </Heading>
+      </Container>
+
+      <Container>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <Heading level="h2">Set up a run</Heading>
+            <Text size="small" className="text-ui-fg-subtle">
+              {active
+                ? 'Settings are locked while a run is going. Stop it to change them.'
+                : 'Pick packs, speed and accounts, then press Start run.'}
+            </Text>
+          </div>
           <Button
             variant="secondary"
-            disabled={active || busy || !state?.accounts.length}
-            onClick={() =>
-              update(
-                'customerIds',
-                state?.accounts
-                  .filter((account) => account.status === 'active')
-                  .map((account) => account.id) ?? [],
-              )
-            }
+            size="small"
+            disabled={locked || !ready}
+            onClick={() => action.mutate({ action: 'save', config })}
           >
-            Select all active accounts
+            Save without starting
           </Button>
         </div>
-        <div
-          role="group"
-          aria-label="Selected account activity"
-          className="mt-3 flex flex-wrap gap-2"
-        >
-          {[...activityCounts].map(([label, group]) => (
-            <StatusBadge key={label} color={group.color}>
-              {label} · {group.count}
-            </StatusBadge>
-          ))}
-        </div>
-        <Text size="small" className="mt-2 text-ui-fg-subtle">
-          Activity updates automatically while the run is active. Next check
-          times follow your browser’s local timezone; session checks may
-          schedule a later draw.
-        </Text>
-        {!state?.accounts.length && (
-          <Text className="mt-3 text-ui-fg-subtle">
-            Add existing customer emails in the Accounts tab to make them
-            available here.
-          </Text>
-        )}
-        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {state?.accounts.map((account) => {
-            const activity = activities.get(account.id)!;
-            return (
-              <label
-                key={account.id}
-                data-account-id={account.id}
-                className="flex items-start gap-2 rounded-md border p-3 text-sm"
-              >
-                <input
-                  type="checkbox"
-                  aria-label={`Select ${account.name}`}
-                  className="mt-1"
-                  checked={config.customerIds.includes(account.id)}
-                  disabled={active || busy || account.status !== 'active'}
-                  onChange={(event) =>
+
+        <fieldset disabled={locked} className="mt-5 space-y-5">
+          <Step
+            n={1}
+            title="Which packs?"
+            hint="Open one pack every time, or let each pack be picked at random by your rates."
+          >
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  ['single', 'One pack'],
+                  ['mix', 'Mix of packs'],
+                ] as const
+              ).map(([mode, label]) => (
+                <Button
+                  key={mode}
+                  size="small"
+                  variant={
+                    (config.packMix ? 'mix' : 'single') === mode
+                      ? 'primary'
+                      : 'secondary'
+                  }
+                  aria-pressed={(config.packMix ? 'mix' : 'single') === mode}
+                  disabled={locked}
+                  onClick={() =>
                     update(
-                      'customerIds',
-                      event.target.checked
-                        ? [...config.customerIds, account.id]
-                        : config.customerIds.filter((id) => id !== account.id),
+                      'packMix',
+                      mode === 'mix'
+                        ? suggestedMix(state?.packs ?? [])
+                        : undefined,
                     )
                   }
-                />
-                <span className="min-w-0 flex-1 space-y-1">
-                  <span className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="break-words font-medium">
-                      {account.name}
-                    </span>
-                    <StatusBadge color={activity.color}>
-                      {activity.label}
-                    </StatusBadge>
-                  </span>
-                  <span className="block text-ui-fg-subtle">
-                    {account.balance === null
-                      ? 'Unavailable'
-                      : rm(account.balance)}{' '}
-                    · Account {account.status}
-                  </span>
-                  <span className="block">{activity.reason}</span>
-                  {activity.nextCheckAt !== null && (
-                    <span className="block text-ui-fg-subtle">
-                      Next check:{' '}
-                      <time
-                        dateTime={new Date(activity.nextCheckAt).toISOString()}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+            {!config.packMix ? (
+              <div className="max-w-sm space-y-2">
+                <Label htmlFor="live-pack">Pack</Label>
+                <Select
+                  value={config.packSlug || undefined}
+                  onValueChange={(value) => update('packSlug', value)}
+                  disabled={locked}
+                >
+                  <Select.Trigger id="live-pack">
+                    <Select.Value placeholder="Choose a pack" />
+                  </Select.Trigger>
+                  <Select.Content>
+                    {state?.packs.map((pack) => (
+                      <Select.Item value={pack.slug} key={pack.slug}>
+                        {pack.title} · {rm(pack.price)}
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  {state?.packs.map((pack) => {
+                    const bp =
+                      config.packMix?.find((row) => row.packSlug === pack.slug)
+                        ?.weightBp ?? 0;
+                    return (
+                      <div
+                        key={pack.slug}
+                        className="space-y-2 rounded-lg border p-3"
                       >
-                        {new Date(activity.nextCheckAt).toLocaleString()}
-                      </time>
+                        <Label htmlFor={`live-rate-${pack.slug}`}>
+                          {pack.title}{' '}
+                          <span className="text-ui-fg-muted">
+                            · {rm(pack.price)}
+                          </span>
+                        </Label>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            id={`live-rate-${pack.slug}`}
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={0.01}
+                            value={bp / 100}
+                            onChange={(event) =>
+                              setRate(
+                                pack.slug,
+                                Math.round(Number(event.target.value) * 100) ||
+                                  0,
+                              )
+                            }
+                          />
+                          <Text size="small" className="text-ui-fg-subtle">
+                            %
+                          </Text>
+                        </div>
+                        <div
+                          aria-hidden
+                          className="bg-ui-bg-component h-1.5 overflow-hidden rounded-full"
+                        >
+                          <div
+                            className="h-full bg-pink-500"
+                            style={{ width: `${bp / 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <Text
+                  size="small"
+                  className={
+                    mixTotal === 10000
+                      ? 'text-ui-fg-subtle'
+                      : 'text-ui-fg-error'
+                  }
+                >
+                  {mixTotal === 10000
+                    ? 'Adds up to 100%. If an account can’t afford the pack it rolls, that pack is skipped for that draw.'
+                    : `Rates must add up to exactly 100%. Now ${percent(mixTotal)}.`}
+                </Text>
+              </div>
+            )}
+          </Step>
+
+          <Step
+            n={2}
+            title="How fast?"
+            hint={
+              config.timingMode === 'humanized'
+                ? 'Each account lives its own day: short play sessions, breaks, pauses between packs and sleep at night. Speed runs that whole day faster, so the pull, rest, sleep, pull cycle repeats sooner: 5× fits a full day into about 5 hours, 24× into 1 hour. All accounts share one queue, so about 15 packs a minute is the most it will do.'
+                : 'Gap between one pack and the next, across all accounts.'
+            }
+          >
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="space-y-2">
+                <Label htmlFor="live-timing">Style</Label>
+                <Select
+                  value={config.timingMode}
+                  onValueChange={(value) =>
+                    update(
+                      'timingMode',
+                      value as NonNullable<LiveConfig['timingMode']>,
+                    )
+                  }
+                  disabled={locked}
+                >
+                  <Select.Trigger id="live-timing">
+                    <Select.Value />
+                  </Select.Trigger>
+                  <Select.Content>
+                    {Object.entries(TIMING).map(([value, label]) => (
+                      <Select.Item value={value} key={value}>
+                        {label}
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select>
+              </div>
+              {config.timingMode === 'fixed' && (
+                <div className="space-y-2">
+                  <Label htmlFor="live-interval">Seconds between packs</Label>
+                  <Input
+                    id="live-interval"
+                    type="number"
+                    min={2}
+                    max={86400}
+                    value={config.intervalSeconds}
+                    onChange={(event) =>
+                      update('intervalSeconds', Number(event.target.value))
+                    }
+                  />
+                </div>
+              )}
+              {config.timingMode === 'random' &&
+                (['randomMinSeconds', 'randomMaxSeconds'] as const).map(
+                  (key) => (
+                    <div className="space-y-2" key={key}>
+                      <Label htmlFor={`live-${key}`}>
+                        {key === 'randomMinSeconds'
+                          ? 'Shortest gap (seconds)'
+                          : 'Longest gap (seconds)'}
+                      </Label>
+                      <Input
+                        id={`live-${key}`}
+                        type="number"
+                        min={2}
+                        max={86400}
+                        value={config[key]}
+                        onChange={(event) =>
+                          update(key, Number(event.target.value))
+                        }
+                      />
+                    </div>
+                  ),
+                )}
+              {config.timingMode === 'humanized' && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="live-pace">Speed</Label>
+                    <Select
+                      value={String(config.humanizedPace)}
+                      onValueChange={(value) =>
+                        update('humanizedPace', Number(value))
+                      }
+                      disabled={locked}
+                    >
+                      <Select.Trigger id="live-pace">
+                        <Select.Value />
+                      </Select.Trigger>
+                      <Select.Content>
+                        {[1, 2, 3, 5, 10, 24].map((pace) => (
+                          <Select.Item value={String(pace)} key={pace}>
+                            {pace === 1
+                              ? 'Real time (1 day = 24 h)'
+                              : `${pace}× (1 day ≈ ${+(24 / pace).toFixed(1)} h)`}
+                          </Select.Item>
+                        ))}
+                      </Select.Content>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="live-region">Where they live</Label>
+                    <Select
+                      value={config.humanizedRegion}
+                      onValueChange={(value) =>
+                        update(
+                          'humanizedRegion',
+                          value as NonNullable<LiveConfig['humanizedRegion']>,
+                        )
+                      }
+                      disabled={locked}
+                    >
+                      <Select.Trigger id="live-region">
+                        <Select.Value />
+                      </Select.Trigger>
+                      <Select.Content>
+                        <Select.Item value="mysg">
+                          Malaysia / Singapore
+                        </Select.Item>
+                        <Select.Item value="global">
+                          Around the world
+                        </Select.Item>
+                      </Select.Content>
+                    </Select>
+                  </div>
+                </>
+              )}
+            </div>
+          </Step>
+
+          <Step
+            n={3}
+            title="How many packs per account?"
+            hint="The run finishes when every account has opened this many, or runs out of balance."
+          >
+            <div className="max-w-40">
+              <Input
+                id="live-cycles"
+                aria-label="Packs per account"
+                type="number"
+                min={1}
+                max={10}
+                value={config.maxCyclesPerAccount}
+                onChange={(event) =>
+                  update('maxCyclesPerAccount', Number(event.target.value))
+                }
+              />
+            </div>
+          </Step>
+
+          <Step
+            n={4}
+            title={`Which accounts? · ${config.customerIds.length} picked`}
+            hint="Add or remove accounts in the Accounts tab."
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                size="small"
+                disabled={locked || !state?.accounts.length}
+                onClick={() =>
+                  update(
+                    'customerIds',
+                    state?.accounts
+                      .filter((account) => account.status === 'active')
+                      .map((account) => account.id) ?? [],
+                  )
+                }
+              >
+                Pick all active
+              </Button>
+              <Button
+                variant="transparent"
+                size="small"
+                disabled={locked || !config.customerIds.length}
+                onClick={() => update('customerIds', [])}
+              >
+                Clear
+              </Button>
+              <div
+                role="group"
+                aria-label="What the picked accounts are doing"
+                className="flex flex-wrap gap-2"
+              >
+                {[...activityCounts].map(([label, group]) => (
+                  <StatusBadge key={label} color={group.color}>
+                    {label} · {group.count}
+                  </StatusBadge>
+                ))}
+              </div>
+            </div>
+            {!state?.accounts.length && (
+              <Text className="text-ui-fg-subtle">
+                No accounts yet. Add their emails in the Accounts tab.
+              </Text>
+            )}
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {state?.accounts.map((account) => {
+                const activity = activities.get(account.id)!;
+                const picked = config.customerIds.includes(account.id);
+                return (
+                  <label
+                    key={account.id}
+                    data-account-id={account.id}
+                    className={`flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-sm transition-colors ${picked ? 'border-ui-border-interactive bg-ui-bg-highlight' : ''}`}
+                  >
+                    <input
+                      type="checkbox"
+                      aria-label={`Pick ${account.name}`}
+                      className="mt-1"
+                      checked={picked}
+                      disabled={locked || account.status !== 'active'}
+                      onChange={(event) =>
+                        update(
+                          'customerIds',
+                          event.target.checked
+                            ? [...config.customerIds, account.id]
+                            : config.customerIds.filter(
+                                (id) => id !== account.id,
+                              ),
+                        )
+                      }
+                    />
+                    <span className="min-w-0 flex-1 space-y-1">
+                      <span className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="break-words font-medium">
+                          {account.name}
+                        </span>
+                        <StatusBadge color={activity.color}>
+                          {activity.label}
+                        </StatusBadge>
+                      </span>
+                      <span className="text-ui-fg-subtle block tabular-nums">
+                        {account.balance === null
+                          ? 'Balance unavailable'
+                          : rm(account.balance)}
+                        {account.status !== 'active' && ` · ${account.status}`}
+                        {' · '}
+                        {activity.settledCycles}/{cycleTarget} packs
+                      </span>
+                      <span className="block">{activity.reason}</span>
+                      {activity.nextCheckAt !== null && (
+                        <span className="text-ui-fg-subtle block">
+                          Next:{' '}
+                          <time
+                            dateTime={new Date(
+                              activity.nextCheckAt,
+                            ).toISOString()}
+                          >
+                            {new Date(activity.nextCheckAt).toLocaleString()}
+                          </time>
+                        </span>
+                      )}
+                      {schedules.has(account.id) && (
+                        <span className="text-ui-fg-muted block">
+                          {schedules.get(account.id)!.humanized.label}
+                        </span>
+                      )}
                     </span>
-                  )}
-                  <span className="block text-ui-fg-subtle">
-                    {activity.settledCycles}/{cycleTarget} cycles settled
-                    {schedules.has(account.id) &&
-                      ` · ${schedules.get(account.id)!.humanized.label}`}
-                  </span>
-                </span>
-              </label>
-            );
-          })}
-        </div>
+                  </label>
+                );
+              })}
+            </div>
+          </Step>
+        </fieldset>
+
+        <details className="mt-5 border-t pt-5">
+          <summary className="cursor-pointer">
+            <Text as="span" weight="plus">
+              Optional: aim for an all-time leaderboard spot
+            </Text>
+          </summary>
+          <LiveRankSettings
+            config={config}
+            state={state}
+            disabled={locked}
+            onChange={setDraft}
+          />
+        </details>
       </Container>
+
       <Container className="p-0">
         <div className="px-6 py-4">
-          <Heading level="h2">Live draws and settlements</Heading>
+          <Heading level="h2">This run’s packs</Heading>
+          <Text size="small" className="text-ui-fg-subtle">
+            Each pack is paid, its card is sold back, and both balances are
+            checked. Newest first.
+          </Text>
         </div>
-        <div className="overflow-x-auto">
+        <div className="max-h-[560px] overflow-auto">
           <Table>
             <Table.Header>
               <Table.Row>
-                <Table.HeaderCell>Account / pull</Table.HeaderCell>
-                <Table.HeaderCell>Draw / sale</Table.HeaderCell>
-                <Table.HeaderCell>Balance verification</Table.HeaderCell>
-                <Table.HeaderCell>Status</Table.HeaderCell>
+                <Table.HeaderCell>Account</Table.HeaderCell>
+                <Table.HeaderCell>Pack → card</Table.HeaderCell>
+                <Table.HeaderCell>Paid → sold for</Table.HeaderCell>
+                <Table.HeaderCell>Check</Table.HeaderCell>
               </Table.Row>
             </Table.Header>
             <Table.Body>
@@ -524,50 +920,60 @@ export function LivePanel() {
                 <Table.Row key={cycle.id}>
                   <Table.Cell>
                     {names.get(cycle.customerId) ?? cycle.customerId}
-                    <Text size="small" className="text-ui-fg-subtle">
-                      {cycle.cardName ?? cycle.id}
-                      {cycle.pullId && (
-                        <>
-                          <br />
-                          {cycle.pullId}
-                        </>
-                      )}
+                    <Text size="xsmall" className="text-ui-fg-muted">
+                      {ago(cycle.startedAt)}
                     </Text>
                   </Table.Cell>
                   <Table.Cell>
+                    <Text size="small">
+                      {cycle.packSlug
+                        ? (packTitles.get(cycle.packSlug) ?? cycle.packSlug)
+                        : '—'}
+                    </Text>
+                    <Text size="xsmall" className="text-ui-fg-subtle">
+                      {cycle.cardName ??
+                        (cycle.skipped || cycle.error ? '—' : 'Opening…')}
+                    </Text>
+                  </Table.Cell>
+                  <Table.Cell className="whitespace-nowrap tabular-nums">
                     {cycle.costCents === undefined
                       ? '—'
                       : rm(cycle.costCents / 100)}{' '}
-                    /{' '}
+                    →{' '}
                     {cycle.saleCents === undefined
                       ? '—'
                       : rm(cycle.saleCents / 100)}
                   </Table.Cell>
                   <Table.Cell>
-                    {cycle.endingCents === undefined ? (
-                      'Pending'
+                    {cycle.error ? (
+                      <Badge size="2xsmall" color="red" title={cycle.error}>
+                        Failed
+                      </Badge>
+                    ) : cycle.skipped ? (
+                      <Badge
+                        size="2xsmall"
+                        color="orange"
+                        title={cycle.skipped}
+                      >
+                        Skipped: low balance
+                      </Badge>
+                    ) : !cycle.finishedAt ? (
+                      <Badge size="2xsmall" color="blue">
+                        In progress
+                      </Badge>
+                    ) : settledCycle(cycle) ? (
+                      <Badge size="2xsmall" color="green">
+                        Balanced
+                      </Badge>
                     ) : (
-                      <>
-                        <Text size="small">
-                          {rm(cycle.startingCents! / 100)} →{' '}
-                          {rm(cycle.endingCents / 100)} · Expected{' '}
-                          {rm(cycle.expectedCents! / 100)}
-                        </Text>
-                        <Text size="small">
-                          Total delta {rm(cycle.differenceCents! / 100)} · Bonus
-                          delta {rm(cycle.bonusDifferenceCents! / 100)}
-                        </Text>
-                      </>
+                      <Badge
+                        size="2xsmall"
+                        color="orange"
+                        title={`Total off by ${rm((cycle.differenceCents ?? 0) / 100)}, bonus off by ${rm((cycle.bonusDifferenceCents ?? 0) / 100)}`}
+                      >
+                        Balance mismatch
+                      </Badge>
                     )}
-                  </Table.Cell>
-                  <Table.Cell>
-                    {cycle.error ??
-                      (!cycle.finishedAt
-                        ? (activities.get(cycle.customerId)?.label ?? 'Pending')
-                        : cycle.differenceCents === 0 &&
-                            cycle.bonusDifferenceCents === 0
-                          ? 'Settled'
-                          : 'Review balance mismatch')}
                   </Table.Cell>
                 </Table.Row>
               ))}
@@ -575,9 +981,76 @@ export function LivePanel() {
           </Table>
         </div>
         {!cycles.length && (
-          <Text className="px-6 py-6 text-ui-fg-subtle">
-            No live run has been started.
+          <Text className="text-ui-fg-subtle px-6 py-6">
+            No packs opened in this run yet.
           </Text>
+        )}
+      </Container>
+
+      <Container className="p-0">
+        <div className="px-6 py-4">
+          <Heading level="h2">Run history</Heading>
+          <Text size="small" className="text-ui-fg-subtle">
+            Every run, newest first. A run moves here when the next one starts.
+          </Text>
+        </div>
+        <div className="overflow-x-auto">
+          <Table>
+            <Table.Header>
+              <Table.Row>
+                <Table.HeaderCell>Started</Table.HeaderCell>
+                <Table.HeaderCell>Result</Table.HeaderCell>
+                <Table.HeaderCell>Packs</Table.HeaderCell>
+                <Table.HeaderCell>Spent → sold back</Table.HeaderCell>
+                <Table.HeaderCell>Setup</Table.HeaderCell>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              {runs.map((row) => (
+                <Table.Row key={row.runId}>
+                  <Table.Cell className="whitespace-nowrap">
+                    {row.startedAt
+                      ? new Date(row.startedAt).toLocaleString()
+                      : '—'}
+                    {row.endedAt && (
+                      <Text size="xsmall" className="text-ui-fg-muted">
+                        ended {ago(row.endedAt)}
+                      </Text>
+                    )}
+                  </Table.Cell>
+                  <Table.Cell>
+                    <StatusBadge color={STATUS[row.status].color}>
+                      {STATUS[row.status].label}
+                    </StatusBadge>
+                  </Table.Cell>
+                  <Table.Cell className="tabular-nums">
+                    {row.settled}
+                    {row.failed > 0 && (
+                      <span className="text-ui-fg-error">
+                        {' '}
+                        · {row.failed} failed
+                      </span>
+                    )}
+                    <Text size="xsmall" className="text-ui-fg-muted">
+                      {row.accounts} accounts
+                    </Text>
+                  </Table.Cell>
+                  <Table.Cell className="whitespace-nowrap tabular-nums">
+                    {rm(row.spentCents / 100)} → {rm(row.soldCents / 100)}
+                  </Table.Cell>
+                  <Table.Cell>
+                    {describe(row)}
+                    <Text size="xsmall" className="text-ui-fg-muted">
+                      {TIMING[row.timingMode]}
+                    </Text>
+                  </Table.Cell>
+                </Table.Row>
+              ))}
+            </Table.Body>
+          </Table>
+        </div>
+        {!runs.length && (
+          <Text className="text-ui-fg-subtle px-6 py-6">No runs yet.</Text>
         )}
       </Container>
     </>

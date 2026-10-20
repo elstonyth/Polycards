@@ -1,7 +1,8 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import { automationDelayMs } from './automation-config';
 import {
-  createHumanizedState,
+  createHumanizedStates,
+  rememberHumanizedAssignments,
   planHumanized,
   recordHumanizedCycle,
 } from './automation-humanized';
@@ -16,6 +17,9 @@ import type {
   LiveConfig,
   LiveCycle,
   LiveCycleAmounts,
+  LivePackWeight,
+  LiveRunSummary,
+  LiveSchedule,
   LiveState,
 } from './automation-live-types';
 
@@ -37,6 +41,82 @@ export function createLiveState(): LiveState {
 }
 
 const timingRandom = () => randomInt(1_000_000) / 1_000_000;
+const pace = (state: LiveState) =>
+  state.config?.humanizedPace ?? DEFAULT_LIVE_TIMING.humanizedPace;
+
+/**
+ * Humanized speed is a clock multiplier: the simulated players live on a
+ * virtual clock that runs `pace` times faster than real time from the run's
+ * start, so sessions, breaks, sleep and days all shrink together (5× = one
+ * player day in about 4.8 real hours). Pace 1 is the real clock.
+ */
+function playerClock(state: LiveState, now: number) {
+  const speed = pace(state);
+  const start = (state.startedAt ??= now);
+  return {
+    now: start + (now - start) * speed,
+    /** A virtual instant or duration converted back to real time. */
+    toRealAt: (virtualAt: number) => start + (virtualAt - start) / speed,
+    toRealMs: (virtualMs: number) => Math.ceil(virtualMs / speed),
+  };
+}
+
+/**
+ * One draw's pack from a weighted mix (weights in basis points). Packs the
+ * account cannot afford drop out and the rest keep their relative weights, so
+ * a rare expensive pick never fails the whole run on a low balance. With none
+ * affordable the full mix is used and the open fails as a single-pack run does.
+ */
+export function pickLivePack(
+  mix: LivePackWeight[],
+  pricesCents: Record<string, number>,
+  balanceCents: number,
+  random: () => number = timingRandom,
+): string {
+  const affordable = mix.filter(
+    (row) => (pricesCents[row.packSlug] ?? Infinity) <= balanceCents,
+  );
+  const pool = affordable.length ? affordable : mix;
+  let roll = random() * pool.reduce((sum, row) => sum + row.weightBp, 0);
+  for (const row of pool) {
+    roll -= row.weightBp;
+    if (roll < 0) return row.packSlug;
+  }
+  return pool[pool.length - 1].packSlug;
+}
+
+const SLUG = /^[a-zA-Z0-9_-]{1,160}$/;
+
+/** Weights are whole basis points summing to exactly 100% (10000). Zero rows drop. */
+export function validateLivePackMix(value: unknown): LivePackWeight[] {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > 30 ||
+    value.some(
+      (row) =>
+        !row ||
+        typeof row !== 'object' ||
+        Array.isArray(row) ||
+        Object.keys(row).some(
+          (key) => !['packSlug', 'weightBp'].includes(key),
+        ) ||
+        typeof row.packSlug !== 'string' ||
+        !SLUG.test(row.packSlug) ||
+        !Number.isInteger(row.weightBp) ||
+        row.weightBp < 0 ||
+        row.weightBp > 10000,
+    ) ||
+    new Set(value.map((row) => row.packSlug)).size !== value.length ||
+    value.reduce((sum, row) => sum + row.weightBp, 0) !== 10000
+  )
+    throw new Error(
+      'Pack rates need distinct paid packs with rates in steps of 0.01% that add up to exactly 100%.',
+    );
+  return value
+    .filter((row) => row.weightBp > 0)
+    .map((row) => ({ packSlug: row.packSlug, weightBp: row.weightBp }));
+}
 
 function remainingCustomers(state: LiveState): string[] {
   const { config } = state;
@@ -48,9 +128,39 @@ function remainingCustomers(state: LiveState): string[] {
       !state.rankGoals?.some(
         (goal) => goal.target.profileId === id && goal.done,
       ) &&
+      // An account that ran out of balance is finished for this run.
+      !state.cycles.some((cycle) => cycle.customerId === id && cycle.skipped) &&
       state.cycles.filter((cycle) => cycle.customerId === id).length <
         config.maxCyclesPerAccount,
   );
+}
+
+/** A finished-or-current run in one row, for the run history list. */
+export function summarizeLiveRun(state: LiveState): LiveRunSummary | null {
+  if (!state.runId || !state.config) return null;
+  const settled = state.cycles.filter(
+    (cycle) =>
+      !cycle.error &&
+      cycle.differenceCents === 0 &&
+      cycle.bonusDifferenceCents === 0,
+  );
+  return {
+    runId: state.runId,
+    startedAt: state.startedAt ?? state.cycles[0]?.startedAt ?? null,
+    endedAt: state.cycles.at(-1)?.finishedAt ?? null,
+    status: state.status,
+    draws: state.cycles.filter((cycle) => !cycle.skipped).length,
+    settled: settled.length,
+    failed:
+      state.cycles.filter((cycle) => !cycle.skipped).length - settled.length,
+    spentCents: state.spentCents,
+    soldCents: settled.reduce((sum, cycle) => sum + (cycle.saleCents ?? 0), 0),
+    accounts: new Set(state.cycles.map((cycle) => cycle.customerId)).size,
+    packSlugs: state.config.packMix?.map((row) => row.packSlug) ?? [
+      state.config.packSlug,
+    ],
+    timingMode: state.config.timingMode ?? DEFAULT_LIVE_TIMING.timingMode,
+  };
 }
 
 export function claimLiveCycle(
@@ -102,32 +212,64 @@ export function claimLiveCycle(
     return null;
   }
   if (state.config.timingMode === 'humanized') {
-    state.schedules = remaining.map((id) => {
+    for (const row of state.schedules ?? [])
+      row.humanized.regionChoice ??=
+        state.config.humanizedRegion ?? DEFAULT_LIVE_TIMING.humanizedRegion;
+    state.humanizedAssignments = rememberHumanizedAssignments(
+      state.humanizedAssignments ?? [],
+      state.schedules?.map((row) => row.humanized) ?? [],
+    );
+    const assignments = createHumanizedStates(
+      state.config.customerIds,
+      state.config.humanizedRegion ?? DEFAULT_LIVE_TIMING.humanizedRegion,
+      state.humanizedAssignments,
+    );
+    const clock = playerClock(state, now);
+    state.schedules = state.config.customerIds.map((id) => {
       const previous = state.schedules?.find((row) => row.customerId === id);
-      if (previous && previous.nextRunAt > now) return previous;
+      if (previous && (previous.nextRunAt > now || !remaining.includes(id)))
+        return previous;
       const humanized = previous
         ? { ...previous.humanized }
-        : createHumanizedState(
-            id,
-            state.config!.humanizedRegion ??
-              DEFAULT_LIVE_TIMING.humanizedRegion,
-          );
-      const plan = planHumanized(humanized, now, random);
+        : assignments.find((row) => row.profileId === id)!;
+      if (!humanized.timerKind) humanized.waitReason = previous?.waitReason;
+      const plan = planHumanized(humanized, clock.now, random);
       return {
         customerId: id,
         humanized,
-        nextRunAt: now + plan.delayMs,
+        // A due draw keeps its due time, so the longest-waiting account goes first.
+        nextRunAt: plan.ready
+          ? Math.min(now, clock.toRealAt(humanized.nextDrawAt ?? clock.now))
+          : now + clock.toRealMs(plan.delayMs),
         waitReason: plan.reason,
       };
     });
+    state.humanizedAssignments = rememberHumanizedAssignments(
+      state.humanizedAssignments,
+      assignments,
+    );
     state.nextRunAt = Math.min(
       ...state.schedules
-        .filter((row) => eligible.includes(row.customerId))
+        .filter(
+          (row) =>
+            remaining.includes(row.customerId) &&
+            eligible.includes(row.customerId),
+        )
         .map((row) => row.nextRunAt),
     );
-    const ready = state.schedules.find(
-      (row) => row.nextRunAt <= now && eligible.includes(row.customerId),
-    );
+    // Draws run one at a time, so serve the longest-waiting account first;
+    // list order would starve the accounts at the end of a busy queue.
+    const ready = state.schedules
+      .filter(
+        (row) =>
+          remaining.includes(row.customerId) &&
+          row.nextRunAt <= now &&
+          eligible.includes(row.customerId),
+      )
+      .reduce<LiveSchedule | undefined>(
+        (best, row) => (best && best.nextRunAt <= row.nextRunAt ? best : row),
+        undefined,
+      );
     if (ranked)
       state.nextRunAt = Math.min(
         state.nextRunAt,
@@ -161,10 +303,13 @@ export function completeLiveCycle(
   state.cycles.push({ ...cycle, finishedAt: now });
   state.spentCents += cycle.costCents ?? 0;
   state.pending = null;
+  // A skip happens before any money moves (see tickLive), so it ends only
+  // that account's draws; anything else unexpected stops the run for review.
   if (
-    cycle.error ||
-    cycle.differenceCents !== 0 ||
-    cycle.bonusDifferenceCents !== 0
+    !cycle.skipped &&
+    (cycle.error ||
+      cycle.differenceCents !== 0 ||
+      cycle.bonusDifferenceCents !== 0)
   ) {
     state.status = 'failed';
     state.error =
@@ -187,9 +332,13 @@ export function completeLiveCycle(
       (row) => row.customerId === cycle.customerId,
     );
     if (schedule) {
-      recordHumanizedCycle(schedule.humanized, now, random);
-      const plan = planHumanized(schedule.humanized, now, random);
-      schedule.nextRunAt = now + plan.delayMs;
+      const clock = playerClock(state, now);
+      recordHumanizedCycle(schedule.humanized, clock.now, random, {
+        spend: cycle.costCents ?? 0,
+        value: cycle.saleCents ?? 0,
+      });
+      const plan = planHumanized(schedule.humanized, clock.now, random);
+      schedule.nextRunAt = now + clock.toRealMs(plan.delayMs);
       schedule.waitReason = plan.reason;
     }
   }
@@ -258,11 +407,19 @@ export function validateLiveConfig(
           'randomMinSeconds',
           'randomMaxSeconds',
           'humanizedRegion',
+          'humanizedPace',
+          'packMix',
           'rankTargets',
         ].includes(key),
     ) ||
     typeof input.packSlug !== 'string' ||
-    !/^[a-zA-Z0-9_-]{1,160}$/.test(input.packSlug) ||
+    !(
+      SLUG.test(input.packSlug) ||
+      (input.packMix !== undefined && input.packSlug === '')
+    ) ||
+    !Number.isInteger(input.humanizedPace) ||
+    Number(input.humanizedPace) < 1 ||
+    Number(input.humanizedPace) > 24 ||
     !Array.isArray(input.customerIds) ||
     input.customerIds.length < 1 ||
     input.customerIds.length > 80 ||
@@ -292,10 +449,13 @@ export function validateLiveConfig(
     Number(input.randomMinSeconds) > Number(input.randomMaxSeconds)
   )
     throw new Error(
-      'Choose a paid pack, 1–80 monitored customers, Fixed/Random/Humanized timing, 2–86400 second intervals with minimum no greater than maximum, a supported region and 1–10 cycles per account.',
+      'Choose a paid pack, 1–80 monitored customers, Fixed/Random/Humanized timing, 2–86400 second intervals with minimum no greater than maximum, a supported region, Humanized speed 1–24× and 1–10 cycles per account.',
     );
   return {
     packSlug: input.packSlug,
+    ...(input.packMix === undefined
+      ? {}
+      : { packMix: validateLivePackMix(input.packMix) }),
     customerIds: [...input.customerIds],
     intervalSeconds: input.intervalSeconds,
     maxCyclesPerAccount: input.maxCyclesPerAccount,
@@ -303,6 +463,7 @@ export function validateLiveConfig(
     randomMinSeconds: input.randomMinSeconds,
     randomMaxSeconds: input.randomMaxSeconds,
     humanizedRegion: input.humanizedRegion,
+    humanizedPace: input.humanizedPace,
     ...(input.rankTargets === undefined
       ? {}
       : {

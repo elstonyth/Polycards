@@ -14,6 +14,8 @@ import AdminActionAudit from '../models/admin-action-audit';
 import Pull from '../models/pull';
 import Card from '../models/card';
 import Pack from '../models/pack';
+import { PixelPokemon } from '../models/pixel-pokemon';
+import { asPixelPokemonCrud } from '../pixel-pokemon-service';
 import PackOdds from '../models/pack-odds';
 import LedgerEntry from '../models/ledger-entry';
 import LedgerSequence from '../models/ledger-sequence';
@@ -38,6 +40,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     Card,
     Pack,
     PackOdds,
+    PixelPokemon,
     LedgerEntry,
     LedgerSequence,
   ],
@@ -101,7 +104,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect(wallet.withdrawable).toBe(0);
       // The finance reports count the bonus prize whole, not its RM 0 normal part.
       const totals = await service.ledgerReasonTotals();
-      expect(totals.find((r) => r.reason === 'reward_credit')?.amount).toBe(2.5);
+      expect(totals.find((r) => r.reason === 'reward_credit')?.amount).toBe(
+        2.5,
+      );
       // A reward_credit debit is floored against the BONUS balance it spends.
       await expect(
         service.mutateCreditAtomic({
@@ -852,6 +857,218 @@ moduleIntegrationTestRunner<PacksModuleService>({
       const next = await service.taskHubFor({ customerId: cus, now: tomorrow });
       expect(next.tasks.find((t) => t.id === ripDaily)!.progress.current).toBe(
         0,
+      );
+    });
+
+    // The goal side of /task shows WHAT to rip or pull ("RIP [Bronze Pack]
+    // ×10"), so a narrowed goal carries its pack's / Pokémon's name and art.
+    it('a pack- or Pokémon-scoped goal carries its name and picture (2026-10-19)', async () => {
+      const [, , , gone] = await service.createPacks([
+        {
+          slug: 'goal-pack',
+          title: 'Goal Pack',
+          category: 'standard',
+          price: 30,
+          image: '/goal.webp',
+          display_image: '/images/polycards/bronze-factory.webp',
+          status: 'active',
+        },
+        {
+          // No product shot, only the pack page's factory hero.
+          slug: 'hero-only',
+          title: 'Hero Only',
+          category: 'standard',
+          price: 30,
+          image: '',
+          display_image: '/images/polycards/celebration-factory.webp',
+          status: 'active',
+        },
+        {
+          // Not on sale yet: its name and art must not reach customers.
+          slug: 'draft-pack',
+          title: 'Secret Pack',
+          category: 'standard',
+          price: 30,
+          image: '/secret.webp',
+          status: 'draft',
+        },
+        {
+          slug: 'gone-pack',
+          title: 'Gone Pack',
+          category: 'standard',
+          price: 30,
+          image: '/gone.webp',
+          status: 'active',
+        },
+      ]);
+      await asPixelPokemonCrud(service).createPixelPokemon([
+        {
+          id: 'px_goal',
+          name: 'Pikachu',
+          types: [] as unknown as Record<string, unknown>,
+          image_url: 'https://cdn.test/pika.png',
+        },
+      ]);
+      const save = async (
+        requirement: Record<string, unknown>,
+        reward: Record<string, unknown> = { type: 'credit', amount_myr: 1 },
+      ) =>
+        (
+          await service.saveTaskDefinition({
+            kind: 'weekly',
+            title: `goal ${String(requirement.type)}`,
+            requirement,
+            reward,
+            active: true,
+            sort: 0,
+            adminId: 'admin_1',
+            reason: 'seed',
+          })
+        ).id;
+      const rip = await save({
+        type: 'rip_count',
+        count: 10,
+        pack_id: 'goal-pack',
+      });
+      const pull = await save({
+        type: 'vault_pixel_count',
+        count: 10,
+        pixel_pokemon_id: 'px_goal',
+      });
+      const any = await save({ type: 'rip_count', count: 5 });
+      const heroOnly = await save(
+        { type: 'rip_count', count: 1, pack_id: 'hero-only' },
+        { type: 'pack', pack_id: 'hero-only' },
+      );
+      const draft = await save({
+        type: 'rip_count',
+        count: 1,
+        pack_id: 'draft-pack',
+      });
+      const deleted = await save({
+        type: 'rip_count',
+        count: 1,
+        pack_id: 'gone-pack',
+      });
+      await service.softDeletePacks([gone.id]);
+
+      const hub = await service.taskHubFor({ customerId: 'cus_goal_art' });
+      const req = (id: string) =>
+        hub.tasks.find((t) => t.id === id)!.requirement;
+      expect(req(rip)).toEqual({
+        type: 'rip_count',
+        count: 10,
+        pack_id: 'goal-pack',
+        pack_title: 'Goal Pack',
+        pack_image: '/goal.webp',
+      });
+      expect(req(pull)).toEqual({
+        type: 'vault_pixel_count',
+        count: 10,
+        pixel_pokemon_id: 'px_goal',
+        pokemon_name: 'Pikachu',
+        pokemon_image: 'https://cdn.test/pika.png',
+      });
+      // A tile never shows the wide factory hero, so no shot = no picture —
+      // on the goal and on the prize alike.
+      expect(req(heroOnly)).toMatchObject({ pack_image: null });
+      expect(hub.tasks.find((t) => t.id === heroOnly)!.reward).toMatchObject({
+        pack_image: null,
+      });
+      expect(req(draft)).toMatchObject({ pack_title: null, pack_image: null });
+      expect(req(deleted)).toMatchObject({
+        pack_title: null,
+        pack_image: null,
+      });
+      // Not narrowed: nothing to picture, sent as stored.
+      expect(req(any)).toEqual({
+        type: 'rip_count',
+        count: 5,
+        pack_id: null,
+      });
+    });
+
+    it('top-up goals count settled top-ups in their window (2026-10-19)', async () => {
+      const cus = 'cus_topup';
+      const now = new Date('2026-10-07T04:00:00Z'); // Wed 12:00 MYT
+      const at = async (row: { id: string }, when: string) => {
+        // created_at is a framework column the update type does not expose
+        // (same idiom as referral-close.integration.spec.ts).
+        await service.updateCreditTransactions({
+          selector: { id: row.id },
+          data: { created_at: new Date(when) } as never,
+        });
+      };
+      const [today, monday, lastWeek, deleted, reversal, adjustment] =
+        await service.createCreditTransactions([
+          { customer_id: cus, amount: 60, reason: 'topup' },
+          { customer_id: cus, amount: 30.5, reason: 'topup' },
+          { customer_id: cus, amount: 500, reason: 'topup' },
+          { customer_id: cus, amount: 1000, reason: 'topup' },
+          { customer_id: cus, amount: -20, reason: 'topup' },
+          { customer_id: cus, amount: 999, reason: 'adjustment' },
+        ]);
+      await at(today, '2026-10-07T03:00:00Z');
+      await at(monday, '2026-10-05T02:00:00Z'); // Mon 10:00 MYT
+      await at(lastWeek, '2026-10-03T02:00:00Z');
+      await at(deleted, '2026-10-07T03:00:00Z');
+      await at(reversal, '2026-10-07T03:00:00Z');
+      await at(adjustment, '2026-10-07T03:00:00Z');
+      await service.softDeleteCreditTransactions([deleted.id]);
+
+      const save = async (
+        kind: 'daily' | 'weekly' | 'achievement',
+        amount_myr: number,
+      ) =>
+        (
+          await service.saveTaskDefinition({
+            kind,
+            title: `Top up RM ${amount_myr}`,
+            requirement: { type: 'topup_myr', amount_myr },
+            reward: { type: 'credit', amount_myr: 1 },
+            active: true,
+            sort: 0,
+            adminId: 'admin_1',
+            reason: 'seed',
+          })
+        ).id;
+      const daily = await save('daily', 50);
+      const weekly = await save('weekly', 100);
+      const total = await save('achievement', 600);
+
+      const hub = await service.taskHubFor({ customerId: cus, now });
+      const progress = (id: string) =>
+        hub.tasks.find((t) => t.id === id)!.progress;
+      expect(progress(daily)).toEqual({
+        current: 50,
+        target: 50,
+        completed: true,
+      });
+      // 60 today + 30.5 Monday; last week, the deleted row, the reversal and
+      // the admin adjustment all stay out.
+      expect(progress(weekly)).toEqual({
+        current: 90.5,
+        target: 100,
+        completed: false,
+      });
+      expect(progress(total)).toEqual({
+        current: 590.5,
+        target: 600,
+        completed: false,
+      });
+      expect(
+        await service.claimTask({ customerId: cus, taskId: weekly, now }),
+      ).toEqual({ claimed: false, reason: 'not_completed' });
+      expect(
+        await service.claimTask({ customerId: cus, taskId: daily, now }),
+      ).toMatchObject({ claimed: true });
+
+      // Next Monday the week starts empty; the lifetime total does not.
+      const nextWeek = new Date('2026-10-12T04:00:00Z');
+      const next = await service.taskHubFor({ customerId: cus, now: nextWeek });
+      expect(next.tasks.find((t) => t.id === weekly)!.progress.current).toBe(0);
+      expect(next.tasks.find((t) => t.id === total)!.progress.current).toBe(
+        590.5,
       );
     });
   },

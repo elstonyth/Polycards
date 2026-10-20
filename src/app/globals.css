@@ -818,6 +818,31 @@
   }
 }
 
+/* Task ticket (/task, 2026-10-19 — DESIGN.md "Challenge ticket"). A task row
+   is a ticket: the challenge on the body, the prize on a tear-off stub
+   var(--stub) wide at the right. This layer is the ticket's paper only — two
+   tones split at the stub line, and a notch punched top and bottom where the
+   perforation runs. Each mask half carries one notch, so no mask-composite.
+   It sits behind the row's content, so the prize's glow is never clipped. */
+@layer utilities {
+  .ticket-cut {
+    background: linear-gradient(
+      to left,
+      var(--ticket-stub) var(--stub),
+      var(--ticket-body) var(--stub)
+    );
+    mask:
+      radial-gradient(circle 7px at calc(100% - var(--stub)) 0, #0000 97%, #000)
+        top / 100% 51% no-repeat,
+      radial-gradient(
+          circle 7px at calc(100% - var(--stub)) 100%,
+          #0000 97%,
+          #000
+        )
+        bottom / 100% 51% no-repeat;
+  }
+}
+
 /* iOS Safari zooms the whole page when a focused field renders under 16px, and
    it never zooms back out. Every form shape in the app is text-sm (14px), so
    pin the floor once here rather than in eight copies of the same input class

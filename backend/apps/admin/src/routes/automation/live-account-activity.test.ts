@@ -150,6 +150,27 @@ describe('Live account activity', () => {
     },
   );
 
+  it.each(['OFFLINE_END', 'SESSION_BREAK_END', 'SHORT_BREAK_END'] as const)(
+    'shows persisted desktop %s timers as resting',
+    (timerKind) => {
+      const state = snapshot();
+      state.schedules![0].humanized.timerKind = timerKind;
+      state.schedules![0].waitReason = 'Short interruption / break';
+      expect(getLiveAccountActivity(state, 'a', true, now).label).toBe(
+        'Resting',
+      );
+    },
+  );
+
+  it('shows desktop thinking state explicitly', () => {
+    const state = snapshot();
+    state.schedules![0].humanized.timerKind = 'DRAW';
+    state.schedules![0].humanized.behaviorState = 'THINKING';
+    expect(getLiveAccountActivity(state, 'a', true, now).label).toBe(
+      'Thinking',
+    );
+  });
+
   it('shows overdue checks as pending instead of continuing to claim account is sleeping', () => {
     const state = snapshot();
     state.schedules![0].nextRunAt = now;

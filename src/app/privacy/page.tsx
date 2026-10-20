@@ -29,6 +29,8 @@ export const metadata: Metadata = {
 // judged from the visitor's IP (src/lib/visitor-country.ts). The MaxMind
 // GeoLite2 credit is required by that data's licence.
 //
+// Updated 2026-10-20: Singapore visitors may request codes too.
+//
 // Updated 2026-10-06: every account now gives its real name (spec
 // docs/superpowers/specs/2026-10-06-real-name-and-phone-lock-design.md), used
 // only by staff for verification (the copy never names the service). A
@@ -37,7 +39,7 @@ export const metadata: Metadata = {
 const SECTIONS: { title: string; body: string }[] = [
   {
     title: 'What we collect',
-    body: 'Your account details (email, mobile phone number, real name, display handle), your pack, vault, and transaction history, and the technical basics every web service receives — IP address and browser information. A mobile number is required to open and keep an account: we verify it by SMS at signup or when you add it, and again if you reset your password. Once verified, your number can only be changed by contacting support. Your real name must be your full name as on your IC; we use it only for verification — to confirm that prize winners and welcome-pack claims belong to real, separate people — and it is never shown publicly. To correct it, contact support. If you sign in with Google, we receive your name and email from Google. To stop abuse, verification codes can only be requested from Malaysia, which we judge from your IP address. This product includes GeoLite2 data created by MaxMind, available from https://www.maxmind.com.',
+    body: 'Your account details (email, mobile phone number, real name, display handle), your pack, vault, and transaction history, and the technical basics every web service receives — IP address and browser information. A mobile number is required to open and keep an account: we verify it by SMS at signup or when you add it, and again if you reset your password. Once verified, your number can only be changed by contacting support. Your real name must be your full name as on your IC; we use it only for verification — to confirm that prize winners and welcome-pack claims belong to real, separate people — and it is never shown publicly. To correct it, contact support. If you sign in with Google, we receive your name and email from Google. To stop abuse, verification codes can only be requested from Malaysia or Singapore, which we judge from your IP address. This product includes GeoLite2 data created by MaxMind, available from https://www.maxmind.com.',
   },
   {
     title: 'Cookies',

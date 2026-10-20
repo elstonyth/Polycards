@@ -134,11 +134,11 @@ export function SandboxPanel() {
       <Container className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-2">
-            <Heading level="h2">Test workspace</Heading>
+            <Heading level="h2">Practice runs</Heading>
             <Text size="small" className="max-w-3xl text-ui-fg-subtle">
-              Synthetic profiles, virtual credits and fixture cards. These API
-              tests cannot spend customer balances, award real cards or affect
-              the public leaderboard.
+              Pretend accounts, pretend credit and sample cards. Try settings
+              here first: nothing touches real balances, real cards or the
+              public leaderboard.
             </Text>
           </div>
           <StatusBadge
@@ -154,8 +154,8 @@ export function SandboxPanel() {
           </StatusBadge>
         </div>
         <Text size="small">
-          {profiles.length} / 80 test profiles · One cycle at a time · Runs
-          continue when the browser is closed.
+          {profiles.length} / 80 pretend accounts · one pack at a time · keeps
+          going when you close this page.
         </Text>
         {profiles.length < 80 && (
           <div className="flex flex-wrap items-end gap-3">

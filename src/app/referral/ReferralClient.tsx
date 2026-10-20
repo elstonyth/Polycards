@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useSyncExternalStore } from 'react';
 import { Check, Copy, Share2 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -15,7 +16,8 @@ import {
   TabBanner,
   UnavailablePanel,
 } from '@/components/task-ui';
-import type { ReferralSummary } from '@/lib/data/schemas';
+import { mytDate } from '@/lib/format';
+import type { ReferralFriend, ReferralSummary } from '@/lib/data/schemas';
 
 // The absolute link needs the page's real origin, which only exists in the
 // browser. useSyncExternalStore hands SSR/hydration the empty server snapshot
@@ -156,6 +158,76 @@ function SharePanel({ code }: { code: string }) {
   );
 }
 
+// Who the player invited, newest first, and what each earned them this week.
+// Names follow the leaderboard (public display name, linked to the profile
+// when it has a handle) — the backend never sends a friend's email, phone, id
+// or spend. Last on the page so a long list doesn't push the payouts out of
+// sight.
+function FriendsPanel({
+  friends,
+  total,
+}: {
+  friends: ReferralFriend[];
+  total: number;
+}) {
+  return (
+    <Panel>
+      <p className="mb-1 text-[11px] tracking-wide text-white/40 uppercase">
+        Your friends
+      </p>
+      {friends.length === 0 ? (
+        <p className="py-3 text-center text-sm text-neutral-400">
+          No friends yet — share your code and they&rsquo;ll show up here.
+        </p>
+      ) : (
+        <ul className="divide-y divide-white/5">
+          {friends.map((f, i) => (
+            <li
+              key={`${f.joined_at}-${i}`}
+              className="flex items-center justify-between gap-3 py-2"
+            >
+              <div className="min-w-0 flex-1">
+                {f.handle ? (
+                  <Link
+                    href={`/profile/${f.handle}`}
+                    className="-my-1 block min-h-11 truncate py-3 text-sm font-semibold text-white hover:underline"
+                  >
+                    {f.name}
+                  </Link>
+                ) : (
+                  <span className="block truncate py-2 text-sm font-semibold text-white">
+                    {f.name}
+                  </span>
+                )}
+                <p className="text-xs text-neutral-400">
+                  Joined {mytDate(f.joined_at)}
+                </p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p
+                  className={
+                    f.week_earned_cents > 0
+                      ? 'text-sm text-white'
+                      : 'text-sm text-neutral-400'
+                  }
+                >
+                  {fromCents(f.week_earned_cents)}
+                </p>
+                <p className="text-xs text-neutral-400">earned you this week</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {friends.length < total && (
+        <p className="mt-2 text-xs text-neutral-400">
+          Showing your newest {friends.length} of {total} friends.
+        </p>
+      )}
+    </Panel>
+  );
+}
+
 function ReferralBody({ data }: { data: ReferralSummary }) {
   return (
     <div className="space-y-4">
@@ -237,6 +309,12 @@ function ReferralBody({ data }: { data: ReferralSummary }) {
           empty="No payouts yet — share your code to start earning."
         />
       </Panel>
+
+      {/* Absent on a backend that predates the list: hide it rather than
+          tell a player with referrals they have none. */}
+      {data.friends && (
+        <FriendsPanel friends={data.friends} total={data.downline_count} />
+      )}
     </div>
   );
 }
