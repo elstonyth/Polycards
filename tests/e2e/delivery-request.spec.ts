@@ -64,7 +64,7 @@ test('customer requests delivery of a vaulted card via the UI', async ({
     .locator('select[aria-label="State"]')
     .selectOption('W.P. Kuala Lumpur');
   await modal.locator('input[aria-label="Postal code"]').fill('50000');
-  await modal.locator('input[aria-label="Country code"]').fill('MY');
+  await modal.locator('select[aria-label="Country"]').selectOption('MY');
   await modal.getByRole('button', { name: /save address/i }).click();
 
   // saveAddress() auto-selects the new address and closes the add-form, which

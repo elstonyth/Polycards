@@ -145,7 +145,7 @@ const fillAddress = async (city, postal, country) => {
   await modal.locator('input[aria-label="Address"]').fill(`${stamp} Test Rd`);
   await modal.locator('input[aria-label="City"]').fill(city);
   await modal.locator('input[aria-label="Postal code"]').fill(postal);
-  await modal.locator('input[aria-label="Country code"]').fill(country);
+  await modal.locator('select[aria-label="Country"]').selectOption(country);
   await modal.getByRole('button', { name: /save address/i }).click();
   await page.waitForTimeout(1500);
 };

@@ -48,6 +48,7 @@ import {
   DELIVERY_LOGIN,
 } from '@/lib/delivery-errors';
 import { normalizePhone } from '@/lib/profile-validation';
+import { isShippableCountry } from '@/lib/delivery-fee';
 import { isPhoneGateError } from '@/lib/phone-gate';
 import { toCardView, type CardView } from '@/lib/card-view';
 
@@ -385,7 +386,7 @@ const addressBody = (input: AddAddressInput) => ({
   city: input.city,
   province: input.province || null,
   postal_code: input.postalCode,
-  country_code: input.countryCode,
+  country_code: input.countryCode.trim().toUpperCase(),
   phone: input.phone || null,
 });
 
@@ -407,6 +408,13 @@ const missingRequired = (input: AddAddressInput): boolean =>
   // Singapore has no states (the forms store "Singapore"), and only MY and
   // SG ship at all — workflows/steps/request-delivery.ts refuses the rest.
   (input.countryCode?.trim().toUpperCase() === 'MY' && !input.province?.trim());
+
+// Only MY and SG ship, so an address in any other "country" is dead on arrival.
+// The forms took free text until 2026-10-20 and customers typed the phone code
+// ("60"), "MALAYSIA" or an area code: 74 Malaysian addresses saved that way and
+// the delivery modal refused every one. Shared by add and edit like the gate
+// above.
+const COUNTRY_ERROR = 'Choose Malaysia or Singapore as the country.';
 
 // The address-book phone is the actual SOURCE of a delivery order's
 // ship_phone — the backend's profile-phone fallback (request-delivery.ts)
@@ -440,6 +448,9 @@ export async function addAddress(
     return { ok: false, error: 'Please log in first.', needsAuth: true };
   if (missingRequired(input)) {
     return { ok: false, error: 'Fill in the required address fields.' };
+  }
+  if (!isShippableCountry(input.countryCode)) {
+    return { ok: false, error: COUNTRY_ERROR };
   }
   const phoneCheck = validateAddressPhone(input.phone);
   if (!phoneCheck.ok) return phoneCheck;
@@ -481,6 +492,9 @@ export async function updateAddress(
     return { ok: false, error: 'Please log in first.', needsAuth: true };
   if (missingRequired(input)) {
     return { ok: false, error: 'Fill in the required address fields.' };
+  }
+  if (!isShippableCountry(input.countryCode)) {
+    return { ok: false, error: COUNTRY_ERROR };
   }
   const phoneCheck = validateAddressPhone(input.phone);
   if (!phoneCheck.ok) return phoneCheck;

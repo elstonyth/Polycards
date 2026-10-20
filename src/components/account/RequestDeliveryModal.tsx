@@ -16,6 +16,7 @@ import { stateAfterCountryChange, statesFor } from '@/lib/my-states';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { Pill } from '@/components/ui/pill';
 import { INPUT_CLASS } from '@/components/account/ui';
+import { CountrySelect } from '@/components/account/CountrySelect';
 import {
   computeDeliveryFee,
   deliveryZone,
@@ -101,7 +102,7 @@ export default function RequestDeliveryModal({
     city: '',
     province: '',
     postalCode: '',
-    countryCode: '',
+    countryCode: 'MY',
   });
   const panelRef = useRef<HTMLDivElement>(null);
   // The sheet stays mounted while closed, so a pending confirmation must not
@@ -446,24 +447,18 @@ export default function RequestDeliveryModal({
             </label>
             <label className="col-span-2 block">
               <span className="mb-1.5 block text-[12px] font-medium text-white/55">
-                Country code
+                Country
               </span>
-              <input
-                aria-label="Country code"
-                autoComplete="country"
-                placeholder="MY or SG"
-                maxLength={2}
+              <CountrySelect
                 value={form.countryCode}
-                onChange={(e) => {
-                  const countryCode = e.target.value.toUpperCase();
+                onChange={(countryCode) =>
                   // A state from the other country's list is never valid.
                   setForm((f) => ({
                     ...f,
                     countryCode,
                     province: stateAfterCountryChange(countryCode, f.province),
-                  }));
-                }}
-                className={INPUT_CLASS}
+                  }))
+                }
               />
             </label>
             <div className="col-span-2 flex gap-2">
@@ -564,11 +559,37 @@ export default function RequestDeliveryModal({
             </Pill>
           </div>
         )}
-        {!adding && unshippableCountry && (
-          <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
-            We currently ship within Malaysia and Singapore only — choose an
-            address in one of them.
-          </p>
+        {/* Nearly every address that lands here is Malaysian, saved with "60"
+            or "MALAYSIA" as its country back when that was free text, so name
+            the stored value and offer the fix rather than only the rule. */}
+        {!adding && unshippableCountry && selectedAddress && (
+          <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
+            <p>
+              This address has “{country}” as its country, so it can’t ship. We
+              ship within Malaysia and Singapore only — enter it again and pick
+              the country from the list.
+            </p>
+            <Pill
+              onClick={() => {
+                setForm({
+                  firstName: selectedAddress.firstName,
+                  lastName: selectedAddress.lastName,
+                  address1: selectedAddress.line1,
+                  address2: selectedAddress.line2 ?? undefined,
+                  city: selectedAddress.city,
+                  province: selectedAddress.province ?? '',
+                  postalCode: selectedAddress.postalCode,
+                  countryCode: '',
+                  phone: selectedAddress.phone ?? undefined,
+                });
+                setAdding(true);
+                setConfirming(false);
+              }}
+              className="mt-2 px-4"
+            >
+              Fix this address
+            </Pill>
+          </div>
         )}
         {!adding && badPostcode && (
           <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">

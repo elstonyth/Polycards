@@ -198,9 +198,37 @@ describe('RequestDeliveryModal confirm and balance', () => {
       [{ ...ADDRESS, countryCode: 'TH', postalCode: '10110' } as AddressView],
     );
     expect(host.textContent).toContain(
-      'We currently ship within Malaysia and Singapore only',
+      'We ship within Malaysia and Singapore only',
     );
     expect(button('Request delivery')!.disabled).toBe(true);
+  });
+
+  // 2026-10-20: 74 Malaysian addresses were saved with "60" or "MALAYSIA" as
+  // the country back when it was free text. The modal names the bad value and
+  // re-opens the address with everything but the country already filled in.
+  test('offers to re-enter an address saved with a junk country', async () => {
+    await render(
+      [item('pull_a', 'pack', 100)],
+      [{ ...ADDRESS, countryCode: '60' } as AddressView],
+    );
+    expect(host.textContent).toContain('This address has “60” as its country');
+
+    await act(async () => button('Fix this address')!.click());
+
+    const input = (label: string) =>
+      host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!
+        .value;
+    expect(input('Address')).toBe(ADDRESS.line1);
+    expect(input('Postal code')).toBe(ADDRESS.postalCode);
+    const country = host.querySelector<HTMLSelectElement>(
+      'select[aria-label="Country"]',
+    )!;
+    expect(country.value).toBe('');
+    expect([...country.options].map((o) => o.textContent)).toEqual([
+      'Select a country',
+      'Malaysia',
+      'Singapore',
+    ]);
   });
 });
 

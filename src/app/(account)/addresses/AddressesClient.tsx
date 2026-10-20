@@ -13,6 +13,7 @@ import {
 import { addressViewFromInput } from '@/lib/address-view';
 import { openAuth } from '@/components/AuthButton';
 import { INPUT_CLASS } from '@/components/account/ui';
+import { CountrySelect } from '@/components/account/CountrySelect';
 import { PhoneField } from '@/components/PhoneField';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import { cn } from '@/lib/utils';
@@ -26,7 +27,7 @@ const EMPTY_FORM: AddAddressInput = {
   city: '',
   province: '',
   postalCode: '',
-  countryCode: '',
+  countryCode: 'MY',
 };
 
 // Seed the edit form from a saved address. firstName/lastName come off the view
@@ -268,20 +269,7 @@ export function AddressesClient({
         <input
           aria-label={label}
           value={form[key] ?? ''}
-          onChange={(e) =>
-            setForm((f) => {
-              if (key !== 'countryCode') {
-                return { ...f, [key]: e.target.value };
-              }
-              const countryCode = e.target.value.toUpperCase();
-              // A state from the other country's list is never valid.
-              return {
-                ...f,
-                countryCode,
-                province: stateAfterCountryChange(countryCode, f.province),
-              };
-            })
-          }
+          onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
           className={INPUT_CLASS}
           {...props}
         />
@@ -413,14 +401,22 @@ export function AddressesClient({
               autoComplete: 'postal-code',
               required: true,
             })}
-            {field('Country code', 'countryCode', {
-              autoComplete: 'country',
-              placeholder: 'MY or SG',
-              maxLength: 2,
-              required: true,
-              pattern: '[A-Za-z]{2}',
-              title: 'Two-letter country code: MY or SG',
-            })}
+            <label className="block">
+              <span className="mb-1.5 block text-[12px] font-medium text-white/55">
+                Country
+              </span>
+              <CountrySelect
+                value={form.countryCode}
+                onChange={(countryCode) =>
+                  // A state from the other country's list is never valid.
+                  setForm((f) => ({
+                    ...f,
+                    countryCode,
+                    province: stateAfterCountryChange(countryCode, f.province),
+                  }))
+                }
+              />
+            </label>
             <div className="col-span-2">
               <label className="block">
                 <span className="mb-1.5 block text-[12px] font-medium text-white/55">
