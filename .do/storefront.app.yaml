@@ -52,7 +52,7 @@ services:
       branch: master
       deploy_on_push: true
     http_port: 3000
-    # Dedicated 1 vCPU / 2 GiB, autoscaled 5-12 on CPU (App Platform autoscaling
+    # Dedicated 1 vCPU / 4 GiB, autoscaled 6-14 on CPU (App Platform autoscaling
     # needs a dedicated size). Keep the heap in NODE_OPTIONS below in step with
     # the box: 512 MB once ran it out of memory, and on 2026-10-20 two shared
     # 1 GiB boxes pinned at 95% CPU and OOM-restarted (503/504 site-wide).
@@ -62,10 +62,10 @@ services:
     # every public page except / reads an auth cookie somewhere in its tree
     # (getFreePackState, getOwnProfileHandle) and is React-rendered per request.
     # Never drop below 2 instances: the second makes a deploy rolling.
-    instance_size_slug: apps-d-1vcpu-2gb
+    instance_size_slug: apps-d-1vcpu-4gb
     autoscaling:
-      min_instance_count: 5
-      max_instance_count: 12
+      min_instance_count: 6
+      max_instance_count: 14
       metrics:
         cpu:
           percent: 60
@@ -179,7 +179,12 @@ services:
       # a different, larger machine.
       - key: NODE_OPTIONS
         scope: RUN_TIME
-        value: --max-old-space-size=1536
+        value: --max-old-space-size=2048
+      # sharp/libvips + glibc malloc arenas grew RSS to 1.7 GB with only
+      # 354 MB of JS heap (2026-10-20); two arenas keep native memory flat.
+      - key: MALLOC_ARENA_MAX
+        scope: RUN_TIME
+        value: "2"
       - key: NEXT_TELEMETRY_DISABLED
         scope: RUN_AND_BUILD_TIME
         value: '1'
