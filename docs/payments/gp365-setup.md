@@ -89,9 +89,8 @@ node scripts/gp365-e2e.mjs payouts
 
 - **USDT limits.** The `currencyLimits` in `gateway.ts` (deposit 10–2,000, payout 10–5,000) are **placeholders**. Replace them with the back-office settings. Keep the RM `limits.withdrawalMin` (RM 30) below the USDT floor at today's rate, so the USDT floor is the one that binds.
 - **Nudge window.** `payinNudgeCents: 100` lets a payin move up to 1 USDT from what we asked and still re-lock at the same rate. It is **provisional** until staging shows how GlobePay365 makes amounts unique.
-- **Short or over payments (owner decision 2026-10-20).** An exchange's withdrawal fee makes short arrivals routine. Within **max(2 USDT, 10%)** of the order (`payinArrivedTolerance` in `gateway.ts`), the deposit sweep credits the USDT that **arrived**, at the row's locked rate: 48 of a 50 USDT order at 4.179 credits RM 200.59. Further off, the row stays pending and an ops alert asks staff to check the back office; never credit it by admin adjustment, because the sweep still watches the order. The signed callback still refuses any amount but the row's, so the sweep (every minute) is what credits these.
 - **Staging is down.** On 2026-10-12, the staging API (`mapi.globepay365stg.com`) answered `HTTP 500.30 – ASP.NET Core app failed to start`. Rerun the preflight once they fix it.
 - **Prove on staging before trusting:**
   - the not-found shape (preflight);
   - `payinActualAmount` on a real payin: its decimals, and whether its tail fits the 1 USDT window;
-  - **what the callback and GetPayinDetail `Amount` are when the customer sends a different amount than asked.** The sweep credits that figure within the tolerance above, so it must be what actually arrived. Also check whether GlobePay365 settles a short payment at all, or reports it as Verify Fail (status 4), which credits nothing.
+  - **what the callback `Amount` is when the customer sends a different amount than asked.** The callback fence settles only the exact locked amount. Any other amount stays pending for a human.

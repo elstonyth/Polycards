@@ -286,60 +286,7 @@ async function depositLegs(admin, cust) {
     Math.round(((await balance(cust)).balance - beforeSweep) * 100) === 8358,
   );
 
-  // ---- 4b. Short or over arrivals (owner decision 2026-10-20): within
-  // max(2 USDT, 10%) the sweep credits what ARRIVED at the locked rate;
-  // further off it is held for staff. The callback still refuses any amount
-  // but the row's, so the sweep is the path that credits it.
-  const waitSettled = async (mtid) => {
-    for (let i = 0; i < 40; i += 1) {
-      if (row('gateway_deposit', mtid)[0] === 'settled') return true;
-      await sleep(5000);
-    }
-    return false;
-  };
-  const d3 = await call('POST', '/store/credits/deposit', {
-    token: cust,
-    body: { amount: 50, currency: 'USDT', payment_method_code: 'UTRC' },
-  });
-  const m3 = d3.json.merchantTransactionId;
-  const beforeShort = (await balance(cust)).balance;
-  const cb3 = await mock(`/__control/payin/${m3}`, { status: 6, paid: 48 });
-  check(
-    'callback for 48 of 50 USDT is refused (the row asked for 50)',
-    String(cb3?.callback?.status ?? cb3?.callback ?? '').includes('400') ||
-      row('gateway_deposit', m3)[0] === 'pending',
-    JSON.stringify(cb3),
-  );
-  const short = await waitSettled(m3);
-  const r3 = row('gateway_deposit', m3);
-  check(
-    'sweep credits the 48 USDT that arrived at the locked rate: RM 200.59',
-    short && Number(r3[6]) === 200.59,
-    r3.join('|'),
-  );
-  check(
-    'ledger rose by exactly RM 200.59',
-    Math.round(((await balance(cust)).balance - beforeShort) * 100) === 20059,
-  );
-
-  const d4 = await call('POST', '/store/credits/deposit', {
-    token: cust,
-    body: { amount: 50, currency: 'USDT', payment_method_code: 'UTRC' },
-  });
-  const m4 = d4.json.merchantTransactionId;
-  const beforeFar = (await balance(cust)).balance;
-  await mock(`/__control/silent/payin/${m4}`, { status: 6, paid: 40 });
-  // Two sweep passes see it and hold it.
-  await sleep(130000);
-  const r4 = row('gateway_deposit', m4);
-  check(
-    '40 of 50 USDT (beyond 5 USDT) is held, not credited',
-    r4[0] === 'pending' && !r4[6] &&
-      (await balance(cust)).balance === beforeFar,
-    r4.join('|'),
-  );
-
-    // ---- 5. Guards
+  // ---- 5. Guards
   const sgdMethod = await call('POST', '/store/credits/deposit', {
     token: cust,
     body: { amount: 100, currency: 'USDT', payment_method_code: 'BQR' },

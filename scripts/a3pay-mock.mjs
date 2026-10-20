@@ -19,7 +19,6 @@
 //
 // Control endpoints (local only, not part of A3Pay's API):
 //   POST /__control/payin/<MTransactionId>   {"status":6}  set status + send the callback
-//                                            (+ "paid": 48 = that amount arrived instead)
 //   POST /__control/payout/<MTransactionId>  {"status":4}  set status + send the callback
 //   GET  /__control/state                                  everything the mock holds
 //   GET  /cashier/<paymentOrderId>                         a fake cashier page (Pay / Fail)
@@ -452,14 +451,12 @@ createServer(async (req, res) => {
     const control = url.pathname.match(/^\/__control\/(payin|payout)\/(.+)$/);
     if (req.method === 'POST' && control) {
       const [, kind, mtid] = control;
-      const { status, paid } = JSON.parse((await body(req)) || '{}');
+      const { status } = JSON.parse((await body(req)) || '{}');
       const p = (kind === 'payin' ? payins : payouts).get(
         decodeURIComponent(mtid),
       );
       if (!p) return send(res, 404, { error: 'unknown' });
       p.status = Number(status);
-      // What actually arrived, when the customer sent another amount.
-      if (paid !== undefined) p.actual = Number(paid);
       const r =
         kind === 'payin' ? await payinCallback(p) : await payoutCallback(p);
       return send(res, 200, { callback: r });
@@ -471,14 +468,12 @@ createServer(async (req, res) => {
       // Change a status WITHOUT a callback — for the "callback lost, the sweep
       // must requery" path.
       const [, , , kind, mtid] = url.pathname.split('/');
-      const { status, paid } = JSON.parse((await body(req)) || '{}');
+      const { status } = JSON.parse((await body(req)) || '{}');
       const p = (kind === 'payin' ? payins : payouts).get(
         decodeURIComponent(mtid),
       );
       if (!p) return send(res, 404, { error: 'unknown' });
       p.status = Number(status);
-      // What actually arrived, when the customer sent another amount.
-      if (paid !== undefined) p.actual = Number(paid);
       return send(res, 200, { ok: true });
     }
     if (req.method === 'GET' && url.pathname === '/__control/state') {

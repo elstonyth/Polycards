@@ -11,7 +11,6 @@ import {
 } from '../modules/packs/gateway-deposit';
 import {
   GATEWAYS,
-  payinLockWindowCents,
   getDepositDetail,
   resolveActiveGateway,
   rowGateway,
@@ -78,40 +77,15 @@ export function __resetFullSweepMarkerForTests(): void {
 
 /** The RM ceiling a requeried credit may reach on this row: its gateway's own
  *  (A3Pay's S$5,000 top-ups pass RM 10,000), else the site-wide one. */
-/** How far the row's gateway lets a payin land from its lock and still be
- *  credited (its nudge, or a crypto rail's arrived tolerance). */
-function lockWindow(deposit: {
-  gateway?: string | null;
-  gateway_amount?: unknown;
-}): number | undefined {
+/** The row gateway's nudge window, the same one its callback allows. */
+function nudgeWindow(deposit: { gateway?: string | null }): number | undefined {
   const gateway = rowGateway(deposit);
-  return gateway
-    ? payinLockWindowCents(gateway, Number(deposit.gateway_amount))
-    : undefined;
+  return gateway ? GATEWAYS[gateway].payinNudgeCents : undefined;
 }
 
 function depositCeiling(deposit: { gateway?: string | null }): number {
   const gateway = rowGateway(deposit);
   return gateway ? GATEWAYS[gateway].limits.depositMax : GATEWAY_MAX_RM;
-}
-
-/** The off-lock alert: an exact-amount gateway's record is a slip to correct
- *  there; a crypto rail's is a payment further off than it auto-credits. */
-function heldMessage(
-  deposit: {
-    merchant_transaction_id: string;
-    customer_id: string;
-    gateway?: string | null;
-    gateway_amount?: unknown;
-  },
-  reported: unknown,
-): string {
-  const head = `Deposit ${deposit.merchant_transaction_id} (customer ${deposit.customer_id}): the gateway reports ${String(reported)} paid, but the order was locked at ${String(deposit.gateway_amount)}. Not credited and left pending.`;
-  const gateway = rowGateway(deposit);
-  const tolerance = gateway ? GATEWAYS[gateway].payinArrivedTolerance : undefined;
-  return tolerance
-    ? `${head} That is further off than the ${(payinLockWindowCents(gateway!, Number(deposit.gateway_amount)) / 100).toFixed(2)} ${GATEWAYS[gateway!].currency} it credits automatically. Check what arrived in the gateway's back office and talk to the customer. Do not credit it by admin adjustment: the sweep still watches the order and would credit it a second time.`
-    : `${head} Check the gateway's record; if the customer paid, have the gateway correct the order so its callback credits it. Never credit it by admin adjustment.`;
 }
 
 export default async function depositReconcileJob(container: MedusaContainer) {
@@ -239,7 +213,7 @@ export default async function depositReconcileJob(container: MedusaContainer) {
           lock: {
             fx: rowFx(deposit),
             reported: Number(detail.reportedAmount),
-            windowCents: lockWindow(deposit),
+            windowCents: nudgeWindow(deposit),
           },
           ceiling: depositCeiling(deposit),
         });
@@ -307,12 +281,12 @@ export default async function depositReconcileJob(container: MedusaContainer) {
           void alertOps(
             container,
             `deposit-off-lock:${deposit.merchant_transaction_id}`,
-            heldMessage(deposit, detail?.reportedAmount),
+            `Deposit ${deposit.merchant_transaction_id} (customer ${deposit.customer_id}): the gateway reports ${detail?.reportedAmount} paid, but the order was locked at ${deposit.gateway_amount}. Not credited and left pending. Check the gateway's record; if the customer paid, have the gateway correct the order so its callback credits it. Never credit it by admin adjustment.`,
             { muteMs: 6 * 60 * 60 * 1000 },
           );
         }
         logger.error(
-          `[deposit-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, ${action.reason === 'off-lock' ? `${detail?.reportedAmount} in the gateway's currency, further from the row's locked ${deposit.gateway_amount} than it credits` : `above the RM ${depositCeiling(deposit)} deposit ceiling`} — not credited, not written off; left ${deposit.status} for manual settlement`,
+          `[deposit-reconcile] ${deposit.merchant_transaction_id} requeried at ${action.amount}, ${action.reason === 'off-lock' ? `${detail?.reportedAmount} in the gateway's currency, more than a nudge from the row's locked ${deposit.gateway_amount}` : `above the RM ${depositCeiling(deposit)} deposit ceiling`} — not credited, not written off; left ${deposit.status} for manual settlement`,
         );
         continue;
       }
