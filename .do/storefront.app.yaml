@@ -61,16 +61,26 @@ services:
     # "must not exceed 1 instance for instance_size_slug basic-xs". Same 1 shared
     # vCPU and 1 GiB for $12/mo instead of $10; the tier buys horizontal scaling
     # (and unlocks autoscaling), not a faster box.
-    instance_size_slug: professional-xs
+    instance_size_slug: apps-d-1vcpu-2gb
     # TWO instances, not one. The storefront reaches the backend over HTTP and
     # touches no Postgres connection, so it scales freely — and it is where the
     # read ceiling actually sits: every public page except / reads an auth
     # cookie somewhere in its tree (getFreePackState, getOwnProfileHandle) and
     # so must be React-rendered per request. The second instance is also what
     # makes a deploy a rolling one instead of an outage window.
-    instance_count: 2
+    # 2026-10-20 incident: two shared-vCPU 1 GiB boxes pinned at 95% CPU and
+    # OOM-restarted under load (503/504 site-wide). Dedicated vCPU, 2 GiB, and
+    # CPU autoscaling (dedicated sizes only) now give the headroom; min 5.
+    autoscaling:
+      min_instance_count: 5
+      max_instance_count: 12
+      metrics:
+        cpu:
+          percent: 60
     health_check:
       http_path: /healthz
+      # 1s default flapped pods out of rotation under CPU load.
+      timeout_seconds: 5
     alerts:
       - rule: CPU_UTILIZATION
         value: 80
@@ -177,7 +187,7 @@ services:
       # a different, larger machine.
       - key: NODE_OPTIONS
         scope: RUN_TIME
-        value: --max-old-space-size=896
+        value: --max-old-space-size=1536
       - key: NEXT_TELEMETRY_DISABLED
         scope: RUN_AND_BUILD_TIME
         value: '1'
